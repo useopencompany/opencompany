@@ -12,7 +12,7 @@ export type ActionCatalogPolicy = {
 
 const includeEveryAction = () => true;
 
-export const GOAT_ACTION_CATALOG_POLICIES: Record<ActionCatalogPolicyName, ActionCatalogPolicy> = {
+export const ACTION_CATALOG_POLICIES: Record<ActionCatalogPolicyName, ActionCatalogPolicy> = {
   foregroundInteractive: {
     name: "foregroundInteractive",
     sourceKinds: ["integration", "managed"],
@@ -40,7 +40,7 @@ export function projectActionCatalog(
   catalog: ResolvedActionCatalog,
   policy: ActionCatalogPolicyName | ActionCatalogPolicy,
 ): ResolvedActionCatalog {
-  const resolvedPolicy = typeof policy === "string" ? GOAT_ACTION_CATALOG_POLICIES[policy] : policy;
+  const resolvedPolicy = typeof policy === "string" ? ACTION_CATALOG_POLICIES[policy] : policy;
   const allowedSourceKinds = new Set(resolvedPolicy.sourceKinds);
   const allowedPermissionModes = new Set(resolvedPolicy.permissionModes);
   const sourceIds = new Set(

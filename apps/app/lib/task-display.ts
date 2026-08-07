@@ -5,13 +5,13 @@ import type {
   TaskViewMode,
 } from "@opencompany/db/schema";
 
-export const GOAT_TASK_VIEW_MODES: TaskViewMode[] = ["board", "list"];
+export const TASK_VIEW_MODES: TaskViewMode[] = ["board", "list"];
 
 export function isTaskViewMode(value: unknown): value is TaskViewMode {
-  return GOAT_TASK_VIEW_MODES.some((mode) => mode === value);
+  return TASK_VIEW_MODES.some((mode) => mode === value);
 }
 
-export const GOAT_STAGE_COPY: Record<TaskStage, string> = {
+export const STAGE_COPY: Record<TaskStage, string> = {
   queued: "Waiting for runner",
   planning: "Planning task",
   sandboxing: "Preparing task",
@@ -21,7 +21,7 @@ export const GOAT_STAGE_COPY: Record<TaskStage, string> = {
   canceled: "Canceled",
 };
 
-export const GOAT_STATUS_COPY: Record<TaskStatus, string> = {
+export const STATUS_COPY: Record<TaskStatus, string> = {
   queued: "Queued",
   running: "Running",
   succeeded: "Done",
@@ -31,14 +31,14 @@ export const GOAT_STATUS_COPY: Record<TaskStatus, string> = {
 
 export type TaskBoardColumn = "in_progress" | "in_review" | "done" | "canceled";
 
-export const GOAT_TASK_BOARD_COLUMNS: TaskBoardColumn[] = [
+export const TASK_BOARD_COLUMNS: TaskBoardColumn[] = [
   "in_progress",
   "in_review",
   "done",
   "canceled",
 ];
 
-export const GOAT_TASK_BOARD_COLUMN_COPY: Record<TaskBoardColumn, string> = {
+export const TASK_BOARD_COLUMN_COPY: Record<TaskBoardColumn, string> = {
   in_progress: "In progress",
   in_review: "In review",
   done: "Done",
@@ -66,7 +66,7 @@ export type WorkflowTaskDisplayStatus =
   | "canceled"
   | "needs-attention";
 
-export const GOAT_WORKFLOW_TASK_STATUS_COPY: Record<WorkflowTaskDisplayStatus, string> = {
+export const WORKFLOW_TASK_STATUS_COPY: Record<WorkflowTaskDisplayStatus, string> = {
   running: "Running",
   failed: "Failed",
   done: "Done",
@@ -74,7 +74,7 @@ export const GOAT_WORKFLOW_TASK_STATUS_COPY: Record<WorkflowTaskDisplayStatus, s
   "needs-attention": "Needs attention",
 };
 
-export const GOAT_WORKFLOW_TASK_STATUS_DOT_CLASS: Record<WorkflowTaskDisplayStatus, string> = {
+export const WORKFLOW_TASK_STATUS_DOT_CLASS: Record<WorkflowTaskDisplayStatus, string> = {
   running: "bg-ink/40 animate-pulse",
   failed: "bg-danger",
   done: "bg-success",
@@ -97,9 +97,9 @@ export function taskBoardStatusCopy(task: {
   reportedOutcome?: TaskReportedOutcome | null;
 }): string {
   if (task.status === "succeeded" && task.reportedOutcome === "needs_attention") {
-    return GOAT_WORKFLOW_TASK_STATUS_COPY["needs-attention"];
+    return WORKFLOW_TASK_STATUS_COPY["needs-attention"];
   }
-  return GOAT_STATUS_COPY[task.status];
+  return STATUS_COPY[task.status];
 }
 
 export function toTaskTitle(text: string): string {

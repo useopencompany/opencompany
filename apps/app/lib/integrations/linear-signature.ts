@@ -10,7 +10,7 @@ export function verifyLinearWebhookSignature(input: {
   webhookTimestampMs: number | null;
   nowMs?: number;
 }): boolean {
-  const secret = process.env.GOAT_LINEAR_WEBHOOK_SECRET?.trim();
+  const secret = process.env.LINEAR_WEBHOOK_SECRET?.trim();
   if (!secret || !input.signature) return false;
   if (typeof input.webhookTimestampMs !== "number" || !Number.isFinite(input.webhookTimestampMs)) {
     return false;

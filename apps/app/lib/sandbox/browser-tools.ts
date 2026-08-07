@@ -21,11 +21,11 @@ import {
 } from "@/lib/chat-screenshot-storage";
 import type { BrowserToolOutput } from "@/lib/chat-ui";
 import {
+  CHAT_SANDBOX_ACTION_POLICY_PATH,
+  CHAT_SANDBOX_AGENT_BROWSER_BIN,
+  CHAT_SANDBOX_SCREENSHOT_DIR,
   type ChatSandbox,
   chatSandboxName,
-  GOAT_CHAT_SANDBOX_ACTION_POLICY_PATH,
-  GOAT_CHAT_SANDBOX_AGENT_BROWSER_BIN,
-  GOAT_CHAT_SANDBOX_SCREENSHOT_DIR,
   getChatSandbox,
   runSandboxCommand,
   sandboxBrowserEnvironment,
@@ -183,7 +183,7 @@ export function createChatBrowserToolSession(input: {
     }
     const screenshotFilename = name === "browser_screenshot" ? chatScreenshotFilename() : undefined;
     const screenshotPath = screenshotFilename
-      ? `${GOAT_CHAT_SANDBOX_SCREENSHOT_DIR}/${screenshotFilename}`
+      ? `${CHAT_SANDBOX_SCREENSHOT_DIR}/${screenshotFilename}`
       : undefined;
     const commandOutput = await executeBrowserCommand(activeSandbox, {
       name,
@@ -357,7 +357,7 @@ async function executeBrowserCommand(
     name: input.name,
     args: input.args,
     sessionId: input.browserSessionId,
-    actionPolicyPath: GOAT_CHAT_SANDBOX_ACTION_POLICY_PATH,
+    actionPolicyPath: CHAT_SANDBOX_ACTION_POLICY_PATH,
     ...(input.activeProfileSession
       ? {
           cdpUrl: input.activeProfileSession.connectUrl,
@@ -387,7 +387,7 @@ async function executeBrowserRead(
       name: "browser_open",
       args: { url: readHttpUrl(record, "url", "browser_read url") },
       sessionId: input.browserSessionId,
-      actionPolicyPath: GOAT_CHAT_SANDBOX_ACTION_POLICY_PATH,
+      actionPolicyPath: CHAT_SANDBOX_ACTION_POLICY_PATH,
       ...(input.activeProfileSession
         ? {
             cdpUrl: input.activeProfileSession.connectUrl,
@@ -409,7 +409,7 @@ async function executeBrowserRead(
     name: "browser_read",
     args: input.args,
     sessionId: input.browserSessionId,
-    actionPolicyPath: GOAT_CHAT_SANDBOX_ACTION_POLICY_PATH,
+    actionPolicyPath: CHAT_SANDBOX_ACTION_POLICY_PATH,
     ...(input.activeProfileSession
       ? {
           cdpUrl: input.activeProfileSession.connectUrl,
@@ -457,7 +457,7 @@ async function runBrowserArgv(
 ): Promise<BrowserToolOutput> {
   onCommand();
   const command = await runSandboxCommand(sandbox, {
-    cmd: sandbox.image ? "agent-browser" : GOAT_CHAT_SANDBOX_AGENT_BROWSER_BIN,
+    cmd: sandbox.image ? "agent-browser" : CHAT_SANDBOX_AGENT_BROWSER_BIN,
     args: argv,
     signal,
     timeoutMs: BROWSER_COMMAND_TIMEOUT_MS,

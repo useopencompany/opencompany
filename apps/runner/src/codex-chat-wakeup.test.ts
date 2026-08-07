@@ -1,8 +1,8 @@
 import type { CodexChatTurn } from "@opencompany/db/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  CODEX_CHAT_WAKEUP_MAX_CHAIN,
   enqueueCodexChatWakeup,
-  GOAT_CODEX_CHAT_WAKEUP_MAX_CHAIN,
   persistCodexChatScheduledWakeup,
   scheduledWakeupFromTurnSettings,
 } from "./codex-chat-wakeup";
@@ -98,7 +98,7 @@ describe("enqueueCodexChatWakeup", () => {
     await expect(
       enqueueCodexChatWakeup({
         parentTurn: parentTurn({
-          settings: { wakeupChain: GOAT_CODEX_CHAT_WAKEUP_MAX_CHAIN },
+          settings: { wakeupChain: CODEX_CHAT_WAKEUP_MAX_CHAIN },
         }),
         model: "claude-opus-4-8",
         wakeup: { delaySeconds: 60, reason: "Wait for CI", prompt: "" },

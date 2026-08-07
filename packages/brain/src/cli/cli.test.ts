@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getBrainCliSource } from "../generated/cli-bundle";
-import { DEFAULT_GOAT_BRAIN_FOLDERS } from "../schema";
+import { DEFAULT_BRAIN_FOLDERS } from "../schema";
 import { parseArgs } from "./args";
 import { commandHelp, HELP, ingestCommandExitCode, validateCommandArgs } from "./index";
 import { fail, ok } from "./io";
@@ -211,7 +211,7 @@ describe("goat-brain cli", () => {
 
     expect(listed).toMatchObject({ exitCode: 0 });
     expect(listed.stdout.trim().split("\n").toSorted()).toEqual(
-      [...DEFAULT_GOAT_BRAIN_FOLDERS].toSorted(),
+      [...DEFAULT_BRAIN_FOLDERS].toSorted(),
     );
   });
 
@@ -1291,7 +1291,7 @@ function spawnNode(
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   return new Promise((resolve, reject) => {
     const child = spawn("node", [script, ...args], {
-      env: { ...process.env, GOAT_BRAIN_ROOT: root },
+      env: { ...process.env, BRAIN_ROOT: root },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";

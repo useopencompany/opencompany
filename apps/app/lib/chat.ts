@@ -41,7 +41,7 @@ import {
   compareChatMessageOrder,
   deriveChatState,
   dismissPendingApprovalsInStoredParts,
-  GOAT_PINNED_CHAT_LIMIT,
+  PINNED_CHAT_LIMIT,
   type StoredChatMessage,
   settleIncompleteToolCallsInStoredParts,
   toChatUiMessage,
@@ -51,8 +51,8 @@ import { codexComposerSettingsFromTurnSettings } from "@/lib/codex-chat-settings
 import { homeActivityCutoff } from "@/lib/home-activity";
 import { toTaskTitle } from "@/lib/task-display";
 
-const GOAT_RECENT_CHAT_LIMIT = 8;
-const GOAT_CHAT_PREVIEW_MAX_LENGTH = 96;
+const RECENT_CHAT_LIMIT = 8;
+const CHAT_PREVIEW_MAX_LENGTH = 96;
 
 export type {
   ChatMessageMetadata,
@@ -225,7 +225,7 @@ export async function loadTaskChatSessionByIdForWorkspace(
 }
 
 export async function listCurrentUserRecentChats(
-  limit = GOAT_RECENT_CHAT_LIMIT,
+  limit = RECENT_CHAT_LIMIT,
 ): Promise<ChatSummaryView[]> {
   const { user } = await currentUser();
   const store = createDbChatStore();
@@ -236,10 +236,7 @@ export async function listRecentChatsForUser(
   input: { userWorkosId: string; limit?: number },
   store: ChatStore = createDbChatStore(),
 ): Promise<ChatSummaryView[]> {
-  const limit = Math.max(
-    1,
-    Math.min(input.limit ?? GOAT_RECENT_CHAT_LIMIT, GOAT_RECENT_CHAT_LIMIT),
-  );
+  const limit = Math.max(1, Math.min(input.limit ?? RECENT_CHAT_LIMIT, RECENT_CHAT_LIMIT));
   const sessions = await store.listOpenSessions({
     userWorkosId: input.userWorkosId,
     limit,
@@ -542,7 +539,7 @@ export function createDbChatStore(db: ChatDb = getDb()): ChatStore {
             ),
           )
           .orderBy(desc(chatSessions.pinnedAt))
-          .limit(GOAT_PINNED_CHAT_LIMIT),
+          .limit(PINNED_CHAT_LIMIT),
         db
           .select()
           .from(chatSessions)
@@ -786,7 +783,7 @@ export function createDbChatStore(db: ChatDb = getDb()): ChatStore {
             isNotNull(chatSessions.pinnedAt),
           ),
         );
-      const pinCapacity = sql`(${pinCount}) < ${GOAT_PINNED_CHAT_LIMIT}`;
+      const pinCapacity = sql`(${pinCount}) < ${PINNED_CHAT_LIMIT}`;
 
       // The web app uses neon-http, which cannot hold an interactive transaction
       // open across a callback. Its batch API still executes these statements in
@@ -902,8 +899,8 @@ function previewFromMessages(messages: readonly Pick<StoredChatMessage, "content
       .map((message) => message.content.replace(/\s+/g, " ").trim())
       .find(Boolean) ?? "No messages yet.";
 
-  if (content.length <= GOAT_CHAT_PREVIEW_MAX_LENGTH) return content;
-  return `${content.slice(0, GOAT_CHAT_PREVIEW_MAX_LENGTH - 1).trimEnd()}...`;
+  if (content.length <= CHAT_PREVIEW_MAX_LENGTH) return content;
+  return `${content.slice(0, CHAT_PREVIEW_MAX_LENGTH - 1).trimEnd()}...`;
 }
 
 async function findOrCreateOpenSession(input: {

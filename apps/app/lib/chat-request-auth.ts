@@ -1,6 +1,6 @@
 import { getDb } from "@opencompany/db/client";
 import { users, workspaceMembers, workspaces } from "@opencompany/db/schema";
-import { DEFAULT_GOAT_BRAIN_SLUG, listAccessibleBrains } from "@opencompany/db/workspaces";
+import { DEFAULT_BRAIN_SLUG, listAccessibleBrains } from "@opencompany/db/workspaces";
 import { and, eq } from "drizzle-orm";
 import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
 import { type AuthContext, currentUser } from "@/lib/auth";
@@ -129,7 +129,7 @@ export async function resolveMacChatContext(
     { db },
   );
   const activeBrain =
-    brains.find((brain) => brain.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
+    brains.find((brain) => brain.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
   if (!activeBrain) {
     return {
       ok: false,

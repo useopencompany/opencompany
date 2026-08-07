@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   effectiveCapabilityMode,
-  GOAT_PROVIDER_CAPABILITIES,
   isCapabilityId,
   isCapabilityMode,
+  PROVIDER_CAPABILITIES,
   providerCapability,
 } from "@/lib/actions/capabilities";
 
-describe("GOAT_PROVIDER_CAPABILITIES", () => {
+describe("PROVIDER_CAPABILITIES", () => {
   it("registers Gmail reads and drafts on by default and sends behind ask", () => {
-    expect(GOAT_PROVIDER_CAPABILITIES.gmail).toEqual([
+    expect(PROVIDER_CAPABILITIES.gmail).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
       expect.objectContaining({ id: "draft", defaultMode: "on" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
@@ -17,48 +17,48 @@ describe("GOAT_PROVIDER_CAPABILITIES", () => {
   });
 
   it("registers Drive reads on by default and document writes behind ask", () => {
-    expect(GOAT_PROVIDER_CAPABILITIES.google_drive).toEqual([
+    expect(PROVIDER_CAPABILITIES.google_drive).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });
 
   it("registers Google Calendar with read on by default and write behind ask", () => {
-    expect(GOAT_PROVIDER_CAPABILITIES.google_calendar).toEqual([
+    expect(PROVIDER_CAPABILITIES.google_calendar).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });
 
   it("registers Linear with read on by default and issue management behind ask", () => {
-    expect(GOAT_PROVIDER_CAPABILITIES.linear).toEqual([
+    expect(PROVIDER_CAPABILITIES.linear).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });
 
   it("registers Slack as one broad read permission", () => {
-    expect(GOAT_PROVIDER_CAPABILITIES.slack).toEqual([
+    expect(PROVIDER_CAPABILITIES.slack).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
     ]);
   });
 
   it("registers Attio reads on by default and updates behind ask", () => {
-    expect(GOAT_PROVIDER_CAPABILITIES.attio).toEqual([
+    expect(PROVIDER_CAPABILITIES.attio).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });
 
   it("keeps Neon structure visible but gates database-row queries by default", () => {
-    expect(GOAT_PROVIDER_CAPABILITIES.neon).toEqual([
+    expect(PROVIDER_CAPABILITIES.neon).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
       expect.objectContaining({ id: "query", defaultMode: "ask" }),
     ]);
   });
 
   it("uses human-readable labels for every registered capability", () => {
-    for (const capabilities of Object.values(GOAT_PROVIDER_CAPABILITIES)) {
+    for (const capabilities of Object.values(PROVIDER_CAPABILITIES)) {
       for (const capability of capabilities) {
         expect(capability.label).toMatch(/^[A-Z][a-z]/);
         expect(capability.description.length).toBeGreaterThan(10);

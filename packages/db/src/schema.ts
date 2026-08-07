@@ -116,14 +116,14 @@ export type IntegrationProvider =
 // answer-bot install) are workspace plumbing: they carry no human identity,
 // must survive the connecting admin leaving, and are manageable by any
 // workspace admin.
-export const WORKSPACE_OWNED_GOAT_INTEGRATION_PROVIDERS = [
+export const WORKSPACE_OWNED_INTEGRATION_PROVIDERS = [
   "github",
   "jamie",
   "slack_bot",
   "stripe",
 ] as const satisfies readonly IntegrationProvider[];
 export function isWorkspaceOwnedIntegrationProvider(provider: IntegrationProvider) {
-  return (WORKSPACE_OWNED_GOAT_INTEGRATION_PROVIDERS as readonly IntegrationProvider[]).includes(
+  return (WORKSPACE_OWNED_INTEGRATION_PROVIDERS as readonly IntegrationProvider[]).includes(
     provider,
   );
 }
@@ -527,7 +527,7 @@ export type CodexChatSessionStatus =
   | "interrupted"
   | "closed";
 export type CodexChatTurnStatus = "queued" | "running" | "completed" | "failed" | "interrupted";
-export const GOAT_CODEX_APP_SERVER_EVENT_TYPES = [
+export const CODEX_APP_SERVER_EVENT_TYPES = [
   "assistant.delta",
   "assistant.completed",
   "reasoning.completed",
@@ -555,13 +555,13 @@ export const GOAT_CODEX_APP_SERVER_EVENT_TYPES = [
   "error",
   "unknown",
 ] as const;
-export type CodexAppServerEventType = (typeof GOAT_CODEX_APP_SERVER_EVENT_TYPES)[number];
+export type CodexAppServerEventType = (typeof CODEX_APP_SERVER_EVENT_TYPES)[number];
 export type CodexChatEventType = Exclude<
   CodexAppServerEventType,
   "assistant.delta" | "command.output"
 >;
-export const GOAT_CODEX_CHAT_EVENT_TYPES: readonly CodexChatEventType[] =
-  GOAT_CODEX_APP_SERVER_EVENT_TYPES.filter(
+export const CODEX_CHAT_EVENT_TYPES: readonly CodexChatEventType[] =
+  CODEX_APP_SERVER_EVENT_TYPES.filter(
     (eventType): eventType is CodexChatEventType =>
       eventType !== "assistant.delta" && eventType !== "command.output",
   );
@@ -609,10 +609,12 @@ export type ChatMessageDebugTrace = {
 
 export type BrainToolRunTrace = Record<string, unknown>;
 
-export const goat = pgSchema("goat");
-export const taskDisplayIdSequence = goat.sequence("task_display_id_seq");
+// The physical Postgres schema keeps its pre-rename name: renaming a live schema
+// is a data migration, not a refactor.
+export const oc = pgSchema("goat");
+export const taskDisplayIdSequence = oc.sequence("task_display_id_seq");
 
-export const users = goat.table(
+export const users = oc.table(
   "users",
   {
     workosUserId: text("workos_user_id").primaryKey(),
@@ -647,7 +649,7 @@ export const users = goat.table(
   }),
 );
 
-export const workspaces = goat.table(
+export const workspaces = oc.table(
   "workspaces",
   {
     id: text("id").primaryKey(),
@@ -675,7 +677,7 @@ export const workspaces = goat.table(
 
 // One row per user capturing what the onboarding flow collected. Owner flows set
 // referral + company context; invited members only ever set (or skip) referral.
-export const onboarding = goat.table("onboarding", {
+export const onboarding = oc.table("onboarding", {
   userWorkosId: text("user_workos_id")
     .primaryKey()
     .references(() => users.workosUserId, { onDelete: "cascade" }),
@@ -705,7 +707,7 @@ export type OnboardingEmailStatus = "pending" | "sending" | "sent" | "failed" | 
 // `sent`. The unique (user, step) index makes enrollment idempotent and gives
 // each send a stable Resend idempotency key. Only owners are enrolled — invited
 // members never reach the create-workspace branch that triggers it.
-export const onboardingEmails = goat.table(
+export const onboardingEmails = oc.table(
   "onboarding_emails",
   {
     id: uuid("id").defaultRandom().primaryKey(),
@@ -741,7 +743,7 @@ export const onboardingEmails = goat.table(
   }),
 );
 
-export const workspaceMembers = goat.table(
+export const workspaceMembers = oc.table(
   "workspace_members",
   {
     id: text("id").primaryKey(),
@@ -771,7 +773,7 @@ export const workspaceMembers = goat.table(
 // OpenCompany-managed paid capabilities are workspace features, not user
 // integrations. Missing rows mean enabled; this table stores only explicit
 // workspace overrides.
-export const workspaceCapabilities = goat.table(
+export const workspaceCapabilities = oc.table(
   "workspace_capabilities",
   {
     workspaceId: text("workspace_id")
@@ -798,7 +800,7 @@ export const workspaceCapabilities = goat.table(
 // the Stripe seat subscription. stripe_product_key distinguishes it from
 // retired v3 seat subscriptions; seat_quantity is the current billable seat
 // count, and included_usage_period_* defines the non-rollover usage grant.
-export const workspaceBilling = goat.table(
+export const workspaceBilling = oc.table(
   "workspace_billing",
   {
     workspaceId: text("workspace_id")
@@ -852,7 +854,7 @@ export const workspaceBilling = goat.table(
   }),
 );
 
-export const stripeWebhookEvents = goat.table("stripe_webhook_events", {
+export const stripeWebhookEvents = oc.table("stripe_webhook_events", {
   eventId: text("event_id").primaryKey(),
   eventType: text("event_type").notNull(),
   eventCreatedAt: timestamp("event_created_at", { withTimezone: true }).notNull(),
@@ -863,7 +865,7 @@ export const stripeWebhookEvents = goat.table("stripe_webhook_events", {
 // used by gates and dashboards; billing v7 also tracks the monthly included pool
 // separately from top-up funds so debits can draw included usage first
 // and expire unused included usage monthly without touching top-ups.
-export const creditBalances = goat.table("credit_balances", {
+export const creditBalances = oc.table("credit_balances", {
   workspaceId: text("workspace_id")
     .primaryKey()
     .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -881,7 +883,7 @@ export const creditBalances = goat.table("credit_balances", {
 
 // One-time credit top-up Checkout sessions. `fulfilled_at IS NULL` is the
 // webhook-fulfillment idempotency guard.
-export const stripeCheckoutSessions = goat.table(
+export const stripeCheckoutSessions = oc.table(
   "stripe_checkout_sessions",
   {
     id: text("id").primaryKey(),
@@ -918,7 +920,7 @@ export const stripeCheckoutSessions = goat.table(
 // One generic idempotency_key dedupes every surface (chat turn, frontier
 // ingest attempt, overage reservation, top-up fulfillment); the typed
 // reference columns exist for reporting only.
-export const creditLedger = goat.table(
+export const creditLedger = oc.table(
   "credit_ledger",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -981,7 +983,7 @@ export const creditLedger = goat.table(
 // Naming convention: on the brain content tables below, `brain_id` is the
 // DOCUMENT slug (legacy name, e.g. "alice-smith"), while `brain_ref` is the
 // FK to `goat.brains.id` — the brain a row belongs to.
-export const brains = goat.table(
+export const brains = oc.table(
   "brains",
   {
     id: text("id").primaryKey(),
@@ -1023,7 +1025,7 @@ export const brains = goat.table(
   }),
 );
 
-export const brainImportRuns = goat.table(
+export const brainImportRuns = oc.table(
   "brain_import_runs",
   {
     id: text("id").primaryKey(),
@@ -1092,7 +1094,7 @@ export const brainImportRuns = goat.table(
   }),
 );
 
-export const brainMembers = goat.table(
+export const brainMembers = oc.table(
   "brain_members",
   {
     id: text("id").primaryKey(),
@@ -1117,7 +1119,7 @@ export const brainMembers = goat.table(
   }),
 );
 
-export const brainFolders = goat.table(
+export const brainFolders = oc.table(
   "brain_folders",
   {
     id: text("id").primaryKey(),
@@ -1148,7 +1150,7 @@ export const brainFolders = goat.table(
   }),
 );
 
-export const brainDocuments = goat.table(
+export const brainDocuments = oc.table(
   "brain_documents",
   {
     id: text("id").primaryKey(),
@@ -1255,7 +1257,7 @@ export const brainDocuments = goat.table(
   }),
 );
 
-export const brainTimelineEntries = goat.table(
+export const brainTimelineEntries = oc.table(
   "brain_timeline_entries",
   {
     id: serial("id").primaryKey(),
@@ -1297,7 +1299,7 @@ export const brainTimelineEntries = goat.table(
   }),
 );
 
-export const brainEdges = goat.table(
+export const brainEdges = oc.table(
   "brain_edges",
   {
     id: text("id").primaryKey(),
@@ -1351,7 +1353,7 @@ export const brainEdges = goat.table(
 // join predicate (e.content_hash = d.content_hash AND e.model = $model); stale or missing rows are
 // re-embedded write-through at query time (goat-brain-read.ts). Rebuildable projection — safe to
 // truncate.
-export const brainDocumentEmbeddings = goat.table(
+export const brainDocumentEmbeddings = oc.table(
   "brain_document_embeddings",
   {
     documentId: text("document_id")
@@ -1373,7 +1375,7 @@ export const brainDocumentEmbeddings = goat.table(
   }),
 );
 
-export const brainDocumentVersions = goat.table(
+export const brainDocumentVersions = oc.table(
   "brain_document_versions",
   {
     id: serial("id").primaryKey(),
@@ -1421,7 +1423,7 @@ export const brainDocumentVersions = goat.table(
   }),
 );
 
-export const integrations = goat.table(
+export const integrations = oc.table(
   "integrations",
   {
     id: text("id").primaryKey(),
@@ -1512,7 +1514,7 @@ export const integrations = goat.table(
   }),
 );
 
-export const integrationCredentials = goat.table(
+export const integrationCredentials = oc.table(
   "integration_credentials",
   {
     id: text("id").primaryKey(),
@@ -1557,7 +1559,7 @@ export const integrationCredentials = goat.table(
   }),
 );
 
-export const integrationResources = goat.table(
+export const integrationResources = oc.table(
   "integration_resources",
   {
     id: text("id").primaryKey(),
@@ -1610,7 +1612,7 @@ export const integrationResources = goat.table(
 // Pending iMessage pairing verification. One active challenge per user,
 // upserted on resend. Lives outside the Electric-synced integrations table so
 // the code hash never reaches clients.
-export const imessagePairingChallenges = goat.table(
+export const imessagePairingChallenges = oc.table(
   "imessage_pairing_challenges",
   {
     id: text("id").primaryKey(),
@@ -1632,7 +1634,7 @@ export const imessagePairingChallenges = goat.table(
 
 // Audit log of outbound iMessages; doubles as the per-user daily rate-limit
 // counter for the send_user_message tool.
-export const imessageSends = goat.table(
+export const imessageSends = oc.table(
   "imessage_sends",
   {
     id: text("id").primaryKey(),
@@ -1666,7 +1668,7 @@ export const imessageSends = goat.table(
 );
 
 // Per-brain source configuration: which integration feeds which brain.
-export const brainSources = goat.table(
+export const brainSources = oc.table(
   "brain_sources",
   {
     id: text("id").primaryKey(),
@@ -1715,7 +1717,7 @@ export const brainSources = goat.table(
 // delivered it. Flush workers only enqueue an ingest job for a brain when at
 // least one event in the window is newly claimed. source_item_id is SET NULL
 // so the dedup guarantee outlives the raw evidence row.
-export const brainSourceEventClaims = goat.table(
+export const brainSourceEventClaims = oc.table(
   "brain_source_event_claims",
   {
     id: text("id").primaryKey(),
@@ -1741,7 +1743,7 @@ export const brainSourceEventClaims = goat.table(
   }),
 );
 
-export const brainSourceItems = goat.table(
+export const brainSourceItems = oc.table(
   "brain_source_items",
   {
     id: text("id").primaryKey(),
@@ -1815,7 +1817,7 @@ export const brainSourceItems = goat.table(
   }),
 );
 
-export const brainIngestJobs = goat.table(
+export const brainIngestJobs = oc.table(
   "brain_ingest_jobs",
   {
     id: text("id").primaryKey(),
@@ -1897,7 +1899,7 @@ export const brainIngestJobs = goat.table(
 
 // One reservation per normalized source item and workspace. Fan-out to several
 // brains in the same workspace therefore consumes the raw events exactly once.
-export const workspaceIngestionReservations = goat.table(
+export const workspaceIngestionReservations = oc.table(
   "workspace_ingestion_reservations",
   {
     id: text("id").primaryKey(),
@@ -1966,7 +1968,7 @@ export const workspaceIngestionReservations = goat.table(
   }),
 );
 
-export const brainImportCandidates = goat.table(
+export const brainImportCandidates = oc.table(
   "brain_import_candidates",
   {
     id: text("id").primaryKey(),
@@ -2007,7 +2009,7 @@ export const brainImportCandidates = goat.table(
 // HTTP delivery while the original after() task is still running, so event_id
 // is claimed before scheduling work and can be reclaimed only after the task's
 // maximum runtime has elapsed.
-export const slackBotEventClaims = goat.table("slack_bot_event_claims", {
+export const slackBotEventClaims = oc.table("slack_bot_event_claims", {
   eventId: text("event_id").primaryKey(),
   teamId: text("team_id").notNull(),
   claimId: text("claim_id").notNull(),
@@ -2021,7 +2023,7 @@ export const slackBotEventClaims = goat.table("slack_bot_event_claims", {
 // instead of calling conversations.replies for every threaded message in every
 // channel the bot is in. Rows are upserted on each bot reply and pruned after
 // ~30 days of thread inactivity.
-export const slackBotThreadParticipation = goat.table(
+export const slackBotThreadParticipation = oc.table(
   "slack_bot_thread_participation",
   {
     teamId: text("team_id").notNull(),
@@ -2047,7 +2049,7 @@ export const slackBotThreadParticipation = goat.table(
 // message; the runner's flush sweeper batches unflushed rows per channel into a
 // conversation-window source item after a quiet period (source_item_id NULL =
 // unflushed).
-export const slackMessageEvents = goat.table(
+export const slackMessageEvents = oc.table(
   "slack_message_events",
   {
     id: text("id").primaryKey(),
@@ -2095,7 +2097,7 @@ export const slackMessageEvents = goat.table(
 // comment event; the runner's flush sweeper batches unflushed rows per issue
 // into an issue-window source item after a quiet period (source_item_id NULL =
 // unflushed).
-export const linearIssueEvents = goat.table(
+export const linearIssueEvents = oc.table(
   "linear_issue_events",
   {
     id: text("id").primaryKey(),
@@ -2151,7 +2153,7 @@ export const linearIssueEvents = goat.table(
 // quiet period (source_item_id NULL = unflushed). Issue activity remains
 // direct-enqueue because it does not have the open-to-merge lifecycle that
 // causes repeated PR ingestion.
-export const gitHubPullRequestEvents = goat.table(
+export const gitHubPullRequestEvents = oc.table(
   "github_pull_request_events",
   {
     id: text("id").primaryKey(),
@@ -2194,7 +2196,7 @@ export const gitHubPullRequestEvents = goat.table(
 // object event (creation or property change); the runner's flush sweeper
 // batches unflushed rows per CRM object into an object-window source item
 // after a quiet period (source_item_id NULL = unflushed).
-export const hubspotObjectEvents = goat.table(
+export const hubspotObjectEvents = oc.table(
   "hubspot_object_events",
   {
     id: text("id").primaryKey(),
@@ -2246,7 +2248,7 @@ export const hubspotObjectEvents = goat.table(
 // record event (creation, attribute change, or note added); the runner's flush
 // sweeper batches unflushed rows per record into an object-window source item
 // after a quiet period (source_item_id NULL = unflushed).
-export const attioObjectEvents = goat.table(
+export const attioObjectEvents = oc.table(
   "attio_object_events",
   {
     id: text("id").primaryKey(),
@@ -2301,7 +2303,7 @@ export const attioObjectEvents = goat.table(
 // message discovered via the Gmail history API; the flush sweeper batches
 // unflushed rows per thread into a thread-window source item after a quiet
 // period (source_item_id NULL = unflushed).
-export const gmailMessageEvents = goat.table(
+export const gmailMessageEvents = oc.table(
   "gmail_message_events",
   {
     id: text("id").primaryKey(),
@@ -2351,7 +2353,7 @@ export const gmailMessageEvents = goat.table(
 // Per-integration Gmail history cursor for the poll worker. history_id NULL =
 // first poll pending (ingestion starts from the moment of connection, no
 // backfill); last_reset_at records historyId-expiry resets for observability.
-export const gmailSyncState = goat.table("gmail_sync_state", {
+export const gmailSyncState = oc.table("gmail_sync_state", {
   integrationId: text("integration_id")
     .primaryKey()
     .references(() => integrations.id, { onDelete: "cascade" }),
@@ -2371,7 +2373,7 @@ export const gmailSyncState = goat.table("gmail_sync_state", {
 // their AI summary and transcript are generated, which can be long after
 // created_at). updated_after_cursor NULL = first poll pending; ingestion starts
 // from the moment of connection, no backfill.
-export const granolaSyncState = goat.table("granola_sync_state", {
+export const granolaSyncState = oc.table("granola_sync_state", {
   integrationId: text("integration_id")
     .primaryKey()
     .references(() => integrations.id, { onDelete: "cascade" }),
@@ -2391,7 +2393,7 @@ export const granolaSyncState = goat.table("granola_sync_state", {
 // is written when the connection is created, so live ingestion never backfills
 // implicitly. pending_created_before_cursor pins the upper bound while an
 // opaque page_cursor continuation is in flight.
-export const fathomSyncState = goat.table("fathom_sync_state", {
+export const fathomSyncState = oc.table("fathom_sync_state", {
   integrationId: text("integration_id")
     .primaryKey()
     .references(() => integrations.id, { onDelete: "cascade" }),
@@ -2410,7 +2412,7 @@ export const fathomSyncState = goat.table("fathom_sync_state", {
 // available. Keep those recordings durable while the timestamp cursor moves
 // forward; the runner retries the recording content endpoints and only creates
 // the cross-brain event claim once usable content exists.
-export const fathomPendingMeetings = goat.table(
+export const fathomPendingMeetings = oc.table(
   "fathom_pending_meetings",
   {
     integrationId: text("integration_id")
@@ -2443,7 +2445,7 @@ export const fathomPendingMeetings = goat.table(
 // One durable Drive change-feed cursor per connected account/corpus. My Drive
 // and directly shared files use corpus_key "user"; selected Shared Drives use
 // "drive:<id>" because Google maintains a distinct change log for each drive.
-export const googleDriveSyncCursors = goat.table(
+export const googleDriveSyncCursors = oc.table(
   "google_drive_sync_cursors",
   {
     id: text("id").primaryKey(),
@@ -2483,7 +2485,7 @@ export const googleDriveSyncCursors = goat.table(
 
 // Drive watch renewal intentionally overlaps old and new channels. Keeping
 // each channel lets the public webhook authenticate either one until expiry.
-export const googleDriveWatchChannels = goat.table(
+export const googleDriveWatchChannels = oc.table(
   "google_drive_watch_channels",
   {
     id: text("id").primaryKey(),
@@ -2516,7 +2518,7 @@ export const googleDriveWatchChannels = goat.table(
 // A single coalescing row per Drive file. observed_version may advance while a
 // leased ingest is running; completion only advances ingested_version to the
 // exact fetched version, leaving any newer observation eligible for the next pass.
-export const googleDriveFileStates = goat.table(
+export const googleDriveFileStates = oc.table(
   "google_drive_file_states",
   {
     id: text("id").primaryKey(),
@@ -2564,7 +2566,7 @@ export const googleDriveFileStates = goat.table(
   }),
 );
 
-export const taskSchedules = goat.table(
+export const taskSchedules = oc.table(
   "task_schedules",
   {
     id: text("id").primaryKey(),
@@ -2607,7 +2609,7 @@ export const taskSchedules = goat.table(
 // first-class, company-level primitive rather than Brain (knowledge) content.
 // `slug` is the stable handle used by the `#` composer mention and persisted as
 // `tasks.workflow_id` when a workflow fires.
-export const workflows = goat.table(
+export const workflows = oc.table(
   "workflows",
   {
     id: text("id").primaryKey(),
@@ -2669,7 +2671,7 @@ export const workflows = goat.table(
 // `skills/` Brain folder; extracted alongside workflows. `slug` is the handle
 // used by the `@skill/<slug>` composer mention. Attaching a skill to a chat
 // still snapshots its content immutably into `chatSessionSkills`.
-export const skills = goat.table(
+export const skills = oc.table(
   "skills",
   {
     id: text("id").primaryKey(),
@@ -2704,7 +2706,7 @@ export const skills = goat.table(
 // Workspace-shared bootstrap material for repositories used by the repo-agnostic
 // Codex and Claude Code chat sandboxes. Environment contents are encrypted at
 // rest; envKeys is intentionally limited to plaintext key names for settings UI.
-export const repoConfigs = goat.table(
+export const repoConfigs = oc.table(
   "repo_configs",
   {
     id: text("id").primaryKey(),
@@ -2736,7 +2738,7 @@ export const repoConfigs = goat.table(
   }),
 );
 
-export const tasks = goat.table(
+export const tasks = oc.table(
   "tasks",
   {
     id: text("id").primaryKey(),
@@ -2820,7 +2822,7 @@ export const tasks = goat.table(
   }),
 );
 
-export const taskScheduleRuns = goat.table(
+export const taskScheduleRuns = oc.table(
   "task_schedule_runs",
   {
     id: text("id").primaryKey(),
@@ -2856,7 +2858,7 @@ export const taskScheduleRuns = goat.table(
   }),
 );
 
-export const workflowScheduleRuns = goat.table(
+export const workflowScheduleRuns = oc.table(
   "workflow_schedule_runs",
   {
     id: text("id").primaryKey(),
@@ -2899,7 +2901,7 @@ export const workflowScheduleRuns = goat.table(
   }),
 );
 
-export const taskMessages = goat.table(
+export const taskMessages = oc.table(
   "task_messages",
   {
     id: text("id").primaryKey(),
@@ -2945,7 +2947,7 @@ export const taskMessages = goat.table(
   }),
 );
 
-export const taskEvents = goat.table(
+export const taskEvents = oc.table(
   "task_events",
   {
     id: serial("id").primaryKey(),
@@ -2972,7 +2974,7 @@ export const taskEvents = goat.table(
   }),
 );
 
-export const taskModelUsage = goat.table(
+export const taskModelUsage = oc.table(
   "task_model_usage",
   {
     id: serial("id").primaryKey(),
@@ -3040,7 +3042,7 @@ export const taskModelUsage = goat.table(
   }),
 );
 
-export const taskToolUsage = goat.table(
+export const taskToolUsage = oc.table(
   "task_tool_usage",
   {
     id: serial("id").primaryKey(),
@@ -3093,7 +3095,7 @@ export const taskToolUsage = goat.table(
   }),
 );
 
-export const taskSandboxUsage = goat.table(
+export const taskSandboxUsage = oc.table(
   "task_sandbox_usage",
   {
     id: serial("id").primaryKey(),
@@ -3148,7 +3150,7 @@ export const taskSandboxUsage = goat.table(
   }),
 );
 
-export const chatSessions = goat.table(
+export const chatSessions = oc.table(
   "chat_sessions",
   {
     id: text("id").primaryKey(),
@@ -3182,7 +3184,7 @@ export const chatSessions = goat.table(
 // An explicit, unguessable public read boundary for a chat session. Shares are
 // separate from sessions so future access controls (revocation, expiry, password
 // hashes, or snapshot boundaries) can evolve without widening the core chat row.
-export const chatShares = goat.table(
+export const chatShares = oc.table(
   "chat_session_shares",
   {
     id: text("id").primaryKey(),
@@ -3201,7 +3203,7 @@ export const chatShares = goat.table(
 // Harness-neutral, durable governance for one cloud action turn. It is the
 // atomic enforcement boundary shared by Codex and MCP requests; foreground
 // chat uses the same action service with request-local governance.
-export const actionTurns = goat.table(
+export const actionTurns = oc.table(
   "action_turns",
   {
     id: text("id").primaryKey(),
@@ -3255,7 +3257,7 @@ export const actionTurns = goat.table(
 // Durable paid-capability lifecycle. Inputs and provider output intentionally
 // stay out of this table: the exact input is bound by input_hash and the
 // safety-bounded provider result lives only in the requesting chat trace.
-export const capabilityRuns = goat.table(
+export const capabilityRuns = oc.table(
   "capability_runs",
   {
     id: text("id").primaryKey(),
@@ -3357,7 +3359,7 @@ export const capabilityRuns = goat.table(
   }),
 );
 
-export const chatMessages = goat.table(
+export const chatMessages = oc.table(
   "chat_messages",
   {
     id: text("id").primaryKey(),
@@ -3390,7 +3392,7 @@ export const chatMessages = goat.table(
 // One immutable row per Auto classifier attempt. Prompt content is deliberately
 // excluded; lengths, outcomes, safe provider metadata, and usage are sufficient
 // to diagnose routing reliability without creating a second message store.
-export const chatModelRoutingAttempts = goat.table(
+export const chatModelRoutingAttempts = oc.table(
   "chat_model_routing_attempts",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -3464,7 +3466,7 @@ export const chatModelRoutingAttempts = goat.table(
   }),
 );
 
-export const chatSandboxUsage = goat.table(
+export const chatSandboxUsage = oc.table(
   "chat_sandbox_usage",
   {
     id: serial("id").primaryKey(),
@@ -3515,7 +3517,7 @@ export const chatSandboxUsage = goat.table(
   }),
 );
 
-export const browserProfiles = goat.table(
+export const browserProfiles = oc.table(
   "browser_profiles",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -3554,7 +3556,7 @@ export const browserProfiles = goat.table(
   }),
 );
 
-export const browserProfileSessions = goat.table(
+export const browserProfileSessions = oc.table(
   "browser_profile_sessions",
   {
     id: serial("id").primaryKey(),
@@ -3608,7 +3610,7 @@ export const browserProfileSessions = goat.table(
 // Immutable skill snapshots activated by an explicit @skill mention in a chat. Keeping the
 // activation message lets non-Codex chat replay the skill as part of conversation history, while
 // Codex can materialize every active snapshot and invoke only the skills selected on the turn.
-export const chatSessionSkills = goat.table(
+export const chatSessionSkills = oc.table(
   "chat_session_skills",
   {
     chatSessionId: text("chat_session_id")
@@ -3634,7 +3636,7 @@ export const chatSessionSkills = goat.table(
   }),
 );
 
-export const codexChatSessions = goat.table(
+export const codexChatSessions = oc.table(
   "codex_chat_sessions",
   {
     id: text("id").primaryKey(),
@@ -3691,7 +3693,7 @@ export const codexChatSessions = goat.table(
   }),
 );
 
-export const codexChatTurns = goat.table(
+export const codexChatTurns = oc.table(
   "codex_chat_turns",
   {
     id: text("id").primaryKey(),
@@ -3746,7 +3748,7 @@ export const codexChatTurns = goat.table(
   }),
 );
 
-export const codexChatInteractions = goat.table(
+export const codexChatInteractions = oc.table(
   "codex_chat_interactions",
   {
     id: text("id").primaryKey(),
@@ -3791,7 +3793,7 @@ export const codexChatInteractions = goat.table(
   }),
 );
 
-export const codexChatEvents = goat.table(
+export const codexChatEvents = oc.table(
   "codex_chat_events",
   {
     id: serial("id").primaryKey(),
@@ -3825,14 +3827,14 @@ export const codexChatEvents = goat.table(
     typeCheck: check(
       "goat_codex_chat_events_type_check",
       sql`${table.type} IN (${sql.join(
-        GOAT_CODEX_CHAT_EVENT_TYPES.map((eventType) => sql`${eventType}`),
+        CODEX_CHAT_EVENT_TYPES.map((eventType) => sql`${eventType}`),
         sql`, `,
       )})`,
     ),
   }),
 );
 
-export const brainToolRuns = goat.table(
+export const brainToolRuns = oc.table(
   "brain_tool_runs",
   {
     id: text("id").primaryKey(),
@@ -3880,7 +3882,7 @@ export const brainToolRuns = goat.table(
   }),
 );
 
-export const codexCredentials = goat.table(
+export const codexCredentials = oc.table(
   "codex_credentials",
   {
     userWorkosId: text("user_workos_id")
@@ -3906,7 +3908,7 @@ export const codexCredentials = goat.table(
   }),
 );
 
-export const codexDeviceAuthFlows = goat.table(
+export const codexDeviceAuthFlows = oc.table(
   "codex_device_auth_flows",
   {
     id: text("id").primaryKey(),
@@ -3939,7 +3941,7 @@ export const codexDeviceAuthFlows = goat.table(
 // bundle contains only Infisical's file-vault config and keyring files; project selection remains
 // repository-local through .infisical.json. A disconnected tombstone is retained so resumed
 // sandboxes can observe the new credential generation and remove stale local auth.
-export const infisicalConnections = goat.table(
+export const infisicalConnections = oc.table(
   "infisical_connections",
   {
     workspaceId: text("workspace_id")
@@ -3980,7 +3982,7 @@ export const infisicalConnections = goat.table(
   }),
 );
 
-export const infisicalAuthFlows = goat.table(
+export const infisicalAuthFlows = oc.table(
   "infisical_auth_flows",
   {
     id: text("id").primaryKey(),
@@ -4014,7 +4016,7 @@ export const infisicalAuthFlows = goat.table(
 // Claude Code subscription auth: one long-lived setup-token per user, pasted in
 // settings (no device flow exists for Claude Code). Strictly per-user — sharing a
 // subscription credential across users is prohibited by Anthropic's terms.
-export const claudeCodeCredentials = goat.table(
+export const claudeCodeCredentials = oc.table(
   "claude_code_credentials",
   {
     userWorkosId: text("user_workos_id")

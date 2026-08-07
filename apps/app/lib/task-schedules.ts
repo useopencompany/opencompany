@@ -15,7 +15,7 @@ import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { planTaskHarness } from "@/lib/task-runner";
 import { createTaskForUser } from "@/lib/tasks";
 
-const GOAT_TASK_SCHEDULE_PROMPT_MAX_LENGTH = 10_000;
+const TASK_SCHEDULE_PROMPT_MAX_LENGTH = 10_000;
 
 export type TaskScheduleView = {
   id: string;
@@ -377,10 +377,10 @@ function parseTaskScheduleInput(input: {
   const prompt = input.prompt.trim();
 
   if (!prompt) return { ok: false, error: "Recurring task prompt is required." };
-  if (prompt.length > GOAT_TASK_SCHEDULE_PROMPT_MAX_LENGTH) {
+  if (prompt.length > TASK_SCHEDULE_PROMPT_MAX_LENGTH) {
     return {
       ok: false,
-      error: `Recurring task prompts can be at most ${GOAT_TASK_SCHEDULE_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
+      error: `Recurring task prompts can be at most ${TASK_SCHEDULE_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
     };
   }
   if (!isValidFiveFieldCron(cron, timezone)) {

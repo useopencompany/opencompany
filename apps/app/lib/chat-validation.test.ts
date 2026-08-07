@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { GOAT_CHAT_PROMPT_MAX_LENGTH, validateChatInput } from "@/lib/chat-validation";
-import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import { CHAT_PROMPT_MAX_LENGTH, validateChatInput } from "@/lib/chat-validation";
+import { DEFAULT_MODEL } from "@/lib/model-options";
 
 describe("validateChatInput", () => {
   it("trims prompts and accepts supported models and session ids", () => {
@@ -23,18 +23,18 @@ describe("validateChatInput", () => {
   it("falls back to the default model for unsupported model ids", () => {
     expect(validateChatInput({ prompt: "hello", model: "bogus" })).toEqual({
       ok: true,
-      value: { prompt: "hello", model: DEFAULT_GOAT_MODEL, sessionId: null },
+      value: { prompt: "hello", model: DEFAULT_MODEL, sessionId: null },
     });
   });
 
   it("rejects empty and oversized prompts", () => {
-    expect(validateChatInput({ prompt: " ", model: DEFAULT_GOAT_MODEL })).toMatchObject({
+    expect(validateChatInput({ prompt: " ", model: DEFAULT_MODEL })).toMatchObject({
       ok: false,
     });
     expect(
       validateChatInput({
-        prompt: "x".repeat(GOAT_CHAT_PROMPT_MAX_LENGTH + 1),
-        model: DEFAULT_GOAT_MODEL,
+        prompt: "x".repeat(CHAT_PROMPT_MAX_LENGTH + 1),
+        model: DEFAULT_MODEL,
       }),
     ).toMatchObject({ ok: false });
   });

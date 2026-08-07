@@ -16,9 +16,9 @@ import {
   toChatUiMessage,
 } from "@/lib/chat-ui";
 
-const GOAT_CHAT_SHARE_ID_PATTERN =
+const CHAT_SHARE_ID_PATTERN =
   /^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const SHAREABLE_GOAT_CHAT_SESSION_KINDS: ChatSessionKind[] = ["chat", "task"];
+const SHAREABLE_CHAT_SESSION_KINDS: ChatSessionKind[] = ["chat", "task"];
 
 export type PublicChatView = Pick<ChatSessionView, "title" | "messages"> & {
   shareId: string;
@@ -61,7 +61,7 @@ export function newChatShareId() {
 }
 
 export function isChatShareId(value: string) {
-  return GOAT_CHAT_SHARE_ID_PATTERN.test(value);
+  return CHAT_SHARE_ID_PATTERN.test(value);
 }
 
 export async function ensureChatShareForUser(
@@ -220,10 +220,7 @@ export function createDbChatShareStore(
         .innerJoin(chatSessions, eq(chatShares.chatSessionId, chatSessions.id))
         .leftJoin(tasks, eq(tasks.sessionId, chatSessions.id))
         .where(
-          and(
-            eq(chatShares.id, shareId),
-            inArray(chatSessions.kind, SHAREABLE_GOAT_CHAT_SESSION_KINDS),
-          ),
+          and(eq(chatShares.id, shareId), inArray(chatSessions.kind, SHAREABLE_CHAT_SESSION_KINDS)),
         )
         .limit(1);
       return result ?? null;
@@ -273,7 +270,7 @@ function shareableChatSessionAccessCondition(input: {
 }): SQL {
   const ownedSession = and(
     eq(chatSessions.userWorkosId, input.userWorkosId),
-    inArray(chatSessions.kind, SHAREABLE_GOAT_CHAT_SESSION_KINDS),
+    inArray(chatSessions.kind, SHAREABLE_CHAT_SESSION_KINDS),
   );
   const workspaceTaskSession = input.workspaceId?.trim()
     ? and(eq(chatSessions.kind, "task"), eq(tasks.workspaceId, input.workspaceId.trim()))

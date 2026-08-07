@@ -6,7 +6,7 @@ import {
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 
-const GOAT_MODEL_IDS = [
+const MODEL_IDS = [
   "anthropic/claude-sonnet-5",
   "anthropic/claude-opus-4.8",
   "openai/gpt-5.5",
@@ -16,23 +16,23 @@ const GOAT_MODEL_IDS = [
   "zai/glm-5.2",
 ] as const satisfies readonly AgentModelId[];
 
-const GOAT_MODEL_ID_SET = new Set<string>(GOAT_MODEL_IDS);
+const MODEL_ID_SET = new Set<string>(MODEL_IDS);
 
-export const GOAT_MODELS = GOAT_MODEL_IDS.map(requireAgentModelDefinition);
+export const MODELS = MODEL_IDS.map(requireAgentModelDefinition);
 
 export const CODEX_MODELS = CODEX_AGENT_MODEL_IDS.map(requireAgentModelDefinition);
 
 export const CLAUDE_CODE_MODELS = CLAUDE_CODE_AGENT_MODEL_IDS.map(requireAgentModelDefinition);
 
-export type ModelOption = (typeof GOAT_MODELS)[number];
+export type ModelOption = (typeof MODELS)[number];
 
-export const DEFAULT_GOAT_MODEL: AgentModelId = "moonshotai/kimi-k3";
+export const DEFAULT_MODEL: AgentModelId = "moonshotai/kimi-k3";
 
 export function normalizeModel(value: unknown): AgentModelId {
-  if (typeof value === "string" && GOAT_MODEL_ID_SET.has(value)) {
+  if (typeof value === "string" && MODEL_ID_SET.has(value)) {
     return value as AgentModelId;
   }
-  return DEFAULT_GOAT_MODEL;
+  return DEFAULT_MODEL;
 }
 
 export function modelContextWindowTokens(modelId: string): number {

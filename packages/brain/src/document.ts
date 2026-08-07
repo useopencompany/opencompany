@@ -3,28 +3,27 @@ import { parseBrainInlineLinks } from "./inline-links";
 import type { BrainDocument, BrainFrontmatter, BrainTimelineEntry } from "./schema";
 import { deterministicEvidenceId, normalizeEvidenceId, normalizeTimelineAt } from "./timeline";
 
-export const GOAT_BRAIN_TRUTH_HEADING = "## Compiled truth";
-export const GOAT_BRAIN_TIMELINE_HEADING = "## Timeline";
-export const GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER = "_No compiled truth yet._";
-export const GOAT_BRAIN_TIMELINE_SENTINEL =
-  "<!-- TIMELINE:BELOW - append only past this marker -->";
+export const BRAIN_TRUTH_HEADING = "## Compiled truth";
+export const BRAIN_TIMELINE_HEADING = "## Timeline";
+export const BRAIN_EMPTY_TRUTH_PLACEHOLDER = "_No compiled truth yet._";
+export const BRAIN_TIMELINE_SENTINEL = "<!-- TIMELINE:BELOW - append only past this marker -->";
 
 // File-backed documents materialize with a generated
 // "extracted text" block appended after the timeline. The block is derived
 // from the DB row on every materialization and is never authoritative: the
 // parser strips it, so edits inside it are discarded on sync.
-export const GOAT_BRAIN_ASSET_TEXT_BEGIN =
+export const BRAIN_ASSET_TEXT_BEGIN =
   "<!-- ASSET-TEXT:BEGIN generated from the source file; edits below are discarded -->";
-export const GOAT_BRAIN_ASSET_TEXT_END = "<!-- ASSET-TEXT:END -->";
-export const GOAT_BRAIN_ASSET_TEXT_HEADING = "## Extracted text";
+export const BRAIN_ASSET_TEXT_END = "<!-- ASSET-TEXT:END -->";
+export const BRAIN_ASSET_TEXT_HEADING = "## Extracted text";
 
 export function stripBrainAssetTextBlock(source: string): string {
   let result = source;
   while (true) {
-    const begin = result.indexOf(GOAT_BRAIN_ASSET_TEXT_BEGIN);
+    const begin = result.indexOf(BRAIN_ASSET_TEXT_BEGIN);
     if (begin === -1) break;
-    const end = result.indexOf(GOAT_BRAIN_ASSET_TEXT_END, begin);
-    let sliceEnd = end === -1 ? result.length : end + GOAT_BRAIN_ASSET_TEXT_END.length;
+    const end = result.indexOf(BRAIN_ASSET_TEXT_END, begin);
+    let sliceEnd = end === -1 ? result.length : end + BRAIN_ASSET_TEXT_END.length;
     if (result[sliceEnd] === "\n") sliceEnd += 1;
     result = result.slice(0, begin) + result.slice(sliceEnd);
   }
@@ -32,12 +31,12 @@ export function stripBrainAssetTextBlock(source: string): string {
 }
 
 export function extractBrainAssetText(source: string): string {
-  const begin = source.indexOf(GOAT_BRAIN_ASSET_TEXT_BEGIN);
+  const begin = source.indexOf(BRAIN_ASSET_TEXT_BEGIN);
   if (begin === -1) return "";
-  const contentStart = begin + GOAT_BRAIN_ASSET_TEXT_BEGIN.length;
-  const end = source.indexOf(GOAT_BRAIN_ASSET_TEXT_END, contentStart);
+  const contentStart = begin + BRAIN_ASSET_TEXT_BEGIN.length;
+  const end = source.indexOf(BRAIN_ASSET_TEXT_END, contentStart);
   const raw = source.slice(contentStart, end === -1 ? source.length : end);
-  return raw.replace(GOAT_BRAIN_ASSET_TEXT_HEADING, "").trim();
+  return raw.replace(BRAIN_ASSET_TEXT_HEADING, "").trim();
 }
 
 export function appendBrainAssetTextBlock(content: string, assetText: string): string {
@@ -47,13 +46,13 @@ export function appendBrainAssetTextBlock(content: string, assetText: string): s
   // Purely additive so stripBrainAssetTextBlock restores the input
   // byte-for-byte — sync relies on that to keep content hashes stable.
   return `${content}${separator}${[
-    GOAT_BRAIN_ASSET_TEXT_BEGIN,
+    BRAIN_ASSET_TEXT_BEGIN,
     "",
-    GOAT_BRAIN_ASSET_TEXT_HEADING,
+    BRAIN_ASSET_TEXT_HEADING,
     "",
     text,
     "",
-    GOAT_BRAIN_ASSET_TEXT_END,
+    BRAIN_ASSET_TEXT_END,
     "",
   ].join("\n")}`;
 }
@@ -100,14 +99,14 @@ export function parseBrainBody(body: string): {
 } {
   const normalized = body.replace(/\r\n/g, "\n");
   const title = readTitle(normalized);
-  const truthStart = sectionStart(normalized, GOAT_BRAIN_TRUTH_HEADING);
-  const lastSentinelStart = normalized.lastIndexOf(GOAT_BRAIN_TIMELINE_SENTINEL);
+  const truthStart = sectionStart(normalized, BRAIN_TRUTH_HEADING);
+  const lastSentinelStart = normalized.lastIndexOf(BRAIN_TIMELINE_SENTINEL);
   const sentinelStart =
     truthStart !== -1 && lastSentinelStart > truthStart ? lastSentinelStart : -1;
   const timelineStart =
     sentinelStart !== -1
-      ? sectionStartFrom(normalized, GOAT_BRAIN_TIMELINE_HEADING, sentinelStart)
-      : sectionStart(normalized, GOAT_BRAIN_TIMELINE_HEADING);
+      ? sectionStartFrom(normalized, BRAIN_TIMELINE_HEADING, sentinelStart)
+      : sectionStart(normalized, BRAIN_TIMELINE_HEADING);
   let compiledTruth = "";
   if (truthStart !== -1) {
     const truthEnd =
@@ -117,12 +116,12 @@ export function parseBrainBody(body: string): {
           ? timelineStart
           : normalized.length;
     compiledTruth = stripSentinel(
-      normalized.slice(truthStart + GOAT_BRAIN_TRUTH_HEADING.length, truthEnd),
+      normalized.slice(truthStart + BRAIN_TRUTH_HEADING.length, truthEnd),
     ).trim();
   }
   const timeline =
     timelineStart !== -1
-      ? parseTimeline(normalized.slice(timelineStart + GOAT_BRAIN_TIMELINE_HEADING.length))
+      ? parseTimeline(normalized.slice(timelineStart + BRAIN_TIMELINE_HEADING.length))
       : [];
   return { title, compiledTruth, timeline };
 }
@@ -147,12 +146,12 @@ export function serializeBrainDocument(doc: BrainDocument): string {
     "",
     `# ${title}`,
     "",
-    GOAT_BRAIN_TRUTH_HEADING,
-    compiledTruth.trim() || GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER,
+    BRAIN_TRUTH_HEADING,
+    compiledTruth.trim() || BRAIN_EMPTY_TRUTH_PLACEHOLDER,
     "",
-    GOAT_BRAIN_TIMELINE_SENTINEL,
+    BRAIN_TIMELINE_SENTINEL,
     "",
-    GOAT_BRAIN_TIMELINE_HEADING,
+    BRAIN_TIMELINE_HEADING,
     timelineBody,
     "",
   ].join("\n");
@@ -200,8 +199,8 @@ function looksLikeLegacyBrainDocument(value: string): boolean {
   return (
     value.startsWith("---\n") &&
     value.includes("\n---") &&
-    value.includes(GOAT_BRAIN_TRUTH_HEADING) &&
-    value.includes(GOAT_BRAIN_TIMELINE_HEADING)
+    value.includes(BRAIN_TRUTH_HEADING) &&
+    value.includes(BRAIN_TIMELINE_HEADING)
   );
 }
 
@@ -238,21 +237,19 @@ function sectionStartFrom(body: string, heading: string, start: number): number 
 
 function replaceCompiledTruthInBody(body: string, compiledTruth: string): string {
   const normalized = body.replace(/\r\n/g, "\n");
-  const truthStart = sectionStart(normalized, GOAT_BRAIN_TRUTH_HEADING);
+  const truthStart = sectionStart(normalized, BRAIN_TRUTH_HEADING);
   if (truthStart === -1) {
     const title = readTitle(normalized) || "Untitled";
-    const timelineStart = sectionStart(normalized, GOAT_BRAIN_TIMELINE_HEADING);
+    const timelineStart = sectionStart(normalized, BRAIN_TIMELINE_HEADING);
     const timelineTail =
-      timelineStart !== -1
-        ? normalized.slice(timelineStart).trimEnd()
-        : GOAT_BRAIN_TIMELINE_HEADING;
+      timelineStart !== -1 ? normalized.slice(timelineStart).trimEnd() : BRAIN_TIMELINE_HEADING;
     return [
       `# ${title}`,
       "",
-      GOAT_BRAIN_TRUTH_HEADING,
-      compiledTruth.trim() || GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER,
+      BRAIN_TRUTH_HEADING,
+      compiledTruth.trim() || BRAIN_EMPTY_TRUTH_PLACEHOLDER,
       "",
-      GOAT_BRAIN_TIMELINE_SENTINEL,
+      BRAIN_TIMELINE_SENTINEL,
       "",
       timelineTail,
     ].join("\n");
@@ -260,9 +257,9 @@ function replaceCompiledTruthInBody(body: string, compiledTruth: string): string
 
   const truthHeadingEnd = normalized.indexOf("\n", truthStart);
   const contentStart =
-    truthHeadingEnd === -1 ? truthStart + GOAT_BRAIN_TRUTH_HEADING.length : truthHeadingEnd + 1;
-  const timelineStart = sectionStart(normalized, GOAT_BRAIN_TIMELINE_HEADING);
-  const sentinelStart = normalized.indexOf(GOAT_BRAIN_TIMELINE_SENTINEL, contentStart);
+    truthHeadingEnd === -1 ? truthStart + BRAIN_TRUTH_HEADING.length : truthHeadingEnd + 1;
+  const timelineStart = sectionStart(normalized, BRAIN_TIMELINE_HEADING);
+  const sentinelStart = normalized.indexOf(BRAIN_TIMELINE_SENTINEL, contentStart);
   const contentEnd =
     sentinelStart !== -1 && (timelineStart === -1 || sentinelStart < timelineStart)
       ? sentinelStart
@@ -271,13 +268,11 @@ function replaceCompiledTruthInBody(body: string, compiledTruth: string): string
         : normalized.length;
   const prefix = normalized.slice(0, contentStart).replace(/\n*$/, "\n");
   const suffix = normalized.slice(contentEnd).replace(/^\n*/, "");
-  return `${prefix}${compiledTruth.trim() || GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER}\n\n${suffix}`;
+  return `${prefix}${compiledTruth.trim() || BRAIN_EMPTY_TRUTH_PLACEHOLDER}\n\n${suffix}`;
 }
 
 function stripSentinel(text: string): string {
-  return text
-    .replace(GOAT_BRAIN_TIMELINE_SENTINEL, "")
-    .replace(/<!--\s*TIMELINE:BELOW[\s\S]*?-->/g, "");
+  return text.replace(BRAIN_TIMELINE_SENTINEL, "").replace(/<!--\s*TIMELINE:BELOW[\s\S]*?-->/g, "");
 }
 
 function comparableTitle(value: string): string {

@@ -16,9 +16,9 @@ import {
   validateBrainSidecar,
 } from "./entry";
 import {
+  BRAIN_FOLDER_MANIFEST_PATH,
   type BrainFolderManifestEntry,
   defaultBrainFolderManifestEntries,
-  GOAT_BRAIN_FOLDER_MANIFEST_PATH,
   normalizeBrainFolderEntries,
   parseBrainFolderManifest,
   serializeBrainFolderManifest,
@@ -34,7 +34,7 @@ export type StoredBrainFile = {
 };
 
 export function resolveBrainRoot(explicit: string | undefined, cwd: string = process.cwd()) {
-  const pinned = process.env.GOAT_BRAIN_ROOT?.trim();
+  const pinned = process.env.BRAIN_ROOT?.trim();
   if (pinned) return path.resolve(cwd, pinned);
   if (explicit && explicit.trim().length > 0) return path.resolve(cwd, explicit);
   return path.resolve(cwd, "goat-brain");
@@ -116,7 +116,7 @@ export async function removeBrainFile(root: string, relativePath: string): Promi
 
 export async function readBrainFolders(root: string): Promise<BrainFolderManifestEntry[]> {
   try {
-    const source = await readFile(path.join(root, GOAT_BRAIN_FOLDER_MANIFEST_PATH), "utf8");
+    const source = await readFile(path.join(root, BRAIN_FOLDER_MANIFEST_PATH), "utf8");
     return parseBrainFolderManifest(source);
   } catch (error) {
     if (isNotFound(error)) return defaultBrainFolderManifestEntries();
@@ -130,7 +130,7 @@ export async function writeBrainFolders(
 ): Promise<void> {
   await writeBrainDocumentText(
     root,
-    GOAT_BRAIN_FOLDER_MANIFEST_PATH,
+    BRAIN_FOLDER_MANIFEST_PATH,
     serializeBrainFolderManifest(folders),
   );
 }

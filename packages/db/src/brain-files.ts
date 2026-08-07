@@ -6,6 +6,7 @@ import { and, desc, eq, like, notInArray, or } from "drizzle-orm";
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import {
   appendBrainAssetTextBlock,
+  BRAIN_FOLDER_MANIFEST_PATH,
   type BrainDocumentFormat,
   type BrainEntityType,
   type BrainFolderManifestEntry,
@@ -23,7 +24,6 @@ import {
   brainSidecarRelativePath,
   defaultBrainFolderManifestEntries,
   deriveBrainEdges,
-  GOAT_BRAIN_FOLDER_MANIFEST_PATH,
   isBuiltInBrainEntityType,
   isHardDefaultBrainFolder,
   isSafeBrainRelativePath,
@@ -61,18 +61,18 @@ import {
   brainTimelineEntries,
 } from "./schema";
 
-export const GOAT_BRAIN_FILE_MIME_TYPE = "text/markdown";
-export const GOAT_BRAIN_FILE_FORMAT = "markdown";
-export const MAX_GOAT_BRAIN_FILE_BYTES = 1_000_000;
+export const BRAIN_FILE_MIME_TYPE = "text/markdown";
+export const BRAIN_FILE_FORMAT = "markdown";
+export const MAX_BRAIN_FILE_BYTES = 1_000_000;
 // Cap on stored machine-extracted asset text for file-backed rows.
-export const MAX_GOAT_BRAIN_ASSET_TEXT_BYTES = 200_000;
+export const MAX_BRAIN_ASSET_TEXT_BYTES = 200_000;
 
 export type BrainFileProjection = {
   path: string;
   brainId: string;
   folderPath: string;
-  format: typeof GOAT_BRAIN_FILE_FORMAT;
-  mimeType: typeof GOAT_BRAIN_FILE_MIME_TYPE;
+  format: typeof BRAIN_FILE_FORMAT;
+  mimeType: typeof BRAIN_FILE_MIME_TYPE;
   content: string;
   body: string;
   timeline: BrainTimelineEntry[];
@@ -272,16 +272,16 @@ export function deriveBrainFileProjection(input: {
     source,
   });
   const sizeBytes = Buffer.byteLength(content, "utf8");
-  if (sizeBytes > MAX_GOAT_BRAIN_FILE_BYTES) {
-    throw new Error(`Brain file "${normalizedPath}" exceeds ${MAX_GOAT_BRAIN_FILE_BYTES} bytes.`);
+  if (sizeBytes > MAX_BRAIN_FILE_BYTES) {
+    throw new Error(`Brain file "${normalizedPath}" exceeds ${MAX_BRAIN_FILE_BYTES} bytes.`);
   }
 
   return {
     path: normalizedPath,
     brainId,
     folderPath,
-    format: GOAT_BRAIN_FILE_FORMAT,
-    mimeType: GOAT_BRAIN_FILE_MIME_TYPE,
+    format: BRAIN_FILE_FORMAT,
+    mimeType: BRAIN_FILE_MIME_TYPE,
     content,
     body,
     timeline: parsed.timeline,
@@ -578,8 +578,8 @@ export async function upsertBrainFile(
           input.createdByWorkosId === undefined ? input.userWorkosId : input.createdByWorkosId,
         brainRef: input.brainRef,
         ...documentValues(projection),
-        format: GOAT_BRAIN_FILE_FORMAT,
-        mimeType: GOAT_BRAIN_FILE_MIME_TYPE,
+        format: BRAIN_FILE_FORMAT,
+        mimeType: BRAIN_FILE_MIME_TYPE,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
       })
@@ -636,8 +636,8 @@ export async function createBrainMarkdownDocument(
       createdByWorkosId: input.userWorkosId,
       brainRef: input.brainRef,
       ...documentValues(projection),
-      format: GOAT_BRAIN_FILE_FORMAT,
-      mimeType: GOAT_BRAIN_FILE_MIME_TYPE,
+      format: BRAIN_FILE_FORMAT,
+      mimeType: BRAIN_FILE_MIME_TYPE,
       createdAt: now,
       updatedAt: now,
     })
@@ -842,7 +842,7 @@ export async function updateBrainAssetExtraction(
   options: { db?: DbClient } = {},
 ): Promise<BrainDocument> {
   const db = options.db ?? getDb();
-  const extractedText = truncateUtf8(input.extractedText, MAX_GOAT_BRAIN_ASSET_TEXT_BYTES);
+  const extractedText = truncateUtf8(input.extractedText, MAX_BRAIN_ASSET_TEXT_BYTES);
   const rows = await db
     .update(brainDocuments)
     .set({
@@ -875,7 +875,7 @@ export async function replaceBrainAssetFile(
   const db = options.db ?? getDb();
   const existing = await getDocumentById(db, input.brainRef, input.fileId);
   if (!existing) throw new Error("Brain document not found.");
-  if (existing.format === GOAT_BRAIN_FILE_FORMAT) {
+  if (existing.format === BRAIN_FILE_FORMAT) {
     throw new Error("Only binary-backed brain documents can have their file replaced.");
   }
   const rows = await db
@@ -928,13 +928,13 @@ export async function materializeBrainFilesToRoot(input: {
   );
   await writeRootFile(
     input.root,
-    GOAT_BRAIN_FOLDER_MANIFEST_PATH,
+    BRAIN_FOLDER_MANIFEST_PATH,
     serializeBrainFolderManifest(folderRows),
   );
   const materializedHashByPath = new Map<string, string>();
   for (const row of rows) {
     const payloadPath = brainFilePathFor(row.folderPath, row.brainId);
-    if (row.format !== GOAT_BRAIN_FILE_FORMAT) {
+    if (row.format !== BRAIN_FILE_FORMAT) {
       // Binary-backed rows materialize as their markdown projection (the
       // content column) plus a generated, non-authoritative extracted-text
       // block; the bytes themselves stay in blob storage.
@@ -993,7 +993,7 @@ export async function readBrainFolderManifestFromRoot(
   root: string,
 ): Promise<BrainFolderManifestEntry[] | null> {
   try {
-    const source = await readFile(path.join(root, GOAT_BRAIN_FOLDER_MANIFEST_PATH), "utf8");
+    const source = await readFile(path.join(root, BRAIN_FOLDER_MANIFEST_PATH), "utf8");
     return parseBrainFolderManifest(source);
   } catch (error) {
     if (isNotFound(error)) return null;

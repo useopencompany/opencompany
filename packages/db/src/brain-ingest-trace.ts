@@ -1,14 +1,14 @@
-export const GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION = "goat.brain_ingest_trace.v1";
+export const BRAIN_INGEST_TRACE_SCHEMA_VERSION = "goat.brain_ingest_trace.v1";
 
-export const GOAT_BRAIN_INGEST_TRACE_MAX_TOOL_CALLS = 96;
-export const GOAT_BRAIN_INGEST_TRACE_MAX_ARGS = 80;
-export const GOAT_BRAIN_INGEST_TRACE_ARG_PREVIEW_LENGTH = 240;
-export const GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH = 1_200;
-export const GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH = 2_000;
-export const GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH = 2_000;
-export const GOAT_BRAIN_INGEST_TRIAGE_REASON_LENGTH = 500;
-export const GOAT_BRAIN_INGEST_TRIAGE_MAX_ENTITY_HINTS = 12;
-export const GOAT_BRAIN_INGEST_TRIAGE_ENTITY_HINT_LENGTH = 160;
+export const BRAIN_INGEST_TRACE_MAX_TOOL_CALLS = 96;
+export const BRAIN_INGEST_TRACE_MAX_ARGS = 80;
+export const BRAIN_INGEST_TRACE_ARG_PREVIEW_LENGTH = 240;
+export const BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH = 1_200;
+export const BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH = 2_000;
+export const BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH = 2_000;
+export const BRAIN_INGEST_TRIAGE_REASON_LENGTH = 500;
+export const BRAIN_INGEST_TRIAGE_MAX_ENTITY_HINTS = 12;
+export const BRAIN_INGEST_TRIAGE_ENTITY_HINT_LENGTH = 160;
 
 export type BrainIngestTraceUsage = {
   inputTokens: number | null;
@@ -60,7 +60,7 @@ export type BrainIngestTraceToolCall = {
 };
 
 export type BrainIngestTrace = {
-  schemaVersion: typeof GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION;
+  schemaVersion: typeof BRAIN_INGEST_TRACE_SCHEMA_VERSION;
   model: string;
   steps: number;
   toolCallCount: number;
@@ -84,10 +84,10 @@ export type BrainIngestTrace = {
 
 export function normalizeBrainIngestTrace(value: unknown): BrainIngestTrace | null {
   const record = readRecord(value);
-  if (!record || record.schemaVersion !== GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION) return null;
+  if (!record || record.schemaVersion !== BRAIN_INGEST_TRACE_SCHEMA_VERSION) return null;
 
   const toolCalls = readArray(record.toolCalls)
-    .slice(0, GOAT_BRAIN_INGEST_TRACE_MAX_TOOL_CALLS)
+    .slice(0, BRAIN_INGEST_TRACE_MAX_TOOL_CALLS)
     .flatMap((item): BrainIngestTraceToolCall[] => {
       const toolCall = normalizeTraceToolCall(item);
       return toolCall ? [toolCall] : [];
@@ -96,7 +96,7 @@ export function normalizeBrainIngestTrace(value: unknown): BrainIngestTrace | nu
   const triage = normalizeTriageTrace(record.triage);
 
   return {
-    schemaVersion: GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
+    schemaVersion: BRAIN_INGEST_TRACE_SCHEMA_VERSION,
     model: readString(record.model),
     steps: readNonNegativeInteger(record.steps),
     toolCallCount: readNonNegativeInteger(record.toolCallCount),
@@ -104,7 +104,7 @@ export function normalizeBrainIngestTrace(value: unknown): BrainIngestTrace | nu
     usage: normalizeTraceUsage(record.usage),
     finalText: brainIngestTracePreview(
       readString(record.finalText),
-      GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH,
+      BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH,
     ),
     toolCalls,
     truncatedToolCalls: readNonNegativeInteger(record.truncatedToolCalls),
@@ -123,11 +123,11 @@ export function hasBrainIngestTrace(value: unknown): boolean {
 export function sanitizeBrainIngestTraceArgs(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
-    .slice(0, GOAT_BRAIN_INGEST_TRACE_MAX_ARGS)
+    .slice(0, BRAIN_INGEST_TRACE_MAX_ARGS)
     .map((item) =>
       brainIngestTracePreview(
         typeof item === "string" ? item : String(item),
-        GOAT_BRAIN_INGEST_TRACE_ARG_PREVIEW_LENGTH,
+        BRAIN_INGEST_TRACE_ARG_PREVIEW_LENGTH,
       ),
     );
 }
@@ -144,19 +144,19 @@ function normalizeTriageTrace(value: unknown): BrainIngestTriageTrace | undefine
     return undefined;
   }
   const entityHints = readArray(record.entityHints)
-    .slice(0, GOAT_BRAIN_INGEST_TRIAGE_MAX_ENTITY_HINTS)
+    .slice(0, BRAIN_INGEST_TRIAGE_MAX_ENTITY_HINTS)
     .flatMap((hint): string[] => {
       if (typeof hint !== "string") return [];
       const normalized = hint.replace(/\s+/g, " ").trim();
       if (!normalized) return [];
-      return [brainIngestTracePreview(normalized, GOAT_BRAIN_INGEST_TRIAGE_ENTITY_HINT_LENGTH)];
+      return [brainIngestTracePreview(normalized, BRAIN_INGEST_TRIAGE_ENTITY_HINT_LENGTH)];
     });
   return {
     model: readString(record.model),
     decision: record.decision,
     reason: brainIngestTracePreview(
       readString(record.reason).trim(),
-      GOAT_BRAIN_INGEST_TRIAGE_REASON_LENGTH,
+      BRAIN_INGEST_TRIAGE_REASON_LENGTH,
     ),
     entityHints,
     usage: normalizeTraceUsage(record.usage),
@@ -203,22 +203,22 @@ function normalizeTraceToolCall(value: unknown): BrainIngestTraceToolCall | null
     args: sanitizeBrainIngestTraceArgs(record.args),
     stdinPreview:
       typeof record.stdinPreview === "string"
-        ? brainIngestTracePreview(record.stdinPreview, GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH)
+        ? brainIngestTracePreview(record.stdinPreview, BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH)
         : null,
     status,
     mutating: record.mutating === true,
     exitCode: readNullableInteger(record.exitCode),
     stdoutPreview: brainIngestTracePreview(
       readString(record.stdoutPreview),
-      GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
+      BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
     ),
     stderrPreview: brainIngestTracePreview(
       readString(record.stderrPreview),
-      GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
+      BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
     ),
     errorPreview: brainIngestTracePreview(
       readString(record.errorPreview),
-      GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
+      BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
     ),
     startedAt: readString(record.startedAt),
     completedAt: readString(record.completedAt),

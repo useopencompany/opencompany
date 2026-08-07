@@ -7,10 +7,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const DEFAULT_APP_HTTPS_PORT = "3443";
-export const GOAT_HTTPS_DISABLED_VALUES = new Set(["1", "true", "yes", "on"]);
+export const HTTPS_DISABLED_VALUES = new Set(["1", "true", "yes", "on"]);
 
 export function httpsDisabled(env = process.env) {
-  return GOAT_HTTPS_DISABLED_VALUES.has(
+  return HTTPS_DISABLED_VALUES.has(
     String(env.APP_HTTPS_DISABLED ?? "")
       .trim()
       .toLowerCase(),

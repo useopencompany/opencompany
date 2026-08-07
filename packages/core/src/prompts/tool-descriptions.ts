@@ -1,4 +1,4 @@
-import { GOAT_ACTION_TOOL_CONTRACT } from "@opencompany/agent-runtime";
+import { ACTION_TOOL_CONTRACT } from "@opencompany/agent-runtime";
 import {
   type BrowserToolName,
   BROWSER_TOOL_DESCRIPTIONS as SHARED_BROWSER_TOOL_DESCRIPTIONS,
@@ -9,7 +9,7 @@ import {
   MAX_WEB_SEARCH_CALLS_PER_TURN,
 } from "../chat-limits";
 
-export const GOAT_BRAIN_TOOL_DESCRIPTION =
+export const BRAIN_TOOL_DESCRIPTION =
   "Read-only access to the user's durable Goat Brain (structured memory stored as Markdown files). Use it to recall and inspect existing knowledge, never to write. Use query for recall/search, list for inventory, get for a known brain id, timeline for a record's history, help for command-specific usage, and doctor for validation. Query returns curated pages by default; pass kind: \"evidence\" only when raw source material is explicitly needed. Use query with since windows like 6h, 2d, 1w, or an ISO timestamp to search or browse recent Brain pages; omit text when the user only wants recent entries. Query output includes pagination. When pagination.hasMore is true, repeat the same query with all filters unchanged and offset set to pagination.nextOffset. Use includeMerged only when inspecting duplicate/merged history and includeArchived only for retired records. To add or edit Brain content — new pages, evidence, corrections, links, or merges — use save_to_brain instead; the background curation agent files it. Do not treat Brain as a chat scratchpad.";
 
 export const SAVE_TO_BRAIN_TOOL_DESCRIPTION =
@@ -151,18 +151,18 @@ export const BROWSER_USE_PROFILE_PROFILE_DESCRIPTION =
 export const BROWSER_USE_PROFILE_REASON_DESCRIPTION =
   "A concise reason shown to the user on the approval card.";
 
-export const LIST_ACTIONS_TOOL_DESCRIPTION = GOAT_ACTION_TOOL_CONTRACT.list.description;
+export const LIST_ACTIONS_TOOL_DESCRIPTION = ACTION_TOOL_CONTRACT.list.description;
 
 export const LIST_ACTIONS_SOURCE_DESCRIPTION =
-  GOAT_ACTION_TOOL_CONTRACT.list.inputSchema.properties.source.description;
+  ACTION_TOOL_CONTRACT.list.inputSchema.properties.source.description;
 
-export const USE_ACTION_TOOL_DESCRIPTION = GOAT_ACTION_TOOL_CONTRACT.execute.description;
+export const USE_ACTION_TOOL_DESCRIPTION = ACTION_TOOL_CONTRACT.execute.description;
 
 export const USE_ACTION_ACTION_DESCRIPTION =
-  GOAT_ACTION_TOOL_CONTRACT.execute.inputSchema.properties.action.description;
+  ACTION_TOOL_CONTRACT.execute.inputSchema.properties.action.description;
 
 export const USE_ACTION_PARAMS_DESCRIPTION =
-  GOAT_ACTION_TOOL_CONTRACT.execute.inputSchema.properties.params.description;
+  ACTION_TOOL_CONTRACT.execute.inputSchema.properties.params.description;
 
 export const LIST_SKILLS_TOOL_DESCRIPTION =
   "Discover user-authored skills available from the active workspace. Skills are reusable workflows and operating instructions that may help with the user's request. Search by a short task-focused query, or omit query to browse. The result contains catalog metadata for matching only, not instructions. Call list_skills before use_skill; a skill id returned successfully remains eligible for use on later turns in this chat while it is still available.";

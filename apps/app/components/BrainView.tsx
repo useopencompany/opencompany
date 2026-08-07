@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER,
+  BRAIN_EMPTY_TRUTH_PLACEHOLDER,
   normalizeBrainCompiledTruth,
   parseBrainDocument,
 } from "@opencompany/brain/document";
@@ -18,14 +18,11 @@ import {
 } from "@opencompany/brain/inline-links";
 import { isBrainSkillFolder, serializeBrainSkillMarkdown } from "@opencompany/brain/skills";
 import { isBrainWorkflowFolder } from "@opencompany/brain/workflows";
-import {
-  DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
-  GOAT_WORKFLOW_MODEL_OPTIONS,
-} from "@/lib/workflow-model-options";
+import { DEFAULT_WORKFLOW_MODEL_TOKEN, WORKFLOW_MODEL_OPTIONS } from "@/lib/workflow-model-options";
 
 const DEFAULT_WORKFLOW_MODEL_LABEL =
-  GOAT_WORKFLOW_MODEL_OPTIONS.find((option) => option.token === DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN)
-    ?.label ?? "Kimi K2.6";
+  WORKFLOW_MODEL_OPTIONS.find((option) => option.token === DEFAULT_WORKFLOW_MODEL_TOKEN)?.label ??
+  "Kimi K2.6";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
@@ -1918,7 +1915,7 @@ function BrainDocumentPanel({
                     className="w-fit min-w-[260px] rounded-md border border-border bg-surface px-3 py-2 text-[13px] font-normal leading-5 text-ink outline-none transition-colors focus:border-border-strong disabled:opacity-60"
                   >
                     <option value="">Default ({DEFAULT_WORKFLOW_MODEL_LABEL})</option>
-                    {GOAT_WORKFLOW_MODEL_OPTIONS.map((option) => (
+                    {WORKFLOW_MODEL_OPTIONS.map((option) => (
                       <option key={option.token} value={option.token}>
                         {option.label} — {option.hint}
                       </option>
@@ -2869,7 +2866,7 @@ function documentEditorBody(document: BrainDocumentView | null | undefined) {
   if (!document) return "";
   const body = normalizeBrainCompiledTruth(document.body, document.title);
   return isSkillLikeBrainFolder(document.folderPath) &&
-    body.trim() === GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER
+    body.trim() === BRAIN_EMPTY_TRUTH_PLACEHOLDER
     ? ""
     : body;
 }

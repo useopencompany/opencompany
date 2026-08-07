@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
+  BRAIN_SKILL_DESCRIPTION_MAX_LENGTH,
+  BRAIN_SKILL_NAME_MAX_LENGTH,
   type BrainSkill,
-  GOAT_BRAIN_SKILL_DESCRIPTION_MAX_LENGTH,
-  GOAT_BRAIN_SKILL_NAME_MAX_LENGTH,
   isValidBrainId,
   normalizeBrainId,
   serializeBrainSkillMarkdown,
@@ -23,8 +23,8 @@ import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 // attaches a skill to a chat message, which snapshots its content immutably into
 // `chatSessionSkills`.
 
-export const MAX_GOAT_CHAT_SKILLS = 16;
-export const MAX_GOAT_CHAT_SKILL_BYTES = 256 * 1024;
+export const MAX_CHAT_SKILLS = 16;
+export const MAX_CHAT_SKILL_BYTES = 256 * 1024;
 
 type Db = ReturnType<typeof getDb>;
 
@@ -165,8 +165,8 @@ export async function resolveSkillMentions(input: {
   }
 
   const unique = [...new Map(input.mentions.map((m) => [m.id, m])).values()];
-  if (unique.length > MAX_GOAT_CHAT_SKILLS) {
-    throw new SkillMentionError(`Attach at most ${MAX_GOAT_CHAT_SKILLS} skills to one message.`);
+  if (unique.length > MAX_CHAT_SKILLS) {
+    throw new SkillMentionError(`Attach at most ${MAX_CHAT_SKILLS} skills to one message.`);
   }
 
   const rows = await (input.db ?? getDb())
@@ -208,7 +208,7 @@ export async function resolveSkillMentions(input: {
   });
 
   const totalBytes = skillsByteLength(resolvedSkills);
-  if (totalBytes > MAX_GOAT_CHAT_SKILL_BYTES) {
+  if (totalBytes > MAX_CHAT_SKILL_BYTES) {
     throw new SkillMentionError("The selected skills are too large to attach together.");
   }
   return resolvedSkills;
@@ -297,11 +297,11 @@ export function validateSkillFields(input: {
   const name = input.name.trim();
   const description = input.description.trim();
   if (!name) return "Skill name cannot be empty.";
-  if (name.length > GOAT_BRAIN_SKILL_NAME_MAX_LENGTH) {
-    return `Skill names must be ${GOAT_BRAIN_SKILL_NAME_MAX_LENGTH} characters or fewer.`;
+  if (name.length > BRAIN_SKILL_NAME_MAX_LENGTH) {
+    return `Skill names must be ${BRAIN_SKILL_NAME_MAX_LENGTH} characters or fewer.`;
   }
-  if (description.length > GOAT_BRAIN_SKILL_DESCRIPTION_MAX_LENGTH) {
-    return `Skill descriptions must be ${GOAT_BRAIN_SKILL_DESCRIPTION_MAX_LENGTH} characters or fewer.`;
+  if (description.length > BRAIN_SKILL_DESCRIPTION_MAX_LENGTH) {
+    return `Skill descriptions must be ${BRAIN_SKILL_DESCRIPTION_MAX_LENGTH} characters or fewer.`;
   }
   if (description.includes("<") || description.includes(">")) {
     return 'Skill descriptions cannot contain "<" or ">".';

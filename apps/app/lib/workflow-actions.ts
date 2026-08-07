@@ -9,7 +9,7 @@ import { prepareWorkflowRunForUser } from "@/lib/workflow-tasks";
 import {
   archiveWorkflow,
   createWorkflow,
-  DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT,
+  DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
   updateWorkflow,
   validateWorkflowFields,
   WorkflowMentionError,
@@ -91,7 +91,7 @@ export async function updateWorkflowAction(input: {
           description: input.description,
           steps: input.steps,
         },
-        description: input.trigger.prompt?.trim() || DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT,
+        description: input.trigger.prompt?.trim() || DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
       });
       scheduleHarnessSpec = prepared.harnessSpec;
     } catch (error) {

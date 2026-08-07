@@ -6,7 +6,7 @@ import {
   listBrainSourceEventClaimedBrainRefs,
 } from "@opencompany/db/brain-event-claims";
 import {
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+  BRAIN_AGENT_INGEST_JOB_KIND,
   upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
@@ -14,9 +14,9 @@ import {
   completeFathomSyncPages,
   deleteFathomPendingMeeting,
   ensureFathomSyncState,
+  FATHOM_CREDENTIAL_KIND,
+  FATHOM_PROVIDER,
   fathomEventClaimKey,
-  GOAT_FATHOM_CREDENTIAL_KIND,
-  GOAT_FATHOM_PROVIDER,
   listEnabledFathomBrainSourceRoutes,
   listFathomPendingMeetings,
   recordFathomPendingMeetingAttempt,
@@ -47,22 +47,22 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "goat-fath
 // API-key integration. A meeting may be listed before generated content is
 // ready, so the time lag avoids most early reads and a durable pending queue
 // retries the recording endpoints before any cross-brain claim is created.
-export const GOAT_FATHOM_POLL_INTERVAL_MS = 5 * 60_000;
+export const FATHOM_POLL_INTERVAL_MS = 5 * 60_000;
 // A claim stamps last_polled_at; other runner replicas skip integrations
 // claimed within the cooldown. Brain event claims absorb any residual
 // double-poll race.
-export const GOAT_FATHOM_POLL_COOLDOWN_MS = 4 * 60_000;
+export const FATHOM_POLL_COOLDOWN_MS = 4 * 60_000;
 // Recordings surface with their transcript and summary within a few minutes
 // of a meeting ending; this lag keeps the window comfortably behind that.
-export const GOAT_FATHOM_PROCESSING_LAG_MS = 15 * 60_000;
+export const FATHOM_PROCESSING_LAG_MS = 15 * 60_000;
 // Runaway guard on cursor pagination within one poll pass. Meetings are
 // low-volume; anything beyond this is drained by later polls because the
 // cursor only advances past processed windows.
-const GOAT_FATHOM_MAX_PAGES_PER_POLL = 5;
+const FATHOM_MAX_PAGES_PER_POLL = 5;
 // Each pending meeting costs two recording-content calls. Ten leaves ample
 // headroom beneath Fathom's per-user 60 requests/minute limit for list pages
 // and concurrent user activity.
-const GOAT_FATHOM_MAX_PENDING_MEETINGS_PER_POLL = 10;
+const FATHOM_MAX_PENDING_MEETINGS_PER_POLL = 10;
 
 type FathomPollCandidate = {
   integrationId: string;
@@ -105,7 +105,7 @@ export async function pollFathomIntegration(input: {
   const state = await claimFathomSyncState(
     {
       integrationId: candidate.integrationId,
-      cooldownMs: input.cooldownMs ?? GOAT_FATHOM_POLL_COOLDOWN_MS,
+      cooldownMs: input.cooldownMs ?? FATHOM_POLL_COOLDOWN_MS,
     },
     db,
   );
@@ -123,8 +123,8 @@ export async function pollFathomIntegration(input: {
   const credential = await loadIntegrationCredential({
     userWorkosId: candidate.userWorkosId,
     integrationId: candidate.integrationId,
-    provider: GOAT_FATHOM_PROVIDER,
-    kind: GOAT_FATHOM_CREDENTIAL_KIND,
+    provider: FATHOM_PROVIDER,
+    kind: FATHOM_CREDENTIAL_KIND,
   });
   const apiKey =
     credential && typeof credential.payload.apiKey === "string" ? credential.payload.apiKey : null;
@@ -155,7 +155,7 @@ export async function pollFathomIntegration(input: {
   // Continuation cursors are only valid for the filters they were minted with,
   // so a resumed pass reuses the persisted window bound; a fresh pass lags
   // "now" to give Fathom time to finish transcripts and summaries.
-  const processingLagMs = input.processingLagMs ?? GOAT_FATHOM_PROCESSING_LAG_MS;
+  const processingLagMs = input.processingLagMs ?? FATHOM_PROCESSING_LAG_MS;
   const createdBefore =
     (state.pageCursor ? state.pendingCreatedBeforeCursor : null) ??
     new Date(Date.now() - processingLagMs);
@@ -260,7 +260,7 @@ export async function listFathomMeetingsWindow(input: {
   const callListMeetings = input.listMeetings ?? listFathomMeetings;
   let cursor = input.cursor;
   const seenCursors = new Set(cursor ? [cursor] : []);
-  for (let page = 0; page < GOAT_FATHOM_MAX_PAGES_PER_POLL; page += 1) {
+  for (let page = 0; page < FATHOM_MAX_PAGES_PER_POLL; page += 1) {
     const result = await callListMeetings({
       apiKey: input.apiKey,
       createdAfter: input.createdAfter,
@@ -296,7 +296,7 @@ async function ingestFathomMeeting(input: {
   // already claimed (e.g. an overlapping window replay) is a no-op.
   const alreadyClaimed = await listBrainSourceEventClaimedBrainRefs({
     brainRefs: input.routedBrainRefs,
-    sourceProvider: GOAT_FATHOM_PROVIDER,
+    sourceProvider: FATHOM_PROVIDER,
     eventKey,
     db,
   });
@@ -316,7 +316,7 @@ async function ingestFathomMeeting(input: {
     for (const brainRef of pendingBrainRefs) {
       const { claimedEventKeys } = await claimBrainSourceEvents({
         brainRef,
-        sourceProvider: GOAT_FATHOM_PROVIDER,
+        sourceProvider: FATHOM_PROVIDER,
         eventKeys: [eventKey],
         db: tx,
       });
@@ -333,14 +333,14 @@ async function ingestFathomMeeting(input: {
       item,
       rawPayload: payload,
       rawEventKeysByBrainRef: claimedEventKeysByBrainRef,
-      kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+      kind: BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
       db: tx,
     });
     for (const brainRef of brainRefs) {
       await attributeBrainSourceEventClaims({
         brainRef,
-        sourceProvider: GOAT_FATHOM_PROVIDER,
+        sourceProvider: FATHOM_PROVIDER,
         eventKeys: claimedEventKeysByBrainRef.get(brainRef) ?? [],
         sourceItemId: upserted.sourceItemId,
         db: tx,
@@ -365,7 +365,7 @@ async function retryPendingFathomMeetings(input: {
   const pending = await listFathomPendingMeetings(
     {
       integrationId: input.candidate.integrationId,
-      limit: GOAT_FATHOM_MAX_PENDING_MEETINGS_PER_POLL,
+      limit: FATHOM_MAX_PENDING_MEETINGS_PER_POLL,
     },
     db,
   );
@@ -450,7 +450,7 @@ async function markFathomNeedsReauth(candidate: FathomPollCandidate, reason: str
   await markIntegrationStatus({
     userWorkosId: candidate.userWorkosId,
     integrationId: candidate.integrationId,
-    provider: GOAT_FATHOM_PROVIDER,
+    provider: FATHOM_PROVIDER,
     status: "needs_reauth",
     statusReason: reason,
     now: new Date(),
@@ -458,7 +458,7 @@ async function markFathomNeedsReauth(candidate: FathomPollCandidate, reason: str
 }
 
 export function startFathomPollWorker(options: { pollIntervalMs?: number } = {}) {
-  const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? GOAT_FATHOM_POLL_INTERVAL_MS);
+  const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? FATHOM_POLL_INTERVAL_MS);
   const abort = new AbortController();
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;

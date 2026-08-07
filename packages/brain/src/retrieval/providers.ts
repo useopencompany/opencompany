@@ -29,8 +29,8 @@ export async function loadProviders(
 }
 
 function gatewayReportingFromEnv(env: NodeJS.ProcessEnv) {
-  const user = env.GOAT_GATEWAY_REPORTING_USER?.trim();
-  const tags = (env.GOAT_GATEWAY_REPORTING_TAGS ?? "")
+  const user = env.GATEWAY_REPORTING_USER?.trim();
+  const tags = (env.GATEWAY_REPORTING_TAGS ?? "")
     .split(",")
     .map((tag) => tag.trim())
     .filter(Boolean);

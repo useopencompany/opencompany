@@ -112,8 +112,8 @@ vi.mock("./codex-chat-events", () => ({
 
 vi.mock("./codex-chat-wakeup", () => ({
   enqueueCodexChatWakeup: wakeupMocks.enqueueCodexChatWakeup,
-  GOAT_CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS: 3_600,
-  GOAT_CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS: 60,
+  CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS: 3_600,
+  CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS: 60,
   persistCodexChatScheduledWakeup: wakeupMocks.persistCodexChatScheduledWakeup,
   scheduledWakeupFromTurnSettings: () => null,
 }));

@@ -24,11 +24,11 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "goat-gmai
 // so new mail is discovered by polling the history API per connected
 // integration. The thread flush already batches with a quiet period, so a few
 // minutes of poll latency is invisible end to end.
-export const GOAT_GMAIL_POLL_INTERVAL_MS = 3 * 60_000;
+export const GMAIL_POLL_INTERVAL_MS = 3 * 60_000;
 // A claim stamps last_polled_at; other runner replicas skip integrations
 // claimed within the cooldown. The buffer's unique (integration, message id)
 // index absorbs any residual double-poll race.
-export const GOAT_GMAIL_POLL_COOLDOWN_MS = 2 * 60_000;
+export const GMAIL_POLL_COOLDOWN_MS = 2 * 60_000;
 
 // Deterministic noise floor only: everything else (promotions, notifications,
 // transactional mail) buffers and is judged by the ingest agent under the
@@ -78,7 +78,7 @@ export async function pollGmailIntegration(input: {
   const state = await claimGmailSyncState(
     {
       integrationId: candidate.integrationId,
-      cooldownMs: input.cooldownMs ?? GOAT_GMAIL_POLL_COOLDOWN_MS,
+      cooldownMs: input.cooldownMs ?? GMAIL_POLL_COOLDOWN_MS,
     },
     db,
   );
@@ -175,7 +175,7 @@ export async function pollGmailIntegration(input: {
 }
 
 export function startGmailPollWorker(env: RunnerEnv, options: { pollIntervalMs?: number } = {}) {
-  const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? GOAT_GMAIL_POLL_INTERVAL_MS);
+  const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? GMAIL_POLL_INTERVAL_MS);
   const abort = new AbortController();
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;

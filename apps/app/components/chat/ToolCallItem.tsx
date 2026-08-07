@@ -16,13 +16,13 @@ import {
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import {
+  BRAIN_TOOL_NAME,
   CODEX_COMMAND_TOOL_NAME,
   CODEX_PLAN_TOOL_NAME,
   CODEX_QUESTION_TOOL_NAME,
   type CodexCommandToolOutput,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
-  GOAT_BRAIN_TOOL_NAME,
   SCHEDULE_TASK_TOOL_NAME,
   USE_ACTION_TOOL_NAME,
 } from "@/lib/chat-ui";
@@ -68,7 +68,7 @@ export function ToolCallItem({
 }) {
   if (readOnly) return <ToolCallRow tool={tool} />;
 
-  if (tool.name === GOAT_BRAIN_TOOL_NAME) {
+  if (tool.name === BRAIN_TOOL_NAME) {
     return <BrainToolCallRow tool={tool} />;
   }
   if (tool.name === CODEX_COMMAND_TOOL_NAME) {
@@ -1226,7 +1226,7 @@ function getToolCallMeta(tool: ToolCallView): {
   }
   return {
     icon:
-      tool.name === GOAT_BRAIN_TOOL_NAME
+      tool.name === BRAIN_TOOL_NAME
         ? BookOpen
         : tool.name === SCHEDULE_TASK_TOOL_NAME ||
             tool.name === EDIT_TASK_SCHEDULE_TOOL_NAME ||
@@ -1235,7 +1235,7 @@ function getToolCallMeta(tool: ToolCallView): {
           : CircleDotDashed,
     className: "text-amber-500",
     spin:
-      tool.name !== GOAT_BRAIN_TOOL_NAME &&
+      tool.name !== BRAIN_TOOL_NAME &&
       tool.name !== SCHEDULE_TASK_TOOL_NAME &&
       tool.name !== EDIT_TASK_SCHEDULE_TOOL_NAME &&
       tool.name !== DELETE_TASK_SCHEDULE_TOOL_NAME,

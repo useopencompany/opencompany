@@ -4,7 +4,7 @@ import type { ChatMessageAttachment } from "@opencompany/db/schema";
 import { extractDocxText, extractUtf8Text, extractXlsxText } from "@opencompany/file-extract";
 import { get } from "@vercel/blob";
 import {
-  GOAT_CHAT_ATTACHMENT_MAX_PER_MESSAGE,
+  CHAT_ATTACHMENT_MAX_PER_MESSAGE,
   validateChatAttachmentCandidate,
 } from "@/lib/chat-attachment-formats";
 import type { ChatUiMessage, StoredChatMessage } from "@/lib/chat-ui";
@@ -28,10 +28,10 @@ export function parseChatAttachmentsInput(
 ): { ok: true; attachments: ChatMessageAttachment[] } | { ok: false; error: string } {
   if (value === undefined || value === null) return { ok: true, attachments: [] };
   if (!Array.isArray(value)) return { ok: false, error: "Invalid attachments." };
-  if (value.length > GOAT_CHAT_ATTACHMENT_MAX_PER_MESSAGE) {
+  if (value.length > CHAT_ATTACHMENT_MAX_PER_MESSAGE) {
     return {
       ok: false,
-      error: `Messages can include at most ${GOAT_CHAT_ATTACHMENT_MAX_PER_MESSAGE} attachments.`,
+      error: `Messages can include at most ${CHAT_ATTACHMENT_MAX_PER_MESSAGE} attachments.`,
     };
   }
 

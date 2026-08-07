@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  AUTO_REFILL_THRESHOLD_USD_MICROS,
   calendarMonthWindow,
-  GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS,
-  GOAT_HOBBY_INCLUDED_USAGE_USD_CENTS,
-  GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS,
-  GOAT_INGEST_ITEM_FEE_USD_MICROS,
-  GOAT_LOW_BALANCE_WARN_USD_MICROS,
+  HOBBY_INCLUDED_USAGE_USD_CENTS,
+  INCLUDED_USAGE_PER_SEAT_USD_CENTS,
+  INGEST_ITEM_FEE_USD_MICROS,
   includedUsageAllowanceCents,
   ingestItemFeeUsdMicros,
+  LOW_BALANCE_WARN_USD_MICROS,
   planForSubscriptionStatus,
   workspaceMemberCap,
 } from "./billing";
@@ -21,7 +21,7 @@ describe("Goat billing v7", () => {
   });
 
   it("does not add a flat ingestion platform fee", () => {
-    expect(GOAT_INGEST_ITEM_FEE_USD_MICROS).toBe(0);
+    expect(INGEST_ITEM_FEE_USD_MICROS).toBe(0);
     expect(ingestItemFeeUsdMicros(50)).toBe(0);
     expect(ingestItemFeeUsdMicros(1)).toBe(0);
     expect(ingestItemFeeUsdMicros(2_000)).toBe(0);
@@ -30,17 +30,17 @@ describe("Goat billing v7", () => {
   });
 
   it("includes $20 of at-cost monthly usage per seat", () => {
-    expect(GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS).toBe(2_000);
+    expect(INCLUDED_USAGE_PER_SEAT_USD_CENTS).toBe(2_000);
     expect(includedUsageAllowanceCents("pro", 3)).toBe(6_000);
   });
 
   it("includes $5 of monthly usage on Hobby", () => {
-    expect(GOAT_HOBBY_INCLUDED_USAGE_USD_CENTS).toBe(500);
+    expect(HOBBY_INCLUDED_USAGE_USD_CENTS).toBe(500);
     expect(includedUsageAllowanceCents("hobby", 10)).toBe(500);
   });
 
   it("warns below the auto-refill threshold so refills fire before the warning", () => {
-    expect(GOAT_LOW_BALANCE_WARN_USD_MICROS).toBeLessThan(GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS);
+    expect(LOW_BALANCE_WARN_USD_MICROS).toBeLessThan(AUTO_REFILL_THRESHOLD_USD_MICROS);
   });
 
   it("projects Pro only for usable subscription states", () => {

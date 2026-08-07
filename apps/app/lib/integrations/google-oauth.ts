@@ -1,10 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { IntegrationProvider } from "@opencompany/db/schema";
-import { GOAT_GMAIL_COMPOSE_SCOPE, GOAT_GMAIL_READ_SCOPE } from "@/lib/integrations/gmail-scopes";
+import { GMAIL_COMPOSE_SCOPE, GMAIL_READ_SCOPE } from "@/lib/integrations/gmail-scopes";
 import {
-  GOAT_GOOGLE_DOCS_WRITE_SCOPE,
-  GOAT_GOOGLE_DRIVE_READ_SCOPE,
-  GOAT_GOOGLE_SHEETS_WRITE_SCOPE,
+  GOOGLE_DOCS_WRITE_SCOPE,
+  GOOGLE_DRIVE_READ_SCOPE,
+  GOOGLE_SHEETS_WRITE_SCOPE,
 } from "@/lib/integrations/google-drive-scopes";
 import { getAppUrl } from "@/lib/workos";
 
@@ -22,40 +22,39 @@ export type GoogleProviderConfig = {
 
 const OPENID_SCOPES = ["openid", "email", "profile"];
 
-export const GOAT_GOOGLE_PROVIDER_CONFIG: Record<GoogleIntegrationProvider, GoogleProviderConfig> =
-  {
-    gmail: {
-      provider: "gmail",
-      routeSegment: "gmail",
-      displayName: "Gmail",
-      // gmail.compose is the narrowest Gmail API scope that can create drafts.
-      // It also authorizes sending, which Goat gates separately in its own
-      // per-account permission model.
-      scopes: [GOAT_GMAIL_READ_SCOPE, GOAT_GMAIL_COMPOSE_SCOPE, ...OPENID_SCOPES],
-    },
-    google_calendar: {
-      provider: "google_calendar",
-      routeSegment: "google-calendar",
-      displayName: "Google Calendar",
-      scopes: [
-        "https://www.googleapis.com/auth/calendar.readonly",
-        "https://www.googleapis.com/auth/calendar.events",
-        "https://www.googleapis.com/auth/calendar.freebusy",
-        ...OPENID_SCOPES,
-      ],
-    },
-    google_drive: {
-      provider: "google_drive",
-      routeSegment: "google-drive",
-      displayName: "Google Drive",
-      scopes: [
-        GOAT_GOOGLE_DRIVE_READ_SCOPE,
-        GOAT_GOOGLE_DOCS_WRITE_SCOPE,
-        GOAT_GOOGLE_SHEETS_WRITE_SCOPE,
-        ...OPENID_SCOPES,
-      ],
-    },
-  };
+export const GOOGLE_PROVIDER_CONFIG: Record<GoogleIntegrationProvider, GoogleProviderConfig> = {
+  gmail: {
+    provider: "gmail",
+    routeSegment: "gmail",
+    displayName: "Gmail",
+    // gmail.compose is the narrowest Gmail API scope that can create drafts.
+    // It also authorizes sending, which Goat gates separately in its own
+    // per-account permission model.
+    scopes: [GMAIL_READ_SCOPE, GMAIL_COMPOSE_SCOPE, ...OPENID_SCOPES],
+  },
+  google_calendar: {
+    provider: "google_calendar",
+    routeSegment: "google-calendar",
+    displayName: "Google Calendar",
+    scopes: [
+      "https://www.googleapis.com/auth/calendar.readonly",
+      "https://www.googleapis.com/auth/calendar.events",
+      "https://www.googleapis.com/auth/calendar.freebusy",
+      ...OPENID_SCOPES,
+    ],
+  },
+  google_drive: {
+    provider: "google_drive",
+    routeSegment: "google-drive",
+    displayName: "Google Drive",
+    scopes: [
+      GOOGLE_DRIVE_READ_SCOPE,
+      GOOGLE_DOCS_WRITE_SCOPE,
+      GOOGLE_SHEETS_WRITE_SCOPE,
+      ...OPENID_SCOPES,
+    ],
+  },
+};
 
 const GOOGLE_INTEGRATION_ENVS = [
   "GOOGLE_OAUTH_CLIENT_ID",
@@ -315,7 +314,7 @@ function sanitizeGoogleOAuthRedirectUri(value: unknown, provider: GoogleIntegrat
     if (url.hash) url.hash = "";
     if (url.protocol !== "https:" && !isLocalhost(url)) return undefined;
 
-    const config = GOAT_GOOGLE_PROVIDER_CONFIG[provider];
+    const config = GOOGLE_PROVIDER_CONFIG[provider];
     if (
       url.pathname === "/api/google/callback" ||
       url.pathname === `/api/integrations/${config.routeSegment}/callback`

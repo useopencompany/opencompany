@@ -1,7 +1,7 @@
 import { getDb } from "@opencompany/db/client";
 import { brainDocuments, brainSources, brainToolRuns } from "@opencompany/db/schema";
 import { and, count, eq, gte, inArray, ne } from "drizzle-orm";
-import { GOAT_BRAIN_READ_PLANE_COMMANDS } from "@/lib/brain-surface";
+import { BRAIN_READ_PLANE_COMMANDS } from "@/lib/brain-surface";
 
 export type BrainOverviewStats = {
   windowStartedAt: string;
@@ -12,7 +12,7 @@ export type BrainOverviewStats = {
 
 // Retrievals are the read-plane commands: keep this tied to the shared surface
 // constant so a new read verb is counted without editing this file too.
-const BRAIN_RETRIEVAL_ACTIONS = GOAT_BRAIN_READ_PLANE_COMMANDS;
+const BRAIN_RETRIEVAL_ACTIONS = BRAIN_READ_PLANE_COMMANDS;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1_000;
 
 export async function getBrainOverviewStats(

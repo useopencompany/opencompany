@@ -11,8 +11,8 @@ vi.mock("@opencompany/analytics/shared-server", () => ({
 }));
 
 vi.mock("@opencompany/db/billing", () => ({
-  GOAT_PRO_MONTHLY_PRICE_USD_CENTS: 2_000,
-  GOAT_PRO_STRIPE_PRODUCT_KEY: "goat_pro",
+  PRO_MONTHLY_PRICE_USD_CENTS: 2_000,
+  PRO_STRIPE_PRODUCT_KEY: "goat_pro",
   loadBillingOverview: vi.fn(),
   setAutoRefillConfig: vi.fn(),
   setStripeCustomerId: vi.fn(),

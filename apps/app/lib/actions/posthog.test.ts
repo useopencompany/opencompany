@@ -20,7 +20,7 @@ vi.mock("@ai-sdk/mcp", () => ({
 }));
 
 vi.mock("@opencompany/core/integrations/posthog-mcp", () => ({
-  GOAT_POSTHOG_MCP_ENDPOINT_URL:
+  POSTHOG_MCP_ENDPOINT_URL:
     "https://mcp.posthog.com/mcp?mode=tools&tools=dashboards-get-all,insight-create",
   getPostHogIntegrationState: vi.fn(),
   loadPostHogMcpWorkerConnection: vi.fn(),

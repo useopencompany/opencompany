@@ -1,4 +1,4 @@
-import { GOAT_ACTION_MAX_CALLS_PER_TURN } from "@opencompany/agent-runtime";
+import { ACTION_MAX_CALLS_PER_TURN } from "@opencompany/agent-runtime";
 import { describe, expect, it, vi } from "vitest";
 import {
   type ActionServiceCatalog,
@@ -50,7 +50,7 @@ describe("serveActionRequest", () => {
       }),
     ).resolves.toMatchObject({ ok: true, source: { id: "gmail" } });
 
-    for (let call = 1; call <= GOAT_ACTION_MAX_CALLS_PER_TURN; call += 1) {
+    for (let call = 1; call <= ACTION_MAX_CALLS_PER_TURN; call += 1) {
       await expect(
         serveActionRequest({
           request: executeRequest(`call_${call}`),
@@ -69,7 +69,7 @@ describe("serveActionRequest", () => {
         execute,
       }),
     ).resolves.toMatchObject({ ok: false, error: { code: "call_budget" } });
-    expect(execute).toHaveBeenCalledTimes(GOAT_ACTION_MAX_CALLS_PER_TURN);
+    expect(execute).toHaveBeenCalledTimes(ACTION_MAX_CALLS_PER_TURN);
 
     await expect(
       serveActionRequest({
@@ -79,7 +79,7 @@ describe("serveActionRequest", () => {
         execute,
       }),
     ).resolves.toMatchObject({ ok: false, error: { code: "duplicate_invocation" } });
-    expect(execute).toHaveBeenCalledTimes(GOAT_ACTION_MAX_CALLS_PER_TURN);
+    expect(execute).toHaveBeenCalledTimes(ACTION_MAX_CALLS_PER_TURN);
   });
 
   it("returns the same structured catalog errors to every adapter", async () => {

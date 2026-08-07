@@ -6,7 +6,7 @@ import {
   normalizeGitHubActivityWebhook,
 } from "@opencompany/brain";
 import {
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+  BRAIN_AGENT_INGEST_JOB_KIND,
   upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
@@ -187,7 +187,7 @@ async function handleActivityEvent(
       integrationId: integration.id,
       item,
       rawPayload: payload,
-      kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+      kind: BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
     });
     captureIngestionQuotaAnalytics(result.quotaUpdates);

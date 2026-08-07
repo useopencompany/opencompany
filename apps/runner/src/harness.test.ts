@@ -2,7 +2,7 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { HarnessSpec } from "@opencompany/db/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { planHarnessForTask } from "./harness";
-import { GOAT_HARNESS_CREATION_SYSTEM_PROMPT } from "./prompts/harness-creation";
+import { HARNESS_CREATION_SYSTEM_PROMPT } from "./prompts/harness-creation";
 
 const aiMock = vi.hoisted(() => ({
   generateObject: vi.fn(),
@@ -92,7 +92,7 @@ describe("planHarness", () => {
       system: string;
       prompt: string;
     };
-    expect(request.system).toBe(GOAT_HARNESS_CREATION_SYSTEM_PROMPT);
+    expect(request.system).toBe(HARNESS_CREATION_SYSTEM_PROMPT);
     expect(request.system).toContain("<goat_harness_planner>");
     expect(request.system).toContain("<tool_policy>");
     expect(request.system).toContain("<skill_policy>");

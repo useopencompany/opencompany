@@ -26,12 +26,12 @@ import {
 import { isIsoDate } from "./time";
 import { validateBrainFolderKindType, validateBrainRelations } from "./validate";
 
-export const GOAT_BRAIN_ENTRY_SCHEMA_VERSION = "goat.brain.entry.v2";
-export const GOAT_BRAIN_MARKDOWN_MIME_TYPE = "text/markdown";
+export const BRAIN_ENTRY_SCHEMA_VERSION = "goat.brain.entry.v2";
+export const BRAIN_MARKDOWN_MIME_TYPE = "text/markdown";
 
 export type BrainEntryFormat = BrainDocumentFormat;
 
-const GOAT_BRAIN_ENTRY_FORMATS = new Set<BrainEntryFormat>([
+const BRAIN_ENTRY_FORMATS = new Set<BrainEntryFormat>([
   "markdown",
   "pdf",
   "docx",
@@ -73,7 +73,7 @@ export type BrainPayloadDescriptor = {
 };
 
 export type BrainSidecar = {
-  schemaVersion: typeof GOAT_BRAIN_ENTRY_SCHEMA_VERSION;
+  schemaVersion: typeof BRAIN_ENTRY_SCHEMA_VERSION;
   id: string;
   folder: string;
   title: string;
@@ -137,7 +137,7 @@ export function brainEntryFromLegacyDocument(doc: BrainDocument): BrainEntry {
     title: (doc.frontmatter.title ?? doc.title ?? doc.frontmatter.id).trim(),
     ...(doc.frontmatter.description ? { description: doc.frontmatter.description } : {}),
     format: "markdown",
-    mimeType: GOAT_BRAIN_MARKDOWN_MIME_TYPE,
+    mimeType: BRAIN_MARKDOWN_MIME_TYPE,
     body: doc.compiledTruth,
     createdAt: doc.frontmatter.createdAt,
     updatedAt: doc.frontmatter.updatedAt,
@@ -174,7 +174,7 @@ export function brainEntryFromParsedLegacy(parsed: ParsedBrainDocument): BrainEn
     title: title || id,
     ...(frontmatter.description ? { description: frontmatter.description } : {}),
     format: "markdown",
-    mimeType: GOAT_BRAIN_MARKDOWN_MIME_TYPE,
+    mimeType: BRAIN_MARKDOWN_MIME_TYPE,
     body: parsed.compiledTruth,
     createdAt: frontmatter.createdAt ?? "",
     updatedAt: frontmatter.updatedAt ?? "",
@@ -227,7 +227,7 @@ export function serializeBrainSidecar(entry: BrainEntry): string {
     entry.originalFileName,
   );
   const sidecar: BrainSidecar = {
-    schemaVersion: GOAT_BRAIN_ENTRY_SCHEMA_VERSION,
+    schemaVersion: BRAIN_ENTRY_SCHEMA_VERSION,
     id: entry.id,
     folder: entry.folder,
     title: entry.title,
@@ -296,7 +296,7 @@ function validateBrainSidecarMetadata(input: {
   const errors: string[] = [];
   const sidecar = input.sidecar;
   if (!sidecar) return { sidecar: null, errors: ["Sidecar JSON is invalid."] };
-  if (sidecar.schemaVersion !== GOAT_BRAIN_ENTRY_SCHEMA_VERSION) {
+  if (sidecar.schemaVersion !== BRAIN_ENTRY_SCHEMA_VERSION) {
     errors.push("sidecar.schemaVersion is invalid.");
   }
   if (!isValidBrainId(sidecar.id)) errors.push("sidecar.id must be a lowercase slug.");
@@ -326,7 +326,7 @@ function validateBrainSidecarMetadata(input: {
   if (sidecar.timeline !== undefined && !Array.isArray(sidecar.timeline)) {
     errors.push("sidecar.timeline must be an array.");
   }
-  if (!GOAT_BRAIN_ENTRY_FORMATS.has(sidecar.format)) {
+  if (!BRAIN_ENTRY_FORMATS.has(sidecar.format)) {
     errors.push("sidecar.format is invalid.");
   }
   if (typeof sidecar.mimeType !== "string" || !sidecar.mimeType.trim()) {

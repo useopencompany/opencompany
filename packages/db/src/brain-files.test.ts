@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   appendBrainAssetTextBlock,
-  GOAT_BRAIN_FOLDER_MANIFEST_PATH,
+  BRAIN_FOLDER_MANIFEST_PATH,
   parseBrainDocument,
   parseBrainFolderManifest,
 } from "@opencompany/brain";
@@ -630,7 +630,7 @@ describe("goat brain file sync", () => {
     await materializeBrainFilesToRoot({ brainRef: "goat_brain_user_1", root, db });
 
     const folders = parseBrainFolderManifest(
-      await readFile(path.join(root, GOAT_BRAIN_FOLDER_MANIFEST_PATH), "utf8"),
+      await readFile(path.join(root, BRAIN_FOLDER_MANIFEST_PATH), "utf8"),
     );
     expect(folders).toEqual(
       expect.arrayContaining([

@@ -10,12 +10,12 @@ import { saveSession, withAuth } from "@workos-inc/authkit-nextjs";
 import { cookies } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  ACTIVE_BRAIN_COOKIE,
+  ACTIVE_WORKSPACE_COOKIE,
   activateWorkspaceForOrganization,
   adoptWorkOSOrganizationMemberships,
   completeAuthentication,
   currentUser,
-  GOAT_ACTIVE_BRAIN_COOKIE,
-  GOAT_ACTIVE_WORKSPACE_COOKIE,
   syncUser,
 } from "@/lib/auth";
 import { recordLastAuthMethod } from "@/lib/auth-methods";
@@ -37,7 +37,7 @@ vi.mock("@opencompany/db/client", () => ({
 vi.mock("@opencompany/db/workspaces", () => ({
   adoptWorkspaceMembershipsFromOrgs: vi.fn(),
   createDefaultWorkspaceForUser: vi.fn(),
-  DEFAULT_GOAT_BRAIN_SLUG: "default",
+  DEFAULT_BRAIN_SLUG: "default",
   getBrainAccess: vi.fn(),
   listAccessibleBrains: vi.fn(),
   listWorkspacesForUser: vi.fn(),
@@ -310,17 +310,12 @@ describe("activateWorkspaceForOrganization", () => {
       userWorkosId: authUser.id,
       workspaceId: "goat_ws_invited",
     });
-    expect(cookieStore.set).toHaveBeenNthCalledWith(
-      1,
-      GOAT_ACTIVE_WORKSPACE_COOKIE,
-      "goat_ws_invited",
-      {
-        path: "/",
-        sameSite: "lax",
-        maxAge: 60 * 60 * 24 * 365,
-      },
-    );
-    expect(cookieStore.set).toHaveBeenNthCalledWith(2, GOAT_ACTIVE_BRAIN_COOKIE, "brain_default", {
+    expect(cookieStore.set).toHaveBeenNthCalledWith(1, ACTIVE_WORKSPACE_COOKIE, "goat_ws_invited", {
+      path: "/",
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 365,
+    });
+    expect(cookieStore.set).toHaveBeenNthCalledWith(2, ACTIVE_BRAIN_COOKIE, "brain_default", {
       path: "/",
       sameSite: "lax",
       maxAge: 60 * 60 * 24 * 365,
@@ -373,11 +368,11 @@ describe("activateWorkspaceForOrganization", () => {
     });
 
     expect(cookieStore.set).toHaveBeenCalledWith(
-      GOAT_ACTIVE_WORKSPACE_COOKIE,
+      ACTIVE_WORKSPACE_COOKIE,
       "goat_ws_invited",
       expect.any(Object),
     );
-    expect(cookieStore.delete).toHaveBeenCalledWith(GOAT_ACTIVE_BRAIN_COOKIE);
+    expect(cookieStore.delete).toHaveBeenCalledWith(ACTIVE_BRAIN_COOKIE);
   });
 });
 

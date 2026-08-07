@@ -4,13 +4,13 @@ import { and, desc, eq, ne } from "drizzle-orm";
 import { GoogleAccessAuthError, googleApiCall } from "../integrations/google-access-token";
 import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  ACTION_EFFECTS_READ,
+  ACTION_EFFECTS_WRITE,
   ActionAuthError,
   type ActionExecuteContext,
   ActionInvalidParamsError,
   ActionPermissionError,
   type ActionProviderCatalog,
-  GOAT_ACTION_EFFECTS_READ,
-  GOAT_ACTION_EFFECTS_WRITE,
   type ResolvedAction,
   requiredStringParam,
   truncateText,
@@ -127,7 +127,7 @@ function listEventsAction(connections: readonly GoogleCalendarConnection[]): Res
     id: "google_calendar.list_events",
     provider: "google_calendar",
     capability: "read",
-    effects: GOAT_ACTION_EFFECTS_READ,
+    effects: ACTION_EFFECTS_READ,
     ...permissionAnnotation("read", connections),
     description:
       "List events from a connected Google Calendar in a bounded time window, optionally filtering by text. Returns compact event details including times, location, attendees, and meeting links.",
@@ -223,7 +223,7 @@ function createEventAction(connections: readonly GoogleCalendarConnection[]): Re
     id: "google_calendar.create_event",
     provider: "google_calendar",
     capability: "write",
-    effects: GOAT_ACTION_EFFECTS_WRITE,
+    effects: ACTION_EFFECTS_WRITE,
     ...permissionAnnotation("write", connections),
     description:
       "Create a new event on a connected Google Calendar. Use only when the user asked to add something to their calendar. Attendees receive an email invite.",

@@ -13,7 +13,7 @@ export type HarnessEngineOption = {
   default?: boolean;
 };
 
-export const GOAT_HARNESS_ENGINE_OPTIONS = [
+export const HARNESS_ENGINE_OPTIONS = [
   {
     id: "opencompany",
     label: "OpenCompany model harness",
@@ -34,7 +34,7 @@ export type HarnessSkillOption = {
   guidance: string;
 };
 
-const GOAT_HARNESS_MODEL_CONFIG = [
+const HARNESS_MODEL_CONFIG = [
   {
     id: "moonshotai/kimi-k2.6",
     guidance:
@@ -66,13 +66,14 @@ const GOAT_HARNESS_MODEL_CONFIG = [
   default?: boolean;
 }[];
 
-export const GOAT_HARNESS_MODEL_OPTIONS: readonly HarnessModelOption[] =
-  GOAT_HARNESS_MODEL_CONFIG.map((option) => ({
+export const HARNESS_MODEL_OPTIONS: readonly HarnessModelOption[] = HARNESS_MODEL_CONFIG.map(
+  (option) => ({
     ...requireAgentModelDefinition(option.id),
     ...option,
-  }));
+  }),
+);
 
-export const GOAT_HARNESS_SKILL_OPTIONS = [
+export const HARNESS_SKILL_OPTIONS = [
   {
     id: "first-principles",
     label: "First-principles thinking",
@@ -154,12 +155,12 @@ function escapeXmlText(value: string) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
-export const GOAT_HARNESS_CREATION_SYSTEM = promptBlock("system", [
+export const HARNESS_CREATION_SYSTEM = promptBlock("system", [
   "You plan a Goat durable task harness.",
   "Return a strict goat.harness.v1 object.",
 ]);
 
-export const GOAT_HARNESS_CREATION_MODEL_SELECTION = promptBlock("model_selection", [
+export const HARNESS_CREATION_MODEL_SELECTION = promptBlock("model_selection", [
   "Choose the execution engine from the provided execution_engine_options.",
   "If requested_engine is present, use that exact engine unless it is unavailable in execution_engine_options.",
   "Do not override requested_engine just because the task is read-only, analytical, or could also be done with ordinary tools.",
@@ -176,7 +177,7 @@ export const GOAT_HARNESS_CREATION_MODEL_SELECTION = promptBlock("model_selectio
   "Choose Claude Sonnet 5 only when the user requests Claude/Sonnet, explicitly prioritizes maximum quality over cost, or the task needs premium polished writing/editorial judgment, vision, or file-input strengths.",
 ]);
 
-export const GOAT_HARNESS_CREATION_PROMPT_CONTRACT = promptBlock("prompt_contract", [
+export const HARNESS_CREATION_PROMPT_CONTRACT = promptBlock("prompt_contract", [
   "Always return a non-empty systemPrompt for the task execution model.",
   "The systemPrompt must include the durable task-runner behavior, tool policy, and result contract needed to execute this task.",
   "Do not rely on any fallback system prompt.",
@@ -186,7 +187,7 @@ export const GOAT_HARNESS_CREATION_PROMPT_CONTRACT = promptBlock("prompt_contrac
   "Put execution guidance, tool-use sequencing, and result-format rules in systemPrompt instead of inflating initialUserMessage.",
 ]);
 
-export const GOAT_HARNESS_CREATION_TOOL_POLICY = promptBlock("tool_policy", [
+export const HARNESS_CREATION_TOOL_POLICY = promptBlock("tool_policy", [
   "Select only operation-level tools from the available list.",
   "Rewrite stale chat-layer limitations into clear instructions to use connected read-only tools when available.",
   "Use exa_search for broad web discovery, source lookup, and cited research across many pages.",
@@ -206,7 +207,7 @@ export const GOAT_HARNESS_CREATION_TOOL_POLICY = promptBlock("tool_policy", [
   "Include github_open_pull_request only when the user explicitly asked to publish, push, or open a pull request.",
 ]);
 
-export const GOAT_HARNESS_CREATION_CODEX_GOAL_POLICY = promptBlock("codex_goal_policy", [
+export const HARNESS_CREATION_CODEX_GOAL_POLICY = promptBlock("codex_goal_policy", [
   'For engine "codex", set codex.goalMode only when the task has an iterative path, a clear finish line, and a verification surface such as tests, build output, reproduced bug behavior, or a review checklist.',
   "Use Goal mode for multi-step coding tasks where Codex should keep working across evidence-based continuation until the objective is complete, blocked, budget-limited, usage-limited, or timed out.",
   "Do not set codex.goalMode for simple one-shot edits, straightforward explanations, quick lookups, or tasks that can finish in a single normal Codex turn.",
@@ -214,7 +215,7 @@ export const GOAT_HARNESS_CREATION_CODEX_GOAL_POLICY = promptBlock("codex_goal_p
   "Omit codex.goalMode.tokenBudget unless the task clearly needs a custom budget. The runner applies a 200000-token default when it is omitted.",
 ]);
 
-export const GOAT_HARNESS_CREATION_SKILL_POLICY = promptBlock("skill_policy", [
+export const HARNESS_CREATION_SKILL_POLICY = promptBlock("skill_policy", [
   "Select zero or more skills from available_skills when they materially improve execution.",
   "Skills are reasoning and operating guidance, not operation-level tools. They do not grant external access.",
   "Use first-principles for hard decisions, shaky assumptions, or cases where conventional answers may be wrong.",
@@ -222,21 +223,21 @@ export const GOAT_HARNESS_CREATION_SKILL_POLICY = promptBlock("skill_policy", [
   "Do not select a skill just because it sounds generally useful; leave skills empty for routine execution.",
 ]);
 
-export const GOAT_HARNESS_CREATION_RESULT_CONTRACT = promptBlock("result_contract", [
+export const HARNESS_CREATION_RESULT_CONTRACT = promptBlock("result_contract", [
   "The task result comes from the final assistant message; there is no final-result tool.",
   'Use resultMode "brain_markdown_report" for deep research, market research, competitor or landscape research, literature research, multi-source web research, or any task where the durable deliverable should be a named Markdown report.',
   'Use resultMode "assistant_final" for ordinary answers, quick summaries, and action-oriented tasks where the final assistant message is the deliverable.',
   'When resultMode is "brain_markdown_report", the execution systemPrompt must tell the model to finish with only a complete, self-contained Markdown report suitable for saving as a .md file in the user Brain.',
 ]);
 
-export const GOAT_HARNESS_CREATION_SYSTEM_PROMPT = promptBlock("goat_harness_planner", [
-  GOAT_HARNESS_CREATION_SYSTEM,
-  GOAT_HARNESS_CREATION_MODEL_SELECTION,
-  GOAT_HARNESS_CREATION_PROMPT_CONTRACT,
-  GOAT_HARNESS_CREATION_TOOL_POLICY,
-  GOAT_HARNESS_CREATION_CODEX_GOAL_POLICY,
-  GOAT_HARNESS_CREATION_SKILL_POLICY,
-  GOAT_HARNESS_CREATION_RESULT_CONTRACT,
+export const HARNESS_CREATION_SYSTEM_PROMPT = promptBlock("goat_harness_planner", [
+  HARNESS_CREATION_SYSTEM,
+  HARNESS_CREATION_MODEL_SELECTION,
+  HARNESS_CREATION_PROMPT_CONTRACT,
+  HARNESS_CREATION_TOOL_POLICY,
+  HARNESS_CREATION_CODEX_GOAL_POLICY,
+  HARNESS_CREATION_SKILL_POLICY,
+  HARNESS_CREATION_RESULT_CONTRACT,
 ]);
 
 export function buildHarnessCreationPrompt(input: {

@@ -42,9 +42,9 @@ import type { ActionExecuteContext } from "@/lib/actions/types";
 import { ActionInvalidParamsError } from "@/lib/actions/types";
 import type { ManagedCapabilityActionSpec } from "@/lib/capabilities/catalog";
 import {
+  CAPABILITY_ASYNC_RUNS_PER_TURN,
   evaluateManagedCapabilityApproval,
   executeManagedCapability,
-  GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
 } from "@/lib/capabilities/execute";
 import {
   MonidApiError,
@@ -655,7 +655,7 @@ describe("executeManagedCapability", () => {
 
   it("permits six asynchronous runs per turn and rejects a seventh without quoting it", async () => {
     const sharedContext = context();
-    const clients = Array.from({ length: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN + 1 }, (_, index) =>
+    const clients = Array.from({ length: CAPABILITY_ASYNC_RUNS_PER_TURN + 1 }, (_, index) =>
       fakeClient({
         inspection: inspectPrice(0.01),
         run: providerRun({
@@ -684,35 +684,35 @@ describe("executeManagedCapability", () => {
     );
 
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(
-      GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+      CAPABILITY_ASYNC_RUNS_PER_TURN,
     );
     const [rejected] = results.filter((result) => result.status === "rejected");
     expect(rejected?.reason).toMatchObject({
       code: "call_budget",
-      message: `Only ${GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN} long-running paid capabilities can be started in a turn.`,
+      message: `Only ${CAPABILITY_ASYNC_RUNS_PER_TURN} long-running paid capabilities can be started in a turn.`,
     });
     expect(clients.reduce((calls, client) => calls + client.run.mock.calls.length, 0)).toBe(
-      GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+      CAPABILITY_ASYNC_RUNS_PER_TURN,
     );
     expect(clients.reduce((calls, client) => calls + client.getRun.mock.calls.length, 0)).toBe(
-      GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+      CAPABILITY_ASYNC_RUNS_PER_TURN,
     );
     expect(sharedContext.capabilityTurnState).toMatchObject({
-      quotedTotalUsdMicros: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN * 10_000,
-      asyncRunsStarted: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+      quotedTotalUsdMicros: CAPABILITY_ASYNC_RUNS_PER_TURN * 10_000,
+      asyncRunsStarted: CAPABILITY_ASYNC_RUNS_PER_TURN,
       admittedToolCallIds: Array.from(
-        { length: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN },
+        { length: CAPABILITY_ASYNC_RUNS_PER_TURN },
         (_, index) => `tool_${index + 1}`,
       ),
     });
     expect(sharedContext.capabilityTurnState?.quotesByToolCallId.size).toBe(
-      GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+      CAPABILITY_ASYNC_RUNS_PER_TURN,
     );
   });
 
   it("releases a pre-admitted quote when the asynchronous run limit is reached", async () => {
     const sharedContext = context();
-    sharedContext.capabilityTurnState!.asyncRunsStarted = GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN;
+    sharedContext.capabilityTurnState!.asyncRunsStarted = CAPABILITY_ASYNC_RUNS_PER_TURN;
     const client = fakeClient({
       inspection: inspectPrice(0.01),
       run: providerRun(),
@@ -745,7 +745,7 @@ describe("executeManagedCapability", () => {
     expect(sharedContext.capabilityTurnState).toMatchObject({
       quotedTotalUsdMicros: 0,
       admittedToolCallIds: [],
-      asyncRunsStarted: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+      asyncRunsStarted: CAPABILITY_ASYNC_RUNS_PER_TURN,
     });
     expect(sharedContext.capabilityTurnState?.quotesByToolCallId.size).toBe(0);
   });

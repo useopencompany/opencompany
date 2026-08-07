@@ -8,7 +8,7 @@ import {
   claimBrainSourceEvents,
 } from "@opencompany/db/brain-event-claims";
 import {
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+  BRAIN_AGENT_INGEST_JOB_KIND,
   upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import { loadIntegrationCredential } from "@opencompany/db/integrations";
@@ -187,7 +187,7 @@ export async function flushSlackConversationWindow(window: SlackDueWindow): Prom
       rawPayload: { eventIds: claimed.map((row) => row.id) },
       rawEventCount: brainRefs.length > 0 ? newlyClaimedEventKeys.size : claimed.length,
       rawEventKeysByBrainRef: claimedEventKeysByBrainRef,
-      kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+      kind: BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
       now: flushedAt,
       db: tx,

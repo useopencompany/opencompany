@@ -4,8 +4,8 @@ import { brainSources, fathomPendingMeetings, fathomSyncState } from "./schema";
 
 type DbLike = any;
 
-export const GOAT_FATHOM_PROVIDER = "fathom" as const;
-export const GOAT_FATHOM_CREDENTIAL_KIND = "api_key" as const;
+export const FATHOM_PROVIDER = "fathom" as const;
+export const FATHOM_CREDENTIAL_KIND = "api_key" as const;
 
 export type FathomBrainSourceRoute = {
   integrationId: string;
@@ -42,7 +42,7 @@ export async function listEnabledFathomBrainSourceRoutes(
     .from(brainSources)
     .where(
       and(
-        eq(brainSources.provider, GOAT_FATHOM_PROVIDER),
+        eq(brainSources.provider, FATHOM_PROVIDER),
         eq(brainSources.enabled, true),
         inArray(brainSources.integrationId, [...integrationIds]),
       ),

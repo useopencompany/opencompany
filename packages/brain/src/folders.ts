@@ -1,8 +1,8 @@
 import {
-  ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS,
-  DEFAULT_GOAT_BRAIN_FOLDERS,
-  GOAT_BRAIN_MIDDLE_FOLDER_ORDER,
-  HARD_DEFAULT_GOAT_BRAIN_FOLDERS,
+  ADJUSTABLE_DEFAULT_BRAIN_FOLDERS,
+  BRAIN_MIDDLE_FOLDER_ORDER,
+  DEFAULT_BRAIN_FOLDERS,
+  HARD_DEFAULT_BRAIN_FOLDERS,
   isHardDefaultBrainFolder,
   isValidBrainFolder,
   normalizeBrainFolder,
@@ -20,12 +20,12 @@ export type BrainFolderManifest = {
   folders: BrainFolderManifestEntry[];
 };
 
-export const GOAT_BRAIN_FOLDER_MANIFEST_PATH = ".brain/folders.json";
+export const BRAIN_FOLDER_MANIFEST_PATH = ".brain/folders.json";
 
-const DEFAULT_FOLDER_SET = new Set<string>(DEFAULT_GOAT_BRAIN_FOLDERS);
-const HARD_FOLDER_SET = new Set<string>(HARD_DEFAULT_GOAT_BRAIN_FOLDERS);
+const DEFAULT_FOLDER_SET = new Set<string>(DEFAULT_BRAIN_FOLDERS);
+const HARD_FOLDER_SET = new Set<string>(HARD_DEFAULT_BRAIN_FOLDERS);
 const MIDDLE_FOLDER_RANK = new Map<string, number>(
-  GOAT_BRAIN_MIDDLE_FOLDER_ORDER.map((folder, index) => [folder, index]),
+  BRAIN_MIDDLE_FOLDER_ORDER.map((folder, index) => [folder, index]),
 );
 const ENTITY_FOLDER_RANK = new Map<string, number>([
   ["people", 0],
@@ -35,7 +35,7 @@ const ENTITY_FOLDER_RANK = new Map<string, number>([
 export function defaultBrainFolderManifestEntries(): BrainFolderManifestEntry[] {
   return [
     ...hardDefaultBrainFolderManifestEntries(),
-    ...ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS.map((path) => ({
+    ...ADJUSTABLE_DEFAULT_BRAIN_FOLDERS.map((path) => ({
       path,
       source: "custom" as const,
     })),
@@ -43,7 +43,7 @@ export function defaultBrainFolderManifestEntries(): BrainFolderManifestEntry[] 
 }
 
 export function hardDefaultBrainFolderManifestEntries(): BrainFolderManifestEntry[] {
-  return HARD_DEFAULT_GOAT_BRAIN_FOLDERS.map((path) => ({
+  return HARD_DEFAULT_BRAIN_FOLDERS.map((path) => ({
     path,
     source: "system" as const,
   })).toSorted((a, b) => compareBrainFolderPaths(a.path, b.path));

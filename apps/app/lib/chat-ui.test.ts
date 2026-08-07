@@ -16,7 +16,7 @@ import {
   USE_SKILL_TOOL_PART_TYPE,
   usedSkillIdsFromMessages,
 } from "@/lib/chat-ui";
-import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import { DEFAULT_MODEL } from "@/lib/model-options";
 
 describe("chatSummaryState", () => {
   it("shows active agent runtime as working before unread", () => {
@@ -85,7 +85,7 @@ describe("toChatUiMessage", () => {
       content: "Before.After",
       debugTrace: {
         schemaVersion: "opencompany.chat.debug.v1",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         uiMessageParts: [
           { type: "text", text: "Before." },
           {
@@ -128,7 +128,7 @@ describe("toChatUiMessage", () => {
       taskPrompt: "Pull the Goat team's Linear board and recommend what to work on next.",
       debugTrace: {
         schemaVersion: "opencompany.chat.debug.v1",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         toolResults: [
           {
             taskId: "task_26",
@@ -255,7 +255,7 @@ describe("toChatUiMessage", () => {
     const message = storedAssistantMessage({
       debugTrace: {
         schemaVersion: "opencompany.chat.debug.v1",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         usage: {
           inputTokens: 14_000,
           outputTokens: 200,
@@ -274,7 +274,7 @@ describe("listedActionSourceIdsFromMessages", () => {
       storedAssistantMessage({
         debugTrace: {
           schemaVersion: "opencompany.chat.debug.v1",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           uiMessageParts: [
             {
               type: LIST_ACTIONS_TOOL_PART_TYPE,
@@ -332,7 +332,7 @@ describe("listedSkillIdsFromMessages", () => {
       storedAssistantMessage({
         debugTrace: {
           schemaVersion: "opencompany.chat.debug.v1",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           uiMessageParts: [
             {
               type: LIST_SKILLS_TOOL_PART_TYPE,
@@ -384,7 +384,7 @@ describe("usedSkillIdsFromMessages", () => {
       storedAssistantMessage({
         debugTrace: {
           schemaVersion: "opencompany.chat.debug.v1",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           uiMessageParts: [
             {
               type: USE_SKILL_TOOL_PART_TYPE,

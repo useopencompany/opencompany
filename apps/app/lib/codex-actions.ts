@@ -1,7 +1,7 @@
 import {
+  ACTION_HOST_TOOL_CONTRACT_VERSIONS,
   type ActionGatewayRequest,
   type ActionGatewayResponse,
-  GOAT_ACTION_HOST_TOOL_CONTRACT_VERSIONS,
 } from "@opencompany/agent-runtime";
 import { projectActionCatalog } from "@opencompany/core/actions/policy";
 import { serveActionRequest } from "@opencompany/core/actions/service";
@@ -205,9 +205,7 @@ async function loadCodexActionContext(
     .where(
       and(
         eq(codexChatSessions.id, request.sessionId),
-        inArray(codexChatSessions.hostToolContractVersion, [
-          ...GOAT_ACTION_HOST_TOOL_CONTRACT_VERSIONS,
-        ]),
+        inArray(codexChatSessions.hostToolContractVersion, [...ACTION_HOST_TOOL_CONTRACT_VERSIONS]),
         eq(codexChatTurns.status, "running"),
       ),
     )

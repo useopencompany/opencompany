@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { McpServer as McpServerType } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type ActionGatewayRequest, GOAT_ACTION_TOOL_CONTRACT } from "@opencompany/agent-runtime";
+import { ACTION_TOOL_CONTRACT, type ActionGatewayRequest } from "@opencompany/agent-runtime";
 import {
   createInMemoryActionTurnGovernance,
   serveActionRequest,
@@ -51,12 +51,12 @@ describe("registerClaudeActionTools", () => {
     const tools = registerTools(vi.fn<typeof executeActionGateway>());
     expect([...tools.keys()]).toEqual(["list_actions", "use_action"]);
     expect(getTool(tools, "list_actions").config.annotations).toEqual(
-      GOAT_ACTION_TOOL_CONTRACT.list.annotations,
+      ACTION_TOOL_CONTRACT.list.annotations,
     );
     expect(getTool(tools, "use_action").config.annotations).toEqual(
-      GOAT_ACTION_TOOL_CONTRACT.execute.annotations,
+      ACTION_TOOL_CONTRACT.execute.annotations,
     );
-    expect(GOAT_ACTION_TOOL_CONTRACT.execute.annotations.idempotentHint).toBe(false);
+    expect(ACTION_TOOL_CONTRACT.execute.annotations.idempotentHint).toBe(false);
   });
 
   it("translates a list_actions call into a gateway list request", async () => {

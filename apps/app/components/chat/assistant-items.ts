@@ -2,6 +2,7 @@ import { isBrowserToolName } from "@opencompany/browser-tools";
 import type { TaskStatus } from "@opencompany/db/schema";
 import type { TaskView } from "@/components/ChatSurface";
 import {
+  BRAIN_TOOL_NAME,
   type BrainToolOutput,
   type ChatUiMessage,
   CODEX_APPROVAL_TOOL_NAME,
@@ -15,7 +16,6 @@ import {
   CODEX_WEB_SEARCH_TOOL_NAME,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
-  GOAT_BRAIN_TOOL_NAME,
   SCHEDULE_TASK_TOOL_NAME,
   START_TASK_TOOL_NAME,
   START_TASK_TOOL_PART_TYPE,
@@ -152,7 +152,7 @@ function collectRenderItems(
     const tool = toolCallViewFromPart(part, stopped);
     if (!tool) continue;
     flushText(`${keyPrefix}text-${index}`);
-    if (tool.name === GOAT_BRAIN_TOOL_NAME && tool.status === "completed") {
+    if (tool.name === BRAIN_TOOL_NAME && tool.status === "completed") {
       pendingCitations = mergeBrainCitations(
         pendingCitations,
         brainCitationsFromToolOutput(tool.output),
@@ -219,7 +219,7 @@ export function toolCallViewFromPart(
   const state = typeof part.state === "string" ? part.state : "";
   const output = part.output;
   const failedBrain =
-    name === GOAT_BRAIN_TOOL_NAME && state === "output-available" && isBrainToolOutput(output)
+    name === BRAIN_TOOL_NAME && state === "output-available" && isBrainToolOutput(output)
       ? !brainToolOutputSucceeded(output)
       : false;
   // use_action reports failures inside its structured output, not via the
@@ -347,7 +347,7 @@ export function toolStatusText(status: ToolCallView["status"], state: string) {
 }
 
 export function toolLabel(name: string) {
-  if (name === GOAT_BRAIN_TOOL_NAME) return "Brain";
+  if (name === BRAIN_TOOL_NAME) return "Brain";
   if (name === CODEX_COMMAND_TOOL_NAME) return "Command";
   if (name === CODEX_PLAN_TOOL_NAME) return "Plan";
   if (name === CODEX_GOAL_TOOL_NAME) return "Goal";
@@ -407,7 +407,7 @@ export function toolDetail(
     return truncateToolPreview(part.errorText);
   }
 
-  if (name === GOAT_BRAIN_TOOL_NAME) {
+  if (name === BRAIN_TOOL_NAME) {
     return brainToolDetail(part, status);
   }
 

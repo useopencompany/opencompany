@@ -3,7 +3,7 @@ import {
   claimDueOnboardingEmails,
   enrollOnboardingEmails,
   failOnboardingEmail,
-  MAX_GOAT_ONBOARDING_EMAIL_ATTEMPTS,
+  MAX_ONBOARDING_EMAIL_ATTEMPTS,
   markOnboardingEmailSent,
   rescheduleOnboardingEmail,
 } from "@opencompany/db/onboarding-emails";
@@ -131,7 +131,7 @@ export async function sweepDueOnboardingEmails({
         step: row.step,
         attempts: row.attempts,
       });
-      if (row.attempts >= MAX_GOAT_ONBOARDING_EMAIL_ATTEMPTS) {
+      if (row.attempts >= MAX_ONBOARDING_EMAIL_ATTEMPTS) {
         await failOnboardingEmail({ id: row.id, error: message });
         failed += 1;
       } else {

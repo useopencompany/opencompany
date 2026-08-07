@@ -11,7 +11,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // The founder onboarding drip: welcome on signup, a check-in a day later, and a
 // feedback-call ask four days after that (five days from signup). Offsets are
 // applied at enrollment time; the cron sweep only ever compares `scheduled_at`.
-export const GOAT_ONBOARDING_EMAIL_SEQUENCE: Array<{
+export const ONBOARDING_EMAIL_SEQUENCE: Array<{
   step: OnboardingEmailStep;
   delayMs: number;
 }> = [
@@ -23,7 +23,7 @@ export const GOAT_ONBOARDING_EMAIL_SEQUENCE: Array<{
 // A send is retried up to this many times (attempts is incremented on each
 // claim). The claim skips rows that have already burned through their attempts;
 // the sweep marks them `failed` once here.
-export const MAX_GOAT_ONBOARDING_EMAIL_ATTEMPTS = 6;
+export const MAX_ONBOARDING_EMAIL_ATTEMPTS = 6;
 
 // The web client is neon-http (no interactive transactions), so the claim is a
 // single-statement CTE — the same atomic-claim shape as the credit ledger. A
@@ -60,7 +60,7 @@ export async function enrollOnboardingEmails(
   await db
     .insert(onboardingEmails)
     .values(
-      GOAT_ONBOARDING_EMAIL_SEQUENCE.map((entry) => ({
+      ONBOARDING_EMAIL_SEQUENCE.map((entry) => ({
         workosUserId: input.workosUserId,
         step: entry.step,
         scheduledAt: new Date(now.getTime() + entry.delayMs),
@@ -86,7 +86,7 @@ export async function claimDueOnboardingEmails(
     WITH due AS (
       SELECT id
       FROM goat.onboarding_emails
-      WHERE attempts < ${MAX_GOAT_ONBOARDING_EMAIL_ATTEMPTS}
+      WHERE attempts < ${MAX_ONBOARDING_EMAIL_ATTEMPTS}
         ${userFilter}
         AND (
           (status = 'pending' AND scheduled_at <= now())

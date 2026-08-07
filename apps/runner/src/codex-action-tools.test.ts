@@ -1,4 +1,4 @@
-import { type ActionGatewayRequest, GOAT_ACTION_TOOL_CONTRACT } from "@opencompany/agent-runtime";
+import { ACTION_TOOL_CONTRACT, type ActionGatewayRequest } from "@opencompany/agent-runtime";
 import {
   createInMemoryActionTurnGovernance,
   serveActionRequest,
@@ -21,12 +21,12 @@ describe("createCodexActionDynamicTools", () => {
   it("registers generic discovery and execution tools", () => {
     const tools = createCodexActionDynamicTools(context);
     expect(tools.map((tool) => tool.spec.name)).toEqual([
-      GOAT_ACTION_TOOL_CONTRACT.list.name,
-      GOAT_ACTION_TOOL_CONTRACT.execute.name,
+      ACTION_TOOL_CONTRACT.list.name,
+      ACTION_TOOL_CONTRACT.execute.name,
     ]);
     expect(tools.map((tool) => tool.spec.inputSchema)).toEqual([
-      GOAT_ACTION_TOOL_CONTRACT.list.inputSchema,
-      GOAT_ACTION_TOOL_CONTRACT.execute.inputSchema,
+      ACTION_TOOL_CONTRACT.list.inputSchema,
+      ACTION_TOOL_CONTRACT.execute.inputSchema,
     ]);
   });
 
@@ -41,7 +41,7 @@ describe("createCodexActionDynamicTools", () => {
       fetch: fetchMock,
     });
 
-    const output = await listTool!.execute(call(GOAT_ACTION_TOOL_CONTRACT.list.name, {}));
+    const output = await listTool!.execute(call(ACTION_TOOL_CONTRACT.list.name, {}));
 
     expect(output.success).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
@@ -70,13 +70,13 @@ describe("createCodexActionDynamicTools", () => {
     });
 
     const valid = await useTool!.execute(
-      call(GOAT_ACTION_TOOL_CONTRACT.execute.name, {
+      call(ACTION_TOOL_CONTRACT.execute.name, {
         action: "gmail.search",
         params: { query: "newer_than:1d" },
       }),
     );
     const invalid = await useTool!.execute(
-      call(GOAT_ACTION_TOOL_CONTRACT.execute.name, { action: "gmail.search" }),
+      call(ACTION_TOOL_CONTRACT.execute.name, { action: "gmail.search" }),
     );
 
     expect(valid.success).toBe(true);
@@ -101,7 +101,7 @@ describe("createCodexActionDynamicTools", () => {
       { fetch: fetchMock },
     );
 
-    const output = await listTool!.execute(call(GOAT_ACTION_TOOL_CONTRACT.list.name, {}));
+    const output = await listTool!.execute(call(ACTION_TOOL_CONTRACT.list.name, {}));
 
     expect(output).toMatchObject({ success: false });
     const contentItem = output.contentItems[0];
@@ -138,13 +138,11 @@ describe("createCodexActionDynamicTools", () => {
       fetch: fetchMock,
     });
 
-    await listTool!.execute(
-      call(GOAT_ACTION_TOOL_CONTRACT.list.name, { source: "gmail" }, "list_1"),
-    );
+    await listTool!.execute(call(ACTION_TOOL_CONTRACT.list.name, { source: "gmail" }, "list_1"));
     for (let callNumber = 1; callNumber <= 16; callNumber += 1) {
       const result = await useTool!.execute(
         call(
-          GOAT_ACTION_TOOL_CONTRACT.execute.name,
+          ACTION_TOOL_CONTRACT.execute.name,
           { action: "gmail.search", params: {} },
           `call_${callNumber}`,
         ),
@@ -152,11 +150,7 @@ describe("createCodexActionDynamicTools", () => {
       expect(result.success).toBe(true);
     }
     const rejected = await useTool!.execute(
-      call(
-        GOAT_ACTION_TOOL_CONTRACT.execute.name,
-        { action: "gmail.search", params: {} },
-        "call_17",
-      ),
+      call(ACTION_TOOL_CONTRACT.execute.name, { action: "gmail.search", params: {} }, "call_17"),
     );
 
     expect(rejected.success).toBe(false);

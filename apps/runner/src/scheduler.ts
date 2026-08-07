@@ -7,7 +7,7 @@ import { captureException } from "@opencompany/observability";
 import { type SQL, sql } from "drizzle-orm";
 import { getDb } from "./db";
 
-const GOAT_SCHEDULE_POLL_INTERVAL_MS = 30_000;
+const SCHEDULE_POLL_INTERVAL_MS = 30_000;
 
 type DueScheduleRow = {
   id: string;
@@ -91,7 +91,7 @@ export function startTaskScheduleWorker(input: { onTaskCreated?: () => void } = 
       const timer = setTimeout(() => {
         wake = null;
         resolve();
-      }, GOAT_SCHEDULE_POLL_INTERVAL_MS);
+      }, SCHEDULE_POLL_INTERVAL_MS);
       wake = () => {
         clearTimeout(timer);
         wake = null;

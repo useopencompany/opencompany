@@ -1,7 +1,7 @@
 import { parse } from "dotenv";
 
-export const GOAT_REPO_ENV_MAX_BYTES = 256 * 1024;
-export const GOAT_REPO_SETUP_INSTRUCTIONS_MAX_LENGTH = 4_000;
+export const REPO_ENV_MAX_BYTES = 256 * 1024;
+export const REPO_SETUP_INSTRUCTIONS_MAX_LENGTH = 4_000;
 
 export type ValidatedRepoEnv = { ok: true } | { ok: false; message: string };
 
@@ -12,10 +12,10 @@ export function validateRepoEnv(content: string): ValidatedRepoEnv {
   if (content.includes("\0")) {
     return { ok: false, message: "Environment files cannot contain null bytes." };
   }
-  if (Buffer.byteLength(content, "utf8") > GOAT_REPO_ENV_MAX_BYTES) {
+  if (Buffer.byteLength(content, "utf8") > REPO_ENV_MAX_BYTES) {
     return {
       ok: false,
-      message: `Environment files must be ${GOAT_REPO_ENV_MAX_BYTES / 1024} KB or smaller.`,
+      message: `Environment files must be ${REPO_ENV_MAX_BYTES / 1024} KB or smaller.`,
     };
   }
 
@@ -36,10 +36,10 @@ export function normalizeRepoSetupInstructions(
   value: string,
 ): { ok: true; instructions: string } | { ok: false; message: string } {
   const instructions = value.trim();
-  if (instructions.length > GOAT_REPO_SETUP_INSTRUCTIONS_MAX_LENGTH) {
+  if (instructions.length > REPO_SETUP_INSTRUCTIONS_MAX_LENGTH) {
     return {
       ok: false,
-      message: `Setup instructions must be ${GOAT_REPO_SETUP_INSTRUCTIONS_MAX_LENGTH.toLocaleString()} characters or fewer.`,
+      message: `Setup instructions must be ${REPO_SETUP_INSTRUCTIONS_MAX_LENGTH.toLocaleString()} characters or fewer.`,
     };
   }
   return { ok: true, instructions };

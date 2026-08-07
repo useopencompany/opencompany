@@ -6,10 +6,10 @@ import { NodeSDK } from "@opentelemetry/sdk-node";
 import { TraceIdRatioBasedSampler } from "@opentelemetry/sdk-trace-base";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 import {
-  GOAT_OBSERVABILITY_SERVICE_NAME,
-  GOAT_OTEL_METRIC_EXPORT_INTERVAL_MS,
-  GOAT_OTEL_TRACE_SAMPLE_RATE,
   isObservabilityEnabled,
+  OBSERVABILITY_SERVICE_NAME,
+  OTEL_METRIC_EXPORT_INTERVAL_MS,
+  OTEL_TRACE_SAMPLE_RATE,
 } from ".";
 
 let sdk: NodeSDK | null = null;
@@ -29,17 +29,17 @@ export function registerNodeObservability(input: { serviceName?: string } = {}) 
       url: metricsEndpoint(endpoint),
       ...(headers ? { headers } : {}),
     }),
-    exportIntervalMillis: GOAT_OTEL_METRIC_EXPORT_INTERVAL_MS,
+    exportIntervalMillis: OTEL_METRIC_EXPORT_INTERVAL_MS,
   });
 
   sdk = new NodeSDK({
     resource: resourceFromAttributes({
-      [ATTR_SERVICE_NAME]: input.serviceName ?? GOAT_OBSERVABILITY_SERVICE_NAME,
+      [ATTR_SERVICE_NAME]: input.serviceName ?? OBSERVABILITY_SERVICE_NAME,
       ...(readRelease() ? { [ATTR_SERVICE_VERSION]: readRelease() } : {}),
     }),
     traceExporter,
     metricReader,
-    sampler: new TraceIdRatioBasedSampler(GOAT_OTEL_TRACE_SAMPLE_RATE),
+    sampler: new TraceIdRatioBasedSampler(OTEL_TRACE_SAMPLE_RATE),
   });
   sdk.start();
   return sdk;

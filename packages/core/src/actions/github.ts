@@ -5,10 +5,10 @@ import {
   searchGitHubIssues,
 } from "../integrations/github";
 import {
+  ACTION_EFFECTS_READ,
   ActionAuthError,
   ActionInvalidParamsError,
   type ActionProviderCatalog,
-  GOAT_ACTION_EFFECTS_READ,
   optionalNumberParam,
   optionalStringParam,
   truncateText,
@@ -55,7 +55,7 @@ export async function resolveGitHubActions(
         id: "github.search_issues",
         provider: "github",
         capability: "read",
-        effects: GOAT_ACTION_EFFECTS_READ,
+        effects: ACTION_EFFECTS_READ,
         permissionMode: "on",
         description:
           "Search GitHub issues and pull requests visible to the connected installation. Supports GitHub qualifiers such as repo:owner/name, org:name, is:issue, is:pr, state:open, author:, assignee:, and label:. Returns compact matches with links and body previews.",

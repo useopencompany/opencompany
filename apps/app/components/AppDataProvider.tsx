@@ -17,8 +17,8 @@ import type { TaskView } from "@/components/ChatSurface";
 import {
   type ChatSummaryView,
   deriveChatState,
-  GOAT_PINNED_CHAT_LIMIT,
   isChatRuntimeActive,
+  PINNED_CHAT_LIMIT,
 } from "@/lib/chat-ui";
 import type { FeatureFlags } from "@/lib/feature-flags";
 import { isRecentHomeActivity } from "@/lib/home-activity";
@@ -105,7 +105,7 @@ type AppData = AppInitialData & {
 
 // Keeps the command palette responsive; older archived chats are still
 // reachable by narrowing the search (which re-filters this bounded list).
-const GOAT_ARCHIVED_CHAT_LIMIT = 50;
+const ARCHIVED_CHAT_LIMIT = 50;
 
 const AppDataContext = createContext<AppData | null>(null);
 const subscribeToHydration = () => () => undefined;
@@ -273,7 +273,7 @@ function AppLiveDataSubscriptions({
       .toSorted(
         (a, b) => new Date(b.pinned_at ?? 0).getTime() - new Date(a.pinned_at ?? 0).getTime(),
       )
-      .slice(0, GOAT_PINNED_CHAT_LIMIT)
+      .slice(0, PINNED_CHAT_LIMIT)
       .map(toSummary);
     const activeRuntime = openRows
       .filter((row) => !row.pinned_at && activeRuntimeChatIds.has(row.id))
@@ -307,7 +307,7 @@ function AppLiveDataSubscriptions({
     return ((chatSessionRows ?? []) as ChatSessionRow[])
       .filter((row) => row.closed_at && row.kind !== "task")
       .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-      .slice(0, GOAT_ARCHIVED_CHAT_LIMIT)
+      .slice(0, ARCHIVED_CHAT_LIMIT)
       .map((row) => ({
         id: row.id,
         title: row.title,

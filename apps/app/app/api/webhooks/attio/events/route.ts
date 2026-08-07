@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import {
+  ATTIO_CREDENTIAL_KIND,
+  ATTIO_PROVIDER,
   type AttioApiKeyCredentialPayload,
   type AttioObjectEventInsert,
   attioEventTypeFor,
   attioRouteMatchesEvent,
   attioSelectedObjectTypes,
-  GOAT_ATTIO_CREDENTIAL_KIND,
-  GOAT_ATTIO_PROVIDER,
   insertAttioObjectEvents,
   listAttioIntegrationsForWorkspace,
   listEnabledAttioBrainSourceRoutes,
@@ -108,8 +108,8 @@ async function findIntegrationForWebhook(
     const credential = await loadIntegrationCredential({
       userWorkosId: integration.userWorkosId,
       integrationId: integration.id,
-      provider: GOAT_ATTIO_PROVIDER,
-      kind: GOAT_ATTIO_CREDENTIAL_KIND,
+      provider: ATTIO_PROVIDER,
+      kind: ATTIO_CREDENTIAL_KIND,
     }).catch(() => null);
     const payload = credential?.payload as AttioApiKeyCredentialPayload | undefined;
     if (payload?.webhookId !== webhookId) continue;

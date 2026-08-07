@@ -3,16 +3,13 @@
 import { randomUUID } from "node:crypto";
 import { captureServerEvent } from "@opencompany/analytics/shared-server";
 import {
-  GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
-  GOAT_PRO_STRIPE_PRODUCT_KEY,
   loadBillingOverview,
+  PRO_MONTHLY_PRICE_USD_CENTS,
+  PRO_STRIPE_PRODUCT_KEY,
   setAutoRefillConfig,
   setStripeCustomerId,
 } from "@opencompany/db/billing";
-import {
-  GOAT_MAX_TOP_UP_USD_CENTS,
-  GOAT_MIN_TOP_UP_USD_CENTS,
-} from "@opencompany/db/billing-constants";
+import { MAX_TOP_UP_USD_CENTS, MIN_TOP_UP_USD_CENTS } from "@opencompany/db/billing-constants";
 import {
   createPendingCheckoutRecord,
   markCheckoutRecordFailed,
@@ -60,12 +57,12 @@ export async function createCreditTopUpAction(amountCents: number): Promise<Bill
   }
   if (
     !Number.isSafeInteger(amountCents) ||
-    amountCents < GOAT_MIN_TOP_UP_USD_CENTS ||
-    amountCents > GOAT_MAX_TOP_UP_USD_CENTS
+    amountCents < MIN_TOP_UP_USD_CENTS ||
+    amountCents > MAX_TOP_UP_USD_CENTS
   ) {
     return {
       ok: false,
-      error: `Credit top-ups must be between $${GOAT_MIN_TOP_UP_USD_CENTS / 100} and $${GOAT_MAX_TOP_UP_USD_CENTS / 100}.`,
+      error: `Credit top-ups must be between $${MIN_TOP_UP_USD_CENTS / 100} and $${MAX_TOP_UP_USD_CENTS / 100}.`,
     };
   }
   let checkoutUrl: string;
@@ -194,7 +191,7 @@ export async function createProCheckoutAction(): Promise<BillingActionResult> {
     });
     const existingPro = subscriptions.data.find(
       (subscription) =>
-        subscription.metadata.billingProduct === GOAT_PRO_STRIPE_PRODUCT_KEY &&
+        subscription.metadata.billingProduct === PRO_STRIPE_PRODUCT_KEY &&
         subscription.status !== "canceled" &&
         subscription.status !== "incomplete_expired",
     );
@@ -221,7 +218,7 @@ export async function createProCheckoutAction(): Promise<BillingActionResult> {
           {
             price_data: {
               currency: "usd",
-              unit_amount: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+              unit_amount: PRO_MONTHLY_PRICE_USD_CENTS,
               tax_behavior: "exclusive",
               recurring: { interval: "month" },
               product_data: {
@@ -233,12 +230,12 @@ export async function createProCheckoutAction(): Promise<BillingActionResult> {
           },
         ],
         metadata: {
-          billingProduct: GOAT_PRO_STRIPE_PRODUCT_KEY,
+          billingProduct: PRO_STRIPE_PRODUCT_KEY,
           workspaceId: context.workspace.id,
         },
         subscription_data: {
           metadata: {
-            billingProduct: GOAT_PRO_STRIPE_PRODUCT_KEY,
+            billingProduct: PRO_STRIPE_PRODUCT_KEY,
             workspaceId: context.workspace.id,
           },
         },
@@ -252,7 +249,7 @@ export async function createProCheckoutAction(): Promise<BillingActionResult> {
     await captureServerEvent("goat_billing_pro_checkout_started", context.user.workosUserId, {
       user_id: context.user.workosUserId,
       workspace_id: context.workspace.id,
-      monthly_price_usd_cents: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+      monthly_price_usd_cents: PRO_MONTHLY_PRICE_USD_CENTS,
     });
     checkoutUrl = session.url;
   } catch (error) {
@@ -272,12 +269,12 @@ export async function setAutoRefillAction(input: {
   }
   if (
     !Number.isSafeInteger(input.amountCents) ||
-    input.amountCents < GOAT_MIN_TOP_UP_USD_CENTS ||
-    input.amountCents > GOAT_MAX_TOP_UP_USD_CENTS
+    input.amountCents < MIN_TOP_UP_USD_CENTS ||
+    input.amountCents > MAX_TOP_UP_USD_CENTS
   ) {
     return {
       ok: false,
-      error: `Auto-refill amounts must be between $${GOAT_MIN_TOP_UP_USD_CENTS / 100} and $${GOAT_MAX_TOP_UP_USD_CENTS / 100}.`,
+      error: `Auto-refill amounts must be between $${MIN_TOP_UP_USD_CENTS / 100} and $${MAX_TOP_UP_USD_CENTS / 100}.`,
     };
   }
   try {

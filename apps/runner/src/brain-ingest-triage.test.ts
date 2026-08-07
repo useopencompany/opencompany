@@ -17,10 +17,10 @@ vi.mock("@opencompany/observability/braintrust", () => ({
 }));
 
 import {
-  GOAT_BRAIN_INGEST_TRIAGE_MAX_OUTPUT_TOKENS,
-  GOAT_BRAIN_INGEST_TRIAGE_MODEL,
-  GOAT_BRAIN_INGEST_TRIAGE_SOURCE_BYTES,
-  GOAT_BRAIN_INGEST_TRIAGE_SYSTEM_PROMPT,
+  BRAIN_INGEST_TRIAGE_MAX_OUTPUT_TOKENS,
+  BRAIN_INGEST_TRIAGE_MODEL,
+  BRAIN_INGEST_TRIAGE_SOURCE_BYTES,
+  BRAIN_INGEST_TRIAGE_SYSTEM_PROMPT,
   runBrainIngestTriage,
   truncateTriageSource,
 } from "./brain-ingest-triage";
@@ -54,10 +54,10 @@ describe("runBrainIngestTriage", () => {
 
     expect(aiMock.generateObject).toHaveBeenCalledWith(
       expect.objectContaining({
-        model: { model: GOAT_BRAIN_INGEST_TRIAGE_MODEL },
-        system: GOAT_BRAIN_INGEST_TRIAGE_SYSTEM_PROMPT,
+        model: { model: BRAIN_INGEST_TRIAGE_MODEL },
+        system: BRAIN_INGEST_TRIAGE_SYSTEM_PROMPT,
         prompt: "Classify this source.",
-        maxOutputTokens: GOAT_BRAIN_INGEST_TRIAGE_MAX_OUTPUT_TOKENS,
+        maxOutputTokens: BRAIN_INGEST_TRIAGE_MAX_OUTPUT_TOKENS,
         providerOptions: expect.objectContaining({
           openai: expect.objectContaining({ reasoningEffort: "low" }),
           gateway: expect.objectContaining({
@@ -67,7 +67,7 @@ describe("runBrainIngestTriage", () => {
       }),
     );
     expect(result).toEqual({
-      model: GOAT_BRAIN_INGEST_TRIAGE_MODEL,
+      model: BRAIN_INGEST_TRIAGE_MODEL,
       decision: "ingest",
       reason: "Contains a durable launch decision.",
       entityHints: ["Launch project", "Acme"],
@@ -87,10 +87,10 @@ describe("runBrainIngestTriage", () => {
 describe("truncateTriageSource", () => {
   it("keeps both ends of oversized source data within the byte budget", () => {
     const source = `BEGIN-${"🙂".repeat(2_000)}-END`;
-    const truncated = truncateTriageSource(source, GOAT_BRAIN_INGEST_TRIAGE_SOURCE_BYTES);
+    const truncated = truncateTriageSource(source, BRAIN_INGEST_TRIAGE_SOURCE_BYTES);
 
     expect(Buffer.byteLength(truncated, "utf8")).toBeLessThanOrEqual(
-      GOAT_BRAIN_INGEST_TRIAGE_SOURCE_BYTES,
+      BRAIN_INGEST_TRIAGE_SOURCE_BYTES,
     );
     expect(truncated.startsWith("BEGIN-")).toBe(true);
     expect(truncated).toContain("[middle truncated for cheap triage]");

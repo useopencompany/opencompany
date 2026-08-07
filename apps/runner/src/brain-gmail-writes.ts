@@ -7,7 +7,7 @@ import {
 import {
   brainFilePathFor,
   createBrainMarkdownContent,
-  MAX_GOAT_BRAIN_FILE_BYTES,
+  MAX_BRAIN_FILE_BYTES,
 } from "@opencompany/db/brain-files";
 import { truncateByBytes } from "./brain-jamie-writes";
 
@@ -39,11 +39,11 @@ export function buildGmailThreadEvidenceWrite(
 ): GmailThreadEvidenceWrite {
   const evidenceBrainId = buildGmailThreadEvidenceId(item);
   const fullContent = createGmailEvidenceContent({ item, evidenceBrainId, truncatedBodies: false });
-  const truncatedBodies = Buffer.byteLength(fullContent, "utf8") > MAX_GOAT_BRAIN_FILE_BYTES;
+  const truncatedBodies = Buffer.byteLength(fullContent, "utf8") > MAX_BRAIN_FILE_BYTES;
   const evidenceContent = truncatedBodies
     ? createGmailEvidenceContent({ item, evidenceBrainId, truncatedBodies: true })
     : fullContent;
-  if (Buffer.byteLength(evidenceContent, "utf8") > MAX_GOAT_BRAIN_FILE_BYTES) {
+  if (Buffer.byteLength(evidenceContent, "utf8") > MAX_BRAIN_FILE_BYTES) {
     throw new Error("Gmail evidence document exceeds the Goat Brain file size limit.");
   }
 
@@ -64,7 +64,7 @@ function createGmailEvidenceContent(input: {
   // Leave generous headroom under the file cap for metadata when bodies are
   // truncated: split the budget evenly across messages.
   const perMessageBudget = input.truncatedBodies
-    ? Math.max(2_000, Math.floor((MAX_GOAT_BRAIN_FILE_BYTES * 0.8) / thread.messages.length))
+    ? Math.max(2_000, Math.floor((MAX_BRAIN_FILE_BYTES * 0.8) / thread.messages.length))
     : Number.POSITIVE_INFINITY;
 
   const compiledTruth = [

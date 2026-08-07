@@ -2,17 +2,13 @@ import type { McpClient } from "@opencompany/db/schema";
 
 // One connector per user: this endpoint spans every brain the signed-in user
 // can access. Kept here (client-safe) and reused by lib/mcp-oauth.ts.
-export const GOAT_USER_MCP_ENDPOINT_PATH = "/mcp";
+export const USER_MCP_ENDPOINT_PATH = "/mcp";
 export const OPENCOMPANY_MCP_SERVER_NAME = "opencompany";
 
-export const GOAT_MCP_CLIENTS = [
-  "claude",
-  "chatgpt",
-  "cursor",
-] as const satisfies readonly McpClient[];
+export const MCP_CLIENTS = ["claude", "chatgpt", "cursor"] as const satisfies readonly McpClient[];
 
 export function isMcpClient(value: unknown): value is McpClient {
-  return typeof value === "string" && GOAT_MCP_CLIENTS.some((client) => client === value);
+  return typeof value === "string" && MCP_CLIENTS.some((client) => client === value);
 }
 
 export function isMcpSetupCompletionRun(input: {

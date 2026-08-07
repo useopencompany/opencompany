@@ -6,9 +6,9 @@ import { buildCorpus, type IndexRecord, loadCachedDocumentEmbeddings } from "./c
 import { reciprocalRankFusion } from "./fuse";
 
 export {
+  BRAIN_WEIGHT_FRESHNESS,
+  BRAIN_WEIGHT_RELEVANCE,
   brainFreshness,
-  GOAT_BRAIN_WEIGHT_FRESHNESS,
-  GOAT_BRAIN_WEIGHT_RELEVANCE,
 } from "./blend";
 export { titleTagMatch } from "./bm25";
 export { reciprocalRankFusion } from "./fuse";

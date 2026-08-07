@@ -10,13 +10,13 @@ import {
 } from "../integrations/google-drive-scopes";
 import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  ACTION_EFFECTS_READ,
+  ACTION_EFFECTS_WRITE,
   ActionAuthError,
   type ActionExecuteContext,
   ActionInvalidParamsError,
   ActionPermissionError,
   type ActionProviderCatalog,
-  GOAT_ACTION_EFFECTS_READ,
-  GOAT_ACTION_EFFECTS_WRITE,
   optionalNumberParam,
   optionalStringParam,
   type ResolvedAction,
@@ -164,7 +164,7 @@ function searchFilesAction(connections: readonly GoogleDriveConnection[]): Resol
     id: "google_drive.search_files",
     provider: "google_drive",
     capability: "read",
-    effects: GOAT_ACTION_EFFECTS_READ,
+    effects: ACTION_EFFECTS_READ,
     ...permissionAnnotation("read", connections),
     description:
       "Search Google Drive, including shared files and shared drives, by file name or indexed text. Returns compact file metadata and links; use google_drive.get_document to read a Google Doc or google_drive.get_spreadsheet_values to read a Google Sheet.",
@@ -249,7 +249,7 @@ function getDocumentAction(connections: readonly GoogleDriveConnection[]): Resol
     id: "google_drive.get_document",
     provider: "google_drive",
     capability: "read",
-    effects: GOAT_ACTION_EFFECTS_READ,
+    effects: ACTION_EFFECTS_READ,
     ...permissionAnnotation("read", connections),
     description:
       "Read the current text of a Google Doc by its Drive file id. Returns text across all document tabs plus the current revision id. Use the revision id when replacing text.",
@@ -316,7 +316,7 @@ function getSpreadsheetValuesAction(connections: readonly GoogleDriveConnection[
     id: "google_drive.get_spreadsheet_values",
     provider: "google_drive",
     capability: "read",
-    effects: GOAT_ACTION_EFFECTS_READ,
+    effects: ACTION_EFFECTS_READ,
     ...permissionAnnotation("read", connections),
     description:
       "Read values from a Google Sheet by Drive file id and A1 notation range. Defaults to A1:Z100 on the first sheet when range is omitted. Empty trailing rows and columns may be omitted by Google Sheets.",
@@ -423,7 +423,7 @@ function createDocumentAction(connections: readonly GoogleDriveConnection[]): Re
     id: "google_drive.create_document",
     provider: "google_drive",
     capability: "write",
-    effects: GOAT_ACTION_EFFECTS_WRITE,
+    effects: ACTION_EFFECTS_WRITE,
     ...permissionAnnotation("write", connections),
     description:
       "Create a new Google Doc in the connected account's My Drive, optionally with initial plain text. Use only when the user explicitly asked to create a document. Returns the document id and link.",
@@ -534,7 +534,7 @@ function replaceDocumentTextAction(connections: readonly GoogleDriveConnection[]
     id: "google_drive.replace_document_text",
     provider: "google_drive",
     capability: "write",
-    effects: GOAT_ACTION_EFFECTS_WRITE,
+    effects: ACTION_EFFECTS_WRITE,
     ...permissionAnnotation("write", connections),
     description:
       "Replace every exact occurrence of text across all tabs of an existing Google Doc. Use only when the user explicitly asked to edit that document. Pass revision_id from google_drive.get_document when available so a concurrent edit fails instead of being overwritten.",
@@ -646,7 +646,7 @@ function updateSpreadsheetValuesAction(
     id: "google_drive.update_spreadsheet_values",
     provider: "google_drive",
     capability: "write",
-    effects: GOAT_ACTION_EFFECTS_WRITE,
+    effects: ACTION_EFFECTS_WRITE,
     ...permissionAnnotation("write", connections),
     description:
       "Update cells in an existing Google Sheet by Drive file id and explicit A1 notation range. Existing values in the target range are overwritten. Use only when the user explicitly asked to edit that spreadsheet.",
@@ -745,7 +745,7 @@ function appendSpreadsheetValuesAction(
     id: "google_drive.append_spreadsheet_values",
     provider: "google_drive",
     capability: "write",
-    effects: GOAT_ACTION_EFFECTS_WRITE,
+    effects: ACTION_EFFECTS_WRITE,
     ...permissionAnnotation("write", connections),
     description:
       "Append rows or columns to an existing Google Sheet using the table detected in an A1 notation range. Use only when the user explicitly asked to add spreadsheet values.",

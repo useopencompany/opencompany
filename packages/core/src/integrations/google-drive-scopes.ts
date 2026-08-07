@@ -1,14 +1,14 @@
-export const GOAT_GOOGLE_DRIVE_READ_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
-export const GOAT_GOOGLE_DOCS_WRITE_SCOPE = "https://www.googleapis.com/auth/documents";
-export const GOAT_GOOGLE_SHEETS_WRITE_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
+export const GOOGLE_DRIVE_READ_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+export const GOOGLE_DOCS_WRITE_SCOPE = "https://www.googleapis.com/auth/documents";
+export const GOOGLE_SHEETS_WRITE_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 
 const GOOGLE_DOCS_WRITE_SCOPES = new Set([
-  GOAT_GOOGLE_DOCS_WRITE_SCOPE,
+  GOOGLE_DOCS_WRITE_SCOPE,
   "https://www.googleapis.com/auth/drive",
 ]);
 
 const GOOGLE_SHEETS_WRITE_SCOPES = new Set([
-  GOAT_GOOGLE_SHEETS_WRITE_SCOPE,
+  GOOGLE_SHEETS_WRITE_SCOPE,
   "https://www.googleapis.com/auth/drive",
 ]);
 

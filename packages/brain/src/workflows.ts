@@ -1,10 +1,10 @@
 import type { ParsedBrainDocument } from "./document";
-import { GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER } from "./document";
+import { BRAIN_EMPTY_TRUTH_PLACEHOLDER } from "./document";
 import { isValidBrainId, normalizeBrainFolder } from "./schema";
 
-export const GOAT_BRAIN_WORKFLOWS_ZONE = "workflows";
-export const GOAT_BRAIN_WORKFLOW_NAME_MAX_LENGTH = 64;
-export const GOAT_BRAIN_WORKFLOW_DESCRIPTION_MAX_LENGTH = 1024;
+export const BRAIN_WORKFLOWS_ZONE = "workflows";
+export const BRAIN_WORKFLOW_NAME_MAX_LENGTH = 64;
+export const BRAIN_WORKFLOW_DESCRIPTION_MAX_LENGTH = 1024;
 
 export type BrainWorkflow = {
   id: string;
@@ -18,7 +18,7 @@ export type BrainWorkflow = {
 
 export function isBrainWorkflowFolder(value: string): boolean {
   const folder = normalizeBrainFolder(value);
-  return folder === GOAT_BRAIN_WORKFLOWS_ZONE || folder.startsWith(`${GOAT_BRAIN_WORKFLOWS_ZONE}/`);
+  return folder === BRAIN_WORKFLOWS_ZONE || folder.startsWith(`${BRAIN_WORKFLOWS_ZONE}/`);
 }
 
 export function brainWorkflowFromDocument(document: ParsedBrainDocument): BrainWorkflow | null {
@@ -39,7 +39,7 @@ export function brainWorkflowFromDocument(document: ParsedBrainDocument): BrainW
     !name ||
     !isValidOptionalBrainWorkflowDescription(description) ||
     !instructions ||
-    instructions === GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER
+    instructions === BRAIN_EMPTY_TRUTH_PLACEHOLDER
   ) {
     return null;
   }
@@ -47,12 +47,12 @@ export function brainWorkflowFromDocument(document: ParsedBrainDocument): BrainW
 }
 
 export function isValidBrainWorkflowId(value: unknown): value is string {
-  return isValidBrainId(value) && value.length <= GOAT_BRAIN_WORKFLOW_NAME_MAX_LENGTH;
+  return isValidBrainId(value) && value.length <= BRAIN_WORKFLOW_NAME_MAX_LENGTH;
 }
 
 function isValidOptionalBrainWorkflowDescription(value: string) {
   return (
-    value.length <= GOAT_BRAIN_WORKFLOW_DESCRIPTION_MAX_LENGTH &&
+    value.length <= BRAIN_WORKFLOW_DESCRIPTION_MAX_LENGTH &&
     !value.includes("<") &&
     !value.includes(">")
   );

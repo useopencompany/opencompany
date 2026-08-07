@@ -1,9 +1,9 @@
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { captureServerEvent as captureSharedServerEvent } from "@opencompany/analytics/shared-server";
 import {
+  AUTO_REFILL_THRESHOLD_USD_MICROS,
   claimAutoRefill,
   ensureMonthlyIncludedUsage,
-  GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS,
   listAutoRefillCandidates,
   releasePendingForWorkspace,
   settleAutoRefill,
@@ -27,7 +27,7 @@ export async function maybeTriggerAutoRefill(workspaceId: string) {
   try {
     await ensureMonthlyIncludedUsage(workspaceId);
     const balance = await getCreditBalanceUsdMicros(workspaceId);
-    if (balance >= GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS) return;
+    if (balance >= AUTO_REFILL_THRESHOLD_USD_MICROS) return;
     await runAutoRefill(workspaceId);
   } catch (error) {
     console.error(`Goat auto-refill trigger failed for workspace ${workspaceId}.`, error);

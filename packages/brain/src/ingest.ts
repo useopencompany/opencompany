@@ -1,10 +1,6 @@
-import {
-  type BrainEntry,
-  brainEntryFromLegacyMarkdown,
-  GOAT_BRAIN_MARKDOWN_MIME_TYPE,
-} from "./entry";
+import { BRAIN_MARKDOWN_MIME_TYPE, type BrainEntry, brainEntryFromLegacyMarkdown } from "./entry";
 import { type BrainHealthReport, checkBrainHealth } from "./health";
-import { GOAT_BRAIN_POINTER_COPY_RULE } from "./pointer-copy";
+import { BRAIN_POINTER_COPY_RULE } from "./pointer-copy";
 import type { Gateway } from "./retrieval/gateway";
 import {
   type BrainEntityType,
@@ -174,7 +170,7 @@ function buildIngestPrompt(input: {
     "Use only these types: person, company, project, meeting, concept, source, analysis, note. External artifacts (articles, videos, email threads, repos) are `source`; synthesized prose is `analysis`.",
     "Prefer relations over extra structured fields. People, companies, projects, and sources should connect through relations.",
     "Use inline links like [[page:brain-id|Label]] for pages, [[evidence:ev-id|Label]] for evidence, and [[source:provider:id|Label]] for source refs. Legacy [[brain-id|Label]] page links are accepted but new content should use typed links.",
-    GOAT_BRAIN_POINTER_COPY_RULE,
+    BRAIN_POINTER_COPY_RULE,
     "Compiled truth is the current synthesis for the entity. Rewrite it as the durable state of play, not as a chronological log.",
     "Timeline entries are append-only evidence. `timelineBody` must be a concise factual event from this source, not a restatement of the full source text.",
     "Every timeline entry must preserve source context; the system will attach the source ref, so make `timelineBody` say what happened and why it matters.",
@@ -283,7 +279,7 @@ async function applyIngestOperation(
       id: operation.id,
       createdAt: source.at,
       format: "markdown" as const,
-      mimeType: GOAT_BRAIN_MARKDOWN_MIME_TYPE,
+      mimeType: BRAIN_MARKDOWN_MIME_TYPE,
       relations: [],
       sources: [],
       status: "draft" as const,

@@ -23,8 +23,8 @@ import {
   textFromChatUiMessage,
 } from "@/lib/chat";
 import { OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION } from "@/lib/chat-agent";
-import { type CodexRuntimeView, GOAT_PINNED_CHAT_LIMIT, START_TASK_TOOL_NAME } from "@/lib/chat-ui";
-import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import { type CodexRuntimeView, PINNED_CHAT_LIMIT, START_TASK_TOOL_NAME } from "@/lib/chat-ui";
+import { DEFAULT_MODEL } from "@/lib/model-options";
 
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
@@ -141,7 +141,7 @@ describe("createChatUserTurn", () => {
       {
         userWorkosId: "user_1",
         prompt: "what do you think of x?",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         messageId: "ui_user_1",
       },
       store,
@@ -165,7 +165,7 @@ describe("createChatUserTurn", () => {
       {
         userWorkosId: "user_1",
         prompt: "open this chat immediately",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         newSessionId,
       },
       store,
@@ -179,14 +179,14 @@ describe("createChatUserTurn", () => {
     const { store, sessions, messages } = createInMemoryChatStore();
 
     const first = await createChatUserTurn(
-      { userWorkosId: "user_1", prompt: "hello", model: DEFAULT_GOAT_MODEL },
+      { userWorkosId: "user_1", prompt: "hello", model: DEFAULT_MODEL },
       store,
     );
     const second = await createChatUserTurn(
       {
         userWorkosId: "user_1",
         prompt: "continue",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         sessionId: first.session.id,
       },
       store,
@@ -208,11 +208,11 @@ describe("createChatUserTurn", () => {
     const { store, sessions } = createInMemoryChatStore();
 
     const first = await createChatUserTurn(
-      { userWorkosId: "user_1", prompt: "hello", model: DEFAULT_GOAT_MODEL },
+      { userWorkosId: "user_1", prompt: "hello", model: DEFAULT_MODEL },
       store,
     );
     const second = await createChatUserTurn(
-      { userWorkosId: "user_1", prompt: "new topic", model: DEFAULT_GOAT_MODEL },
+      { userWorkosId: "user_1", prompt: "new topic", model: DEFAULT_MODEL },
       store,
     );
 
@@ -224,7 +224,7 @@ describe("createChatUserTurn", () => {
     const { store, sessions } = createInMemoryChatStore();
 
     const first = await createChatUserTurn(
-      { userWorkosId: "user_1", prompt: "hello", model: DEFAULT_GOAT_MODEL },
+      { userWorkosId: "user_1", prompt: "hello", model: DEFAULT_MODEL },
       store,
     );
     const closed = await closeChatSessionForUser(
@@ -232,7 +232,7 @@ describe("createChatUserTurn", () => {
       store,
     );
     const second = await createChatUserTurn(
-      { userWorkosId: "user_1", prompt: "new thread", model: DEFAULT_GOAT_MODEL },
+      { userWorkosId: "user_1", prompt: "new thread", model: DEFAULT_MODEL },
       store,
     );
 
@@ -261,7 +261,7 @@ describe("persistChatAssistantMessage", () => {
       {
         userWorkosId: "user_1",
         prompt: "research x",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
       },
       store,
     );
@@ -274,7 +274,7 @@ describe("persistChatAssistantMessage", () => {
         taskId: "task_1",
         debugTrace: {
           schemaVersion: OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION,
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           finishReason: "stop",
           toolCalls: [{ toolName: START_TASK_TOOL_NAME }],
           toolResults: [{ taskId: "task_1" }],
@@ -293,7 +293,7 @@ describe("persistChatAssistantMessage", () => {
       taskStatus: "running",
       debugTrace: {
         schemaVersion: OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION,
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         finishReason: "stop",
       },
     });
@@ -314,14 +314,14 @@ function pendingApprovalPart(overrides: Record<string, unknown> = {}): Record<st
 function assistantApprovalTrace(parts: unknown[]): ChatMessageDebugTrace {
   return {
     schemaVersion: OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION,
-    model: DEFAULT_GOAT_MODEL,
+    model: DEFAULT_MODEL,
     uiMessageParts: parts,
   };
 }
 
 async function seedTurnAwaitingApproval(store: ChatStore, parts: unknown[]) {
   const turn = await createChatUserTurn(
-    { userWorkosId: "user_1", prompt: "add my sync", model: DEFAULT_GOAT_MODEL },
+    { userWorkosId: "user_1", prompt: "add my sync", model: DEFAULT_MODEL },
     store,
   );
   const assistant = await persistChatAssistantMessage(
@@ -398,7 +398,7 @@ describe("createChatApprovalContinuationTurn", () => {
         {
           userWorkosId: "user_1",
           prompt: "actually nevermind",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           sessionId: turn.session.id,
         },
         memory.store,
@@ -465,7 +465,7 @@ describe("settleStaleChatToolCalls", () => {
       {
         userWorkosId: "user_1",
         prompt: "different question",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         sessionId: turn.session.id,
       },
       store,
@@ -501,7 +501,7 @@ describe("settleStaleChatToolCalls", () => {
       {
         userWorkosId: "user_1",
         prompt: "give me results",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         sessionId: turn.session.id,
       },
       store,
@@ -513,7 +513,7 @@ describe("settleStaleChatToolCalls", () => {
         content: "I could not produce a response. Try sending that again.",
         debugTrace: {
           schemaVersion: OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION,
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           error: "Tool result is missing for tool call browser_open_12.",
         },
       },
@@ -523,7 +523,7 @@ describe("settleStaleChatToolCalls", () => {
       {
         userWorkosId: "user_1",
         prompt: "go",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         sessionId: failedFollowUp.session.id,
       },
       store,
@@ -572,7 +572,7 @@ describe("settleStaleChatToolCalls", () => {
       {
         userWorkosId: "user_1",
         prompt: "continue",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         sessionId: turn.session.id,
       },
       store,
@@ -605,19 +605,19 @@ describe("Goat chat history helpers", () => {
     const { store, sessions } = createInMemoryChatStore();
     try {
       const first = await createChatUserTurn(
-        { userWorkosId: "user_1", prompt: "first chat", model: DEFAULT_GOAT_MODEL },
+        { userWorkosId: "user_1", prompt: "first chat", model: DEFAULT_MODEL },
         store,
       );
       const second = await createChatUserTurn(
-        { userWorkosId: "user_1", prompt: "second chat", model: DEFAULT_GOAT_MODEL },
+        { userWorkosId: "user_1", prompt: "second chat", model: DEFAULT_MODEL },
         store,
       );
       const old = await createChatUserTurn(
-        { userWorkosId: "user_1", prompt: "old chat", model: DEFAULT_GOAT_MODEL },
+        { userWorkosId: "user_1", prompt: "old chat", model: DEFAULT_MODEL },
         store,
       );
       await createChatUserTurn(
-        { userWorkosId: "user_2", prompt: "other user chat", model: DEFAULT_GOAT_MODEL },
+        { userWorkosId: "user_2", prompt: "other user chat", model: DEFAULT_MODEL },
         store,
       );
       await closeChatSessionForUser({ userWorkosId: "user_1", sessionId: first.session.id }, store);
@@ -648,7 +648,7 @@ describe("Goat chat history helpers", () => {
     try {
       vi.setSystemTime(new Date("2026-07-04T12:00:00.000Z"));
       const turn = await createChatUserTurn(
-        { userWorkosId: "user_1", prompt: "hello", model: DEFAULT_GOAT_MODEL },
+        { userWorkosId: "user_1", prompt: "hello", model: DEFAULT_MODEL },
         store,
       );
 
@@ -692,11 +692,11 @@ describe("Goat chat history helpers", () => {
     const { store, sessions } = createInMemoryChatStore();
     try {
       const recent = await createChatUserTurn(
-        { userWorkosId: "user_1", prompt: "recent chat", model: DEFAULT_GOAT_MODEL },
+        { userWorkosId: "user_1", prompt: "recent chat", model: DEFAULT_MODEL },
         store,
       );
       const old = await createChatUserTurn(
-        { userWorkosId: "user_1", prompt: "old pinned chat", model: DEFAULT_GOAT_MODEL },
+        { userWorkosId: "user_1", prompt: "old pinned chat", model: DEFAULT_MODEL },
         store,
       );
       sessions.find((session) => session.id === old.session.id)!.updatedAt = new Date(
@@ -741,11 +741,11 @@ describe("Goat chat history helpers", () => {
   it("bounds pinned chat hydration and rejects pins beyond the limit", async () => {
     const { store, sessions } = createInMemoryChatStore();
     const candidate = await createChatUserTurn(
-      { userWorkosId: "user_1", prompt: "candidate", model: DEFAULT_GOAT_MODEL },
+      { userWorkosId: "user_1", prompt: "candidate", model: DEFAULT_MODEL },
       store,
     );
     const now = new Date();
-    for (let index = 0; index < GOAT_PINNED_CHAT_LIMIT + 1; index += 1) {
+    for (let index = 0; index < PINNED_CHAT_LIMIT + 1; index += 1) {
       sessions.push({
         ...candidate.session,
         id: `pinned_${index}`,
@@ -755,7 +755,7 @@ describe("Goat chat history helpers", () => {
     }
 
     const summaries = await listRecentChatsForUser({ userWorkosId: "user_1", limit: 8 }, store);
-    expect(summaries.filter((summary) => summary.pinnedAt)).toHaveLength(GOAT_PINNED_CHAT_LIMIT);
+    expect(summaries.filter((summary) => summary.pinnedAt)).toHaveLength(PINNED_CHAT_LIMIT);
     await expect(
       setChatSessionPinnedForUser(
         { userWorkosId: "user_1", sessionId: candidate.session.id, pinned: true },
@@ -767,15 +767,15 @@ describe("Goat chat history helpers", () => {
   it("keeps concurrent pin requests within the per-user limit", async () => {
     const { store, sessions } = createInMemoryChatStore();
     const first = await createChatUserTurn(
-      { userWorkosId: "user_1", prompt: "first candidate", model: DEFAULT_GOAT_MODEL },
+      { userWorkosId: "user_1", prompt: "first candidate", model: DEFAULT_MODEL },
       store,
     );
     const second = await createChatUserTurn(
-      { userWorkosId: "user_1", prompt: "second candidate", model: DEFAULT_GOAT_MODEL },
+      { userWorkosId: "user_1", prompt: "second candidate", model: DEFAULT_MODEL },
       store,
     );
     const now = new Date();
-    for (let index = 0; index < GOAT_PINNED_CHAT_LIMIT - 1; index += 1) {
+    for (let index = 0; index < PINNED_CHAT_LIMIT - 1; index += 1) {
       sessions.push({
         ...first.session,
         id: `existing_pin_${index}`,
@@ -796,7 +796,7 @@ describe("Goat chat history helpers", () => {
     ]);
 
     expect(results).toEqual([true, false]);
-    expect(sessions.filter((session) => session.pinnedAt)).toHaveLength(GOAT_PINNED_CHAT_LIMIT);
+    expect(sessions.filter((session) => session.pinnedAt)).toHaveLength(PINNED_CHAT_LIMIT);
     await expect(
       setChatSessionPinnedForUser(
         { userWorkosId: "user_1", sessionId: first.session.id, pinned: true },
@@ -808,11 +808,11 @@ describe("Goat chat history helpers", () => {
   it("loads only the requested user's open chat", async () => {
     const { store } = createInMemoryChatStore();
     const own = await createChatUserTurn(
-      { userWorkosId: "user_1", prompt: "mine", model: DEFAULT_GOAT_MODEL },
+      { userWorkosId: "user_1", prompt: "mine", model: DEFAULT_MODEL },
       store,
     );
     const other = await createChatUserTurn(
-      { userWorkosId: "user_2", prompt: "not mine", model: DEFAULT_GOAT_MODEL },
+      { userWorkosId: "user_2", prompt: "not mine", model: DEFAULT_MODEL },
       store,
     );
 
@@ -831,7 +831,7 @@ describe("Goat chat history helpers", () => {
       id: "goat_chat_task_1",
       userWorkosId: "user_1",
       title: "Background research",
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       engine: "opencompany",
       kind: "task",
       closedAt: null,
@@ -877,7 +877,7 @@ describe("Goat chat history helpers", () => {
         id: "goat_chat_codex_1",
         userWorkosId: "user_1",
         title: "Codex chat",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         engine: "codex",
         kind: "chat",
         closedAt: null,
@@ -1000,7 +1000,7 @@ function createInMemoryChatStore(
       const pinned = open
         .filter((session) => session.pinnedAt)
         .toSorted((a, b) => (b.pinnedAt?.getTime() ?? 0) - (a.pinnedAt?.getTime() ?? 0))
-        .slice(0, GOAT_PINNED_CHAT_LIMIT);
+        .slice(0, PINNED_CHAT_LIMIT);
       const recent = open
         .filter((session) => !session.pinnedAt)
         .filter((session) =>
@@ -1140,7 +1140,7 @@ function createInMemoryChatStore(
         sessions.filter(
           (item) =>
             item.userWorkosId === input.userWorkosId && !item.closedAt && Boolean(item.pinnedAt),
-        ).length >= GOAT_PINNED_CHAT_LIMIT
+        ).length >= PINNED_CHAT_LIMIT
       ) {
         return false;
       }

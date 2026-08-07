@@ -28,7 +28,7 @@ import { getAvailableHarnessTools } from "@/lib/integrations/google-data";
 import { readSkillMentionRefs, resolveSkillMentions, SkillMentionError } from "@/lib/skills";
 import { normalizeTaskName } from "@/lib/task-display";
 import { triggerCodexChatWake } from "@/lib/task-runner";
-import { GOAT_TASK_PROMPT_MAX_LENGTH } from "@/lib/task-validation";
+import { TASK_PROMPT_MAX_LENGTH } from "@/lib/task-validation";
 
 export type ArchiveTaskResult = {
   ok: boolean;
@@ -422,10 +422,10 @@ export async function continueTaskAction(
   if (!normalizedTaskId || !content) {
     return { ok: false, error: "Write a message to continue this task.", messageId: null };
   }
-  if (content.length > GOAT_TASK_PROMPT_MAX_LENGTH) {
+  if (content.length > TASK_PROMPT_MAX_LENGTH) {
     return {
       ok: false,
-      error: `Messages can be at most ${GOAT_TASK_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
+      error: `Messages can be at most ${TASK_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
       messageId: null,
     };
   }

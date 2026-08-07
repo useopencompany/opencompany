@@ -13,7 +13,7 @@ import { getLatitudeIntegrationState } from "@/lib/integrations/latitude-mcp";
 import { getLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 
 const GOOGLE_PROVIDERS: IntegrationProvider[] = ["gmail", "google_calendar", "google_drive"];
-const GOAT_BROWSER_TOOLS = [
+const BROWSER_TOOLS = [
   "browser_open",
   "browser_snapshot",
   "browser_click",
@@ -134,7 +134,7 @@ export async function getAvailableHarnessTools(userWorkosId: string): Promise<Ta
   ]);
   const tools: TaskToolName[] = ["exa_search"];
   if (process.env.RUNNER_BROWSER_ENABLED?.trim().toLowerCase() === "true") {
-    tools.push(...GOAT_BROWSER_TOOLS);
+    tools.push(...BROWSER_TOOLS);
   }
   if (state.gmail.connected) {
     tools.push("gmail_search", "gmail_get_message", "gmail_list_threads", "gmail_get_thread");

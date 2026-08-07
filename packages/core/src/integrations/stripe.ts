@@ -10,15 +10,15 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import type { StripeProviderState } from "../integration-state";
 import { captureIntegrationAddedAnalytics } from "./analytics";
 
-export const GOAT_STRIPE_PROVIDER = "stripe" as const;
-export const GOAT_STRIPE_CREDENTIAL_KIND = "api_key" as const;
-export const GOAT_STRIPE_API_BASE_URL = "https://api.stripe.com/v1";
-export const GOAT_STRIPE_API_VERSION = "2026-04-22.dahlia";
+export const STRIPE_PROVIDER = "stripe" as const;
+export const STRIPE_CREDENTIAL_KIND = "api_key" as const;
+export const STRIPE_API_BASE_URL = "https://api.stripe.com/v1";
+export const STRIPE_API_VERSION = "2026-04-22.dahlia";
 
 const STRIPE_API_TIMEOUT_MS = 15_000;
 const MAX_STRIPE_ERROR_DETAIL_CHARS = 200;
 
-export const GOAT_STRIPE_REQUIRED_READ_PERMISSIONS = [
+export const STRIPE_REQUIRED_READ_PERMISSIONS = [
   "balance_read",
   "subscription_read",
   "invoice_read",
@@ -176,7 +176,7 @@ export async function connectStripeIntegration(input: {
       : "stripe_test_restricted_key",
     status: "connected" as const,
     statusReason: null,
-    scopes: [...GOAT_STRIPE_REQUIRED_READ_PERMISSIONS],
+    scopes: [...STRIPE_REQUIRED_READ_PERMISSIONS],
     lastSyncedAt: now,
     updatedAt: now,
   };
@@ -187,7 +187,7 @@ export async function connectStripeIntegration(input: {
       id: newStripeIntegrationId(),
       userWorkosId: input.userWorkosId,
       workspaceId: input.workspaceId,
-      provider: GOAT_STRIPE_PROVIDER,
+      provider: STRIPE_PROVIDER,
       ...values,
     })
     .onConflictDoUpdate({
@@ -209,8 +209,8 @@ export async function connectStripeIntegration(input: {
     await saveIntegrationCredential({
       userWorkosId: integration.userWorkosId,
       integrationId: integration.id,
-      provider: GOAT_STRIPE_PROVIDER,
-      kind: GOAT_STRIPE_CREDENTIAL_KIND,
+      provider: STRIPE_PROVIDER,
+      kind: STRIPE_CREDENTIAL_KIND,
       payload: {
         apiKey: input.apiKey,
         accountId: input.identity.accountId,
@@ -225,7 +225,7 @@ export async function connectStripeIntegration(input: {
     await markIntegrationStatus({
       userWorkosId: integration.userWorkosId,
       integrationId: integration.id,
-      provider: GOAT_STRIPE_PROVIDER,
+      provider: STRIPE_PROVIDER,
       status: "sync_failed",
       statusReason: "Failed to persist Stripe credentials.",
       db,
@@ -237,7 +237,7 @@ export async function connectStripeIntegration(input: {
   await captureIntegrationAddedAnalytics({
     userWorkosId: input.userWorkosId,
     workspaceId: input.workspaceId,
-    provider: GOAT_STRIPE_PROVIDER,
+    provider: STRIPE_PROVIDER,
   });
 
   return { integrationId: integration.id };
@@ -254,10 +254,7 @@ export async function getStripeIntegrationState(workspaceId: string): Promise<St
     })
     .from(integrations)
     .where(
-      and(
-        eq(integrations.workspaceId, workspaceId),
-        eq(integrations.provider, GOAT_STRIPE_PROVIDER),
-      ),
+      and(eq(integrations.workspaceId, workspaceId), eq(integrations.provider, STRIPE_PROVIDER)),
     )
     .orderBy(desc(integrations.updatedAt))
     .limit(1);
@@ -265,7 +262,7 @@ export async function getStripeIntegrationState(workspaceId: string): Promise<St
   if (!row || row.status === "disconnected") return emptyStripeProviderState();
 
   return {
-    provider: GOAT_STRIPE_PROVIDER,
+    provider: STRIPE_PROVIDER,
     connected: row.status === "connected",
     status: row.status,
     integrationId: row.id,
@@ -286,10 +283,7 @@ export async function loadStripeConnection(workspaceId: string): Promise<StripeC
     })
     .from(integrations)
     .where(
-      and(
-        eq(integrations.workspaceId, workspaceId),
-        eq(integrations.provider, GOAT_STRIPE_PROVIDER),
-      ),
+      and(eq(integrations.workspaceId, workspaceId), eq(integrations.provider, STRIPE_PROVIDER)),
     )
     .orderBy(desc(integrations.updatedAt))
     .limit(1);
@@ -298,8 +292,8 @@ export async function loadStripeConnection(workspaceId: string): Promise<StripeC
   const credential = await loadIntegrationCredential({
     userWorkosId: integration.userWorkosId,
     integrationId: integration.id,
-    provider: GOAT_STRIPE_PROVIDER,
-    kind: GOAT_STRIPE_CREDENTIAL_KIND,
+    provider: STRIPE_PROVIDER,
+    kind: STRIPE_CREDENTIAL_KIND,
   });
   const payload = parseStripeCredential(credential?.payload);
   if (!payload || payload.accountId !== integration.externalId) return null;
@@ -318,10 +312,7 @@ export async function disconnectStripeIntegration(workspaceId: string): Promise<
   const deleted = await getDb()
     .delete(integrations)
     .where(
-      and(
-        eq(integrations.workspaceId, workspaceId),
-        eq(integrations.provider, GOAT_STRIPE_PROVIDER),
-      ),
+      and(eq(integrations.workspaceId, workspaceId), eq(integrations.provider, STRIPE_PROVIDER)),
     )
     .returning({ id: integrations.id });
   return deleted.length > 0;
@@ -331,7 +322,7 @@ export async function markStripeConnectionNeedsReauth(connection: StripeConnecti
   await markIntegrationStatus({
     userWorkosId: connection.userWorkosId,
     integrationId: connection.integrationId,
-    provider: GOAT_STRIPE_PROVIDER,
+    provider: STRIPE_PROVIDER,
     status: "needs_reauth",
     statusReason: "Stripe rejected the saved restricted key or one of its required permissions.",
   });
@@ -343,7 +334,7 @@ export async function requestStripeApi<T>(input: {
   params?: Readonly<Record<string, string | number | boolean | undefined>>;
   signal?: AbortSignal;
 }): Promise<T> {
-  const url = new URL(`${GOAT_STRIPE_API_BASE_URL}${input.path}`);
+  const url = new URL(`${STRIPE_API_BASE_URL}${input.path}`);
   for (const [key, value] of Object.entries(input.params ?? {})) {
     if (value !== undefined) url.searchParams.set(key, String(value));
   }
@@ -354,7 +345,7 @@ export async function requestStripeApi<T>(input: {
       headers: {
         Authorization: `Bearer ${input.apiKey}`,
         Accept: "application/json",
-        "Stripe-Version": GOAT_STRIPE_API_VERSION,
+        "Stripe-Version": STRIPE_API_VERSION,
       },
       signal: input.signal ?? AbortSignal.timeout(STRIPE_API_TIMEOUT_MS),
     });
@@ -430,7 +421,7 @@ function newStripeIntegrationId() {
 
 function emptyStripeProviderState(): StripeProviderState {
   return {
-    provider: GOAT_STRIPE_PROVIDER,
+    provider: STRIPE_PROVIDER,
     connected: false,
     status: "not_connected",
     integrationId: null,

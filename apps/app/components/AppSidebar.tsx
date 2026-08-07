@@ -26,7 +26,7 @@ import { AppSidebarFeedback } from "@/components/AppSidebarFeedback";
 import { BrainSwitcher } from "@/components/BrainSwitcher";
 import { ChatStateIndicator } from "@/components/ChatStateIndicator";
 import { closeChatSessionAction, setChatPinnedAction } from "@/lib/chat-actions";
-import { GOAT_HOME_NAVIGATION_EVENT, requestChatComposerFocus } from "@/lib/chat-navigation";
+import { HOME_NAVIGATION_EVENT, requestChatComposerFocus } from "@/lib/chat-navigation";
 import { clearLocalChatState, useLocalChatStates } from "@/lib/chat-session-state";
 import { type ChatSummaryView, chatSummaryState } from "@/lib/chat-ui";
 import { createWorkspaceAction, switchWorkspaceAction } from "@/lib/workspace-actions";
@@ -159,7 +159,7 @@ export function AppSidebar({
               ) {
                 return;
               }
-              window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT));
+              window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT));
             }}
           />
           {featureFlags.taskSpawning ? (

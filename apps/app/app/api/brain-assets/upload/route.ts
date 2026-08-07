@@ -1,9 +1,9 @@
 import { type HandleUploadBody, handleUpload } from "@vercel/blob/client";
 import { currentUser } from "@/lib/auth";
 import {
+  BRAIN_ASSET_CONTENT_TYPES,
+  BRAIN_ASSET_MAX_BYTES,
   brainAssetUploadPrefix,
-  GOAT_BRAIN_ASSET_CONTENT_TYPES,
-  GOAT_BRAIN_ASSET_MAX_BYTES,
 } from "@/lib/brain-assets";
 
 // Mints short-lived client-upload tokens so the browser uploads brain assets
@@ -28,8 +28,8 @@ export async function POST(request: Request): Promise<Response> {
         }
         return {
           addRandomSuffix: true,
-          allowedContentTypes: [...GOAT_BRAIN_ASSET_CONTENT_TYPES],
-          maximumSizeInBytes: GOAT_BRAIN_ASSET_MAX_BYTES,
+          allowedContentTypes: [...BRAIN_ASSET_CONTENT_TYPES],
+          maximumSizeInBytes: BRAIN_ASSET_MAX_BYTES,
         };
       },
       onUploadCompleted: async () => {

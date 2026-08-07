@@ -1,4 +1,4 @@
-const GOAT_ONBOARDING_KICKOFF_STORAGE_KEY = "goat-onboarding-kickoff-v1";
+const ONBOARDING_KICKOFF_STORAGE_KEY = "goat-onboarding-kickoff-v1";
 
 export function buildOnboardingKickoffPrompt(companyUrl: string) {
   return `You're helping me seed our company Brain for the first time. Keep this workflow in main chat and work transparently with me.
@@ -15,7 +15,7 @@ Company: ${companyUrl}`;
 
 export function queueOnboardingKickoff(companyUrl: string): boolean {
   try {
-    window.sessionStorage.setItem(GOAT_ONBOARDING_KICKOFF_STORAGE_KEY, companyUrl);
+    window.sessionStorage.setItem(ONBOARDING_KICKOFF_STORAGE_KEY, companyUrl);
     return true;
   } catch {
     return false;
@@ -24,8 +24,8 @@ export function queueOnboardingKickoff(companyUrl: string): boolean {
 
 export function consumeOnboardingKickoffPrompt(): string | null {
   try {
-    const companyUrl = window.sessionStorage.getItem(GOAT_ONBOARDING_KICKOFF_STORAGE_KEY);
-    window.sessionStorage.removeItem(GOAT_ONBOARDING_KICKOFF_STORAGE_KEY);
+    const companyUrl = window.sessionStorage.getItem(ONBOARDING_KICKOFF_STORAGE_KEY);
+    window.sessionStorage.removeItem(ONBOARDING_KICKOFF_STORAGE_KEY);
     return companyUrl ? buildOnboardingKickoffPrompt(companyUrl) : null;
   } catch {
     return null;

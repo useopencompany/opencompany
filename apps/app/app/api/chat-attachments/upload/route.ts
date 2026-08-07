@@ -1,8 +1,8 @@
 import { type HandleUploadBody, handleUpload } from "@vercel/blob/client";
 import { currentUser } from "@/lib/auth";
 import {
-  GOAT_CHAT_ATTACHMENT_CONTENT_TYPES,
-  GOAT_CHAT_ATTACHMENT_MAX_BYTES,
+  CHAT_ATTACHMENT_CONTENT_TYPES,
+  CHAT_ATTACHMENT_MAX_BYTES,
 } from "@/lib/chat-attachment-formats";
 
 export function chatAttachmentUploadPrefix(userWorkosId: string): string {
@@ -30,8 +30,8 @@ export async function POST(request: Request): Promise<Response> {
         }
         return {
           addRandomSuffix: true,
-          allowedContentTypes: [...GOAT_CHAT_ATTACHMENT_CONTENT_TYPES],
-          maximumSizeInBytes: GOAT_CHAT_ATTACHMENT_MAX_BYTES,
+          allowedContentTypes: [...CHAT_ATTACHMENT_CONTENT_TYPES],
+          maximumSizeInBytes: CHAT_ATTACHMENT_MAX_BYTES,
         };
       },
       onUploadCompleted: async () => {

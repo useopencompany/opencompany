@@ -34,7 +34,7 @@ import {
   chatMessages,
 } from "@opencompany/db/schema";
 import {
-  DEFAULT_GOAT_BRAIN_SLUG,
+  DEFAULT_BRAIN_SLUG,
   getBrainAccess,
   getWorkspaceRole,
   listAccessibleBrains,
@@ -779,8 +779,7 @@ async function resolveOpenCompanyChatRuntime(input: {
       { userWorkosId: turn.userWorkosId, workspaceId },
       { db: getDb() },
     );
-    brain =
-      brains.find((candidate) => candidate.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
+    brain = brains.find((candidate) => candidate.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
   }
 
   const resolved = await resolveActionCatalog({

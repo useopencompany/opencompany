@@ -32,14 +32,14 @@ import {
   formatStartedAt,
   formatTaskDuration,
   formatTaskDurationMs,
-  GOAT_STATUS_COPY,
-  GOAT_TASK_BOARD_COLUMN_COPY,
-  GOAT_TASK_BOARD_COLUMNS,
-  GOAT_WORKFLOW_TASK_STATUS_DOT_CLASS,
+  STATUS_COPY,
+  TASK_BOARD_COLUMN_COPY,
+  TASK_BOARD_COLUMNS,
   type TaskBoardColumn,
   taskBoardColumn,
   taskBoardStatusCopy,
   toTaskTitle,
+  WORKFLOW_TASK_STATUS_DOT_CLASS,
   workflowTaskDisplayStatus,
 } from "@/lib/task-display";
 import { archiveTaskAction } from "@/lib/tasks";
@@ -48,7 +48,7 @@ import { updateTaskViewModeAction } from "@/lib/user-preferences";
 
 const TERMINAL_TASK_STATUSES = new Set<TaskView["status"]>(["succeeded", "failed", "canceled"]);
 const CAPPED_TASK_BOARD_COLUMNS = new Set<TaskBoardColumn>(["done", "canceled"]);
-export const GOAT_TASK_BOARD_COLUMN_CAP = 50;
+export const TASK_BOARD_COLUMN_CAP = 50;
 
 type TaskTimeRange = "7d" | "30d" | "90d" | "all";
 
@@ -186,7 +186,7 @@ export function TasksBoardRoute({
             />
           ) : (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {GOAT_TASK_BOARD_COLUMNS.map((column) => (
+              {TASK_BOARD_COLUMNS.map((column) => (
                 <TaskBoardColumn
                   key={column}
                   column={column}
@@ -231,7 +231,7 @@ export function TasksBoardSkeleton() {
             aria-label="Loading tasks"
             className="grid animate-pulse grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4"
           >
-            {GOAT_TASK_BOARD_COLUMNS.map((column) => (
+            {TASK_BOARD_COLUMNS.map((column) => (
               <section key={column} className="flex min-w-0 flex-col gap-2.5">
                 <div className="flex items-center justify-between px-1">
                   <div className="h-3 w-20 rounded bg-surface-muted" />
@@ -319,7 +319,7 @@ function TaskListView({
 }) {
   return (
     <div className="flex flex-col gap-6">
-      {GOAT_TASK_BOARD_COLUMNS.map((column) => (
+      {TASK_BOARD_COLUMNS.map((column) => (
         <TaskListSection
           key={column}
           column={column}
@@ -343,10 +343,10 @@ function TaskListSection({
   workflowNames: Record<string, string>;
   onSelectTask: (taskId: string) => void;
 }) {
-  const label = GOAT_TASK_BOARD_COLUMN_COPY[column];
+  const label = TASK_BOARD_COLUMN_COPY[column];
   const [expanded, setExpanded] = useState(false);
   const capped = CAPPED_TASK_BOARD_COLUMNS.has(column) && !expanded;
-  const visibleTasks = capped ? tasks.slice(0, GOAT_TASK_BOARD_COLUMN_CAP) : tasks;
+  const visibleTasks = capped ? tasks.slice(0, TASK_BOARD_COLUMN_CAP) : tasks;
   const remaining = tasks.length - visibleTasks.length;
 
   if (tasks.length === 0) return null;
@@ -440,10 +440,10 @@ function TaskBoardColumn({
   workflowNames: Record<string, string>;
   onSelectTask: (taskId: string) => void;
 }) {
-  const label = GOAT_TASK_BOARD_COLUMN_COPY[column];
+  const label = TASK_BOARD_COLUMN_COPY[column];
   const [expanded, setExpanded] = useState(false);
   const capped = CAPPED_TASK_BOARD_COLUMNS.has(column) && !expanded;
-  const visibleTasks = capped ? tasks.slice(0, GOAT_TASK_BOARD_COLUMN_CAP) : tasks;
+  const visibleTasks = capped ? tasks.slice(0, TASK_BOARD_COLUMN_CAP) : tasks;
   const remaining = tasks.length - visibleTasks.length;
 
   return (
@@ -685,7 +685,7 @@ function TaskBoardSheet({
               <PropertyRow label="Status">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-muted px-2 py-1 text-[11.5px] font-medium text-ink">
                   <TaskStatusDot task={task} />
-                  {GOAT_STATUS_COPY[task.status]}
+                  {STATUS_COPY[task.status]}
                 </span>
                 {task.reportedOutcome === "needs_attention" ? (
                   <span className="mt-1.5 inline-flex w-fit rounded-full bg-warning-bg px-2 py-0.5 text-[10.5px] font-medium text-warning">
@@ -814,7 +814,7 @@ function buildTaskActivityEntries({
     if (task.updatedAt !== task.createdAt) {
       entries.push({
         id: "status",
-        label: GOAT_STATUS_COPY[task.status],
+        label: STATUS_COPY[task.status],
         timestamp: task.updatedAt,
       });
     }
@@ -879,7 +879,7 @@ function workflowStepStatusLabel(status: NonNullable<TaskView["workflowSteps"]>[
 }
 
 function TaskStatusDot({ task, className = "" }: { task: TaskView; className?: string }) {
-  const dotClass = GOAT_WORKFLOW_TASK_STATUS_DOT_CLASS[workflowTaskDisplayStatus(task)];
+  const dotClass = WORKFLOW_TASK_STATUS_DOT_CLASS[workflowTaskDisplayStatus(task)];
   return (
     <span
       aria-hidden="true"

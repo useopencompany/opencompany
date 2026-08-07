@@ -6,15 +6,15 @@ import {
   listBrainSourceEventClaimedBrainRefs,
 } from "@opencompany/db/brain-event-claims";
 import {
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+  BRAIN_AGENT_INGEST_JOB_KIND,
   upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
   claimGranolaSyncState,
   completeGranolaSyncPages,
   ensureGranolaSyncState,
-  GOAT_GRANOLA_CREDENTIAL_KIND,
-  GOAT_GRANOLA_PROVIDER,
+  GRANOLA_CREDENTIAL_KIND,
+  GRANOLA_PROVIDER,
   granolaEventClaimKey,
   listEnabledGranolaBrainSourceRoutes,
   updateGranolaSyncCursor,
@@ -40,15 +40,15 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "goat-gran
 // only surface once Granola finishes their AI summary and transcript, so
 // updated_at (not created_at) is the watermark that never skips a
 // late-finishing note.
-export const GOAT_GRANOLA_POLL_INTERVAL_MS = 5 * 60_000;
+export const GRANOLA_POLL_INTERVAL_MS = 5 * 60_000;
 // A claim stamps last_polled_at; other runner replicas skip integrations
 // claimed within the cooldown. Brain event claims absorb any residual
 // double-poll race.
-export const GOAT_GRANOLA_POLL_COOLDOWN_MS = 4 * 60_000;
+export const GRANOLA_POLL_COOLDOWN_MS = 4 * 60_000;
 // Runaway guard on cursor pagination within one poll pass. Meetings are
 // low-volume; anything beyond this is drained by later polls because the
 // cursor only advances past processed notes.
-const GOAT_GRANOLA_MAX_PAGES_PER_POLL = 5;
+const GRANOLA_MAX_PAGES_PER_POLL = 5;
 
 type GranolaPollCandidate = {
   integrationId: string;
@@ -90,7 +90,7 @@ export async function pollGranolaIntegration(input: {
   const state = await claimGranolaSyncState(
     {
       integrationId: candidate.integrationId,
-      cooldownMs: input.cooldownMs ?? GOAT_GRANOLA_POLL_COOLDOWN_MS,
+      cooldownMs: input.cooldownMs ?? GRANOLA_POLL_COOLDOWN_MS,
     },
     db,
   );
@@ -108,8 +108,8 @@ export async function pollGranolaIntegration(input: {
   const credential = await loadIntegrationCredential({
     userWorkosId: candidate.userWorkosId,
     integrationId: candidate.integrationId,
-    provider: GOAT_GRANOLA_PROVIDER,
-    kind: GOAT_GRANOLA_CREDENTIAL_KIND,
+    provider: GRANOLA_PROVIDER,
+    kind: GRANOLA_CREDENTIAL_KIND,
   });
   const apiKey =
     credential && typeof credential.payload.apiKey === "string" ? credential.payload.apiKey : null;
@@ -203,7 +203,7 @@ export async function listGranolaNotesSince(input: {
   const callListNotes = input.listNotes ?? listGranolaNotes;
   let cursor = input.cursor;
   const seenCursors = new Set(cursor ? [cursor] : []);
-  for (let page = 0; page < GOAT_GRANOLA_MAX_PAGES_PER_POLL; page += 1) {
+  for (let page = 0; page < GRANOLA_MAX_PAGES_PER_POLL; page += 1) {
     const result = await callListNotes({
       apiKey: input.apiKey,
       updatedAfter: input.updatedAfter,
@@ -246,7 +246,7 @@ async function ingestGranolaNote(input: {
   // already claimed (an earlier poll, or an edit bumping updated_at) is a no-op.
   const alreadyClaimed = await listBrainSourceEventClaimedBrainRefs({
     brainRefs: input.routedBrainRefs,
-    sourceProvider: GOAT_GRANOLA_PROVIDER,
+    sourceProvider: GRANOLA_PROVIDER,
     eventKey,
     db,
   });
@@ -268,7 +268,7 @@ async function ingestGranolaNote(input: {
     for (const brainRef of pendingBrainRefs) {
       const { claimedEventKeys } = await claimBrainSourceEvents({
         brainRef,
-        sourceProvider: GOAT_GRANOLA_PROVIDER,
+        sourceProvider: GRANOLA_PROVIDER,
         eventKeys: [eventKey],
         db: tx,
       });
@@ -285,14 +285,14 @@ async function ingestGranolaNote(input: {
       item,
       rawPayload: payload,
       rawEventKeysByBrainRef: claimedEventKeysByBrainRef,
-      kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+      kind: BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
       db: tx,
     });
     for (const brainRef of brainRefs) {
       await attributeBrainSourceEventClaims({
         brainRef,
-        sourceProvider: GOAT_GRANOLA_PROVIDER,
+        sourceProvider: GRANOLA_PROVIDER,
         eventKeys: claimedEventKeysByBrainRef.get(brainRef) ?? [],
         sourceItemId: upserted.sourceItemId,
         db: tx,
@@ -314,7 +314,7 @@ async function markGranolaNeedsReauth(candidate: GranolaPollCandidate, reason: s
   await markIntegrationStatus({
     userWorkosId: candidate.userWorkosId,
     integrationId: candidate.integrationId,
-    provider: GOAT_GRANOLA_PROVIDER,
+    provider: GRANOLA_PROVIDER,
     status: "needs_reauth",
     statusReason: reason,
     now: new Date(),
@@ -322,7 +322,7 @@ async function markGranolaNeedsReauth(candidate: GranolaPollCandidate, reason: s
 }
 
 export function startGranolaPollWorker(options: { pollIntervalMs?: number } = {}) {
-  const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? GOAT_GRANOLA_POLL_INTERVAL_MS);
+  const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? GRANOLA_POLL_INTERVAL_MS);
   const abort = new AbortController();
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;

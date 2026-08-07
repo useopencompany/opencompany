@@ -2,18 +2,18 @@ import { createMCPClient, type OAuthClientProvider } from "@ai-sdk/mcp";
 import type { JSONSchema7, ToolExecutionOptions, ToolSet } from "ai";
 import Ajv, { type AnySchema } from "ajv";
 import {
-  GOAT_NEON_MCP_ENDPOINT_URL,
   getNeonIntegrationState,
   loadNeonMcpWorkerConnection,
+  NEON_MCP_ENDPOINT_URL,
 } from "../integrations/neon-mcp";
 import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  ACTION_EFFECTS_READ,
   ActionAuthError,
   type ActionExecuteContext,
   ActionInvalidParamsError,
   ActionPermissionError,
   type ActionProviderCatalog,
-  GOAT_ACTION_EFFECTS_READ,
   type ResolvedAction,
 } from "./types";
 
@@ -96,7 +96,7 @@ export async function resolveNeonActions(
         id: `neon.${remoteName}`,
         provider: "neon",
         capability,
-        effects: GOAT_ACTION_EFFECTS_READ,
+        effects: ACTION_EFFECTS_READ,
         ...permissionAnnotation(capability, {
           integrationId,
           capabilityModes: state.capabilityModes,
@@ -241,7 +241,7 @@ function createNeonClient(authProvider: OAuthClientProvider) {
     version: "0.1.0",
     transport: {
       type: "http" as const,
-      url: GOAT_NEON_MCP_ENDPOINT_URL,
+      url: NEON_MCP_ENDPOINT_URL,
       authProvider,
     },
   });
@@ -312,7 +312,7 @@ function hasSupportedNeonSafetyContract(definition: NeonToolDefinition) {
   // validateNeonReadOnlySql adds a second local guard before execution.
   return (
     definition.name === "run_sql" &&
-    new URL(GOAT_NEON_MCP_ENDPOINT_URL).searchParams.get("readonly") === "true"
+    new URL(NEON_MCP_ENDPOINT_URL).searchParams.get("readonly") === "true"
   );
 }
 

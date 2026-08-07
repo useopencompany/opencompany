@@ -1,4 +1,4 @@
-import { GOAT_CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
+import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
 import { describe, expect, it, vi } from "vitest";
 import { createCodexBrainDynamicTool, executeCodexBrainTool } from "./codex-brain-tool";
 
@@ -67,7 +67,7 @@ describe("Codex Brain dynamic tool", () => {
   it("publishes the read-only Brain contract", () => {
     const tool = createCodexBrainDynamicTool(context());
 
-    expect(GOAT_CODEX_BRAIN_TOOL_CONTRACT_VERSION).toBe("goat-codex-brain.v1");
+    expect(CODEX_BRAIN_TOOL_CONTRACT_VERSION).toBe("goat-codex-brain.v1");
     expect(tool.spec).toMatchObject({
       type: "function",
       name: "goat_brain",

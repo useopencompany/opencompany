@@ -26,14 +26,14 @@ const POSTHOG_OAUTH_SCOPES = [
   "insight:write",
 ] as const;
 
-export const GOAT_POSTHOG_MCP_ENDPOINT_URL = `https://mcp.posthog.com/mcp?mode=tools&tools=${POSTHOG_TOOL_NAMES.join(
+export const POSTHOG_MCP_ENDPOINT_URL = `https://mcp.posthog.com/mcp?mode=tools&tools=${POSTHOG_TOOL_NAMES.join(
   ",",
 )}`;
 
 const posthogMcpIntegration = createRemoteMcpIntegration({
   provider: "posthog",
   displayName: "PostHog",
-  endpointUrl: GOAT_POSTHOG_MCP_ENDPOINT_URL,
+  endpointUrl: POSTHOG_MCP_ENDPOINT_URL,
   externalId: "posthog_mcp",
   storedScopes: POSTHOG_OAUTH_SCOPES,
   authScope: POSTHOG_OAUTH_SCOPES.join(" "),

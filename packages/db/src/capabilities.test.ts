@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   approveCapabilityRunByToolCall,
+  CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS,
   cancelCapabilityRunByToolCall,
   consumeCapabilityApprovalByToolCall,
-  GOAT_CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS,
-  GOAT_MANAGED_CAPABILITY_SOURCES,
   getCapabilityApprovalByToolCall,
   getCapabilitySessionBudgetUsdMicros,
   isWorkspaceCapabilityEnabled,
   listWorkspaceCapabilities,
+  MANAGED_CAPABILITY_SOURCES,
   setCapabilitySessionBudget,
   setWorkspaceCapability,
   sumCapabilitySessionSpendUsdMicros,
@@ -17,7 +17,7 @@ import {
 describe("Goat workspace capabilities", () => {
   it("defaults every managed source to enabled when no override row exists", async () => {
     await expect(listWorkspaceCapabilities("workspace_1", selectDb([]))).resolves.toEqual(
-      GOAT_MANAGED_CAPABILITY_SOURCES.map((source) => ({ source, enabled: true })),
+      MANAGED_CAPABILITY_SOURCES.map((source) => ({ source, enabled: true })),
     );
   });
 
@@ -77,13 +77,13 @@ describe("Goat capability session budgets", () => {
   it("uses the default budget only when the workspace override is null or missing", async () => {
     await expect(
       getCapabilitySessionBudgetUsdMicros("workspace_1", fluentDb({ selects: [] })),
-    ).resolves.toBe(GOAT_CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS);
+    ).resolves.toBe(CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS);
     await expect(
       getCapabilitySessionBudgetUsdMicros(
         "workspace_1",
         fluentDb({ selects: [[{ budgetUsdMicros: null }]] }),
       ),
-    ).resolves.toBe(GOAT_CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS);
+    ).resolves.toBe(CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS);
     await expect(
       getCapabilitySessionBudgetUsdMicros(
         "workspace_1",

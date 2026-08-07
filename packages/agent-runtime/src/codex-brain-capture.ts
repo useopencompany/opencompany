@@ -1,4 +1,4 @@
-export const GOAT_CODEX_SAVE_TO_BRAIN_TOOL_NAME = "save_to_brain";
+export const CODEX_SAVE_TO_BRAIN_TOOL_NAME = "save_to_brain";
 
 export type CodexBrainCaptureGatewayRequest = {
   codexChatSessionId: string;

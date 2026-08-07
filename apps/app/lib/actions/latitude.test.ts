@@ -20,7 +20,7 @@ vi.mock("@ai-sdk/mcp", () => ({
 }));
 
 vi.mock("@opencompany/core/integrations/latitude-mcp", () => ({
-  GOAT_LATITUDE_MCP_ENDPOINT_URL: "https://api.latitude.so/v1/mcp",
+  LATITUDE_MCP_ENDPOINT_URL: "https://api.latitude.so/v1/mcp",
   getLatitudeIntegrationState: vi.fn(),
   loadLatitudeMcpWorkerConnection: vi.fn(),
 }));

@@ -1,8 +1,8 @@
 import {
+  ATTIO_CREDENTIAL_KIND,
+  ATTIO_OBJECT_SLUGS,
+  ATTIO_PROVIDER,
   type AttioApiKeyCredentialPayload,
-  GOAT_ATTIO_CREDENTIAL_KIND,
-  GOAT_ATTIO_OBJECT_SLUGS,
-  GOAT_ATTIO_PROVIDER,
 } from "@opencompany/db/attio";
 import { getDb } from "@opencompany/db/client";
 import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
@@ -22,13 +22,13 @@ import {
 } from "../integrations/attio";
 import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  ACTION_EFFECTS_READ,
+  ACTION_EFFECTS_WRITE,
   ActionAuthError,
   type ActionExecuteContext,
   ActionInvalidParamsError,
   ActionPermissionError,
   type ActionProviderCatalog,
-  GOAT_ACTION_EFFECTS_READ,
-  GOAT_ACTION_EFFECTS_WRITE,
   type ResolvedAction,
   requiredStringParam,
 } from "./types";
@@ -214,7 +214,7 @@ export async function resolveAttioActions(
       id: "attio.search_records",
       provider: "attio",
       capability: "read",
-      effects: GOAT_ACTION_EFFECTS_READ,
+      effects: ACTION_EFFECTS_READ,
       ...permissionAnnotation("read", readConnections),
       description:
         "Fuzzy-search Attio people, companies, and deals by name, domain, email, phone number, social handle, or deal label. Returns compact matches only; call attio.get_record with the returned object and id for full properties such as company domain or deal stage and value.",
@@ -295,7 +295,7 @@ export async function resolveAttioActions(
       id: "attio.get_record",
       provider: "attio",
       capability: "read",
-      effects: GOAT_ACTION_EFFECTS_READ,
+      effects: ACTION_EFFECTS_READ,
       ...permissionAnnotation("read", readConnections),
       description:
         "Get one Attio person, company, or deal by object and record id. Returns a detailed CRM record with a larger property set than attio.search_records.",
@@ -359,7 +359,7 @@ export async function resolveAttioActions(
       id: "attio.list_record_attributes",
       provider: "attio",
       capability: "read",
-      effects: GOAT_ACTION_EFFECTS_READ,
+      effects: ACTION_EFFECTS_READ,
       ...permissionAnnotation("read", readConnections),
       description:
         "List the fields available on an Attio people, companies, or deals object, including writable flags and valid status/select options. Use this before attio.update_record when the field slug or accepted value is unclear.",
@@ -406,7 +406,7 @@ export async function resolveAttioActions(
       id: "attio.list_lists",
       provider: "attio",
       capability: "read",
-      effects: GOAT_ACTION_EFFECTS_READ,
+      effects: ACTION_EFFECTS_READ,
       ...permissionAnnotation("read", listReadConnections),
       description:
         "List the Attio lists/collections available in a workspace. Use this to resolve a human list name to the UUID or API slug accepted by attio.query_list and the list-entry actions.",
@@ -487,7 +487,7 @@ export async function resolveAttioActions(
       id: "attio.list_list_attributes",
       provider: "attio",
       capability: "read",
-      effects: GOAT_ACTION_EFFECTS_READ,
+      effects: ACTION_EFFECTS_READ,
       ...permissionAnnotation("read", listReadConnections),
       description:
         "List the fields available on an Attio list/collection entry, including writable flags and valid status/select options. Use this before attio.update_list_entry when the field slug or accepted value is unclear.",
@@ -527,7 +527,7 @@ export async function resolveAttioActions(
       id: "attio.list_record_entries",
       provider: "attio",
       capability: "read",
-      effects: GOAT_ACTION_EFFECTS_READ,
+      effects: ACTION_EFFECTS_READ,
       ...permissionAnnotation("read", listReadConnections),
       description:
         "List every Attio list/collection entry that a person, company, or deal belongs to. Returns list ids/slugs and entry ids; use it to locate the pipeline entry for attio.update_list_entry.",
@@ -610,7 +610,7 @@ export async function resolveAttioActions(
       id: "attio.query_list",
       provider: "attio",
       capability: "read",
-      effects: GOAT_ACTION_EFFECTS_READ,
+      effects: ACTION_EFFECTS_READ,
       ...permissionAnnotation("read", listReadConnections),
       description:
         "Read entries from an Attio list, optionally using a saved view, bounded Attio filter, and field sorting. Returns list values plus hydrated parent CRM records and entry ids.",
@@ -724,7 +724,7 @@ export async function resolveAttioActions(
       id: "attio.create_record",
       provider: "attio",
       capability: "write",
-      effects: GOAT_ACTION_EFFECTS_WRITE,
+      effects: ACTION_EFFECTS_WRITE,
       ...permissionAnnotation("write", recordWriteConnections),
       description:
         "Create a new Attio person, company, or deal. For people, set name as an array with full_name and optional first_name/last_name; include email_addresses only when the user supplied a real email. This creates the CRM record only; use attio.add_record_to_list with the returned id when the user also asked to add it to a list.",
@@ -788,7 +788,7 @@ export async function resolveAttioActions(
       id: "attio.update_record",
       provider: "attio",
       capability: "write",
-      effects: GOAT_ACTION_EFFECTS_WRITE,
+      effects: ACTION_EFFECTS_WRITE,
       ...permissionAnnotation("write", recordWriteConnections),
       description:
         "Update fields on an existing Attio person, company, or deal. This sets the supplied fields only and overwrites multiselect fields; use an empty array to clear a multiselect. Use only when the user explicitly asked to change the CRM record.",
@@ -866,7 +866,7 @@ export async function resolveAttioActions(
       id: "attio.create_comment",
       provider: "attio",
       capability: "write",
-      effects: GOAT_ACTION_EFFECTS_WRITE,
+      effects: ACTION_EFFECTS_WRITE,
       ...permissionAnnotation("write", commentWriteConnections),
       description:
         "Create a plaintext Attio comment on a record, on a list entry, or as a reply to an existing thread. Record comments are workspace-visible; list-entry comments follow list access. Use only when the user explicitly asked to leave or reply with a CRM comment. Mention workspace members by email in the content when they should be notified.",
@@ -996,7 +996,7 @@ export async function resolveAttioActions(
       id: "attio.create_attribute",
       provider: "attio",
       capability: "write",
-      effects: GOAT_ACTION_EFFECTS_WRITE,
+      effects: ACTION_EFFECTS_WRITE,
       ...permissionAnnotation("write", listConfigurationWriteConnections),
       description:
         "Create a status, select, or text field on an Attio list/collection. Use the returned attribute API slug or id with attio.create_status or attio.create_select_option, then write entry values by option title. Use only when the user explicitly asked to configure the list.",
@@ -1110,7 +1110,7 @@ export async function resolveAttioActions(
       id: "attio.create_status",
       provider: "attio",
       capability: "write",
-      effects: GOAT_ACTION_EFFECTS_WRITE,
+      effects: ACTION_EFFECTS_WRITE,
       ...permissionAnnotation("write", listConfigurationWriteConnections),
       description:
         "Add one option to a status field on an Attio list/collection. Call once per stage, in the desired pipeline order. target_time_in_status is an optional ISO-8601 duration. Use only when the user explicitly asked to configure the pipeline.",
@@ -1209,7 +1209,7 @@ export async function resolveAttioActions(
       id: "attio.create_select_option",
       provider: "attio",
       capability: "write",
-      effects: GOAT_ACTION_EFFECTS_WRITE,
+      effects: ACTION_EFFECTS_WRITE,
       ...permissionAnnotation("write", listConfigurationWriteConnections),
       description:
         "Add one option to a select field on an Attio list/collection. Call once per option, in the desired display order. Entry values can then be written by title. Use only when the user explicitly asked to configure the list.",
@@ -1286,7 +1286,7 @@ export async function resolveAttioActions(
       id: "attio.add_record_to_list",
       provider: "attio",
       capability: "write",
-      effects: GOAT_ACTION_EFFECTS_WRITE,
+      effects: ACTION_EFFECTS_WRITE,
       ...permissionAnnotation("write", listWriteConnections),
       description:
         "Add an existing Attio person, company, or deal to a list/collection. This is idempotent when the record has at most one existing entry in the list. Optional values set list fields such as stage, status, or owner. Use only when the user explicitly asked to add the record.",
@@ -1378,7 +1378,7 @@ export async function resolveAttioActions(
       id: "attio.update_list_entry",
       provider: "attio",
       capability: "write",
-      effects: GOAT_ACTION_EFFECTS_WRITE,
+      effects: ACTION_EFFECTS_WRITE,
       ...permissionAnnotation("write", listWriteConnections),
       description:
         "Update pipeline/list fields such as stage, status, or owner on one existing Attio list entry. This sets supplied fields only and overwrites multiselect fields; use the entry id returned by attio.query_list or attio.list_record_entries. Use only when the user explicitly asked for the change.",
@@ -1533,7 +1533,7 @@ async function loadAttioConnections(userWorkosId: string): Promise<AttioConnecti
     .where(
       and(
         eq(integrations.userWorkosId, userWorkosId),
-        eq(integrations.provider, GOAT_ATTIO_PROVIDER),
+        eq(integrations.provider, ATTIO_PROVIDER),
         eq(integrations.status, "connected"),
       ),
     )
@@ -1618,8 +1618,8 @@ async function loadAttioCredential(
   const credential = await loadIntegrationCredential({
     userWorkosId,
     integrationId: connection.integrationId,
-    provider: GOAT_ATTIO_PROVIDER,
-    kind: GOAT_ATTIO_CREDENTIAL_KIND,
+    provider: ATTIO_PROVIDER,
+    kind: ATTIO_CREDENTIAL_KIND,
   });
   const payload = credential?.payload as AttioApiKeyCredentialPayload | undefined;
   if (
@@ -1637,7 +1637,7 @@ async function loadAttioCredential(
   const objectSlugById = new Map<string, AttioObjectSlug>();
   const availableObjects = new Set<AttioObjectSlug>();
   for (const [objectType, objectId] of Object.entries(payload.objectIdBySlug ?? {})) {
-    const slug = GOAT_ATTIO_OBJECT_SLUGS[objectType as keyof typeof GOAT_ATTIO_OBJECT_SLUGS];
+    const slug = ATTIO_OBJECT_SLUGS[objectType as keyof typeof ATTIO_OBJECT_SLUGS];
     if (isAttioObjectSlug(slug) && typeof objectId === "string" && objectId) {
       objectSlugById.set(objectId, slug);
       availableObjects.add(slug);
@@ -1786,7 +1786,7 @@ async function assertAttioWriteStillEnabled(
       and(
         eq(integrations.id, connection.integrationId),
         eq(integrations.userWorkosId, context.userWorkosId),
-        eq(integrations.provider, GOAT_ATTIO_PROVIDER),
+        eq(integrations.provider, ATTIO_PROVIDER),
       ),
     )
     .limit(1);
@@ -1888,7 +1888,7 @@ async function rethrowAttioError(
     await markIntegrationStatus({
       userWorkosId: input.context.userWorkosId,
       integrationId: input.connection.integrationId,
-      provider: GOAT_ATTIO_PROVIDER,
+      provider: ATTIO_PROVIDER,
       status: "needs_reauth",
       statusReason: "Attio rejected the saved API key.",
     }).catch(() => {});

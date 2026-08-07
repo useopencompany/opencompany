@@ -10,15 +10,15 @@ import {
 
 type DbLike = any;
 
-export const GOAT_GMAIL_EVENT_TYPES = ["email_received", "email_sent"] as const;
+export const GMAIL_EVENT_TYPES = ["email_received", "email_sent"] as const;
 
-export type GmailEventType = (typeof GOAT_GMAIL_EVENT_TYPES)[number];
+export type GmailEventType = (typeof GMAIL_EVENT_TYPES)[number];
 
 export type GmailEventRef = {
   id: GmailEventType;
 };
 
-export const GOAT_GMAIL_INSTRUCTIONS_MAX_LENGTH = 2000;
+export const GMAIL_INSTRUCTIONS_MAX_LENGTH = 2000;
 
 // The routing contract between the source editor, the poll worker, and the
 // flush worker: buffered messages are ingested into a brain only when their
@@ -77,7 +77,7 @@ export function sanitizeGmailInstructions(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   if (!trimmed) return undefined;
-  return trimmed.slice(0, GOAT_GMAIL_INSTRUCTIONS_MAX_LENGTH);
+  return trimmed.slice(0, GMAIL_INSTRUCTIONS_MAX_LENGTH);
 }
 
 export function gmailSelectedEventTypes(
@@ -276,5 +276,5 @@ function parseEventRefs(value: unknown): GmailEventRef[] | undefined {
 }
 
 function isGmailEventType(value: unknown): value is GmailEventType {
-  return typeof value === "string" && (GOAT_GMAIL_EVENT_TYPES as readonly string[]).includes(value);
+  return typeof value === "string" && (GMAIL_EVENT_TYPES as readonly string[]).includes(value);
 }

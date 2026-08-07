@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
 import {
   ensureGranolaSyncState,
-  GOAT_GRANOLA_CREDENTIAL_KIND,
-  GOAT_GRANOLA_PROVIDER,
+  GRANOLA_CREDENTIAL_KIND,
+  GRANOLA_PROVIDER,
 } from "@opencompany/db/granola";
 import { markIntegrationStatus, saveIntegrationCredential } from "@opencompany/db/integrations";
 import { integrations } from "@opencompany/db/schema";
@@ -11,7 +11,7 @@ import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { GranolaProviderState } from "@/lib/integration-state";
 import { captureIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 
-export const GOAT_GRANOLA_API_BASE_URL = "https://public-api.granola.ai/v1";
+export const GRANOLA_API_BASE_URL = "https://public-api.granola.ai/v1";
 
 export type GranolaApiKeyCredentialPayload = {
   apiKey: string;
@@ -39,7 +39,7 @@ export type GranolaApiKeyValidation =
 export async function validateGranolaApiKey(apiKey: string): Promise<GranolaApiKeyValidation> {
   let response: Response;
   try {
-    response = await fetch(`${GOAT_GRANOLA_API_BASE_URL}/notes?page_size=1`, {
+    response = await fetch(`${GRANOLA_API_BASE_URL}/notes?page_size=1`, {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: AbortSignal.timeout(15_000),
     });
@@ -85,7 +85,7 @@ export async function connectGranolaIntegration(input: {
     .values({
       id: newIntegrationId(),
       userWorkosId: input.userWorkosId,
-      provider: GOAT_GRANOLA_PROVIDER,
+      provider: GRANOLA_PROVIDER,
       externalId: granolaExternalIdForUser(input.userWorkosId),
       connectionLabel,
       accountName: input.accountName,
@@ -127,8 +127,8 @@ export async function connectGranolaIntegration(input: {
     await saveIntegrationCredential({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
-      provider: GOAT_GRANOLA_PROVIDER,
-      kind: GOAT_GRANOLA_CREDENTIAL_KIND,
+      provider: GRANOLA_PROVIDER,
+      kind: GRANOLA_CREDENTIAL_KIND,
       payload,
       // Granola API keys do not expire; users revoke them in the Granola app.
       expiresAt: null,
@@ -139,7 +139,7 @@ export async function connectGranolaIntegration(input: {
     await markIntegrationStatus({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
-      provider: GOAT_GRANOLA_PROVIDER,
+      provider: GRANOLA_PROVIDER,
       status: "sync_failed",
       statusReason: "Failed to persist Granola integration credentials.",
       db,
@@ -178,7 +178,7 @@ export async function getGranolaIntegrationState(
     .where(
       and(
         eq(integrations.userWorkosId, userWorkosId),
-        eq(integrations.provider, GOAT_GRANOLA_PROVIDER),
+        eq(integrations.provider, GRANOLA_PROVIDER),
         ne(integrations.status, "disconnected"),
       ),
     )

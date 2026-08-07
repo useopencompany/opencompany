@@ -4,8 +4,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  BRAIN_ENTITY_TYPES,
   type BrainKind,
-  GOAT_BRAIN_ENTITY_TYPES,
   isBuiltInBrainEntityType,
   isValidBrainKind,
   normalizeBrainFolderForV1,
@@ -30,7 +30,7 @@ import { createPooledDb } from "@opencompany/db/pool";
 import { brainToolRuns, users } from "@opencompany/db/schema";
 import { createGatewayAttribution } from "@opencompany/telemetry";
 import { and, eq, isNull } from "drizzle-orm";
-import { GOAT_BRAIN_READ_PLANE_COMMANDS } from "@/lib/brain-surface";
+import { BRAIN_READ_PLANE_COMMANDS } from "@/lib/brain-surface";
 import type {
   BrainCliCommand,
   BrainToolFlagValue,
@@ -39,14 +39,14 @@ import type {
 } from "@/lib/chat-ui";
 import { isMcpSetupCompletionRun } from "@/lib/mcp-setup";
 
-const GOAT_BRAIN_CHAT_CLI_TIMEOUT_MS = 60_000;
-const GOAT_BRAIN_TRACE_SCHEMA_VERSION = "goat.brain.cli-run.v2";
-const DEFAULT_GOAT_BRAIN_QUERY_LIMIT = 10;
-const MAX_GOAT_BRAIN_QUERY_LIMIT = 50;
-const GOAT_BRAIN_TOOL_HELP =
+const BRAIN_CHAT_CLI_TIMEOUT_MS = 60_000;
+const BRAIN_TRACE_SCHEMA_VERSION = "goat.brain.cli-run.v2";
+const DEFAULT_BRAIN_QUERY_LIMIT = 10;
+const MAX_BRAIN_QUERY_LIMIT = 50;
+const BRAIN_TOOL_HELP =
   'Use goat_brain as { command, flags, stdin? }. For command-specific usage, call { command: "help", flags: { topic: "<command>" } }. Common commands: list, query, get, create, append-evidence, timeline-add, rewrite, alias, link, merge, move, delete, folder, doctor. The brain has required folders inbox, skills, people, companies, and evidence; core folders such as thoughts, projects, meetings, research, decisions, and concepts are adjustable and can be recreated with folder create when needed. Skills are excluded from default list/query retrieval; pass folder: "skills" (or a descendant) to retrieve them explicitly, while get remains available by id. query returns curated pages by default; pass kind: "evidence" only when raw evidence is explicitly needed. query supports type/kind/folder filters, hops for graph expansion, and offset pagination; when pagination.hasMore is true, repeat the same query with offset set to pagination.nextOffset. Hits list linked pages — follow them with get. get accepts one id or a list of ids (aliases resolve too). Use append-evidence to create sourced evidence records linked to a subject. Use includeMerged when you need merged records and includeArchived when you need archived ones.';
 
-const READ_ONLY_GOAT_BRAIN_COMMANDS = new Set<BrainCliCommand>([
+const READ_ONLY_BRAIN_COMMANDS = new Set<BrainCliCommand>([
   "help",
   "list",
   "get",
@@ -58,8 +58,8 @@ const READ_ONLY_GOAT_BRAIN_COMMANDS = new Set<BrainCliCommand>([
 // Commands served by the DB read plane (@opencompany/db/brain-read) — indexed SQL, no brain
 // materialization, no CLI spawn. `help`/`folder`/`doctor` stay on the CLI: help is static text and
 // doctor legitimately wants the full corpus.
-const READ_PLANE_GOAT_BRAIN_COMMANDS = new Set<BrainCliCommand>(GOAT_BRAIN_READ_PLANE_COMMANDS);
-const GOAT_BRAIN_MUTATION_QUEUES = new Map<string, Promise<void>>();
+const READ_PLANE_BRAIN_COMMANDS = new Set<BrainCliCommand>(BRAIN_READ_PLANE_COMMANDS);
+const BRAIN_MUTATION_QUEUES = new Map<string, Promise<void>>();
 
 type BrainCliTraceContext = {
   sourceRef: string;
@@ -139,7 +139,7 @@ export async function runBrainToolForUser(input: {
       error: errorMessage(error),
     };
   }
-  if (READ_PLANE_GOAT_BRAIN_COMMANDS.has(input.toolInput.command)) {
+  if (READ_PLANE_BRAIN_COMMANDS.has(input.toolInput.command)) {
     return runBrainReadCommandForUser(input, {
       argv: invocation.argv,
       display: formatCliDisplay(invocation.argv),
@@ -322,7 +322,7 @@ async function runBrainReadCommandForUser(
       stderr: "",
       command: resolved.display,
       argv: resolved.argv,
-      // Read errors return just the message: GOAT_BRAIN_TOOL_HELP documents write commands
+      // Read errors return just the message: BRAIN_TOOL_HELP documents write commands
       // (create/rewrite/merge/delete…) the read surface cannot call, so appending it here misleads.
       error: errorMessage(error),
     };
@@ -620,14 +620,14 @@ function flagNumber(value: BrainToolFlagValue | undefined): number | undefined {
 
 function readQueryLimit(value: BrainToolFlagValue | undefined): number {
   const parsed = flagNumber(value);
-  const limit = parsed ?? DEFAULT_GOAT_BRAIN_QUERY_LIMIT;
+  const limit = parsed ?? DEFAULT_BRAIN_QUERY_LIMIT;
   if (
     (value !== undefined && parsed === undefined) ||
     !Number.isSafeInteger(limit) ||
     limit < 1 ||
-    limit > MAX_GOAT_BRAIN_QUERY_LIMIT
+    limit > MAX_BRAIN_QUERY_LIMIT
   ) {
-    throw new Error(`limit must be an integer from 1 to ${MAX_GOAT_BRAIN_QUERY_LIMIT}.`);
+    throw new Error(`limit must be an integer from 1 to ${MAX_BRAIN_QUERY_LIMIT}.`);
   }
   return limit;
 }
@@ -659,7 +659,7 @@ function readEntityTypeFlag(value: BrainToolFlagValue | undefined): string | und
   if (!type) return undefined;
   if (!isBuiltInBrainEntityType(type)) {
     throw new Error(
-      `Unsupported Goat Brain entity type "${type}". Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(", ")}.`,
+      `Unsupported Goat Brain entity type "${type}". Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`,
     );
   }
   return type;
@@ -702,7 +702,7 @@ function brainToolInvocation(
   };
 }
 
-const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<BrainCliCommand, readonly string[]> = {
+const BRAIN_TOOL_COMMAND_FLAGS: Record<BrainCliCommand, readonly string[]> = {
   help: ["topic", "command", "json"],
   create: [
     "folder",
@@ -799,7 +799,7 @@ export function renderBrainToolCommand(
   input: BrainToolInput,
   sourceRef: string,
 ): { argv: string[]; stdin?: string } {
-  const allowed = GOAT_BRAIN_TOOL_COMMAND_FLAGS[input.command];
+  const allowed = BRAIN_TOOL_COMMAND_FLAGS[input.command];
   if (!allowed) throw brainToolInputError(`Unsupported goat_brain command "${input.command}".`);
 
   const flags = normalizeCliToolFlags(input.flags ?? {});
@@ -905,15 +905,13 @@ function validateCreateFlags(flags: Record<string, BrainToolFlagValue>, stdin: s
   const type = typeof flags.type === "string" ? flags.type.trim() : "";
   if (!type) {
     throw brainToolInputError(
-      `goat_brain create requires a type. Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(", ")}.`,
+      `goat_brain create requires a type. Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`,
       "create",
     );
   }
   if (!isBuiltInBrainEntityType(type)) {
     throw brainToolInputError(
-      `Unsupported Goat Brain entity type "${type}". Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(
-        ", ",
-      )}.`,
+      `Unsupported Goat Brain entity type "${type}". Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`,
       "create",
     );
   }
@@ -941,7 +939,7 @@ function brainToolInputError(message: string, command?: BrainCliCommand | string
   const topicHelp = topics?.length
     ? `\n\nRelevant help command: { command: "help", flags: { topic: "${topics[0]}" } }.`
     : "";
-  return new Error(`${message}\n\n${GOAT_BRAIN_TOOL_HELP}${topicHelp}`);
+  return new Error(`${message}\n\n${BRAIN_TOOL_HELP}${topicHelp}`);
 }
 
 function appendCliFlag(argv: string[], name: string, value: BrainToolFlagValue) {
@@ -973,30 +971,29 @@ function normalizeResolvedBrainCommand(value: string | undefined): BrainCliComma
 
 function isBrainCliCommand(value: unknown): value is BrainCliCommand {
   return (
-    typeof value === "string" &&
-    Object.hasOwn(GOAT_BRAIN_TOOL_COMMAND_FLAGS, value as BrainCliCommand)
+    typeof value === "string" && Object.hasOwn(BRAIN_TOOL_COMMAND_FLAGS, value as BrainCliCommand)
   );
 }
 
 function brainCommandIsReadOnly(command: BrainCliCommand): boolean {
-  return READ_ONLY_GOAT_BRAIN_COMMANDS.has(command);
+  return READ_ONLY_BRAIN_COMMANDS.has(command);
 }
 
 async function enqueueBrainMutation<T>(brainRef: string, run: () => Promise<T>): Promise<T> {
-  const previous = GOAT_BRAIN_MUTATION_QUEUES.get(brainRef) ?? Promise.resolve();
+  const previous = BRAIN_MUTATION_QUEUES.get(brainRef) ?? Promise.resolve();
   let release: () => void = () => {};
   const current = previous.then(run, run);
   const parked = current.then(
     () => new Promise<void>((resolve) => (release = resolve)),
     () => new Promise<void>((resolve) => (release = resolve)),
   );
-  GOAT_BRAIN_MUTATION_QUEUES.set(brainRef, parked);
+  BRAIN_MUTATION_QUEUES.set(brainRef, parked);
   try {
     return await current;
   } finally {
     release();
-    if (GOAT_BRAIN_MUTATION_QUEUES.get(brainRef) === parked) {
-      GOAT_BRAIN_MUTATION_QUEUES.delete(brainRef);
+    if (BRAIN_MUTATION_QUEUES.get(brainRef) === parked) {
+      BRAIN_MUTATION_QUEUES.delete(brainRef);
     }
   }
 }
@@ -1048,7 +1045,7 @@ async function runCliProcess(input: {
         rawStderr: stderr,
         timedOut: true,
       });
-    }, GOAT_BRAIN_CHAT_CLI_TIMEOUT_MS);
+    }, BRAIN_CHAT_CLI_TIMEOUT_MS);
 
     const abort = () => {
       if (settled) return;
@@ -1110,7 +1107,7 @@ function childBrainCliEnv(input: {
     PATH: process.env.PATH ?? "",
     HOME: process.env.HOME ?? "",
     NODE_ENV: process.env.NODE_ENV ?? "production",
-    GOAT_BRAIN_ROOT: input.root,
+    BRAIN_ROOT: input.root,
     VERCEL_AI_GATEWAY_API_KEY: input.gatewayApiKey,
     ...(process.env.BRAIN_GATEWAY_BASE_URL
       ? { BRAIN_GATEWAY_BASE_URL: process.env.BRAIN_GATEWAY_BASE_URL }
@@ -1118,9 +1115,9 @@ function childBrainCliEnv(input: {
     ...(process.env.BRAIN_EMBEDDING_MODEL
       ? { BRAIN_EMBEDDING_MODEL: process.env.BRAIN_EMBEDDING_MODEL }
       : {}),
-    ...(input.reporting?.user ? { GOAT_GATEWAY_REPORTING_USER: input.reporting.user } : {}),
+    ...(input.reporting?.user ? { GATEWAY_REPORTING_USER: input.reporting.user } : {}),
     ...(input.reporting?.tags.length
-      ? { GOAT_GATEWAY_REPORTING_TAGS: input.reporting.tags.join(",") }
+      ? { GATEWAY_REPORTING_TAGS: input.reporting.tags.join(",") }
       : {}),
   };
 }
@@ -1186,7 +1183,7 @@ async function recordBrainToolRun(input: {
       durationMs: input.durationMs,
       tracePath: null,
       trace: {
-        schemaVersion: GOAT_BRAIN_TRACE_SCHEMA_VERSION,
+        schemaVersion: BRAIN_TRACE_SCHEMA_VERSION,
         startedAt: input.startedAt.toISOString(),
         argv: input.resolved.argv,
         command: input.resolved.display,

@@ -25,13 +25,13 @@ const preserveLocalKeys = new Set([
 ]);
 const LOCAL_WORKOS_REDIRECT_URI = "http://localhost:3000/auth/callback";
 const LOCAL_APP_HTTPS_PORT = "3443";
-const LOCAL_GOAT_APP_URL = `https://localhost:${LOCAL_APP_HTTPS_PORT}`;
+const LOCAL_APP_URL = `https://localhost:${LOCAL_APP_HTTPS_PORT}`;
 const localDefaultLines = [
   'OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS="louis@acta.so"',
   'APP_PORT="3002"',
   `APP_HTTPS_PORT="${LOCAL_APP_HTTPS_PORT}"`,
-  `NEXT_PUBLIC_APP_URL=${JSON.stringify(LOCAL_GOAT_APP_URL)}`,
-  `NEXT_PUBLIC_WORKOS_REDIRECT_URI=${JSON.stringify(`${LOCAL_GOAT_APP_URL}/auth/callback`)}`,
+  `NEXT_PUBLIC_APP_URL=${JSON.stringify(LOCAL_APP_URL)}`,
+  `NEXT_PUBLIC_WORKOS_REDIRECT_URI=${JSON.stringify(`${LOCAL_APP_URL}/auth/callback`)}`,
   'RUNNER_LLM_BROKER_PUBLIC_URL=""',
 ];
 const chunks = [];

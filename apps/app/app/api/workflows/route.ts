@@ -1,7 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
 import { extractChatAttachmentTexts, parseChatAttachmentsInput } from "@/lib/chat-attachments";
-import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
+import { CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
 import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { SkillMentionError } from "@/lib/skills";
 import { createTaskFromWorkflow, generateWorkflowTaskTitle } from "@/lib/workflow-tasks";
@@ -43,10 +43,10 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  if (description.length > GOAT_CHAT_PROMPT_MAX_LENGTH) {
+  if (description.length > CHAT_PROMPT_MAX_LENGTH) {
     return NextResponse.json(
       {
-        error: `Workflow task descriptions can be at most ${GOAT_CHAT_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
+        error: `Workflow task descriptions can be at most ${CHAT_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
       },
       { status: 400 },
     );

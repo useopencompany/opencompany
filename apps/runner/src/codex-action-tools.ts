@@ -1,8 +1,8 @@
 import {
+  ACTION_GATEWAY_TIMEOUT_MS,
+  ACTION_TOOL_CONTRACT,
   type ActionGatewayRequest,
   type ActionGatewayResponse,
-  GOAT_ACTION_GATEWAY_TIMEOUT_MS,
-  GOAT_ACTION_TOOL_CONTRACT,
 } from "@opencompany/agent-runtime";
 import type {
   CodexAppServerDynamicTool,
@@ -11,7 +11,7 @@ import type {
 } from "./codex-app-server";
 import type { RunnerEnv } from "./env";
 
-const GOAT_ACTION_GATEWAY_PATH = "/api/internal/action-gateway";
+const ACTION_GATEWAY_PATH = "/api/internal/action-gateway";
 
 type CodexActionToolContext = {
   codexChatSessionId: string;
@@ -37,9 +37,9 @@ export function createCodexActionDynamicTools(
     {
       spec: {
         type: "function",
-        name: GOAT_ACTION_TOOL_CONTRACT.list.name,
-        description: GOAT_ACTION_TOOL_CONTRACT.list.description,
-        inputSchema: GOAT_ACTION_TOOL_CONTRACT.list.inputSchema,
+        name: ACTION_TOOL_CONTRACT.list.name,
+        description: ACTION_TOOL_CONTRACT.list.description,
+        inputSchema: ACTION_TOOL_CONTRACT.list.inputSchema,
       },
       execute: (call) =>
         executeGatewayCall({
@@ -51,9 +51,9 @@ export function createCodexActionDynamicTools(
     {
       spec: {
         type: "function",
-        name: GOAT_ACTION_TOOL_CONTRACT.execute.name,
-        description: GOAT_ACTION_TOOL_CONTRACT.execute.description,
-        inputSchema: GOAT_ACTION_TOOL_CONTRACT.execute.inputSchema,
+        name: ACTION_TOOL_CONTRACT.execute.name,
+        description: ACTION_TOOL_CONTRACT.execute.description,
+        inputSchema: ACTION_TOOL_CONTRACT.execute.inputSchema,
       },
       execute: async (call) => {
         const parsed = executeRequest(context, call);
@@ -88,14 +88,14 @@ async function executeGatewayCall(input: {
 
   try {
     await input.context.checkAbort();
-    const response = await input.dependencies.fetch(new URL(GOAT_ACTION_GATEWAY_PATH, appUrl), {
+    const response = await input.dependencies.fetch(new URL(ACTION_GATEWAY_PATH, appUrl), {
       method: "POST",
       headers: {
         authorization: `Bearer ${input.context.env.internalToken}`,
         "content-type": "application/json",
       },
       body: JSON.stringify(input.request),
-      signal: AbortSignal.timeout(GOAT_ACTION_GATEWAY_TIMEOUT_MS),
+      signal: AbortSignal.timeout(ACTION_GATEWAY_TIMEOUT_MS),
     });
     const result = await readGatewayResponse(response);
     await input.context.checkAbort();

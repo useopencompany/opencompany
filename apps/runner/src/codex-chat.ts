@@ -1,10 +1,10 @@
 import {
+  ACTION_HOST_TOOL_CONTRACT_VERSION,
   CLOUD_CODING_ENGINE_CONFIG,
   CODEX_COMMAND_TOOL_PART_TYPE,
   CODEX_DYNAMIC_TOOL_NAME,
   CODEX_SUBAGENT_TOOL_PART_TYPE,
   type CodexUiMessagePart,
-  GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
   isActionHostToolContractVersion,
   isCodexReasoningEffort,
   shellQuote,
@@ -12,7 +12,7 @@ import {
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import {
   type BrainSkill,
-  GOAT_CODEX_BRAIN_TOOL_CONTRACT_VERSION,
+  CODEX_BRAIN_TOOL_CONTRACT_VERSION,
   serializeBrainSkillMarkdown,
 } from "@opencompany/brain";
 import { TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK } from "@opencompany/core/chat-agent";
@@ -47,7 +47,7 @@ import { ensureCodexInstalled } from "./codex-cli";
 import { materializeCodexSkillSnapshotsForSession } from "./codex-managed-skills";
 import { createKnownSecretRedactor, gitAuthHeader } from "./coding-agent-shared";
 import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
-import { GOAT_CODING_WORKSPACE_SANDBOX_NETWORK } from "./coding-workspace-runtime";
+import { CODING_WORKSPACE_SANDBOX_NETWORK } from "./coding-workspace-runtime";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { getGitHubWorkInstallationToken } from "./github";
@@ -82,7 +82,7 @@ const INTERACTION_POLL_INTERVAL_MS = 500;
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-codex-chat" });
 
-export const GOAT_CODEX_CHAT_REAUTH_MESSAGE =
+export const CODEX_CHAT_REAUTH_MESSAGE =
   "Codex is disconnected. Reconnect Codex in Goat settings, then send your message again.";
 
 export class CodexChatInterruptedError extends Error {
@@ -196,7 +196,7 @@ export async function runCodexChatTurn(input: {
 
   const auth = await loadCodexCliAuth(turn.userWorkosId);
   if (!auth) {
-    await (await bareProjector()).fail(GOAT_CODEX_CHAT_REAUTH_MESSAGE, {
+    await (await bareProjector()).fail(CODEX_CHAT_REAUTH_MESSAGE, {
       sessionStatus: "failed",
       ...(taskContext ? { taskCompletion: buildTaskTerminalProjection(taskContext) } : {}),
     });
@@ -218,7 +218,7 @@ export async function runCodexChatTurn(input: {
       metadata: {
         user_id: turn.userWorkosId,
       },
-      network: GOAT_CODING_WORKSPACE_SANDBOX_NETWORK,
+      network: CODING_WORKSPACE_SANDBOX_NETWORK,
       idleTimeoutMs: env.codexChatIdleTimeoutMs,
     });
   } catch (error) {
@@ -382,11 +382,11 @@ export async function runCodexChatTurn(input: {
     const brainToolEnabled =
       Boolean(session.brainRef) &&
       (actionHostToolsEnabled ||
-        session.hostToolContractVersion === GOAT_CODEX_BRAIN_TOOL_CONTRACT_VERSION);
+        session.hostToolContractVersion === CODEX_BRAIN_TOOL_CONTRACT_VERSION);
     const brainCaptureEnabled =
       Boolean(session.brainRef) &&
       Boolean(session.workspaceId) &&
-      session.hostToolContractVersion === GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION;
+      session.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION;
     const actionToolsEnabled = actionHostToolsEnabled && Boolean(session.workspaceId);
     const dynamicTools = [
       ...(brainToolEnabled && session.brainRef

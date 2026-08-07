@@ -4,8 +4,8 @@ import { brainSources, granolaSyncState } from "./schema";
 
 type DbLike = any;
 
-export const GOAT_GRANOLA_PROVIDER = "granola" as const;
-export const GOAT_GRANOLA_CREDENTIAL_KIND = "api_key" as const;
+export const GRANOLA_PROVIDER = "granola" as const;
+export const GRANOLA_CREDENTIAL_KIND = "api_key" as const;
 
 export type GranolaBrainSourceRoute = {
   integrationId: string;
@@ -33,7 +33,7 @@ export async function listEnabledGranolaBrainSourceRoutes(
     .from(brainSources)
     .where(
       and(
-        eq(brainSources.provider, GOAT_GRANOLA_PROVIDER),
+        eq(brainSources.provider, GRANOLA_PROVIDER),
         eq(brainSources.enabled, true),
         inArray(brainSources.integrationId, [...integrationIds]),
       ),

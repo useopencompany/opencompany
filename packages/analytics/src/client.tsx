@@ -19,7 +19,7 @@ type AnalyticsProviderProps = {
 let initialized = false;
 let capturedAppOpenKey: string | undefined;
 const logger = createLogger({ service: "opencompany-analytics", runtime: "browser" });
-const GOAT_PROPERTY_DENYLIST = [
+const PROPERTY_DENYLIST = [
   "$current_url",
   "$host",
   "$initial_current_url",
@@ -81,7 +81,7 @@ export function initClientAnalytics() {
       ip: false,
       person_profiles: "identified_only",
       persistence: "localStorage",
-      property_denylist: GOAT_PROPERTY_DENYLIST,
+      property_denylist: PROPERTY_DENYLIST,
       rageclick: false,
       respect_dnt: true,
       save_campaign_params: false,

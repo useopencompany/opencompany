@@ -51,7 +51,7 @@ import type { BrainSnapshot } from "@/lib/brain";
 import type { BrainOverviewStats } from "@/lib/brain-overview";
 import type { ChatSessionView } from "@/lib/chat-ui";
 import type { IntegrationState } from "@/lib/integration-state";
-import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import { DEFAULT_MODEL } from "@/lib/model-options";
 import { archiveSkillAction, createSkillAction, updateSkillAction } from "@/lib/skill-actions";
 import type { SkillListItem, WorkspaceSkill } from "@/lib/skills";
 import { buildHarnessRun, type HarnessRunViewModel } from "@/lib/task-harness-run";
@@ -79,7 +79,7 @@ export function HomeRoute({
     return {
       id: chatId,
       title: summary?.title ?? "Goat",
-      model: summary?.model ?? DEFAULT_GOAT_MODEL,
+      model: summary?.model ?? DEFAULT_MODEL,
       engine: summary?.engine ?? "opencompany",
       codexComposerSettings: summary?.codexComposerSettings ?? null,
       codexRuntime: summary?.codexRuntime ?? null,
@@ -93,7 +93,7 @@ export function HomeRoute({
         key={data.activeBrain?.id ?? "no-brain"}
         tasks={data.tasks}
         schedules={data.schedules}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={initialChat}
         recentChats={data.recentChats}
         archivedChats={data.archivedChats}

@@ -32,7 +32,7 @@ type IntegrationTransactionalDb = IntegrationDb & {
 };
 type IntegrationBatchDb = Pick<ReturnType<typeof getDb>, "batch" | "insert" | "select" | "update">;
 type IntegrationRefreshDb = IntegrationTransactionalDb | IntegrationBatchDb;
-const GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING = {
+const INTEGRATION_CREDENTIAL_WRITE_RETURNING = {
   id: integrationCredentials.id,
   expiresAt: integrationCredentials.expiresAt,
   lastRotatedAt: integrationCredentials.lastRotatedAt,
@@ -249,7 +249,7 @@ export type SlackBotOAuthCredentialPayload = {
 };
 
 // The Slack answer-bot install. Workspace-owned (see
-// WORKSPACE_OWNED_GOAT_INTEGRATION_PROVIDERS): the bot token belongs to the
+// WORKSPACE_OWNED_INTEGRATION_PROVIDERS): the bot token belongs to the
 // Slack workspace install, not to the connecting admin.
 export async function connectSlackBotIntegration(input: {
   userWorkosId: string;
@@ -346,7 +346,7 @@ export async function connectSlackBotIntegration(input: {
         target: [integrationCredentials.integrationId, integrationCredentials.kind],
         set: credentialWrite.conflictSet,
       })
-      .returning(GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING),
+      .returning(INTEGRATION_CREDENTIAL_WRITE_RETURNING),
   ] as const);
 
   const integration = integrationRows[0];
@@ -589,7 +589,7 @@ export async function saveIntegrationCredential(
       target: [integrationCredentials.integrationId, integrationCredentials.kind],
       set: write.conflictSet,
     })
-    .returning(GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING);
+    .returning(INTEGRATION_CREDENTIAL_WRITE_RETURNING);
 
   if (!credential) {
     throw new Error("Could not persist Goat integration credential.");
@@ -621,7 +621,7 @@ export async function refreshIntegrationCredential(
           target: [integrationCredentials.integrationId, integrationCredentials.kind],
           set: write.conflictSet,
         })
-        .returning(GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING),
+        .returning(INTEGRATION_CREDENTIAL_WRITE_RETURNING),
       input.db
         .update(integrations)
         .set({ status: "connected", statusReason: null, updatedAt: now })

@@ -1,11 +1,8 @@
+import { ACTION_MAX_CALLS_PER_TURN, type ActionGatewayRequest } from "@opencompany/agent-runtime";
 import {
-  type ActionGatewayRequest,
-  GOAT_ACTION_MAX_CALLS_PER_TURN,
-} from "@opencompany/agent-runtime";
-import {
-  GOAT_ACTION_EFFECTS_METERED_READ,
-  GOAT_ACTION_EFFECTS_READ,
-  GOAT_ACTION_EFFECTS_WRITE,
+  ACTION_EFFECTS_METERED_READ,
+  ACTION_EFFECTS_READ,
+  ACTION_EFFECTS_WRITE,
 } from "@opencompany/core/actions/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedAction, ResolvedActionCatalog } from "@/lib/actions/types";
@@ -47,7 +44,7 @@ describe("executeActionGateway", () => {
           ...readAction,
           id: "gmail.send",
           capability: "write",
-          effects: GOAT_ACTION_EFFECTS_WRITE,
+          effects: ACTION_EFFECTS_WRITE,
         },
         {
           ...readAction,
@@ -59,7 +56,7 @@ describe("executeActionGateway", () => {
           ...readAction,
           id: "linkedin.search",
           provider: "linkedin",
-          effects: GOAT_ACTION_EFFECTS_METERED_READ,
+          effects: ACTION_EFFECTS_METERED_READ,
         },
         {
           ...readAction,
@@ -166,7 +163,7 @@ describe("executeActionGateway", () => {
 
   it("shares managed capability turn state across calls in the same turn", async () => {
     const managedAction = createReadAction("linkedin.search_posts", "linkedin");
-    managedAction.effects = GOAT_ACTION_EFFECTS_METERED_READ;
+    managedAction.effects = ACTION_EFFECTS_METERED_READ;
     managedAction.execute = vi.fn(async (_params, actionContext) => {
       const turnState = actionContext.capabilityTurnState;
       if (!turnState) throw new Error("Missing capability turn state");
@@ -230,7 +227,7 @@ describe("executeActionGateway", () => {
     };
     let count = 0;
     const claimInvocation = vi.fn(async () => {
-      if (count >= GOAT_ACTION_MAX_CALLS_PER_TURN) {
+      if (count >= ACTION_MAX_CALLS_PER_TURN) {
         return { ok: false as const, reason: "call_budget" as const };
       }
       count += 1;
@@ -242,7 +239,7 @@ describe("executeActionGateway", () => {
       claimInvocation,
     };
 
-    for (let call = 1; call <= GOAT_ACTION_MAX_CALLS_PER_TURN; call += 1) {
+    for (let call = 1; call <= ACTION_MAX_CALLS_PER_TURN; call += 1) {
       await expect(
         executeActionGateway({
           request: {
@@ -358,7 +355,7 @@ function createReadAction(
     id,
     provider,
     capability: "read",
-    effects: GOAT_ACTION_EFFECTS_READ,
+    effects: ACTION_EFFECTS_READ,
     description: "Search Gmail.",
     params: { type: "object" },
     permissionMode: "on",

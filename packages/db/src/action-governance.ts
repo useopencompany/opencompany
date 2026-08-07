@@ -24,7 +24,7 @@ export type ActionCapabilityQuoteRecord = {
   runId?: string;
 };
 
-const GOAT_ACTION_TURN_TTL_MS = 6 * 60 * 60 * 1000;
+const ACTION_TURN_TTL_MS = 6 * 60 * 60 * 1000;
 
 export async function recordActionSourceDiscovery(input: {
   turn: ActionTurnRef;
@@ -283,7 +283,7 @@ async function ensureActionTurn(turn: ActionTurnRef, db: DbLike) {
       userWorkosId: turn.userWorkosId,
       workspaceId: turn.workspaceId,
       policy: turn.policy,
-      expiresAt: new Date(now.getTime() + GOAT_ACTION_TURN_TTL_MS),
+      expiresAt: new Date(now.getTime() + ACTION_TURN_TTL_MS),
       createdAt: now,
       updatedAt: now,
     })
@@ -310,5 +310,5 @@ function actionTurnMatches(turn: ActionTurnRef) {
 }
 
 function actionTurnExpiresAt() {
-  return new Date(Date.now() + GOAT_ACTION_TURN_TTL_MS);
+  return new Date(Date.now() + ACTION_TURN_TTL_MS);
 }

@@ -9,7 +9,7 @@ import {
   claimBrainSourceEvents,
 } from "@opencompany/db/brain-event-claims";
 import {
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+  BRAIN_AGENT_INGEST_JOB_KIND,
   upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
@@ -30,10 +30,10 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "goat-gith
 // Pull-request activity flushes after 45 minutes of quiet, or once the oldest
 // event has waited four hours. This collapses the common open -> discussion ->
 // merge lifecycle without leaving an active PR invisible indefinitely.
-export const GOAT_GITHUB_QUIET_PERIOD_MS = 45 * 60_000;
-export const GOAT_GITHUB_MAX_WAIT_MS = 4 * 60 * 60_000;
-export const GOAT_GITHUB_MAX_WINDOW_EVENTS = 200;
-const GOAT_GITHUB_FLUSH_POLL_INTERVAL_MS = 60_000;
+export const GITHUB_QUIET_PERIOD_MS = 45 * 60_000;
+export const GITHUB_MAX_WAIT_MS = 4 * 60 * 60_000;
+export const GITHUB_MAX_WINDOW_EVENTS = 200;
+const GITHUB_FLUSH_POLL_INTERVAL_MS = 60_000;
 
 export type GitHubDueWindow = {
   integrationId: string;
@@ -58,10 +58,8 @@ export async function listDueGitHubPullRequestWindows(input: {
   maxWaitMs?: number;
 }): Promise<GitHubDueWindow[]> {
   const now = input.now ?? new Date();
-  const quietCutoff = new Date(
-    now.getTime() - (input.quietPeriodMs ?? GOAT_GITHUB_QUIET_PERIOD_MS),
-  );
-  const maxWaitCutoff = new Date(now.getTime() - (input.maxWaitMs ?? GOAT_GITHUB_MAX_WAIT_MS));
+  const quietCutoff = new Date(now.getTime() - (input.quietPeriodMs ?? GITHUB_QUIET_PERIOD_MS));
+  const maxWaitCutoff = new Date(now.getTime() - (input.maxWaitMs ?? GITHUB_MAX_WAIT_MS));
   const result = await getDb().execute(sql`
     SELECT
       integration_id AS "integrationId",
@@ -167,7 +165,7 @@ export async function flushGitHubPullRequestWindow(window: GitHubDueWindow): Pro
       rawPayload: { eventIds: claimed.map((row) => row.id) },
       rawEventCount: brainRefs.length > 0 ? newlyClaimedEventKeys.size : claimed.length,
       rawEventKeysByBrainRef: claimedEventKeysByBrainRef,
-      kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+      kind: BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
       now: flushedAt,
       db: tx,
@@ -236,10 +234,7 @@ export function buildGitHubPullRequestWindowItem(input: {
 }
 
 export function startGitHubFlushWorker(options: { pollIntervalMs?: number } = {}) {
-  const pollIntervalMs = Math.max(
-    1_000,
-    options.pollIntervalMs ?? GOAT_GITHUB_FLUSH_POLL_INTERVAL_MS,
-  );
+  const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? GITHUB_FLUSH_POLL_INTERVAL_MS);
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let wake: (() => void) | null = null;
@@ -330,7 +325,7 @@ async function previewBufferedGitHubPullRequestEvents(window: GitHubDueWindow) {
         AND pull_request_number = ${window.pullRequestNumber}
         AND source_item_id IS NULL
       ORDER BY event_time ASC, id ASC
-      LIMIT ${GOAT_GITHUB_MAX_WINDOW_EVENTS}
+      LIMIT ${GITHUB_MAX_WINDOW_EVENTS}
     `),
   );
 }

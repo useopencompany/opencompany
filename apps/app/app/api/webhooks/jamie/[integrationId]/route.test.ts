@@ -24,7 +24,7 @@ vi.mock("@/lib/task-runner", () => ({
 }));
 
 vi.mock("@opencompany/db/brain-ingest", () => ({
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND: "brain_agent_ingest",
+  BRAIN_AGENT_INGEST_JOB_KIND: "brain_agent_ingest",
   upsertBrainSourceItemAndEnqueue: vi.fn(),
 }));
 

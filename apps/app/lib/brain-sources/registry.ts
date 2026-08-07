@@ -13,7 +13,7 @@ import {
   Video,
 } from "lucide-react";
 
-export const GOAT_JAMIE_DOCS_HREF = "/docs/integrations/jamie";
+export const JAMIE_DOCS_HREF = "/docs/integrations/jamie";
 
 export type BrainSourceProviderDef = {
   id: BrainSourceConfigProvider;
@@ -31,7 +31,7 @@ export type BrainSourceProviderDef = {
 // Deliberately excludes "slack_bot": those brain_sources rows are answer
 // destinations (rendered by the Destinations section in brain settings via
 // SlackBotDestinationCard), not ingestion sources.
-export const GOAT_BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
+export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
   {
     id: "jamie",
     name: "Jamie",
@@ -40,7 +40,7 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
     connectionKind: "webhook",
     available: true,
     connectHref: "/settings/jamie",
-    docsHref: GOAT_JAMIE_DOCS_HREF,
+    docsHref: JAMIE_DOCS_HREF,
   },
   {
     id: "granola",

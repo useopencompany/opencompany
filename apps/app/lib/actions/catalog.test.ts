@@ -1,4 +1,4 @@
-import { GOAT_ACTION_EFFECTS_READ } from "@opencompany/core/actions/types";
+import { ACTION_EFFECTS_READ } from "@opencompany/core/actions/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -85,7 +85,7 @@ function providerCatalog(
         id: `${id}.read_something`,
         provider: id,
         capability: "read",
-        effects: GOAT_ACTION_EFFECTS_READ,
+        effects: ACTION_EFFECTS_READ,
         permissionMode: "on",
         description: "read",
         params: { type: "object" },

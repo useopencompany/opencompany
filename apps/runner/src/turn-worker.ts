@@ -6,7 +6,7 @@ import {
   tasks,
 } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
-import { GOAT_METRICS, recordHistogram } from "@opencompany/telemetry";
+import { METRICS, recordHistogram } from "@opencompany/telemetry";
 import { and, eq, sql } from "drizzle-orm";
 import { runClaudeCodeChatTurn } from "./claude-code-chat";
 import { runCodexChatTurn } from "./codex-chat";
@@ -23,9 +23,9 @@ import { armSandboxActiveTimeoutById, armSandboxIdleTimeoutById } from "./sandbo
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-codex-chat-worker" });
-const GOAT_CODEX_CHAT_SANDBOX_SWEEP_INTERVAL_MS = 60_000;
-const GOAT_CODEX_CHAT_RETRY_BASE_DELAY_MS = 5_000;
-const GOAT_CODEX_CHAT_RETRY_MAX_DELAY_MS = 60_000;
+const CODEX_CHAT_SANDBOX_SWEEP_INTERVAL_MS = 60_000;
+const CODEX_CHAT_RETRY_BASE_DELAY_MS = 5_000;
+const CODEX_CHAT_RETRY_MAX_DELAY_MS = 60_000;
 
 let registeredWakeup: (() => void) | null = null;
 
@@ -209,7 +209,7 @@ export async function runClaimedTurn(
     const queueStartedAt =
       turn.runAfter && turn.runAfter > turn.createdAt ? turn.runAfter : turn.createdAt;
     recordHistogram(
-      GOAT_METRICS.codexChatQueueWaitMs,
+      METRICS.codexChatQueueWaitMs,
       Math.max(0, Date.now() - queueStartedAt.getTime()),
       {
         "goat.engine": session.engine,
@@ -399,8 +399,8 @@ export async function deferCodexChatTurnForRetry(input: {
 
 export function codexChatRetryAt(now: Date, attempts: number) {
   const delayMs = Math.min(
-    GOAT_CODEX_CHAT_RETRY_MAX_DELAY_MS,
-    GOAT_CODEX_CHAT_RETRY_BASE_DELAY_MS * 2 ** Math.max(0, attempts - 1),
+    CODEX_CHAT_RETRY_MAX_DELAY_MS,
+    CODEX_CHAT_RETRY_BASE_DELAY_MS * 2 ** Math.max(0, attempts - 1),
   );
   return new Date(now.getTime() + delayMs);
 }
@@ -533,7 +533,7 @@ export function startCodexChatWorker(
   >();
   const sandboxSweepIntervalMs = Math.max(
     1_000,
-    options.sandboxSweepIntervalMs ?? GOAT_CODEX_CHAT_SANDBOX_SWEEP_INTERVAL_MS,
+    options.sandboxSweepIntervalMs ?? CODEX_CHAT_SANDBOX_SWEEP_INTERVAL_MS,
   );
   let stopped = false;
   let lastSandboxSweepAt = 0;

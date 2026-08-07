@@ -1,8 +1,8 @@
 import type { CodexCommandToolInput, CodexCommandToolOutput } from "@opencompany/agent-runtime";
 import {
+  ACTION_TOOL_CONTRACT,
   type ActionExecutionResponse,
   type ActionGatewayResponse,
-  GOAT_ACTION_TOOL_CONTRACT,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { BrowserToolName } from "@opencompany/browser-tools";
@@ -51,17 +51,17 @@ export const EDIT_TASK_SCHEDULE_TOOL_PART_TYPE = `tool-${EDIT_TASK_SCHEDULE_TOOL
 export const DELETE_TASK_SCHEDULE_TOOL_NAME = "delete_task_schedule";
 export const DELETE_TASK_SCHEDULE_TOOL_PART_TYPE =
   `tool-${DELETE_TASK_SCHEDULE_TOOL_NAME}` as const;
-export const GOAT_BRAIN_TOOL_NAME = "goat_brain";
-export const GOAT_BRAIN_TOOL_PART_TYPE = `tool-${GOAT_BRAIN_TOOL_NAME}` as const;
+export const BRAIN_TOOL_NAME = "goat_brain";
+export const BRAIN_TOOL_PART_TYPE = `tool-${BRAIN_TOOL_NAME}` as const;
 export const SAVE_TO_BRAIN_TOOL_NAME = "save_to_brain";
 export const SAVE_TO_BRAIN_TOOL_PART_TYPE = `tool-${SAVE_TO_BRAIN_TOOL_NAME}` as const;
 export const WEB_FETCH_TOOL_NAME = "web_fetch";
 export const WEB_FETCH_TOOL_PART_TYPE = `tool-${WEB_FETCH_TOOL_NAME}` as const;
 export const WEB_SEARCH_TOOL_NAME = "web_search";
 export const WEB_SEARCH_TOOL_PART_TYPE = `tool-${WEB_SEARCH_TOOL_NAME}` as const;
-export const LIST_ACTIONS_TOOL_NAME = GOAT_ACTION_TOOL_CONTRACT.list.name;
+export const LIST_ACTIONS_TOOL_NAME = ACTION_TOOL_CONTRACT.list.name;
 export const LIST_ACTIONS_TOOL_PART_TYPE = `tool-${LIST_ACTIONS_TOOL_NAME}` as const;
-export const USE_ACTION_TOOL_NAME = GOAT_ACTION_TOOL_CONTRACT.execute.name;
+export const USE_ACTION_TOOL_NAME = ACTION_TOOL_CONTRACT.execute.name;
 export const USE_ACTION_TOOL_PART_TYPE = `tool-${USE_ACTION_TOOL_NAME}` as const;
 export const SEND_USER_MESSAGE_TOOL_NAME = "send_user_message";
 export const SEND_USER_MESSAGE_TOOL_PART_TYPE = `tool-${SEND_USER_MESSAGE_TOOL_NAME}` as const;
@@ -639,7 +639,7 @@ export type ChatSummaryView = {
   archived?: boolean;
 };
 
-export const GOAT_PINNED_CHAT_LIMIT = 20;
+export const PINNED_CHAT_LIMIT = 20;
 
 export function deriveChatState(input: {
   updatedAt: string;
@@ -929,8 +929,8 @@ function isPersistedToolPart(value: Record<string, unknown>) {
 // (debug_trace) so both the chat route and the turn store can use them without
 // round-tripping through UIMessage types.
 
-export const GOAT_APPROVAL_DISMISSED_REASON = "The user did not respond to the approval request.";
-export const GOAT_INCOMPLETE_TOOL_CALL_REASON =
+export const APPROVAL_DISMISSED_REASON = "The user did not respond to the approval request.";
+export const INCOMPLETE_TOOL_CALL_REASON =
   "The turn ended before the tool returned a result, so its outcome is unknown.";
 
 type RawApprovalPart = Record<string, unknown> & {
@@ -1008,7 +1008,7 @@ export function applyApprovalResponsesToStoredParts(
         approval: {
           id: pending.approval.id,
           approved: false,
-          reason: GOAT_APPROVAL_DISMISSED_REASON,
+          reason: APPROVAL_DISMISSED_REASON,
         },
       };
     }
@@ -1050,7 +1050,7 @@ export function dismissPendingApprovalsInStoredParts(parts: unknown): {
       approval: {
         id: pending.approval.id,
         approved: false,
-        reason: GOAT_APPROVAL_DISMISSED_REASON,
+        reason: APPROVAL_DISMISSED_REASON,
       },
     };
   });
@@ -1092,7 +1092,7 @@ export function settleIncompleteToolCallsInStoredParts(parts: unknown): {
     settled.push({
       ...call,
       state: "output-error",
-      errorText: GOAT_INCOMPLETE_TOOL_CALL_REASON,
+      errorText: INCOMPLETE_TOOL_CALL_REASON,
     });
   }
 

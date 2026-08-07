@@ -10,7 +10,7 @@ import {
   claimBrainSourceEvents,
 } from "@opencompany/db/brain-event-claims";
 import {
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+  BRAIN_AGENT_INGEST_JOB_KIND,
   upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import { loadIntegrationCredential } from "@opencompany/db/integrations";
@@ -39,10 +39,10 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "goat-line
 // once its oldest buffered event has waited out the max wait — whichever comes
 // first. One agent ingest session then covers the whole window. Issues change
 // in slower bursts than chat, so the windows are wider than Slack's.
-export const GOAT_LINEAR_QUIET_PERIOD_MS = 15 * 60_000;
-export const GOAT_LINEAR_MAX_WAIT_MS = 2 * 60 * 60_000;
-export const GOAT_LINEAR_MAX_WINDOW_EVENTS = 200;
-const GOAT_LINEAR_FLUSH_POLL_INTERVAL_MS = 60_000;
+export const LINEAR_QUIET_PERIOD_MS = 15 * 60_000;
+export const LINEAR_MAX_WAIT_MS = 2 * 60 * 60_000;
+export const LINEAR_MAX_WINDOW_EVENTS = 200;
+const LINEAR_FLUSH_POLL_INTERVAL_MS = 60_000;
 
 export type LinearDueWindow = {
   integrationId: string;
@@ -69,10 +69,8 @@ export async function listDueLinearIssueWindows(input: {
   maxWaitMs?: number;
 }): Promise<LinearDueWindow[]> {
   const now = input.now ?? new Date();
-  const quietCutoff = new Date(
-    now.getTime() - (input.quietPeriodMs ?? GOAT_LINEAR_QUIET_PERIOD_MS),
-  );
-  const maxWaitCutoff = new Date(now.getTime() - (input.maxWaitMs ?? GOAT_LINEAR_MAX_WAIT_MS));
+  const quietCutoff = new Date(now.getTime() - (input.quietPeriodMs ?? LINEAR_QUIET_PERIOD_MS));
+  const maxWaitCutoff = new Date(now.getTime() - (input.maxWaitMs ?? LINEAR_MAX_WAIT_MS));
   const result = await getDb().execute(sql`
     SELECT
       integration_id AS "integrationId",
@@ -198,7 +196,7 @@ export async function flushLinearIssueWindow(window: LinearDueWindow): Promise<{
       rawPayload: { eventIds: claimed.map((row) => row.id) },
       rawEventCount: brainRefs.length > 0 ? newlyClaimedEventKeys.size : claimed.length,
       rawEventKeysByBrainRef: claimedEventKeysByBrainRef,
-      kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+      kind: BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
       skipReason: ingestDecision.action === "skip" ? ingestDecision.reason : null,
       now: flushedAt,
@@ -290,10 +288,7 @@ export function buildLinearIssueWindowItem(input: {
 }
 
 export function startLinearFlushWorker(options: { pollIntervalMs?: number } = {}) {
-  const pollIntervalMs = Math.max(
-    1_000,
-    options.pollIntervalMs ?? GOAT_LINEAR_FLUSH_POLL_INTERVAL_MS,
-  );
+  const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? LINEAR_FLUSH_POLL_INTERVAL_MS);
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let wake: (() => void) | null = null;
@@ -383,7 +378,7 @@ async function previewBufferedLinearEvents(window: LinearDueWindow) {
         AND issue_id = ${window.issueId}
         AND source_item_id IS NULL
       ORDER BY event_time ASC, id ASC
-      LIMIT ${GOAT_LINEAR_MAX_WINDOW_EVENTS}
+      LIMIT ${LINEAR_MAX_WINDOW_EVENTS}
     `),
   );
 }

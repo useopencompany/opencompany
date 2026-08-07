@@ -1,6 +1,6 @@
-import { ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS } from "@opencompany/brain/schema";
+import { ADJUSTABLE_DEFAULT_BRAIN_FOLDERS } from "@opencompany/brain/schema";
 
-export const GOAT_ONBOARDING_ROLE_IDS = [
+export const ONBOARDING_ROLE_IDS = [
   "founder",
   "product",
   "sales",
@@ -11,9 +11,9 @@ export const GOAT_ONBOARDING_ROLE_IDS = [
   "research",
 ] as const;
 
-export type OnboardingRole = (typeof GOAT_ONBOARDING_ROLE_IDS)[number];
+export type OnboardingRole = (typeof ONBOARDING_ROLE_IDS)[number];
 
-export const GOAT_ONBOARDING_ROLE_FOLDERS = {
+export const ONBOARDING_ROLE_FOLDERS = {
   founder: ["thoughts", "projects", "product", "meetings", "decisions", "fundraising", "metrics"],
   product: ["projects", "specs", "meetings", "decisions", "research", "incidents"],
   sales: ["deals", "meetings", "calls", "playbooks", "competitors", "notes"],
@@ -24,24 +24,24 @@ export const GOAT_ONBOARDING_ROLE_FOLDERS = {
   research: ["research", "sources", "notes", "concepts", "meetings", "reports"],
 } as const satisfies Record<OnboardingRole, readonly string[]>;
 
-export const GOAT_ONBOARDING_COMPANY_URL_MAX_LENGTH = 2_048;
+export const ONBOARDING_COMPANY_URL_MAX_LENGTH = 2_048;
 
-const GOAT_ONBOARDING_ROLES = new Set<string>(GOAT_ONBOARDING_ROLE_IDS);
+const ONBOARDING_ROLES = new Set<string>(ONBOARDING_ROLE_IDS);
 
 export function isOnboardingRole(value: unknown): value is OnboardingRole {
-  return typeof value === "string" && GOAT_ONBOARDING_ROLES.has(value);
+  return typeof value === "string" && ONBOARDING_ROLES.has(value);
 }
 
 export function onboardingFoldersForRole(role: unknown): string[] {
   return isOnboardingRole(role)
-    ? [...GOAT_ONBOARDING_ROLE_FOLDERS[role]]
-    : [...ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS];
+    ? [...ONBOARDING_ROLE_FOLDERS[role]]
+    : [...ADJUSTABLE_DEFAULT_BRAIN_FOLDERS];
 }
 
 export function normalizeOnboardingCompanyUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
-  if (!trimmed || trimmed.length > GOAT_ONBOARDING_COMPANY_URL_MAX_LENGTH) return null;
+  if (!trimmed || trimmed.length > ONBOARDING_COMPANY_URL_MAX_LENGTH) return null;
 
   const candidate = /^https?:/i.test(trimmed)
     ? trimmed

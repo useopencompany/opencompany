@@ -1,8 +1,8 @@
-import { ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS } from "@opencompany/brain/schema";
+import { ADJUSTABLE_DEFAULT_BRAIN_FOLDERS } from "@opencompany/brain/schema";
 import { describe, expect, it } from "vitest";
 import {
-  GOAT_ONBOARDING_COMPANY_URL_MAX_LENGTH,
   normalizeOnboardingCompanyUrl,
+  ONBOARDING_COMPANY_URL_MAX_LENGTH,
   onboardingFoldersForRole,
   parseOnboardingProfile,
 } from "./onboarding-profile";
@@ -21,7 +21,7 @@ describe("onboardingFoldersForRole", () => {
     ]);
     founderFolders.pop();
     expect(onboardingFoldersForRole("founder")).toHaveLength(7);
-    expect(onboardingFoldersForRole("unknown")).toEqual([...ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS]);
+    expect(onboardingFoldersForRole("unknown")).toEqual([...ADJUSTABLE_DEFAULT_BRAIN_FOLDERS]);
   });
 });
 
@@ -94,7 +94,7 @@ describe("parseOnboardingProfile", () => {
     expect(normalizeOnboardingCompanyUrl("https://user:secret@example.com")).toBeNull();
     expect(
       normalizeOnboardingCompanyUrl(
-        `https://example.com/${"x".repeat(GOAT_ONBOARDING_COMPANY_URL_MAX_LENGTH)}`,
+        `https://example.com/${"x".repeat(ONBOARDING_COMPANY_URL_MAX_LENGTH)}`,
       ),
     ).toBeNull();
   });

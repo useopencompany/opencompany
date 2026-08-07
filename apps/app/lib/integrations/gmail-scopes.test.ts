@@ -1,20 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
-  GOAT_GMAIL_COMPOSE_SCOPE,
-  GOAT_GMAIL_SEND_SCOPE,
+  GMAIL_COMPOSE_SCOPE,
+  GMAIL_SEND_SCOPE,
   hasGmailDraftScope,
   hasGmailSendScope,
 } from "./gmail-scopes";
 
 describe("Gmail OAuth scope capabilities", () => {
   it("treats compose as draft- and send-capable", () => {
-    expect(hasGmailDraftScope([GOAT_GMAIL_COMPOSE_SCOPE])).toBe(true);
-    expect(hasGmailSendScope([GOAT_GMAIL_COMPOSE_SCOPE])).toBe(true);
+    expect(hasGmailDraftScope([GMAIL_COMPOSE_SCOPE])).toBe(true);
+    expect(hasGmailSendScope([GMAIL_COMPOSE_SCOPE])).toBe(true);
   });
 
   it("does not treat the send-only scope as draft-capable", () => {
-    expect(hasGmailDraftScope([GOAT_GMAIL_SEND_SCOPE])).toBe(false);
-    expect(hasGmailSendScope([GOAT_GMAIL_SEND_SCOPE])).toBe(true);
+    expect(hasGmailDraftScope([GMAIL_SEND_SCOPE])).toBe(false);
+    expect(hasGmailSendScope([GMAIL_SEND_SCOPE])).toBe(true);
   });
 
   it("accepts broader legacy grants and rejects malformed scope values", () => {

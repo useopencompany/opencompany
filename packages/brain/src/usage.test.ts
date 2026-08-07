@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  BRAIN_USAGE_MARKER,
   type BrainUsageEntry,
   formatBrainUsageReport,
-  GOAT_BRAIN_USAGE_MARKER,
   isUsageEntry,
   parseBrainUsageReport,
 } from "./usage";
@@ -40,7 +40,7 @@ describe("goat brain usage reports", () => {
       "first line",
       `[runner] ${formatBrainUsageReport([entries[0]!])}`,
       "second line",
-      `${GOAT_BRAIN_USAGE_MARKER} ${JSON.stringify({ entries: [entries[1]!] })}`,
+      `${BRAIN_USAGE_MARKER} ${JSON.stringify({ entries: [entries[1]!] })}`,
       "",
     ].join("\n");
 
@@ -52,8 +52,8 @@ describe("goat brain usage reports", () => {
 
   it("ignores malformed and invalid marker payloads", () => {
     const stdout = [
-      `${GOAT_BRAIN_USAGE_MARKER} not json`,
-      `${GOAT_BRAIN_USAGE_MARKER} ${JSON.stringify({
+      `${BRAIN_USAGE_MARKER} not json`,
+      `${BRAIN_USAGE_MARKER} ${JSON.stringify({
         entries: [
           { model: "missing-fields" },
           {

@@ -1,9 +1,9 @@
-export const GOAT_ONBOARDING_CONNECTION_MESSAGE = "goat-onboarding-connection" as const;
-export const GOAT_ONBOARDING_CONNECTION_STORAGE_KEY = "goat-onboarding-connection-result";
-export const GOAT_ONBOARDING_CONNECTION_RETURN_TO = "/onboarding/connected";
+export const ONBOARDING_CONNECTION_MESSAGE = "goat-onboarding-connection" as const;
+export const ONBOARDING_CONNECTION_STORAGE_KEY = "goat-onboarding-connection-result";
+export const ONBOARDING_CONNECTION_RETURN_TO = "/onboarding/connected";
 
 export type OnboardingConnectionMessage = {
-  type: typeof GOAT_ONBOARDING_CONNECTION_MESSAGE;
+  type: typeof ONBOARDING_CONNECTION_MESSAGE;
   provider: string | null;
   status: string | null;
   reason: string | null;
@@ -13,7 +13,7 @@ export type OnboardingConnectionResult = Omit<OnboardingConnectionMessage, "type
 
 export function onboardingConnectHref(connectHref: string) {
   const url = new URL(connectHref, "https://goat.local");
-  url.searchParams.set("returnTo", GOAT_ONBOARDING_CONNECTION_RETURN_TO);
+  url.searchParams.set("returnTo", ONBOARDING_CONNECTION_RETURN_TO);
   return `${url.pathname}${url.search}`;
 }
 

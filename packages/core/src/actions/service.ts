@@ -1,8 +1,8 @@
 import {
+  ACTION_MAX_CALLS_PER_TURN,
+  ACTION_MAX_PROVIDER_FAILURES_PER_TURN,
   type ActionGatewayRequest,
   type ActionGatewayResponse,
-  GOAT_ACTION_MAX_CALLS_PER_TURN,
-  GOAT_ACTION_MAX_PROVIDER_FAILURES_PER_TURN,
 } from "@opencompany/agent-runtime";
 import type { ActionSourceDescriptor } from "./types";
 
@@ -105,7 +105,7 @@ export async function serveActionRequest(input: {
     };
   }
 
-  const maxCalls = input.maxCalls ?? GOAT_ACTION_MAX_CALLS_PER_TURN;
+  const maxCalls = input.maxCalls ?? ACTION_MAX_CALLS_PER_TURN;
   const claim = await input.governance.claimInvocation({
     sourceId: action.source,
     invocationId: request.invocationId,
@@ -185,7 +185,7 @@ export function createInMemoryActionTurnGovernance(
   const invocationIds = new Set<string>();
   let callCount = 0;
   const providerRetryGate = createProviderRetryGate(
-    input.maxProviderFailures ?? GOAT_ACTION_MAX_PROVIDER_FAILURES_PER_TURN,
+    input.maxProviderFailures ?? ACTION_MAX_PROVIDER_FAILURES_PER_TURN,
   );
 
   return {

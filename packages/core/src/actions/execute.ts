@@ -10,7 +10,7 @@ import {
   type ResolvedActionCatalog,
 } from "./types";
 
-export const GOAT_ACTION_TIMEOUT_MS = 20_000;
+export const ACTION_TIMEOUT_MS = 20_000;
 export const MAX_ACTION_RESULT_CHARS = 16_000;
 export const MAX_EXPANDED_ACTION_RESULT_CHARS = 256_000;
 
@@ -52,7 +52,7 @@ export async function executeAction(input: {
     };
   }
 
-  const timeoutMs = action.timeoutMs ?? GOAT_ACTION_TIMEOUT_MS;
+  const timeoutMs = action.timeoutMs ?? ACTION_TIMEOUT_MS;
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const signal = AbortSignal.any([input.signal, timeoutSignal]);
 

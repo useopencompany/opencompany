@@ -1,6 +1,6 @@
 import {
-  GOAT_STRIPE_API_VERSION,
   isValidStripeRestrictedApiKey,
+  STRIPE_API_VERSION,
   validateStripeRestrictedApiKey,
 } from "@opencompany/core/integrations/stripe";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -53,7 +53,7 @@ describe("Stripe restricted-key validation", () => {
     ]);
     for (const [, init] of fetchMock.mock.calls) {
       expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${apiKey}`);
-      expect(new Headers(init?.headers).get("Stripe-Version")).toBe(GOAT_STRIPE_API_VERSION);
+      expect(new Headers(init?.headers).get("Stripe-Version")).toBe(STRIPE_API_VERSION);
     }
   });
 

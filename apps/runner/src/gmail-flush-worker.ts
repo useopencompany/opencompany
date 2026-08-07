@@ -5,7 +5,7 @@ import {
   claimBrainSourceEvents,
 } from "@opencompany/db/brain-event-claims";
 import {
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+  BRAIN_AGENT_INGEST_JOB_KIND,
   upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
@@ -31,10 +31,10 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "goat-gmai
 // once its oldest buffered message has waited out the max wait — whichever
 // comes first. One agent ingest session then covers the whole window. Email
 // threads move in slow bursts like Linear issues, so the windows match.
-export const GOAT_GMAIL_QUIET_PERIOD_MS = 15 * 60_000;
-export const GOAT_GMAIL_MAX_WAIT_MS = 2 * 60 * 60_000;
-export const GOAT_GMAIL_MAX_WINDOW_EVENTS = 100;
-const GOAT_GMAIL_FLUSH_POLL_INTERVAL_MS = 60_000;
+export const GMAIL_QUIET_PERIOD_MS = 15 * 60_000;
+export const GMAIL_MAX_WAIT_MS = 2 * 60 * 60_000;
+export const GMAIL_MAX_WINDOW_EVENTS = 100;
+const GMAIL_FLUSH_POLL_INTERVAL_MS = 60_000;
 
 export type GmailDueWindow = {
   integrationId: string;
@@ -59,8 +59,8 @@ export async function listDueGmailThreadWindows(input: {
   maxWaitMs?: number;
 }): Promise<GmailDueWindow[]> {
   const now = input.now ?? new Date();
-  const quietCutoff = new Date(now.getTime() - (input.quietPeriodMs ?? GOAT_GMAIL_QUIET_PERIOD_MS));
-  const maxWaitCutoff = new Date(now.getTime() - (input.maxWaitMs ?? GOAT_GMAIL_MAX_WAIT_MS));
+  const quietCutoff = new Date(now.getTime() - (input.quietPeriodMs ?? GMAIL_QUIET_PERIOD_MS));
+  const maxWaitCutoff = new Date(now.getTime() - (input.maxWaitMs ?? GMAIL_MAX_WAIT_MS));
   const result = await getDb().execute(sql`
     SELECT
       integration_id AS "integrationId",
@@ -207,7 +207,7 @@ export async function flushGmailThreadWindow(
       rawPayload: { eventIds: claimed.map((row) => row.id) },
       rawEventCount: brainRefs.length > 0 ? newlyClaimedEventKeys.size : claimed.length,
       rawEventKeysByBrainRef: claimedEventKeysByBrainRef,
-      kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+      kind: BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
       now: flushedAt,
       db: tx,
@@ -305,10 +305,7 @@ export function buildGmailThreadWindowItem(input: {
 }
 
 export function startGmailFlushWorker(env: RunnerEnv, options: { pollIntervalMs?: number } = {}) {
-  const pollIntervalMs = Math.max(
-    1_000,
-    options.pollIntervalMs ?? GOAT_GMAIL_FLUSH_POLL_INTERVAL_MS,
-  );
+  const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? GMAIL_FLUSH_POLL_INTERVAL_MS);
   const abort = new AbortController();
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -399,7 +396,7 @@ async function previewBufferedGmailMessages(window: GmailDueWindow) {
         AND thread_id = ${window.threadId}
         AND source_item_id IS NULL
       ORDER BY event_time ASC, id ASC
-      LIMIT ${GOAT_GMAIL_MAX_WINDOW_EVENTS}
+      LIMIT ${GMAIL_MAX_WINDOW_EVENTS}
     `),
   );
 }

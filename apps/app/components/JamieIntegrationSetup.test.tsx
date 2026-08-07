@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import type { JamieProviderState } from "@/lib/integration-state";
 import { saveJamieWebhookApiKeyAction } from "@/lib/integrations/jamie-actions";
-import { GOAT_JAMIE_WEBHOOK_SECRET_HEADER } from "@/lib/integrations/jamie-constants";
+import { JAMIE_WEBHOOK_SECRET_HEADER } from "@/lib/integrations/jamie-constants";
 
 const routerMock = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -98,7 +98,7 @@ describe("JamieIntegrationSetup", () => {
       setup: {
         integrationId: "goat_integration_1",
         webhookUrl: "https://my.opencompany.chat/api/webhooks/jamie",
-        headerName: GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
+        headerName: JAMIE_WEBHOOK_SECRET_HEADER,
         apiKeyConfigured: true,
       },
     });

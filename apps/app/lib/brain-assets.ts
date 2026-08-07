@@ -14,7 +14,7 @@ import {
   replaceBrainAssetFile,
 } from "@opencompany/db/brain-files";
 import {
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+  BRAIN_AGENT_INGEST_JOB_KIND,
   upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
@@ -23,14 +23,14 @@ import {
   nextAvailableBrainId,
 } from "@/lib/brain";
 import {
-  GOAT_CHAT_SRT_MIME_TYPE,
+  CHAT_SRT_MIME_TYPE,
   normalizedChatAttachmentMediaType,
   validateChatAttachmentCandidate,
 } from "@/lib/chat-attachment-formats";
 
-export const GOAT_BRAIN_ASSET_MAX_BYTES = 20 * 1024 * 1024;
+export const BRAIN_ASSET_MAX_BYTES = 20 * 1024 * 1024;
 // Claude's per-image limit is 5 MB; the ingestion agent sees images natively.
-export const GOAT_BRAIN_ASSET_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+export const BRAIN_ASSET_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 
 export type BrainAssetFormat =
   | "pdf"
@@ -47,7 +47,7 @@ const CONTENT_TYPE_FORMATS: Record<string, BrainAssetFormat> = {
   "application/pdf": "pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
-  [GOAT_CHAT_SRT_MIME_TYPE]: "srt",
+  [CHAT_SRT_MIME_TYPE]: "srt",
   "text/csv": "csv",
   "text/tab-separated-values": "tsv",
   "application/json": "json",
@@ -58,7 +58,7 @@ const CONTENT_TYPE_FORMATS: Record<string, BrainAssetFormat> = {
   "image/webp": "image",
 };
 
-export const GOAT_BRAIN_ASSET_CONTENT_TYPES = Object.keys(CONTENT_TYPE_FORMATS);
+export const BRAIN_ASSET_CONTENT_TYPES = Object.keys(CONTENT_TYPE_FORMATS);
 
 export function brainAssetUploadPrefix(brainRef: string): string {
   return `goat-brain/${brainRef}/assets/`;
@@ -206,10 +206,10 @@ function validateAssetUpload(
   if (!Number.isFinite(input.sizeBytes) || input.sizeBytes <= 0) {
     return { ok: false, message: "Upload size is invalid." };
   }
-  if (input.sizeBytes > GOAT_BRAIN_ASSET_MAX_BYTES) {
+  if (input.sizeBytes > BRAIN_ASSET_MAX_BYTES) {
     return { ok: false, message: "Uploads are limited to 20 MB." };
   }
-  if (format === "image" && input.sizeBytes > GOAT_BRAIN_ASSET_IMAGE_MAX_BYTES) {
+  if (format === "image" && input.sizeBytes > BRAIN_ASSET_IMAGE_MAX_BYTES) {
     return { ok: false, message: "Images are limited to 5 MB." };
   }
   let pathname: string;
@@ -254,7 +254,7 @@ async function enqueueAssetIngest(input: {
     sourceConnectionId: input.brainRef,
     item,
     rawPayload: item.contentHashInput,
-    kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+    kind: BRAIN_AGENT_INGEST_JOB_KIND,
     brainRefs: [input.brainRef],
   });
   captureIngestionQuotaAnalytics(result.quotaUpdates);

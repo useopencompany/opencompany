@@ -1,6 +1,6 @@
 import { CODEX_DEFAULT_MODEL_ID } from "@opencompany/agent-runtime";
 import { BROWSER_TOOL_NAMES } from "@opencompany/browser-tools";
-import { GOAT_ACTION_EFFECTS_READ } from "@opencompany/core/actions/types";
+import { ACTION_EFFECTS_READ } from "@opencompany/core/actions/types";
 import { recordChatModelRoutingAttempt } from "@opencompany/db/chat-model-routing";
 import { convertToModelMessages, streamText } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,11 +18,11 @@ import { resolveAutoModel } from "@/lib/chat-model-router";
 import { resolveChatRequestContext } from "@/lib/chat-request-auth";
 import { generateChatTitleForMessage } from "@/lib/chat-title";
 import {
+  BRAIN_TOOL_NAME,
+  BRAIN_TOOL_PART_TYPE,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
-  GOAT_BRAIN_TOOL_NAME,
-  GOAT_BRAIN_TOOL_PART_TYPE,
-  GOAT_INCOMPLETE_TOOL_CALL_REASON,
+  INCOMPLETE_TOOL_CALL_REASON,
   LIST_ACTIONS_TOOL_NAME,
   LIST_ACTIONS_TOOL_PART_TYPE,
   LIST_SKILLS_TOOL_NAME,
@@ -33,7 +33,7 @@ import {
   USE_ACTION_TOOL_NAME,
   USE_SKILL_TOOL_NAME,
 } from "@/lib/chat-ui";
-import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
+import { CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
 import { isClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
 import { isCodexConnectedForUser } from "@/lib/codex-auth";
 import {
@@ -291,7 +291,7 @@ describe("POST /api/chat", () => {
         message: {
           id: "ui_user_1",
           role: "user",
-          parts: [{ type: "text", text: "x".repeat(GOAT_CHAT_PROMPT_MAX_LENGTH + 1) }],
+          parts: [{ type: "text", text: "x".repeat(CHAT_PROMPT_MAX_LENGTH + 1) }],
         },
       }),
     );
@@ -701,7 +701,7 @@ describe("POST /api/chat", () => {
           id: "stripe.get_revenue_summary",
           provider: "stripe",
           capability: "read",
-          effects: GOAT_ACTION_EFFECTS_READ,
+          effects: ACTION_EFFECTS_READ,
           permissionMode: "on",
           description: "Summarize operational payment activity.",
           params: { type: "object", properties: {} },
@@ -1552,7 +1552,7 @@ describe("POST /api/chat", () => {
       expect(typedOptions.tools?.[EDIT_TASK_SCHEDULE_TOOL_NAME]).toBeUndefined();
       expect(typedOptions.tools?.[DELETE_TASK_SCHEDULE_TOOL_NAME]).toBeUndefined();
 
-      const brainTool = typedOptions.tools?.[GOAT_BRAIN_TOOL_NAME];
+      const brainTool = typedOptions.tools?.[BRAIN_TOOL_NAME];
       const schema = brainTool?.inputSchema as {
         properties?: { command?: { enum?: string[] } };
       };
@@ -1632,7 +1632,7 @@ describe("POST /api/chat", () => {
       expect(typedOptions.system).not.toContain("Current recurring schedules");
       expect(typedOptions.system).not.toContain("Start a task when the user asks");
       expect(typedOptions.system).not.toMatch(/\btask(?:s)?\b|Results|routines/i);
-      expect(typedOptions.tools?.[GOAT_BRAIN_TOOL_NAME]).toBeDefined();
+      expect(typedOptions.tools?.[BRAIN_TOOL_NAME]).toBeDefined();
       expect(typedOptions.tools?.[START_TASK_TOOL_NAME]).toBeUndefined();
       expect(typedOptions.tools?.[SCHEDULE_TASK_TOOL_NAME]).toBeUndefined();
       expect(typedOptions.tools?.[EDIT_TASK_SCHEDULE_TOOL_NAME]).toBeUndefined();
@@ -2452,7 +2452,7 @@ describe("POST /api/chat", () => {
     mockAuth();
     mockCreateTurn();
     const toolPart = {
-      type: GOAT_BRAIN_TOOL_PART_TYPE,
+      type: BRAIN_TOOL_PART_TYPE,
       toolCallId: "tool_brain_1",
       state: "input-available",
       input: { command: "query", flags: { text: "hiring" } },
@@ -2512,7 +2512,7 @@ describe("POST /api/chat", () => {
             {
               ...toolPart,
               state: "output-error",
-              errorText: GOAT_INCOMPLETE_TOOL_CALL_REASON,
+              errorText: INCOMPLETE_TOOL_CALL_REASON,
             },
           ],
         }),
@@ -2833,7 +2833,7 @@ function sampleActionCatalog() {
         id: "slack.fetch_history",
         provider: "slack" as const,
         capability: "read" as const,
-        effects: GOAT_ACTION_EFFECTS_READ,
+        effects: ACTION_EFFECTS_READ,
         permissionMode: "on" as const,
         description: "Fetch recent messages from one Slack conversation.",
         params: { type: "object" as const, properties: {} },

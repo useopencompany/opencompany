@@ -13,7 +13,7 @@ vi.mock("@opencompany/db/capabilities", () => ({
   listUnsettledCapabilityRuns: mocks.listUnsettledRuns,
 }));
 vi.mock("@opencompany/telemetry", () => ({
-  GOAT_METRICS: { capabilityWalletBalanceUsdMicros: "goat.capability.wallet_balance" },
+  METRICS: { capabilityWalletBalanceUsdMicros: "goat.capability.wallet_balance" },
   recordHistogram: vi.fn(),
 }));
 vi.mock("@/lib/capabilities/execute", () => ({

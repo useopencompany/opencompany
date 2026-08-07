@@ -4,15 +4,15 @@ import type {
   ActionSourceDescriptor,
   ResolvedAction,
 } from "@opencompany/core/actions/types";
-import { GOAT_ACTION_EFFECTS_METERED_READ } from "@opencompany/core/actions/types";
+import { ACTION_EFFECTS_METERED_READ } from "@opencompany/core/actions/types";
 import { listWorkspaceCapabilities } from "@opencompany/db/capabilities";
 import {
   MANAGED_CAPABILITY_ACTIONS,
   MANAGED_CAPABILITY_SOURCE_DETAILS,
 } from "@/lib/capabilities/catalog";
 import {
+  CAPABILITY_ACTION_TIMEOUT_MS,
   executeManagedCapability,
-  GOAT_CAPABILITY_ACTION_TIMEOUT_MS,
   isManagedCapabilitiesKilled,
   isManagedCapabilityActionKilled,
 } from "@/lib/capabilities/execute";
@@ -38,10 +38,10 @@ export async function resolveManagedCapabilities(
     id: spec.id,
     provider: spec.source,
     capability: "read" as const,
-    effects: GOAT_ACTION_EFFECTS_METERED_READ,
+    effects: ACTION_EFFECTS_METERED_READ,
     description: spec.description,
     params: spec.params,
-    timeoutMs: GOAT_CAPABILITY_ACTION_TIMEOUT_MS,
+    timeoutMs: CAPABILITY_ACTION_TIMEOUT_MS,
     ...(spec.maxActionResultChars === undefined
       ? {}
       : { maxResultChars: spec.maxActionResultChars }),

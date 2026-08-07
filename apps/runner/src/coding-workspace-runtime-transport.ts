@@ -19,7 +19,7 @@ import {
   verifyCodingWorkspacePreviewCapability,
   verifyCodingWorkspaceTicket,
 } from "./coding-workspace-runtime-auth";
-import { createDictationWebSocketServer, GOAT_DICTATION_PATH } from "./dictation-transport";
+import { createDictationWebSocketServer, DICTATION_PATH } from "./dictation-transport";
 import type { RunnerEnv } from "./env";
 import {
   armSandboxIdleTimeout,
@@ -101,7 +101,7 @@ export function createCodingWorkspaceTransport(env: RunnerEnv) {
       }
 
       const path = request.url?.split("?", 1)[0];
-      if (path === GOAT_DICTATION_PATH) {
+      if (path === DICTATION_PATH) {
         dictationWebSockets.accept(request, socket, head);
         return;
       }

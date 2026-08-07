@@ -1,7 +1,7 @@
 import {
   ensureMonthlyIncludedUsage,
-  GOAT_LOW_BALANCE_WARN_USD_MICROS,
   isCreditsEnforcementEnabled,
+  LOW_BALANCE_WARN_USD_MICROS,
 } from "@opencompany/db/billing";
 import { getCreditBalanceUsdMicros } from "@opencompany/db/credits";
 import { NextResponse } from "next/server";
@@ -18,7 +18,7 @@ export async function GET() {
     const balanceUsdMicros = await getCreditBalanceUsdMicros(context.workspace.id);
     return NextResponse.json({
       balanceUsdMicros,
-      lowBalanceWarnUsdMicros: GOAT_LOW_BALANCE_WARN_USD_MICROS,
+      lowBalanceWarnUsdMicros: LOW_BALANCE_WARN_USD_MICROS,
       enforcementEnabled: isCreditsEnforcementEnabled(),
     });
   } catch {

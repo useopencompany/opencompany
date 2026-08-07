@@ -1,16 +1,9 @@
-export const GOAT_BRAIN_READ_COMMANDS = [
-  "help",
-  "list",
-  "get",
-  "timeline",
-  "query",
-  "doctor",
-] as const;
+export const BRAIN_READ_COMMANDS = ["help", "list", "get", "timeline", "query", "doctor"] as const;
 
-export const GOAT_BRAIN_RETRIEVAL_COMMANDS = ["query", "get", "timeline", "list"] as const;
+export const BRAIN_RETRIEVAL_COMMANDS = ["query", "get", "timeline", "list"] as const;
 
-export type BrainReadCommand = (typeof GOAT_BRAIN_READ_COMMANDS)[number];
-export type BrainRetrievalCommand = (typeof GOAT_BRAIN_RETRIEVAL_COMMANDS)[number];
+export type BrainReadCommand = (typeof BRAIN_READ_COMMANDS)[number];
+export type BrainRetrievalCommand = (typeof BRAIN_RETRIEVAL_COMMANDS)[number];
 export type BrainToolFlagValue = string | number | boolean | string[];
 
 export type BrainReadToolInput = {
@@ -19,7 +12,7 @@ export type BrainReadToolInput = {
   stdin?: string;
 };
 
-export const GOAT_BRAIN_TOOL_FLAG_VALUE_JSON_SCHEMA = {
+export const BRAIN_TOOL_FLAG_VALUE_JSON_SCHEMA = {
   anyOf: [
     { type: "string" },
     { type: "number" },
@@ -28,13 +21,13 @@ export const GOAT_BRAIN_TOOL_FLAG_VALUE_JSON_SCHEMA = {
   ],
 };
 
-export const GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA = {
+export const BRAIN_READ_TOOL_INPUT_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
     command: {
       type: "string",
-      enum: [...GOAT_BRAIN_READ_COMMANDS],
+      enum: [...BRAIN_READ_COMMANDS],
       description:
         "Read-only Goat Brain command. Use query for recall/search, list for inventory, get for known ids, timeline for dated evidence, doctor for validation, and help for usage.",
     },
@@ -114,7 +107,7 @@ export const GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA = {
           description: "Include archived records in query.",
         },
       },
-      additionalProperties: GOAT_BRAIN_TOOL_FLAG_VALUE_JSON_SCHEMA,
+      additionalProperties: BRAIN_TOOL_FLAG_VALUE_JSON_SCHEMA,
       description:
         'CLI flags for the command, without leading dashes. Query defaults to kind "page". Query output includes pagination; when hasMore is true, repeat the same query with offset set to nextOffset.',
     },
@@ -126,23 +119,23 @@ export const GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA = {
   required: ["command"],
 };
 
-export const GOAT_BRAIN_RETRIEVAL_TOOL_INPUT_JSON_SCHEMA = {
-  ...GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
+export const BRAIN_RETRIEVAL_TOOL_INPUT_JSON_SCHEMA = {
+  ...BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
   properties: {
-    ...GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA.properties,
+    ...BRAIN_READ_TOOL_INPUT_JSON_SCHEMA.properties,
     command: {
-      ...GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA.properties.command,
-      enum: [...GOAT_BRAIN_RETRIEVAL_COMMANDS],
+      ...BRAIN_READ_TOOL_INPUT_JSON_SCHEMA.properties.command,
+      enum: [...BRAIN_RETRIEVAL_COMMANDS],
       description:
         "Read-only Goat Brain command. Use query for recall/search, list for inventory, get for known ids, and timeline for dated evidence.",
     },
   },
 };
 
-export const GOAT_BRAIN_READ_TOOL_DESCRIPTION =
+export const BRAIN_READ_TOOL_DESCRIPTION =
   "Read-only access to the user's durable Goat Brain. Use it to recall and inspect existing knowledge, never to write. Arguments are { command, flags }: use query with flags.text for recall/search, list with optional flags.folder/type for inventory, get with flags.id for known Brain ids, and timeline with flags.id for a record's history. Query returns curated pages by default; pass kind: \"evidence\" only when raw source material is explicitly needed. Use query with since windows like 6h, 2d, 1w, or an ISO timestamp to search or browse recent Brain pages; omit text when the user only wants recent entries. Query output includes pagination. When pagination.hasMore is true, repeat the same query with all filters unchanged and offset set to pagination.nextOffset. Use includeMerged only when inspecting duplicate/merged history and includeArchived only for retired records. Do not treat Brain as a chat scratchpad.";
 
-export const GOAT_CODEX_BRAIN_TOOL_CONTRACT_VERSION = "goat-codex-brain.v1";
+export const CODEX_BRAIN_TOOL_CONTRACT_VERSION = "goat-codex-brain.v1";
 
 export function normalizeBrainReadToolInput(input: unknown): BrainReadToolInput {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
@@ -161,12 +154,12 @@ export function normalizeBrainReadToolInput(input: unknown): BrainReadToolInput 
 }
 
 export function isBrainRetrievalCommand(value: BrainReadCommand): value is BrainRetrievalCommand {
-  return (GOAT_BRAIN_RETRIEVAL_COMMANDS as readonly string[]).includes(value);
+  return (BRAIN_RETRIEVAL_COMMANDS as readonly string[]).includes(value);
 }
 
 function normalizeBrainReadCommand(value: unknown): BrainReadCommand | null {
   if (typeof value !== "string") return null;
-  return (GOAT_BRAIN_READ_COMMANDS as readonly string[]).includes(value)
+  return (BRAIN_READ_COMMANDS as readonly string[]).includes(value)
     ? (value as BrainReadCommand)
     : null;
 }

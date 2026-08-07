@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import {
+  ACTION_HOST_TOOL_CONTRACT_VERSION,
   type CodexBrainCaptureGatewayRequest,
   type CodexBrainCaptureGatewayResponse,
-  GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
 } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import { codexChatSessions, codexChatTurns } from "@opencompany/db/schema";
@@ -183,7 +183,7 @@ async function loadCodexBrainCaptureContext(
     .where(
       and(
         eq(codexChatSessions.id, request.codexChatSessionId),
-        eq(codexChatSessions.hostToolContractVersion, GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION),
+        eq(codexChatSessions.hostToolContractVersion, ACTION_HOST_TOOL_CONTRACT_VERSION),
         eq(codexChatTurns.status, "running"),
       ),
     )

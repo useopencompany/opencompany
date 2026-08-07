@@ -1,7 +1,7 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { normalizeModel } from "@/lib/model-options";
 
-export const GOAT_TASK_PROMPT_MAX_LENGTH = 10_000;
+export const TASK_PROMPT_MAX_LENGTH = 10_000;
 
 export type TaskInput = {
   prompt: string;
@@ -16,10 +16,10 @@ export function validateTaskInput(input: {
   if (!prompt) {
     return { ok: false, error: "Enter a task before starting a run." };
   }
-  if (prompt.length > GOAT_TASK_PROMPT_MAX_LENGTH) {
+  if (prompt.length > TASK_PROMPT_MAX_LENGTH) {
     return {
       ok: false,
-      error: `Tasks can be at most ${GOAT_TASK_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
+      error: `Tasks can be at most ${TASK_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
     };
   }
 

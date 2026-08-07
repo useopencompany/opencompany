@@ -11,7 +11,7 @@ import {
 
 type DbLike = any;
 
-export const GOAT_MANAGED_CAPABILITY_SOURCES = [
+export const MANAGED_CAPABILITY_SOURCES = [
   "x",
   "linkedin",
   "youtube",
@@ -21,7 +21,7 @@ export const GOAT_MANAGED_CAPABILITY_SOURCES = [
   "seo",
 ] as const satisfies readonly ManagedCapabilitySource[];
 
-export const GOAT_CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS = 5_000_000;
+export const CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS = 5_000_000;
 
 export type WorkspaceCapabilityState = {
   source: ManagedCapabilitySource;
@@ -37,7 +37,7 @@ export async function getCapabilitySessionBudgetUsdMicros(
     .from(workspaces)
     .where(eq(workspaces.id, workspaceId))
     .limit(1);
-  return row?.budgetUsdMicros ?? GOAT_CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS;
+  return row?.budgetUsdMicros ?? CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS;
 }
 
 export async function setCapabilitySessionBudget(input: {
@@ -63,7 +63,7 @@ export async function setCapabilitySessionBudget(input: {
       budgetUsdMicros: workspaces.capabilitySessionBudgetUsdMicros,
     });
   if (!row) throw new Error("Could not update the capability session budget.");
-  return row.budgetUsdMicros ?? GOAT_CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS;
+  return row.budgetUsdMicros ?? CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS;
 }
 
 export async function sumCapabilitySessionSpendUsdMicros(input: {
@@ -112,7 +112,7 @@ export async function listWorkspaceCapabilities(
       Boolean(row.enabled),
     ]),
   );
-  return GOAT_MANAGED_CAPABILITY_SOURCES.map((source) => ({
+  return MANAGED_CAPABILITY_SOURCES.map((source) => ({
     source,
     enabled: overrides.get(source) ?? true,
   }));
@@ -144,7 +144,7 @@ export async function setWorkspaceCapability(input: {
   updatedByWorkosId: string;
   db?: DbLike;
 }) {
-  if (!GOAT_MANAGED_CAPABILITY_SOURCES.includes(input.source)) {
+  if (!MANAGED_CAPABILITY_SOURCES.includes(input.source)) {
     throw new Error("Unknown managed capability source.");
   }
   const db = input.db ?? getDb();

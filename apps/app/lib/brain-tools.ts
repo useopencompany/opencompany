@@ -22,7 +22,7 @@ export const SAVE_TO_BRAIN_TOOL_NAME = "save_to_brain";
 // Advanced escape hatch: the full CLI-shaped read surface (doctor, help, and any flag the
 // dedicated tools do not expose). Kept for completeness and back-compat, de-emphasized so
 // agents reach for the flat tools first.
-export const GOAT_BRAIN_ADVANCED_TOOL_NAME = "goat_brain";
+export const BRAIN_ADVANCED_TOOL_NAME = "goat_brain";
 
 const nonEmptyString = z.string().check(z.minLength(1));
 const idOrIds = z.union([
@@ -240,5 +240,5 @@ export const brainAdvancedInputSchema = {
   ...brainSelectorSchema,
 };
 
-export const GOAT_BRAIN_ADVANCED_TOOL_DESCRIPTION =
+export const BRAIN_ADVANCED_TOOL_DESCRIPTION =
   "Advanced: the raw CLI-shaped read surface for a brain. Prefer search_brain, get_document, list_documents, and get_timeline for everyday use. This tool exposes commands they do not (doctor for validation, help for usage) and full flag control via { command, flags }. Read-only.";

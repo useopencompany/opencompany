@@ -1,4 +1,4 @@
-import { GOAT_CODEX_SAVE_TO_BRAIN_TOOL_NAME } from "@opencompany/agent-runtime";
+import { CODEX_SAVE_TO_BRAIN_TOOL_NAME } from "@opencompany/agent-runtime";
 import { describe, expect, it, vi } from "vitest";
 import type { CodexAppServerDynamicToolCall } from "./codex-app-server";
 import { createCodexBrainCaptureDynamicTool } from "./codex-brain-capture-tool";
@@ -19,7 +19,7 @@ describe("createCodexBrainCaptureDynamicTool", () => {
 
     expect(tool.spec).toMatchObject({
       type: "function",
-      name: GOAT_CODEX_SAVE_TO_BRAIN_TOOL_NAME,
+      name: CODEX_SAVE_TO_BRAIN_TOOL_NAME,
       description: expect.stringContaining("explicitly"),
     });
     expect(tool.spec.inputSchema).not.toHaveProperty("properties.attachmentIds");
@@ -124,7 +124,7 @@ function call(argumentsValue: unknown): CodexAppServerDynamicToolCall {
     turnId: "turn_1",
     callId: "call_1",
     namespace: null,
-    tool: GOAT_CODEX_SAVE_TO_BRAIN_TOOL_NAME,
+    tool: CODEX_SAVE_TO_BRAIN_TOOL_NAME,
     arguments: argumentsValue,
   };
 }

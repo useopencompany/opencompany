@@ -1,6 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
-import { GOAT_LINEAR_MCP_EXTERNAL_ID } from "@opencompany/db/linear";
+import { LINEAR_MCP_EXTERNAL_ID } from "@opencompany/db/linear";
 import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq, ne } from "drizzle-orm";
 import type { LinearSourceProviderState } from "@/lib/integration-state";
@@ -28,19 +28,19 @@ export type LinearIdentity = {
 };
 
 const LINEAR_PROVIDER = "linear" as const;
-const GOAT_LINEAR_INGEST_ENVS = [
-  "GOAT_LINEAR_CLIENT_ID",
-  "GOAT_LINEAR_CLIENT_SECRET",
-  "GOAT_LINEAR_WEBHOOK_SECRET",
-  "GOAT_LINEAR_STATE_SECRET",
+const LINEAR_INGEST_ENVS = [
+  "LINEAR_CLIENT_ID",
+  "LINEAR_CLIENT_SECRET",
+  "LINEAR_WEBHOOK_SECRET",
+  "LINEAR_STATE_SECRET",
 ] as const;
 
 // Read-only scope: the app reads issues, comments, and teams to route and
 // enrich ingestion. Writes never happen through this connection.
-export const GOAT_LINEAR_INGEST_SCOPES = ["read"] as const;
+export const LINEAR_INGEST_SCOPES = ["read"] as const;
 
 export function isLinearIngestConfigured() {
-  return GOAT_LINEAR_INGEST_ENVS.every((name) => Boolean(process.env[name]?.trim()));
+  return LINEAR_INGEST_ENVS.every((name) => Boolean(process.env[name]?.trim()));
 }
 
 // The ingestion connection only; the Linear MCP connector shares provider
@@ -61,7 +61,7 @@ export async function getLinearSourceIntegrationState(
       and(
         eq(integrations.userWorkosId, userWorkosId),
         eq(integrations.provider, LINEAR_PROVIDER),
-        ne(integrations.externalId, GOAT_LINEAR_MCP_EXTERNAL_ID),
+        ne(integrations.externalId, LINEAR_MCP_EXTERNAL_ID),
       ),
     )
     .orderBy(desc(integrations.updatedAt))
@@ -125,10 +125,10 @@ export function verifyLinearIngestState(state: string): LinearIngestStatePayload
 
 export function buildLinearAuthorizationUrl(state: string) {
   const url = new URL("https://linear.app/oauth/authorize");
-  url.searchParams.set("client_id", requiredEnv("GOAT_LINEAR_CLIENT_ID"));
+  url.searchParams.set("client_id", requiredEnv("LINEAR_CLIENT_ID"));
   url.searchParams.set("redirect_uri", linearIngestCallbackUrl());
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", GOAT_LINEAR_INGEST_SCOPES.join(","));
+  url.searchParams.set("scope", LINEAR_INGEST_SCOPES.join(","));
   url.searchParams.set("state", state);
   url.searchParams.set("actor", "user");
   url.searchParams.set("prompt", "consent");
@@ -143,8 +143,8 @@ export async function exchangeLinearCode(code: string): Promise<LinearOAuthResul
       grant_type: "authorization_code",
       code,
       redirect_uri: linearIngestCallbackUrl(),
-      client_id: requiredEnv("GOAT_LINEAR_CLIENT_ID"),
-      client_secret: requiredEnv("GOAT_LINEAR_CLIENT_SECRET"),
+      client_id: requiredEnv("LINEAR_CLIENT_ID"),
+      client_secret: requiredEnv("LINEAR_CLIENT_SECRET"),
     }).toString(),
   });
   if (!response.ok) {
@@ -255,9 +255,7 @@ function sanitizeReturnTo(value: string) {
 }
 
 function signStateBody(body: string) {
-  return createHmac("sha256", requiredEnv("GOAT_LINEAR_STATE_SECRET"))
-    .update(body)
-    .digest("base64url");
+  return createHmac("sha256", requiredEnv("LINEAR_STATE_SECRET")).update(body).digest("base64url");
 }
 
 function safeEqual(left: string, right: string) {

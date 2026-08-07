@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { and, asc, eq, or, sql } from "drizzle-orm";
 import { defaultBrainFolderManifestEntries, normalizeBrainId } from "../../brain/src/index";
-import { calendarMonthWindow, GOAT_PRO_STRIPE_PRODUCT_KEY } from "./billing-constants";
+import { calendarMonthWindow, PRO_STRIPE_PRODUCT_KEY } from "./billing-constants";
 import { hashBrainContent, seedDefaultBrainFolders } from "./brain-files";
 import { getDb } from "./client";
 import { grantMonthlyIncludedUsage } from "./credits";
@@ -25,10 +25,10 @@ import {
 
 type DbClient = any;
 
-export const DEFAULT_GOAT_BRAIN_NAME = "General";
-export const DEFAULT_GOAT_BRAIN_SLUG = "general";
-const GOAT_BRAIN_ID_SUFFIX_LENGTH = 12;
-const GOAT_BRAIN_ID_MAX_LENGTH = 80;
+export const DEFAULT_BRAIN_NAME = "General";
+export const DEFAULT_BRAIN_SLUG = "general";
+const BRAIN_ID_SUFFIX_LENGTH = 12;
+const BRAIN_ID_MAX_LENGTH = 80;
 
 export type WorkspaceWithRole = {
   workspace: Workspace;
@@ -54,16 +54,16 @@ export function newBrainId(name = "brain") {
 }
 
 export function defaultBrainIdForUser(userWorkosId: string) {
-  return readableBrainId(DEFAULT_GOAT_BRAIN_SLUG, userWorkosId);
+  return readableBrainId(DEFAULT_BRAIN_SLUG, userWorkosId);
 }
 
 function readableBrainId(name: string, entropy: string) {
   const suffix = createHash("sha256")
     .update(entropy)
     .digest("hex")
-    .slice(0, GOAT_BRAIN_ID_SUFFIX_LENGTH);
+    .slice(0, BRAIN_ID_SUFFIX_LENGTH);
   const base = normalizeBrainId(name) || "brain";
-  const baseMaxLength = GOAT_BRAIN_ID_MAX_LENGTH - suffix.length - 1;
+  const baseMaxLength = BRAIN_ID_MAX_LENGTH - suffix.length - 1;
   return `${base.slice(0, baseMaxLength).replace(/-+$/g, "")}-${suffix}`;
 }
 
@@ -82,7 +82,7 @@ function brainAccessCondition(userWorkosId: string) {
           access_workspace."created_by_workos_id" = ${userWorkosId}
           OR (
             access_billing."plan" = 'pro'
-            AND access_billing."stripe_product_key" = ${GOAT_PRO_STRIPE_PRODUCT_KEY}
+            AND access_billing."stripe_product_key" = ${PRO_STRIPE_PRODUCT_KEY}
           )
         )
     )
@@ -119,7 +119,7 @@ export async function listWorkspacesForUser(
           eq(workspaces.createdByWorkosId, userWorkosId),
           and(
             eq(workspaceBilling.plan, "pro"),
-            eq(workspaceBilling.stripeProductKey, GOAT_PRO_STRIPE_PRODUCT_KEY),
+            eq(workspaceBilling.stripeProductKey, PRO_STRIPE_PRODUCT_KEY),
           ),
         ),
       ),
@@ -140,7 +140,7 @@ export async function hasOwnedHobbyWorkspace(
     .where(
       and(
         eq(workspaces.createdByWorkosId, userWorkosId),
-        sql`NOT COALESCE(${workspaceBilling.plan} = 'pro' AND ${workspaceBilling.stripeProductKey} = ${GOAT_PRO_STRIPE_PRODUCT_KEY}, false)`,
+        sql`NOT COALESCE(${workspaceBilling.plan} = 'pro' AND ${workspaceBilling.stripeProductKey} = ${PRO_STRIPE_PRODUCT_KEY}, false)`,
       ),
     )
     .limit(1);
@@ -252,7 +252,7 @@ export async function getWorkspaceRole(
           eq(workspaces.createdByWorkosId, input.userWorkosId),
           and(
             eq(workspaceBilling.plan, "pro"),
-            eq(workspaceBilling.stripeProductKey, GOAT_PRO_STRIPE_PRODUCT_KEY),
+            eq(workspaceBilling.stripeProductKey, PRO_STRIPE_PRODUCT_KEY),
           ),
         ),
       ),
@@ -300,7 +300,7 @@ export async function getDefaultBrainForUser(
     { userWorkosId, workspaceId: first.workspace.id },
     { db },
   );
-  return brains.find((brain) => brain.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
+  return brains.find((brain) => brain.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
 }
 
 // Bootstraps the personal workspace + "General" brain for a user that has no
@@ -334,8 +334,8 @@ export async function createDefaultWorkspaceForUser(
     .values({
       id: brainId,
       workspaceId: `goat_ws_${input.userWorkosId}`,
-      name: DEFAULT_GOAT_BRAIN_NAME,
-      slug: DEFAULT_GOAT_BRAIN_SLUG,
+      name: DEFAULT_BRAIN_NAME,
+      slug: DEFAULT_BRAIN_SLUG,
       visibility: "workspace",
       createdByWorkosId: input.userWorkosId,
     })
@@ -383,7 +383,7 @@ export async function createWorkspaceForUser(
   const name = input.name.trim();
   if (!name) throw new Error("Workspace name cannot be empty.");
 
-  const brainId = newBrainId(DEFAULT_GOAT_BRAIN_SLUG);
+  const brainId = newBrainId(DEFAULT_BRAIN_SLUG);
   const workspaceInsert = db
     .insert(workspaces)
     .values({
@@ -404,8 +404,8 @@ export async function createWorkspaceForUser(
     .values({
       id: brainId,
       workspaceId: input.workspaceId,
-      name: DEFAULT_GOAT_BRAIN_NAME,
-      slug: DEFAULT_GOAT_BRAIN_SLUG,
+      name: DEFAULT_BRAIN_NAME,
+      slug: DEFAULT_BRAIN_SLUG,
       visibility: "workspace",
       createdByWorkosId: input.userWorkosId,
     })
@@ -481,8 +481,7 @@ export async function adoptWorkspaceMembershipsFromOrgs(
       .limit(1);
     const workspace = rows[0];
     if (!workspace) continue;
-    const isPro =
-      workspace.plan === "pro" && workspace.stripeProductKey === GOAT_PRO_STRIPE_PRODUCT_KEY;
+    const isPro = workspace.plan === "pro" && workspace.stripeProductKey === PRO_STRIPE_PRODUCT_KEY;
     if (!isPro && workspace.createdByWorkosId !== input.userWorkosId) continue;
     await db
       .insert(workspaceMembers)

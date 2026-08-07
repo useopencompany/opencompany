@@ -2,14 +2,14 @@ import type { BrainUsageEntry } from "./retrieval/gateway";
 
 export type { BrainUsageEntry } from "./retrieval/gateway";
 
-export const GOAT_BRAIN_USAGE_MARKER = "__GOAT_BRAIN_USAGE__";
+export const BRAIN_USAGE_MARKER = "__GOAT_BRAIN_USAGE__";
 
 export type BrainUsageReport = {
   entries: BrainUsageEntry[];
 };
 
 export function formatBrainUsageReport(entries: BrainUsageEntry[]): string {
-  return `${GOAT_BRAIN_USAGE_MARKER} ${JSON.stringify({ entries } satisfies BrainUsageReport)}`;
+  return `${BRAIN_USAGE_MARKER} ${JSON.stringify({ entries } satisfies BrainUsageReport)}`;
 }
 
 export function parseBrainUsageReport(stdout: string): {
@@ -19,11 +19,9 @@ export function parseBrainUsageReport(stdout: string): {
   const entries: BrainUsageEntry[] = [];
   const kept: string[] = [];
   for (const line of stdout.split("\n")) {
-    const markerIndex = line.indexOf(GOAT_BRAIN_USAGE_MARKER);
+    const markerIndex = line.indexOf(BRAIN_USAGE_MARKER);
     if (markerIndex !== -1) {
-      entries.push(
-        ...parseEntries(line.slice(markerIndex + GOAT_BRAIN_USAGE_MARKER.length).trim()),
-      );
+      entries.push(...parseEntries(line.slice(markerIndex + BRAIN_USAGE_MARKER.length).trim()));
       continue;
     }
     kept.push(line);

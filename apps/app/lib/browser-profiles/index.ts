@@ -62,11 +62,11 @@ export type BrowserProfileAgentSession = {
 };
 
 export function browserProfilesEnabled() {
-  return process.env.GOAT_BROWSER_PROFILES_ENABLED === "true";
+  return process.env.BROWSER_PROFILES_ENABLED === "true";
 }
 
 export function browserProfilesKilled() {
-  return process.env.GOAT_BROWSER_PROFILES_KILL_SWITCH === "true";
+  return process.env.BROWSER_PROFILES_KILL_SWITCH === "true";
 }
 
 export function browserProfilesAvailable() {

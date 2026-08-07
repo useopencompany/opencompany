@@ -9,16 +9,15 @@ export function resolveDevEnv({
   httpsEnv = {},
 } = {}) {
   const localHttpAppUrl = `http://localhost:${port}`;
-  const configuredAppUrl = configuredAppUrl(processEnv, httpsEnv);
+  const configured = configuredAppUrl(processEnv, httpsEnv);
   const appUrl =
     trimmed(httpsEnv.NEXT_PUBLIC_APP_URL) ||
     trimmed(tunnelEnv.NEXT_PUBLIC_APP_URL) ||
-    trimmed(tunnelEnv.NEXT_PUBLIC_APP_URL) ||
-    configuredAppUrl ||
+    configured ||
     localHttpAppUrl;
 
   const localRedirectAppUrl =
-    trimmed(httpsEnv.NEXT_PUBLIC_APP_URL) || configuredAppUrl || localHttpAppUrl;
+    trimmed(httpsEnv.NEXT_PUBLIC_APP_URL) || configured || localHttpAppUrl;
   const redirectUri =
     trimmed(httpsEnv.NEXT_PUBLIC_WORKOS_REDIRECT_URI) ||
     configuredRedirectUri(processEnv, httpsEnv) ||
@@ -27,13 +26,11 @@ export function resolveDevEnv({
   return {
     NEXT_PUBLIC_APP_URL: appUrl,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: redirectUri,
-    NEXT_PUBLIC_APP_URL: appUrl,
-    NEXT_PUBLIC_WORKOS_REDIRECT_URI: redirectUri,
     WORKOS_REDIRECT_URI: redirectUri,
     RUNNER_WORKERS_ENABLED: "true",
     RUNNER_ALLOWED_ORIGINS: appendCsvValues(
       processEnv.RUNNER_ALLOWED_ORIGINS,
-      [appUrl, tunnelEnv.NEXT_PUBLIC_APP_URL, tunnelEnv.NEXT_PUBLIC_APP_URL].filter(Boolean),
+      [appUrl, tunnelEnv.NEXT_PUBLIC_APP_URL].filter(Boolean),
     ),
     RUNNER_PREVIEW_BASE_DOMAIN:
       trimmed(processEnv.RUNNER_PREVIEW_BASE_DOMAIN) ||
@@ -46,8 +43,8 @@ export function resolveDevEnv({
 
 function previewProtocol(appUrl, runnerPublicUrl) {
   try {
-    const appUrl = new URL(appUrl);
-    if (appUrl.hostname === "localhost") return appUrl.protocol === "https:" ? "https" : "http";
+    const parsed = new URL(appUrl);
+    if (parsed.hostname === "localhost") return parsed.protocol === "https:" ? "https" : "http";
   } catch {
     // Fall through to the runner origin.
   }
@@ -63,9 +60,9 @@ function previewProtocol(appUrl, runnerPublicUrl) {
 
 function localPreviewBaseDomain(appUrl, runnerPublicUrl) {
   try {
-    const appUrl = new URL(appUrl);
-    if (appUrl.protocol === "https:" && appUrl.hostname === "localhost") {
-      return `preview.localhost:${appUrl.port || "443"}`;
+    const parsed = new URL(appUrl);
+    if (parsed.protocol === "https:" && parsed.hostname === "localhost") {
+      return `preview.localhost:${parsed.port || "443"}`;
     }
   } catch {}
 

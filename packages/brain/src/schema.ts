@@ -1,14 +1,9 @@
 // Workflows and skills used to live here as reserved folders. They were
 // extracted into their own workspace-scoped tables (goat.workflows /
 // goat.skills) so the Brain stays purely knowledge/context.
-export const HARD_DEFAULT_GOAT_BRAIN_FOLDERS = [
-  "inbox",
-  "people",
-  "companies",
-  "evidence",
-] as const;
+export const HARD_DEFAULT_BRAIN_FOLDERS = ["inbox", "people", "companies", "evidence"] as const;
 
-export const ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS = [
+export const ADJUSTABLE_DEFAULT_BRAIN_FOLDERS = [
   "thoughts",
   "projects",
   "meetings",
@@ -17,19 +12,19 @@ export const ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS = [
   "concepts",
 ] as const;
 
-export const DEFAULT_GOAT_BRAIN_FOLDERS = [
+export const DEFAULT_BRAIN_FOLDERS = [
   "inbox",
-  ...ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS,
+  ...ADJUSTABLE_DEFAULT_BRAIN_FOLDERS,
   "people",
   "companies",
   "evidence",
 ] as const;
 
-export const GOAT_BRAIN_MIDDLE_FOLDER_ORDER = ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS;
+export const BRAIN_MIDDLE_FOLDER_ORDER = ADJUSTABLE_DEFAULT_BRAIN_FOLDERS;
 
-export type BrainDefaultFolder = (typeof DEFAULT_GOAT_BRAIN_FOLDERS)[number];
-export type HardDefaultBrainFolder = (typeof HARD_DEFAULT_GOAT_BRAIN_FOLDERS)[number];
-export type AdjustableDefaultBrainFolder = (typeof ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS)[number];
+export type BrainDefaultFolder = (typeof DEFAULT_BRAIN_FOLDERS)[number];
+export type HardDefaultBrainFolder = (typeof HARD_DEFAULT_BRAIN_FOLDERS)[number];
+export type AdjustableDefaultBrainFolder = (typeof ADJUSTABLE_DEFAULT_BRAIN_FOLDERS)[number];
 export type BrainDocumentFormat =
   | "markdown"
   | "pdf"
@@ -42,17 +37,17 @@ export type BrainDocumentFormat =
   | "text"
   | "image";
 
-export const GOAT_BRAIN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
-export const GOAT_BRAIN_FOLDER_PATTERN = /^[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*){0,5}$/;
-export const GOAT_BRAIN_RELATION_TYPE_PATTERN = /^[a-z][a-z0-9_]*$/;
-export const GOAT_BRAIN_ENTITY_TYPE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
-export const DEFAULT_GOAT_BRAIN_RELATION_TYPE = "related";
+export const BRAIN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
+export const BRAIN_FOLDER_PATTERN = /^[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*){0,5}$/;
+export const BRAIN_RELATION_TYPE_PATTERN = /^[a-z][a-z0-9_]*$/;
+export const BRAIN_ENTITY_TYPE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+export const DEFAULT_BRAIN_RELATION_TYPE = "related";
 
 // One question decides the type: what does this record represent?
 // External artifacts of any format (articles, videos, email threads, repos)
 // are `source` — the source ref's provider already carries the format nuance.
 // Synthesized prose (research reports, drafts) is `analysis`.
-export const GOAT_BRAIN_ENTITY_TYPES = [
+export const BRAIN_ENTITY_TYPES = [
   "person",
   "company",
   "project",
@@ -63,17 +58,17 @@ export const GOAT_BRAIN_ENTITY_TYPES = [
   "note",
 ] as const;
 
-export type BrainEntityType = (typeof GOAT_BRAIN_ENTITY_TYPES)[number];
+export type BrainEntityType = (typeof BRAIN_ENTITY_TYPES)[number];
 
-export const GOAT_BRAIN_KINDS = ["page", "evidence"] as const;
+export const BRAIN_KINDS = ["page", "evidence"] as const;
 
-export type BrainKind = (typeof GOAT_BRAIN_KINDS)[number];
+export type BrainKind = (typeof BRAIN_KINDS)[number];
 
-export const GOAT_BRAIN_EVIDENCE_ZONE = "evidence";
+export const BRAIN_EVIDENCE_ZONE = "evidence";
 
-export const GOAT_BRAIN_STATUS_VALUES = ["draft", "active", "archived", "merged"] as const;
+export const BRAIN_STATUS_VALUES = ["draft", "active", "archived", "merged"] as const;
 
-export type BrainStatus = (typeof GOAT_BRAIN_STATUS_VALUES)[number];
+export type BrainStatus = (typeof BRAIN_STATUS_VALUES)[number];
 
 export type BrainRelation = {
   type: string;
@@ -96,14 +91,14 @@ export type BrainSource = {
   title?: string;
 };
 
-export const GOAT_BRAIN_EVIDENCE_ID_PATTERN = /^ev-[a-z0-9][a-z0-9-]{0,76}$/;
+export const BRAIN_EVIDENCE_ID_PATTERN = /^ev-[a-z0-9][a-z0-9-]{0,76}$/;
 
 // Source refs are `provider:id` — a lowercase provider slug, a colon, then the
 // provider's own identifier (which may itself contain colons or slashes, e.g.
 // `jamie:meeting:calendar_event_123`). No whitespace, brackets, or pipes so the
 // ref stays inline-link safe.
-export const GOAT_BRAIN_SOURCE_REF_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}:[^\s[\]|]+$/;
-export const GOAT_BRAIN_SOURCE_REF_MAX_LENGTH = 256;
+export const BRAIN_SOURCE_REF_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}:[^\s[\]|]+$/;
+export const BRAIN_SOURCE_REF_MAX_LENGTH = 256;
 
 export type ParsedBrainSourceRef = {
   raw: string;
@@ -145,28 +140,26 @@ export type BrainDocument = {
 };
 
 export function isValidBrainId(value: unknown): value is string {
-  return typeof value === "string" && GOAT_BRAIN_ID_PATTERN.test(value);
+  return typeof value === "string" && BRAIN_ID_PATTERN.test(value);
 }
 
 export function isValidBrainFolder(value: unknown): value is string {
-  return typeof value === "string" && GOAT_BRAIN_FOLDER_PATTERN.test(value);
+  return typeof value === "string" && BRAIN_FOLDER_PATTERN.test(value);
 }
 
 export function isBrainEvidenceFolder(value: string): boolean {
   const normalized = normalizeBrainFolder(value);
-  return (
-    normalized === GOAT_BRAIN_EVIDENCE_ZONE || normalized.startsWith(`${GOAT_BRAIN_EVIDENCE_ZONE}/`)
-  );
+  return normalized === BRAIN_EVIDENCE_ZONE || normalized.startsWith(`${BRAIN_EVIDENCE_ZONE}/`);
 }
 
 export function isHardDefaultBrainFolder(value: string): boolean {
   const normalized = normalizeBrainFolder(value);
-  return HARD_DEFAULT_GOAT_BRAIN_FOLDERS.includes(normalized as HardDefaultBrainFolder);
+  return HARD_DEFAULT_BRAIN_FOLDERS.includes(normalized as HardDefaultBrainFolder);
 }
 
 export function isAdjustableDefaultBrainFolder(value: string): boolean {
   const normalized = normalizeBrainFolder(value);
-  return ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS.includes(normalized as AdjustableDefaultBrainFolder);
+  return ADJUSTABLE_DEFAULT_BRAIN_FOLDERS.includes(normalized as AdjustableDefaultBrainFolder);
 }
 
 export function brainKindForFolder(folder: string): BrainKind {
@@ -174,30 +167,30 @@ export function brainKindForFolder(folder: string): BrainKind {
 }
 
 export function isValidBrainRelationType(value: unknown): value is string {
-  return typeof value === "string" && GOAT_BRAIN_RELATION_TYPE_PATTERN.test(value);
+  return typeof value === "string" && BRAIN_RELATION_TYPE_PATTERN.test(value);
 }
 
 export function isValidBrainEntityType(value: unknown): value is BrainEntityType {
-  return typeof value === "string" && GOAT_BRAIN_ENTITY_TYPES.includes(value as BrainEntityType);
+  return typeof value === "string" && BRAIN_ENTITY_TYPES.includes(value as BrainEntityType);
 }
 
 export function isValidBrainKind(value: unknown): value is BrainKind {
-  return typeof value === "string" && GOAT_BRAIN_KINDS.includes(value as BrainKind);
+  return typeof value === "string" && BRAIN_KINDS.includes(value as BrainKind);
 }
 
 export function isValidBrainStatus(value: unknown): value is BrainStatus {
-  return typeof value === "string" && GOAT_BRAIN_STATUS_VALUES.includes(value as BrainStatus);
+  return typeof value === "string" && BRAIN_STATUS_VALUES.includes(value as BrainStatus);
 }
 
 export function isValidBrainEvidenceId(value: unknown): value is string {
-  return typeof value === "string" && GOAT_BRAIN_EVIDENCE_ID_PATTERN.test(value);
+  return typeof value === "string" && BRAIN_EVIDENCE_ID_PATTERN.test(value);
 }
 
 export function isValidBrainSourceRef(value: unknown): value is string {
   return (
     typeof value === "string" &&
-    value.length <= GOAT_BRAIN_SOURCE_REF_MAX_LENGTH &&
-    GOAT_BRAIN_SOURCE_REF_PATTERN.test(value)
+    value.length <= BRAIN_SOURCE_REF_MAX_LENGTH &&
+    BRAIN_SOURCE_REF_PATTERN.test(value)
   );
 }
 

@@ -8,7 +8,7 @@ import {
 import {
   brainFilePathFor,
   createBrainMarkdownContent,
-  MAX_GOAT_BRAIN_FILE_BYTES,
+  MAX_BRAIN_FILE_BYTES,
 } from "@opencompany/db/brain-files";
 import { truncateByBytes } from "./brain-jamie-writes";
 
@@ -61,8 +61,7 @@ export function buildGranolaMeetingEvidenceWrite(
     transcriptMarkdown: formatGranolaTranscript(meeting.transcript),
     truncatedTranscript: false,
   });
-  const truncatedTranscript =
-    Buffer.byteLength(fullEvidenceContent, "utf8") > MAX_GOAT_BRAIN_FILE_BYTES;
+  const truncatedTranscript = Buffer.byteLength(fullEvidenceContent, "utf8") > MAX_BRAIN_FILE_BYTES;
   const evidenceContent = truncatedTranscript
     ? createEvidenceContent({
         item,
@@ -77,7 +76,7 @@ export function buildGranolaMeetingEvidenceWrite(
         truncatedTranscript: true,
       })
     : fullEvidenceContent;
-  if (Buffer.byteLength(evidenceContent, "utf8") > MAX_GOAT_BRAIN_FILE_BYTES) {
+  if (Buffer.byteLength(evidenceContent, "utf8") > MAX_BRAIN_FILE_BYTES) {
     throw new Error("Granola evidence document exceeds the Goat Brain file size limit.");
   }
 

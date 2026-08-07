@@ -7,9 +7,9 @@ import { CodexChatLeaseLostError } from "./codex-chat-errors";
 import { getDb } from "./db";
 import { rowsFromExecute } from "./sql-exec";
 
-export const GOAT_CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS = 60;
-export const GOAT_CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS = 3_600;
-export const GOAT_CODEX_CHAT_WAKEUP_MAX_CHAIN = 5;
+export const CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS = 60;
+export const CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS = 3_600;
+export const CODEX_CHAT_WAKEUP_MAX_CHAIN = 5;
 
 export type CodexChatScheduledWakeup = {
   delaySeconds: number;
@@ -165,12 +165,12 @@ export function prepareCodexChatScheduledWakeup(input: {
   now?: Date;
 }): PreparedCodexChatScheduledWakeup | null {
   const wakeupChain = validWakeupChain(input.parentSettings) + 1;
-  if (wakeupChain > GOAT_CODEX_CHAT_WAKEUP_MAX_CHAIN) return null;
+  if (wakeupChain > CODEX_CHAT_WAKEUP_MAX_CHAIN) return null;
 
   const now = input.now ?? new Date();
   const delaySeconds = Math.min(
-    GOAT_CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS,
-    Math.max(GOAT_CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS, input.wakeup.delaySeconds),
+    CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS,
+    Math.max(CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS, input.wakeup.delaySeconds),
   );
   const dueAt = new Date(now.getTime() + delaySeconds * 1_000);
   const reason = input.wakeup.reason.trim();
@@ -245,8 +245,8 @@ export function scheduledWakeupFromTurnSettings(
   }
   return {
     delaySeconds: Math.min(
-      GOAT_CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS,
-      Math.max(GOAT_CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS, Math.round(wakeup.delaySeconds)),
+      CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS,
+      Math.max(CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS, Math.round(wakeup.delaySeconds)),
     ),
     reason: wakeup.reason.trim().slice(0, 500),
     prompt: wakeup.prompt.trim().slice(0, 10_000),

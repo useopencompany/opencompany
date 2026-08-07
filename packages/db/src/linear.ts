@@ -15,7 +15,7 @@ type DbLike = any;
 // The Linear MCP connector reuses provider "linear" with this sentinel external
 // id; ingestion integrations key on the Linear organization id instead, so the
 // two kinds of rows never collide.
-export const GOAT_LINEAR_MCP_EXTERNAL_ID = "linear_mcp";
+export const LINEAR_MCP_EXTERNAL_ID = "linear_mcp";
 
 export type LinearTeamRef = {
   id: string;
@@ -23,7 +23,7 @@ export type LinearTeamRef = {
   name: string;
 };
 
-export const GOAT_LINEAR_EVENT_TYPES = [
+export const LINEAR_EVENT_TYPES = [
   "issue_created",
   "issue_updated",
   "issue_status_changed",
@@ -33,7 +33,7 @@ export const GOAT_LINEAR_EVENT_TYPES = [
   "comment_removed",
 ] as const;
 
-export type LinearEventType = (typeof GOAT_LINEAR_EVENT_TYPES)[number];
+export type LinearEventType = (typeof LINEAR_EVENT_TYPES)[number];
 
 export type LinearEventRef = {
   id: LinearEventType;
@@ -248,9 +248,7 @@ function parseEventRefs(value: unknown): LinearEventRef[] | undefined {
 }
 
 function isLinearEventType(value: unknown): value is LinearEventType {
-  return (
-    typeof value === "string" && (GOAT_LINEAR_EVENT_TYPES as readonly string[]).includes(value)
-  );
+  return typeof value === "string" && (LINEAR_EVENT_TYPES as readonly string[]).includes(value);
 }
 
 function linearUpdatedFromHasStatusChange(updatedFrom: Record<string, unknown> | null | undefined) {

@@ -1,4 +1,4 @@
-import { GOAT_ACTION_EFFECTS_READ } from "@opencompany/core/actions/types";
+import { ACTION_EFFECTS_READ } from "@opencompany/core/actions/types";
 import { describe, expect, it, vi } from "vitest";
 import {
   clampActionResult,
@@ -24,7 +24,7 @@ function catalogWith(
         id: "slack.fetch_history",
         provider: "slack",
         capability: "read",
-        effects: GOAT_ACTION_EFFECTS_READ,
+        effects: ACTION_EFFECTS_READ,
         permissionMode: "on",
         description: "fetch",
         params: { type: "object" },

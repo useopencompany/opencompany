@@ -1,12 +1,12 @@
 import { createRemoteMcpIntegration, type RemoteMcpProviderState } from "./remote-mcp-oauth";
 
-export const GOAT_LATITUDE_MCP_ENDPOINT_URL = "https://api.latitude.so/v1/mcp";
-const GOAT_LATITUDE_PROVIDER = "latitude" as const;
+export const LATITUDE_MCP_ENDPOINT_URL = "https://api.latitude.so/v1/mcp";
+const LATITUDE_PROVIDER = "latitude" as const;
 
 const latitudeMcpIntegration = createRemoteMcpIntegration({
-  provider: GOAT_LATITUDE_PROVIDER,
+  provider: LATITUDE_PROVIDER,
   displayName: "Latitude",
-  endpointUrl: GOAT_LATITUDE_MCP_ENDPOINT_URL,
+  endpointUrl: LATITUDE_MCP_ENDPOINT_URL,
   externalId: "latitude_mcp",
   // Latitude's protected-resource metadata does not advertise MCP scopes.
   // Read/write controls are Goat capability modes, not claimed OAuth grants.

@@ -1,5 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, isNull, like, ne, or, type SQL, sql } from "drizzle-orm";
 import {
+  BRAIN_WEIGHT_FRESHNESS,
+  BRAIN_WEIGHT_RELEVANCE,
   type BrainEntityType,
   type BrainGraphHop,
   type BrainKind,
@@ -7,8 +9,6 @@ import {
   type BrainUsageEntry,
   brainFreshness,
   createGateway,
-  GOAT_BRAIN_WEIGHT_FRESHNESS,
-  GOAT_BRAIN_WEIGHT_RELEVANCE,
   parseBrainDocument,
   reciprocalRankFusion,
   titleTagMatch,
@@ -617,7 +617,7 @@ export function filterVectorCandidates(
 }
 
 function vectorMaxDistance(): number {
-  const raw = Number(process.env.GOAT_BRAIN_VECTOR_MAX_DISTANCE);
+  const raw = Number(process.env.BRAIN_VECTOR_MAX_DISTANCE);
   return Number.isFinite(raw) && raw > 0 ? raw : VECTOR_MAX_DISTANCE_DEFAULT;
 }
 
@@ -1030,8 +1030,8 @@ function applyNameBoost(
 
 function blendScore(relevance: number, maxRelevance: number, updatedAt: Date, now: number): number {
   return (
-    GOAT_BRAIN_WEIGHT_RELEVANCE * (relevance / maxRelevance) +
-    GOAT_BRAIN_WEIGHT_FRESHNESS * brainFreshness(updatedAt, now)
+    BRAIN_WEIGHT_RELEVANCE * (relevance / maxRelevance) +
+    BRAIN_WEIGHT_FRESHNESS * brainFreshness(updatedAt, now)
   );
 }
 

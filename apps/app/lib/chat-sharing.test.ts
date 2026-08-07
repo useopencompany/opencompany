@@ -13,7 +13,7 @@ import {
   revokeChatShareForUser,
 } from "@/lib/chat-sharing";
 import type { StoredChatMessage } from "@/lib/chat-ui";
-import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import { DEFAULT_MODEL } from "@/lib/model-options";
 
 vi.mock("@/lib/auth", () => ({
   currentUser: vi.fn(),
@@ -289,7 +289,7 @@ function createStore({ messages = [] }: { messages?: StoredChatMessage[] } = {})
     id: "chat_1",
     userWorkosId: "user_1",
     title: "Architecture review",
-    model: DEFAULT_GOAT_MODEL,
+    model: DEFAULT_MODEL,
     engine: "opencompany",
     kind: "chat",
     closedAt: null,

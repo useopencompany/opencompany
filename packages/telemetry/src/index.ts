@@ -7,11 +7,11 @@ import {
   trace,
 } from "@opentelemetry/api";
 
-export const GOAT_OBSERVABILITY_SERVICE_NAME = "opencompany-goat";
-export const GOAT_OTEL_METRIC_EXPORT_INTERVAL_MS = 60_000;
-export const GOAT_OTEL_TRACE_SAMPLE_RATE = 1;
+export const OBSERVABILITY_SERVICE_NAME = "opencompany-goat";
+export const OTEL_METRIC_EXPORT_INTERVAL_MS = 60_000;
+export const OTEL_TRACE_SAMPLE_RATE = 1;
 
-export const GOAT_SPANS = {
+export const SPANS = {
   signupCompleted: "goat.signup.completed",
   chatTurn: "goat.chat.turn",
   chatActionCall: "goat.chat.action_call",
@@ -28,7 +28,7 @@ export const GOAT_SPANS = {
   brainIngestFail: "goat.brain_ingest.fail",
 } as const;
 
-export const GOAT_METRICS = {
+export const METRICS = {
   signupsTotal: "goat.signups_total",
   runsTotal: "goat.runs_total",
   runDurationMs: "goat.run_duration_ms",
@@ -416,23 +416,23 @@ export function recordRunOutcome(input: {
     "goat.surface": input.surface,
     "goat.outcome": input.outcome,
   };
-  recordCounter(GOAT_METRICS.runsTotal, 1, attributes);
-  recordHistogram(GOAT_METRICS.runDurationMs, input.durationMs, attributes);
+  recordCounter(METRICS.runsTotal, 1, attributes);
+  recordHistogram(METRICS.runDurationMs, input.durationMs, attributes);
 
   if (input.surface === "chat") {
-    recordCounter(GOAT_METRICS.chatTurnsTotal, 1, attributes);
-    recordHistogram(GOAT_METRICS.chatTurnDurationMs, input.durationMs, attributes);
+    recordCounter(METRICS.chatTurnsTotal, 1, attributes);
+    recordHistogram(METRICS.chatTurnDurationMs, input.durationMs, attributes);
     return;
   }
 
   if (input.surface === "task") {
-    recordCounter(GOAT_METRICS.taskRunsTotal, 1, attributes);
-    recordHistogram(GOAT_METRICS.taskRunDurationMs, input.durationMs, attributes);
+    recordCounter(METRICS.taskRunsTotal, 1, attributes);
+    recordHistogram(METRICS.taskRunDurationMs, input.durationMs, attributes);
     return;
   }
 
-  recordCounter(GOAT_METRICS.brainIngestRunsTotal, 1, attributes);
-  recordHistogram(GOAT_METRICS.brainIngestRunDurationMs, input.durationMs, attributes);
+  recordCounter(METRICS.brainIngestRunsTotal, 1, attributes);
+  recordHistogram(METRICS.brainIngestRunDurationMs, input.durationMs, attributes);
 }
 
 export function recordSignup(input: { source?: SignupSource; attributes?: Attributes } = {}) {
@@ -441,9 +441,9 @@ export function recordSignup(input: { source?: SignupSource; attributes?: Attrib
     "goat.signup_source": input.source ?? "user_sync",
     "goat.outcome": "success",
   };
-  const span = startSpan(GOAT_SPANS.signupCompleted, attributes);
+  const span = startSpan(SPANS.signupCompleted, attributes);
   span.end(attributes);
-  recordCounter(GOAT_METRICS.signupsTotal, 1, attributes);
+  recordCounter(METRICS.signupsTotal, 1, attributes);
 }
 
 export function recordChatTurn(input: {
@@ -460,8 +460,8 @@ export function recordTaskDispatch(input: {
   attributes?: Attributes;
 }) {
   const attributes = { ...input.attributes, "goat.outcome": input.outcome };
-  recordCounter(GOAT_METRICS.taskDispatchesTotal, 1, attributes);
-  recordHistogram(GOAT_METRICS.taskDispatchDurationMs, input.durationMs, attributes);
+  recordCounter(METRICS.taskDispatchesTotal, 1, attributes);
+  recordHistogram(METRICS.taskDispatchDurationMs, input.durationMs, attributes);
 }
 
 export function recordTaskRun(input: {
@@ -486,7 +486,7 @@ export function recordBrainIngestSpend(input: {
   attributes?: Attributes;
 }) {
   if (!Number.isFinite(input.costUsdMicros) || input.costUsdMicros <= 0) return;
-  recordCounter(GOAT_METRICS.brainIngestSpendUsdMicros, Math.round(input.costUsdMicros), {
+  recordCounter(METRICS.brainIngestSpendUsdMicros, Math.round(input.costUsdMicros), {
     ...input.attributes,
     "goat.surface": "brain_ingest",
     "goat.cost_source": input.source,
@@ -494,7 +494,7 @@ export function recordBrainIngestSpend(input: {
 }
 
 export function recordBrainIngestBudgetExhausted(attributes?: Attributes) {
-  recordCounter(GOAT_METRICS.brainIngestBudgetExhaustionsTotal, 1, {
+  recordCounter(METRICS.brainIngestBudgetExhaustionsTotal, 1, {
     ...attributes,
     "goat.surface": "brain_ingest",
     "goat.budget_exhausted": true,
@@ -507,8 +507,8 @@ export function recordToolCall(input: {
   attributes?: Attributes;
 }) {
   const attributes = { ...input.attributes, "goat.outcome": input.outcome };
-  recordCounter(GOAT_METRICS.toolCallsTotal, 1, attributes);
-  recordHistogram(GOAT_METRICS.toolCallDurationMs, input.durationMs, attributes);
+  recordCounter(METRICS.toolCallsTotal, 1, attributes);
+  recordHistogram(METRICS.toolCallDurationMs, input.durationMs, attributes);
 }
 
 export function recordModelUsageTokens(input: {
@@ -516,7 +516,7 @@ export function recordModelUsageTokens(input: {
   direction: "input" | "output" | "total";
   attributes?: Attributes;
 }) {
-  recordCounter(GOAT_METRICS.modelUsageTokens, input.tokens, {
+  recordCounter(METRICS.modelUsageTokens, input.tokens, {
     ...input.attributes,
     "goat.token_direction": input.direction,
   });
@@ -524,7 +524,7 @@ export function recordModelUsageTokens(input: {
 
 export function recordModelCost(input: { costUsdMicros: number; attributes?: Attributes }) {
   if (!Number.isFinite(input.costUsdMicros) || input.costUsdMicros <= 0) return;
-  recordCounter(GOAT_METRICS.modelCostUsdMicros, Math.round(input.costUsdMicros), {
+  recordCounter(METRICS.modelCostUsdMicros, Math.round(input.costUsdMicros), {
     ...input.attributes,
   });
 }

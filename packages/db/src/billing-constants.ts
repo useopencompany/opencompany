@@ -7,40 +7,40 @@
 // Hobby contributes $5 per workspace; every paid Pro seat contributes $20.
 // Purchased top-up funds live in a separate, non-expiring workspace pool.
 
-export const GOAT_PRO_MONTHLY_PRICE_USD_CENTS = 2_000;
-export const GOAT_SEAT_MONTHLY_PRICE_USD_CENTS = GOAT_PRO_MONTHLY_PRICE_USD_CENTS;
-export const GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS = 2_000;
-export const GOAT_HOBBY_INCLUDED_USAGE_USD_CENTS = 500;
-export const GOAT_PRO_STRIPE_PRODUCT_KEY = "goat_pro";
-export const GOAT_HOBBY_MAX_MEMBERS = 1;
-export const GOAT_PRO_MAX_MEMBERS = 10;
+export const PRO_MONTHLY_PRICE_USD_CENTS = 2_000;
+export const SEAT_MONTHLY_PRICE_USD_CENTS = PRO_MONTHLY_PRICE_USD_CENTS;
+export const INCLUDED_USAGE_PER_SEAT_USD_CENTS = 2_000;
+export const HOBBY_INCLUDED_USAGE_USD_CENTS = 500;
+export const PRO_STRIPE_PRODUCT_KEY = "goat_pro";
+export const HOBBY_MAX_MEMBERS = 1;
+export const PRO_MAX_MEMBERS = 10;
 
-export const GOAT_TOP_UP_AMOUNTS_USD_CENTS = [500, 1_000, 2_000, 5_000, 10_000] as const;
-export const GOAT_DEFAULT_TOP_UP_USD_CENTS = 2_000;
-export const GOAT_MIN_TOP_UP_USD_CENTS = 500;
-export const GOAT_MAX_TOP_UP_USD_CENTS = 100_000;
+export const TOP_UP_AMOUNTS_USD_CENTS = [500, 1_000, 2_000, 5_000, 10_000] as const;
+export const DEFAULT_TOP_UP_USD_CENTS = 2_000;
+export const MIN_TOP_UP_USD_CENTS = 500;
+export const MAX_TOP_UP_USD_CENTS = 100_000;
 // Charge-loop protection for unattended auto-refills. Admins can still add
 // credits manually after reviewing spend.
-export const GOAT_AUTO_REFILL_MONTHLY_MAX_USD_CENTS = 100_000;
+export const AUTO_REFILL_MONTHLY_MAX_USD_CENTS = 100_000;
 
 // Billing v6 charges usage at real cost. Brain ingestion is now only the model,
 // capability, and sandbox COGS recorded elsewhere; no flat per-item platform
 // fee is added.
-export const GOAT_INGEST_ITEM_FEE_USD_MICROS = 0;
+export const INGEST_ITEM_FEE_USD_MICROS = 0;
 
 // Balance thresholds: warn in the UI below $2; auto-refill (when enabled and
 // a card is saved) tops up once the balance drops below $5.
-export const GOAT_LOW_BALANCE_WARN_USD_MICROS = 2_000_000;
-export const GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS = 5_000_000;
+export const LOW_BALANCE_WARN_USD_MICROS = 2_000_000;
+export const AUTO_REFILL_THRESHOLD_USD_MICROS = 5_000_000;
 
 export function workspaceMemberCap(plan: "hobby" | "pro") {
-  return plan === "pro" ? GOAT_PRO_MAX_MEMBERS : GOAT_HOBBY_MAX_MEMBERS;
+  return plan === "pro" ? PRO_MAX_MEMBERS : HOBBY_MAX_MEMBERS;
 }
 
 export function includedUsageAllowanceCents(plan: "hobby" | "pro", seatQuantity: number) {
   return plan === "pro"
-    ? Math.max(1, Math.floor(seatQuantity)) * GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS
-    : GOAT_HOBBY_INCLUDED_USAGE_USD_CENTS;
+    ? Math.max(1, Math.floor(seatQuantity)) * INCLUDED_USAGE_PER_SEAT_USD_CENTS
+    : HOBBY_INCLUDED_USAGE_USD_CENTS;
 }
 
 export function calendarMonthWindow(now: Date) {
@@ -60,9 +60,9 @@ export function calendarMonthWindow(now: Date) {
 // averaged 23 steps/job (32% of jobs hit the 32-step cap) vs 6-8 steps for
 // Anthropic models on the same events, netting ~23c/job vs ~7-12c for Haiku.
 // Evidence: apps/runner/scripts/ingest-model-bench.ts replays.
-export const GOAT_BASIC_INGEST_MODEL = "anthropic/claude-haiku-4.5";
-export const GOAT_FRONTIER_INGEST_MODEL = "anthropic/claude-sonnet-5";
+export const BASIC_INGEST_MODEL = "anthropic/claude-haiku-4.5";
+export const FRONTIER_INGEST_MODEL = "anthropic/claude-sonnet-5";
 
 export function ingestItemFeeUsdMicros(rawEventCount: number) {
-  return Math.max(0, rawEventCount) * GOAT_INGEST_ITEM_FEE_USD_MICROS;
+  return Math.max(0, rawEventCount) * INGEST_ITEM_FEE_USD_MICROS;
 }

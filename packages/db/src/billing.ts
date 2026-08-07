@@ -18,36 +18,32 @@ import {
 type DbLike = any;
 
 export {
+  AUTO_REFILL_MONTHLY_MAX_USD_CENTS,
+  AUTO_REFILL_THRESHOLD_USD_MICROS,
   calendarMonthWindow,
-  GOAT_AUTO_REFILL_MONTHLY_MAX_USD_CENTS,
-  GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS,
-  GOAT_HOBBY_INCLUDED_USAGE_USD_CENTS,
-  GOAT_HOBBY_MAX_MEMBERS,
-  GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS,
-  GOAT_INGEST_ITEM_FEE_USD_MICROS,
-  GOAT_LOW_BALANCE_WARN_USD_MICROS,
-  GOAT_PRO_MAX_MEMBERS,
-  GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
-  GOAT_PRO_STRIPE_PRODUCT_KEY,
+  HOBBY_INCLUDED_USAGE_USD_CENTS,
+  HOBBY_MAX_MEMBERS,
+  INCLUDED_USAGE_PER_SEAT_USD_CENTS,
+  INGEST_ITEM_FEE_USD_MICROS,
   includedUsageAllowanceCents,
   ingestItemFeeUsdMicros,
+  LOW_BALANCE_WARN_USD_MICROS,
+  PRO_MAX_MEMBERS,
+  PRO_MONTHLY_PRICE_USD_CENTS,
+  PRO_STRIPE_PRODUCT_KEY,
   workspaceMemberCap,
 } from "./billing-constants";
 
 import {
+  AUTO_REFILL_MONTHLY_MAX_USD_CENTS,
+  AUTO_REFILL_THRESHOLD_USD_MICROS,
   calendarMonthWindow,
-  GOAT_AUTO_REFILL_MONTHLY_MAX_USD_CENTS,
-  GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS,
-  GOAT_INGEST_ITEM_FEE_USD_MICROS,
-  GOAT_PRO_STRIPE_PRODUCT_KEY,
+  INGEST_ITEM_FEE_USD_MICROS,
   includedUsageAllowanceCents,
   ingestItemFeeUsdMicros,
+  PRO_STRIPE_PRODUCT_KEY,
 } from "./billing-constants";
-import {
-  GOAT_USD_MICROS_PER_CENT,
-  getCreditPoolsUsdMicros,
-  grantMonthlyIncludedUsage,
-} from "./credits";
+import { getCreditPoolsUsdMicros, grantMonthlyIncludedUsage, USD_MICROS_PER_CENT } from "./credits";
 
 // The default web-app client (`./client`) is neon-http, which has no interactive
 // transactions (one HTTPS request per query) and throws on db.transaction().
@@ -98,9 +94,7 @@ export async function ensureMonthlyIncludedUsage(
   const now = options.now ?? new Date();
   const billing = await ensureBillingRow(workspaceId, db);
   const plan: WorkspacePlan =
-    billing.stripeProductKey === GOAT_PRO_STRIPE_PRODUCT_KEY && billing.plan === "pro"
-      ? "pro"
-      : "hobby";
+    billing.stripeProductKey === PRO_STRIPE_PRODUCT_KEY && billing.plan === "pro" ? "pro" : "hobby";
   const seatQuantity = plan === "pro" ? Math.max(1, Number(billing.seatQuantity)) : 1;
   const targetAllowanceCents = includedUsageAllowanceCents(plan, seatQuantity);
   const { start, resetAt } = calendarMonthWindow(now);
@@ -202,12 +196,12 @@ async function tryAdmitIngestion(
     const rows = Array.isArray(result) ? result : ((result as { rows?: unknown[] })?.rows ?? []);
     return rows.length > 0;
   }
-  const feeCents = Math.round(feeUsdMicros / GOAT_USD_MICROS_PER_CENT);
+  const feeCents = Math.round(feeUsdMicros / USD_MICROS_PER_CENT);
   const requirePositiveBalance = isCreditsEnforcementEnabled();
   const costBasis = {
     kind: "ingest_fee",
     rawEventCount: input.rawEventCount,
-    usdMicrosPerRawEvent: GOAT_INGEST_ITEM_FEE_USD_MICROS,
+    usdMicrosPerRawEvent: INGEST_ITEM_FEE_USD_MICROS,
   };
   const result = await db.execute(sql`
     WITH locked_balance AS MATERIALIZED (
@@ -283,7 +277,7 @@ async function tryAdmitIngestion(
       FROM debit
       ON CONFLICT (workspace_id) DO UPDATE
       SET balance_usd_micros = goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros,
-          balance_cents = ROUND((goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros)::numeric / ${GOAT_USD_MICROS_PER_CENT})::integer,
+          balance_cents = ROUND((goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros)::numeric / ${USD_MICROS_PER_CENT})::integer,
           included_balance_usd_micros = goat.credit_balances.included_balance_usd_micros - (SELECT included_debit FROM debit_split),
           top_up_balance_usd_micros = goat.credit_balances.top_up_balance_usd_micros - (SELECT top_up_debit FROM debit_split),
           updated_at = now()
@@ -546,7 +540,7 @@ export async function loadBillingOverview(workspaceId: string, options: { db?: D
       ...billing,
       // v3 Pro rows were intentionally retained when billing v4 retired
       // plans. Only the new product key can confer the new entitlement.
-      plan: billing.stripeProductKey === GOAT_PRO_STRIPE_PRODUCT_KEY ? billing.plan : "hobby",
+      plan: billing.stripeProductKey === PRO_STRIPE_PRODUCT_KEY ? billing.plan : "hobby",
     },
     memberCount: Number(memberCountRows[0]?.total ?? 0),
     creditBalanceUsdMicros: creditBalance.balanceUsdMicros,
@@ -596,7 +590,7 @@ export async function setStripeCustomerId(
 export async function getWorkspacePlan(workspaceId: string, options: { db?: DbLike } = {}) {
   const db = options.db ?? getDb();
   const billing = await ensureBillingRow(workspaceId, db);
-  return billing.stripeProductKey === GOAT_PRO_STRIPE_PRODUCT_KEY
+  return billing.stripeProductKey === PRO_STRIPE_PRODUCT_KEY
     ? (billing.plan as WorkspacePlan)
     : "hobby";
 }
@@ -615,7 +609,7 @@ export async function reconcileStripeSeatQuantity(
   const billing = await ensureBillingRow(input.workspaceId, db);
   if (
     billing.plan !== "pro" ||
-    billing.stripeProductKey !== GOAT_PRO_STRIPE_PRODUCT_KEY ||
+    billing.stripeProductKey !== PRO_STRIPE_PRODUCT_KEY ||
     !billing.subscriptionStatus ||
     !PRO_SUBSCRIPTION_STATUSES.has(billing.subscriptionStatus)
   ) {
@@ -647,7 +641,7 @@ export async function listStripeSeatReconciliationCandidates(
     .where(
       and(
         eq(workspaceBilling.plan, "pro"),
-        eq(workspaceBilling.stripeProductKey, GOAT_PRO_STRIPE_PRODUCT_KEY),
+        eq(workspaceBilling.stripeProductKey, PRO_STRIPE_PRODUCT_KEY),
         inArray(workspaceBilling.subscriptionStatus, ["active", "trialing", "past_due"]),
         isNotNull(workspaceBilling.stripeSubscriptionItemId),
       ),
@@ -700,7 +694,7 @@ export async function applyStripeSubscriptionProjection(
       return { applied: false as const, reason: "stale" as const };
     }
 
-    const isSeatSubscription = input.productKey === GOAT_PRO_STRIPE_PRODUCT_KEY;
+    const isSeatSubscription = input.productKey === PRO_STRIPE_PRODUCT_KEY;
     const plan = isSeatSubscription ? planForSubscriptionStatus(input.status) : "hobby";
     const planChanged = plan !== current.plan;
     const cancellationScheduled = !current.cancelAtPeriodEnd && input.cancelAtPeriodEnd;
@@ -761,7 +755,7 @@ export async function findWorkspaceIdForStripeSubscription(
     .where(
       and(
         eq(workspaceBilling.stripeSubscriptionId, subscriptionId),
-        eq(workspaceBilling.stripeProductKey, GOAT_PRO_STRIPE_PRODUCT_KEY),
+        eq(workspaceBilling.stripeProductKey, PRO_STRIPE_PRODUCT_KEY),
       ),
     )
     .limit(1);
@@ -830,11 +824,11 @@ export async function getStripeCustomerId(workspaceId: string, options: { db?: D
 
 // ---------------------------------------------------------------------------
 // Auto-refill: a card saved during top-up Checkout is charged off-session when
-// the balance drops below GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS. The lease
+// the balance drops below AUTO_REFILL_THRESHOLD_USD_MICROS. The lease
 // (auto_refill_in_flight_at) makes concurrent triggers charge at most once;
 // last_attempt_at paces retries so a transient Stripe failure cannot loop.
 
-const GOAT_AUTO_REFILL_RETRY_COOLDOWN_MS = 10 * 60 * 1000;
+const AUTO_REFILL_RETRY_COOLDOWN_MS = 10 * 60 * 1000;
 
 export async function setAutoRefillPaymentMethod(
   input: { workspaceId: string; paymentMethodId: string },
@@ -872,7 +866,7 @@ export async function setAutoRefillConfig(
         eq(workspaceBilling.workspaceId, input.workspaceId),
         ...(input.enabled ? [isNotNull(workspaceBilling.autoRefillPaymentMethodId)] : []),
         eq(workspaceBilling.plan, "pro"),
-        eq(workspaceBilling.stripeProductKey, GOAT_PRO_STRIPE_PRODUCT_KEY),
+        eq(workspaceBilling.stripeProductKey, PRO_STRIPE_PRODUCT_KEY),
       ),
     )
     .returning({
@@ -891,7 +885,7 @@ export async function claimAutoRefill(
 ) {
   const db = options.db ?? getDb();
   const now = options.now ?? new Date();
-  const retryBefore = new Date(now.getTime() - GOAT_AUTO_REFILL_RETRY_COOLDOWN_MS);
+  const retryBefore = new Date(now.getTime() - AUTO_REFILL_RETRY_COOLDOWN_MS);
   const [claimed] = await db
     .update(workspaceBilling)
     .set({ autoRefillInFlightAt: now, autoRefillLastAttemptAt: now, updatedAt: now })
@@ -900,7 +894,7 @@ export async function claimAutoRefill(
         eq(workspaceBilling.workspaceId, workspaceId),
         eq(workspaceBilling.autoRefillEnabled, true),
         eq(workspaceBilling.plan, "pro"),
-        eq(workspaceBilling.stripeProductKey, GOAT_PRO_STRIPE_PRODUCT_KEY),
+        eq(workspaceBilling.stripeProductKey, PRO_STRIPE_PRODUCT_KEY),
         isNotNull(workspaceBilling.autoRefillPaymentMethodId),
         isNotNull(workspaceBilling.stripeCustomerId),
         or(
@@ -918,7 +912,7 @@ export async function claimAutoRefill(
             AND ${creditLedger.source} = 'stripe_topup'
             AND ${creditLedger.metadata}->>'kind' = 'auto_refill'
             AND ${creditLedger.createdAt} >= date_trunc('month', ${now.toISOString()}::timestamptz, 'UTC')
-        ) + ${workspaceBilling.autoRefillAmountCents} <= ${GOAT_AUTO_REFILL_MONTHLY_MAX_USD_CENTS}`,
+        ) + ${workspaceBilling.autoRefillAmountCents} <= ${AUTO_REFILL_MONTHLY_MAX_USD_CENTS}`,
       ),
     )
     .returning({
@@ -960,7 +954,7 @@ export async function listAutoRefillCandidates(
 ) {
   const db = options.db ?? getDb();
   const now = options.now ?? new Date();
-  const retryBefore = new Date(now.getTime() - GOAT_AUTO_REFILL_RETRY_COOLDOWN_MS);
+  const retryBefore = new Date(now.getTime() - AUTO_REFILL_RETRY_COOLDOWN_MS);
   const rows = await db
     .select({ workspaceId: workspaceBilling.workspaceId })
     .from(workspaceBilling)
@@ -969,10 +963,10 @@ export async function listAutoRefillCandidates(
       and(
         eq(workspaceBilling.autoRefillEnabled, true),
         eq(workspaceBilling.plan, "pro"),
-        eq(workspaceBilling.stripeProductKey, GOAT_PRO_STRIPE_PRODUCT_KEY),
+        eq(workspaceBilling.stripeProductKey, PRO_STRIPE_PRODUCT_KEY),
         isNotNull(workspaceBilling.autoRefillPaymentMethodId),
         isNotNull(workspaceBilling.stripeCustomerId),
-        lt(creditBalances.balanceUsdMicros, GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS),
+        lt(creditBalances.balanceUsdMicros, AUTO_REFILL_THRESHOLD_USD_MICROS),
         or(
           isNull(workspaceBilling.autoRefillInFlightAt),
           lt(workspaceBilling.autoRefillInFlightAt, retryBefore),
@@ -988,7 +982,7 @@ export async function listAutoRefillCandidates(
             AND ${creditLedger.source} = 'stripe_topup'
             AND ${creditLedger.metadata}->>'kind' = 'auto_refill'
             AND ${creditLedger.createdAt} >= date_trunc('month', ${now.toISOString()}::timestamptz, 'UTC')
-        ) + ${workspaceBilling.autoRefillAmountCents} <= ${GOAT_AUTO_REFILL_MONTHLY_MAX_USD_CENTS}`,
+        ) + ${workspaceBilling.autoRefillAmountCents} <= ${AUTO_REFILL_MONTHLY_MAX_USD_CENTS}`,
       ),
     )
     .limit(options.limit ?? 50);

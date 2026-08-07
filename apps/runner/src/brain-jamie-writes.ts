@@ -10,7 +10,7 @@ import {
 import {
   brainFilePathFor,
   createBrainMarkdownContent,
-  MAX_GOAT_BRAIN_FILE_BYTES,
+  MAX_BRAIN_FILE_BYTES,
 } from "@opencompany/db/brain-files";
 
 export const JAMIE_TRANSCRIPT_EXCERPT_BYTES = 400_000;
@@ -60,8 +60,7 @@ export function buildJamieMeetingEvidenceWrite(
     transcriptMarkdown: formatTranscript(meeting.transcript),
     truncatedTranscript: false,
   });
-  const truncatedTranscript =
-    Buffer.byteLength(fullEvidenceContent, "utf8") > MAX_GOAT_BRAIN_FILE_BYTES;
+  const truncatedTranscript = Buffer.byteLength(fullEvidenceContent, "utf8") > MAX_BRAIN_FILE_BYTES;
   const evidenceContent = truncatedTranscript
     ? createEvidenceContent({
         item,
@@ -76,7 +75,7 @@ export function buildJamieMeetingEvidenceWrite(
         truncatedTranscript: true,
       })
     : fullEvidenceContent;
-  if (Buffer.byteLength(evidenceContent, "utf8") > MAX_GOAT_BRAIN_FILE_BYTES) {
+  if (Buffer.byteLength(evidenceContent, "utf8") > MAX_BRAIN_FILE_BYTES) {
     throw new Error("Jamie evidence document exceeds the Goat Brain file size limit.");
   }
 
@@ -128,7 +127,7 @@ export function buildJamieMeetingBrainWrites(item: NormalizedJamieMeetingSourceI
     ],
   });
 
-  if (Buffer.byteLength(meetingContent, "utf8") > MAX_GOAT_BRAIN_FILE_BYTES) {
+  if (Buffer.byteLength(meetingContent, "utf8") > MAX_BRAIN_FILE_BYTES) {
     throw new Error("Jamie meeting document exceeds the Goat Brain file size limit.");
   }
 

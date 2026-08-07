@@ -6,14 +6,14 @@ import { hasGmailDraftScope, hasGmailSendScope } from "../integrations/gmail-sco
 import { GoogleAccessAuthError, googleApiCall } from "../integrations/google-access-token";
 import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  ACTION_EFFECTS_READ,
+  ACTION_EFFECTS_WRITE,
   ActionAuthError,
   type ActionExecuteContext,
   ActionInvalidParamsError,
   ActionPermissionError,
   type ActionProviderCatalog,
   clampCount,
-  GOAT_ACTION_EFFECTS_READ,
-  GOAT_ACTION_EFFECTS_WRITE,
   optionalNumberParam,
   optionalStringParam,
   type ResolvedAction,
@@ -98,7 +98,7 @@ export async function resolveGmailActions(
       id: "gmail.search_messages",
       provider: "gmail",
       capability: "read",
-      effects: GOAT_ACTION_EFFECTS_READ,
+      effects: ACTION_EFFECTS_READ,
       ...permissionAnnotation("read", connections),
       description:
         'Search one page of the user\'s Gmail with Gmail search syntax, e.g. "from:jane after:2026/07/01 subject:invoice is:unread". Returns message ids with From/To/Subject/Date and a snippet; use gmail.get_message or gmail.get_thread for full content. Pass nextPageToken as pageToken to continue.',
@@ -159,7 +159,7 @@ export async function resolveGmailActions(
       id: "gmail.get_message",
       provider: "gmail",
       capability: "read",
-      effects: GOAT_ACTION_EFFECTS_READ,
+      effects: ACTION_EFFECTS_READ,
       ...permissionAnnotation("read", connections),
       description:
         "Fetch one Gmail message by id, including its plain-text body (truncated). Prefer gmail.get_thread when the conversation context matters.",
@@ -189,7 +189,7 @@ export async function resolveGmailActions(
       id: "gmail.get_thread",
       provider: "gmail",
       capability: "read",
-      effects: GOAT_ACTION_EFFECTS_READ,
+      effects: ACTION_EFFECTS_READ,
       ...permissionAnnotation("read", connections),
       description:
         "Fetch one Gmail thread by id with each message's headers and truncated plain-text body (newest 15 messages).",
@@ -296,7 +296,7 @@ function createDraftAction(connections: readonly GmailConnection[]): ResolvedAct
     id: "gmail.create_draft",
     provider: "gmail",
     capability: "draft",
-    effects: GOAT_ACTION_EFFECTS_WRITE,
+    effects: ACTION_EFFECTS_WRITE,
     ...permissionAnnotation("draft", connections),
     description:
       "Save a new plain-text draft in a connected Gmail account for the user to review, edit, and manually send. Use only when the user explicitly asked to save a Gmail draft. This action never sends email, replies to threads, or attaches files.",
@@ -362,7 +362,7 @@ function sendEmailAction(connections: readonly GmailConnection[]): ResolvedActio
     id: "gmail.send_email",
     provider: "gmail",
     capability: "write",
-    effects: GOAT_ACTION_EFFECTS_WRITE,
+    effects: ACTION_EFFECTS_WRITE,
     ...permissionAnnotation("write", connections),
     description:
       "Send a new plain-text email from a connected Gmail account. Use only when the user explicitly asked to send it. This does not create drafts, reply to threads, or attach files.",

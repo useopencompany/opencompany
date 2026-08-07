@@ -9,7 +9,7 @@ import {
   claimBrainSourceEvents,
 } from "@opencompany/db/brain-event-claims";
 import {
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+  BRAIN_AGENT_INGEST_JOB_KIND,
   upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
@@ -214,7 +214,7 @@ export async function flushHubspotObjectWindow(
       rawPayload: { eventIds: claimed.map((row) => row.id) },
       rawEventCount: brainRefs.length > 0 ? newlyClaimedEventKeys.size : claimed.length,
       rawEventKeysByBrainRef: claimedEventKeysByBrainRef,
-      kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+      kind: BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
       skipReason: ingestDecision.action === "skip" ? ingestDecision.reason : null,
       now: flushedAt,

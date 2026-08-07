@@ -17,10 +17,10 @@ import {
 } from "@opencompany/analytics/server";
 import {
   type ChatMessageDebugTrace,
+  CODEX_CHAT_EVENT_TYPES,
   type CodexChatEventType,
   type CodexChatSessionStatus,
   chatMessages,
-  GOAT_CODEX_CHAT_EVENT_TYPES,
 } from "@opencompany/db/schema";
 import { captureException } from "@opencompany/observability";
 import { and, eq, sql } from "drizzle-orm";
@@ -35,7 +35,7 @@ const CODEX_CHAT_DEBUG_SCHEMA_VERSION = "goat.codex_chat.debug.v1" as const;
 // Event types that are persisted to goat.codex_chat_events. Deltas are volume, not chunks:
 // they never land in the audit log or the message row.
 const PERSISTED_EVENT_TYPES = new Set<CodexChatEventType>(
-  GOAT_CODEX_CHAT_EVENT_TYPES.filter((eventType) => eventType !== "unknown"),
+  CODEX_CHAT_EVENT_TYPES.filter((eventType) => eventType !== "unknown"),
 );
 
 export type CodexChatProjectorTarget = {

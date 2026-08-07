@@ -12,10 +12,7 @@ import {
 import type { BrainSummaryView, WorkspaceView } from "@/components/AppDataProvider";
 import { resolveBrainSourceState, SourceProviderCard } from "@/components/BrainSourceCards";
 import { type BrainSourcesDetails, getBrainSourcesAction } from "@/lib/brain-source-actions";
-import {
-  type BrainSourceProviderDef,
-  GOAT_BRAIN_SOURCE_PROVIDERS,
-} from "@/lib/brain-sources/registry";
+import { BRAIN_SOURCE_PROVIDERS, type BrainSourceProviderDef } from "@/lib/brain-sources/registry";
 import { getBrainAccessDetailsAction, type WorkspaceMemberView } from "@/lib/workspace-actions";
 
 const MAX_VISIBLE_PEOPLE = 5;
@@ -152,7 +149,7 @@ function FlowDiagram({
       return `M ${from.x} ${from.y} C ${from.x + dx} ${from.y}, ${to.x - dx} ${to.y}, ${to.x} ${to.y}`;
     };
     const next: FlowLink[] = [];
-    for (const provider of GOAT_BRAIN_SOURCE_PROVIDERS) {
+    for (const provider of BRAIN_SOURCE_PROVIDERS) {
       const el = sourceRefs.current.get(provider.id);
       if (!el) continue;
       const rect = el.getBoundingClientRect();
@@ -238,7 +235,7 @@ function FlowDiagram({
           {details === null ? (
             <div className="px-0.5 py-1 text-[12px] text-ink-subtle">Loading sources…</div>
           ) : (
-            GOAT_BRAIN_SOURCE_PROVIDERS.map((provider) => (
+            BRAIN_SOURCE_PROVIDERS.map((provider) => (
               <SourceFlowNode
                 key={provider.id}
                 provider={provider}

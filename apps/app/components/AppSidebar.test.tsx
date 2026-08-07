@@ -3,9 +3,9 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  CHAT_COMPOSER_FOCUS_EVENT,
   consumePendingChatComposerFocus,
-  GOAT_CHAT_COMPOSER_FOCUS_EVENT,
-  GOAT_HOME_NAVIGATION_EVENT,
+  HOME_NAVIGATION_EVENT,
 } from "@/lib/chat-navigation";
 import { clearAllLocalChatStates, setLocalChatState } from "@/lib/chat-session-state";
 import { AppSidebar } from "./AppSidebar";
@@ -254,13 +254,13 @@ describe("AppSidebar", () => {
   it("requests an immediate home reset on a normal Home click", async () => {
     const user = userEvent.setup();
     const homeNavigation = vi.fn();
-    window.addEventListener(GOAT_HOME_NAVIGATION_EVENT, homeNavigation);
+    window.addEventListener(HOME_NAVIGATION_EVENT, homeNavigation);
     render(<AppSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     await user.click(screen.getByRole("link", { name: "Home" }));
 
     expect(homeNavigation).toHaveBeenCalledOnce();
-    window.removeEventListener(GOAT_HOME_NAVIGATION_EVENT, homeNavigation);
+    window.removeEventListener(HOME_NAVIGATION_EVENT, homeNavigation);
   });
 
   it("does not mark home active on nested brain routes", () => {
@@ -456,7 +456,7 @@ describe("AppSidebar", () => {
   it("requests composer focus when a recent chat is opened normally", async () => {
     const user = userEvent.setup();
     const focusRequest = vi.fn();
-    window.addEventListener(GOAT_CHAT_COMPOSER_FOCUS_EVENT, focusRequest);
+    window.addEventListener(CHAT_COMPOSER_FOCUS_EVENT, focusRequest);
     recentChatsMock.value = [
       {
         id: "goat_chat_focus",
@@ -476,7 +476,7 @@ describe("AppSidebar", () => {
 
     expect(focusRequest).toHaveBeenCalledTimes(1);
     expect(consumePendingChatComposerFocus("goat_chat_focus")).toBe(true);
-    window.removeEventListener(GOAT_CHAT_COMPOSER_FOCUS_EVENT, focusRequest);
+    window.removeEventListener(CHAT_COMPOSER_FOCUS_EVENT, focusRequest);
   });
 
   it("shows working instead of unseen when a chat still has an active model turn", () => {

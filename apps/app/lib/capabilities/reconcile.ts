@@ -5,7 +5,7 @@ import {
   expirePendingCapabilityApprovals,
   listUnsettledCapabilityRuns,
 } from "@opencompany/db/capabilities";
-import { GOAT_METRICS, recordHistogram } from "@opencompany/telemetry";
+import { METRICS, recordHistogram } from "@opencompany/telemetry";
 import { settleManagedCapabilityRun } from "@/lib/capabilities/execute";
 import { isTerminalMonidRun, MonidClient, type MonidMoney } from "@/lib/capabilities/monid";
 
@@ -69,7 +69,7 @@ export async function reconcileCapabilities(limit = 100) {
   try {
     wallet = await client.getWalletBalance();
     recordHistogram(
-      GOAT_METRICS.capabilityWalletBalanceUsdMicros,
+      METRICS.capabilityWalletBalanceUsdMicros,
       Math.max(0, Math.round(wallet.balance.value * USD_MICROS_PER_DOLLAR)),
     );
   } catch {

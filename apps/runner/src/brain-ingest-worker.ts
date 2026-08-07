@@ -35,21 +35,21 @@ import { captureException, createLogger } from "@opencompany/observability";
 import { flushBraintrust, traceBraintrust } from "@opencompany/observability/braintrust";
 import {
   type Attributes,
-  GOAT_SPANS,
   hashUserId,
   recordBrainIngestRun,
   recordModelCost,
+  SPANS,
   startSpan,
   withSpan,
 } from "@opencompany/telemetry";
 import { flushLatitude } from "@opencompany/telemetry/latitude";
 import { sql } from "drizzle-orm";
 import {
+  BRAIN_AGENT_INGEST_TIMEOUT_MS,
+  BRAIN_AGENT_SKIP_SENTINEL,
   type BrainAgentIngestEnv,
   BrainAgentOutcomeError,
   BrainIngestBudgetError,
-  GOAT_BRAIN_AGENT_INGEST_TIMEOUT_MS,
-  GOAT_BRAIN_AGENT_SKIP_SENTINEL,
   runAttioObjectAgentIngest,
   runChatCaptureAgentIngest,
   runFathomMeetingAgentIngest,
@@ -82,21 +82,21 @@ const logger = createLogger({
 // A running job's lease must outlive one full agent-ingest attempt so a transient
 // heartbeat outage (DB blip, brief event-loop stall) can't let a second worker
 // re-claim and double-run a job that is still executing. The agent self-aborts at
-// GOAT_BRAIN_AGENT_INGEST_TIMEOUT_MS, which stays comfortably inside this window.
+// BRAIN_AGENT_INGEST_TIMEOUT_MS, which stays comfortably inside this window.
 // Intentionally decoupled from the shared RUNNER_JOB_LEASE_TTL_MS: brain ingests run
 // far longer than typical leased jobs and a delayed retry on a genuinely dead worker
 // is preferable to concurrent double-processing.
-export const GOAT_BRAIN_INGEST_LEASE_BUFFER_MS = 2 * 60 * 1000;
-export const GOAT_BRAIN_INGEST_LEASE_TTL_MS =
-  GOAT_BRAIN_AGENT_INGEST_TIMEOUT_MS + GOAT_BRAIN_INGEST_LEASE_BUFFER_MS;
-export const GOAT_BRAIN_INGEST_HEARTBEAT_INTERVAL_MS = 5_000;
-export const GOAT_BRAIN_INGEST_MAX_ATTEMPTS = 5;
+export const BRAIN_INGEST_LEASE_BUFFER_MS = 2 * 60 * 1000;
+export const BRAIN_INGEST_LEASE_TTL_MS =
+  BRAIN_AGENT_INGEST_TIMEOUT_MS + BRAIN_INGEST_LEASE_BUFFER_MS;
+export const BRAIN_INGEST_HEARTBEAT_INTERVAL_MS = 5_000;
+export const BRAIN_INGEST_MAX_ATTEMPTS = 5;
 // Agent-outcome failures (ran to completion, wrote nothing, did not skip) are
 // near-deterministic on identical content: one retry covers model
 // nondeterminism, further ones just burn full agent runs. Infrastructure
 // failures keep the full budget above.
-export const GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS = 2;
-const GOAT_BRAIN_INGEST_POLL_INTERVAL_MS = 5_000;
+export const BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS = 2;
+const BRAIN_INGEST_POLL_INTERVAL_MS = 5_000;
 // Per-entry cap for result.attemptErrors; the full text of the latest failure
 // still lives in last_error.
 const ATTEMPT_ERROR_MAX_CHARS = 500;
@@ -168,7 +168,7 @@ const FATHOM_MEETING_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "meeting",
 } as const satisfies BrainIngestJobDescriptor;
 
-const GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR = {
+const CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "goat-chat",
   sourceType: "capture",
@@ -240,13 +240,13 @@ const GOOGLE_DRIVE_DOCUMENT_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "document",
 } as const satisfies BrainIngestJobDescriptor;
 
-const GOAT_IMPORT_AGENT_INGEST_DESCRIPTOR = {
+const IMPORT_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "goat-import",
   sourceType: "run",
 } as const satisfies BrainIngestJobDescriptor;
 
-const GOAT_BRAIN_INGEST_HANDLERS: readonly BrainIngestHandler[] = [
+const BRAIN_INGEST_HANDLERS: readonly BrainIngestHandler[] = [
   {
     descriptor: JAMIE_MEETING_INGEST_DESCRIPTOR,
     isPayload: isNormalizedJamieMeetingSourceItem,
@@ -268,7 +268,7 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly BrainIngestHandler[] = [
     run: runTypedBrainIngestHandler(runFathomMeetingAgentIngest),
   },
   {
-    descriptor: GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR,
+    descriptor: CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedChatCaptureSourceItem,
     run: runTypedBrainIngestHandler(runChatCaptureAgentIngest),
   },
@@ -320,7 +320,7 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly BrainIngestHandler[] = [
     run: runTypedBrainIngestHandler(runGoogleDriveDocumentAgentIngest),
   },
   {
-    descriptor: GOAT_IMPORT_AGENT_INGEST_DESCRIPTOR,
+    descriptor: IMPORT_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedImportSourceItem,
     run: runTypedBrainIngestHandler(runImportAgentIngest),
   },
@@ -546,7 +546,7 @@ export function createDbBrainIngestStore(): BrainIngestStore {
     },
 
     async fail(input) {
-      const terminal = input.attempts >= (input.maxAttempts ?? GOAT_BRAIN_INGEST_MAX_ATTEMPTS);
+      const terminal = input.attempts >= (input.maxAttempts ?? BRAIN_INGEST_MAX_ATTEMPTS);
       const nextRunAt = terminal ? input.now : nextRetryAt(input.now, input.attempts);
       // Append this attempt's error to result.attemptErrors so retry causes
       // survive the retries (last_error alone is overwritten per attempt and
@@ -627,7 +627,7 @@ export async function claimNextBrainIngestJob(input: {
     leaseId,
     leaseOwner: input.leaseOwner,
     now,
-    leaseExpiresAt: new Date(now.getTime() + (input.leaseTtlMs ?? GOAT_BRAIN_INGEST_LEASE_TTL_MS)),
+    leaseExpiresAt: new Date(now.getTime() + (input.leaseTtlMs ?? BRAIN_INGEST_LEASE_TTL_MS)),
     supportedJobs: input.supportedJobs,
   });
 }
@@ -645,7 +645,7 @@ export async function runClaimedBrainIngestJob(input: {
 }) {
   const runStartedAt = performance.now();
   const store = input.store ?? createDbBrainIngestStore();
-  const handlers = input.handlers ?? GOAT_BRAIN_INGEST_HANDLERS;
+  const handlers = input.handlers ?? BRAIN_INGEST_HANDLERS;
   const leaseId = requireJobLease(input.job, "leaseId");
   const leaseOwner = requireJobLease(input.job, "leaseOwner");
   const userIdHash = hashUserId(input.job.userWorkosId);
@@ -661,7 +661,7 @@ export async function runClaimedBrainIngestJob(input: {
     "goat.attempt": input.job.attempts,
     "goat.lease_owner": leaseOwner,
   } satisfies Attributes;
-  const runSpan = startSpan(GOAT_SPANS.brainIngestRun, baseAttributes);
+  const runSpan = startSpan(SPANS.brainIngestRun, baseAttributes);
   let leaseActive = true;
   let telemetryFinished = false;
   const runAbort = new AbortController();
@@ -732,7 +732,7 @@ export async function runClaimedBrainIngestJob(input: {
       leaseId,
       leaseOwner,
       now,
-      leaseExpiresAt: new Date(now.getTime() + GOAT_BRAIN_INGEST_LEASE_TTL_MS),
+      leaseExpiresAt: new Date(now.getTime() + BRAIN_INGEST_LEASE_TTL_MS),
     });
     if (!active) loseLease();
   };
@@ -750,7 +750,7 @@ export async function runClaimedBrainIngestJob(input: {
       });
       loseLease();
     });
-  }, GOAT_BRAIN_INGEST_HEARTBEAT_INTERVAL_MS);
+  }, BRAIN_INGEST_HEARTBEAT_INTERVAL_MS);
 
   try {
     // Revalidate immediately before starting expensive work. Disable/remove
@@ -787,7 +787,7 @@ export async function runClaimedBrainIngestJob(input: {
     const result = await runSpan.runInContext(() =>
       traceBraintrust(
         {
-          name: GOAT_SPANS.brainIngestRun,
+          name: SPANS.brainIngestRun,
           type: "task",
           metadata: {
             job_id: input.job.id,
@@ -835,7 +835,7 @@ export async function runClaimedBrainIngestJob(input: {
     }
     if (isSkippedIngestResult(resultWithDuration)) {
       const skipped = await runSpan.runInContext(() =>
-        withSpan(GOAT_SPANS.brainIngestComplete, baseAttributes, () =>
+        withSpan(SPANS.brainIngestComplete, baseAttributes, () =>
           store.skip({
             id: input.job.id,
             sourceItemId: input.job.sourceItemId,
@@ -862,7 +862,7 @@ export async function runClaimedBrainIngestJob(input: {
       return;
     }
     const completed = await runSpan.runInContext(() =>
-      withSpan(GOAT_SPANS.brainIngestComplete, baseAttributes, () =>
+      withSpan(SPANS.brainIngestComplete, baseAttributes, () =>
         store.complete({
           id: input.job.id,
           sourceItemId: input.job.sourceItemId,
@@ -917,15 +917,15 @@ export async function runClaimedBrainIngestJob(input: {
       error instanceof BrainIngestBudgetError
         ? 1
         : error instanceof BrainAgentOutcomeError
-          ? GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS
-          : GOAT_BRAIN_INGEST_MAX_ATTEMPTS;
+          ? BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS
+          : BRAIN_INGEST_MAX_ATTEMPTS;
     const terminal = input.job.attempts >= maxAttempts;
     const failureResult =
       error instanceof BrainIngestBudgetError
         ? withBrainIngestRunDuration({ ...error.result }, runStartedAt)
         : undefined;
     const active = await runSpan.runInContext(() =>
-      withSpan(GOAT_SPANS.brainIngestFail, baseAttributes, () =>
+      withSpan(SPANS.brainIngestFail, baseAttributes, () =>
         store.fail({
           id: input.job.id,
           sourceItemId: input.job.sourceItemId,
@@ -1110,10 +1110,10 @@ export function startBrainIngestWorker(
   } = {},
 ) {
   const store = options.store ?? createDbBrainIngestStore();
-  const handlers = GOAT_BRAIN_INGEST_HANDLERS;
+  const handlers = BRAIN_INGEST_HANDLERS;
   const supportedJobs = handlers.map((handler) => handler.descriptor);
   const concurrency = Math.max(1, options.concurrency ?? Math.min(2, env.workerConcurrency));
-  const pollIntervalMs = Math.max(50, options.pollIntervalMs ?? GOAT_BRAIN_INGEST_POLL_INTERVAL_MS);
+  const pollIntervalMs = Math.max(50, options.pollIntervalMs ?? BRAIN_INGEST_POLL_INTERVAL_MS);
   const active = new Set<Promise<void>>();
   let stopped = false;
   let pendingWake = false;
@@ -1153,7 +1153,7 @@ export function startBrainIngestWorker(
             leaseOwner: env.instanceId,
             supportedJobs,
             store,
-            leaseTtlMs: GOAT_BRAIN_INGEST_LEASE_TTL_MS,
+            leaseTtlMs: BRAIN_INGEST_LEASE_TTL_MS,
             releasePendingReservations: true,
           });
           if (!job) break;
@@ -1309,7 +1309,7 @@ function skippedIngestReason(result: Record<string, unknown>) {
   if (
     typeof summary === "string" &&
     summary.trim() &&
-    summary.trim() !== GOAT_BRAIN_AGENT_SKIP_SENTINEL
+    summary.trim() !== BRAIN_AGENT_SKIP_SENTINEL
   ) {
     return summary.trim();
   }

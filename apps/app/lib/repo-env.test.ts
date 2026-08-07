@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  GOAT_REPO_ENV_MAX_BYTES,
-  normalizeRepoSetupInstructions,
-  validateRepoEnv,
-} from "./repo-env";
+import { normalizeRepoSetupInstructions, REPO_ENV_MAX_BYTES, validateRepoEnv } from "./repo-env";
 
 describe("validateRepoEnv", () => {
   it("accepts dotenv files with comments, quotes, multiline values, and equals signs", () => {
@@ -25,7 +21,7 @@ EMPTY=
       ok: false,
       message: "No environment variables were found.",
     });
-    expect(validateRepoEnv(`KEY=${"x".repeat(GOAT_REPO_ENV_MAX_BYTES)}`)).toEqual({
+    expect(validateRepoEnv(`KEY=${"x".repeat(REPO_ENV_MAX_BYTES)}`)).toEqual({
       ok: false,
       message: "Environment files must be 256 KB or smaller.",
     });

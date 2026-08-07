@@ -13,16 +13,16 @@ import {
   upsertBrainFile,
 } from "@opencompany/db/brain-files";
 import {
+  BRAIN_AGENT_INGEST_JOB_KIND,
+  BRAIN_POINTER_HYDRATE_JOB_KIND,
   findExistingBrainChatCaptureIngest,
   findExistingBrainPointerIngest,
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
-  GOAT_BRAIN_POINTER_HYDRATE_JOB_KIND,
   upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import { nextAvailableBrainId } from "@/lib/brain";
 import { triggerBrainIngestWake } from "@/lib/task-runner";
 
-export const GOAT_BRAIN_CAPTURE_FOLDER = "inbox";
+export const BRAIN_CAPTURE_FOLDER = "inbox";
 const CAPTURE_TITLE_MAX_LENGTH = 80;
 const CAPTURE_TEXT_MAX_BYTES = 64_000;
 const POINTER_FALLBACK_MAX_BYTES = 2_000;
@@ -150,14 +150,14 @@ export async function captureToBrainInbox(input: {
   const draftBrainId = await nextAvailableBrainId(input.brainRef, normalizeBrainId(title));
   const resolvedSourceRef =
     sourceRef ?? `${input.source.kind === "mcp" ? "mcp" : "goat-chat"}:${input.source.itemId}`;
-  const path = brainFilePathFor(GOAT_BRAIN_CAPTURE_FOLDER, draftBrainId);
+  const path = brainFilePathFor(BRAIN_CAPTURE_FOLDER, draftBrainId);
   await upsertBrainFile({
     brainRef: input.brainRef,
     userWorkosId: input.userWorkosId,
     path,
     content: createBrainMarkdownContent({
       id: draftBrainId,
-      folderPath: GOAT_BRAIN_CAPTURE_FOLDER,
+      folderPath: BRAIN_CAPTURE_FOLDER,
       title,
       type: "note",
       status: "draft",
@@ -185,7 +185,7 @@ export async function captureToBrainInbox(input: {
         chatSessionId: input.source.connectionId,
         userMessageId: input.source.itemId,
         draftBrainId,
-        draftFolder: GOAT_BRAIN_CAPTURE_FOLDER,
+        draftFolder: BRAIN_CAPTURE_FOLDER,
         capturedAt,
       })
     : normalizeChatCapture({
@@ -195,7 +195,7 @@ export async function captureToBrainInbox(input: {
         chatSessionId: input.source.connectionId,
         userMessageId: input.source.itemId,
         draftBrainId,
-        draftFolder: GOAT_BRAIN_CAPTURE_FOLDER,
+        draftFolder: BRAIN_CAPTURE_FOLDER,
         capturedAt,
         sourceRef: resolvedSourceRef,
         ...(idempotencyKey ? { externalId: idempotencyKey } : {}),
@@ -206,7 +206,7 @@ export async function captureToBrainInbox(input: {
     ...(isPointerCapture ? { integrationId: integrationId! } : {}),
     item,
     rawPayload: item.content,
-    kind: isPointerCapture ? GOAT_BRAIN_POINTER_HYDRATE_JOB_KIND : GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+    kind: isPointerCapture ? BRAIN_POINTER_HYDRATE_JOB_KIND : BRAIN_AGENT_INGEST_JOB_KIND,
     brainRef: input.brainRef,
   });
   captureIngestionQuotaAnalytics(result.quotaUpdates);

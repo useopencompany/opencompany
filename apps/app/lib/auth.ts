@@ -4,7 +4,7 @@ import { type Brain, users, type Workspace, type WorkspaceRole } from "@opencomp
 import {
   adoptWorkspaceMembershipsFromOrgs,
   createDefaultWorkspaceForUser,
-  DEFAULT_GOAT_BRAIN_SLUG,
+  DEFAULT_BRAIN_SLUG,
   getBrainAccess,
   listAccessibleBrains,
   listWorkspacesForUser,
@@ -24,8 +24,8 @@ import { enrollOwnerInOnboardingEmails } from "@/lib/email/onboarding-emails";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureWorkspaceOrganizationsForEntries } from "@/lib/workos-organizations";
 
-export const GOAT_ACTIVE_WORKSPACE_COOKIE = "goat-active-workspace";
-export const GOAT_ACTIVE_BRAIN_COOKIE = "goat-active-brain";
+export const ACTIVE_WORKSPACE_COOKIE = "goat-active-workspace";
+export const ACTIVE_BRAIN_COOKIE = "goat-active-brain";
 
 export type AuthContext = {
   authUser: WorkOSUser;
@@ -148,22 +148,22 @@ export async function activateWorkspaceForOrganization(input: {
     workspaceId: target.workspace.id,
   });
   const activeBrain =
-    brains.find((brain) => brain.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
+    brains.find((brain) => brain.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
 
   const cookieStore = await cookies();
-  cookieStore.set(GOAT_ACTIVE_WORKSPACE_COOKIE, target.workspace.id, {
+  cookieStore.set(ACTIVE_WORKSPACE_COOKIE, target.workspace.id, {
     path: "/",
     sameSite: "lax",
     maxAge: 60 * 60 * 24 * 365,
   });
   if (activeBrain) {
-    cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, activeBrain.id, {
+    cookieStore.set(ACTIVE_BRAIN_COOKIE, activeBrain.id, {
       path: "/",
       sameSite: "lax",
       maxAge: 60 * 60 * 24 * 365,
     });
   } else {
-    cookieStore.delete(GOAT_ACTIVE_BRAIN_COOKIE);
+    cookieStore.delete(ACTIVE_BRAIN_COOKIE);
   }
 
   return true;
@@ -236,7 +236,7 @@ const resolveAuthContext = cache(async (): Promise<AuthContext | null> => {
   if (!first) return null;
 
   const cookieStore = await cookies();
-  const requestedWorkspaceId = cookieStore.get(GOAT_ACTIVE_WORKSPACE_COOKIE)?.value;
+  const requestedWorkspaceId = cookieStore.get(ACTIVE_WORKSPACE_COOKIE)?.value;
   const active =
     workspaces.find(
       (entry) =>
@@ -249,10 +249,10 @@ const resolveAuthContext = cache(async (): Promise<AuthContext | null> => {
     userWorkosId: user.workosUserId,
     workspaceId: active.workspace.id,
   });
-  const requestedBrainId = cookieStore.get(GOAT_ACTIVE_BRAIN_COOKIE)?.value;
+  const requestedBrainId = cookieStore.get(ACTIVE_BRAIN_COOKIE)?.value;
   const activeBrain =
     brains.find((brain) => brain.id === requestedBrainId) ??
-    brains.find((brain) => brain.slug === DEFAULT_GOAT_BRAIN_SLUG) ??
+    brains.find((brain) => brain.slug === DEFAULT_BRAIN_SLUG) ??
     brains[0] ??
     null;
 

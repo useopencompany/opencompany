@@ -4,7 +4,7 @@ export type FeatureFlags = {
   imessage: boolean;
 };
 
-export const DEFAULT_GOAT_FEATURE_FLAGS: FeatureFlags = {
+export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   taskSpawning: false,
   autoModelRouting: false,
   imessage: false,

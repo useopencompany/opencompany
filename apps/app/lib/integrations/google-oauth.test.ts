@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildGoogleAuthorizationUrl,
   createGoogleIntegrationState,
-  GOAT_GOOGLE_PROVIDER_CONFIG,
+  GOOGLE_PROVIDER_CONFIG,
   googleOAuthRedirectUri,
   googleOAuthTargetOriginForState,
   verifyGoogleIntegrationState,
@@ -34,14 +34,12 @@ describe("Goat Google OAuth", () => {
   });
 
   it("requests draft-capable Gmail, writable Calendar, and read-plus-edit Drive scopes", () => {
-    const gmailUrl = new URL(
-      buildGoogleAuthorizationUrl(GOAT_GOOGLE_PROVIDER_CONFIG.gmail, "state"),
-    );
+    const gmailUrl = new URL(buildGoogleAuthorizationUrl(GOOGLE_PROVIDER_CONFIG.gmail, "state"));
     const calendarUrl = new URL(
-      buildGoogleAuthorizationUrl(GOAT_GOOGLE_PROVIDER_CONFIG.google_calendar, "state"),
+      buildGoogleAuthorizationUrl(GOOGLE_PROVIDER_CONFIG.google_calendar, "state"),
     );
     const driveUrl = new URL(
-      buildGoogleAuthorizationUrl(GOAT_GOOGLE_PROVIDER_CONFIG.google_drive, "state"),
+      buildGoogleAuthorizationUrl(GOOGLE_PROVIDER_CONFIG.google_drive, "state"),
     );
 
     const gmailScopes = gmailUrl.searchParams.get("scope")?.split(" ") ?? [];
@@ -73,7 +71,7 @@ describe("Goat Google OAuth", () => {
     vi.stubEnv("GOOGLE_OAUTH_CALLBACK_URL", "https://oauth.opencompany.cloud/api/google/callback");
 
     expect(
-      Object.values(GOAT_GOOGLE_PROVIDER_CONFIG).map((config) => googleOAuthRedirectUri(config)),
+      Object.values(GOOGLE_PROVIDER_CONFIG).map((config) => googleOAuthRedirectUri(config)),
     ).toEqual([
       "https://opencompany.chat/api/integrations/gmail/callback",
       "https://opencompany.chat/api/integrations/google-calendar/callback",
@@ -86,7 +84,7 @@ describe("Goat Google OAuth", () => {
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://pr-42.preview.opencompany.cloud/");
     vi.stubEnv("GOOGLE_OAUTH_CALLBACK_URL", "https://oauth.opencompany.cloud/api/google/callback");
 
-    expect(googleOAuthRedirectUri(GOAT_GOOGLE_PROVIDER_CONFIG.gmail)).toBe(
+    expect(googleOAuthRedirectUri(GOOGLE_PROVIDER_CONFIG.gmail)).toBe(
       "https://oauth.opencompany.cloud/api/google/callback",
     );
     const targetOrigin = googleOAuthTargetOriginForState();

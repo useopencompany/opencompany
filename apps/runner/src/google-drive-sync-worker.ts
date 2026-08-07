@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { captureIngestionQuotaAnalytics } from "@opencompany/analytics/app";
 import { normalizeGoogleDriveDocument } from "@opencompany/brain";
 import {
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+  BRAIN_AGENT_INGEST_JOB_KIND,
   upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
@@ -391,7 +391,7 @@ async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
             version: state.observedVersion,
             skipReason: "Google Drive no longer permits this file to be read.",
           },
-          kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+          kind: BRAIN_AGENT_INGEST_JOB_KIND,
           brainRefs: uniqueStrings(eligibleRoutes.map((route) => route.brainRef)),
           skipReason: "Google Drive no longer permits this file to be read.",
         });
@@ -453,7 +453,7 @@ async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
         driveId: file.driveId,
         skipReason: skippedReason,
       },
-      kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+      kind: BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs: uniqueStrings(matching.map((route) => route.brainRef)),
       skipReason: skippedReason,
     });

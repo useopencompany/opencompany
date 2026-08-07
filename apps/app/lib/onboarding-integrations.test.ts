@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  GOAT_ONBOARDING_CONNECTION_RETURN_TO,
   integrationConnectionSuccess,
+  ONBOARDING_CONNECTION_RETURN_TO,
   onboardingConnectHref,
   onboardingConnectionError,
 } from "./onboarding-integrations";
@@ -13,7 +13,7 @@ describe("Goat onboarding integrations", () => {
     );
 
     expect(new URL(href, "https://goat.test").searchParams.get("returnTo")).toBe(
-      GOAT_ONBOARDING_CONNECTION_RETURN_TO,
+      ONBOARDING_CONNECTION_RETURN_TO,
     );
   });
 

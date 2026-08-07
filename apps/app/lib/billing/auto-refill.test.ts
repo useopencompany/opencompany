@@ -20,7 +20,7 @@ vi.mock("@opencompany/analytics/shared-server", () => ({
 
 vi.mock("@opencompany/db/billing", () => ({
   claimAutoRefill: vi.fn(),
-  GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS: 5_000_000,
+  AUTO_REFILL_THRESHOLD_USD_MICROS: 5_000_000,
   listAutoRefillCandidates: vi.fn(async () => []),
   releasePendingForWorkspace: vi.fn(async () => 0),
   settleAutoRefill: vi.fn(async () => undefined),

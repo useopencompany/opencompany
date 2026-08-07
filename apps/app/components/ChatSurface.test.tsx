@@ -6,24 +6,24 @@ import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeChatSessionAction, markChatSeenAction } from "@/lib/chat-actions";
 import {
-  GOAT_CHAT_COMPOSER_FOCUS_EVENT,
-  GOAT_HOME_NAVIGATION_EVENT,
+  CHAT_COMPOSER_FOCUS_EVENT,
+  HOME_NAVIGATION_EVENT,
   requestChatComposerFocus,
 } from "@/lib/chat-navigation";
 import { clearAllLocalChatStates, useLocalChatStates } from "@/lib/chat-session-state";
 import {
+  BRAIN_TOOL_PART_TYPE,
   type ChatMessageMetadata,
   type ChatSummaryView,
   type ChatUiMessage,
   type CodexRuntimeView,
-  GOAT_BRAIN_TOOL_PART_TYPE,
   START_TASK_TOOL_PART_TYPE,
   START_WORKFLOW_TOOL_PART_TYPE,
   WEB_FETCH_TOOL_PART_TYPE,
   WEB_SEARCH_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
 import { CLAUDE_CHAT_DEFAULT_MODEL_ID } from "@/lib/claude-chat-constants";
-import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import { DEFAULT_MODEL } from "@/lib/model-options";
 import { buildOnboardingKickoffPrompt, queueOnboardingKickoff } from "@/lib/onboarding-kickoff";
 import { cancelTaskAction, continueTaskAction } from "@/lib/tasks";
 import { ChatSurface, type TaskView } from "./ChatSurface";
@@ -348,12 +348,7 @@ describe("ChatSurface chat streaming UI", () => {
     const user = userEvent.setup();
 
     render(
-      <ChatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        codexConnected
-      />,
+      <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />,
     );
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
@@ -392,7 +387,7 @@ describe("ChatSurface chat streaming UI", () => {
       <>
         <ChatSurface
           tasks={[]}
-          defaultModel={DEFAULT_GOAT_MODEL}
+          defaultModel={DEFAULT_MODEL}
           initialChat={null}
           userWorkosId="user_1"
         />
@@ -420,7 +415,7 @@ describe("ChatSurface chat streaming UI", () => {
 
     expect(body).toMatchObject({
       sessionId: null,
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       message: {
         role: "user",
         parts: [{ type: "text", text: "Research Q3" }],
@@ -468,11 +463,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "goat_chat_codex_active",
           title: "Codex active",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           engine: "codex",
           messages: [],
           codexRuntime: {
@@ -554,11 +549,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "goat_chat_codex_active",
           title: "Codex active",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           engine: "codex",
           messages: [],
           codexRuntime: {
@@ -633,11 +628,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "goat_chat_streaming_1",
           title: "Streaming chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           engine: "opencompany",
           messages: [
             {
@@ -672,7 +667,7 @@ describe("ChatSurface chat streaming UI", () => {
     )!;
     expect(JSON.parse(String(request?.body))).toEqual({
       description: "#task research competitors",
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
     });
     expect(chatMock.stop).not.toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
@@ -686,7 +681,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         userWorkosId="user_1"
       />,
@@ -716,7 +711,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         userWorkosId="user_1"
       />,
@@ -745,7 +740,7 @@ describe("ChatSurface chat streaming UI", () => {
     const initialChat = {
       id: "goat_chat_live_seen",
       title: "Live chat",
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       engine: "opencompany" as const,
       messages: [
         {
@@ -758,7 +753,7 @@ describe("ChatSurface chat streaming UI", () => {
     const staleSummary: ChatSummaryView = {
       id: initialChat.id,
       title: initialChat.title,
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       engine: "opencompany",
       preview: "Start",
       updatedAt: staleSummaryUpdatedAt,
@@ -770,7 +765,7 @@ describe("ChatSurface chat streaming UI", () => {
     const { rerender } = render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={initialChat}
         recentChats={[staleSummary]}
       />,
@@ -781,7 +776,7 @@ describe("ChatSurface chat streaming UI", () => {
 
     await act(async () => {
       chatMock.status = "streaming";
-      chatMock.startWithSessionId?.(initialChat.id, DEFAULT_GOAT_MODEL);
+      chatMock.startWithSessionId?.(initialChat.id, DEFAULT_MODEL);
     });
     expect(markChatSeenAction).not.toHaveBeenCalled();
 
@@ -789,7 +784,7 @@ describe("ChatSurface chat streaming UI", () => {
     rerender(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={initialChat}
         recentChats={[staleSummary]}
       />,
@@ -804,11 +799,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "goat_chat_task_1",
           title: "Morning workflow",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           engine: "opencompany",
           messages: [
             {
@@ -883,11 +878,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "goat_chat_task_1",
           title: "Investigate task",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           engine: "opencompany",
           messages: [],
         }}
@@ -941,11 +936,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "goat_chat_task_1",
           title: "Morning workflow",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           engine: "opencompany",
           messages: [
             {
@@ -986,7 +981,7 @@ describe("ChatSurface chat streaming UI", () => {
     )!;
     expect(JSON.parse(String(request?.body))).toEqual({
       description: "#task research competitors",
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
     });
     expect(continueTaskAction).not.toHaveBeenCalled();
     expect(cancelTaskAction).not.toHaveBeenCalled();
@@ -999,11 +994,11 @@ describe("ChatSurface chat streaming UI", () => {
     const { rerender } = render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "goat_task_1",
           title: "Morning workflow",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           engine: "codex",
           messages: [
             {
@@ -1038,11 +1033,11 @@ describe("ChatSurface chat streaming UI", () => {
     rerender(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "goat_task_1",
           title: "Morning workflow",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           engine: "codex",
           messages: [
             {
@@ -1081,11 +1076,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "goat_task_1",
           title: "Morning workflow",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           engine: "codex",
           messages: [],
         }}
@@ -1114,7 +1109,7 @@ describe("ChatSurface chat streaming UI", () => {
 
     const { rerender } = render(
       <StrictMode>
-        <ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />
+        <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />
       </StrictMode>,
     );
 
@@ -1127,7 +1122,7 @@ describe("ChatSurface chat streaming UI", () => {
 
     rerender(
       <StrictMode>
-        <ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />
+        <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />
       </StrictMode>,
     );
     expect(chatMock.sendMessage).toHaveBeenCalledTimes(1);
@@ -1135,7 +1130,7 @@ describe("ChatSurface chat streaming UI", () => {
 
   it("updates the URL without a server navigation and sends the reserved id", async () => {
     const user = userEvent.setup();
-    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start now");
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -1149,7 +1144,7 @@ describe("ChatSurface chat streaming UI", () => {
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
       sessionId: null,
       newSessionId: optimisticSessionId,
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
     });
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
@@ -1157,7 +1152,7 @@ describe("ChatSurface chat streaming UI", () => {
 
   it("keeps Shift+Enter as a newline in the main composer", async () => {
     const user = userEvent.setup();
-    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
     await user.type(textarea, "Start now");
@@ -1173,7 +1168,7 @@ describe("ChatSurface chat streaming UI", () => {
   it("keeps the reserved detail URL and reuses its id when the first send is retried", async () => {
     const user = userEvent.setup();
     chatMock.sendError = new Error("network failed");
-    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Try again");
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -1200,11 +1195,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [],
         }}
       />,
@@ -1214,7 +1209,7 @@ describe("ChatSurface chat streaming UI", () => {
     expect(screen.queryByText("Task")).not.toBeInTheDocument();
 
     await user.type(screen.getByPlaceholderText("Reply..."), "Unsent draft");
-    act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
+    act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
 
     const composer = screen.getByPlaceholderText("Ask Goat anything...");
     expect(composer).toHaveValue("");
@@ -1227,22 +1222,22 @@ describe("ChatSurface chat streaming UI", () => {
     const chatOne = {
       id: "chat_1",
       title: "First chat",
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       messages: [],
     };
     const chatTwo = {
       id: "chat_2",
       title: "Second chat",
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       messages: [],
     };
     const { rerender } = render(
-      <ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={chatOne} />,
+      <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={chatOne} />,
     );
 
     await user.type(screen.getByPlaceholderText("Reply..."), "Draft for the first chat");
 
-    rerender(<ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={chatTwo} />);
+    rerender(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={chatTwo} />);
     await nextAnimationFrame();
 
     expect(screen.getByText("Second chat")).toBeInTheDocument();
@@ -1250,13 +1245,13 @@ describe("ChatSurface chat streaming UI", () => {
 
     await user.type(screen.getByPlaceholderText("Reply..."), "Draft for the second chat");
 
-    rerender(<ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={chatOne} />);
+    rerender(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={chatOne} />);
     await nextAnimationFrame();
 
     expect(screen.getByText("First chat")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Draft for the first chat");
 
-    rerender(<ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={chatTwo} />);
+    rerender(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={chatTwo} />);
     await nextAnimationFrame();
 
     expect(screen.getByText("Second chat")).toBeInTheDocument();
@@ -1268,17 +1263,17 @@ describe("ChatSurface chat streaming UI", () => {
     const chatOne = {
       id: "chat_1",
       title: "First chat",
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       messages: [],
     };
     const chatTwo = {
       id: "chat_2",
       title: "Second chat",
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       messages: [],
     };
     const { rerender } = render(
-      <ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={chatOne} />,
+      <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={chatOne} />,
     );
     const composer = screen.getByPlaceholderText("Reply...");
 
@@ -1286,7 +1281,7 @@ describe("ChatSurface chat streaming UI", () => {
     composer.blur();
     act(() => requestChatComposerFocus("chat_2"));
 
-    rerender(<ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={chatTwo} />);
+    rerender(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={chatTwo} />);
     await nextAnimationFrame();
     await nextAnimationFrame();
 
@@ -1298,11 +1293,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [],
         }}
       />,
@@ -1312,7 +1307,7 @@ describe("ChatSurface chat streaming UI", () => {
     composer.blur();
     act(() =>
       window.dispatchEvent(
-        new CustomEvent(GOAT_CHAT_COMPOSER_FOCUS_EVENT, { detail: { sessionId: "chat_1" } }),
+        new CustomEvent(CHAT_COMPOSER_FOCUS_EVENT, { detail: { sessionId: "chat_1" } }),
       ),
     );
 
@@ -1321,11 +1316,11 @@ describe("ChatSurface chat streaming UI", () => {
 
   it("does not reopen a new chat when its response arrives after Home was clicked", async () => {
     const user = userEvent.setup();
-    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start");
     await user.click(screen.getByRole("button", { name: "Send message" }));
-    act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
+    act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
     act(() => chatMock.finishWithSessionId?.("goat_chat_returned_late"));
 
     expect(screen.getByPlaceholderText("Ask Goat anything...")).toHaveFocus();
@@ -1342,11 +1337,11 @@ describe("ChatSurface chat streaming UI", () => {
       <>
         <ChatSurface
           tasks={[]}
-          defaultModel={DEFAULT_GOAT_MODEL}
+          defaultModel={DEFAULT_MODEL}
           initialChat={{
             id: "chat_1",
             title: "Chat",
-            model: DEFAULT_GOAT_MODEL,
+            model: DEFAULT_MODEL,
             messages: [],
           }}
         />
@@ -1358,11 +1353,11 @@ describe("ChatSurface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
     act(() => {
       chatMock.status = "streaming";
-      chatMock.startWithSessionId?.("chat_1", DEFAULT_GOAT_MODEL);
+      chatMock.startWithSessionId?.("chat_1", DEFAULT_MODEL);
     });
     expect(screen.getByTestId("local-chat-state")).toHaveTextContent("working");
 
-    act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
+    act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
 
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
     expect(screen.getByTestId("local-chat-state")).toHaveTextContent("working");
@@ -1374,7 +1369,7 @@ describe("ChatSurface chat streaming UI", () => {
 
   it("renders composer input as native textarea text", async () => {
     const user = userEvent.setup();
-    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
     await user.type(textarea, "@codex inspect this long prompt");
@@ -1386,7 +1381,7 @@ describe("ChatSurface chat streaming UI", () => {
   it("selects from the active goat model list and sends the chosen model", async () => {
     const user = userEvent.setup();
 
-    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
     const modelPicker = screen.getByRole("button", { name: "Model" });
     expect(modelPicker).toHaveTextContent("Kimi K3");
@@ -1414,7 +1409,7 @@ describe("ChatSurface chat streaming UI", () => {
     const user = userEvent.setup();
 
     const { rerender } = render(
-      <ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />,
+      <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />,
     );
     await user.click(screen.getByRole("button", { name: "Model" }));
     expect(screen.queryByText("Picks once from your first message")).not.toBeInTheDocument();
@@ -1422,7 +1417,7 @@ describe("ChatSurface chat streaming UI", () => {
     rerender(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         autoModelRoutingEnabled
       />,
@@ -1447,7 +1442,7 @@ describe("ChatSurface chat streaming UI", () => {
     const user = userEvent.setup();
     const props = {
       tasks: [],
-      defaultModel: DEFAULT_GOAT_MODEL,
+      defaultModel: DEFAULT_MODEL,
       initialChat: null,
       userWorkosId: "user_1",
     } as const;
@@ -1457,7 +1452,7 @@ describe("ChatSurface chat streaming UI", () => {
     await user.click(screen.getByText("Claude Sonnet 5"));
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Use Sonnet");
     await user.click(screen.getByRole("button", { name: "Send message" }));
-    act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
+    act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
 
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Claude Sonnet 5");
 
@@ -1474,7 +1469,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         userWorkosId="user_1"
       />,
@@ -1501,7 +1496,7 @@ describe("ChatSurface chat streaming UI", () => {
 
     expect(modelPicker).toHaveTextContent("Kimi K3");
 
-    act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
+    act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Claude Sonnet 5"),
     );
@@ -1512,7 +1507,7 @@ describe("ChatSurface chat streaming UI", () => {
     const user = userEvent.setup();
     const sharedProps = {
       tasks: [],
-      defaultModel: DEFAULT_GOAT_MODEL,
+      defaultModel: DEFAULT_MODEL,
       codexConnected: true,
       userWorkosId: "user_1",
     } as const;
@@ -1520,7 +1515,7 @@ describe("ChatSurface chat streaming UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Cloud Codex sandbox"));
-    act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
+    act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
 
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
 
@@ -1536,19 +1531,14 @@ describe("ChatSurface chat streaming UI", () => {
     const user = userEvent.setup();
 
     const { unmount } = render(
-      <ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />,
+      <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />,
     );
     await user.click(screen.getByRole("button", { name: "Model" }));
     expect(screen.queryByText("Cloud Codex sandbox")).not.toBeInTheDocument();
     unmount();
 
     render(
-      <ChatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        codexConnected
-      />,
+      <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />,
     );
     await user.click(screen.getByRole("button", { name: "Model" }));
     expect(screen.getByText("Cloud Codex sandbox")).toBeInTheDocument();
@@ -1558,12 +1548,7 @@ describe("ChatSurface chat streaming UI", () => {
     const user = userEvent.setup();
 
     render(
-      <ChatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        codexConnected
-      />,
+      <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />,
     );
 
     expect(screen.queryByRole("button", { name: /Codex reasoning effort/i })).toBeNull();
@@ -1604,12 +1589,7 @@ describe("ChatSurface chat streaming UI", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(
-      <ChatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        codexConnected
-      />,
+      <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />,
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
@@ -1662,7 +1642,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         claudeCodeConnected
       />,
@@ -1740,7 +1720,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         codexConnected
         userWorkosId="user_1"
@@ -1787,7 +1767,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         codexConnected
         userWorkosId="user_1"
@@ -1837,7 +1817,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         codexConnected
         userWorkosId="user_1"
@@ -1878,12 +1858,7 @@ describe("ChatSurface chat streaming UI", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(
-      <ChatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        codexConnected
-      />,
+      <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />,
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
@@ -1945,12 +1920,12 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         codexConnected
         initialChat={{
           id: "goat_chat_codex_1",
           title: "Codex plan",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           engine: "codex",
           codexComposerSettings: {
             reasoningEffort: "high",
@@ -2007,12 +1982,12 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         codexConnected
         initialChat={{
           id: "goat_chat_codex_1",
           title: "Codex question",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           engine: "codex",
           messages: [
             {
@@ -2066,13 +2041,13 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         codexConnected
         chatResumeEnabled
         initialChat={{
           id: "goat_chat_codex_1",
           title: "Codex chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           engine: "codex",
           messages: [
             {
@@ -2094,12 +2069,12 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         claudeCodeConnected
         initialChat={{
           id: "goat_chat_claude_1",
           title: "Claude Code chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           engine: "claude_code",
           messages: [
             {
@@ -2120,12 +2095,12 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         codexConnected
         initialChat={{
           id: "goat_chat_codex_1",
           title: "Codex chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           engine: "codex",
           codexRuntime: {
             status: "idle",
@@ -2148,11 +2123,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "goat_chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -2175,12 +2150,12 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         codexConnected
         initialChat={{
           id: "goat_chat_codex_1",
           title: "Codex chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           engine: "codex",
           codexRuntime: {
             status: "queued",
@@ -2201,12 +2176,12 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         codexConnected
         initialChat={{
           id: "goat_chat_codex_1",
           title: "Codex chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           engine: "codex",
           codexComposerSettings: {
             reasoningEffort: "high",
@@ -2219,7 +2194,7 @@ describe("ChatSurface chat streaming UI", () => {
           {
             id: "goat_chat_codex_1",
             title: "Codex chat",
-            model: DEFAULT_GOAT_MODEL,
+            model: DEFAULT_MODEL,
             engine: "codex",
             preview: "Run the failing suite",
             updatedAt: currentTimestamp(),
@@ -2264,12 +2239,7 @@ describe("ChatSurface chat streaming UI", () => {
     const user = userEvent.setup();
 
     render(
-      <ChatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        codexConnected
-      />,
+      <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />,
     );
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
@@ -2287,11 +2257,11 @@ describe("ChatSurface chat streaming UI", () => {
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
       sessionId: null,
       newSessionId: expect.stringMatching(/^goat_chat_/),
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
     });
     expect(chatMock.preparedRequestBodies[1]).toMatchObject({
       sessionId: firstRequest.newSessionId,
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
     });
     expect(historyMock.replaceState).toHaveBeenCalledTimes(1);
     expect(routerMock.replace).not.toHaveBeenCalled();
@@ -2314,12 +2284,12 @@ describe("ChatSurface chat streaming UI", () => {
       );
     });
     vi.stubGlobal("fetch", fetchMock);
-    window.localStorage.setItem("opencompany-goat-main-chat-selection:user_1", DEFAULT_GOAT_MODEL);
+    window.localStorage.setItem("opencompany-goat-main-chat-selection:user_1", DEFAULT_MODEL);
 
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         codexConnected
         userWorkosId="user_1"
@@ -2361,7 +2331,7 @@ describe("ChatSurface chat streaming UI", () => {
       model: "openai/gpt-5.6-sol",
     });
     expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBe(
-      DEFAULT_GOAT_MODEL,
+      DEFAULT_MODEL,
     );
 
     await user.keyboard("{Escape}");
@@ -2387,12 +2357,12 @@ describe("ChatSurface chat streaming UI", () => {
       );
     });
     vi.stubGlobal("fetch", fetchMock);
-    window.localStorage.setItem("opencompany-goat-main-chat-selection:user_1", DEFAULT_GOAT_MODEL);
+    window.localStorage.setItem("opencompany-goat-main-chat-selection:user_1", DEFAULT_MODEL);
 
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         claudeCodeConnected
         userWorkosId="user_1"
@@ -2436,7 +2406,7 @@ describe("ChatSurface chat streaming UI", () => {
       model: CLAUDE_CHAT_DEFAULT_MODEL_ID,
     });
     expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBe(
-      DEFAULT_GOAT_MODEL,
+      DEFAULT_MODEL,
     );
 
     await user.keyboard("{Escape}");
@@ -2483,11 +2453,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "goat_chat_1",
           title: "Existing chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [],
         }}
         userWorkosId="user_1"
@@ -2570,11 +2540,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "goat_chat_1",
           title: "Existing chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [],
         }}
         userWorkosId="user_1"
@@ -2673,7 +2643,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         codexConnected
         userWorkosId="user_1"
@@ -2742,11 +2712,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "goat_chat_1",
           title: "Existing chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [],
         }}
         userWorkosId="user_1"
@@ -2774,7 +2744,7 @@ describe("ChatSurface chat streaming UI", () => {
     )!;
     expect(JSON.parse(String(request?.body))).toEqual({
       description: "#task research our three closest competitors",
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
     });
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
@@ -2802,7 +2772,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         userWorkosId="user_1"
       />,
@@ -2821,7 +2791,7 @@ describe("ChatSurface chat streaming UI", () => {
   it("does not show Codex mention options when Codex is not connected", async () => {
     const user = userEvent.setup();
 
-    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
     await user.type(textarea, "@");
@@ -2833,12 +2803,7 @@ describe("ChatSurface chat streaming UI", () => {
     const user = userEvent.setup();
 
     render(
-      <ChatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        codexConnected
-      />,
+      <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />,
     );
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
@@ -2854,12 +2819,7 @@ describe("ChatSurface chat streaming UI", () => {
     const user = userEvent.setup();
 
     render(
-      <ChatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        codexConnected
-      />,
+      <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />,
     );
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
@@ -2901,7 +2861,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         userWorkosId="user_1"
       />,
@@ -2965,7 +2925,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         userWorkosId="user_1"
       />,
@@ -3025,7 +2985,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         userWorkosId="user_1"
       />,
@@ -3045,7 +3005,7 @@ describe("ChatSurface chat streaming UI", () => {
   it("keeps a completed new chat visible while server props refresh", async () => {
     const user = userEvent.setup();
 
-    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Hello Goat");
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -3056,12 +3016,7 @@ describe("ChatSurface chat streaming UI", () => {
 
   it("keeps the home screen clean when there is no activity", () => {
     render(
-      <ChatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        userName="Louis"
-      />,
+      <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userName="Louis" />,
     );
 
     expect(screen.getByText("welcome back, Louis")).toBeInTheDocument();
@@ -3078,13 +3033,13 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         recentChats={[
           {
             id: "chat_1",
             title: "Market research",
-            model: DEFAULT_GOAT_MODEL,
+            model: DEFAULT_MODEL,
             preview: "Compare the latest pricing.",
             updatedAt: currentTimestamp(),
           },
@@ -3101,7 +3056,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         recentChats={[
           codexChatSummary({
@@ -3112,7 +3067,7 @@ describe("ChatSurface chat streaming UI", () => {
           {
             id: "unseen_chat",
             title: "Done unseen",
-            model: DEFAULT_GOAT_MODEL,
+            model: DEFAULT_MODEL,
             preview: "Ready to review.",
             updatedAt: currentTimestamp(),
             state: "done_unseen",
@@ -3120,7 +3075,7 @@ describe("ChatSurface chat streaming UI", () => {
           {
             id: "seen_chat",
             title: "Done seen",
-            model: DEFAULT_GOAT_MODEL,
+            model: DEFAULT_MODEL,
             preview: "Already opened.",
             updatedAt: currentTimestamp(),
             state: "done_seen",
@@ -3166,7 +3121,7 @@ describe("ChatSurface chat streaming UI", () => {
             updatedAt: currentTimestamp(),
           },
         ]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         recentChats={[
           codexChatSummary({ id: "codex_1", title: "Fix deployment" }),
@@ -3179,7 +3134,7 @@ describe("ChatSurface chat streaming UI", () => {
           {
             id: "chat_1",
             title: "Market research",
-            model: DEFAULT_GOAT_MODEL,
+            model: DEFAULT_MODEL,
             engine: "opencompany",
             preview: "Compare the latest pricing.",
             updatedAt: currentTimestamp(),
@@ -3219,7 +3174,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         recentChats={[codexChatSummary()]}
       />,
@@ -3245,11 +3200,11 @@ describe("ChatSurface chat streaming UI", () => {
       render(
         <ChatSurface
           tasks={[]}
-          defaultModel={DEFAULT_GOAT_MODEL}
+          defaultModel={DEFAULT_MODEL}
           initialChat={{
             id: `goat_chat_${engine}`,
             title: `${engine} chat`,
-            model: DEFAULT_GOAT_MODEL,
+            model: DEFAULT_MODEL,
             engine,
             messages: [],
           }}
@@ -3287,7 +3242,7 @@ describe("ChatSurface chat streaming UI", () => {
       render(
         <ChatSurface
           tasks={[]}
-          defaultModel={DEFAULT_GOAT_MODEL}
+          defaultModel={DEFAULT_MODEL}
           initialChat={null}
           recentChats={[
             codexChatSummary({
@@ -3342,7 +3297,7 @@ describe("ChatSurface chat streaming UI", () => {
             displayId: "TASK-1",
             name: "Run market report",
             prompt: "Write a report",
-            model: DEFAULT_GOAT_MODEL,
+            model: DEFAULT_MODEL,
             status: "succeeded",
             stage: "completed",
             result: "Done",
@@ -3352,13 +3307,13 @@ describe("ChatSurface chat streaming UI", () => {
             updatedAt: currentTimestamp(),
           },
         ]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         recentChats={[
           {
             id: "chat_1",
             title: "Market research",
-            model: DEFAULT_GOAT_MODEL,
+            model: DEFAULT_MODEL,
             preview: "Compare the latest pricing.",
             updatedAt: currentTimestamp(),
           },
@@ -3404,20 +3359,20 @@ describe("ChatSurface chat streaming UI", () => {
               updatedAt: "2026-07-02T10:00:00.000Z",
             }),
           ]}
-          defaultModel={DEFAULT_GOAT_MODEL}
+          defaultModel={DEFAULT_MODEL}
           initialChat={null}
           recentChats={[
             {
               id: "recent_chat",
               title: "Recent chat",
-              model: DEFAULT_GOAT_MODEL,
+              model: DEFAULT_MODEL,
               preview: "Visible",
               updatedAt: "2026-07-04T10:00:00.000Z",
             },
             {
               id: "old_chat",
               title: "Old chat",
-              model: DEFAULT_GOAT_MODEL,
+              model: DEFAULT_MODEL,
               preview: "Hidden",
               updatedAt: "2026-07-02T10:00:00.000Z",
             },
@@ -3439,13 +3394,13 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         recentChats={[
           {
             id: "chat_1",
             title: "Market research",
-            model: DEFAULT_GOAT_MODEL,
+            model: DEFAULT_MODEL,
             preview: "Compare the latest pricing.",
             updatedAt: currentTimestamp(),
           },
@@ -3488,7 +3443,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         userWorkosId="user_1"
       />,
@@ -3525,7 +3480,7 @@ describe("ChatSurface chat streaming UI", () => {
     );
     expect(body).toMatchObject({
       sessionId: null,
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       message: {
         role: "user",
         parts: [{ type: "text", text: "Research Q3" }],
@@ -3570,7 +3525,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         userWorkosId="user_1"
       />,
@@ -3615,7 +3570,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         codexConnected
         userWorkosId="user_1"
@@ -3658,12 +3613,7 @@ describe("ChatSurface chat streaming UI", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(
-      <ChatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        codexConnected
-      />,
+      <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />,
     );
 
     await user.keyboard("{Meta>}k{/Meta}");
@@ -3735,7 +3685,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         codexConnected
         userWorkosId="user_1"
@@ -3789,12 +3739,7 @@ describe("ChatSurface chat streaming UI", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(
-      <ChatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        codexConnected
-      />,
+      <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />,
     );
 
     await user.keyboard("{Meta>}k{/Meta}");
@@ -3827,7 +3772,7 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         codexConnected
         userWorkosId="user_1"
@@ -3850,13 +3795,13 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         recentChats={[
           {
             id: "chat_1",
             title: "Q2 planning",
-            model: DEFAULT_GOAT_MODEL,
+            model: DEFAULT_MODEL,
             preview: "Let's plan Q2",
             updatedAt: currentTimestamp(),
           },
@@ -3879,7 +3824,7 @@ describe("ChatSurface chat streaming UI", () => {
   it("drills from Cmd+K search into compose on Enter, prefilled with the typed query", async () => {
     const user = userEvent.setup();
 
-    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
@@ -3903,13 +3848,13 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={null}
         recentChats={[
           {
             id: "chat_1",
             title: "Q2 planning",
-            model: DEFAULT_GOAT_MODEL,
+            model: DEFAULT_MODEL,
             preview: "Let's plan Q2",
             updatedAt: currentTimestamp(),
           },
@@ -3937,7 +3882,7 @@ describe("ChatSurface chat streaming UI", () => {
   it("does not navigate or refresh when the stream confirms the reserved session id", async () => {
     const user = userEvent.setup();
 
-    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start");
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -3954,14 +3899,14 @@ describe("ChatSurface chat streaming UI", () => {
   it("does not route back to chat when a turn finishes after navigating away", async () => {
     const user = userEvent.setup();
     const { rerender } = render(
-      <ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />,
+      <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />,
     );
 
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     pathnameMock.value = "/brain";
-    rerender(<ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    rerender(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
     act(() => {
       chatMock.finishWithSessionId?.("goat_chat_123");
@@ -3977,11 +3922,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4008,11 +3953,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4043,11 +3988,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4071,7 +4016,7 @@ describe("ChatSurface chat streaming UI", () => {
     const user = userEvent.setup();
     chatMock.status = "streaming";
 
-    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
     expect(textarea).toBeEnabled();
@@ -4093,11 +4038,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "user_1",
@@ -4120,11 +4065,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "user_1",
@@ -4152,11 +4097,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4200,11 +4145,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4234,11 +4179,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4263,11 +4208,11 @@ describe("ChatSurface chat streaming UI", () => {
     const { container } = render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4289,11 +4234,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4334,11 +4279,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4405,11 +4350,11 @@ describe("ChatSurface chat streaming UI", () => {
             error: "Runner failed.",
           }),
         ]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4456,11 +4401,11 @@ describe("ChatSurface chat streaming UI", () => {
             stage: "completed",
           }),
         ]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4483,11 +4428,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4510,11 +4455,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4562,11 +4507,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4575,7 +4520,7 @@ describe("ChatSurface chat streaming UI", () => {
               parts: [
                 { type: "text", text: "I'll check your Brain." },
                 {
-                  type: GOAT_BRAIN_TOOL_PART_TYPE,
+                  type: BRAIN_TOOL_PART_TYPE,
                   toolCallId: "tool_brain_1",
                   state: "input-available",
                   input: {
@@ -4608,11 +4553,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4620,7 +4565,7 @@ describe("ChatSurface chat streaming UI", () => {
               metadata: { sessionId: "chat_1", aborted: true },
               parts: [
                 {
-                  type: GOAT_BRAIN_TOOL_PART_TYPE,
+                  type: BRAIN_TOOL_PART_TYPE,
                   toolCallId: "tool_brain_1",
                   state: "input-available",
                   input: {
@@ -4648,11 +4593,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4660,7 +4605,7 @@ describe("ChatSurface chat streaming UI", () => {
               metadata: { sessionId: "chat_1" },
               parts: [
                 {
-                  type: GOAT_BRAIN_TOOL_PART_TYPE,
+                  type: BRAIN_TOOL_PART_TYPE,
                   toolCallId: "tool_brain_1",
                   state: "output-available",
                   input: {
@@ -4702,7 +4647,7 @@ describe("ChatSurface chat streaming UI", () => {
                   },
                 },
                 {
-                  type: GOAT_BRAIN_TOOL_PART_TYPE,
+                  type: BRAIN_TOOL_PART_TYPE,
                   toolCallId: "tool_brain_2",
                   state: "output-available",
                   input: { command: "rewrite", flags: { id: "bad-id", truth: "Noop" } },
@@ -4745,11 +4690,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4757,7 +4702,7 @@ describe("ChatSurface chat streaming UI", () => {
               metadata: { sessionId: "chat_1" },
               parts: [
                 {
-                  type: GOAT_BRAIN_TOOL_PART_TYPE,
+                  type: BRAIN_TOOL_PART_TYPE,
                   toolCallId: "tool_brain_doctor",
                   state: "output-available",
                   input: { command: "doctor" },
@@ -4792,11 +4737,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4838,11 +4783,11 @@ describe("ChatSurface chat streaming UI", () => {
     render(
       <ChatSurface
         tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
+        defaultModel={DEFAULT_MODEL}
         initialChat={{
           id: "chat_1",
           title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           messages: [
             {
               id: "assistant_1",
@@ -4880,7 +4825,7 @@ describe("ChatSurface chat streaming UI", () => {
         <ChatSurface
           taskSpawningEnabled
           tasks={[taskView({ createdAt: "2026-07-02T17:43:45.000Z" })]}
-          defaultModel={DEFAULT_GOAT_MODEL}
+          defaultModel={DEFAULT_MODEL}
           initialChat={null}
         />,
       );
@@ -4900,7 +4845,7 @@ function taskView(overrides: Partial<TaskView> = {}): TaskView {
     displayId: "TASK-1",
     name: "Summarize latest email",
     prompt: "Summarize latest email",
-    model: DEFAULT_GOAT_MODEL,
+    model: DEFAULT_MODEL,
     status: "succeeded",
     stage: "completed",
     result: "Done.",
@@ -4924,7 +4869,7 @@ function codexChatSummary(
   return {
     id: "goat_chat_codex_1",
     title: "Codex task",
-    model: DEFAULT_GOAT_MODEL,
+    model: DEFAULT_MODEL,
     engine: "codex",
     preview: "Codex is working on the repository.",
     updatedAt,

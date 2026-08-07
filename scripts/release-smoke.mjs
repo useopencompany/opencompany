@@ -1,24 +1,24 @@
 #!/usr/bin/env node
 
 // Called by: .github/workflows/release-production.yml and root `bun run release:smoke`.
-// Purpose: polls production Goat and runner health checks after deployment.
+// Purpose: polls production App and runner health checks after deployment.
 
 import { execFileSync } from "node:child_process";
 
 import { expectedReleaseFor } from "./lib/release-smoke.mjs";
 
-const url = normalizeBaseUrl(process.env.GOAT_URL || process.env.PRODUCTION_APP_URL);
-const vercelDeployment = normalizeBaseUrl(process.env.SMOKE_APP_VERCEL_DEPLOYMENT);
+const appUrl = normalizeBaseUrl(process.env.APP_URL || process.env.PRODUCTION_APP_URL);
+const appVercelDeployment = normalizeBaseUrl(process.env.SMOKE_APP_VERCEL_DEPLOYMENT);
 const runnerUrl = normalizeBaseUrl(process.env.RUNNER_PUBLIC_URL);
 const attempts = Number(process.env.SMOKE_ATTEMPTS ?? "30");
-const attempts = Number(process.env.SMOKE_APP_ATTEMPTS ?? attempts);
+const appAttempts = Number(process.env.SMOKE_APP_ATTEMPTS ?? attempts);
 const runnerAttempts = Number(process.env.SMOKE_RUNNER_ATTEMPTS ?? attempts);
 const delayMs = Number(process.env.SMOKE_DELAY_MS ?? "10000");
-const checkGoat = booleanEnv("SMOKE_APP", true);
+const checkApp = booleanEnv("SMOKE_APP", true);
 const checkRunner = booleanEnv("SMOKE_RUNNER", true);
 
-if (checkGoat && !url && !vercelDeployment) {
-  console.error("GOAT_URL, PRODUCTION_APP_URL, or SMOKE_APP_VERCEL_DEPLOYMENT is required.");
+if (checkApp && !appUrl && !appVercelDeployment) {
+  console.error("APP_URL, PRODUCTION_APP_URL, or SMOKE_APP_VERCEL_DEPLOYMENT is required.");
   process.exit(1);
 }
 
@@ -29,8 +29,8 @@ if (checkRunner && !runnerUrl) {
 
 const checks = [];
 
-if (checkGoat) {
-  checks.push(checkUntilReady("goat", healthTarget("goat"), attempts, delayMs));
+if (checkApp) {
+  checks.push(checkUntilReady("app", healthTarget("app"), appAttempts, delayMs));
 }
 
 if (checkRunner) {
@@ -82,7 +82,7 @@ async function checkUntilReady(name, url, maxAttempts, waitMs) {
 }
 
 async function readHealthBody(name, url) {
-  if (name === "goat" && vercelDeployment) {
+  if (name === "app" && appVercelDeployment) {
     const args = ["vercel", "curl", "/api/healthz", "--deployment", url];
     if (process.env.VERCEL_TOKEN?.trim()) args.push("--token", process.env.VERCEL_TOKEN.trim());
     return execFileSync("bunx", args, {
@@ -104,10 +104,10 @@ async function readHealthBody(name, url) {
 }
 
 function healthTarget(name) {
-  if (name !== "goat") {
+  if (name !== "app") {
     throw new Error(`Unknown health target: ${name}`);
   }
-  return vercelDeployment || `${url}/api/healthz`;
+  return appVercelDeployment || `${appUrl}/api/healthz`;
 }
 
 function normalizeBaseUrl(value) {

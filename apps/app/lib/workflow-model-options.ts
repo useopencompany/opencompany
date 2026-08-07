@@ -14,7 +14,7 @@ import type { HarnessEngine } from "@opencompany/db/schema";
 
 // The token is stored on a workflow step and can also be used as an inline
 // `@<token>` mention. Model metadata comes from the shared agent catalog.
-const GOAT_WORKFLOW_MODEL_CONFIG = [
+const WORKFLOW_MODEL_CONFIG = [
   {
     token: "kimi-k2.6",
     engine: "opencompany",
@@ -67,7 +67,7 @@ const GOAT_WORKFLOW_MODEL_CONFIG = [
   hint: string;
 }[];
 
-export type WorkflowModelToken = (typeof GOAT_WORKFLOW_MODEL_CONFIG)[number]["token"];
+export type WorkflowModelToken = (typeof WORKFLOW_MODEL_CONFIG)[number]["token"];
 
 export type WorkflowModelOption = AgentModelDefinition & {
   token: WorkflowModelToken;
@@ -87,34 +87,35 @@ export type WorkflowStepSettingsInput = {
   reasoningEffort?: unknown;
 };
 
-export const GOAT_WORKFLOW_MODEL_OPTIONS: readonly WorkflowModelOption[] =
-  GOAT_WORKFLOW_MODEL_CONFIG.map(({ modelId, ...option }) => ({
+export const WORKFLOW_MODEL_OPTIONS: readonly WorkflowModelOption[] = WORKFLOW_MODEL_CONFIG.map(
+  ({ modelId, ...option }) => ({
     ...requireAgentModelDefinition(modelId),
     ...option,
-  }));
-
-export const DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN: WorkflowModelToken = "kimi-k2.6";
-export const DEFAULT_GOAT_WORKFLOW_REASONING_EFFORT: CodexReasoningEffort = "high";
-export const GOAT_WORKFLOW_REASONING_EFFORT_OPTIONS = CODEX_REASONING_EFFORTS;
-
-const GOAT_WORKFLOW_MODEL_TOKEN_SET = new Set<string>(
-  GOAT_WORKFLOW_MODEL_OPTIONS.map((option) => option.token),
+  }),
 );
 
-export const GOAT_WORKFLOW_CODEX_MODEL_OPTIONS: readonly WorkflowCloudModelOption[] =
+export const DEFAULT_WORKFLOW_MODEL_TOKEN: WorkflowModelToken = "kimi-k2.6";
+export const DEFAULT_WORKFLOW_REASONING_EFFORT: CodexReasoningEffort = "high";
+export const WORKFLOW_REASONING_EFFORT_OPTIONS = CODEX_REASONING_EFFORTS;
+
+const WORKFLOW_MODEL_TOKEN_SET = new Set<string>(
+  WORKFLOW_MODEL_OPTIONS.map((option) => option.token),
+);
+
+export const WORKFLOW_CODEX_MODEL_OPTIONS: readonly WorkflowCloudModelOption[] =
   CODEX_AGENT_MODEL_IDS.map((modelId) => ({
     ...requireAgentModelDefinition(modelId),
     engine: "codex",
   }));
 
-export const GOAT_WORKFLOW_CLAUDE_CODE_MODEL_OPTIONS: readonly WorkflowCloudModelOption[] =
+export const WORKFLOW_CLAUDE_CODE_MODEL_OPTIONS: readonly WorkflowCloudModelOption[] =
   CLAUDE_CODE_AGENT_MODEL_IDS.map((modelId) => ({
     ...requireAgentModelDefinition(modelId),
     engine: "claude_code",
   }));
 
 export function isWorkflowModelToken(value: unknown): value is WorkflowModelToken {
-  return typeof value === "string" && GOAT_WORKFLOW_MODEL_TOKEN_SET.has(value);
+  return typeof value === "string" && WORKFLOW_MODEL_TOKEN_SET.has(value);
 }
 
 export function workflowModelSelection(input: {
@@ -126,7 +127,7 @@ export function workflowModelSelection(input: {
   model: AgentModelId;
   reasoningEffort?: CodexReasoningEffort;
 } {
-  const option = GOAT_WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === input.model);
+  const option = WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === input.model);
   if (!option) {
     throw new Error(`Workflow model token "${input.model}" is missing from the workflow catalog.`);
   }
@@ -154,7 +155,7 @@ export function workflowStepSettings(input: WorkflowStepSettingsInput): {
 } {
   const model = input.model.trim().toLowerCase();
   if (!isWorkflowModelToken(model)) return { model };
-  const option = GOAT_WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === model);
+  const option = WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === model);
   if (!option || !isWorkflowCloudRuntime(option.engine)) return { model };
 
   const runtimeModel = normalizeWorkflowRuntimeModel(option.engine, input.runtimeModel);
@@ -178,13 +179,11 @@ export function isWorkflowCloudRuntime(engine: HarnessEngine): engine is Workflo
 export function workflowCloudModelOptions(
   engine: WorkflowCloudRuntime,
 ): readonly WorkflowCloudModelOption[] {
-  return engine === "codex"
-    ? GOAT_WORKFLOW_CODEX_MODEL_OPTIONS
-    : GOAT_WORKFLOW_CLAUDE_CODE_MODEL_OPTIONS;
+  return engine === "codex" ? WORKFLOW_CODEX_MODEL_OPTIONS : WORKFLOW_CLAUDE_CODE_MODEL_OPTIONS;
 }
 
 export function defaultWorkflowRuntimeModel(engine: WorkflowCloudRuntime): AgentModelId {
-  const defaultOption = GOAT_WORKFLOW_MODEL_OPTIONS.find((option) => option.engine === engine);
+  const defaultOption = WORKFLOW_MODEL_OPTIONS.find((option) => option.engine === engine);
   if (!defaultOption) {
     throw new Error(`Workflow cloud runtime "${engine}" is missing from the workflow catalog.`);
   }
@@ -223,7 +222,7 @@ export function normalizeWorkflowReasoningEffort(
   if (!workflowRuntimeModelSupportsReasoningEffort(engine, runtimeModel)) return undefined;
   return typeof value === "string" && isCodexReasoningEffort(value)
     ? value
-    : DEFAULT_GOAT_WORKFLOW_REASONING_EFFORT;
+    : DEFAULT_WORKFLOW_REASONING_EFFORT;
 }
 
 function requireAgentModelDefinition(modelId: AgentModelId) {

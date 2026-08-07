@@ -2,10 +2,10 @@
 
 import { GITHUB_ACTIVITY_EVENT_TYPES, type GitHubActivityEventType } from "@opencompany/brain";
 import {
+  ATTIO_EVENT_TYPES,
   type AttioEventRef,
   type AttioEventType,
   type AttioObjectTypeRef,
-  GOAT_ATTIO_EVENT_TYPES,
   isAttioObjectType,
 } from "@opencompany/db/attio";
 import {
@@ -22,13 +22,13 @@ import {
   listGitHubIntegrationRepositories,
 } from "@opencompany/db/github";
 import {
+  GMAIL_EVENT_TYPES,
   type GmailEventRef,
   type GmailEventType,
-  GOAT_GMAIL_EVENT_TYPES,
   sanitizeGmailInstructions,
 } from "@opencompany/db/gmail";
 import {
-  GOAT_GOOGLE_DRIVE_FOLDER_MIME_TYPE,
+  GOOGLE_DRIVE_FOLDER_MIME_TYPE,
   type GoogleDriveAllFilesRef,
   type GoogleDriveCorpusKey,
   type GoogleDriveResourceRef,
@@ -45,8 +45,8 @@ import {
 } from "@opencompany/db/hubspot";
 import { loadIntegrationCredential } from "@opencompany/db/integrations";
 import {
-  GOAT_LINEAR_EVENT_TYPES,
-  GOAT_LINEAR_MCP_EXTERNAL_ID,
+  LINEAR_EVENT_TYPES,
+  LINEAR_MCP_EXTERNAL_ID,
   type LinearEventRef,
   type LinearEventType,
   type LinearTeamRef,
@@ -276,7 +276,7 @@ async function loadSourceIntegrationForContext(input: {
         // Provider "linear" also covers the MCP connector row; only the
         // ingestion connection (keyed on the organization id) can feed brains.
         ...(input.provider === "linear"
-          ? [ne(integrations.externalId, GOAT_LINEAR_MCP_EXTERNAL_ID)]
+          ? [ne(integrations.externalId, LINEAR_MCP_EXTERNAL_ID)]
           : []),
       ),
     )
@@ -393,7 +393,7 @@ export async function getBrainSourcesAction(brainRef: string): Promise<BrainSour
     listPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
       provider: "linear",
-      excludeExternalId: GOAT_LINEAR_MCP_EXTERNAL_ID,
+      excludeExternalId: LINEAR_MCP_EXTERNAL_ID,
     }),
     listPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
@@ -1039,7 +1039,7 @@ export async function listGoogleDriveResourcesAction(input: {
           id: drive.id,
           name: `${drive.name} (Shared Drive)`,
           kind: "folder" as const,
-          mimeType: GOAT_GOOGLE_DRIVE_FOLDER_MIME_TYPE,
+          mimeType: GOOGLE_DRIVE_FOLDER_MIME_TYPE,
           driveId: drive.id,
           webViewLink: `https://drive.google.com/drive/folders/${drive.id}`,
         })),
@@ -1047,7 +1047,7 @@ export async function listGoogleDriveResourcesAction(input: {
           id: file.id,
           name: file.name,
           kind:
-            file.mimeType === GOAT_GOOGLE_DRIVE_FOLDER_MIME_TYPE
+            file.mimeType === GOOGLE_DRIVE_FOLDER_MIME_TYPE
               ? ("folder" as const)
               : ("file" as const),
           mimeType: file.mimeType,
@@ -1209,7 +1209,7 @@ export async function setBrainGoogleDriveSourceAction(input: {
       return {
         id: file.id,
         name: file.name,
-        kind: file.mimeType === GOAT_GOOGLE_DRIVE_FOLDER_MIME_TYPE ? "folder" : "file",
+        kind: file.mimeType === GOOGLE_DRIVE_FOLDER_MIME_TYPE ? "folder" : "file",
         mimeType: file.mimeType,
         driveId: file.driveId,
         corpusKey,
@@ -1245,7 +1245,7 @@ export async function setBrainGoogleDriveSourceAction(input: {
 }
 
 function sanitizeGmailEventRefs(refs: GmailEventRef[]): GmailEventRef[] {
-  const allowed = new Set<GmailEventType>(GOAT_GMAIL_EVENT_TYPES);
+  const allowed = new Set<GmailEventType>(GMAIL_EVENT_TYPES);
   const seen = new Set<GmailEventType>();
   const sanitized: GmailEventRef[] = [];
   for (const ref of refs) {
@@ -1276,7 +1276,7 @@ async function loadOwnLinearAccessToken(userWorkosId: string, integrationId: str
         eq(integrations.id, integrationId),
         eq(integrations.userWorkosId, userWorkosId),
         eq(integrations.provider, "linear"),
-        ne(integrations.externalId, GOAT_LINEAR_MCP_EXTERNAL_ID),
+        ne(integrations.externalId, LINEAR_MCP_EXTERNAL_ID),
       ),
     )
     .limit(1);
@@ -1307,7 +1307,7 @@ function sanitizeTeamRefs(refs: LinearTeamRef[]): LinearTeamRef[] {
 }
 
 function sanitizeLinearEventRefs(refs: LinearEventRef[]): LinearEventRef[] {
-  const allowed = new Set<LinearEventType>(GOAT_LINEAR_EVENT_TYPES);
+  const allowed = new Set<LinearEventType>(LINEAR_EVENT_TYPES);
   const seen = new Set<LinearEventType>();
   const sanitized: LinearEventRef[] = [];
   for (const ref of refs) {
@@ -1355,7 +1355,7 @@ function sanitizeAttioObjectTypeRefs(refs: AttioObjectTypeRef[]): AttioObjectTyp
 }
 
 function sanitizeAttioEventRefs(refs: AttioEventRef[]): AttioEventRef[] {
-  const allowed = new Set<AttioEventType>(GOAT_ATTIO_EVENT_TYPES);
+  const allowed = new Set<AttioEventType>(ATTIO_EVENT_TYPES);
   const seen = new Set<AttioEventType>();
   const sanitized: AttioEventRef[] = [];
   for (const ref of refs) {

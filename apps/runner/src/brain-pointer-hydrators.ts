@@ -53,7 +53,7 @@ export type BrainPointerHydrator = {
   }): Promise<HydratedPointerItem | null>;
 };
 
-export const GOAT_BRAIN_POINTER_HYDRATORS: readonly BrainPointerHydrator[] = [
+export const BRAIN_POINTER_HYDRATORS: readonly BrainPointerHydrator[] = [
   { provider: "slack", hydrate: hydrateSlackPointer },
   { provider: "gmail", hydrate: hydrateGmailPointer },
   { provider: "linear", hydrate: hydrateLinearPointer },
@@ -67,7 +67,7 @@ export async function hydrateBrainPointer(
     env: BrainPointerHydrationEnv;
     signal: AbortSignal;
   },
-  hydrators: readonly BrainPointerHydrator[] = GOAT_BRAIN_POINTER_HYDRATORS,
+  hydrators: readonly BrainPointerHydrator[] = BRAIN_POINTER_HYDRATORS,
 ) {
   const hydrator = hydrators.find((entry) => entry.provider === input.item.sourceProvider);
   if (!hydrator)

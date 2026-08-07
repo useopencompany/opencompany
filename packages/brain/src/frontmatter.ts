@@ -4,7 +4,7 @@ import {
   type BrainRelation,
   type BrainSource,
   type BrainStatus,
-  DEFAULT_GOAT_BRAIN_RELATION_TYPE,
+  DEFAULT_BRAIN_RELATION_TYPE,
   isValidBrainKind,
 } from "./schema";
 import { normalizeBuiltInBrainEntityType } from "./schemas";
@@ -99,11 +99,11 @@ function readRelations(value: unknown): BrainRelation[] {
     let relation: BrainRelation | null = null;
     if (typeof item === "string") {
       const target = readString(item);
-      if (target) relation = { type: DEFAULT_GOAT_BRAIN_RELATION_TYPE, to: target };
+      if (target) relation = { type: DEFAULT_BRAIN_RELATION_TYPE, to: target };
     } else if (isRecord(item)) {
       const target = readString(item.to);
       if (target)
-        relation = { type: readString(item.type) ?? DEFAULT_GOAT_BRAIN_RELATION_TYPE, to: target };
+        relation = { type: readString(item.type) ?? DEFAULT_BRAIN_RELATION_TYPE, to: target };
     }
     if (relation && !seen.has(relationKey(relation))) {
       seen.add(relationKey(relation));

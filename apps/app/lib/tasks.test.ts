@@ -2,7 +2,7 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { currentUser } from "@/lib/auth";
-import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import { DEFAULT_MODEL } from "@/lib/model-options";
 import type { WorkspaceSkill } from "@/lib/skills";
 import {
   cancelTaskAction,
@@ -90,7 +90,7 @@ describe("createTaskForUser", () => {
         userWorkosId: "user_1",
         name: "Research x",
         prompt: "Research x",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         status: "queued",
         stage: "queued",
         result: null,
@@ -98,7 +98,7 @@ describe("createTaskForUser", () => {
         harnessSpec: {
           schemaVersion: "goat.harness.v1",
           engine: "opencompany",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           systemPrompt: "",
           initialUserMessage: "Research x",
           tools: ["exa_search", "gmail_search"],
@@ -132,7 +132,7 @@ describe("createTaskForUser", () => {
     const task = await createTaskForUser({
       userWorkosId: "user_1",
       prompt: "Research x",
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
     });
 
     expect(task).toMatchObject({ id: "task_1", status: "queued", stage: "queued" });
@@ -144,7 +144,7 @@ describe("createTaskForUser", () => {
         taskId: "task_1",
         displayId: "TASK-1",
         engine: "opencompany",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         workflowId: undefined,
         scheduleId: undefined,
         trigger: "manual",
@@ -173,7 +173,7 @@ describe("createTaskForUser", () => {
       createTaskForUser({
         userWorkosId: "user_1",
         prompt: "Research x",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
       }),
     ).rejects.toThrow("Tasks & Workflows is disabled");
 
@@ -199,7 +199,7 @@ describe("createTaskForUser", () => {
       createTaskForUser({
         userWorkosId: "user_1",
         prompt: "Research x",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
       }),
     ).rejects.toThrow("Tasks & Workflows is disabled");
     expect(mocks.captureTaskSpawned).not.toHaveBeenCalled();
@@ -216,7 +216,7 @@ describe("createTaskForUser", () => {
       createTaskForUser({
         userWorkosId: "missing_user",
         prompt: "Research x",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
       }),
     ).rejects.toThrow("unknown user");
     expect(mocks.execute).not.toHaveBeenCalled();

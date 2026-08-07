@@ -1,6 +1,6 @@
 import { upload } from "@vercel/blob/client";
 import {
-  GOAT_CHAT_ATTACHMENT_ACCEPT,
+  CHAT_ATTACHMENT_ACCEPT,
   normalizedChatAttachmentMediaType,
   validateChatAttachmentCandidate,
 } from "@/lib/chat-attachment-formats";
@@ -10,7 +10,7 @@ import {
 // caller registers the document via uploadBrainAssetAction. Limits mirror
 // the server-side checks in lib/brain-assets.ts; the accepted set is the same
 // core set the chat composer takes.
-export const BRAIN_ASSET_ACCEPT = GOAT_CHAT_ATTACHMENT_ACCEPT;
+export const BRAIN_ASSET_ACCEPT = CHAT_ATTACHMENT_ACCEPT;
 export const BRAIN_ASSET_MAX_BYTES = 20 * 1024 * 1024;
 
 export function validateBrainAssetFile(file: File): string | null {

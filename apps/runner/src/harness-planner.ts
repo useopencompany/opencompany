@@ -17,7 +17,7 @@ const TOOL_PROVIDER_MAP: Record<string, TaskToolName[]> = {
 };
 
 const PLANNABLE_PROVIDERS = ["gmail", "google_calendar", "linear", "latitude", "github"] as const;
-const GOAT_BROWSER_TOOLS = [
+const BROWSER_TOOLS = [
   "browser_open",
   "browser_snapshot",
   "browser_click",
@@ -55,7 +55,7 @@ export async function getAvailableHarnessToolsForRunner(
 
   const tools = new Set<TaskToolName>(["exa_search"]);
   if (options.browserEnabled) {
-    for (const toolName of GOAT_BROWSER_TOOLS) tools.add(toolName);
+    for (const toolName of BROWSER_TOOLS) tools.add(toolName);
   }
   if (process.env.APIFY_API_TOKEN?.trim()) {
     for (const toolName of X_TOOLS) tools.add(toolName);

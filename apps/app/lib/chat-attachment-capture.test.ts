@@ -9,7 +9,7 @@ vi.mock("@/lib/brain-assets", () => ({
   createBrainAssetForUser: vi.fn(),
   brainAssetUploadPrefix: vi.fn(() => "goat-brain/brain_1/assets/"),
 }));
-vi.mock("@/lib/brain-capture", () => ({ GOAT_BRAIN_CAPTURE_FOLDER: "inbox" }));
+vi.mock("@/lib/brain-capture", () => ({ BRAIN_CAPTURE_FOLDER: "inbox" }));
 vi.mock("@/lib/chat-attachments", () => ({ downloadChatAttachment: vi.fn() }));
 vi.mock("@/lib/task-runner", () => ({
   triggerBrainIngestWake: vi.fn().mockResolvedValue(undefined),

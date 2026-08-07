@@ -8,7 +8,7 @@ import {
   createGoogleIntegrationState,
   exchangeGoogleCode,
   fetchGoogleUserInfo,
-  GOAT_GOOGLE_PROVIDER_CONFIG,
+  GOOGLE_PROVIDER_CONFIG,
   type GoogleIntegrationProvider,
   googleOAuthRedirectUri,
   googleOAuthTargetOriginForState,
@@ -23,7 +23,7 @@ export async function handleGoogleOAuthStart(
   const { user } = await currentUser();
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
-  const config = GOAT_GOOGLE_PROVIDER_CONFIG[provider];
+  const config = GOOGLE_PROVIDER_CONFIG[provider];
   const oauthRedirectUri = googleOAuthRedirectUri(config);
   const targetOrigin = googleOAuthTargetOriginForState();
 
@@ -50,7 +50,7 @@ export async function handleGoogleOAuthCallback(
 ) {
   const current = await currentUser();
   const url = new URL(request.url);
-  const config = GOAT_GOOGLE_PROVIDER_CONFIG[provider];
+  const config = GOOGLE_PROVIDER_CONFIG[provider];
   const errorRedirect = (returnTo: string) =>
     NextResponse.redirect(new URL(appendGoogleIntegrationStatus(returnTo, provider, "error"), url));
 

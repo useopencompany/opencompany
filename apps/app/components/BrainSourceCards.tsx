@@ -36,10 +36,7 @@ import {
   setBrainSlackSourceAction,
   setBrainSourceEnabledAction,
 } from "@/lib/brain-source-actions";
-import {
-  type BrainSourceProviderDef,
-  GOAT_BRAIN_SOURCE_PROVIDERS,
-} from "@/lib/brain-sources/registry";
+import { BRAIN_SOURCE_PROVIDERS, type BrainSourceProviderDef } from "@/lib/brain-sources/registry";
 
 export type BrainSourceState = {
   source: BrainSourceView | null;
@@ -167,7 +164,7 @@ export function BrainSourcesSection({ brainRef }: { brainRef: string }) {
       <p className="px-1 text-[12px] leading-5 text-ink-subtle">
         Connected sources feed new content into this brain automatically.
       </p>
-      {GOAT_BRAIN_SOURCE_PROVIDERS.map((provider) => (
+      {BRAIN_SOURCE_PROVIDERS.map((provider) => (
         <SourceProviderCard
           key={provider.id}
           brainRef={brainRef}

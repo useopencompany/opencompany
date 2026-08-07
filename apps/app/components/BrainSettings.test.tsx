@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SourceProviderCard } from "@/components/BrainSourceCards";
 import type { BrainSourcesDetails, BrainSourceView } from "@/lib/brain-source-actions";
-import { GOAT_BRAIN_SOURCE_PROVIDERS } from "@/lib/brain-sources/registry";
+import { BRAIN_SOURCE_PROVIDERS } from "@/lib/brain-sources/registry";
 import type { JamieProviderState } from "@/lib/integration-state";
 
 const brainSourceActionsMock = vi.hoisted(() => ({
@@ -122,7 +122,7 @@ describe("BrainSourceCards", () => {
 
   it("browses and saves personal Drive selections with the workspace visibility warning", async () => {
     const user = userEvent.setup();
-    const provider = GOAT_BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "google_drive");
+    const provider = BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "google_drive");
     if (!provider) throw new Error("Google Drive source provider is not registered.");
     render(
       <SourceProviderCard
@@ -167,7 +167,7 @@ describe("BrainSourceCards", () => {
 
   it("saves personal Drive sources in all-files mode", async () => {
     const user = userEvent.setup();
-    const provider = GOAT_BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "google_drive");
+    const provider = BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "google_drive");
     if (!provider) throw new Error("Google Drive source provider is not registered.");
     render(
       <SourceProviderCard
@@ -205,7 +205,7 @@ describe("BrainSourceCards", () => {
 
   it("surfaces Slack Connect conversations and bulk-selects each privacy group", async () => {
     const user = userEvent.setup();
-    const provider = GOAT_BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "slack");
+    const provider = BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "slack");
     if (!provider) throw new Error("Slack source provider is not registered.");
     brainSourceActionsMock.listSlackConversationsAction.mockResolvedValue({
       ok: true,
@@ -284,7 +284,7 @@ describe("BrainSourceCards", () => {
 
   it("uses safe Attio defaults and never offers system updates", async () => {
     const user = userEvent.setup();
-    const provider = GOAT_BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "attio");
+    const provider = BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "attio");
     if (!provider) throw new Error("Attio source provider is not registered.");
     render(
       <SourceProviderCard
@@ -338,7 +338,7 @@ describe("BrainSourceCards", () => {
 
   it("renders one row per source with owner-only config and admin veto affordances", async () => {
     const user = userEvent.setup();
-    const provider = GOAT_BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "gmail");
+    const provider = BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "gmail");
     if (!provider) throw new Error("Gmail source provider is not registered.");
     render(
       <SourceProviderCard
@@ -387,7 +387,7 @@ describe("BrainSourceCards", () => {
   });
 
   it("renders another member's source read-only for non-admin members", () => {
-    const provider = GOAT_BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "gmail");
+    const provider = BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "gmail");
     if (!provider) throw new Error("Gmail source provider is not registered.");
     render(
       <SourceProviderCard
@@ -419,7 +419,7 @@ describe("BrainSourceCards", () => {
 
   it("adds one of the member's own accounts after the consent step", async () => {
     const user = userEvent.setup();
-    const provider = GOAT_BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "gmail");
+    const provider = BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "gmail");
     if (!provider) throw new Error("Gmail source provider is not registered.");
     render(
       <SourceProviderCard
@@ -511,7 +511,7 @@ describe("BrainSourceCards", () => {
   });
 });
 
-const jamieProvider = GOAT_BRAIN_SOURCE_PROVIDERS.find((provider) => provider.id === "jamie");
+const jamieProvider = BRAIN_SOURCE_PROVIDERS.find((provider) => provider.id === "jamie");
 
 function renderJamieSource(details: BrainSourcesDetails) {
   if (!jamieProvider) throw new Error("Jamie source provider is not registered.");

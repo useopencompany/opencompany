@@ -49,17 +49,17 @@ import {
 } from "./codex-chat-errors";
 import { createCodexChatProjector, loadCodexChatAssistantMessageParts } from "./codex-chat-events";
 import {
+  CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS,
+  CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS,
   type CodexChatScheduledWakeup,
   enqueueCodexChatWakeup,
-  GOAT_CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS,
-  GOAT_CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS,
   persistCodexChatScheduledWakeup,
   scheduledWakeupFromTurnSettings,
 } from "./codex-chat-wakeup";
 import { materializeCodexSkillSnapshotsForSession } from "./codex-managed-skills";
 import { buildGitHubCommandEnv, createKnownSecretRedactor } from "./coding-agent-shared";
 import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
-import { GOAT_CODING_WORKSPACE_SANDBOX_NETWORK } from "./coding-workspace-runtime";
+import { CODING_WORKSPACE_SANDBOX_NETWORK } from "./coding-workspace-runtime";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import {
@@ -107,7 +107,7 @@ const CLAUDE_CHAT_ACTIONS_GATEWAY_PATH = "/api/internal/claude-actions";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-claude-code-chat" });
 
-export const GOAT_CLAUDE_CODE_CHAT_REAUTH_MESSAGE =
+export const CLAUDE_CODE_CHAT_REAUTH_MESSAGE =
   "Claude Code is disconnected. Reconnect Claude Code in Goat settings, then send your message again.";
 
 // "authenticat" covers both "Failed to authenticate" (real 401 result text, observed
@@ -238,7 +238,7 @@ export async function runClaudeCodeChatTurn(input: {
 
   const auth = await loadClaudeCodeAuth(turn.userWorkosId);
   if (!auth) {
-    await bareProjector().fail(GOAT_CLAUDE_CODE_CHAT_REAUTH_MESSAGE, {
+    await bareProjector().fail(CLAUDE_CODE_CHAT_REAUTH_MESSAGE, {
       sessionStatus: "failed",
       ...(taskContext ? { taskCompletion: buildTaskTerminalProjection(taskContext) } : {}),
     });
@@ -260,7 +260,7 @@ export async function runClaudeCodeChatTurn(input: {
       metadata: {
         user_id: turn.userWorkosId,
       },
-      network: GOAT_CODING_WORKSPACE_SANDBOX_NETWORK,
+      network: CODING_WORKSPACE_SANDBOX_NETWORK,
       idleTimeoutMs: env.codexChatIdleTimeoutMs,
     });
   } catch (error) {
@@ -556,7 +556,7 @@ export async function runClaudeCodeChatTurn(input: {
           userWorkosId: turn.userWorkosId,
           statusReason: "Claude Code rejected the stored token. Reconnect in Goat settings.",
         });
-        summary = { ...summary, error: GOAT_CLAUDE_CODE_CHAT_REAUTH_MESSAGE };
+        summary = { ...summary, error: CLAUDE_CODE_CHAT_REAUTH_MESSAGE };
       }
     }
     if (summary.status === "success") {
@@ -798,8 +798,8 @@ export function extractClaudeScheduleWakeup(
     }
     wakeup = {
       delaySeconds: Math.min(
-        GOAT_CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS,
-        Math.max(GOAT_CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS, Math.round(rawDelay)),
+        CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS,
+        Math.max(CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS, Math.round(rawDelay)),
       ),
       reason: reason.slice(0, 500),
       prompt: typeof toolInput.prompt === "string" ? toolInput.prompt.trim().slice(0, 10_000) : "",

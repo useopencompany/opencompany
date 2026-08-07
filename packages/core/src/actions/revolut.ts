@@ -5,10 +5,10 @@ import {
   requestRevolutBusinessApi,
 } from "../integrations/revolut";
 import {
+  ACTION_EFFECTS_READ,
   ActionAuthError,
   ActionInvalidParamsError,
   type ActionProviderCatalog,
-  GOAT_ACTION_EFFECTS_READ,
   optionalNumberParam,
   optionalStringParam,
   truncateText,
@@ -68,7 +68,7 @@ export async function resolveRevolutActions(
         id: "revolut.get_accounts",
         provider: "revolut",
         capability: "read",
-        effects: GOAT_ACTION_EFFECTS_READ,
+        effects: ACTION_EFFECTS_READ,
         permissionMode: "on",
         description:
           "List Revolut Business accounts visible to the configured read-only Business API token, including account id, label, currency, state, and balance. Does not return account numbers or card details.",
@@ -97,7 +97,7 @@ export async function resolveRevolutActions(
         id: "revolut.list_expenses",
         provider: "revolut",
         capability: "read",
-        effects: GOAT_ACTION_EFFECTS_READ,
+        effects: ACTION_EFFECTS_READ,
         permissionMode: "on",
         description:
           "List Revolut Business expenses for a bounded date range. Use state=missing_info to inspect expenses that still need information. Set onlyMissingReceipts=true to keep only expenses with no receipt ids. Defaults to the trailing 30 days and a limit of 50.",
@@ -189,7 +189,7 @@ export async function resolveRevolutActions(
         id: "revolut.get_expense",
         provider: "revolut",
         capability: "read",
-        effects: GOAT_ACTION_EFFECTS_READ,
+        effects: ACTION_EFFECTS_READ,
         permissionMode: "on",
         description:
           "Retrieve one Revolut Business expense by id, including safe summary fields, receipt ids, labels, and split count. Does not download receipt binary content.",

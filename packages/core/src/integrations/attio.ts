@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
+  ATTIO_CREDENTIAL_KIND,
+  ATTIO_OBJECT_SLUGS,
+  ATTIO_PROVIDER,
   type AttioApiKeyCredentialPayload,
-  GOAT_ATTIO_CREDENTIAL_KIND,
-  GOAT_ATTIO_OBJECT_SLUGS,
-  GOAT_ATTIO_PROVIDER,
 } from "@opencompany/db/attio";
 import { getDb } from "@opencompany/db/client";
 import {
@@ -17,7 +17,7 @@ import { getAppUrl } from "../app-url";
 import type { AttioProviderState } from "../integration-state";
 import { captureIntegrationAddedAnalytics } from "./analytics";
 
-export const GOAT_ATTIO_API_BASE_URL = "https://api.attio.com/v2";
+export const ATTIO_API_BASE_URL = "https://api.attio.com/v2";
 
 const ATTIO_API_TIMEOUT_MS = 15_000;
 const MAX_ATTIO_ERROR_DETAIL_CHARS = 200;
@@ -119,7 +119,7 @@ export type AttioApiKeyValidation =
 export async function validateAttioApiKey(apiKey: string): Promise<AttioApiKeyValidation> {
   let response: Response;
   try {
-    response = await fetch(`${GOAT_ATTIO_API_BASE_URL}/self`, {
+    response = await fetch(`${ATTIO_API_BASE_URL}/self`, {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: AbortSignal.timeout(ATTIO_API_TIMEOUT_MS),
     });
@@ -168,7 +168,7 @@ export async function fetchAttioObjectIds(
   const response = await requestAttioApi({ apiKey, path: "/objects" });
   const objects = (response as { data?: Array<Record<string, unknown>> })?.data ?? [];
   const slugToType = new Map(
-    (Object.entries(GOAT_ATTIO_OBJECT_SLUGS) as [AttioObjectType, string][]).map(([type, slug]) => [
+    (Object.entries(ATTIO_OBJECT_SLUGS) as [AttioObjectType, string][]).map(([type, slug]) => [
       slug,
       type,
     ]),
@@ -269,7 +269,7 @@ export async function connectAttioIntegration(input: {
     .values({
       id: newIntegrationId(),
       userWorkosId: input.userWorkosId,
-      provider: GOAT_ATTIO_PROVIDER,
+      provider: ATTIO_PROVIDER,
       // The Attio workspace id is the routing key for inbound webhooks.
       externalId: input.identity.workspaceId,
       connectionLabel,
@@ -309,8 +309,8 @@ export async function connectAttioIntegration(input: {
   const existing = await loadIntegrationCredential({
     userWorkosId: input.userWorkosId,
     integrationId: integration.id,
-    provider: GOAT_ATTIO_PROVIDER,
-    kind: GOAT_ATTIO_CREDENTIAL_KIND,
+    provider: ATTIO_PROVIDER,
+    kind: ATTIO_CREDENTIAL_KIND,
     db,
   }).catch(() => null);
   const existingPayload = existing?.payload as AttioApiKeyCredentialPayload | undefined;
@@ -342,7 +342,7 @@ export async function connectAttioIntegration(input: {
     await markIntegrationStatus({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
-      provider: GOAT_ATTIO_PROVIDER,
+      provider: ATTIO_PROVIDER,
       status: "sync_failed",
       statusReason: "Failed to register the Attio webhook.",
       db,
@@ -355,8 +355,8 @@ export async function connectAttioIntegration(input: {
     await saveIntegrationCredential({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
-      provider: GOAT_ATTIO_PROVIDER,
-      kind: GOAT_ATTIO_CREDENTIAL_KIND,
+      provider: ATTIO_PROVIDER,
+      kind: ATTIO_CREDENTIAL_KIND,
       payload,
       // Attio workspace API keys do not expire; users revoke them in Attio.
       expiresAt: null,
@@ -368,7 +368,7 @@ export async function connectAttioIntegration(input: {
     await markIntegrationStatus({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
-      provider: GOAT_ATTIO_PROVIDER,
+      provider: ATTIO_PROVIDER,
       status: "sync_failed",
       statusReason: "Failed to persist Attio integration credentials.",
       db,
@@ -397,7 +397,7 @@ export async function getAttioIntegrationState(userWorkosId: string): Promise<At
     .where(
       and(
         eq(integrations.userWorkosId, userWorkosId),
-        eq(integrations.provider, GOAT_ATTIO_PROVIDER),
+        eq(integrations.provider, ATTIO_PROVIDER),
         ne(integrations.status, "disconnected"),
       ),
     )
@@ -433,7 +433,7 @@ export async function requestAttioApi(input: {
   signal?: AbortSignal;
 }): Promise<unknown> {
   const method = input.method ?? "GET";
-  const response = await fetch(`${GOAT_ATTIO_API_BASE_URL}${input.path}`, {
+  const response = await fetch(`${ATTIO_API_BASE_URL}${input.path}`, {
     method,
     headers: {
       Authorization: `Bearer ${input.apiKey}`,

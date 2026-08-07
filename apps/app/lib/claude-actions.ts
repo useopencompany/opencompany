@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
+  ACTION_TOOL_CONTRACT,
   type ActionGatewayRequest,
   type ActionGatewayResponse,
-  GOAT_ACTION_TOOL_CONTRACT,
 } from "@opencompany/agent-runtime";
 import * as z from "zod/v4-mini";
 import { executeActionGateway } from "@/lib/codex-actions";
@@ -20,8 +20,8 @@ type ClaudeActionToolDependencies = {
 // MCP requires Zod validators, while Codex accepts JSON Schema directly. Build
 // the MCP validators from the same dependency-light contract so field names,
 // requiredness, descriptions, and annotations cannot drift between harnesses.
-const listActionsInputSchema = mcpInputSchema(GOAT_ACTION_TOOL_CONTRACT.list.inputSchema);
-const useActionInputSchema = mcpInputSchema(GOAT_ACTION_TOOL_CONTRACT.execute.inputSchema);
+const listActionsInputSchema = mcpInputSchema(ACTION_TOOL_CONTRACT.list.inputSchema);
+const useActionInputSchema = mcpInputSchema(ACTION_TOOL_CONTRACT.execute.inputSchema);
 
 export function registerClaudeActionTools(
   server: McpServer,
@@ -31,12 +31,12 @@ export function registerClaudeActionTools(
   const executeAction = dependencies.executeAction ?? executeActionGateway;
 
   server.registerTool(
-    GOAT_ACTION_TOOL_CONTRACT.list.name,
+    ACTION_TOOL_CONTRACT.list.name,
     {
-      title: GOAT_ACTION_TOOL_CONTRACT.list.title,
-      description: GOAT_ACTION_TOOL_CONTRACT.list.description,
+      title: ACTION_TOOL_CONTRACT.list.title,
+      description: ACTION_TOOL_CONTRACT.list.description,
       inputSchema: listActionsInputSchema,
-      annotations: GOAT_ACTION_TOOL_CONTRACT.list.annotations,
+      annotations: ACTION_TOOL_CONTRACT.list.annotations,
     },
     async (args) => {
       const source = typeof args.source === "string" ? args.source : undefined;
@@ -50,12 +50,12 @@ export function registerClaudeActionTools(
   );
 
   server.registerTool(
-    GOAT_ACTION_TOOL_CONTRACT.execute.name,
+    ACTION_TOOL_CONTRACT.execute.name,
     {
-      title: GOAT_ACTION_TOOL_CONTRACT.execute.title,
-      description: GOAT_ACTION_TOOL_CONTRACT.execute.description,
+      title: ACTION_TOOL_CONTRACT.execute.title,
+      description: ACTION_TOOL_CONTRACT.execute.description,
       inputSchema: useActionInputSchema,
-      annotations: GOAT_ACTION_TOOL_CONTRACT.execute.annotations,
+      annotations: ACTION_TOOL_CONTRACT.execute.annotations,
     },
     async (args, extra) => {
       const action = typeof args.action === "string" ? args.action : "";

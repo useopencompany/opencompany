@@ -8,8 +8,8 @@ import type {
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import {
   createGatewayAttribution,
-  GOAT_SPANS,
   gatewayProviderOptions,
+  SPANS,
   withSpan,
 } from "@opencompany/telemetry";
 import * as ai from "ai";
@@ -17,17 +17,17 @@ import { createGateway, jsonSchema, type LanguageModelUsage } from "ai";
 import {
   buildHarnessCreationPrompt,
   buildHarnessSkillSystemPrompt,
-  GOAT_HARNESS_CREATION_SYSTEM_PROMPT,
-  GOAT_HARNESS_ENGINE_OPTIONS,
-  GOAT_HARNESS_MODEL_OPTIONS,
-  GOAT_HARNESS_SKILL_OPTIONS,
+  HARNESS_CREATION_SYSTEM_PROMPT,
+  HARNESS_ENGINE_OPTIONS,
+  HARNESS_MODEL_OPTIONS,
+  HARNESS_SKILL_OPTIONS,
 } from "./prompts/harness-creation";
 import { normalizeTaskToolNames } from "./task-tool-names";
 
-export const GOAT_PLANNER_MODEL = "anthropic/claude-sonnet-4.6";
-const DEFAULT_GOAT_MAX_MODEL_STEPS = 16;
-const MAX_GOAT_MODEL_STEPS = 32;
-const MIN_GOAT_BROWSER_MODEL_STEPS = 16;
+export const PLANNER_MODEL = "anthropic/claude-sonnet-4.6";
+const DEFAULT_MAX_MODEL_STEPS = 16;
+const MAX_MODEL_STEPS = 32;
+const MIN_BROWSER_MODEL_STEPS = 16;
 const CODEX_GOAL_OBJECTIVE_MAX_LENGTH = 4_000;
 const DEFAULT_CODEX_GOAL_TOKEN_BUDGET = 200_000;
 const MIN_CODEX_GOAL_TOKEN_BUDGET = 1;
@@ -49,9 +49,9 @@ export async function planHarnessForTask(input: {
   usage?: LanguageModelUsage;
 }> {
   const availableTools = normalizeTaskToolNames(input.availableTools);
-  const availableEngines = GOAT_HARNESS_ENGINE_OPTIONS.map((option) => option.id);
-  const availableModels = GOAT_HARNESS_MODEL_OPTIONS.map((option) => option.id);
-  const availableSkills = GOAT_HARNESS_SKILL_OPTIONS.map((option) => option.id);
+  const availableEngines = HARNESS_ENGINE_OPTIONS.map((option) => option.id);
+  const availableModels = HARNESS_MODEL_OPTIONS.map((option) => option.id);
+  const availableSkills = HARNESS_SKILL_OPTIONS.map((option) => option.id);
   const requestedEngine = readRequestedHarnessEngine(input.requestedEngine, availableEngines);
   const gateway = createGateway({ apiKey: input.gatewayApiKey });
   const { generateObject } = getBraintrustAISDK(ai);
@@ -61,16 +61,16 @@ export async function planHarnessForTask(input: {
     availableModels,
     availableSkills,
   );
-  const systemPrompt = GOAT_HARNESS_CREATION_SYSTEM_PROMPT;
+  const systemPrompt = HARNESS_CREATION_SYSTEM_PROMPT;
   const userPrompt = buildHarnessCreationPrompt({
     taskPrompt: input.prompt,
     ...(requestedEngine ? { requestedEngine } : {}),
-    executionEngineOptions: GOAT_HARNESS_ENGINE_OPTIONS,
-    executionModelOptions: GOAT_HARNESS_MODEL_OPTIONS,
+    executionEngineOptions: HARNESS_ENGINE_OPTIONS,
+    executionModelOptions: HARNESS_MODEL_OPTIONS,
     availableOperationTools: availableTools,
-    availableSkills: GOAT_HARNESS_SKILL_OPTIONS,
+    availableSkills: HARNESS_SKILL_OPTIONS,
     githubRepositories: input.githubRepositories ?? [],
-    defaultMaxModelSteps: DEFAULT_GOAT_MAX_MODEL_STEPS,
+    defaultMaxModelSteps: DEFAULT_MAX_MODEL_STEPS,
   });
   const attribution = createGatewayAttribution({
     userWorkosId: input.userWorkosId,
@@ -79,17 +79,17 @@ export async function planHarnessForTask(input: {
   });
 
   const result = await withSpan(
-    GOAT_SPANS.taskPlan,
+    SPANS.taskPlan,
     {
       "goat.model": input.model,
-      "goat.planner_model": GOAT_PLANNER_MODEL,
+      "goat.planner_model": PLANNER_MODEL,
       "goat.queued_model": input.model,
       "goat.tool_count": availableTools.length,
       "goat.skill_count": availableSkills.length,
     },
     () =>
       generateObject({
-        model: gateway(GOAT_PLANNER_MODEL),
+        model: gateway(PLANNER_MODEL),
         schema: jsonSchema(schema as never),
         system: systemPrompt,
         prompt: userPrompt,
@@ -115,7 +115,7 @@ export async function planHarnessForTask(input: {
     debugTrace: {
       schemaVersion: "goat.debug.v1",
       planner: {
-        model: GOAT_PLANNER_MODEL,
+        model: PLANNER_MODEL,
         request: {
           messages: [
             { role: "system", content: systemPrompt },
@@ -162,7 +162,7 @@ function harnessSpecResponseSchema(
         maxItems: availableSkills.length,
         uniqueItems: true,
       },
-      maxModelSteps: { type: "integer", minimum: 1, maximum: MAX_GOAT_MODEL_STEPS },
+      maxModelSteps: { type: "integer", minimum: 1, maximum: MAX_MODEL_STEPS },
       resultMode: { type: "string", enum: ["assistant_final", "brain_markdown_report"] },
       codex: {
         type: "object",
@@ -237,10 +237,10 @@ function normalizeHarnessSpec(
   );
   const requestedMaxModelSteps =
     typeof record.maxModelSteps === "number" && Number.isFinite(record.maxModelSteps)
-      ? clampInteger(record.maxModelSteps, 1, MAX_GOAT_MODEL_STEPS)
-      : DEFAULT_GOAT_MAX_MODEL_STEPS;
+      ? clampInteger(record.maxModelSteps, 1, MAX_MODEL_STEPS)
+      : DEFAULT_MAX_MODEL_STEPS;
   const minModelSteps = tools.some((toolName) => toolName.startsWith("browser_"))
-    ? MIN_GOAT_BROWSER_MODEL_STEPS
+    ? MIN_BROWSER_MODEL_STEPS
     : 1;
   const maxModelSteps = Math.max(requestedMaxModelSteps, minModelSteps);
 
@@ -286,7 +286,7 @@ function readRequestedHarnessEngine(
 function normalizeTaskSkillIds(value: unknown): TaskSkillId[] {
   if (!Array.isArray(value)) return [];
   const ids = value.filter((item): item is TaskSkillId =>
-    GOAT_HARNESS_SKILL_OPTIONS.some((option) => option.id === item),
+    HARNESS_SKILL_OPTIONS.some((option) => option.id === item),
   );
   return [...new Set(ids)];
 }

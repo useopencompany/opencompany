@@ -6,8 +6,8 @@ import {
   normalizeScheduleTimezone,
 } from "@opencompany/agent-runtime";
 import {
-  GOAT_BRAIN_WORKFLOW_DESCRIPTION_MAX_LENGTH,
-  GOAT_BRAIN_WORKFLOW_NAME_MAX_LENGTH,
+  BRAIN_WORKFLOW_DESCRIPTION_MAX_LENGTH,
+  BRAIN_WORKFLOW_NAME_MAX_LENGTH,
   isValidBrainId,
   normalizeBrainId,
 } from "@opencompany/brain";
@@ -21,16 +21,16 @@ import {
 } from "@opencompany/db/schema";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import {
-  GOAT_WORKFLOW_MODEL_OPTIONS,
   isWorkflowCloudRuntime,
   isWorkflowModelToken,
   isWorkflowRuntimeModel,
+  WORKFLOW_MODEL_OPTIONS,
   workflowStepSettings,
 } from "@/lib/workflow-model-options";
 import {
-  DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON,
-  DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT,
-  DEFAULT_GOAT_WORKFLOW_SCHEDULE_TIMEZONE,
+  DEFAULT_WORKFLOW_SCHEDULE_CRON,
+  DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
+  DEFAULT_WORKFLOW_SCHEDULE_TIMEZONE,
 } from "@/lib/workflow-schedule-defaults";
 
 // Workflows are workspace-scoped automations. They used to live as markdown
@@ -41,9 +41,9 @@ import {
 
 type Db = ReturnType<typeof getDb>;
 
-export { DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON, DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT };
+export { DEFAULT_WORKFLOW_SCHEDULE_CRON, DEFAULT_WORKFLOW_SCHEDULE_PROMPT };
 
-const GOAT_WORKFLOW_SCHEDULE_PROMPT_MAX_LENGTH = 10_000;
+const WORKFLOW_SCHEDULE_PROMPT_MAX_LENGTH = 10_000;
 
 export type WorkflowTriggerInput =
   | { type: "manual" }
@@ -262,11 +262,11 @@ export function validateWorkflowFields(input: {
   const name = input.name.trim();
   const description = input.description.trim();
   if (!name) return "Workflow name cannot be empty.";
-  if (name.length > GOAT_BRAIN_WORKFLOW_NAME_MAX_LENGTH) {
-    return `Workflow names must be ${GOAT_BRAIN_WORKFLOW_NAME_MAX_LENGTH} characters or fewer.`;
+  if (name.length > BRAIN_WORKFLOW_NAME_MAX_LENGTH) {
+    return `Workflow names must be ${BRAIN_WORKFLOW_NAME_MAX_LENGTH} characters or fewer.`;
   }
-  if (description.length > GOAT_BRAIN_WORKFLOW_DESCRIPTION_MAX_LENGTH) {
-    return `Workflow descriptions must be ${GOAT_BRAIN_WORKFLOW_DESCRIPTION_MAX_LENGTH} characters or fewer.`;
+  if (description.length > BRAIN_WORKFLOW_DESCRIPTION_MAX_LENGTH) {
+    return `Workflow descriptions must be ${BRAIN_WORKFLOW_DESCRIPTION_MAX_LENGTH} characters or fewer.`;
   }
   if (description.includes("<") || description.includes(">")) {
     return 'Workflow descriptions cannot contain "<" or ">".';
@@ -287,7 +287,7 @@ export function validateWorkflowFields(input: {
     if (model && !isWorkflowModelToken(model)) {
       return "That workflow model is not available.";
     }
-    const option = GOAT_WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === model);
+    const option = WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === model);
     if (option && isWorkflowCloudRuntime(option.engine)) {
       const runtimeModelValue = step.runtimeModel as unknown;
       const runtimeModel = typeof runtimeModelValue === "string" ? runtimeModelValue.trim() : "";
@@ -336,7 +336,7 @@ export async function createWorkflow(input: {
     trigger: "manual",
     scheduleEnabled: false,
     scheduleCron: null,
-    scheduleTimezone: DEFAULT_GOAT_WORKFLOW_SCHEDULE_TIMEZONE,
+    scheduleTimezone: DEFAULT_WORKFLOW_SCHEDULE_TIMEZONE,
     schedulePrompt: "",
     scheduleHarnessSpec: null,
     scheduleUserWorkosId: null,
@@ -393,7 +393,7 @@ export async function updateWorkflow(input: {
       scheduleTimezone:
         trigger.value.type === "schedule"
           ? trigger.value.timezone
-          : DEFAULT_GOAT_WORKFLOW_SCHEDULE_TIMEZONE,
+          : DEFAULT_WORKFLOW_SCHEDULE_TIMEZONE,
       schedulePrompt: trigger.value.type === "schedule" ? trigger.value.prompt : "",
       scheduleEnabled: trigger.value.type === "schedule",
       scheduleUserWorkosId:
@@ -446,9 +446,9 @@ export function workflowTriggerFromRow(input: {
   if (input.trigger !== "schedule") return { type: "manual" };
   return {
     type: "schedule",
-    cron: input.scheduleCron?.trim() || DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON,
+    cron: input.scheduleCron?.trim() || DEFAULT_WORKFLOW_SCHEDULE_CRON,
     timezone: normalizeScheduleTimezone(input.scheduleTimezone),
-    prompt: input.schedulePrompt.trim() || DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT,
+    prompt: input.schedulePrompt.trim() || DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
     enabled: input.scheduleEnabled,
     lastRunAt: input.scheduleLastRunAt,
     nextRunAt: input.scheduleNextRunAt,
@@ -471,12 +471,12 @@ function normalizeWorkflowTriggerInput(
 
   const cron = input.cron.trim().replace(/\s+/g, " ");
   const timezone = normalizeScheduleTimezone(input.timezone);
-  const prompt = input.prompt?.trim() || DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT;
+  const prompt = input.prompt?.trim() || DEFAULT_WORKFLOW_SCHEDULE_PROMPT;
 
-  if (prompt.length > GOAT_WORKFLOW_SCHEDULE_PROMPT_MAX_LENGTH) {
+  if (prompt.length > WORKFLOW_SCHEDULE_PROMPT_MAX_LENGTH) {
     return {
       ok: false,
-      message: `Schedule task requests must be ${GOAT_WORKFLOW_SCHEDULE_PROMPT_MAX_LENGTH.toLocaleString()} characters or fewer.`,
+      message: `Schedule task requests must be ${WORKFLOW_SCHEDULE_PROMPT_MAX_LENGTH.toLocaleString()} characters or fewer.`,
     };
   }
   if (!isValidFiveFieldCron(cron, timezone) || !nextCronRunAt(cron, timezone, now)) {

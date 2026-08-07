@@ -1,7 +1,7 @@
 import { shellQuote } from "@opencompany/agent-runtime";
 import {
-  GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
-  GOAT_INFISICAL_HOST,
+  INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
+  INFISICAL_HOST,
   type InfisicalAuthBundle,
   newInfisicalAuthFlowId,
   saveInfisicalConnection,
@@ -334,7 +334,7 @@ async function prepareInfisicalAuthSandbox(sandbox: SandboxHandle) {
     [
       "#!/usr/bin/env bash",
       "export HOME=/home/user",
-      `infisical login --domain=${shellQuote(GOAT_INFISICAL_HOST)}`,
+      `infisical login --domain=${shellQuote(INFISICAL_HOST)}`,
       "login_exit=$?",
       `printf '%s' "$login_exit" > ${shellQuote(INFISICAL_LOGIN_EXIT)}`,
       'exit "$login_exit"',
@@ -500,7 +500,7 @@ async function captureInfisicalAuthBundle(
     throw new Error("Infisical produced an unexpectedly large authentication bundle.");
   }
   return {
-    formatVersion: GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
+    formatVersion: INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
     files,
     redactionValues: [...redactionValues],
   };

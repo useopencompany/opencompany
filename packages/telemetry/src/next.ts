@@ -5,9 +5,9 @@ import { MeterProvider, PeriodicExportingMetricReader } from "@opentelemetry/sdk
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 import { OTLPHttpJsonTraceExporter, registerOTel } from "@vercel/otel";
 import {
-  GOAT_OBSERVABILITY_SERVICE_NAME,
-  GOAT_OTEL_METRIC_EXPORT_INTERVAL_MS,
   isObservabilityEnabled,
+  OBSERVABILITY_SERVICE_NAME,
+  OTEL_METRIC_EXPORT_INTERVAL_MS,
 } from ".";
 import { parseOtlpHeaders } from "./node";
 
@@ -19,7 +19,7 @@ export function registerNextObservability(input: { serviceName?: string } = {}) 
   if (!endpoint) return;
   registered = true;
 
-  const serviceName = input.serviceName ?? GOAT_OBSERVABILITY_SERVICE_NAME;
+  const serviceName = input.serviceName ?? OBSERVABILITY_SERVICE_NAME;
   const headers = parseOtlpHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS);
   registerOTel({
     serviceName,
@@ -34,7 +34,7 @@ export function registerNextObservability(input: { serviceName?: string } = {}) 
       url: `${endpoint.replace(/\/+$/, "")}/v1/metrics`,
       ...(headers ? { headers } : {}),
     }),
-    exportIntervalMillis: GOAT_OTEL_METRIC_EXPORT_INTERVAL_MS,
+    exportIntervalMillis: OTEL_METRIC_EXPORT_INTERVAL_MS,
   });
   metrics.setGlobalMeterProvider(
     new MeterProvider({

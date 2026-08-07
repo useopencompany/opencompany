@@ -10,10 +10,10 @@ import {
 
 type DbLike = any;
 
-export const GOAT_GOOGLE_DRIVE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
-export const GOAT_GOOGLE_DRIVE_QUIET_MS = 5 * 60_000;
-export const GOAT_GOOGLE_DRIVE_FORCE_MS = 30 * 60_000;
-export const GOAT_GOOGLE_DRIVE_MAX_FILE_ATTEMPTS = 5;
+export const GOOGLE_DRIVE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
+export const GOOGLE_DRIVE_QUIET_MS = 5 * 60_000;
+export const GOOGLE_DRIVE_FORCE_MS = 30 * 60_000;
+export const GOOGLE_DRIVE_MAX_FILE_ATTEMPTS = 5;
 
 export type GoogleDriveCorpusKey = "user" | `drive:${string}`;
 export type GoogleDriveResourceKind = "file" | "folder";
@@ -385,8 +385,8 @@ export async function observeGoogleDriveFile(input: {
 }) {
   const db = input.db ?? getDb();
   const now = input.observedAt ?? new Date();
-  const nextIngestAt = new Date(now.getTime() + GOAT_GOOGLE_DRIVE_QUIET_MS);
-  const forceIngestAt = new Date(now.getTime() + GOAT_GOOGLE_DRIVE_FORCE_MS);
+  const nextIngestAt = new Date(now.getTime() + GOOGLE_DRIVE_QUIET_MS);
+  const forceIngestAt = new Date(now.getTime() + GOOGLE_DRIVE_FORCE_MS);
   await db
     .insert(googleDriveFileStates)
     .values({
@@ -436,7 +436,7 @@ export async function claimNextGoogleDriveFile(input: {
       SELECT id
       FROM goat.google_drive_file_states
       WHERE observed_version <> COALESCE(ingested_version, '')
-        AND attempts < ${GOAT_GOOGLE_DRIVE_MAX_FILE_ATTEMPTS}
+        AND attempts < ${GOOGLE_DRIVE_MAX_FILE_ATTEMPTS}
         AND (next_ingest_at <= ${now} OR force_ingest_at <= ${now})
         AND (lease_expires_at IS NULL OR lease_expires_at <= ${now})
       ORDER BY LEAST(next_ingest_at, force_ingest_at), created_at

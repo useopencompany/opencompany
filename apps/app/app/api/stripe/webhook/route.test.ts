@@ -35,7 +35,7 @@ vi.mock("@opencompany/db/billing", () => ({
     cancellationScheduled: false,
   }),
   findWorkspaceIdForStripeSubscription: vi.fn().mockResolvedValue(null),
-  GOAT_PRO_STRIPE_PRODUCT_KEY: "goat_pro",
+  PRO_STRIPE_PRODUCT_KEY: "goat_pro",
   releasePendingForWorkspace: vi.fn().mockResolvedValue(0),
   setAutoRefillPaymentMethod: vi.fn().mockResolvedValue(undefined),
   settleAutoRefill: vi.fn().mockResolvedValue(undefined),

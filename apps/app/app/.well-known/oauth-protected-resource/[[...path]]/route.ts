@@ -1,5 +1,5 @@
 import {
-  GOAT_MCP_METADATA_CORS_HEADERS,
+  MCP_METADATA_CORS_HEADERS,
   mcpProtectedResourceMetadata,
   resolveAuthKitDomain,
 } from "@/lib/mcp-oauth";
@@ -14,7 +14,7 @@ export function GET(request: Request) {
 
   return Response.json(mcpProtectedResourceMetadata(request, authKitDomain.domain), {
     headers: {
-      ...GOAT_MCP_METADATA_CORS_HEADERS,
+      ...MCP_METADATA_CORS_HEADERS,
       "Cache-Control": "max-age=3600",
     },
   });
@@ -23,6 +23,6 @@ export function GET(request: Request) {
 export function OPTIONS() {
   return new Response(null, {
     status: 200,
-    headers: GOAT_MCP_METADATA_CORS_HEADERS,
+    headers: MCP_METADATA_CORS_HEADERS,
   });
 }

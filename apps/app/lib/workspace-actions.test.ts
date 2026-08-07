@@ -35,7 +35,7 @@ vi.mock("@opencompany/db/billing", () => ({
 vi.mock("@opencompany/db/workspaces", () => ({
   createBrain: vi.fn(),
   createWorkspaceForUser: vi.fn(),
-  DEFAULT_GOAT_BRAIN_SLUG: "general",
+  DEFAULT_BRAIN_SLUG: "general",
   getBrainAccess: vi.fn(),
   hasOwnedHobbyWorkspace: vi.fn().mockResolvedValue(false),
   listAccessibleBrains: vi.fn(),
@@ -65,8 +65,8 @@ vi.mock("next/headers", () => ({
 
 vi.mock("@/lib/auth", () => ({
   currentUser: vi.fn(),
-  GOAT_ACTIVE_BRAIN_COOKIE: "goat-active-brain",
-  GOAT_ACTIVE_WORKSPACE_COOKIE: "goat-active-workspace",
+  ACTIVE_BRAIN_COOKIE: "goat-active-brain",
+  ACTIVE_WORKSPACE_COOKIE: "goat-active-workspace",
 }));
 
 vi.mock("@/lib/billing/seats", () => ({

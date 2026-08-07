@@ -1,9 +1,9 @@
 import { APICallError, type generateObject, NoObjectGeneratedError } from "ai";
 import { describe, expect, it, vi } from "vitest";
 import {
-  GOAT_CHAT_FRONTIER_MODEL,
-  GOAT_CHAT_PDF_MODEL,
-  GOAT_CHAT_STANDARD_MODEL,
+  CHAT_FRONTIER_MODEL,
+  CHAT_PDF_MODEL,
+  CHAT_STANDARD_MODEL,
   resolveAutoModel,
 } from "@/lib/chat-model-router";
 
@@ -28,7 +28,7 @@ describe("resolveAutoModel", () => {
     );
 
     expect(result).toMatchObject({
-      model: GOAT_CHAT_PDF_MODEL,
+      model: CHAT_PDF_MODEL,
       tier: "frontier",
       reason: "pdf_attachment",
       classifier: { outcome: "skipped" },
@@ -43,7 +43,7 @@ describe("resolveAutoModel", () => {
     });
 
     expect(result).toMatchObject({
-      model: GOAT_CHAT_FRONTIER_MODEL,
+      model: CHAT_FRONTIER_MODEL,
       tier: "frontier",
       reason: "attachment",
       classifier: { outcome: "skipped" },
@@ -61,7 +61,7 @@ describe("resolveAutoModel", () => {
     });
 
     expect(result).toMatchObject({
-      model: GOAT_CHAT_STANDARD_MODEL,
+      model: CHAT_STANDARD_MODEL,
       tier: "standard",
       reason: "simple_answer",
       classifier: { outcome: "success" },
@@ -95,7 +95,7 @@ describe("resolveAutoModel", () => {
     });
 
     expect(result).toMatchObject({
-      model: GOAT_CHAT_FRONTIER_MODEL,
+      model: CHAT_FRONTIER_MODEL,
       tier: "frontier",
       reason: "coding",
       classifier: { outcome: "success" },
@@ -112,7 +112,7 @@ describe("resolveAutoModel", () => {
     });
 
     expect(result).toMatchObject({
-      model: GOAT_CHAT_FRONTIER_MODEL,
+      model: CHAT_FRONTIER_MODEL,
       tier: "frontier",
       reason: "router_fallback",
       classifier: { outcome: "timeout", errorCategory: "timeout" },
@@ -147,7 +147,7 @@ describe("resolveAutoModel", () => {
     });
 
     expect(result).toMatchObject({
-      model: GOAT_CHAT_FRONTIER_MODEL,
+      model: CHAT_FRONTIER_MODEL,
       reason: "router_fallback",
       classifier: {
         outcome: "invalid",
@@ -194,7 +194,7 @@ describe("resolveAutoModel", () => {
     });
 
     expect(result).toMatchObject({
-      model: GOAT_CHAT_FRONTIER_MODEL,
+      model: CHAT_FRONTIER_MODEL,
       tier: "frontier",
       reason: "router_fallback",
       classifier: { outcome: "invalid", errorCategory: "invalid_output" },

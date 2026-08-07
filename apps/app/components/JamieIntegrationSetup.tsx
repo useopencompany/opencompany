@@ -9,7 +9,7 @@ import {
   createOrResetJamieWebhookEndpointAction,
   saveJamieWebhookApiKeyAction,
 } from "@/lib/integrations/jamie-actions";
-import { GOAT_JAMIE_WEBHOOK_SECRET_HEADER } from "@/lib/integrations/jamie-constants";
+import { JAMIE_WEBHOOK_SECRET_HEADER } from "@/lib/integrations/jamie-constants";
 
 type EndpointSetup = {
   integrationId: string;
@@ -44,7 +44,7 @@ export function JamieIntegrationSetup({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const webhookUrl = endpoint?.webhookUrl ?? initialState.webhookUrl;
-  const headerName = endpoint?.headerName ?? GOAT_JAMIE_WEBHOOK_SECRET_HEADER;
+  const headerName = endpoint?.headerName ?? JAMIE_WEBHOOK_SECRET_HEADER;
   const apiKeyConfigured =
     endpoint?.apiKeyConfigured ?? initialState.apiKeyConfigured ?? initialState.connected;
   const status = useMemo(

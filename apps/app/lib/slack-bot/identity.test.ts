@@ -23,7 +23,7 @@ vi.mock("@/lib/integrations/slack", () => ({
   slackApiRequest: vi.fn(),
 }));
 
-const GOAT_USER = {
+const USER = {
   workosUserId: "user_1",
   email: "jane@acme.com",
   firstName: "Jane",
@@ -42,7 +42,7 @@ describe("resolveSlackSender", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearSlackSenderCacheForTests();
-    dbState.rows = [GOAT_USER];
+    dbState.rows = [USER];
     vi.mocked(slackApiRequest).mockResolvedValue({
       ok: true,
       user: { is_bot: false, profile: { email: "Jane@Acme.com" } },
@@ -54,7 +54,7 @@ describe("resolveSlackSender", () => {
     const resolution = await resolveSlackSender(INPUT);
     expect(resolution).toEqual({
       kind: "member",
-      member: { ...GOAT_USER, role: "member" },
+      member: { ...USER, role: "member" },
     });
   });
 
@@ -79,7 +79,7 @@ describe("resolveSlackSender", () => {
     expect(await resolveSlackSender(INPUT)).toEqual({ kind: "unmapped", reason: "no_email" });
 
     clearSlackSenderCacheForTests();
-    dbState.rows = [GOAT_USER, { ...GOAT_USER, workosUserId: "user_2" }];
+    dbState.rows = [USER, { ...USER, workosUserId: "user_2" }];
     expect(await resolveSlackSender(INPUT)).toEqual({ kind: "unmapped", reason: "no_match" });
 
     clearSlackSenderCacheForTests();
@@ -105,7 +105,7 @@ describe("resolveSlackSender", () => {
     // The next call retries Slack instead of serving the failure from cache.
     expect(await resolveSlackSender(INPUT)).toEqual({
       kind: "member",
-      member: { ...GOAT_USER, role: "member" },
+      member: { ...USER, role: "member" },
     });
     expect(slackApiRequest).toHaveBeenCalledTimes(2);
   });

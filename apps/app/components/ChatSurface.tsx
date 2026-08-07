@@ -102,9 +102,9 @@ import { useChatAttachments } from "@/components/chat/useChatAttachments";
 import { useCreditBalance } from "@/components/chat/useCreditBalance";
 import { useHydrated } from "@/components/useHydrated";
 import {
+  AD_HOC_TASK_ID,
+  AD_HOC_TASK_TOKEN,
   descriptionFromAdHocTaskPrompt,
-  GOAT_AD_HOC_TASK_ID,
-  GOAT_AD_HOC_TASK_TOKEN,
   hasAdHocTaskToken,
 } from "@/lib/ad-hoc-task";
 import {
@@ -112,11 +112,8 @@ import {
   markChatSeenAction,
   reopenChatSessionAction,
 } from "@/lib/chat-actions";
-import { GOAT_CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
-import {
-  AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES,
-  AUTO_GOAT_MODEL_SELECTION,
-} from "@/lib/chat-auto-model";
+import { CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
+import { AUTO_MODEL_ATTACHMENT_CAPABILITIES, AUTO_MODEL_SELECTION } from "@/lib/chat-auto-model";
 import {
   type ChatModelSelection,
   persistLastChatSelection,
@@ -124,9 +121,9 @@ import {
   subscribeLastChatSelection,
 } from "@/lib/chat-composer-selection";
 import {
+  CHAT_COMPOSER_FOCUS_EVENT,
   consumePendingChatComposerFocus,
-  GOAT_CHAT_COMPOSER_FOCUS_EVENT,
-  GOAT_HOME_NAVIGATION_EVENT,
+  HOME_NAVIGATION_EVENT,
   newOptimisticChatSessionId,
 } from "@/lib/chat-navigation";
 import {
@@ -149,7 +146,7 @@ import {
   textFromChatUiMessage,
   toChatUiMessage,
 } from "@/lib/chat-ui";
-import { GOAT_CHAT_OUT_OF_CREDITS_MESSAGE } from "@/lib/chat-validation";
+import { CHAT_OUT_OF_CREDITS_MESSAGE } from "@/lib/chat-validation";
 import {
   CLAUDE_CHAT_DEFAULT_MODEL_ID,
   CLAUDE_PICKER_VALUE,
@@ -172,8 +169,8 @@ import { alwaysAllowChatActionAction } from "@/lib/integration-account-actions";
 import {
   CLAUDE_CODE_MODELS,
   CODEX_MODELS,
-  DEFAULT_GOAT_MODEL,
-  GOAT_MODELS,
+  DEFAULT_MODEL,
+  MODELS,
   modelContextWindowTokens,
   normalizeModel,
 } from "@/lib/model-options";
@@ -185,7 +182,7 @@ import {
   createCollections,
   type TaskRow,
 } from "@/lib/task-collections";
-import { GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
+import { STAGE_COPY, STATUS_COPY } from "@/lib/task-display";
 import type { CodexSandboxStatus } from "@/lib/task-runner";
 import {
   deleteTaskScheduleAction,
@@ -225,7 +222,7 @@ type MentionOption =
   | { kind: "engine"; token: "@codex" | "@claude"; label: string; mention: ChatMention }
   | {
       kind: "task";
-      token: typeof GOAT_AD_HOC_TASK_TOKEN;
+      token: typeof AD_HOC_TASK_TOKEN;
       label: string;
       description: string;
     }
@@ -581,7 +578,7 @@ export function ChatSurface({
     chatModelSelectionFromEngineMention(
       activeSelectedMentions.find((mention) => mention.kind === "engine"),
     ) ?? baseChatModel;
-  const isAutoChatModel = chatModel === AUTO_GOAT_MODEL_SELECTION;
+  const isAutoChatModel = chatModel === AUTO_MODEL_SELECTION;
   const activeTaskId = activeTaskConversation?.taskId ?? null;
   const activeTaskStatus = activeTaskConversation?.status ?? null;
   const isTaskConversationStopping = Boolean(
@@ -769,9 +766,9 @@ export function ChatSurface({
     },
     onError: (error) => {
       clearLocalActiveTurnState(null);
-      if (error.message?.includes(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE)) {
+      if (error.message?.includes(CHAT_OUT_OF_CREDITS_MESSAGE)) {
         void refetchCreditBalance();
-        toast.error(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, {
+        toast.error(CHAT_OUT_OF_CREDITS_MESSAGE, {
           action: {
             label: "Add credits",
             onClick: () => router.push("/settings/workspace/billing"),
@@ -865,7 +862,7 @@ export function ChatSurface({
     ...(composerEngine === "codex" || composerEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
       : isAutoChatModel
-        ? { capabilities: AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES }
+        ? { capabilities: AUTO_MODEL_ATTACHMENT_CAPABILITIES }
         : {}),
   });
   const applyDictatedInput = useCallback(
@@ -1071,7 +1068,7 @@ export function ChatSurface({
   const activeChatModel =
     activeChatSummary?.model ??
     (initialChat?.id === chatSessionId ? initialChat.model : null) ??
-    (isEngineChat ? DEFAULT_GOAT_MODEL : chatModel);
+    (isEngineChat ? DEFAULT_MODEL : chatModel);
   const activeChatEngine =
     activeChatSummary?.engine ??
     (initialChat?.id === chatSessionId ? initialChat.engine : null) ??
@@ -1251,8 +1248,8 @@ export function ChatSurface({
       clearComposerAttachments();
       inputRef.current?.focus({ preventScroll: true });
     };
-    window.addEventListener(GOAT_HOME_NAVIGATION_EVENT, handleHomeNavigation);
-    return () => window.removeEventListener(GOAT_HOME_NAVIGATION_EVENT, handleHomeNavigation);
+    window.addEventListener(HOME_NAVIGATION_EVENT, handleHomeNavigation);
+    return () => window.removeEventListener(HOME_NAVIGATION_EVENT, handleHomeNavigation);
   }, [clearComposerAttachments, openChat]);
 
   useEffect(() => {
@@ -1265,9 +1262,9 @@ export function ChatSurface({
       consumePendingChatComposerFocus(sessionId);
       inputRef.current?.focus({ preventScroll: true });
     };
-    window.addEventListener(GOAT_CHAT_COMPOSER_FOCUS_EVENT, handleChatComposerFocusRequest);
+    window.addEventListener(CHAT_COMPOSER_FOCUS_EVENT, handleChatComposerFocusRequest);
     return () =>
-      window.removeEventListener(GOAT_CHAT_COMPOSER_FOCUS_EVENT, handleChatComposerFocusRequest);
+      window.removeEventListener(CHAT_COMPOSER_FOCUS_EVENT, handleChatComposerFocusRequest);
   }, []);
 
   useLayoutEffect(() => {
@@ -1496,7 +1493,7 @@ export function ChatSurface({
     const backgroundEngine = backgroundChat ? (backgroundChat.engine ?? activeEngine) : null;
     if ((isInteractionPending && !isBackgroundSubmit) || backgroundTaskSubmitting) return;
     if (outOfCredits && !(backgroundEngine ?? activeEngine)) {
-      toast.error(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, {
+      toast.error(CHAT_OUT_OF_CREDITS_MESSAGE, {
         action: {
           label: "Add credits",
           onClick: () => router.push("/settings/workspace/billing"),
@@ -1619,7 +1616,7 @@ export function ChatSurface({
       if (taskSpawningEnabled && hasAdHocTaskToken(messagePrompt)) {
         const description = descriptionFromAdHocTaskPrompt(messagePrompt);
         if (!description) {
-          toast.error(`Describe the task after ${GOAT_AD_HOC_TASK_TOKEN}.`);
+          toast.error(`Describe the task after ${AD_HOC_TASK_TOKEN}.`);
           return;
         }
         if (pendingAttachments.length > 0) {
@@ -1808,7 +1805,7 @@ export function ChatSurface({
     if (adHocTaskMentionEnabled && hasAdHocTaskToken(prompt)) {
       const description = descriptionFromAdHocTaskPrompt(prompt);
       if (!description) {
-        toast.error(`Describe the task after ${GOAT_AD_HOC_TASK_TOKEN}.`);
+        toast.error(`Describe the task after ${AD_HOC_TASK_TOKEN}.`);
         return;
       }
       if (pendingAttachments.length > 0) {
@@ -3029,7 +3026,7 @@ export function ChatSurface({
                         ref={attachmentFileInputRef}
                         type="file"
                         multiple
-                        accept={GOAT_CHAT_ATTACHMENT_ACCEPT}
+                        accept={CHAT_ATTACHMENT_ACCEPT}
                         className="hidden"
                         onChange={(event) => {
                           const files = Array.from(event.currentTarget.files ?? []);
@@ -3290,8 +3287,8 @@ function QuickChatComposer({
     enabled: attachmentsEnabled && !isSubmitting,
     ...(composerEngine === "codex" || composerEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
-      : chatModel === AUTO_GOAT_MODEL_SELECTION
-        ? { capabilities: AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES }
+      : chatModel === AUTO_MODEL_SELECTION
+        ? { capabilities: AUTO_MODEL_ATTACHMENT_CAPABILITIES }
         : {}),
   });
 
@@ -3546,7 +3543,7 @@ function QuickChatComposer({
     event.preventDefault();
     if (isSubmitting) return;
     if (chatSendBlocked) {
-      toast.error(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, {
+      toast.error(CHAT_OUT_OF_CREDITS_MESSAGE, {
         action: {
           label: "Add credits",
           onClick: () => router.push("/settings/workspace/billing"),
@@ -3603,7 +3600,7 @@ function QuickChatComposer({
     ) {
       const description = descriptionFromAdHocTaskPrompt(prompt);
       if (!description) {
-        toast.error(`Describe the task after ${GOAT_AD_HOC_TASK_TOKEN}.`);
+        toast.error(`Describe the task after ${AD_HOC_TASK_TOKEN}.`);
         return;
       }
       if (pendingAttachments.length > 0) {
@@ -3934,7 +3931,7 @@ function QuickChatComposer({
                   ref={attachmentFileInputRef}
                   type="file"
                   multiple
-                  accept={GOAT_CHAT_ATTACHMENT_ACCEPT}
+                  accept={CHAT_ATTACHMENT_ACCEPT}
                   className="hidden"
                   onChange={(event) => {
                     const files = Array.from(event.currentTarget.files ?? []);
@@ -4900,7 +4897,7 @@ function workflowMentionIdsFromText(value: string) {
   const ids = new Set<string>();
   for (const match of value.matchAll(/(^|\s)#([a-z0-9][a-z0-9-]{0,63})(?=\s|$)/gi)) {
     const id = match[2]?.toLowerCase();
-    if (id && id !== GOAT_AD_HOC_TASK_ID) ids.add(id);
+    if (id && id !== AD_HOC_TASK_ID) ids.add(id);
   }
   return ids;
 }
@@ -4963,14 +4960,14 @@ function buildMentionOptions(input: {
     if (input.adHocTaskEnabled && (!query || "task ad-hoc background".includes(query))) {
       options.push({
         kind: "task",
-        token: GOAT_AD_HOC_TASK_TOKEN,
+        token: AD_HOC_TASK_TOKEN,
         label: "Ad-hoc task",
         description: "Run this request in the background",
       });
     }
     if (input.workflowsEnabled) {
       for (const workflow of input.workflows) {
-        if (workflow.id === GOAT_AD_HOC_TASK_ID) continue;
+        if (workflow.id === AD_HOC_TASK_ID) continue;
         const haystack = `${workflow.id} ${workflow.name} ${workflow.description}`.toLowerCase();
         if (query && !haystack.includes(query)) continue;
         options.push({
@@ -6252,14 +6249,12 @@ function ModelPicker({
   autoModelRoutingEnabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const isAutoSelected = value === AUTO_GOAT_MODEL_SELECTION;
+  const isAutoSelected = value === AUTO_MODEL_SELECTION;
   const isCodexSelected = value === CODEX_PICKER_VALUE;
   const isClaudeSelected = value === CLAUDE_PICKER_VALUE;
   const isEngineSelected = isCodexSelected || isClaudeSelected;
   const selectedModel =
-    !isAutoSelected && !isEngineSelected
-      ? (findModel(value) ?? findModel(DEFAULT_GOAT_MODEL))
-      : null;
+    !isAutoSelected && !isEngineSelected ? (findModel(value) ?? findModel(DEFAULT_MODEL)) : null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -6277,7 +6272,7 @@ function ModelPicker({
           <AnthropicIcon size={13} strokeWidth={1.9} className="shrink-0" />
         ) : (
           <ModelProviderIcon
-            modelId={selectedModel?.id ?? DEFAULT_GOAT_MODEL}
+            modelId={selectedModel?.id ?? DEFAULT_MODEL}
             size={13}
             strokeWidth={1.9}
             className="shrink-0"
@@ -6306,10 +6301,10 @@ function ModelPicker({
             {autoModelRoutingEnabled ? (
               <CommandGroup heading="Routing">
                 <CommandItem
-                  value={AUTO_GOAT_MODEL_SELECTION}
+                  value={AUTO_MODEL_SELECTION}
                   keywords={["Auto", "automatic", "routing", "recommended"]}
                   onSelect={() => {
-                    onChange(AUTO_GOAT_MODEL_SELECTION);
+                    onChange(AUTO_MODEL_SELECTION);
                     setOpen(false);
                   }}
                   title="Choose a model from the first message and keep it for the chat."
@@ -6398,7 +6393,7 @@ function ModelPicker({
               </CommandGroup>
             ) : null}
             <CommandGroup heading="Models">
-              {GOAT_MODELS.map((model) => {
+              {MODELS.map((model) => {
                 const isSelected =
                   !isAutoSelected && !isEngineSelected && model.id === selectedModel?.id;
                 return (
@@ -6442,7 +6437,7 @@ function ModelPicker({
 }
 
 function findModel(id: string) {
-  return GOAT_MODELS.find((model) => model.id === id);
+  return MODELS.find((model) => model.id === id);
 }
 
 function ModelProviderIcon({
@@ -6622,7 +6617,7 @@ function getTaskMeta(task: TaskView): {
     return {
       icon: AlertCircle,
       className: "text-danger",
-      detail: `${recurringPrefix}${task.error ?? GOAT_STATUS_COPY.failed}`,
+      detail: `${recurringPrefix}${task.error ?? STATUS_COPY.failed}`,
       spin: false,
     };
   }
@@ -6630,7 +6625,7 @@ function getTaskMeta(task: TaskView): {
     return {
       icon: X,
       className: "text-ink-subtle",
-      detail: `${recurringPrefix}${task.error ?? GOAT_STATUS_COPY.canceled}`,
+      detail: `${recurringPrefix}${task.error ?? STATUS_COPY.canceled}`,
       spin: false,
     };
   }
@@ -6638,7 +6633,7 @@ function getTaskMeta(task: TaskView): {
     return {
       icon: CheckCircle2,
       className: "text-emerald-600",
-      detail: `${recurringPrefix}${firstLine(task.result) ?? GOAT_STATUS_COPY.succeeded}`,
+      detail: `${recurringPrefix}${firstLine(task.result) ?? STATUS_COPY.succeeded}`,
       spin: false,
     };
   }
@@ -6646,14 +6641,14 @@ function getTaskMeta(task: TaskView): {
     return {
       icon: Clock,
       className: "text-ink-subtle",
-      detail: `${recurringPrefix}${GOAT_STAGE_COPY[task.stage]}`,
+      detail: `${recurringPrefix}${STAGE_COPY[task.stage]}`,
       spin: false,
     };
   }
   return {
     icon: CircleDotDashed,
     className: "text-amber-500",
-    detail: `${recurringPrefix}${GOAT_STAGE_COPY[task.stage]}`,
+    detail: `${recurringPrefix}${STAGE_COPY[task.stage]}`,
     spin: true,
   };
 }

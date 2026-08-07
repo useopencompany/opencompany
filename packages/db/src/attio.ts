@@ -12,13 +12,13 @@ import {
 
 type DbLike = any;
 
-export const GOAT_ATTIO_PROVIDER = "attio" as const;
-export const GOAT_ATTIO_CREDENTIAL_KIND = "api_key" as const;
+export const ATTIO_PROVIDER = "attio" as const;
+export const ATTIO_CREDENTIAL_KIND = "api_key" as const;
 
-export const GOAT_ATTIO_OBJECT_TYPES = ["person", "company", "deal"] as const;
+export const ATTIO_OBJECT_TYPES = ["person", "company", "deal"] as const;
 
 // Attio's standard-object api slugs, keyed by our object type.
-export const GOAT_ATTIO_OBJECT_SLUGS: Record<AttioObjectType, string> = {
+export const ATTIO_OBJECT_SLUGS: Record<AttioObjectType, string> = {
   person: "people",
   company: "companies",
   deal: "deals",
@@ -28,17 +28,17 @@ export type AttioObjectTypeRef = {
   id: AttioObjectType;
 };
 
-export const GOAT_ATTIO_EVENT_TYPES = ["object_created", "object_updated", "note_added"] as const;
-export const GOAT_ATTIO_DEFAULT_EVENT_TYPES = ["object_created", "note_added"] as const;
+export const ATTIO_EVENT_TYPES = ["object_created", "object_updated", "note_added"] as const;
+export const ATTIO_DEFAULT_EVENT_TYPES = ["object_created", "note_added"] as const;
 
 // Attio record.updated payloads have no provider-native event id. Deliveries
 // for the same update reach each member webhook within a short interval, while
 // distinct windows are separated by the worker's 15-minute quiet period. A
 // five-minute bucket therefore deduplicates the former without collapsing all
 // changes to one attribute for an entire day.
-export const GOAT_ATTIO_UPDATE_CLAIM_BUCKET_MS = 5 * 60_000;
+export const ATTIO_UPDATE_CLAIM_BUCKET_MS = 5 * 60_000;
 
-export type AttioEventType = (typeof GOAT_ATTIO_EVENT_TYPES)[number];
+export type AttioEventType = (typeof ATTIO_EVENT_TYPES)[number];
 
 export type AttioEventRef = {
   id: AttioEventType;
@@ -113,7 +113,7 @@ export function attioSelectedObjectTypes(config: AttioBrainSourceConfig): Set<At
 
 export function attioSelectedEventTypes(config: AttioBrainSourceConfig): Set<AttioEventType> {
   return new Set(
-    (config.events ?? GOAT_ATTIO_DEFAULT_EVENT_TYPES.map((id) => ({ id }))).map((ref) => ref.id),
+    (config.events ?? ATTIO_DEFAULT_EVENT_TYPES.map((id) => ({ id }))).map((ref) => ref.id),
   );
 }
 
@@ -136,9 +136,7 @@ export function attioEventTypeFor(action: AttioEventAction): AttioEventType {
 }
 
 export function isAttioObjectType(value: unknown): value is AttioObjectType {
-  return (
-    typeof value === "string" && (GOAT_ATTIO_OBJECT_TYPES as readonly string[]).includes(value)
-  );
+  return typeof value === "string" && (ATTIO_OBJECT_TYPES as readonly string[]).includes(value);
 }
 
 // Cross-member dedup identity for an event. Attio delivers separately to each
@@ -159,8 +157,8 @@ export function attioEventClaimKey(event: {
   if (event.action === "note") return `${scope}:note:${event.noteId ?? "unknown"}`;
   if (event.action === "create") return `${scope}:created`;
   const bucketStart = new Date(
-    Math.floor(event.eventTime.getTime() / GOAT_ATTIO_UPDATE_CLAIM_BUCKET_MS) *
-      GOAT_ATTIO_UPDATE_CLAIM_BUCKET_MS,
+    Math.floor(event.eventTime.getTime() / ATTIO_UPDATE_CLAIM_BUCKET_MS) *
+      ATTIO_UPDATE_CLAIM_BUCKET_MS,
   ).toISOString();
   return `${scope}:updated:${event.attributeId ?? "unknown"}:${bucketStart}`;
 }
@@ -178,7 +176,7 @@ export async function listAttioIntegrationsForWorkspace(
     .from(integrations)
     .where(
       and(
-        eq(integrations.provider, GOAT_ATTIO_PROVIDER),
+        eq(integrations.provider, ATTIO_PROVIDER),
         // Integration rows key external_id on the Attio workspace id, so
         // inbound webhooks route by the event's workspace_id.
         eq(integrations.externalId, workspaceId),
@@ -200,7 +198,7 @@ export async function listEnabledAttioBrainSourceRoutes(
     .from(brainSources)
     .where(
       and(
-        eq(brainSources.provider, GOAT_ATTIO_PROVIDER),
+        eq(brainSources.provider, ATTIO_PROVIDER),
         eq(brainSources.enabled, true),
         inArray(brainSources.integrationId, [...integrationIds]),
       ),
@@ -286,5 +284,5 @@ function parseEventRefs(value: unknown): AttioEventRef[] | undefined {
 }
 
 function isAttioEventType(value: unknown): value is AttioEventType {
-  return typeof value === "string" && (GOAT_ATTIO_EVENT_TYPES as readonly string[]).includes(value);
+  return typeof value === "string" && (ATTIO_EVENT_TYPES as readonly string[]).includes(value);
 }

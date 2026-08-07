@@ -1,7 +1,7 @@
 "use server";
 
 import {
-  GOAT_MANAGED_CAPABILITY_SOURCES,
+  MANAGED_CAPABILITY_SOURCES,
   setCapabilitySessionBudget,
   setWorkspaceCapability,
 } from "@opencompany/db/capabilities";
@@ -23,7 +23,7 @@ export async function setWorkspaceCapabilityAction(input: {
   if (
     !input ||
     typeof input.enabled !== "boolean" ||
-    !GOAT_MANAGED_CAPABILITY_SOURCES.includes(input.source)
+    !MANAGED_CAPABILITY_SOURCES.includes(input.source)
   ) {
     return { ok: false as const, error: "Invalid capability setting." };
   }

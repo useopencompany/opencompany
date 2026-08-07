@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { put } from "@vercel/blob";
 import { brainAssetUploadPrefix, createBrainAssetForUser } from "@/lib/brain-assets";
-import { GOAT_BRAIN_CAPTURE_FOLDER } from "@/lib/brain-capture";
+import { BRAIN_CAPTURE_FOLDER } from "@/lib/brain-capture";
 import { downloadChatAttachment } from "@/lib/chat-attachments";
 import type { SaveToBrainToolOutput, StoredChatMessage } from "@/lib/chat-ui";
 import { triggerBrainIngestWake } from "@/lib/task-runner";
@@ -56,7 +56,7 @@ export async function saveChatAttachmentsToBrain(input: {
     const created = await createBrainAssetForUser({
       brainRef: input.brainRef,
       userWorkosId: input.userWorkosId,
-      folderPath: GOAT_BRAIN_CAPTURE_FOLDER,
+      folderPath: BRAIN_CAPTURE_FOLDER,
       blobUrl: copy.url,
       originalFileName: attachment.filename,
       mimeType: attachment.mediaType,

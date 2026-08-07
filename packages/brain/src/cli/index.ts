@@ -3,6 +3,8 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  BRAIN_ENTITY_TYPES,
+  BRAIN_EVIDENCE_ZONE,
   type BrainDocument,
   type BrainKind,
   type BrainRelation,
@@ -14,12 +16,10 @@ import {
   brainTimelineEntryFromParts,
   checkBrainHealth,
   compareBrainFolderPaths,
-  DEFAULT_GOAT_BRAIN_RELATION_TYPE,
+  DEFAULT_BRAIN_RELATION_TYPE,
   defaultBrainFolder,
   deterministicEvidenceId,
   formatBrainEvidenceLink,
-  GOAT_BRAIN_ENTITY_TYPES,
-  GOAT_BRAIN_EVIDENCE_ZONE,
   ingestBrain,
   isBrainSkillFolder,
   isBuiltInBrainEntityType,
@@ -195,7 +195,7 @@ Commands:
   doctor            Check validation, links, folder shape, and weak provenance.
 
 Global options:
-  --root <path>     Brain root (default: goat-brain; GOAT_BRAIN_ROOT pins it).
+  --root <path>     Brain root (default: goat-brain; BRAIN_ROOT pins it).
   --json            Machine-readable output.
   --help            Show help for a command.
 
@@ -216,16 +216,16 @@ Examples:
 Create a new Markdown brain document. Types classify documents; folders are free-form navigation.
 
 Required:
-  --type <type>       Entity type: ${GOAT_BRAIN_ENTITY_TYPES.join(", ")}.
+  --type <type>       Entity type: ${BRAIN_ENTITY_TYPES.join(", ")}.
   --id <id>           Lowercase brain slug.
   --title <title>     Human-readable title.
   --truth <text>      Compiled truth, or pass --truth-stdin and write truth to stdin.
 
 Common options:
   --folder <path>     Any folder path. Defaults to the type's suggested folder.
-                      "${GOAT_BRAIN_EVIDENCE_ZONE}/" is reserved for evidence documents.
+                      "${BRAIN_EVIDENCE_ZONE}/" is reserved for evidence documents.
   --kind <kind>       "page" (default) or "evidence". Evidence docs must live under
-                      "${GOAT_BRAIN_EVIDENCE_ZONE}/"; inferred from --folder when omitted.
+                      "${BRAIN_EVIDENCE_ZONE}/"; inferred from --folder when omitted.
   --alias <text>      Repeatable alias.
   --relation <type:id>
   --source-ref <ref>  Provenance reference for the initial evidence entry.
@@ -317,7 +317,7 @@ compiled truth to cite provenance with [[evidence:<evidence-id>]] or
 
 Options:
   --title <title>     New human-readable title.
-  --type <type>       Entity type: ${GOAT_BRAIN_ENTITY_TYPES.join(", ")}.
+  --type <type>       Entity type: ${BRAIN_ENTITY_TYPES.join(", ")}.
   --status <status>   draft, active, archived, or merged.
 
 Examples:
@@ -345,11 +345,11 @@ Example:
   goat-brain append-timeline opencompany --body "Updated launch plan."`,
   "append-evidence": `Usage: goat-brain append-evidence <subject-id> --source-ref <ref> [--at <iso-date>] (--body <text> | --body-stdin) [options]
 
-Create an immutable evidence record in the ${GOAT_BRAIN_EVIDENCE_ZONE}/ zone and link it to the subject document.
+Create an immutable evidence record in the ${BRAIN_EVIDENCE_ZONE}/ zone and link it to the subject document.
 
 Options:
   --type <type>        Entity type for the record. Defaults to source.
-  --folder <path>      Folder inside "${GOAT_BRAIN_EVIDENCE_ZONE}/". Defaults to "${GOAT_BRAIN_EVIDENCE_ZONE}".
+  --folder <path>      Folder inside "${BRAIN_EVIDENCE_ZONE}/". Defaults to "${BRAIN_EVIDENCE_ZONE}".
   --title <title>
   --detail <text> or --detail-stdin
   --source-title <title>
@@ -381,7 +381,7 @@ Example:
   goat-brain merge --from acme-old --into acme`,
   move: `Usage: goat-brain move <id> --folder <path> [--json]
 
-Move a document to a different folder. Evidence documents stay inside "${GOAT_BRAIN_EVIDENCE_ZONE}/"; pages stay outside it.
+Move a document to a different folder. Evidence documents stay inside "${BRAIN_EVIDENCE_ZONE}/"; pages stay outside it.
 
 Example:
   goat-brain move launch-plan --folder projects/launch`,
@@ -447,11 +447,11 @@ async function helpCommand(ctx: CommandContext): Promise<CommandResult> {
 async function create(ctx: CommandContext): Promise<CommandResult> {
   const typeInput = ctx.args.get("type")?.trim();
   if (!typeInput) {
-    return fail(`\`--type\` is required. Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(", ")}.`);
+    return fail(`\`--type\` is required. Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`);
   }
   if (!isBuiltInBrainEntityType(typeInput)) {
     return fail(
-      `Unsupported Goat Brain entity type "${typeInput}". Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(
+      `Unsupported Goat Brain entity type "${typeInput}". Use one of: ${BRAIN_ENTITY_TYPES.join(
         ", ",
       )}.`,
     );
@@ -778,9 +778,7 @@ async function ingest(ctx: CommandContext): Promise<CommandResult> {
     ...(process.env.BRAIN_GATEWAY_BASE_URL ? { baseUrl: process.env.BRAIN_GATEWAY_BASE_URL } : {}),
     ...(reporting ? { reporting } : {}),
     chatModel:
-      ctx.args.get("model")?.trim() ||
-      process.env.GOAT_BRAIN_INGEST_MODEL?.trim() ||
-      "openai/gpt-5.5",
+      ctx.args.get("model")?.trim() || process.env.BRAIN_INGEST_MODEL?.trim() || "openai/gpt-5.5",
     onUsage: (entry) => usage.push(entry),
   });
   const sourceTitle = ctx.args.get("source-title")?.trim();
@@ -809,8 +807,8 @@ async function ingest(ctx: CommandContext): Promise<CommandResult> {
 }
 
 function gatewayReportingFromEnv(env: NodeJS.ProcessEnv) {
-  const user = env.GOAT_GATEWAY_REPORTING_USER?.trim();
-  const tags = (env.GOAT_GATEWAY_REPORTING_TAGS ?? "")
+  const user = env.GATEWAY_REPORTING_USER?.trim();
+  const tags = (env.GATEWAY_REPORTING_TAGS ?? "")
     .split(",")
     .map((tag) => tag.trim())
     .filter(Boolean);
@@ -873,7 +871,7 @@ async function set(ctx: CommandContext): Promise<CommandResult> {
   const type = typeInput ? normalizeBuiltInBrainEntityType(typeInput) : undefined;
   if (typeInput && !type) {
     return fail(
-      `Unsupported Goat Brain entity type "${typeInput}". Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(
+      `Unsupported Goat Brain entity type "${typeInput}". Use one of: ${BRAIN_ENTITY_TYPES.join(
         ", ",
       )}.`,
     );
@@ -977,12 +975,10 @@ async function appendEvidence(ctx: CommandContext): Promise<CommandResult> {
   const typeInput = ctx.args.get("type")?.trim() || "source";
   if (!isBuiltInBrainEntityType(typeInput)) {
     return fail(
-      `Unsupported Goat Brain entity type "${typeInput}". Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(", ")}.`,
+      `Unsupported Goat Brain entity type "${typeInput}". Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`,
     );
   }
-  const folder = normalizeBrainFolderForV1(
-    ctx.args.get("folder")?.trim() || GOAT_BRAIN_EVIDENCE_ZONE,
-  );
+  const folder = normalizeBrainFolderForV1(ctx.args.get("folder")?.trim() || BRAIN_EVIDENCE_ZONE);
   if (!isValidBrainFolder(folder)) return fail("`--folder` must be a safe folder path.");
   const folderKindError = brainFolderKindError(folder, "evidence");
   if (folderKindError) return fail(`\`--folder\` "${folder}" is invalid. ${folderKindError}`);
@@ -1123,7 +1119,7 @@ async function link(ctx: CommandContext): Promise<CommandResult> {
   const loaded = await loadDoc(ctx.root, id);
   if (!loaded) return notFound(`No brain doc found with id "${id}".`);
   const remove = new Set(ctx.args.getAll("remove"));
-  const relationType = ctx.args.get("as") ?? DEFAULT_GOAT_BRAIN_RELATION_TYPE;
+  const relationType = ctx.args.get("as") ?? DEFAULT_BRAIN_RELATION_TYPE;
   if (!isValidBrainRelationType(relationType))
     return fail("`--as` must be a lowercase relation type.");
   const byKey = new Map(
@@ -1485,7 +1481,7 @@ function readRelations(
     if (!rawType || !rawTo || rest.length > 0) {
       return { ok: false, error: '`--relation` must use "type:brain-id".' };
     }
-    const type = rawType.trim() || DEFAULT_GOAT_BRAIN_RELATION_TYPE;
+    const type = rawType.trim() || DEFAULT_BRAIN_RELATION_TYPE;
     const to = rawTo.trim();
     if (!isValidBrainRelationType(type))
       return { ok: false, error: `Invalid relation type "${type}".` };

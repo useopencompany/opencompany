@@ -17,8 +17,8 @@ import {
 } from "./schema";
 
 const ENCRYPTION_KEY_VERSION = 1;
-export const GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION = 1 as const;
-export const GOAT_INFISICAL_HOST = "https://app.infisical.com";
+export const INFISICAL_AUTH_BUNDLE_FORMAT_VERSION = 1 as const;
+export const INFISICAL_HOST = "https://app.infisical.com";
 
 type DbSchema = typeof schema;
 type InfisicalAuthDb = Pick<PgDatabase<PgQueryResultHKT, DbSchema>, "insert" | "select" | "update">;
@@ -30,7 +30,7 @@ export type InfisicalAuthBundleFile = {
 };
 
 export type InfisicalAuthBundle = {
-  formatVersion: typeof GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION;
+  formatVersion: typeof INFISICAL_AUTH_BUNDLE_FORMAT_VERSION;
   files: InfisicalAuthBundleFile[];
   redactionValues: string[];
 };
@@ -85,10 +85,10 @@ export async function saveInfisicalConnection(input: {
       credentialGeneration,
       status: "connected",
       statusReason: null,
-      host: GOAT_INFISICAL_HOST,
+      host: INFISICAL_HOST,
       accountEmail: input.accountEmail,
       cliVersion: input.cliVersion,
-      bundleFormatVersion: GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
+      bundleFormatVersion: INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
       expiresAt: input.expiresAt ?? null,
       connectedByWorkosId: input.connectedByWorkosId,
       lastValidatedAt: now,
@@ -103,10 +103,10 @@ export async function saveInfisicalConnection(input: {
         credentialGeneration,
         status: "connected",
         statusReason: null,
-        host: GOAT_INFISICAL_HOST,
+        host: INFISICAL_HOST,
         accountEmail: input.accountEmail,
         cliVersion: input.cliVersion,
-        bundleFormatVersion: GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
+        bundleFormatVersion: INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
         expiresAt: input.expiresAt ?? null,
         connectedByWorkosId: input.connectedByWorkosId,
         lastValidatedAt: now,
@@ -139,7 +139,7 @@ export async function disconnectInfisicalConnection(input: {
       credentialGeneration,
       status: "disconnected",
       statusReason: null,
-      host: GOAT_INFISICAL_HOST,
+      host: INFISICAL_HOST,
       accountEmail: null,
       cliVersion: null,
       bundleFormatVersion: null,
@@ -339,7 +339,7 @@ function isAuthBundle(value: unknown): value is InfisicalAuthBundle {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<InfisicalAuthBundle>;
   return (
-    candidate.formatVersion === GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION &&
+    candidate.formatVersion === INFISICAL_AUTH_BUNDLE_FORMAT_VERSION &&
     Array.isArray(candidate.files) &&
     candidate.files.every(
       (file) =>

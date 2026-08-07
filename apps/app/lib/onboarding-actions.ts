@@ -1,8 +1,8 @@
 "use server";
 
 import {
-  ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS,
-  HARD_DEFAULT_GOAT_BRAIN_FOLDERS,
+  ADJUSTABLE_DEFAULT_BRAIN_FOLDERS,
+  HARD_DEFAULT_BRAIN_FOLDERS,
   normalizeBrainFolder,
 } from "@opencompany/brain/schema";
 import {
@@ -97,13 +97,13 @@ export async function saveOnboardingBrainFoldersAction(input: {
   const target = new Set(
     input.folders.map((f) => normalizeBrainFolder(f)).filter((f) => f.length > 0),
   );
-  const hard = new Set<string>(HARD_DEFAULT_GOAT_BRAIN_FOLDERS);
-  const adjustable = new Set<string>(ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS);
+  const hard = new Set<string>(HARD_DEFAULT_BRAIN_FOLDERS);
+  const adjustable = new Set<string>(ADJUSTABLE_DEFAULT_BRAIN_FOLDERS);
   const userWorkosId = context.user.workosUserId;
 
   // Reconcile the seeded adjustable defaults with what the user kept, then add
   // any custom folders. Mutations are idempotent, so we ignore no-op failures.
-  for (const folder of ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS) {
+  for (const folder of ADJUSTABLE_DEFAULT_BRAIN_FOLDERS) {
     if (target.has(folder)) {
       await createBrainFolderForUser({ brainRef: brain.id, userWorkosId, folderPath: folder });
     } else {

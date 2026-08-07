@@ -1,14 +1,14 @@
 import {
+  BRAIN_ENTITY_TYPES,
+  BRAIN_EVIDENCE_ZONE,
   type BrainEntityType,
   type BrainKind,
-  GOAT_BRAIN_ENTITY_TYPES,
-  GOAT_BRAIN_EVIDENCE_ZONE,
   isBrainEvidenceFolder,
   normalizeBrainEntityType,
   normalizeBrainFolder,
 } from "./schema";
 
-const ENTITY_TYPE_SET = new Set<string>(GOAT_BRAIN_ENTITY_TYPES);
+const ENTITY_TYPE_SET = new Set<string>(BRAIN_ENTITY_TYPES);
 
 // Retired v1 type names normalize to their v2 home so documents materialized
 // before migration 0100 keep parsing; the next write rewrites the frontmatter.
@@ -43,7 +43,7 @@ const DEFAULT_FOLDER_BY_ENTITY_TYPE: Record<BrainEntityType, string> = {
 };
 
 export function defaultBrainFolder(type: BrainEntityType, kind: BrainKind): string {
-  if (kind === "evidence") return GOAT_BRAIN_EVIDENCE_ZONE;
+  if (kind === "evidence") return BRAIN_EVIDENCE_ZONE;
   return DEFAULT_FOLDER_BY_ENTITY_TYPE[type];
 }
 
@@ -51,10 +51,10 @@ export function brainFolderKindError(folder: string, kind: BrainKind): string | 
   const normalizedFolder = normalizeBrainFolder(folder);
   const inZone = isBrainEvidenceFolder(normalizedFolder);
   if (kind === "evidence" && !inZone) {
-    return `evidence documents must live under the "${GOAT_BRAIN_EVIDENCE_ZONE}/" zone.`;
+    return `evidence documents must live under the "${BRAIN_EVIDENCE_ZONE}/" zone.`;
   }
   if (kind === "page" && inZone) {
-    return `folder "${folder}" is inside the "${GOAT_BRAIN_EVIDENCE_ZONE}/" zone, which is reserved for evidence documents.`;
+    return `folder "${folder}" is inside the "${BRAIN_EVIDENCE_ZONE}/" zone, which is reserved for evidence documents.`;
   }
   return null;
 }

@@ -17,9 +17,9 @@ import {
   MAX_WEB_SEARCH_CALLS_PER_TURN,
 } from "@/lib/chat-limits";
 import {
+  BRAIN_TOOL_NAME,
   type BrainToolInput,
   type ChatActionCatalog,
-  GOAT_BRAIN_TOOL_NAME,
   LIST_ACTIONS_TOOL_NAME,
   LIST_SKILLS_TOOL_NAME,
   type ListActionsToolInput,
@@ -43,7 +43,7 @@ import {
   type WebSearchToolInput,
   type WebSearchToolOutput,
 } from "@/lib/chat-ui";
-import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import { DEFAULT_MODEL } from "@/lib/model-options";
 import {
   OPENCOMPANY_CHAT_SOUL,
   OPENCOMPANY_CHAT_SYSTEM,
@@ -54,7 +54,7 @@ describe("runOpenCompanyChatAgent", () => {
   it("enables Gateway prompt caching for headless chat generation", async () => {
     await runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "research this in chat" }],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       generateTextImpl: (async (options: unknown) => {
         expect(options).toMatchObject({
@@ -89,7 +89,7 @@ describe("runOpenCompanyChatAgent", () => {
   it("reserves the final model step for an answer without tools", async () => {
     await runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "research this in chat" }],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       generateTextImpl: (async (options: unknown) => {
         const prepareStep = (
@@ -120,7 +120,7 @@ describe("runOpenCompanyChatAgent", () => {
 
     await runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "open example.com" }],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       browserTools,
       maxSteps: OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX,
@@ -173,7 +173,7 @@ describe("runOpenCompanyChatAgent", () => {
 
     await runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "check my latest emails" }],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       startTask,
       generateTextImpl: (async (options: unknown) => {
@@ -219,7 +219,7 @@ describe("runOpenCompanyChatAgent", () => {
 
     await runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "what should I do today?" }],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       startTask,
       userContext: {
@@ -250,7 +250,7 @@ describe("runOpenCompanyChatAgent", () => {
 
     const result = await runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "what do you think of x?" }],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       startTask,
       generateTextImpl: (async (options: unknown) => {
@@ -293,7 +293,7 @@ describe("runOpenCompanyChatAgent", () => {
 
     await runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "find the Company Brain project" }],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       actions,
       generateTextImpl: (async (options: unknown) => {
@@ -319,7 +319,7 @@ describe("runOpenCompanyChatAgent", () => {
 
     const result = await runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "research the market for x" }],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       startTask,
       generateTextImpl: (async (options: unknown) => {
@@ -346,7 +346,7 @@ describe("runOpenCompanyChatAgent", () => {
     expect(startTask).toHaveBeenCalledWith({
       name: "Market research for x",
       prompt: "Research the market for x and summarize the strongest signals.",
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
     });
     expect(result.task).toEqual({
       id: "task_1",
@@ -373,7 +373,7 @@ describe("runOpenCompanyChatAgent", () => {
             "try creating a new codex task that checks out opencompany-experimental and tests repo access",
         },
       ],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       startTask,
       generateTextImpl: (async (options: unknown) => {
@@ -411,7 +411,7 @@ describe("runOpenCompanyChatAgent", () => {
 
     await runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "@codex check repo access" }],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       startTask,
       generateTextImpl: (async (options: unknown) => {
@@ -432,7 +432,7 @@ describe("runOpenCompanyChatAgent", () => {
     expect(startTask).toHaveBeenCalledWith({
       name: "Test repo access",
       prompt: "Check repo access and report whether development work can start.",
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
     });
   });
 
@@ -446,7 +446,7 @@ describe("runOpenCompanyChatAgent", () => {
 
     await runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "@codex check repo access" }],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       requestedEngine: "codex",
       startTask,
@@ -483,7 +483,7 @@ describe("runOpenCompanyChatAgent", () => {
 
     await runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "@claude check repo access" }],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       requestedEngine: "claude_code",
       startTask,
@@ -505,7 +505,7 @@ describe("runOpenCompanyChatAgent", () => {
     expect(startTask).toHaveBeenCalledWith({
       name: "Test repo access",
       prompt: "Check repo access and report whether development work can start.",
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       engine: "claude_code",
     });
   });
@@ -520,7 +520,7 @@ describe("runOpenCompanyChatAgent", () => {
 
     await runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "start a Claude Code task to check repo access" }],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       startTask,
       generateTextImpl: (async (options: unknown) => {
@@ -542,7 +542,7 @@ describe("runOpenCompanyChatAgent", () => {
     expect(startTask).toHaveBeenCalledWith({
       name: "Test repo access",
       prompt: "Check repo access and report whether development work can start.",
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       engine: "claude_code",
     });
   });
@@ -564,7 +564,7 @@ describe("runOpenCompanyChatAgent", () => {
 
     const resultPromise = runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "research the market for x" }],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       startTask,
       generateTextImpl: (async (options: unknown) => {
@@ -624,7 +624,7 @@ describe("runOpenCompanyChatAgent", () => {
 
     const result = await runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "what did I say about hiring?" }],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       startTask,
       runBrainCli,
@@ -653,7 +653,7 @@ describe("runOpenCompanyChatAgent", () => {
           finishReason: "stop",
           steps: [
             {
-              toolCalls: [{ toolName: GOAT_BRAIN_TOOL_NAME }],
+              toolCalls: [{ toolName: BRAIN_TOOL_NAME }],
               toolResults: [toolResult],
             },
           ],
@@ -682,7 +682,7 @@ describe("runOpenCompanyChatAgent", () => {
 
     await runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "remember Acme is building billing tools" }],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       startTask,
       runBrainCli,
@@ -728,7 +728,7 @@ describe("runOpenCompanyChatAgent", () => {
 
     await runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "show me everything in my brain" }],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       startTask,
       runBrainCli,
@@ -739,7 +739,7 @@ describe("runOpenCompanyChatAgent", () => {
           finishReason: "stop",
           steps: [
             {
-              toolCalls: [{ toolName: GOAT_BRAIN_TOOL_NAME }],
+              toolCalls: [{ toolName: BRAIN_TOOL_NAME }],
               toolResults: [
                 await executeBrainTool(options, {
                   command: "list",
@@ -777,7 +777,7 @@ describe("runOpenCompanyChatAgent", () => {
           content: "save this reference: https://example.com/pricing-teardown",
         },
       ],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       startTask,
       saveToBrain,
@@ -872,7 +872,7 @@ describe("runOpenCompanyChatAgent", () => {
           ].join("\n"),
         },
       ],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       webFetch,
       generateTextImpl: (async (options: unknown) => {
@@ -950,7 +950,7 @@ describe("runOpenCompanyChatAgent", () => {
 
     const result = await runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "What are the latest updates on Google?" }],
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       gatewayApiKey: "test-key",
       startTask,
       webSearch,
@@ -1023,7 +1023,7 @@ describe("browser tools", () => {
       output: "page",
     }));
     const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       browserTools,
     });
 
@@ -1061,14 +1061,14 @@ describe("list_skills and use_skill tools", () => {
 
   it("is absent without an available skill catalog", () => {
     const withoutSkills = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
     });
     expect(withoutSkills.tools[LIST_SKILLS_TOOL_NAME]).toBeUndefined();
     expect(withoutSkills.tools[USE_SKILL_TOOL_NAME]).toBeUndefined();
 
     const empty = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
       skills: { catalog: [], execute: vi.fn() },
     });
@@ -1083,7 +1083,7 @@ describe("list_skills and use_skill tools", () => {
       description: "A reusable product workflow.",
     }));
     const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
       skills: { catalog: broadCatalog, execute: vi.fn() },
     });
@@ -1118,7 +1118,7 @@ describe("list_skills and use_skill tools", () => {
       }),
     );
     const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
       skills: { catalog, execute },
     });
@@ -1155,7 +1155,7 @@ describe("list_skills and use_skill tools", () => {
       }),
     );
     const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
       skills: {
         catalog,
@@ -1210,14 +1210,14 @@ describe("list_actions and use_action tools", () => {
 
   it("is absent without an action catalog", () => {
     const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
     });
     expect(context.tools[LIST_ACTIONS_TOOL_NAME]).toBeUndefined();
     expect(context.tools[USE_ACTION_TOOL_NAME]).toBeUndefined();
 
     const emptyContext = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
       actions: { catalog: { sources: [], actions: [] }, execute: vi.fn() },
     });
@@ -1227,7 +1227,7 @@ describe("list_actions and use_action tools", () => {
 
   it("builds source and action enums and lists only the selected source", async () => {
     const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
       actions: { catalog, execute: vi.fn() },
     });
@@ -1283,7 +1283,7 @@ describe("list_actions and use_action tools", () => {
       ],
     };
     const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
       actions: {
         catalog: approvalCatalog,
@@ -1325,7 +1325,7 @@ describe("list_actions and use_action tools", () => {
   it("requires list_actions separately for each source before dispatch", async () => {
     const execute = vi.fn(async ({ action }: { action: string }) => okResult(action));
     const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
       actions: { catalog, execute },
     });
@@ -1368,7 +1368,7 @@ describe("list_actions and use_action tools", () => {
   it("accepts discovery carried forward from an earlier turn in the same chat", async () => {
     const execute = vi.fn(async ({ action }: { action: string }) => okResult(action));
     const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
       actions: {
         catalog,
@@ -1398,7 +1398,7 @@ describe("list_actions and use_action tools", () => {
     });
     const execute = vi.fn(async ({ action }: { action: string }) => providerFailure(action));
     const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
       actions: {
         catalog,
@@ -1444,7 +1444,7 @@ describe("list_actions and use_action tools", () => {
       }),
     );
     const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
       actions: {
         catalog,
@@ -1486,7 +1486,7 @@ describe("list_actions and use_action tools", () => {
       return okResult(action);
     });
     const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
       actions: {
         catalog,
@@ -1530,7 +1530,7 @@ describe("list_actions and use_action tools", () => {
       };
     });
     const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
       actions: {
         catalog,
@@ -1569,7 +1569,7 @@ describe("list_actions and use_action tools", () => {
       return okResult(action);
     });
     const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
       actions: {
         catalog,
@@ -1608,7 +1608,7 @@ describe("list_actions and use_action tools", () => {
   it("dispatches valid calls and steers invalid or over-budget ones", async () => {
     const execute = vi.fn(async ({ action }: { action: string }) => okResult(action));
     const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
       actions: { catalog, execute },
     });
@@ -1681,7 +1681,7 @@ describe("list_actions and use_action tools", () => {
       ],
     };
     const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
       actions: { catalog: repairCatalog, execute: vi.fn() },
     });
@@ -1730,7 +1730,7 @@ describe("list_actions and use_action tools", () => {
 
   it("does not repair unknown actions or malformed action arguments", async () => {
     const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       runBrainCli: vi.fn(),
       actions: { catalog, execute: vi.fn() },
     });
@@ -1782,22 +1782,22 @@ function extractStartTaskToolDescription(options: unknown) {
 
 function extractBrainToolDescription(options: unknown) {
   type ToolOptions = {
-    tools?: Record<typeof GOAT_BRAIN_TOOL_NAME, { description?: string }>;
+    tools?: Record<typeof BRAIN_TOOL_NAME, { description?: string }>;
   };
-  return (options as ToolOptions).tools?.[GOAT_BRAIN_TOOL_NAME]?.description ?? "";
+  return (options as ToolOptions).tools?.[BRAIN_TOOL_NAME]?.description ?? "";
 }
 
 function extractBrainCommandEnum(options: unknown) {
   type CommandSchema = { properties?: { command?: { enum?: string[] } } };
   type ToolOptions = {
     tools?: Record<
-      typeof GOAT_BRAIN_TOOL_NAME,
+      typeof BRAIN_TOOL_NAME,
       { inputSchema?: CommandSchema & { jsonSchema?: CommandSchema } }
     >;
   };
   // The AI SDK jsonSchema() helper wraps the schema, so the enum can live at
   // inputSchema.properties or inputSchema.jsonSchema.properties.
-  const inputSchema = (options as ToolOptions).tools?.[GOAT_BRAIN_TOOL_NAME]?.inputSchema;
+  const inputSchema = (options as ToolOptions).tools?.[BRAIN_TOOL_NAME]?.inputSchema;
   return (
     inputSchema?.properties?.command?.enum ??
     inputSchema?.jsonSchema?.properties?.command?.enum ??
@@ -1838,11 +1838,11 @@ async function executeStartTaskTool(
 
 async function executeBrainTool(options: unknown, input: Record<string, unknown>) {
   type ToolOptions = {
-    tools?: Record<typeof GOAT_BRAIN_TOOL_NAME, { execute?: unknown }>;
+    tools?: Record<typeof BRAIN_TOOL_NAME, { execute?: unknown }>;
   };
-  const tool = (options as ToolOptions).tools?.[GOAT_BRAIN_TOOL_NAME];
+  const tool = (options as ToolOptions).tools?.[BRAIN_TOOL_NAME];
   if (typeof tool?.execute !== "function") {
-    throw new Error(`${GOAT_BRAIN_TOOL_NAME} execute function was not configured.`);
+    throw new Error(`${BRAIN_TOOL_NAME} execute function was not configured.`);
   }
   return tool.execute(input);
 }

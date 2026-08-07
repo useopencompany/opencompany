@@ -9,10 +9,10 @@ type DbLike = any;
 // Mirrors USD_MICROS_PER_CENT in @opencompany/billing; duplicated because the
 // dependency points the other way (billing has no drizzle schema, db has no
 // billing dependency).
-export const GOAT_USD_MICROS_PER_CENT = 10_000;
+export const USD_MICROS_PER_CENT = 10_000;
 
 export function usdMicrosToCents(micros: number) {
-  return Math.round(micros / GOAT_USD_MICROS_PER_CENT);
+  return Math.round(micros / USD_MICROS_PER_CENT);
 }
 
 // Every money mutation below is a single-statement CTE chain. The web client
@@ -177,7 +177,7 @@ export async function recordCreditDebit(input: CreditDebitInput) {
       FROM ledger
       ON CONFLICT (workspace_id) DO UPDATE
       SET balance_usd_micros = goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros,
-          balance_cents = ROUND((goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros)::numeric / ${GOAT_USD_MICROS_PER_CENT})::integer,
+          balance_cents = ROUND((goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros)::numeric / ${USD_MICROS_PER_CENT})::integer,
           included_balance_usd_micros = goat.credit_balances.included_balance_usd_micros - (SELECT included_debit FROM debit_split),
           top_up_balance_usd_micros = goat.credit_balances.top_up_balance_usd_micros - (SELECT top_up_debit FROM debit_split),
           updated_at = now()
@@ -260,7 +260,7 @@ export async function grantMonthlyIncludedUsage(input: {
       )
       SELECT
         ${input.workspaceId},
-        -ROUND(COALESCE(included_balance_usd_micros, 0)::numeric / ${GOAT_USD_MICROS_PER_CENT})::integer,
+        -ROUND(COALESCE(included_balance_usd_micros, 0)::numeric / ${USD_MICROS_PER_CENT})::integer,
         -COALESCE(included_balance_usd_micros, 0),
         'included_usage_expiration',
         ${expireKey},
@@ -287,7 +287,7 @@ export async function grantMonthlyIncludedUsage(input: {
       SELECT
         ${input.workspaceId},
         (SELECT cents FROM grant_amount),
-        (SELECT cents FROM grant_amount)::bigint * ${GOAT_USD_MICROS_PER_CENT},
+        (SELECT cents FROM grant_amount)::bigint * ${USD_MICROS_PER_CENT},
         'included_usage_grant',
         ${grantKey},
         jsonb_build_object(
@@ -314,7 +314,7 @@ export async function grantMonthlyIncludedUsage(input: {
       )
       SELECT
         ${input.workspaceId},
-        ROUND((COALESCE((SELECT SUM(amount_usd_micros) FROM expiration), 0) + COALESCE((SELECT SUM(amount_usd_micros) FROM grant_row), 0))::numeric / ${GOAT_USD_MICROS_PER_CENT})::integer,
+        ROUND((COALESCE((SELECT SUM(amount_usd_micros) FROM expiration), 0) + COALESCE((SELECT SUM(amount_usd_micros) FROM grant_row), 0))::numeric / ${USD_MICROS_PER_CENT})::integer,
         COALESCE((SELECT SUM(amount_usd_micros) FROM expiration), 0) + COALESCE((SELECT SUM(amount_usd_micros) FROM grant_row), 0),
         COALESCE((SELECT SUM(amount_usd_micros) FROM expiration), 0) + COALESCE((SELECT SUM(amount_usd_micros) FROM grant_row), 0),
         0,
@@ -323,7 +323,7 @@ export async function grantMonthlyIncludedUsage(input: {
       ON CONFLICT (workspace_id) DO UPDATE
       SET included_balance_usd_micros = goat.credit_balances.included_balance_usd_micros + excluded.included_balance_usd_micros,
           balance_usd_micros = goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros,
-          balance_cents = ROUND((goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros)::numeric / ${GOAT_USD_MICROS_PER_CENT})::integer,
+          balance_cents = ROUND((goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros)::numeric / ${USD_MICROS_PER_CENT})::integer,
           updated_at = now()
       RETURNING balance_usd_micros
     ),
@@ -467,9 +467,9 @@ export async function fulfillTopUpCheckoutSession(
       SELECT
         workspace_id,
         amount_cents,
-        amount_cents::bigint * ${GOAT_USD_MICROS_PER_CENT},
+        amount_cents::bigint * ${USD_MICROS_PER_CENT},
         0,
-        amount_cents::bigint * ${GOAT_USD_MICROS_PER_CENT},
+        amount_cents::bigint * ${USD_MICROS_PER_CENT},
         now()
       FROM fulfilled_session
       ON CONFLICT (workspace_id) DO UPDATE
@@ -493,7 +493,7 @@ export async function fulfillTopUpCheckoutSession(
         workspace_id,
         user_workos_id,
         amount_cents,
-        amount_cents::bigint * ${GOAT_USD_MICROS_PER_CENT},
+        amount_cents::bigint * ${USD_MICROS_PER_CENT},
         'stripe_topup',
         id,
         jsonb_build_object(
@@ -542,7 +542,7 @@ export async function recordAutoRefillCredit(input: {
       VALUES (
         ${input.workspaceId},
         ${input.amountCents},
-        ${input.amountCents}::bigint * ${GOAT_USD_MICROS_PER_CENT},
+        ${input.amountCents}::bigint * ${USD_MICROS_PER_CENT},
         'stripe_topup',
         ${`pi:${input.paymentIntentId}`},
         jsonb_build_object('kind', 'auto_refill', 'stripePaymentIntentId', ${input.paymentIntentId})

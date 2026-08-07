@@ -30,21 +30,21 @@ import type { SkillCatalogItem } from "@/lib/skills";
 import { supportedTimezones, timezoneLabel } from "@/lib/timezones";
 import { archiveWorkflowAction, updateWorkflowAction } from "@/lib/workflow-actions";
 import {
-  DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
-  DEFAULT_GOAT_WORKFLOW_REASONING_EFFORT,
-  GOAT_WORKFLOW_MODEL_OPTIONS,
-  GOAT_WORKFLOW_REASONING_EFFORT_OPTIONS,
+  DEFAULT_WORKFLOW_MODEL_TOKEN,
+  DEFAULT_WORKFLOW_REASONING_EFFORT,
   isWorkflowCloudRuntime,
   normalizeWorkflowReasoningEffort,
   normalizeWorkflowRuntimeModel,
+  WORKFLOW_MODEL_OPTIONS,
+  WORKFLOW_REASONING_EFFORT_OPTIONS,
   type WorkflowCloudRuntime,
   workflowCloudModelOptions,
   workflowRuntimeModelSupportsReasoningEffort,
 } from "@/lib/workflow-model-options";
 import {
-  DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON,
-  DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT,
-  DEFAULT_GOAT_WORKFLOW_SCHEDULE_TIMEZONE,
+  DEFAULT_WORKFLOW_SCHEDULE_CRON,
+  DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
+  DEFAULT_WORKFLOW_SCHEDULE_TIMEZONE,
 } from "@/lib/workflow-schedule-defaults";
 import type { WorkflowDetail } from "@/lib/workflows";
 
@@ -66,8 +66,8 @@ type WorkflowDraft = Pick<WorkflowDetail, "name" | "description" | "status" | "s
 type SaveState = "saved" | "saving" | "error";
 
 const DEFAULT_MODEL_LABEL =
-  GOAT_WORKFLOW_MODEL_OPTIONS.find((option) => option.token === DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN)
-    ?.label ?? "Default";
+  WORKFLOW_MODEL_OPTIONS.find((option) => option.token === DEFAULT_WORKFLOW_MODEL_TOKEN)?.label ??
+  "Default";
 
 export function WorkflowEditor({
   workflow,
@@ -468,9 +468,9 @@ function TriggerSection({
         ? trigger
         : {
             type: "schedule",
-            cron: DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON,
-            timezone: DEFAULT_GOAT_WORKFLOW_SCHEDULE_TIMEZONE,
-            prompt: DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT,
+            cron: DEFAULT_WORKFLOW_SCHEDULE_CRON,
+            timezone: DEFAULT_WORKFLOW_SCHEDULE_TIMEZONE,
+            prompt: DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
           },
     );
   const updateSchedule = (
@@ -521,7 +521,7 @@ function TriggerSection({
                 readOnly={!canEdit}
                 onChange={(event) => updateSchedule({ prompt: event.target.value })}
                 rows={3}
-                placeholder={DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT}
+                placeholder={DEFAULT_WORKFLOW_SCHEDULE_PROMPT}
                 className="min-h-20 resize-y rounded-lg border border-border bg-canvas px-2.5 py-2 text-[13px] leading-5 text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
               />
             </label>
@@ -715,7 +715,7 @@ function ScheduleFrequencyBuilder({
               value={cron}
               readOnly={!canEdit}
               onChange={(event) => onCronChange(event.target.value)}
-              placeholder={DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON}
+              placeholder={DEFAULT_WORKFLOW_SCHEDULE_CRON}
               className="h-8 rounded-lg border border-border bg-canvas px-2.5 font-mono text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
             />
           </label>
@@ -724,7 +724,7 @@ function ScheduleFrequencyBuilder({
 
       <p className="text-[12px] text-ink-subtle">
         {summaryText === "Unsupported schedule"
-          ? `Enter a 5-field cron expression, e.g. "${DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON}".`
+          ? `Enter a 5-field cron expression, e.g. "${DEFAULT_WORKFLOW_SCHEDULE_CRON}".`
           : `Runs ${summaryText.toLowerCase()} · ${timezone}`}
       </p>
     </div>
@@ -812,14 +812,14 @@ function StepCard({
   onChange: (partial: WorkflowStepPatch) => void;
   onRemove: () => void;
 }) {
-  const selectedRuntime = GOAT_WORKFLOW_MODEL_OPTIONS.find((option) => option.token === step.model);
+  const selectedRuntime = WORKFLOW_MODEL_OPTIONS.find((option) => option.token === step.model);
   const cloudRuntime =
     selectedRuntime && isWorkflowCloudRuntime(selectedRuntime.engine)
       ? selectedRuntime.engine
       : null;
 
   const updateRuntime = (model: string) => {
-    const option = GOAT_WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === model);
+    const option = WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === model);
     if (!option || !isWorkflowCloudRuntime(option.engine)) {
       onChange({ model, runtimeModel: undefined, reasoningEffort: undefined });
       return;
@@ -900,7 +900,7 @@ function StepRuntimePicker({
   disabled: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const selectedOption = GOAT_WORKFLOW_MODEL_OPTIONS.find((option) => option.token === value);
+  const selectedOption = WORKFLOW_MODEL_OPTIONS.find((option) => option.token === value);
   const selectedLabel = selectedOption?.label ?? DEFAULT_MODEL_LABEL;
 
   return (
@@ -929,7 +929,7 @@ function StepRuntimePicker({
             setOpen(false);
           }}
         />
-        {GOAT_WORKFLOW_MODEL_OPTIONS.map((option) => (
+        {WORKFLOW_MODEL_OPTIONS.map((option) => (
           <ModelOption
             key={option.token}
             label={option.label}
@@ -984,7 +984,7 @@ function StepCloudRuntimeControls({
       />
       {supportsEffort ? (
         <StepEffortPicker
-          value={reasoningEffort ?? DEFAULT_GOAT_WORKFLOW_REASONING_EFFORT}
+          value={reasoningEffort ?? DEFAULT_WORKFLOW_REASONING_EFFORT}
           onChange={(nextEffort) => onChange({ reasoningEffort: nextEffort })}
           disabled={disabled}
         />
@@ -1050,7 +1050,7 @@ const WORKFLOW_EFFORT_LABELS = {
   xhigh: { label: "X-high effort", hint: "Maximum" },
 } as const;
 
-const WORKFLOW_EFFORT_OPTIONS = GOAT_WORKFLOW_REASONING_EFFORT_OPTIONS.map((value) => ({
+const WORKFLOW_EFFORT_OPTIONS = WORKFLOW_REASONING_EFFORT_OPTIONS.map((value) => ({
   value,
   ...WORKFLOW_EFFORT_LABELS[value],
 }));

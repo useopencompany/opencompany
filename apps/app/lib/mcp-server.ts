@@ -7,6 +7,8 @@ import { captureToBrainInbox } from "@/lib/brain-capture";
 import { runBrainToolForUser } from "@/lib/brain-cli";
 import { normalizeBrainReadToolInput } from "@/lib/brain-surface";
 import {
+  BRAIN_ADVANCED_TOOL_DESCRIPTION,
+  BRAIN_ADVANCED_TOOL_NAME,
   type BrainSelectorArgs,
   brainAdvancedInputSchema,
   coerceDocumentIds,
@@ -16,8 +18,6 @@ import {
   GET_TIMELINE_TOOL_NAME,
   type GetDocumentArgs,
   type GetTimelineArgs,
-  GOAT_BRAIN_ADVANCED_TOOL_DESCRIPTION,
-  GOAT_BRAIN_ADVANCED_TOOL_NAME,
   getDocumentInputSchema,
   getDocumentToToolInput,
   getTimelineInputSchema,
@@ -264,10 +264,10 @@ export function registerBrainTools(server: McpServer, ctx: McpToolContext) {
   );
 
   server.registerTool(
-    GOAT_BRAIN_ADVANCED_TOOL_NAME,
+    BRAIN_ADVANCED_TOOL_NAME,
     {
       title: "OpenCompany brain (advanced)",
-      description: GOAT_BRAIN_ADVANCED_TOOL_DESCRIPTION,
+      description: BRAIN_ADVANCED_TOOL_DESCRIPTION,
       inputSchema: brainAdvancedInputSchema,
       annotations: READ_TOOL_ANNOTATIONS,
     },

@@ -5,7 +5,7 @@ import WebSocket, { type RawData, WebSocketServer } from "ws";
 import { verifyDictationTicket } from "./dictation-auth";
 import type { RunnerEnv } from "./env";
 
-export const GOAT_DICTATION_PATH = "/goat/dictation";
+export const DICTATION_PATH = "/goat/dictation";
 
 const DICTATION_PROTOCOL = "goat-dictation-v1";
 const TICKET_PROTOCOL_PREFIX = "goat-dictation-ticket.";

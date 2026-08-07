@@ -1,7 +1,7 @@
 import {
+  CODEX_SAVE_TO_BRAIN_TOOL_NAME,
   type CodexBrainCaptureGatewayRequest,
   type CodexBrainCaptureGatewayResponse,
-  GOAT_CODEX_SAVE_TO_BRAIN_TOOL_NAME,
 } from "@opencompany/agent-runtime";
 import {
   SAVE_TO_BRAIN_FALLBACK_CONTENT_DESCRIPTION,
@@ -17,8 +17,8 @@ import type {
 } from "./codex-app-server";
 import type { RunnerEnv } from "./env";
 
-const GOAT_CODEX_BRAIN_CAPTURE_GATEWAY_PATH = "/api/internal/codex-brain-capture";
-const GOAT_CODEX_BRAIN_CAPTURE_GATEWAY_TIMEOUT_MS = 30_000;
+const CODEX_BRAIN_CAPTURE_GATEWAY_PATH = "/api/internal/codex-brain-capture";
+const CODEX_BRAIN_CAPTURE_GATEWAY_TIMEOUT_MS = 30_000;
 
 type CodexBrainCaptureToolContext = {
   codexChatSessionId: string;
@@ -43,7 +43,7 @@ export function createCodexBrainCaptureDynamicTool(
   return {
     spec: {
       type: "function",
-      name: GOAT_CODEX_SAVE_TO_BRAIN_TOOL_NAME,
+      name: CODEX_SAVE_TO_BRAIN_TOOL_NAME,
       description:
         "Save something the user explicitly wants remembered into the Brain pinned to this Codex chat. It creates an inbox draft immediately and queues background curation. Preserve the user's content faithfully; never use this as a scratchpad or save without clear user intent.",
       inputSchema: {
@@ -112,7 +112,7 @@ async function executeGatewayCall(input: {
   try {
     await input.context.checkAbort();
     const response = await input.dependencies.fetch(
-      new URL(GOAT_CODEX_BRAIN_CAPTURE_GATEWAY_PATH, appUrl),
+      new URL(CODEX_BRAIN_CAPTURE_GATEWAY_PATH, appUrl),
       {
         method: "POST",
         headers: {
@@ -120,7 +120,7 @@ async function executeGatewayCall(input: {
           "content-type": "application/json",
         },
         body: JSON.stringify(input.request),
-        signal: AbortSignal.timeout(GOAT_CODEX_BRAIN_CAPTURE_GATEWAY_TIMEOUT_MS),
+        signal: AbortSignal.timeout(CODEX_BRAIN_CAPTURE_GATEWAY_TIMEOUT_MS),
       },
     );
     const result = await readGatewayResponse(response);

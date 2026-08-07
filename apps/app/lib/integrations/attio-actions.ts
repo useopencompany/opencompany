@@ -1,9 +1,9 @@
 "use server";
 
 import {
+  ATTIO_CREDENTIAL_KIND,
+  ATTIO_PROVIDER,
   type AttioApiKeyCredentialPayload,
-  GOAT_ATTIO_CREDENTIAL_KIND,
-  GOAT_ATTIO_PROVIDER,
 } from "@opencompany/db/attio";
 import { loadIntegrationCredential } from "@opencompany/db/integrations";
 import { revalidatePath } from "next/cache";
@@ -79,8 +79,8 @@ export async function disconnectAttioIntegrationAction(
   const credential = await loadIntegrationCredential({
     userWorkosId: user.workosUserId,
     integrationId,
-    provider: GOAT_ATTIO_PROVIDER,
-    kind: GOAT_ATTIO_CREDENTIAL_KIND,
+    provider: ATTIO_PROVIDER,
+    kind: ATTIO_CREDENTIAL_KIND,
   }).catch(() => null);
   const payload = credential?.payload as AttioApiKeyCredentialPayload | undefined;
   if (payload?.apiKey && payload.webhookId) {

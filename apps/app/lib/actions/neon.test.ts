@@ -22,7 +22,7 @@ vi.mock("@ai-sdk/mcp", () => ({
 }));
 
 vi.mock("@opencompany/core/integrations/neon-mcp", () => ({
-  GOAT_NEON_MCP_ENDPOINT_URL:
+  NEON_MCP_ENDPOINT_URL:
     "https://mcp.neon.tech/mcp?readonly=true&category=projects&category=branches&category=schema&category=querying",
   getNeonIntegrationState: vi.fn(),
   loadNeonMcpWorkerConnection: vi.fn(),

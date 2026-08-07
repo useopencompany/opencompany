@@ -4,7 +4,7 @@ import {
   applyStripeInvoicePaymentState,
   applyStripeSubscriptionProjection,
   findWorkspaceIdForStripeSubscription,
-  GOAT_PRO_STRIPE_PRODUCT_KEY,
+  PRO_STRIPE_PRODUCT_KEY,
   releasePendingForWorkspace,
   setAutoRefillPaymentMethod,
   settleAutoRefill,
@@ -108,7 +108,7 @@ export async function POST(request: Request) {
     }
     if (
       session.mode === "subscription" &&
-      (session.metadata?.billingProduct === GOAT_PRO_STRIPE_PRODUCT_KEY ||
+      (session.metadata?.billingProduct === PRO_STRIPE_PRODUCT_KEY ||
         session.metadata?.billingProduct === "goat")
     ) {
       // Subscription lifecycle events carry the authoritative item and status.
@@ -170,9 +170,9 @@ async function handleSubscriptionEvent(
 ) {
   const subscription = event.data.object;
   const productKey = subscription.metadata.billingProduct;
-  if (productKey !== GOAT_PRO_STRIPE_PRODUCT_KEY && productKey !== "goat") return;
+  if (productKey !== PRO_STRIPE_PRODUCT_KEY && productKey !== "goat") return;
   const storedWorkspaceId =
-    productKey === GOAT_PRO_STRIPE_PRODUCT_KEY
+    productKey === PRO_STRIPE_PRODUCT_KEY
       ? await findWorkspaceIdForStripeSubscription(subscription.id)
       : null;
   const workspaceId = subscription.metadata.workspaceId?.trim() || storedWorkspaceId;

@@ -6,10 +6,10 @@ import {
   type StripeConnection,
 } from "../integrations/stripe";
 import {
+  ACTION_EFFECTS_READ,
   ActionAuthError,
   ActionInvalidParamsError,
   type ActionProviderCatalog,
-  GOAT_ACTION_EFFECTS_READ,
   optionalStringParam,
 } from "./types";
 
@@ -133,7 +133,7 @@ export async function resolveStripeActions(
         id: "stripe.get_revenue_summary",
         provider: "stripe",
         capability: "read",
-        effects: GOAT_ACTION_EFFECTS_READ,
+        effects: ACTION_EFFECTS_READ,
         permissionMode: "on",
         description:
           "Summarize Stripe balance activity for a period, grouped by currency and Stripe reporting category. Returns captured payment volume, partial-capture reversals, refunds, disputes, net Stripe fees, and net payment activity. This is operational payment reporting, not GAAP revenue. Defaults to the trailing 7 days; for calendar periods pass start and end as ISO 8601 instants, with end exclusive.",
@@ -189,7 +189,7 @@ export async function resolveStripeActions(
         id: "stripe.get_balance",
         provider: "stripe",
         capability: "read",
-        effects: GOAT_ACTION_EFFECTS_READ,
+        effects: ACTION_EFFECTS_READ,
         permissionMode: "on",
         description:
           "Get the Stripe account's current available and pending balances by currency. Amounts are returned in each currency's minor unit.",
@@ -227,7 +227,7 @@ export async function resolveStripeActions(
         id: "stripe.get_subscription_summary",
         provider: "stripe",
         capability: "read",
-        effects: GOAT_ACTION_EFFECTS_READ,
+        effects: ACTION_EFFECTS_READ,
         permissionMode: "on",
         description:
           "Summarize current Stripe subscriptions by status, cancellations scheduled at period end, and estimated monthly recurring value by currency. The MRR estimate includes fixed per-unit recurring prices and excludes metered, tiered, or otherwise unpriced items.",
@@ -259,7 +259,7 @@ export async function resolveStripeActions(
         id: "stripe.get_receivables_summary",
         provider: "stripe",
         capability: "read",
-        effects: GOAT_ACTION_EFFECTS_READ,
+        effects: ACTION_EFFECTS_READ,
         permissionMode: "on",
         description:
           "Summarize open Stripe invoices and outstanding receivables by currency, including overdue or previously attempted invoices that need attention and links to the largest open invoices.",

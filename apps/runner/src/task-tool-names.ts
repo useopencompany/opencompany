@@ -1,6 +1,6 @@
 import type { TaskToolName } from "@opencompany/db/schema";
 
-export const GOAT_TASK_TOOL_NAMES = [
+export const TASK_TOOL_NAMES = [
   "exa_search",
   "browser_open",
   "browser_snapshot",
@@ -36,13 +36,13 @@ export const GOAT_TASK_TOOL_NAMES = [
   "github_open_pull_request",
 ] as const satisfies readonly TaskToolName[];
 
-const GOAT_TASK_TOOL_SET = new Set<TaskToolName>(GOAT_TASK_TOOL_NAMES);
+const TASK_TOOL_SET = new Set<TaskToolName>(TASK_TOOL_NAMES);
 
 export function normalizeTaskToolNames(value: unknown): TaskToolName[] {
   const selected = new Set<TaskToolName>();
   if (Array.isArray(value)) {
     for (const item of value) {
-      if (typeof item === "string" && GOAT_TASK_TOOL_SET.has(item as TaskToolName)) {
+      if (typeof item === "string" && TASK_TOOL_SET.has(item as TaskToolName)) {
         selected.add(item as TaskToolName);
       }
     }
@@ -50,5 +50,5 @@ export function normalizeTaskToolNames(value: unknown): TaskToolName[] {
   if (selected.size === 0) {
     selected.add("exa_search");
   }
-  return GOAT_TASK_TOOL_NAMES.filter((name) => selected.has(name));
+  return TASK_TOOL_NAMES.filter((name) => selected.has(name));
 }

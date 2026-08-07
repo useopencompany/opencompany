@@ -2,14 +2,14 @@ import { calculateModelUsageCost } from "@opencompany/billing";
 import { normalizeJamieMeetingCompletedWebhook } from "@opencompany/brain";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  BRAIN_AGENT_SKIP_SENTINEL,
   BrainAgentOutcomeError,
   BrainIngestBudgetError,
-  GOAT_BRAIN_AGENT_SKIP_SENTINEL,
 } from "./brain-agent-ingest";
 import {
+  BRAIN_INGEST_MAX_ATTEMPTS,
+  BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS,
   type BrainIngestStore,
-  GOAT_BRAIN_INGEST_MAX_ATTEMPTS,
-  GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS,
   runClaimedBrainIngestJob,
   startBrainIngestWorker,
 } from "./brain-ingest-worker";
@@ -534,7 +534,7 @@ describe("Goat Brain ingest worker", () => {
         result: {
           skipped: true,
           reason: "routine_linear_status_change",
-          summary: GOAT_BRAIN_AGENT_SKIP_SENTINEL,
+          summary: BRAIN_AGENT_SKIP_SENTINEL,
         },
         reason: "routine_linear_status_change",
       },
@@ -543,7 +543,7 @@ describe("Goat Brain ingest worker", () => {
         reason: "No durable brain material.",
       },
       {
-        result: { skipped: true, summary: GOAT_BRAIN_AGENT_SKIP_SENTINEL },
+        result: { skipped: true, summary: BRAIN_AGENT_SKIP_SENTINEL },
         reason: null,
       },
     ]) {
@@ -695,7 +695,7 @@ describe("Goat Brain ingest worker", () => {
         sourceItemId: "gbsrc_123",
         attempts: 5,
         error: "gateway stream failed",
-        maxAttempts: GOAT_BRAIN_INGEST_MAX_ATTEMPTS,
+        maxAttempts: BRAIN_INGEST_MAX_ATTEMPTS,
       }),
     );
     expect(telemetry.recordBrainIngestRun).toHaveBeenCalledWith(
@@ -767,7 +767,7 @@ describe("Goat Brain ingest worker", () => {
           kind: "brain_agent_ingest",
           contentHash: "hash_123",
           status: "running",
-          attempts: GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS,
+          attempts: BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS,
           nextRunAt: new Date("2026-01-01T10:00:00.000Z"),
           leaseId: "lease_123",
           leaseOwner: "runner_123",
@@ -784,8 +784,8 @@ describe("Goat Brain ingest worker", () => {
 
     expect(fail).toHaveBeenCalledWith(
       expect.objectContaining({
-        attempts: GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS,
-        maxAttempts: GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS,
+        attempts: BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS,
+        maxAttempts: BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS,
       }),
     );
     // attempts >= the outcome cap: telemetry records this run as terminal.

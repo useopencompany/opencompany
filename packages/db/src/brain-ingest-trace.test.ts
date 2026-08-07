@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
-import {
-  GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
-  normalizeBrainIngestTrace,
-} from "./brain-ingest-trace";
+import { BRAIN_INGEST_TRACE_SCHEMA_VERSION, normalizeBrainIngestTrace } from "./brain-ingest-trace";
 
 function trace(budget?: Record<string, unknown>) {
   return {
-    schemaVersion: GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
+    schemaVersion: BRAIN_INGEST_TRACE_SCHEMA_VERSION,
     model: "anthropic/claude-sonnet-5",
     steps: 2,
     toolCallCount: 1,

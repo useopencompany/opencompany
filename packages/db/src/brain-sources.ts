@@ -21,7 +21,7 @@ function runAtomically<T>(db: DbLike, fn: (tx: DbLike) => Promise<T>): Promise<T
   return db.transaction(fn);
 }
 
-export const GOAT_BRAIN_SOURCE_DISABLED_INGEST_REASON =
+export const BRAIN_SOURCE_DISABLED_INGEST_REASON =
   "Stopped because this Brain source was disabled.";
 
 export type BrainSourceWithIntegration = {
@@ -249,7 +249,7 @@ async function cancelActiveBrainIngestJobsForSource(input: {
   now: Date;
   db: DbLike;
 }) {
-  const reason = GOAT_BRAIN_SOURCE_DISABLED_INGEST_REASON;
+  const reason = BRAIN_SOURCE_DISABLED_INGEST_REASON;
   await input.db.execute(sql`
     WITH canceled_jobs AS MATERIALIZED (
       UPDATE goat.brain_ingest_jobs AS job

@@ -18,7 +18,7 @@ import {
   claimBrainSourceEvents,
 } from "@opencompany/db/brain-event-claims";
 import {
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+  BRAIN_AGENT_INGEST_JOB_KIND,
   upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import type { AttioEventAction, AttioObjectType, IntegrationStatus } from "@opencompany/db/schema";
@@ -45,11 +45,11 @@ type DbLike = any;
 // comes first. One agent ingest session then covers the whole window. A CRM
 // edit session touches many attributes in a quick burst, then the record goes
 // quiet for days, so a HubSpot-sized quiet period captures the whole burst.
-export const GOAT_ATTIO_QUIET_PERIOD_MS = 15 * 60_000;
-export const GOAT_ATTIO_MAX_WAIT_MS = 4 * 60 * 60_000;
-export const GOAT_ATTIO_MAX_WINDOW_EVENTS = 200;
-export const GOAT_ATTIO_MAX_NOTES_PER_WINDOW = 5;
-const GOAT_ATTIO_FLUSH_POLL_INTERVAL_MS = 60_000;
+export const ATTIO_QUIET_PERIOD_MS = 15 * 60_000;
+export const ATTIO_MAX_WAIT_MS = 4 * 60 * 60_000;
+export const ATTIO_MAX_WINDOW_EVENTS = 200;
+export const ATTIO_MAX_NOTES_PER_WINDOW = 5;
+const ATTIO_FLUSH_POLL_INTERVAL_MS = 60_000;
 
 export type AttioDueWindow = {
   integrationId: string;
@@ -75,8 +75,8 @@ export async function listDueAttioObjectWindows(input: {
   maxWaitMs?: number;
 }): Promise<AttioDueWindow[]> {
   const now = input.now ?? new Date();
-  const quietCutoff = new Date(now.getTime() - (input.quietPeriodMs ?? GOAT_ATTIO_QUIET_PERIOD_MS));
-  const maxWaitCutoff = new Date(now.getTime() - (input.maxWaitMs ?? GOAT_ATTIO_MAX_WAIT_MS));
+  const quietCutoff = new Date(now.getTime() - (input.quietPeriodMs ?? ATTIO_QUIET_PERIOD_MS));
+  const maxWaitCutoff = new Date(now.getTime() - (input.maxWaitMs ?? ATTIO_MAX_WAIT_MS));
   const result = await getDb().execute(sql`
     SELECT
       integration_id AS "integrationId",
@@ -244,7 +244,7 @@ export async function flushAttioObjectWindow(window: AttioDueWindow): Promise<{
         rawPayload: { eventIds: group.events.map((row) => row.id) },
         rawEventCount: group.eventKeys.length,
         rawEventKeysByBrainRef: group.eventKeysByBrainRef,
-        kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+        kind: BRAIN_AGENT_INGEST_JOB_KIND,
         brainRefs: group.brainRefs,
         skipReason: null,
         now: flushedAt,
@@ -279,7 +279,7 @@ export async function flushAttioObjectWindow(window: AttioDueWindow): Promise<{
         rawPayload: { eventIds: unrouted.map((row) => row.id) },
         rawEventCount: new Set(unrouted.map((row) => eventKeyByEventId.get(row.id)!)).size,
         rawEventKeysByBrainRef: new Map(),
-        kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+        kind: BRAIN_AGENT_INGEST_JOB_KIND,
         brainRefs: [],
         skipReason: null,
         now: flushedAt,
@@ -414,7 +414,7 @@ export function buildAttioObjectWindowItem(input: {
 
 export function selectAttioWindowEventsForFlush<T extends { action: AttioEventAction }>(
   events: readonly T[],
-  maxNotes = GOAT_ATTIO_MAX_NOTES_PER_WINDOW,
+  maxNotes = ATTIO_MAX_NOTES_PER_WINDOW,
 ): T[] {
   const selected: T[] = [];
   let selectedNotes = 0;
@@ -444,10 +444,7 @@ function attioActorType(row: BufferedAttioEventRow): string | null {
 }
 
 export function startAttioFlushWorker(options: { pollIntervalMs?: number } = {}) {
-  const pollIntervalMs = Math.max(
-    1_000,
-    options.pollIntervalMs ?? GOAT_ATTIO_FLUSH_POLL_INTERVAL_MS,
-  );
+  const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? ATTIO_FLUSH_POLL_INTERVAL_MS);
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let wake: (() => void) | null = null;
@@ -540,7 +537,7 @@ async function previewBufferedAttioEvents(window: AttioDueWindow) {
         AND record_id = ${window.recordId}
         AND source_item_id IS NULL
       ORDER BY event_time ASC, id ASC
-      LIMIT ${GOAT_ATTIO_MAX_WINDOW_EVENTS}
+      LIMIT ${ATTIO_MAX_WINDOW_EVENTS}
     `),
   );
 }

@@ -4,18 +4,18 @@ import type { ChatAttachmentKind } from "@opencompany/db/schema";
 // set matches what the brain asset pipeline can ingest: pdf, docx, xlsx, SRT,
 // still images, and text-like founder artifacts such as CSV exports, Markdown,
 // plain text, and JSON. No legacy .doc/.xls or gif (animated frames collapse).
-export const GOAT_CHAT_SRT_MIME_TYPE = "application/x-subrip";
-export const GOAT_CHAT_TSV_MIME_TYPE = "text/tab-separated-values";
+export const CHAT_SRT_MIME_TYPE = "application/x-subrip";
+export const CHAT_TSV_MIME_TYPE = "text/tab-separated-values";
 
-export const GOAT_CHAT_ATTACHMENT_MIME_KINDS: Record<string, ChatAttachmentKind> = {
+export const CHAT_ATTACHMENT_MIME_KINDS: Record<string, ChatAttachmentKind> = {
   "application/pdf": "pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
-  [GOAT_CHAT_SRT_MIME_TYPE]: "srt",
+  [CHAT_SRT_MIME_TYPE]: "srt",
   "application/srt": "srt",
   "text/srt": "srt",
   "text/csv": "csv",
-  [GOAT_CHAT_TSV_MIME_TYPE]: "tsv",
+  [CHAT_TSV_MIME_TYPE]: "tsv",
   "application/json": "json",
   "text/markdown": "text",
   "text/plain": "text",
@@ -24,10 +24,10 @@ export const GOAT_CHAT_ATTACHMENT_MIME_KINDS: Record<string, ChatAttachmentKind>
   "image/webp": "image",
 };
 
-export const GOAT_CHAT_ATTACHMENT_CONTENT_TYPES = Object.keys(GOAT_CHAT_ATTACHMENT_MIME_KINDS);
+export const CHAT_ATTACHMENT_CONTENT_TYPES = Object.keys(CHAT_ATTACHMENT_MIME_KINDS);
 
-export const GOAT_CHAT_ATTACHMENT_ACCEPT = [
-  ...GOAT_CHAT_ATTACHMENT_CONTENT_TYPES,
+export const CHAT_ATTACHMENT_ACCEPT = [
+  ...CHAT_ATTACHMENT_CONTENT_TYPES,
   ".pdf",
   ".docx",
   ".xlsx",
@@ -44,13 +44,13 @@ export const GOAT_CHAT_ATTACHMENT_ACCEPT = [
   ".webp",
 ].join(",");
 
-export const GOAT_CHAT_ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
+export const CHAT_ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
 // Claude's per-image request limit is 5 MB; reject rather than downscale (v1).
-export const GOAT_CHAT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
-export const GOAT_CHAT_ATTACHMENT_MAX_PER_MESSAGE = 5;
+export const CHAT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+export const CHAT_ATTACHMENT_MAX_PER_MESSAGE = 5;
 
 export function chatAttachmentKindForMime(mediaType: string): ChatAttachmentKind | null {
-  return GOAT_CHAT_ATTACHMENT_MIME_KINDS[normalizedMimeType(mediaType)] ?? null;
+  return CHAT_ATTACHMENT_MIME_KINDS[normalizedMimeType(mediaType)] ?? null;
 }
 
 export type ChatAttachmentValidation =
@@ -84,7 +84,7 @@ export function validateChatAttachmentCandidate(input: {
   if (!Number.isFinite(input.sizeBytes) || input.sizeBytes <= 0) {
     return { ok: false, reason: "size", message: "File is empty or its size is unknown." };
   }
-  const maxBytes = kind === "image" ? GOAT_CHAT_IMAGE_MAX_BYTES : GOAT_CHAT_ATTACHMENT_MAX_BYTES;
+  const maxBytes = kind === "image" ? CHAT_IMAGE_MAX_BYTES : CHAT_ATTACHMENT_MAX_BYTES;
   if (input.sizeBytes > maxBytes) {
     return {
       ok: false,
@@ -108,11 +108,11 @@ export function normalizedChatAttachmentMediaType(input: {
       mediaType === "text/plain" ||
       chatAttachmentKindForMime(mediaType) === "srt")
   ) {
-    return GOAT_CHAT_SRT_MIME_TYPE;
+    return CHAT_SRT_MIME_TYPE;
   }
   if (shouldTrustExtension(mediaType)) {
     if (extension === "csv") return "text/csv";
-    if (extension === "tsv") return GOAT_CHAT_TSV_MIME_TYPE;
+    if (extension === "tsv") return CHAT_TSV_MIME_TYPE;
     if (extension === "md" || extension === "markdown") return "text/markdown";
     if (extension === "txt") return "text/plain";
     if (extension === "json") return "application/json";

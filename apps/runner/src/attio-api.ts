@@ -1,8 +1,8 @@
 import {
+  ATTIO_CREDENTIAL_KIND,
+  ATTIO_OBJECT_SLUGS,
+  ATTIO_PROVIDER,
   type AttioApiKeyCredentialPayload,
-  GOAT_ATTIO_CREDENTIAL_KIND,
-  GOAT_ATTIO_OBJECT_SLUGS,
-  GOAT_ATTIO_PROVIDER,
 } from "@opencompany/db/attio";
 import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
 import type { AttioObjectType } from "@opencompany/db/schema";
@@ -51,8 +51,8 @@ export async function loadAttioApiKey(input: {
   const credential = await loadIntegrationCredential({
     userWorkosId: input.userWorkosId,
     integrationId: input.integrationId,
-    provider: GOAT_ATTIO_PROVIDER,
-    kind: GOAT_ATTIO_CREDENTIAL_KIND,
+    provider: ATTIO_PROVIDER,
+    kind: ATTIO_CREDENTIAL_KIND,
     db: getDb(),
   }).catch((error) => {
     logger.warn("Goat Attio credential load failed", {
@@ -74,7 +74,7 @@ export async function markAttioNeedsReauth(
   await markIntegrationStatus({
     userWorkosId: input.userWorkosId,
     integrationId: input.integrationId,
-    provider: GOAT_ATTIO_PROVIDER,
+    provider: ATTIO_PROVIDER,
     status: "needs_reauth",
     statusReason: reason,
     db: getDb(),
@@ -97,7 +97,7 @@ export async function fetchAttioRecordSnapshot(input: {
   recordId: string;
 }): Promise<AttioRecordSnapshot | null> {
   try {
-    const slug = GOAT_ATTIO_OBJECT_SLUGS[input.objectType];
+    const slug = ATTIO_OBJECT_SLUGS[input.objectType];
     const record = (await attioApiRequest({
       apiKey: input.apiKey,
       path: `/objects/${slug}/records/${encodeURIComponent(input.recordId)}`,
@@ -146,7 +146,7 @@ export async function fetchAttioAttributeTitles(input: {
 }): Promise<Map<string, string>> {
   const titles = new Map<string, string>();
   try {
-    const slug = GOAT_ATTIO_OBJECT_SLUGS[input.objectType];
+    const slug = ATTIO_OBJECT_SLUGS[input.objectType];
     const response = (await attioApiRequest({
       apiKey: input.apiKey,
       path: `/objects/${slug}/attributes?limit=500`,

@@ -26,10 +26,9 @@ type PersistedBrainIngestJob = {
   lastError: string | null;
 };
 
-export const GOAT_BRAIN_SOURCE_ITEM_INGEST_JOB_KIND: BrainIngestJobKind =
-  "brain_source_item_ingest";
-export const GOAT_BRAIN_AGENT_INGEST_JOB_KIND: BrainIngestJobKind = "brain_agent_ingest";
-export const GOAT_BRAIN_POINTER_HYDRATE_JOB_KIND: BrainIngestJobKind = "brain_pointer_hydrate";
+export const BRAIN_SOURCE_ITEM_INGEST_JOB_KIND: BrainIngestJobKind = "brain_source_item_ingest";
+export const BRAIN_AGENT_INGEST_JOB_KIND: BrainIngestJobKind = "brain_agent_ingest";
+export const BRAIN_POINTER_HYDRATE_JOB_KIND: BrainIngestJobKind = "brain_pointer_hydrate";
 
 export type UpsertBrainSourceItemResult = {
   sourceItemId: string;
@@ -86,7 +85,7 @@ export async function findExistingBrainChatCaptureIngest(input: {
       brainIngestJobs,
       and(
         eq(brainIngestJobs.sourceItemId, brainSourceItems.id),
-        eq(brainIngestJobs.kind, GOAT_BRAIN_AGENT_INGEST_JOB_KIND),
+        eq(brainIngestJobs.kind, BRAIN_AGENT_INGEST_JOB_KIND),
         eq(brainIngestJobs.brainRef, input.brainRef),
       ),
     )
@@ -134,7 +133,7 @@ export async function findExistingBrainPointerIngest(input: {
       brainIngestJobs,
       and(
         eq(brainIngestJobs.sourceItemId, brainSourceItems.id),
-        eq(brainIngestJobs.kind, GOAT_BRAIN_POINTER_HYDRATE_JOB_KIND),
+        eq(brainIngestJobs.kind, BRAIN_POINTER_HYDRATE_JOB_KIND),
         eq(brainIngestJobs.brainRef, input.brainRef),
       ),
     )
@@ -205,7 +204,7 @@ export async function upsertBrainSourceItemAndEnqueue(input: {
 
   const db = input.db;
   const now = input.now ?? new Date();
-  const kind = input.kind ?? GOAT_BRAIN_SOURCE_ITEM_INGEST_JOB_KIND;
+  const kind = input.kind ?? BRAIN_SOURCE_ITEM_INGEST_JOB_KIND;
   const occurredAt = new Date(input.item.occurredAt);
   const capturedAt = new Date(input.item.capturedAt);
   const integrationId = input.integrationId ?? null;

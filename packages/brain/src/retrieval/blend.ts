@@ -1,7 +1,7 @@
 import type { IndexRecord } from "./corpus";
 
-export const GOAT_BRAIN_WEIGHT_RELEVANCE = 0.85;
-export const GOAT_BRAIN_WEIGHT_FRESHNESS = 0.15;
+export const BRAIN_WEIGHT_RELEVANCE = 0.85;
+export const BRAIN_WEIGHT_FRESHNESS = 0.15;
 const HALF_LIFE_DAYS = 90;
 
 export function blend(
@@ -13,8 +13,8 @@ export function blend(
     .map(({ record, relevance }) => ({
       record,
       score:
-        GOAT_BRAIN_WEIGHT_RELEVANCE * (relevance / maxRelevance) +
-        GOAT_BRAIN_WEIGHT_FRESHNESS * brainFreshness(record.updatedAt, now),
+        BRAIN_WEIGHT_RELEVANCE * (relevance / maxRelevance) +
+        BRAIN_WEIGHT_FRESHNESS * brainFreshness(record.updatedAt, now),
     }))
     .sort((a, b) => b.score - a.score || a.record.id.localeCompare(b.record.id));
 }

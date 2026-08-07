@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  GOAT_FINISHED_TASK_SANDBOX_IDLE_TIMEOUT_MS,
+  FINISHED_TASK_SANDBOX_IDLE_TIMEOUT_MS,
   settledCodingSandboxIdleTimeoutMs,
 } from "./coding-sandbox-lifecycle";
 
@@ -20,7 +20,7 @@ describe("settledCodingSandboxIdleTimeoutMs", () => {
         configuredIdleTimeoutMs: 30 * 60 * 1000,
         taskSession: true,
       }),
-    ).toBe(GOAT_FINISHED_TASK_SANDBOX_IDLE_TIMEOUT_MS);
+    ).toBe(FINISHED_TASK_SANDBOX_IDLE_TIMEOUT_MS);
   });
 
   it("does not extend a shorter configured task timeout", () => {

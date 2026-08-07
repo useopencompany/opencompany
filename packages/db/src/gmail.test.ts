@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  GOAT_GMAIL_INSTRUCTIONS_MAX_LENGTH,
+  GMAIL_INSTRUCTIONS_MAX_LENGTH,
   gmailEventTypeForDirection,
   gmailRouteMatchesEvent,
   gmailSelectedEventTypes,
@@ -36,9 +36,7 @@ describe("Goat Gmail brain source config", () => {
     expect(sanitizeGmailInstructions("  only investor emails  ")).toBe("only investor emails");
     expect(sanitizeGmailInstructions("   ")).toBeUndefined();
     expect(sanitizeGmailInstructions(42)).toBeUndefined();
-    expect(sanitizeGmailInstructions("x".repeat(5000))).toHaveLength(
-      GOAT_GMAIL_INSTRUCTIONS_MAX_LENGTH,
-    );
+    expect(sanitizeGmailInstructions("x".repeat(5000))).toHaveLength(GMAIL_INSTRUCTIONS_MAX_LENGTH);
   });
 
   it("drops empty instructions when parsing config", () => {

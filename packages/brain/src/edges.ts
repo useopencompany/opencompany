@@ -2,7 +2,7 @@ import { evidenceLinkTargets, pageLinkTargets } from "./inline-links";
 import {
   type BrainDerivedEdge,
   type BrainRelation,
-  DEFAULT_GOAT_BRAIN_RELATION_TYPE,
+  DEFAULT_BRAIN_RELATION_TYPE,
   isValidBrainId,
   isValidBrainRelationType,
 } from "./schema";
@@ -20,7 +20,7 @@ export function deriveBrainEdges(input: {
   };
 
   for (const relation of input.relations ?? []) {
-    const type = relation.type || DEFAULT_GOAT_BRAIN_RELATION_TYPE;
+    const type = relation.type || DEFAULT_BRAIN_RELATION_TYPE;
     if (!isValidBrainRelationType(type) || !isValidBrainId(relation.to)) continue;
     add({
       from: input.id,

@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
+  ACTION_HOST_TOOL_CONTRACT_VERSION,
   claudeCodeCliModelNameForModelId,
   codexCliModelNameForModelId,
-  GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
 } from "@opencompany/agent-runtime";
 import {
   analyticsUsageSourceForEngine,
@@ -48,7 +48,7 @@ import { rowsFromExecute } from "./sql-exec";
 import { normalizeTaskToolNames } from "./task-tool-names";
 
 const TASK_OUTCOME_COMMENT_MAX_LENGTH = 200;
-const GOAT_TASK_CLOSER_MODEL = "openai/gpt-5.4-mini";
+const TASK_CLOSER_MODEL = "openai/gpt-5.4-mini";
 
 export type TaskTurnContext = {
   task: Task;
@@ -141,7 +141,7 @@ export async function prepareCodexTaskTurn(input: {
   const githubRepositories = task.harnessSpec.tools.some((tool) => tool.startsWith("github_"))
     ? await getAvailableGitHubRepositoryNamesForRunner(task.userWorkosId)
     : [];
-  const { GOAT_PLANNER_MODEL, planHarnessForTask } = await import("./harness");
+  const { PLANNER_MODEL, planHarnessForTask } = await import("./harness");
   const planned = await planHarnessForTask({
     prompt: task.prompt,
     model: task.model,
@@ -158,7 +158,7 @@ export async function prepareCodexTaskTurn(input: {
       context: input.context,
       session: input.session,
       turn: input.turn,
-      model: GOAT_PLANNER_MODEL,
+      model: PLANNER_MODEL,
       usage: planned.usage,
       phase: "planner",
     });
@@ -248,7 +248,7 @@ export async function closeTaskTurn(input: {
     const { getBraintrustAISDK } = await import("@opencompany/observability/braintrust");
     const { generateText } = getBraintrustAISDK(ai);
     const result = await generateText({
-      model: gateway(GOAT_TASK_CLOSER_MODEL),
+      model: gateway(TASK_CLOSER_MODEL),
       system: currentStep
         ? 'You close one finished step in a sequential background workflow. Judge whether this step\'s own instructions were completed ("done") or the user should look at it ("needs_attention"). Do not penalize it because later workflow steps remain. Always call update_task_status exactly once.'
         : 'You close a finished autonomous background task. Decide whether it is complete ("done") or the user should look at it ("needs_attention": partial results, blockers, errors, questions, or requested review). Always call update_task_status exactly once.',
@@ -296,7 +296,7 @@ export async function closeTaskTurn(input: {
       context: input.context,
       session: input.session,
       turn: input.turn,
-      model: GOAT_TASK_CLOSER_MODEL,
+      model: TASK_CLOSER_MODEL,
       usage: result.usage,
       phase: "closer",
     });
@@ -919,7 +919,7 @@ function createNextTaskTurn(input: {
     chatModel: input.harnessSpec.model,
     runtimeModel,
     hostToolContractVersion:
-      input.harnessSpec.engine === "opencompany" ? null : GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
+      input.harnessSpec.engine === "opencompany" ? null : ACTION_HOST_TOOL_CONTRACT_VERSION,
     settings: input.settings ?? {
       ...(input.harnessSpec.codex?.reasoningEffort
         ? { reasoningEffort: input.harnessSpec.codex.reasoningEffort }

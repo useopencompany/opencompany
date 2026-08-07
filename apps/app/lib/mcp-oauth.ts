@@ -1,11 +1,11 @@
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
 import { generateProtectedResourceMetadata, getPublicUrl } from "mcp-handler";
-import { GOAT_USER_MCP_ENDPOINT_PATH } from "@/lib/mcp-setup";
+import { USER_MCP_ENDPOINT_PATH } from "@/lib/mcp-setup";
 
 export const AUTHKIT_DOMAIN_ENV = "AUTHKIT_DOMAIN";
 
-export const GOAT_MCP_METADATA_CORS_HEADERS = {
+export const MCP_METADATA_CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "*",
@@ -39,7 +39,7 @@ export function resolveAuthKitDomain(
 }
 
 export function buildUserMcpResourceMetadataPath() {
-  return `/.well-known/oauth-protected-resource${GOAT_USER_MCP_ENDPOINT_PATH}`;
+  return `/.well-known/oauth-protected-resource${USER_MCP_ENDPOINT_PATH}`;
 }
 
 export function mcpResourceUrlFromMetadataRequest(request: Request) {
@@ -56,7 +56,7 @@ export function mcpResourceUrlFromMetadataRequest(request: Request) {
 
 export function mcpResourceIndicatorUrlFromRequest(request: Request) {
   const publicUrl = getPublicUrl(request);
-  publicUrl.pathname = GOAT_USER_MCP_ENDPOINT_PATH;
+  publicUrl.pathname = USER_MCP_ENDPOINT_PATH;
   publicUrl.search = "";
   publicUrl.hash = "";
   return publicUrl.toString();

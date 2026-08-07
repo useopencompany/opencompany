@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { projectActionCatalog } from "./policy";
 import type { ResolvedAction, ResolvedActionCatalog } from "./types";
-import {
-  GOAT_ACTION_EFFECTS_METERED_READ,
-  GOAT_ACTION_EFFECTS_READ,
-  GOAT_ACTION_EFFECTS_WRITE,
-} from "./types";
+import { ACTION_EFFECTS_METERED_READ, ACTION_EFFECTS_READ, ACTION_EFFECTS_WRITE } from "./types";
 
 const action = (
   id: string,
@@ -30,10 +26,10 @@ const catalog: ResolvedActionCatalog = {
     { id: "linkedin", kind: "managed", label: "LinkedIn", description: "Research" },
   ],
   actions: [
-    action("gmail.search", "gmail", GOAT_ACTION_EFFECTS_READ),
-    action("gmail.send", "gmail", GOAT_ACTION_EFFECTS_WRITE, "ask"),
-    action("neon.run_sql", "neon", GOAT_ACTION_EFFECTS_READ),
-    action("linkedin.search", "linkedin", GOAT_ACTION_EFFECTS_METERED_READ),
+    action("gmail.search", "gmail", ACTION_EFFECTS_READ),
+    action("gmail.send", "gmail", ACTION_EFFECTS_WRITE, "ask"),
+    action("neon.run_sql", "neon", ACTION_EFFECTS_READ),
+    action("linkedin.search", "linkedin", ACTION_EFFECTS_METERED_READ),
   ],
 };
 

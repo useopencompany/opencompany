@@ -16,8 +16,8 @@ import {
   getBrainImportJobProgress,
 } from "@opencompany/db/brain-import";
 import { upsertBrainSourceItemAndEnqueue } from "@opencompany/db/brain-ingest";
-import { GOAT_FATHOM_CREDENTIAL_KIND, GOAT_FATHOM_PROVIDER } from "@opencompany/db/fathom";
-import { GOAT_GRANOLA_CREDENTIAL_KIND, GOAT_GRANOLA_PROVIDER } from "@opencompany/db/granola";
+import { FATHOM_CREDENTIAL_KIND, FATHOM_PROVIDER } from "@opencompany/db/fathom";
+import { GRANOLA_CREDENTIAL_KIND, GRANOLA_PROVIDER } from "@opencompany/db/granola";
 import { loadIntegrationCredential } from "@opencompany/db/integrations";
 import {
   type BrainImportDiscoverySummary,
@@ -187,8 +187,8 @@ async function hydrateGranolaImportSourceItems(run: BrainImportRun) {
   const credential = await loadIntegrationCredential({
     userWorkosId: run.userWorkosId,
     integrationId: selection.integrationId,
-    provider: GOAT_GRANOLA_PROVIDER,
-    kind: GOAT_GRANOLA_CREDENTIAL_KIND,
+    provider: GRANOLA_PROVIDER,
+    kind: GRANOLA_CREDENTIAL_KIND,
   });
   const apiKey =
     credential && typeof credential.payload.apiKey === "string" ? credential.payload.apiKey : null;
@@ -266,8 +266,8 @@ async function hydrateFathomImportSourceItems(run: BrainImportRun) {
   const credential = await loadIntegrationCredential({
     userWorkosId: run.userWorkosId,
     integrationId: selection.integrationId,
-    provider: GOAT_FATHOM_PROVIDER,
-    kind: GOAT_FATHOM_CREDENTIAL_KIND,
+    provider: FATHOM_PROVIDER,
+    kind: FATHOM_CREDENTIAL_KIND,
   });
   const apiKey =
     credential && typeof credential.payload.apiKey === "string" ? credential.payload.apiKey : null;

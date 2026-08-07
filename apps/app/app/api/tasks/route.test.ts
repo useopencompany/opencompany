@@ -3,7 +3,7 @@ import type { AuthContext } from "@/lib/auth";
 import { currentUser } from "@/lib/auth";
 import { isClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
 import { isCodexConnectedForUser } from "@/lib/codex-auth";
-import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import { DEFAULT_MODEL } from "@/lib/model-options";
 import { createTaskForUser } from "@/lib/tasks";
 import { POST } from "./route";
 
@@ -70,7 +70,7 @@ describe("POST /api/tasks", () => {
     await POST(jsonRequest({ description: "#task Research the market", model: "auto" }));
 
     expect(createTaskForUser).toHaveBeenCalledWith(
-      expect.objectContaining({ model: DEFAULT_GOAT_MODEL }),
+      expect.objectContaining({ model: DEFAULT_MODEL }),
     );
   });
 
@@ -78,7 +78,7 @@ describe("POST /api/tasks", () => {
     await POST(
       jsonRequest({
         description: "#task Check the repository",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         engine: "codex",
       }),
     );
@@ -90,7 +90,7 @@ describe("POST /api/tasks", () => {
     await POST(
       jsonRequest({
         description: "#task Check the repository",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         engine: "claude_code",
       }),
     );
@@ -108,7 +108,7 @@ describe("POST /api/tasks", () => {
     const response = await POST(
       jsonRequest({
         description: "#task Check the repository",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         engine: "codex",
       }),
     );
@@ -126,7 +126,7 @@ describe("POST /api/tasks", () => {
     const response = await POST(
       jsonRequest({
         description: "#task Check the repository",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         engine: "claude_code",
       }),
     );
@@ -142,7 +142,7 @@ describe("POST /api/tasks", () => {
     const response = await POST(
       jsonRequest({
         description: "#task Research the market",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
         engine: "claude",
       }),
     );
@@ -153,7 +153,7 @@ describe("POST /api/tasks", () => {
   });
 
   it("rejects empty task descriptions", async () => {
-    const response = await POST(jsonRequest({ description: " #task ", model: DEFAULT_GOAT_MODEL }));
+    const response = await POST(jsonRequest({ description: " #task ", model: DEFAULT_MODEL }));
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
@@ -166,7 +166,7 @@ describe("POST /api/tasks", () => {
     vi.mocked(currentUser).mockResolvedValueOnce(null as never);
 
     const response = await POST(
-      jsonRequest({ description: "#task Research the market", model: DEFAULT_GOAT_MODEL }),
+      jsonRequest({ description: "#task Research the market", model: DEFAULT_MODEL }),
     );
 
     expect(response.status).toBe(401);
@@ -184,7 +184,7 @@ describe("POST /api/tasks", () => {
     } as AuthContext);
 
     const response = await POST(
-      jsonRequest({ description: "#task Research the market", model: DEFAULT_GOAT_MODEL }),
+      jsonRequest({ description: "#task Research the market", model: DEFAULT_MODEL }),
     );
 
     expect(response.status).toBe(403);

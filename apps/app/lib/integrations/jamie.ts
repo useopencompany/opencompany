@@ -9,18 +9,18 @@ import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq, ne } from "drizzle-orm";
 import type { JamieProviderState } from "@/lib/integration-state";
 import {
-  GOAT_JAMIE_CREDENTIAL_KIND,
-  GOAT_JAMIE_PROVIDER,
-  GOAT_JAMIE_WEBHOOK_EVENT_HEADER,
-  GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
+  JAMIE_CREDENTIAL_KIND,
+  JAMIE_PROVIDER,
+  JAMIE_WEBHOOK_EVENT_HEADER,
+  JAMIE_WEBHOOK_SECRET_HEADER,
 } from "@/lib/integrations/jamie-constants";
 import { getAppUrl } from "@/lib/workos";
 
 export {
-  GOAT_JAMIE_CREDENTIAL_KIND,
-  GOAT_JAMIE_PROVIDER,
-  GOAT_JAMIE_WEBHOOK_EVENT_HEADER,
-  GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
+  JAMIE_CREDENTIAL_KIND,
+  JAMIE_PROVIDER,
+  JAMIE_WEBHOOK_EVENT_HEADER,
+  JAMIE_WEBHOOK_SECRET_HEADER,
 };
 
 const JAMIE_SETUP_STATUS_REASON = "Waiting for Jamie to send the first valid webhook delivery.";
@@ -30,14 +30,14 @@ const JAMIE_API_KEY_EXTERNAL_ID_PREFIX = "jamie_api_key_sha256:";
 type JamieWebhookCredentialPayload = {
   apiKeyHash: string | null;
   legacySecretHash: string | null;
-  headerName: typeof GOAT_JAMIE_WEBHOOK_SECRET_HEADER;
+  headerName: typeof JAMIE_WEBHOOK_SECRET_HEADER;
   createdAt: string;
 };
 
 export type JamieWebhookSetup = {
   integrationId: string;
   webhookUrl: string;
-  headerName: typeof GOAT_JAMIE_WEBHOOK_SECRET_HEADER;
+  headerName: typeof JAMIE_WEBHOOK_SECRET_HEADER;
   apiKeyConfigured: boolean;
 };
 
@@ -63,17 +63,14 @@ export async function getJamieIntegrationState(workspaceId: string): Promise<Jam
     })
     .from(integrations)
     .where(
-      and(
-        eq(integrations.workspaceId, workspaceId),
-        eq(integrations.provider, GOAT_JAMIE_PROVIDER),
-      ),
+      and(eq(integrations.workspaceId, workspaceId), eq(integrations.provider, JAMIE_PROVIDER)),
     )
     .orderBy(desc(integrations.updatedAt))
     .limit(1);
 
   if (!row || row.status === "disconnected") {
     return {
-      provider: GOAT_JAMIE_PROVIDER,
+      provider: JAMIE_PROVIDER,
       connected: false,
       status: "not_connected",
       accountName: null,
@@ -85,7 +82,7 @@ export async function getJamieIntegrationState(workspaceId: string): Promise<Jam
   }
 
   return {
-    provider: GOAT_JAMIE_PROVIDER,
+    provider: JAMIE_PROVIDER,
     connected: row.status === "connected",
     status: row.status,
     accountName: row.accountName,
@@ -117,7 +114,7 @@ export async function createOrResetJamieWebhookEndpoint(input: {
     .where(
       and(
         eq(integrations.workspaceId, input.workspaceId),
-        eq(integrations.provider, GOAT_JAMIE_PROVIDER),
+        eq(integrations.provider, JAMIE_PROVIDER),
         ne(integrations.status, "disconnected"),
       ),
     )
@@ -148,7 +145,7 @@ export async function createOrResetJamieWebhookEndpoint(input: {
             and(
               eq(integrations.id, integrationId),
               eq(integrations.workspaceId, input.workspaceId),
-              eq(integrations.provider, GOAT_JAMIE_PROVIDER),
+              eq(integrations.provider, JAMIE_PROVIDER),
             ),
           )
           .returning({ id: integrations.id })
@@ -160,7 +157,7 @@ export async function createOrResetJamieWebhookEndpoint(input: {
             id: integrationId,
             userWorkosId: connectorWorkosId,
             workspaceId: input.workspaceId,
-            provider: GOAT_JAMIE_PROVIDER,
+            provider: JAMIE_PROVIDER,
             ...integrationValues,
           })
           .returning({ id: integrations.id })
@@ -172,11 +169,11 @@ export async function createOrResetJamieWebhookEndpoint(input: {
     await saveIntegrationCredential({
       userWorkosId: connectorWorkosId,
       integrationId: integration.id,
-      provider: GOAT_JAMIE_PROVIDER,
-      kind: GOAT_JAMIE_CREDENTIAL_KIND,
+      provider: JAMIE_PROVIDER,
+      kind: JAMIE_CREDENTIAL_KIND,
       payload: {
         apiKeyHash: null,
-        headerName: GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
+        headerName: JAMIE_WEBHOOK_SECRET_HEADER,
         createdAt: now.toISOString(),
       },
       db,
@@ -186,7 +183,7 @@ export async function createOrResetJamieWebhookEndpoint(input: {
     await markIntegrationStatus({
       userWorkosId: connectorWorkosId,
       integrationId: integration.id,
-      provider: GOAT_JAMIE_PROVIDER,
+      provider: JAMIE_PROVIDER,
       status: "sync_failed",
       statusReason: "Failed to reset Jamie webhook API key binding.",
       db,
@@ -198,7 +195,7 @@ export async function createOrResetJamieWebhookEndpoint(input: {
   return {
     integrationId: integration.id,
     webhookUrl: jamieWebhookUrl(),
-    headerName: GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
+    headerName: JAMIE_WEBHOOK_SECRET_HEADER,
     apiKeyConfigured: false,
   };
 }
@@ -220,7 +217,7 @@ export async function saveJamieWebhookApiKey(input: {
     .where(
       and(
         eq(integrations.workspaceId, input.workspaceId),
-        eq(integrations.provider, GOAT_JAMIE_PROVIDER),
+        eq(integrations.provider, JAMIE_PROVIDER),
         ne(integrations.status, "disconnected"),
       ),
     )
@@ -237,11 +234,11 @@ export async function saveJamieWebhookApiKey(input: {
     await saveIntegrationCredential({
       userWorkosId: integration.userWorkosId,
       integrationId: integration.id,
-      provider: GOAT_JAMIE_PROVIDER,
-      kind: GOAT_JAMIE_CREDENTIAL_KIND,
+      provider: JAMIE_PROVIDER,
+      kind: JAMIE_CREDENTIAL_KIND,
       payload: {
         apiKeyHash: hashJamieWebhookApiKey(apiKey),
-        headerName: GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
+        headerName: JAMIE_WEBHOOK_SECRET_HEADER,
         createdAt: now.toISOString(),
       },
       db,
@@ -262,14 +259,14 @@ export async function saveJamieWebhookApiKey(input: {
         and(
           eq(integrations.id, integration.id),
           eq(integrations.workspaceId, input.workspaceId),
-          eq(integrations.provider, GOAT_JAMIE_PROVIDER),
+          eq(integrations.provider, JAMIE_PROVIDER),
         ),
       );
   } catch (error) {
     await markIntegrationStatus({
       userWorkosId: integration.userWorkosId,
       integrationId: integration.id,
-      provider: GOAT_JAMIE_PROVIDER,
+      provider: JAMIE_PROVIDER,
       status: "sync_failed",
       statusReason: "Failed to save Jamie webhook API key.",
       db,
@@ -281,7 +278,7 @@ export async function saveJamieWebhookApiKey(input: {
   return {
     integrationId: integration.id,
     webhookUrl: jamieWebhookUrl(),
-    headerName: GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
+    headerName: JAMIE_WEBHOOK_SECRET_HEADER,
     apiKeyConfigured: true,
   };
 }
@@ -298,7 +295,7 @@ export async function loadJamieWebhookContext(
     .where(
       and(
         eq(integrations.id, integrationId),
-        eq(integrations.provider, GOAT_JAMIE_PROVIDER),
+        eq(integrations.provider, JAMIE_PROVIDER),
         ne(integrations.status, "disconnected"),
       ),
     )
@@ -322,7 +319,7 @@ export async function loadJamieWebhookContextForApiKey(
     .from(integrations)
     .where(
       and(
-        eq(integrations.provider, GOAT_JAMIE_PROVIDER),
+        eq(integrations.provider, JAMIE_PROVIDER),
         eq(integrations.externalId, jamieExternalIdForApiKey(apiKey)),
         ne(integrations.status, "disconnected"),
       ),
@@ -341,9 +338,7 @@ export async function loadJamieWebhookContextForApiKey(
       userWorkosId: integrations.userWorkosId,
     })
     .from(integrations)
-    .where(
-      and(eq(integrations.provider, GOAT_JAMIE_PROVIDER), ne(integrations.status, "disconnected")),
-    );
+    .where(and(eq(integrations.provider, JAMIE_PROVIDER), ne(integrations.status, "disconnected")));
 
   const matches: JamieWebhookContext[] = [];
   for (const integration of candidateIntegrations) {
@@ -372,7 +367,7 @@ export async function loadJamieWebhookContextForApiKey(
         and(
           eq(integrations.id, matched.integrationId),
           eq(integrations.userWorkosId, matched.userWorkosId),
-          eq(integrations.provider, GOAT_JAMIE_PROVIDER),
+          eq(integrations.provider, JAMIE_PROVIDER),
         ),
       );
   } catch (error) {
@@ -391,8 +386,8 @@ async function loadJamieWebhookContextForIntegration(integration: {
   const credential = await loadIntegrationCredential({
     userWorkosId: integration.userWorkosId,
     integrationId: integration.id,
-    provider: GOAT_JAMIE_PROVIDER,
-    kind: GOAT_JAMIE_CREDENTIAL_KIND,
+    provider: JAMIE_PROVIDER,
+    kind: JAMIE_CREDENTIAL_KIND,
   });
   if (!credential) return null;
 
@@ -428,7 +423,7 @@ export async function markJamieWebhookConnected(input: {
       and(
         eq(integrations.id, input.integrationId),
         eq(integrations.userWorkosId, input.userWorkosId),
-        eq(integrations.provider, GOAT_JAMIE_PROVIDER),
+        eq(integrations.provider, JAMIE_PROVIDER),
       ),
     );
 }
@@ -475,10 +470,7 @@ export function jamieWebhookUrl() {
 function parseJamieWebhookCredentialPayload(
   value: Record<string, unknown>,
 ): JamieWebhookCredentialPayload | null {
-  if (
-    value.headerName !== GOAT_JAMIE_WEBHOOK_SECRET_HEADER ||
-    typeof value.createdAt !== "string"
-  ) {
+  if (value.headerName !== JAMIE_WEBHOOK_SECRET_HEADER || typeof value.createdAt !== "string") {
     return null;
   }
 

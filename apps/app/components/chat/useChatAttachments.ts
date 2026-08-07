@@ -13,7 +13,7 @@ import {
 } from "react";
 import type { PendingChatAttachment } from "@/components/chat/ChatComposerAttachments";
 import {
-  GOAT_CHAT_ATTACHMENT_MAX_PER_MESSAGE,
+  CHAT_ATTACHMENT_MAX_PER_MESSAGE,
   validateChatAttachmentCandidate,
 } from "@/lib/chat-attachment-formats";
 import { uploadChatAttachmentBlob } from "@/lib/chat-attachment-upload";
@@ -82,8 +82,8 @@ export function useChatAttachments(opts: {
       setAttachments((prev) => {
         const next = [...prev];
         for (const file of files) {
-          if (next.length >= GOAT_CHAT_ATTACHMENT_MAX_PER_MESSAGE) {
-            toast.error(`Max ${GOAT_CHAT_ATTACHMENT_MAX_PER_MESSAGE} files per message.`);
+          if (next.length >= CHAT_ATTACHMENT_MAX_PER_MESSAGE) {
+            toast.error(`Max ${CHAT_ATTACHMENT_MAX_PER_MESSAGE} files per message.`);
             break;
           }
           const validation = validateChatAttachmentCandidate({

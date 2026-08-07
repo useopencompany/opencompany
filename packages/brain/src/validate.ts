@@ -1,7 +1,7 @@
 import {
+  BRAIN_TIMELINE_HEADING,
+  BRAIN_TRUTH_HEADING,
   extractBrainCitations,
-  GOAT_BRAIN_TIMELINE_HEADING,
-  GOAT_BRAIN_TRUTH_HEADING,
   type ParsedBrainDocument,
 } from "./document";
 import { parseBrainInlineLinks, sourceLinkTargets } from "./inline-links";
@@ -118,7 +118,7 @@ export function validateBrainDocument(
   if (!doc.title.trim()) errors.push("document must have a # title.");
   if (
     source &&
-    (!source.includes(GOAT_BRAIN_TRUTH_HEADING) || !source.includes(GOAT_BRAIN_TIMELINE_HEADING))
+    (!source.includes(BRAIN_TRUTH_HEADING) || !source.includes(BRAIN_TIMELINE_HEADING))
   ) {
     errors.push("document must include ## Compiled truth and ## Timeline sections.");
   }

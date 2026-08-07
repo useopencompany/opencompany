@@ -2,19 +2,19 @@ import { createMCPClient, type OAuthClientProvider } from "@ai-sdk/mcp";
 import type { JSONSchema7, ToolExecutionOptions, ToolSet } from "ai";
 import Ajv, { type AnySchema } from "ajv";
 import {
-  GOAT_LATITUDE_MCP_ENDPOINT_URL,
   getLatitudeIntegrationState,
+  LATITUDE_MCP_ENDPOINT_URL,
   loadLatitudeMcpWorkerConnection,
 } from "../integrations/latitude-mcp";
 import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  ACTION_EFFECTS_READ,
+  ACTION_EFFECTS_WRITE,
   ActionAuthError,
   type ActionExecuteContext,
   ActionInvalidParamsError,
   ActionPermissionError,
   type ActionProviderCatalog,
-  GOAT_ACTION_EFFECTS_READ,
-  GOAT_ACTION_EFFECTS_WRITE,
   type ResolvedAction,
 } from "./types";
 
@@ -70,7 +70,7 @@ export async function resolveLatitudeActions(
         id: `latitude.${definition.name}`,
         provider: "latitude",
         capability,
-        effects: capability === "read" ? GOAT_ACTION_EFFECTS_READ : GOAT_ACTION_EFFECTS_WRITE,
+        effects: capability === "read" ? ACTION_EFFECTS_READ : ACTION_EFFECTS_WRITE,
         ...permissionAnnotation(capability, {
           integrationId,
           capabilityModes: state.capabilityModes,
@@ -214,7 +214,7 @@ function createLatitudeClient(authProvider: OAuthClientProvider) {
     version: "0.1.0",
     transport: {
       type: "http" as const,
-      url: GOAT_LATITUDE_MCP_ENDPOINT_URL,
+      url: LATITUDE_MCP_ENDPOINT_URL,
       authProvider,
     },
   });

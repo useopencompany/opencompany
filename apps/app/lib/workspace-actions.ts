@@ -6,7 +6,7 @@ import { type BrainIntelligence, type BrainVisibility, workspaces } from "@openc
 import {
   createBrain,
   createWorkspaceForUser,
-  DEFAULT_GOAT_BRAIN_SLUG,
+  DEFAULT_BRAIN_SLUG,
   getBrainAccess,
   hasOwnedHobbyWorkspace,
   listAccessibleBrains,
@@ -26,7 +26,7 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
-import { currentUser, GOAT_ACTIVE_BRAIN_COOKIE, GOAT_ACTIVE_WORKSPACE_COOKIE } from "@/lib/auth";
+import { ACTIVE_BRAIN_COOKIE, ACTIVE_WORKSPACE_COOKIE, currentUser } from "@/lib/auth";
 import { syncStripeSeatQuantityForWorkspace } from "@/lib/billing/seats";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureWorkspaceOrganization } from "@/lib/workos-organizations";
@@ -95,19 +95,19 @@ async function activateWorkspace(input: {
   });
 
   const cookieStore = await cookies();
-  cookieStore.set(GOAT_ACTIVE_WORKSPACE_COOKIE, input.workspaceId, {
+  cookieStore.set(ACTIVE_WORKSPACE_COOKIE, input.workspaceId, {
     path: "/",
     sameSite: "lax",
     maxAge: 60 * 60 * 24 * 365,
   });
   if (input.brainId) {
-    cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, input.brainId, {
+    cookieStore.set(ACTIVE_BRAIN_COOKIE, input.brainId, {
       path: "/",
       sameSite: "lax",
       maxAge: 60 * 60 * 24 * 365,
     });
   } else {
-    cookieStore.delete(GOAT_ACTIVE_BRAIN_COOKIE);
+    cookieStore.delete(ACTIVE_BRAIN_COOKIE);
   }
 }
 
@@ -117,7 +117,7 @@ export async function switchBrainAction(brainRef: string): Promise<WorkspaceActi
   if (!access) return { ok: false, error: "You do not have access to that brain." };
 
   const cookieStore = await cookies();
-  cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, access.brain.id, {
+  cookieStore.set(ACTIVE_BRAIN_COOKIE, access.brain.id, {
     path: "/",
     sameSite: "lax",
     maxAge: 60 * 60 * 24 * 365,
@@ -140,7 +140,7 @@ export async function switchWorkspaceAction(workspaceId: string): Promise<Worksp
     workspaceId: target.workspace.id,
   });
   const activeBrain =
-    brains.find((brain) => brain.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
+    brains.find((brain) => brain.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
 
   try {
     await activateWorkspace({
@@ -276,7 +276,7 @@ export async function createBrainAction(input: {
       createdByWorkosId: context.user.workosUserId,
     });
     const cookieStore = await cookies();
-    cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, brain.id, {
+    cookieStore.set(ACTIVE_BRAIN_COOKIE, brain.id, {
       path: "/",
       sameSite: "lax",
       maxAge: 60 * 60 * 24 * 365,

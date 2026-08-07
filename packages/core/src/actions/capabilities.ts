@@ -20,9 +20,9 @@ export type ProviderCapability = {
   defaultMode: CapabilityMode;
 };
 
-export const GOAT_CAPABILITY_MODES: readonly CapabilityMode[] = ["on", "ask", "off"];
+export const CAPABILITY_MODES: readonly CapabilityMode[] = ["on", "ask", "off"];
 
-export const GOAT_PROVIDER_CAPABILITIES: Partial<
+export const PROVIDER_CAPABILITIES: Partial<
   Record<ActionProviderId, readonly ProviderCapability[]>
 > = {
   gmail: [
@@ -167,7 +167,7 @@ export function isCapabilityId(value: unknown): value is CapabilityId {
 // with no chat actions, e.g. jamie or hubspot); unknown providers simply have
 // no capabilities.
 export function providerCapabilities(provider: string): readonly ProviderCapability[] {
-  return GOAT_PROVIDER_CAPABILITIES[provider as ActionProviderId] ?? [];
+  return PROVIDER_CAPABILITIES[provider as ActionProviderId] ?? [];
 }
 
 export function providerCapability(

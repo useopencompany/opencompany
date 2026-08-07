@@ -1,8 +1,8 @@
 "use client";
 
 import {
-  ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS,
-  HARD_DEFAULT_GOAT_BRAIN_FOLDERS,
+  ADJUSTABLE_DEFAULT_BRAIN_FOLDERS,
+  HARD_DEFAULT_BRAIN_FOLDERS,
   normalizeBrainFolder,
 } from "@opencompany/brain/schema";
 import {
@@ -58,9 +58,9 @@ import {
   setBrainSourceEnabledAction,
 } from "@/lib/brain-source-actions";
 import {
+  BRAIN_SOURCE_PROVIDERS,
   type BrainSourceProviderDef,
   brainSourceNeedsConfig,
-  GOAT_BRAIN_SOURCE_PROVIDERS,
 } from "@/lib/brain-sources/registry";
 import {
   checkWorkspaceSlugAction,
@@ -70,8 +70,8 @@ import {
   saveOnboardingWorkspaceAction,
 } from "@/lib/onboarding-actions";
 import {
-  GOAT_ONBOARDING_CONNECTION_MESSAGE,
-  GOAT_ONBOARDING_CONNECTION_STORAGE_KEY,
+  ONBOARDING_CONNECTION_MESSAGE,
+  ONBOARDING_CONNECTION_STORAGE_KEY,
   type OnboardingConnectionMessage,
   type OnboardingConnectionResult,
   onboardingConnectHref,
@@ -79,9 +79,9 @@ import {
 } from "@/lib/onboarding-integrations";
 import { queueOnboardingKickoff } from "@/lib/onboarding-kickoff";
 import {
-  GOAT_ONBOARDING_COMPANY_URL_MAX_LENGTH,
   isOnboardingRole,
   normalizeOnboardingCompanyUrl,
+  ONBOARDING_COMPANY_URL_MAX_LENGTH,
   type OnboardingRole,
   onboardingFoldersForRole,
 } from "@/lib/onboarding-profile";
@@ -131,14 +131,13 @@ function isSourceFeeding(
 }
 
 function countSourcesFeeding(details: BrainSourcesDetails | null): number {
-  return GOAT_BRAIN_SOURCE_PROVIDERS.filter((provider) => isSourceFeeding(provider.id, details))
-    .length;
+  return BRAIN_SOURCE_PROVIDERS.filter((provider) => isSourceFeeding(provider.id, details)).length;
 }
 
 // Sources the user authorized but that aren't feeding the brain yet — the exact
 // "landed with no sources" gap we surface before leaving the step.
 function countSourcesAuthorizedNotFeeding(details: BrainSourcesDetails | null): number {
-  return GOAT_BRAIN_SOURCE_PROVIDERS.filter((provider) => {
+  return BRAIN_SOURCE_PROVIDERS.filter((provider) => {
     const state = resolveBrainSourceState(provider.id, details);
     return state.connected && !isSourceFeeding(provider.id, details);
   }).length;
@@ -147,7 +146,7 @@ function countSourcesAuthorizedNotFeeding(details: BrainSourcesDetails | null): 
 // Role presets — the first onboarding step. Picking one seeds the adjustable
 // brain folders with a set that matches how that person actually works (the
 // hard defaults inbox/people/companies/evidence are always added on top). Every
-// folder here must satisfy GOAT_BRAIN_FOLDER_PATTERN (lowercase, single word).
+// folder here must satisfy BRAIN_FOLDER_PATTERN (lowercase, single word).
 type RoleProfile = {
   id: OnboardingRole;
   label: string;
@@ -697,7 +696,7 @@ function ProfileStep({
             autoComplete="url"
             value={companyUrl}
             onChange={(e) => onCompanyUrl(e.target.value)}
-            maxLength={GOAT_ONBOARDING_COMPANY_URL_MAX_LENGTH}
+            maxLength={ONBOARDING_COMPANY_URL_MAX_LENGTH}
             placeholder="https://yourcompany.com"
             required
           />
@@ -886,7 +885,7 @@ function FolderIcon({ path }: { path: string }) {
 
 // Folders we ship as defaults — kept ones render grayed to set them apart from
 // folders the user adds themselves.
-const ADJUSTABLE_DEFAULT_SET = new Set<string>(ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS);
+const ADJUSTABLE_DEFAULT_SET = new Set<string>(ADJUSTABLE_DEFAULT_BRAIN_FOLDERS);
 
 function BrainStep({
   workingFolders,
@@ -900,7 +899,7 @@ function BrainStep({
 
   const tryAdd = (value: string) => {
     const normalized = normalizeBrainFolder(value);
-    const reserved = new Set<string>([...HARD_DEFAULT_GOAT_BRAIN_FOLDERS, ...workingFolders]);
+    const reserved = new Set<string>([...HARD_DEFAULT_BRAIN_FOLDERS, ...workingFolders]);
     if (!normalized || reserved.has(normalized)) return false;
     onChange([...workingFolders, normalized]);
     return true;
@@ -1151,7 +1150,7 @@ function SourcesStep({
   // brain where connected accounts silently ingest nothing.
   const onSourceConnected = useCallback(
     async (providerId: string | null) => {
-      const provider = GOAT_BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === providerId) ?? null;
+      const provider = BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === providerId) ?? null;
       const next = await reload();
       if (!provider) return;
       const state = resolveBrainSourceState(provider.id, next);
@@ -1187,7 +1186,7 @@ function SourcesStep({
 
   useEffect(() => {
     function handleConnection(message: OnboardingConnectionMessage | undefined) {
-      if (!message || message.type !== GOAT_ONBOARDING_CONNECTION_MESSAGE) return;
+      if (!message || message.type !== ONBOARDING_CONNECTION_MESSAGE) return;
       if (connectingRef.current && message.provider !== connectingRef.current) return;
 
       popupRef.current?.close();
@@ -1209,7 +1208,7 @@ function SourcesStep({
     }
 
     function onStorage(event: StorageEvent) {
-      if (event.key !== GOAT_ONBOARDING_CONNECTION_STORAGE_KEY || !event.newValue) return;
+      if (event.key !== ONBOARDING_CONNECTION_STORAGE_KEY || !event.newValue) return;
       try {
         handleConnection(JSON.parse(event.newValue) as OnboardingConnectionMessage);
       } catch {
@@ -1291,7 +1290,7 @@ function SourcesStep({
   };
 
   const feedingCount = countSourcesFeeding(details);
-  const authorizedCount = GOAT_BRAIN_SOURCE_PROVIDERS.filter(
+  const authorizedCount = BRAIN_SOURCE_PROVIDERS.filter(
     (provider) => resolveBrainSourceState(provider.id, details).connected,
   ).length;
   const pct = Math.min(100, (feedingCount / SOURCE_GOAL) * 100);
@@ -1348,7 +1347,7 @@ function SourcesStep({
       </div>
 
       <div className="flex flex-col gap-2">
-        {GOAT_BRAIN_SOURCE_PROVIDERS.map((provider) => (
+        {BRAIN_SOURCE_PROVIDERS.map((provider) => (
           <OnboardingSourceCard
             key={provider.id}
             brainRef={brainRef ?? ""}

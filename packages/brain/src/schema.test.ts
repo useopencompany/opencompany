@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  GOAT_BRAIN_SOURCE_REF_MAX_LENGTH,
-  isValidBrainSourceRef,
-  parseBrainSourceRef,
-} from "./schema";
+import { BRAIN_SOURCE_REF_MAX_LENGTH, isValidBrainSourceRef, parseBrainSourceRef } from "./schema";
 
 describe("goat brain source refs", () => {
   it("accepts provider:id refs, including ids with colons and slashes", () => {
@@ -20,9 +16,7 @@ describe("goat brain source refs", () => {
     expect(isValidBrainSourceRef("gmail:bad|ref")).toBe(false);
     expect(isValidBrainSourceRef("gmail:")).toBe(false);
     expect(isValidBrainSourceRef(":thread_1")).toBe(false);
-    expect(isValidBrainSourceRef(`gmail:${"x".repeat(GOAT_BRAIN_SOURCE_REF_MAX_LENGTH)}`)).toBe(
-      false,
-    );
+    expect(isValidBrainSourceRef(`gmail:${"x".repeat(BRAIN_SOURCE_REF_MAX_LENGTH)}`)).toBe(false);
   });
 
   it("parses the provider and provider-scoped id", () => {

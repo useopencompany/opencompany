@@ -1,16 +1,16 @@
 import { serializeActionPolicy } from "@opencompany/browser-tools";
 import { type NetworkPolicy, Sandbox } from "@vercel/sandbox";
 
-export const GOAT_CHAT_SANDBOX_TIMEOUT_MS = 10 * 60 * 1_000;
-export const GOAT_CHAT_SANDBOX_SNAPSHOT_EXPIRATION_MS = 7 * 24 * 60 * 60 * 1_000;
-export const GOAT_CHAT_SANDBOX_ROOT = "/vercel/sandbox/.opencompany";
-export const GOAT_CHAT_SANDBOX_ACTION_POLICY_PATH = `${GOAT_CHAT_SANDBOX_ROOT}/action-policy.json`;
-export const GOAT_CHAT_SANDBOX_SCREENSHOT_DIR = `${GOAT_CHAT_SANDBOX_ROOT}/screenshots`;
-export const GOAT_CHAT_SANDBOX_AGENT_BROWSER_BIN = `${GOAT_CHAT_SANDBOX_ROOT}/agent-browser/node_modules/.bin/agent-browser`;
+export const CHAT_SANDBOX_TIMEOUT_MS = 10 * 60 * 1_000;
+export const CHAT_SANDBOX_SNAPSHOT_EXPIRATION_MS = 7 * 24 * 60 * 60 * 1_000;
+export const CHAT_SANDBOX_ROOT = "/vercel/sandbox/.opencompany";
+export const CHAT_SANDBOX_ACTION_POLICY_PATH = `${CHAT_SANDBOX_ROOT}/action-policy.json`;
+export const CHAT_SANDBOX_SCREENSHOT_DIR = `${CHAT_SANDBOX_ROOT}/screenshots`;
+export const CHAT_SANDBOX_AGENT_BROWSER_BIN = `${CHAT_SANDBOX_ROOT}/agent-browser/node_modules/.bin/agent-browser`;
 // Keep loopback available for agent-browser's local daemon and Chromium CDP.
 // The Sandbox firewall still blocks private, carrier-grade NAT, and metadata egress.
 // Vercel currently rejects IPv6 CIDRs in subnet policies, so these ranges are IPv4-only.
-export const GOAT_CHAT_SANDBOX_NETWORK_POLICY: NetworkPolicy = {
+export const CHAT_SANDBOX_NETWORK_POLICY: NetworkPolicy = {
   allow: ["*"],
   subnets: {
     deny: [
@@ -44,13 +44,13 @@ export async function getChatSandbox(input: { chatSessionId: string; signal: Abo
     name: chatSandboxName(input.chatSessionId),
     ...(image ? { image } : { runtime: "node24" as const }),
     persistent: true,
-    timeout: GOAT_CHAT_SANDBOX_TIMEOUT_MS,
-    snapshotExpiration: GOAT_CHAT_SANDBOX_SNAPSHOT_EXPIRATION_MS,
+    timeout: CHAT_SANDBOX_TIMEOUT_MS,
+    snapshotExpiration: CHAT_SANDBOX_SNAPSHOT_EXPIRATION_MS,
     keepLastSnapshots: {
       count: 1,
-      expiration: GOAT_CHAT_SANDBOX_SNAPSHOT_EXPIRATION_MS,
+      expiration: CHAT_SANDBOX_SNAPSHOT_EXPIRATION_MS,
     },
-    networkPolicy: GOAT_CHAT_SANDBOX_NETWORK_POLICY,
+    networkPolicy: CHAT_SANDBOX_NETWORK_POLICY,
     tags: {
       surface: "goat-chat",
       version: "browser-v1",
@@ -70,7 +70,7 @@ export async function provisionChatSandbox(
 ) {
   const directories = await runSandboxCommand(sandbox, {
     cmd: "mkdir",
-    args: ["-p", GOAT_CHAT_SANDBOX_SCREENSHOT_DIR],
+    args: ["-p", CHAT_SANDBOX_SCREENSHOT_DIR],
     signal: input.signal,
     timeoutMs: 10_000,
   });
@@ -78,7 +78,7 @@ export async function provisionChatSandbox(
   await sandbox.writeFiles(
     [
       {
-        path: GOAT_CHAT_SANDBOX_ACTION_POLICY_PATH,
+        path: CHAT_SANDBOX_ACTION_POLICY_PATH,
         content: serializeActionPolicy(),
         mode: 0o600,
       },
@@ -92,7 +92,7 @@ export async function provisionChatSandbox(
     args: [
       "install",
       "--prefix",
-      `${GOAT_CHAT_SANDBOX_ROOT}/agent-browser`,
+      `${CHAT_SANDBOX_ROOT}/agent-browser`,
       `agent-browser@${AGENT_BROWSER_VERSION}`,
       "--no-audit",
       "--no-fund",
@@ -105,7 +105,7 @@ export async function provisionChatSandbox(
   // agent-browser uses sudo for system packages while keeping Chrome in the
   // sandbox user's home, where later browser commands can discover it.
   const browser = await runSandboxCommand(sandbox, {
-    cmd: GOAT_CHAT_SANDBOX_AGENT_BROWSER_BIN,
+    cmd: CHAT_SANDBOX_AGENT_BROWSER_BIN,
     args: ["install", "--with-deps"],
     signal: input.signal,
     timeoutMs: 5 * 60 * 1_000,
@@ -115,7 +115,7 @@ export async function provisionChatSandbox(
 
   const permissions = await runSandboxCommand(sandbox, {
     cmd: "chmod",
-    args: ["-R", "a+rX", `${GOAT_CHAT_SANDBOX_ROOT}/agent-browser`],
+    args: ["-R", "a+rX", `${CHAT_SANDBOX_ROOT}/agent-browser`],
     signal: input.signal,
     timeoutMs: 10_000,
   });
@@ -180,7 +180,7 @@ export async function runSandboxCommand(
 
 export function sandboxBrowserEnvironment() {
   return {
-    AGENT_BROWSER_SCREENSHOT_DIR: GOAT_CHAT_SANDBOX_SCREENSHOT_DIR,
+    AGENT_BROWSER_SCREENSHOT_DIR: CHAT_SANDBOX_SCREENSHOT_DIR,
   };
 }
 

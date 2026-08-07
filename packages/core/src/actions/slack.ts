@@ -9,12 +9,12 @@ import { and, desc, eq } from "drizzle-orm";
 import { slackApiRequest } from "../integrations/slack";
 import { effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  ACTION_EFFECTS_READ,
   ActionAuthError,
   type ActionExecuteContext,
   ActionInvalidParamsError,
   type ActionProviderCatalog,
   clampCount,
-  GOAT_ACTION_EFFECTS_READ,
   optionalNumberParam,
   optionalStringParam,
   type ResolvedAction,
@@ -122,7 +122,7 @@ export async function resolveSlackActions(
       id: "slack.list_conversations",
       provider: "slack",
       capability: "read",
-      effects: GOAT_ACTION_EFFECTS_READ,
+      effects: ACTION_EFFECTS_READ,
       ...readPermission,
       description:
         "List the user's Slack conversations: channels, private groups, DMs (im), and group DMs (mpim). Channel ids look like C…/G…, DMs like D…. To find a DM with a person, resolve their user id via slack.list_users first, then match the user field on im conversations.",
@@ -185,7 +185,7 @@ export async function resolveSlackActions(
       id: "slack.fetch_history",
       provider: "slack",
       capability: "read",
-      effects: GOAT_ACTION_EFFECTS_READ,
+      effects: ACTION_EFFECTS_READ,
       ...readPermission,
       description:
         "Fetch one page of recent messages from a Slack conversation (channel, DM, or group DM). A message's id is its ts value in its channel. Pass nextCursor as cursor to continue deeper into history.",
@@ -253,7 +253,7 @@ export async function resolveSlackActions(
       id: "slack.fetch_thread",
       provider: "slack",
       capability: "read",
-      effects: GOAT_ACTION_EFFECTS_READ,
+      effects: ACTION_EFFECTS_READ,
       ...readPermission,
       description: "Fetch the replies of one Slack thread.",
       params: {
@@ -299,7 +299,7 @@ export async function resolveSlackActions(
       id: "slack.list_users",
       provider: "slack",
       capability: "read",
-      effects: GOAT_ACTION_EFFECTS_READ,
+      effects: ACTION_EFFECTS_READ,
       ...readPermission,
       description: "List members of the Slack workspace to resolve names to user ids (U…).",
       params: {
@@ -347,7 +347,7 @@ export async function resolveSlackActions(
       id: "slack.search_messages",
       provider: "slack",
       capability: "read",
-      effects: GOAT_ACTION_EFFECTS_READ,
+      effects: ACTION_EFFECTS_READ,
       ...readPermission,
       description:
         "Keyword-search messages across the Slack workspace. Supports modifiers like in:#channel, from:@displayname, after:YYYY-MM-DD inside the query.",

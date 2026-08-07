@@ -1,4 +1,4 @@
-import { GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runtime";
+import { ACTION_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runtime";
 import type { CodexChatTurn, HarnessSpec, Task } from "@opencompany/db/schema";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -124,7 +124,7 @@ describe("session-backed task turns", () => {
       codexChatSessionId: expect.stringMatching(/^goat_codex_chat_/),
       chatModel: "anthropic/claude-sonnet-5",
       runtimeModel: "claude-sonnet-5",
-      hostToolContractVersion: GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
+      hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION,
       settings: { reasoningEffort: "medium" },
       prompt: expect.stringContaining("Step 2/2 — Implement"),
     });

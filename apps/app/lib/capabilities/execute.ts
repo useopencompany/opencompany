@@ -15,7 +15,7 @@ import {
 } from "@opencompany/db/capabilities";
 import { getCreditBalanceUsdMicros, recordCreditDebit } from "@opencompany/db/credits";
 import type { CapabilityRun } from "@opencompany/db/schema";
-import { GOAT_METRICS, recordCounter, recordHistogram } from "@opencompany/telemetry";
+import { METRICS, recordCounter, recordHistogram } from "@opencompany/telemetry";
 import {
   type ActionExecuteContext,
   ActionExecutionError,
@@ -36,14 +36,14 @@ import {
 } from "@/lib/capabilities/monid";
 import { sanitizeCapabilityResult } from "@/lib/capabilities/sanitize";
 
-export const GOAT_CAPABILITY_APPROVAL_EXPIRES_MS = 15 * 60 * 1_000;
-export const GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN = 6;
-export const GOAT_CAPABILITY_POLL_MAX_MS = 120_000;
-export const GOAT_CAPABILITY_ACTION_TIMEOUT_MS = 125_000;
+export const CAPABILITY_APPROVAL_EXPIRES_MS = 15 * 60 * 1_000;
+export const CAPABILITY_ASYNC_RUNS_PER_TURN = 6;
+export const CAPABILITY_POLL_MAX_MS = 120_000;
+export const CAPABILITY_ACTION_TIMEOUT_MS = 125_000;
 export const assertInspectionMatches = assertManagedCapabilityInspection;
 
 const DEFAULT_POLL_INTERVAL_MS = 1_500;
-const GOAT_ACTION_QUOTE_TIMEOUT_MS = 20_000;
+const ACTION_QUOTE_TIMEOUT_MS = 20_000;
 
 export function isManagedCapabilitiesKilled() {
   return process.env.MANAGED_CAPABILITIES_KILL_SWITCH === "true";
@@ -95,7 +95,7 @@ export async function evaluateManagedCapabilityApproval(input: {
     }
 
     const mapped = input.spec.mapInput(input.params);
-    const quoteTimeoutSignal = AbortSignal.timeout(GOAT_ACTION_QUOTE_TIMEOUT_MS);
+    const quoteTimeoutSignal = AbortSignal.timeout(ACTION_QUOTE_TIMEOUT_MS);
     const inspection = await client.inspect(
       { provider: input.spec.provider, endpoint: input.spec.endpoint },
       input.signal ? AbortSignal.any([input.signal, quoteTimeoutSignal]) : quoteTimeoutSignal,
@@ -141,7 +141,7 @@ export async function evaluateManagedCapabilityApproval(input: {
       quoteProviderCostUsdMicros: quote.quoteProviderCostUsdMicros,
       quotePlatformFeeUsdMicros: quote.quotePlatformFeeUsdMicros,
       quoteTotalCostUsdMicros: quote.quoteTotalCostUsdMicros,
-      approvalExpiresAt: new Date(createdAt.getTime() + GOAT_CAPABILITY_APPROVAL_EXPIRES_MS),
+      approvalExpiresAt: new Date(createdAt.getTime() + CAPABILITY_APPROVAL_EXPIRES_MS),
       now: createdAt,
     });
     await storeCapabilityQuote(
@@ -561,16 +561,16 @@ export async function settleManagedCapabilityRun(input: {
       "goat.capability_action": input.auditRun.action,
       "goat.outcome": status,
     };
-    recordCounter(GOAT_METRICS.capabilityRunsTotal, 1, metricAttributes);
+    recordCounter(METRICS.capabilityRunsTotal, 1, metricAttributes);
     recordCounter(
-      GOAT_METRICS.capabilityProviderCostUsdMicros,
+      METRICS.capabilityProviderCostUsdMicros,
       settledProviderCostUsdMicros,
       metricAttributes,
     );
     const createdAt = input.auditRun.createdAt;
     if (createdAt instanceof Date && Number.isFinite(createdAt.getTime())) {
       recordHistogram(
-        GOAT_METRICS.capabilitySettlementLagMs,
+        METRICS.capabilitySettlementLagMs,
         Math.max(0, Date.now() - createdAt.getTime()),
         metricAttributes,
       );
@@ -718,20 +718,20 @@ async function claimAsyncCapabilityRun(
   if (turnState.governance && toolCallId) {
     const claimed = await turnState.governance.claimAsyncRun({
       toolCallId,
-      maxRuns: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+      maxRuns: CAPABILITY_ASYNC_RUNS_PER_TURN,
     });
     if (!claimed) {
       throw new ActionExecutionError(
         "call_budget",
-        `Only ${GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN} long-running paid capabilities can be started in a turn.`,
+        `Only ${CAPABILITY_ASYNC_RUNS_PER_TURN} long-running paid capabilities can be started in a turn.`,
       );
     }
     return;
   }
-  if (turnState.asyncRunsStarted >= GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN) {
+  if (turnState.asyncRunsStarted >= CAPABILITY_ASYNC_RUNS_PER_TURN) {
     throw new ActionExecutionError(
       "call_budget",
-      `Only ${GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN} long-running paid capabilities can be started in a turn.`,
+      `Only ${CAPABILITY_ASYNC_RUNS_PER_TURN} long-running paid capabilities can be started in a turn.`,
     );
   }
   // Claim before the next await so parallel calls cannot exceed the limit.
@@ -792,7 +792,7 @@ async function pollMonidRun(input: {
   now: () => Date;
   intervalMs: number;
 }) {
-  const deadline = input.now().getTime() + GOAT_CAPABILITY_POLL_MAX_MS;
+  const deadline = input.now().getTime() + CAPABILITY_POLL_MAX_MS;
   let run = await input.client.getRun(input.runId, input.signal);
   while (!isTerminalMonidRun(run.status)) {
     if (input.now().getTime() >= deadline) throw new CapabilityPollTimeoutError();

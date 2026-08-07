@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   disconnectInfisicalConnection,
-  GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
+  INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
   loadInfisicalConnection,
   saveInfisicalConnection,
 } from "./infisical-auth";
@@ -33,7 +33,7 @@ describe("Goat Infisical credentials", () => {
       })),
     };
     const bundle = {
-      formatVersion: GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
+      formatVersion: INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
       files: [
         {
           path: ".infisical/infisical-config.json",

@@ -24,14 +24,14 @@ import {
 import { createLogger } from "@opencompany/observability";
 import {
   createGatewayAttribution,
-  GOAT_METRICS,
-  GOAT_SPANS,
   gatewayProviderOptions,
   hashUserId,
+  METRICS,
   recordChatTurn,
   recordCounter,
   recordHistogram,
   recordModelCost,
+  SPANS,
   startSpan,
 } from "@opencompany/telemetry";
 import { flushLatitude, latitudeTelemetry } from "@opencompany/telemetry/latitude";
@@ -116,23 +116,23 @@ import {
   type WebSearchToolOutput,
 } from "@/lib/chat-ui";
 import {
-  GOAT_CHAT_OUT_OF_CREDITS_MESSAGE,
-  GOAT_CHAT_PROMPT_MAX_LENGTH,
+  CHAT_OUT_OF_CREDITS_MESSAGE,
+  CHAT_PROMPT_MAX_LENGTH,
   validateChatInput,
 } from "@/lib/chat-validation";
 import { executeChatExaFetch } from "@/lib/chat-web-fetch";
 import { executeChatExaSearch } from "@/lib/chat-web-search";
 import { isClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
 import { isCodexConnectedForUser } from "@/lib/codex-auth";
-import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import { DEFAULT_MODEL } from "@/lib/model-options";
 import type { ChatBrowserToolSession } from "@/lib/sandbox/browser-tools";
 import {
   activateAndListChatSessionSkills,
   attachSkillsToPrompt,
   type ChatSessionSkillSnapshot,
   listSkillCatalog,
-  MAX_GOAT_CHAT_SKILL_BYTES,
-  MAX_GOAT_CHAT_SKILLS,
+  MAX_CHAT_SKILL_BYTES,
+  MAX_CHAT_SKILLS,
   readSkillMentionRefs,
   resolveSkillMentions,
   SkillMentionError,
@@ -203,7 +203,7 @@ export async function POST(request: Request): Promise<Response> {
   const parsed = message
     ? validateChatInput({
         prompt: textFromChatUiMessage(message),
-        model: autoModelRequested ? DEFAULT_GOAT_MODEL : body.value.model,
+        model: autoModelRequested ? DEFAULT_MODEL : body.value.model,
         sessionId: body.value.sessionId,
         hasAttachments: attachments.length > 0,
       })
@@ -316,7 +316,7 @@ export async function POST(request: Request): Promise<Response> {
       return true;
     });
     if (!hasCredits) {
-      return new Response(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, { status: 402 });
+      return new Response(CHAT_OUT_OF_CREDITS_MESSAGE, { status: 402 });
     }
   }
   const exaApiKey = process.env.EXA_API_KEY?.trim();
@@ -414,7 +414,7 @@ export async function POST(request: Request): Promise<Response> {
   // Continuations do not carry a model in the request; the session's stored
   // model takes over once the turn is loaded.
   let telemetryModel = userInput?.model ?? "";
-  const chatSpan = startSpan(GOAT_SPANS.chatTurn, {
+  const chatSpan = startSpan(SPANS.chatTurn, {
     ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
     "goat.model": telemetryModel,
     "goat.task_started": false,
@@ -575,7 +575,7 @@ export async function POST(request: Request): Promise<Response> {
                 workspaceId: context.workspace.id,
               });
           if (row) {
-            recordCounter(GOAT_METRICS.capabilityApprovalsTotal, 1, {
+            recordCounter(METRICS.capabilityApprovalsTotal, 1, {
               "goat.capability_source": row.source,
               "goat.capability_action": row.action,
               "goat.approval_decision": approval.approved ? "approve" : "cancel",
@@ -1030,15 +1030,15 @@ export async function POST(request: Request): Promise<Response> {
                 }
                 const skillBytes = skillsByteLength([resolved]);
                 if (
-                  loadedSkillCount >= MAX_GOAT_CHAT_SKILLS ||
-                  loadedSkillBytes + skillBytes > MAX_GOAT_CHAT_SKILL_BYTES
+                  loadedSkillCount >= MAX_CHAT_SKILLS ||
+                  loadedSkillBytes + skillBytes > MAX_CHAT_SKILL_BYTES
                 ) {
                   return {
                     ok: false as const,
                     skill,
                     error: {
                       code: "call_budget" as const,
-                      message: `Skill loading is limited to ${MAX_GOAT_CHAT_SKILLS} skills and ${MAX_GOAT_CHAT_SKILL_BYTES / 1024} KiB of instructions per chat turn. Continue with the skills already loaded.`,
+                      message: `Skill loading is limited to ${MAX_CHAT_SKILLS} skills and ${MAX_CHAT_SKILL_BYTES / 1024} KiB of instructions per chat turn. Continue with the skills already loaded.`,
                     },
                   };
                 }
@@ -1077,9 +1077,9 @@ export async function POST(request: Request): Promise<Response> {
             catalog: workflowCatalog,
             execute: async ({ workflowId, prompt }: { workflowId: string; prompt: string }) => {
               const description = prompt.trim();
-              if (description.length > GOAT_CHAT_PROMPT_MAX_LENGTH) {
+              if (description.length > CHAT_PROMPT_MAX_LENGTH) {
                 throw new Error(
-                  `Workflow task descriptions can be at most ${GOAT_CHAT_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
+                  `Workflow task descriptions can be at most ${CHAT_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
                 );
               }
               const created = await createTaskFromWorkflow({
@@ -1109,7 +1109,7 @@ export async function POST(request: Request): Promise<Response> {
                 ...attributes,
                 "goat.task_started": true,
               });
-              recordCounter(GOAT_METRICS.chatTasksStartedTotal, 1, attributes);
+              recordCounter(METRICS.chatTasksStartedTotal, 1, attributes);
               return {
                 id: created.id,
                 displayId: created.displayId,
@@ -1203,7 +1203,7 @@ export async function POST(request: Request): Promise<Response> {
               ...attributes,
               "goat.task_started": true,
             });
-            recordCounter(GOAT_METRICS.chatTasksStartedTotal, 1, attributes);
+            recordCounter(METRICS.chatTasksStartedTotal, 1, attributes);
             return {
               id: created.id,
               displayId: created.displayId,
@@ -1672,9 +1672,9 @@ async function executeChatWebFetch(input: {
       "goat.web_fetch_used": true,
       "goat.web_fetch_cost_usd_micros": output.costUsdMicros ?? 0,
     });
-    recordCounter(GOAT_METRICS.chatWebFetchesTotal, 1, attributes);
+    recordCounter(METRICS.chatWebFetchesTotal, 1, attributes);
     if (output.costUsdMicros) {
-      recordCounter(GOAT_METRICS.chatWebFetchCostUsdMicros, output.costUsdMicros, attributes);
+      recordCounter(METRICS.chatWebFetchCostUsdMicros, output.costUsdMicros, attributes);
     }
     return output;
   } catch (error) {
@@ -1682,7 +1682,7 @@ async function executeChatWebFetch(input: {
       "goat.web_fetch_used": true,
       "goat.web_fetch_failed": true,
     });
-    recordCounter(GOAT_METRICS.chatWebFetchesTotal, 1, {
+    recordCounter(METRICS.chatWebFetchesTotal, 1, {
       ...baseAttributes,
       "goat.outcome": "failure",
     });
@@ -1719,9 +1719,9 @@ async function executeChatWebSearch(input: {
       "goat.web_search_cost_usd_micros": output.costUsdMicros ?? 0,
       "goat.web_search_result_count": output.results.length,
     });
-    recordCounter(GOAT_METRICS.chatWebSearchesTotal, 1, attributes);
+    recordCounter(METRICS.chatWebSearchesTotal, 1, attributes);
     if (output.costUsdMicros) {
-      recordCounter(GOAT_METRICS.chatWebSearchCostUsdMicros, output.costUsdMicros, attributes);
+      recordCounter(METRICS.chatWebSearchCostUsdMicros, output.costUsdMicros, attributes);
     }
     return output;
   } catch (error) {
@@ -1733,7 +1733,7 @@ async function executeChatWebSearch(input: {
       "goat.web_search_used": true,
       "goat.web_search_failed": true,
     });
-    recordCounter(GOAT_METRICS.chatWebSearchesTotal, 1, attributes);
+    recordCounter(METRICS.chatWebSearchesTotal, 1, attributes);
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Web search failed.",
@@ -1762,7 +1762,7 @@ async function executeChatActionCall(input: {
   const provider = input.catalog.actions.find((entry) => entry.id === input.action)?.provider;
   // Created inside the chat-turn span's context so it nests as a child span.
   const actionSpan = input.chatSpan.runInContext(() =>
-    startSpan(GOAT_SPANS.chatActionCall, {
+    startSpan(SPANS.chatActionCall, {
       ...input.attributes,
       "goat.action": input.action,
       ...(provider ? { "goat.action_provider": provider } : {}),
@@ -1791,12 +1791,12 @@ async function executeChatActionCall(input: {
       "goat.outcome": result.ok ? "success" : "failure",
       ...(result.ok ? {} : { "goat.action_error_code": result.error.code }),
     });
-    recordCounter(GOAT_METRICS.chatActionCallsTotal, 1, {
+    recordCounter(METRICS.chatActionCallsTotal, 1, {
       ...metricAttributes,
       "goat.outcome": result.ok ? "success" : result.error.code,
     });
     recordHistogram(
-      GOAT_METRICS.chatActionCallDurationMs,
+      METRICS.chatActionCallDurationMs,
       Math.max(0, Math.round(performance.now() - startedAt)),
       metricAttributes,
     );
@@ -1807,7 +1807,7 @@ async function executeChatActionCall(input: {
     // Still return a structured result so the turn survives.
     actionSpan.fail(error, metricAttributes);
     actionSpan.end({ "goat.outcome": "failure" });
-    recordCounter(GOAT_METRICS.chatActionCallsTotal, 1, {
+    recordCounter(METRICS.chatActionCallsTotal, 1, {
       ...metricAttributes,
       "goat.outcome": "error",
     });

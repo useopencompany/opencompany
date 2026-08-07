@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
+  ACTION_HOST_TOOL_CONTRACT_VERSION,
   claudeCodeCliModelNameForModelId,
   codexCliModelNameForModelId,
-  GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
 } from "@opencompany/agent-runtime";
 import type { SQL } from "drizzle-orm";
 import { sql } from "drizzle-orm";
@@ -233,7 +233,7 @@ export async function createTaskSession(
           ${runtimeModel},
           (SELECT id FROM resolved_brain),
           (SELECT workspace_id FROM resolved_workspace),
-          ${engine === "opencompany" ? null : GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION},
+          ${engine === "opencompany" ? null : ACTION_HOST_TOOL_CONTRACT_VERSION},
           ${turnId},
           'queued',
           ${now},

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  CHAT_ATTACHMENT_MAX_BYTES,
+  CHAT_IMAGE_MAX_BYTES,
+  CHAT_SRT_MIME_TYPE,
   chatAttachmentKindForMime,
-  GOAT_CHAT_ATTACHMENT_MAX_BYTES,
-  GOAT_CHAT_IMAGE_MAX_BYTES,
-  GOAT_CHAT_SRT_MIME_TYPE,
   normalizedChatAttachmentMediaType,
   validateChatAttachmentCandidate,
 } from "@/lib/chat-attachment-formats";
@@ -48,7 +48,7 @@ describe("normalizedChatAttachmentMediaType", () => {
     "text/srt",
   ])("normalizes %j for an SRT filename", (mediaType) => {
     expect(normalizedChatAttachmentMediaType({ mediaType, filename: "captions.SRT" })).toBe(
-      GOAT_CHAT_SRT_MIME_TYPE,
+      CHAT_SRT_MIME_TYPE,
     );
   });
 
@@ -74,13 +74,13 @@ describe("validateChatAttachmentCandidate", () => {
     expect(
       validateChatAttachmentCandidate({
         mediaType: "application/pdf",
-        sizeBytes: GOAT_CHAT_ATTACHMENT_MAX_BYTES,
+        sizeBytes: CHAT_ATTACHMENT_MAX_BYTES,
       }),
     ).toEqual({ ok: true, kind: "pdf", mediaType: "application/pdf" });
     expect(
       validateChatAttachmentCandidate({
         mediaType: "application/pdf",
-        sizeBytes: GOAT_CHAT_ATTACHMENT_MAX_BYTES + 1,
+        sizeBytes: CHAT_ATTACHMENT_MAX_BYTES + 1,
       }),
     ).toMatchObject({ ok: false, reason: "size" });
   });
@@ -89,13 +89,13 @@ describe("validateChatAttachmentCandidate", () => {
     expect(
       validateChatAttachmentCandidate({
         mediaType: "image/png",
-        sizeBytes: GOAT_CHAT_IMAGE_MAX_BYTES,
+        sizeBytes: CHAT_IMAGE_MAX_BYTES,
       }),
     ).toEqual({ ok: true, kind: "image", mediaType: "image/png" });
     expect(
       validateChatAttachmentCandidate({
         mediaType: "image/png",
-        sizeBytes: GOAT_CHAT_IMAGE_MAX_BYTES + 1,
+        sizeBytes: CHAT_IMAGE_MAX_BYTES + 1,
       }),
     ).toMatchObject({ ok: false, reason: "size" });
   });
@@ -116,7 +116,7 @@ describe("validateChatAttachmentCandidate", () => {
         filename: "captions.srt",
         sizeBytes: 100,
       }),
-    ).toEqual({ ok: true, kind: "srt", mediaType: GOAT_CHAT_SRT_MIME_TYPE });
+    ).toEqual({ ok: true, kind: "srt", mediaType: CHAT_SRT_MIME_TYPE });
     expect(
       validateChatAttachmentCandidate({
         mediaType: "text/srt",

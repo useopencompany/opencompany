@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  CODING_WORKSPACE_SANDBOX_NETWORK,
   discoverCodingWorkspacePreviewPorts,
-  GOAT_CODING_WORKSPACE_SANDBOX_NETWORK,
   isAllowedPreviewPort,
   mintCodingWorkspaceAccess,
   parseListeningPorts,
@@ -43,7 +43,7 @@ beforeEach(() => {
 
 describe("Goat coding workspace preview port discovery", () => {
   it("keeps raw sandbox traffic private for every coding engine", () => {
-    expect(GOAT_CODING_WORKSPACE_SANDBOX_NETWORK).toEqual({
+    expect(CODING_WORKSPACE_SANDBOX_NETWORK).toEqual({
       allowPublicTraffic: false,
       maskRequestHost: "localhost:${PORT}",
     });

@@ -2,19 +2,19 @@ import { createMCPClient } from "@ai-sdk/mcp";
 import { isValidBrainSourceRef } from "@opencompany/brain";
 import type { JSONSchema7, ToolExecutionOptions, ToolSet } from "ai";
 import {
-  GOAT_LINEAR_MCP_ENDPOINT_URL,
   getLinearIntegrationState,
+  LINEAR_MCP_ENDPOINT_URL,
   loadLinearMcpWorkerConnection,
 } from "../integrations/linear-mcp";
 import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  ACTION_EFFECTS_READ,
+  ACTION_EFFECTS_WRITE,
   ActionAuthError,
   type ActionExecuteContext,
   ActionInvalidParamsError,
   ActionPermissionError,
   type ActionProviderCatalog,
-  GOAT_ACTION_EFFECTS_READ,
-  GOAT_ACTION_EFFECTS_WRITE,
   type ResolvedAction,
   requiredStringParam,
 } from "./types";
@@ -430,7 +430,7 @@ export async function resolveLinearActions(
     id: spec.id,
     provider: "linear",
     capability: spec.capability,
-    effects: spec.capability === "read" ? GOAT_ACTION_EFFECTS_READ : GOAT_ACTION_EFFECTS_WRITE,
+    effects: spec.capability === "read" ? ACTION_EFFECTS_READ : ACTION_EFFECTS_WRITE,
     ...permissionAnnotation(spec.capability, {
       integrationId,
       capabilityModes: state.capabilityModes,
@@ -516,7 +516,7 @@ async function executeLinearAction(
     version: "0.1.0",
     transport: {
       type: "http" as const,
-      url: GOAT_LINEAR_MCP_ENDPOINT_URL,
+      url: LINEAR_MCP_ENDPOINT_URL,
       authProvider: connection.authProvider,
     },
   });

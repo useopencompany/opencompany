@@ -2,7 +2,7 @@
 // canonical prose lives in apps/app/docs/brain/pointer-copy-contract.md; this
 // constant is the prompt-ready form every brain writing agent must embed so
 // the enforced rule and the documented rule cannot drift apart.
-export const GOAT_BRAIN_POINTER_COPY_RULE = [
+export const BRAIN_POINTER_COPY_RULE = [
   "Pointers over copies. Every claim you write into the brain has three parts:",
   "1. The claim itself, in compiled truth or a timeline entry.",
   "2. A source pointer: a [[source:provider:id|Label]] inline link or a timeline --source-ref. Source refs are provider:id (lowercase provider slug, colon, then the provider's identifier — e.g. jamie:meeting:calendar_event_123, gmail:thread_456, linear:issue_ABC-12).",

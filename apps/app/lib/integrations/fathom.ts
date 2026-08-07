@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
 import {
   ensureFathomSyncState,
-  GOAT_FATHOM_CREDENTIAL_KIND,
-  GOAT_FATHOM_PROVIDER,
+  FATHOM_CREDENTIAL_KIND,
+  FATHOM_PROVIDER,
 } from "@opencompany/db/fathom";
 import { markIntegrationStatus, saveIntegrationCredential } from "@opencompany/db/integrations";
 import { integrations } from "@opencompany/db/schema";
@@ -11,7 +11,7 @@ import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { FathomProviderState } from "@/lib/integration-state";
 import { captureIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 
-export const GOAT_FATHOM_API_BASE_URL = "https://api.fathom.ai/external/v1";
+export const FATHOM_API_BASE_URL = "https://api.fathom.ai/external/v1";
 
 export type FathomApiKeyCredentialPayload = {
   apiKey: string;
@@ -38,7 +38,7 @@ export type FathomApiKeyValidation = { ok: true } | { ok: false; error: string }
 export async function validateFathomApiKey(apiKey: string): Promise<FathomApiKeyValidation> {
   let response: Response;
   try {
-    response = await fetch(`${GOAT_FATHOM_API_BASE_URL}/meetings`, {
+    response = await fetch(`${FATHOM_API_BASE_URL}/meetings`, {
       headers: { "X-Api-Key": apiKey },
       signal: AbortSignal.timeout(15_000),
     });
@@ -67,7 +67,7 @@ export async function connectFathomIntegration(input: {
     .values({
       id: newIntegrationId(),
       userWorkosId: input.userWorkosId,
-      provider: GOAT_FATHOM_PROVIDER,
+      provider: FATHOM_PROVIDER,
       externalId: fathomExternalIdForUser(input.userWorkosId),
       connectionLabel: "Fathom",
       accountName: null,
@@ -107,8 +107,8 @@ export async function connectFathomIntegration(input: {
     await saveIntegrationCredential({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
-      provider: GOAT_FATHOM_PROVIDER,
-      kind: GOAT_FATHOM_CREDENTIAL_KIND,
+      provider: FATHOM_PROVIDER,
+      kind: FATHOM_CREDENTIAL_KIND,
       payload,
       // Fathom API keys do not expire; users revoke them in Fathom settings.
       expiresAt: null,
@@ -119,7 +119,7 @@ export async function connectFathomIntegration(input: {
     await markIntegrationStatus({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
-      provider: GOAT_FATHOM_PROVIDER,
+      provider: FATHOM_PROVIDER,
       status: "sync_failed",
       statusReason: "Failed to persist Fathom integration credentials.",
       db,
@@ -162,7 +162,7 @@ export async function getFathomIntegrationState(
     .where(
       and(
         eq(integrations.userWorkosId, userWorkosId),
-        eq(integrations.provider, GOAT_FATHOM_PROVIDER),
+        eq(integrations.provider, FATHOM_PROVIDER),
         ne(integrations.status, "disconnected"),
       ),
     )

@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import {
+  BRAIN_ENTITY_TYPES,
+  BRAIN_READ_TOOL_DESCRIPTION,
+  BRAIN_RETRIEVAL_TOOL_INPUT_JSON_SCHEMA,
   type BrainReadToolInput,
   type BrainRetrievalCommand,
   type BrainToolFlagValue,
-  GOAT_BRAIN_ENTITY_TYPES,
-  GOAT_BRAIN_READ_TOOL_DESCRIPTION,
-  GOAT_BRAIN_RETRIEVAL_TOOL_INPUT_JSON_SCHEMA,
   isBrainRetrievalCommand,
   isBuiltInBrainEntityType,
   isValidBrainKind,
@@ -31,8 +31,8 @@ import type {
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 
-const GOAT_CODEX_BRAIN_TOOL_NAME = "goat_brain";
-const GOAT_CODEX_BRAIN_RESULT_MAX_CHARS = 120_000;
+const CODEX_BRAIN_TOOL_NAME = "goat_brain";
+const CODEX_BRAIN_RESULT_MAX_CHARS = 120_000;
 const DEFAULT_QUERY_LIMIT = 10;
 const MAX_QUERY_LIMIT = 50;
 const DEFAULT_LIST_LIMIT = 50;
@@ -70,9 +70,9 @@ export function createCodexBrainDynamicTool(
   return {
     spec: {
       type: "function",
-      name: GOAT_CODEX_BRAIN_TOOL_NAME,
-      description: GOAT_BRAIN_READ_TOOL_DESCRIPTION,
-      inputSchema: GOAT_BRAIN_RETRIEVAL_TOOL_INPUT_JSON_SCHEMA,
+      name: CODEX_BRAIN_TOOL_NAME,
+      description: BRAIN_READ_TOOL_DESCRIPTION,
+      inputSchema: BRAIN_RETRIEVAL_TOOL_INPUT_JSON_SCHEMA,
     },
     execute: (call) => executeCodexBrainTool({ context, call }),
   };
@@ -119,7 +119,7 @@ export async function executeCodexBrainTool(input: {
     });
     await input.context.checkAbort();
     const stdout = JSON.stringify(parsed);
-    if (stdout.length > GOAT_CODEX_BRAIN_RESULT_MAX_CHARS) {
+    if (stdout.length > CODEX_BRAIN_RESULT_MAX_CHARS) {
       throw new Error(
         "The Brain result is too large for this Codex session. Retry with fewer ids or a smaller limit.",
       );
@@ -468,7 +468,7 @@ function entityTypeFlag(value: BrainToolFlagValue | undefined) {
   if (!type) return undefined;
   if (!isBuiltInBrainEntityType(type)) {
     throw new Error(
-      `Unsupported Goat Brain entity type "${type}". Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(", ")}.`,
+      `Unsupported Goat Brain entity type "${type}". Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`,
     );
   }
   return type;

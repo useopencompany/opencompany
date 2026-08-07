@@ -13,7 +13,7 @@ import { getSandboxLifecycleStatus, type SandboxHandle } from "./sandbox";
 const RESERVED_PREVIEW_PORTS = new Set([22, 2_019, 4_998, 4_999, 49_983, 50_005]);
 const MAX_DISCOVERED_PORTS = 24;
 
-export const GOAT_CODING_WORKSPACE_SANDBOX_NETWORK = {
+export const CODING_WORKSPACE_SANDBOX_NETWORK = {
   allowPublicTraffic: false,
   maskRequestHost: "localhost:${PORT}",
 } as const;

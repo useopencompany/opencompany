@@ -3,11 +3,7 @@ import { CODEX_PLAN_TOOL_NAME, CODEX_QUESTION_TOOL_NAME } from "@opencompany/age
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  type ChatUiMessage,
-  GOAT_BRAIN_TOOL_PART_TYPE,
-  USE_ACTION_TOOL_PART_TYPE,
-} from "@/lib/chat-ui";
+import { BRAIN_TOOL_PART_TYPE, type ChatUiMessage, USE_ACTION_TOOL_PART_TYPE } from "@/lib/chat-ui";
 import { getVisibleBrainCitationCount } from "./AssistantTextBubble";
 import type { ChatTaskLookup } from "./assistant-items";
 import { MessageBubble } from "./MessageBubble";
@@ -100,7 +96,7 @@ describe("MessageBubble assistant errors", () => {
       metadata: { sessionId: "goat_chat_1" },
       parts: [
         {
-          type: GOAT_BRAIN_TOOL_PART_TYPE,
+          type: BRAIN_TOOL_PART_TYPE,
           toolCallId: "tool_brain_1",
           state: "output-available",
           input: { command: "query", flags: { text: "gtm", limit: 3 } },
@@ -150,7 +146,7 @@ describe("MessageBubble assistant errors", () => {
       metadata: { sessionId: "goat_chat_1" },
       parts: [
         {
-          type: GOAT_BRAIN_TOOL_PART_TYPE,
+          type: BRAIN_TOOL_PART_TYPE,
           toolCallId: "tool_brain_2",
           state: "output-available",
           input: { command: "get", flags: { id: "ada" } },

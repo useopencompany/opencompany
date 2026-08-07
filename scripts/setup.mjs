@@ -106,7 +106,7 @@ const STRIPE_OPTIONAL_ENV_KEYS = [
   "STRIPE_LISTEN_EVENTS",
   "STRIPE_CLI_PROJECT_NAME",
 ];
-const GOAT_BILLING_LOCAL_ENV_KEYS = ["STRIPE_API_KEY", "STRIPE_CHECKOUT_ENABLED", "CRON_SECRET"];
+const BILLING_LOCAL_ENV_KEYS = ["STRIPE_API_KEY", "STRIPE_CHECKOUT_ENABLED", "CRON_SECRET"];
 const OBSERVABILITY_ENV_KEYS = [
   "BETTER_STACK_ERRORS_DSN",
   "OBSERVABILITY_ENABLED",
@@ -124,7 +124,7 @@ const OBSERVABILITY_ENV_KEYS = [
   "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
   "NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL",
 ];
-const GOAT_OBSERVABILITY_ENV_KEYS = [
+const TELEMETRY_ENV_KEYS = [
   "TELEMETRY_ENABLED",
   "OTEL_EXPORTER_OTLP_ENDPOINT",
   "OTEL_EXPORTER_OTLP_HEADERS",
@@ -143,8 +143,6 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   "WORKOS_REDIRECT_URI",
   "NEXT_PUBLIC_POSTHOG_TOKEN",
   "NEXT_PUBLIC_POSTHOG_HOST",
-  "NEXT_PUBLIC_POSTHOG_TOKEN",
-  "NEXT_PUBLIC_POSTHOG_HOST",
   "NEXT_PUBLIC_ANALYTICS_DEBUG",
   "OPENCOMPANY_NGROK_REQUIRED",
   "OPENCOMPANY_NGROK_URL",
@@ -154,7 +152,7 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   ...LINEAR_ENV_KEYS,
   ...RUNNER_ENV_KEYS,
   ...OBSERVABILITY_ENV_KEYS,
-  ...GOAT_OBSERVABILITY_ENV_KEYS,
+  ...TELEMETRY_ENV_KEYS,
   ...AGENT_MCP_ENV_KEYS,
 ];
 const SHARED_DEV_ENV_KEYS = [
@@ -167,11 +165,10 @@ const SHARED_DEV_ENV_KEYS = [
 const NEON_ENV_KEYS = ["NEON_PROJECT_ID"];
 const INFISICAL_DEV_ENV = "dev";
 const INFISICAL_DEV_PATHS = ["/web", "/runner"];
-const LOCAL_WORKOS_REDIRECT_URI = "http://localhost:3000/auth/callback";
-const LEGACY_LOCAL_GOAT_APP_URL = "http://localhost:3002";
-const LOCAL_GOAT_APP_URL = httpsOrigin(process.env);
-const LOCAL_GOAT_WORKOS_REDIRECT_URI = `${LOCAL_GOAT_APP_URL}/auth/callback`;
-const GOAT_ENV_PATH = "apps/app/.env.local";
+const LEGACY_LOCAL_APP_URL = "http://localhost:3002";
+const LOCAL_APP_URL = httpsOrigin(process.env);
+const LOCAL_WORKOS_REDIRECT_URI = `${LOCAL_APP_URL}/auth/callback`;
+const ENV_PATH = "apps/app/.env.local";
 const LOCAL_ONLY_ENV_KEYS = new Set([
   "DATABASE_URL",
   "NEON_BRANCH",
@@ -186,11 +183,11 @@ const LOCAL_DEV_DEFAULT_ENV_VALUES = {
   OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS: "louis@acta.so",
   APP_PORT: "3002",
   APP_HTTPS_PORT: httpsPort(process.env),
-  NEXT_PUBLIC_APP_URL: LOCAL_GOAT_APP_URL,
-  NEXT_PUBLIC_WORKOS_REDIRECT_URI: LOCAL_GOAT_WORKOS_REDIRECT_URI,
+  NEXT_PUBLIC_APP_URL: LOCAL_APP_URL,
+  NEXT_PUBLIC_WORKOS_REDIRECT_URI: LOCAL_WORKOS_REDIRECT_URI,
   RUNNER_LLM_BROKER_PUBLIC_URL: "",
 };
-const GOAT_LOCAL_ENV_KEYS = [
+const LOCAL_ENV_KEYS = [
   "APP_PORT",
   "APP_HTTPS_PORT",
   "DATABASE_URL",
@@ -218,7 +215,7 @@ const GOAT_LOCAL_ENV_KEYS = [
   "NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN",
   "NEXT_PUBLIC_POSTHOG_TOKEN",
   "NEXT_PUBLIC_POSTHOG_HOST",
-  ...GOAT_OBSERVABILITY_ENV_KEYS,
+  ...TELEMETRY_ENV_KEYS,
 ];
 
 function assertNodeVersion() {
@@ -352,7 +349,7 @@ function inspectState() {
   const githubIntegrationMissing = GITHUB_WORK_INTEGRATION_ENV_KEYS.filter((k) =>
     isPlaceholder(env[k]),
   );
-  const billingMissing = GOAT_BILLING_LOCAL_ENV_KEYS.filter((key) => isPlaceholder(env[key]));
+  const billingMissing = BILLING_LOCAL_ENV_KEYS.filter((key) => isPlaceholder(env[key]));
 
   return {
     databaseMode: SHARED_DATABASE_MODE ? "shared" : "branch",
@@ -562,19 +559,19 @@ async function ensureLocalDevDefaults() {
 
 function shouldReplaceLocalDefault(key, current, next) {
   if (key === "NEXT_PUBLIC_APP_URL") {
-    return current === LEGACY_LOCAL_GOAT_APP_URL && next !== current;
+    return current === LEGACY_LOCAL_APP_URL && next !== current;
   }
   if (key === "NEXT_PUBLIC_WORKOS_REDIRECT_URI") {
-    return current === `${LEGACY_LOCAL_GOAT_APP_URL}/auth/callback` && next !== current;
+    return current === `${LEGACY_LOCAL_APP_URL}/auth/callback` && next !== current;
   }
   return false;
 }
 
-async function ensureEnvFile() {
+async function ensureAppEnvFile() {
   step("Goat app env file");
 
   const env = readEffectiveLocalEnv();
-  const appUrl = env.NEXT_PUBLIC_APP_URL || LOCAL_GOAT_APP_URL;
+  const appUrl = env.NEXT_PUBLIC_APP_URL || LOCAL_APP_URL;
   const redirectUri = env.NEXT_PUBLIC_WORKOS_REDIRECT_URI || `${appUrl}/auth/callback`;
   const values = {
     NEXT_PUBLIC_APP_URL: appUrl,
@@ -584,15 +581,15 @@ async function ensureEnvFile() {
     WORKOS_REDIRECT_URI: redirectUri,
   };
 
-  for (const key of GOAT_LOCAL_ENV_KEYS) {
+  for (const key of LOCAL_ENV_KEYS) {
     if (!isPlaceholder(env[key])) {
       values[key] = env[key];
     }
   }
 
-  writeEnvValues(GOAT_ENV_PATH, values);
+  writeEnvValues(ENV_PATH, values);
   ok(
-    `Updated ${GOAT_ENV_PATH} with Goat-local DB/Auth/runner/GitHub/Electric/observability/analytics env`,
+    `Updated ${ENV_PATH} with Goat-local DB/Auth/runner/GitHub/Electric/observability/analytics env`,
   );
 }
 
@@ -684,7 +681,7 @@ function pullBillingDevEnvFromInfisical() {
   if (!existsSync(".infisical.json")) return [];
 
   const current = readEffectiveLocalEnv();
-  const missing = GOAT_BILLING_LOCAL_ENV_KEYS.filter((key) => isPlaceholder(current[key]));
+  const missing = BILLING_LOCAL_ENV_KEYS.filter((key) => isPlaceholder(current[key]));
   if (missing.length === 0) return [];
 
   const result = spawnSync(
@@ -1097,7 +1094,7 @@ async function main() {
       requireNeonProject: !SHARED_DATABASE_MODE && state.neonProject !== "set",
     });
     await ensureLocalDevDefaults();
-    await ensureEnvFile();
+    await ensureAppEnvFile();
     ok(`Updated .env.local with shared setup values from ${source}`);
     return;
   }
@@ -1107,7 +1104,7 @@ async function main() {
     await ensureEnvFile(inspectState());
     await ensureLocalDevDefaults();
     await ensureStripe(inspectState());
-    await ensureEnvFile();
+    await ensureAppEnvFile();
     return;
   }
 
@@ -1186,10 +1183,10 @@ async function main() {
         reason: "start local Electric and set ELECTRIC_URL for live agents/sessions sync",
       });
     }
-    if (!existsSync(GOAT_ENV_PATH)) {
+    if (!existsSync(ENV_PATH)) {
       nextSteps.push({
         command: "bun run setup",
-        reason: `write ${GOAT_ENV_PATH} for direct Goat app local tooling`,
+        reason: `write ${ENV_PATH} for direct Goat app local tooling`,
       });
     }
     if (!httpsDisabled(process.env) && !caddy.available) {
@@ -1247,9 +1244,7 @@ async function main() {
     return;
   }
 
-  console.log(
-    "\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Starting \x1b[1mbun run dev\x1b[0m — open http://localhost:3000\n",
-  );
+  console.log("\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Starting \x1b[1mbun run dev\x1b[0m\n");
   run("bun", ["run", "dev"]);
 }
 

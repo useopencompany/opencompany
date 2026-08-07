@@ -2,19 +2,19 @@ import { createMCPClient, type OAuthClientProvider } from "@ai-sdk/mcp";
 import type { JSONSchema7, ToolExecutionOptions, ToolSet } from "ai";
 import Ajv, { type AnySchema } from "ajv";
 import {
-  GOAT_POSTHOG_MCP_ENDPOINT_URL,
   getPostHogIntegrationState,
   loadPostHogMcpWorkerConnection,
+  POSTHOG_MCP_ENDPOINT_URL,
 } from "../integrations/posthog-mcp";
 import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  ACTION_EFFECTS_READ,
+  ACTION_EFFECTS_WRITE,
   ActionAuthError,
   type ActionExecuteContext,
   ActionInvalidParamsError,
   ActionPermissionError,
   type ActionProviderCatalog,
-  GOAT_ACTION_EFFECTS_READ,
-  GOAT_ACTION_EFFECTS_WRITE,
   type ResolvedAction,
 } from "./types";
 
@@ -91,7 +91,7 @@ export async function resolvePostHogActions(
         id: `posthog.${remoteName}`,
         provider: "posthog",
         capability,
-        effects: capability === "read" ? GOAT_ACTION_EFFECTS_READ : GOAT_ACTION_EFFECTS_WRITE,
+        effects: capability === "read" ? ACTION_EFFECTS_READ : ACTION_EFFECTS_WRITE,
         ...permissionAnnotation(capability, {
           integrationId,
           capabilityModes: state.capabilityModes,
@@ -243,7 +243,7 @@ function createPostHogClient(authProvider: OAuthClientProvider) {
     version: "0.1.0",
     transport: {
       type: "http" as const,
-      url: GOAT_POSTHOG_MCP_ENDPOINT_URL,
+      url: POSTHOG_MCP_ENDPOINT_URL,
       authProvider,
     },
   });

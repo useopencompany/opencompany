@@ -18,7 +18,7 @@ import { getAvailableHarnessTools } from "@/lib/integrations/google-data";
 import { resolveSkillMentions, type SkillMentionRef, type WorkspaceSkill } from "@/lib/skills";
 import { createTaskForUser } from "@/lib/tasks";
 import {
-  DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
+  DEFAULT_WORKFLOW_MODEL_TOKEN,
   isWorkflowModelToken,
   workflowModelSelection,
 } from "@/lib/workflow-model-options";
@@ -35,8 +35,8 @@ export type WorkflowEngineSelection = {
   reasoningEffort?: WorkflowStep["reasoningEffort"];
 };
 
-const DEFAULT_GOAT_WORKFLOW_SELECTION: WorkflowEngineSelection = workflowModelSelection({
-  model: DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
+const DEFAULT_WORKFLOW_SELECTION: WorkflowEngineSelection = workflowModelSelection({
+  model: DEFAULT_WORKFLOW_MODEL_TOKEN,
 });
 
 // The token must end alphanumeric so trailing punctuation ("run @sonnet-5.")
@@ -77,7 +77,7 @@ export function resolveWorkflowStepSelection(step: {
         .join(", ")}). Pick one model for the step.`,
     );
   }
-  return [...selected.values()][0] ?? DEFAULT_GOAT_WORKFLOW_SELECTION;
+  return [...selected.values()][0] ?? DEFAULT_WORKFLOW_SELECTION;
 }
 
 // Retained as a compatibility name for callers that parse one legacy step.

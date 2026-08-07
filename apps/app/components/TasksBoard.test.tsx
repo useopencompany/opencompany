@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskRow } from "@/lib/task-collections";
-import { GOAT_TASK_BOARD_COLUMN_CAP, TasksBoardRoute } from "./TasksBoard";
+import { TASK_BOARD_COLUMN_CAP, TasksBoardRoute } from "./TasksBoard";
 
 const appDataMock = vi.hoisted(() => ({
   featureFlags: { taskSpawning: true, autoModelRouting: false },
@@ -288,7 +288,7 @@ describe("TasksBoardRoute", () => {
 
   it("caps terminal columns and expands the remaining tasks on demand", async () => {
     const user = userEvent.setup();
-    appDataMock.taskRows = Array.from({ length: GOAT_TASK_BOARD_COLUMN_CAP + 2 }, (_, index) =>
+    appDataMock.taskRows = Array.from({ length: TASK_BOARD_COLUMN_CAP + 2 }, (_, index) =>
       taskRow({
         id: `done-${index}`,
         name: `Completed task ${index + 1}`,
@@ -300,12 +300,10 @@ describe("TasksBoardRoute", () => {
     render(<TasksBoardRoute workflowNames={{}} />);
 
     const doneColumn = screen.getByRole("region", { name: "Done" });
-    expect(within(doneColumn).getAllByRole("link")).toHaveLength(GOAT_TASK_BOARD_COLUMN_CAP);
-    expect(
-      within(doneColumn).getByText(String(GOAT_TASK_BOARD_COLUMN_CAP + 2)),
-    ).toBeInTheDocument();
+    expect(within(doneColumn).getAllByRole("link")).toHaveLength(TASK_BOARD_COLUMN_CAP);
+    expect(within(doneColumn).getByText(String(TASK_BOARD_COLUMN_CAP + 2))).toBeInTheDocument();
     await user.click(within(doneColumn).getByRole("button", { name: "Show 2 more" }));
-    expect(within(doneColumn).getAllByRole("link")).toHaveLength(GOAT_TASK_BOARD_COLUMN_CAP + 2);
+    expect(within(doneColumn).getAllByRole("link")).toHaveLength(TASK_BOARD_COLUMN_CAP + 2);
   });
 
   it("defaults to the last 7 days and hides older terminal tasks until widened", async () => {

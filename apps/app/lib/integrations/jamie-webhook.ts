@@ -4,7 +4,7 @@ import {
   normalizeJamieMeetingCompletedWebhook,
 } from "@opencompany/brain";
 import {
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+  BRAIN_AGENT_INGEST_JOB_KIND,
   upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
@@ -19,8 +19,8 @@ import {
   verifyJamieWebhookApiKey,
 } from "@/lib/integrations/jamie";
 import {
-  GOAT_JAMIE_WEBHOOK_EVENT_HEADER,
-  GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
+  JAMIE_WEBHOOK_EVENT_HEADER,
+  JAMIE_WEBHOOK_SECRET_HEADER,
 } from "@/lib/integrations/jamie-constants";
 import { triggerBrainIngestWake } from "@/lib/task-runner";
 
@@ -42,7 +42,7 @@ export async function handleJamieWebhookDelivery(input: {
     );
   }
 
-  const apiKey = request.headers.get(GOAT_JAMIE_WEBHOOK_SECRET_HEADER);
+  const apiKey = request.headers.get(JAMIE_WEBHOOK_SECRET_HEADER);
   const apiKeyVerification = verifyJamieWebhookApiKey({
     candidate: apiKey,
     apiKeyHash: webhookContext.apiKeyHash,
@@ -52,7 +52,7 @@ export async function handleJamieWebhookDelivery(input: {
     return NextResponse.json({ error: "Invalid Jamie webhook API key." }, { status: 401 });
   }
 
-  const event = request.headers.get(GOAT_JAMIE_WEBHOOK_EVENT_HEADER);
+  const event = request.headers.get(JAMIE_WEBHOOK_EVENT_HEADER);
   if (event !== "meeting.completed") {
     return NextResponse.json({ error: "Unsupported Jamie webhook event." }, { status: 400 });
   }
@@ -97,7 +97,7 @@ export async function handleJamieWebhookDelivery(input: {
     integrationId: webhookContext.integrationId,
     item,
     rawPayload: payload,
-    kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+    kind: BRAIN_AGENT_INGEST_JOB_KIND,
     brainRefs,
     now: receivedAt,
   });

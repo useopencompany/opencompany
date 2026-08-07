@@ -15,7 +15,7 @@ import {
   recordSlackBotThreadParticipation,
   type SlackBotIntegrationForTeam,
 } from "@opencompany/db/slack-bot";
-import { DEFAULT_GOAT_BRAIN_SLUG, listAccessibleBrains } from "@opencompany/db/workspaces";
+import { DEFAULT_BRAIN_SLUG, listAccessibleBrains } from "@opencompany/db/workspaces";
 import { recordModelCost } from "@opencompany/telemetry";
 import type { LanguageModelUsage } from "ai";
 import { eq } from "drizzle-orm";
@@ -29,7 +29,7 @@ import { runOpenCompanyChatAgent } from "@/lib/chat-agent";
 import { executeChatExaSearch } from "@/lib/chat-web-search";
 import { slackApiRequest } from "@/lib/integrations/slack";
 import { slackBotHasScope } from "@/lib/integrations/slack-bot";
-import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import { DEFAULT_MODEL } from "@/lib/model-options";
 import { createSlackSurfacePromptBlock } from "@/lib/prompts/slack-surface";
 import {
   collectSlackMentionUserIds,
@@ -295,7 +295,7 @@ async function answerForIntegration(
     await recordSlackBotUsage({
       workspaceId: integration.workspaceId,
       userWorkosId: identity.userWorkosId,
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       usage: answer.totalUsage,
       idempotencyKey: `slack_bot:${integration.id}:${input.teamId}:${input.channelId}:${input.messageTs}`,
     });
@@ -331,7 +331,7 @@ async function resolveBrainTargets(
     });
     if (brains.length === 0) return { kind: "none" };
     const ordered = [...brains].sort((a, b) =>
-      a.slug === DEFAULT_GOAT_BRAIN_SLUG ? -1 : b.slug === DEFAULT_GOAT_BRAIN_SLUG ? 1 : 0,
+      a.slug === DEFAULT_BRAIN_SLUG ? -1 : b.slug === DEFAULT_BRAIN_SLUG ? 1 : 0,
     );
     return {
       kind: "targets",
@@ -457,7 +457,7 @@ async function runSlackChatAgent(input: {
 
   return runOpenCompanyChatAgent({
     messages: [...input.contextMessages, { role: "user", content: finalUserContent }],
-    model: DEFAULT_GOAT_MODEL,
+    model: DEFAULT_MODEL,
     gatewayApiKey,
     feature: "slack-bot",
     taskToolsEnabled: false,

@@ -13,7 +13,7 @@ vi.mock("@opencompany/db/brain-files", () => ({
   replaceBrainAssetFile: vi.fn(),
 }));
 vi.mock("@opencompany/db/brain-ingest", () => ({
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND: "goat-brain-agent-ingest",
+  BRAIN_AGENT_INGEST_JOB_KIND: "goat-brain-agent-ingest",
   upsertBrainSourceItemAndEnqueue: vi.fn(),
 }));
 vi.mock("@/lib/brain", () => ({

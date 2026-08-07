@@ -44,7 +44,7 @@ export type ActionEffects = {
   readonly uncertainAfterDispatch: boolean;
 };
 
-export const GOAT_ACTION_EFFECTS_READ = {
+export const ACTION_EFFECTS_READ = {
   mutatesExternalSystem: false,
   metered: false,
   idempotent: true,
@@ -52,7 +52,7 @@ export const GOAT_ACTION_EFFECTS_READ = {
   uncertainAfterDispatch: false,
 } as const satisfies ActionEffects;
 
-export const GOAT_ACTION_EFFECTS_WRITE = {
+export const ACTION_EFFECTS_WRITE = {
   mutatesExternalSystem: true,
   metered: false,
   idempotent: false,
@@ -60,7 +60,7 @@ export const GOAT_ACTION_EFFECTS_WRITE = {
   uncertainAfterDispatch: true,
 } as const satisfies ActionEffects;
 
-export const GOAT_ACTION_EFFECTS_METERED_READ = {
+export const ACTION_EFFECTS_METERED_READ = {
   mutatesExternalSystem: false,
   metered: true,
   idempotent: false,

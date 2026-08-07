@@ -1,12 +1,12 @@
 import { createRemoteMcpIntegration, type RemoteMcpProviderState } from "./remote-mcp-oauth";
 
-export const GOAT_LINEAR_MCP_ENDPOINT_URL = "https://mcp.linear.app/mcp";
-const GOAT_LINEAR_PROVIDER = "linear" as const;
+export const LINEAR_MCP_ENDPOINT_URL = "https://mcp.linear.app/mcp";
+const LINEAR_PROVIDER = "linear" as const;
 
 const linearMcpIntegration = createRemoteMcpIntegration({
-  provider: GOAT_LINEAR_PROVIDER,
+  provider: LINEAR_PROVIDER,
   displayName: "Linear",
-  endpointUrl: GOAT_LINEAR_MCP_ENDPOINT_URL,
+  endpointUrl: LINEAR_MCP_ENDPOINT_URL,
   externalId: "linear_mcp",
   storedScopes: ["read", "write"],
   authScope: "read write",

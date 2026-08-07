@@ -3,7 +3,7 @@ import type { HarnessSpec } from "@opencompany/db/schema";
 const CODEX_CHAT_WAKE_TIMEOUT_MS = 5_000;
 const CODEX_CHAT_SANDBOX_STATUS_TIMEOUT_MS = 5_000;
 const CODING_WORKSPACE_RUNTIME_ACCESS_TIMEOUT_MS = 10_000;
-const GOAT_DICTATION_ACCESS_TIMEOUT_MS = 10_000;
+const DICTATION_ACCESS_TIMEOUT_MS = 10_000;
 
 export type CodexSandboxStatus = "running" | "sleeping" | "deleted";
 export type CodingWorkspaceRuntimeAccess = {
@@ -217,7 +217,7 @@ export async function requestDictationAccess(input: {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), GOAT_DICTATION_ACCESS_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), DICTATION_ACCESS_TIMEOUT_MS);
   let response: Response;
   try {
     response = await fetch(`${internalBaseUrl}/internal/goat/dictation/access`, {

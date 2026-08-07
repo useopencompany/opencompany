@@ -11,8 +11,8 @@ import {
   buildCursorMcpConfig,
   buildCursorMcpDeeplink,
   buildMcpFirstPrompt,
-  GOAT_USER_MCP_ENDPOINT_PATH,
   OPENCOMPANY_MCP_SERVER_NAME,
+  USER_MCP_ENDPOINT_PATH,
 } from "@/lib/mcp-setup";
 import { checkMcpSetupStatusAction, savePreferredMcpClientAction } from "@/lib/mcp-setup-actions";
 
@@ -97,9 +97,7 @@ export function McpSetupGuide({
 
   const selectedClient = CLIENTS.find((definition) => definition.id === client) ?? null;
   const origin = hydrated ? window.location.origin.replace(/\/+$/, "") : "";
-  const connectorUrl = origin
-    ? `${origin}${GOAT_USER_MCP_ENDPOINT_PATH}`
-    : GOAT_USER_MCP_ENDPOINT_PATH;
+  const connectorUrl = origin ? `${origin}${USER_MCP_ENDPOINT_PATH}` : USER_MCP_ENDPOINT_PATH;
   const cursorConfig = useMemo(
     () =>
       JSON.stringify(
