@@ -379,6 +379,9 @@ jobs:
             "GOAT_HUBSPOT_CLIENT_ID",
             "GOAT_HUBSPOT_CLIENT_SECRET",
             "GOAT_HUBSPOT_STATE_SECRET",
+            "GOAT_X_CLIENT_ID",
+            "GOAT_X_CLIENT_SECRET",
+            "GOAT_X_STATE_SECRET",
           ];
 
           async function listProductionEnv(projectId, label, teamId, token) {
