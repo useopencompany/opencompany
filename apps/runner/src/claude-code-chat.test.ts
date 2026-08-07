@@ -1,6 +1,10 @@
 import type { CodexChatSession, CodexChatTurn, HarnessSpec, Task } from "@opencompany/db/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { extractClaudeScheduleWakeup, runClaudeCodeChatTurn } from "./claude-code-chat";
+import {
+  extractClaudeScheduleWakeup,
+  isClaudeCodeAuthenticationFailure,
+  runClaudeCodeChatTurn,
+} from "./claude-code-chat";
 import { CodexChatRetryableInfrastructureError } from "./codex-chat-errors";
 import type { RunnerEnv } from "./env";
 
@@ -148,6 +152,25 @@ vi.mock("./sandbox", () => ({
 vi.mock("./codex-managed-skills", () => ({
   materializeCodexSkillSnapshotsForSession: skillMocks.materializeCodexSkillSnapshotsForSession,
 }));
+
+describe("isClaudeCodeAuthenticationFailure", () => {
+  it.each([
+    "Failed to authenticate. API Error: 401",
+    "OAuth token has expired",
+    "Unauthorized: login expired",
+    "Invalid API key",
+  ])("recognizes rejected credentials: %s", (message) => {
+    expect(isClaudeCodeAuthenticationFailure(message)).toBe(true);
+  });
+
+  it.each([
+    "You're out of usage credits · resets 10am (UTC)",
+    "Credit balance is too low",
+    "5-hour limit reached - resets 10am (UTC)",
+  ])("keeps credentials connected for usage limits: %s", (message) => {
+    expect(isClaudeCodeAuthenticationFailure(message)).toBe(false);
+  });
+});
 
 describe("extractClaudeScheduleWakeup", () => {
   it("uses the last valid ScheduleWakeup call and clamps its delay", () => {
