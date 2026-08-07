@@ -5,30 +5,34 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("Goat WorkOS URL helpers", () => {
-  it("prefers the Goat app URL over a shared web app URL", () => {
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://my.opencompany.chat/");
-    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://my.opencompany.cloud");
+describe("WorkOS URL helpers", () => {
+  it("normalizes the configured app URL", () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://my.opencompany.chat/");
 
     expect(getGoatAppUrl()).toBe("https://my.opencompany.chat");
   });
 
-  it("builds the callback URL from the Goat app URL before using a shared web callback", () => {
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://my.opencompany.chat");
-    vi.stubEnv("GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI", "");
-    vi.stubEnv("NEXT_PUBLIC_WORKOS_REDIRECT_URI", "https://my.opencompany.cloud/auth/callback");
+  it("prefers the explicit redirect URI over the app-URL-derived callback", () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://my.opencompany.chat");
+    vi.stubEnv("NEXT_PUBLIC_WORKOS_REDIRECT_URI", "https://my.opencompany.chat/auth/custom");
+
+    expect(getGoatWorkOSRedirectUri()).toBe("https://my.opencompany.chat/auth/custom");
+  });
+
+  it("derives the callback from the app URL when no redirect URI is set", () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://my.opencompany.chat");
+    vi.stubEnv("NEXT_PUBLIC_WORKOS_REDIRECT_URI", "");
 
     expect(getGoatWorkOSRedirectUri()).toBe("https://my.opencompany.chat/auth/callback");
   });
 
-  it("does not use the legacy web callback in production when Goat is misconfigured", () => {
+  it("fails in production when neither redirect URI nor app URL is configured", () => {
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "");
-    vi.stubEnv("GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI", "");
-    vi.stubEnv("NEXT_PUBLIC_WORKOS_REDIRECT_URI", "https://my.opencompany.cloud/auth/callback");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "");
+    vi.stubEnv("NEXT_PUBLIC_WORKOS_REDIRECT_URI", "");
 
     expect(() => getGoatWorkOSRedirectUri()).toThrow(
-      "GOAT_NEXT_PUBLIC_APP_URL is required for Goat in production.",
+      "NEXT_PUBLIC_APP_URL is required in production.",
     );
   });
 });

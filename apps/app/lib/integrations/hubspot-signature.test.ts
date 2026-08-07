@@ -14,10 +14,10 @@ function sign(input: { method?: string; uri?: string; rawBody: string; timestamp
 
 describe("verifyGoatHubspotWebhookSignature", () => {
   beforeEach(() => {
-    process.env.GOAT_HUBSPOT_CLIENT_SECRET = SECRET;
+    process.env.HUBSPOT_CLIENT_SECRET = SECRET;
   });
   afterEach(() => {
-    delete process.env.GOAT_HUBSPOT_CLIENT_SECRET;
+    delete process.env.HUBSPOT_CLIENT_SECRET;
   });
 
   it("accepts a valid v3 signature", () => {
@@ -99,7 +99,7 @@ describe("verifyGoatHubspotWebhookSignature", () => {
         nowMs: NOW_MS,
       }),
     ).toBe(false);
-    delete process.env.GOAT_HUBSPOT_CLIENT_SECRET;
+    delete process.env.HUBSPOT_CLIENT_SECRET;
     const timestamp = String(NOW_MS);
     expect(
       verifyGoatHubspotWebhookSignature({

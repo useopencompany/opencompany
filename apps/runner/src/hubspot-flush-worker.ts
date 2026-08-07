@@ -43,10 +43,10 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "goat-hubs
 // comes first. One agent ingest session then covers the whole window. A CRM
 // edit session touches many properties in a quick burst, then the record goes
 // quiet for days, so a Linear-sized quiet period captures the whole burst.
-export const GOAT_HUBSPOT_QUIET_PERIOD_MS = 15 * 60_000;
-export const GOAT_HUBSPOT_MAX_WAIT_MS = 4 * 60 * 60_000;
-export const GOAT_HUBSPOT_MAX_WINDOW_EVENTS = 200;
-const GOAT_HUBSPOT_FLUSH_POLL_INTERVAL_MS = 60_000;
+export const HUBSPOT_QUIET_PERIOD_MS = 15 * 60_000;
+export const HUBSPOT_MAX_WAIT_MS = 4 * 60 * 60_000;
+export const HUBSPOT_MAX_WINDOW_EVENTS = 200;
+const HUBSPOT_FLUSH_POLL_INTERVAL_MS = 60_000;
 
 const ACTIVITY_PROPERTY_VALUE_MAX_CHARS = 500;
 
@@ -81,10 +81,8 @@ export async function listDueGoatHubspotObjectWindows(input: {
   maxWaitMs?: number;
 }): Promise<GoatHubspotDueWindow[]> {
   const now = input.now ?? new Date();
-  const quietCutoff = new Date(
-    now.getTime() - (input.quietPeriodMs ?? GOAT_HUBSPOT_QUIET_PERIOD_MS),
-  );
-  const maxWaitCutoff = new Date(now.getTime() - (input.maxWaitMs ?? GOAT_HUBSPOT_MAX_WAIT_MS));
+  const quietCutoff = new Date(now.getTime() - (input.quietPeriodMs ?? HUBSPOT_QUIET_PERIOD_MS));
+  const maxWaitCutoff = new Date(now.getTime() - (input.maxWaitMs ?? HUBSPOT_MAX_WAIT_MS));
   const result = await getDb().execute(sql`
     SELECT
       integration_id AS "integrationId",
@@ -298,10 +296,7 @@ export function startGoatHubspotFlushWorker(
   env: RunnerEnv,
   options: { pollIntervalMs?: number } = {},
 ) {
-  const pollIntervalMs = Math.max(
-    1_000,
-    options.pollIntervalMs ?? GOAT_HUBSPOT_FLUSH_POLL_INTERVAL_MS,
-  );
+  const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? HUBSPOT_FLUSH_POLL_INTERVAL_MS);
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let wake: (() => void) | null = null;
@@ -393,7 +388,7 @@ async function previewBufferedHubspotEvents(window: GoatHubspotDueWindow) {
         AND object_id = ${window.objectId}
         AND source_item_id IS NULL
       ORDER BY event_time ASC, id ASC
-      LIMIT ${GOAT_HUBSPOT_MAX_WINDOW_EVENTS}
+      LIMIT ${HUBSPOT_MAX_WINDOW_EVENTS}
     `),
   );
 }

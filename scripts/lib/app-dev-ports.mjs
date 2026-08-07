@@ -4,9 +4,9 @@
 
 import { findPortListeners, normalizePort } from "./port-kill.mjs";
 
-const DEFAULT_GOAT_PORT = "3002";
+const DEFAULT_APP_PORT = "3002";
 const DEFAULT_RUNNER_PORT = "3040";
-const DEFAULT_GOAT_HTTPS_PORT = "3443";
+const DEFAULT_APP_HTTPS_PORT = "3443";
 const DEFAULT_DURABLE_STREAMS_PORT = "4150";
 
 export function resolveGoatDevPorts({ env = process.env } = {}) {
@@ -42,9 +42,9 @@ export function selectGoatDevPorts({
 
 function resolveConventionalGoatDevPorts({ env }) {
   return {
-    app: optionalPort(env.GOAT_PORT, "GOAT_PORT") ?? DEFAULT_GOAT_PORT,
+    app: optionalPort(env.APP_PORT, "APP_PORT") ?? DEFAULT_APP_PORT,
     runner: configuredRunnerPort(env) ?? DEFAULT_RUNNER_PORT,
-    https: optionalPort(env.GOAT_HTTPS_PORT, "GOAT_HTTPS_PORT") ?? DEFAULT_GOAT_HTTPS_PORT,
+    https: optionalPort(env.APP_HTTPS_PORT, "APP_HTTPS_PORT") ?? DEFAULT_APP_HTTPS_PORT,
     durableStreams:
       optionalPort(env.DURABLE_STREAMS_DEV_PORT, "DURABLE_STREAMS_DEV_PORT") ??
       DEFAULT_DURABLE_STREAMS_PORT,
@@ -60,10 +60,10 @@ export function isolatedGoatDevEnvironment(ports, { httpsDisabled = false } = {}
   const runnerOrigin = `http://localhost:${ports.runner}`;
 
   return {
-    GOAT_PORT: ports.app,
-    GOAT_HTTPS_PORT: ports.https,
-    GOAT_NEXT_PUBLIC_APP_URL: appOrigin,
-    GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: `${appOrigin}/auth/callback`,
+    APP_PORT: ports.app,
+    APP_HTTPS_PORT: ports.https,
+    NEXT_PUBLIC_APP_URL: appOrigin,
+    NEXT_PUBLIC_WORKOS_REDIRECT_URI: `${appOrigin}/auth/callback`,
     PORT: ports.runner,
     RUNNER_INTERNAL_URL: runnerOrigin,
     RUNNER_PUBLIC_URL: runnerOrigin,

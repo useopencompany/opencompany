@@ -20,11 +20,7 @@ export function isInitialDocumentRequest(request: RedirectRequest) {
 export function localGoatHttpsRedirectUrl(request: RedirectRequest) {
   if (!isInitialDocumentRequest(request)) return null;
 
-  const configured = (
-    process.env.GOAT_NEXT_PUBLIC_APP_URL?.trim() ||
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-    ""
-  ).replace(/\/+$/, "");
+  const configured = (process.env.NEXT_PUBLIC_APP_URL?.trim() || "").replace(/\/+$/, "");
   if (!configured.startsWith("https://localhost")) return null;
 
   let targetOrigin: URL;

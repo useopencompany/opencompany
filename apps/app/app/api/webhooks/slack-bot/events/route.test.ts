@@ -94,7 +94,7 @@ describe("POST /api/webhooks/slack-bot/events", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     afterTasks.length = 0;
-    process.env.GOAT_SLACK_BOT_SIGNING_SECRET = SIGNING_SECRET;
+    process.env.SLACK_BOT_SIGNING_SECRET = SIGNING_SECRET;
     vi.mocked(claimGoatSlackBotEvent).mockResolvedValue(CLAIM);
     vi.mocked(getGoatSlackBotThreadParticipation).mockResolvedValue(null);
   });

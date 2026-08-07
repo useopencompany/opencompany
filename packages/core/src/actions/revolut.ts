@@ -236,7 +236,7 @@ async function withRevolutAuth<T>(
       throw new GoatActionAuthError(
         "auth_expired",
         "revolut",
-        `Revolut Business rejected the configured API token for ${connection.accountLabel}. Generate a fresh READ-scoped access token and update GOAT_REVOLUT_BUSINESS_API_TOKEN.`,
+        `Revolut Business rejected the configured API token for ${connection.accountLabel}. Generate a fresh READ-scoped access token and update REVOLUT_BUSINESS_API_TOKEN.`,
       );
     }
     throw error;

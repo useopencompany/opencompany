@@ -21,18 +21,18 @@ export type GoatSlackOAuthResult = {
 };
 
 const SLACK_PROVIDER = "slack" as const;
-const GOAT_SLACK_INTEGRATION_ENVS = [
-  "GOAT_SLACK_CLIENT_ID",
-  "GOAT_SLACK_CLIENT_SECRET",
-  "GOAT_SLACK_SIGNING_SECRET",
-  "GOAT_SLACK_STATE_SECRET",
+const SLACK_INTEGRATION_ENVS = [
+  "SLACK_CLIENT_ID",
+  "SLACK_CLIENT_SECRET",
+  "SLACK_SIGNING_SECRET",
+  "SLACK_STATE_SECRET",
 ] as const;
 
 // User-token scopes: the app reads what the connected user can read (their
 // channels and DMs) and never gets a bot presence in the workspace. The
 // search:read scope powers search.messages for the chat capability; connections
 // created before it was added keep working without search until reconnected.
-export const GOAT_SLACK_USER_SCOPES = [
+export const SLACK_USER_SCOPES = [
   "channels:history",
   "groups:history",
   "im:history",
@@ -47,7 +47,7 @@ export const GOAT_SLACK_USER_SCOPES = [
 ] as const;
 
 export function isGoatSlackIntegrationConfigured() {
-  return GOAT_SLACK_INTEGRATION_ENVS.every((name) => Boolean(process.env[name]?.trim()));
+  return SLACK_INTEGRATION_ENVS.every((name) => Boolean(process.env[name]?.trim()));
 }
 
 export async function getGoatSlackIntegrationState(
@@ -129,9 +129,9 @@ export function verifyGoatSlackIntegrationState(state: string): GoatSlackIntegra
 
 export function buildGoatSlackAuthorizationUrl(state: string) {
   const url = new URL("https://slack.com/oauth/v2/authorize");
-  url.searchParams.set("client_id", requiredEnv("GOAT_SLACK_CLIENT_ID"));
+  url.searchParams.set("client_id", requiredEnv("SLACK_CLIENT_ID"));
   // user_scope (not scope): we request a user token only, no bot token.
-  url.searchParams.set("user_scope", GOAT_SLACK_USER_SCOPES.join(","));
+  url.searchParams.set("user_scope", SLACK_USER_SCOPES.join(","));
   url.searchParams.set("redirect_uri", goatSlackCallbackUrl());
   url.searchParams.set("state", state);
   return url.toString();
@@ -144,8 +144,8 @@ export async function exchangeGoatSlackCode(code: string): Promise<GoatSlackOAut
   }>({
     method: "oauth.v2.access",
     form: {
-      client_id: requiredEnv("GOAT_SLACK_CLIENT_ID"),
-      client_secret: requiredEnv("GOAT_SLACK_CLIENT_SECRET"),
+      client_id: requiredEnv("SLACK_CLIENT_ID"),
+      client_secret: requiredEnv("SLACK_CLIENT_SECRET"),
       code,
       redirect_uri: goatSlackCallbackUrl(),
     },
@@ -251,9 +251,7 @@ function sanitizeReturnTo(value: string) {
 }
 
 function signStateBody(body: string) {
-  return createHmac("sha256", requiredEnv("GOAT_SLACK_STATE_SECRET"))
-    .update(body)
-    .digest("base64url");
+  return createHmac("sha256", requiredEnv("SLACK_STATE_SECRET")).update(body).digest("base64url");
 }
 
 function safeEqual(left: string, right: string) {

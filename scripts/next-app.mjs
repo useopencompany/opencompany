@@ -14,23 +14,23 @@ const args = argv.slice(2);
 const env = { ...process.env };
 
 if (args[0] === "dev") {
-  env.PORT = env.GOAT_PORT?.trim() || "3002";
+  env.PORT = env.APP_PORT?.trim() || "3002";
   const hasPortArg = args.includes("-p") || args.includes("--port");
   if (!hasPortArg) {
     args.push("--port", env.PORT);
   }
 
-  const appUrl = env.GOAT_NEXT_PUBLIC_APP_URL?.trim() || `http://localhost:${env.PORT}`;
+  const appUrl = env.NEXT_PUBLIC_APP_URL?.trim() || `http://localhost:${env.PORT}`;
   env.NEXT_PUBLIC_APP_URL = appUrl;
   env.NEXT_PUBLIC_WORKOS_REDIRECT_URI =
-    env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim() || `${appUrl}/auth/callback`;
+    env.NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim() || `${appUrl}/auth/callback`;
   env.WORKOS_REDIRECT_URI ||= env.NEXT_PUBLIC_WORKOS_REDIRECT_URI;
 } else {
-  if (env.GOAT_NEXT_PUBLIC_APP_URL?.trim()) {
-    env.NEXT_PUBLIC_APP_URL = env.GOAT_NEXT_PUBLIC_APP_URL.trim();
+  if (env.NEXT_PUBLIC_APP_URL?.trim()) {
+    env.NEXT_PUBLIC_APP_URL = env.NEXT_PUBLIC_APP_URL.trim();
   }
-  if (env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim()) {
-    env.NEXT_PUBLIC_WORKOS_REDIRECT_URI = env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI.trim();
+  if (env.NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim()) {
+    env.NEXT_PUBLIC_WORKOS_REDIRECT_URI = env.NEXT_PUBLIC_WORKOS_REDIRECT_URI.trim();
     env.WORKOS_REDIRECT_URI ||= env.NEXT_PUBLIC_WORKOS_REDIRECT_URI;
   }
 }

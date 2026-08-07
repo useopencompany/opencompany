@@ -51,14 +51,14 @@ describe("submitGoatFeedback", () => {
   beforeEach(() => {
     currentGoatUserMock.mockResolvedValue(authContext());
     process.env.LINEAR_API_KEY = "lin_api_test";
-    process.env.GOAT_FEEDBACK_LINEAR_TEAM_ID = "team_1";
+    process.env.FEEDBACK_LINEAR_TEAM_ID = "team_1";
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     delete process.env.LINEAR_API_KEY;
-    delete process.env.GOAT_FEEDBACK_LINEAR_TEAM_ID;
+    delete process.env.FEEDBACK_LINEAR_TEAM_ID;
   });
 
   it("rejects an empty message", async () => {

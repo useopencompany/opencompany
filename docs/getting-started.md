@@ -153,7 +153,7 @@ into the runner process so sandboxed coding agents can call back to `/broker/*`.
 `bun run dev:goat` also starts Caddy when available and prints the local HTTPS URL to open so
 Electric shape requests use HTTP/2. The URL is normally `https://localhost:3443`; when those ports
 are occupied, a Conductor workspace falls back to its isolated port range. Set
-`OPENCOMPANY_NGROK_DISABLED=1` to skip the tunnel, or `OPENCOMPANY_GOAT_HTTPS_DISABLED=1` to skip
+`OPENCOMPANY_NGROK_DISABLED=1` to skip the tunnel, or `APP_HTTPS_DISABLED=1` to skip
 Caddy and use HTTP. Register `https://localhost:3443/auth/callback` in WorkOS for fixed-port local
 development and allow the printed localhost callback port when using parallel workspaces.
 
@@ -203,8 +203,8 @@ in Infisical `dev` + `/web` and `/runner`:
 - `GITHUB_APP_INSTALLATION_ID`
 - `GITHUB_APP_PRIVATE_KEY`
 - `STRIPE_SECRET_KEY`
-- `GOAT_STRIPE_API_KEY`
-- `GOAT_STRIPE_CHECKOUT_ENABLED`
+- `STRIPE_API_KEY`
+- `STRIPE_CHECKOUT_ENABLED`
 - `CRON_SECRET`
 - optional runner, Linear, analytics, and observability values from `.env.example`
 
@@ -226,7 +226,7 @@ set `STRIPE_CLI_PROJECT_NAME` before running setup.
 
 For an existing checkout where only Stripe is missing, run `bun run setup:stripe`.
 
-Goat billing additionally requires `GOAT_STRIPE_API_KEY`. Setup prefers an `rk_test_` key from
+Goat billing additionally requires `STRIPE_API_KEY`. Setup prefers an `rk_test_` key from
 the Stripe CLI. Stripe may instead issue an expiring `sk_test_` CLI key; setup accepts that only as a
 gitignored local-development fallback. It refuses non-restricted keys without an expiry, and hosted
 environments always require a dedicated restricted key stored in Infisical. If the active profile
@@ -241,7 +241,7 @@ separately in test and live modes with payment methods, invoice history, and tax
 Limit the Goat restricted key to Customer, Checkout Session, Customer Portal, PaymentIntent, and
 Subscription read/write permissions (seat reconciliation updates subscription items; auto-refill
 creates off-session PaymentIntents on saved cards).
-Hosted live Checkout also requires `GOAT_STRIPE_CHECKOUT_ENABLED=true`; keep it false until the
+Hosted live Checkout also requires `STRIPE_CHECKOUT_ENABLED=true`; keep it false until the
 business's Stripe Tax registrations are configured.
 
 Goat credit top-up Checkouts accept promotion codes. For internal no-cost tests, create a 100%-off

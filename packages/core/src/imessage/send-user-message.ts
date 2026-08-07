@@ -14,7 +14,7 @@ export type SendUserMessageResult = { ok: true; delivered: true } | { ok: false;
 export type SendUserMessageRunner = (message: string) => Promise<SendUserMessageResult>;
 
 function dailySendCap(): number {
-  const parsed = Number.parseInt(process.env.GOAT_IMESSAGE_DAILY_CAP ?? "", 10);
+  const parsed = Number.parseInt(process.env.IMESSAGE_DAILY_CAP ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_DAILY_SEND_CAP;
 }
 

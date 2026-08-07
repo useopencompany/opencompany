@@ -11,8 +11,8 @@ export async function loadProviders(
 ): Promise<RetrievalProviders> {
   const apiKey = env.VERCEL_AI_GATEWAY_API_KEY;
   if (!apiKey) return {};
-  const baseUrl = env.GOAT_BRAIN_GATEWAY_BASE_URL;
-  const embeddingModel = env.GOAT_BRAIN_EMBEDDING_MODEL ?? "openai/text-embedding-3-small";
+  const baseUrl = env.BRAIN_GATEWAY_BASE_URL;
+  const embeddingModel = env.BRAIN_EMBEDDING_MODEL ?? "openai/text-embedding-3-small";
   const reporting = gatewayReportingFromEnv(env);
 
   const gateway = createGateway({

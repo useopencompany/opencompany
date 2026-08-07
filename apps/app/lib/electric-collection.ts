@@ -8,7 +8,7 @@ function shapeProxyUrl(): string {
   const origin =
     typeof window !== "undefined"
       ? window.location.origin
-      : (process.env.GOAT_NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") ?? "");
+      : (process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") ?? "");
   return `${origin}/api/electric/v1/shape`;
 }
 

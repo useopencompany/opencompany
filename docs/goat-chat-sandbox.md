@@ -30,10 +30,10 @@ apps/goat/sandbox-image/build-push.sh
 
 For local VCR authentication, `vercel env pull` supplies
 `VERCEL_OIDC_TOKEN`; the script uses it with Docker when present. You may
-instead set `GOAT_CHAT_SANDBOX_IMAGE_REF` to the complete VCR image reference.
+instead set `CHAT_SANDBOX_IMAGE_REF` to the complete VCR image reference.
 
 After the registry reports the image as ready, set the same reference as
-`GOAT_CHAT_SANDBOX_IMAGE` in Infisical `prod` + `/goat`, sync it to the Goat
+`CHAT_SANDBOX_IMAGE` in Infisical `prod` + `/goat`, sync it to the Goat
 Vercel project, and verify Sandbox authentication and Blob storage.
 
 If the image variable is absent, Goat creates a stock Node 24 sandbox and

@@ -34,10 +34,10 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "goat-slac
 // A window flushes after the channel has been quiet for the quiet period, or
 // once its oldest buffered message has waited out the max wait — whichever
 // comes first. One agent ingest session then covers the whole window.
-export const GOAT_SLACK_QUIET_PERIOD_MS = 12 * 60_000;
-export const GOAT_SLACK_MAX_WAIT_MS = 60 * 60_000;
-export const GOAT_SLACK_MAX_WINDOW_MESSAGES = 200;
-const GOAT_SLACK_FLUSH_POLL_INTERVAL_MS = 60_000;
+export const SLACK_QUIET_PERIOD_MS = 12 * 60_000;
+export const SLACK_MAX_WAIT_MS = 60 * 60_000;
+export const SLACK_MAX_WINDOW_MESSAGES = 200;
+const SLACK_FLUSH_POLL_INTERVAL_MS = 60_000;
 
 export type GoatSlackDueWindow = {
   integrationId: string;
@@ -63,8 +63,8 @@ export async function listDueGoatSlackConversationWindows(input: {
   maxWaitMs?: number;
 }): Promise<GoatSlackDueWindow[]> {
   const now = input.now ?? new Date();
-  const quietCutoff = new Date(now.getTime() - (input.quietPeriodMs ?? GOAT_SLACK_QUIET_PERIOD_MS));
-  const maxWaitCutoff = new Date(now.getTime() - (input.maxWaitMs ?? GOAT_SLACK_MAX_WAIT_MS));
+  const quietCutoff = new Date(now.getTime() - (input.quietPeriodMs ?? SLACK_QUIET_PERIOD_MS));
+  const maxWaitCutoff = new Date(now.getTime() - (input.maxWaitMs ?? SLACK_MAX_WAIT_MS));
   const result = await getDb().execute(sql`
     SELECT
       integration_id AS "integrationId",
@@ -240,16 +240,13 @@ async function previewBufferedSlackMessages(window: GoatSlackDueWindow) {
         AND channel_id = ${window.channelId}
         AND source_item_id IS NULL
       ORDER BY message_ts ASC
-      LIMIT ${GOAT_SLACK_MAX_WINDOW_MESSAGES}
+      LIMIT ${SLACK_MAX_WINDOW_MESSAGES}
     `),
   );
 }
 
 export function startGoatSlackFlushWorker(options: { pollIntervalMs?: number } = {}) {
-  const pollIntervalMs = Math.max(
-    1_000,
-    options.pollIntervalMs ?? GOAT_SLACK_FLUSH_POLL_INTERVAL_MS,
-  );
+  const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? SLACK_FLUSH_POLL_INTERVAL_MS);
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let wake: (() => void) | null = null;

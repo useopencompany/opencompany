@@ -92,7 +92,7 @@ describe("requestGoatCodingWorkspaceRuntimeAccess", () => {
   it("uses the same-origin dev proxy when Goat is HTTPS and the runner is local HTTP", async () => {
     vi.stubEnv("RUNNER_INTERNAL_URL", "http://127.0.0.1:3040");
     vi.stubEnv("RUNNER_PUBLIC_URL", "http://localhost:3040");
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://localhost:3443");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://localhost:3443");
     vi.stubEnv("RUNNER_INTERNAL_TOKEN", "token");
     vi.stubGlobal(
       "fetch",
@@ -123,7 +123,7 @@ describe("requestGoatCodingWorkspaceRuntimeAccess", () => {
   it("uses the hosted runner URL in production-style environments", async () => {
     vi.stubEnv("RUNNER_INTERNAL_URL", "https://runner-internal.example.com");
     vi.stubEnv("RUNNER_PUBLIC_URL", "https://runner.example.com");
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://goat.example.com");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://goat.example.com");
     vi.stubEnv("RUNNER_INTERNAL_TOKEN", "token");
     vi.stubGlobal(
       "fetch",
@@ -151,7 +151,7 @@ describe("requestGoatDictationAccess", () => {
   it("uses the same-origin dev proxy when Goat is HTTPS and the runner is local HTTP", async () => {
     vi.stubEnv("RUNNER_INTERNAL_URL", "http://127.0.0.1:3040");
     vi.stubEnv("RUNNER_PUBLIC_URL", "http://localhost:3040");
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://localhost:3443");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://localhost:3443");
     vi.stubEnv("RUNNER_INTERNAL_TOKEN", "token");
     vi.stubGlobal(
       "fetch",
@@ -172,7 +172,7 @@ describe("requestGoatDictationAccess", () => {
   it("uses the hosted runner URL in production-style environments", async () => {
     vi.stubEnv("RUNNER_INTERNAL_URL", "https://runner-internal.example.com");
     vi.stubEnv("RUNNER_PUBLIC_URL", "https://runner.example.com");
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://goat.example.com");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://goat.example.com");
     vi.stubEnv("RUNNER_INTERNAL_TOKEN", "token");
     vi.stubGlobal(
       "fetch",

@@ -15,12 +15,12 @@ let registered = false;
 
 export function registerGoatNextObservability(input: { serviceName?: string } = {}) {
   if (registered || !isGoatObservabilityEnabled()) return;
-  const endpoint = process.env.GOAT_OTEL_EXPORTER_OTLP_ENDPOINT?.trim();
+  const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim();
   if (!endpoint) return;
   registered = true;
 
   const serviceName = input.serviceName ?? GOAT_OBSERVABILITY_SERVICE_NAME;
-  const headers = parseOtlpHeaders(process.env.GOAT_OTEL_EXPORTER_OTLP_HEADERS);
+  const headers = parseOtlpHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS);
   registerOTel({
     serviceName,
     traceExporter: new OTLPHttpJsonTraceExporter({

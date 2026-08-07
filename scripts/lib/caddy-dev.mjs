@@ -6,23 +6,23 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const DEFAULT_GOAT_HTTPS_PORT = "3443";
+export const DEFAULT_APP_HTTPS_PORT = "3443";
 export const GOAT_HTTPS_DISABLED_VALUES = new Set(["1", "true", "yes", "on"]);
 
 export function goatHttpsDisabled(env = process.env) {
   return GOAT_HTTPS_DISABLED_VALUES.has(
-    String(env.OPENCOMPANY_GOAT_HTTPS_DISABLED ?? "")
+    String(env.APP_HTTPS_DISABLED ?? "")
       .trim()
       .toLowerCase(),
   );
 }
 
 export function goatHttpsPort(env = process.env) {
-  return String(env.GOAT_HTTPS_PORT?.trim() || DEFAULT_GOAT_HTTPS_PORT);
+  return String(env.APP_HTTPS_PORT?.trim() || DEFAULT_APP_HTTPS_PORT);
 }
 
 export function goatHttpsOrigin(env = process.env) {
-  const configured = env.GOAT_NEXT_PUBLIC_APP_URL?.trim();
+  const configured = env.NEXT_PUBLIC_APP_URL?.trim();
   if (configured?.startsWith("https://localhost")) {
     try {
       return new URL(configured).origin;
@@ -79,7 +79,7 @@ export async function startGoatLocalHttpsProxy({
   onWarning = console.warn,
 } = {}) {
   if (goatHttpsDisabled(env)) {
-    onWarning("\nGoat local HTTPS is disabled by OPENCOMPANY_GOAT_HTTPS_DISABLED=1.\n");
+    onWarning("\nGoat local HTTPS is disabled by APP_HTTPS_DISABLED=1.\n");
     return null;
   }
   if (!targetPort) {

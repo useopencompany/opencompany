@@ -17,14 +17,14 @@ WorkOS documents the native loopback flow in [Connect with OAuth](https://workos
 Configure the Goat server with the same environment and application:
 
 ```dotenv
-GOAT_AUTHKIT_DOMAIN="https://your-environment.authkit.app"
-GOAT_MACOS_OAUTH_AUDIENCE="client_..."
-GOAT_MACOS_OAUTH_CLIENT_ID="client_..."
+AUTHKIT_DOMAIN="https://your-environment.authkit.app"
+MACOS_OAUTH_AUDIENCE="client_..."
+MACOS_OAUTH_CLIENT_ID="client_..."
 ```
 
-`GOAT_MACOS_OAUTH_CLIENT_ID` is a public identifier used by the native PKCE flow. WorkOS access
+`MACOS_OAUTH_CLIENT_ID` is a public identifier used by the native PKCE flow. WorkOS access
 tokens use a separate resource identifier for `aud`, so the server verifies that value through
-`GOAT_MACOS_OAUTH_AUDIENCE` together with the JWT issuer, signature, and expiry. It then resolves
+`MACOS_OAUTH_AUDIENCE` together with the JWT issuer, signature, and expiry. It then resolves
 `sub` and `org_id` to an onboarded Goat user and workspace membership.
 
 ## Local configuration

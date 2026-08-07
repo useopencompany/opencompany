@@ -117,7 +117,7 @@ bun run dev:goat
 ```
 
 When ngrok is available, `dev:goat` injects the public ngrok origin as
-`GOAT_NEXT_PUBLIC_APP_URL`, `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI`,
+`NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_WORKOS_REDIRECT_URI`,
 `NEXT_PUBLIC_APP_URL`, and `NEXT_PUBLIC_WORKOS_REDIRECT_URI` for that dev process. It also exposes
 runner callback routes through the same public origin and sets `RUNNER_LLM_BROKER_PUBLIC_URL`.
 

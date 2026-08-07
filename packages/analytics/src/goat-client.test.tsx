@@ -20,8 +20,8 @@ vi.mock("@opencompany/observability", () => ({
 
 describe("GoatAnalyticsProvider", () => {
   it("captures one explicit app event with all automatic collection disabled", async () => {
-    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_TOKEN", "phc_goat_test");
-    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_HOST", "https://eu.i.posthog.com");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://eu.i.posthog.com");
 
     const { rerender } = render(
       <GoatAnalyticsProvider

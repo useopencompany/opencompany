@@ -10,7 +10,7 @@ afterEach(() => {
 
 describe("GET /mcp", () => {
   it("challenges missing bearer tokens with MCP resource metadata", async () => {
-    vi.stubEnv("GOAT_AUTHKIT_DOMAIN", "https://example.authkit.app");
+    vi.stubEnv("AUTHKIT_DOMAIN", "https://example.authkit.app");
 
     const response = await GET(new Request("https://goat.example.com/mcp"));
 
@@ -21,7 +21,7 @@ describe("GET /mcp", () => {
   });
 
   it("reports missing AuthKit configuration before authentication", async () => {
-    vi.stubEnv("GOAT_AUTHKIT_DOMAIN", "");
+    vi.stubEnv("AUTHKIT_DOMAIN", "");
 
     const response = await GET(new Request("https://goat.example.com/mcp"));
 

@@ -16,10 +16,10 @@ let sdk: NodeSDK | null = null;
 
 export function registerGoatNodeObservability(input: { serviceName?: string } = {}) {
   if (sdk || !isGoatObservabilityEnabled()) return null;
-  const endpoint = process.env.GOAT_OTEL_EXPORTER_OTLP_ENDPOINT?.trim();
+  const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim();
   if (!endpoint) return null;
 
-  const headers = parseOtlpHeaders(process.env.GOAT_OTEL_EXPORTER_OTLP_HEADERS);
+  const headers = parseOtlpHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS);
   const traceExporter = new OTLPTraceExporter({
     url: tracesEndpoint(endpoint),
     ...(headers ? { headers } : {}),

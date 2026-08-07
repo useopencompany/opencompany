@@ -12,19 +12,19 @@ import {
 
 type DbLike = any;
 
-export const GOAT_HUBSPOT_OBJECT_TYPES = ["contact", "company", "deal"] as const;
+export const HUBSPOT_OBJECT_TYPES = ["contact", "company", "deal"] as const;
 
 export type GoatHubspotObjectTypeRef = {
   id: GoatHubspotObjectType;
 };
 
-export const GOAT_HUBSPOT_EVENT_TYPES = [
+export const HUBSPOT_EVENT_TYPES = [
   "object_created",
   "object_updated",
   "object_stage_changed",
 ] as const;
 
-export type GoatHubspotEventType = (typeof GOAT_HUBSPOT_EVENT_TYPES)[number];
+export type GoatHubspotEventType = (typeof HUBSPOT_EVENT_TYPES)[number];
 
 export type GoatHubspotEventRef = {
   id: GoatHubspotEventType;
@@ -113,9 +113,7 @@ export function goatHubspotEventTypeFor(input: {
 }
 
 export function isGoatHubspotObjectType(value: unknown): value is GoatHubspotObjectType {
-  return (
-    typeof value === "string" && (GOAT_HUBSPOT_OBJECT_TYPES as readonly string[]).includes(value)
-  );
+  return typeof value === "string" && (HUBSPOT_OBJECT_TYPES as readonly string[]).includes(value);
 }
 
 export async function listGoatHubspotIntegrationsForPortal(
@@ -238,7 +236,5 @@ function parseEventRefs(value: unknown): GoatHubspotEventRef[] | undefined {
 }
 
 function isGoatHubspotEventType(value: unknown): value is GoatHubspotEventType {
-  return (
-    typeof value === "string" && (GOAT_HUBSPOT_EVENT_TYPES as readonly string[]).includes(value)
-  );
+  return typeof value === "string" && (HUBSPOT_EVENT_TYPES as readonly string[]).includes(value);
 }

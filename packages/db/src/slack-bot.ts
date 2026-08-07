@@ -14,7 +14,7 @@ import { type GoatSlackBrainSourceConfig, parseGoatSlackBrainSourceConfig } from
 
 type DbLike = any;
 
-export const GOAT_SLACK_BOT_EVENT_CLAIM_LEASE_MS = 5 * 60 * 1000;
+export const SLACK_BOT_EVENT_CLAIM_LEASE_MS = 5 * 60 * 1000;
 
 export type GoatSlackBotEventClaim = {
   eventId: string;
@@ -171,7 +171,7 @@ export async function claimGoatSlackBotEvent(
   if (!eventId || !teamId) return null;
 
   const now = input.now ?? new Date();
-  const staleBefore = new Date(now.getTime() - GOAT_SLACK_BOT_EVENT_CLAIM_LEASE_MS);
+  const staleBefore = new Date(now.getTime() - SLACK_BOT_EVENT_CLAIM_LEASE_MS);
   const claimId = `gsbec_${randomUUID().replace(/-/g, "")}`;
   const [claimed] = await db
     .insert(goatSlackBotEventClaims)
@@ -219,7 +219,7 @@ export async function releaseGoatSlackBotEvent(
     );
 }
 
-export const GOAT_SLACK_BOT_THREAD_PARTICIPATION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export const SLACK_BOT_THREAD_PARTICIPATION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 export type GoatSlackBotThreadRef = {
   teamId: string;
@@ -264,7 +264,7 @@ export async function getGoatSlackBotThreadParticipation(
   db: DbLike = getDb(),
 ): Promise<{ integrationId: string } | null> {
   const cutoff = new Date(
-    (input.now ?? new Date()).getTime() - GOAT_SLACK_BOT_THREAD_PARTICIPATION_TTL_MS,
+    (input.now ?? new Date()).getTime() - SLACK_BOT_THREAD_PARTICIPATION_TTL_MS,
   );
   const rows = await db
     .select({ integrationId: goatSlackBotThreadParticipation.integrationId })
@@ -287,7 +287,7 @@ export async function pruneGoatSlackBotThreadParticipation(
   now: Date = new Date(),
   db: DbLike = getDb(),
 ): Promise<void> {
-  const cutoff = new Date(now.getTime() - GOAT_SLACK_BOT_THREAD_PARTICIPATION_TTL_MS);
+  const cutoff = new Date(now.getTime() - SLACK_BOT_THREAD_PARTICIPATION_TTL_MS);
   await db
     .delete(goatSlackBotThreadParticipation)
     .where(lt(goatSlackBotThreadParticipation.updatedAt, cutoff));

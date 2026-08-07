@@ -140,7 +140,7 @@ export async function getGoatAvailableHarnessTools(
     getGoatGitHubIntegrationState(userWorkosId),
   ]);
   const tools: GoatTaskToolName[] = ["exa_search"];
-  if (process.env.RUNNER_GOAT_BROWSER_ENABLED?.trim().toLowerCase() === "true") {
+  if (process.env.RUNNER_BROWSER_ENABLED?.trim().toLowerCase() === "true") {
     tools.push(...GOAT_BROWSER_TOOLS);
   }
   if (state.gmail.connected) {

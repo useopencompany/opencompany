@@ -284,11 +284,11 @@ Required environment variables:
   sessions default to E2B's `codex` template)
 - `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` (required; validated at boot — the runner refuses to start if it is missing or not a base64-encoded 32-byte key)
 - `RUNNER_E2B_IDLE_TIMEOUT_MS` (optional, defaults to `30000`)
-- `RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS` (optional legacy name, defaults to `300000`; persistent Goat Codex and Claude Code chat sandboxes pause on idle and auto-resume on the next message)
+- `RUNNER_CODEX_CHAT_IDLE_TIMEOUT_MS` (optional legacy name, defaults to `300000`; persistent Goat Codex and Claude Code chat sandboxes pause on idle and auto-resume on the next message)
 - `RUNNER_LLM_BROKER_PUBLIC_URL` (optional; defaults to Render's `RENDER_EXTERNAL_URL`. Public runner URL for E2B sandbox callbacks to the LLM broker (`/broker/*`). Unset locally unless the local runner port is exposed through a public tunnel.)
 - `RUNNER_LLM_BROKER_ENABLED` (optional, defaults to `true`; no-deploy kill switch back to direct key injection)
-- `RUNNER_GOAT_TASK_WORKER_ENABLED` (optional, defaults to `false`; set `true` only for runner deployments meant to execute Goat tasks. `bun run dev:goat` injects it locally.)
-- `RUNNER_GOAT_BROWSER_ENABLED` (optional, defaults to `false`; set `true` to let Goat harnesses grant rendered browser navigation tools)
+- `RUNNER_WORKERS_ENABLED` (optional, defaults to `false`; set `true` only for runner deployments meant to execute Goat tasks. `bun run dev:goat` injects it locally.)
+- `RUNNER_BROWSER_ENABLED` (optional, defaults to `false`; set `true` to let Goat harnesses grant rendered browser navigation tools)
 - `AGENT_BROWSER_PROVIDER` (optional; production defaults to `browserless`, local dev can leave unset for local Chrome)
 - `BROWSERLESS_API_KEY` (required when Goat Browser uses Browserless)
 - `OPENAI_CODEX_API_KEY` (optional; server-side upstream credential for the broker's `openai` provider and local-dev `codex_coder` fallback)
@@ -317,7 +317,7 @@ New E2B sandboxes are created with lifecycle auto-pause and auto-resume enabled.
 the sandbox on a one-hour timeout while it is actively preparing or executing work, then resets it to
 `RUNNER_E2B_IDLE_TIMEOUT_MS` so unused sandboxes pause shortly after the runner stops touching them.
 Persistent Goat Codex and Claude Code chat sandboxes use the legacy-named
-`RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS` instead, defaulting to 5 minutes, so completed turns pause
+`RUNNER_CODEX_CHAT_IDLE_TIMEOUT_MS` instead, defaulting to 5 minutes, so completed turns pause
 quickly while preserving the session sandbox for resume. During a rolling runner shutdown, the
 worker stops claiming new turns and gives active cloud coding proxies up to four minutes to finish
 in place. A proxy that is still active after that drain window detaches, and the sandbox keeps a

@@ -32,7 +32,7 @@ if (goatDevPorts?.isolated) {
     isolatedGoatDevEnvironment(goatDevPorts, { httpsDisabled: goatHttpsDisabled() }),
   );
 }
-const defaultPort = process.env.GOAT_PORT ?? "3002";
+const defaultPort = process.env.APP_PORT ?? "3002";
 const port = valueFor(turboArgs, "--port") ?? defaultPort;
 const isCI = process.env.CI === "true" || process.env.CI === "1";
 const tunnelDisabled = process.env.OPENCOMPANY_NGROK_DISABLED === "1" || isCI;
@@ -281,8 +281,8 @@ async function startGoatHttps(targetPort) {
 
   const goatRedirectUri = `${proxy.url}/auth/callback`;
   goatHttpsEnv = {
-    GOAT_NEXT_PUBLIC_APP_URL: proxy.url,
-    GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
+    NEXT_PUBLIC_APP_URL: proxy.url,
+    NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
     NEXT_PUBLIC_APP_URL: proxy.url,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
     WORKOS_REDIRECT_URI: goatRedirectUri,
@@ -366,7 +366,7 @@ async function startDefaultTunnel(
     if (exposesRunnerCallbacks) {
       tunnelEnv = {
         ...tunnelEnv,
-        GOAT_NEXT_PUBLIC_APP_URL: publicUrl,
+        NEXT_PUBLIC_APP_URL: publicUrl,
         NEXT_PUBLIC_APP_URL: publicUrl,
         RUNNER_LLM_BROKER_PUBLIC_URL: publicUrl,
       };

@@ -5,9 +5,9 @@ const fetchMock = vi.fn<typeof fetch>();
 
 describe("Goat HubSpot OAuth", () => {
   beforeEach(() => {
-    vi.stubEnv("GOAT_HUBSPOT_CLIENT_ID", "hubspot-client-id");
-    vi.stubEnv("GOAT_HUBSPOT_CLIENT_SECRET", "hubspot-client-secret");
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://goat.example.com");
+    vi.stubEnv("HUBSPOT_CLIENT_ID", "hubspot-client-id");
+    vi.stubEnv("HUBSPOT_CLIENT_SECRET", "hubspot-client-secret");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://goat.example.com");
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockReset();
   });

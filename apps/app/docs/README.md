@@ -259,8 +259,8 @@ action-result allowance reserved for this validated shape; oversized transcripts
 instead of being silently truncated. `youtube.find_in_transcript` searches the same provider result
 server-side and returns only bounded timestamped context windows for a requested phrase.
 `MONID_API_KEY` belongs in Infisical `prod` + `/goat`, and
-`GOAT_MANAGED_CAPABILITIES_KILL_SWITCH=true` removes managed sources from new turns.
-`GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS` accepts comma-separated action ids for endpoint
+`MANAGED_CAPABILITIES_KILL_SWITCH=true` removes managed sources from new turns.
+`DISABLED_MANAGED_CAPABILITY_ACTIONS` accepts comma-separated action ids for endpoint
 isolation. Managed sources never participate in automatic Brain-fill surveying; the user must
 explicitly ask to save their results.
 

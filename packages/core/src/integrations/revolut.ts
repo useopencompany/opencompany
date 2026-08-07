@@ -1,6 +1,6 @@
-export const GOAT_REVOLUT_BUSINESS_PROVIDER = "revolut" as const;
-export const GOAT_REVOLUT_BUSINESS_API_BASE_URL = "https://b2b.revolut.com/api/1.0";
-export const GOAT_REVOLUT_BUSINESS_SANDBOX_API_BASE_URL = "https://sandbox-b2b.revolut.com/api/1.0";
+export const REVOLUT_BUSINESS_PROVIDER = "revolut" as const;
+export const REVOLUT_BUSINESS_API_BASE_URL = "https://b2b.revolut.com/api/1.0";
+export const REVOLUT_BUSINESS_SANDBOX_API_BASE_URL = "https://sandbox-b2b.revolut.com/api/1.0";
 
 const REVOLUT_API_TIMEOUT_MS = 15_000;
 const MAX_REVOLUT_ERROR_DETAIL_CHARS = 240;
@@ -43,17 +43,17 @@ export class GoatRevolutApiError extends Error {
 export function loadGoatRevolutBusinessConnection(
   workspaceId: string,
 ): GoatRevolutBusinessConnection | null {
-  const allowedWorkspaceId = process.env.GOAT_REVOLUT_BUSINESS_WORKSPACE_ID?.trim();
+  const allowedWorkspaceId = process.env.REVOLUT_BUSINESS_WORKSPACE_ID?.trim();
   if (!allowedWorkspaceId || allowedWorkspaceId !== workspaceId) return null;
 
-  const apiToken = process.env.GOAT_REVOLUT_BUSINESS_API_TOKEN?.trim();
+  const apiToken = process.env.REVOLUT_BUSINESS_API_TOKEN?.trim();
   if (!apiToken || !isPlausibleRevolutBusinessApiToken(apiToken)) return null;
 
   const apiBaseUrl = normalizeRevolutApiBaseUrl(
-    process.env.GOAT_REVOLUT_BUSINESS_API_BASE_URL,
+    process.env.REVOLUT_BUSINESS_API_BASE_URL,
     apiToken,
   );
-  const accountLabel = cleanRevolutLabel(process.env.GOAT_REVOLUT_BUSINESS_ACCOUNT_LABEL);
+  const accountLabel = cleanRevolutLabel(process.env.REVOLUT_BUSINESS_ACCOUNT_LABEL);
   return {
     workspaceId,
     accountLabel: accountLabel ?? "Revolut Business",
@@ -125,7 +125,7 @@ function inferRevolutEnvironment(
   apiToken: string,
 ): GoatRevolutBusinessConnection["environment"] {
   if (apiToken.startsWith("oa_sand_") || apiBaseUrl.includes("sandbox")) return "sandbox";
-  if (apiBaseUrl === GOAT_REVOLUT_BUSINESS_API_BASE_URL && apiToken.startsWith("oa_prod_")) {
+  if (apiBaseUrl === REVOLUT_BUSINESS_API_BASE_URL && apiToken.startsWith("oa_prod_")) {
     return "production";
   }
   return "custom";
@@ -133,8 +133,8 @@ function inferRevolutEnvironment(
 
 function defaultRevolutApiBaseUrl(apiToken: string) {
   return apiToken.startsWith("oa_sand_")
-    ? GOAT_REVOLUT_BUSINESS_SANDBOX_API_BASE_URL
-    : GOAT_REVOLUT_BUSINESS_API_BASE_URL;
+    ? REVOLUT_BUSINESS_SANDBOX_API_BASE_URL
+    : REVOLUT_BUSINESS_API_BASE_URL;
 }
 
 function cleanRevolutLabel(value: unknown): string | null {

@@ -157,7 +157,7 @@ describe("@opencompany/telemetry", () => {
   });
 
   it("no-ops safely when disabled", () => {
-    vi.stubEnv("GOAT_OBSERVABILITY_ENABLED", "false");
+    vi.stubEnv("TELEMETRY_ENABLED", "false");
     expect(isGoatObservabilityEnabled()).toBe(false);
     expect(() => recordGoatCounter("goat.test", 1, { "goat.task_id": "task" })).not.toThrow();
     expect(() =>

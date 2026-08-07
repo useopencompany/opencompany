@@ -67,7 +67,7 @@ function messageEnvelope(event: Record<string, unknown> = {}) {
 describe("POST /api/webhooks/slack/events", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.GOAT_SLACK_SIGNING_SECRET = SIGNING_SECRET;
+    process.env.SLACK_SIGNING_SECRET = SIGNING_SECRET;
     vi.mocked(listGoatSlackIntegrationsForTeam).mockResolvedValue([
       { id: "gint_1", userWorkosId: "user_1", status: "connected" },
     ]);

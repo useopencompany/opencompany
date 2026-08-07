@@ -30,7 +30,7 @@ function runnerToken() {
 
 function runnerPublicBaseUrl() {
   const publicUrl = process.env.RUNNER_PUBLIC_URL?.trim().replace(/\/+$/, "");
-  const goatUrl = process.env.GOAT_NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, "");
+  const goatUrl = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, "");
   if (!publicUrl || !goatUrl) return publicUrl;
   try {
     const runner = new URL(publicUrl);

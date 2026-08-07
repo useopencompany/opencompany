@@ -38,7 +38,7 @@ export type GoatActionCatalogDeps = {
 // Environment kill switch: disables chat actions for everyone without a
 // deploy. Actions are otherwise on by default for any connected integration.
 export function isGoatChatActionsKilled(): boolean {
-  return process.env.GOAT_CHAT_ACTIONS_KILL_SWITCH === "true";
+  return process.env.CHAT_ACTIONS_KILL_SWITCH === "true";
 }
 
 // Resolves the user's connected providers into a flat action catalog. A

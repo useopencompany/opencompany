@@ -22,18 +22,18 @@ export type GoatSlackBotOAuthResult = {
   scopes: string[];
 };
 
-const GOAT_SLACK_BOT_ENVS = [
+const SLACK_BOT_ENVS = [
   "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
-  "GOAT_SLACK_BOT_CLIENT_ID",
-  "GOAT_SLACK_BOT_CLIENT_SECRET",
-  "GOAT_SLACK_BOT_SIGNING_SECRET",
-  "GOAT_SLACK_BOT_STATE_SECRET",
+  "SLACK_BOT_CLIENT_ID",
+  "SLACK_BOT_CLIENT_SECRET",
+  "SLACK_BOT_SIGNING_SECRET",
+  "SLACK_BOT_STATE_SECRET",
 ] as const;
 
 // Bot scopes: receive mentions and channel/DM messages, reply, list channels
 // for the picker, read thread context, react for status acks, and resolve the
 // asking Slack user's email for goat-identity mapping.
-export const GOAT_SLACK_BOT_SCOPES = [
+export const SLACK_BOT_SCOPES = [
   "app_mentions:read",
   "chat:write",
   "channels:read",
@@ -50,22 +50,22 @@ export const GOAT_SLACK_BOT_SCOPES = [
 // settings UI surfaces a reconnect banner until the granted set catches up.
 export function goatSlackBotScopesSatisfied(grantedScopes: readonly string[]): boolean {
   const granted = new Set(grantedScopes);
-  return GOAT_SLACK_BOT_SCOPES.every((scope) => granted.has(scope));
+  return SLACK_BOT_SCOPES.every((scope) => granted.has(scope));
 }
 
 export function goatSlackBotHasScope(
   grantedScopes: readonly string[],
-  scope: (typeof GOAT_SLACK_BOT_SCOPES)[number],
+  scope: (typeof SLACK_BOT_SCOPES)[number],
 ): boolean {
   return grantedScopes.includes(scope);
 }
 
 export function isGoatSlackBotConfigured() {
-  return GOAT_SLACK_BOT_ENVS.every((name) => Boolean(process.env[name]?.trim()));
+  return SLACK_BOT_ENVS.every((name) => Boolean(process.env[name]?.trim()));
 }
 
 export function goatSlackBotSigningSecret() {
-  return process.env.GOAT_SLACK_BOT_SIGNING_SECRET?.trim();
+  return process.env.SLACK_BOT_SIGNING_SECRET?.trim();
 }
 
 export function createGoatSlackBotState(
@@ -103,9 +103,9 @@ export function verifyGoatSlackBotState(state: string): GoatSlackBotStatePayload
 
 export function buildGoatSlackBotAuthorizationUrl(state: string) {
   const url = new URL("https://slack.com/oauth/v2/authorize");
-  url.searchParams.set("client_id", requiredEnv("GOAT_SLACK_BOT_CLIENT_ID"));
+  url.searchParams.set("client_id", requiredEnv("SLACK_BOT_CLIENT_ID"));
   // scope (not user_scope): we request a bot token only.
-  url.searchParams.set("scope", GOAT_SLACK_BOT_SCOPES.join(","));
+  url.searchParams.set("scope", SLACK_BOT_SCOPES.join(","));
   url.searchParams.set("redirect_uri", goatSlackBotCallbackUrl());
   url.searchParams.set("state", state);
   return url.toString();
@@ -122,8 +122,8 @@ export async function exchangeGoatSlackBotCode(code: string): Promise<GoatSlackB
   }>({
     method: "oauth.v2.access",
     form: {
-      client_id: requiredEnv("GOAT_SLACK_BOT_CLIENT_ID"),
-      client_secret: requiredEnv("GOAT_SLACK_BOT_CLIENT_SECRET"),
+      client_id: requiredEnv("SLACK_BOT_CLIENT_ID"),
+      client_secret: requiredEnv("SLACK_BOT_CLIENT_SECRET"),
       code,
       redirect_uri: goatSlackBotCallbackUrl(),
     },
@@ -179,7 +179,7 @@ function sanitizeReturnTo(value: string) {
 }
 
 function signStateBody(body: string) {
-  return createHmac("sha256", requiredEnv("GOAT_SLACK_BOT_STATE_SECRET"))
+  return createHmac("sha256", requiredEnv("SLACK_BOT_STATE_SECRET"))
     .update(body)
     .digest("base64url");
 }

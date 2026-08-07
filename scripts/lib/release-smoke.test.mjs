@@ -7,7 +7,7 @@ test("uses a surface-specific expected release", () => {
   assert.equal(
     expectedReleaseFor("goat", {
       EXPECTED_RELEASE: "fallback",
-      EXPECTED_GOAT_RELEASE: "goat-sha",
+      EXPECTED_APP_RELEASE: "goat-sha",
     }),
     "goat-sha",
   );
@@ -17,7 +17,7 @@ test("an explicit empty surface release disables the global fallback", () => {
   assert.equal(
     expectedReleaseFor("goat", {
       EXPECTED_RELEASE: "fallback",
-      EXPECTED_GOAT_RELEASE: "",
+      EXPECTED_APP_RELEASE: "",
     }),
     "",
   );

@@ -124,7 +124,7 @@ function buildDescription({
 
 async function linearGraphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
   // Reuses the shared Linear API key (same one the web app's feedback intake uses).
-  // Only the target team differs — GOAT_FEEDBACK_LINEAR_TEAM_ID points at the Goat team.
+  // Only the target team differs — FEEDBACK_LINEAR_TEAM_ID points at the Goat team.
   const apiKey = process.env.LINEAR_API_KEY;
   if (!apiKey) {
     throw new Error("Missing LINEAR_API_KEY.");
@@ -250,15 +250,15 @@ async function createLinearIssue({
   description: string;
   kind: GoatFeedbackKind;
 }) {
-  const teamId = process.env.GOAT_FEEDBACK_LINEAR_TEAM_ID;
+  const teamId = process.env.FEEDBACK_LINEAR_TEAM_ID;
   if (!teamId) {
-    throw new Error("Missing GOAT_FEEDBACK_LINEAR_TEAM_ID.");
+    throw new Error("Missing FEEDBACK_LINEAR_TEAM_ID.");
   }
 
   const labelNames = uniqueLabels([
     "source:goat",
     KIND_LABELS[kind],
-    ...splitEnvList(process.env.GOAT_FEEDBACK_LINEAR_LABELS),
+    ...splitEnvList(process.env.FEEDBACK_LINEAR_LABELS),
   ]);
 
   const [labelIds, triageStateId] = await Promise.all([
@@ -286,8 +286,8 @@ async function createLinearIssue({
         priority: 3,
         labelIds,
         ...(triageStateId ? { stateId: triageStateId } : {}),
-        ...(process.env.GOAT_FEEDBACK_LINEAR_PROJECT_ID
-          ? { projectId: process.env.GOAT_FEEDBACK_LINEAR_PROJECT_ID }
+        ...(process.env.FEEDBACK_LINEAR_PROJECT_ID
+          ? { projectId: process.env.FEEDBACK_LINEAR_PROJECT_ID }
           : {}),
       },
     },

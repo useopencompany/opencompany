@@ -15,10 +15,10 @@ if (disabled) {
 
 // Forward straight to the Goat Next.js HTTP port rather than the Caddy HTTPS
 // origin so the Stripe CLI does not trip over the self-signed certificate.
-// scripts/dev.mjs exports GOAT_PORT into the dev stack when it picks isolated
+// scripts/dev.mjs exports APP_PORT into the dev stack when it picks isolated
 // Conductor ports, so this always matches the running app.
 function appOrigin() {
-  return `http://localhost:${process.env.GOAT_PORT?.trim() || "3002"}`;
+  return `http://localhost:${process.env.APP_PORT?.trim() || "3002"}`;
 }
 
 const forwardTo = `${appOrigin()}/api/stripe/webhook`;
@@ -27,9 +27,9 @@ const events =
   "checkout.session.completed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,invoice.paid,invoice.payment_failed,payment_intent.succeeded,payment_intent.payment_failed";
 const stripeCliProjectName = process.env.STRIPE_CLI_PROJECT_NAME?.trim();
 
-if (!process.env.GOAT_STRIPE_WEBHOOK_SECRET?.trim()) {
+if (!process.env.STRIPE_WEBHOOK_SECRET?.trim()) {
   console.warn(
-    "GOAT_STRIPE_WEBHOOK_SECRET is not set. The Goat app will reject forwarded Stripe webhooks until .env.local uses the whsec_ value printed by stripe listen.",
+    "STRIPE_WEBHOOK_SECRET is not set. The Goat app will reject forwarded Stripe webhooks until .env.local uses the whsec_ value printed by stripe listen.",
   );
 }
 

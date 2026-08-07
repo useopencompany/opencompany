@@ -12,7 +12,7 @@ describe("Goat Google OAuth", () => {
   beforeEach(() => {
     vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "client-id");
     vi.stubEnv("GOOGLE_INTEGRATION_STATE_SECRET", "state-secret");
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://goat.example.com");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://goat.example.com");
   });
 
   afterEach(() => {
@@ -69,7 +69,7 @@ describe("Goat Google OAuth", () => {
   });
 
   it("uses direct Goat callbacks in production even when the preview broker is configured", () => {
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.chat");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://opencompany.chat");
     vi.stubEnv("GOOGLE_OAUTH_CALLBACK_URL", "https://oauth.opencompany.cloud/api/google/callback");
 
     expect(
@@ -85,7 +85,7 @@ describe("Goat Google OAuth", () => {
   });
 
   it("keeps the stable broker for hosted previews and signs the preview target", () => {
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://pr-42.preview.opencompany.cloud/");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://pr-42.preview.opencompany.cloud/");
     vi.stubEnv("GOOGLE_OAUTH_CALLBACK_URL", "https://oauth.opencompany.cloud/api/google/callback");
 
     expect(goatGoogleOAuthRedirectUri(GOAT_GOOGLE_PROVIDER_CONFIG.gmail)).toBe(

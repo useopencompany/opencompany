@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  GOAT_REVOLUT_BUSINESS_API_BASE_URL,
-  GOAT_REVOLUT_BUSINESS_SANDBOX_API_BASE_URL,
   GoatRevolutApiError,
   isPlausibleRevolutBusinessApiToken,
   loadGoatRevolutBusinessConnection,
+  REVOLUT_BUSINESS_API_BASE_URL,
+  REVOLUT_BUSINESS_SANDBOX_API_BASE_URL,
   requestGoatRevolutBusinessApi,
 } from "@/lib/integrations/revolut";
 
@@ -15,29 +15,29 @@ afterEach(() => {
 
 describe("loadGoatRevolutBusinessConnection", () => {
   it("requires a workspace match and plausible short-lived access token", () => {
-    vi.stubEnv("GOAT_REVOLUT_BUSINESS_WORKSPACE_ID", "workspace_1");
-    vi.stubEnv("GOAT_REVOLUT_BUSINESS_API_TOKEN", "oa_prod_testtokenwithenoughlength");
-    vi.stubEnv("GOAT_REVOLUT_BUSINESS_ACCOUNT_LABEL", "Acme Revolut");
+    vi.stubEnv("REVOLUT_BUSINESS_WORKSPACE_ID", "workspace_1");
+    vi.stubEnv("REVOLUT_BUSINESS_API_TOKEN", "oa_prod_testtokenwithenoughlength");
+    vi.stubEnv("REVOLUT_BUSINESS_ACCOUNT_LABEL", "Acme Revolut");
 
     expect(loadGoatRevolutBusinessConnection("workspace_2")).toBeNull();
     expect(loadGoatRevolutBusinessConnection("workspace_1")).toEqual({
       workspaceId: "workspace_1",
       accountLabel: "Acme Revolut",
       apiToken: "oa_prod_testtokenwithenoughlength",
-      apiBaseUrl: GOAT_REVOLUT_BUSINESS_API_BASE_URL,
+      apiBaseUrl: REVOLUT_BUSINESS_API_BASE_URL,
       environment: "production",
     });
   });
 
   it("rejects refresh tokens and non-https base URLs", () => {
-    vi.stubEnv("GOAT_REVOLUT_BUSINESS_WORKSPACE_ID", "workspace_1");
-    vi.stubEnv("GOAT_REVOLUT_BUSINESS_API_TOKEN", "refresh_token");
+    vi.stubEnv("REVOLUT_BUSINESS_WORKSPACE_ID", "workspace_1");
+    vi.stubEnv("REVOLUT_BUSINESS_API_TOKEN", "refresh_token");
     expect(loadGoatRevolutBusinessConnection("workspace_1")).toBeNull();
 
-    vi.stubEnv("GOAT_REVOLUT_BUSINESS_API_TOKEN", "oa_sand_testtokenwithenoughlength");
-    vi.stubEnv("GOAT_REVOLUT_BUSINESS_API_BASE_URL", "http://localhost:9999/api/1.0");
+    vi.stubEnv("REVOLUT_BUSINESS_API_TOKEN", "oa_sand_testtokenwithenoughlength");
+    vi.stubEnv("REVOLUT_BUSINESS_API_BASE_URL", "http://localhost:9999/api/1.0");
     expect(loadGoatRevolutBusinessConnection("workspace_1")).toMatchObject({
-      apiBaseUrl: GOAT_REVOLUT_BUSINESS_SANDBOX_API_BASE_URL,
+      apiBaseUrl: REVOLUT_BUSINESS_SANDBOX_API_BASE_URL,
       environment: "sandbox",
     });
   });
@@ -68,7 +68,7 @@ describe("requestGoatRevolutBusinessApi", () => {
           workspaceId: "workspace_1",
           accountLabel: "Acme Revolut",
           apiToken: "oa_prod_testtokenwithenoughlength",
-          apiBaseUrl: GOAT_REVOLUT_BUSINESS_API_BASE_URL,
+          apiBaseUrl: REVOLUT_BUSINESS_API_BASE_URL,
           environment: "production",
         },
         path: "/expenses",
@@ -105,7 +105,7 @@ describe("requestGoatRevolutBusinessApi", () => {
           workspaceId: "workspace_1",
           accountLabel: "Acme Revolut",
           apiToken: "oa_prod_testtokenwithenoughlength",
-          apiBaseUrl: GOAT_REVOLUT_BUSINESS_API_BASE_URL,
+          apiBaseUrl: REVOLUT_BUSINESS_API_BASE_URL,
           environment: "production",
         },
         path: "/accounts",

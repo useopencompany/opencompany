@@ -29,16 +29,16 @@ const HUBSPOT_PROVIDER = "hubspot" as const;
 const HUBSPOT_OAUTH_TOKEN_ENDPOINT = "https://api.hubapi.com/oauth/2026-03/token";
 const HUBSPOT_OAUTH_INTROSPECT_ENDPOINT = "https://api.hubapi.com/oauth/2026-03/token/introspect";
 const HUBSPOT_API_TIMEOUT_MS = 10_000;
-const GOAT_HUBSPOT_INGEST_ENVS = [
-  "GOAT_HUBSPOT_CLIENT_ID",
-  "GOAT_HUBSPOT_CLIENT_SECRET",
-  "GOAT_HUBSPOT_STATE_SECRET",
+const HUBSPOT_INGEST_ENVS = [
+  "HUBSPOT_CLIENT_ID",
+  "HUBSPOT_CLIENT_SECRET",
+  "HUBSPOT_STATE_SECRET",
 ] as const;
 
 // Read-only CRM scopes: the app reads contacts, companies, and deals to route
 // and enrich ingestion. Writes never happen through this connection. The list
 // must exactly match the scopes configured on the HubSpot app.
-export const GOAT_HUBSPOT_INGEST_SCOPES = [
+export const HUBSPOT_INGEST_SCOPES = [
   "crm.objects.contacts.read",
   "crm.objects.companies.read",
   "crm.objects.deals.read",
@@ -46,7 +46,7 @@ export const GOAT_HUBSPOT_INGEST_SCOPES = [
 ] as const;
 
 export function isGoatHubspotIngestConfigured() {
-  return GOAT_HUBSPOT_INGEST_ENVS.every((name) => Boolean(process.env[name]?.trim()));
+  return HUBSPOT_INGEST_ENVS.every((name) => Boolean(process.env[name]?.trim()));
 }
 
 // The HubSpot brain-source connection state for the acting user (most recently
@@ -130,9 +130,9 @@ export function verifyGoatHubspotIngestState(state: string): GoatHubspotIngestSt
 
 export function buildGoatHubspotAuthorizationUrl(state: string) {
   const url = new URL("https://app.hubspot.com/oauth/authorize");
-  url.searchParams.set("client_id", requiredEnv("GOAT_HUBSPOT_CLIENT_ID"));
+  url.searchParams.set("client_id", requiredEnv("HUBSPOT_CLIENT_ID"));
   url.searchParams.set("redirect_uri", goatHubspotIngestCallbackUrl());
-  url.searchParams.set("scope", GOAT_HUBSPOT_INGEST_SCOPES.join(" "));
+  url.searchParams.set("scope", HUBSPOT_INGEST_SCOPES.join(" "));
   url.searchParams.set("state", state);
   return url.toString();
 }
@@ -146,8 +146,8 @@ export async function exchangeGoatHubspotCode(code: string): Promise<GoatHubspot
       grant_type: "authorization_code",
       code,
       redirect_uri: goatHubspotIngestCallbackUrl(),
-      client_id: requiredEnv("GOAT_HUBSPOT_CLIENT_ID"),
-      client_secret: requiredEnv("GOAT_HUBSPOT_CLIENT_SECRET"),
+      client_id: requiredEnv("HUBSPOT_CLIENT_ID"),
+      client_secret: requiredEnv("HUBSPOT_CLIENT_SECRET"),
     }).toString(),
   });
   if (!response.ok) {
@@ -180,8 +180,8 @@ export async function fetchGoatHubspotIdentity(accessToken: string): Promise<Goa
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     signal: AbortSignal.timeout(HUBSPOT_API_TIMEOUT_MS),
     body: new URLSearchParams({
-      client_id: requiredEnv("GOAT_HUBSPOT_CLIENT_ID"),
-      client_secret: requiredEnv("GOAT_HUBSPOT_CLIENT_SECRET"),
+      client_id: requiredEnv("HUBSPOT_CLIENT_ID"),
+      client_secret: requiredEnv("HUBSPOT_CLIENT_SECRET"),
       token_type_hint: "access_token",
       token: accessToken,
     }).toString(),
@@ -246,9 +246,7 @@ function sanitizeReturnTo(value: string) {
 }
 
 function signStateBody(body: string) {
-  return createHmac("sha256", requiredEnv("GOAT_HUBSPOT_STATE_SECRET"))
-    .update(body)
-    .digest("base64url");
+  return createHmac("sha256", requiredEnv("HUBSPOT_STATE_SECRET")).update(body).digest("base64url");
 }
 
 function safeEqual(left: string, right: string) {

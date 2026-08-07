@@ -10,7 +10,7 @@ export type GoatImessageProvider = {
 };
 
 export function isGoatImessageKilled(): boolean {
-  return process.env.GOAT_IMESSAGE_KILL_SWITCH === "true";
+  return process.env.IMESSAGE_KILL_SWITCH === "true";
 }
 
 // Dev/test transport: logs instead of sending (pairing codes included), so the
@@ -27,7 +27,7 @@ const logProvider: GoatImessageProvider = {
 // killed or unconfigured. A null here must unbind the tool everywhere.
 export function resolveGoatImessageProvider(): GoatImessageProvider | null {
   if (isGoatImessageKilled()) return null;
-  if (process.env.GOAT_IMESSAGE_PROVIDER === "log") return logProvider;
+  if (process.env.IMESSAGE_PROVIDER === "log") return logProvider;
   const token = process.env.LINQ_API_TOKEN;
   const fromNumber = process.env.LINQ_FROM_NUMBER;
   if (token && fromNumber) {

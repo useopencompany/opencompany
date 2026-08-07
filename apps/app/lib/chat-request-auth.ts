@@ -6,7 +6,7 @@ import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
 import { currentGoatUser, type GoatAuthContext } from "@/lib/auth";
 import { resolveGoatAuthKitDomain } from "@/lib/mcp-oauth";
 
-export const GOAT_MACOS_OAUTH_AUDIENCE_ENV = "GOAT_MACOS_OAUTH_AUDIENCE";
+export const MACOS_OAUTH_AUDIENCE_ENV = "MACOS_OAUTH_AUDIENCE";
 
 export type GoatChatRequestContext = Pick<
   GoatAuthContext,
@@ -53,7 +53,7 @@ export async function verifyGoatMacAccessToken(
     verifyJwt?: typeof jwtVerify;
   } = {},
 ): Promise<TokenVerification> {
-  const audience = options.audience ?? process.env[GOAT_MACOS_OAUTH_AUDIENCE_ENV]?.trim();
+  const audience = options.audience ?? process.env[MACOS_OAUTH_AUDIENCE_ENV]?.trim();
   if (!audience) {
     return {
       ok: false,

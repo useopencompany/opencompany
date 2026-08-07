@@ -7,18 +7,18 @@ import { execFileSync } from "node:child_process";
 
 import { expectedReleaseFor } from "./lib/release-smoke.mjs";
 
-const goatUrl = normalizeBaseUrl(process.env.GOAT_URL || process.env.PRODUCTION_GOAT_URL);
-const goatVercelDeployment = normalizeBaseUrl(process.env.SMOKE_GOAT_VERCEL_DEPLOYMENT);
+const goatUrl = normalizeBaseUrl(process.env.GOAT_URL || process.env.PRODUCTION_APP_URL);
+const goatVercelDeployment = normalizeBaseUrl(process.env.SMOKE_APP_VERCEL_DEPLOYMENT);
 const runnerUrl = normalizeBaseUrl(process.env.RUNNER_PUBLIC_URL);
 const attempts = Number(process.env.SMOKE_ATTEMPTS ?? "30");
-const goatAttempts = Number(process.env.SMOKE_GOAT_ATTEMPTS ?? attempts);
+const goatAttempts = Number(process.env.SMOKE_APP_ATTEMPTS ?? attempts);
 const runnerAttempts = Number(process.env.SMOKE_RUNNER_ATTEMPTS ?? attempts);
 const delayMs = Number(process.env.SMOKE_DELAY_MS ?? "10000");
-const checkGoat = booleanEnv("SMOKE_GOAT", true);
+const checkGoat = booleanEnv("SMOKE_APP", true);
 const checkRunner = booleanEnv("SMOKE_RUNNER", true);
 
 if (checkGoat && !goatUrl && !goatVercelDeployment) {
-  console.error("GOAT_URL, PRODUCTION_GOAT_URL, or SMOKE_GOAT_VERCEL_DEPLOYMENT is required.");
+  console.error("GOAT_URL, PRODUCTION_APP_URL, or SMOKE_APP_VERCEL_DEPLOYMENT is required.");
   process.exit(1);
 }
 

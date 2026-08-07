@@ -180,7 +180,7 @@ const LOW_CARDINAL_METRIC_ATTRIBUTE_KEYS = new Set([
 ]);
 
 export function isGoatObservabilityEnabled(env: EnvLike = readEnv()) {
-  return enabledFromEnv(env.GOAT_OBSERVABILITY_ENABLED);
+  return enabledFromEnv(env.TELEMETRY_ENABLED);
 }
 
 export function hashGoatUserId(userWorkosId: string | null | undefined) {

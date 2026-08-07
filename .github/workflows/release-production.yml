@@ -210,8 +210,8 @@ jobs:
               description: `Production release ${shortSha} is in progress.`,
             };
 
-            if (process.env.PRODUCTION_GOAT_URL) {
-              status.environment_url = process.env.PRODUCTION_GOAT_URL;
+            if (process.env.PRODUCTION_APP_URL) {
+              status.environment_url = process.env.PRODUCTION_APP_URL;
             }
 
             await github.rest.repos.createDeploymentStatus(status);
@@ -251,15 +251,15 @@ jobs:
       - name: Map Goat production app env
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.goat == 'true' }}
         run: |
-          goat_url="${PRODUCTION_GOAT_URL%/}"
+          goat_url="${PRODUCTION_APP_URL%/}"
           if [ -z "$goat_url" ]; then
-            echo "PRODUCTION_GOAT_URL is required to deploy Goat."
+            echo "PRODUCTION_APP_URL is required to deploy Goat."
             exit 1
           fi
 
           {
-            echo "GOAT_NEXT_PUBLIC_APP_URL=$goat_url"
-            echo "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI=$goat_url/auth/callback"
+            echo "NEXT_PUBLIC_APP_URL=$goat_url"
+            echo "NEXT_PUBLIC_WORKOS_REDIRECT_URI=$goat_url/auth/callback"
           } >> "$GITHUB_ENV"
 
       - name: Check Vercel Goat project config
@@ -271,12 +271,12 @@ jobs:
           const { mkdirSync, writeFileSync } = require("node:fs");
 
           async function main() {
-            const projectId = process.env.GOAT_VERCEL_PROJECT_ID;
+            const projectId = process.env.APP_VERCEL_PROJECT_ID;
             const teamId = process.env.VERCEL_ORG_ID;
             const token = process.env.VERCEL_TOKEN;
 
             if (!projectId || !teamId || !token) {
-              throw new Error("GOAT_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
+              throw new Error("APP_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
             }
 
             const response = await fetch(
@@ -291,7 +291,7 @@ jobs:
             const project = await response.json();
 
             if (project.id !== projectId) {
-              throw new Error("Fetched Vercel project id does not match GOAT_VERCEL_PROJECT_ID.");
+              throw new Error("Fetched Vercel project id does not match APP_VERCEL_PROJECT_ID.");
             }
 
             if (project.rootDirectory !== "apps/app") {
@@ -340,24 +340,24 @@ jobs:
             "WORKOS_CLIENT_ID",
             "WORKOS_API_KEY",
             "WORKOS_COOKIE_PASSWORD",
-            "GOAT_NEXT_PUBLIC_APP_URL",
-            "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
-            "GOAT_AUTHKIT_DOMAIN",
-            "GOAT_MACOS_OAUTH_AUDIENCE",
-            "GOAT_MACOS_OAUTH_CLIENT_ID",
-            "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
-            "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
+            "NEXT_PUBLIC_APP_URL",
+            "NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+            "AUTHKIT_DOMAIN",
+            "MACOS_OAUTH_AUDIENCE",
+            "MACOS_OAUTH_CLIENT_ID",
+            "NEXT_PUBLIC_POSTHOG_TOKEN",
+            "NEXT_PUBLIC_POSTHOG_HOST",
             "VERCEL_AI_GATEWAY_API_KEY",
             "RUNNER_PUBLIC_URL",
             "RUNNER_INTERNAL_TOKEN",
             "ELECTRIC_URL",
-            "GOAT_STRIPE_API_KEY",
-            "GOAT_STRIPE_WEBHOOK_SECRET",
-            "GOAT_STRIPE_CHECKOUT_ENABLED",
+            "STRIPE_API_KEY",
+            "STRIPE_WEBHOOK_SECRET",
+            "STRIPE_CHECKOUT_ENABLED",
             "CRON_SECRET",
-            "GOAT_HUBSPOT_CLIENT_ID",
-            "GOAT_HUBSPOT_CLIENT_SECRET",
-            "GOAT_HUBSPOT_STATE_SECRET",
+            "HUBSPOT_CLIENT_ID",
+            "HUBSPOT_CLIENT_SECRET",
+            "HUBSPOT_STATE_SECRET",
           ];
 
           async function listProductionEnv(projectId, label, teamId, token) {
@@ -405,12 +405,12 @@ jobs:
           }
 
           async function main() {
-            const goatProjectId = process.env.GOAT_VERCEL_PROJECT_ID;
+            const goatProjectId = process.env.APP_VERCEL_PROJECT_ID;
             const teamId = process.env.VERCEL_ORG_ID;
             const token = process.env.VERCEL_TOKEN;
 
             if (!goatProjectId || !teamId || !token) {
-              throw new Error("GOAT_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
+              throw new Error("APP_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
             }
 
             const goatEnv = await listProductionEnv(goatProjectId, "Goat", teamId, token);
@@ -426,21 +426,21 @@ jobs:
             const checkoutEnabled = await readEnvValue(
               goatProjectId,
               goatEnv,
-              "GOAT_STRIPE_CHECKOUT_ENABLED",
+              "STRIPE_CHECKOUT_ENABLED",
               "Goat",
               teamId,
               token,
             );
             if (checkoutEnabled.trim() !== "true") {
               throw new Error(
-                "Goat GOAT_STRIPE_CHECKOUT_ENABLED must be true before a production billing release.",
+                "Goat STRIPE_CHECKOUT_ENABLED must be true before a production billing release.",
               );
             }
 
-            const expectedGoatOrigin = new URL(process.env.PRODUCTION_GOAT_URL).origin;
+            const expectedGoatOrigin = new URL(process.env.PRODUCTION_APP_URL).origin;
             const expectedValues = new Map([
-              ["GOAT_NEXT_PUBLIC_APP_URL", expectedGoatOrigin],
-              ["GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI", `${expectedGoatOrigin}/auth/callback`],
+              ["NEXT_PUBLIC_APP_URL", expectedGoatOrigin],
+              ["NEXT_PUBLIC_WORKOS_REDIRECT_URI", `${expectedGoatOrigin}/auth/callback`],
             ]);
             const configuredGoatUrls = await Promise.all(
               Array.from(expectedValues.keys(), (key) =>
@@ -453,7 +453,7 @@ jobs:
 
             if (mismatched.length > 0) {
               throw new Error(
-                `Goat Vercel production envs do not match PRODUCTION_GOAT_URL: ${mismatched.join(", ")}`,
+                `Goat Vercel production envs do not match PRODUCTION_APP_URL: ${mismatched.join(", ")}`,
               );
             }
           }
@@ -469,12 +469,12 @@ jobs:
         env:
           OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
           NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
-        run: VERCEL_PROJECT_ID="$GOAT_VERCEL_PROJECT_ID" bunx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$GOAT_VERCEL_PROJECT_ID"
+        run: VERCEL_PROJECT_ID="$APP_VERCEL_PROJECT_ID" bunx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$APP_VERCEL_PROJECT_ID"
 
       - name: Deploy Goat
         id: deploy-goat
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.goat == 'true' }}
-        run: node scripts/release-vercel-deploy.mjs --label Goat --project-env GOAT_VERCEL_PROJECT_ID
+        run: node scripts/release-vercel-deploy.mjs --label Goat --project-env APP_VERCEL_PROJECT_ID
 
       - name: Check Vercel marketing project config
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.marketing == 'true' }}
@@ -486,7 +486,7 @@ jobs:
 
           async function main() {
             const projectId = process.env.MARKETING_VERCEL_PROJECT_ID;
-            const goatProjectId = process.env.GOAT_VERCEL_PROJECT_ID;
+            const goatProjectId = process.env.APP_VERCEL_PROJECT_ID;
             const teamId = process.env.VERCEL_ORG_ID;
             const token = process.env.VERCEL_TOKEN;
 
@@ -573,11 +573,11 @@ jobs:
       - name: Smoke check release
         if: ${{ (github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'true') || (github.event_name == 'workflow_dispatch' && inputs.smoke) }}
         env:
-          EXPECTED_GOAT_RELEASE: ${{ steps.release-scope.outputs.goat == 'true' && env.RELEASE_SHA || '' }}
+          EXPECTED_APP_RELEASE: ${{ steps.release-scope.outputs.goat == 'true' && env.RELEASE_SHA || '' }}
           EXPECTED_RUNNER_RELEASE: ${{ steps.release-scope.outputs.runner == 'true' && env.RELEASE_SHA || '' }}
-          SMOKE_GOAT: "true"
+          SMOKE_APP: "true"
           SMOKE_RUNNER: "true"
-          SMOKE_GOAT_ATTEMPTS: "12"
+          SMOKE_APP_ATTEMPTS: "12"
           SMOKE_RUNNER_ATTEMPTS: "12"
           SMOKE_DELAY_MS: "10000"
         run: bun run release:smoke
@@ -620,8 +620,8 @@ jobs:
               description,
             };
 
-            if (process.env.PRODUCTION_GOAT_URL) {
-              status.environment_url = process.env.PRODUCTION_GOAT_URL;
+            if (process.env.PRODUCTION_APP_URL) {
+              status.environment_url = process.env.PRODUCTION_APP_URL;
             }
 
             await github.rest.repos.createDeploymentStatus(status);

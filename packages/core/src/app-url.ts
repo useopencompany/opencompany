@@ -1,17 +1,14 @@
 export function getGoatAppUrl() {
-  const goatAppUrl = process.env.GOAT_NEXT_PUBLIC_APP_URL?.trim();
-  if (goatAppUrl && !/^\/+$/u.test(goatAppUrl)) {
-    return parseAppOrigin(goatAppUrl, "GOAT_NEXT_PUBLIC_APP_URL");
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (appUrl && !/^\/+$/u.test(appUrl)) {
+    return parseAppOrigin(appUrl, "NEXT_PUBLIC_APP_URL");
   }
 
   if (process.env.NODE_ENV === "production") {
-    throw new Error("GOAT_NEXT_PUBLIC_APP_URL is required for Goat in production.");
+    throw new Error("NEXT_PUBLIC_APP_URL is required in production.");
   }
 
-  return parseAppOrigin(
-    process.env.NEXT_PUBLIC_APP_URL?.trim() || "http://localhost:3002",
-    "NEXT_PUBLIC_APP_URL",
-  );
+  return parseAppOrigin("http://localhost:3002", "NEXT_PUBLIC_APP_URL");
 }
 
 function parseAppOrigin(value: string, envName: string) {

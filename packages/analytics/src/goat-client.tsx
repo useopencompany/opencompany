@@ -38,8 +38,8 @@ function isDebugEnabled() {
 
 function getConfig() {
   return {
-    token: process.env.NEXT_PUBLIC_GOAT_POSTHOG_TOKEN,
-    host: process.env.NEXT_PUBLIC_GOAT_POSTHOG_HOST,
+    token: process.env.NEXT_PUBLIC_POSTHOG_TOKEN,
+    host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
   };
 }
 

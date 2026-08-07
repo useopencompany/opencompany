@@ -11,7 +11,7 @@ export function verifyGoatSlackEventSignature(input: {
   // Defaults to the ingestion app's secret; the bot webhook passes its own.
   secret?: string | undefined;
 }): boolean {
-  const secret = (input.secret ?? process.env.GOAT_SLACK_SIGNING_SECRET)?.trim();
+  const secret = (input.secret ?? process.env.SLACK_SIGNING_SECRET)?.trim();
   if (!secret || !input.timestamp || !input.signature) return false;
   const timestampSeconds = Number(input.timestamp);
   if (!Number.isFinite(timestampSeconds)) return false;

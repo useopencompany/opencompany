@@ -52,7 +52,7 @@ This monorepo contains two product generations. `apps/web` is the older OpenComp
 When the user says "Goat" or the task is clearly about Goat:
 
 - Start in `apps/goat`; do not edit `apps/web` unless the task explicitly crosses both apps or a shared dependency requires it.
-- "Goat runner" means the Goat-specific execution paths inside the shared `apps/runner` package. Look first at `goat-*` modules, `/internal/goat/*` routes, and the `RUNNER_GOAT_TASK_WORKER_ENABLED` gate. There is currently no separate `apps/goat-runner` package.
+- "Goat runner" means the Goat-specific execution paths inside the shared `apps/runner` package. Look first at `goat-*` modules, `/internal/goat/*` routes, and the `RUNNER_WORKERS_ENABLED` gate. There is currently no separate `apps/goat-runner` package.
 - Follow Goat-specific shared code into `packages/db/src/goat-*`, `packages/goat-brain`, and `packages/goat-observability` as needed. Only modify generic or legacy paths when tracing confirms they are shared by the Goat flow.
 - Use `apps/goat/docs/README.md` for the current Goat app/runner flow and `bun run dev:goat` for the Goat development stack.
 

@@ -3,7 +3,7 @@ import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
 import { generateProtectedResourceMetadata, getPublicUrl } from "mcp-handler";
 import { GOAT_USER_MCP_ENDPOINT_PATH } from "@/lib/mcp-setup";
 
-export const GOAT_AUTHKIT_DOMAIN_ENV = "GOAT_AUTHKIT_DOMAIN";
+export const AUTHKIT_DOMAIN_ENV = "AUTHKIT_DOMAIN";
 
 export const GOAT_MCP_METADATA_CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -20,21 +20,21 @@ let jwksCache:
   | undefined;
 
 export function resolveGoatAuthKitDomain(
-  value = process.env[GOAT_AUTHKIT_DOMAIN_ENV],
+  value = process.env[AUTHKIT_DOMAIN_ENV],
 ): { ok: true; domain: string } | { ok: false; error: string } {
   const trimmed = value?.trim();
   if (!trimmed) {
-    return { ok: false, error: `${GOAT_AUTHKIT_DOMAIN_ENV} is not configured.` };
+    return { ok: false, error: `${AUTHKIT_DOMAIN_ENV} is not configured.` };
   }
 
   try {
     const url = new URL(trimmed);
     if (url.pathname !== "/" || url.search || url.hash) {
-      return { ok: false, error: `${GOAT_AUTHKIT_DOMAIN_ENV} must be a URL origin.` };
+      return { ok: false, error: `${AUTHKIT_DOMAIN_ENV} must be a URL origin.` };
     }
     return { ok: true, domain: url.origin };
   } catch {
-    return { ok: false, error: `${GOAT_AUTHKIT_DOMAIN_ENV} must be a valid URL.` };
+    return { ok: false, error: `${AUTHKIT_DOMAIN_ENV} must be a valid URL.` };
   }
 }
 

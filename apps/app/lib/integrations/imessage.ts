@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
-import { GOAT_IMESSAGE_PROVIDER, goatImessageExternalIdForUser } from "@opencompany/db/imessage";
+import { goatImessageExternalIdForUser, IMESSAGE_PROVIDER } from "@opencompany/db/imessage";
 import { goatIntegrations } from "@opencompany/db/schema";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { GoatImessageProviderState } from "@/lib/integration-state";
@@ -32,7 +32,7 @@ export async function connectGoatImessageIntegration(input: {
     .values({
       id: `gint_${randomUUID().replace(/-/g, "")}`,
       userWorkosId: input.userWorkosId,
-      provider: GOAT_IMESSAGE_PROVIDER,
+      provider: IMESSAGE_PROVIDER,
       externalId: goatImessageExternalIdForUser(input.userWorkosId),
       connectionLabel: input.phoneE164,
       accountName: input.phoneE164,
@@ -90,7 +90,7 @@ export async function getGoatImessageIntegrationState(
     .where(
       and(
         eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, GOAT_IMESSAGE_PROVIDER),
+        eq(goatIntegrations.provider, IMESSAGE_PROVIDER),
         ne(goatIntegrations.status, "disconnected"),
       ),
     )

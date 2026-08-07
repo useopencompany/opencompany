@@ -157,7 +157,7 @@ const ENRICHMENT_RESULT_SUMMARY_LIMIT = 800;
 // "evidence/" root. Mirrors the deterministic connector evidence folders
 // (evidence/document for Jamie, evidence/email for Gmail).
 export const GOAT_CHAT_CAPTURE_EVIDENCE_FOLDER = "evidence/chat";
-export const GOAT_SLACK_EVIDENCE_FOLDER = "evidence/slack";
+export const SLACK_EVIDENCE_FOLDER = "evidence/slack";
 const AGENT_CLI_TIMEOUT_MS = 60_000;
 const AGENT_CLI_STDOUT_LIMIT = 24_000;
 const AGENT_CLI_STDERR_LIMIT = 4_000;
@@ -900,7 +900,7 @@ export function buildSlackConversationAgentIngestPrompt(
     "2. Judge the current window first: extract only durable knowledge — decisions, plans, commitments, facts about people, companies, or projects, and substantive shared content. Ignore chit-chat around it.",
     `3. Fold each durable point into the page where it belongs (rewrite compiled truth when the state of play changes, timeline-add for dated evidence). Cite individual messages with --source-ref slack:message:${conversation.teamId}:${conversation.channelId}:<message ts>.`,
     "4. You may cite context messages only when they materially support a durable point from the current window. Do not ingest context-only chatter by itself.",
-    `5. Snapshot with append-evidence --folder ${GOAT_SLACK_EVIDENCE_FOLDER} only when a message contains substantive standalone content (a decision writeup, a spec, a pasted document, an announcement). Never snapshot the whole window; Slack chatter is not evidence.`,
+    `5. Snapshot with append-evidence --folder ${SLACK_EVIDENCE_FOLDER} only when a message contains substantive standalone content (a decision writeup, a spec, a pasted document, an announcement). Never snapshot the whole window; Slack chatter is not evidence.`,
     "6. Create or update person, company, or project pages for entities central to the conversation, with backlinks per the iron law. Do not create pages for people who merely posted a message.",
     "",
     `Source ref: ${item.sourceRef}`,
@@ -3128,13 +3128,13 @@ const runGoatBrainAgentCli: GoatBrainAgentCliRunner = async (input) => {
       NODE_ENV: process.env.NODE_ENV ?? "production",
       GOAT_BRAIN_ROOT: input.root,
       VERCEL_AI_GATEWAY_API_KEY: input.gatewayApiKey,
-      ...(process.env.GOAT_BRAIN_GATEWAY_BASE_URL
+      ...(process.env.BRAIN_GATEWAY_BASE_URL
         ? {
-            GOAT_BRAIN_GATEWAY_BASE_URL: process.env.GOAT_BRAIN_GATEWAY_BASE_URL,
+            BRAIN_GATEWAY_BASE_URL: process.env.BRAIN_GATEWAY_BASE_URL,
           }
         : {}),
-      ...(process.env.GOAT_BRAIN_EMBEDDING_MODEL
-        ? { GOAT_BRAIN_EMBEDDING_MODEL: process.env.GOAT_BRAIN_EMBEDDING_MODEL }
+      ...(process.env.BRAIN_EMBEDDING_MODEL
+        ? { BRAIN_EMBEDDING_MODEL: process.env.BRAIN_EMBEDDING_MODEL }
         : {}),
       ...(input.reporting?.user ? { GOAT_GATEWAY_REPORTING_USER: input.reporting.user } : {}),
       ...(input.reporting?.tags.length

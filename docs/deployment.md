@@ -57,7 +57,7 @@ The `CI` workflow uses branch/PR concurrency with `cancel-in-progress: true`, so
 same PR or to `main` cancels superseded lint/typecheck/build/test work. This keeps rapid merge
 bursts from spending Actions minutes on commits that can no longer release.
 
-The web and Goat smoke checks use `PRODUCTION_WEB_URL` and `PRODUCTION_GOAT_URL` from Infisical
+The web and Goat smoke checks use `PRODUCTION_WEB_URL` and `PRODUCTION_APP_URL` from Infisical
 `prod` + `/release`, not the raw Vercel deployment URLs, so Vercel deployment protection can remain
 enabled on generated preview-style URLs. All three production surfaces receive a basic health check;
 only surfaces selected by the release plan must report the new commit SHA. In production the canonical
@@ -124,8 +124,8 @@ Set these in Infisical `prod` + `/web` and sync them into Vercel:
 - `RUNNER_INTERNAL_TOKEN`
 - `DURABLE_STREAMS_URL`
 - `DURABLE_STREAMS_TOKEN`
-- `NEXT_PUBLIC_GOAT_POSTHOG_TOKEN`
-- `NEXT_PUBLIC_GOAT_POSTHOG_HOST`
+- `NEXT_PUBLIC_POSTHOG_TOKEN`
+- `NEXT_PUBLIC_POSTHOG_HOST`
 - optional analytics, feedback, and observability env vars
 
 Forward production web logs to the Better Stack source `opencompany-web-production` using the
@@ -149,13 +149,13 @@ Production environment. Create a separate Goat WorkOS Application in the same Wo
 the core app, then register the Goat redirect URI on that Application:
 
 Create a separate `Goat` project in the existing PostHog organization. Store its
-`NEXT_PUBLIC_GOAT_POSTHOG_TOKEN` and `NEXT_PUBLIC_GOAT_POSTHOG_HOST` values in this path; do not
+`NEXT_PUBLIC_POSTHOG_TOKEN` and `NEXT_PUBLIC_POSTHOG_HOST` values in this path; do not
 reuse the legacy web project's token.
 
 Managed social and lead capabilities additionally require `MONID_API_KEY` in that same `/goat`
-path. `GOAT_MANAGED_CAPABILITIES_KILL_SWITCH=true` removes those managed sources from new chats
+path. `MANAGED_CAPABILITIES_KILL_SWITCH=true` removes those managed sources from new chats
 without disabling connected-integration actions.
-`GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS=x.search_posts,linkedin.list_comments` can isolate
+`DISABLED_MANAGED_CAPABILITY_ACTIONS=x.search_posts,linkedin.list_comments` can isolate
 specific reviewed endpoints. Keep the hourly `/api/billing/reconcile` cron
 enabled even during a kill-switch incident so already-started runs and their final costs settle.
 
@@ -210,10 +210,10 @@ Set these in Infisical `prod` + `/runner` and sync them into Render:
 - `DURABLE_STREAMS_TOKEN`
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
-- `NEXT_PUBLIC_GOAT_POSTHOG_TOKEN`
-- `NEXT_PUBLIC_GOAT_POSTHOG_HOST`
+- `NEXT_PUBLIC_POSTHOG_TOKEN`
+- `NEXT_PUBLIC_POSTHOG_HOST`
 - `EXA_API_KEY` (required when Goat tasks are enabled)
-- `RUNNER_GOAT_BROWSER_ENABLED` (optional; set `true` to allow Goat rendered-browser tasks)
+- `RUNNER_BROWSER_ENABLED` (optional; set `true` to allow Goat rendered-browser tasks)
 - `BROWSERLESS_API_KEY` (required when Goat Browser is enabled with the production Browserless default)
 - `GITHUB_APP_ID`
 - `GITHUB_APP_INSTALLATION_ID`

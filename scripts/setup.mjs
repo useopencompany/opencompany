@@ -86,7 +86,7 @@ const RUNNER_ENV_KEYS = [
   "RUNNER_LLM_BROKER_ENABLED",
   "RUNNER_CODEX_MODEL",
   "RUNNER_CODEX_TIMEOUT_MS",
-  "RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS",
+  "RUNNER_CODEX_CHAT_IDLE_TIMEOUT_MS",
   "RUNNER_INSTANCE_ID",
 ];
 const LOCAL_RUNNER_REQUIRED_ENV_KEYS = [
@@ -97,20 +97,16 @@ const LOCAL_RUNNER_REQUIRED_ENV_KEYS = [
   "E2B_API_KEY",
   "VERCEL_AI_GATEWAY_API_KEY",
 ];
-const STRIPE_ENV_KEYS = ["GOAT_STRIPE_WEBHOOK_SECRET"];
+const STRIPE_ENV_KEYS = ["STRIPE_WEBHOOK_SECRET"];
 const STRIPE_OPTIONAL_ENV_KEYS = [
-  "GOAT_STRIPE_API_KEY",
-  "GOAT_STRIPE_CHECKOUT_ENABLED",
+  "STRIPE_API_KEY",
+  "STRIPE_CHECKOUT_ENABLED",
   "CRON_SECRET",
   "STRIPE_LISTEN_DISABLED",
   "STRIPE_LISTEN_EVENTS",
   "STRIPE_CLI_PROJECT_NAME",
 ];
-const GOAT_BILLING_LOCAL_ENV_KEYS = [
-  "GOAT_STRIPE_API_KEY",
-  "GOAT_STRIPE_CHECKOUT_ENABLED",
-  "CRON_SECRET",
-];
+const GOAT_BILLING_LOCAL_ENV_KEYS = ["STRIPE_API_KEY", "STRIPE_CHECKOUT_ENABLED", "CRON_SECRET"];
 const OBSERVABILITY_ENV_KEYS = [
   "BETTER_STACK_ERRORS_DSN",
   "OBSERVABILITY_ENABLED",
@@ -129,9 +125,9 @@ const OBSERVABILITY_ENV_KEYS = [
   "NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL",
 ];
 const GOAT_OBSERVABILITY_ENV_KEYS = [
-  "GOAT_OBSERVABILITY_ENABLED",
-  "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
-  "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
+  "TELEMETRY_ENABLED",
+  "OTEL_EXPORTER_OTLP_ENDPOINT",
+  "OTEL_EXPORTER_OTLP_HEADERS",
   "LATITUDE_API_KEY",
   "LATITUDE_PROJECT_SLUG",
   "LATITUDE_SERVICE_NAME",
@@ -147,8 +143,8 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   "WORKOS_REDIRECT_URI",
   "NEXT_PUBLIC_POSTHOG_TOKEN",
   "NEXT_PUBLIC_POSTHOG_HOST",
-  "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
-  "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
+  "NEXT_PUBLIC_POSTHOG_TOKEN",
+  "NEXT_PUBLIC_POSTHOG_HOST",
   "NEXT_PUBLIC_ANALYTICS_DEBUG",
   "OPENCOMPANY_NGROK_REQUIRED",
   "OPENCOMPANY_NGROK_URL",
@@ -180,23 +176,23 @@ const LOCAL_ONLY_ENV_KEYS = new Set([
   "DATABASE_URL",
   "NEON_BRANCH",
   "OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS",
-  "GOAT_PORT",
-  "GOAT_HTTPS_PORT",
-  "GOAT_NEXT_PUBLIC_APP_URL",
-  "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+  "APP_PORT",
+  "APP_HTTPS_PORT",
+  "NEXT_PUBLIC_APP_URL",
+  "NEXT_PUBLIC_WORKOS_REDIRECT_URI",
   "RUNNER_LLM_BROKER_PUBLIC_URL",
 ]);
 const LOCAL_DEV_DEFAULT_ENV_VALUES = {
   OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS: "louis@acta.so",
-  GOAT_PORT: "3002",
-  GOAT_HTTPS_PORT: goatHttpsPort(process.env),
-  GOAT_NEXT_PUBLIC_APP_URL: LOCAL_GOAT_APP_URL,
-  GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: LOCAL_GOAT_WORKOS_REDIRECT_URI,
+  APP_PORT: "3002",
+  APP_HTTPS_PORT: goatHttpsPort(process.env),
+  NEXT_PUBLIC_APP_URL: LOCAL_GOAT_APP_URL,
+  NEXT_PUBLIC_WORKOS_REDIRECT_URI: LOCAL_GOAT_WORKOS_REDIRECT_URI,
   RUNNER_LLM_BROKER_PUBLIC_URL: "",
 };
 const GOAT_LOCAL_ENV_KEYS = [
-  "GOAT_PORT",
-  "GOAT_HTTPS_PORT",
+  "APP_PORT",
+  "APP_HTTPS_PORT",
   "DATABASE_URL",
   "WORKOS_CLIENT_ID",
   "WORKOS_API_KEY",
@@ -204,9 +200,9 @@ const GOAT_LOCAL_ENV_KEYS = [
   "RUNNER_PUBLIC_URL",
   "RUNNER_INTERNAL_URL",
   "RUNNER_INTERNAL_TOKEN",
-  "GOAT_STRIPE_API_KEY",
-  "GOAT_STRIPE_WEBHOOK_SECRET",
-  "GOAT_STRIPE_CHECKOUT_ENABLED",
+  "STRIPE_API_KEY",
+  "STRIPE_WEBHOOK_SECRET",
+  "STRIPE_CHECKOUT_ENABLED",
   "CRON_SECRET",
   ...GITHUB_WORK_INTEGRATION_ENV_KEYS,
   ...INTEGRATION_CREDENTIAL_ENV_KEYS,
@@ -220,8 +216,8 @@ const GOAT_LOCAL_ENV_KEYS = [
   "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
   "NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL",
   "NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN",
-  "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
-  "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
+  "NEXT_PUBLIC_POSTHOG_TOKEN",
+  "NEXT_PUBLIC_POSTHOG_HOST",
   ...GOAT_OBSERVABILITY_ENV_KEYS,
 ];
 
@@ -372,7 +368,7 @@ function inspectState() {
     databaseUrl: isPlaceholder(env.DATABASE_URL) ? "placeholder" : "set",
     neonProject: isPlaceholder(env.NEON_PROJECT_ID) ? "placeholder" : "set",
     neonBranch: isPlaceholder(env.NEON_BRANCH) ? "placeholder" : "set",
-    stripeWebhookSecret: isPlaceholder(env.GOAT_STRIPE_WEBHOOK_SECRET) ? "placeholder" : "set",
+    stripeWebhookSecret: isPlaceholder(env.STRIPE_WEBHOOK_SECRET) ? "placeholder" : "set",
     goatBilling: goatBillingMissing.length === 0 ? "ready" : "placeholder",
     goatBillingMissingKeys: goatBillingMissing,
   };
@@ -565,10 +561,10 @@ async function ensureLocalDevDefaults() {
 }
 
 function shouldReplaceLocalDefault(key, current, next) {
-  if (key === "GOAT_NEXT_PUBLIC_APP_URL") {
+  if (key === "NEXT_PUBLIC_APP_URL") {
     return current === LEGACY_LOCAL_GOAT_APP_URL && next !== current;
   }
-  if (key === "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI") {
+  if (key === "NEXT_PUBLIC_WORKOS_REDIRECT_URI") {
     return current === `${LEGACY_LOCAL_GOAT_APP_URL}/auth/callback` && next !== current;
   }
   return false;
@@ -578,11 +574,11 @@ async function ensureGoatEnvFile() {
   step("Goat app env file");
 
   const env = readEffectiveLocalEnv();
-  const goatAppUrl = env.GOAT_NEXT_PUBLIC_APP_URL || LOCAL_GOAT_APP_URL;
-  const goatRedirectUri = env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI || `${goatAppUrl}/auth/callback`;
+  const goatAppUrl = env.NEXT_PUBLIC_APP_URL || LOCAL_GOAT_APP_URL;
+  const goatRedirectUri = env.NEXT_PUBLIC_WORKOS_REDIRECT_URI || `${goatAppUrl}/auth/callback`;
   const values = {
-    GOAT_NEXT_PUBLIC_APP_URL: goatAppUrl,
-    GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
+    NEXT_PUBLIC_APP_URL: goatAppUrl,
+    NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
     NEXT_PUBLIC_APP_URL: goatAppUrl,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
     WORKOS_REDIRECT_URI: goatRedirectUri,
@@ -856,10 +852,10 @@ async function ensureStripe(state) {
     return cliCredentials;
   };
   const env = { ...readEffectiveLocalEnv(), ...updates };
-  if (isPlaceholder(env.GOAT_STRIPE_API_KEY)) {
+  if (isPlaceholder(env.STRIPE_API_KEY)) {
     const result = getCliCredentials();
     if (result.ok && (result.key.startsWith("rk_test_") || result.expiresAt)) {
-      updates.GOAT_STRIPE_API_KEY = result.key;
+      updates.STRIPE_API_KEY = result.key;
       if (result.key.startsWith("rk_test_")) {
         ok(`Will use restricted Stripe CLI profile "${result.projectName}" for local Goat billing`);
       } else {
@@ -872,14 +868,14 @@ async function ensureStripe(state) {
         "Stripe CLI returned a non-restricted test key without an expiry. Run `stripe login` to refresh the CLI profile, or create a restricted test key for Goat billing and store it in Infisical dev /web.",
       );
     } else {
-      warn(`GOAT_STRIPE_API_KEY is missing: ${result.message}`);
+      warn(`STRIPE_API_KEY is missing: ${result.message}`);
     }
   } else {
-    ok("GOAT_STRIPE_API_KEY is set");
+    ok("STRIPE_API_KEY is set");
   }
 
-  if (isPlaceholder(env.GOAT_STRIPE_CHECKOUT_ENABLED)) {
-    updates.GOAT_STRIPE_CHECKOUT_ENABLED = "false";
+  if (isPlaceholder(env.STRIPE_CHECKOUT_ENABLED)) {
+    updates.STRIPE_CHECKOUT_ENABLED = "false";
     ok("Will keep live Goat Checkout disabled by default");
   }
 
@@ -891,15 +887,15 @@ async function ensureStripe(state) {
   }
 
   if (state.stripeWebhookSecret === "set") {
-    ok("GOAT_STRIPE_WEBHOOK_SECRET is set");
+    ok("STRIPE_WEBHOOK_SECRET is set");
   } else {
     const result = readStripeWebhookSecretFromCli();
     if (result.ok) {
-      updates.GOAT_STRIPE_WEBHOOK_SECRET = result.secret;
-      ok("Will write GOAT_STRIPE_WEBHOOK_SECRET from Stripe CLI");
+      updates.STRIPE_WEBHOOK_SECRET = result.secret;
+      ok("Will write STRIPE_WEBHOOK_SECRET from Stripe CLI");
     } else {
       warn(
-        `GOAT_STRIPE_WEBHOOK_SECRET is missing and could not be read from Stripe CLI: ${result.message} ` +
+        `STRIPE_WEBHOOK_SECRET is missing and could not be read from Stripe CLI: ${result.message} ` +
           "Forwarded Stripe webhooks will fail signature verification until it is set.",
       );
     }
@@ -1055,7 +1051,7 @@ async function ensureGoatLocalHttps() {
   step("Goat local HTTPS");
 
   if (goatHttpsDisabled(process.env)) {
-    warn("OPENCOMPANY_GOAT_HTTPS_DISABLED is set; Goat local dev will use HTTP.");
+    warn("APP_HTTPS_DISABLED is set; Goat local dev will use HTTP.");
     return;
   }
 
@@ -1143,7 +1139,7 @@ async function main() {
       });
     }
     if (state.stripeWebhookSecret === "placeholder") {
-      const missingStripe = ["GOAT_STRIPE_WEBHOOK_SECRET"];
+      const missingStripe = ["STRIPE_WEBHOOK_SECRET"];
       nextSteps.push({
         command: "bun run setup:stripe",
         reason: `copy local Stripe CLI credentials into .env.local (${missingStripe.join(", ")})`,

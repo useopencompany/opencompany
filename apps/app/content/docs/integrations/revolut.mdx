@@ -23,12 +23,12 @@ Set these server-side env vars in the Goat app and runner environment where chat
 
 | Var | Required | Purpose |
 |---|---:|---|
-| `GOAT_REVOLUT_BUSINESS_WORKSPACE_ID` | Yes | The only workspace that should see the Revolut action source. Goat hides the source for every other workspace. |
-| `GOAT_REVOLUT_BUSINESS_API_TOKEN` | Yes | A short-lived Revolut Business API access token with `READ` scope. It should start with `oa_prod_` or `oa_sand_`. Do not use a refresh token, client assertion JWT, private key, or `PAY`-scoped token here. |
-| `GOAT_REVOLUT_BUSINESS_ACCOUNT_LABEL` | No | Friendly label shown in the action source, for example `Acme Revolut`. |
-| `GOAT_REVOLUT_BUSINESS_API_BASE_URL` | No | HTTPS Business API base URL. Defaults to `https://b2b.revolut.com/api/1.0` for `oa_prod_` tokens and `https://sandbox-b2b.revolut.com/api/1.0` for `oa_sand_` tokens. |
+| `REVOLUT_BUSINESS_WORKSPACE_ID` | Yes | The only workspace that should see the Revolut action source. Goat hides the source for every other workspace. |
+| `REVOLUT_BUSINESS_API_TOKEN` | Yes | A short-lived Revolut Business API access token with `READ` scope. It should start with `oa_prod_` or `oa_sand_`. Do not use a refresh token, client assertion JWT, private key, or `PAY`-scoped token here. |
+| `REVOLUT_BUSINESS_ACCOUNT_LABEL` | No | Friendly label shown in the action source, for example `Acme Revolut`. |
+| `REVOLUT_BUSINESS_API_BASE_URL` | No | HTTPS Business API base URL. Defaults to `https://b2b.revolut.com/api/1.0` for `oa_prod_` tokens and `https://sandbox-b2b.revolut.com/api/1.0` for `oa_sand_` tokens. |
 
-The access token expires after about 40 minutes. For this first test connector, generate a fresh access token manually and update `GOAT_REVOLUT_BUSINESS_API_TOKEN` when Revolut rejects it. The full OAuth/certificate and refresh-token flow should be a follow-up after the API shape feels right.
+The access token expires after about 40 minutes. For this first test connector, generate a fresh access token manually and update `REVOLUT_BUSINESS_API_TOKEN` when Revolut rejects it. The full OAuth/certificate and refresh-token flow should be a follow-up after the API shape feels right.
 
 ## Use it in chat
 

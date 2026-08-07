@@ -1,16 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  GOAT_SLACK_BOT_SCOPES,
   goatSlackBotScopesSatisfied,
   isGoatSlackBotConfigured,
+  SLACK_BOT_SCOPES,
 } from "./slack-bot";
 
 const REQUIRED_ENVS = {
   INTEGRATION_CREDENTIAL_ENCRYPTION_KEY: "encryption-key",
-  GOAT_SLACK_BOT_CLIENT_ID: "client-id",
-  GOAT_SLACK_BOT_CLIENT_SECRET: "client-secret",
-  GOAT_SLACK_BOT_SIGNING_SECRET: "signing-secret",
-  GOAT_SLACK_BOT_STATE_SECRET: "state-secret",
+  SLACK_BOT_CLIENT_ID: "client-id",
+  SLACK_BOT_CLIENT_SECRET: "client-secret",
+  SLACK_BOT_SIGNING_SECRET: "signing-secret",
+  SLACK_BOT_STATE_SECRET: "state-secret",
 } as const;
 
 describe("isGoatSlackBotConfigured", () => {
@@ -29,8 +29,8 @@ describe("isGoatSlackBotConfigured", () => {
 
 describe("goatSlackBotScopesSatisfied", () => {
   it("is true when every required scope was granted", () => {
-    expect(goatSlackBotScopesSatisfied([...GOAT_SLACK_BOT_SCOPES])).toBe(true);
-    expect(goatSlackBotScopesSatisfied([...GOAT_SLACK_BOT_SCOPES, "extra:scope"])).toBe(true);
+    expect(goatSlackBotScopesSatisfied([...SLACK_BOT_SCOPES])).toBe(true);
+    expect(goatSlackBotScopesSatisfied([...SLACK_BOT_SCOPES, "extra:scope"])).toBe(true);
   });
 
   it("is false for pre-v2 installs missing the DM/reaction/user scopes", () => {

@@ -780,9 +780,7 @@ async function ingest(ctx: CommandContext): Promise<CommandResult> {
   const reporting = gatewayReportingFromEnv(process.env);
   const gateway = createGateway({
     apiKey,
-    ...(process.env.GOAT_BRAIN_GATEWAY_BASE_URL
-      ? { baseUrl: process.env.GOAT_BRAIN_GATEWAY_BASE_URL }
-      : {}),
+    ...(process.env.BRAIN_GATEWAY_BASE_URL ? { baseUrl: process.env.BRAIN_GATEWAY_BASE_URL } : {}),
     ...(reporting ? { reporting } : {}),
     chatModel:
       ctx.args.get("model")?.trim() ||

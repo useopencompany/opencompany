@@ -12,7 +12,7 @@ import {
 
 type DbLike = any;
 
-export const GOAT_IMESSAGE_PROVIDER = "imessage" as const;
+export const IMESSAGE_PROVIDER = "imessage" as const;
 
 // One iMessage pairing per user: the paired phone lives on a single personal
 // integration row keyed on this stable sentinel, so re-pairing with a new
@@ -43,7 +43,7 @@ export async function resolveGoatImessageDelivery(
     .where(
       and(
         eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, GOAT_IMESSAGE_PROVIDER),
+        eq(goatIntegrations.provider, IMESSAGE_PROVIDER),
         eq(goatIntegrations.status, "connected"),
         sql`${goatIntegrations.workspaceId} IS NULL`,
         eq(goatUsers.imessageEnabled, true),

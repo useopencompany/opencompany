@@ -30,13 +30,13 @@ services:
         sync: false
       - key: RUNNER_INTERNAL_TOKEN
         sync: false
-      - key: NEXT_PUBLIC_GOAT_POSTHOG_TOKEN
+      - key: NEXT_PUBLIC_POSTHOG_TOKEN
         sync: false
-      - key: NEXT_PUBLIC_GOAT_POSTHOG_HOST
+      - key: NEXT_PUBLIC_POSTHOG_HOST
         sync: false
       # Canonical Goat origin for private, bearer-protected host calls made on behalf of
       # Cloud Codex. Credentials and this origin are never injected into E2B.
-      - key: GOAT_NEXT_PUBLIC_APP_URL
+      - key: NEXT_PUBLIC_APP_URL
         sync: false
       - key: RUNNER_STREAM_TOKEN_SECRET
         sync: false
@@ -56,11 +56,11 @@ services:
       - key: VERCEL_AI_GATEWAY_API_KEY
         sync: false
       # Optional Goat OpenTelemetry export to SigNoz. Populated from Infisical prod `/runner`.
-      - key: GOAT_OBSERVABILITY_ENABLED
+      - key: TELEMETRY_ENABLED
         sync: false
-      - key: GOAT_OTEL_EXPORTER_OTLP_ENDPOINT
+      - key: OTEL_EXPORTER_OTLP_ENDPOINT
         sync: false
-      - key: GOAT_OTEL_EXPORTER_OTLP_HEADERS
+      - key: OTEL_EXPORTER_OTLP_HEADERS
         sync: false
       # LLM broker (llm-broker.ts). The broker URL defaults to Render's own
       # RENDER_EXTERNAL_URL, so these are optional overrides: the kill switch reverts
@@ -87,7 +87,7 @@ services:
       - key: GOOGLE_OAUTH_CLIENT_SECRET
         sync: false
       # Optional Goat rendered-browser task tools.
-      - key: RUNNER_GOAT_BROWSER_ENABLED
+      - key: RUNNER_BROWSER_ENABLED
         sync: false
       - key: OPENCOMPANY_CODEX_E2B_TEMPLATE
         sync: false

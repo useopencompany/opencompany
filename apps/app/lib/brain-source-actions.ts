@@ -37,10 +37,10 @@ import {
   upsertGoatGoogleDriveSyncCursor,
 } from "@opencompany/db/google-drive";
 import {
-  GOAT_HUBSPOT_EVENT_TYPES,
   type GoatHubspotEventRef,
   type GoatHubspotEventType,
   type GoatHubspotObjectTypeRef,
+  HUBSPOT_EVENT_TYPES,
   isGoatHubspotObjectType,
 } from "@opencompany/db/hubspot";
 import { loadGoatIntegrationCredential } from "@opencompany/db/integrations";
@@ -1356,7 +1356,7 @@ function sanitizeHubspotObjectTypeRefs(
 }
 
 function sanitizeHubspotEventRefs(refs: GoatHubspotEventRef[]): GoatHubspotEventRef[] {
-  const allowed = new Set<GoatHubspotEventType>(GOAT_HUBSPOT_EVENT_TYPES);
+  const allowed = new Set<GoatHubspotEventType>(HUBSPOT_EVENT_TYPES);
   const seen = new Set<GoatHubspotEventType>();
   const sanitized: GoatHubspotEventRef[] = [];
   for (const ref of refs) {

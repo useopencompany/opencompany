@@ -36,8 +36,8 @@ describe("PostHog server analytics", () => {
   });
 
   it("routes typed events to the dedicated Goat PostHog project", async () => {
-    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_TOKEN", "phc_goat_test");
-    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_HOST", "https://eu.i.posthog.com");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://eu.i.posthog.com");
     vi.stubEnv("NEXT_PUBLIC_ANALYTICS_DEBUG", "true");
 
     await captureGoatServerEvent(
@@ -111,7 +111,10 @@ describe("PostHog server analytics", () => {
     expect(JSON.stringify(posthog.info.mock.calls)).not.toContain("Ada Lovelace");
   });
 
-  it("is a no-op when the dedicated Goat project is not configured", async () => {
+  it("is a no-op when the PostHog project is not configured", async () => {
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "");
+
     await captureGoatServerEvent("signup_completed", "user_123", {
       source: "user_sync",
     });
@@ -121,8 +124,8 @@ describe("PostHog server analytics", () => {
   });
 
   it("captures task spawn events with dashboard-safe attributes", async () => {
-    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_TOKEN", "phc_goat_test");
-    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_HOST", "https://eu.i.posthog.com");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://eu.i.posthog.com");
 
     await captureGoatTaskSpawned({
       userWorkosId: "user_123",
@@ -158,8 +161,8 @@ describe("PostHog server analytics", () => {
   });
 
   it("captures LLM usage with dashboard-friendly model and token properties", async () => {
-    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_TOKEN", "phc_goat_test");
-    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_HOST", "https://eu.i.posthog.com");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://eu.i.posthog.com");
 
     await captureGoatLlmUsageRecorded({
       distinctId: "user_123",
@@ -225,8 +228,8 @@ describe("PostHog server analytics", () => {
   });
 
   it("captures model spend with sum-ready micros properties", async () => {
-    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_TOKEN", "phc_goat_test");
-    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_HOST", "https://eu.i.posthog.com");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://eu.i.posthog.com");
 
     await captureGoatModelSpendRecorded({
       userWorkosId: "user_123",
@@ -266,8 +269,8 @@ describe("PostHog server analytics", () => {
   });
 
   it("does not capture model spend when the model cost is zero", async () => {
-    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_TOKEN", "phc_goat_test");
-    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_HOST", "https://eu.i.posthog.com");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://eu.i.posthog.com");
 
     await captureGoatModelSpendRecorded({
       userWorkosId: "user_123",

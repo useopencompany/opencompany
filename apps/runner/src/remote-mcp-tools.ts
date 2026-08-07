@@ -247,10 +247,7 @@ export function createGoatRemoteMcpTools<const TProvider extends GoatIntegration
   }
 
   function callbackUrl() {
-    const appUrl =
-      process.env.GOAT_NEXT_PUBLIC_APP_URL?.trim() ||
-      process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-      "http://localhost:3000";
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim() || "http://localhost:3000";
     return `${appUrl.replace(/\/$/, "")}/api/integrations/${config.provider.replaceAll("_", "-")}/callback`;
   }
 

@@ -633,7 +633,7 @@ async function vectorCandidates(
   // Ranking assist only: any gateway or pgvector failure degrades this list to empty and the
   // query stays lexical, mirroring the CLI's silent degrade.
   try {
-    const model = process.env.GOAT_BRAIN_EMBEDDING_MODEL?.trim() || DEFAULT_EMBEDDING_MODEL;
+    const model = process.env.BRAIN_EMBEDDING_MODEL?.trim() || DEFAULT_EMBEDDING_MODEL;
     const embeddingJoin = and(
       eq(goatBrainDocumentEmbeddings.documentId, goatBrainDocuments.id),
       eq(goatBrainDocumentEmbeddings.contentHash, goatBrainDocuments.contentHash),
@@ -662,8 +662,8 @@ async function vectorCandidates(
     const gateway = createGateway({
       apiKey: ctx.gatewayApiKey ?? "",
       embeddingModel: model,
-      ...(process.env.GOAT_BRAIN_GATEWAY_BASE_URL
-        ? { baseUrl: process.env.GOAT_BRAIN_GATEWAY_BASE_URL }
+      ...(process.env.BRAIN_GATEWAY_BASE_URL
+        ? { baseUrl: process.env.BRAIN_GATEWAY_BASE_URL }
         : {}),
       ...(ctx.reporting ? { reporting: ctx.reporting } : {}),
       ...(ctx.onUsage ? { onUsage: ctx.onUsage } : {}),
