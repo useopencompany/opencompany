@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { serializeGoatBrainDocument } from "../document";
-import { queryGoatBrain } from "./index";
+import { serializeBrainDocument } from "../document";
+import { queryBrain } from "./index";
 
 let root: string;
 
@@ -27,10 +27,10 @@ describe("goat brain retrieval", () => {
     });
 
     await expect(
-      queryGoatBrain(root, { text: "focused verification", lexicalOnly: true }),
+      queryBrain(root, { text: "focused verification", lexicalOnly: true }),
     ).resolves.toEqual([]);
     await expect(
-      queryGoatBrain(root, {
+      queryBrain(root, {
         text: "focused verification",
         folder: "skills",
         lexicalOnly: true,
@@ -57,7 +57,7 @@ describe("goat brain retrieval", () => {
     });
 
     await expect(
-      queryGoatBrain(root, { text: "enterprise search procurement", hops: 1, lexicalOnly: true }),
+      queryBrain(root, { text: "enterprise search procurement", hops: 1, lexicalOnly: true }),
     ).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: "acme" }),
@@ -93,13 +93,13 @@ describe("goat brain retrieval", () => {
     });
 
     await expect(
-      queryGoatBrain(root, { text: "enterprise search", lexicalOnly: true }),
+      queryBrain(root, { text: "enterprise search", lexicalOnly: true }),
     ).resolves.not.toEqual(
       expect.arrayContaining([expect.objectContaining({ id: "ev-acme-email" })]),
     );
 
     await expect(
-      queryGoatBrain(root, {
+      queryBrain(root, {
         text: "enterprise search",
         kind: "evidence",
         lexicalOnly: true,
@@ -121,12 +121,12 @@ describe("goat brain retrieval", () => {
       });
     }
 
-    const first = await queryGoatBrain(root, {
+    const first = await queryBrain(root, {
       text: "shared pagination target",
       limit: 10,
       lexicalOnly: true,
     });
-    const second = await queryGoatBrain(root, {
+    const second = await queryBrain(root, {
       text: "shared pagination target",
       limit: 10,
       offset: 10,
@@ -157,14 +157,14 @@ describe("goat brain retrieval", () => {
       relations: [{ type: "conflicts_with", to: "acme" }],
     });
 
-    const hits = await queryGoatBrain(root, { text: "enterprise search", lexicalOnly: true });
+    const hits = await queryBrain(root, { text: "enterprise search", lexicalOnly: true });
     expect(hits).toEqual(expect.arrayContaining([expect.objectContaining({ id: "acme" })]));
     expect(hits).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ id: "acme-conflict-1a2b3c4d" })]),
     );
 
     await expect(
-      queryGoatBrain(root, {
+      queryBrain(root, {
         text: "enterprise search",
         lexicalOnly: true,
         includeConflicts: true,
@@ -193,7 +193,7 @@ describe("goat brain retrieval", () => {
     });
 
     await expect(
-      queryGoatBrain(root, {
+      queryBrain(root, {
         text: "enterprise search",
         hops: 1,
         graphDirection: "out",
@@ -207,7 +207,7 @@ describe("goat brain retrieval", () => {
     );
 
     await expect(
-      queryGoatBrain(root, {
+      queryBrain(root, {
         text: "enterprise search",
         hops: 1,
         graphDirection: "in",
@@ -247,7 +247,7 @@ describe("goat brain retrieval", () => {
     });
 
     await expect(
-      queryGoatBrain(root, {
+      queryBrain(root, {
         text: "enterprise search",
         folder: "projects",
         since: "2026-01-15T00:00:00.000Z",
@@ -256,7 +256,7 @@ describe("goat brain retrieval", () => {
     ).resolves.toEqual([expect.objectContaining({ id: "roadmap" })]);
 
     await expect(
-      queryGoatBrain(root, {
+      queryBrain(root, {
         text: "enterprise search",
         folder: "projects",
         includeMerged: true,
@@ -276,7 +276,7 @@ describe("goat brain retrieval", () => {
     });
 
     await expect(
-      queryGoatBrain(root, {
+      queryBrain(root, {
         text: "enterprise search",
         since: "not-a-date",
         lexicalOnly: true,
@@ -295,7 +295,7 @@ describe("goat brain retrieval", () => {
     });
 
     await expect(
-      queryGoatBrain(root, { text: "no lexical match anywhere", lexicalOnly: true }),
+      queryBrain(root, { text: "no lexical match anywhere", lexicalOnly: true }),
     ).resolves.toEqual([]);
   });
 
@@ -318,7 +318,7 @@ describe("goat brain retrieval", () => {
     });
 
     await expect(
-      queryGoatBrain(
+      queryBrain(
         root,
         { text: "semantic target" },
         {
@@ -359,8 +359,8 @@ describe("goat brain retrieval", () => {
       );
     };
 
-    await queryGoatBrain(root, { text: "semantic target" }, { embedTexts });
-    await queryGoatBrain(root, { text: "semantic target" }, { embedTexts });
+    await queryBrain(root, { text: "semantic target" }, { embedTexts });
+    await queryBrain(root, { text: "semantic target" }, { embedTexts });
 
     expect(calls).toHaveLength(3);
     expect(calls[0]).toEqual(["semantic target"]);
@@ -387,7 +387,7 @@ async function writeDoc(
   await mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
   await writeFile(
     path.join(root, relativePath),
-    serializeGoatBrainDocument({
+    serializeBrainDocument({
       frontmatter: {
         id: input.id,
         folder: input.folder,

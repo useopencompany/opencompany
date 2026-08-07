@@ -1,27 +1,27 @@
 import { evidenceLinkTargets, pageLinkTargets } from "./inline-links";
 import {
+  type BrainDerivedEdge,
+  type BrainRelation,
   DEFAULT_GOAT_BRAIN_RELATION_TYPE,
-  type GoatBrainDerivedEdge,
-  type GoatBrainRelation,
-  isValidGoatBrainId,
-  isValidGoatBrainRelationType,
+  isValidBrainId,
+  isValidBrainRelationType,
 } from "./schema";
 
-export function deriveGoatBrainEdges(input: {
+export function deriveBrainEdges(input: {
   id: string;
-  relations?: GoatBrainRelation[];
+  relations?: BrainRelation[];
   body?: string;
-}): GoatBrainDerivedEdge[] {
-  if (!isValidGoatBrainId(input.id)) return [];
-  const byKey = new Map<string, GoatBrainDerivedEdge>();
-  const add = (edge: GoatBrainDerivedEdge) => {
+}): BrainDerivedEdge[] {
+  if (!isValidBrainId(input.id)) return [];
+  const byKey = new Map<string, BrainDerivedEdge>();
+  const add = (edge: BrainDerivedEdge) => {
     if (edge.from === edge.to) return;
     byKey.set(`${edge.sourceKind}:${edge.type}:${edge.from}:${edge.to}`, edge);
   };
 
   for (const relation of input.relations ?? []) {
     const type = relation.type || DEFAULT_GOAT_BRAIN_RELATION_TYPE;
-    if (!isValidGoatBrainRelationType(type) || !isValidGoatBrainId(relation.to)) continue;
+    if (!isValidBrainRelationType(type) || !isValidBrainId(relation.to)) continue;
     add({
       from: input.id,
       to: relation.to,

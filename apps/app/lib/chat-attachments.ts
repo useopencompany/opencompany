@@ -1,20 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { modelSupportsAttachments } from "@opencompany/agent-runtime";
-import type { GoatChatMessageAttachment } from "@opencompany/db/schema";
+import type { ChatMessageAttachment } from "@opencompany/db/schema";
 import { extractDocxText, extractUtf8Text, extractXlsxText } from "@opencompany/file-extract";
 import { get } from "@vercel/blob";
 import {
   GOAT_CHAT_ATTACHMENT_MAX_PER_MESSAGE,
-  validateGoatChatAttachmentCandidate,
+  validateChatAttachmentCandidate,
 } from "@/lib/chat-attachment-formats";
-import type { GoatChatUiMessage, GoatStoredChatMessage } from "@/lib/chat-ui";
+import type { ChatUiMessage, StoredChatMessage } from "@/lib/chat-ui";
 
 // Extracted text shown to the chat model; matches the brain capture cap so a
 // save_to_brain of the same content never silently exceeds it.
 const CHAT_ATTACHMENT_TEXT_MAX_BYTES = 64_000;
 const MAX_FILENAME_LENGTH = 200;
 
-export function goatChatAttachmentBlobPrefix(userWorkosId: string): string {
+export function chatAttachmentBlobPrefix(userWorkosId: string): string {
   return `goat-chat/${userWorkosId}/`;
 }
 
@@ -22,10 +22,10 @@ export function goatChatAttachmentBlobPrefix(userWorkosId: string): string {
 // pathname prefix check is the forged-ref guard: the upload route only mints
 // tokens under the caller's own prefix, so re-checking here stops a crafted
 // request from attaching someone else's blob. Ids are re-minted server-side.
-export function parseGoatChatAttachmentsInput(
+export function parseChatAttachmentsInput(
   value: unknown,
   userWorkosId: string,
-): { ok: true; attachments: GoatChatMessageAttachment[] } | { ok: false; error: string } {
+): { ok: true; attachments: ChatMessageAttachment[] } | { ok: false; error: string } {
   if (value === undefined || value === null) return { ok: true, attachments: [] };
   if (!Array.isArray(value)) return { ok: false, error: "Invalid attachments." };
   if (value.length > GOAT_CHAT_ATTACHMENT_MAX_PER_MESSAGE) {
@@ -35,8 +35,8 @@ export function parseGoatChatAttachmentsInput(
     };
   }
 
-  const prefix = goatChatAttachmentBlobPrefix(userWorkosId);
-  const attachments: GoatChatMessageAttachment[] = [];
+  const prefix = chatAttachmentBlobPrefix(userWorkosId);
+  const attachments: ChatMessageAttachment[] = [];
   const seenBlobUrls = new Set<string>();
   for (const entry of value) {
     if (!entry || typeof entry !== "object") return { ok: false, error: "Invalid attachment." };
@@ -47,7 +47,7 @@ export function parseGoatChatAttachmentsInput(
     const filenameRaw = typeof record.filename === "string" ? record.filename.trim() : "";
     const filename = (filenameRaw || "upload").slice(0, MAX_FILENAME_LENGTH);
 
-    const validation = validateGoatChatAttachmentCandidate({ mediaType, filename, sizeBytes });
+    const validation = validateChatAttachmentCandidate({ mediaType, filename, sizeBytes });
     if (!validation.ok) return { ok: false, error: validation.message };
 
     let pathname: string;
@@ -78,14 +78,14 @@ export function parseGoatChatAttachmentsInput(
 // Runs at submit time so extractable file content is visible to the model on this
 // and every later turn without re-extraction. Failures degrade to "no text"
 // (the model still sees the filename) rather than blocking the send.
-export async function extractGoatChatAttachmentTexts(
-  attachments: readonly GoatChatMessageAttachment[],
+export async function extractChatAttachmentTexts(
+  attachments: readonly ChatMessageAttachment[],
 ): Promise<Record<string, string> | null> {
   const texts: Record<string, string> = {};
   for (const attachment of attachments) {
-    if (!isTextExtractableGoatChatAttachment(attachment)) continue;
+    if (!isTextExtractableChatAttachment(attachment)) continue;
     try {
-      const bytes = await downloadGoatChatAttachment(attachment.blobUrl);
+      const bytes = await downloadChatAttachment(attachment.blobUrl);
       const text =
         attachment.kind === "docx"
           ? await extractDocxText(bytes, { maxBytes: CHAT_ATTACHMENT_TEXT_MAX_BYTES })
@@ -104,7 +104,7 @@ export async function extractGoatChatAttachmentTexts(
   return Object.keys(texts).length > 0 ? texts : null;
 }
 
-export async function downloadGoatChatAttachment(blobUrl: string): Promise<Buffer> {
+export async function downloadChatAttachment(blobUrl: string): Promise<Buffer> {
   const result = await get(blobUrl, { access: "private", useCache: false });
   if (!result || result.statusCode !== 200 || !result.stream) {
     throw new Error("Attachment blob is unavailable.");
@@ -125,14 +125,14 @@ export async function downloadGoatChatAttachment(blobUrl: string): Promise<Buffe
 // every turn — follow-up questions about a file are the core use case; caps
 // bound the cost. Each part carries the attachment id so the model can pass it
 // to save_to_brain.
-export async function hydrateGoatChatAttachmentParts(input: {
-  uiMessages: GoatChatUiMessage[];
+export async function hydrateChatAttachmentParts(input: {
+  uiMessages: ChatUiMessage[];
   storedMessages: readonly Pick<
-    GoatStoredChatMessage,
+    StoredChatMessage,
     "id" | "role" | "attachments" | "attachmentTexts"
   >[];
   modelId: string;
-}): Promise<GoatChatUiMessage[]> {
+}): Promise<ChatUiMessage[]> {
   const storedById = new Map(
     input.storedMessages
       .filter((message) => message.role === "user" && (message.attachments?.length ?? 0) > 0)
@@ -146,7 +146,7 @@ export async function hydrateGoatChatAttachmentParts(input: {
       const stored = message.role === "user" ? storedById.get(message.id) : undefined;
       if (!stored?.attachments?.length) return message;
 
-      const parts: GoatChatUiMessage["parts"] = [...message.parts];
+      const parts: ChatUiMessage["parts"] = [...message.parts];
       for (const attachment of stored.attachments) {
         parts.push(...(await attachmentToParts(attachment, stored, capabilities)));
       }
@@ -156,13 +156,13 @@ export async function hydrateGoatChatAttachmentParts(input: {
 }
 
 async function attachmentToParts(
-  attachment: GoatChatMessageAttachment,
-  stored: Pick<GoatStoredChatMessage, "attachmentTexts">,
+  attachment: ChatMessageAttachment,
+  stored: Pick<StoredChatMessage, "attachmentTexts">,
   capabilities: { images: boolean; pdf: boolean },
-): Promise<GoatChatUiMessage["parts"]> {
+): Promise<ChatUiMessage["parts"]> {
   const label = attachmentLabel(attachment);
 
-  if (isTextExtractableGoatChatAttachment(attachment)) {
+  if (isTextExtractableChatAttachment(attachment)) {
     const text = stored.attachmentTexts?.[attachment.id];
     return [
       {
@@ -180,7 +180,7 @@ async function attachmentToParts(
   }
 
   try {
-    const bytes = await downloadGoatChatAttachment(attachment.blobUrl);
+    const bytes = await downloadChatAttachment(attachment.blobUrl);
     return [
       { type: "text", text: label },
       {
@@ -200,12 +200,12 @@ async function attachmentToParts(
   }
 }
 
-function attachmentLabel(attachment: GoatChatMessageAttachment): string {
+function attachmentLabel(attachment: ChatMessageAttachment): string {
   return `[Attached file "${attachment.filename}" (${attachment.kind}) — attachment id: ${attachment.id}]`;
 }
 
-export function isTextExtractableGoatChatAttachment(
-  attachment: Pick<GoatChatMessageAttachment, "kind">,
+export function isTextExtractableChatAttachment(
+  attachment: Pick<ChatMessageAttachment, "kind">,
 ): boolean {
   return (
     attachment.kind === "docx" ||

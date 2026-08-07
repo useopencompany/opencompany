@@ -1,4 +1,4 @@
-import { createGateway, type Gateway, type GoatBrainUsageEntry } from "./gateway";
+import { type BrainUsageEntry, createGateway, type Gateway } from "./gateway";
 import type { RetrievalProviders } from "./index";
 
 // Retrieval's only model dependency is embeddings. Query expansion and LLM reranking were removed
@@ -7,7 +7,7 @@ import type { RetrievalProviders } from "./index";
 // evals ever show a precision gap, a dedicated reranker model slots in behind this same seam.
 export async function loadProviders(
   env: NodeJS.ProcessEnv = process.env,
-  onUsage?: (entry: GoatBrainUsageEntry) => void,
+  onUsage?: (entry: BrainUsageEntry) => void,
 ): Promise<RetrievalProviders> {
   const apiKey = env.VERCEL_AI_GATEWAY_API_KEY;
   if (!apiKey) return {};

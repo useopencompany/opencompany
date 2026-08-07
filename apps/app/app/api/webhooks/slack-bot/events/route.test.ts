@@ -1,15 +1,15 @@
 import { createHmac } from "node:crypto";
 import {
-  claimGoatSlackBotEvent,
-  completeGoatSlackBotEvent,
-  getGoatSlackBotThreadParticipation,
-  releaseGoatSlackBotEvent,
+  claimSlackBotEvent,
+  completeSlackBotEvent,
+  getSlackBotThreadParticipation,
+  releaseSlackBotEvent,
 } from "@opencompany/db/slack-bot";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  processGoatSlackBotDirectMessage,
-  processGoatSlackBotMention,
-  processGoatSlackBotThreadFollowUp,
+  processSlackBotDirectMessage,
+  processSlackBotMention,
+  processSlackBotThreadFollowUp,
 } from "@/lib/slack-bot/answer";
 import { POST } from "./route";
 
@@ -26,17 +26,17 @@ vi.mock("next/server", async (importOriginal) => {
 });
 
 vi.mock("@opencompany/db/slack-bot", () => ({
-  claimGoatSlackBotEvent: vi.fn(),
-  completeGoatSlackBotEvent: vi.fn(async () => undefined),
-  getGoatSlackBotThreadParticipation: vi.fn(async () => null),
-  markGoatSlackBotIntegrationStatusForTeam: vi.fn(async () => undefined),
-  releaseGoatSlackBotEvent: vi.fn(async () => undefined),
+  claimSlackBotEvent: vi.fn(),
+  completeSlackBotEvent: vi.fn(async () => undefined),
+  getSlackBotThreadParticipation: vi.fn(async () => null),
+  markSlackBotIntegrationStatusForTeam: vi.fn(async () => undefined),
+  releaseSlackBotEvent: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/lib/slack-bot/answer", () => ({
-  processGoatSlackBotDirectMessage: vi.fn(async () => undefined),
-  processGoatSlackBotMention: vi.fn(async () => undefined),
-  processGoatSlackBotThreadFollowUp: vi.fn(async () => undefined),
+  processSlackBotDirectMessage: vi.fn(async () => undefined),
+  processSlackBotMention: vi.fn(async () => undefined),
+  processSlackBotThreadFollowUp: vi.fn(async () => undefined),
 }));
 
 const SIGNING_SECRET = "test-bot-signing-secret";
@@ -95,8 +95,8 @@ describe("POST /api/webhooks/slack-bot/events", () => {
     vi.clearAllMocks();
     afterTasks.length = 0;
     process.env.SLACK_BOT_SIGNING_SECRET = SIGNING_SECRET;
-    vi.mocked(claimGoatSlackBotEvent).mockResolvedValue(CLAIM);
-    vi.mocked(getGoatSlackBotThreadParticipation).mockResolvedValue(null);
+    vi.mocked(claimSlackBotEvent).mockResolvedValue(CLAIM);
+    vi.mocked(getSlackBotThreadParticipation).mockResolvedValue(null);
   });
 
   it("processes a retry when it acquires the event lease", async () => {
@@ -105,26 +105,26 @@ describe("POST /api/webhooks/slack-bot/events", () => {
     expect(await response.json()).toEqual({ ok: true });
     await Promise.all(afterTasks);
 
-    expect(processGoatSlackBotMention).toHaveBeenCalledOnce();
-    expect(completeGoatSlackBotEvent).toHaveBeenCalledWith(CLAIM);
+    expect(processSlackBotMention).toHaveBeenCalledOnce();
+    expect(completeSlackBotEvent).toHaveBeenCalledWith(CLAIM);
   });
 
   it("acks a concurrent or completed duplicate without answering twice", async () => {
-    vi.mocked(claimGoatSlackBotEvent).mockResolvedValue(null);
+    vi.mocked(claimSlackBotEvent).mockResolvedValue(null);
 
     const response = await POST(signedEventRequest(mentionEvent(), { retry: true }));
     expect(await response.json()).toEqual({ ok: true, skipped: "duplicate" });
-    expect(processGoatSlackBotMention).not.toHaveBeenCalled();
+    expect(processSlackBotMention).not.toHaveBeenCalled();
   });
 
   it("releases the lease when mention processing fails", async () => {
-    vi.mocked(processGoatSlackBotMention).mockRejectedValue(new Error("gateway unavailable"));
+    vi.mocked(processSlackBotMention).mockRejectedValue(new Error("gateway unavailable"));
 
     await POST(signedEventRequest(mentionEvent()));
     await Promise.all(afterTasks);
 
-    expect(releaseGoatSlackBotEvent).toHaveBeenCalledWith(CLAIM);
-    expect(completeGoatSlackBotEvent).not.toHaveBeenCalled();
+    expect(releaseSlackBotEvent).toHaveBeenCalledWith(CLAIM);
+    expect(completeSlackBotEvent).not.toHaveBeenCalled();
   });
 
   it("drops bot echoes and system subtypes before claiming", async () => {
@@ -136,8 +136,8 @@ describe("POST /api/webhooks/slack-bot/events", () => {
     );
     expect(await subtype.json()).toEqual({ ok: true, dropped: true });
 
-    expect(claimGoatSlackBotEvent).not.toHaveBeenCalled();
-    expect(processGoatSlackBotThreadFollowUp).not.toHaveBeenCalled();
+    expect(claimSlackBotEvent).not.toHaveBeenCalled();
+    expect(processSlackBotThreadFollowUp).not.toHaveBeenCalled();
   });
 
   it("ignores channel messages outside threads and threads without bot participation", async () => {
@@ -146,18 +146,18 @@ describe("POST /api/webhooks/slack-bot/events", () => {
 
     const unknownThread = await POST(signedEventRequest(threadMessageEvent()));
     expect(await unknownThread.json()).toEqual({ ok: true, ignored: true });
-    expect(getGoatSlackBotThreadParticipation).toHaveBeenCalledWith({
+    expect(getSlackBotThreadParticipation).toHaveBeenCalledWith({
       teamId: "T123",
       channelId: "C123",
       threadTs: "1784196000.000100",
     });
 
-    expect(claimGoatSlackBotEvent).not.toHaveBeenCalled();
-    expect(processGoatSlackBotThreadFollowUp).not.toHaveBeenCalled();
+    expect(claimSlackBotEvent).not.toHaveBeenCalled();
+    expect(processSlackBotThreadFollowUp).not.toHaveBeenCalled();
   });
 
   it("ignores thread replies that mention anyone (bot or human)", async () => {
-    vi.mocked(getGoatSlackBotThreadParticipation).mockResolvedValue({
+    vi.mocked(getSlackBotThreadParticipation).mockResolvedValue({
       integrationId: "goatint_1",
     });
 
@@ -171,11 +171,11 @@ describe("POST /api/webhooks/slack-bot/events", () => {
     );
     expect(await mentionsHuman.json()).toEqual({ ok: true, ignored: true });
 
-    expect(claimGoatSlackBotEvent).not.toHaveBeenCalled();
+    expect(claimSlackBotEvent).not.toHaveBeenCalled();
   });
 
   it("answers a mention-free reply in a thread the bot participates in", async () => {
-    vi.mocked(getGoatSlackBotThreadParticipation).mockResolvedValue({
+    vi.mocked(getSlackBotThreadParticipation).mockResolvedValue({
       integrationId: "goatint_1",
     });
 
@@ -183,9 +183,9 @@ describe("POST /api/webhooks/slack-bot/events", () => {
     expect(await response.json()).toEqual({ ok: true });
     await Promise.all(afterTasks);
 
-    expect(processGoatSlackBotThreadFollowUp).toHaveBeenCalledOnce();
-    expect(processGoatSlackBotMention).not.toHaveBeenCalled();
-    expect(completeGoatSlackBotEvent).toHaveBeenCalledWith(CLAIM);
+    expect(processSlackBotThreadFollowUp).toHaveBeenCalledOnce();
+    expect(processSlackBotMention).not.toHaveBeenCalled();
+    expect(completeSlackBotEvent).toHaveBeenCalledWith(CLAIM);
   });
 
   it("routes direct messages to the DM processor without a participation check", async () => {
@@ -202,7 +202,7 @@ describe("POST /api/webhooks/slack-bot/events", () => {
     expect(await response.json()).toEqual({ ok: true });
     await Promise.all(afterTasks);
 
-    expect(processGoatSlackBotDirectMessage).toHaveBeenCalledOnce();
-    expect(getGoatSlackBotThreadParticipation).not.toHaveBeenCalled();
+    expect(processSlackBotDirectMessage).toHaveBeenCalledOnce();
+    expect(getSlackBotThreadParticipation).not.toHaveBeenCalled();
   });
 });

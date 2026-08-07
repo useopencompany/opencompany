@@ -1,21 +1,18 @@
-import type { GoatResolvedActionCatalog, ResolvedGoatAction } from "./types";
+import type { ResolvedAction, ResolvedActionCatalog } from "./types";
 
-export type GoatActionCatalogPolicyName = "foregroundInteractive" | "cloudReadOnly" | "headless";
+export type ActionCatalogPolicyName = "foregroundInteractive" | "cloudReadOnly" | "headless";
 
-export type GoatActionCatalogPolicy = {
-  name: GoatActionCatalogPolicyName;
+export type ActionCatalogPolicy = {
+  name: ActionCatalogPolicyName;
   sourceKinds: readonly ("integration" | "managed")[];
   permissionModes: readonly ("on" | "ask")[];
   approvalCapable: boolean;
-  includeAction: (action: ResolvedGoatAction) => boolean;
+  includeAction: (action: ResolvedAction) => boolean;
 };
 
 const includeEveryAction = () => true;
 
-export const GOAT_ACTION_CATALOG_POLICIES: Record<
-  GoatActionCatalogPolicyName,
-  GoatActionCatalogPolicy
-> = {
+export const GOAT_ACTION_CATALOG_POLICIES: Record<ActionCatalogPolicyName, ActionCatalogPolicy> = {
   foregroundInteractive: {
     name: "foregroundInteractive",
     sourceKinds: ["integration", "managed"],
@@ -40,9 +37,9 @@ export const GOAT_ACTION_CATALOG_POLICIES: Record<
 };
 
 export function projectActionCatalog(
-  catalog: GoatResolvedActionCatalog,
-  policy: GoatActionCatalogPolicyName | GoatActionCatalogPolicy,
-): GoatResolvedActionCatalog {
+  catalog: ResolvedActionCatalog,
+  policy: ActionCatalogPolicyName | ActionCatalogPolicy,
+): ResolvedActionCatalog {
   const resolvedPolicy = typeof policy === "string" ? GOAT_ACTION_CATALOG_POLICIES[policy] : policy;
   const allowedSourceKinds = new Set(resolvedPolicy.sourceKinds);
   const allowedPermissionModes = new Set(resolvedPolicy.permissionModes);

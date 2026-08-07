@@ -2,12 +2,12 @@ import { type EncryptedPayload, EncryptionKeyConfigError } from "@opencompany/cr
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { GoatRepoConfigDb } from "./repo-configs";
+import type { RepoConfigDb } from "./repo-configs";
 import {
   isValidGitHubRepositoryExternalId,
   isValidGitHubRepositoryFullName,
-  listDecryptedGoatRepoConfigs,
-  upsertGoatRepoConfig,
+  listDecryptedRepoConfigs,
+  upsertRepoConfig,
 } from "./repo-configs";
 
 describe("Goat repository configs", () => {
@@ -43,9 +43,9 @@ describe("Goat repository configs", () => {
           };
         },
       }),
-    } as unknown as GoatRepoConfigDb;
+    } as unknown as RepoConfigDb;
 
-    await upsertGoatRepoConfig({
+    await upsertRepoConfig({
       db: insertDb,
       workspaceId: "goat_ws_1",
       repositoryExternalId: "123",
@@ -80,7 +80,7 @@ describe("Goat repository configs", () => {
       },
     ]);
     await expect(
-      listDecryptedGoatRepoConfigs({ db: selectDb.db, workspaceId: "goat_ws_1" }),
+      listDecryptedRepoConfigs({ db: selectDb.db, workspaceId: "goat_ws_1" }),
     ).resolves.toEqual([
       {
         repositoryExternalId: "123",
@@ -126,8 +126,8 @@ describe("Goat repository configs", () => {
           };
         },
       }),
-    } as unknown as GoatRepoConfigDb;
-    await upsertGoatRepoConfig({
+    } as unknown as RepoConfigDb;
+    await upsertRepoConfig({
       db: insertDb,
       workspaceId: "goat_ws_1",
       repositoryExternalId: "123",
@@ -162,7 +162,7 @@ describe("Goat repository configs", () => {
       },
     ]);
 
-    await expect(listDecryptedGoatRepoConfigs({ db, workspaceId: "goat_ws_1" })).resolves.toEqual([
+    await expect(listDecryptedRepoConfigs({ db, workspaceId: "goat_ws_1" })).resolves.toEqual([
       expect.objectContaining({
         repositoryExternalId: "123",
         envContent: "API_TOKEN=token_secret",
@@ -198,9 +198,9 @@ describe("Goat repository configs", () => {
       },
     ]);
 
-    await expect(
-      listDecryptedGoatRepoConfigs({ db, workspaceId: "goat_ws_1" }),
-    ).rejects.toBeInstanceOf(EncryptionKeyConfigError);
+    await expect(listDecryptedRepoConfigs({ db, workspaceId: "goat_ws_1" })).rejects.toBeInstanceOf(
+      EncryptionKeyConfigError,
+    );
   });
 
   it("accepts GitHub ids and names but rejects unsafe identifiers", () => {
@@ -214,7 +214,7 @@ describe("Goat repository configs", () => {
 });
 
 function selectRowsDb(rows: unknown[]): {
-  db: GoatRepoConfigDb;
+  db: RepoConfigDb;
   innerJoin: ReturnType<typeof vi.fn>;
 } {
   const innerJoin = vi.fn();
@@ -229,7 +229,7 @@ function selectRowsDb(rows: unknown[]): {
       select: () => ({
         from: () => query,
       }),
-    } as unknown as GoatRepoConfigDb,
+    } as unknown as RepoConfigDb,
     innerJoin,
   };
 }

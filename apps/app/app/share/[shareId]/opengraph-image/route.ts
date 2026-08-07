@@ -1,12 +1,12 @@
 import { createSharedChatOpenGraphImage } from "@/components/chat/SharedChatOpenGraphImage";
-import { loadPublicGoatChatMetadata } from "@/lib/chat-sharing";
+import { loadPublicChatMetadata } from "@/lib/chat-sharing";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(_request: Request, { params }: { params: Promise<{ shareId: string }> }) {
   const { shareId } = await params;
-  const chat = await loadPublicGoatChatMetadata(shareId);
+  const chat = await loadPublicChatMetadata(shareId);
   if (!chat) {
     return new Response(null, {
       status: 404,

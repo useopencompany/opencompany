@@ -1,14 +1,14 @@
 import {
-  GoatGitHubApiError,
-  type GoatGitHubConnectedInstallation,
-  listConnectedGoatGitHubInstallations,
-  searchGoatGitHubIssues,
+  GitHubApiError,
+  type GitHubConnectedInstallation,
+  listConnectedGitHubInstallations,
+  searchGitHubIssues,
 } from "../integrations/github";
 import {
+  ActionAuthError,
+  ActionInvalidParamsError,
+  type ActionProviderCatalog,
   GOAT_ACTION_EFFECTS_READ,
-  GoatActionAuthError,
-  GoatActionInvalidParamsError,
-  type GoatActionProviderCatalog,
   optionalNumberParam,
   optionalStringParam,
   truncateText,
@@ -27,8 +27,8 @@ const MAX_URL_CHARS = 500;
 
 export async function resolveGitHubActions(
   workspaceId: string,
-): Promise<GoatActionProviderCatalog | null> {
-  const connections = await listConnectedGoatGitHubInstallations(workspaceId);
+): Promise<ActionProviderCatalog | null> {
+  const connections = await listConnectedGitHubInstallations(workspaceId);
   if (connections.length === 0) return null;
 
   const accountParam =
@@ -86,7 +86,7 @@ export async function resolveGitHubActions(
           const limit = searchLimit(params);
 
           try {
-            const response = await searchGoatGitHubIssues({
+            const response = await searchGitHubIssues({
               installationId: connection.installationId,
               query,
               limit,
@@ -99,12 +99,12 @@ export async function resolveGitHubActions(
             };
           } catch (error) {
             if (
-              error instanceof GoatGitHubApiError &&
+              error instanceof GitHubApiError &&
               (error.status === 401 ||
                 error.status === 404 ||
                 (error.status === 403 && error.operation === "installation_token"))
             ) {
-              throw new GoatActionAuthError(
+              throw new ActionAuthError(
                 "auth_expired",
                 "github",
                 `The GitHub installation for ${connectionLabel(connection)} is no longer usable; reconnect GitHub in Settings → Integrations, then retry.`,
@@ -122,20 +122,18 @@ function validateKeys(params: Record<string, unknown>, hasMultipleAccounts: bool
   const allowed = new Set(hasMultipleAccounts ? ["query", "limit", "account"] : ["query", "limit"]);
   const unexpected = Object.keys(params).find((key) => !allowed.has(key));
   if (unexpected) {
-    throw new GoatActionInvalidParamsError(`Unexpected parameter ${JSON.stringify(unexpected)}.`);
+    throw new ActionInvalidParamsError(`Unexpected parameter ${JSON.stringify(unexpected)}.`);
   }
 }
 
 function requiredSearchQuery(params: Record<string, unknown>) {
   const value = params.query;
   if (typeof value !== "string" || !value.trim()) {
-    throw new GoatActionInvalidParamsError('"query" is required and must be a non-empty string.');
+    throw new ActionInvalidParamsError('"query" is required and must be a non-empty string.');
   }
   const query = value.trim();
   if (query.length > MAX_QUERY_CHARS) {
-    throw new GoatActionInvalidParamsError(
-      `"query" must be at most ${MAX_QUERY_CHARS} characters.`,
-    );
+    throw new ActionInvalidParamsError(`"query" must be at most ${MAX_QUERY_CHARS} characters.`);
   }
   return query;
 }
@@ -144,7 +142,7 @@ function searchLimit(params: Record<string, unknown>) {
   const value = optionalNumberParam(params, "limit");
   if (value === undefined) return DEFAULT_SEARCH_RESULTS;
   if (!Number.isInteger(value) || value < 1 || value > MAX_SEARCH_RESULTS) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"limit" must be an integer from 1 to ${MAX_SEARCH_RESULTS}.`,
     );
   }
@@ -152,7 +150,7 @@ function searchLimit(params: Record<string, unknown>) {
 }
 
 function resolveConnection(
-  connections: readonly GoatGitHubConnectedInstallation[],
+  connections: readonly GitHubConnectedInstallation[],
   account: string | undefined,
 ) {
   if (account) {
@@ -161,7 +159,7 @@ function resolveConnection(
       (connection) => connectionSelector(connection, connections).toLowerCase() === wanted,
     );
     if (!match) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `No connected GitHub account matches ${JSON.stringify(account)}. Connected accounts: ${connections
           .map((connection) => JSON.stringify(connectionSelector(connection, connections)))
           .join(", ")}.`,
@@ -170,14 +168,14 @@ function resolveConnection(
     return match;
   }
   if (connections.length === 1) return connections[0]!;
-  throw new GoatActionInvalidParamsError(
+  throw new ActionInvalidParamsError(
     `Multiple GitHub accounts are connected; pass account as one of: ${connections
       .map((connection) => JSON.stringify(connectionSelector(connection, connections)))
       .join(", ")}.`,
   );
 }
 
-function connectionLabel(connection: GoatGitHubConnectedInstallation) {
+function connectionLabel(connection: GitHubConnectedInstallation) {
   const label =
     connection.accountName?.trim() || `GitHub installation ${connection.installationId}`;
   const normalized = label.replace(/\s+/g, " ");
@@ -185,8 +183,8 @@ function connectionLabel(connection: GoatGitHubConnectedInstallation) {
 }
 
 function connectionSelector(
-  connection: GoatGitHubConnectedInstallation,
-  connections: readonly GoatGitHubConnectedInstallation[],
+  connection: GitHubConnectedInstallation,
+  connections: readonly GitHubConnectedInstallation[],
 ) {
   const label = connectionLabel(connection);
   const duplicates = connections.filter(

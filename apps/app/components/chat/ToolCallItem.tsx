@@ -28,7 +28,7 @@ import {
 } from "@/lib/chat-ui";
 import {
   formatDebugValue,
-  isGoatBrainToolOutput,
+  isBrainToolOutput,
   isRecord,
   type ToolCallView,
 } from "./assistant-items";
@@ -1025,7 +1025,7 @@ function BrainToolCallRow({ tool }: { tool: ToolCallView }) {
           {parsedPreview ? <ToolPreviewBlock label="Parsed" value={parsedPreview} /> : null}
           {stderrPreview ? <ToolPreviewBlock label="Stderr" value={stderrPreview} /> : null}
           {errorPreview ? <ToolPreviewBlock label="Error" value={errorPreview} /> : null}
-          {!isGoatBrainToolOutput(tool.output) && !tool.errorText ? (
+          {!isBrainToolOutput(tool.output) && !tool.errorText ? (
             <div className="py-1 text-[11px] text-ink-subtle">Waiting for result</div>
           ) : null}
         </div>
@@ -1181,7 +1181,7 @@ function ToolPreviewBlock({ label, value }: { label: string; value: string }) {
 }
 
 function brainOutputCommand(value: unknown) {
-  if (!isGoatBrainToolOutput(value)) return null;
+  if (!isBrainToolOutput(value)) return null;
   const lines: string[] = [];
   if (value.command) lines.push(`goat_brain ${value.command}`);
   if (Array.isArray(value.argv)) lines.push(`argv: ${JSON.stringify(value.argv)}`);
@@ -1189,22 +1189,22 @@ function brainOutputCommand(value: unknown) {
 }
 
 function brainOutputStdout(value: unknown) {
-  return isGoatBrainToolOutput(value) && value.stdout?.trim() ? value.stdout : null;
+  return isBrainToolOutput(value) && value.stdout?.trim() ? value.stdout : null;
 }
 
 function brainOutputStderr(value: unknown) {
-  return isGoatBrainToolOutput(value) && value.stderr?.trim() ? value.stderr : null;
+  return isBrainToolOutput(value) && value.stderr?.trim() ? value.stderr : null;
 }
 
 function brainOutputParsed(value: unknown) {
-  return isGoatBrainToolOutput(value) && value.parsed !== undefined
+  return isBrainToolOutput(value) && value.parsed !== undefined
     ? formatDebugValue(value.parsed)
     : null;
 }
 
 function brainOutputError(value: unknown, errorText: string | null) {
   if (errorText?.trim()) return errorText;
-  return isGoatBrainToolOutput(value) && value.error?.trim() ? value.error : null;
+  return isBrainToolOutput(value) && value.error?.trim() ? value.error : null;
 }
 
 function getToolCallMeta(tool: ToolCallView): {

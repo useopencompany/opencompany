@@ -1,16 +1,16 @@
-import { loadGoatBillingOverview } from "@opencompany/db/billing";
-import { loadGoatSpendBreakdown } from "@opencompany/db/credits";
-import { type GoatUsageData, GoatUsagePanel } from "@/components/GoatIngestionUsagePanel";
-import { currentGoatUser } from "@/lib/auth";
+import { loadBillingOverview } from "@opencompany/db/billing";
+import { loadSpendBreakdown } from "@opencompany/db/credits";
+import { type UsageData, UsagePanel } from "@/components/IngestionUsagePanel";
+import { currentUser } from "@/lib/auth";
 
 export default async function WorkspaceUsageSettingsPage() {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   const [overview, breakdown] = await Promise.all([
-    loadGoatBillingOverview(context.workspace.id),
-    loadGoatSpendBreakdown(context.workspace.id, { days: 30 }),
+    loadBillingOverview(context.workspace.id),
+    loadSpendBreakdown(context.workspace.id, { days: 30 }),
   ]);
   return (
-    <GoatUsagePanel
+    <UsagePanel
       data={{
         breakdown,
         ingestedThisMonth: overview.ingestedThisMonth,
@@ -19,7 +19,7 @@ export default async function WorkspaceUsageSettingsPage() {
         providers: overview.providers,
         recent: overview.recent.map(
           (
-            item: Omit<GoatUsageData["recent"][number], "createdAt"> & {
+            item: Omit<UsageData["recent"][number], "createdAt"> & {
               createdAt: Date;
             },
           ) => ({

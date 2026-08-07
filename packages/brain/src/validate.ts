@@ -1,53 +1,53 @@
 import {
-  extractGoatBrainCitations,
+  extractBrainCitations,
   GOAT_BRAIN_TIMELINE_HEADING,
   GOAT_BRAIN_TRUTH_HEADING,
-  type ParsedGoatBrainDocument,
+  type ParsedBrainDocument,
 } from "./document";
-import { parseGoatBrainInlineLinks, sourceLinkTargets } from "./inline-links";
+import { parseBrainInlineLinks, sourceLinkTargets } from "./inline-links";
 import {
-  isValidGoatBrainEntityType,
-  isValidGoatBrainEvidenceId,
-  isValidGoatBrainFolder,
-  isValidGoatBrainId,
-  isValidGoatBrainKind,
-  isValidGoatBrainRelationType,
-  isValidGoatBrainStatus,
+  isValidBrainEntityType,
+  isValidBrainEvidenceId,
+  isValidBrainFolder,
+  isValidBrainId,
+  isValidBrainKind,
+  isValidBrainRelationType,
+  isValidBrainStatus,
 } from "./schema";
-import { goatBrainFolderKindError } from "./schemas";
+import { brainFolderKindError } from "./schemas";
 import { isIsoDate } from "./time";
 
-export type GoatBrainValidationResult = { ok: true } | { ok: false; errors: string[] };
-export type GoatBrainValidationSubject = "frontmatter" | "sidecar";
+export type BrainValidationResult = { ok: true } | { ok: false; errors: string[] };
+export type BrainValidationSubject = "frontmatter" | "sidecar";
 
-export function validateGoatBrainFolderKindType(input: {
+export function validateBrainFolderKindType(input: {
   folder: unknown;
   kind: unknown;
   type: unknown;
-  subject: GoatBrainValidationSubject;
+  subject: BrainValidationSubject;
 }): string[] {
   const errors: string[] = [];
-  if (!isValidGoatBrainFolder(input.folder)) {
+  if (!isValidBrainFolder(input.folder)) {
     errors.push(`${input.subject}.folder must be a safe lowercase folder path.`);
   }
-  if (!isValidGoatBrainEntityType(input.type)) {
+  if (!isValidBrainEntityType(input.type)) {
     errors.push(
       input.subject === "frontmatter"
         ? "frontmatter.type must be a built-in brain entity type."
         : "sidecar.type is invalid.",
     );
   }
-  if (!isValidGoatBrainKind(input.kind)) {
+  if (!isValidBrainKind(input.kind)) {
     errors.push(`${input.subject}.kind must be "page" or "evidence".`);
   }
-  if (isValidGoatBrainFolder(input.folder) && isValidGoatBrainKind(input.kind)) {
-    const folderKindError = goatBrainFolderKindError(input.folder, input.kind);
+  if (isValidBrainFolder(input.folder) && isValidBrainKind(input.kind)) {
+    const folderKindError = brainFolderKindError(input.folder, input.kind);
     if (folderKindError) errors.push(`${input.subject}.folder/kind mismatch: ${folderKindError}`);
   }
   return errors;
 }
 
-export function validateGoatBrainRelations(
+export function validateBrainRelations(
   relations: unknown,
   options: { fieldName: string } = { fieldName: "relations" },
 ): string[] {
@@ -59,36 +59,36 @@ export function validateGoatBrainRelations(
       errors.push("relation must have type and to fields.");
       continue;
     }
-    if (!isValidGoatBrainRelationType(relation.type)) {
+    if (!isValidBrainRelationType(relation.type)) {
       errors.push(`relation type "${String(relation.type)}" is invalid.`);
     }
-    if (!isValidGoatBrainId(relation.to)) {
+    if (!isValidBrainId(relation.to)) {
       errors.push(`relation target "${String(relation.to)}" is invalid.`);
     }
   }
   return errors;
 }
 
-export function validateGoatBrainDocument(
-  doc: ParsedGoatBrainDocument,
+export function validateBrainDocument(
+  doc: ParsedBrainDocument,
   expectedId?: string,
   source = "",
-): GoatBrainValidationResult {
+): BrainValidationResult {
   const errors: string[] = [];
   const fm = doc.frontmatter;
-  if (!isValidGoatBrainId(fm.id)) errors.push("frontmatter.id must be a lowercase slug.");
+  if (!isValidBrainId(fm.id)) errors.push("frontmatter.id must be a lowercase slug.");
   if (expectedId && fm.id && fm.id !== expectedId) {
     errors.push(`frontmatter.id "${fm.id}" does not match file id "${expectedId}".`);
   }
   errors.push(
-    ...validateGoatBrainFolderKindType({
+    ...validateBrainFolderKindType({
       folder: fm.folder,
       kind: fm.kind,
       type: fm.type,
       subject: "frontmatter",
     }),
   );
-  if (!isValidGoatBrainStatus(fm.status)) {
+  if (!isValidBrainStatus(fm.status)) {
     errors.push("frontmatter.status must be draft, active, archived, or merged.");
   }
   if (!fm.createdAt || !isIsoDate(fm.createdAt)) {
@@ -101,9 +101,9 @@ export function validateGoatBrainDocument(
     errors.push(`frontmatter.${legacyKey} is not supported by the v2 brain contract.`);
   }
   errors.push(
-    ...validateGoatBrainRelations(fm.relations ?? [], { fieldName: "frontmatter.relations" }),
+    ...validateBrainRelations(fm.relations ?? [], { fieldName: "frontmatter.relations" }),
   );
-  if (fm.mergedInto && !isValidGoatBrainId(fm.mergedInto)) {
+  if (fm.mergedInto && !isValidBrainId(fm.mergedInto)) {
     errors.push(`mergedInto target "${fm.mergedInto}" is invalid.`);
   }
   for (const alias of fm.aliases ?? []) {
@@ -123,7 +123,7 @@ export function validateGoatBrainDocument(
     errors.push("document must include ## Compiled truth and ## Timeline sections.");
   }
   for (const text of [doc.compiledTruth, ...doc.timeline.map((entry) => entry.body)]) {
-    for (const link of parseGoatBrainInlineLinks(text)) {
+    for (const link of parseBrainInlineLinks(text)) {
       if (link.valid) continue;
       if (link.kind === "page") errors.push(`wiki link target "${link.target}" is invalid.`);
       else if (link.kind === "evidence")
@@ -133,7 +133,7 @@ export function validateGoatBrainDocument(
   }
   const evidenceIds = new Set<string>();
   for (const entry of doc.timeline) {
-    if (!isValidGoatBrainEvidenceId(entry.evidenceId)) {
+    if (!isValidBrainEvidenceId(entry.evidenceId)) {
       errors.push(`timeline evidence id "${entry.evidenceId}" is invalid.`);
     } else if (evidenceIds.has(entry.evidenceId)) {
       errors.push(`timeline evidence id "${entry.evidenceId}" is duplicated.`);
@@ -144,7 +144,7 @@ export function validateGoatBrainDocument(
       errors.push(`timeline entry "${entry.evidenceId}" timestamp must be ISO-8601 UTC.`);
     }
   }
-  const citations = extractGoatBrainCitations(doc.compiledTruth);
+  const citations = extractBrainCitations(doc.compiledTruth);
   const sourceCitations = sourceLinkTargets(doc.compiledTruth);
   if (
     fm.status === "active" &&

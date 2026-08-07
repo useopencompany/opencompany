@@ -6,18 +6,18 @@ import { ReactRenderer } from "@tiptap/react";
 import { Suggestion, type SuggestionOptions } from "@tiptap/suggestion";
 import { Sparkles } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
-import type { GoatSkillCatalogItem } from "@/lib/skills";
+import type { SkillCatalogItem } from "@/lib/skills";
 
 // Workflow instructions are plain markdown compiled server-side
-// (extractGoatWorkflowSkillMentionRefs in lib/workflow-tasks.ts scans the raw
+// (extractWorkflowSkillMentionRefs in lib/workflow-tasks.ts scans the raw
 // text for `@skill/<id>` tokens when the workflow fires) — so this extension
 // only needs to make that token easy to discover and type correctly. It
 // inserts literal `@skill/<id>` text, not a special mention node, so it
 // round-trips through the Markdown extension like any other text.
 export function filterSkillMentionItems(
-  skills: GoatSkillCatalogItem[],
+  skills: SkillCatalogItem[],
   query: string,
-): GoatSkillCatalogItem[] {
+): SkillCatalogItem[] {
   const q = query.trim().toLowerCase();
   const matches = q
     ? skills.filter((skill) =>
@@ -27,13 +27,13 @@ export function filterSkillMentionItems(
   return matches.slice(0, 8);
 }
 
-export function skillMentionInsertText(skill: GoatSkillCatalogItem): string {
+export function skillMentionInsertText(skill: SkillCatalogItem): string {
   return `@skill/${skill.id} `;
 }
 
 type SkillMentionListProps = {
-  items: GoatSkillCatalogItem[];
-  command: (item: GoatSkillCatalogItem) => void;
+  items: SkillCatalogItem[];
+  command: (item: SkillCatalogItem) => void;
 };
 
 type SkillMentionListHandle = {
@@ -116,11 +116,11 @@ const SkillMentionList = forwardRef<SkillMentionListHandle, SkillMentionListProp
 
 // `skills` is captured once (the workflow editor passes a static server-fetched
 // catalog for the lifetime of the page), so no ref/live-update plumbing is
-// needed here — unlike `brainLinks` in MarkdownGoatBrainEditor, which changes
+// needed here — unlike `brainLinks` in MarkdownBrainEditor, which changes
 // while a Brain document stays mounted.
 export function createSkillMentionSuggestion(
-  skills: GoatSkillCatalogItem[],
-): Omit<SuggestionOptions<GoatSkillCatalogItem>, "editor"> {
+  skills: SkillCatalogItem[],
+): Omit<SuggestionOptions<SkillCatalogItem>, "editor"> {
   return {
     char: "@",
     allowSpaces: false,
@@ -144,7 +144,7 @@ export function createSkillMentionSuggestion(
           component = new ReactRenderer(SkillMentionList, {
             props: {
               items: props.items,
-              command: (item: GoatSkillCatalogItem) => props.command(item),
+              command: (item: SkillCatalogItem) => props.command(item),
             },
             editor: props.editor,
           });
@@ -158,7 +158,7 @@ export function createSkillMentionSuggestion(
         onUpdate: (props) => {
           component?.updateProps({
             items: props.items,
-            command: (item: GoatSkillCatalogItem) => props.command(item),
+            command: (item: SkillCatalogItem) => props.command(item),
           });
           position(props.clientRect);
         },
@@ -176,14 +176,14 @@ export function createSkillMentionSuggestion(
 
 export function createSkillMentionPlugin(
   editor: Parameters<typeof Suggestion>[0]["editor"],
-  skills: GoatSkillCatalogItem[],
+  skills: SkillCatalogItem[],
 ) {
   return Suggestion({ editor, ...createSkillMentionSuggestion(skills) });
 }
 
 // Paints each literal `@skill/<id>` token as a subtle chip so mentions read as
 // distinct atoms, mirroring the main chat composer's selected-mention styling
-// (see renderComposerInputOverlay in GoatSurface). This is a view-only
+// (see renderComposerInputOverlay in ChatSurface). This is a view-only
 // decoration: the underlying text stays plain `@skill/<id>` and round-trips
 // through Markdown untouched. The shadow spread (not padding) creates the chip
 // gutter so caret metrics and line height are unaffected.

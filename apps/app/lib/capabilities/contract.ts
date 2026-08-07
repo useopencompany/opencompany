@@ -1,4 +1,4 @@
-import { GoatActionExecutionError } from "@/lib/actions/types";
+import { ActionExecutionError } from "@/lib/actions/types";
 import type {
   ManagedCapabilityActionSpec,
   ManagedCapabilityMappedInput,
@@ -11,19 +11,19 @@ export function assertManagedCapabilityInspection(
   inspection: MonidInspection,
 ) {
   if (inspection.provider !== spec.provider || inspection.endpoint !== spec.endpoint) {
-    throw new GoatActionExecutionError(
+    throw new ActionExecutionError(
       "provider_error",
       "The capability endpoint no longer matches its reviewed contract.",
     );
   }
   if (!inspection.price || inspection.price.type !== spec.priceType) {
-    throw new GoatActionExecutionError(
+    throw new ActionExecutionError(
       "provider_error",
       "The capability pricing contract changed and requires review.",
     );
   }
   if (inspection.price.currency !== "USD") {
-    throw new GoatActionExecutionError(
+    throw new ActionExecutionError(
       "provider_error",
       "The capability currency contract changed and requires review.",
     );
@@ -41,7 +41,7 @@ export function assertManagedCapabilityInspection(
         !inspectionValueMatchesSchema(mapped.providerInput[key], inputContract.fields.get(key)),
     )
   ) {
-    throw new GoatActionExecutionError(
+    throw new ActionExecutionError(
       "provider_error",
       "The capability input contract changed and requires review.",
     );
@@ -51,7 +51,7 @@ export function assertManagedCapabilityInspection(
 function inspectedProviderInput(spec: ManagedCapabilityActionSpec, input: unknown) {
   if (!spec.inputLocation) return input;
   if (!isPlainRecord(input) || !isPlainRecord(input[spec.inputLocation])) {
-    throw new GoatActionExecutionError(
+    throw new ActionExecutionError(
       "provider_error",
       "The capability input contract changed and requires review.",
     );

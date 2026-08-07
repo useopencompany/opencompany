@@ -2,19 +2,19 @@
 // with the runner). The app binds the managed-capability (Monid) resolver here,
 // which stays app-side because managed execution needs server-only modules.
 import {
-  isGoatChatActionsKilled,
-  resolveGoatActionCatalog as resolveGoatActionCatalogBase,
+  isChatActionsKilled,
+  resolveActionCatalog as resolveActionCatalogBase,
 } from "@opencompany/core/actions/catalog";
-import type { GoatResolvedActionCatalog } from "@opencompany/core/actions/types";
-import { resolveGoatManagedCapabilities } from "@/lib/capabilities/resolve";
+import type { ResolvedActionCatalog } from "@opencompany/core/actions/types";
+import { resolveManagedCapabilities } from "@/lib/capabilities/resolve";
 
-export { isGoatChatActionsKilled };
+export { isChatActionsKilled };
 
-export function resolveGoatActionCatalog(input: {
+export function resolveActionCatalog(input: {
   userWorkosId: string;
   workspaceId: string;
-}): Promise<GoatResolvedActionCatalog> {
-  return resolveGoatActionCatalogBase(input, {
-    resolveManagedCapabilities: resolveGoatManagedCapabilities,
+}): Promise<ResolvedActionCatalog> {
+  return resolveActionCatalogBase(input, {
+    resolveManagedCapabilities: resolveManagedCapabilities,
   });
 }

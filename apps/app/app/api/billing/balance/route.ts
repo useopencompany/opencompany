@@ -1,11 +1,11 @@
 import {
-  ensureGoatMonthlyIncludedUsage,
+  ensureMonthlyIncludedUsage,
   GOAT_LOW_BALANCE_WARN_USD_MICROS,
-  isGoatCreditsEnforcementEnabled,
+  isCreditsEnforcementEnabled,
 } from "@opencompany/db/billing";
-import { getGoatCreditBalanceUsdMicros } from "@opencompany/db/credits";
+import { getCreditBalanceUsdMicros } from "@opencompany/db/credits";
 import { NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -13,13 +13,13 @@ export const runtime = "nodejs";
 // prop; the client refetches here after each turn and on a 402.
 export async function GET() {
   try {
-    const context = await currentGoatUser();
-    await ensureGoatMonthlyIncludedUsage(context.workspace.id);
-    const balanceUsdMicros = await getGoatCreditBalanceUsdMicros(context.workspace.id);
+    const context = await currentUser();
+    await ensureMonthlyIncludedUsage(context.workspace.id);
+    const balanceUsdMicros = await getCreditBalanceUsdMicros(context.workspace.id);
     return NextResponse.json({
       balanceUsdMicros,
       lowBalanceWarnUsdMicros: GOAT_LOW_BALANCE_WARN_USD_MICROS,
-      enforcementEnabled: isGoatCreditsEnforcementEnabled(),
+      enforcementEnabled: isCreditsEnforcementEnabled(),
     });
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

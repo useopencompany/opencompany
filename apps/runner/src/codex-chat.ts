@@ -5,60 +5,57 @@ import {
   CODEX_SUBAGENT_TOOL_PART_TYPE,
   type CodexUiMessagePart,
   GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
+  isActionHostToolContractVersion,
   isCodexReasoningEffort,
-  isGoatActionHostToolContractVersion,
   shellQuote,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import {
+  type BrainSkill,
   GOAT_CODEX_BRAIN_TOOL_CONTRACT_VERSION,
-  type GoatBrainSkill,
-  serializeGoatBrainSkillMarkdown,
+  serializeBrainSkillMarkdown,
 } from "@opencompany/brain";
 import { TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK } from "@opencompany/core/chat-agent";
-import { getGoatWorkflowHarnessSkillSnapshots } from "@opencompany/db/harness";
+import { getWorkflowHarnessSkillSnapshots } from "@opencompany/db/harness";
 import {
-  type GoatChatMessageAttachment,
-  type GoatCodexChatSession,
-  type GoatCodexChatTurn,
-  type GoatHarnessSpec,
-  goatChatMessages,
-  goatChatSessionSkills,
-  goatCodexChatInteractions,
-  goatCodexChatTurns,
-  goatIntegrations,
+  type ChatMessageAttachment,
+  type CodexChatSession,
+  type CodexChatTurn,
+  chatMessages,
+  chatSessionSkills,
+  codexChatInteractions,
+  codexChatTurns,
+  type HarnessSpec,
+  integrations,
 } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { and, asc, desc, eq, lt, lte, or, type SQL, sql } from "drizzle-orm";
 import { downloadBlobBytes } from "./attachment-hydration";
-import { loadGoatCodexCliAuth, persistRefreshedGoatCodexAuth } from "./codex";
-import { createGoatCodexActionDynamicTools } from "./codex-action-tools";
+import { loadCodexCliAuth, persistRefreshedCodexAuth } from "./codex";
+import { createCodexActionDynamicTools } from "./codex-action-tools";
 import { runCodexAppServerTurn } from "./codex-app-server";
-import { createGoatCodexBrainCaptureDynamicTool } from "./codex-brain-capture-tool";
-import { createGoatCodexBrainDynamicTool } from "./codex-brain-tool";
+import { createCodexBrainCaptureDynamicTool } from "./codex-brain-capture-tool";
+import { createCodexBrainDynamicTool } from "./codex-brain-tool";
 import {
-  GoatCodexChatHandoffError,
-  GoatCodexChatLeaseLostError,
-  GoatCodexChatRetryableInfrastructureError,
-  GoatTaskTurnTerminalError,
+  CodexChatHandoffError,
+  CodexChatLeaseLostError,
+  CodexChatRetryableInfrastructureError,
+  TaskTurnTerminalError,
 } from "./codex-chat-errors";
-import {
-  createGoatCodexChatProjector,
-  loadCodexChatAssistantMessageParts,
-} from "./codex-chat-events";
+import { createCodexChatProjector, loadCodexChatAssistantMessageParts } from "./codex-chat-events";
 import { ensureCodexInstalled } from "./codex-cli";
 import { materializeCodexSkillSnapshotsForSession } from "./codex-managed-skills";
 import { createKnownSecretRedactor, gitAuthHeader } from "./coding-agent-shared";
-import { settledGoatCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
+import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
 import { GOAT_CODING_WORKSPACE_SANDBOX_NETWORK } from "./coding-workspace-runtime";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { getGitHubWorkInstallationToken } from "./github";
 import {
   combineSandboxPromptFragments,
-  reconcileGoatInfisicalSandboxAuth,
+  reconcileInfisicalSandboxAuth,
 } from "./infisical-sandbox-auth";
-import { loadGoatRepositoryBootstrap, stageGoatRepositoryBootstrap } from "./repo-bootstrap";
+import { loadRepositoryBootstrap, stageRepositoryBootstrap } from "./repo-bootstrap";
 import {
   armSandboxActiveTimeoutById,
   armSandboxIdleTimeout,
@@ -69,12 +66,12 @@ import {
 } from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
 import {
-  buildGoatTaskTerminalProjection,
-  buildGoatTaskTurnCompletion,
-  closeGoatTaskTurn,
-  finalizeGoatTaskResult,
-  type GoatTaskTurnContext,
-  prepareGoatCodexTaskTurn,
+  buildTaskTerminalProjection,
+  buildTaskTurnCompletion,
+  closeTaskTurn,
+  finalizeTaskResult,
+  prepareCodexTaskTurn,
+  type TaskTurnContext,
 } from "./task-turn";
 
 export const CODEX_CHAT_HOME = "/home/user/.opencompany-goat/codex-chat-home";
@@ -88,18 +85,18 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "goat-code
 export const GOAT_CODEX_CHAT_REAUTH_MESSAGE =
   "Codex is disconnected. Reconnect Codex in Goat settings, then send your message again.";
 
-export class GoatCodexChatInterruptedError extends Error {
+export class CodexChatInterruptedError extends Error {
   constructor() {
     super("Codex chat turn was interrupted.");
-    this.name = "GoatCodexChatInterruptedError";
+    this.name = "CodexChatInterruptedError";
   }
 }
 
-export async function runGoatCodexChatTurn(input: {
-  turn: GoatCodexChatTurn;
-  session: GoatCodexChatSession;
+export async function runCodexChatTurn(input: {
+  turn: CodexChatTurn;
+  session: CodexChatSession;
   env: RunnerEnv;
-  taskContext?: GoatTaskTurnContext | undefined;
+  taskContext?: TaskTurnContext | undefined;
   recovery?: { reason: "lease_reclaimed" };
   shouldAbort?: () => Error | null;
 }): Promise<"settled" | "handed_off"> {
@@ -114,7 +111,7 @@ export async function runGoatCodexChatTurn(input: {
 
   const initialParts = await loadCodexChatAssistantMessageParts(turn.assistantMessageId);
   const bareProjector = async () =>
-    createGoatCodexChatProjector({
+    createCodexChatProjector({
       target: {
         userWorkosId: turn.userWorkosId,
         workspaceId: session.workspaceId,
@@ -138,7 +135,7 @@ export async function runGoatCodexChatTurn(input: {
   if (turn.interruptRequestedAt) {
     const projector = await bareProjector();
     if (input.taskContext) {
-      await projector.interrupted(buildGoatTaskTerminalProjection(input.taskContext));
+      await projector.interrupted(buildTaskTerminalProjection(input.taskContext));
     } else {
       await projector.interrupted();
     }
@@ -162,7 +159,7 @@ export async function runGoatCodexChatTurn(input: {
     planningAbortTimer.unref?.();
     try {
       await checkPlanningAbort();
-      taskContext = await prepareGoatCodexTaskTurn({
+      taskContext = await prepareCodexTaskTurn({
         context: taskContext,
         turn,
         session,
@@ -175,20 +172,20 @@ export async function runGoatCodexChatTurn(input: {
         ? planningController.signal.reason
         : error;
       if (
-        effectiveError instanceof GoatCodexChatHandoffError ||
-        effectiveError instanceof GoatCodexChatLeaseLostError
+        effectiveError instanceof CodexChatHandoffError ||
+        effectiveError instanceof CodexChatLeaseLostError
       ) {
         throw effectiveError;
       }
       const projector = await bareProjector();
       if (
-        effectiveError instanceof GoatCodexChatInterruptedError ||
-        effectiveError instanceof GoatTaskTurnTerminalError
+        effectiveError instanceof CodexChatInterruptedError ||
+        effectiveError instanceof TaskTurnTerminalError
       ) {
-        await projector.interrupted(buildGoatTaskTerminalProjection(taskContext));
+        await projector.interrupted(buildTaskTerminalProjection(taskContext));
       } else {
         await projector.fail(errorMessage(effectiveError), {
-          taskCompletion: buildGoatTaskTerminalProjection(taskContext),
+          taskCompletion: buildTaskTerminalProjection(taskContext),
         });
       }
       return "settled";
@@ -197,16 +194,16 @@ export async function runGoatCodexChatTurn(input: {
     }
   }
 
-  const auth = await loadGoatCodexCliAuth(turn.userWorkosId);
+  const auth = await loadCodexCliAuth(turn.userWorkosId);
   if (!auth) {
     await (await bareProjector()).fail(GOAT_CODEX_CHAT_REAUTH_MESSAGE, {
       sessionStatus: "failed",
-      ...(taskContext ? { taskCompletion: buildGoatTaskTerminalProjection(taskContext) } : {}),
+      ...(taskContext ? { taskCompletion: buildTaskTerminalProjection(taskContext) } : {}),
     });
     return "settled";
   }
 
-  const repositoryBootstrapPromise = loadGoatRepositoryBootstrap(
+  const repositoryBootstrapPromise = loadRepositoryBootstrap(
     session.workspaceId,
     turn.userWorkosId,
   );
@@ -222,13 +219,13 @@ export async function runGoatCodexChatTurn(input: {
         user_id: turn.userWorkosId,
       },
       network: GOAT_CODING_WORKSPACE_SANDBOX_NETWORK,
-      idleTimeoutMs: env.goatCodexChatIdleTimeoutMs,
+      idleTimeoutMs: env.codexChatIdleTimeoutMs,
     });
   } catch (error) {
     const abort = shouldAbort?.();
     if (abort) throw abort;
     if (isRetryableSandboxAcquisitionError(error)) {
-      throw new GoatCodexChatRetryableInfrastructureError(
+      throw new CodexChatRetryableInfrastructureError(
         "Codex sandbox capacity is temporarily unavailable.",
         error,
       );
@@ -237,7 +234,7 @@ export async function runGoatCodexChatTurn(input: {
     const projector = await bareProjector();
     if (taskContext) {
       await projector.fail(message, {
-        taskCompletion: buildGoatTaskTerminalProjection(taskContext),
+        taskCompletion: buildTaskTerminalProjection(taskContext),
       });
     } else {
       await projector.fail(message);
@@ -255,13 +252,13 @@ export async function runGoatCodexChatTurn(input: {
   }
 
   const repositoryBootstrap = await repositoryBootstrapPromise;
-  const infisicalAuth = await reconcileGoatInfisicalSandboxAuth({
+  const infisicalAuth = await reconcileInfisicalSandboxAuth({
     sandbox,
     workspaceId: session.workspaceId,
     userWorkosId: turn.userWorkosId,
   });
   const serializedAuthJson = auth.kind === "chatgpt" ? JSON.stringify(auth.authJson) : null;
-  const github = await loadGoatGitHubAuthForUser(turn.userWorkosId);
+  const github = await loadGitHubAuthForUser(turn.userWorkosId);
   const redact = createKnownSecretRedactor([
     serializedAuthJson,
     auth.kind === "api" ? auth.apiKeyValue : null,
@@ -271,7 +268,7 @@ export async function runGoatCodexChatTurn(input: {
     ...repositoryBootstrap.secretValues,
     ...infisicalAuth.redactionValues,
   ]);
-  const projector = createGoatCodexChatProjector({
+  const projector = createCodexChatProjector({
     target: {
       userWorkosId: turn.userWorkosId,
       workspaceId: session.workspaceId,
@@ -320,7 +317,7 @@ export async function runGoatCodexChatTurn(input: {
   let executionStage = "load_attachments";
   try {
     checkExternalAbort();
-    const attachments = await loadGoatCodexChatAttachments(turn);
+    const attachments = await loadCodexChatAttachments(turn);
     checkExternalAbort();
     executionStage = "prepare_directories";
     await sandbox.commands.run(
@@ -329,7 +326,7 @@ export async function runGoatCodexChatTurn(input: {
     );
     checkExternalAbort();
     executionStage = "stage_repository_configs";
-    await stageGoatRepositoryBootstrap({ sandbox, bootstrap: repositoryBootstrap });
+    await stageRepositoryBootstrap({ sandbox, bootstrap: repositoryBootstrap });
     checkExternalAbort();
     if (serializedAuthJson) {
       executionStage = "write_auth";
@@ -340,8 +337,8 @@ export async function runGoatCodexChatTurn(input: {
     await ensureCodexInstalled(sandbox);
     checkExternalAbort();
     executionStage = "load_skills";
-    const sessionSkills = await loadGoatCodexChatSessionSkills(turn);
-    const turnSkills = resolveGoatCodexTurnSkills({
+    const sessionSkills = await loadCodexChatSessionSkills(turn);
+    const turnSkills = resolveCodexTurnSkills({
       sessionSkills,
       userMessageId: turn.userMessageId,
       ...(taskContext ? { harnessSpec: taskContext.harnessSpec } : {}),
@@ -356,7 +353,7 @@ export async function runGoatCodexChatTurn(input: {
         files: [
           {
             path: "SKILL.md",
-            content: serializeGoatBrainSkillMarkdown(skill),
+            content: serializeBrainSkillMarkdown(skill),
           },
         ],
       })),
@@ -367,7 +364,7 @@ export async function runGoatCodexChatTurn(input: {
       path: `${CODEX_CHAT_WORKDIR}/.agents/skills/${skillId}/SKILL.md`,
     }));
     executionStage = "materialize_attachments";
-    const materializedAttachments = await materializeGoatCodexChatAttachments({
+    const materializedAttachments = await materializeCodexChatAttachments({
       sandbox,
       turnId: turn.id,
       attachments,
@@ -381,9 +378,7 @@ export async function runGoatCodexChatTurn(input: {
       leaseOwner,
       ...(shouldAbort ? { shouldAbort } : {}),
     });
-    const actionHostToolsEnabled = isGoatActionHostToolContractVersion(
-      session.hostToolContractVersion,
-    );
+    const actionHostToolsEnabled = isActionHostToolContractVersion(session.hostToolContractVersion);
     const brainToolEnabled =
       Boolean(session.brainRef) &&
       (actionHostToolsEnabled ||
@@ -396,7 +391,7 @@ export async function runGoatCodexChatTurn(input: {
     const dynamicTools = [
       ...(brainToolEnabled && session.brainRef
         ? [
-            createGoatCodexBrainDynamicTool({
+            createCodexBrainDynamicTool({
               brainRef: session.brainRef,
               userWorkosId: turn.userWorkosId,
               chatSessionId: session.chatSessionId,
@@ -409,7 +404,7 @@ export async function runGoatCodexChatTurn(input: {
         : []),
       ...(brainCaptureEnabled
         ? [
-            createGoatCodexBrainCaptureDynamicTool({
+            createCodexBrainCaptureDynamicTool({
               codexChatSessionId: session.id,
               codexChatTurnId: turn.id,
               env,
@@ -418,7 +413,7 @@ export async function runGoatCodexChatTurn(input: {
           ]
         : []),
       ...(actionToolsEnabled
-        ? createGoatCodexActionDynamicTools({
+        ? createCodexActionDynamicTools({
             codexChatSessionId: session.id,
             codexChatTurnId: turn.id,
             env,
@@ -479,7 +474,7 @@ export async function runGoatCodexChatTurn(input: {
       },
       timeoutMs: env.codexTimeoutMs,
       checkAbort,
-      detachOnAbort: (error) => error instanceof GoatCodexChatHandoffError,
+      detachOnAbort: (error) => error instanceof CodexChatHandoffError,
       onRuntimeEvents: (events) => projector.push(events),
       onEngineSessionId: (codexThreadId) =>
         updateCodexChatSessionIfLeaseHeld({
@@ -535,7 +530,7 @@ export async function runGoatCodexChatTurn(input: {
         setSql: sql`codex_thread_id = ${summary.sessionId}, updated_at = ${new Date()}`,
       });
     }
-    await persistRefreshedGoatCodexAuth({
+    await persistRefreshedCodexAuth({
       sandbox,
       userWorkosId: turn.userWorkosId,
       auth,
@@ -566,7 +561,7 @@ export async function runGoatCodexChatTurn(input: {
       let reported;
       try {
         await checkAbort();
-        reported = await closeGoatTaskTurn({
+        reported = await closeTaskTurn({
           context: taskContext,
           finalContent: rawResult,
           env,
@@ -583,7 +578,7 @@ export async function runGoatCodexChatTurn(input: {
       // Artifact creation is the success tail's point of no return. Once it starts, persist the
       // matching turn projection under the still-held lease even if shutdown begins, so recovery
       // cannot replay the artifact write. The turn id also dedupes a replay after a hard crash.
-      const finalResult = await finalizeGoatTaskResult({
+      const finalResult = await finalizeTaskResult({
         context: taskContext,
         assistantContent: rawResult,
         turnId: turn.id,
@@ -592,7 +587,7 @@ export async function runGoatCodexChatTurn(input: {
         { ...summary, result: finalResult },
         {
           replacementContent: finalResult,
-          taskCompletion: buildGoatTaskTurnCompletion({
+          taskCompletion: buildTaskTurnCompletion({
             context: taskContext,
             result: finalResult,
             reportedOutcome: reported?.reportedOutcome,
@@ -603,7 +598,7 @@ export async function runGoatCodexChatTurn(input: {
     } else {
       if (taskContext) {
         await projector.finalize(summary, {
-          taskCompletion: buildGoatTaskTerminalProjection(taskContext),
+          taskCompletion: buildTaskTerminalProjection(taskContext),
         });
       } else {
         await projector.finalize(summary);
@@ -613,33 +608,33 @@ export async function runGoatCodexChatTurn(input: {
     // A setup operation can finish or time out after shutdown requested a handoff. Prefer the
     // current ownership signal over that stale operation result so the next runner can recover it.
     const effectiveError =
-      error instanceof GoatCodexChatHandoffError ||
-      error instanceof GoatCodexChatInterruptedError ||
-      error instanceof GoatCodexChatLeaseLostError
+      error instanceof CodexChatHandoffError ||
+      error instanceof CodexChatInterruptedError ||
+      error instanceof CodexChatLeaseLostError
         ? error
         : (shouldAbort?.() ?? error);
-    if (effectiveError instanceof GoatCodexChatHandoffError) {
+    if (effectiveError instanceof CodexChatHandoffError) {
       outcome = "handed_off";
       await projector.cancelPendingInteractions();
-      await persistRefreshedGoatCodexAuth({
+      await persistRefreshedCodexAuth({
         sandbox,
         userWorkosId: turn.userWorkosId,
         auth,
         codexHome: CODEX_CHAT_HOME,
       }).catch(() => undefined);
-    } else if (effectiveError instanceof GoatCodexChatInterruptedError) {
-      await persistRefreshedGoatCodexAuth({
+    } else if (effectiveError instanceof CodexChatInterruptedError) {
+      await persistRefreshedCodexAuth({
         sandbox,
         userWorkosId: turn.userWorkosId,
         auth,
         codexHome: CODEX_CHAT_HOME,
       }).catch(() => undefined);
       if (taskContext) {
-        await projector.interrupted(buildGoatTaskTerminalProjection(taskContext));
+        await projector.interrupted(buildTaskTerminalProjection(taskContext));
       } else {
         await projector.interrupted();
       }
-    } else if (effectiveError instanceof GoatCodexChatLeaseLostError) {
+    } else if (effectiveError instanceof CodexChatLeaseLostError) {
       // Another worker owns the turn now; leave all rows to it.
       leaseLost = true;
       throw effectiveError;
@@ -657,7 +652,7 @@ export async function runGoatCodexChatTurn(input: {
       });
       if (taskContext) {
         await projector.fail(message, {
-          taskCompletion: buildGoatTaskTerminalProjection(taskContext),
+          taskCompletion: buildTaskTerminalProjection(taskContext),
         });
       } else {
         await projector.fail(message);
@@ -676,8 +671,8 @@ export async function runGoatCodexChatTurn(input: {
       } else if (!leaseLost) {
         const armed = await armSandboxIdleTimeout(
           sandbox,
-          settledGoatCodingSandboxIdleTimeoutMs({
-            configuredIdleTimeoutMs: env.goatCodexChatIdleTimeoutMs,
+          settledCodingSandboxIdleTimeoutMs({
+            configuredIdleTimeoutMs: env.codexChatIdleTimeoutMs,
             taskSession: Boolean(taskContext),
           }),
         );
@@ -707,7 +702,7 @@ export async function runGoatCodexChatTurn(input: {
 }
 
 export async function codexChatTurnLeaseIsHeld(input: {
-  turn: GoatCodexChatTurn;
+  turn: CodexChatTurn;
   leaseId: string;
   leaseOwner: string;
 }) {
@@ -746,19 +741,16 @@ async function waitForCodexChatInteraction(input: {
     await input.checkAbort();
     const [interaction] = await getDb()
       .select({
-        status: goatCodexChatInteractions.status,
-        response: goatCodexChatInteractions.response,
+        status: codexChatInteractions.status,
+        response: codexChatInteractions.response,
       })
-      .from(goatCodexChatInteractions)
-      .innerJoin(
-        goatCodexChatTurns,
-        eq(goatCodexChatTurns.id, goatCodexChatInteractions.codexChatTurnId),
-      )
+      .from(codexChatInteractions)
+      .innerJoin(codexChatTurns, eq(codexChatTurns.id, codexChatInteractions.codexChatTurnId))
       .where(
         and(
-          eq(goatCodexChatInteractions.id, input.interactionId),
-          eq(goatCodexChatInteractions.leaseId, input.leaseId),
-          eq(goatCodexChatInteractions.leaseId, goatCodexChatTurns.leaseId),
+          eq(codexChatInteractions.id, input.interactionId),
+          eq(codexChatInteractions.leaseId, input.leaseId),
+          eq(codexChatInteractions.leaseId, codexChatTurns.leaseId),
         ),
       )
       .limit(1);
@@ -778,7 +770,7 @@ async function waitForCodexChatInteraction(input: {
       if (autoResolutionMs !== null) {
         const response = defaultCodexUserInputResponse(input.request);
         const [resolved] = await getDb()
-          .update(goatCodexChatInteractions)
+          .update(codexChatInteractions)
           .set({
             status: "resolved",
             response,
@@ -787,30 +779,30 @@ async function waitForCodexChatInteraction(input: {
           })
           .where(
             and(
-              eq(goatCodexChatInteractions.id, input.interactionId),
-              eq(goatCodexChatInteractions.leaseId, input.leaseId),
-              eq(goatCodexChatInteractions.status, "pending"),
+              eq(codexChatInteractions.id, input.interactionId),
+              eq(codexChatInteractions.leaseId, input.leaseId),
+              eq(codexChatInteractions.status, "pending"),
               currentInteractionLeaseSql(),
             ),
           )
-          .returning({ response: goatCodexChatInteractions.response });
+          .returning({ response: codexChatInteractions.response });
         if (resolved && isRecord(resolved.response)) {
           return { response: resolved.response, status: "auto-resolved" };
         }
         continue;
       }
       const [canceled] = await getDb()
-        .update(goatCodexChatInteractions)
+        .update(codexChatInteractions)
         .set({ status: "canceled", resolvedAt: new Date(), updatedAt: new Date() })
         .where(
           and(
-            eq(goatCodexChatInteractions.id, input.interactionId),
-            eq(goatCodexChatInteractions.leaseId, input.leaseId),
-            eq(goatCodexChatInteractions.status, "pending"),
+            eq(codexChatInteractions.id, input.interactionId),
+            eq(codexChatInteractions.leaseId, input.leaseId),
+            eq(codexChatInteractions.status, "pending"),
             currentInteractionLeaseSql(),
           ),
         )
-        .returning({ id: goatCodexChatInteractions.id });
+        .returning({ id: codexChatInteractions.id });
       // If the cancel claimed nothing, a user answer resolved the row in the SELECT→UPDATE
       // window; loop so the next SELECT observes it instead of dropping the answer.
       if (!canceled) continue;
@@ -839,58 +831,51 @@ function isEmptyCodexUserInputResponse(response: Record<string, unknown>) {
 function currentInteractionLeaseSql() {
   return sql`EXISTS (
     SELECT 1
-    FROM ${goatCodexChatTurns} AS current_turn
-    WHERE current_turn.id = ${goatCodexChatInteractions.codexChatTurnId}
+    FROM ${codexChatTurns} AS current_turn
+    WHERE current_turn.id = ${codexChatInteractions.codexChatTurnId}
       AND current_turn.status = 'running'
-      AND current_turn.lease_id = ${goatCodexChatInteractions.leaseId}
+      AND current_turn.lease_id = ${codexChatInteractions.leaseId}
   )`;
 }
 
-export async function loadGoatCodexChatSessionSkills(turn: GoatCodexChatTurn) {
+export async function loadCodexChatSessionSkills(turn: CodexChatTurn) {
   return getDb()
     .select({
-      skillId: goatChatSessionSkills.skillId,
-      activatedMessageId: goatChatSessionSkills.activatedMessageId,
-      name: goatChatSessionSkills.name,
-      description: goatChatSessionSkills.description,
-      instructions: goatChatSessionSkills.instructions,
-      activatedAt: goatCodexChatTurns.createdAt,
+      skillId: chatSessionSkills.skillId,
+      activatedMessageId: chatSessionSkills.activatedMessageId,
+      name: chatSessionSkills.name,
+      description: chatSessionSkills.description,
+      instructions: chatSessionSkills.instructions,
+      activatedAt: codexChatTurns.createdAt,
     })
-    .from(goatChatSessionSkills)
+    .from(chatSessionSkills)
     .innerJoin(
-      goatChatMessages,
+      chatMessages,
       and(
-        eq(goatChatMessages.id, goatChatSessionSkills.activatedMessageId),
-        eq(goatChatMessages.sessionId, turn.chatSessionId),
+        eq(chatMessages.id, chatSessionSkills.activatedMessageId),
+        eq(chatMessages.sessionId, turn.chatSessionId),
       ),
     )
     .innerJoin(
-      goatCodexChatTurns,
+      codexChatTurns,
       and(
-        eq(goatCodexChatTurns.userMessageId, goatChatMessages.id),
-        eq(goatCodexChatTurns.chatSessionId, turn.chatSessionId),
+        eq(codexChatTurns.userMessageId, chatMessages.id),
+        eq(codexChatTurns.chatSessionId, turn.chatSessionId),
       ),
     )
     .where(
       and(
-        eq(goatChatSessionSkills.chatSessionId, turn.chatSessionId),
+        eq(chatSessionSkills.chatSessionId, turn.chatSessionId),
         or(
-          lt(goatCodexChatTurns.createdAt, turn.createdAt),
-          and(
-            eq(goatCodexChatTurns.createdAt, turn.createdAt),
-            lte(goatCodexChatTurns.id, turn.id),
-          ),
+          lt(codexChatTurns.createdAt, turn.createdAt),
+          and(eq(codexChatTurns.createdAt, turn.createdAt), lte(codexChatTurns.id, turn.id)),
         ),
       ),
     )
-    .orderBy(
-      asc(goatCodexChatTurns.createdAt),
-      asc(goatCodexChatTurns.id),
-      asc(goatChatSessionSkills.skillId),
-    );
+    .orderBy(asc(codexChatTurns.createdAt), asc(codexChatTurns.id), asc(chatSessionSkills.skillId));
 }
 
-type GoatCodexTurnSessionSkill = {
+type CodexTurnSessionSkill = {
   skillId: string;
   activatedMessageId: string;
   name: string;
@@ -898,12 +883,12 @@ type GoatCodexTurnSessionSkill = {
   instructions: string;
 };
 
-function resolveGoatCodexTurnSkills(input: {
-  sessionSkills: readonly GoatCodexTurnSessionSkill[];
+function resolveCodexTurnSkills(input: {
+  sessionSkills: readonly CodexTurnSessionSkill[];
   userMessageId: string;
-  harnessSpec?: GoatHarnessSpec | undefined;
+  harnessSpec?: HarnessSpec | undefined;
 }) {
-  const snapshotsById = new Map<string, GoatBrainSkill>();
+  const snapshotsById = new Map<string, BrainSkill>();
   const invokedSkillIds = new Set<string>();
 
   for (const skill of input.sessionSkills) {
@@ -919,7 +904,7 @@ function resolveGoatCodexTurnSkills(input: {
   }
 
   const workflowSkills = input.harnessSpec
-    ? (getGoatWorkflowHarnessSkillSnapshots(input.harnessSpec) ?? [])
+    ? (getWorkflowHarnessSkillSnapshots(input.harnessSpec) ?? [])
     : [];
   for (const skill of workflowSkills) {
     // The task-creation snapshot is the workflow's immutable contract. Prefer it when an
@@ -937,18 +922,18 @@ function resolveGoatCodexTurnSkills(input: {
 // GitHub auth is injected whenever the user has a connected Goat GitHub integration; the token
 // covers every repository of the installation (no repo scoping) so Codex can clone what the user
 // asks for in chat. Missing integration is not an error - the sandbox simply has no GitHub auth.
-export async function loadGoatGitHubAuthForUser(userWorkosId: string) {
+export async function loadGitHubAuthForUser(userWorkosId: string) {
   const [integration] = await getDb()
-    .select({ installationId: goatIntegrations.externalId })
-    .from(goatIntegrations)
+    .select({ installationId: integrations.externalId })
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, "github"),
-        eq(goatIntegrations.status, "connected"),
+        eq(integrations.userWorkosId, userWorkosId),
+        eq(integrations.provider, "github"),
+        eq(integrations.status, "connected"),
       ),
     )
-    .orderBy(desc(goatIntegrations.updatedAt))
+    .orderBy(desc(integrations.updatedAt))
     .limit(1);
   if (!integration?.installationId) return null;
 
@@ -960,7 +945,7 @@ export async function loadGoatGitHubAuthForUser(userWorkosId: string) {
 }
 
 export async function updateCodexChatSessionIfLeaseHeld(input: {
-  turn: GoatCodexChatTurn;
+  turn: CodexChatTurn;
   leaseId: string;
   leaseOwner: string;
   setSql: SQL;
@@ -983,7 +968,7 @@ export async function updateCodexChatSessionIfLeaseHeld(input: {
     RETURNING session.id
   `);
   if (rowsFromExecute(result).length === 0) {
-    throw new GoatCodexChatLeaseLostError();
+    throw new CodexChatLeaseLostError();
   }
 }
 
@@ -1003,7 +988,7 @@ export async function markCodexChatSandboxTimeoutArmed(input: {
 }
 
 async function persistCodexChatEngineTurnId(input: {
-  turn: GoatCodexChatTurn;
+  turn: CodexChatTurn;
   leaseId: string;
   leaseOwner: string;
   codexTurnId: string;
@@ -1026,11 +1011,11 @@ async function persistCodexChatEngineTurnId(input: {
       AND turn.status = 'running'
     RETURNING turn.id
   `);
-  if (rowsFromExecute(result).length === 0) throw new GoatCodexChatLeaseLostError();
+  if (rowsFromExecute(result).length === 0) throw new CodexChatLeaseLostError();
 }
 
 async function persistCodexChatEngineTurnBaseline(input: {
-  turn: GoatCodexChatTurn;
+  turn: CodexChatTurn;
   leaseId: string;
   leaseOwner: string;
   baselineTurnIds: string[];
@@ -1053,11 +1038,11 @@ async function persistCodexChatEngineTurnBaseline(input: {
       AND turn.status = 'running'
     RETURNING turn.id
   `);
-  if (rowsFromExecute(result).length === 0) throw new GoatCodexChatLeaseLostError();
+  if (rowsFromExecute(result).length === 0) throw new CodexChatLeaseLostError();
 }
 
 export async function claimCodexChatRecovery(input: {
-  turn: GoatCodexChatTurn;
+  turn: CodexChatTurn;
   leaseId: string;
   leaseOwner: string;
   // Codex caps recovery at a single attempt and rearms the guard only after durably adopting a
@@ -1113,12 +1098,12 @@ export function createTurnAbortCheck(input: {
     try {
       [row] = await getDb()
         .select({
-          interruptRequestedAt: goatCodexChatTurns.interruptRequestedAt,
-          leaseId: goatCodexChatTurns.leaseId,
-          leaseOwner: goatCodexChatTurns.leaseOwner,
+          interruptRequestedAt: codexChatTurns.interruptRequestedAt,
+          leaseId: codexChatTurns.leaseId,
+          leaseOwner: codexChatTurns.leaseOwner,
         })
-        .from(goatCodexChatTurns)
-        .where(eq(goatCodexChatTurns.id, input.turnId))
+        .from(codexChatTurns)
+        .where(eq(codexChatTurns.id, input.turnId))
         .limit(1);
     } catch (error) {
       // Shutdown must remain bounded when the database cannot be consulted. The replacement runner
@@ -1127,9 +1112,9 @@ export function createTurnAbortCheck(input: {
       throw error;
     }
     if (!row || row.leaseId !== input.leaseId || row.leaseOwner !== input.leaseOwner) {
-      throw new GoatCodexChatLeaseLostError();
+      throw new CodexChatLeaseLostError();
     }
-    if (row.interruptRequestedAt) throw new GoatCodexChatInterruptedError();
+    if (row.interruptRequestedAt) throw new CodexChatInterruptedError();
     if (externalAbort) throw externalAbort;
   };
 }
@@ -1142,7 +1127,7 @@ function buildCodexChatTask(input: {
   actionsAvailable: boolean;
   repositoryBootstrapPrompt: string;
   attachmentPaths: string[];
-  taskContext?: GoatTaskTurnContext | undefined;
+  taskContext?: TaskTurnContext | undefined;
 }) {
   return [
     "You are Codex running in a persistent cloud sandbox for an ongoing chat with a user.",
@@ -1181,7 +1166,7 @@ function buildCodexChatRecoveryTask(input: {
   repositoryBootstrapPrompt: string;
   previousProgress: string;
   attachmentPaths: string[];
-  taskContext?: GoatTaskTurnContext | undefined;
+  taskContext?: TaskTurnContext | undefined;
 }) {
   return [
     "You are Codex running in a persistent cloud sandbox for an ongoing chat with a user.",
@@ -1216,7 +1201,7 @@ function buildCodexChatRecoveryTask(input: {
     .join("\n");
 }
 
-function codexBackgroundTaskPromptLines(context: GoatTaskTurnContext | undefined) {
+function codexBackgroundTaskPromptLines(context: TaskTurnContext | undefined) {
   if (!context) return [];
   const codex = context.harnessSpec.codex;
   return [
@@ -1237,26 +1222,23 @@ function codexBackgroundTaskPromptLines(context: GoatTaskTurnContext | undefined
   ].filter((line): line is string => line !== null);
 }
 
-export async function loadGoatCodexChatAttachments(
-  turn: GoatCodexChatTurn,
-): Promise<GoatChatMessageAttachment[]> {
+export async function loadCodexChatAttachments(
+  turn: CodexChatTurn,
+): Promise<ChatMessageAttachment[]> {
   const [message] = await getDb()
-    .select({ attachments: goatChatMessages.attachments })
-    .from(goatChatMessages)
+    .select({ attachments: chatMessages.attachments })
+    .from(chatMessages)
     .where(
-      and(
-        eq(goatChatMessages.id, turn.userMessageId),
-        eq(goatChatMessages.sessionId, turn.chatSessionId),
-      ),
+      and(eq(chatMessages.id, turn.userMessageId), eq(chatMessages.sessionId, turn.chatSessionId)),
     )
     .limit(1);
   return message?.attachments ?? [];
 }
 
-export async function materializeGoatCodexChatAttachments(input: {
+export async function materializeCodexChatAttachments(input: {
   sandbox: SandboxHandle;
   turnId: string;
-  attachments: GoatChatMessageAttachment[];
+  attachments: ChatMessageAttachment[];
   blobToken: string | undefined;
 }) {
   if (input.attachments.length === 0) {

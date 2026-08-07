@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  goatSlackBotScopesSatisfied,
-  isGoatSlackBotConfigured,
-  SLACK_BOT_SCOPES,
-} from "./slack-bot";
+import { isSlackBotConfigured, SLACK_BOT_SCOPES, slackBotScopesSatisfied } from "./slack-bot";
 
 const REQUIRED_ENVS = {
   INTEGRATION_CREDENTIAL_ENCRYPTION_KEY: "encryption-key",
@@ -13,24 +9,24 @@ const REQUIRED_ENVS = {
   SLACK_BOT_STATE_SECRET: "state-secret",
 } as const;
 
-describe("isGoatSlackBotConfigured", () => {
+describe("isSlackBotConfigured", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
   it("requires the credential encryption key as well as the Slack app secrets", () => {
     for (const [name, value] of Object.entries(REQUIRED_ENVS)) vi.stubEnv(name, value);
-    expect(isGoatSlackBotConfigured()).toBe(true);
+    expect(isSlackBotConfigured()).toBe(true);
 
     vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", "");
-    expect(isGoatSlackBotConfigured()).toBe(false);
+    expect(isSlackBotConfigured()).toBe(false);
   });
 });
 
-describe("goatSlackBotScopesSatisfied", () => {
+describe("slackBotScopesSatisfied", () => {
   it("is true when every required scope was granted", () => {
-    expect(goatSlackBotScopesSatisfied([...SLACK_BOT_SCOPES])).toBe(true);
-    expect(goatSlackBotScopesSatisfied([...SLACK_BOT_SCOPES, "extra:scope"])).toBe(true);
+    expect(slackBotScopesSatisfied([...SLACK_BOT_SCOPES])).toBe(true);
+    expect(slackBotScopesSatisfied([...SLACK_BOT_SCOPES, "extra:scope"])).toBe(true);
   });
 
   it("is false for pre-v2 installs missing the DM/reaction/user scopes", () => {
@@ -42,7 +38,7 @@ describe("goatSlackBotScopesSatisfied", () => {
       "channels:history",
       "groups:history",
     ];
-    expect(goatSlackBotScopesSatisfied(v1Scopes)).toBe(false);
-    expect(goatSlackBotScopesSatisfied([])).toBe(false);
+    expect(slackBotScopesSatisfied(v1Scopes)).toBe(false);
+    expect(slackBotScopesSatisfied([])).toBe(false);
   });
 });

@@ -2,43 +2,37 @@ import {
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   modelSupportsAttachments,
 } from "@opencompany/agent-runtime";
-import {
-  captureGoatLlmUsageRecorded,
-  captureGoatModelSpendRecorded,
-} from "@opencompany/analytics/goat/server";
+import { captureLlmUsageRecorded, captureModelSpendRecorded } from "@opencompany/analytics/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { projectActionCatalog } from "@opencompany/core/actions/policy";
-import { resolveGoatImessageProvider } from "@opencompany/core/imessage/provider";
-import { createGoatSendUserMessageRunner } from "@opencompany/core/imessage/send-user-message";
+import { resolveImessageProvider } from "@opencompany/core/imessage/provider";
+import { createSendUserMessageRunner } from "@opencompany/core/imessage/send-user-message";
+import { ensureMonthlyIncludedUsage, isCreditsEnforcementEnabled } from "@opencompany/db/billing";
 import {
-  ensureGoatMonthlyIncludedUsage,
-  isGoatCreditsEnforcementEnabled,
-} from "@opencompany/db/billing";
-import {
-  approveGoatCapabilityRunByToolCall,
-  cancelGoatCapabilityRunByToolCall,
+  approveCapabilityRunByToolCall,
+  cancelCapabilityRunByToolCall,
 } from "@opencompany/db/capabilities";
-import { recordGoatChatModelRoutingAttempt } from "@opencompany/db/chat-model-routing";
+import { recordChatModelRoutingAttempt } from "@opencompany/db/chat-model-routing";
 import { getDb } from "@opencompany/db/client";
-import { hasPositiveGoatCreditBalance, recordGoatCreditDebit } from "@opencompany/db/credits";
-import { type GoatImessageDelivery, resolveGoatImessageDelivery } from "@opencompany/db/imessage";
+import { hasPositiveCreditBalance, recordCreditDebit } from "@opencompany/db/credits";
+import { type ImessageDelivery, resolveImessageDelivery } from "@opencompany/db/imessage";
 import {
-  type GoatChatMessageDebugTrace,
-  type GoatHarnessEngine,
-  goatChatSandboxUsage,
+  type ChatMessageDebugTrace,
+  chatSandboxUsage,
+  type HarnessEngine,
 } from "@opencompany/db/schema";
 import { createLogger } from "@opencompany/observability";
 import {
-  createGoatGatewayAttribution,
+  createGatewayAttribution,
   GOAT_METRICS,
   GOAT_SPANS,
-  goatGatewayProviderOptions,
-  hashGoatUserId,
-  recordGoatChatTurn,
-  recordGoatCounter,
-  recordGoatHistogram,
-  recordGoatModelCost,
-  startGoatSpan,
+  gatewayProviderOptions,
+  hashUserId,
+  recordChatTurn,
+  recordCounter,
+  recordHistogram,
+  recordModelCost,
+  startSpan,
 } from "@opencompany/telemetry";
 import { flushLatitude, latitudeTelemetry } from "@opencompany/telemetry/latitude";
 import {
@@ -50,12 +44,12 @@ import {
   streamText,
 } from "ai";
 import { after } from "next/server";
-import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
-import { executeGoatAction } from "@/lib/actions/execute";
-import type { GoatCapabilityTurnState, GoatResolvedActionCatalog } from "@/lib/actions/types";
-import { maybeTriggerGoatAutoRefill } from "@/lib/billing/auto-refill";
-import { captureToGoatBrainInbox } from "@/lib/brain-capture";
-import { runGoatBrainToolForUser } from "@/lib/brain-cli";
+import { isChatActionsKilled, resolveActionCatalog } from "@/lib/actions/catalog";
+import { executeAction } from "@/lib/actions/execute";
+import type { CapabilityTurnState, ResolvedActionCatalog } from "@/lib/actions/types";
+import { maybeTriggerAutoRefill } from "@/lib/billing/auto-refill";
+import { captureToBrainInbox } from "@/lib/brain-capture";
+import { runBrainToolForUser } from "@/lib/brain-cli";
 import {
   browserProfilesAvailable,
   createAgentSession,
@@ -65,12 +59,12 @@ import {
 import { MANAGED_CAPABILITY_ACTIONS_BY_ID } from "@/lib/capabilities/catalog";
 import { evaluateManagedCapabilityApproval } from "@/lib/capabilities/execute";
 import {
-  createDbGoatChatStore,
-  createGoatChatApprovalContinuationTurn,
-  createGoatChatUserTurn,
-  newGoatChatMessageId,
-  persistGoatChatAssistantMessage,
-  settleStaleGoatChatToolCalls,
+  createChatApprovalContinuationTurn,
+  createChatUserTurn,
+  createDbChatStore,
+  newChatMessageId,
+  persistChatAssistantMessage,
+  settleStaleChatToolCalls,
 } from "@/lib/chat";
 import {
   createOpenCompanyChatDebugTrace,
@@ -83,37 +77,37 @@ import {
   type StartedTask,
   stringifyFinishReason,
 } from "@/lib/chat-agent";
-import { captureGoatChatMessageSent } from "@/lib/chat-analytics";
-import { saveChatAttachmentsToGoatBrain } from "@/lib/chat-attachment-capture";
+import { captureChatMessageSent } from "@/lib/chat-analytics";
+import { saveChatAttachmentsToBrain } from "@/lib/chat-attachment-capture";
 import {
-  extractGoatChatAttachmentTexts,
-  hydrateGoatChatAttachmentParts,
-  parseGoatChatAttachmentsInput,
+  extractChatAttachmentTexts,
+  hydrateChatAttachmentParts,
+  parseChatAttachmentsInput,
 } from "@/lib/chat-attachments";
-import { isAutoGoatModelSelection } from "@/lib/chat-auto-model";
-import { type GoatChatModelRoutingResult, resolveAutoGoatModel } from "@/lib/chat-model-router";
-import { parseOptimisticGoatChatSessionId } from "@/lib/chat-navigation";
-import { resolveGoatChatRequestContext } from "@/lib/chat-request-auth";
+import { isAutoModelSelection } from "@/lib/chat-auto-model";
+import { type ChatModelRoutingResult, resolveAutoModel } from "@/lib/chat-model-router";
+import { parseOptimisticChatSessionId } from "@/lib/chat-navigation";
+import { resolveChatRequestContext } from "@/lib/chat-request-auth";
 import {
-  clearActiveGoatChatStream,
-  getGoatChatStreamContext,
-  isGoatChatResumeEnabled,
-  newGoatChatStreamId,
-  setActiveGoatChatStream,
-  watchGoatChatStop,
+  clearActiveChatStream,
+  getChatStreamContext,
+  isChatResumeEnabled,
+  newChatStreamId,
+  setActiveChatStream,
+  watchChatStop,
 } from "@/lib/chat-streams";
-import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
+import { generateChatTitleForMessage } from "@/lib/chat-title";
 import {
+  type ChatMessageMetadata,
+  type ChatUiMessage,
+  chatContextTokensFromUsage,
   type DeleteTaskScheduleToolOutput,
   type EditTaskScheduleToolOutput,
-  type GoatChatMessageMetadata,
-  type GoatChatUiMessage,
-  goatChatContextTokensFromUsage,
   listedActionSourceIdsFromMessages,
   listedSkillIdsFromMessages,
-  replaceGoatChatUiMessageText,
+  replaceChatUiMessageText,
   settleIncompleteToolCallsInStoredParts,
-  textFromGoatChatUiMessage,
+  textFromChatUiMessage,
   type UseActionToolOutput,
   usedSkillIdsFromMessages,
   type WebFetchToolInput,
@@ -124,36 +118,36 @@ import {
 import {
   GOAT_CHAT_OUT_OF_CREDITS_MESSAGE,
   GOAT_CHAT_PROMPT_MAX_LENGTH,
-  validateGoatChatInput,
+  validateChatInput,
 } from "@/lib/chat-validation";
-import { executeGoatChatExaFetch } from "@/lib/chat-web-fetch";
-import { executeGoatChatExaSearch } from "@/lib/chat-web-search";
-import { isGoatClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
-import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
+import { executeChatExaFetch } from "@/lib/chat-web-fetch";
+import { executeChatExaSearch } from "@/lib/chat-web-search";
+import { isClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
+import { isCodexConnectedForUser } from "@/lib/codex-auth";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import type { ChatBrowserToolSession } from "@/lib/sandbox/browser-tools";
 import {
-  activateAndListGoatChatSessionSkills,
-  attachGoatSkillsToPrompt,
-  type GoatChatSessionSkillSnapshot,
-  GoatSkillMentionError,
-  goatSkillsByteLength,
-  listGoatSkillCatalog,
+  activateAndListChatSessionSkills,
+  attachSkillsToPrompt,
+  type ChatSessionSkillSnapshot,
+  listSkillCatalog,
   MAX_GOAT_CHAT_SKILL_BYTES,
   MAX_GOAT_CHAT_SKILLS,
-  readGoatSkillMentionRefs,
-  resolveGoatSkillMentions,
+  readSkillMentionRefs,
+  resolveSkillMentions,
+  SkillMentionError,
+  skillsByteLength,
 } from "@/lib/skills";
 import {
-  createGoatTaskScheduleForUser,
-  deleteGoatTaskScheduleForUser,
-  type GoatTaskScheduleView,
-  listGoatTaskSchedulesForUser,
-  updateGoatTaskScheduleForUser,
+  createTaskScheduleForUser,
+  deleteTaskScheduleForUser,
+  listTaskSchedulesForUser,
+  type TaskScheduleView,
+  updateTaskScheduleForUser,
 } from "@/lib/task-schedules";
-import { createGoatTaskForUser } from "@/lib/tasks";
-import { createGoatTaskFromWorkflow, generateGoatWorkflowTaskTitle } from "@/lib/workflow-tasks";
-import { listGoatWorkflowCatalog, readGoatWorkflowMentionRef } from "@/lib/workflows";
+import { createTaskForUser } from "@/lib/tasks";
+import { createTaskFromWorkflow, generateWorkflowTaskTitle } from "@/lib/workflow-tasks";
+import { listWorkflowCatalog, readWorkflowMentionRef } from "@/lib/workflows";
 
 export const maxDuration = 800;
 export const runtime = "nodejs";
@@ -172,7 +166,7 @@ type ChatRequestBody = {
 };
 
 export async function POST(request: Request): Promise<Response> {
-  const auth = await resolveGoatChatRequestContext(request);
+  const auth = await resolveChatRequestContext(request);
   if (!auth.ok) return auth.response;
   const { context } = auth;
 
@@ -198,17 +192,17 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const parsedAttachments = message
-    ? parseGoatChatAttachmentsInput(message.metadata?.attachments, context.user.workosUserId)
+    ? parseChatAttachmentsInput(message.metadata?.attachments, context.user.workosUserId)
     : null;
   if (parsedAttachments && !parsedAttachments.ok) {
     return new Response(parsedAttachments.error, { status: 400 });
   }
   const attachments = parsedAttachments?.ok ? parsedAttachments.attachments : [];
-  const autoModelRequested = Boolean(message && isAutoGoatModelSelection(body.value.model));
+  const autoModelRequested = Boolean(message && isAutoModelSelection(body.value.model));
 
   const parsed = message
-    ? validateGoatChatInput({
-        prompt: textFromGoatChatUiMessage(message),
+    ? validateChatInput({
+        prompt: textFromChatUiMessage(message),
         model: autoModelRequested ? DEFAULT_GOAT_MODEL : body.value.model,
         sessionId: body.value.sessionId,
         hasAttachments: attachments.length > 0,
@@ -216,9 +210,7 @@ export async function POST(request: Request): Promise<Response> {
     : null;
   if (parsed && !parsed.ok) return new Response(parsed.error, { status: 400 });
   let userInput = parsed?.ok ? parsed.value : null;
-  const parsedNewSessionId = message
-    ? parseOptimisticGoatChatSessionId(body.value.newSessionId)
-    : null;
+  const parsedNewSessionId = message ? parseOptimisticChatSessionId(body.value.newSessionId) : null;
   if (parsedNewSessionId && !parsedNewSessionId.ok) {
     return new Response(parsedNewSessionId.error, { status: 400 });
   }
@@ -256,9 +248,9 @@ export async function POST(request: Request): Promise<Response> {
     }
   }
 
-  const mentionEngine = message ? readGoatChatMentionEngine(body.value.mentions) : undefined;
+  const mentionEngine = message ? readChatMentionEngine(body.value.mentions) : undefined;
   const requestedEngine = mentionEngine
-    ? await resolveConnectedGoatChatMentionEngine({
+    ? await resolveConnectedChatMentionEngine({
         engine: mentionEngine,
         userWorkosId: context.user.workosUserId,
       })
@@ -274,28 +266,28 @@ export async function POST(request: Request): Promise<Response> {
     });
   }
 
-  let resolvedSkills: Awaited<ReturnType<typeof resolveGoatSkillMentions>> = [];
+  let resolvedSkills: Awaited<ReturnType<typeof resolveSkillMentions>> = [];
   if (message) {
-    const parsedSkillMentions = readGoatSkillMentionRefs(
+    const parsedSkillMentions = readSkillMentionRefs(
       message.metadata?.mentions ?? body.value.mentions,
     );
     if (!parsedSkillMentions.ok) {
       return new Response(parsedSkillMentions.error, { status: 400 });
     }
     try {
-      resolvedSkills = await resolveGoatSkillMentions({
+      resolvedSkills = await resolveSkillMentions({
         workspaceId: context.workspace.id,
         mentions: parsedSkillMentions.mentions,
       });
     } catch (error) {
-      if (error instanceof GoatSkillMentionError) {
+      if (error instanceof SkillMentionError) {
         return new Response(error.message, { status: 400 });
       }
       throw error;
     }
   }
   if (message) {
-    const parsedWorkflowMention = readGoatWorkflowMentionRef(
+    const parsedWorkflowMention = readWorkflowMentionRef(
       message.metadata?.mentions ?? body.value.mentions,
     );
     if (!parsedWorkflowMention.ok) {
@@ -312,9 +304,9 @@ export async function POST(request: Request): Promise<Response> {
   // Chat is usage-based on both plans: each turn debits the workspace's USD
   // credits, and a turn cannot start on an empty balance. Codex-engine turns
   // are exempt (the user's own Codex auth pays for those, not the gateway).
-  if (!requestedEngine && isGoatCreditsEnforcementEnabled()) {
-    await ensureGoatMonthlyIncludedUsage(context.workspace.id);
-    const hasCredits = await hasPositiveGoatCreditBalance(context.workspace.id).catch((error) => {
+  if (!requestedEngine && isCreditsEnforcementEnabled()) {
+    await ensureMonthlyIncludedUsage(context.workspace.id);
+    const hasCredits = await hasPositiveCreditBalance(context.workspace.id).catch((error) => {
       logger.warn("Goat chat credit balance check failed", {
         event: "goat.chat_credit_balance_check_failed",
         workspace_id: context.workspace.id,
@@ -336,12 +328,12 @@ export async function POST(request: Request): Promise<Response> {
   // and active-Brain state. Engine handoffs get neither: their execution
   // context is assembled separately, and main-chat skills must not leak into
   // delegated work.
-  const actionsEnabled = !requestedEngine && !isGoatChatActionsKilled();
-  const emptyCatalog: GoatResolvedActionCatalog = { providers: [], actions: [] };
+  const actionsEnabled = !requestedEngine && !isChatActionsKilled();
+  const emptyCatalog: ResolvedActionCatalog = { providers: [], actions: [] };
   const [resolvedActionCatalog, skillCatalog, workflowCatalog, modelRouting, imessageDelivery] =
     await Promise.all([
       actionsEnabled
-        ? resolveGoatActionCatalog({
+        ? resolveActionCatalog({
             userWorkosId: context.user.workosUserId,
             workspaceId: context.workspace.id,
           }).catch((error) => {
@@ -353,7 +345,7 @@ export async function POST(request: Request): Promise<Response> {
           })
         : Promise.resolve(emptyCatalog),
       !requestedEngine
-        ? listGoatSkillCatalog(context.workspace.id).catch((error) => {
+        ? listSkillCatalog(context.workspace.id).catch((error) => {
             logger.warn("Goat chat skill catalog resolution failed", {
               event: "goat.chat_skill_catalog_resolution_failed",
               error,
@@ -362,7 +354,7 @@ export async function POST(request: Request): Promise<Response> {
           })
         : Promise.resolve([]),
       !requestedEngine && context.user.taskSpawningEnabled
-        ? listGoatWorkflowCatalog(context.workspace.id).catch((error) => {
+        ? listWorkflowCatalog(context.workspace.id).catch((error) => {
             logger.warn("Goat chat workflow catalog resolution failed", {
               event: "goat.chat_workflow_catalog_resolution_failed",
               error,
@@ -371,23 +363,23 @@ export async function POST(request: Request): Promise<Response> {
           })
         : Promise.resolve([]),
       autoModelRequested && userInput
-        ? resolveAutoGoatModel({
+        ? resolveAutoModel({
             prompt: userInput.prompt,
             attachments,
             gatewayApiKey,
             userWorkosId: context.user.workosUserId,
             workspaceId: context.workspace.id,
           })
-        : Promise.resolve<GoatChatModelRoutingResult | null>(null),
-      !requestedEngine && resolveGoatImessageProvider() !== null
-        ? resolveGoatImessageDelivery(context.user.workosUserId).catch((error) => {
+        : Promise.resolve<ChatModelRoutingResult | null>(null),
+      !requestedEngine && resolveImessageProvider() !== null
+        ? resolveImessageDelivery(context.user.workosUserId).catch((error) => {
             logger.warn("Goat chat iMessage delivery resolution failed", {
               event: "goat.chat_imessage_delivery_resolution_failed",
               error,
             });
             return null;
           })
-        : Promise.resolve<GoatImessageDelivery | null>(null),
+        : Promise.resolve<ImessageDelivery | null>(null),
     ]);
   const actionCatalog = projectActionCatalog(resolvedActionCatalog, "foregroundInteractive");
   if (modelRouting && userInput) {
@@ -411,18 +403,18 @@ export async function POST(request: Request): Promise<Response> {
     }
   }
 
-  const store = createDbGoatChatStore();
+  const store = createDbChatStore();
   const recurringSchedules = taskToolsEnabled
-    ? await listGoatTaskSchedulesForUser(context.user.workosUserId)
+    ? await listTaskSchedulesForUser(context.user.workosUserId)
     : [];
   const startedAt = performance.now();
   const currentDate = new Date();
-  const userIdHash = hashGoatUserId(context.user.workosUserId);
+  const userIdHash = hashUserId(context.user.workosUserId);
   const elapsedChatDurationMs = () => Math.max(0, Math.round(performance.now() - startedAt));
   // Continuations do not carry a model in the request; the session's stored
   // model takes over once the turn is loaded.
   let telemetryModel = userInput?.model ?? "";
-  const chatSpan = startGoatSpan(GOAT_SPANS.chatTurn, {
+  const chatSpan = startSpan(GOAT_SPANS.chatTurn, {
     ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
     "goat.model": telemetryModel,
     "goat.task_started": false,
@@ -464,7 +456,7 @@ export async function POST(request: Request): Promise<Response> {
       ...attributes,
     };
     chatSpan.end(finalAttributes);
-    recordGoatChatTurn({
+    recordChatTurn({
       durationMs,
       outcome,
       attributes: finalAttributes,
@@ -490,13 +482,13 @@ export async function POST(request: Request): Promise<Response> {
   // The two turn shapes normalize to this state so the streaming tail below
   // stays a single code path.
   type ChatTurnState = {
-    session: Awaited<ReturnType<typeof createGoatChatUserTurn>>["session"];
+    session: Awaited<ReturnType<typeof createChatUserTurn>>["session"];
     sessionCreated: boolean;
     userMessageId: string;
     usageUserMessageId: string | null;
     userMessageContent: string;
-    storedMessages: Awaited<ReturnType<typeof createGoatChatUserTurn>>["storedMessages"];
-    messages: GoatChatUiMessage[];
+    storedMessages: Awaited<ReturnType<typeof createChatUserTurn>>["storedMessages"];
+    messages: ChatUiMessage[];
     respondedApprovals: Array<{
       approvalId: string;
       toolCallId: string;
@@ -511,8 +503,8 @@ export async function POST(request: Request): Promise<Response> {
       // Extract readable file text once at submit time; every later turn reads the
       // stored text instead of re-downloading the blob.
       const attachmentTexts =
-        attachments.length > 0 ? await extractGoatChatAttachmentTexts(attachments) : null;
-      const userTurn = await createGoatChatUserTurn(
+        attachments.length > 0 ? await extractChatAttachmentTexts(attachments) : null;
+      const userTurn = await createChatUserTurn(
         {
           userWorkosId: context.user.workosUserId,
           prompt: userInput.prompt,
@@ -527,10 +519,10 @@ export async function POST(request: Request): Promise<Response> {
       );
       // Settle approvals the user talked past and tools interrupted by an
       // earlier stream so persisted history remains model-convertible.
-      const settled = await settleStaleGoatChatToolCalls(userTurn, store);
+      const settled = await settleStaleChatToolCalls(userTurn, store);
       await Promise.allSettled(
         settled.toolCallIds.map((toolCallId) =>
-          cancelGoatCapabilityRunByToolCall({
+          cancelCapabilityRunByToolCall({
             toolCallId,
             chatSessionId: userTurn.session.id,
             userWorkosId: context.user.workosUserId,
@@ -550,11 +542,11 @@ export async function POST(request: Request): Promise<Response> {
         continuationTaskId: null,
       };
     } else {
-      const continuation = await createGoatChatApprovalContinuationTurn(
+      const continuation = await createChatApprovalContinuationTurn(
         {
           userWorkosId: context.user.workosUserId,
           sessionId: continuationSessionId ?? "",
-          message: approvalMessage as GoatChatUiMessage,
+          message: approvalMessage as ChatUiMessage,
         },
         store,
       );
@@ -570,20 +562,20 @@ export async function POST(request: Request): Promise<Response> {
       await Promise.allSettled(
         managedResponses.map(async (approval) => {
           const row = approval.approved
-            ? await approveGoatCapabilityRunByToolCall({
+            ? await approveCapabilityRunByToolCall({
                 toolCallId: approval.toolCallId,
                 chatSessionId: continuation.session.id,
                 userWorkosId: context.user.workosUserId,
                 workspaceId: context.workspace.id,
               })
-            : await cancelGoatCapabilityRunByToolCall({
+            : await cancelCapabilityRunByToolCall({
                 toolCallId: approval.toolCallId,
                 chatSessionId: continuation.session.id,
                 userWorkosId: context.user.workosUserId,
                 workspaceId: context.workspace.id,
               });
           if (row) {
-            recordGoatCounter(GOAT_METRICS.capabilityApprovalsTotal, 1, {
+            recordCounter(GOAT_METRICS.capabilityApprovalsTotal, 1, {
               "goat.capability_source": row.source,
               "goat.capability_action": row.action,
               "goat.approval_decision": approval.approved ? "approve" : "cancel",
@@ -615,7 +607,7 @@ export async function POST(request: Request): Promise<Response> {
         ? normalizeChatModelUsage(modelRouting.classifier.usage)
         : null;
       try {
-        await recordGoatChatModelRoutingAttempt({
+        await recordChatModelRoutingAttempt({
           workspaceId: context.workspace.id,
           userWorkosId: context.user.workosUserId,
           chatSessionId: turn.session.id,
@@ -673,9 +665,9 @@ export async function POST(request: Request): Promise<Response> {
     finishChatTelemetry("failure", {}, error);
     throw error;
   }
-  let sessionSkills: GoatChatSessionSkillSnapshot[];
+  let sessionSkills: ChatSessionSkillSnapshot[];
   try {
-    sessionSkills = await activateAndListGoatChatSessionSkills({
+    sessionSkills = await activateAndListChatSessionSkills({
       chatSessionId: turn.session.id,
       activatedMessageId: turn.userMessageId,
       workspaceRef: context.workspace.id,
@@ -688,7 +680,7 @@ export async function POST(request: Request): Promise<Response> {
   const skillsByActivationMessageId = groupSessionSkillsByActivationMessage(sessionSkills);
   if (message && userInput) {
     after(
-      generateGoatChatTitleForMessage({
+      generateChatTitleForMessage({
         sessionId: turn.session.id,
         messageId: turn.userMessageId,
         apiKey: gatewayApiKey,
@@ -697,7 +689,7 @@ export async function POST(request: Request): Promise<Response> {
     // One event covers both new and continued chats. `is_first_message` keeps the new-chat
     // funnel queryable without double-capturing the first user action.
     after(
-      captureGoatChatMessageSent({
+      captureChatMessageSent({
         user: context.user,
         workspaceId: context.workspace.id,
         sessionId: turn.session.id,
@@ -735,10 +727,10 @@ export async function POST(request: Request): Promise<Response> {
   // reattach. Explicit stops arrive via the stop endpoint, which aborts this
   // controller through the Redis stop signal. Without Redis, the request
   // signal keeps its old meaning: disconnect cancels generation.
-  const resumeEnabled = isGoatChatResumeEnabled();
+  const resumeEnabled = isChatResumeEnabled();
   const stopController = new AbortController();
   const generationSignal = resumeEnabled ? stopController.signal : request.signal;
-  const capabilityTurnState: GoatCapabilityTurnState = {
+  const capabilityTurnState: CapabilityTurnState = {
     quotedTotalUsdMicros: 0,
     admittedToolCallIds: [],
     quotesByToolCallId: new Map(),
@@ -761,12 +753,12 @@ export async function POST(request: Request): Promise<Response> {
     ...usedSkillIdsFromMessages(turn.messages),
   ]);
   let loadedSkillCount = resolvedSkills.length;
-  let loadedSkillBytes = goatSkillsByteLength(resolvedSkills);
+  let loadedSkillBytes = skillsByteLength(resolvedSkills);
   const releaseStreamCoordination = () => {
     stopWatcherCleanup?.();
     stopWatcherCleanup = null;
     if (activeStreamId) {
-      void clearActiveGoatChatStream(turn.session.id, activeStreamId);
+      void clearActiveChatStream(turn.session.id, activeStreamId);
       activeStreamId = null;
     }
   };
@@ -812,7 +804,7 @@ export async function POST(request: Request): Promise<Response> {
       const usage = browserToolSession?.getUsage();
       if (!usage) return;
       await getDb()
-        .insert(goatChatSandboxUsage)
+        .insert(chatSandboxUsage)
         .values({
           chatSessionId: turn.session.id,
           userWorkosId: context.user.workosUserId,
@@ -847,7 +839,7 @@ export async function POST(request: Request): Promise<Response> {
     ...(browserToolSession ? { browserTools: browserToolSession.execute } : {}),
     ...(imessageDelivery
       ? {
-          sendUserMessage: createGoatSendUserMessageRunner({
+          sendUserMessage: createSendUserMessageRunner({
             userWorkosId: context.user.workosUserId,
             phoneE164: imessageDelivery.phoneE164,
             source: "chat",
@@ -888,7 +880,7 @@ export async function POST(request: Request): Promise<Response> {
     // in chat is save_to_brain, which is available to every workspace member
     // with an active brain and enqueues the durable ingestion agent.
     runBrainCli: (toolInput, toolExecutionContext) => {
-      const toolCallId = goatBrainToolCallId(toolExecutionContext);
+      const toolCallId = brainToolCallId(toolExecutionContext);
       const activeBrain = context.activeBrain;
       if (!activeBrain) {
         return Promise.resolve({
@@ -899,7 +891,7 @@ export async function POST(request: Request): Promise<Response> {
           error: "You do not have access to any brain in this workspace.",
         });
       }
-      return runGoatBrainToolForUser({
+      return runBrainToolForUser({
         brainRef: activeBrain.id,
         userWorkosId: context.user.workosUserId,
         toolInput,
@@ -923,7 +915,7 @@ export async function POST(request: Request): Promise<Response> {
             }
             const attachmentIds = toolInput.attachmentIds ?? [];
             if (attachmentIds.length > 0) {
-              return saveChatAttachmentsToGoatBrain({
+              return saveChatAttachmentsToBrain({
                 brainRef: activeBrain.id,
                 userWorkosId: context.user.workosUserId,
                 attachmentIds,
@@ -938,7 +930,7 @@ export async function POST(request: Request): Promise<Response> {
                 error: "Provide content, sourceRef, or attachmentIds to save.",
               };
             }
-            const captured = await captureToGoatBrainInbox({
+            const captured = await captureToBrainInbox({
               brainRef: activeBrain.id,
               userWorkosId: context.user.workosUserId,
               ...(content ? { text: content } : {}),
@@ -1012,7 +1004,7 @@ export async function POST(request: Request): Promise<Response> {
             ...(prelistedSkillIds.size > 0 ? { prelistedSkillIds: [...prelistedSkillIds] } : {}),
             execute: async ({ skill }: { skill: string }) => {
               try {
-                const [resolved] = await resolveGoatSkillMentions({
+                const [resolved] = await resolveSkillMentions({
                   workspaceId: context.workspace.id,
                   mentions: [{ id: skill }],
                 });
@@ -1036,7 +1028,7 @@ export async function POST(request: Request): Promise<Response> {
                     },
                   };
                 }
-                const skillBytes = goatSkillsByteLength([resolved]);
+                const skillBytes = skillsByteLength([resolved]);
                 if (
                   loadedSkillCount >= MAX_GOAT_CHAT_SKILLS ||
                   loadedSkillBytes + skillBytes > MAX_GOAT_CHAT_SKILL_BYTES
@@ -1063,7 +1055,7 @@ export async function POST(request: Request): Promise<Response> {
                   },
                 };
               } catch (error) {
-                if (error instanceof GoatSkillMentionError) {
+                if (error instanceof SkillMentionError) {
                   return {
                     ok: false as const,
                     skill,
@@ -1090,14 +1082,14 @@ export async function POST(request: Request): Promise<Response> {
                   `Workflow task descriptions can be at most ${GOAT_CHAT_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
                 );
               }
-              const created = await createGoatTaskFromWorkflow({
+              const created = await createTaskFromWorkflow({
                 userWorkosId: context.user.workosUserId,
                 workspaceId: context.workspace.id,
                 mention: { id: workflowId },
                 description,
               });
               after(
-                generateGoatWorkflowTaskTitle({
+                generateWorkflowTaskTitle({
                   taskId: created.id,
                   userWorkosId: context.user.workosUserId,
                   workflowName: created.name,
@@ -1117,7 +1109,7 @@ export async function POST(request: Request): Promise<Response> {
                 ...attributes,
                 "goat.task_started": true,
               });
-              recordGoatCounter(GOAT_METRICS.chatTasksStartedTotal, 1, attributes);
+              recordCounter(GOAT_METRICS.chatTasksStartedTotal, 1, attributes);
               return {
                 id: created.id,
                 displayId: created.displayId,
@@ -1191,7 +1183,7 @@ export async function POST(request: Request): Promise<Response> {
     ...(taskToolsEnabled
       ? {
           startTask: async (task) => {
-            const created = await createGoatTaskForUser({
+            const created = await createTaskForUser({
               userWorkosId: context.user.workosUserId,
               workspaceId: context.workspace.id,
               brainRef: context.activeBrain?.id ?? null,
@@ -1211,7 +1203,7 @@ export async function POST(request: Request): Promise<Response> {
               ...attributes,
               "goat.task_started": true,
             });
-            recordGoatCounter(GOAT_METRICS.chatTasksStartedTotal, 1, attributes);
+            recordCounter(GOAT_METRICS.chatTasksStartedTotal, 1, attributes);
             return {
               id: created.id,
               displayId: created.displayId,
@@ -1220,7 +1212,7 @@ export async function POST(request: Request): Promise<Response> {
             };
           },
           scheduleTask: async (schedule) => {
-            const created = await createGoatTaskScheduleForUser({
+            const created = await createTaskScheduleForUser({
               userWorkosId: context.user.workosUserId,
               name: schedule.name,
               sourceDescription: schedule.sourceDescription ?? schedule.reason ?? "",
@@ -1255,7 +1247,7 @@ export async function POST(request: Request): Promise<Response> {
               (!scheduleTimingChanged ? target.schedule.sourceDescription : "") ||
               `${cron} - ${timezone}`;
 
-            const result = await updateGoatTaskScheduleForUser(
+            const result = await updateTaskScheduleForUser(
               context.user.workosUserId,
               target.schedule.id,
               {
@@ -1288,7 +1280,7 @@ export async function POST(request: Request): Promise<Response> {
             const target = resolveChatScheduleTarget(recurringSchedules, input);
             if (!target.ok) return target;
 
-            const result = await deleteGoatTaskScheduleForUser(
+            const result = await deleteTaskScheduleForUser(
               context.user.workosUserId,
               target.schedule.id,
             );
@@ -1310,7 +1302,7 @@ export async function POST(request: Request): Promise<Response> {
       : {}),
   });
 
-  let debugTrace: GoatChatMessageDebugTrace = createOpenCompanyChatDebugTrace({
+  let debugTrace: ChatMessageDebugTrace = createOpenCompanyChatDebugTrace({
     model: turn.session.model,
   });
   let assistantPersisted = false;
@@ -1339,7 +1331,7 @@ export async function POST(request: Request): Promise<Response> {
       error,
     );
     assistantPersistPromise = Promise.resolve(
-      persistGoatChatAssistantMessage(
+      persistChatAssistantMessage(
         {
           sessionId: turn.session.id,
           content: startedTask
@@ -1367,7 +1359,7 @@ export async function POST(request: Request): Promise<Response> {
   // as an abort chunk, so the stream onFinish below persists the real partial
   // response (text included) instead of a placeholder.
   const gateway = createGateway({ apiKey: gatewayApiKey });
-  const gatewayAttribution = createGoatGatewayAttribution({
+  const gatewayAttribution = createGatewayAttribution({
     userWorkosId: context.user.workosUserId,
     feature: "chat",
     chatSessionId: turn.session.id,
@@ -1413,15 +1405,15 @@ export async function POST(request: Request): Promise<Response> {
         : {}),
     }),
     messages: await convertToModelMessages(
-      await hydrateGoatChatAttachmentParts({
+      await hydrateChatAttachmentParts({
         // Match native skill runtimes: the full skill enters history on its activation message and
         // remains available on every later turn in this chat without re-inlining it elsewhere.
         uiMessages: turn.messages.map((uiMessage) => {
           const activatedSkills = skillsByActivationMessageId.get(uiMessage.id) ?? [];
           return activatedSkills.length > 0
-            ? replaceGoatChatUiMessageText(
+            ? replaceChatUiMessageText(
                 uiMessage,
-                attachGoatSkillsToPrompt(textFromGoatChatUiMessage(uiMessage), activatedSkills),
+                attachSkillsToPrompt(textFromChatUiMessage(uiMessage), activatedSkills),
               )
             : uiMessage;
         }),
@@ -1447,7 +1439,7 @@ export async function POST(request: Request): Promise<Response> {
     ...(toolContext.repairToolCall
       ? { experimental_repairToolCall: toolContext.repairToolCall }
       : {}),
-    providerOptions: goatGatewayProviderOptions(
+    providerOptions: gatewayProviderOptions(
       gatewayAttribution,
       GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
     ),
@@ -1512,15 +1504,15 @@ export async function POST(request: Request): Promise<Response> {
   // spans have ended; export them to Latitude before the function is frozen.
   after(() => flushLatitude());
 
-  return result.toUIMessageStreamResponse<GoatChatUiMessage>({
+  return result.toUIMessageStreamResponse<ChatUiMessage>({
     originalMessages: turn.messages,
-    generateMessageId: newGoatChatMessageId,
+    generateMessageId: newChatMessageId,
     messageMetadata: ({ part }) =>
       toStreamMessageMetadata(
         turn.session.id,
         turn.session.model,
         toolContext.getStartedTask(),
-        part.type === "finish-step" ? goatChatContextTokensFromUsage(part.usage) : undefined,
+        part.type === "finish-step" ? chatContextTokensFromUsage(part.usage) : undefined,
       ),
     consumeSseStream({ stream }) {
       // This copy of the SSE stream keeps the turn alive independently of the
@@ -1530,14 +1522,14 @@ export async function POST(request: Request): Promise<Response> {
         after(stream.pipeTo(new WritableStream()).catch(() => undefined));
         return;
       }
-      const streamId = newGoatChatStreamId();
+      const streamId = newChatStreamId();
       activeStreamId = streamId;
-      const streamContext = getGoatChatStreamContext();
+      const streamContext = getChatStreamContext();
       after(
         (async () => {
           try {
-            await setActiveGoatChatStream(turn.session.id, streamId);
-            stopWatcherCleanup = watchGoatChatStop(streamId, () => stopController.abort());
+            await setActiveChatStream(turn.session.id, streamId);
+            stopWatcherCleanup = watchChatStop(streamId, () => stopController.abort());
             await streamContext.createNewResumableStream(streamId, () => stream);
           } catch (error) {
             console.warn("Goat chat resumable stream setup failed.", {
@@ -1570,9 +1562,9 @@ export async function POST(request: Request): Promise<Response> {
 
       const startedTask = toolContext.getStartedTask();
       const responseParts = settleIncompleteToolCallsInStoredParts(responseMessage.parts)
-        .parts as GoatChatUiMessage["parts"];
+        .parts as ChatUiMessage["parts"];
       const settledResponseMessage = { ...responseMessage, parts: responseParts };
-      const rawContent = textFromGoatChatUiMessage(settledResponseMessage);
+      const rawContent = textFromChatUiMessage(settledResponseMessage);
       const hasAssistantParts = hasDisplayableAssistantParts(settledResponseMessage);
       if (isAborted && !rawContent && !startedTask && !hasAssistantParts) {
         finishChatTelemetry("aborted", {
@@ -1606,7 +1598,7 @@ export async function POST(request: Request): Promise<Response> {
         debugTrace: finalTrace,
       };
       try {
-        await persistGoatChatAssistantMessage(assistantMessageInput, store);
+        await persistChatAssistantMessage(assistantMessageInput, store);
       } catch (error) {
         if (!responseMessageId) throw error;
         console.warn("Goat chat assistant persistence failed; retrying with a server id.", {
@@ -1614,7 +1606,7 @@ export async function POST(request: Request): Promise<Response> {
           session_id: turn.session.id,
           error,
         });
-        await persistGoatChatAssistantMessage(
+        await persistChatAssistantMessage(
           {
             ...assistantMessageInput,
             messageId: null,
@@ -1634,7 +1626,7 @@ export async function POST(request: Request): Promise<Response> {
   });
 }
 
-function groupSessionSkillsByActivationMessage(skills: GoatChatSessionSkillSnapshot[]) {
+function groupSessionSkillsByActivationMessage(skills: ChatSessionSkillSnapshot[]) {
   const grouped = new Map<
     string,
     Array<{
@@ -1662,7 +1654,7 @@ async function executeChatWebFetch(input: {
   apiKey: string;
   signal: AbortSignal;
   attributes: Record<string, string | number | boolean | null | undefined>;
-  chatSpan: ReturnType<typeof startGoatSpan>;
+  chatSpan: ReturnType<typeof startSpan>;
 }): Promise<WebFetchToolOutput> {
   const baseAttributes = {
     ...input.attributes,
@@ -1670,7 +1662,7 @@ async function executeChatWebFetch(input: {
     "goat.web_fetch_operation": "contents",
   };
   try {
-    const output = await executeGoatChatExaFetch(input);
+    const output = await executeChatExaFetch(input);
     const attributes = {
       ...baseAttributes,
       "goat.outcome": "success",
@@ -1680,9 +1672,9 @@ async function executeChatWebFetch(input: {
       "goat.web_fetch_used": true,
       "goat.web_fetch_cost_usd_micros": output.costUsdMicros ?? 0,
     });
-    recordGoatCounter(GOAT_METRICS.chatWebFetchesTotal, 1, attributes);
+    recordCounter(GOAT_METRICS.chatWebFetchesTotal, 1, attributes);
     if (output.costUsdMicros) {
-      recordGoatCounter(GOAT_METRICS.chatWebFetchCostUsdMicros, output.costUsdMicros, attributes);
+      recordCounter(GOAT_METRICS.chatWebFetchCostUsdMicros, output.costUsdMicros, attributes);
     }
     return output;
   } catch (error) {
@@ -1690,7 +1682,7 @@ async function executeChatWebFetch(input: {
       "goat.web_fetch_used": true,
       "goat.web_fetch_failed": true,
     });
-    recordGoatCounter(GOAT_METRICS.chatWebFetchesTotal, 1, {
+    recordCounter(GOAT_METRICS.chatWebFetchesTotal, 1, {
       ...baseAttributes,
       "goat.outcome": "failure",
     });
@@ -1707,7 +1699,7 @@ async function executeChatWebSearch(input: {
   signal: AbortSignal;
   currentDate: Date;
   attributes: Record<string, string | number | boolean | null | undefined>;
-  chatSpan: ReturnType<typeof startGoatSpan>;
+  chatSpan: ReturnType<typeof startSpan>;
 }): Promise<WebSearchToolOutput> {
   const baseAttributes = {
     ...input.attributes,
@@ -1715,7 +1707,7 @@ async function executeChatWebSearch(input: {
     "goat.web_search_operation": "search",
   };
   try {
-    const output = await executeGoatChatExaSearch(input);
+    const output = await executeChatExaSearch(input);
     const attributes = {
       ...baseAttributes,
       "goat.outcome": "success",
@@ -1727,9 +1719,9 @@ async function executeChatWebSearch(input: {
       "goat.web_search_cost_usd_micros": output.costUsdMicros ?? 0,
       "goat.web_search_result_count": output.results.length,
     });
-    recordGoatCounter(GOAT_METRICS.chatWebSearchesTotal, 1, attributes);
+    recordCounter(GOAT_METRICS.chatWebSearchesTotal, 1, attributes);
     if (output.costUsdMicros) {
-      recordGoatCounter(GOAT_METRICS.chatWebSearchCostUsdMicros, output.costUsdMicros, attributes);
+      recordCounter(GOAT_METRICS.chatWebSearchCostUsdMicros, output.costUsdMicros, attributes);
     }
     return output;
   } catch (error) {
@@ -1741,7 +1733,7 @@ async function executeChatWebSearch(input: {
       "goat.web_search_used": true,
       "goat.web_search_failed": true,
     });
-    recordGoatCounter(GOAT_METRICS.chatWebSearchesTotal, 1, attributes);
+    recordCounter(GOAT_METRICS.chatWebSearchesTotal, 1, attributes);
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Web search failed.",
@@ -1752,7 +1744,7 @@ async function executeChatWebSearch(input: {
 // Direct provider calls: no sub-agent LLM, so no worker cost recording — the
 // only model usage in a turn is the main stream's own totalUsage.
 async function executeChatActionCall(input: {
-  catalog: GoatResolvedActionCatalog;
+  catalog: ResolvedActionCatalog;
   action: string;
   params: Record<string, unknown>;
   signal: AbortSignal;
@@ -1762,15 +1754,15 @@ async function executeChatActionCall(input: {
   workspaceId: string;
   chatSessionId: string;
   toolCallId: string;
-  capabilityTurnState: GoatCapabilityTurnState;
+  capabilityTurnState: CapabilityTurnState;
   attributes: Record<string, string | number | boolean | null | undefined>;
-  chatSpan: ReturnType<typeof startGoatSpan>;
+  chatSpan: ReturnType<typeof startSpan>;
 }): Promise<UseActionToolOutput> {
   const startedAt = performance.now();
   const provider = input.catalog.actions.find((entry) => entry.id === input.action)?.provider;
   // Created inside the chat-turn span's context so it nests as a child span.
   const actionSpan = input.chatSpan.runInContext(() =>
-    startGoatSpan(GOAT_SPANS.chatActionCall, {
+    startSpan(GOAT_SPANS.chatActionCall, {
       ...input.attributes,
       "goat.action": input.action,
       ...(provider ? { "goat.action_provider": provider } : {}),
@@ -1782,7 +1774,7 @@ async function executeChatActionCall(input: {
   };
 
   try {
-    const result = await executeGoatAction({
+    const result = await executeAction({
       catalog: input.catalog,
       actionId: input.action,
       params: input.params,
@@ -1799,23 +1791,23 @@ async function executeChatActionCall(input: {
       "goat.outcome": result.ok ? "success" : "failure",
       ...(result.ok ? {} : { "goat.action_error_code": result.error.code }),
     });
-    recordGoatCounter(GOAT_METRICS.chatActionCallsTotal, 1, {
+    recordCounter(GOAT_METRICS.chatActionCallsTotal, 1, {
       ...metricAttributes,
       "goat.outcome": result.ok ? "success" : result.error.code,
     });
-    recordGoatHistogram(
+    recordHistogram(
       GOAT_METRICS.chatActionCallDurationMs,
       Math.max(0, Math.round(performance.now() - startedAt)),
       metricAttributes,
     );
     return result;
   } catch (error) {
-    // executeGoatAction converts action failures into structured results;
+    // executeAction converts action failures into structured results;
     // reaching here means infrastructure broke (or the turn was aborted).
     // Still return a structured result so the turn survives.
     actionSpan.fail(error, metricAttributes);
     actionSpan.end({ "goat.outcome": "failure" });
-    recordGoatCounter(GOAT_METRICS.chatActionCallsTotal, 1, {
+    recordCounter(GOAT_METRICS.chatActionCallsTotal, 1, {
       ...metricAttributes,
       "goat.outcome": "error",
     });
@@ -1856,7 +1848,7 @@ async function recordChatModelCost(input: {
     inputCacheWriteTokens: usage.inputCacheWriteTokens,
     outputTokens: usage.outputTokens,
   });
-  recordGoatModelCost({
+  recordModelCost({
     costUsdMicros: cost.totalCostUsdMicros,
     attributes: {
       "goat.model": input.model,
@@ -1864,7 +1856,7 @@ async function recordChatModelCost(input: {
       "goat.stage": input.stage ?? "generation",
     },
   });
-  await captureGoatLlmUsageRecorded({
+  await captureLlmUsageRecorded({
     distinctId: input.userWorkosId,
     workspaceId: input.workspaceId,
     surface: "chat",
@@ -1893,7 +1885,7 @@ async function recordChatModelCost(input: {
   // resume/replay paths. A debit failure must never fail the turn.
   if (!cost.billable) return;
   try {
-    const debit = await recordGoatCreditDebit({
+    const debit = await recordCreditDebit({
       workspaceId: input.workspaceId,
       userWorkosId: input.userWorkosId,
       source: "chat_model_usage",
@@ -1905,7 +1897,7 @@ async function recordChatModelCost(input: {
       costBasis: cost.costBasis,
     });
     if (debit.ok) {
-      await captureGoatModelSpendRecorded({
+      await captureModelSpendRecorded({
         userWorkosId: input.userWorkosId,
         workspaceId: input.workspaceId,
         billingSource: "chat_model_usage",
@@ -1924,7 +1916,7 @@ async function recordChatModelCost(input: {
     }
     // Fire-and-forget: charge the saved card when the balance dropped below
     // the auto-refill threshold. The cron sweep covers runner-side debits.
-    void maybeTriggerGoatAutoRefill(input.workspaceId);
+    void maybeTriggerAutoRefill(input.workspaceId);
   } catch (error) {
     logger.warn("Goat chat credit debit failed", {
       event: "goat.chat_credit_debit_failed",
@@ -1968,10 +1960,10 @@ function readUsageNumber(value: number | undefined) {
 }
 
 function resolveChatScheduleTarget(
-  schedules: readonly GoatTaskScheduleView[],
+  schedules: readonly TaskScheduleView[],
   input: { scheduleId?: string; scheduleName?: string },
 ):
-  | { ok: true; schedule: GoatTaskScheduleView }
+  | { ok: true; schedule: TaskScheduleView }
   | {
       ok: false;
       error: string;
@@ -2018,7 +2010,7 @@ function toStreamMessageMetadata(
   model: string,
   task: StartedTask | null,
   contextTokens?: number,
-): GoatChatMessageMetadata {
+): ChatMessageMetadata {
   return {
     sessionId,
     model,
@@ -2048,19 +2040,19 @@ async function readJsonBody(
   }
 }
 
-function parseUserMessage(value: unknown): GoatChatUiMessage | null {
+function parseUserMessage(value: unknown): ChatUiMessage | null {
   if (!isRecord(value) || value.role !== "user" || typeof value.id !== "string") return null;
   if (!Array.isArray(value.parts)) return null;
-  return value as unknown as GoatChatUiMessage;
+  return value as unknown as ChatUiMessage;
 }
 
 // The auto-resend after the user answers a tool-approval card carries the
 // assistant message itself. Only its approval decisions are trusted — the
 // continuation turn re-reads everything else from the stored copy.
-function parseApprovalContinuationMessage(value: unknown): GoatChatUiMessage | null {
+function parseApprovalContinuationMessage(value: unknown): ChatUiMessage | null {
   if (!isRecord(value) || value.role !== "assistant" || typeof value.id !== "string") return null;
   if (!Array.isArray(value.parts)) return null;
-  return value as unknown as GoatChatUiMessage;
+  return value as unknown as ChatUiMessage;
 }
 
 function safeClientMessageId(value: unknown) {
@@ -2070,7 +2062,7 @@ function safeClientMessageId(value: unknown) {
   return trimmed;
 }
 
-function goatBrainToolCallId(value: unknown) {
+function brainToolCallId(value: unknown) {
   if (!isRecord(value)) return undefined;
   const direct = normalizedOptionalString(value.toolCallId);
   if (direct) return direct;
@@ -2081,7 +2073,7 @@ function goatBrainToolCallId(value: unknown) {
   );
 }
 
-function hasDisplayableAssistantParts(message: Pick<GoatChatUiMessage, "parts">) {
+function hasDisplayableAssistantParts(message: Pick<ChatUiMessage, "parts">) {
   return message.parts.some((part) => {
     if (part.type === "text") return part.text.trim().length > 0;
     return isRecord(part) && isPersistableToolPartType(part.type);
@@ -2098,19 +2090,19 @@ function normalizedOptionalString(value: unknown) {
   return trimmed || undefined;
 }
 
-type GoatChatMentionEngine = Extract<GoatHarnessEngine, "codex" | "claude_code">;
+type ChatMentionEngine = Extract<HarnessEngine, "codex" | "claude_code">;
 
-async function resolveConnectedGoatChatMentionEngine(input: {
-  engine: GoatChatMentionEngine;
+async function resolveConnectedChatMentionEngine(input: {
+  engine: ChatMentionEngine;
   userWorkosId: string;
-}): Promise<GoatChatMentionEngine | undefined> {
+}): Promise<ChatMentionEngine | undefined> {
   if (input.engine === "codex") {
-    return (await isGoatCodexConnectedForUser(input.userWorkosId)) ? "codex" : undefined;
+    return (await isCodexConnectedForUser(input.userWorkosId)) ? "codex" : undefined;
   }
-  return (await isGoatClaudeCodeConnectedForUser(input.userWorkosId)) ? "claude_code" : undefined;
+  return (await isClaudeCodeConnectedForUser(input.userWorkosId)) ? "claude_code" : undefined;
 }
 
-function readGoatChatMentionEngine(value: unknown): GoatChatMentionEngine | undefined {
+function readChatMentionEngine(value: unknown): ChatMentionEngine | undefined {
   if (!Array.isArray(value)) return undefined;
   for (const item of value) {
     if (isCodexEngineMention(item)) return "codex";

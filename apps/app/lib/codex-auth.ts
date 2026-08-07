@@ -1,20 +1,20 @@
 "use server";
 
 import { getDb } from "@opencompany/db/client";
-import { deleteGoatCodexCredential } from "@opencompany/db/codex-auth";
-import { goatCodexCredentials } from "@opencompany/db/schema";
+import { deleteCodexCredential } from "@opencompany/db/codex-auth";
+import { codexCredentials } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 
-export type GoatCodexAuthSettings = {
+export type CodexAuthSettings = {
   status: "connected" | "needs_reauth" | null;
   statusReason: string | null;
   lastValidatedAt: string | null;
   lastRotatedAt: string | null;
 };
 
-export type GoatCodexDeviceAuthFlow = {
+export type CodexDeviceAuthFlow = {
   id: string;
   status: "pending" | "code_ready" | "completed" | "failed" | "expired";
   userCode: string | null;
@@ -25,26 +25,26 @@ export type GoatCodexDeviceAuthFlow = {
 
 type RunnerFlowResponse = {
   ok: boolean;
-  flow: GoatCodexDeviceAuthFlow;
+  flow: CodexDeviceAuthFlow;
 };
 
-export async function loadCurrentGoatCodexAuthSettings(): Promise<GoatCodexAuthSettings> {
-  const { user } = await currentGoatUser();
-  return loadGoatCodexAuthSettingsForUser(user.workosUserId);
+export async function loadCurrentCodexAuthSettings(): Promise<CodexAuthSettings> {
+  const { user } = await currentUser();
+  return loadCodexAuthSettingsForUser(user.workosUserId);
 }
 
-export async function loadGoatCodexAuthSettingsForUser(
+export async function loadCodexAuthSettingsForUser(
   userWorkosId: string,
-): Promise<GoatCodexAuthSettings> {
+): Promise<CodexAuthSettings> {
   const [row] = await getDb()
     .select({
-      status: goatCodexCredentials.status,
-      statusReason: goatCodexCredentials.statusReason,
-      lastValidatedAt: goatCodexCredentials.lastValidatedAt,
-      lastRotatedAt: goatCodexCredentials.lastRotatedAt,
+      status: codexCredentials.status,
+      statusReason: codexCredentials.statusReason,
+      lastValidatedAt: codexCredentials.lastValidatedAt,
+      lastRotatedAt: codexCredentials.lastRotatedAt,
     })
-    .from(goatCodexCredentials)
-    .where(eq(goatCodexCredentials.userWorkosId, userWorkosId))
+    .from(codexCredentials)
+    .where(eq(codexCredentials.userWorkosId, userWorkosId))
     .limit(1);
 
   return {
@@ -55,13 +55,13 @@ export async function loadGoatCodexAuthSettingsForUser(
   };
 }
 
-export async function isGoatCodexConnectedForUser(userWorkosId: string) {
-  const settings = await loadGoatCodexAuthSettingsForUser(userWorkosId);
+export async function isCodexConnectedForUser(userWorkosId: string) {
+  const settings = await loadCodexAuthSettingsForUser(userWorkosId);
   return settings.status === "connected";
 }
 
-export async function startGoatCodexDeviceAuth() {
-  const { user } = await currentGoatUser();
+export async function startCodexDeviceAuth() {
+  const { user } = await currentUser();
   try {
     const response = await callRunnerJson<RunnerFlowResponse>(
       "/internal/goat/codex-auth/device/start",
@@ -76,11 +76,11 @@ export async function startGoatCodexDeviceAuth() {
   }
 }
 
-export async function pollGoatCodexDeviceAuth(flowId: string) {
+export async function pollCodexDeviceAuth(flowId: string) {
   const trimmedFlowId = flowId.trim();
   if (!trimmedFlowId) return { ok: false as const, error: "Codex auth flow is required." };
 
-  const { user } = await currentGoatUser();
+  const { user } = await currentUser();
   try {
     const response = await callRunnerJson<RunnerFlowResponse>(
       `/internal/goat/codex-auth/device/${encodeURIComponent(trimmedFlowId)}/poll`,
@@ -96,9 +96,9 @@ export async function pollGoatCodexDeviceAuth(flowId: string) {
   }
 }
 
-export async function disconnectGoatCodexAuth() {
-  const { user } = await currentGoatUser();
-  await deleteGoatCodexCredential({ db: getDb(), userWorkosId: user.workosUserId });
+export async function disconnectCodexAuth() {
+  const { user } = await currentUser();
+  await deleteCodexCredential({ db: getDb(), userWorkosId: user.workosUserId });
   revalidatePath("/settings");
   return { ok: true as const };
 }

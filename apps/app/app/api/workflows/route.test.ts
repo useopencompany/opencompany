@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { GoatAuthContext } from "@/lib/auth";
-import { currentGoatUser } from "@/lib/auth";
-import { createGoatTaskFromWorkflow, generateGoatWorkflowTaskTitle } from "@/lib/workflow-tasks";
+import type { AuthContext } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
+import { createTaskFromWorkflow, generateWorkflowTaskTitle } from "@/lib/workflow-tasks";
 import { POST } from "./route";
 
 vi.mock("next/server", () => ({
@@ -16,25 +16,25 @@ vi.mock("next/server", () => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
 }));
 
 vi.mock("@/lib/workflow-tasks", () => ({
-  createGoatTaskFromWorkflow: vi.fn(),
-  generateGoatWorkflowTaskTitle: vi.fn(async () => undefined),
+  createTaskFromWorkflow: vi.fn(),
+  generateWorkflowTaskTitle: vi.fn(async () => undefined),
 }));
 
 describe("POST /api/workflows", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(currentGoatUser).mockResolvedValue({
+    vi.mocked(currentUser).mockResolvedValue({
       user: {
         workosUserId: "user_1",
         taskSpawningEnabled: true,
       },
       workspace: { id: "workspace_1" },
-    } as GoatAuthContext);
-    vi.mocked(createGoatTaskFromWorkflow).mockResolvedValue({
+    } as AuthContext);
+    vi.mocked(createTaskFromWorkflow).mockResolvedValue({
       id: "goat_task_1",
       displayId: "TASK-1",
       name: "Morning Test",
@@ -67,7 +67,7 @@ describe("POST /api/workflows", () => {
         name: "Morning Test",
       },
     });
-    expect(createGoatTaskFromWorkflow).toHaveBeenCalledWith({
+    expect(createTaskFromWorkflow).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
       mention: { id: "morning-test" },
@@ -85,7 +85,7 @@ describe("POST /api/workflows", () => {
       ],
       attachmentTexts: null,
     });
-    expect(generateGoatWorkflowTaskTitle).toHaveBeenCalledWith(
+    expect(generateWorkflowTaskTitle).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: "goat_task_1",
         userWorkosId: "user_1",

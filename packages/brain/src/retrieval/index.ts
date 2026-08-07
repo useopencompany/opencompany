@@ -1,29 +1,29 @@
-import type { GoatBrainGraphDirection, GoatBrainKind, GoatBrainRelation } from "../schema";
-import { isGoatBrainSkillFolder } from "../skills";
+import type { BrainGraphDirection, BrainKind, BrainRelation } from "../schema";
+import { isBrainSkillFolder } from "../skills";
 import { blend } from "./blend";
 import { createLexicalIndex, lexicalSearch, titleTagMatch } from "./bm25";
 import { buildCorpus, type IndexRecord, loadCachedDocumentEmbeddings } from "./corpus";
 import { reciprocalRankFusion } from "./fuse";
 
 export {
+  brainFreshness,
   GOAT_BRAIN_WEIGHT_FRESHNESS,
   GOAT_BRAIN_WEIGHT_RELEVANCE,
-  goatBrainFreshness,
 } from "./blend";
 export { titleTagMatch } from "./bm25";
 export { reciprocalRankFusion } from "./fuse";
 export { createGateway, type FetchLike, type Gateway, type GatewayConfig } from "./gateway";
 
-export type GoatBrainQueryOptions = {
+export type BrainQueryOptions = {
   text: string;
   folder?: string;
-  kind?: GoatBrainKind;
+  kind?: BrainKind;
   since?: string;
   limit?: number;
   offset?: number;
   lexicalOnly?: boolean;
   hops?: number;
-  graphDirection?: GoatBrainGraphDirection;
+  graphDirection?: BrainGraphDirection;
   includeInvalid?: boolean;
   includeMerged?: boolean;
   includeArchived?: boolean;
@@ -38,7 +38,7 @@ export type RetrievalProviders = {
   embeddingCacheKey?: string;
 };
 
-export type GoatBrainQueryHit = {
+export type BrainQueryHit = {
   id: string;
   folder: string;
   title: string;
@@ -51,21 +51,21 @@ export type GoatBrainQueryHit = {
   relationContext: string;
   updatedAt: string;
   matchedBy: "text" | "graph" | "both";
-  via?: GoatBrainGraphHop[];
+  via?: BrainGraphHop[];
 };
 
-export type GoatBrainGraphHop = {
+export type BrainGraphHop = {
   from: string;
   type: string;
   to: string;
 };
 
-export async function queryGoatBrain(
+export async function queryBrain(
   root: string,
-  options: GoatBrainQueryOptions,
+  options: BrainQueryOptions,
   providers: RetrievalProviders = {},
   now: number = Date.now(),
-): Promise<GoatBrainQueryHit[]> {
+): Promise<BrainQueryHit[]> {
   const all = await buildCorpus(root);
   const candidates = applyFilters(all, options);
   if (candidates.length === 0) return [];
@@ -100,7 +100,7 @@ export async function queryGoatBrain(
       : reciprocalRankFusion(lists);
 
   const textMatchIds = new Set(relevanceById.keys());
-  const graphPaths = new Map<string, GoatBrainGraphHop[]>();
+  const graphPaths = new Map<string, BrainGraphHop[]>();
   if ((options.hops ?? 0) > 0) {
     expandAlongGraph(
       relevanceById,
@@ -153,7 +153,7 @@ export async function queryGoatBrain(
     });
 }
 
-function applyFilters(records: IndexRecord[], options: GoatBrainQueryOptions): IndexRecord[] {
+function applyFilters(records: IndexRecord[], options: BrainQueryOptions): IndexRecord[] {
   const sinceMs = options.since ? Date.parse(options.since) : Number.NaN;
   const kind = options.kind ?? "page";
   if (options.since && Number.isNaN(sinceMs)) {
@@ -177,7 +177,7 @@ function applyFilters(records: IndexRecord[], options: GoatBrainQueryOptions): I
     ) {
       return false;
     }
-    if (!options.folder && isGoatBrainSkillFolder(record.folder)) return false;
+    if (!options.folder && isBrainSkillFolder(record.folder)) return false;
     if (!Number.isNaN(sinceMs)) {
       const updated = Date.parse(record.updatedAt);
       if (Number.isNaN(updated) || updated < sinceMs) return false;
@@ -191,19 +191,19 @@ const GRAPH_SEED_LIMIT = 20;
 
 function expandAlongGraph(
   relevance: Map<string, number>,
-  graphPaths: Map<string, GoatBrainGraphHop[]>,
+  graphPaths: Map<string, BrainGraphHop[]>,
   byId: Map<string, IndexRecord>,
   hops: number,
-  direction: GoatBrainGraphDirection,
+  direction: BrainGraphDirection,
 ): void {
   const adjacency = buildAdjacency(byId, direction);
   let frontier = [...relevance.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, GRAPH_SEED_LIMIT)
-    .map(([id, score]) => ({ id, score, path: [] as GoatBrainGraphHop[] }));
+    .map(([id, score]) => ({ id, score, path: [] as BrainGraphHop[] }));
 
   for (let hop = 0; hop < hops && frontier.length > 0; hop++) {
-    const next: Array<{ id: string; score: number; path: GoatBrainGraphHop[] }> = [];
+    const next: Array<{ id: string; score: number; path: BrainGraphHop[] }> = [];
     for (const { id, score, path } of frontier) {
       const boosted = score * HOP_DECAY;
       for (const edge of adjacency.get(id) ?? []) {
@@ -222,9 +222,9 @@ function expandAlongGraph(
 
 function buildAdjacency(
   byId: Map<string, IndexRecord>,
-  direction: GoatBrainGraphDirection,
-): Map<string, GoatBrainGraphHop[]> {
-  const adjacency = new Map<string, GoatBrainGraphHop[]>();
+  direction: BrainGraphDirection,
+): Map<string, BrainGraphHop[]> {
+  const adjacency = new Map<string, BrainGraphHop[]>();
   const link = (a: string, type: string, b: string) => {
     if (a === b) return;
     const forward = { from: a, type, to: b };
@@ -237,7 +237,7 @@ function buildAdjacency(
     }
   };
   for (const record of byId.values()) {
-    for (const relation of record.relations as GoatBrainRelation[])
+    for (const relation of record.relations as BrainRelation[])
       link(record.id, relation.type, relation.to);
     for (const target of record.wikiLinks) link(record.id, "wiki_link", target);
     for (const target of record.evidenceLinks) link(record.id, "cites", target);

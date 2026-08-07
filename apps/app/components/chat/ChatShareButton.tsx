@@ -13,9 +13,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@opencompany/ui/compone
 import { Check, Copy, Link2, LoaderCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  createGoatChatShareAction,
-  getGoatChatShareAction,
-  revokeGoatChatShareAction,
+  createChatShareAction,
+  getChatShareAction,
+  revokeChatShareAction,
 } from "@/lib/chat-actions";
 
 type ShareStatus = "idle" | "loading" | "ready" | "error";
@@ -51,7 +51,7 @@ export function ChatShareButton({
 
     let active = true;
 
-    void getGoatChatShareAction(chatSessionId)
+    void getChatShareAction(chatSessionId)
       .then((result) => {
         if (!active) return;
         if (!result.ok) {
@@ -102,7 +102,7 @@ export function ChatShareButton({
     try {
       let currentShareId = shareId;
       if (!currentShareId) {
-        const result = await createGoatChatShareAction(chatSessionId);
+        const result = await createChatShareAction(chatSessionId);
         if (!result.ok) throw new Error(result.error);
         currentShareId = result.shareId;
         setShareId(currentShareId);
@@ -135,7 +135,7 @@ export function ChatShareButton({
     setOperation("revoking");
 
     try {
-      const result = await revokeGoatChatShareAction(chatSessionId);
+      const result = await revokeChatShareAction(chatSessionId);
       if (!result.ok) throw new Error(result.error);
       setShareId(null);
       setConfirmingRevoke(false);

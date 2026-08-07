@@ -20,13 +20,13 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { isNormalizedGitHubActivitySourceItem } from "@opencompany/brain";
-import { getGoatBrainCliSource } from "@opencompany/brain/cli-bundle";
-import { materializeGoatBrainFilesToRoot } from "@opencompany/db/brain-files";
+import { getBrainCliSource } from "@opencompany/brain/cli-bundle";
+import { materializeBrainFilesToRoot } from "@opencompany/db/brain-files";
 import { sql } from "drizzle-orm";
 import { closeDb, getDb } from "../src/db";
 import {
+  buildBrainFolderInventoryPrompt,
   buildGitHubActivityAgentIngestPrompt,
-  buildGoatBrainFolderInventoryPrompt,
   GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT,
   runIngestAgentLoop,
 } from "../src/goat-brain-agent-ingest";
@@ -116,13 +116,13 @@ async function runOne(fixture: Fixture, model: string): Promise<RunResult> {
   const root = await mkdtemp(path.join(os.tmpdir(), "goat-ingest-bench-"));
   const startedAt = Date.now();
   try {
-    await materializeGoatBrainFilesToRoot({
+    await materializeBrainFilesToRoot({
       brainRef: fixture.brainRef,
       root,
-      cliSource: getGoatBrainCliSource(),
+      cliSource: getBrainCliSource(),
       db,
     });
-    const folderPrompt = await buildGoatBrainFolderInventoryPrompt(root);
+    const folderPrompt = await buildBrainFolderInventoryPrompt(root);
     const basePrompt = buildGitHubActivityAgentIngestPrompt(fixture.item);
     const prompt = folderPrompt ? `${folderPrompt}\n\n${basePrompt}` : basePrompt;
     const loop = await runIngestAgentLoop({

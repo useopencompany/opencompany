@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
-import { goatImessageExternalIdForUser, IMESSAGE_PROVIDER } from "@opencompany/db/imessage";
-import { goatIntegrations } from "@opencompany/db/schema";
+import { IMESSAGE_PROVIDER, imessageExternalIdForUser } from "@opencompany/db/imessage";
+import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
-import type { GoatImessageProviderState } from "@/lib/integration-state";
-import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
+import type { ImessageProviderState } from "@/lib/integration-state";
+import { captureIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 
 export {
-  hashGoatImessagePairingCode,
-  verifyGoatImessagePairingCode,
+  hashImessagePairingCode,
+  verifyImessagePairingCode,
 } from "@/lib/integrations/imessage-pairing-code";
 
 // Deliberately naive (no libphonenumber): strip common separators, require
@@ -19,7 +19,7 @@ export function normalizeImessagePhoneE164(raw: string): string | null {
   return /^\+[1-9]\d{6,14}$/.test(stripped) ? stripped : null;
 }
 
-export async function connectGoatImessageIntegration(input: {
+export async function connectImessageIntegration(input: {
   userWorkosId: string;
   phoneE164: string;
   now?: Date;
@@ -28,12 +28,12 @@ export async function connectGoatImessageIntegration(input: {
   const now = input.now ?? new Date();
 
   const [integration] = await db
-    .insert(goatIntegrations)
+    .insert(integrations)
     .values({
       id: `gint_${randomUUID().replace(/-/g, "")}`,
       userWorkosId: input.userWorkosId,
       provider: IMESSAGE_PROVIDER,
-      externalId: goatImessageExternalIdForUser(input.userWorkosId),
+      externalId: imessageExternalIdForUser(input.userWorkosId),
       connectionLabel: input.phoneE164,
       accountName: input.phoneE164,
       accountEmail: null,
@@ -45,13 +45,9 @@ export async function connectGoatImessageIntegration(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: [
-        goatIntegrations.userWorkosId,
-        goatIntegrations.provider,
-        goatIntegrations.externalId,
-      ],
+      target: [integrations.userWorkosId, integrations.provider, integrations.externalId],
       // The personal-uniqueness index is partial; the arbiter must match it.
-      targetWhere: sql`${goatIntegrations.workspaceId} IS NULL`,
+      targetWhere: sql`${integrations.workspaceId} IS NULL`,
       set: {
         connectionLabel: input.phoneE164,
         accountName: input.phoneE164,
@@ -62,13 +58,13 @@ export async function connectGoatImessageIntegration(input: {
         updatedAt: now,
       },
     })
-    .returning({ id: goatIntegrations.id });
+    .returning({ id: integrations.id });
 
   if (!integration) {
     throw new Error("Could not persist Goat iMessage integration.");
   }
 
-  await captureGoatIntegrationAddedAnalytics({
+  await captureIntegrationAddedAnalytics({
     userWorkosId: input.userWorkosId,
     provider: "imessage",
   });
@@ -76,25 +72,25 @@ export async function connectGoatImessageIntegration(input: {
   return { integrationId: integration.id };
 }
 
-export async function getGoatImessageIntegrationState(
+export async function getImessageIntegrationState(
   userWorkosId: string,
-): Promise<GoatImessageProviderState> {
+): Promise<ImessageProviderState> {
   const [row] = await getDb()
     .select({
-      id: goatIntegrations.id,
-      status: goatIntegrations.status,
-      accountName: goatIntegrations.accountName,
-      statusReason: goatIntegrations.statusReason,
+      id: integrations.id,
+      status: integrations.status,
+      accountName: integrations.accountName,
+      statusReason: integrations.statusReason,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, IMESSAGE_PROVIDER),
-        ne(goatIntegrations.status, "disconnected"),
+        eq(integrations.userWorkosId, userWorkosId),
+        eq(integrations.provider, IMESSAGE_PROVIDER),
+        ne(integrations.status, "disconnected"),
       ),
     )
-    .orderBy(desc(goatIntegrations.updatedAt))
+    .orderBy(desc(integrations.updatedAt))
     .limit(1);
 
   if (!row) {

@@ -1,10 +1,10 @@
-import { getGoatOnboarding } from "@opencompany/db/workspaces";
+import { getOnboarding } from "@opencompany/db/workspaces";
 import { cookies } from "next/headers";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
-import { currentGoatUser } from "@/lib/auth";
-import { getGoatBrainSourcesAction } from "@/lib/brain-source-actions";
-import type { GoatOnboardingConnectionResult } from "@/lib/onboarding-integrations";
+import { currentUser } from "@/lib/auth";
+import { getBrainSourcesAction } from "@/lib/brain-source-actions";
+import type { OnboardingConnectionResult } from "@/lib/onboarding-integrations";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +18,7 @@ export default async function OnboardingPage({
     reason?: string;
   }>;
 }) {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   const userWorkosId = context.user.workosUserId;
   const name =
     [context.user.firstName, context.user.lastName].filter(Boolean).join(" ").trim() || "Teammate";
@@ -40,11 +40,11 @@ export default async function OnboardingPage({
   // Hydrate anything already persisted so the flow resumes cleanly (e.g. after an
   // OAuth round-trip when connecting a source).
   const [onboarding, sourceDetails, cookieStore] = await Promise.all([
-    getGoatOnboarding(userWorkosId),
-    context.activeBrain ? getGoatBrainSourcesAction(context.activeBrain.id) : null,
+    getOnboarding(userWorkosId),
+    context.activeBrain ? getBrainSourcesAction(context.activeBrain.id) : null,
     cookies(),
   ]);
-  const connectionResult: GoatOnboardingConnectionResult | null =
+  const connectionResult: OnboardingConnectionResult | null =
     params.setup === "connected" || params.setup === "error"
       ? {
           provider: params.integration ?? null,

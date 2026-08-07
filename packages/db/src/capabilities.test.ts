@@ -1,29 +1,29 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  approveGoatCapabilityRunByToolCall,
-  cancelGoatCapabilityRunByToolCall,
-  consumeGoatCapabilityApprovalByToolCall,
+  approveCapabilityRunByToolCall,
+  cancelCapabilityRunByToolCall,
+  consumeCapabilityApprovalByToolCall,
   GOAT_CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS,
   GOAT_MANAGED_CAPABILITY_SOURCES,
-  getGoatCapabilityApprovalByToolCall,
-  getGoatCapabilitySessionBudgetUsdMicros,
-  isGoatWorkspaceCapabilityEnabled,
-  listGoatWorkspaceCapabilities,
-  setGoatCapabilitySessionBudget,
-  setGoatWorkspaceCapability,
-  sumGoatCapabilitySessionSpendUsdMicros,
+  getCapabilityApprovalByToolCall,
+  getCapabilitySessionBudgetUsdMicros,
+  isWorkspaceCapabilityEnabled,
+  listWorkspaceCapabilities,
+  setCapabilitySessionBudget,
+  setWorkspaceCapability,
+  sumCapabilitySessionSpendUsdMicros,
 } from "./capabilities";
 
 describe("Goat workspace capabilities", () => {
   it("defaults every managed source to enabled when no override row exists", async () => {
-    await expect(listGoatWorkspaceCapabilities("workspace_1", selectDb([]))).resolves.toEqual(
+    await expect(listWorkspaceCapabilities("workspace_1", selectDb([]))).resolves.toEqual(
       GOAT_MANAGED_CAPABILITY_SOURCES.map((source) => ({ source, enabled: true })),
     );
   });
 
   it("applies only explicit workspace overrides", async () => {
     await expect(
-      listGoatWorkspaceCapabilities(
+      listWorkspaceCapabilities(
         "workspace_1",
         selectDb([
           { source: "linkedin", enabled: false },
@@ -43,14 +43,14 @@ describe("Goat workspace capabilities", () => {
 
   it("treats a missing single-source override as enabled", async () => {
     await expect(
-      isGoatWorkspaceCapabilityEnabled({
+      isWorkspaceCapabilityEnabled({
         workspaceId: "workspace_1",
         source: "x",
         db: selectOneDb([]),
       }),
     ).resolves.toBe(true);
     await expect(
-      isGoatWorkspaceCapabilityEnabled({
+      isWorkspaceCapabilityEnabled({
         workspaceId: "workspace_1",
         source: "x",
         db: selectOneDb([{ enabled: false }]),
@@ -61,7 +61,7 @@ describe("Goat workspace capabilities", () => {
   it("rejects unknown source ids before touching the database", async () => {
     const db = { insert: vi.fn() };
     await expect(
-      setGoatWorkspaceCapability({
+      setWorkspaceCapability({
         workspaceId: "workspace_1",
         source: "followers_export" as never,
         enabled: true,
@@ -76,16 +76,16 @@ describe("Goat workspace capabilities", () => {
 describe("Goat capability session budgets", () => {
   it("uses the default budget only when the workspace override is null or missing", async () => {
     await expect(
-      getGoatCapabilitySessionBudgetUsdMicros("workspace_1", fluentDb({ selects: [] })),
+      getCapabilitySessionBudgetUsdMicros("workspace_1", fluentDb({ selects: [] })),
     ).resolves.toBe(GOAT_CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS);
     await expect(
-      getGoatCapabilitySessionBudgetUsdMicros(
+      getCapabilitySessionBudgetUsdMicros(
         "workspace_1",
         fluentDb({ selects: [[{ budgetUsdMicros: null }]] }),
       ),
     ).resolves.toBe(GOAT_CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS);
     await expect(
-      getGoatCapabilitySessionBudgetUsdMicros(
+      getCapabilitySessionBudgetUsdMicros(
         "workspace_1",
         fluentDb({ selects: [[{ budgetUsdMicros: 2_500_000 }]] }),
       ),
@@ -95,14 +95,14 @@ describe("Goat capability session budgets", () => {
   it("stores a positive micros override and rejects invalid values", async () => {
     const db = fluentDb({ updates: [[{ budgetUsdMicros: 2_500_000 }]] });
     await expect(
-      setGoatCapabilitySessionBudget({
+      setCapabilitySessionBudget({
         workspaceId: "workspace_1",
         budgetUsdMicros: 2_500_000,
         db,
       }),
     ).resolves.toBe(2_500_000);
     await expect(
-      setGoatCapabilitySessionBudget({
+      setCapabilitySessionBudget({
         workspaceId: "workspace_1",
         budgetUsdMicros: 0,
         db,
@@ -113,7 +113,7 @@ describe("Goat capability session budgets", () => {
   it("returns the database session-spend aggregate and accepts exclusions", async () => {
     const db = fluentDb({ selects: [[{ totalUsdMicros: 425_000 }]] });
     await expect(
-      sumGoatCapabilitySessionSpendUsdMicros({
+      sumCapabilitySessionSpendUsdMicros({
         workspaceId: "workspace_1",
         chatSessionId: "chat_1",
         excludeToolCallIds: ["tool_1", "tool_1"],
@@ -140,7 +140,7 @@ describe("Goat capability approvals by tool call", () => {
       selects: [[approval]],
     });
     await expect(
-      getGoatCapabilityApprovalByToolCall({
+      getCapabilityApprovalByToolCall({
         toolCallId: "tool_1",
         chatSessionId: "chat_1",
         userWorkosId: "user_1",
@@ -154,7 +154,7 @@ describe("Goat capability approvals by tool call", () => {
   it("approves or cancels the newest pending row", async () => {
     const approved = { ...approval, status: "approved" };
     await expect(
-      approveGoatCapabilityRunByToolCall({
+      approveCapabilityRunByToolCall({
         toolCallId: "tool_1",
         chatSessionId: "chat_1",
         userWorkosId: "user_1",
@@ -168,7 +168,7 @@ describe("Goat capability approvals by tool call", () => {
 
     const canceled = { ...approval, status: "canceled" };
     await expect(
-      cancelGoatCapabilityRunByToolCall({
+      cancelCapabilityRunByToolCall({
         toolCallId: "tool_1",
         chatSessionId: "chat_1",
         userWorkosId: "user_1",
@@ -194,7 +194,7 @@ describe("Goat capability approvals by tool call", () => {
       quoteTotalCostUsdMicros: 360_000,
     };
     await expect(
-      consumeGoatCapabilityApprovalByToolCall({
+      consumeCapabilityApprovalByToolCall({
         ...input,
         db: fluentDb({
           updates: [[], [executing]],
@@ -203,7 +203,7 @@ describe("Goat capability approvals by tool call", () => {
       }),
     ).resolves.toEqual(executing);
     await expect(
-      consumeGoatCapabilityApprovalByToolCall({
+      consumeCapabilityApprovalByToolCall({
         ...input,
         db: fluentDb({
           updates: [[], []],

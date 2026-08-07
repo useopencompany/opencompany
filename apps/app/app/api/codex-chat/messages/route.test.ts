@@ -1,34 +1,34 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { GoatAuthContext } from "@/lib/auth";
-import { currentGoatUser } from "@/lib/auth";
-import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
-import { createGoatCodexChatMessage } from "@/lib/codex-chat";
-import { GoatSkillMentionError, resolveGoatSkillMentions } from "@/lib/skills";
+import type { AuthContext } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
+import { generateChatTitleForMessage } from "@/lib/chat-title";
+import { createCodexChatMessage } from "@/lib/codex-chat";
+import { resolveSkillMentions, SkillMentionError } from "@/lib/skills";
 import { POST } from "./route";
 
 const analyticsMocks = vi.hoisted(() => ({
-  captureGoatServerEvent: vi.fn(async () => undefined),
+  captureServerEvent: vi.fn(async () => undefined),
 }));
 
-vi.mock("@opencompany/analytics/goat/server", () => ({
-  captureGoatServerEvent: analyticsMocks.captureGoatServerEvent,
+vi.mock("@opencompany/analytics/server", () => ({
+  captureServerEvent: analyticsMocks.captureServerEvent,
 }));
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
 }));
 
 vi.mock("@/lib/codex-chat", () => ({
-  createGoatCodexChatMessage: vi.fn(),
+  createCodexChatMessage: vi.fn(),
 }));
 
 vi.mock("@/lib/chat-title", () => ({
-  generateGoatChatTitleForMessage: vi.fn(async () => ({ ok: true, title: "Generated title" })),
+  generateChatTitleForMessage: vi.fn(async () => ({ ok: true, title: "Generated title" })),
 }));
 
 vi.mock("@/lib/skills", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/skills")>();
-  return { ...actual, resolveGoatSkillMentions: vi.fn() };
+  return { ...actual, resolveSkillMentions: vi.fn() };
 });
 
 vi.mock("next/server", () => ({
@@ -46,7 +46,7 @@ describe("POST /api/codex-chat/messages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("VERCEL_AI_GATEWAY_API_KEY", "test-key");
-    mockCurrentGoatUser().mockResolvedValue({
+    mockCurrentUser().mockResolvedValue({
       user: {
         workosUserId: "user_1",
         email: "ada@example.com",
@@ -60,8 +60,8 @@ describe("POST /api/codex-chat/messages", () => {
       },
       workspace: { id: "workspace_1" },
       activeBrain: { id: "goat_brain_1" },
-    } as GoatAuthContext);
-    mockCreateGoatCodexChatMessage().mockResolvedValue({
+    } as AuthContext);
+    mockCreateCodexChatMessage().mockResolvedValue({
       ok: true,
       sessionId: "goat_chat_1",
       userMessageId: "goat_chat_msg_user",
@@ -73,7 +73,7 @@ describe("POST /api/codex-chat/messages", () => {
         model: "openai/gpt-5.6-sol",
       },
     });
-    vi.mocked(resolveGoatSkillMentions).mockResolvedValue([]);
+    vi.mocked(resolveSkillMentions).mockResolvedValue([]);
   });
 
   it("rejects malformed JSON shapes", async () => {
@@ -81,11 +81,11 @@ describe("POST /api/codex-chat/messages", () => {
 
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toBe("Invalid Codex chat message.");
-    expect(mockCreateGoatCodexChatMessage()).not.toHaveBeenCalled();
+    expect(mockCreateCodexChatMessage()).not.toHaveBeenCalled();
   });
 
   it("accepts UI message payloads", async () => {
-    mockCreateGoatCodexChatMessage().mockResolvedValueOnce({
+    mockCreateCodexChatMessage().mockResolvedValueOnce({
       ok: true,
       sessionId: "goat_chat_1",
       userMessageId: "goat_chat_msg_user",
@@ -116,7 +116,7 @@ describe("POST /api/codex-chat/messages", () => {
       assistantMessageId: "goat_chat_msg_assistant",
       mode: "started",
     });
-    expect(mockCreateGoatCodexChatMessage()).toHaveBeenCalledWith({
+    expect(mockCreateCodexChatMessage()).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
       brainRef: "goat_brain_1",
@@ -128,8 +128,8 @@ describe("POST /api/codex-chat/messages", () => {
       settings: undefined,
       engine: "codex",
     });
-    expect(mockGenerateGoatChatTitleForMessage()).not.toHaveBeenCalled();
-    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
+    expect(mockGenerateChatTitleForMessage()).not.toHaveBeenCalled();
+    expect(analyticsMocks.captureServerEvent).toHaveBeenCalledWith(
       "chat_message_sent",
       "user_1",
       {
@@ -164,7 +164,7 @@ describe("POST /api/codex-chat/messages", () => {
     );
 
     expect(response.status).toBe(202);
-    expect(mockCreateGoatCodexChatMessage()).toHaveBeenCalledWith(
+    expect(mockCreateCodexChatMessage()).toHaveBeenCalledWith(
       expect.objectContaining({ newSessionId }),
     );
   });
@@ -179,7 +179,7 @@ describe("POST /api/codex-chat/messages", () => {
 
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toBe("Invalid new chat session id.");
-    expect(mockCreateGoatCodexChatMessage()).not.toHaveBeenCalled();
+    expect(mockCreateCodexChatMessage()).not.toHaveBeenCalled();
   });
 
   it("validates and forwards uploaded files, including attachment-only messages", async () => {
@@ -207,7 +207,7 @@ describe("POST /api/codex-chat/messages", () => {
     );
 
     expect(response.status).toBe(202);
-    expect(mockCreateGoatCodexChatMessage()).toHaveBeenCalledWith(
+    expect(mockCreateCodexChatMessage()).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: "",
         attachments: [
@@ -220,11 +220,11 @@ describe("POST /api/codex-chat/messages", () => {
         ],
       }),
     );
-    expect(mockGenerateGoatChatTitleForMessage()).not.toHaveBeenCalled();
+    expect(mockGenerateChatTitleForMessage()).not.toHaveBeenCalled();
   });
 
   it("forwards the selected model for a new Codex sandbox", async () => {
-    mockCreateGoatCodexChatMessage().mockResolvedValueOnce({
+    mockCreateCodexChatMessage().mockResolvedValueOnce({
       ok: true,
       sessionId: "goat_chat_1",
       userMessageId: "goat_chat_msg_user",
@@ -244,10 +244,10 @@ describe("POST /api/codex-chat/messages", () => {
     );
 
     expect(response.status).toBe(202);
-    expect(mockCreateGoatCodexChatMessage()).toHaveBeenCalledWith(
+    expect(mockCreateCodexChatMessage()).toHaveBeenCalledWith(
       expect.objectContaining({ model: "openai/gpt-5.6-luna" }),
     );
-    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
+    expect(analyticsMocks.captureServerEvent).toHaveBeenCalledWith(
       "chat_message_sent",
       "user_1",
       expect.objectContaining({
@@ -268,7 +268,7 @@ describe("POST /api/codex-chat/messages", () => {
     );
 
     expect(response.status).toBe(202);
-    expect(mockGenerateGoatChatTitleForMessage()).toHaveBeenCalledWith({
+    expect(mockGenerateChatTitleForMessage()).toHaveBeenCalledWith({
       sessionId: "goat_chat_1",
       messageId: "goat_chat_msg_user",
       apiKey: "test-key",
@@ -276,7 +276,7 @@ describe("POST /api/codex-chat/messages", () => {
   });
 
   it("forwards a validated skill snapshot for native session activation", async () => {
-    vi.mocked(resolveGoatSkillMentions).mockResolvedValue([
+    vi.mocked(resolveSkillMentions).mockResolvedValue([
       {
         id: "coding-work",
         name: "Coding work",
@@ -298,7 +298,7 @@ describe("POST /api/codex-chat/messages", () => {
     );
 
     expect(response.status).toBe(202);
-    expect(mockCreateGoatCodexChatMessage()).toHaveBeenCalledWith(
+    expect(mockCreateCodexChatMessage()).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: "Implement this",
         skills: [
@@ -315,8 +315,8 @@ describe("POST /api/codex-chat/messages", () => {
   });
 
   it("rejects stale structured skill references before queueing", async () => {
-    vi.mocked(resolveGoatSkillMentions).mockRejectedValue(
-      new GoatSkillMentionError("Skill is unavailable."),
+    vi.mocked(resolveSkillMentions).mockRejectedValue(
+      new SkillMentionError("Skill is unavailable."),
     );
     const response = await POST(
       jsonRequest({
@@ -333,7 +333,7 @@ describe("POST /api/codex-chat/messages", () => {
 
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toBe("Skill is unavailable.");
-    expect(mockCreateGoatCodexChatMessage()).not.toHaveBeenCalled();
+    expect(mockCreateCodexChatMessage()).not.toHaveBeenCalled();
   });
 });
 
@@ -345,14 +345,14 @@ function jsonRequest(body: unknown) {
   });
 }
 
-function mockCurrentGoatUser() {
-  return vi.mocked(currentGoatUser);
+function mockCurrentUser() {
+  return vi.mocked(currentUser);
 }
 
-function mockCreateGoatCodexChatMessage() {
-  return vi.mocked(createGoatCodexChatMessage);
+function mockCreateCodexChatMessage() {
+  return vi.mocked(createCodexChatMessage);
 }
 
-function mockGenerateGoatChatTitleForMessage() {
-  return vi.mocked(generateGoatChatTitleForMessage);
+function mockGenerateChatTitleForMessage() {
+  return vi.mocked(generateChatTitleForMessage);
 }

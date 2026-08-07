@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { resolveAttioActions } from "./attio";
-import type { GoatActionExecuteContext, ResolvedGoatAction } from "./types";
+import type { ActionExecuteContext, ResolvedAction } from "./types";
 
 const mocks = vi.hoisted(() => ({
   getDb: vi.fn(),
-  loadGoatIntegrationCredential: vi.fn(),
-  markGoatIntegrationStatus: vi.fn(),
-  requestGoatAttioApi: vi.fn(),
+  loadIntegrationCredential: vi.fn(),
+  markIntegrationStatus: vi.fn(),
+  requestAttioApi: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/client", () => ({
@@ -14,13 +14,13 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@opencompany/db/integrations", () => ({
-  loadGoatIntegrationCredential: mocks.loadGoatIntegrationCredential,
-  markGoatIntegrationStatus: mocks.markGoatIntegrationStatus,
+  loadIntegrationCredential: mocks.loadIntegrationCredential,
+  markIntegrationStatus: mocks.markIntegrationStatus,
 }));
 
 vi.mock("../integrations/attio", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../integrations/attio")>()),
-  requestGoatAttioApi: mocks.requestGoatAttioApi,
+  requestAttioApi: mocks.requestAttioApi,
 }));
 
 describe("resolveAttioActions", () => {
@@ -58,7 +58,7 @@ describe("resolveAttioActions", () => {
         ],
       }),
     );
-    mocks.loadGoatIntegrationCredential.mockResolvedValue({
+    mocks.loadIntegrationCredential.mockResolvedValue({
       payload: {
         apiKey: "attio_api_key",
         workspaceId: "workspace_1",
@@ -73,53 +73,51 @@ describe("resolveAttioActions", () => {
         createdAt: "2026-08-04T00:00:00.000Z",
       },
     });
-    mocks.requestGoatAttioApi.mockImplementation(
-      async (input: { path: string; method?: string }) => {
-        if (input.path === "/objects/people/records" && input.method === "POST") {
-          return {
-            data: {
-              id: {
-                workspace_id: "workspace_1",
-                object_id: "object_people",
-                record_id: "record_tim",
-              },
-              web_url: "https://app.attio.com/opencompany/person/record_tim",
-              values: {
-                name: [
-                  {
-                    active_until: null,
-                    attribute_type: "personal-name",
-                    full_name: "Tim Draper",
-                  },
-                ],
-              },
+    mocks.requestAttioApi.mockImplementation(async (input: { path: string; method?: string }) => {
+      if (input.path === "/objects/people/records" && input.method === "POST") {
+        return {
+          data: {
+            id: {
+              workspace_id: "workspace_1",
+              object_id: "object_people",
+              record_id: "record_tim",
             },
-          };
-        }
-        if (input.path === "/lists/youtube_guests/entries" && input.method === "PUT") {
-          return {
-            data: {
-              id: { entry_id: "entry_tim" },
-              parent_record_id: "record_tim",
-              parent_object: "people",
-              entry_values: {},
+            web_url: "https://app.attio.com/opencompany/person/record_tim",
+            values: {
+              name: [
+                {
+                  active_until: null,
+                  attribute_type: "personal-name",
+                  full_name: "Tim Draper",
+                },
+              ],
             },
-          };
-        }
-        if (input.path === "/comments" && input.method === "POST") {
-          return {
-            data: {
-              id: { comment_id: "comment_tim" },
-              thread_id: "comment_tim",
-              content_plaintext: "Julian can likely intro us",
-              entry: { list_id: "youtube_guests", entry_id: "entry_tim" },
-              author: { type: "workspace-member", id: "member_1" },
-            },
-          };
-        }
-        throw new Error(`unexpected Attio call: ${input.method ?? "GET"} ${input.path}`);
-      },
-    );
+          },
+        };
+      }
+      if (input.path === "/lists/youtube_guests/entries" && input.method === "PUT") {
+        return {
+          data: {
+            id: { entry_id: "entry_tim" },
+            parent_record_id: "record_tim",
+            parent_object: "people",
+            entry_values: {},
+          },
+        };
+      }
+      if (input.path === "/comments" && input.method === "POST") {
+        return {
+          data: {
+            id: { comment_id: "comment_tim" },
+            thread_id: "comment_tim",
+            content_plaintext: "Julian can likely intro us",
+            entry: { list_id: "youtube_guests", entry_id: "entry_tim" },
+            author: { type: "workspace-member", id: "member_1" },
+          },
+        };
+      }
+      throw new Error(`unexpected Attio call: ${input.method ?? "GET"} ${input.path}`);
+    });
 
     const catalog = await resolveAttioActions("user_1");
     const createRecord = findAction(catalog!.actions, "attio.create_record");
@@ -177,7 +175,7 @@ describe("resolveAttioActions", () => {
       },
     });
 
-    expect(mocks.requestGoatAttioApi).toHaveBeenCalledWith(
+    expect(mocks.requestAttioApi).toHaveBeenCalledWith(
       expect.objectContaining({
         path: "/objects/people/records",
         method: "POST",
@@ -187,13 +185,13 @@ describe("resolveAttioActions", () => {
   });
 });
 
-function findAction(actions: ResolvedGoatAction[], id: string) {
+function findAction(actions: ResolvedAction[], id: string) {
   const action = actions.find((candidate) => candidate.id === id);
   if (!action) throw new Error(`Missing action ${id}`);
   return action;
 }
 
-function actionContext(): GoatActionExecuteContext {
+function actionContext(): ActionExecuteContext {
   return {
     userWorkosId: "user_1",
     signal: new AbortController().signal,

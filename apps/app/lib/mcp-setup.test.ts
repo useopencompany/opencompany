@@ -2,19 +2,19 @@ import { describe, expect, it } from "vitest";
 import {
   buildCursorMcpConfig,
   buildCursorMcpDeeplink,
-  buildGoatMcpFirstPrompt,
-  isGoatMcpClient,
-  isGoatMcpSetupCompletionRun,
+  buildMcpFirstPrompt,
+  isMcpClient,
+  isMcpSetupCompletionRun,
   OPENCOMPANY_MCP_SERVER_NAME,
 } from "@/lib/mcp-setup";
 
 describe("OpenCompany MCP setup", () => {
   it("accepts only supported client preferences", () => {
-    expect(isGoatMcpClient("claude")).toBe(true);
-    expect(isGoatMcpClient("chatgpt")).toBe(true);
-    expect(isGoatMcpClient("cursor")).toBe(true);
-    expect(isGoatMcpClient("email")).toBe(false);
-    expect(isGoatMcpClient(null)).toBe(false);
+    expect(isMcpClient("claude")).toBe(true);
+    expect(isMcpClient("chatgpt")).toBe(true);
+    expect(isMcpClient("cursor")).toBe(true);
+    expect(isMcpClient("email")).toBe(false);
+    expect(isMcpClient(null)).toBe(false);
   });
 
   it.each([
@@ -24,11 +24,11 @@ describe("OpenCompany MCP setup", () => {
     { sourceRef: "goat-chat:message_1", command: "query", ok: true, expected: false },
     { sourceRef: null, command: "query", ok: true, expected: false },
   ])("recognizes only a successful MCP query as completion", (input) => {
-    expect(isGoatMcpSetupCompletionRun(input)).toBe(input.expected);
+    expect(isMcpSetupCompletionRun(input)).toBe(input.expected);
   });
 
   it("builds a deterministic, personalized first question without an email", () => {
-    const prompt = buildGoatMcpFirstPrompt({
+    const prompt = buildMcpFirstPrompt({
       displayName: "Ada Lovelace",
       workspaceName: "Analytical Engines",
     });

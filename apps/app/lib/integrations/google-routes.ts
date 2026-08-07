@@ -1,39 +1,39 @@
-import { connectGoatGoogleIntegration } from "@opencompany/db/integrations";
+import { connectGoogleIntegration } from "@opencompany/db/integrations";
 import { NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
-import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
+import { currentUser } from "@/lib/auth";
+import { captureIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 import {
-  appendGoatGoogleIntegrationStatus,
-  buildGoatGoogleAuthorizationUrl,
-  createGoatGoogleIntegrationState,
-  exchangeGoatGoogleCode,
-  fetchGoatGoogleUserInfo,
+  appendGoogleIntegrationStatus,
+  buildGoogleAuthorizationUrl,
+  createGoogleIntegrationState,
+  exchangeGoogleCode,
+  fetchGoogleUserInfo,
   GOAT_GOOGLE_PROVIDER_CONFIG,
-  type GoatGoogleIntegrationProvider,
-  goatGoogleOAuthRedirectUri,
-  goatGoogleOAuthTargetOriginForState,
-  isGoatGoogleIntegrationConfigured,
-  verifyGoatGoogleIntegrationState,
+  type GoogleIntegrationProvider,
+  googleOAuthRedirectUri,
+  googleOAuthTargetOriginForState,
+  isGoogleIntegrationConfigured,
+  verifyGoogleIntegrationState,
 } from "@/lib/integrations/google-oauth";
 
-export async function handleGoatGoogleOAuthStart(
-  provider: GoatGoogleIntegrationProvider,
+export async function handleGoogleOAuthStart(
+  provider: GoogleIntegrationProvider,
   request: Request,
 ) {
-  const { user } = await currentGoatUser();
+  const { user } = await currentUser();
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
   const config = GOAT_GOOGLE_PROVIDER_CONFIG[provider];
-  const oauthRedirectUri = goatGoogleOAuthRedirectUri(config);
-  const targetOrigin = goatGoogleOAuthTargetOriginForState();
+  const oauthRedirectUri = googleOAuthRedirectUri(config);
+  const targetOrigin = googleOAuthTargetOriginForState();
 
-  if (!isGoatGoogleIntegrationConfigured()) {
+  if (!isGoogleIntegrationConfigured()) {
     return NextResponse.redirect(
-      new URL(appendGoatGoogleIntegrationStatus(returnTo, provider, "error"), url),
+      new URL(appendGoogleIntegrationStatus(returnTo, provider, "error"), url),
     );
   }
 
-  const state = createGoatGoogleIntegrationState({
+  const state = createGoogleIntegrationState({
     provider,
     userWorkosId: user.workosUserId,
     returnTo,
@@ -41,24 +41,22 @@ export async function handleGoatGoogleOAuthStart(
     ...(targetOrigin ? { targetOrigin } : {}),
   });
 
-  return NextResponse.redirect(buildGoatGoogleAuthorizationUrl(config, state, oauthRedirectUri));
+  return NextResponse.redirect(buildGoogleAuthorizationUrl(config, state, oauthRedirectUri));
 }
 
-export async function handleGoatGoogleOAuthCallback(
-  provider: GoatGoogleIntegrationProvider,
+export async function handleGoogleOAuthCallback(
+  provider: GoogleIntegrationProvider,
   request: Request,
 ) {
-  const current = await currentGoatUser();
+  const current = await currentUser();
   const url = new URL(request.url);
   const config = GOAT_GOOGLE_PROVIDER_CONFIG[provider];
   const errorRedirect = (returnTo: string) =>
-    NextResponse.redirect(
-      new URL(appendGoatGoogleIntegrationStatus(returnTo, provider, "error"), url),
-    );
+    NextResponse.redirect(new URL(appendGoogleIntegrationStatus(returnTo, provider, "error"), url));
 
   let state;
   try {
-    state = verifyGoatGoogleIntegrationState(url.searchParams.get("state") ?? "");
+    state = verifyGoogleIntegrationState(url.searchParams.get("state") ?? "");
   } catch (error) {
     console.warn("Goat Google integration callback failed with invalid state.", {
       event: "goat.google_integration_callback_failed",
@@ -78,7 +76,7 @@ export async function handleGoatGoogleOAuthCallback(
     return errorRedirect(state.returnTo);
   }
 
-  if (!isGoatGoogleIntegrationConfigured()) {
+  if (!isGoogleIntegrationConfigured()) {
     return errorRedirect(state.returnTo);
   }
 
@@ -99,13 +97,9 @@ export async function handleGoatGoogleOAuthCallback(
   }
 
   try {
-    const { tokens, expiresAt } = await exchangeGoatGoogleCode(
-      config,
-      code,
-      state.oauthRedirectUri,
-    );
-    const userInfo = await fetchGoatGoogleUserInfo(tokens.access_token);
-    await connectGoatGoogleIntegration({
+    const { tokens, expiresAt } = await exchangeGoogleCode(config, code, state.oauthRedirectUri);
+    const userInfo = await fetchGoogleUserInfo(tokens.access_token);
+    await connectGoogleIntegration({
       provider,
       userWorkosId: current.user.workosUserId,
       externalId: userInfo.sub,
@@ -115,14 +109,14 @@ export async function handleGoatGoogleOAuthCallback(
       expiresAt,
       scopes: readScopes(tokens.scope, config.scopes),
     });
-    await captureGoatIntegrationAddedAnalytics({
+    await captureIntegrationAddedAnalytics({
       userWorkosId: current.user.workosUserId,
       workspaceId: current.workspace.id,
       provider,
     });
 
     return NextResponse.redirect(
-      new URL(appendGoatGoogleIntegrationStatus(state.returnTo, provider, "connected"), url),
+      new URL(appendGoogleIntegrationStatus(state.returnTo, provider, "connected"), url),
     );
   } catch (error) {
     console.warn("Goat Google integration callback failed while connecting account.", {

@@ -1,15 +1,15 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import type { GoatChatState } from "@/lib/chat-ui";
+import type { ChatState } from "@/lib/chat-ui";
 
-const EMPTY_SNAPSHOT: ReadonlyMap<string, GoatChatState> = new Map();
+const EMPTY_SNAPSHOT: ReadonlyMap<string, ChatState> = new Map();
 
-let snapshot: ReadonlyMap<string, GoatChatState> = EMPTY_SNAPSHOT;
-const states = new Map<string, GoatChatState>();
+let snapshot: ReadonlyMap<string, ChatState> = EMPTY_SNAPSHOT;
+const states = new Map<string, ChatState>();
 const listeners = new Set<() => void>();
 
-export function setLocalGoatChatState(sessionId: string | null, state: GoatChatState | null) {
+export function setLocalChatState(sessionId: string | null, state: ChatState | null) {
   if (!sessionId) return;
   const current = states.get(sessionId) ?? null;
   if (current === state) return;
@@ -22,7 +22,7 @@ export function setLocalGoatChatState(sessionId: string | null, state: GoatChatS
   for (const listener of listeners) listener();
 }
 
-export function clearLocalGoatChatState(sessionId: string | null, expectedState?: GoatChatState) {
+export function clearLocalChatState(sessionId: string | null, expectedState?: ChatState) {
   if (!sessionId) return;
   const current = states.get(sessionId) ?? null;
   if (!current || (expectedState && current !== expectedState)) return;
@@ -31,14 +31,14 @@ export function clearLocalGoatChatState(sessionId: string | null, expectedState?
   for (const listener of listeners) listener();
 }
 
-export function clearAllLocalGoatChatStates() {
+export function clearAllLocalChatStates() {
   if (states.size === 0) return;
   states.clear();
   snapshot = EMPTY_SNAPSHOT;
   for (const listener of listeners) listener();
 }
 
-export function useLocalGoatChatStates() {
+export function useLocalChatStates() {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 

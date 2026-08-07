@@ -1,8 +1,8 @@
 import { getDb } from "@opencompany/db/client";
-import { goatBrainDocuments } from "@opencompany/db/schema";
+import { brainDocuments } from "@opencompany/db/schema";
 import { get } from "@vercel/blob";
 import { eq } from "drizzle-orm";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 
 // Serves a brain asset's bytes (PDF today) from the PRIVATE Vercel Blob
 // store. Mirrors apps/web/app/api/attachments/[id]/route.ts: auth-scoped raw
@@ -13,20 +13,20 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ documentId: string }> },
 ) {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return new Response(null, { status: 401 });
 
   const { documentId } = await params;
   const db = getDb();
   const [row] = await db
     .select({
-      brainRef: goatBrainDocuments.brainRef,
-      mimeType: goatBrainDocuments.mimeType,
-      originalFileName: goatBrainDocuments.originalFileName,
-      assetStorageKey: goatBrainDocuments.assetStorageKey,
+      brainRef: brainDocuments.brainRef,
+      mimeType: brainDocuments.mimeType,
+      originalFileName: brainDocuments.originalFileName,
+      assetStorageKey: brainDocuments.assetStorageKey,
     })
-    .from(goatBrainDocuments)
-    .where(eq(goatBrainDocuments.id, documentId))
+    .from(brainDocuments)
+    .where(eq(brainDocuments.id, documentId))
     .limit(1);
 
   // 404 (not 403) on cross-brain ids so the endpoint never reveals that a

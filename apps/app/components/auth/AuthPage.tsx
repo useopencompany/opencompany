@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 import { AuthCard } from "@/components/auth/AuthCard";
-import { GoatMark } from "@/components/GoatMark";
-import { currentGoatUser } from "@/lib/auth";
-import { readGoatOrganizationOptions, readLastGoatAuthMethod } from "@/lib/auth-methods";
+import { BrandMark } from "@/components/BrandMark";
+import { currentUser } from "@/lib/auth";
+import { readLastAuthMethod, readOrganizationOptions } from "@/lib/auth-methods";
 
 type AuthPageSearchParams = Promise<{ invitation_token?: string; email?: string; error?: string }>;
 
@@ -18,13 +18,13 @@ export async function AuthPage({
   mode: "sign-in" | "sign-up";
   searchParams: AuthPageSearchParams;
 }) {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (context) redirect("/");
 
   const [params, lastUsedMethod, organizationOptions] = await Promise.all([
     searchParams,
-    readLastGoatAuthMethod(),
-    readGoatOrganizationOptions(),
+    readLastAuthMethod(),
+    readOrganizationOptions(),
   ]);
 
   return (
@@ -46,7 +46,7 @@ export async function AuthPage({
           className="mb-8 flex items-center gap-2.5 text-ink"
           aria-label="opencompany home"
         >
-          <GoatMark className="size-6 animate-goat-mark-spin" />
+          <BrandMark className="size-6 animate-goat-mark-spin" />
           <span className="font-medium font-mono text-[17px] tracking-tight">opencompany</span>
         </a>
 

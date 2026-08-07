@@ -9,13 +9,13 @@ import { slackApiRequest } from "@/lib/integrations/slack";
 const STATUS_UPDATE_MIN_INTERVAL_MS = 1500;
 const INITIAL_STATUS_TEXT = "_Working on it…_";
 
-export type GoatSlackBotStatusReporter = {
+export type SlackBotStatusReporter = {
   setPhase: (text: string) => void;
   finish: (answerText: string) => Promise<{ replyTs: string | null }>;
   fail: (message: string) => Promise<void>;
 };
 
-export function createGoatSlackBotStatusReporter(input: {
+export function createSlackBotStatusReporter(input: {
   botToken: string;
   channelId: string;
   // The user's triggering message (reaction target).
@@ -24,7 +24,7 @@ export function createGoatSlackBotStatusReporter(input: {
   threadTs: string | null;
   canReact: boolean;
   nowMs?: () => number;
-}): GoatSlackBotStatusReporter {
+}): SlackBotStatusReporter {
   const now = input.nowMs ?? Date.now;
   let statusTs: string | null = null;
   // null = no chat.update yet; the first phase replaces "Working on it…"

@@ -1,27 +1,27 @@
 import {
+  type BrainEntry,
+  brainEntryFromLegacyMarkdown,
   GOAT_BRAIN_MARKDOWN_MIME_TYPE,
-  type GoatBrainEntry,
-  goatBrainEntryFromLegacyMarkdown,
 } from "./entry";
-import { checkGoatBrainHealth, type GoatBrainHealthReport } from "./health";
+import { type BrainHealthReport, checkBrainHealth } from "./health";
 import { GOAT_BRAIN_POINTER_COPY_RULE } from "./pointer-copy";
 import type { Gateway } from "./retrieval/gateway";
 import {
-  type GoatBrainEntityType,
-  type GoatBrainRelation,
-  type GoatBrainTimelineEntry,
-  isValidGoatBrainRelationType,
-  normalizeGoatBrainId,
+  type BrainEntityType,
+  type BrainRelation,
+  type BrainTimelineEntry,
+  isValidBrainRelationType,
+  normalizeBrainId,
 } from "./schema";
-import { defaultGoatBrainFolder, normalizeBuiltInGoatBrainEntityType } from "./schemas";
-import { findGoatBrainFile, listGoatBrainFiles, writeGoatBrainEntry } from "./store";
+import { defaultBrainFolder, normalizeBuiltInBrainEntityType } from "./schemas";
+import { findBrainFile, listBrainFiles, writeBrainEntry } from "./store";
 import { nowIso } from "./time";
-import { goatBrainTimelineEntryFromParts, goatBrainTimelinePartsFromEntry } from "./timeline";
-import { parseGoatBrainWikiLinks } from "./wiki-links";
+import { brainTimelineEntryFromParts, brainTimelinePartsFromEntry } from "./timeline";
+import { parseBrainWikiLinks } from "./wiki-links";
 
 type IngestGateway = Pick<Gateway, "chat">;
 
-export type GoatBrainIngestOptions = {
+export type BrainIngestOptions = {
   text: string;
   sourceRef: string;
   sourceTitle?: string;
@@ -29,26 +29,26 @@ export type GoatBrainIngestOptions = {
   dryRun?: boolean;
 };
 
-export type GoatBrainIngestAppliedChange = {
+export type BrainIngestAppliedChange = {
   action: "create" | "update";
   id: string;
   path: string;
-  type: GoatBrainEntityType;
+  type: BrainEntityType;
 };
 
-export type GoatBrainIngestFailedChange = {
+export type BrainIngestFailedChange = {
   action: "create" | "update";
   id: string;
-  type: GoatBrainEntityType;
+  type: BrainEntityType;
   error: string;
 };
 
-export type GoatBrainIngestResult = {
+export type BrainIngestResult = {
   dryRun: boolean;
-  applied: GoatBrainIngestAppliedChange[];
-  failed: GoatBrainIngestFailedChange[];
+  applied: BrainIngestAppliedChange[];
+  failed: BrainIngestFailedChange[];
   schemaSuggestion: null;
-  health: GoatBrainHealthReport | null;
+  health: BrainHealthReport | null;
   plan: NormalizedIngestOperation[];
 };
 
@@ -71,18 +71,18 @@ export type NormalizedIngestOperation = {
   action: "create" | "update";
   id: string;
   title: string;
-  type: GoatBrainEntityType;
+  type: BrainEntityType;
   aliases: string[];
   body: string;
   timelineBody: string;
-  relations: GoatBrainRelation[];
+  relations: BrainRelation[];
 };
 
-export async function ingestGoatBrain(
+export async function ingestBrain(
   root: string,
-  options: GoatBrainIngestOptions,
+  options: BrainIngestOptions,
   gateway: IngestGateway,
-): Promise<GoatBrainIngestResult> {
+): Promise<BrainIngestResult> {
   const text = options.text.trim();
   if (!text) throw new Error("Ingest text must not be empty.");
   const sourceRef = options.sourceRef.trim();
@@ -108,8 +108,8 @@ export async function ingestGoatBrain(
   }
   if (!plan.ok) throw new Error(`Brain ingest plan was invalid: ${plan.errors.join(" ")}`);
 
-  const applied: GoatBrainIngestAppliedChange[] = [];
-  const failed: GoatBrainIngestFailedChange[] = [];
+  const applied: BrainIngestAppliedChange[] = [];
+  const failed: BrainIngestFailedChange[] = [];
   if (!options.dryRun) {
     for (const operation of plan.operations) {
       try {
@@ -131,7 +131,7 @@ export async function ingestGoatBrain(
     }
   }
 
-  const health = options.dryRun ? null : await checkGoatBrainHealth(root);
+  const health = options.dryRun ? null : await checkBrainHealth(root);
   return {
     dryRun: Boolean(options.dryRun),
     applied,
@@ -143,10 +143,10 @@ export async function ingestGoatBrain(
 }
 
 async function loadExistingEntries(root: string) {
-  const files = await listGoatBrainFiles(root);
+  const files = await listBrainFiles(root);
   return files.flatMap((file) => {
     try {
-      const entry = goatBrainEntryFromLegacyMarkdown(file.source);
+      const entry = brainEntryFromLegacyMarkdown(file.source);
       return [{ file, entry }];
     } catch {
       return [];
@@ -159,7 +159,7 @@ function buildIngestPrompt(input: {
   sourceRef: string;
   sourceTitle?: string;
   at: string;
-  existing: Array<{ entry: GoatBrainEntry }>;
+  existing: Array<{ entry: BrainEntry }>;
 }) {
   const docs = input.existing
     .map(
@@ -211,7 +211,7 @@ function buildRepairPrompt(input: {
 
 function normalizePlan(
   text: string,
-  input: { existing: Array<{ entry: GoatBrainEntry }>; fallbackText: string },
+  input: { existing: Array<{ entry: BrainEntry }>; fallbackText: string },
 ): { ok: true; operations: NormalizedIngestOperation[] } | { ok: false; errors: string[] } {
   const raw = parseJsonObject(text);
   if (!raw) return { ok: false, errors: ["Response was not a JSON object."] };
@@ -226,8 +226,8 @@ function normalizePlan(
   const normalized = operations.flatMap((operation): NormalizedIngestOperation[] => {
     const item = isRecord(operation) ? (operation as RawIngestOperation) : {};
     const title = stringValue(item.title) || "Brain note";
-    const type = normalizeBuiltInGoatBrainEntityType(stringValue(item.type)) ?? "note";
-    const id = normalizeGoatBrainId(stringValue(item.id) || title) || "brain-note";
+    const type = normalizeBuiltInBrainEntityType(stringValue(item.type)) ?? "note";
+    const id = normalizeBrainId(stringValue(item.id) || title) || "brain-note";
     const action = item.action === "update" && knownIds.has(id) ? "update" : "create";
     const body = stringValue(item.body) || input.fallbackText;
     const relations = normalizeRelations(item.relations);
@@ -249,14 +249,14 @@ function normalizePlan(
   const allKnownIds = new Set([...knownIds, ...plannedIds]);
   for (const operation of normalized) {
     for (const relation of operation.relations) {
-      if (!isValidGoatBrainRelationType(relation.type)) {
+      if (!isValidBrainRelationType(relation.type)) {
         errors.push(`Relation type "${relation.type}" for "${operation.id}" is invalid.`);
       }
       if (!allKnownIds.has(relation.to)) {
         errors.push(`Relation target "${relation.to}" for "${operation.id}" does not exist.`);
       }
     }
-    for (const link of parseGoatBrainWikiLinks(operation.body)) {
+    for (const link of parseBrainWikiLinks(operation.body)) {
       if (!link.valid) errors.push(`Wiki link target "${link.target}" is invalid.`);
       if (link.valid && !allKnownIds.has(link.target)) {
         errors.push(`Wiki link target "${link.target}" for "${operation.id}" does not exist.`);
@@ -271,14 +271,14 @@ async function applyIngestOperation(
   root: string,
   operation: NormalizedIngestOperation,
   source: { at: string; sourceRef: string; sourceTitle?: string },
-): Promise<GoatBrainIngestAppliedChange> {
-  const existing = await findGoatBrainFile(root, operation.id);
-  const existingEntry = existing ? goatBrainEntryFromLegacyMarkdown(existing.source) : null;
+): Promise<BrainIngestAppliedChange> {
+  const existing = await findBrainFile(root, operation.id);
+  const existingEntry = existing ? brainEntryFromLegacyMarkdown(existing.source) : null;
   // The one-shot planner only writes working pages; evidence docs are captured
   // by dedicated ingestion paths. Folders are navigation: keep the existing
   // placement on update and fall back to the type's default for new docs.
-  const folder = existingEntry?.folder ?? defaultGoatBrainFolder(operation.type, "page");
-  const entry: GoatBrainEntry = {
+  const folder = existingEntry?.folder ?? defaultBrainFolder(operation.type, "page");
+  const entry: BrainEntry = {
     ...(existingEntry ?? {
       id: operation.id,
       createdAt: source.at,
@@ -304,7 +304,7 @@ async function applyIngestOperation(
     capturedAt: source.at,
     ...(source.sourceTitle ? { title: source.sourceTitle } : {}),
   });
-  const timelineEntry = goatBrainTimelineEntryFromParts({
+  const timelineEntry = brainTimelineEntryFromParts({
     at: source.at,
     summary: operation.timelineBody,
     sourceRef: source.sourceRef,
@@ -313,17 +313,14 @@ async function applyIngestOperation(
   if (!entry.timeline.some((entry) => isDuplicateTimelineEntry(entry, timelineEntry))) {
     entry.timeline = [...entry.timeline, timelineEntry];
   }
-  const path = await writeGoatBrainEntry(root, entry);
+  const path = await writeBrainEntry(root, entry);
   return { action: existingEntry ? "update" : "create", id: entry.id, path, type: entry.type };
 }
 
-function isDuplicateTimelineEntry(
-  current: GoatBrainTimelineEntry,
-  next: GoatBrainTimelineEntry,
-): boolean {
+function isDuplicateTimelineEntry(current: BrainTimelineEntry, next: BrainTimelineEntry): boolean {
   if (current.evidenceId === next.evidenceId) return true;
-  const currentParts = goatBrainTimelinePartsFromEntry(current);
-  const nextParts = goatBrainTimelinePartsFromEntry(next);
+  const currentParts = brainTimelinePartsFromEntry(current);
+  const nextParts = brainTimelinePartsFromEntry(next);
   if (!currentParts || !nextParts || !currentParts.sourceRef) return false;
   return currentParts.sourceRef === nextParts.sourceRef && currentParts.at === nextParts.at;
 }
@@ -342,9 +339,9 @@ function parseJsonObject(text: string): Record<string, unknown> | null {
 function normalizeRelations(value: unknown) {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
-  return value.flatMap((item): GoatBrainRelation[] => {
+  return value.flatMap((item): BrainRelation[] => {
     if (!isRecord(item)) return [];
-    const to = normalizeGoatBrainId(stringValue(item.to));
+    const to = normalizeBrainId(stringValue(item.to));
     const type = stringValue(item.type) || "related";
     if (!to || seen.has(`${type}:${to}`)) return [];
     seen.add(`${type}:${to}`);
@@ -352,16 +349,13 @@ function normalizeRelations(value: unknown) {
   });
 }
 
-function mergeRelations(current: GoatBrainRelation[], next: GoatBrainRelation[]) {
+function mergeRelations(current: BrainRelation[], next: BrainRelation[]) {
   const byKey = new Map(current.map((relation) => [`${relation.type}:${relation.to}`, relation]));
   for (const relation of next) byKey.set(`${relation.type}:${relation.to}`, relation);
   return [...byKey.values()].sort((a, b) => a.to.localeCompare(b.to));
 }
 
-function mergeSources(
-  current: GoatBrainEntry["sources"],
-  source: GoatBrainEntry["sources"][number],
-) {
+function mergeSources(current: BrainEntry["sources"], source: BrainEntry["sources"][number]) {
   if (current.some((item) => item.ref === source.ref)) return current;
   return [...current, source];
 }

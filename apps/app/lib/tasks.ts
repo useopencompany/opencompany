@@ -1,37 +1,33 @@
 "use server";
 
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import { captureGoatTaskSpawned } from "@opencompany/analytics/goat/server";
+import { captureTaskSpawned } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import type {
-  GoatChatMessageAttachment,
-  GoatHarnessEngine,
-  GoatHarnessSpec,
-  GoatTask,
+  ChatMessageAttachment,
+  HarnessEngine,
+  HarnessSpec,
+  Task,
 } from "@opencompany/db/schema";
 import {
-  goatTaskEvents,
-  goatTaskMessages,
-  goatTaskModelUsage,
-  goatTaskSandboxUsage,
-  goatTasks,
-  goatTaskToolUsage,
-  goatUsers,
+  taskEvents,
+  taskMessages,
+  taskModelUsage,
+  taskSandboxUsage,
+  tasks,
+  taskToolUsage,
+  users,
 } from "@opencompany/db/schema";
-import { createGoatTaskSession, enqueueGoatTaskSessionTurn } from "@opencompany/db/task-sessions";
+import { createTaskSession, enqueueTaskSessionTurn } from "@opencompany/db/task-sessions";
 import { and, asc, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { after } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
-import { goatHomeActivityCutoff } from "@/lib/home-activity";
-import { getGoatAvailableHarnessTools } from "@/lib/integrations/google-data";
-import {
-  GoatSkillMentionError,
-  readGoatSkillMentionRefs,
-  resolveGoatSkillMentions,
-} from "@/lib/skills";
-import { normalizeGoatTaskName } from "@/lib/task-display";
-import { triggerGoatCodexChatWake } from "@/lib/task-runner";
+import { homeActivityCutoff } from "@/lib/home-activity";
+import { getAvailableHarnessTools } from "@/lib/integrations/google-data";
+import { readSkillMentionRefs, resolveSkillMentions, SkillMentionError } from "@/lib/skills";
+import { normalizeTaskName } from "@/lib/task-display";
+import { triggerCodexChatWake } from "@/lib/task-runner";
 import { GOAT_TASK_PROMPT_MAX_LENGTH } from "@/lib/task-validation";
 
 export type ArchiveTaskResult = {
@@ -50,41 +46,41 @@ export type ContinueTaskResult = {
   messageId: string | null;
 };
 
-export async function listCurrentUserGoatTasks() {
-  const { user, workspace } = await currentGoatUser();
+export async function listCurrentUserTasks() {
+  const { user, workspace } = await currentUser();
   return getDb()
     .select()
-    .from(goatTasks)
+    .from(tasks)
     .where(
       and(
-        goatTaskVisibleInWorkspace({
+        taskVisibleInWorkspace({
           userWorkosId: user.workosUserId,
           workspaceId: workspace.id,
         }),
-        isNull(goatTasks.archivedAt),
+        isNull(tasks.archivedAt),
         or(
-          inArray(goatTasks.status, ["queued", "running"]),
-          gte(goatTasks.createdAt, goatHomeActivityCutoff()),
+          inArray(tasks.status, ["queued", "running"]),
+          gte(tasks.createdAt, homeActivityCutoff()),
         ),
       ),
     )
-    .orderBy(desc(goatTasks.createdAt))
+    .orderBy(desc(tasks.createdAt))
     .limit(50);
 }
 
-export async function getCurrentUserGoatTask(taskId: string) {
-  const { user, workspace } = await currentGoatUser();
+export async function getCurrentUserTask(taskId: string) {
+  const { user, workspace } = await currentUser();
   const normalizedTaskId = taskId.trim().toUpperCase();
   const [task] = await getDb()
     .select()
-    .from(goatTasks)
+    .from(tasks)
     .where(
       and(
-        goatTaskVisibleInWorkspace({
+        taskVisibleInWorkspace({
           userWorkosId: user.workosUserId,
           workspaceId: workspace.id,
         }),
-        or(eq(goatTasks.id, taskId), eq(goatTasks.displayId, normalizedTaskId)),
+        or(eq(tasks.id, taskId), eq(tasks.displayId, normalizedTaskId)),
       ),
     )
     .limit(1);
@@ -92,8 +88,8 @@ export async function getCurrentUserGoatTask(taskId: string) {
   return task ?? null;
 }
 
-export async function getCurrentUserGoatTaskSummary(taskId: string) {
-  const task = await getCurrentUserGoatTask(taskId);
+export async function getCurrentUserTaskSummary(taskId: string) {
+  const task = await getCurrentUserTask(taskId);
   if (!task) return null;
 
   const [aggregate] = rowsFromExecute<{
@@ -146,47 +142,47 @@ export async function getCurrentUserGoatTaskSummary(taskId: string) {
         : sql`
             SELECT
               (
-                SELECT MIN(${goatTaskMessages.createdAt})
-                FROM ${goatTaskMessages}
-                WHERE ${goatTaskMessages.taskId} = ${task.id}
-                  AND ${goatTaskMessages.userWorkosId} = ${task.userWorkosId}
-                  AND ${goatTaskMessages.role} <> 'user'
+                SELECT MIN(${taskMessages.createdAt})
+                FROM ${taskMessages}
+                WHERE ${taskMessages.taskId} = ${task.id}
+                  AND ${taskMessages.userWorkosId} = ${task.userWorkosId}
+                  AND ${taskMessages.role} <> 'user'
               ) AS "runStartedAt",
               (
-                SELECT MAX(${goatTaskMessages.completedAt})
-                FROM ${goatTaskMessages}
-                WHERE ${goatTaskMessages.taskId} = ${task.id}
-                  AND ${goatTaskMessages.userWorkosId} = ${task.userWorkosId}
+                SELECT MAX(${taskMessages.completedAt})
+                FROM ${taskMessages}
+                WHERE ${taskMessages.taskId} = ${task.id}
+                  AND ${taskMessages.userWorkosId} = ${task.userWorkosId}
               ) AS "runCompletedAt",
               NULL AS "runDurationMs",
               (
-                SELECT COUNT(*) FROM ${goatTaskModelUsage}
-                WHERE ${goatTaskModelUsage.taskId} = ${task.id}
-                  AND ${goatTaskModelUsage.userWorkosId} = ${task.userWorkosId}
+                SELECT COUNT(*) FROM ${taskModelUsage}
+                WHERE ${taskModelUsage.taskId} = ${task.id}
+                  AND ${taskModelUsage.userWorkosId} = ${task.userWorkosId}
               ) + (
-                SELECT COUNT(*) FROM ${goatTaskToolUsage}
-                WHERE ${goatTaskToolUsage.taskId} = ${task.id}
-                  AND ${goatTaskToolUsage.userWorkosId} = ${task.userWorkosId}
+                SELECT COUNT(*) FROM ${taskToolUsage}
+                WHERE ${taskToolUsage.taskId} = ${task.id}
+                  AND ${taskToolUsage.userWorkosId} = ${task.userWorkosId}
               ) + (
-                SELECT COUNT(*) FROM ${goatTaskSandboxUsage}
-                WHERE ${goatTaskSandboxUsage.taskId} = ${task.id}
-                  AND ${goatTaskSandboxUsage.userWorkosId} = ${task.userWorkosId}
+                SELECT COUNT(*) FROM ${taskSandboxUsage}
+                WHERE ${taskSandboxUsage.taskId} = ${task.id}
+                  AND ${taskSandboxUsage.userWorkosId} = ${task.userWorkosId}
               ) AS "usageRowCount",
               (
-                SELECT COALESCE(SUM(${goatTaskModelUsage.totalCostUsdMicros}), 0)
-                FROM ${goatTaskModelUsage}
-                WHERE ${goatTaskModelUsage.taskId} = ${task.id}
-                  AND ${goatTaskModelUsage.userWorkosId} = ${task.userWorkosId}
+                SELECT COALESCE(SUM(${taskModelUsage.totalCostUsdMicros}), 0)
+                FROM ${taskModelUsage}
+                WHERE ${taskModelUsage.taskId} = ${task.id}
+                  AND ${taskModelUsage.userWorkosId} = ${task.userWorkosId}
               ) + (
-                SELECT COALESCE(SUM(${goatTaskToolUsage.totalCostUsdMicros}), 0)
-                FROM ${goatTaskToolUsage}
-                WHERE ${goatTaskToolUsage.taskId} = ${task.id}
-                  AND ${goatTaskToolUsage.userWorkosId} = ${task.userWorkosId}
+                SELECT COALESCE(SUM(${taskToolUsage.totalCostUsdMicros}), 0)
+                FROM ${taskToolUsage}
+                WHERE ${taskToolUsage.taskId} = ${task.id}
+                  AND ${taskToolUsage.userWorkosId} = ${task.userWorkosId}
               ) + (
-                SELECT COALESCE(SUM(${goatTaskSandboxUsage.totalCostUsdMicros}), 0)
-                FROM ${goatTaskSandboxUsage}
-                WHERE ${goatTaskSandboxUsage.taskId} = ${task.id}
-                  AND ${goatTaskSandboxUsage.userWorkosId} = ${task.userWorkosId}
+                SELECT COALESCE(SUM(${taskSandboxUsage.totalCostUsdMicros}), 0)
+                FROM ${taskSandboxUsage}
+                WHERE ${taskSandboxUsage.taskId} = ${task.id}
+                  AND ${taskSandboxUsage.userWorkosId} = ${task.userWorkosId}
               ) AS "totalCostUsdMicros"
           `,
     ),
@@ -224,90 +220,79 @@ export async function getCurrentUserGoatTaskSummary(taskId: string) {
   };
 }
 
-export async function getCurrentUserGoatTaskRun(taskId: string) {
-  const task = await getCurrentUserGoatTask(taskId);
+export async function getCurrentUserTaskRun(taskId: string) {
+  const task = await getCurrentUserTask(taskId);
 
   if (!task) return null;
 
   const [messages, events, modelUsage, toolUsage, sandboxUsage] = await Promise.all([
     getDb()
       .select()
-      .from(goatTaskMessages)
+      .from(taskMessages)
       .where(
-        and(
-          eq(goatTaskMessages.userWorkosId, task.userWorkosId),
-          eq(goatTaskMessages.taskId, task.id),
-        ),
+        and(eq(taskMessages.userWorkosId, task.userWorkosId), eq(taskMessages.taskId, task.id)),
       )
-      .orderBy(asc(goatTaskMessages.createdAt)),
+      .orderBy(asc(taskMessages.createdAt)),
     getDb()
       .select()
-      .from(goatTaskEvents)
-      .where(
-        and(eq(goatTaskEvents.userWorkosId, task.userWorkosId), eq(goatTaskEvents.taskId, task.id)),
-      )
-      .orderBy(asc(goatTaskEvents.id)),
+      .from(taskEvents)
+      .where(and(eq(taskEvents.userWorkosId, task.userWorkosId), eq(taskEvents.taskId, task.id)))
+      .orderBy(asc(taskEvents.id)),
     getDb()
       .select()
-      .from(goatTaskModelUsage)
+      .from(taskModelUsage)
       .where(
-        and(
-          eq(goatTaskModelUsage.userWorkosId, task.userWorkosId),
-          eq(goatTaskModelUsage.taskId, task.id),
-        ),
+        and(eq(taskModelUsage.userWorkosId, task.userWorkosId), eq(taskModelUsage.taskId, task.id)),
       )
-      .orderBy(asc(goatTaskModelUsage.createdAt), asc(goatTaskModelUsage.id)),
+      .orderBy(asc(taskModelUsage.createdAt), asc(taskModelUsage.id)),
     getDb()
       .select()
-      .from(goatTaskToolUsage)
+      .from(taskToolUsage)
       .where(
-        and(
-          eq(goatTaskToolUsage.userWorkosId, task.userWorkosId),
-          eq(goatTaskToolUsage.taskId, task.id),
-        ),
+        and(eq(taskToolUsage.userWorkosId, task.userWorkosId), eq(taskToolUsage.taskId, task.id)),
       )
-      .orderBy(asc(goatTaskToolUsage.createdAt), asc(goatTaskToolUsage.id)),
+      .orderBy(asc(taskToolUsage.createdAt), asc(taskToolUsage.id)),
     getDb()
       .select()
-      .from(goatTaskSandboxUsage)
+      .from(taskSandboxUsage)
       .where(
         and(
-          eq(goatTaskSandboxUsage.userWorkosId, task.userWorkosId),
-          eq(goatTaskSandboxUsage.taskId, task.id),
+          eq(taskSandboxUsage.userWorkosId, task.userWorkosId),
+          eq(taskSandboxUsage.taskId, task.id),
         ),
       )
-      .orderBy(asc(goatTaskSandboxUsage.createdAt), asc(goatTaskSandboxUsage.id)),
+      .orderBy(asc(taskSandboxUsage.createdAt), asc(taskSandboxUsage.id)),
   ]);
 
   return { task, messages, events, modelUsage, toolUsage, sandboxUsage };
 }
 
-export async function archiveGoatTaskAction(taskId: string): Promise<ArchiveTaskResult> {
+export async function archiveTaskAction(taskId: string): Promise<ArchiveTaskResult> {
   if (!taskId.trim()) {
     return { ok: false, error: "Could not archive task." };
   }
 
-  const { user, workspace } = await currentGoatUser();
-  const taskVisibility = goatTaskVisibleInWorkspace({
+  const { user, workspace } = await currentUser();
+  const taskVisibility = taskVisibleInWorkspace({
     userWorkosId: user.workosUserId,
     workspaceId: workspace.id,
   });
   const now = new Date();
   const [task] = await getDb()
-    .update(goatTasks)
+    .update(tasks)
     .set({
       archivedAt: now,
       updatedAt: now,
     })
     .where(
       and(
-        eq(goatTasks.id, taskId),
+        eq(tasks.id, taskId),
         taskVisibility,
-        isNull(goatTasks.archivedAt),
-        inArray(goatTasks.status, ["succeeded", "failed", "canceled"]),
+        isNull(tasks.archivedAt),
+        inArray(tasks.status, ["succeeded", "failed", "canceled"]),
       ),
     )
-    .returning({ id: goatTasks.id });
+    .returning({ id: tasks.id });
 
   if (!task) {
     return { ok: false, error: "Could not archive task." };
@@ -316,20 +301,20 @@ export async function archiveGoatTaskAction(taskId: string): Promise<ArchiveTask
   return { ok: true, error: null };
 }
 
-export async function cancelGoatTaskAction(taskId: string): Promise<CancelTaskResult> {
+export async function cancelTaskAction(taskId: string): Promise<CancelTaskResult> {
   if (!taskId.trim()) {
     return { ok: false, error: "Could not stop task." };
   }
 
-  const { user, workspace } = await currentGoatUser();
+  const { user, workspace } = await currentUser();
   const now = new Date();
   const [sessionTask] = await getDb()
-    .select({ sessionId: goatTasks.sessionId, userWorkosId: goatTasks.userWorkosId })
-    .from(goatTasks)
+    .select({ sessionId: tasks.sessionId, userWorkosId: tasks.userWorkosId })
+    .from(tasks)
     .where(
       and(
-        eq(goatTasks.id, taskId),
-        goatTaskVisibleInWorkspace({
+        eq(tasks.id, taskId),
+        taskVisibleInWorkspace({
           userWorkosId: user.workosUserId,
           workspaceId: workspace.id,
         }),
@@ -337,7 +322,7 @@ export async function cancelGoatTaskAction(taskId: string): Promise<CancelTaskRe
     )
     .limit(1);
   if (sessionTask?.sessionId) {
-    const result = await cancelSessionBackedGoatTask({
+    const result = await cancelSessionBackedTask({
       taskId,
       userWorkosId: sessionTask.userWorkosId,
       sessionId: sessionTask.sessionId,
@@ -426,7 +411,7 @@ export async function cancelGoatTaskAction(taskId: string): Promise<CancelTaskRe
 // Tasks are durable conversations. A reply appends a completed user turn and
 // atomically moves a terminal task back to the queue; the runner then answers
 // with the same instructions and prior conversation context.
-export async function continueGoatTaskAction(
+export async function continueTaskAction(
   taskId: string,
   prompt: string,
   clientMessageId?: string,
@@ -445,32 +430,32 @@ export async function continueGoatTaskAction(
     };
   }
 
-  const { user, workspace } = await currentGoatUser();
-  const parsedSkillMentions = readGoatSkillMentionRefs(mentions);
+  const { user, workspace } = await currentUser();
+  const parsedSkillMentions = readSkillMentionRefs(mentions);
   if (!parsedSkillMentions.ok) {
     return { ok: false, error: parsedSkillMentions.error, messageId: null };
   }
-  let resolvedSkills: Awaited<ReturnType<typeof resolveGoatSkillMentions>> = [];
+  let resolvedSkills: Awaited<ReturnType<typeof resolveSkillMentions>> = [];
   if (parsedSkillMentions.mentions.length > 0) {
     try {
-      resolvedSkills = await resolveGoatSkillMentions({
+      resolvedSkills = await resolveSkillMentions({
         workspaceId: workspace.id,
         mentions: parsedSkillMentions.mentions,
       });
     } catch (error) {
-      if (error instanceof GoatSkillMentionError) {
+      if (error instanceof SkillMentionError) {
         return { ok: false, error: error.message, messageId: null };
       }
       throw error;
     }
   }
   const [task] = await getDb()
-    .select({ sessionId: goatTasks.sessionId, userWorkosId: goatTasks.userWorkosId })
-    .from(goatTasks)
+    .select({ sessionId: tasks.sessionId, userWorkosId: tasks.userWorkosId })
+    .from(tasks)
     .where(
       and(
-        eq(goatTasks.id, normalizedTaskId),
-        goatTaskVisibleInWorkspace({
+        eq(tasks.id, normalizedTaskId),
+        taskVisibleInWorkspace({
           userWorkosId: user.workosUserId,
           workspaceId: workspace.id,
         }),
@@ -478,7 +463,7 @@ export async function continueGoatTaskAction(
     )
     .limit(1);
   if (task?.sessionId) {
-    const continued = await enqueueGoatTaskSessionTurn({
+    const continued = await enqueueTaskSessionTurn({
       taskId: normalizedTaskId,
       userWorkosId: task.userWorkosId,
       prompt: content,
@@ -495,7 +480,7 @@ export async function continueGoatTaskAction(
         messageId: null,
       };
     }
-    await triggerGoatCodexChatWake().catch((error) => {
+    await triggerCodexChatWake().catch((error) => {
       console.warn("Goat durable task wake failed; the turn remains queued for polling.", {
         event: "goat.durable_task_continued_wake_failed",
         task_id: normalizedTaskId,
@@ -515,23 +500,23 @@ export async function continueGoatTaskAction(
   };
 }
 
-export async function createGoatTaskForUser(input: {
+export async function createTaskForUser(input: {
   userWorkosId: string;
   workspaceId?: string | null;
   brainRef?: string | null;
   prompt: string;
   model: AgentModelId;
   name?: string;
-  engine?: GoatHarnessEngine;
-  harnessSpec?: GoatHarnessSpec;
+  engine?: HarnessEngine;
+  harnessSpec?: HarnessSpec;
   scheduleId?: string;
   scheduledFor?: Date;
   workflowId?: string;
   workflowBrainRef?: string;
-  attachments?: GoatChatMessageAttachment[];
+  attachments?: ChatMessageAttachment[];
   attachmentTexts?: Record<string, string> | null;
 }) {
-  const initialTaskSpawningState = await loadGoatTaskSpawningState(input.userWorkosId);
+  const initialTaskSpawningState = await loadTaskSpawningState(input.userWorkosId);
   if (initialTaskSpawningState === null) {
     throw new Error("Unable to create a Goat task for an unknown user.");
   }
@@ -540,9 +525,9 @@ export async function createGoatTaskForUser(input: {
   }
 
   const now = new Date();
-  const name = normalizeGoatTaskName(input.name, input.prompt);
-  const tools = input.harnessSpec ? [] : await getGoatAvailableHarnessTools(input.userWorkosId);
-  const harnessSpec: GoatHarnessSpec = input.harnessSpec ?? {
+  const name = normalizeTaskName(input.name, input.prompt);
+  const tools = input.harnessSpec ? [] : await getAvailableHarnessTools(input.userWorkosId);
+  const harnessSpec: HarnessSpec = input.harnessSpec ?? {
     schemaVersion: "goat.harness.v1",
     engine: input.engine ?? "opencompany",
     model: input.model,
@@ -554,9 +539,9 @@ export async function createGoatTaskForUser(input: {
     resultMode: "assistant_final",
   };
   const attachments = input.attachments ?? [];
-  let task: GoatTask;
+  let task: Task;
   try {
-    task = await createGoatTaskSession({
+    task = await createTaskSession({
       userWorkosId: input.userWorkosId,
       workspaceId: input.workspaceId ?? null,
       brainRef: input.brainRef ?? null,
@@ -575,7 +560,7 @@ export async function createGoatTaskForUser(input: {
     if (!(error instanceof Error) || error.message !== "Unable to create Goat task session.") {
       throw error;
     }
-    const currentTaskSpawningState = await loadGoatTaskSpawningState(input.userWorkosId);
+    const currentTaskSpawningState = await loadTaskSpawningState(input.userWorkosId);
     if (currentTaskSpawningState === null) {
       throw new Error("Unable to create a Goat task for an unknown user.");
     }
@@ -584,8 +569,8 @@ export async function createGoatTaskForUser(input: {
     }
     throw error;
   }
-  captureGoatTaskSpawnedAfterResponse(task, input.workspaceId ?? null);
-  await triggerGoatCodexChatWake().catch((error) => {
+  captureTaskSpawnedAfterResponse(task, input.workspaceId ?? null);
+  await triggerCodexChatWake().catch((error) => {
     console.warn("Goat durable task wake failed; the turn remains queued for polling.", {
       event: "goat.durable_task_created_wake_failed",
       task_id: task.id,
@@ -595,12 +580,9 @@ export async function createGoatTaskForUser(input: {
   return task;
 }
 
-function captureGoatTaskSpawnedAfterResponse(
-  task: GoatTask,
-  workspaceId: string | null | undefined,
-) {
+function captureTaskSpawnedAfterResponse(task: Task, workspaceId: string | null | undefined) {
   after(
-    captureGoatTaskSpawned({
+    captureTaskSpawned({
       userWorkosId: task.userWorkosId,
       workspaceId: workspaceId ?? task.harnessSpec.workflow?.workspaceId ?? null,
       taskId: task.id,
@@ -620,7 +602,7 @@ function captureGoatTaskSpawnedAfterResponse(
   );
 }
 
-async function cancelSessionBackedGoatTask(input: {
+async function cancelSessionBackedTask(input: {
   taskId: string;
   userWorkosId: string;
   sessionId: string;
@@ -700,18 +682,18 @@ async function cancelSessionBackedGoatTask(input: {
   return rowsFromExecute<{ id: string }>(result).length > 0;
 }
 
-function goatTaskVisibleInWorkspace(input: { userWorkosId: string; workspaceId: string }) {
+function taskVisibleInWorkspace(input: { userWorkosId: string; workspaceId: string }) {
   return or(
-    eq(goatTasks.workspaceId, input.workspaceId),
-    and(eq(goatTasks.userWorkosId, input.userWorkosId), isNull(goatTasks.workspaceId)),
+    eq(tasks.workspaceId, input.workspaceId),
+    and(eq(tasks.userWorkosId, input.userWorkosId), isNull(tasks.workspaceId)),
   );
 }
 
-async function loadGoatTaskSpawningState(userWorkosId: string): Promise<boolean | null> {
+async function loadTaskSpawningState(userWorkosId: string): Promise<boolean | null> {
   const [user] = await getDb()
-    .select({ enabled: goatUsers.taskSpawningEnabled })
-    .from(goatUsers)
-    .where(eq(goatUsers.workosUserId, userWorkosId))
+    .select({ enabled: users.taskSpawningEnabled })
+    .from(users)
+    .where(eq(users.workosUserId, userWorkosId))
     .limit(1);
   return user ? user.enabled : null;
 }

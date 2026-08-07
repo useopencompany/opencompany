@@ -8,24 +8,24 @@ import {
 import {
   GOAT_BRAIN_WORKFLOW_DESCRIPTION_MAX_LENGTH,
   GOAT_BRAIN_WORKFLOW_NAME_MAX_LENGTH,
-  isValidGoatBrainId,
-  normalizeGoatBrainId,
+  isValidBrainId,
+  normalizeBrainId,
 } from "@opencompany/brain";
 import { getDb } from "@opencompany/db/client";
 import {
-  type GoatHarnessSpec,
-  type GoatWorkflowStatus,
-  type GoatWorkflowStep,
-  type GoatWorkflowTrigger,
-  goatWorkflows,
+  type HarnessSpec,
+  type WorkflowStatus,
+  type WorkflowStep,
+  type WorkflowTrigger,
+  workflows,
 } from "@opencompany/db/schema";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import {
   GOAT_WORKFLOW_MODEL_OPTIONS,
-  goatWorkflowStepSettings,
-  isGoatWorkflowCloudRuntime,
-  isGoatWorkflowModelToken,
-  isGoatWorkflowRuntimeModel,
+  isWorkflowCloudRuntime,
+  isWorkflowModelToken,
+  isWorkflowRuntimeModel,
+  workflowStepSettings,
 } from "@/lib/workflow-model-options";
 import {
   DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON,
@@ -45,7 +45,7 @@ export { DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON, DEFAULT_GOAT_WORKFLOW_SCHEDULE_PRO
 
 const GOAT_WORKFLOW_SCHEDULE_PROMPT_MAX_LENGTH = 10_000;
 
-export type GoatWorkflowTriggerInput =
+export type WorkflowTriggerInput =
   | { type: "manual" }
   | {
       type: "schedule";
@@ -54,7 +54,7 @@ export type GoatWorkflowTriggerInput =
       prompt?: string | null;
     };
 
-export type GoatWorkflowTriggerDetail =
+export type WorkflowTriggerDetail =
   | { type: "manual" }
   | {
       type: "schedule";
@@ -67,54 +67,52 @@ export type GoatWorkflowTriggerDetail =
     };
 
 // `id` is the workspace-unique slug used by composer mentions and task rows.
-export type GoatWorkspaceWorkflow = {
+export type WorkspaceWorkflow = {
   id: string;
   name: string;
   description: string;
-  steps: GoatWorkflowStep[];
+  steps: WorkflowStep[];
 };
 
-export type GoatWorkflowListItem = {
+export type WorkflowListItem = {
   slug: string;
   name: string;
   description: string;
-  status: GoatWorkflowStatus;
-  trigger: GoatWorkflowTriggerDetail;
+  status: WorkflowStatus;
+  trigger: WorkflowTriggerDetail;
   updatedAt: Date;
 };
 
-export type GoatWorkflowCatalogItem = Pick<GoatWorkspaceWorkflow, "id" | "name" | "description">;
+export type WorkflowCatalogItem = Pick<WorkspaceWorkflow, "id" | "name" | "description">;
 
-export type GoatWorkflowDetail = GoatWorkspaceWorkflow & {
-  status: GoatWorkflowStatus;
-  trigger: GoatWorkflowTriggerDetail;
+export type WorkflowDetail = WorkspaceWorkflow & {
+  status: WorkflowStatus;
+  trigger: WorkflowTriggerDetail;
 };
 
-export type GoatWorkflowMentionRef = { id: string };
+export type WorkflowMentionRef = { id: string };
 
-export type GoatWorkflowMutationResult =
-  | { ok: true; slug: string }
-  | { ok: false; message: string };
+export type WorkflowMutationResult = { ok: true; slug: string } | { ok: false; message: string };
 
-export class GoatWorkflowMentionError extends Error {
+export class WorkflowMentionError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "GoatWorkflowMentionError";
+    this.name = "WorkflowMentionError";
   }
 }
 
-export function readGoatWorkflowMentionRef(
+export function readWorkflowMentionRef(
   value: unknown,
-): { ok: true; mention: GoatWorkflowMentionRef | null } | { ok: false; error: string } {
+): { ok: true; mention: WorkflowMentionRef | null } | { ok: false; error: string } {
   if (value === undefined || value === null) return { ok: true, mention: null };
   if (!Array.isArray(value)) return { ok: false, error: "Invalid workflow mentions." };
 
-  const mentions: GoatWorkflowMentionRef[] = [];
+  const mentions: WorkflowMentionRef[] = [];
   for (const mention of value) {
     if (!mention || typeof mention !== "object" || Array.isArray(mention)) continue;
     const candidate = mention as Record<string, unknown>;
     if (candidate.kind !== "workflow") continue;
-    if (typeof candidate.id !== "string" || !isValidGoatBrainId(candidate.id)) {
+    if (typeof candidate.id !== "string" || !isValidBrainId(candidate.id)) {
       return { ok: false, error: "Invalid workflow mention." };
     }
     mentions.push({ id: candidate.id });
@@ -126,98 +124,98 @@ export function readGoatWorkflowMentionRef(
   return { ok: true, mention: unique[0] ?? null };
 }
 
-export async function listGoatWorkflowCatalog(
+export async function listWorkflowCatalog(
   workspaceId: string,
   db: Db = getDb(),
-): Promise<GoatWorkflowCatalogItem[]> {
+): Promise<WorkflowCatalogItem[]> {
   const rows = await db
     .select({
-      slug: goatWorkflows.slug,
-      name: goatWorkflows.name,
-      description: goatWorkflows.description,
-      instructions: goatWorkflows.instructions,
-      model: goatWorkflows.model,
-      steps: goatWorkflows.steps,
+      slug: workflows.slug,
+      name: workflows.name,
+      description: workflows.description,
+      instructions: workflows.instructions,
+      model: workflows.model,
+      steps: workflows.steps,
     })
-    .from(goatWorkflows)
+    .from(workflows)
     .where(
       and(
-        eq(goatWorkflows.workspaceId, workspaceId),
-        eq(goatWorkflows.status, "active"),
-        isNull(goatWorkflows.archivedAt),
+        eq(workflows.workspaceId, workspaceId),
+        eq(workflows.status, "active"),
+        isNull(workflows.archivedAt),
       ),
     )
-    .orderBy(asc(goatWorkflows.name));
+    .orderBy(asc(workflows.name));
 
-  const catalog: GoatWorkflowCatalogItem[] = [];
+  const catalog: WorkflowCatalogItem[] = [];
   for (const row of rows) {
-    const steps = goatWorkflowStepsWithLegacyFallback(row);
+    const steps = workflowStepsWithLegacyFallback(row);
     if (steps.length === 0 || steps.some((step) => !step.instructions.trim())) continue;
     catalog.push({ id: row.slug, name: row.name, description: row.description });
   }
   return catalog;
 }
 
-export async function listGoatWorkflows(
+export async function listWorkflows(
   workspaceId: string,
   db: Db = getDb(),
-): Promise<GoatWorkflowListItem[]> {
+): Promise<WorkflowListItem[]> {
   const rows = await db
     .select({
-      slug: goatWorkflows.slug,
-      name: goatWorkflows.name,
-      description: goatWorkflows.description,
-      status: goatWorkflows.status,
-      trigger: goatWorkflows.trigger,
-      scheduleCron: goatWorkflows.scheduleCron,
-      scheduleTimezone: goatWorkflows.scheduleTimezone,
-      schedulePrompt: goatWorkflows.schedulePrompt,
-      scheduleEnabled: goatWorkflows.scheduleEnabled,
-      scheduleLastRunAt: goatWorkflows.scheduleLastRunAt,
-      scheduleNextRunAt: goatWorkflows.scheduleNextRunAt,
-      updatedAt: goatWorkflows.updatedAt,
+      slug: workflows.slug,
+      name: workflows.name,
+      description: workflows.description,
+      status: workflows.status,
+      trigger: workflows.trigger,
+      scheduleCron: workflows.scheduleCron,
+      scheduleTimezone: workflows.scheduleTimezone,
+      schedulePrompt: workflows.schedulePrompt,
+      scheduleEnabled: workflows.scheduleEnabled,
+      scheduleLastRunAt: workflows.scheduleLastRunAt,
+      scheduleNextRunAt: workflows.scheduleNextRunAt,
+      updatedAt: workflows.updatedAt,
     })
-    .from(goatWorkflows)
-    .where(and(eq(goatWorkflows.workspaceId, workspaceId), isNull(goatWorkflows.archivedAt)))
-    .orderBy(desc(goatWorkflows.updatedAt));
+    .from(workflows)
+    .where(and(eq(workflows.workspaceId, workspaceId), isNull(workflows.archivedAt)))
+    .orderBy(desc(workflows.updatedAt));
   return rows.map((row) => ({
     slug: row.slug,
     name: row.name,
     description: row.description,
     status: row.status,
-    trigger: goatWorkflowTriggerFromRow(row),
+    trigger: workflowTriggerFromRow(row),
     updatedAt: row.updatedAt,
   }));
 }
 
-export async function getGoatWorkflow(
+export async function getWorkflow(
   workspaceId: string,
   slug: string,
   db: Db = getDb(),
-): Promise<GoatWorkflowDetail | null> {
+): Promise<WorkflowDetail | null> {
   const [row] = await db
     .select({
-      slug: goatWorkflows.slug,
-      name: goatWorkflows.name,
-      description: goatWorkflows.description,
-      instructions: goatWorkflows.instructions,
-      model: goatWorkflows.model,
-      steps: goatWorkflows.steps,
-      trigger: goatWorkflows.trigger,
-      scheduleCron: goatWorkflows.scheduleCron,
-      scheduleTimezone: goatWorkflows.scheduleTimezone,
-      schedulePrompt: goatWorkflows.schedulePrompt,
-      scheduleEnabled: goatWorkflows.scheduleEnabled,
-      scheduleLastRunAt: goatWorkflows.scheduleLastRunAt,
-      scheduleNextRunAt: goatWorkflows.scheduleNextRunAt,
-      status: goatWorkflows.status,
+      slug: workflows.slug,
+      name: workflows.name,
+      description: workflows.description,
+      instructions: workflows.instructions,
+      model: workflows.model,
+      steps: workflows.steps,
+      trigger: workflows.trigger,
+      scheduleCron: workflows.scheduleCron,
+      scheduleTimezone: workflows.scheduleTimezone,
+      schedulePrompt: workflows.schedulePrompt,
+      scheduleEnabled: workflows.scheduleEnabled,
+      scheduleLastRunAt: workflows.scheduleLastRunAt,
+      scheduleNextRunAt: workflows.scheduleNextRunAt,
+      status: workflows.status,
     })
-    .from(goatWorkflows)
+    .from(workflows)
     .where(
       and(
-        eq(goatWorkflows.workspaceId, workspaceId),
-        eq(goatWorkflows.slug, slug),
-        isNull(goatWorkflows.archivedAt),
+        eq(workflows.workspaceId, workspaceId),
+        eq(workflows.slug, slug),
+        isNull(workflows.archivedAt),
       ),
     )
     .limit(1);
@@ -226,42 +224,40 @@ export async function getGoatWorkflow(
     id: row.slug,
     name: row.name,
     description: row.description,
-    steps: goatWorkflowStepsWithLegacyFallback(row),
+    steps: workflowStepsWithLegacyFallback(row),
     status: row.status,
-    trigger: goatWorkflowTriggerFromRow(row),
+    trigger: workflowTriggerFromRow(row),
   };
 }
 
-export async function resolveGoatWorkflowMention(input: {
+export async function resolveWorkflowMention(input: {
   workspaceId: string | null;
-  mention: GoatWorkflowMentionRef;
+  mention: WorkflowMentionRef;
   db?: Db;
-}): Promise<GoatWorkspaceWorkflow> {
+}): Promise<WorkspaceWorkflow> {
   if (!input.workspaceId) {
-    throw new GoatWorkflowMentionError("No active workspace is available for workflow mentions.");
+    throw new WorkflowMentionError("No active workspace is available for workflow mentions.");
   }
-  const workflow = await getGoatWorkflow(input.workspaceId, input.mention.id, input.db ?? getDb());
+  const workflow = await getWorkflow(input.workspaceId, input.mention.id, input.db ?? getDb());
   if (
     !workflow ||
     workflow.status !== "active" ||
     workflow.steps.length === 0 ||
     workflow.steps.some((step) => !step.instructions.trim())
   ) {
-    throw new GoatWorkflowMentionError(
-      `Workflow "#${input.mention.id}" is unavailable or incomplete.`,
-    );
+    throw new WorkflowMentionError(`Workflow "#${input.mention.id}" is unavailable or incomplete.`);
   }
   return workflow;
 }
 
 // --- Authoring (mutations) ---------------------------------------------------
 
-export function validateGoatWorkflowFields(input: {
+export function validateWorkflowFields(input: {
   name: string;
   description: string;
-  steps: GoatWorkflowStep[];
-  status?: GoatWorkflowStatus;
-  trigger?: GoatWorkflowTriggerInput;
+  steps: WorkflowStep[];
+  status?: WorkflowStatus;
+  trigger?: WorkflowTriggerInput;
 }): string | null {
   const name = input.name.trim();
   const description = input.description.trim();
@@ -288,14 +284,14 @@ export function validateGoatWorkflowFields(input: {
       return "Workflow step instructions must be 20,000 characters or fewer.";
     }
     const model = step.model.trim();
-    if (model && !isGoatWorkflowModelToken(model)) {
+    if (model && !isWorkflowModelToken(model)) {
       return "That workflow model is not available.";
     }
     const option = GOAT_WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === model);
-    if (option && isGoatWorkflowCloudRuntime(option.engine)) {
+    if (option && isWorkflowCloudRuntime(option.engine)) {
       const runtimeModelValue = step.runtimeModel as unknown;
       const runtimeModel = typeof runtimeModelValue === "string" ? runtimeModelValue.trim() : "";
-      if (runtimeModel && !isGoatWorkflowRuntimeModel(option.engine, runtimeModel)) {
+      if (runtimeModel && !isWorkflowRuntimeModel(option.engine, runtimeModel)) {
         return "That workflow coding model is not available.";
       }
       const reasoningEffort = step.reasoningEffort as unknown;
@@ -308,27 +304,27 @@ export function validateGoatWorkflowFields(input: {
       }
     }
   }
-  const trigger = normalizeGoatWorkflowTriggerInput(input.trigger);
+  const trigger = normalizeWorkflowTriggerInput(input.trigger);
   if (!trigger.ok) return trigger.message;
   return null;
 }
 
-export async function createGoatWorkflow(input: {
+export async function createWorkflow(input: {
   workspaceId: string;
   createdByWorkosId: string;
   name: string;
   description?: string;
-}): Promise<GoatWorkflowMutationResult> {
-  const steps = [emptyGoatWorkflowStep()];
-  const invalid = validateGoatWorkflowFields({
+}): Promise<WorkflowMutationResult> {
+  const steps = [emptyWorkflowStep()];
+  const invalid = validateWorkflowFields({
     name: input.name,
     description: input.description ?? "",
     steps,
   });
   if (invalid) return { ok: false, message: invalid };
   const db = getDb();
-  const slug = await uniqueGoatWorkflowSlug(db, input.workspaceId, input.name);
-  await db.insert(goatWorkflows).values({
+  const slug = await uniqueWorkflowSlug(db, input.workspaceId, input.name);
+  await db.insert(workflows).values({
     id: `goat_wf_${randomUUID()}`,
     workspaceId: input.workspaceId,
     slug,
@@ -351,21 +347,21 @@ export async function createGoatWorkflow(input: {
   return { ok: true, slug };
 }
 
-export async function updateGoatWorkflow(input: {
+export async function updateWorkflow(input: {
   workspaceId: string;
   slug: string;
   name: string;
   description: string;
-  steps: GoatWorkflowStep[];
-  status: GoatWorkflowStatus;
-  trigger?: GoatWorkflowTriggerInput;
-  scheduleHarnessSpec?: GoatHarnessSpec | null;
+  steps: WorkflowStep[];
+  status: WorkflowStatus;
+  trigger?: WorkflowTriggerInput;
+  scheduleHarnessSpec?: HarnessSpec | null;
   scheduleUserWorkosId?: string | null;
   now?: Date;
-}): Promise<GoatWorkflowMutationResult> {
-  const invalid = validateGoatWorkflowFields(input);
+}): Promise<WorkflowMutationResult> {
+  const invalid = validateWorkflowFields(input);
   if (invalid) return { ok: false, message: invalid };
-  const trigger = normalizeGoatWorkflowTriggerInput(input.trigger, input.now);
+  const trigger = normalizeWorkflowTriggerInput(input.trigger, input.now);
   if (!trigger.ok) return { ok: false, message: trigger.message };
   if (trigger.value.type === "schedule" && input.status === "active") {
     if (!input.scheduleUserWorkosId?.trim()) {
@@ -378,7 +374,7 @@ export async function updateGoatWorkflow(input: {
   const steps = input.steps.map((step) => ({
     id: step.id,
     title: step.title,
-    ...goatWorkflowStepSettings(step),
+    ...workflowStepSettings(step),
     instructions: step.instructions,
   }));
   const scheduleNextRunAt =
@@ -387,7 +383,7 @@ export async function updateGoatWorkflow(input: {
       : null;
   const db = getDb();
   const result = await db
-    .update(goatWorkflows)
+    .update(workflows)
     .set({
       name: input.name.trim(),
       description: input.description.trim(),
@@ -410,22 +406,22 @@ export async function updateGoatWorkflow(input: {
     })
     .where(
       and(
-        eq(goatWorkflows.workspaceId, input.workspaceId),
-        eq(goatWorkflows.slug, input.slug),
-        isNull(goatWorkflows.archivedAt),
+        eq(workflows.workspaceId, input.workspaceId),
+        eq(workflows.slug, input.slug),
+        isNull(workflows.archivedAt),
       ),
     )
-    .returning({ slug: goatWorkflows.slug });
+    .returning({ slug: workflows.slug });
   if (result.length === 0) return { ok: false, message: "Workflow not found." };
   return { ok: true, slug: input.slug };
 }
 
-export function goatWorkflowStepsWithLegacyFallback(input: {
+export function workflowStepsWithLegacyFallback(input: {
   slug: string;
-  steps: GoatWorkflowStep[];
+  steps: WorkflowStep[];
   instructions: string;
   model: string;
-}): GoatWorkflowStep[] {
+}): WorkflowStep[] {
   if (input.steps.length > 0) return input.steps;
   if (!input.instructions.trim() && !input.model.trim()) return [];
   return [
@@ -438,15 +434,15 @@ export function goatWorkflowStepsWithLegacyFallback(input: {
   ];
 }
 
-export function goatWorkflowTriggerFromRow(input: {
-  trigger: GoatWorkflowTrigger;
+export function workflowTriggerFromRow(input: {
+  trigger: WorkflowTrigger;
   scheduleCron: string | null;
   scheduleTimezone: string;
   schedulePrompt: string;
   scheduleEnabled: boolean;
   scheduleLastRunAt: Date | null;
   scheduleNextRunAt: Date | null;
-}): GoatWorkflowTriggerDetail {
+}): WorkflowTriggerDetail {
   if (input.trigger !== "schedule") return { type: "manual" };
   return {
     type: "schedule",
@@ -459,8 +455,8 @@ export function goatWorkflowTriggerFromRow(input: {
   };
 }
 
-function normalizeGoatWorkflowTriggerInput(
-  input: GoatWorkflowTriggerInput | undefined,
+function normalizeWorkflowTriggerInput(
+  input: WorkflowTriggerInput | undefined,
   now = new Date(),
 ):
   | {
@@ -490,27 +486,27 @@ function normalizeGoatWorkflowTriggerInput(
   return { ok: true, value: { type: "schedule", cron, timezone, prompt } };
 }
 
-export async function archiveGoatWorkflow(input: {
+export async function archiveWorkflow(input: {
   workspaceId: string;
   slug: string;
-}): Promise<GoatWorkflowMutationResult> {
+}): Promise<WorkflowMutationResult> {
   const db = getDb();
   const result = await db
-    .update(goatWorkflows)
+    .update(workflows)
     .set({ archivedAt: new Date(), updatedAt: new Date() })
     .where(
       and(
-        eq(goatWorkflows.workspaceId, input.workspaceId),
-        eq(goatWorkflows.slug, input.slug),
-        isNull(goatWorkflows.archivedAt),
+        eq(workflows.workspaceId, input.workspaceId),
+        eq(workflows.slug, input.slug),
+        isNull(workflows.archivedAt),
       ),
     )
-    .returning({ slug: goatWorkflows.slug });
+    .returning({ slug: workflows.slug });
   if (result.length === 0) return { ok: false, message: "Workflow not found." };
   return { ok: true, slug: input.slug };
 }
 
-function emptyGoatWorkflowStep(): GoatWorkflowStep {
+function emptyWorkflowStep(): WorkflowStep {
   return {
     id: `step-${randomUUID()}`,
     title: "",
@@ -519,12 +515,12 @@ function emptyGoatWorkflowStep(): GoatWorkflowStep {
   };
 }
 
-async function uniqueGoatWorkflowSlug(db: Db, workspaceId: string, name: string): Promise<string> {
-  const base = normalizeGoatBrainId(name).slice(0, 64).replace(/-+$/g, "") || "workflow";
+async function uniqueWorkflowSlug(db: Db, workspaceId: string, name: string): Promise<string> {
+  const base = normalizeBrainId(name).slice(0, 64).replace(/-+$/g, "") || "workflow";
   const rows = await db
-    .select({ slug: goatWorkflows.slug })
-    .from(goatWorkflows)
-    .where(and(eq(goatWorkflows.workspaceId, workspaceId), isNull(goatWorkflows.archivedAt)));
+    .select({ slug: workflows.slug })
+    .from(workflows)
+    .where(and(eq(workflows.workspaceId, workspaceId), isNull(workflows.archivedAt)));
   const taken = new Set(rows.map((row) => row.slug));
   if (!taken.has(base)) return base;
   for (let number = 2; number < 1000; number += 1) {

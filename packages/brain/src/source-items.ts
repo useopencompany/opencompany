@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { isValidGoatBrainSourceRef, parseGoatBrainSourceRef } from "./schema";
+import { isValidBrainSourceRef, parseBrainSourceRef } from "./schema";
 
 export type BrainSourceProvider =
   | "jamie"
@@ -40,7 +40,7 @@ export type NormalizedBrainSourceItem<TContent = unknown> = {
   content: TContent;
 };
 
-export type GoatImportResearchResult = {
+export type ImportResearchResult = {
   title: string;
   url: string;
   publishedDate?: string;
@@ -49,7 +49,7 @@ export type GoatImportResearchResult = {
   summary?: string;
 };
 
-export type NormalizedGoatImportContent =
+export type NormalizedImportContent =
   | {
       phase: "research";
       importRunId: string;
@@ -61,7 +61,7 @@ export type NormalizedGoatImportContent =
         query: string;
         category: "company" | "people" | "general";
       }>;
-      results: GoatImportResearchResult[];
+      results: ImportResearchResult[];
     }
   | {
       phase: "finalize";
@@ -77,13 +77,12 @@ export type NormalizedGoatImportContent =
       }>;
     };
 
-export type NormalizedGoatImportSourceItem =
-  NormalizedBrainSourceItem<NormalizedGoatImportContent> & {
-    sourceProvider: "goat-import";
-    sourceType: "run";
-  };
+export type NormalizedImportSourceItem = NormalizedBrainSourceItem<NormalizedImportContent> & {
+  sourceProvider: "goat-import";
+  sourceType: "run";
+};
 
-export function normalizeGoatImportRun(input: {
+export function normalizeImportRun(input: {
   phase: "research" | "finalize";
   importRunId: string;
   companyUrl: string;
@@ -94,21 +93,21 @@ export function normalizeGoatImportRun(input: {
     query: string;
     category: "company" | "people" | "general";
   }>;
-  results?: GoatImportResearchResult[];
+  results?: ImportResearchResult[];
   childSummary?: Array<{
     provider: string;
     status: "succeeded" | "failed" | "skipped";
     summary?: string;
   }>;
   capturedAt?: string;
-}): NormalizedGoatImportSourceItem {
+}): NormalizedImportSourceItem {
   const importRunId = readNonEmpty(input.importRunId, "import importRunId");
   const companyUrl = readNonEmpty(input.companyUrl, "import companyUrl");
   const companyDomain = readNonEmpty(input.companyDomain, "import companyDomain");
   const capturedAt = input.capturedAt ?? new Date().toISOString();
   const companyName = optionalString(input.companyName);
   const focus = optionalString(input.focus);
-  const content: NormalizedGoatImportContent =
+  const content: NormalizedImportContent =
     input.phase === "research"
       ? {
           phase: "research",
@@ -147,11 +146,9 @@ export function normalizeGoatImportRun(input: {
   };
 }
 
-export function isNormalizedGoatImportSourceItem(
-  value: unknown,
-): value is NormalizedGoatImportSourceItem {
+export function isNormalizedImportSourceItem(value: unknown): value is NormalizedImportSourceItem {
   if (!value || typeof value !== "object") return false;
-  const item = value as Partial<NormalizedGoatImportSourceItem>;
+  const item = value as Partial<NormalizedImportSourceItem>;
   if (
     item.sourceProvider !== "goat-import" ||
     item.sourceType !== "run" ||
@@ -163,7 +160,7 @@ export function isNormalizedGoatImportSourceItem(
   ) {
     return false;
   }
-  const content = item.content as Partial<NormalizedGoatImportContent>;
+  const content = item.content as Partial<NormalizedImportContent>;
   return (
     (content.phase === "research" || content.phase === "finalize") &&
     typeof content.importRunId === "string" &&
@@ -301,7 +298,7 @@ export type NormalizedFathomMeetingSourceItem =
     sourceType: "meeting";
   };
 
-export type NormalizedGoatChatCaptureContent = {
+export type NormalizedChatCaptureContent = {
   capture: {
     text: string;
     intent?: string;
@@ -312,15 +309,15 @@ export type NormalizedGoatChatCaptureContent = {
   };
 };
 
-export type NormalizedGoatChatCaptureSourceItem =
-  NormalizedBrainSourceItem<NormalizedGoatChatCaptureContent> & {
+export type NormalizedChatCaptureSourceItem =
+  NormalizedBrainSourceItem<NormalizedChatCaptureContent> & {
     sourceProvider: "goat-chat";
     sourceType: "capture";
   };
 
-export type GoatBrainHydratablePointerProvider = "slack" | "gmail" | "linear";
+export type BrainHydratablePointerProvider = "slack" | "gmail" | "linear";
 
-export type NormalizedGoatBrainPointerContent = {
+export type NormalizedBrainPointerContent = {
   pointer: {
     ref: string;
     fallbackText?: string;
@@ -331,13 +328,13 @@ export type NormalizedGoatBrainPointerContent = {
   };
 };
 
-export type NormalizedGoatBrainPointerSourceItem =
-  NormalizedBrainSourceItem<NormalizedGoatBrainPointerContent> & {
-    sourceProvider: GoatBrainHydratablePointerProvider;
+export type NormalizedBrainPointerSourceItem =
+  NormalizedBrainSourceItem<NormalizedBrainPointerContent> & {
+    sourceProvider: BrainHydratablePointerProvider;
     sourceType: "pointer";
   };
 
-export function normalizeGoatBrainPointerCapture(input: {
+export function normalizeBrainPointerCapture(input: {
   sourceRef: string;
   title: string;
   fallbackText?: string;
@@ -346,9 +343,9 @@ export function normalizeGoatBrainPointerCapture(input: {
   draftBrainId: string;
   draftFolder: string;
   capturedAt: string;
-}): NormalizedGoatBrainPointerSourceItem {
+}): NormalizedBrainPointerSourceItem {
   const sourceRef = input.sourceRef.trim();
-  const parsedRef = parseGoatBrainSourceRef(sourceRef);
+  const parsedRef = parseBrainSourceRef(sourceRef);
   if (!parsedRef || !isHydratablePointerProvider(parsedRef.provider)) {
     throw invalid(
       "pointer sourceRef must identify a supported integration source",
@@ -394,17 +391,17 @@ export function normalizeGoatBrainPointerCapture(input: {
   };
 }
 
-export function isNormalizedGoatBrainPointerSourceItem(
+export function isNormalizedBrainPointerSourceItem(
   value: unknown,
-): value is NormalizedGoatBrainPointerSourceItem {
+): value is NormalizedBrainPointerSourceItem {
   if (!value || typeof value !== "object") return false;
-  const item = value as Partial<NormalizedGoatBrainPointerSourceItem>;
+  const item = value as Partial<NormalizedBrainPointerSourceItem>;
   if (
     !isHydratablePointerProvider(item.sourceProvider) ||
     item.sourceType !== "pointer" ||
     typeof item.externalId !== "string" ||
     typeof item.sourceRef !== "string" ||
-    !isValidGoatBrainSourceRef(item.sourceRef) ||
+    !isValidBrainSourceRef(item.sourceRef) ||
     typeof item.title !== "string" ||
     typeof item.occurredAt !== "string" ||
     typeof item.capturedAt !== "string" ||
@@ -414,11 +411,11 @@ export function isNormalizedGoatBrainPointerSourceItem(
   ) {
     return false;
   }
-  const parsedRef = parseGoatBrainSourceRef(item.sourceRef);
+  const parsedRef = parseBrainSourceRef(item.sourceRef);
   if (parsedRef?.provider !== item.sourceProvider || item.externalId !== item.sourceRef) {
     return false;
   }
-  const pointer = (item.content as Partial<NormalizedGoatBrainPointerContent>).pointer;
+  const pointer = (item.content as Partial<NormalizedBrainPointerContent>).pointer;
   return (
     !!pointer &&
     typeof pointer === "object" &&
@@ -431,11 +428,11 @@ export function isNormalizedGoatBrainPointerSourceItem(
   );
 }
 
-function isHydratablePointerProvider(value: unknown): value is GoatBrainHydratablePointerProvider {
+function isHydratablePointerProvider(value: unknown): value is BrainHydratablePointerProvider {
   return value === "slack" || value === "gmail" || value === "linear";
 }
 
-export function normalizeGoatChatCapture(input: {
+export function normalizeChatCapture(input: {
   text: string;
   title: string;
   intent?: string;
@@ -446,7 +443,7 @@ export function normalizeGoatChatCapture(input: {
   capturedAt: string;
   sourceRef?: string;
   externalId?: string;
-}): NormalizedGoatChatCaptureSourceItem {
+}): NormalizedChatCaptureSourceItem {
   const text = input.text.trim();
   if (!text) throw invalid("capture text must not be empty", "invalid_capture");
   const title = input.title.trim();
@@ -461,7 +458,7 @@ export function normalizeGoatChatCapture(input: {
   if (!capturedAt) throw invalid("capture capturedAt must be a timestamp", "invalid_capture");
   const intent = optionalString(input.intent);
   const sourceRef = input.sourceRef?.trim() || `goat-chat:${userMessageId}`;
-  if (!isValidGoatBrainSourceRef(sourceRef)) {
+  if (!isValidBrainSourceRef(sourceRef)) {
     throw invalid("capture sourceRef must be valid", "invalid_capture");
   }
   const externalId = input.externalId?.trim() || draftBrainId;
@@ -498,11 +495,11 @@ export function normalizeGoatChatCapture(input: {
   };
 }
 
-export function isNormalizedGoatChatCaptureSourceItem(
+export function isNormalizedChatCaptureSourceItem(
   value: unknown,
-): value is NormalizedGoatChatCaptureSourceItem {
+): value is NormalizedChatCaptureSourceItem {
   if (!value || typeof value !== "object") return false;
-  const item = value as Partial<NormalizedGoatChatCaptureSourceItem>;
+  const item = value as Partial<NormalizedChatCaptureSourceItem>;
   if (
     item.sourceProvider !== "goat-chat" ||
     item.sourceType !== "capture" ||
@@ -517,7 +514,7 @@ export function isNormalizedGoatChatCaptureSourceItem(
   ) {
     return false;
   }
-  const capture = (item.content as Partial<NormalizedGoatChatCaptureContent>).capture;
+  const capture = (item.content as Partial<NormalizedChatCaptureContent>).capture;
   return (
     !!capture &&
     typeof capture === "object" &&

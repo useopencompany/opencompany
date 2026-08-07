@@ -1,37 +1,37 @@
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
-import { defaultGoatBrainFolderManifestEntries } from "../../brain/src/index";
-import { goatBrainFolders, goatBrains, goatWorkspaceMembers, goatWorkspaces } from "./schema";
+import { defaultBrainFolderManifestEntries } from "../../brain/src/index";
+import { brainFolders, brains, workspaceMembers, workspaces } from "./schema";
 import {
-  createGoatWorkspaceForUser,
-  defaultGoatBrainIdForUser,
-  getGoatBrainEnrichmentEnabled,
-  newGoatBrainId,
-  replaceGoatBrainMembers,
-  updateGoatBrainEnrichmentEnabled,
+  createWorkspaceForUser,
+  defaultBrainIdForUser,
+  getBrainEnrichmentEnabled,
+  newBrainId,
+  replaceBrainMembers,
+  updateBrainEnrichmentEnabled,
 } from "./workspaces";
 
 const pgDialect = new PgDialect();
 
 describe("Goat brain ids", () => {
   it("generates readable default brain ids without embedding the WorkOS user id", () => {
-    const id = defaultGoatBrainIdForUser("user_01JXYZ123456789");
+    const id = defaultBrainIdForUser("user_01JXYZ123456789");
 
     expect(id).toMatch(/^general-[a-f0-9]{12}$/);
     expect(id).not.toContain("user_01JXYZ123456789");
   });
 
   it("prefixes new brain ids with the normalized brain name", () => {
-    expect(newGoatBrainId("Customer Research")).toMatch(/^customer-research-[a-f0-9]{12}$/);
+    expect(newBrainId("Customer Research")).toMatch(/^customer-research-[a-f0-9]{12}$/);
   });
 
   it("falls back to a generic readable prefix when the name has no slug characters", () => {
-    expect(newGoatBrainId("!!!")).toMatch(/^brain-[a-f0-9]{12}$/);
+    expect(newBrainId("!!!")).toMatch(/^brain-[a-f0-9]{12}$/);
   });
 
   it("keeps generated ids within the legacy brain document id length", () => {
-    const id = newGoatBrainId("A".repeat(200));
+    const id = newBrainId("A".repeat(200));
 
     expect(id).toHaveLength(80);
   });
@@ -53,14 +53,14 @@ describe("Goat workspace creation", () => {
     const batch = vi.fn(
       async (queries: Array<{ table: unknown; values: Record<string, unknown> }>) =>
         queries.map((query) => {
-          if (query.table === goatWorkspaces) return [query.values];
-          if (query.table === goatBrains) return [query.values];
+          if (query.table === workspaces) return [query.values];
+          if (query.table === brains) return [query.values];
           return undefined;
         }),
     );
     const execute = vi.fn(async () => []);
 
-    const result = await createGoatWorkspaceForUser(
+    const result = await createWorkspaceForUser(
       {
         workspaceId: "goat_ws_new",
         workosOrganizationId: "org_new",
@@ -86,10 +86,10 @@ describe("Goat workspace creation", () => {
     );
     expect(batch).toHaveBeenCalledOnce();
     const batchedQueries = batch.mock.calls[0]?.[0] ?? [];
-    expect(batchedQueries).toHaveLength(3 + defaultGoatBrainFolderManifestEntries().length);
-    expect(batchedQueries.some((query) => query.table === goatWorkspaceMembers)).toBe(true);
-    expect(batchedQueries.filter((query) => query.table === goatBrainFolders)).toHaveLength(
-      defaultGoatBrainFolderManifestEntries().length,
+    expect(batchedQueries).toHaveLength(3 + defaultBrainFolderManifestEntries().length);
+    expect(batchedQueries.some((query) => query.table === workspaceMembers)).toBe(true);
+    expect(batchedQueries.filter((query) => query.table === brainFolders)).toHaveLength(
+      defaultBrainFolderManifestEntries().length,
     );
     expect(execute).toHaveBeenCalledOnce();
   });
@@ -99,20 +99,20 @@ describe("Goat brain enrichment flag", () => {
   it("returns the stored enrichment setting when the brain exists", async () => {
     const db = selectRowsDb([{ enrichmentEnabled: false }]);
 
-    await expect(getGoatBrainEnrichmentEnabled("gbrain_123", db)).resolves.toBe(false);
+    await expect(getBrainEnrichmentEnabled("gbrain_123", db)).resolves.toBe(false);
   });
 
   it("fails closed when the brain row is missing", async () => {
     const db = selectRowsDb([]);
 
-    await expect(getGoatBrainEnrichmentEnabled("gbrain_missing", db)).resolves.toBe(false);
+    await expect(getBrainEnrichmentEnabled("gbrain_missing", db)).resolves.toBe(false);
   });
 
   it("throws when updating a missing brain", async () => {
     const db = updateRowsDb([]);
 
     await expect(
-      updateGoatBrainEnrichmentEnabled({ brainRef: "gbrain_missing", enabled: true }, { db }),
+      updateBrainEnrichmentEnabled({ brainRef: "gbrain_missing", enabled: true }, { db }),
     ).rejects.toThrow("Brain not found.");
   });
 });
@@ -125,7 +125,7 @@ describe("Goat brain access membership", () => {
       return [];
     });
 
-    await replaceGoatBrainMembers(
+    await replaceBrainMembers(
       {
         brainRef: "brain_restricted",
         userWorkosIds: ["user_admin", "user_retained"],

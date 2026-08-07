@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseGoatBrainDocument, serializeGoatBrainDocument } from "./document";
-import { goatBrainWorkflowFromDocument, isGoatBrainWorkflowFolder } from "./workflows";
+import { parseBrainDocument, serializeBrainDocument } from "./document";
+import { brainWorkflowFromDocument, isBrainWorkflowFolder } from "./workflows";
 
 function workflowDocument(
   overrides: {
@@ -12,8 +12,8 @@ function workflowDocument(
     model?: string;
   } = {},
 ) {
-  return parseGoatBrainDocument(
-    serializeGoatBrainDocument({
+  return parseBrainDocument(
+    serializeBrainDocument({
       frontmatter: {
         id: overrides.id ?? "weekly-report",
         folder: overrides.folder ?? "workflows",
@@ -41,14 +41,14 @@ function workflowDocument(
 
 describe("Goat Brain workflows", () => {
   it("recognizes the workflows folder and its subfolders", () => {
-    expect(isGoatBrainWorkflowFolder("workflows")).toBe(true);
-    expect(isGoatBrainWorkflowFolder("workflows/reporting")).toBe(true);
-    expect(isGoatBrainWorkflowFolder("skills")).toBe(false);
-    expect(isGoatBrainWorkflowFolder("workflows-archive")).toBe(false);
+    expect(isBrainWorkflowFolder("workflows")).toBe(true);
+    expect(isBrainWorkflowFolder("workflows/reporting")).toBe(true);
+    expect(isBrainWorkflowFolder("skills")).toBe(false);
+    expect(isBrainWorkflowFolder("workflows-archive")).toBe(false);
   });
 
   it("materializes a complete draft or active workflow page", () => {
-    const workflow = goatBrainWorkflowFromDocument(workflowDocument());
+    const workflow = brainWorkflowFromDocument(workflowDocument());
     expect(workflow).toEqual({
       id: "weekly-report",
       name: "Weekly report",
@@ -56,21 +56,19 @@ describe("Goat Brain workflows", () => {
       instructions: "Collect updates with @skill/research on @kimi-k2.6.",
       model: "",
     });
-    expect(goatBrainWorkflowFromDocument(workflowDocument({ status: "active" }))).not.toBeNull();
+    expect(brainWorkflowFromDocument(workflowDocument({ status: "active" }))).not.toBeNull();
   });
 
   it("round-trips the frontmatter model", () => {
-    expect(goatBrainWorkflowFromDocument(workflowDocument({ model: "codex" }))?.model).toBe(
-      "codex",
-    );
+    expect(brainWorkflowFromDocument(workflowDocument({ model: "codex" }))?.model).toBe("codex");
   });
 
   it("rejects documents outside the workflows folder", () => {
-    expect(goatBrainWorkflowFromDocument(workflowDocument({ folder: "skills" }))).toBeNull();
+    expect(brainWorkflowFromDocument(workflowDocument({ folder: "skills" }))).toBeNull();
   });
 
   it("rejects archived documents and empty instructions", () => {
-    expect(goatBrainWorkflowFromDocument(workflowDocument({ status: "archived" }))).toBeNull();
-    expect(goatBrainWorkflowFromDocument(workflowDocument({ instructions: " " }))).toBeNull();
+    expect(brainWorkflowFromDocument(workflowDocument({ status: "archived" }))).toBeNull();
+    expect(brainWorkflowFromDocument(workflowDocument({ instructions: " " }))).toBeNull();
   });
 });

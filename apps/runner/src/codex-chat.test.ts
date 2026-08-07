@@ -1,19 +1,16 @@
 import { CODEX_COMMAND_TOOL_PART_TYPE, type CodexUiMessagePart } from "@opencompany/agent-runtime";
-import type { GoatWorkflowHarnessSpec } from "@opencompany/db/harness";
-import type { GoatTask } from "@opencompany/db/schema";
+import type { WorkflowHarnessSpec } from "@opencompany/db/harness";
+import type { Task } from "@opencompany/db/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CodexAppServerRequest } from "./codex-app-server";
 import {
+  CodexChatInterruptedError,
   claimCodexChatRecovery,
   createTurnAbortCheck,
-  GoatCodexChatInterruptedError,
-  runGoatCodexChatTurn,
+  runCodexChatTurn,
   summarizeCodexChatRecoveryProgress,
 } from "./codex-chat";
-import {
-  GoatCodexChatHandoffError,
-  GoatCodexChatRetryableInfrastructureError,
-} from "./codex-chat-errors";
+import { CodexChatHandoffError, CodexChatRetryableInfrastructureError } from "./codex-chat-errors";
 import type { RunnerEnv } from "./env";
 
 const appServerMocks = vi.hoisted(() => ({
@@ -25,8 +22,8 @@ const attachmentMocks = vi.hoisted(() => ({
 }));
 
 const codexAuthMocks = vi.hoisted(() => ({
-  loadGoatCodexCliAuth: vi.fn(),
-  persistRefreshedGoatCodexAuth: vi.fn(),
+  loadCodexCliAuth: vi.fn(),
+  persistRefreshedCodexAuth: vi.fn(),
 }));
 
 const codexToolMocks = vi.hoisted(() => ({
@@ -39,7 +36,7 @@ const dbMocks = vi.hoisted(() => ({
 }));
 
 const eventMocks = vi.hoisted(() => ({
-  createGoatCodexChatProjector: vi.fn(),
+  createCodexChatProjector: vi.fn(),
   loadCodexChatAssistantMessageParts: vi.fn(),
 }));
 
@@ -51,8 +48,8 @@ const sandboxMocks = vi.hoisted(() => ({
 }));
 
 const repoBootstrapMocks = vi.hoisted(() => ({
-  loadGoatRepositoryBootstrap: vi.fn(),
-  stageGoatRepositoryBootstrap: vi.fn(),
+  loadRepositoryBootstrap: vi.fn(),
+  stageRepositoryBootstrap: vi.fn(),
 }));
 
 vi.mock("./codex-app-server", () => ({
@@ -81,12 +78,12 @@ vi.mock("./github", () => ({
 }));
 
 vi.mock("./codex", () => ({
-  loadGoatCodexCliAuth: codexAuthMocks.loadGoatCodexCliAuth,
-  persistRefreshedGoatCodexAuth: codexAuthMocks.persistRefreshedGoatCodexAuth,
+  loadCodexCliAuth: codexAuthMocks.loadCodexCliAuth,
+  persistRefreshedCodexAuth: codexAuthMocks.persistRefreshedCodexAuth,
 }));
 
 vi.mock("./codex-chat-events", () => ({
-  createGoatCodexChatProjector: eventMocks.createGoatCodexChatProjector,
+  createCodexChatProjector: eventMocks.createCodexChatProjector,
   loadCodexChatAssistantMessageParts: eventMocks.loadCodexChatAssistantMessageParts,
 }));
 
@@ -107,8 +104,8 @@ vi.mock("./sandbox", () => ({
 }));
 
 vi.mock("./repo-bootstrap", () => ({
-  loadGoatRepositoryBootstrap: repoBootstrapMocks.loadGoatRepositoryBootstrap,
-  stageGoatRepositoryBootstrap: repoBootstrapMocks.stageGoatRepositoryBootstrap,
+  loadRepositoryBootstrap: repoBootstrapMocks.loadRepositoryBootstrap,
+  stageRepositoryBootstrap: repoBootstrapMocks.stageRepositoryBootstrap,
 }));
 
 describe("createTurnAbortCheck", () => {
@@ -128,10 +125,10 @@ describe("createTurnAbortCheck", () => {
       turnId: "turn_1",
       leaseId: "lease_1",
       leaseOwner: "runner_1",
-      shouldAbort: () => new GoatCodexChatHandoffError(),
+      shouldAbort: () => new CodexChatHandoffError(),
     });
 
-    await expect(checkAbort()).rejects.toBeInstanceOf(GoatCodexChatInterruptedError);
+    await expect(checkAbort()).rejects.toBeInstanceOf(CodexChatInterruptedError);
   });
 
   it("still hands off when the durable turn has no interrupt request", async () => {
@@ -146,29 +143,29 @@ describe("createTurnAbortCheck", () => {
       turnId: "turn_1",
       leaseId: "lease_1",
       leaseOwner: "runner_1",
-      shouldAbort: () => new GoatCodexChatHandoffError(),
+      shouldAbort: () => new CodexChatHandoffError(),
     });
 
-    await expect(checkAbort()).rejects.toBeInstanceOf(GoatCodexChatHandoffError);
+    await expect(checkAbort()).rejects.toBeInstanceOf(CodexChatHandoffError);
   });
 });
 
-describe("runGoatCodexChatTurn", () => {
+describe("runCodexChatTurn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dbMocks.selectRows.length = 0;
     dbMocks.execute.mockReset().mockResolvedValue({ rows: [{ id: "updated" }] });
-    codexAuthMocks.loadGoatCodexCliAuth.mockResolvedValue({
+    codexAuthMocks.loadCodexCliAuth.mockResolvedValue({
       kind: "api",
       baseUrl: "https://api.openai.test/v1",
       apiKeyEnvVar: "CODEX_API_KEY",
       apiKeyValue: "codex_secret",
       brokered: false,
     });
-    codexAuthMocks.persistRefreshedGoatCodexAuth.mockResolvedValue(undefined);
+    codexAuthMocks.persistRefreshedCodexAuth.mockResolvedValue(undefined);
     codexToolMocks.ensureCodexInstalled.mockResolvedValue(undefined);
     eventMocks.loadCodexChatAssistantMessageParts.mockResolvedValue([]);
-    eventMocks.createGoatCodexChatProjector.mockReturnValue({
+    eventMocks.createCodexChatProjector.mockReturnValue({
       push: vi.fn(async () => undefined),
       finalize: vi.fn(async () => undefined),
       fail: vi.fn(async () => undefined),
@@ -179,12 +176,12 @@ describe("runGoatCodexChatTurn", () => {
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
     sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValue(false);
-    repoBootstrapMocks.loadGoatRepositoryBootstrap.mockResolvedValue({
+    repoBootstrapMocks.loadRepositoryBootstrap.mockResolvedValue({
       configs: [],
       promptFragment: "",
       secretValues: [],
     });
-    repoBootstrapMocks.stageGoatRepositoryBootstrap.mockResolvedValue(undefined);
+    repoBootstrapMocks.stageRepositoryBootstrap.mockResolvedValue(undefined);
     appServerMocks.runCodexAppServerTurn.mockImplementation(
       async (input: { onBeforeEngineTurnStart?: (turnIds: string[]) => Promise<void> }) => {
         await input.onBeforeEngineTurnStart?.(["turn_before"]);
@@ -247,7 +244,7 @@ describe("runGoatCodexChatTurn", () => {
       },
     );
 
-    await runGoatCodexChatTurn({
+    await runCodexChatTurn({
       turn: codexTurn(),
       session: codexSession(),
       env: env(),
@@ -276,7 +273,7 @@ describe("runGoatCodexChatTurn", () => {
     const sandbox = fakeSandbox("sbx_existing");
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
 
-    await runGoatCodexChatTurn({
+    await runCodexChatTurn({
       turn: codexTurn(),
       session: codexSession(),
       env: env({ blobReadWriteToken: "blob-token" }),
@@ -317,7 +314,7 @@ describe("runGoatCodexChatTurn", () => {
     let resolveBootstrap:
       | ((bootstrap: { configs: []; promptFragment: string; secretValues: string[] }) => void)
       | undefined;
-    repoBootstrapMocks.loadGoatRepositoryBootstrap.mockImplementationOnce(
+    repoBootstrapMocks.loadRepositoryBootstrap.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
           resolveBootstrap = resolve;
@@ -336,17 +333,14 @@ describe("runGoatCodexChatTurn", () => {
       return sandbox;
     });
 
-    await runGoatCodexChatTurn({
+    await runCodexChatTurn({
       turn: codexTurn(),
       session: { ...codexSession(), workspaceId: "goat_ws_1" },
       env: env(),
     });
 
-    expect(repoBootstrapMocks.loadGoatRepositoryBootstrap).toHaveBeenCalledWith(
-      "goat_ws_1",
-      "user_1",
-    );
-    expect(repoBootstrapMocks.stageGoatRepositoryBootstrap).toHaveBeenCalledWith({
+    expect(repoBootstrapMocks.loadRepositoryBootstrap).toHaveBeenCalledWith("goat_ws_1", "user_1");
+    expect(repoBootstrapMocks.stageRepositoryBootstrap).toHaveBeenCalledWith({
       sandbox,
       bootstrap: expect.objectContaining({
         secretValues: ["never-project-this-secret"],
@@ -366,11 +360,11 @@ describe("runGoatCodexChatTurn", () => {
 
   it("propagates repository bootstrap load failures so the worker can retry the turn", async () => {
     const loadError = new Error("database unavailable");
-    repoBootstrapMocks.loadGoatRepositoryBootstrap.mockRejectedValueOnce(loadError);
+    repoBootstrapMocks.loadRepositoryBootstrap.mockRejectedValueOnce(loadError);
     dbMocks.selectRows.push([]);
 
     await expect(
-      runGoatCodexChatTurn({
+      runCodexChatTurn({
         turn: codexTurn(),
         session: { ...codexSession(), workspaceId: "goat_ws_1" },
         env: env(),
@@ -407,7 +401,7 @@ describe("runGoatCodexChatTurn", () => {
     const sandbox = fakeSandbox("sbx_existing");
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
 
-    await runGoatCodexChatTurn({
+    await runCodexChatTurn({
       turn: codexTurn(),
       session: codexSession(),
       env: env(),
@@ -475,7 +469,7 @@ describe("runGoatCodexChatTurn", () => {
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
     const harnessSpec = workflowTaskHarnessSpec();
 
-    await runGoatCodexChatTurn({
+    await runCodexChatTurn({
       turn: codexTurn(),
       session: codexSession(),
       taskContext: {
@@ -525,7 +519,7 @@ describe("runGoatCodexChatTurn", () => {
     const sandbox = fakeSandbox("sbx_existing");
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
 
-    await runGoatCodexChatTurn({
+    await runCodexChatTurn({
       turn: codexTurn(),
       session: codexSession(),
       env: env(),
@@ -573,14 +567,14 @@ describe("runGoatCodexChatTurn", () => {
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
     const harnessSpec = workflowTaskHarnessSpec();
 
-    await runGoatCodexChatTurn({
+    await runCodexChatTurn({
       turn: codexTurn(),
       session: codexSession(),
       taskContext: {
         task: workflowTask(harnessSpec),
         harnessSpec,
       },
-      env: env({ goatCodexChatIdleTimeoutMs: 30 * 60 * 1000 }),
+      env: env({ codexChatIdleTimeoutMs: 30 * 60 * 1000 }),
     });
 
     expect(sandboxMocks.createOrConnectSandbox).toHaveBeenCalledWith(
@@ -597,14 +591,14 @@ describe("runGoatCodexChatTurn", () => {
     sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValueOnce(true);
 
     await expect(
-      runGoatCodexChatTurn({
+      runCodexChatTurn({
         turn: codexTurn(),
         session: codexSession(),
         env: env(),
       }),
-    ).rejects.toBeInstanceOf(GoatCodexChatRetryableInfrastructureError);
+    ).rejects.toBeInstanceOf(CodexChatRetryableInfrastructureError);
 
-    expect(eventMocks.createGoatCodexChatProjector).not.toHaveBeenCalled();
+    expect(eventMocks.createCodexChatProjector).not.toHaveBeenCalled();
     expect(appServerMocks.runCodexAppServerTurn).not.toHaveBeenCalled();
   });
 
@@ -615,14 +609,14 @@ describe("runGoatCodexChatTurn", () => {
     sandboxMocks.createOrConnectSandbox.mockRejectedValueOnce(authentication);
 
     await expect(
-      runGoatCodexChatTurn({
+      runCodexChatTurn({
         turn: codexTurn(),
         session: codexSession(),
         env: env(),
       }),
     ).resolves.toBe("settled");
 
-    const projector = eventMocks.createGoatCodexChatProjector.mock.results[0]?.value;
+    const projector = eventMocks.createCodexChatProjector.mock.results[0]?.value;
     expect(projector.fail).toHaveBeenCalledWith(
       "Codex sandbox could not be started: Unauthorized. Send your message again to retry.",
     );
@@ -631,7 +625,7 @@ describe("runGoatCodexChatTurn", () => {
   it("persists the engine turn baseline at the start boundary", async () => {
     dbMocks.selectRows.push([]);
 
-    await runGoatCodexChatTurn({
+    await runCodexChatTurn({
       turn: codexTurn(),
       session: codexSession(),
       env: env(),
@@ -650,7 +644,7 @@ describe("runGoatCodexChatTurn", () => {
     dbMocks.selectRows.push([]);
 
     await expect(
-      runGoatCodexChatTurn({
+      runCodexChatTurn({
         turn: { ...codexTurn(), interruptRequestedAt: new Date("2026-07-10T09:01:00.000Z") },
         session: codexSession(),
         env: env(),
@@ -658,16 +652,16 @@ describe("runGoatCodexChatTurn", () => {
       }),
     ).resolves.toBe("settled");
 
-    const projector = eventMocks.createGoatCodexChatProjector.mock.results[0]?.value;
+    const projector = eventMocks.createCodexChatProjector.mock.results[0]?.value;
     expect(projector.interrupted).toHaveBeenCalledOnce();
-    expect(codexAuthMocks.loadGoatCodexCliAuth).not.toHaveBeenCalled();
+    expect(codexAuthMocks.loadCodexCliAuth).not.toHaveBeenCalled();
     expect(sandboxMocks.createOrConnectSandbox).not.toHaveBeenCalled();
   });
 
   it("registers the Brain host tool only for a session pinned to its contract", async () => {
     dbMocks.selectRows.push([]);
 
-    await runGoatCodexChatTurn({
+    await runCodexChatTurn({
       turn: codexTurn(),
       session: {
         ...codexSession(),
@@ -698,17 +692,17 @@ describe("runGoatCodexChatTurn", () => {
     dbMocks.selectRows.push([]);
     const sandbox = fakeSandbox("sbx_existing");
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
-    appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(new GoatCodexChatHandoffError());
+    appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(new CodexChatHandoffError());
 
     await expect(
-      runGoatCodexChatTurn({
+      runCodexChatTurn({
         turn: codexTurn(),
         session: codexSession(),
         env: env(),
       }),
     ).resolves.toBe("handed_off");
 
-    const projector = eventMocks.createGoatCodexChatProjector.mock.results[0]?.value;
+    const projector = eventMocks.createCodexChatProjector.mock.results[0]?.value;
     expect(projector.cancelPendingInteractions).toHaveBeenCalledOnce();
     expect(projector.finalize).not.toHaveBeenCalled();
     expect(projector.fail).not.toHaveBeenCalled();
@@ -730,15 +724,15 @@ describe("runGoatCodexChatTurn", () => {
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
 
     await expect(
-      runGoatCodexChatTurn({
+      runCodexChatTurn({
         turn: codexTurn(),
         session: codexSession(),
         env: env(),
-        shouldAbort: () => (handoffRequested ? new GoatCodexChatHandoffError() : null),
+        shouldAbort: () => (handoffRequested ? new CodexChatHandoffError() : null),
       }),
     ).resolves.toBe("handed_off");
 
-    const projector = eventMocks.createGoatCodexChatProjector.mock.results[0]?.value;
+    const projector = eventMocks.createCodexChatProjector.mock.results[0]?.value;
     expect(projector.cancelPendingInteractions).toHaveBeenCalledOnce();
     expect(projector.fail).not.toHaveBeenCalled();
     expect(appServerMocks.runCodexAppServerTurn).not.toHaveBeenCalled();
@@ -753,10 +747,10 @@ describe("runGoatCodexChatTurn", () => {
     }));
     const sandbox = fakeSandbox("sbx_existing");
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
-    appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(new GoatCodexChatHandoffError());
+    appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(new CodexChatHandoffError());
 
     await expect(
-      runGoatCodexChatTurn({
+      runCodexChatTurn({
         turn: codexTurn(),
         session: codexSession(),
         env: env(),
@@ -772,10 +766,10 @@ describe("runGoatCodexChatTurn", () => {
     dbMocks.execute.mockImplementation(async () => ({ rows: [{ id: "owned" }] }));
     const sandbox = fakeSandbox("sbx_existing");
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
-    appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(new GoatCodexChatHandoffError());
+    appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(new CodexChatHandoffError());
 
     await expect(
-      runGoatCodexChatTurn({
+      runCodexChatTurn({
         turn: codexTurn(),
         session: codexSession(),
         env: env(),
@@ -795,12 +789,12 @@ describe("runGoatCodexChatTurn", () => {
       }) => {
         await input.onEngineSessionId?.("thread_new");
         await input.onEngineTurnId?.("turn_new");
-        throw new GoatCodexChatHandoffError();
+        throw new CodexChatHandoffError();
       },
     );
 
     await expect(
-      runGoatCodexChatTurn({
+      runCodexChatTurn({
         turn: codexTurn(),
         session: { ...codexSession(), codexThreadId: null },
         env: env(),
@@ -832,7 +826,7 @@ describe("runGoatCodexChatTurn", () => {
       },
     );
 
-    await runGoatCodexChatTurn({
+    await runCodexChatTurn({
       turn: {
         ...codexTurn(),
         attempts: 2,
@@ -868,7 +862,7 @@ describe("runGoatCodexChatTurn", () => {
       },
     );
 
-    await runGoatCodexChatTurn({
+    await runCodexChatTurn({
       turn: {
         ...codexTurn(),
         attempts: 2,
@@ -904,9 +898,9 @@ describe("runGoatCodexChatTurn", () => {
       interrupted: vi.fn(async () => undefined),
       cancelPendingInteractions: vi.fn(async () => true),
     };
-    eventMocks.createGoatCodexChatProjector.mockReturnValueOnce(projector);
+    eventMocks.createCodexChatProjector.mockReturnValueOnce(projector);
 
-    await runGoatCodexChatTurn({
+    await runCodexChatTurn({
       turn: { ...codexTurn(), attempts: 2, codexTurnId: "turn_existing" },
       session: codexSession(),
       env: env(),
@@ -934,7 +928,7 @@ describe("runGoatCodexChatTurn", () => {
       },
     ]);
 
-    await runGoatCodexChatTurn({
+    await runCodexChatTurn({
       turn: { ...codexTurn(), attempts: 2, codexTurnId: "turn_existing" },
       session: {
         ...codexSession(),
@@ -955,14 +949,14 @@ describe("runGoatCodexChatTurn", () => {
   });
 
   it("registers read-only action tools for v2 workspace-pinned sessions", async () => {
-    await runGoatCodexChatTurn({
+    await runCodexChatTurn({
       turn: codexTurn(),
       session: {
         ...codexSession(),
         workspaceId: "workspace_1",
         hostToolContractVersion: "goat-codex-host-tools.v2",
       },
-      env: env({ goatAppUrl: "https://goat.example.com" }),
+      env: env({ appUrl: "https://goat.example.com" }),
     });
 
     expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
@@ -977,7 +971,7 @@ describe("runGoatCodexChatTurn", () => {
   });
 
   it("registers Brain capture for v3 Brain-pinned sessions", async () => {
-    await runGoatCodexChatTurn({
+    await runCodexChatTurn({
       turn: codexTurn(),
       session: {
         ...codexSession(),
@@ -985,7 +979,7 @@ describe("runGoatCodexChatTurn", () => {
         workspaceId: "workspace_1",
         hostToolContractVersion: "goat-codex-host-tools.v3",
       },
-      env: env({ goatAppUrl: "https://goat.example.com" }),
+      env: env({ appUrl: "https://goat.example.com" }),
     });
 
     expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
@@ -1196,7 +1190,7 @@ function codexTurn() {
   } as const;
 }
 
-function workflowTaskHarnessSpec(): GoatWorkflowHarnessSpec {
+function workflowTaskHarnessSpec(): WorkflowHarnessSpec {
   return {
     schemaVersion: "goat.harness.v1",
     engine: "codex",
@@ -1252,7 +1246,7 @@ function workflowTaskHarnessSpec(): GoatWorkflowHarnessSpec {
   };
 }
 
-function workflowTask(harnessSpec: GoatWorkflowHarnessSpec): GoatTask {
+function workflowTask(harnessSpec: WorkflowHarnessSpec): Task {
   const now = new Date("2026-07-10T12:00:00Z");
   return {
     id: "goat_task_1",
@@ -1298,15 +1292,15 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     publicUrl: undefined,
     llmBrokerEnabled: true,
     exaApiKey: "exa",
-    goatBrowserEnabled: false,
+    browserEnabled: false,
     ampE2bTemplate: undefined,
     codexE2bTemplate: undefined,
     e2bSandboxIdleTimeoutMs: 30_000,
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",
-    goatCodexChatIdleTimeoutMs: 300_000,
+    codexChatIdleTimeoutMs: 300_000,
     jobLeaseTtlMs: 300_000,
-    goatTaskWorkerEnabled: false,
+    taskWorkerEnabled: false,
     workerConcurrency: 2,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],

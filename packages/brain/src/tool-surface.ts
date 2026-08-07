@@ -9,13 +9,13 @@ export const GOAT_BRAIN_READ_COMMANDS = [
 
 export const GOAT_BRAIN_RETRIEVAL_COMMANDS = ["query", "get", "timeline", "list"] as const;
 
-export type GoatBrainReadCommand = (typeof GOAT_BRAIN_READ_COMMANDS)[number];
-export type GoatBrainRetrievalCommand = (typeof GOAT_BRAIN_RETRIEVAL_COMMANDS)[number];
-export type GoatBrainToolFlagValue = string | number | boolean | string[];
+export type BrainReadCommand = (typeof GOAT_BRAIN_READ_COMMANDS)[number];
+export type BrainRetrievalCommand = (typeof GOAT_BRAIN_RETRIEVAL_COMMANDS)[number];
+export type BrainToolFlagValue = string | number | boolean | string[];
 
-export type GoatBrainReadToolInput = {
-  command: GoatBrainReadCommand;
-  flags?: Record<string, GoatBrainToolFlagValue>;
+export type BrainReadToolInput = {
+  command: BrainReadCommand;
+  flags?: Record<string, BrainToolFlagValue>;
   stdin?: string;
 };
 
@@ -144,14 +144,14 @@ export const GOAT_BRAIN_READ_TOOL_DESCRIPTION =
 
 export const GOAT_CODEX_BRAIN_TOOL_CONTRACT_VERSION = "goat-codex-brain.v1";
 
-export function normalizeGoatBrainReadToolInput(input: unknown): GoatBrainReadToolInput {
+export function normalizeBrainReadToolInput(input: unknown): BrainReadToolInput {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new Error("goat_brain command is required.");
   }
   const record = input as Record<string, unknown>;
-  const command = normalizeGoatBrainReadCommand(record.command);
+  const command = normalizeBrainReadCommand(record.command);
   if (!command) throw new Error("goat_brain command is invalid.");
-  const flags = normalizeGoatBrainFlags(record.flags);
+  const flags = normalizeBrainFlags(record.flags);
   const stdin = typeof record.stdin === "string" ? record.stdin : "";
   return {
     command,
@@ -160,22 +160,20 @@ export function normalizeGoatBrainReadToolInput(input: unknown): GoatBrainReadTo
   };
 }
 
-export function isGoatBrainRetrievalCommand(
-  value: GoatBrainReadCommand,
-): value is GoatBrainRetrievalCommand {
+export function isBrainRetrievalCommand(value: BrainReadCommand): value is BrainRetrievalCommand {
   return (GOAT_BRAIN_RETRIEVAL_COMMANDS as readonly string[]).includes(value);
 }
 
-function normalizeGoatBrainReadCommand(value: unknown): GoatBrainReadCommand | null {
+function normalizeBrainReadCommand(value: unknown): BrainReadCommand | null {
   if (typeof value !== "string") return null;
   return (GOAT_BRAIN_READ_COMMANDS as readonly string[]).includes(value)
-    ? (value as GoatBrainReadCommand)
+    ? (value as BrainReadCommand)
     : null;
 }
 
-function normalizeGoatBrainFlags(value: unknown): Record<string, GoatBrainToolFlagValue> {
+function normalizeBrainFlags(value: unknown): Record<string, BrainToolFlagValue> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const out: Record<string, GoatBrainToolFlagValue> = {};
+  const out: Record<string, BrainToolFlagValue> = {};
   for (const [key, raw] of Object.entries(value)) {
     if (!key.trim()) continue;
     if (typeof raw === "string") {

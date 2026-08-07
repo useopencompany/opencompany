@@ -1,10 +1,10 @@
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { describe, expect, it, vi } from "vitest";
-import { goatBrainIngestJobs, goatBrainSourceItems, goatBrains } from "./schema";
+import { brainIngestJobs, brainSourceItems, brains } from "./schema";
 
-const { getDbMock, reserveGoatWorkspaceIngestionMock } = vi.hoisted(() => ({
+const { getDbMock, reserveWorkspaceIngestionMock } = vi.hoisted(() => ({
   getDbMock: vi.fn(),
-  reserveGoatWorkspaceIngestionMock: vi.fn(async ({ workspaceId }: { workspaceId: string }) => ({
+  reserveWorkspaceIngestionMock: vi.fn(async ({ workspaceId }: { workspaceId: string }) => ({
     reservation: { workspaceId },
     pendingUnits: 0,
     paused: false,
@@ -13,17 +13,17 @@ const { getDbMock, reserveGoatWorkspaceIngestionMock } = vi.hoisted(() => ({
 }));
 vi.mock("./client", () => ({ getDb: getDbMock }));
 vi.mock("./billing", () => ({
-  reserveGoatWorkspaceIngestion: reserveGoatWorkspaceIngestionMock,
+  reserveWorkspaceIngestion: reserveWorkspaceIngestionMock,
 }));
 
-const { upsertGoatBrainSourceItemAndEnqueue } = await import("./brain-ingest");
+const { upsertBrainSourceItemAndEnqueue } = await import("./brain-ingest");
 
-describe("upsertGoatBrainSourceItemAndEnqueue", () => {
+describe("upsertBrainSourceItemAndEnqueue", () => {
   it("persists discovery candidates without enqueueing an ingest job", async () => {
     let jobInsertAttempted = false;
     const db = {
       insert: (table: unknown) => {
-        if (table === goatBrainIngestJobs) jobInsertAttempted = true;
+        if (table === brainIngestJobs) jobInsertAttempted = true;
         return {
           values: () => ({
             onConflictDoUpdate: () => ({
@@ -34,7 +34,7 @@ describe("upsertGoatBrainSourceItemAndEnqueue", () => {
       },
     };
 
-    const result = await upsertGoatBrainSourceItemAndEnqueue({
+    const result = await upsertBrainSourceItemAndEnqueue({
       userWorkosId: "user_123",
       sourceConnectionId: "gbimp_123",
       item: {
@@ -71,14 +71,13 @@ describe("upsertGoatBrainSourceItemAndEnqueue", () => {
         values: (values: Record<string, unknown> | Array<Record<string, unknown>>) => ({
           onConflictDoUpdate: () => ({
             returning: async () => {
-              if (table !== goatBrainSourceItems)
-                throw new Error("Unexpected source insert table.");
+              if (table !== brainSourceItems) throw new Error("Unexpected source insert table.");
               return [{ id: "gbsrc_import" }];
             },
           }),
           onConflictDoNothing: () => ({
             returning: async () => {
-              if (table !== goatBrainIngestJobs) throw new Error("Unexpected job insert table.");
+              if (table !== brainIngestJobs) throw new Error("Unexpected job insert table.");
               insertedJobValues = Array.isArray(values) ? values : [values];
               return [
                 {
@@ -96,21 +95,21 @@ describe("upsertGoatBrainSourceItemAndEnqueue", () => {
       update: (table: unknown) => ({
         set: () => ({
           where: async () => {
-            if (table !== goatBrainSourceItems) throw new Error("Unexpected update table.");
+            if (table !== brainSourceItems) throw new Error("Unexpected update table.");
           },
         }),
       }),
       select: () => ({
         from: (table: unknown) => ({
           where: async () => {
-            if (table !== goatBrains) throw new Error("Unexpected select table.");
+            if (table !== brains) throw new Error("Unexpected select table.");
             return [{ id: "goat_brain_123", workspaceId: "goat_workspace_123" }];
           },
         }),
       }),
     };
 
-    const result = await upsertGoatBrainSourceItemAndEnqueue({
+    const result = await upsertBrainSourceItemAndEnqueue({
       userWorkosId: "user_123",
       sourceConnectionId: "gbimp_123",
       importRunId: "gbimp_123",
@@ -146,8 +145,8 @@ describe("upsertGoatBrainSourceItemAndEnqueue", () => {
   });
 
   it("bills only the union of newly claimed events in each workspace", async () => {
-    reserveGoatWorkspaceIngestionMock.mockClear();
-    const brains = [
+    reserveWorkspaceIngestionMock.mockClear();
+    const brainRows = [
       { id: "brain_a", workspaceId: "workspace_one" },
       { id: "brain_b", workspaceId: "workspace_one" },
       { id: "brain_c", workspaceId: "workspace_two" },
@@ -157,14 +156,13 @@ describe("upsertGoatBrainSourceItemAndEnqueue", () => {
         values: (values: Record<string, unknown> | Array<Record<string, unknown>>) => ({
           onConflictDoUpdate: () => ({
             returning: async () => {
-              if (table !== goatBrainSourceItems)
-                throw new Error("Unexpected source insert table.");
+              if (table !== brainSourceItems) throw new Error("Unexpected source insert table.");
               return [{ id: "gbsrc_claimed_window" }];
             },
           }),
           onConflictDoNothing: () => ({
             returning: async () => {
-              if (table !== goatBrainIngestJobs) throw new Error("Unexpected job insert table.");
+              if (table !== brainIngestJobs) throw new Error("Unexpected job insert table.");
               const rows = Array.isArray(values) ? values : [values];
               return rows.map((row, index) => ({
                 id: `job_${index}`,
@@ -180,15 +178,15 @@ describe("upsertGoatBrainSourceItemAndEnqueue", () => {
       select: () => ({
         from: (table: unknown) => ({
           where: async () => {
-            if (table !== goatBrains) throw new Error("Unexpected select table.");
-            return brains;
+            if (table !== brains) throw new Error("Unexpected select table.");
+            return brainRows;
           },
         }),
       }),
       update: () => ({ set: () => ({ where: async () => undefined }) }),
     };
 
-    await upsertGoatBrainSourceItemAndEnqueue({
+    await upsertBrainSourceItemAndEnqueue({
       userWorkosId: "user_123",
       sourceConnectionId: "slack_connection_123",
       integrationId: "integration_123",
@@ -205,7 +203,7 @@ describe("upsertGoatBrainSourceItemAndEnqueue", () => {
         content: {},
       },
       rawPayload: {},
-      brainRefs: brains.map((brain) => brain.id),
+      brainRefs: brainRows.map((brain) => brain.id),
       rawEventCount: 2,
       rawEventKeysByBrainRef: new Map([
         ["brain_a", ["message_1"]],
@@ -215,11 +213,11 @@ describe("upsertGoatBrainSourceItemAndEnqueue", () => {
       db,
     });
 
-    expect(reserveGoatWorkspaceIngestionMock).toHaveBeenCalledTimes(2);
-    expect(reserveGoatWorkspaceIngestionMock).toHaveBeenCalledWith(
+    expect(reserveWorkspaceIngestionMock).toHaveBeenCalledTimes(2);
+    expect(reserveWorkspaceIngestionMock).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceId: "workspace_one", rawEventCount: 2 }),
     );
-    expect(reserveGoatWorkspaceIngestionMock).toHaveBeenCalledWith(
+    expect(reserveWorkspaceIngestionMock).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceId: "workspace_two", rawEventCount: 1 }),
     );
   });
@@ -235,9 +233,9 @@ describe("upsertGoatBrainSourceItemAndEnqueue", () => {
       lastError: null,
       result: {},
     };
-    const db = goatBrainIngestDbMock({ sourceItem, jobs: [existingJob] });
+    const db = brainIngestDbMock({ sourceItem, jobs: [existingJob] });
 
-    const result = await upsertGoatBrainSourceItemAndEnqueue({
+    const result = await upsertBrainSourceItemAndEnqueue({
       userWorkosId: "user_123",
       sourceConnectionId: "glinconn_123",
       integrationId: "gint_123",
@@ -299,7 +297,7 @@ describe("upsertGoatBrainSourceItemAndEnqueue", () => {
       lastError: null,
       result: {},
     };
-    const db = goatBrainIngestDbMock({ sourceItem, jobs: [existingJob] });
+    const db = brainIngestDbMock({ sourceItem, jobs: [existingJob] });
     const transaction = vi.fn(() => {
       throw new Error("No transactions support in neon-http driver");
     });
@@ -309,7 +307,7 @@ describe("upsertGoatBrainSourceItemAndEnqueue", () => {
     Object.setPrototypeOf(db, NeonHttpDatabase.prototype);
     getDbMock.mockReturnValue(db);
 
-    const result = await upsertGoatBrainSourceItemAndEnqueue({
+    const result = await upsertBrainSourceItemAndEnqueue({
       userWorkosId: "user_123",
       sourceConnectionId: "glinconn_123",
       integrationId: "gint_123",
@@ -343,7 +341,7 @@ describe("upsertGoatBrainSourceItemAndEnqueue", () => {
   });
 });
 
-function goatBrainIngestDbMock(input: {
+function brainIngestDbMock(input: {
   sourceItem: { id: string };
   jobs: Array<{
     id: string;
@@ -360,13 +358,13 @@ function goatBrainIngestDbMock(input: {
       values: () => ({
         onConflictDoUpdate: () => ({
           returning: async () => {
-            if (table !== goatBrainSourceItems) throw new Error("Unexpected source insert table.");
+            if (table !== brainSourceItems) throw new Error("Unexpected source insert table.");
             return [input.sourceItem];
           },
         }),
         onConflictDoNothing: () => ({
           returning: async () => {
-            if (table !== goatBrainIngestJobs) throw new Error("Unexpected job insert table.");
+            if (table !== brainIngestJobs) throw new Error("Unexpected job insert table.");
             return [];
           },
         }),
@@ -375,14 +373,14 @@ function goatBrainIngestDbMock(input: {
     update: (table: unknown) => ({
       set: (values: Record<string, unknown>) => ({
         where: async () => {
-          if (table === goatBrainIngestJobs) {
+          if (table === brainIngestJobs) {
             for (const job of input.jobs) {
               if (job.status !== "queued") continue;
               Object.assign(job, values);
             }
             return;
           }
-          if (table === goatBrainSourceItems) {
+          if (table === brainSourceItems) {
             db.sourceItemUpdate = values;
             return;
           }
@@ -393,10 +391,10 @@ function goatBrainIngestDbMock(input: {
     select: () => ({
       from: (table: unknown) => ({
         where: async () => {
-          if (table === goatBrains) {
+          if (table === brains) {
             return [{ id: "goat_brain_123", workspaceId: "goat_workspace_123" }];
           }
-          if (table === goatBrainIngestJobs) return input.jobs;
+          if (table === brainIngestJobs) return input.jobs;
           throw new Error("Unexpected select table.");
         },
       }),

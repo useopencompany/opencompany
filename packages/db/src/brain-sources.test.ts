@@ -4,9 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 const { getDbMock } = vi.hoisted(() => ({ getDbMock: vi.fn() }));
 vi.mock("./client", () => ({ getDb: getDbMock }));
 
-const { setGoatBrainSourceEnabled, upsertGoatBrainSource } = await import("./brain-sources");
+const { setBrainSourceEnabled, upsertBrainSource } = await import("./brain-sources");
 
-describe("upsertGoatBrainSource", () => {
+describe("upsertBrainSource", () => {
   it("reports a new source without opening a transaction on the neon-http web client", async () => {
     const returning = vi.fn(async () => [{ id: "gbscfg_1" }]);
     const transaction = vi.fn(() => {
@@ -24,7 +24,7 @@ describe("upsertGoatBrainSource", () => {
     getDbMock.mockReturnValue(db);
 
     await expect(
-      upsertGoatBrainSource({
+      upsertBrainSource({
         brainRef: "gbrain_1",
         provider: "github",
         integrationId: "gint_1",
@@ -57,7 +57,7 @@ describe("upsertGoatBrainSource", () => {
     };
 
     await expect(
-      upsertGoatBrainSource({
+      upsertBrainSource({
         brainRef: "gbrain_1",
         provider: "github",
         integrationId: "gint_1",
@@ -75,7 +75,7 @@ describe("upsertGoatBrainSource", () => {
   });
 });
 
-describe("setGoatBrainSourceEnabled", () => {
+describe("setBrainSourceEnabled", () => {
   it("terminally cancels active ingest work when a source is disabled", async () => {
     const execute = vi.fn(async () => undefined);
     const returning = vi.fn(async () => [{ id: "gbscfg_1", integrationId: "gint_1" }]);
@@ -89,7 +89,7 @@ describe("setGoatBrainSourceEnabled", () => {
     };
 
     await expect(
-      setGoatBrainSourceEnabled({
+      setBrainSourceEnabled({
         brainRef: "gbrain_1",
         sourceId: "gbscfg_1",
         enabled: false,
@@ -114,7 +114,7 @@ describe("setGoatBrainSourceEnabled", () => {
     };
 
     await expect(
-      setGoatBrainSourceEnabled({
+      setBrainSourceEnabled({
         brainRef: "gbrain_1",
         sourceId: "gbscfg_1",
         enabled: true,

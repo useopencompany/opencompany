@@ -1,22 +1,22 @@
 import { createHash } from "node:crypto";
 import {
+  type CodexBrainCaptureGatewayRequest,
+  type CodexBrainCaptureGatewayResponse,
   GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
-  type GoatCodexBrainCaptureGatewayRequest,
-  type GoatCodexBrainCaptureGatewayResponse,
 } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
-import { goatCodexChatSessions, goatCodexChatTurns } from "@opencompany/db/schema";
-import { getGoatBrainAccess } from "@opencompany/db/workspaces";
+import { codexChatSessions, codexChatTurns } from "@opencompany/db/schema";
+import { getBrainAccess } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
 import { and, eq } from "drizzle-orm";
-import { captureToGoatBrainInbox } from "@/lib/brain-capture";
+import { captureToBrainInbox } from "@/lib/brain-capture";
 
 const logger = createLogger({
   service: "opencompany-goat",
   runtime: "codex-brain-capture",
 });
 
-type GoatCodexBrainCaptureContext = {
+type CodexBrainCaptureContext = {
   userWorkosId: string;
   workspaceId: string;
   brainRef: string;
@@ -24,27 +24,27 @@ type GoatCodexBrainCaptureContext = {
   userMessageId: string;
 };
 
-type GoatCodexBrainCaptureDependencies = {
+type CodexBrainCaptureDependencies = {
   loadContext: (
-    request: GoatCodexBrainCaptureGatewayRequest,
-  ) => Promise<GoatCodexBrainCaptureContext | null>;
+    request: CodexBrainCaptureGatewayRequest,
+  ) => Promise<CodexBrainCaptureContext | null>;
   getBrainAccess: (input: {
     userWorkosId: string;
     brainRef: string;
   }) => Promise<{ brain: { workspaceId: string } } | null>;
-  capture: typeof captureToGoatBrainInbox;
+  capture: typeof captureToBrainInbox;
 };
 
-const defaultDependencies: GoatCodexBrainCaptureDependencies = {
-  loadContext: loadGoatCodexBrainCaptureContext,
-  getBrainAccess: (input) => getGoatBrainAccess(input),
-  capture: captureToGoatBrainInbox,
+const defaultDependencies: CodexBrainCaptureDependencies = {
+  loadContext: loadCodexBrainCaptureContext,
+  getBrainAccess: (input) => getBrainAccess(input),
+  capture: captureToBrainInbox,
 };
 
-export async function executeGoatCodexBrainCaptureGateway(input: {
-  request: GoatCodexBrainCaptureGatewayRequest;
-  dependencies?: Partial<GoatCodexBrainCaptureDependencies>;
-}): Promise<GoatCodexBrainCaptureGatewayResponse> {
+export async function executeCodexBrainCaptureGateway(input: {
+  request: CodexBrainCaptureGatewayRequest;
+  dependencies?: Partial<CodexBrainCaptureDependencies>;
+}): Promise<CodexBrainCaptureGatewayResponse> {
   const dependencies = { ...defaultDependencies, ...input.dependencies };
   const context = await dependencies.loadContext(input.request);
   if (!context) {
@@ -160,31 +160,31 @@ function brainCaptureIdempotencyKey(input: {
   return `codex-save:${hash}`;
 }
 
-async function loadGoatCodexBrainCaptureContext(
-  request: GoatCodexBrainCaptureGatewayRequest,
-): Promise<GoatCodexBrainCaptureContext | null> {
+async function loadCodexBrainCaptureContext(
+  request: CodexBrainCaptureGatewayRequest,
+): Promise<CodexBrainCaptureContext | null> {
   const [row] = await getDb()
     .select({
-      userWorkosId: goatCodexChatSessions.userWorkosId,
-      workspaceId: goatCodexChatSessions.workspaceId,
-      brainRef: goatCodexChatSessions.brainRef,
-      chatSessionId: goatCodexChatSessions.chatSessionId,
-      userMessageId: goatCodexChatTurns.userMessageId,
+      userWorkosId: codexChatSessions.userWorkosId,
+      workspaceId: codexChatSessions.workspaceId,
+      brainRef: codexChatSessions.brainRef,
+      chatSessionId: codexChatSessions.chatSessionId,
+      userMessageId: codexChatTurns.userMessageId,
     })
-    .from(goatCodexChatSessions)
+    .from(codexChatSessions)
     .innerJoin(
-      goatCodexChatTurns,
+      codexChatTurns,
       and(
-        eq(goatCodexChatTurns.id, request.codexChatTurnId),
-        eq(goatCodexChatTurns.codexChatSessionId, goatCodexChatSessions.id),
-        eq(goatCodexChatTurns.userWorkosId, goatCodexChatSessions.userWorkosId),
+        eq(codexChatTurns.id, request.codexChatTurnId),
+        eq(codexChatTurns.codexChatSessionId, codexChatSessions.id),
+        eq(codexChatTurns.userWorkosId, codexChatSessions.userWorkosId),
       ),
     )
     .where(
       and(
-        eq(goatCodexChatSessions.id, request.codexChatSessionId),
-        eq(goatCodexChatSessions.hostToolContractVersion, GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION),
-        eq(goatCodexChatTurns.status, "running"),
+        eq(codexChatSessions.id, request.codexChatSessionId),
+        eq(codexChatSessions.hostToolContractVersion, GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION),
+        eq(codexChatTurns.status, "running"),
       ),
     )
     .limit(1);

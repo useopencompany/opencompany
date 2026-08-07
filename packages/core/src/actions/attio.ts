@@ -1,38 +1,35 @@
 import {
+  type AttioApiKeyCredentialPayload,
   GOAT_ATTIO_CREDENTIAL_KIND,
   GOAT_ATTIO_OBJECT_SLUGS,
   GOAT_ATTIO_PROVIDER,
-  type GoatAttioApiKeyCredentialPayload,
 } from "@opencompany/db/attio";
 import { getDb } from "@opencompany/db/client";
-import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-} from "@opencompany/db/integrations";
-import { goatIntegrations } from "@opencompany/db/schema";
+import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
+import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq } from "drizzle-orm";
 import {
-  GoatAttioApiRequestError,
-  hasGoatAttioCommentWriteScopes,
-  hasGoatAttioListCommentWriteScopes,
-  hasGoatAttioListConfigurationWriteScope,
-  hasGoatAttioListReadScopes,
-  hasGoatAttioListWriteScopes,
-  hasGoatAttioRecordCommentWriteScopes,
-  hasGoatAttioRecordReadScopes,
-  hasGoatAttioRecordWriteScopes,
-  requestGoatAttioApi,
+  AttioApiRequestError,
+  hasAttioCommentWriteScopes,
+  hasAttioListCommentWriteScopes,
+  hasAttioListConfigurationWriteScope,
+  hasAttioListReadScopes,
+  hasAttioListWriteScopes,
+  hasAttioRecordCommentWriteScopes,
+  hasAttioRecordReadScopes,
+  hasAttioRecordWriteScopes,
+  requestAttioApi,
 } from "../integrations/attio";
-import { effectiveCapabilityMode, type GoatCapabilityId, providerCapability } from "./capabilities";
+import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  ActionAuthError,
+  type ActionExecuteContext,
+  ActionInvalidParamsError,
+  ActionPermissionError,
+  type ActionProviderCatalog,
   GOAT_ACTION_EFFECTS_READ,
   GOAT_ACTION_EFFECTS_WRITE,
-  GoatActionAuthError,
-  type GoatActionExecuteContext,
-  GoatActionInvalidParamsError,
-  GoatActionPermissionError,
-  type GoatActionProviderCatalog,
-  type ResolvedGoatAction,
+  type ResolvedAction,
   requiredStringParam,
 } from "./types";
 
@@ -162,29 +159,29 @@ type AttioSelectOptionInput = {
 
 export async function resolveAttioActions(
   userWorkosId: string,
-): Promise<GoatActionProviderCatalog | null> {
+): Promise<ActionProviderCatalog | null> {
   const connections = await loadAttioConnections(userWorkosId);
   if (connections.length === 0) return null;
 
   const readConnections = eligibleConnections(connections, "read");
   const writeConnections = eligibleConnections(connections, "write");
   const listReadConnections = readConnections.filter((connection) =>
-    hasGoatAttioListReadScopes(connection.scopes),
+    hasAttioListReadScopes(connection.scopes),
   );
   // Reads remain backward-compatible with connections saved before scope
   // tracking, but mutations fail closed unless Attio explicitly reported the
   // required read-write scope.
   const recordWriteConnections = writeConnections.filter((connection) =>
-    hasGoatAttioRecordWriteScopes(connection.scopes),
+    hasAttioRecordWriteScopes(connection.scopes),
   );
   const listWriteConnections = writeConnections.filter((connection) =>
-    hasGoatAttioListWriteScopes(connection.scopes),
+    hasAttioListWriteScopes(connection.scopes),
   );
   const listConfigurationWriteConnections = writeConnections.filter((connection) =>
-    hasGoatAttioListConfigurationWriteScope(connection.scopes),
+    hasAttioListConfigurationWriteScope(connection.scopes),
   );
   const commentWriteConnections = writeConnections.filter((connection) =>
-    hasGoatAttioCommentWriteScopes(connection.scopes),
+    hasAttioCommentWriteScopes(connection.scopes),
   );
   if (
     readConnections.length === 0 &&
@@ -197,7 +194,7 @@ export async function resolveAttioActions(
   }
 
   const credentialPromises = new Map<string, Promise<AttioCredential>>();
-  const getCredential = (context: GoatActionExecuteContext, connection: AttioConnection) => {
+  const getCredential = (context: ActionExecuteContext, connection: AttioConnection) => {
     const existing = credentialPromises.get(connection.integrationId);
     if (existing) return existing;
     const pending = loadAttioCredential(context.userWorkosId, connection).catch((error) => {
@@ -208,7 +205,7 @@ export async function resolveAttioActions(
     return pending;
   };
 
-  const actions: ResolvedGoatAction[] = [];
+  const actions: ResolvedAction[] = [];
 
   if (readConnections.length > 0) {
     const multipleAccounts = readConnections.length > 1;
@@ -258,7 +255,7 @@ export async function resolveAttioActions(
         );
         const query = requiredStringParam(params, "query");
         if (query.length > MAX_QUERY_CHARS) {
-          throw new GoatActionInvalidParamsError(
+          throw new ActionInvalidParamsError(
             `"query" must be at most ${MAX_QUERY_CHARS} characters.`,
           );
         }
@@ -337,7 +334,7 @@ export async function resolveAttioActions(
         );
         const recordId = requiredStringParam(params, "record_id");
         if (recordId.length > MAX_RECORD_ID_CHARS) {
-          throw new GoatActionInvalidParamsError(
+          throw new ActionInvalidParamsError(
             `"record_id" must be at most ${MAX_RECORD_ID_CHARS} characters.`,
           );
         }
@@ -452,7 +449,7 @@ export async function resolveAttioActions(
         );
         const query = optionalAttioStringParam(params, "query");
         if (query && query.length > MAX_QUERY_CHARS) {
-          throw new GoatActionInvalidParamsError(
+          throw new ActionInvalidParamsError(
             `"query" must be at most ${MAX_QUERY_CHARS} characters.`,
           );
         }
@@ -690,7 +687,7 @@ export async function resolveAttioActions(
         );
         const filter = parseAttioFilter(params.filter);
         if (reference.viewId && filter) {
-          throw new GoatActionInvalidParamsError(
+          throw new ActionInvalidParamsError(
             '"filter" cannot be combined with a saved view; use either "view" or "filter".',
           );
         }
@@ -1066,13 +1063,13 @@ export async function resolveAttioActions(
         const type = parseAttioListAttributeType(params.type);
         const description = optionalAttioStringParam(params, "description");
         if (description && description.length > MAX_PROPERTY_CHARS) {
-          throw new GoatActionInvalidParamsError(
+          throw new ActionInvalidParamsError(
             `"description" must be at most ${MAX_PROPERTY_CHARS} characters.`,
           );
         }
         const isMultiselect = optionalBooleanParam(params, "is_multiselect") ?? false;
         if (type === "status" && isMultiselect) {
-          throw new GoatActionInvalidParamsError(
+          throw new ActionInvalidParamsError(
             '"is_multiselect" cannot be true for a status attribute.',
           );
         }
@@ -1486,7 +1483,7 @@ export async function resolveAttioActions(
 
 function eligibleConnections(
   connections: readonly AttioConnection[],
-  capabilityId: GoatCapabilityId,
+  capabilityId: CapabilityId,
 ): AttioConnection[] {
   return connections.filter(
     (connection) =>
@@ -1495,9 +1492,9 @@ function eligibleConnections(
 }
 
 function permissionAnnotation(
-  capabilityId: GoatCapabilityId,
+  capabilityId: CapabilityId,
   connections: readonly AttioConnection[],
-): Pick<ResolvedGoatAction, "permissionMode" | "permission"> {
+): Pick<ResolvedAction, "permissionMode" | "permission"> {
   const askIntegrationIds = connections
     .filter(
       (connection) =>
@@ -1525,22 +1522,22 @@ function uniqueConnections(connections: readonly AttioConnection[]): AttioConnec
 async function loadAttioConnections(userWorkosId: string): Promise<AttioConnection[]> {
   const rows = await getDb()
     .select({
-      integrationId: goatIntegrations.id,
-      workspaceId: goatIntegrations.externalId,
-      workspaceName: goatIntegrations.connectionLabel,
-      scopes: goatIntegrations.scopes,
-      status: goatIntegrations.status,
-      capabilityModes: goatIntegrations.capabilityModes,
+      integrationId: integrations.id,
+      workspaceId: integrations.externalId,
+      workspaceName: integrations.connectionLabel,
+      scopes: integrations.scopes,
+      status: integrations.status,
+      capabilityModes: integrations.capabilityModes,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, GOAT_ATTIO_PROVIDER),
-        eq(goatIntegrations.status, "connected"),
+        eq(integrations.userWorkosId, userWorkosId),
+        eq(integrations.provider, GOAT_ATTIO_PROVIDER),
+        eq(integrations.status, "connected"),
       ),
     )
-    .orderBy(desc(goatIntegrations.updatedAt));
+    .orderBy(desc(integrations.updatedAt));
 
   const readable = rows
     .filter((row) => row.status === "connected" && hasAttioReadScopes(row.scopes))
@@ -1582,7 +1579,7 @@ function hasAttioReadScopes(scopes: string[]) {
   // Connections saved before scope tracking still came through the same
   // read/write setup flow; execution remains the final permission check.
   if (scopes.length === 0) return true;
-  return hasGoatAttioRecordReadScopes(scopes);
+  return hasAttioRecordReadScopes(scopes);
 }
 
 function baseConnectionLabel(connection: { workspaceId: string; workspaceName: string | null }) {
@@ -1596,7 +1593,7 @@ function resolveConnection(
 ): AttioConnection {
   if (!account) {
     if (connections.length === 1) return connections[0]!;
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `Multiple Attio workspaces are connected; pass account as one of: ${connections
         .map((connection) => JSON.stringify(connection.selector))
         .join(", ")}.`,
@@ -1605,7 +1602,7 @@ function resolveConnection(
   const wanted = account.toLowerCase();
   const match = connections.find((connection) => connection.selector.toLowerCase() === wanted);
   if (!match) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `No connected Attio workspace matches ${JSON.stringify(account)}. Connected workspaces: ${connections
         .map((connection) => JSON.stringify(connection.selector))
         .join(", ")}.`,
@@ -1618,19 +1615,19 @@ async function loadAttioCredential(
   userWorkosId: string,
   connection: AttioConnection,
 ): Promise<AttioCredential> {
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId,
     integrationId: connection.integrationId,
     provider: GOAT_ATTIO_PROVIDER,
     kind: GOAT_ATTIO_CREDENTIAL_KIND,
   });
-  const payload = credential?.payload as GoatAttioApiKeyCredentialPayload | undefined;
+  const payload = credential?.payload as AttioApiKeyCredentialPayload | undefined;
   if (
     typeof payload?.apiKey !== "string" ||
     !payload.apiKey ||
     payload.workspaceId !== connection.workspaceId
   ) {
-    throw new GoatActionAuthError(
+    throw new ActionAuthError(
       "auth_expired",
       "attio",
       `The Attio connection for ${connection.selector} has no usable API key; reconnect Attio in Settings → Integrations.`,
@@ -1647,7 +1644,7 @@ async function loadAttioCredential(
     }
   }
   if (availableObjects.size === 0) {
-    throw new GoatActionAuthError(
+    throw new ActionAuthError(
       "auth_expired",
       "attio",
       `The Attio connection for ${connection.selector} has no usable standard objects; reconnect Attio in Settings → Integrations.`,
@@ -1662,7 +1659,7 @@ async function loadAttioCredential(
 }
 
 async function searchAttioRecords(input: {
-  context: GoatActionExecuteContext;
+  context: ActionExecuteContext;
   connection: AttioConnection;
   credential: AttioCredential;
   query: string;
@@ -1685,7 +1682,7 @@ async function searchAttioRecords(input: {
 }
 
 async function callAttioApi(input: {
-  context: GoatActionExecuteContext;
+  context: ActionExecuteContext;
   connection: AttioConnection;
   credential: AttioCredential;
   path: string;
@@ -1693,7 +1690,7 @@ async function callAttioApi(input: {
   body?: unknown;
 }) {
   try {
-    return await requestGoatAttioApi({
+    return await requestAttioApi({
       apiKey: input.credential.apiKey,
       path: input.path,
       ...(input.method ? { method: input.method } : {}),
@@ -1706,7 +1703,7 @@ async function callAttioApi(input: {
 }
 
 async function listAttioAttributes(input: {
-  context: GoatActionExecuteContext;
+  context: ActionExecuteContext;
   connection: AttioConnection;
   credential: AttioCredential;
   target: "objects" | "lists";
@@ -1742,7 +1739,7 @@ async function listAttioAttributes(input: {
 
 async function hydrateAttioAttributeOptions(
   input: {
-    context: GoatActionExecuteContext;
+    context: ActionExecuteContext;
     connection: AttioConnection;
     credential: AttioCredential;
     target: "objects" | "lists";
@@ -1768,7 +1765,7 @@ async function hydrateAttioAttributeOptions(
 }
 
 async function assertAttioWriteStillEnabled(
-  context: GoatActionExecuteContext,
+  context: ActionExecuteContext,
   connection: AttioConnection,
   resource:
     | "record"
@@ -1780,45 +1777,45 @@ async function assertAttioWriteStillEnabled(
 ) {
   const [row] = await getDb()
     .select({
-      status: goatIntegrations.status,
-      scopes: goatIntegrations.scopes,
-      capabilityModes: goatIntegrations.capabilityModes,
+      status: integrations.status,
+      scopes: integrations.scopes,
+      capabilityModes: integrations.capabilityModes,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.id, connection.integrationId),
-        eq(goatIntegrations.userWorkosId, context.userWorkosId),
-        eq(goatIntegrations.provider, GOAT_ATTIO_PROVIDER),
+        eq(integrations.id, connection.integrationId),
+        eq(integrations.userWorkosId, context.userWorkosId),
+        eq(integrations.provider, GOAT_ATTIO_PROVIDER),
       ),
     )
     .limit(1);
   if (!row || row.status !== "connected") {
-    throw new GoatActionPermissionError(
+    throw new ActionPermissionError(
       "attio",
       `The Attio connection for ${connection.selector} changed before the update. Retry so Goat can use the current connection and permission.`,
     );
   }
   if (effectiveCapabilityMode("attio", "write", row.capabilityModes) === "off") {
-    throw new GoatActionPermissionError(
+    throw new ActionPermissionError(
       "attio",
       `Updating Attio is turned off for ${connection.selector}. It can be changed under Settings → Integrations.`,
     );
   }
   const hasWriteScope =
     resource === "record"
-      ? hasGoatAttioRecordWriteScopes(row.scopes)
+      ? hasAttioRecordWriteScopes(row.scopes)
       : resource === "list_entry"
-        ? hasGoatAttioListWriteScopes(row.scopes)
+        ? hasAttioListWriteScopes(row.scopes)
         : resource === "list_configuration"
-          ? hasGoatAttioListConfigurationWriteScope(row.scopes)
+          ? hasAttioListConfigurationWriteScope(row.scopes)
           : resource === "record_comment"
-            ? hasGoatAttioRecordCommentWriteScopes(row.scopes)
+            ? hasAttioRecordCommentWriteScopes(row.scopes)
             : resource === "list_comment"
-              ? hasGoatAttioListCommentWriteScopes(row.scopes)
-              : hasGoatAttioCommentWriteScopes(row.scopes);
+              ? hasAttioListCommentWriteScopes(row.scopes)
+              : hasAttioCommentWriteScopes(row.scopes);
   if (!hasWriteScope) {
-    throw new GoatActionPermissionError(
+    throw new ActionPermissionError(
       "attio",
       `The Attio API key for ${connection.selector} does not allow this update. Reconnect Attio with the read-write scopes shown in Settings → Integrations.`,
     );
@@ -1826,7 +1823,7 @@ async function assertAttioWriteStillEnabled(
 }
 
 async function queryAttioList(input: {
-  context: GoatActionExecuteContext;
+  context: ActionExecuteContext;
   connection: AttioConnection;
   credential: AttioCredential;
   list: string;
@@ -1839,12 +1836,12 @@ async function queryAttioList(input: {
   const encodedList = encodeURIComponent(input.list);
   try {
     const [listResponse, entriesResponse] = await Promise.all([
-      requestGoatAttioApi({
+      requestAttioApi({
         apiKey: input.credential.apiKey,
         path: `/lists/${encodedList}`,
         signal: input.context.signal,
       }),
-      requestGoatAttioApi({
+      requestAttioApi({
         apiKey: input.credential.apiKey,
         path: `/lists/${encodedList}/entries/query`,
         method: "POST",
@@ -1884,24 +1881,24 @@ async function queryAttioList(input: {
 
 async function rethrowAttioError(
   error: unknown,
-  input: { context: GoatActionExecuteContext; connection: AttioConnection },
+  input: { context: ActionExecuteContext; connection: AttioConnection },
 ): Promise<never> {
   if (input.context.signal.aborted) throw error;
-  if (error instanceof GoatAttioApiRequestError && (error.status === 401 || error.status === 403)) {
-    await markGoatIntegrationStatus({
+  if (error instanceof AttioApiRequestError && (error.status === 401 || error.status === 403)) {
+    await markIntegrationStatus({
       userWorkosId: input.context.userWorkosId,
       integrationId: input.connection.integrationId,
       provider: GOAT_ATTIO_PROVIDER,
       status: "needs_reauth",
       statusReason: "Attio rejected the saved API key.",
     }).catch(() => {});
-    throw new GoatActionAuthError(
+    throw new ActionAuthError(
       "auth_expired",
       "attio",
       `Attio rejected the API key for ${input.connection.selector}; reconnect Attio in Settings → Integrations.`,
     );
   }
-  if (error instanceof GoatAttioApiRequestError) {
+  if (error instanceof AttioApiRequestError) {
     throw new Error(
       error.detail
         ? `Attio API request failed (${error.status}): ${error.detail}.`
@@ -1915,7 +1912,7 @@ function assertKnownParams(params: Record<string, unknown>, allowed: readonly st
   const allowedSet = new Set(allowed);
   const unknown = Object.keys(params).filter((key) => !allowedSet.has(key));
   if (unknown.length > 0) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `Unknown parameter${unknown.length === 1 ? "" : "s"}: ${unknown
         .map((key) => JSON.stringify(key))
         .join(", ")}.`,
@@ -1926,7 +1923,7 @@ function assertKnownParams(params: Record<string, unknown>, allowed: readonly st
 function parseLimit(value: unknown, bounds: { fallback: number; max: number }) {
   if (value === undefined || value === null) return bounds.fallback;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > bounds.max) {
-    throw new GoatActionInvalidParamsError(`"limit" must be an integer from 1 to ${bounds.max}.`);
+    throw new ActionInvalidParamsError(`"limit" must be an integer from 1 to ${bounds.max}.`);
   }
   return value;
 }
@@ -1939,9 +1936,7 @@ function parseOffset(value: unknown) {
     value < 0 ||
     value > MAX_LIST_OFFSET
   ) {
-    throw new GoatActionInvalidParamsError(
-      `"offset" must be an integer from 0 to ${MAX_LIST_OFFSET}.`,
-    );
+    throw new ActionInvalidParamsError(`"offset" must be an integer from 0 to ${MAX_LIST_OFFSET}.`);
   }
   return value;
 }
@@ -1949,7 +1944,7 @@ function parseOffset(value: unknown) {
 function parseBoundedId(params: Record<string, unknown>, key: string, maxChars: number): string {
   const value = requiredStringParam(params, key);
   if (value.length > maxChars) {
-    throw new GoatActionInvalidParamsError(`"${key}" must be at most ${maxChars} characters.`);
+    throw new ActionInvalidParamsError(`"${key}" must be at most ${maxChars} characters.`);
   }
   return value;
 }
@@ -1958,7 +1953,7 @@ function optionalAttioStringParam(params: Record<string, unknown>, key: string) 
   const value = params[key];
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "string" || !value.trim()) {
-    throw new GoatActionInvalidParamsError(`"${key}" must be a non-empty string.`);
+    throw new ActionInvalidParamsError(`"${key}" must be a non-empty string.`);
   }
   return value.trim();
 }
@@ -1967,7 +1962,7 @@ function optionalBooleanParam(params: Record<string, unknown>, key: string): boo
   const value = params[key];
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "boolean") {
-    throw new GoatActionInvalidParamsError(`"${key}" must be a boolean.`);
+    throw new ActionInvalidParamsError(`"${key}" must be a boolean.`);
   }
   return value;
 }
@@ -1978,7 +1973,7 @@ function parseAttioApiSlug(value: unknown) {
     !/^[a-z0-9_-]{1,200}$/.test(value.trim()) ||
     ["__proto__", "constructor", "prototype"].includes(value.trim())
   ) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       '"api_slug" must be a lowercase Attio API slug containing only letters, numbers, underscores, or hyphens.',
     );
   }
@@ -1987,7 +1982,7 @@ function parseAttioApiSlug(value: unknown) {
 
 function parseAttioListAttributeType(value: unknown): AttioListAttributeType {
   if (typeof value !== "string" || !(LIST_ATTRIBUTE_TYPES as readonly string[]).includes(value)) {
-    throw new GoatActionInvalidParamsError('"type" must be one of status, select, or text.');
+    throw new ActionInvalidParamsError('"type" must be one of status, select, or text.');
   }
   return value as AttioListAttributeType;
 }
@@ -1995,7 +1990,7 @@ function parseAttioListAttributeType(value: unknown): AttioListAttributeType {
 function parseOptionalAttioDuration(value: unknown) {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "string") {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       '"target_time_in_status" must be an ISO-8601 duration string.',
     );
   }
@@ -2007,7 +2002,7 @@ function parseOptionalAttioDuration(value: unknown) {
     normalized.length > MAX_TARGET_TIME_IN_STATUS_CHARS ||
     !isoDuration.test(normalized)
   ) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       '"target_time_in_status" must be a valid ISO-8601 duration such as "P7D" or "PT24H".',
     );
   }
@@ -2018,10 +2013,10 @@ function parseAttioFilter(value: unknown): Record<string, unknown> | undefined {
   if (value === undefined || value === null) return undefined;
   const filter = asRecord(value);
   if (!filter || Object.keys(filter).length === 0) {
-    throw new GoatActionInvalidParamsError('"filter" must be a non-empty object.');
+    throw new ActionInvalidParamsError('"filter" must be a non-empty object.');
   }
   if (Object.keys(filter).length > MAX_FILTER_PROPERTIES) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"filter" allows at most ${MAX_FILTER_PROPERTIES} top-level properties.`,
     );
   }
@@ -2035,21 +2030,17 @@ function parseAttioSorts(
 ): Array<{ direction: "asc" | "desc"; attribute: string; field?: string }> | undefined {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value) || value.length > MAX_SORTS) {
-    throw new GoatActionInvalidParamsError(
-      `"sorts" must be an array of at most ${MAX_SORTS} sorts.`,
-    );
+    throw new ActionInvalidParamsError(`"sorts" must be an array of at most ${MAX_SORTS} sorts.`);
   }
   if (value.length === 0) return undefined;
   return value.map((raw, index) => {
     const sort = asRecord(raw);
     if (!sort) {
-      throw new GoatActionInvalidParamsError(`"sorts[${index}]" must be an object.`);
+      throw new ActionInvalidParamsError(`"sorts[${index}]" must be an object.`);
     }
     assertKnownParams(sort, ["direction", "attribute", "field"]);
     if (sort.direction !== "asc" && sort.direction !== "desc") {
-      throw new GoatActionInvalidParamsError(
-        `"sorts[${index}].direction" must be "asc" or "desc".`,
-      );
+      throw new ActionInvalidParamsError(`"sorts[${index}].direction" must be "asc" or "desc".`);
     }
     const attribute = parseSafeAttioIdentifier(sort.attribute, `sorts[${index}].attribute`);
     const field =
@@ -2079,16 +2070,16 @@ function parseAttioValuesObject(
 ): Record<string, unknown> {
   const values = asRecord(value);
   if (!values || Object.keys(values).length === 0) {
-    throw new GoatActionInvalidParamsError(`"${key}" must be a non-empty object.`);
+    throw new ActionInvalidParamsError(`"${key}" must be a non-empty object.`);
   }
   if (Object.keys(values).length > MAX_WRITE_PROPERTIES) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"${key}" allows at most ${MAX_WRITE_PROPERTIES} fields per write.`,
     );
   }
   for (const key of Object.keys(values)) {
     if (!safeAttioApiIdentifier(key)) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `"values" key ${JSON.stringify(key)} must be an Attio attribute slug or UUID.`,
       );
     }
@@ -2100,11 +2091,11 @@ function parseAttioValuesObject(
 
 function parseAttioCommentContent(value: unknown) {
   if (typeof value !== "string" || !value.trim()) {
-    throw new GoatActionInvalidParamsError('"content" must be a non-empty string.');
+    throw new ActionInvalidParamsError('"content" must be a non-empty string.');
   }
   const content = value.trim();
   if (content.length > MAX_COMMENT_CHARS) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"content" must be at most ${MAX_COMMENT_CHARS} characters.`,
     );
   }
@@ -2116,7 +2107,7 @@ function parseOptionalAttioAuthorId(params: Record<string, unknown>) {
   if (value === undefined || value === null) return undefined;
   const id = safeAttioApiIdentifier(value);
   if (!id || id.length > MAX_COMMENT_ID_CHARS) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"author_workspace_member_id" must be an Attio workspace member UUID.`,
     );
   }
@@ -2141,7 +2132,7 @@ function parseAttioCommentTarget(
   const targetCount =
     Number(hasThread) + Number(hasObject || hasRecordId) + Number(hasList || hasEntryId);
   if (targetCount !== 1) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       'Pass exactly one comment target: "thread_id", or both "object" and "record_id", or both "list" and "entry_id".',
     );
   }
@@ -2153,9 +2144,7 @@ function parseAttioCommentTarget(
   }
   if (hasObject || hasRecordId) {
     if (!hasObject || !hasRecordId) {
-      throw new GoatActionInvalidParamsError(
-        'Record comments require both "object" and "record_id".',
-      );
+      throw new ActionInvalidParamsError('Record comments require both "object" and "record_id".');
     }
     const object = parseObject(requiredStringParam(params, "object"), availableObjects);
     const recordId = parseBoundedId(params, "record_id", MAX_RECORD_ID_CHARS);
@@ -2165,9 +2154,7 @@ function parseAttioCommentTarget(
     };
   }
   if (!hasList || !hasEntryId) {
-    throw new GoatActionInvalidParamsError(
-      'List-entry comments require both "list" and "entry_id".',
-    );
+    throw new ActionInvalidParamsError('List-entry comments require both "list" and "entry_id".');
   }
   const reference = parseAttioListReference(requiredStringParam(params, "list"));
   const entryId = parseBoundedId(params, "entry_id", MAX_ENTRY_ID_CHARS);
@@ -2178,7 +2165,7 @@ function parseAttioCommentTarget(
 }
 
 async function resolveAttioCommentAuthorId(input: {
-  context: GoatActionExecuteContext;
+  context: ActionExecuteContext;
   connection: AttioConnection;
   credential: AttioCredential;
 }) {
@@ -2196,7 +2183,7 @@ async function resolveAttioCommentAuthorId(input: {
     MAX_COMMENT_ID_CHARS,
   );
   if (!authorId) {
-    throw new GoatActionAuthError(
+    throw new ActionAuthError(
       "auth_expired",
       "attio",
       `Attio did not return an author for ${input.connection.selector}; reconnect Attio in Settings → Integrations.`,
@@ -2207,20 +2194,20 @@ async function resolveAttioCommentAuthorId(input: {
 
 function normalizeAttioJson(value: unknown, path: string, depth: number): unknown {
   if (depth > MAX_JSON_DEPTH) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"${path}" is nested too deeply (maximum depth ${MAX_JSON_DEPTH}).`,
     );
   }
   if (value === null || typeof value === "boolean") return value;
   if (typeof value === "number") {
     if (!Number.isFinite(value)) {
-      throw new GoatActionInvalidParamsError(`"${path}" must contain only finite numbers.`);
+      throw new ActionInvalidParamsError(`"${path}" must contain only finite numbers.`);
     }
     return value;
   }
   if (typeof value === "string") {
     if (value.length > MAX_JSON_STRING_CHARS) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `"${path}" strings must be at most ${MAX_JSON_STRING_CHARS} characters.`,
       );
     }
@@ -2228,7 +2215,7 @@ function normalizeAttioJson(value: unknown, path: string, depth: number): unknow
   }
   if (Array.isArray(value)) {
     if (value.length > MAX_JSON_ARRAY_ITEMS) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `"${path}" arrays allow at most ${MAX_JSON_ARRAY_ITEMS} items.`,
       );
     }
@@ -2236,13 +2223,13 @@ function normalizeAttioJson(value: unknown, path: string, depth: number): unknow
   }
   const record = asRecord(value);
   if (!record) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"${path}" must contain only JSON strings, numbers, booleans, nulls, arrays, and objects.`,
     );
   }
   const keys = Object.keys(record);
   if (keys.length > MAX_JSON_OBJECT_PROPERTIES) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"${path}" objects allow at most ${MAX_JSON_OBJECT_PROPERTIES} properties.`,
     );
   }
@@ -2255,7 +2242,7 @@ function normalizeAttioJson(value: unknown, path: string, depth: number): unknow
       key === "constructor" ||
       key === "prototype"
     ) {
-      throw new GoatActionInvalidParamsError(`"${path}" contains an invalid property name.`);
+      throw new ActionInvalidParamsError(`"${path}" contains an invalid property name.`);
     }
     normalized[key] = normalizeAttioJson(record[key], `${path}.${key}`, depth + 1);
   }
@@ -2265,14 +2252,14 @@ function normalizeAttioJson(value: unknown, path: string, depth: number): unknow
 function assertAttioJsonSize(value: unknown, key: string, maxChars: number) {
   const serialized = JSON.stringify(value);
   if (serialized.length > maxChars) {
-    throw new GoatActionInvalidParamsError(`"${key}" must be at most ${maxChars} JSON characters.`);
+    throw new ActionInvalidParamsError(`"${key}" must be at most ${maxChars} JSON characters.`);
   }
 }
 
 function parseSafeAttioIdentifier(value: unknown, path: string): string {
   const identifier = safeAttioApiIdentifier(value);
   if (!identifier) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"${path}" must be an Attio attribute slug, field, or UUID.`,
     );
   }
@@ -2281,12 +2268,12 @@ function parseSafeAttioIdentifier(value: unknown, path: string): string {
 
 function parseAttioListReference(listInput: string, viewInput?: string) {
   if (listInput.length > MAX_LIST_REFERENCE_CHARS) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"list" must be at most ${MAX_LIST_REFERENCE_CHARS} characters.`,
     );
   }
   if (viewInput && viewInput.length > MAX_LIST_REFERENCE_CHARS) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"view" must be at most ${MAX_LIST_REFERENCE_CHARS} characters.`,
     );
   }
@@ -2298,12 +2285,12 @@ function parseAttioListReference(listInput: string, viewInput?: string) {
     ? (explicitViewUrl?.viewId ?? parseAttioViewIdentifier(viewInput))
     : undefined;
   if (explicitViewUrl && explicitViewUrl.list !== list) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       'The "view" URL must belong to the list supplied in "list".',
     );
   }
   if (listUrl?.viewId && explicitView && listUrl.viewId !== explicitView) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       'The saved view in "list" does not match the explicit "view".',
     );
   }
@@ -2325,7 +2312,7 @@ function parseAttioCollectionUrl(value: string): { list: string; viewId?: string
     url.search ||
     url.hash
   ) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       "Attio collection URLs must be secure app.attio.com URLs without query parameters.",
     );
   }
@@ -2333,7 +2320,7 @@ function parseAttioCollectionUrl(value: string): { list: string; viewId?: string
     /^\/[a-z0-9_-]+\/collection\/([a-z0-9_-]+)(?:\/view\/([a-z0-9-]+))?\/?$/i,
   );
   if (!match) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       'Attio collection URLs must contain "/collection/{list}" and may end with "/view/{view}".',
     );
   }
@@ -2346,7 +2333,7 @@ function parseAttioCollectionUrl(value: string): { list: string; viewId?: string
 function parseAttioListIdentifier(value: string) {
   const normalized = value.trim();
   if (!/^[a-z0-9_-]{1,200}$/i.test(normalized)) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       '"list" must be an Attio list UUID, API slug, or collection URL.',
     );
   }
@@ -2356,7 +2343,7 @@ function parseAttioListIdentifier(value: string) {
 function parseAttioViewIdentifier(value: string) {
   const normalized = value.trim();
   if (!isUuid(normalized)) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       '"view" must be an Attio saved-view UUID or collection URL.',
     );
   }
@@ -2371,22 +2358,22 @@ function parseObjects(
     return STANDARD_OBJECTS.filter((object) => availableObjects.has(object));
   }
   if (!Array.isArray(value) || value.length === 0 || value.length > STANDARD_OBJECTS.length) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       '"objects" must be a non-empty array containing people, companies, or deals.',
     );
   }
   const objects: AttioObjectSlug[] = [];
   for (const entry of value) {
     if (!isAttioObjectSlug(entry)) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         'Each "objects" entry must be one of people, companies, or deals.',
       );
     }
     if (objects.includes(entry)) {
-      throw new GoatActionInvalidParamsError('"objects" must not contain duplicates.');
+      throw new ActionInvalidParamsError('"objects" must not contain duplicates.');
     }
     if (!availableObjects.has(entry)) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `The Attio ${entry} object is not available in this workspace. Available: ${[
           ...availableObjects,
         ].join(", ")}.`,
@@ -2399,10 +2386,10 @@ function parseObjects(
 
 function parseObject(value: string, availableObjects: ReadonlySet<AttioObjectSlug>) {
   if (!isAttioObjectSlug(value)) {
-    throw new GoatActionInvalidParamsError('"object" must be one of people, companies, or deals.');
+    throw new ActionInvalidParamsError('"object" must be one of people, companies, or deals.');
   }
   if (!availableObjects.has(value)) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `The Attio ${value} object is not available in this workspace. Available: ${[
         ...availableObjects,
       ].join(", ")}.`,
@@ -2545,7 +2532,7 @@ async function fetchAttioListParentRecords(input: {
   await Promise.all(
     [...recordIdsByObject].map(async ([object, recordIdSet]) => {
       const recordIds = [...recordIdSet];
-      const response = await requestGoatAttioApi({
+      const response = await requestAttioApi({
         apiKey: input.apiKey,
         path: `/objects/${encodeURIComponent(object)}/records/query`,
         method: "POST",

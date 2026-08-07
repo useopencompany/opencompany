@@ -15,11 +15,11 @@ const GMAIL_SEND_CAPABLE_SCOPES = new Set([
   GOAT_GMAIL_SEND_SCOPE,
 ]);
 
-export function hasGoatGmailDraftScope(scopes: unknown): boolean {
+export function hasGmailDraftScope(scopes: unknown): boolean {
   return hasAnyGmailScope(scopes, GMAIL_DRAFT_CAPABLE_SCOPES);
 }
 
-export function hasGoatGmailSendScope(scopes: unknown): boolean {
+export function hasGmailSendScope(scopes: unknown): boolean {
   return hasAnyGmailScope(scopes, GMAIL_SEND_CAPABLE_SCOPES);
 }
 

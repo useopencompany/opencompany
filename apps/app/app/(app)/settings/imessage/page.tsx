@@ -1,5 +1,5 @@
-import { GoatIMessageSettingsRoute } from "@/components/GoatRoutes";
+import { IMessageSettingsRoute } from "@/components/AppRoutes";
 
 export default function IMessageSettingsPage() {
-  return <GoatIMessageSettingsRoute />;
+  return <IMessageSettingsRoute />;
 }

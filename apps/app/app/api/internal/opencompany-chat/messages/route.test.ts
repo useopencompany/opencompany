@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/codex-chat", () => ({
-  createGoatCodexChatMessage: mocks.createMessage,
+  createCodexChatMessage: mocks.createMessage,
 }));
 
 describe("POST /api/internal/opencompany-chat/messages", () => {

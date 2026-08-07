@@ -1,24 +1,24 @@
-import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
+import { captureIngestionQuotaAnalytics } from "@opencompany/analytics/app";
 import { type NormalizedGmailThreadMessage, normalizeGmailThreadWindow } from "@opencompany/brain";
 import {
-  attributeGoatBrainSourceEventClaims,
-  claimGoatBrainSourceEvents,
+  attributeBrainSourceEventClaims,
+  claimBrainSourceEvents,
 } from "@opencompany/db/brain-event-claims";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
-  upsertGoatBrainSourceItemAndEnqueue,
+  upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
-  goatGmailEventClaimKey,
-  goatGmailEventTypeForDirection,
-  goatGmailRouteMatchesEvent,
-  listEnabledGoatGmailBrainSourceRoutes,
-  newGoatGmailThreadWindowId,
+  gmailEventClaimKey,
+  gmailEventTypeForDirection,
+  gmailRouteMatchesEvent,
+  listEnabledGmailBrainSourceRoutes,
+  newGmailThreadWindowId,
 } from "@opencompany/db/gmail";
-import type { GoatGmailMessageDirection, GoatIntegrationStatus } from "@opencompany/db/schema";
+import type { GmailMessageDirection, IntegrationStatus } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
-import { wakeGoatBrainIngestWorker } from "./brain-ingest-worker";
+import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { fetchGmailThreadSnapshot, type GmailThreadSnapshot } from "./gmail-api";
@@ -36,7 +36,7 @@ export const GOAT_GMAIL_MAX_WAIT_MS = 2 * 60 * 60_000;
 export const GOAT_GMAIL_MAX_WINDOW_EVENTS = 100;
 const GOAT_GMAIL_FLUSH_POLL_INTERVAL_MS = 60_000;
 
-export type GoatGmailDueWindow = {
+export type GmailDueWindow = {
   integrationId: string;
   userWorkosId: string;
   threadId: string;
@@ -46,18 +46,18 @@ type BufferedGmailMessageRow = {
   id: string;
   messageId: string;
   rfc822MessageId: string | null;
-  direction: GoatGmailMessageDirection;
+  direction: GmailMessageDirection;
   subject: string | null;
   fromHeader: string | null;
   payload: Record<string, unknown>;
   eventTime: string | Date;
 };
 
-export async function listDueGoatGmailThreadWindows(input: {
+export async function listDueGmailThreadWindows(input: {
   now?: Date;
   quietPeriodMs?: number;
   maxWaitMs?: number;
-}): Promise<GoatGmailDueWindow[]> {
+}): Promise<GmailDueWindow[]> {
   const now = input.now ?? new Date();
   const quietCutoff = new Date(now.getTime() - (input.quietPeriodMs ?? GOAT_GMAIL_QUIET_PERIOD_MS));
   const maxWaitCutoff = new Date(now.getTime() - (input.maxWaitMs ?? GOAT_GMAIL_MAX_WAIT_MS));
@@ -71,11 +71,11 @@ export async function listDueGoatGmailThreadWindows(input: {
     GROUP BY 1, 2, 3
     HAVING max(received_at) < ${quietCutoff} OR min(received_at) < ${maxWaitCutoff}
   `);
-  return rowsFromExecute<GoatGmailDueWindow>(result);
+  return rowsFromExecute<GmailDueWindow>(result);
 }
 
-export async function flushGoatGmailThreadWindow(
-  window: GoatGmailDueWindow,
+export async function flushGmailThreadWindow(
+  window: GmailDueWindow,
   env: RunnerEnv,
   signal: AbortSignal,
 ): Promise<{
@@ -161,13 +161,13 @@ export async function flushGoatGmailThreadWindow(
     // jobs, so the buffer never wedges on a dead token.
     const routes =
       integration.status === "connected"
-        ? await listEnabledGoatGmailBrainSourceRoutes([window.integrationId], tx)
+        ? await listEnabledGmailBrainSourceRoutes([window.integrationId], tx)
         : [];
     const directions = new Set(claimed.map((row) => row.direction));
     const candidateBrainRefs = routes
       .filter((route) =>
         [...directions].some((direction) =>
-          goatGmailRouteMatchesEvent(route.config, goatGmailEventTypeForDirection(direction)),
+          gmailRouteMatchesEvent(route.config, gmailEventTypeForDirection(direction)),
         ),
       )
       .map((route) => route.brainRef);
@@ -177,7 +177,7 @@ export async function flushGoatGmailThreadWindow(
     // shared across mailboxes; a brain whose claims all lose (thread already
     // ingested via another member's window) is skipped — no job, no billing.
     const eventKeys = claimed.map((row) =>
-      goatGmailEventClaimKey({
+      gmailEventClaimKey({
         rfc822MessageId: row.rfc822MessageId,
         integrationId: window.integrationId,
         gmailMessageId: row.messageId,
@@ -187,7 +187,7 @@ export async function flushGoatGmailThreadWindow(
     const claimedEventKeysByBrainRef = new Map<string, string[]>();
     const newlyClaimedEventKeys = new Set<string>();
     for (const brainRef of new Set(candidateBrainRefs)) {
-      const { claimedEventKeys } = await claimGoatBrainSourceEvents({
+      const { claimedEventKeys } = await claimBrainSourceEvents({
         brainRef,
         sourceProvider: "gmail",
         eventKeys,
@@ -199,7 +199,7 @@ export async function flushGoatGmailThreadWindow(
       for (const eventKey of claimedEventKeys) newlyClaimedEventKeys.add(eventKey);
     }
 
-    const upserted = await upsertGoatBrainSourceItemAndEnqueue({
+    const upserted = await upsertBrainSourceItemAndEnqueue({
       userWorkosId: window.userWorkosId,
       sourceConnectionId: window.integrationId,
       integrationId: window.integrationId,
@@ -222,7 +222,7 @@ export async function flushGoatGmailThreadWindow(
       )})
     `);
     for (const brainRef of brainRefs) {
-      await attributeGoatBrainSourceEventClaims({
+      await attributeBrainSourceEventClaims({
         brainRef,
         sourceProvider: "gmail",
         eventKeys: claimedEventKeysByBrainRef.get(brainRef) ?? [],
@@ -239,13 +239,13 @@ export async function flushGoatGmailThreadWindow(
     };
   });
 
-  captureGoatIngestionQuotaAnalytics(result?.quotaUpdates);
-  if (result?.enqueued) wakeGoatBrainIngestWorker();
+  captureIngestionQuotaAnalytics(result?.quotaUpdates);
+  if (result?.enqueued) wakeBrainIngestWorker();
   return result;
 }
 
 export function buildGmailThreadWindowItem(input: {
-  window: GoatGmailDueWindow;
+  window: GmailDueWindow;
   events: readonly BufferedGmailMessageRow[];
   snapshot: GmailThreadSnapshot | null;
   accountEmail: string | null;
@@ -294,7 +294,7 @@ export function buildGmailThreadWindowItem(input: {
     undefined;
 
   return normalizeGmailThreadWindow({
-    windowId: newGoatGmailThreadWindowId(),
+    windowId: newGmailThreadWindowId(),
     threadId: window.threadId,
     ...(subject ? { subject } : {}),
     messages,
@@ -304,10 +304,7 @@ export function buildGmailThreadWindowItem(input: {
   });
 }
 
-export function startGoatGmailFlushWorker(
-  env: RunnerEnv,
-  options: { pollIntervalMs?: number } = {},
-) {
+export function startGmailFlushWorker(env: RunnerEnv, options: { pollIntervalMs?: number } = {}) {
   const pollIntervalMs = Math.max(
     1_000,
     options.pollIntervalMs ?? GOAT_GMAIL_FLUSH_POLL_INTERVAL_MS,
@@ -334,25 +331,23 @@ export function startGoatGmailFlushWorker(
   const loop = (async () => {
     while (!stopped) {
       try {
-        const due = await listDueGoatGmailThreadWindows({});
+        const due = await listDueGmailThreadWindows({});
         for (const window of due) {
           if (stopped) break;
-          const flushed = await flushGoatGmailThreadWindow(window, env, abort.signal).catch(
-            (error) => {
-              captureException(error, {
-                event: "opencompany.goat_gmail_flush_failed",
-                integration_id: window.integrationId,
-                thread_id: window.threadId,
-              });
-              logger.error("Goat Gmail window flush failed", {
-                event: "opencompany.goat_gmail_flush_failed",
-                integration_id: window.integrationId,
-                thread_id: window.threadId,
-                error,
-              });
-              return null;
-            },
-          );
+          const flushed = await flushGmailThreadWindow(window, env, abort.signal).catch((error) => {
+            captureException(error, {
+              event: "opencompany.goat_gmail_flush_failed",
+              integration_id: window.integrationId,
+              thread_id: window.threadId,
+            });
+            logger.error("Goat Gmail window flush failed", {
+              event: "opencompany.goat_gmail_flush_failed",
+              integration_id: window.integrationId,
+              thread_id: window.threadId,
+              error,
+            });
+            return null;
+          });
           if (flushed) {
             logger.info("Goat Gmail window flushed", {
               event: "opencompany.goat_gmail_window_flushed",
@@ -387,7 +382,7 @@ export function startGoatGmailFlushWorker(
   };
 }
 
-async function previewBufferedGmailMessages(window: GoatGmailDueWindow) {
+async function previewBufferedGmailMessages(window: GmailDueWindow) {
   return rowsFromExecute<BufferedGmailMessageRow>(
     await getDb().execute(sql`
       SELECT
@@ -409,11 +404,11 @@ async function previewBufferedGmailMessages(window: GoatGmailDueWindow) {
   );
 }
 
-async function loadGmailIntegrationContext(window: GoatGmailDueWindow): Promise<{
-  status: GoatIntegrationStatus | "unknown";
+async function loadGmailIntegrationContext(window: GmailDueWindow): Promise<{
+  status: IntegrationStatus | "unknown";
   accountEmail: string | null;
 }> {
-  const rows = rowsFromExecute<{ status: GoatIntegrationStatus; accountEmail: string | null }>(
+  const rows = rowsFromExecute<{ status: IntegrationStatus; accountEmail: string | null }>(
     await getDb().execute(sql`
       SELECT status, account_email AS "accountEmail"
       FROM goat.integrations

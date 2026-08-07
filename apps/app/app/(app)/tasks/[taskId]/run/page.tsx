@@ -1,4 +1,4 @@
-import { GoatTaskDetailRoute } from "@/components/GoatRoutes";
+import { TaskDetailRoute } from "@/components/AppRoutes";
 
 type TaskHarnessRunPageProps = {
   params: Promise<{ taskId: string }>;
@@ -6,5 +6,5 @@ type TaskHarnessRunPageProps = {
 
 export default async function TaskHarnessRunPage({ params }: TaskHarnessRunPageProps) {
   const { taskId } = await params;
-  return <GoatTaskDetailRoute taskId={taskId} />;
+  return <TaskDetailRoute taskId={taskId} />;
 }

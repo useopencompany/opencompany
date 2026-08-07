@@ -2,9 +2,9 @@ import { neon } from "@neondatabase/serverless";
 import { drizzle, type NeonHttpDatabase } from "drizzle-orm/neon-http";
 import * as legacyBillingSchema from "./legacy-billing-schema";
 import * as llmBrokerSchema from "./llm-broker-schema";
-import * as goatSchema from "./schema";
+import * as productSchema from "./schema";
 
-const schema = { ...legacyBillingSchema, ...llmBrokerSchema, ...goatSchema };
+const schema = { ...legacyBillingSchema, ...llmBrokerSchema, ...productSchema };
 
 let db: NeonHttpDatabase<typeof schema> | undefined;
 

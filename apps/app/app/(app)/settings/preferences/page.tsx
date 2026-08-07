@@ -1,5 +1,5 @@
-import { GoatPreferencesSettingsRoute } from "@/components/GoatRoutes";
+import { PreferencesSettingsRoute } from "@/components/AppRoutes";
 
 export default function PreferencesSettingsPage() {
-  return <GoatPreferencesSettingsRoute />;
+  return <PreferencesSettingsRoute />;
 }

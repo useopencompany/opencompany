@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { deriveGoatTaskSteps, type GoatTaskStepInput } from "@/lib/task-steps";
+import { deriveTaskSteps, type TaskStepInput } from "@/lib/task-steps";
 
-describe("deriveGoatTaskSteps", () => {
+describe("deriveTaskSteps", () => {
   it("returns a pending step for queued tasks with no trace", () => {
-    expect(deriveGoatTaskSteps(task())).toEqual(["Waiting for the runner to start the task."]);
+    expect(deriveTaskSteps(task())).toEqual(["Waiting for the runner to start the task."]);
   });
 
   it("uses stage progress when a running task has only coarse state", () => {
     expect(
-      deriveGoatTaskSteps(
+      deriveTaskSteps(
         task({
           status: "running",
           stage: "running",
@@ -25,7 +25,7 @@ describe("deriveGoatTaskSteps", () => {
 
   it("summarizes a successful searched task without exposing tool payloads", () => {
     expect(
-      deriveGoatTaskSteps(
+      deriveTaskSteps(
         task({
           status: "succeeded",
           stage: "completed",
@@ -52,7 +52,7 @@ describe("deriveGoatTaskSteps", () => {
   });
 
   it("dedupes repeated searches and groups multiple topics", () => {
-    const steps = deriveGoatTaskSteps(
+    const steps = deriveTaskSteps(
       task({
         status: "succeeded",
         stage: "completed",
@@ -75,7 +75,7 @@ describe("deriveGoatTaskSteps", () => {
 
   it("separates deeper follow-up searches", () => {
     expect(
-      deriveGoatTaskSteps(
+      deriveTaskSteps(
         task({
           status: "succeeded",
           stage: "completed",
@@ -99,7 +99,7 @@ describe("deriveGoatTaskSteps", () => {
   });
 
   it("handles a single deep search without duplicating it", () => {
-    const steps = deriveGoatTaskSteps(
+    const steps = deriveTaskSteps(
       task({
         status: "succeeded",
         stage: "completed",
@@ -117,7 +117,7 @@ describe("deriveGoatTaskSteps", () => {
 
   it("handles malformed traces with safe fallback steps", () => {
     expect(
-      deriveGoatTaskSteps(
+      deriveTaskSteps(
         task({
           status: "succeeded",
           stage: "completed",
@@ -136,7 +136,7 @@ describe("deriveGoatTaskSteps", () => {
   });
 
   it("summarizes failed tool calls without exposing raw debug JSON", () => {
-    const steps = deriveGoatTaskSteps(
+    const steps = deriveTaskSteps(
       task({
         status: "failed",
         stage: "failed",
@@ -159,7 +159,7 @@ describe("deriveGoatTaskSteps", () => {
   });
 });
 
-function task(overrides: Partial<GoatTaskStepInput> = {}): GoatTaskStepInput {
+function task(overrides: Partial<TaskStepInput> = {}): TaskStepInput {
   return {
     status: "queued",
     stage: "queued",
@@ -172,7 +172,7 @@ function task(overrides: Partial<GoatTaskStepInput> = {}): GoatTaskStepInput {
   };
 }
 
-function defaultHarnessSpec(): GoatTaskStepInput["harnessSpec"] {
+function defaultHarnessSpec(): TaskStepInput["harnessSpec"] {
   return {
     schemaVersion: "goat.harness.v1",
     engine: "opencompany",
@@ -186,7 +186,7 @@ function defaultHarnessSpec(): GoatTaskStepInput["harnessSpec"] {
   };
 }
 
-function traceWithTools(toolResults: unknown[]): GoatTaskStepInput["debugTrace"] {
+function traceWithTools(toolResults: unknown[]): TaskStepInput["debugTrace"] {
   return {
     schemaVersion: "goat.debug.v1",
     planner: {

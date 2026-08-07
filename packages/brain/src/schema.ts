@@ -27,11 +27,10 @@ export const DEFAULT_GOAT_BRAIN_FOLDERS = [
 
 export const GOAT_BRAIN_MIDDLE_FOLDER_ORDER = ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS;
 
-export type GoatBrainDefaultFolder = (typeof DEFAULT_GOAT_BRAIN_FOLDERS)[number];
-export type HardDefaultGoatBrainFolder = (typeof HARD_DEFAULT_GOAT_BRAIN_FOLDERS)[number];
-export type AdjustableDefaultGoatBrainFolder =
-  (typeof ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS)[number];
-export type GoatBrainDocumentFormat =
+export type BrainDefaultFolder = (typeof DEFAULT_GOAT_BRAIN_FOLDERS)[number];
+export type HardDefaultBrainFolder = (typeof HARD_DEFAULT_GOAT_BRAIN_FOLDERS)[number];
+export type AdjustableDefaultBrainFolder = (typeof ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS)[number];
+export type BrainDocumentFormat =
   | "markdown"
   | "pdf"
   | "docx"
@@ -64,34 +63,34 @@ export const GOAT_BRAIN_ENTITY_TYPES = [
   "note",
 ] as const;
 
-export type GoatBrainEntityType = (typeof GOAT_BRAIN_ENTITY_TYPES)[number];
+export type BrainEntityType = (typeof GOAT_BRAIN_ENTITY_TYPES)[number];
 
 export const GOAT_BRAIN_KINDS = ["page", "evidence"] as const;
 
-export type GoatBrainKind = (typeof GOAT_BRAIN_KINDS)[number];
+export type BrainKind = (typeof GOAT_BRAIN_KINDS)[number];
 
 export const GOAT_BRAIN_EVIDENCE_ZONE = "evidence";
 
 export const GOAT_BRAIN_STATUS_VALUES = ["draft", "active", "archived", "merged"] as const;
 
-export type GoatBrainStatus = (typeof GOAT_BRAIN_STATUS_VALUES)[number];
+export type BrainStatus = (typeof GOAT_BRAIN_STATUS_VALUES)[number];
 
-export type GoatBrainRelation = {
+export type BrainRelation = {
   type: string;
   to: string;
 };
 
-export type GoatBrainEdgeSourceKind = "relation" | "wiki_link";
-export type GoatBrainGraphDirection = "out" | "in" | "both";
+export type BrainEdgeSourceKind = "relation" | "wiki_link";
+export type BrainGraphDirection = "out" | "in" | "both";
 
-export type GoatBrainDerivedEdge = {
+export type BrainDerivedEdge = {
   from: string;
   to: string;
   type: string;
-  sourceKind: GoatBrainEdgeSourceKind;
+  sourceKind: BrainEdgeSourceKind;
 };
 
-export type GoatBrainSource = {
+export type BrainSource = {
   ref: string;
   capturedAt?: string;
   title?: string;
@@ -106,99 +105,95 @@ export const GOAT_BRAIN_EVIDENCE_ID_PATTERN = /^ev-[a-z0-9][a-z0-9-]{0,76}$/;
 export const GOAT_BRAIN_SOURCE_REF_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}:[^\s[\]|]+$/;
 export const GOAT_BRAIN_SOURCE_REF_MAX_LENGTH = 256;
 
-export type ParsedGoatBrainSourceRef = {
+export type ParsedBrainSourceRef = {
   raw: string;
   provider: string;
   id: string;
 };
 
-export type GoatBrainFrontmatter = {
+export type BrainFrontmatter = {
   id: string;
   folder: string;
-  kind: GoatBrainKind;
-  type: GoatBrainEntityType;
-  status: GoatBrainStatus;
+  kind: BrainKind;
+  type: BrainEntityType;
+  status: BrainStatus;
   createdAt: string;
   updatedAt: string;
-  relations: GoatBrainRelation[];
+  relations: BrainRelation[];
   title?: string;
   description?: string;
   // Workflow docs only: the model/engine mention token the workflow runs on
   // (e.g. "kimi-k2.6", "codex"). Ignored for other document kinds.
   model?: string;
   aliases?: string[];
-  sources?: GoatBrainSource[];
+  sources?: BrainSource[];
   mergedInto?: string;
   legacyKeys?: string[];
 };
 
-export type GoatBrainTimelineEntry = {
+export type BrainTimelineEntry = {
   evidenceId: string;
   at: string;
   body: string;
 };
 
-export type GoatBrainDocument = {
-  frontmatter: GoatBrainFrontmatter;
+export type BrainDocument = {
+  frontmatter: BrainFrontmatter;
   title: string;
   compiledTruth: string;
-  timeline: GoatBrainTimelineEntry[];
+  timeline: BrainTimelineEntry[];
 };
 
-export function isValidGoatBrainId(value: unknown): value is string {
+export function isValidBrainId(value: unknown): value is string {
   return typeof value === "string" && GOAT_BRAIN_ID_PATTERN.test(value);
 }
 
-export function isValidGoatBrainFolder(value: unknown): value is string {
+export function isValidBrainFolder(value: unknown): value is string {
   return typeof value === "string" && GOAT_BRAIN_FOLDER_PATTERN.test(value);
 }
 
-export function isGoatBrainEvidenceFolder(value: string): boolean {
-  const normalized = normalizeGoatBrainFolder(value);
+export function isBrainEvidenceFolder(value: string): boolean {
+  const normalized = normalizeBrainFolder(value);
   return (
     normalized === GOAT_BRAIN_EVIDENCE_ZONE || normalized.startsWith(`${GOAT_BRAIN_EVIDENCE_ZONE}/`)
   );
 }
 
-export function isHardDefaultGoatBrainFolder(value: string): boolean {
-  const normalized = normalizeGoatBrainFolder(value);
-  return HARD_DEFAULT_GOAT_BRAIN_FOLDERS.includes(normalized as HardDefaultGoatBrainFolder);
+export function isHardDefaultBrainFolder(value: string): boolean {
+  const normalized = normalizeBrainFolder(value);
+  return HARD_DEFAULT_GOAT_BRAIN_FOLDERS.includes(normalized as HardDefaultBrainFolder);
 }
 
-export function isAdjustableDefaultGoatBrainFolder(value: string): boolean {
-  const normalized = normalizeGoatBrainFolder(value);
-  return ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS.includes(
-    normalized as AdjustableDefaultGoatBrainFolder,
-  );
+export function isAdjustableDefaultBrainFolder(value: string): boolean {
+  const normalized = normalizeBrainFolder(value);
+  return ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS.includes(normalized as AdjustableDefaultBrainFolder);
 }
 
-export function goatBrainKindForFolder(folder: string): GoatBrainKind {
-  return isGoatBrainEvidenceFolder(folder) ? "evidence" : "page";
+export function brainKindForFolder(folder: string): BrainKind {
+  return isBrainEvidenceFolder(folder) ? "evidence" : "page";
 }
 
-export function isValidGoatBrainRelationType(value: unknown): value is string {
+export function isValidBrainRelationType(value: unknown): value is string {
   return typeof value === "string" && GOAT_BRAIN_RELATION_TYPE_PATTERN.test(value);
 }
 
-export function isValidGoatBrainEntityType(value: unknown): value is GoatBrainEntityType {
-  return (
-    typeof value === "string" && GOAT_BRAIN_ENTITY_TYPES.includes(value as GoatBrainEntityType)
-  );
+export function isValidBrainEntityType(value: unknown): value is BrainEntityType {
+  return typeof value === "string" && GOAT_BRAIN_ENTITY_TYPES.includes(value as BrainEntityType);
 }
 
-export function isValidGoatBrainKind(value: unknown): value is GoatBrainKind {
-  return typeof value === "string" && GOAT_BRAIN_KINDS.includes(value as GoatBrainKind);
+export function isValidBrainKind(value: unknown): value is BrainKind {
+  return typeof value === "string" && GOAT_BRAIN_KINDS.includes(value as BrainKind);
 }
 
-export function isValidGoatBrainStatus(value: unknown): value is GoatBrainStatus {
-  return typeof value === "string" && GOAT_BRAIN_STATUS_VALUES.includes(value as GoatBrainStatus);
+export function isValidBrainStatus(value: unknown): value is BrainStatus {
+  return typeof value === "string" && GOAT_BRAIN_STATUS_VALUES.includes(value as BrainStatus);
 }
 
-export function isValidGoatBrainEvidenceId(value: unknown): value is string {
+export function isValidBrainEvidenceId(value: unknown): value is string {
   return typeof value === "string" && GOAT_BRAIN_EVIDENCE_ID_PATTERN.test(value);
 }
 
-export function isValidGoatBrainSourceRef(value: unknown): value is string {
+export function isValidBrainSourceRef(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length <= GOAT_BRAIN_SOURCE_REF_MAX_LENGTH &&
@@ -206,19 +201,19 @@ export function isValidGoatBrainSourceRef(value: unknown): value is string {
   );
 }
 
-export function parseGoatBrainSourceRef(value: unknown): ParsedGoatBrainSourceRef | null {
+export function parseBrainSourceRef(value: unknown): ParsedBrainSourceRef | null {
   if (typeof value !== "string") return null;
   const raw = value.trim();
-  if (!isValidGoatBrainSourceRef(raw)) return null;
+  if (!isValidBrainSourceRef(raw)) return null;
   const separator = raw.indexOf(":");
   return { raw, provider: raw.slice(0, separator), id: raw.slice(separator + 1) };
 }
 
-export function goatBrainRelated(frontmatter: Partial<GoatBrainFrontmatter>): GoatBrainRelation[] {
+export function brainRelated(frontmatter: Partial<BrainFrontmatter>): BrainRelation[] {
   return frontmatter.relations ?? [];
 }
 
-export function normalizeGoatBrainFolder(value: string): string {
+export function normalizeBrainFolder(value: string): string {
   return value
     .trim()
     .toLowerCase()
@@ -226,7 +221,7 @@ export function normalizeGoatBrainFolder(value: string): string {
     .replace(/\/+/g, "/");
 }
 
-export function normalizeGoatBrainId(value: string): string {
+export function normalizeBrainId(value: string): string {
   return value
     .trim()
     .toLowerCase()
@@ -237,7 +232,7 @@ export function normalizeGoatBrainId(value: string): string {
     .replace(/-+$/g, "");
 }
 
-export function normalizeGoatBrainEntityType(value: string): string {
+export function normalizeBrainEntityType(value: string): string {
   return value
     .trim()
     .toLowerCase()

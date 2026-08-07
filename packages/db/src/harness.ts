@@ -1,21 +1,21 @@
-import type { GoatBrainSkill } from "@opencompany/brain";
-import type { GoatHarnessSpec } from "./schema";
+import type { BrainSkill } from "@opencompany/brain";
+import type { HarnessSpec } from "./schema";
 
-export type GoatWorkflowHarnessMetadata = NonNullable<GoatHarnessSpec["workflow"]> & {
+export type WorkflowHarnessMetadata = NonNullable<HarnessSpec["workflow"]> & {
   // Immutable skill contents resolved when the workflow task was created.
   // Codex materializes these as native SKILL.md inputs; older persisted specs
   // only have skillIds, so this remains optional.
-  skillSnapshots?: GoatBrainSkill[];
+  skillSnapshots?: BrainSkill[];
 };
 
-export type GoatWorkflowHarnessSpec = Omit<GoatHarnessSpec, "workflow"> & {
-  workflow: GoatWorkflowHarnessMetadata;
+export type WorkflowHarnessSpec = Omit<HarnessSpec, "workflow"> & {
+  workflow: WorkflowHarnessMetadata;
 };
 
-export function getGoatWorkflowHarnessSkillSnapshots(
-  harnessSpec: GoatHarnessSpec,
-): GoatBrainSkill[] | undefined {
-  const workflow = harnessSpec.workflow as GoatWorkflowHarnessMetadata | undefined;
+export function getWorkflowHarnessSkillSnapshots(
+  harnessSpec: HarnessSpec,
+): BrainSkill[] | undefined {
+  const workflow = harnessSpec.workflow as WorkflowHarnessMetadata | undefined;
   const snapshots = workflow?.skillSnapshots;
   const currentStep = workflow?.steps?.[workflow.currentStepIndex ?? 0];
   if (!snapshots || !currentStep) return snapshots;

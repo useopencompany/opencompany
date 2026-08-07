@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-  formatGoatBrainUsageReport,
+  type BrainUsageEntry,
+  formatBrainUsageReport,
   GOAT_BRAIN_USAGE_MARKER,
-  type GoatBrainUsageEntry,
   isUsageEntry,
-  parseGoatBrainUsageReport,
+  parseBrainUsageReport,
 } from "./usage";
 
-const entries: GoatBrainUsageEntry[] = [
+const entries: BrainUsageEntry[] = [
   {
     operation: "chat",
     model: "openai/gpt-5.5",
@@ -28,7 +28,7 @@ const entries: GoatBrainUsageEntry[] = [
 
 describe("goat brain usage reports", () => {
   it("round-trips multiple usage entries", () => {
-    const parsed = parseGoatBrainUsageReport(formatGoatBrainUsageReport(entries));
+    const parsed = parseBrainUsageReport(formatBrainUsageReport(entries));
 
     expect(parsed.entries).toEqual(entries);
     expect(parsed.entries.every(isUsageEntry)).toBe(true);
@@ -38,13 +38,13 @@ describe("goat brain usage reports", () => {
   it("removes marker lines while preserving ordinary stdout", () => {
     const stdout = [
       "first line",
-      `[runner] ${formatGoatBrainUsageReport([entries[0]!])}`,
+      `[runner] ${formatBrainUsageReport([entries[0]!])}`,
       "second line",
       `${GOAT_BRAIN_USAGE_MARKER} ${JSON.stringify({ entries: [entries[1]!] })}`,
       "",
     ].join("\n");
 
-    const parsed = parseGoatBrainUsageReport(stdout);
+    const parsed = parseBrainUsageReport(stdout);
 
     expect(parsed.entries).toEqual(entries);
     expect(parsed.cleanedStdout).toBe("first line\nsecond line\n");
@@ -68,7 +68,7 @@ describe("goat brain usage reports", () => {
       "kept",
     ].join("\n");
 
-    expect(parseGoatBrainUsageReport(stdout)).toEqual({
+    expect(parseBrainUsageReport(stdout)).toEqual({
       entries: [],
       cleanedStdout: "kept",
     });

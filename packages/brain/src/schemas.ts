@@ -1,39 +1,37 @@
 import {
+  type BrainEntityType,
+  type BrainKind,
   GOAT_BRAIN_ENTITY_TYPES,
   GOAT_BRAIN_EVIDENCE_ZONE,
-  type GoatBrainEntityType,
-  type GoatBrainKind,
-  isGoatBrainEvidenceFolder,
-  normalizeGoatBrainEntityType,
-  normalizeGoatBrainFolder,
+  isBrainEvidenceFolder,
+  normalizeBrainEntityType,
+  normalizeBrainFolder,
 } from "./schema";
 
 const ENTITY_TYPE_SET = new Set<string>(GOAT_BRAIN_ENTITY_TYPES);
 
 // Retired v1 type names normalize to their v2 home so documents materialized
 // before migration 0100 keep parsing; the next write rewrites the frontmatter.
-const LEGACY_ENTITY_TYPE_ALIASES: Record<string, GoatBrainEntityType> = {
+const LEGACY_ENTITY_TYPE_ALIASES: Record<string, BrainEntityType> = {
   media: "source",
   email: "source",
   writing: "analysis",
 };
 
-export function isBuiltInGoatBrainEntityType(value: unknown): value is GoatBrainEntityType {
+export function isBuiltInBrainEntityType(value: unknown): value is BrainEntityType {
   return typeof value === "string" && ENTITY_TYPE_SET.has(value);
 }
 
-export function normalizeBuiltInGoatBrainEntityType(
-  value: string | undefined,
-): GoatBrainEntityType | null {
+export function normalizeBuiltInBrainEntityType(value: string | undefined): BrainEntityType | null {
   if (!value) return null;
-  const normalized = normalizeGoatBrainEntityType(value);
-  if (isBuiltInGoatBrainEntityType(normalized)) return normalized;
+  const normalized = normalizeBrainEntityType(value);
+  if (isBuiltInBrainEntityType(normalized)) return normalized;
   return LEGACY_ENTITY_TYPE_ALIASES[normalized] ?? null;
 }
 
 // Types classify documents; folders are free-form human navigation. This map
 // is only the opinionated default used when a caller does not pick a folder.
-const DEFAULT_FOLDER_BY_ENTITY_TYPE: Record<GoatBrainEntityType, string> = {
+const DEFAULT_FOLDER_BY_ENTITY_TYPE: Record<BrainEntityType, string> = {
   person: "people",
   company: "companies",
   project: "projects",
@@ -44,14 +42,14 @@ const DEFAULT_FOLDER_BY_ENTITY_TYPE: Record<GoatBrainEntityType, string> = {
   note: "inbox",
 };
 
-export function defaultGoatBrainFolder(type: GoatBrainEntityType, kind: GoatBrainKind): string {
+export function defaultBrainFolder(type: BrainEntityType, kind: BrainKind): string {
   if (kind === "evidence") return GOAT_BRAIN_EVIDENCE_ZONE;
   return DEFAULT_FOLDER_BY_ENTITY_TYPE[type];
 }
 
-export function goatBrainFolderKindError(folder: string, kind: GoatBrainKind): string | null {
-  const normalizedFolder = normalizeGoatBrainFolder(folder);
-  const inZone = isGoatBrainEvidenceFolder(normalizedFolder);
+export function brainFolderKindError(folder: string, kind: BrainKind): string | null {
+  const normalizedFolder = normalizeBrainFolder(folder);
+  const inZone = isBrainEvidenceFolder(normalizedFolder);
   if (kind === "evidence" && !inZone) {
     return `evidence documents must live under the "${GOAT_BRAIN_EVIDENCE_ZONE}/" zone.`;
   }
@@ -61,6 +59,6 @@ export function goatBrainFolderKindError(folder: string, kind: GoatBrainKind): s
   return null;
 }
 
-export function normalizeGoatBrainFolderForV1(folder: string): string {
-  return normalizeGoatBrainFolder(folder);
+export function normalizeBrainFolderForV1(folder: string): string {
+  return normalizeBrainFolder(folder);
 }

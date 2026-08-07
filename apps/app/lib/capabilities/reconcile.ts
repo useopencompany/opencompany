@@ -2,15 +2,15 @@ import "server-only";
 
 import { USD_MICROS_PER_DOLLAR } from "@opencompany/billing";
 import {
-  expirePendingGoatCapabilityApprovals,
-  listUnsettledGoatCapabilityRuns,
+  expirePendingCapabilityApprovals,
+  listUnsettledCapabilityRuns,
 } from "@opencompany/db/capabilities";
-import { GOAT_METRICS, recordGoatHistogram } from "@opencompany/telemetry";
+import { GOAT_METRICS, recordHistogram } from "@opencompany/telemetry";
 import { settleManagedCapabilityRun } from "@/lib/capabilities/execute";
 import { isTerminalMonidRun, MonidClient, type MonidMoney } from "@/lib/capabilities/monid";
 
-export async function reconcileGoatCapabilities(limit = 100) {
-  const expiredApprovals = await expirePendingGoatCapabilityApprovals({});
+export async function reconcileCapabilities(limit = 100) {
+  const expiredApprovals = await expirePendingCapabilityApprovals({});
   const apiKey = process.env.MONID_API_KEY?.trim();
   if (!apiKey) {
     return {
@@ -24,7 +24,7 @@ export async function reconcileGoatCapabilities(limit = 100) {
   }
 
   const client = new MonidClient({ apiKey });
-  const candidates = await listUnsettledGoatCapabilityRuns({ limit });
+  const candidates = await listUnsettledCapabilityRuns({ limit });
   let settled = 0;
   let pending = 0;
   let failed = 0;
@@ -68,7 +68,7 @@ export async function reconcileGoatCapabilities(limit = 100) {
   let wallet: { balance: MonidMoney; held?: MonidMoney } | null = null;
   try {
     wallet = await client.getWalletBalance();
-    recordGoatHistogram(
+    recordHistogram(
       GOAT_METRICS.capabilityWalletBalanceUsdMicros,
       Math.max(0, Math.round(wallet.balance.value * USD_MICROS_PER_DOLLAR)),
     );

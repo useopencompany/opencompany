@@ -1,16 +1,13 @@
-import {
-  normalizeGoatBrainPointerCapture,
-  normalizeSlackConversationWindow,
-} from "@opencompany/brain";
+import { normalizeBrainPointerCapture, normalizeSlackConversationWindow } from "@opencompany/brain";
 import { describe, expect, it, vi } from "vitest";
-import { runGoatBrainPointerHydrate } from "./brain-pointer-hydrators";
+import { runBrainPointerHydrate } from "./brain-pointer-hydrators";
 
 const ENV = {
   vercelAiGatewayApiKey: "gateway_test",
 };
 
 function pointerItem(fallbackText?: string) {
-  return normalizeGoatBrainPointerCapture({
+  return normalizeBrainPointerCapture({
     sourceRef: "slack:conversation:T123:C456:1234.5678",
     title: "Launch decision",
     ...(fallbackText ? { fallbackText } : {}),
@@ -53,12 +50,12 @@ function runInput(fallbackText?: string) {
   };
 }
 
-describe("runGoatBrainPointerHydrate", () => {
+describe("runBrainPointerHydrate", () => {
   it("delegates a hydrated source to its existing provider ingest", async () => {
     const hydrated = hydratedSlackItem();
     const runSlack = vi.fn(async () => ({ handled: true, traceId: "trace_1" }));
 
-    const result = await runGoatBrainPointerHydrate(runInput(), {
+    const result = await runBrainPointerHydrate(runInput(), {
       hydrate: vi.fn(async () => hydrated),
       runSlack,
     });
@@ -83,7 +80,7 @@ describe("runGoatBrainPointerHydrate", () => {
   it("skips an unreachable source with no fallback", async () => {
     const runFallback = vi.fn();
 
-    const result = await runGoatBrainPointerHydrate(runInput(), {
+    const result = await runBrainPointerHydrate(runInput(), {
       hydrate: vi.fn(async () => null),
       runFallback,
     });
@@ -100,13 +97,10 @@ describe("runGoatBrainPointerHydrate", () => {
   it("curates fallback content when the provider source is unreachable", async () => {
     const runFallback = vi.fn(async () => ({ handled: true }));
 
-    const result = await runGoatBrainPointerHydrate(
-      runInput("The team approved the launch plan."),
-      {
-        hydrate: vi.fn(async () => null),
-        runFallback,
-      },
-    );
+    const result = await runBrainPointerHydrate(runInput("The team approved the launch plan."), {
+      hydrate: vi.fn(async () => null),
+      runFallback,
+    });
 
     expect(runFallback).toHaveBeenCalledWith(
       expect.objectContaining({

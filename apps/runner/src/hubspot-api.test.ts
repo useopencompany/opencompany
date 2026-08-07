@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
 
 const integrationsMock = vi.hoisted(() => ({
-  loadGoatIntegrationCredential: vi.fn(),
-  markGoatIntegrationStatus: vi.fn(),
-  refreshGoatIntegrationCredential: vi.fn(),
+  loadIntegrationCredential: vi.fn(),
+  markIntegrationStatus: vi.fn(),
+  refreshIntegrationCredential: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/integrations", () => integrationsMock);
@@ -25,7 +25,7 @@ describe("HubSpot API OAuth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal("fetch", fetchMock);
-    integrationsMock.loadGoatIntegrationCredential.mockResolvedValue({
+    integrationsMock.loadIntegrationCredential.mockResolvedValue({
       payload: {
         access_token: "expired-access-token",
         refresh_token: "refresh-token",
@@ -35,7 +35,7 @@ describe("HubSpot API OAuth", () => {
       updatedAt: new Date(),
       encryptionKeyVersion: 1,
     });
-    integrationsMock.refreshGoatIntegrationCredential.mockResolvedValue({});
+    integrationsMock.refreshIntegrationCredential.mockResolvedValue({});
     fetchMock.mockResolvedValue(
       Response.json({
         access_token: "fresh-access-token",
@@ -66,7 +66,7 @@ describe("HubSpot API OAuth", () => {
     const body = new URLSearchParams(String(request?.body));
     expect(body.get("grant_type")).toBe("refresh_token");
     expect(body.get("refresh_token")).toBe("refresh-token");
-    expect(integrationsMock.refreshGoatIntegrationCredential).toHaveBeenCalledWith(
+    expect(integrationsMock.refreshIntegrationCredential).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: {
           access_token: "fresh-access-token",

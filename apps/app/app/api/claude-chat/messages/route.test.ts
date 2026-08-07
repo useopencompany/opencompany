@@ -1,33 +1,33 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { GoatAuthContext } from "@/lib/auth";
-import { currentGoatUser } from "@/lib/auth";
-import { createGoatCodexChatMessage } from "@/lib/codex-chat";
-import { GoatSkillMentionError, resolveGoatSkillMentions } from "@/lib/skills";
+import type { AuthContext } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
+import { createCodexChatMessage } from "@/lib/codex-chat";
+import { resolveSkillMentions, SkillMentionError } from "@/lib/skills";
 import { POST } from "./route";
 
 const analyticsMocks = vi.hoisted(() => ({
-  captureGoatServerEvent: vi.fn(async () => undefined),
+  captureServerEvent: vi.fn(async () => undefined),
 }));
 
-vi.mock("@opencompany/analytics/goat/server", () => ({
-  captureGoatServerEvent: analyticsMocks.captureGoatServerEvent,
+vi.mock("@opencompany/analytics/server", () => ({
+  captureServerEvent: analyticsMocks.captureServerEvent,
 }));
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
 }));
 
 vi.mock("@/lib/codex-chat", () => ({
-  createGoatCodexChatMessage: vi.fn(),
+  createCodexChatMessage: vi.fn(),
 }));
 
 vi.mock("@/lib/chat-title", () => ({
-  generateGoatChatTitleForMessage: vi.fn(async () => ({ ok: true, title: "Generated title" })),
+  generateChatTitleForMessage: vi.fn(async () => ({ ok: true, title: "Generated title" })),
 }));
 
 vi.mock("@/lib/skills", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/skills")>();
-  return { ...actual, resolveGoatSkillMentions: vi.fn() };
+  return { ...actual, resolveSkillMentions: vi.fn() };
 });
 
 vi.mock("next/server", () => ({
@@ -44,7 +44,7 @@ vi.mock("next/server", () => ({
 describe("POST /api/claude-chat/messages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(currentGoatUser).mockResolvedValue({
+    vi.mocked(currentUser).mockResolvedValue({
       user: {
         workosUserId: "user_1",
         email: "ada@example.com",
@@ -58,8 +58,8 @@ describe("POST /api/claude-chat/messages", () => {
       },
       workspace: { id: "workspace_1" },
       activeBrain: { id: "goat_brain_1" },
-    } as GoatAuthContext);
-    vi.mocked(createGoatCodexChatMessage).mockResolvedValue({
+    } as AuthContext);
+    vi.mocked(createCodexChatMessage).mockResolvedValue({
       ok: true,
       sessionId: "goat_chat_1",
       userMessageId: "goat_chat_msg_user",
@@ -71,11 +71,11 @@ describe("POST /api/claude-chat/messages", () => {
         model: "anthropic/claude-opus-4.8",
       },
     });
-    vi.mocked(resolveGoatSkillMentions).mockResolvedValue([]);
+    vi.mocked(resolveSkillMentions).mockResolvedValue([]);
   });
 
   it("resolves workspace skills and queues the Claude engine", async () => {
-    vi.mocked(resolveGoatSkillMentions).mockResolvedValue([
+    vi.mocked(resolveSkillMentions).mockResolvedValue([
       {
         id: "coding-work",
         name: "Coding work",
@@ -107,11 +107,11 @@ describe("POST /api/claude-chat/messages", () => {
       assistantMessageId: "goat_chat_msg_assistant",
       mode: "started",
     });
-    expect(resolveGoatSkillMentions).toHaveBeenCalledWith({
+    expect(resolveSkillMentions).toHaveBeenCalledWith({
       workspaceId: "workspace_1",
       mentions: [{ id: "coding-work" }],
     });
-    expect(createGoatCodexChatMessage).toHaveBeenCalledWith(
+    expect(createCodexChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         userWorkosId: "user_1",
         workspaceId: "workspace_1",
@@ -130,7 +130,7 @@ describe("POST /api/claude-chat/messages", () => {
         ],
       }),
     );
-    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
+    expect(analyticsMocks.captureServerEvent).toHaveBeenCalledWith(
       "chat_message_sent",
       "user_1",
       {
@@ -152,8 +152,8 @@ describe("POST /api/claude-chat/messages", () => {
   });
 
   it("rejects stale workspace skills before queueing", async () => {
-    vi.mocked(resolveGoatSkillMentions).mockRejectedValue(
-      new GoatSkillMentionError("Skill is unavailable."),
+    vi.mocked(resolveSkillMentions).mockRejectedValue(
+      new SkillMentionError("Skill is unavailable."),
     );
 
     const response = await POST(
@@ -171,8 +171,8 @@ describe("POST /api/claude-chat/messages", () => {
 
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toBe("Skill is unavailable.");
-    expect(createGoatCodexChatMessage).not.toHaveBeenCalled();
-    expect(analyticsMocks.captureGoatServerEvent).not.toHaveBeenCalled();
+    expect(createCodexChatMessage).not.toHaveBeenCalled();
+    expect(analyticsMocks.captureServerEvent).not.toHaveBeenCalled();
   });
 });
 

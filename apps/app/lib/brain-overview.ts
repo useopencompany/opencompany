@@ -1,9 +1,9 @@
 import { getDb } from "@opencompany/db/client";
-import { goatBrainDocuments, goatBrainSources, goatBrainToolRuns } from "@opencompany/db/schema";
+import { brainDocuments, brainSources, brainToolRuns } from "@opencompany/db/schema";
 import { and, count, eq, gte, inArray, ne } from "drizzle-orm";
 import { GOAT_BRAIN_READ_PLANE_COMMANDS } from "@/lib/brain-surface";
 
-export type GoatBrainOverviewStats = {
+export type BrainOverviewStats = {
   windowStartedAt: string;
   itemsAddedLast7Days: number;
   retrievalsLast7Days: number;
@@ -15,38 +15,36 @@ export type GoatBrainOverviewStats = {
 const BRAIN_RETRIEVAL_ACTIONS = GOAT_BRAIN_READ_PLANE_COMMANDS;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1_000;
 
-export async function getGoatBrainOverviewStats(
+export async function getBrainOverviewStats(
   brainRef: string,
   now = new Date(),
   db = getDb(),
-): Promise<GoatBrainOverviewStats> {
+): Promise<BrainOverviewStats> {
   const cutoff = new Date(now.getTime() - SEVEN_DAYS_MS);
   const [[itemsAdded], [retrievals], [sources]] = await Promise.all([
     db
       .select({ value: count() })
-      .from(goatBrainDocuments)
-      .where(
-        and(eq(goatBrainDocuments.brainRef, brainRef), gte(goatBrainDocuments.createdAt, cutoff)),
-      ),
+      .from(brainDocuments)
+      .where(and(eq(brainDocuments.brainRef, brainRef), gte(brainDocuments.createdAt, cutoff))),
     db
       .select({ value: count() })
-      .from(goatBrainToolRuns)
+      .from(brainToolRuns)
       .where(
         and(
-          eq(goatBrainToolRuns.brainRef, brainRef),
-          eq(goatBrainToolRuns.ok, true),
-          gte(goatBrainToolRuns.createdAt, cutoff),
-          inArray(goatBrainToolRuns.action, BRAIN_RETRIEVAL_ACTIONS),
+          eq(brainToolRuns.brainRef, brainRef),
+          eq(brainToolRuns.ok, true),
+          gte(brainToolRuns.createdAt, cutoff),
+          inArray(brainToolRuns.action, BRAIN_RETRIEVAL_ACTIONS),
         ),
       ),
     db
       .select({ value: count() })
-      .from(goatBrainSources)
+      .from(brainSources)
       .where(
         and(
-          eq(goatBrainSources.brainId, brainRef),
-          eq(goatBrainSources.enabled, true),
-          ne(goatBrainSources.provider, "slack_bot"),
+          eq(brainSources.brainId, brainRef),
+          eq(brainSources.enabled, true),
+          ne(brainSources.provider, "slack_bot"),
         ),
       ),
   ]);

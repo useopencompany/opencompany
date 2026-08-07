@@ -1,11 +1,11 @@
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import {
-  buildGoatUserMcpResourceMetadataPath,
-  resolveGoatAuthKitDomain,
+  buildUserMcpResourceMetadataPath,
+  resolveAuthKitDomain,
   userWorkosIdFromMcpAuth,
-  verifyGoatMcpBearerToken,
+  verifyMcpBearerToken,
 } from "@/lib/mcp-oauth";
-import { registerGoatBrainTools } from "@/lib/mcp-server";
+import { registerBrainTools } from "@/lib/mcp-server";
 import { OPENCOMPANY_MCP_SERVER_NAME } from "@/lib/mcp-setup";
 
 export const runtime = "nodejs";
@@ -17,7 +17,7 @@ export const maxDuration = 120;
 // access is authorized per brain on every tool call via workspace/brain
 // membership.
 async function handleMcpRequest(request: Request) {
-  const authConfig = resolveGoatAuthKitDomain();
+  const authConfig = resolveAuthKitDomain();
   if (!authConfig.ok) {
     return Response.json({ error: authConfig.error }, { status: 503 });
   }
@@ -36,7 +36,7 @@ async function handleMcpRequest(request: Request) {
 
       const handler = createMcpHandler(
         (server) => {
-          registerGoatBrainTools(server, {
+          registerBrainTools(server, {
             userWorkosId,
             gatewayApiKey,
             signal: authenticatedRequest.signal,
@@ -60,10 +60,10 @@ async function handleMcpRequest(request: Request) {
 
       return handler(authenticatedRequest);
     },
-    verifyGoatMcpBearerToken,
+    verifyMcpBearerToken,
     {
       required: true,
-      resourceMetadataPath: buildGoatUserMcpResourceMetadataPath(),
+      resourceMetadataPath: buildUserMcpResourceMetadataPath(),
     },
   );
 

@@ -1,24 +1,24 @@
 import { getDb } from "@opencompany/db/client";
-import { goatChatSessions, goatCodexChatSessions } from "@opencompany/db/schema";
-import { getGoatBrainAccess } from "@opencompany/db/workspaces";
+import { chatSessions, codexChatSessions } from "@opencompany/db/schema";
+import { getBrainAccess } from "@opencompany/db/workspaces";
 import { and, eq, isNull, or } from "drizzle-orm";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import {
-  buildGoatElectricOriginUrl,
-  goatElectricBaseUrl,
-  goatElectricBrainRef,
-  goatElectricChatMessagesSessionId,
-  goatElectricCodexChatSessionId,
+  buildElectricOriginUrl,
+  electricBaseUrl,
+  electricBrainRef,
+  electricChatMessagesSessionId,
+  electricCodexChatSessionId,
   hasInvalidElectricCloudSecretPair,
 } from "@/lib/electric";
 
 export async function GET(request: Request): Promise<Response> {
-  const electricUrl = goatElectricBaseUrl();
+  const electricUrl = electricBaseUrl();
   if (!electricUrl) {
     return new Response("Electric sync is not configured.", { status: 503 });
   }
 
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) {
     return new Response("Unauthorized", { status: 401 });
   }
@@ -41,7 +41,7 @@ export async function GET(request: Request): Promise<Response> {
     userWorkosId: context.user.workosUserId,
   });
 
-  const originUrl = buildGoatElectricOriginUrl({
+  const originUrl = buildElectricOriginUrl({
     electricUrl,
     requestUrl,
     userWorkosId: context.user.workosUserId,
@@ -82,33 +82,26 @@ export async function authorizeChatSessionShape(input: {
   workspaceId: string;
 }): Promise<string | null> {
   const sessionId =
-    goatElectricChatMessagesSessionId(input.requestUrl) ??
-    goatElectricCodexChatSessionId(input.requestUrl);
+    electricChatMessagesSessionId(input.requestUrl) ?? electricCodexChatSessionId(input.requestUrl);
   if (!sessionId) return null;
 
   const [session] = await getDb()
-    .select({ id: goatChatSessions.id })
-    .from(goatChatSessions)
+    .select({ id: chatSessions.id })
+    .from(chatSessions)
     .leftJoin(
-      goatCodexChatSessions,
+      codexChatSessions,
       and(
-        eq(goatCodexChatSessions.chatSessionId, goatChatSessions.id),
-        eq(goatCodexChatSessions.userWorkosId, goatChatSessions.userWorkosId),
+        eq(codexChatSessions.chatSessionId, chatSessions.id),
+        eq(codexChatSessions.userWorkosId, chatSessions.userWorkosId),
       ),
     )
     .where(
       and(
-        eq(goatChatSessions.id, sessionId),
-        isNull(goatChatSessions.closedAt),
+        eq(chatSessions.id, sessionId),
+        isNull(chatSessions.closedAt),
         or(
-          and(
-            eq(goatChatSessions.kind, "chat"),
-            eq(goatChatSessions.userWorkosId, input.userWorkosId),
-          ),
-          and(
-            eq(goatChatSessions.kind, "task"),
-            eq(goatCodexChatSessions.workspaceId, input.workspaceId),
-          ),
+          and(eq(chatSessions.kind, "chat"), eq(chatSessions.userWorkosId, input.userWorkosId)),
+          and(eq(chatSessions.kind, "task"), eq(codexChatSessions.workspaceId, input.workspaceId)),
         ),
       ),
     )
@@ -121,10 +114,10 @@ async function authorizeBrainShape(input: {
   requestUrl: URL;
   userWorkosId: string;
 }): Promise<string | null> {
-  const brainRef = goatElectricBrainRef(input.requestUrl);
+  const brainRef = electricBrainRef(input.requestUrl);
   if (!brainRef) return null;
 
-  const access = await getGoatBrainAccess({
+  const access = await getBrainAccess({
     userWorkosId: input.userWorkosId,
     brainRef,
   });

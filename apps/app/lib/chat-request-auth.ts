@@ -1,21 +1,19 @@
 import { getDb } from "@opencompany/db/client";
-import { goatUsers, goatWorkspaceMembers, goatWorkspaces } from "@opencompany/db/schema";
-import { DEFAULT_GOAT_BRAIN_SLUG, listAccessibleGoatBrains } from "@opencompany/db/workspaces";
+import { users, workspaceMembers, workspaces } from "@opencompany/db/schema";
+import { DEFAULT_GOAT_BRAIN_SLUG, listAccessibleBrains } from "@opencompany/db/workspaces";
 import { and, eq } from "drizzle-orm";
 import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
-import { currentGoatUser, type GoatAuthContext } from "@/lib/auth";
-import { resolveGoatAuthKitDomain } from "@/lib/mcp-oauth";
+import { type AuthContext, currentUser } from "@/lib/auth";
+import { resolveAuthKitDomain } from "@/lib/mcp-oauth";
 
 export const MACOS_OAUTH_AUDIENCE_ENV = "MACOS_OAUTH_AUDIENCE";
 
-export type GoatChatRequestContext = Pick<
-  GoatAuthContext,
+export type ChatRequestContext = Pick<
+  AuthContext,
   "user" | "workspace" | "role" | "workspaces" | "brains" | "activeBrain"
 >;
 
-type ChatAuthResult =
-  | { ok: true; context: GoatChatRequestContext }
-  | { ok: false; response: Response };
+type ChatAuthResult = { ok: true; context: ChatRequestContext } | { ok: false; response: Response };
 
 type TokenVerification = { ok: true; payload: JWTPayload } | { ok: false; response: Response };
 
@@ -26,10 +24,10 @@ let jwksCache:
     }
   | undefined;
 
-export async function resolveGoatChatRequestContext(request: Request): Promise<ChatAuthResult> {
+export async function resolveChatRequestContext(request: Request): Promise<ChatAuthResult> {
   const authorization = request.headers.get("authorization");
   if (!authorization) {
-    const context = await currentGoatUser({ optional: true });
+    const context = await currentUser({ optional: true });
     return context
       ? { ok: true, context }
       : { ok: false, response: unauthorizedResponse("Unauthorized") };
@@ -40,12 +38,12 @@ export async function resolveGoatChatRequestContext(request: Request): Promise<C
     return { ok: false, response: unauthorizedResponse("Invalid bearer token.") };
   }
 
-  const verified = await verifyGoatMacAccessToken(token);
+  const verified = await verifyMacAccessToken(token);
   if (!verified.ok) return verified;
-  return resolveGoatMacChatContext(verified.payload);
+  return resolveMacChatContext(verified.payload);
 }
 
-export async function verifyGoatMacAccessToken(
+export async function verifyMacAccessToken(
   token: string,
   options: {
     audience?: string | null;
@@ -62,8 +60,8 @@ export async function verifyGoatMacAccessToken(
   }
 
   const configuredDomain = options.authKitDomain
-    ? resolveGoatAuthKitDomain(options.authKitDomain)
-    : resolveGoatAuthKitDomain();
+    ? resolveAuthKitDomain(options.authKitDomain)
+    : resolveAuthKitDomain();
   if (!configuredDomain.ok) {
     return { ok: false, response: new Response(configuredDomain.error, { status: 503 }) };
   }
@@ -80,7 +78,7 @@ export async function verifyGoatMacAccessToken(
   }
 }
 
-export async function resolveGoatMacChatContext(
+export async function resolveMacChatContext(
   payload: JWTPayload,
   db = getDb(),
 ): Promise<ChatAuthResult> {
@@ -91,15 +89,15 @@ export async function resolveGoatMacChatContext(
   }
 
   const [userRows, membershipRows] = await Promise.all([
-    db.select().from(goatUsers).where(eq(goatUsers.workosUserId, userWorkosId)).limit(1),
+    db.select().from(users).where(eq(users.workosUserId, userWorkosId)).limit(1),
     db
-      .select({ workspace: goatWorkspaces, role: goatWorkspaceMembers.role })
-      .from(goatWorkspaceMembers)
-      .innerJoin(goatWorkspaces, eq(goatWorkspaces.id, goatWorkspaceMembers.workspaceId))
+      .select({ workspace: workspaces, role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .innerJoin(workspaces, eq(workspaces.id, workspaceMembers.workspaceId))
       .where(
         and(
-          eq(goatWorkspaceMembers.userWorkosId, userWorkosId),
-          eq(goatWorkspaces.workosOrganizationId, organizationId),
+          eq(workspaceMembers.userWorkosId, userWorkosId),
+          eq(workspaces.workosOrganizationId, organizationId),
         ),
       )
       .limit(1),
@@ -126,7 +124,7 @@ export async function resolveGoatMacChatContext(
     };
   }
 
-  const brains = await listAccessibleGoatBrains(
+  const brains = await listAccessibleBrains(
     { userWorkosId, workspaceId: membership.workspace.id },
     { db },
   );

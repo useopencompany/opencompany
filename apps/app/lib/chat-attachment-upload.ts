@@ -5,7 +5,7 @@ import { upload } from "@vercel/blob/client";
 // /api/chat-attachments/upload); the attachment metadata rides on the chat
 // message when the user sends it. Mirrors lib/brain-asset-upload.ts — no
 // client-side sha here because save_to_brain recomputes it server-side.
-export async function uploadGoatChatAttachmentBlob(
+export async function uploadChatAttachmentBlob(
   userWorkosId: string,
   file: File,
   mediaType: string,

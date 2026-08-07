@@ -1,41 +1,34 @@
-import { loadGoatBillingOverview, setGoatAutoRefillConfig } from "@opencompany/db/billing";
-import {
-  createGoatPendingCheckoutRecord,
-  markGoatCheckoutRecordOpen,
-} from "@opencompany/db/credits";
+import { loadBillingOverview, setAutoRefillConfig } from "@opencompany/db/billing";
+import { createPendingCheckoutRecord, markCheckoutRecordOpen } from "@opencompany/db/credits";
 import { redirect } from "next/navigation";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { currentGoatUser } from "@/lib/auth";
-import { getGoatStripe } from "@/lib/billing/stripe";
-import {
-  createGoatCreditTopUpAction,
-  createGoatProCheckoutAction,
-  setGoatAutoRefillAction,
-} from "./actions";
+import { currentUser } from "@/lib/auth";
+import { getStripe } from "@/lib/billing/stripe";
+import { createCreditTopUpAction, createProCheckoutAction, setAutoRefillAction } from "./actions";
 
-vi.mock("@opencompany/analytics/server", () => ({
+vi.mock("@opencompany/analytics/shared-server", () => ({
   captureServerEvent: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@opencompany/db/billing", () => ({
   GOAT_PRO_MONTHLY_PRICE_USD_CENTS: 2_000,
   GOAT_PRO_STRIPE_PRODUCT_KEY: "goat_pro",
-  loadGoatBillingOverview: vi.fn(),
-  setGoatAutoRefillConfig: vi.fn(),
-  setGoatStripeCustomerId: vi.fn(),
+  loadBillingOverview: vi.fn(),
+  setAutoRefillConfig: vi.fn(),
+  setStripeCustomerId: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/credits", () => ({
-  createGoatPendingCheckoutRecord: vi.fn().mockResolvedValue(undefined),
-  markGoatCheckoutRecordFailed: vi.fn().mockResolvedValue(undefined),
-  markGoatCheckoutRecordOpen: vi.fn().mockResolvedValue(undefined),
+  createPendingCheckoutRecord: vi.fn().mockResolvedValue(undefined),
+  markCheckoutRecordFailed: vi.fn().mockResolvedValue(undefined),
+  markCheckoutRecordOpen: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@/lib/auth", () => ({ currentGoatUser: vi.fn() }));
+vi.mock("@/lib/auth", () => ({ currentUser: vi.fn() }));
 vi.mock("@/lib/billing/stripe", () => ({
-  assertGoatCheckoutEnabled: vi.fn(),
-  getGoatAppUrl: vi.fn(() => "https://goat.test"),
-  getGoatStripe: vi.fn(),
+  assertCheckoutEnabled: vi.fn(),
+  getAppUrl: vi.fn(() => "https://goat.test"),
+  getStripe: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({
   redirect: vi.fn(() => {
@@ -49,30 +42,30 @@ describe("Goat billing actions", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(currentGoatUser).mockResolvedValue({
+    vi.mocked(currentUser).mockResolvedValue({
       role: "admin",
       workspace: { id: "goat_ws_1", name: "Acme" },
       user: { workosUserId: "user_1" },
       authUser: { email: "admin@example.com" },
-    } as Awaited<ReturnType<typeof currentGoatUser>>);
-    vi.mocked(loadGoatBillingOverview).mockResolvedValue({
+    } as Awaited<ReturnType<typeof currentUser>>);
+    vi.mocked(loadBillingOverview).mockResolvedValue({
       billing: { plan: "pro", stripeCustomerId: "cus_goat_1" },
-    } as unknown as Awaited<ReturnType<typeof loadGoatBillingOverview>>);
+    } as unknown as Awaited<ReturnType<typeof loadBillingOverview>>);
     checkoutCreate.mockResolvedValue({
       id: "cs_test_1",
       url: "https://checkout.stripe.test/session",
     });
     subscriptionList.mockResolvedValue({ data: [] });
-    vi.mocked(getGoatStripe).mockReturnValue({
+    vi.mocked(getStripe).mockReturnValue({
       checkout: { sessions: { create: checkoutCreate } },
       subscriptions: { list: subscriptionList },
     } as never);
   });
 
   it("creates a payment-mode top-up Checkout for a Pro admin, saving the card", async () => {
-    await expect(createGoatCreditTopUpAction(1_000)).rejects.toThrow("NEXT_REDIRECT");
+    await expect(createCreditTopUpAction(1_000)).rejects.toThrow("NEXT_REDIRECT");
 
-    expect(createGoatPendingCheckoutRecord).toHaveBeenCalledWith(
+    expect(createPendingCheckoutRecord).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceId: "goat_ws_1",
         userWorkosId: "user_1",
@@ -97,23 +90,23 @@ describe("Goat billing actions", () => {
       unit_amount: 1_000,
     });
     expect(params.metadata.billingProduct).toBe("goat_topup");
-    expect(params.metadata.goatWorkspaceId).toBe("goat_ws_1");
+    expect(params.metadata.workspaceId).toBe("goat_ws_1");
     expect(params.metadata.amountCents).toBe("1000");
-    expect(markGoatCheckoutRecordOpen).toHaveBeenCalledWith(
+    expect(markCheckoutRecordOpen).toHaveBeenCalledWith(
       expect.objectContaining({ stripeCheckoutSessionId: "cs_test_1" }),
     );
     expect(redirect).toHaveBeenCalledWith("https://checkout.stripe.test/session");
   });
 
   it("rejects top-ups from non-admin members", async () => {
-    vi.mocked(currentGoatUser).mockResolvedValue({
+    vi.mocked(currentUser).mockResolvedValue({
       role: "member",
       workspace: { id: "goat_ws_1", name: "Acme" },
       user: { workosUserId: "user_2" },
       authUser: { email: "member@example.com" },
-    } as Awaited<ReturnType<typeof currentGoatUser>>);
+    } as Awaited<ReturnType<typeof currentUser>>);
 
-    await expect(createGoatCreditTopUpAction(1_000)).resolves.toEqual({
+    await expect(createCreditTopUpAction(1_000)).resolves.toEqual({
       ok: false,
       error: "Only workspace admins can add credits.",
     });
@@ -121,11 +114,11 @@ describe("Goat billing actions", () => {
   });
 
   it("rejects top-ups on Hobby", async () => {
-    vi.mocked(loadGoatBillingOverview).mockResolvedValue({
+    vi.mocked(loadBillingOverview).mockResolvedValue({
       billing: { plan: "hobby", stripeCustomerId: "cus_goat_1" },
-    } as unknown as Awaited<ReturnType<typeof loadGoatBillingOverview>>);
+    } as unknown as Awaited<ReturnType<typeof loadBillingOverview>>);
 
-    await expect(createGoatCreditTopUpAction(1_000)).resolves.toEqual({
+    await expect(createCreditTopUpAction(1_000)).resolves.toEqual({
       ok: false,
       error: "Upgrade this workspace to Pro before adding credits.",
     });
@@ -133,19 +126,19 @@ describe("Goat billing actions", () => {
   });
 
   it("rejects top-up amounts outside the allowed range", async () => {
-    await expect(createGoatCreditTopUpAction(100)).resolves.toMatchObject({ ok: false });
-    await expect(createGoatCreditTopUpAction(1_000_000)).resolves.toMatchObject({ ok: false });
+    await expect(createCreditTopUpAction(100)).resolves.toMatchObject({ ok: false });
+    await expect(createCreditTopUpAction(1_000_000)).resolves.toMatchObject({ ok: false });
     expect(checkoutCreate).not.toHaveBeenCalled();
   });
 
   it("starts a monthly seat subscription for workspace admins", async () => {
-    vi.mocked(currentGoatUser).mockResolvedValue({
+    vi.mocked(currentUser).mockResolvedValue({
       role: "admin",
       workspace: { id: "goat_ws_1", name: "Acme" },
       user: { workosUserId: "user_1" },
       authUser: { email: "admin@example.com" },
-    } as Awaited<ReturnType<typeof currentGoatUser>>);
-    vi.mocked(loadGoatBillingOverview).mockResolvedValue({
+    } as Awaited<ReturnType<typeof currentUser>>);
+    vi.mocked(loadBillingOverview).mockResolvedValue({
       billing: {
         plan: "hobby",
         stripeCustomerId: "cus_goat_1",
@@ -153,9 +146,9 @@ describe("Goat billing actions", () => {
         subscriptionStatus: null,
       },
       memberCount: 3,
-    } as unknown as Awaited<ReturnType<typeof loadGoatBillingOverview>>);
+    } as unknown as Awaited<ReturnType<typeof loadBillingOverview>>);
 
-    await expect(createGoatProCheckoutAction()).rejects.toThrow("NEXT_REDIRECT");
+    await expect(createProCheckoutAction()).rejects.toThrow("NEXT_REDIRECT");
 
     const [params, options] = checkoutCreate.mock.calls[0] as [
       {
@@ -179,21 +172,21 @@ describe("Goat billing actions", () => {
     });
     expect(params.metadata).toMatchObject({
       billingProduct: "goat_pro",
-      goatWorkspaceId: "goat_ws_1",
+      workspaceId: "goat_ws_1",
     });
     expect(params.subscription_data.metadata).toEqual(params.metadata);
     expect(options.idempotencyKey).toMatch(/^goat-pro-goat_ws_1-/);
   });
 
   it("does not let non-admin members change the plan", async () => {
-    vi.mocked(currentGoatUser).mockResolvedValue({
+    vi.mocked(currentUser).mockResolvedValue({
       role: "member",
       workspace: { id: "goat_ws_1", name: "Acme" },
       user: { workosUserId: "user_2" },
       authUser: { email: "member@example.com" },
-    } as Awaited<ReturnType<typeof currentGoatUser>>);
+    } as Awaited<ReturnType<typeof currentUser>>);
 
-    await expect(createGoatProCheckoutAction()).resolves.toEqual({
+    await expect(createProCheckoutAction()).resolves.toEqual({
       ok: false,
       error: "Only workspace admins can change the plan.",
     });
@@ -201,30 +194,30 @@ describe("Goat billing actions", () => {
   });
 
   it("does not create a duplicate Pro subscription while the webhook projection lags", async () => {
-    vi.mocked(currentGoatUser).mockResolvedValue({
+    vi.mocked(currentUser).mockResolvedValue({
       role: "admin",
       workspace: { id: "goat_ws_1", name: "Acme" },
       user: { workosUserId: "user_1" },
       authUser: { email: "admin@example.com" },
-    } as Awaited<ReturnType<typeof currentGoatUser>>);
-    vi.mocked(loadGoatBillingOverview).mockResolvedValue({
+    } as Awaited<ReturnType<typeof currentUser>>);
+    vi.mocked(loadBillingOverview).mockResolvedValue({
       billing: {
         plan: "hobby",
         stripeCustomerId: "cus_goat_1",
         stripeSubscriptionId: null,
         subscriptionStatus: null,
       },
-    } as unknown as Awaited<ReturnType<typeof loadGoatBillingOverview>>);
+    } as unknown as Awaited<ReturnType<typeof loadBillingOverview>>);
     subscriptionList.mockResolvedValueOnce({
       data: [
         {
           status: "active",
-          metadata: { billingProduct: "goat_pro", goatWorkspaceId: "goat_ws_1" },
+          metadata: { billingProduct: "goat_pro", workspaceId: "goat_ws_1" },
         },
       ],
     });
 
-    await expect(createGoatProCheckoutAction()).resolves.toMatchObject({
+    await expect(createProCheckoutAction()).resolves.toMatchObject({
       ok: false,
       error: expect.stringContaining("already has a seat subscription"),
     });
@@ -232,12 +225,12 @@ describe("Goat billing actions", () => {
   });
 
   it("saves auto-refill config when a payment method exists", async () => {
-    vi.mocked(setGoatAutoRefillConfig).mockResolvedValue({ enabled: true, amountCents: 2_000 });
+    vi.mocked(setAutoRefillConfig).mockResolvedValue({ enabled: true, amountCents: 2_000 });
 
-    await expect(setGoatAutoRefillAction({ enabled: true, amountCents: 2_000 })).resolves.toEqual({
+    await expect(setAutoRefillAction({ enabled: true, amountCents: 2_000 })).resolves.toEqual({
       ok: true,
     });
-    expect(setGoatAutoRefillConfig).toHaveBeenCalledWith({
+    expect(setAutoRefillConfig).toHaveBeenCalledWith({
       workspaceId: "goat_ws_1",
       enabled: true,
       amountCents: 2_000,
@@ -245,17 +238,17 @@ describe("Goat billing actions", () => {
   });
 
   it("refuses to enable auto-refill before a card is saved", async () => {
-    vi.mocked(setGoatAutoRefillConfig).mockResolvedValue(null);
+    vi.mocked(setAutoRefillConfig).mockResolvedValue(null);
 
-    await expect(
-      setGoatAutoRefillAction({ enabled: true, amountCents: 2_000 }),
-    ).resolves.toMatchObject({ ok: false });
+    await expect(setAutoRefillAction({ enabled: true, amountCents: 2_000 })).resolves.toMatchObject(
+      { ok: false },
+    );
   });
 
   it("rejects auto-refill amounts outside the allowed range", async () => {
-    await expect(
-      setGoatAutoRefillAction({ enabled: true, amountCents: 100 }),
-    ).resolves.toMatchObject({ ok: false });
-    expect(setGoatAutoRefillConfig).not.toHaveBeenCalled();
+    await expect(setAutoRefillAction({ enabled: true, amountCents: 100 })).resolves.toMatchObject({
+      ok: false,
+    });
+    expect(setAutoRefillConfig).not.toHaveBeenCalled();
   });
 });

@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { recordGoatChatModelRoutingAttempt } from "./chat-model-routing";
-import { goatChatModelRoutingAttempts } from "./schema";
+import { recordChatModelRoutingAttempt } from "./chat-model-routing";
+import { chatModelRoutingAttempts } from "./schema";
 
 describe("Goat chat model routing attempts", () => {
   it("persists prompt-free classifier diagnostics and usage", async () => {
     const values = vi.fn(async (_value: unknown) => undefined);
     const insert = vi.fn(() => ({ values }));
 
-    await recordGoatChatModelRoutingAttempt({
+    await recordChatModelRoutingAttempt({
       workspaceId: "workspace_1",
       userWorkosId: "user_1",
       chatSessionId: "session_1",
@@ -28,7 +28,7 @@ describe("Goat chat model routing attempts", () => {
       db: { insert },
     });
 
-    expect(insert).toHaveBeenCalledWith(goatChatModelRoutingAttempts);
+    expect(insert).toHaveBeenCalledWith(chatModelRoutingAttempts);
     expect(values).toHaveBeenCalledWith({
       workspaceId: "workspace_1",
       userWorkosId: "user_1",

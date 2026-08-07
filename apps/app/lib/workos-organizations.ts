@@ -1,8 +1,8 @@
-import type { GoatWorkspace } from "@opencompany/db/schema";
+import type { Workspace } from "@opencompany/db/schema";
 import {
-  type GoatWorkspaceMemberWithUser,
-  listGoatWorkspaceMembers,
-  setGoatWorkspaceOrganizationId,
+  listWorkspaceMembers,
+  setWorkspaceOrganizationId,
+  type WorkspaceMemberWithUser,
 } from "@opencompany/db/workspaces";
 import { getWorkOSClient } from "@/lib/workos-client";
 
@@ -11,14 +11,14 @@ const MEMBER_ROLE = "member";
 
 type WorkOSClient = ReturnType<typeof getWorkOSClient>;
 
-export async function ensureGoatWorkspaceOrganization(workspace: GoatWorkspace): Promise<string> {
+export async function ensureWorkspaceOrganization(workspace: Workspace): Promise<string> {
   if (workspace.workosOrganizationId) return workspace.workosOrganizationId;
 
   const workos = getWorkOSClient();
-  const existing = await findGoatWorkspaceOrganization(workos, workspace.id);
+  const existing = await findWorkspaceOrganization(workos, workspace.id);
   if (existing) {
-    await syncGoatWorkspaceMembersToOrganization(workos, workspace.id, existing.id);
-    await setGoatWorkspaceOrganizationId({
+    await syncWorkspaceMembersToOrganization(workos, workspace.id, existing.id);
+    await setWorkspaceOrganizationId({
       workspaceId: workspace.id,
       workosOrganizationId: existing.id,
     });
@@ -27,21 +27,21 @@ export async function ensureGoatWorkspaceOrganization(workspace: GoatWorkspace):
 
   let organizationId: string | undefined;
   try {
-    const organization = await createGoatWorkspaceOrganization(workos, workspace);
+    const organization = await createWorkspaceOrganization(workos, workspace);
     organizationId = organization.id;
 
-    await syncGoatWorkspaceMembersToOrganization(workos, workspace.id, organization.id);
-    await setGoatWorkspaceOrganizationId({
+    await syncWorkspaceMembersToOrganization(workos, workspace.id, organization.id);
+    await setWorkspaceOrganizationId({
       workspaceId: workspace.id,
       workosOrganizationId: organization.id,
     });
     return organization.id;
   } catch (error) {
     if (isWorkOSConflict(error)) {
-      const conflicted = await findGoatWorkspaceOrganization(workos, workspace.id);
+      const conflicted = await findWorkspaceOrganization(workos, workspace.id);
       if (conflicted) {
-        await syncGoatWorkspaceMembersToOrganization(workos, workspace.id, conflicted.id);
-        await setGoatWorkspaceOrganizationId({
+        await syncWorkspaceMembersToOrganization(workos, workspace.id, conflicted.id);
+        await setWorkspaceOrganizationId({
           workspaceId: workspace.id,
           workosOrganizationId: conflicted.id,
         });
@@ -60,13 +60,13 @@ export async function ensureGoatWorkspaceOrganization(workspace: GoatWorkspace):
   }
 }
 
-export async function ensureGoatWorkspaceOrganizationsForEntries<
-  T extends { workspace: GoatWorkspace },
->(entries: T[]): Promise<T[]> {
+export async function ensureWorkspaceOrganizationsForEntries<T extends { workspace: Workspace }>(
+  entries: T[],
+): Promise<T[]> {
   const next: T[] = [];
   for (const entry of entries) {
     try {
-      const workosOrganizationId = await ensureGoatWorkspaceOrganization(entry.workspace);
+      const workosOrganizationId = await ensureWorkspaceOrganization(entry.workspace);
       next.push({
         ...entry,
         workspace: { ...entry.workspace, workosOrganizationId },
@@ -82,7 +82,7 @@ export async function ensureGoatWorkspaceOrganizationsForEntries<
   return next;
 }
 
-async function findGoatWorkspaceOrganization(workos: WorkOSClient, workspaceId: string) {
+async function findWorkspaceOrganization(workos: WorkOSClient, workspaceId: string) {
   try {
     return await workos.organizations.getOrganizationByExternalId(workspaceId);
   } catch (error) {
@@ -91,7 +91,7 @@ async function findGoatWorkspaceOrganization(workos: WorkOSClient, workspaceId: 
   }
 }
 
-async function createGoatWorkspaceOrganization(workos: WorkOSClient, workspace: GoatWorkspace) {
+async function createWorkspaceOrganization(workos: WorkOSClient, workspace: Workspace) {
   return workos.organizations.createOrganization(
     {
       name: workspace.name,
@@ -104,12 +104,12 @@ async function createGoatWorkspaceOrganization(workos: WorkOSClient, workspace: 
   );
 }
 
-async function syncGoatWorkspaceMembersToOrganization(
+async function syncWorkspaceMembersToOrganization(
   workos: WorkOSClient,
   workspaceId: string,
   organizationId: string,
 ) {
-  const members = await listGoatWorkspaceMembers(workspaceId);
+  const members = await listWorkspaceMembers(workspaceId);
   for (const member of members) {
     await ensureOrganizationMembership(workos, organizationId, member);
   }
@@ -118,7 +118,7 @@ async function syncGoatWorkspaceMembersToOrganization(
 async function ensureOrganizationMembership(
   workos: WorkOSClient,
   organizationId: string,
-  entry: GoatWorkspaceMemberWithUser,
+  entry: WorkspaceMemberWithUser,
 ) {
   const roleSlug = entry.member.role === ADMIN_ROLE ? ADMIN_ROLE : MEMBER_ROLE;
   const memberships = await workos.userManagement.listOrganizationMemberships({

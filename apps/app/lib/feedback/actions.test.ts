@@ -1,18 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { currentGoatUser } from "@/lib/auth";
-import { submitGoatFeedback } from "./actions";
+import { currentUser } from "@/lib/auth";
+import { submitFeedback } from "./actions";
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
 }));
 
-const currentGoatUserMock = vi.mocked(currentGoatUser);
+const currentUserMock = vi.mocked(currentUser);
 
 function authContext() {
   return {
     authUser: { email: "ana@acme.com", firstName: "Ana", lastName: "Ng" },
     workspace: { id: "gws_1", name: "Acme" },
-  } as unknown as Awaited<ReturnType<typeof currentGoatUser>>;
+  } as unknown as Awaited<ReturnType<typeof currentUser>>;
 }
 
 function linearOk<T>(data: T) {
@@ -24,13 +24,13 @@ function linearOk<T>(data: T) {
 function routeLinear(overrides: { issue?: unknown } = {}) {
   return vi.fn(async (_url: string, init: RequestInit) => {
     const body = JSON.parse(String(init.body)) as { query: string };
-    if (body.query.includes("GoatFeedbackTriageState")) {
+    if (body.query.includes("FeedbackTriageState")) {
       return linearOk({ team: { states: { nodes: [{ id: "st_triage", type: "triage" }] } } });
     }
-    if (body.query.includes("GoatFeedbackLabels")) {
+    if (body.query.includes("FeedbackLabels")) {
       return linearOk({ team: { labels: { nodes: [] } } });
     }
-    if (body.query.includes("GoatFeedbackCreateLabel")) {
+    if (body.query.includes("FeedbackCreateLabel")) {
       return linearOk({ issueLabelCreate: { success: false, issueLabel: null } });
     }
     return linearOk(
@@ -47,9 +47,9 @@ function form(fields: Record<string, string>) {
   return data;
 }
 
-describe("submitGoatFeedback", () => {
+describe("submitFeedback", () => {
   beforeEach(() => {
-    currentGoatUserMock.mockResolvedValue(authContext());
+    currentUserMock.mockResolvedValue(authContext());
     process.env.LINEAR_API_KEY = "lin_api_test";
     process.env.FEEDBACK_LINEAR_TEAM_ID = "team_1";
   });
@@ -62,12 +62,12 @@ describe("submitGoatFeedback", () => {
   });
 
   it("rejects an empty message", async () => {
-    const result = await submitGoatFeedback(null, form({ kind: "bug", message: "  " }));
+    const result = await submitFeedback(null, form({ kind: "bug", message: "  " }));
     expect(result).toEqual({ ok: false, error: "Enter a bit more detail." });
   });
 
   it("rejects an overly long message", async () => {
-    const result = await submitGoatFeedback(
+    const result = await submitFeedback(
       null,
       form({ kind: "feedback", message: "x".repeat(4001) }),
     );
@@ -78,7 +78,7 @@ describe("submitGoatFeedback", () => {
     const fetchMock = routeLinear();
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await submitGoatFeedback(
+    const result = await submitFeedback(
       null,
       form({ kind: "bug", message: "Search returns stale results" }),
     );
@@ -86,7 +86,7 @@ describe("submitGoatFeedback", () => {
     expect(result).toEqual({ ok: true });
 
     const issueCall = fetchMock.mock.calls.find(([, init]) =>
-      String((init as RequestInit).body).includes("GoatFeedbackCreateIssue"),
+      String((init as RequestInit).body).includes("FeedbackCreateIssue"),
     );
     expect(issueCall).toBeDefined();
     const input = JSON.parse(String((issueCall?.[1] as RequestInit).body)).variables.input;
@@ -100,13 +100,13 @@ describe("submitGoatFeedback", () => {
 
   it("defaults an unknown kind to feedback", async () => {
     vi.stubGlobal("fetch", routeLinear());
-    const result = await submitGoatFeedback(null, form({ kind: "nonsense", message: "Nice tool" }));
+    const result = await submitFeedback(null, form({ kind: "nonsense", message: "Nice tool" }));
     expect(result).toEqual({ ok: true });
   });
 
   it("surfaces a missing API key as an error", async () => {
     delete process.env.LINEAR_API_KEY;
-    const result = await submitGoatFeedback(null, form({ kind: "idea", message: "Add dark mode" }));
+    const result = await submitFeedback(null, form({ kind: "idea", message: "Add dark mode" }));
     expect(result).toEqual({ ok: false, error: "Missing LINEAR_API_KEY." });
   });
 
@@ -115,7 +115,7 @@ describe("submitGoatFeedback", () => {
       "fetch",
       routeLinear({ issue: { issueCreate: { success: false, issue: null } } }),
     );
-    const result = await submitGoatFeedback(
+    const result = await submitFeedback(
       null,
       form({ kind: "feedback", message: "Something broke" }),
     );

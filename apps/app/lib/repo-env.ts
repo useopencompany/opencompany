@@ -3,9 +3,9 @@ import { parse } from "dotenv";
 export const GOAT_REPO_ENV_MAX_BYTES = 256 * 1024;
 export const GOAT_REPO_SETUP_INSTRUCTIONS_MAX_LENGTH = 4_000;
 
-export type ValidatedGoatRepoEnv = { ok: true } | { ok: false; message: string };
+export type ValidatedRepoEnv = { ok: true } | { ok: false; message: string };
 
-export function validateGoatRepoEnv(content: string): ValidatedGoatRepoEnv {
+export function validateRepoEnv(content: string): ValidatedRepoEnv {
   if (!content.trim()) {
     return { ok: false, message: "Paste an environment file before saving." };
   }
@@ -32,7 +32,7 @@ export function validateGoatRepoEnv(content: string): ValidatedGoatRepoEnv {
   return { ok: true };
 }
 
-export function normalizeGoatRepoSetupInstructions(
+export function normalizeRepoSetupInstructions(
   value: string,
 ): { ok: true; instructions: string } | { ok: false; message: string } {
   const instructions = value.trim();

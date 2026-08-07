@@ -5,10 +5,10 @@ import { chmodSync, copyFileSync, existsSync, readFileSync, writeFileSync } from
 import { argv, exit, versions } from "node:process";
 import {
   caddyState,
-  goatHttpsDisabled,
-  goatHttpsOrigin,
-  goatHttpsPort,
   homebrewAvailable,
+  httpsDisabled,
+  httpsOrigin,
+  httpsPort,
   installCaddyWithHomebrew,
 } from "./lib/caddy-dev.mjs";
 import {
@@ -169,7 +169,7 @@ const INFISICAL_DEV_ENV = "dev";
 const INFISICAL_DEV_PATHS = ["/web", "/runner"];
 const LOCAL_WORKOS_REDIRECT_URI = "http://localhost:3000/auth/callback";
 const LEGACY_LOCAL_GOAT_APP_URL = "http://localhost:3002";
-const LOCAL_GOAT_APP_URL = goatHttpsOrigin(process.env);
+const LOCAL_GOAT_APP_URL = httpsOrigin(process.env);
 const LOCAL_GOAT_WORKOS_REDIRECT_URI = `${LOCAL_GOAT_APP_URL}/auth/callback`;
 const GOAT_ENV_PATH = "apps/app/.env.local";
 const LOCAL_ONLY_ENV_KEYS = new Set([
@@ -185,7 +185,7 @@ const LOCAL_ONLY_ENV_KEYS = new Set([
 const LOCAL_DEV_DEFAULT_ENV_VALUES = {
   OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS: "louis@acta.so",
   APP_PORT: "3002",
-  APP_HTTPS_PORT: goatHttpsPort(process.env),
+  APP_HTTPS_PORT: httpsPort(process.env),
   NEXT_PUBLIC_APP_URL: LOCAL_GOAT_APP_URL,
   NEXT_PUBLIC_WORKOS_REDIRECT_URI: LOCAL_GOAT_WORKOS_REDIRECT_URI,
   RUNNER_LLM_BROKER_PUBLIC_URL: "",
@@ -352,7 +352,7 @@ function inspectState() {
   const githubIntegrationMissing = GITHUB_WORK_INTEGRATION_ENV_KEYS.filter((k) =>
     isPlaceholder(env[k]),
   );
-  const goatBillingMissing = GOAT_BILLING_LOCAL_ENV_KEYS.filter((key) => isPlaceholder(env[key]));
+  const billingMissing = GOAT_BILLING_LOCAL_ENV_KEYS.filter((key) => isPlaceholder(env[key]));
 
   return {
     databaseMode: SHARED_DATABASE_MODE ? "shared" : "branch",
@@ -369,8 +369,8 @@ function inspectState() {
     neonProject: isPlaceholder(env.NEON_PROJECT_ID) ? "placeholder" : "set",
     neonBranch: isPlaceholder(env.NEON_BRANCH) ? "placeholder" : "set",
     stripeWebhookSecret: isPlaceholder(env.STRIPE_WEBHOOK_SECRET) ? "placeholder" : "set",
-    goatBilling: goatBillingMissing.length === 0 ? "ready" : "placeholder",
-    goatBillingMissingKeys: goatBillingMissing,
+    billing: billingMissing.length === 0 ? "ready" : "placeholder",
+    billingMissingKeys: billingMissing,
   };
 }
 
@@ -570,18 +570,18 @@ function shouldReplaceLocalDefault(key, current, next) {
   return false;
 }
 
-async function ensureGoatEnvFile() {
+async function ensureEnvFile() {
   step("Goat app env file");
 
   const env = readEffectiveLocalEnv();
-  const goatAppUrl = env.NEXT_PUBLIC_APP_URL || LOCAL_GOAT_APP_URL;
-  const goatRedirectUri = env.NEXT_PUBLIC_WORKOS_REDIRECT_URI || `${goatAppUrl}/auth/callback`;
+  const appUrl = env.NEXT_PUBLIC_APP_URL || LOCAL_GOAT_APP_URL;
+  const redirectUri = env.NEXT_PUBLIC_WORKOS_REDIRECT_URI || `${appUrl}/auth/callback`;
   const values = {
-    NEXT_PUBLIC_APP_URL: goatAppUrl,
-    NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
-    NEXT_PUBLIC_APP_URL: goatAppUrl,
-    NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
-    WORKOS_REDIRECT_URI: goatRedirectUri,
+    NEXT_PUBLIC_APP_URL: appUrl,
+    NEXT_PUBLIC_WORKOS_REDIRECT_URI: redirectUri,
+    NEXT_PUBLIC_APP_URL: appUrl,
+    NEXT_PUBLIC_WORKOS_REDIRECT_URI: redirectUri,
+    WORKOS_REDIRECT_URI: redirectUri,
   };
 
   for (const key of GOAT_LOCAL_ENV_KEYS) {
@@ -680,7 +680,7 @@ function pullSharedDevEnvFromInfisical({
   );
 }
 
-function pullGoatBillingDevEnvFromInfisical() {
+function pullBillingDevEnvFromInfisical() {
   if (!existsSync(".infisical.json")) return [];
 
   const current = readEffectiveLocalEnv();
@@ -840,9 +840,9 @@ async function ensureSharedDatabaseUrl(state) {
 async function ensureStripe(state) {
   step("Stripe local credentials");
 
-  const pulledGoatBillingKeys = pullGoatBillingDevEnvFromInfisical();
-  if (pulledGoatBillingKeys.length > 0) {
-    ok(`Loaded Goat billing values from Infisical dev: ${pulledGoatBillingKeys.join(", ")}`);
+  const pulledBillingKeys = pullBillingDevEnvFromInfisical();
+  if (pulledBillingKeys.length > 0) {
+    ok(`Loaded Goat billing values from Infisical dev: ${pulledBillingKeys.join(", ")}`);
   }
 
   const updates = {};
@@ -1047,10 +1047,10 @@ async function ensureElectric() {
   }
 }
 
-async function ensureGoatLocalHttps() {
+async function ensureLocalHttps() {
   step("Goat local HTTPS");
 
-  if (goatHttpsDisabled(process.env)) {
+  if (httpsDisabled(process.env)) {
     warn("APP_HTTPS_DISABLED is set; Goat local dev will use HTTP.");
     return;
   }
@@ -1075,7 +1075,7 @@ async function ensureGoatLocalHttps() {
     return;
   }
 
-  ok(`Caddy is installed; dev:goat will serve Goat at ${goatHttpsOrigin(process.env)}`);
+  ok(`Caddy is installed; dev:goat will serve Goat at ${httpsOrigin(process.env)}`);
 }
 
 async function main() {
@@ -1097,7 +1097,7 @@ async function main() {
       requireNeonProject: !SHARED_DATABASE_MODE && state.neonProject !== "set",
     });
     await ensureLocalDevDefaults();
-    await ensureGoatEnvFile();
+    await ensureEnvFile();
     ok(`Updated .env.local with shared setup values from ${source}`);
     return;
   }
@@ -1107,7 +1107,7 @@ async function main() {
     await ensureEnvFile(inspectState());
     await ensureLocalDevDefaults();
     await ensureStripe(inspectState());
-    await ensureGoatEnvFile();
+    await ensureEnvFile();
     return;
   }
 
@@ -1145,10 +1145,10 @@ async function main() {
         reason: `copy local Stripe CLI credentials into .env.local (${missingStripe.join(", ")})`,
       });
     }
-    if (state.goatBilling === "placeholder") {
+    if (state.billing === "placeholder") {
       nextSteps.push({
         command: "bun run setup:stripe",
-        reason: `configure local Goat billing (${state.goatBillingMissingKeys.join(", ")})`,
+        reason: `configure local Goat billing (${state.billingMissingKeys.join(", ")})`,
       });
     }
     if (!SHARED_DATABASE_MODE && state.neonProject === "set") {
@@ -1192,7 +1192,7 @@ async function main() {
         reason: `write ${GOAT_ENV_PATH} for direct Goat app local tooling`,
       });
     }
-    if (!goatHttpsDisabled(process.env) && !caddy.available) {
+    if (!httpsDisabled(process.env) && !caddy.available) {
       nextSteps.push({
         command: "bun run setup",
         reason: "install/check Caddy so `bun run dev:goat` serves local Goat over HTTPS/HTTP2",
@@ -1205,9 +1205,7 @@ async function main() {
           electric,
           electricUrl: electricUrlSet ? "set" : "placeholder",
           caddy: caddy.available ? "ready" : "missing",
-          goatLocalHttps: goatHttpsDisabled(process.env)
-            ? "disabled"
-            : goatHttpsOrigin(process.env),
+          localHttps: httpsDisabled(process.env) ? "disabled" : httpsOrigin(process.env),
           nextSteps,
         },
         null,
@@ -1239,8 +1237,8 @@ async function main() {
   await ensureStripe(inspectState());
   await runMigrations();
   await ensureElectric();
-  await ensureGoatLocalHttps();
-  await ensureGoatEnvFile();
+  await ensureLocalHttps();
+  await ensureEnvFile();
 
   if (!START_DEV_MODE) {
     console.log(

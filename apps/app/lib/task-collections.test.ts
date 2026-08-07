@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createGoatCollections } from "@/lib/task-collections";
+import { createCollections } from "@/lib/task-collections";
 
-describe("createGoatCollections", () => {
+describe("createCollections", () => {
   it("reuses root Electric collections across callers", () => {
-    const first = createGoatCollections();
-    const second = createGoatCollections();
+    const first = createCollections();
+    const second = createCollections();
 
     expect(second).toBe(first);
     expect(second.tasks).toBe(first.tasks);
@@ -13,7 +13,7 @@ describe("createGoatCollections", () => {
   });
 
   it("reuses brain-scoped Electric collections for the same brain ref", () => {
-    const collections = createGoatCollections();
+    const collections = createCollections();
 
     const first = collections.brainCollections("goat_brain_1");
     const second = collections.brainCollections("goat_brain_1");
@@ -27,7 +27,7 @@ describe("createGoatCollections", () => {
   });
 
   it("reuses task-scoped Electric collections for the same task id", () => {
-    const collections = createGoatCollections();
+    const collections = createCollections();
 
     const first = collections.taskRunCollections("goat_task_1");
     const second = collections.taskRunCollections("goat_task_1");

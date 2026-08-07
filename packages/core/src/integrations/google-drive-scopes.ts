@@ -12,14 +12,14 @@ const GOOGLE_SHEETS_WRITE_SCOPES = new Set([
   "https://www.googleapis.com/auth/drive",
 ]);
 
-export function hasGoatGoogleDocsWriteScope(scopes: readonly string[]) {
+export function hasGoogleDocsWriteScope(scopes: readonly string[]) {
   return scopes.some((scope) => GOOGLE_DOCS_WRITE_SCOPES.has(scope));
 }
 
-export function hasGoatGoogleSheetsWriteScope(scopes: readonly string[]) {
+export function hasGoogleSheetsWriteScope(scopes: readonly string[]) {
   return scopes.some((scope) => GOOGLE_SHEETS_WRITE_SCOPES.has(scope));
 }
 
-export function hasGoatGoogleDriveWriteScope(scopes: readonly string[]) {
-  return hasGoatGoogleDocsWriteScope(scopes) && hasGoatGoogleSheetsWriteScope(scopes);
+export function hasGoogleDriveWriteScope(scopes: readonly string[]) {
+  return hasGoogleDocsWriteScope(scopes) && hasGoogleSheetsWriteScope(scopes);
 }

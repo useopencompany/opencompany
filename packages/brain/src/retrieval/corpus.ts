@@ -1,27 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { extractGoatBrainAssetText, parseGoatBrainDocument } from "../document";
-import { goatBrainPayloadHash } from "../entry";
+import { extractBrainAssetText, parseBrainDocument } from "../document";
+import { brainPayloadHash } from "../entry";
 import { evidenceLinkTargets, pageLinkTargets } from "../inline-links";
-import { goatBrainFolderFromRelativePath } from "../paths";
-import type {
-  GoatBrainEntityType,
-  GoatBrainKind,
-  GoatBrainRelation,
-  GoatBrainStatus,
-} from "../schema";
-import { goatBrainKindForFolder } from "../schema";
-import { listGoatBrainFiles } from "../store";
-import { validateGoatBrainDocument } from "../validate";
+import { brainFolderFromRelativePath } from "../paths";
+import type { BrainEntityType, BrainKind, BrainRelation, BrainStatus } from "../schema";
+import { brainKindForFolder } from "../schema";
+import { listBrainFiles } from "../store";
+import { validateBrainDocument } from "../validate";
 
 export type IndexRecord = {
   id: string;
   folder: string;
   title: string;
-  kind: GoatBrainKind;
-  type: GoatBrainEntityType;
-  status: GoatBrainStatus;
+  kind: BrainKind;
+  type: BrainEntityType;
+  status: BrainStatus;
   aliases: string[];
   relationText: string;
   compiledTruth: string;
@@ -31,17 +26,17 @@ export type IndexRecord = {
   // Machine-extracted text of file-backed documents; empty for plain markdown pages.
   assetText: string;
   updatedAt: string;
-  relations: GoatBrainRelation[];
+  relations: BrainRelation[];
   wikiLinks: string[];
   evidenceLinks: string[];
   valid: boolean;
 };
 
 export async function buildCorpus(root: string): Promise<IndexRecord[]> {
-  const files = await listGoatBrainFiles(root);
+  const files = await listBrainFiles(root);
   return files.flatMap((file) => {
-    const doc = parseGoatBrainDocument(file.source);
-    const folder = goatBrainFolderFromRelativePath(file.relativePath);
+    const doc = parseBrainDocument(file.source);
+    const folder = brainFolderFromRelativePath(file.relativePath);
     const id = doc.frontmatter.id ?? file.id;
     if (!folder) return [];
     const title = doc.title || doc.frontmatter.title || id;
@@ -53,21 +48,21 @@ export async function buildCorpus(root: string): Promise<IndexRecord[]> {
         id,
         folder: doc.frontmatter.folder ?? folder,
         title,
-        kind: doc.frontmatter.kind ?? goatBrainKindForFolder(doc.frontmatter.folder ?? folder),
+        kind: doc.frontmatter.kind ?? brainKindForFolder(doc.frontmatter.folder ?? folder),
         type: doc.frontmatter.type ?? "note",
         status: doc.frontmatter.status ?? "draft",
         aliases: doc.frontmatter.aliases ?? [],
         relationText: relationsToText(doc.frontmatter.relations),
         compiledTruth: doc.compiledTruth,
-        contentHash: goatBrainPayloadHash(embeddingText),
+        contentHash: brainPayloadHash(embeddingText),
         embeddingText,
         timelineText,
-        assetText: extractGoatBrainAssetText(file.source),
+        assetText: extractBrainAssetText(file.source),
         updatedAt: doc.frontmatter.updatedAt ?? "",
         relations: doc.frontmatter.relations ?? [],
         wikiLinks: pageLinkTargets(inlineLinkText),
         evidenceLinks: evidenceLinkTargets(inlineLinkText),
-        valid: validateGoatBrainDocument(doc, file.id, file.source).ok,
+        valid: validateBrainDocument(doc, file.id, file.source).ok,
       },
     ];
   });
@@ -105,7 +100,7 @@ export async function loadCachedDocumentEmbeddings(
   return byId;
 }
 
-function relationsToText(relations: GoatBrainRelation[] | undefined): string {
+function relationsToText(relations: BrainRelation[] | undefined): string {
   if (!relations) return "";
   return relations.map((relation) => `${relation.type}: ${relation.to}`).join("\n");
 }

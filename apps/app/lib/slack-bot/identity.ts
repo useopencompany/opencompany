@@ -1,25 +1,25 @@
 import { getDb } from "@opencompany/db/client";
-import type { GoatWorkspaceRole } from "@opencompany/db/schema";
-import { goatUsers } from "@opencompany/db/schema";
-import { getGoatWorkspaceRole } from "@opencompany/db/workspaces";
+import type { WorkspaceRole } from "@opencompany/db/schema";
+import { users } from "@opencompany/db/schema";
+import { getWorkspaceRole } from "@opencompany/db/workspaces";
 import { eq, sql } from "drizzle-orm";
 import { slackApiRequest } from "@/lib/integrations/slack";
 
-export type GoatSlackMappedMember = {
+export type SlackMappedMember = {
   workosUserId: string;
   email: string;
   firstName: string | null;
   lastName: string | null;
   timezone: string;
-  role: GoatWorkspaceRole;
+  role: WorkspaceRole;
 };
 
 // Who is asking in Slack, resolved against the installing goat workspace.
 // "member" carries the mapped goat user (attribution, brain access, action
 // connections); anything else degrades to the workspace fallback identity in
 // channels and to a polite refusal in DMs.
-export type GoatSlackSenderResolution =
-  | { kind: "member"; member: GoatSlackMappedMember }
+export type SlackSenderResolution =
+  | { kind: "member"; member: SlackMappedMember }
   | {
       kind: "unmapped";
       reason: "bot" | "no_email" | "no_match" | "not_in_workspace" | "lookup_failed";
@@ -29,7 +29,7 @@ const SENDER_CACHE_TTL_MS = 10 * 60 * 1000;
 const SENDER_CACHE_MAX_ENTRIES = 500;
 
 type SenderCacheEntry = {
-  resolution: GoatSlackSenderResolution;
+  resolution: SlackSenderResolution;
   expiresAt: number;
 };
 
@@ -37,17 +37,17 @@ type SenderCacheEntry = {
 // indexed query, which is cheap enough not to warrant a DB cache table.
 const senderCache = new Map<string, SenderCacheEntry>();
 
-export function clearGoatSlackSenderCacheForTests() {
+export function clearSlackSenderCacheForTests() {
   senderCache.clear();
 }
 
-export async function resolveGoatSlackSender(input: {
+export async function resolveSlackSender(input: {
   botToken: string;
   teamId: string;
   slackUserId: string;
   workspaceId: string;
   now?: () => number;
-}): Promise<GoatSlackSenderResolution> {
+}): Promise<SlackSenderResolution> {
   const now = input.now ?? Date.now;
   const cacheKey = `${input.teamId}:${input.workspaceId}:${input.slackUserId}`;
   const cached = senderCache.get(cacheKey);
@@ -71,7 +71,7 @@ async function resolveUncached(input: {
   botToken: string;
   slackUserId: string;
   workspaceId: string;
-}): Promise<GoatSlackSenderResolution> {
+}): Promise<SlackSenderResolution> {
   let email: string | null = null;
   try {
     const result = await slackApiRequest<{
@@ -94,14 +94,14 @@ async function resolveUncached(input: {
   // person is worse than acting as the workspace.
   const rows = await getDb()
     .select({
-      workosUserId: goatUsers.workosUserId,
-      email: goatUsers.email,
-      firstName: goatUsers.firstName,
-      lastName: goatUsers.lastName,
-      timezone: goatUsers.timezone,
+      workosUserId: users.workosUserId,
+      email: users.email,
+      firstName: users.firstName,
+      lastName: users.lastName,
+      timezone: users.timezone,
     })
-    .from(goatUsers)
-    .where(sql`lower(${goatUsers.email}) = ${email.toLowerCase()}`)
+    .from(users)
+    .where(sql`lower(${users.email}) = ${email.toLowerCase()}`)
     .limit(2);
   if (rows.length !== 1) return { kind: "unmapped", reason: "no_match" };
   const user = rows[0];
@@ -109,7 +109,7 @@ async function resolveUncached(input: {
 
   // A goat user outside the installing workspace is treated exactly like a
   // stranger — no cross-workspace attribution.
-  const role = await getGoatWorkspaceRole({
+  const role = await getWorkspaceRole({
     userWorkosId: user.workosUserId,
     workspaceId: input.workspaceId,
   });
@@ -128,7 +128,7 @@ async function resolveUncached(input: {
   };
 }
 
-export type GoatUserBasics = {
+export type UserBasics = {
   email: string;
   firstName: string | null;
   lastName: string | null;
@@ -136,16 +136,16 @@ export type GoatUserBasics = {
 };
 
 // Prompt user-context for the fallback (installing admin) identity.
-export async function getGoatUserBasics(userWorkosId: string): Promise<GoatUserBasics | null> {
+export async function getUserBasics(userWorkosId: string): Promise<UserBasics | null> {
   const rows = await getDb()
     .select({
-      email: goatUsers.email,
-      firstName: goatUsers.firstName,
-      lastName: goatUsers.lastName,
-      timezone: goatUsers.timezone,
+      email: users.email,
+      firstName: users.firstName,
+      lastName: users.lastName,
+      timezone: users.timezone,
     })
-    .from(goatUsers)
-    .where(eq(goatUsers.workosUserId, userWorkosId))
+    .from(users)
+    .where(eq(users.workosUserId, userWorkosId))
     .limit(1);
   const user = rows[0];
   if (!user) return null;

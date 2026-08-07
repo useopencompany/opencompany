@@ -2,7 +2,7 @@ import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { createLogger } from "@opencompany/observability";
 import WebSocket, { type RawData, WebSocketServer } from "ws";
-import { verifyGoatDictationTicket } from "./dictation-auth";
+import { verifyDictationTicket } from "./dictation-auth";
 import type { RunnerEnv } from "./env";
 
 export const GOAT_DICTATION_PATH = "/goat/dictation";
@@ -27,7 +27,7 @@ type DictationControlMessage =
   | { type: "stop" }
   | { type: "cancel" };
 
-export function createGoatDictationWebSocketServer(env: RunnerEnv) {
+export function createDictationWebSocketServer(env: RunnerEnv) {
   const webSocketServer = new WebSocketServer({
     noServer: true,
     maxPayload: 96 * 1_024,
@@ -37,13 +37,13 @@ export function createGoatDictationWebSocketServer(env: RunnerEnv) {
   });
 
   const accept = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
-    void acceptGoatDictationWebSocket(request, socket, head, env, webSocketServer);
+    void acceptDictationWebSocket(request, socket, head, env, webSocketServer);
   };
 
   return { webSocketServer, accept };
 }
 
-async function acceptGoatDictationWebSocket(
+async function acceptDictationWebSocket(
   request: IncomingMessage,
   socket: Duplex,
   head: Buffer,
@@ -62,7 +62,7 @@ async function acceptGoatDictationWebSocket(
     .find((protocol) => protocol.startsWith(TICKET_PROTOCOL_PREFIX))
     ?.slice(TICKET_PROTOCOL_PREFIX.length);
   const ticket = encodedTicket
-    ? verifyGoatDictationTicket({ ticket: encodedTicket, secret: env.streamTokenSecret })
+    ? verifyDictationTicket({ ticket: encodedTicket, secret: env.streamTokenSecret })
     : null;
   if (!ticket || !protocols.includes(DICTATION_PROTOCOL)) {
     logDictationReject("ticket_invalid", { has_ticket: Boolean(encodedTicket) });
@@ -72,11 +72,11 @@ async function acceptGoatDictationWebSocket(
 
   webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
     webSocketServer.emit("connection", webSocket, request);
-    attachGoatDictationConnection(webSocket, env, ticket.userWorkosId);
+    attachDictationConnection(webSocket, env, ticket.userWorkosId);
   });
 }
 
-export function attachGoatDictationConnection(
+export function attachDictationConnection(
   downstream: WebSocket,
   env: RunnerEnv,
   userWorkosId: string,
@@ -93,8 +93,8 @@ export function attachGoatDictationConnection(
 
   const createUpstream = options.createUpstream ?? createOpenAiRealtimeSocket;
   const transcribeFinal = options.fetchFinalTranscript ?? fetchFinalTranscript;
-  const realtimeModel = env.goatDictationRealtimeModel || "gpt-4o-transcribe";
-  const finalModel = env.goatDictationFinalModel || "gpt-4o-transcribe";
+  const realtimeModel = env.dictationRealtimeModel || "gpt-4o-transcribe";
+  const finalModel = env.dictationFinalModel || "gpt-4o-transcribe";
   const upstream = createUpstream(openaiApiKey);
   const pendingAudio: string[] = [];
   const pcmChunks: Buffer[] = [];

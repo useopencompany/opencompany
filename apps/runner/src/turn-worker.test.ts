@@ -1,23 +1,23 @@
-import type { GoatCodexChatSession, GoatCodexChatTurn } from "@opencompany/db/schema";
+import type { CodexChatSession, CodexChatTurn } from "@opencompany/db/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  GoatCodexChatHandoffError,
-  GoatCodexChatLeaseLostError,
-  GoatCodexChatRetryableInfrastructureError,
+  CodexChatHandoffError,
+  CodexChatLeaseLostError,
+  CodexChatRetryableInfrastructureError,
 } from "./codex-chat-errors";
 import type { RunnerEnv } from "./env";
 import {
-  claimNextGoatCodexChatTurn,
-  goatCodexChatLeaseTtlMs,
-  goatCodexChatRetryAt,
-  heartbeatGoatCodexChatTurn,
-  resolveGoatCodexChatWorkerConcurrency,
+  claimNextCodexChatTurn,
+  codexChatLeaseTtlMs,
+  codexChatRetryAt,
+  heartbeatCodexChatTurn,
+  resolveCodexChatWorkerConcurrency,
   runClaimedTurn,
-  startGoatCodexChatWorker,
-  sweepTerminalGoatCodexChatSandboxes,
+  startCodexChatWorker,
+  sweepTerminalCodexChatSandboxes,
 } from "./turn-worker";
 
-const sessionRows = vi.hoisted(() => [] as GoatCodexChatSession[]);
+const sessionRows = vi.hoisted(() => [] as CodexChatSession[]);
 
 const dbMock = vi.hoisted(() => {
   const db = {
@@ -32,11 +32,11 @@ const dbMock = vi.hoisted(() => {
 });
 
 const chatMocks = vi.hoisted(() => ({
-  runGoatCodexChatTurn: vi.fn(),
-  runGoatOpenCompanyChatTurn: vi.fn(),
+  runCodexChatTurn: vi.fn(),
+  runOpenCompanyChatTurn: vi.fn(),
 }));
 
-const telemetry = vi.hoisted(() => ({ recordGoatHistogram: vi.fn() }));
+const telemetry = vi.hoisted(() => ({ recordHistogram: vi.fn() }));
 const sandboxMocks = vi.hoisted(() => ({
   armSandboxActiveTimeoutById: vi.fn(),
   armSandboxIdleTimeoutById: vi.fn(),
@@ -44,12 +44,12 @@ const sandboxMocks = vi.hoisted(() => ({
 
 vi.mock("@opencompany/telemetry", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opencompany/telemetry")>();
-  return { ...actual, recordGoatHistogram: telemetry.recordGoatHistogram };
+  return { ...actual, recordHistogram: telemetry.recordHistogram };
 });
 
 const eventMocks = vi.hoisted(() => ({
   fail: vi.fn(),
-  createGoatCodexChatProjector: vi.fn(() => ({ fail: eventMocks.fail })),
+  createCodexChatProjector: vi.fn(() => ({ fail: eventMocks.fail })),
   loadCodexChatAssistantMessageParts: vi.fn(async () => []),
 }));
 
@@ -58,15 +58,15 @@ vi.mock("./db", () => ({
 }));
 
 vi.mock("./codex-chat", () => ({
-  runGoatCodexChatTurn: chatMocks.runGoatCodexChatTurn,
+  runCodexChatTurn: chatMocks.runCodexChatTurn,
 }));
 
 vi.mock("./opencompany-chat", () => ({
-  runGoatOpenCompanyChatTurn: chatMocks.runGoatOpenCompanyChatTurn,
+  runOpenCompanyChatTurn: chatMocks.runOpenCompanyChatTurn,
 }));
 
 vi.mock("./codex-chat-events", () => ({
-  createGoatCodexChatProjector: eventMocks.createGoatCodexChatProjector,
+  createCodexChatProjector: eventMocks.createCodexChatProjector,
   loadCodexChatAssistantMessageParts: eventMocks.loadCodexChatAssistantMessageParts,
 }));
 
@@ -75,7 +75,7 @@ vi.mock("./sandbox", () => ({
   armSandboxIdleTimeoutById: sandboxMocks.armSandboxIdleTimeoutById,
 }));
 
-describe("claimNextGoatCodexChatTurn", () => {
+describe("claimNextCodexChatTurn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dbMock.execute.mockResolvedValue({ rows: [claimedTurnRow()] });
@@ -83,7 +83,7 @@ describe("claimNextGoatCodexChatTurn", () => {
 
   it("atomically moves the claimed session from queued to starting", async () => {
     await expect(
-      claimNextGoatCodexChatTurn({ leaseOwner: "runner_1", leaseTtlMs: 300_000 }),
+      claimNextCodexChatTurn({ leaseOwner: "runner_1", leaseTtlMs: 300_000 }),
     ).resolves.toMatchObject({ id: "goat_codex_chat_turn_1", status: "running", attempts: 1 });
 
     const statement = sqlText(dbMock.execute.mock.calls[0]?.[0]);
@@ -94,7 +94,7 @@ describe("claimNextGoatCodexChatTurn", () => {
 
   it("only lets due delayed turns participate in claiming and per-session FIFO", async () => {
     await expect(
-      claimNextGoatCodexChatTurn({ leaseOwner: "runner_1", leaseTtlMs: 300_000 }),
+      claimNextCodexChatTurn({ leaseOwner: "runner_1", leaseTtlMs: 300_000 }),
     ).resolves.toMatchObject({
       id: "goat_codex_chat_turn_1",
       runAfter: new Date("2026-07-10T08:59:00.000Z"),
@@ -108,12 +108,12 @@ describe("claimNextGoatCodexChatTurn", () => {
     dbMock.execute.mockResolvedValueOnce({ rows: [] });
 
     await expect(
-      claimNextGoatCodexChatTurn({ leaseOwner: "runner_1", leaseTtlMs: 300_000 }),
+      claimNextCodexChatTurn({ leaseOwner: "runner_1", leaseTtlMs: 300_000 }),
     ).resolves.toBeNull();
   });
 });
 
-describe("heartbeatGoatCodexChatTurn", () => {
+describe("heartbeatCodexChatTurn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -122,7 +122,7 @@ describe("heartbeatGoatCodexChatTurn", () => {
     dbMock.execute.mockResolvedValueOnce({ rows: [{ id: "goat_codex_chat_turn_1" }] });
 
     await expect(
-      heartbeatGoatCodexChatTurn({
+      heartbeatCodexChatTurn({
         turnId: "goat_codex_chat_turn_1",
         leaseId: "lease_1",
         leaseOwner: "runner_1",
@@ -146,7 +146,7 @@ describe("heartbeatGoatCodexChatTurn", () => {
     dbMock.execute.mockResolvedValueOnce({ rows: [] });
 
     await expect(
-      heartbeatGoatCodexChatTurn({
+      heartbeatCodexChatTurn({
         turnId: "goat_codex_chat_turn_1",
         leaseId: "lease_1",
         leaseOwner: "runner_1",
@@ -163,28 +163,28 @@ describe("heartbeatGoatCodexChatTurn", () => {
   });
 });
 
-describe("resolveGoatCodexChatWorkerConcurrency", () => {
+describe("resolveCodexChatWorkerConcurrency", () => {
   it("uses the runner-wide concurrency by default", () => {
-    expect(resolveGoatCodexChatWorkerConcurrency({ workerConcurrency: 40 })).toBe(40);
+    expect(resolveCodexChatWorkerConcurrency({ workerConcurrency: 40 })).toBe(40);
   });
 
   it("honors an explicit test override", () => {
-    expect(resolveGoatCodexChatWorkerConcurrency({ workerConcurrency: 40 }, 2)).toBe(2);
+    expect(resolveCodexChatWorkerConcurrency({ workerConcurrency: 40 }, 2)).toBe(2);
   });
 });
 
-describe("goatCodexChatLeaseTtlMs", () => {
+describe("codexChatLeaseTtlMs", () => {
   it("uses the dedicated durable chat lease when configured", () => {
     expect(
-      goatCodexChatLeaseTtlMs({
+      codexChatLeaseTtlMs({
         jobLeaseTtlMs: 300_000,
-        goatCodexChatLeaseTtlMs: 90_000,
+        codexChatLeaseTtlMs: 90_000,
       }),
     ).toBe(90_000);
   });
 
   it("falls back to the generic job lease for older env fixtures", () => {
-    expect(goatCodexChatLeaseTtlMs({ jobLeaseTtlMs: 300_000 })).toBe(300_000);
+    expect(codexChatLeaseTtlMs({ jobLeaseTtlMs: 300_000 })).toBe(300_000);
   });
 });
 
@@ -244,7 +244,7 @@ describe("Goat Codex chat worker shutdown", () => {
     sessionRows.length = 0;
     sessionRows.push(session());
     let releaseSilentTurn: (() => void) | undefined;
-    chatMocks.runGoatCodexChatTurn
+    chatMocks.runCodexChatTurn
       .mockImplementationOnce(
         () =>
           new Promise<"settled">((resolve) => {
@@ -253,22 +253,22 @@ describe("Goat Codex chat worker shutdown", () => {
       )
       .mockResolvedValue("settled");
 
-    const worker = startGoatCodexChatWorker(env({ jobLeaseTtlMs: 15_000 }), {
+    const worker = startCodexChatWorker(env({ jobLeaseTtlMs: 15_000 }), {
       concurrency: 1,
       pollIntervalMs: 50,
     });
 
     try {
-      await vi.waitFor(() => expect(chatMocks.runGoatCodexChatTurn).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(chatMocks.runCodexChatTurn).toHaveBeenCalledOnce());
       await vi.advanceTimersByTimeAsync(5_050);
-      await vi.waitFor(() => expect(chatMocks.runGoatCodexChatTurn).toHaveBeenCalledTimes(3));
+      await vi.waitFor(() => expect(chatMocks.runCodexChatTurn).toHaveBeenCalledTimes(3));
 
       expect(claimedTurnIds).toEqual([
         "goat_codex_chat_turn_1",
         "goat_codex_chat_turn_1",
         "goat_codex_chat_turn_2",
       ]);
-      expect(chatMocks.runGoatCodexChatTurn.mock.calls[1]?.[0]).toMatchObject({
+      expect(chatMocks.runCodexChatTurn.mock.calls[1]?.[0]).toMatchObject({
         turn: expect.objectContaining({
           id: "goat_codex_chat_turn_1",
           attempts: 2,
@@ -296,16 +296,16 @@ describe("Goat Codex chat worker shutdown", () => {
     sessionRows.length = 0;
     sessionRows.push(session());
     let finishTurn: (() => void) | undefined;
-    chatMocks.runGoatCodexChatTurn.mockImplementationOnce(
+    chatMocks.runCodexChatTurn.mockImplementationOnce(
       () =>
         new Promise<"settled">((resolve) => {
           finishTurn = () => resolve("settled");
         }),
     );
     const onHandoff = vi.fn();
-    const worker = startGoatCodexChatWorker(env(), { concurrency: 1, pollIntervalMs: 50 });
+    const worker = startCodexChatWorker(env(), { concurrency: 1, pollIntervalMs: 50 });
 
-    await vi.waitFor(() => expect(chatMocks.runGoatCodexChatTurn).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(chatMocks.runCodexChatTurn).toHaveBeenCalledOnce());
     const stopping = worker.stop({
       handoffAfterMs: 1_000,
       postHandoffWaitMs: 1_000,
@@ -335,15 +335,15 @@ describe("Goat Codex chat worker shutdown", () => {
     });
     sessionRows.length = 0;
     sessionRows.push(session());
-    chatMocks.runGoatCodexChatTurn.mockImplementationOnce(async (input) => {
+    chatMocks.runCodexChatTurn.mockImplementationOnce(async (input) => {
       while (!input.shouldAbort()) await new Promise((resolve) => setTimeout(resolve, 1));
-      expect(input.shouldAbort()).toBeInstanceOf(GoatCodexChatHandoffError);
+      expect(input.shouldAbort()).toBeInstanceOf(CodexChatHandoffError);
       return "handed_off";
     });
     const onHandoff = vi.fn();
-    const worker = startGoatCodexChatWorker(env(), { concurrency: 1, pollIntervalMs: 50 });
+    const worker = startCodexChatWorker(env(), { concurrency: 1, pollIntervalMs: 50 });
 
-    await vi.waitFor(() => expect(chatMocks.runGoatCodexChatTurn).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(chatMocks.runCodexChatTurn).toHaveBeenCalledOnce());
     await worker.stop({
       handoffAfterMs: 1,
       postHandoffWaitMs: 1_000,
@@ -368,15 +368,15 @@ describe("Goat Codex chat worker shutdown", () => {
     sessionRows.length = 0;
     sessionRows.push(session());
     let finishTurn: (() => void) | undefined;
-    chatMocks.runGoatCodexChatTurn.mockImplementationOnce(
+    chatMocks.runCodexChatTurn.mockImplementationOnce(
       () =>
         new Promise<"settled">((resolve) => {
           finishTurn = () => resolve("settled");
         }),
     );
-    const worker = startGoatCodexChatWorker(env(), { concurrency: 1, pollIntervalMs: 50 });
+    const worker = startCodexChatWorker(env(), { concurrency: 1, pollIntervalMs: 50 });
 
-    await vi.waitFor(() => expect(chatMocks.runGoatCodexChatTurn).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(chatMocks.runCodexChatTurn).toHaveBeenCalledOnce());
     await expect(worker.stop({ handoffAfterMs: 1, postHandoffWaitMs: 1 })).resolves.toBeUndefined();
     expect(worker.activeCount()).toBe(1);
     expect(
@@ -405,7 +405,7 @@ describe("terminal Goat Codex sandbox reconciliation", () => {
       .mockResolvedValueOnce({ rows: [{ id: "session_1" }] });
     sandboxMocks.armSandboxIdleTimeoutById.mockResolvedValueOnce(true);
 
-    await expect(sweepTerminalGoatCodexChatSandboxes({ idleTimeoutMs: 300_000 })).resolves.toBe(1);
+    await expect(sweepTerminalCodexChatSandboxes({ idleTimeoutMs: 300_000 })).resolves.toBe(1);
 
     expect(sqlText(dbMock.execute.mock.calls[0]?.[0])).toContain("sandbox_id IS NOT NULL");
     expect(sandboxMocks.armSandboxIdleTimeoutById).toHaveBeenCalledWith("sbx_1", 300_000);
@@ -428,9 +428,9 @@ describe("terminal Goat Codex sandbox reconciliation", () => {
       .mockResolvedValueOnce({ rows: [{ id: "session_1" }] });
     sandboxMocks.armSandboxIdleTimeoutById.mockResolvedValueOnce(true);
 
-    await expect(
-      sweepTerminalGoatCodexChatSandboxes({ idleTimeoutMs: 30 * 60 * 1000 }),
-    ).resolves.toBe(1);
+    await expect(sweepTerminalCodexChatSandboxes({ idleTimeoutMs: 30 * 60 * 1000 })).resolves.toBe(
+      1,
+    );
 
     expect(sqlText(dbMock.execute.mock.calls[0]?.[0])).toContain(
       "INNER JOIN goat.chat_sessions AS chat",
@@ -456,7 +456,7 @@ describe("terminal Goat Codex sandbox reconciliation", () => {
     sandboxMocks.armSandboxIdleTimeoutById.mockResolvedValueOnce(true);
     sandboxMocks.armSandboxActiveTimeoutById.mockResolvedValueOnce(true);
 
-    await expect(sweepTerminalGoatCodexChatSandboxes({ idleTimeoutMs: 300_000 })).resolves.toBe(1);
+    await expect(sweepTerminalCodexChatSandboxes({ idleTimeoutMs: 300_000 })).resolves.toBe(1);
 
     expect(sandboxMocks.armSandboxActiveTimeoutById).toHaveBeenCalledWith("sbx_1");
   });
@@ -467,8 +467,8 @@ describe("runClaimedTurn", () => {
     vi.clearAllMocks();
     sessionRows.length = 0;
     sessionRows.push(session());
-    chatMocks.runGoatCodexChatTurn.mockResolvedValue(undefined);
-    chatMocks.runGoatOpenCompanyChatTurn.mockResolvedValue(undefined);
+    chatMocks.runCodexChatTurn.mockResolvedValue(undefined);
+    chatMocks.runOpenCompanyChatTurn.mockResolvedValue(undefined);
     dbMock.execute.mockResolvedValue({ rows: [{ id: "updated" }] });
   });
 
@@ -481,23 +481,19 @@ describe("runClaimedTurn", () => {
       vi.useRealTimers();
     }
 
-    const input = chatMocks.runGoatCodexChatTurn.mock.calls[0]?.[0];
+    const input = chatMocks.runCodexChatTurn.mock.calls[0]?.[0];
     expect(input).toEqual(
       expect.objectContaining({ turn: expect.objectContaining({ attempts: 1 }) }),
     );
     expect(input).not.toHaveProperty("recovery");
     expect(dbMock.select).toHaveBeenCalledOnce();
     expect(dbMock.leftJoin).toHaveBeenCalledOnce();
-    expect(telemetry.recordGoatHistogram).toHaveBeenCalledWith(
-      "goat.codex_chat.queue_wait_ms",
-      5_000,
-      {
-        "goat.engine": "codex",
-        "goat.model": "gpt-5.5",
-        "goat.status": "running",
-        "goat.attempt": 1,
-      },
-    );
+    expect(telemetry.recordHistogram).toHaveBeenCalledWith("goat.codex_chat.queue_wait_ms", 5_000, {
+      "goat.engine": "codex",
+      "goat.model": "gpt-5.5",
+      "goat.status": "running",
+      "goat.attempt": 1,
+    });
   });
 
   it("does not count a scheduled delay as queue wait", async () => {
@@ -516,7 +512,7 @@ describe("runClaimedTurn", () => {
       vi.useRealTimers();
     }
 
-    expect(telemetry.recordGoatHistogram).toHaveBeenCalledWith(
+    expect(telemetry.recordHistogram).toHaveBeenCalledWith(
       "goat.codex_chat.queue_wait_ms",
       5_000,
       expect.any(Object),
@@ -536,14 +532,14 @@ describe("runClaimedTurn", () => {
       env(),
     );
 
-    expect(chatMocks.runGoatOpenCompanyChatTurn).toHaveBeenCalledWith(
+    expect(chatMocks.runOpenCompanyChatTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         session: expect.objectContaining({ engine: "opencompany" }),
         turn: expect.objectContaining({ attempts: 2 }),
       }),
     );
-    expect(chatMocks.runGoatOpenCompanyChatTurn.mock.calls[0]?.[0]).not.toHaveProperty("recovery");
-    expect(chatMocks.runGoatCodexChatTurn).not.toHaveBeenCalled();
+    expect(chatMocks.runOpenCompanyChatTurn.mock.calls[0]?.[0]).not.toHaveProperty("recovery");
+    expect(chatMocks.runCodexChatTurn).not.toHaveBeenCalled();
   });
 
   it("propagates heartbeat lease loss into an active OpenCompany stream", async () => {
@@ -553,7 +549,7 @@ describe("runClaimedTurn", () => {
     dbMock.execute.mockImplementation(async (query) =>
       sqlText(query).includes("WITH heartbeat AS") ? { rows: [] } : { rows: [{ id: "updated" }] },
     );
-    chatMocks.runGoatOpenCompanyChatTurn.mockImplementationOnce(
+    chatMocks.runOpenCompanyChatTurn.mockImplementationOnce(
       (input) =>
         new Promise<"settled">((_resolve, reject) => {
           const timer = setInterval(() => {
@@ -569,7 +565,7 @@ describe("runClaimedTurn", () => {
       const running = runClaimedTurn(turn(), env({ jobLeaseTtlMs: 15_000 }));
       const outcome = running.catch((error) => error);
       await vi.advanceTimersByTimeAsync(5_020);
-      await expect(outcome).resolves.toBeInstanceOf(GoatCodexChatLeaseLostError);
+      await expect(outcome).resolves.toBeInstanceOf(CodexChatLeaseLostError);
     } finally {
       vi.useRealTimers();
     }
@@ -578,14 +574,14 @@ describe("runClaimedTurn", () => {
   it("recovers a persisted engine turn across the migration rollout", async () => {
     await runClaimedTurn(turn({ attempts: 2, engineRecoveryRequired: false }), env());
 
-    expect(chatMocks.runGoatCodexChatTurn).toHaveBeenCalledWith(
+    expect(chatMocks.runCodexChatTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         turn: expect.objectContaining({ attempts: 2 }),
         recovery: { reason: "lease_reclaimed" },
       }),
     );
     expect(eventMocks.fail).not.toHaveBeenCalled();
-    expect(telemetry.recordGoatHistogram).not.toHaveBeenCalled();
+    expect(telemetry.recordHistogram).not.toHaveBeenCalled();
   });
 
   it("recovers after crossing the engine boundary before an id was persisted", async () => {
@@ -598,7 +594,7 @@ describe("runClaimedTurn", () => {
       env(),
     );
 
-    expect(chatMocks.runGoatCodexChatTurn).toHaveBeenCalledWith(
+    expect(chatMocks.runCodexChatTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         turn: expect.objectContaining({ attempts: 3 }),
         recovery: { reason: "lease_reclaimed" },
@@ -617,15 +613,15 @@ describe("runClaimedTurn", () => {
       env(),
     );
 
-    const input = chatMocks.runGoatCodexChatTurn.mock.calls[0]?.[0];
+    const input = chatMocks.runCodexChatTurn.mock.calls[0]?.[0];
     expect(input).not.toHaveProperty("recovery");
   });
 
   it("releases its lease only after the Codex proxy reports a handoff", async () => {
     const handoff = new AbortController();
     handoff.abort();
-    chatMocks.runGoatCodexChatTurn.mockImplementationOnce(async (input) => {
-      expect(input.shouldAbort()).toBeInstanceOf(GoatCodexChatHandoffError);
+    chatMocks.runCodexChatTurn.mockImplementationOnce(async (input) => {
+      expect(input.shouldAbort()).toBeInstanceOf(CodexChatHandoffError);
       return "handed_off";
     });
 
@@ -643,8 +639,8 @@ describe("runClaimedTurn", () => {
     try {
       const capacity = new Error("500: Failed to place sandbox");
       capacity.name = "SandboxError";
-      chatMocks.runGoatCodexChatTurn.mockRejectedValueOnce(
-        new GoatCodexChatRetryableInfrastructureError(
+      chatMocks.runCodexChatTurn.mockRejectedValueOnce(
+        new CodexChatRetryableInfrastructureError(
           "Codex sandbox capacity is temporarily unavailable.",
           capacity,
         ),
@@ -667,8 +663,8 @@ describe("runClaimedTurn", () => {
   it("caps infrastructure retry backoff at one minute", () => {
     const now = new Date("2026-07-10T09:00:00.000Z");
 
-    expect(goatCodexChatRetryAt(now, 1)).toEqual(new Date("2026-07-10T09:00:05.000Z"));
-    expect(goatCodexChatRetryAt(now, 20)).toEqual(new Date("2026-07-10T09:01:00.000Z"));
+    expect(codexChatRetryAt(now, 1)).toEqual(new Date("2026-07-10T09:00:05.000Z"));
+    expect(codexChatRetryAt(now, 20)).toEqual(new Date("2026-07-10T09:01:00.000Z"));
   });
 });
 
@@ -718,7 +714,7 @@ function sqlText(query: unknown): string {
     .join("");
 }
 
-function turn(overrides: Partial<GoatCodexChatTurn> = {}): GoatCodexChatTurn {
+function turn(overrides: Partial<CodexChatTurn> = {}): CodexChatTurn {
   const now = new Date("2026-07-10T09:00:00.000Z");
   return {
     id: "goat_codex_chat_turn_1",
@@ -748,7 +744,7 @@ function turn(overrides: Partial<GoatCodexChatTurn> = {}): GoatCodexChatTurn {
   };
 }
 
-function session(overrides: Partial<GoatCodexChatSession> = {}): GoatCodexChatSession {
+function session(overrides: Partial<CodexChatSession> = {}): CodexChatSession {
   const now = new Date("2026-07-10T09:00:00.000Z");
   return {
     id: "goat_codex_chat_1",
@@ -781,15 +777,15 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     publicUrl: undefined,
     llmBrokerEnabled: true,
     exaApiKey: "exa",
-    goatBrowserEnabled: false,
+    browserEnabled: false,
     ampE2bTemplate: undefined,
     codexE2bTemplate: undefined,
     e2bSandboxIdleTimeoutMs: 30_000,
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",
-    goatCodexChatIdleTimeoutMs: 1_800_000,
+    codexChatIdleTimeoutMs: 1_800_000,
     jobLeaseTtlMs: 300_000,
-    goatTaskWorkerEnabled: false,
+    taskWorkerEnabled: false,
     workerConcurrency: 2,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],

@@ -34,7 +34,7 @@ export type SlackContextMessage = {
 // Fetches prior conversation context for a channel thread (conversations.replies)
 // or a DM (conversations.history). Best-effort: missing scopes, membership, or
 // Slack flakiness degrade to no context, never to a failed answer.
-export async function fetchGoatSlackConversationContext(input: {
+export async function fetchSlackConversationContext(input: {
   botToken: string;
   channelId: string;
   // Thread root when replying in a channel thread; null for DM history.
@@ -49,7 +49,7 @@ export async function fetchGoatSlackConversationContext(input: {
       ? await fetchThreadReplies(input.botToken, input.channelId, input.threadTs)
       : await fetchDirectMessageHistory(input.botToken, input.channelId);
     const displayNames = await resolveDisplayNames(input.botToken, raw, input.botUserId);
-    return buildGoatSlackContextMessages(raw, {
+    return buildSlackContextMessages(raw, {
       botUserId: input.botUserId,
       excludeTs: input.excludeTs,
       displayNames,
@@ -106,7 +106,7 @@ async function fetchDirectMessageHistory(
 }
 
 // Pure and unit-testable: raw Slack messages → role-typed agent messages.
-export function buildGoatSlackContextMessages(
+export function buildSlackContextMessages(
   messages: readonly SlackContextRawMessage[],
   options: {
     botUserId: string | null;

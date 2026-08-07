@@ -1,4 +1,4 @@
-export function formatGoatChatDuration(durationMs: number) {
+export function formatChatDuration(durationMs: number) {
   const safeDurationMs = Math.max(0, durationMs);
   const totalTenths = Math.round(safeDurationMs / 100);
   const totalSeconds = totalTenths / 10;

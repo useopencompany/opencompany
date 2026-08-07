@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildGoatBrainMultiBrainToolSchema,
+  buildBrainMultiBrainToolSchema,
   GOAT_BRAIN_READ_COMMANDS,
   GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
-  normalizeGoatBrainReadToolInput,
+  normalizeBrainReadToolInput,
 } from "@/lib/brain-surface";
 
 describe("Goat Brain read surface", () => {
@@ -23,7 +23,7 @@ describe("Goat Brain read surface", () => {
 
   it("normalizes read command flags without accepting write commands", () => {
     expect(
-      normalizeGoatBrainReadToolInput({
+      normalizeBrainReadToolInput({
         command: "query",
         flags: {
           text: " hiring ",
@@ -46,7 +46,7 @@ describe("Goat Brain read surface", () => {
     });
 
     expect(() =>
-      normalizeGoatBrainReadToolInput({ command: "create", flags: { title: "Acme" } }),
+      normalizeBrainReadToolInput({ command: "create", flags: { title: "Acme" } }),
     ).toThrow("goat_brain command is invalid");
   });
 
@@ -65,18 +65,16 @@ describe("Goat Brain read surface", () => {
   });
 });
 
-describe("buildGoatBrainMultiBrainToolSchema", () => {
+describe("buildBrainMultiBrainToolSchema", () => {
   const BRAIN_A = { brainRef: "brain_a", brainName: "Product" };
   const BRAIN_B = { brainRef: "brain_b", brainName: "Customers" };
 
   it("uses the shared read-tool schema unchanged for a single brain", () => {
-    expect(buildGoatBrainMultiBrainToolSchema([BRAIN_A])).toBe(
-      GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
-    );
+    expect(buildBrainMultiBrainToolSchema([BRAIN_A])).toBe(GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA);
   });
 
   it("adds a required brain enum when multiple brains match", () => {
-    const schema = buildGoatBrainMultiBrainToolSchema([BRAIN_A, BRAIN_B]) as {
+    const schema = buildBrainMultiBrainToolSchema([BRAIN_A, BRAIN_B]) as {
       properties: Record<string, { enum?: string[]; description?: string }>;
       required: string[];
     };
@@ -90,7 +88,7 @@ describe("buildGoatBrainMultiBrainToolSchema", () => {
 
   it("does not mutate the shared base schema", () => {
     const before = JSON.stringify(GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA);
-    buildGoatBrainMultiBrainToolSchema([BRAIN_A, BRAIN_B]);
+    buildBrainMultiBrainToolSchema([BRAIN_A, BRAIN_B]);
     expect(JSON.stringify(GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA)).toBe(before);
   });
 });

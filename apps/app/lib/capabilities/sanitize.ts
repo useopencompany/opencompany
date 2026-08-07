@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { GoatManagedCapabilitySource } from "@opencompany/db/schema";
+import type { ManagedCapabilitySource } from "@opencompany/db/schema";
 
 const MAX_DEPTH = 8;
 const MAX_ARRAY_ITEMS = 50;
@@ -13,7 +13,7 @@ const CREDENTIAL_KEY_PATTERN =
 const OTHER_CREDENTIAL_KEY_PATTERN =
   /^(?:auth[-_]?token|bearer[-_]?token|csrf(?:[-_]?token)?|credentials?|session[-_]?id|sessionid)$/i;
 
-const PLATFORM_HOSTS: Record<GoatManagedCapabilitySource, readonly string[]> = {
+const PLATFORM_HOSTS: Record<ManagedCapabilitySource, readonly string[]> = {
   x: ["x.com", "twitter.com"],
   linkedin: ["linkedin.com"],
   youtube: ["youtube.com", "youtu.be"],
@@ -26,7 +26,7 @@ const PLATFORM_HOSTS: Record<GoatManagedCapabilitySource, readonly string[]> = {
 export type SanitizedCapabilityResult = {
   untrustedProviderData: true;
   securityNotice: string;
-  source: GoatManagedCapabilitySource;
+  source: ManagedCapabilitySource;
   action: string;
   resultCount: number;
   canonicalLinks: string[];
@@ -38,7 +38,7 @@ export type SanitizedCapabilityResult = {
 };
 
 export function sanitizeCapabilityResult(input: {
-  source: GoatManagedCapabilitySource;
+  source: ManagedCapabilitySource;
   action: string;
   payload: unknown;
   expectedLimit: number;
@@ -106,7 +106,7 @@ function sanitizeValue(
     stringLimit: number;
     discoverLinks: boolean;
     discoveredLinks: Set<string>;
-    source: GoatManagedCapabilitySource;
+    source: ManagedCapabilitySource;
   },
 ): unknown {
   if (value === null || typeof value === "boolean" || typeof value === "number") {
@@ -152,11 +152,7 @@ function sanitizeValue(
   return result;
 }
 
-function collectPlatformLinks(
-  value: string,
-  source: GoatManagedCapabilitySource,
-  links: Set<string>,
-) {
+function collectPlatformLinks(value: string, source: ManagedCapabilitySource, links: Set<string>) {
   const matches = value.match(/https?:\/\/[^\s<>"'`)\]}]+/gi);
   for (const match of matches ?? []) {
     const canonical = canonicalPlatformUrl(match, source);
@@ -164,7 +160,7 @@ function collectPlatformLinks(
   }
 }
 
-function canonicalPlatformUrl(value: string, source: GoatManagedCapabilitySource): string | null {
+function canonicalPlatformUrl(value: string, source: ManagedCapabilitySource): string | null {
   try {
     if (value.length > 2_000) return null;
     const url = new URL(value);

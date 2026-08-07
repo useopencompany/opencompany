@@ -1,12 +1,12 @@
-import type { GoatHarnessSpec } from "@opencompany/db/schema";
+import type { HarnessSpec } from "@opencompany/db/schema";
 import { describe, expect, it } from "vitest";
-import { deriveGoatTaskWorkflowSteps } from "@/lib/task-workflow-activity";
+import { deriveTaskWorkflowSteps } from "@/lib/task-workflow-activity";
 
-describe("deriveGoatTaskWorkflowSteps", () => {
+describe("deriveTaskWorkflowSteps", () => {
   it("omits non-workflow and single-step tasks", () => {
-    expect(deriveGoatTaskWorkflowSteps({ harnessSpec: {}, taskStatus: "running" })).toEqual([]);
+    expect(deriveTaskWorkflowSteps({ harnessSpec: {}, taskStatus: "running" })).toEqual([]);
     expect(
-      deriveGoatTaskWorkflowSteps({
+      deriveTaskWorkflowSteps({
         harnessSpec: workflowSpec({ stepCount: 1 }),
         taskStatus: "running",
       }),
@@ -15,7 +15,7 @@ describe("deriveGoatTaskWorkflowSteps", () => {
 
   it("marks completed, running, and pending workflow subtasks from the checkpoint", () => {
     expect(
-      deriveGoatTaskWorkflowSteps({
+      deriveTaskWorkflowSteps({
         harnessSpec: workflowSpec({ stepCount: 3, currentStepIndex: 1, completedStepCount: 1 }),
         taskStatus: "running",
       }),
@@ -28,7 +28,7 @@ describe("deriveGoatTaskWorkflowSteps", () => {
 
   it("keeps a needs-attention stop on the completed step", () => {
     expect(
-      deriveGoatTaskWorkflowSteps({
+      deriveTaskWorkflowSteps({
         harnessSpec: workflowSpec({
           stepCount: 3,
           currentStepIndex: 0,
@@ -50,7 +50,7 @@ function workflowSpec(input: {
   currentStepIndex?: number;
   completedStepCount?: number;
   reportedOutcome?: "done" | "needs_attention";
-}): GoatHarnessSpec {
+}): HarnessSpec {
   const titles = ["Step A", "Step B", "Step C"];
   return {
     schemaVersion: "goat.harness.v1",

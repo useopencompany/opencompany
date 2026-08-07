@@ -1,27 +1,27 @@
 "use server";
 
 import { getDb } from "@opencompany/db/client";
-import { type GoatMcpClient, goatUsers } from "@opencompany/db/schema";
+import { type McpClient, users } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
-import { isGoatMcpClient } from "@/lib/mcp-setup";
+import { currentUser } from "@/lib/auth";
+import { isMcpClient } from "@/lib/mcp-setup";
 
-export type GoatMcpSetupActionResult = { ok: true } | { ok: false; error: string };
+export type McpSetupActionResult = { ok: true } | { ok: false; error: string };
 
-export async function savePreferredGoatMcpClientAction(
-  client: GoatMcpClient,
-): Promise<GoatMcpSetupActionResult> {
-  if (!isGoatMcpClient(client)) {
+export async function savePreferredMcpClientAction(
+  client: McpClient,
+): Promise<McpSetupActionResult> {
+  if (!isMcpClient(client)) {
     return { ok: false, error: "Choose a supported AI client." };
   }
 
-  const { user } = await currentGoatUser();
+  const { user } = await currentUser();
   try {
     await getDb()
-      .update(goatUsers)
+      .update(users)
       .set({ preferredMcpClient: client, updatedAt: new Date() })
-      .where(eq(goatUsers.workosUserId, user.workosUserId));
+      .where(eq(users.workosUserId, user.workosUserId));
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
@@ -33,11 +33,11 @@ export async function savePreferredGoatMcpClientAction(
   }
 }
 
-export async function checkGoatMcpSetupStatusAction(): Promise<{
+export async function checkMcpSetupStatusAction(): Promise<{
   complete: boolean;
   completedAt: string | null;
 }> {
-  const { user } = await currentGoatUser();
+  const { user } = await currentUser();
   return {
     complete: Boolean(user.mcpSetupCompletedAt),
     completedAt: user.mcpSetupCompletedAt?.toISOString() ?? null,

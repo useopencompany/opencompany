@@ -191,12 +191,8 @@ if (!isUnset(githubIntegrationStateSecret) && githubIntegrationStateSecret.lengt
   console.log("\nGITHUB_INTEGRATION_STATE_SECRET must be at least 32 characters.");
 }
 
-const goatRedirectUri = process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI;
-if (
-  goatRedirectUri &&
-  !goatRedirectUri.startsWith("https://") &&
-  !goatRedirectUri.includes("localhost")
-) {
+const redirectUri = process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI;
+if (redirectUri && !redirectUri.startsWith("https://") && !redirectUri.includes("localhost")) {
   failed = true;
   console.log("\nNEXT_PUBLIC_WORKOS_REDIRECT_URI should be https:// outside local development.");
 }

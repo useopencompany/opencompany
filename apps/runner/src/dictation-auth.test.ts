@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createGoatDictationTicket, verifyGoatDictationTicket } from "./dictation-auth";
+import { createDictationTicket, verifyDictationTicket } from "./dictation-auth";
 
 describe("Goat dictation tickets", () => {
   it("mints short-lived user-bound tickets", () => {
-    const access = createGoatDictationTicket({
+    const access = createDictationTicket({
       userWorkosId: "user_1",
       secret: "test-secret",
       now: 1_000,
@@ -12,7 +12,7 @@ describe("Goat dictation tickets", () => {
 
     expect(access.expiresAt).toBe(61_000);
     expect(
-      verifyGoatDictationTicket({
+      verifyDictationTicket({
         ticket: access.ticket,
         secret: "test-secret",
         now: 2_000,
@@ -24,7 +24,7 @@ describe("Goat dictation tickets", () => {
   });
 
   it("rejects expired or tampered tickets", () => {
-    const access = createGoatDictationTicket({
+    const access = createDictationTicket({
       userWorkosId: "user_1",
       secret: "test-secret",
       now: 1_000,
@@ -32,14 +32,14 @@ describe("Goat dictation tickets", () => {
     });
 
     expect(
-      verifyGoatDictationTicket({
+      verifyDictationTicket({
         ticket: access.ticket,
         secret: "test-secret",
         now: 61_000,
       }),
     ).toBeNull();
     expect(
-      verifyGoatDictationTicket({
+      verifyDictationTicket({
         ticket: `${access.ticket}tampered`,
         secret: "test-secret",
         now: 2_000,

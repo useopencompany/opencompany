@@ -9,7 +9,7 @@ import { argv, exit } from "node:process";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const appRoot = join(repoRoot, "apps", "goat");
+const appRoot = join(repoRoot, "apps", "app");
 const args = argv.slice(2);
 const env = { ...process.env };
 
@@ -41,4 +41,7 @@ const result = spawnSync("bunx", ["next", ...args], {
   stdio: "inherit",
 });
 
+if (result.error) {
+  console.error(`Could not run next from ${appRoot}:`, result.error.message);
+}
 exit(result.status ?? 1);

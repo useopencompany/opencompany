@@ -1,17 +1,17 @@
 import type {
-  GoatTaskReportedOutcome,
-  GoatTaskStage,
-  GoatTaskStatus,
-  GoatTaskViewMode,
+  TaskReportedOutcome,
+  TaskStage,
+  TaskStatus,
+  TaskViewMode,
 } from "@opencompany/db/schema";
 
-export const GOAT_TASK_VIEW_MODES: GoatTaskViewMode[] = ["board", "list"];
+export const GOAT_TASK_VIEW_MODES: TaskViewMode[] = ["board", "list"];
 
-export function isGoatTaskViewMode(value: unknown): value is GoatTaskViewMode {
+export function isTaskViewMode(value: unknown): value is TaskViewMode {
   return GOAT_TASK_VIEW_MODES.some((mode) => mode === value);
 }
 
-export const GOAT_STAGE_COPY: Record<GoatTaskStage, string> = {
+export const GOAT_STAGE_COPY: Record<TaskStage, string> = {
   queued: "Waiting for runner",
   planning: "Planning task",
   sandboxing: "Preparing task",
@@ -21,7 +21,7 @@ export const GOAT_STAGE_COPY: Record<GoatTaskStage, string> = {
   canceled: "Canceled",
 };
 
-export const GOAT_STATUS_COPY: Record<GoatTaskStatus, string> = {
+export const GOAT_STATUS_COPY: Record<TaskStatus, string> = {
   queued: "Queued",
   running: "Running",
   succeeded: "Done",
@@ -29,26 +29,26 @@ export const GOAT_STATUS_COPY: Record<GoatTaskStatus, string> = {
   canceled: "Canceled",
 };
 
-export type GoatTaskBoardColumn = "in_progress" | "in_review" | "done" | "canceled";
+export type TaskBoardColumn = "in_progress" | "in_review" | "done" | "canceled";
 
-export const GOAT_TASK_BOARD_COLUMNS: GoatTaskBoardColumn[] = [
+export const GOAT_TASK_BOARD_COLUMNS: TaskBoardColumn[] = [
   "in_progress",
   "in_review",
   "done",
   "canceled",
 ];
 
-export const GOAT_TASK_BOARD_COLUMN_COPY: Record<GoatTaskBoardColumn, string> = {
+export const GOAT_TASK_BOARD_COLUMN_COPY: Record<TaskBoardColumn, string> = {
   in_progress: "In progress",
   in_review: "In review",
   done: "Done",
   canceled: "Canceled",
 };
 
-export function goatTaskBoardColumn(task: {
-  status: GoatTaskStatus;
-  reportedOutcome?: GoatTaskReportedOutcome | null;
-}): GoatTaskBoardColumn {
+export function taskBoardColumn(task: {
+  status: TaskStatus;
+  reportedOutcome?: TaskReportedOutcome | null;
+}): TaskBoardColumn {
   if (task.status === "queued" || task.status === "running") return "in_progress";
   if (task.status === "canceled") return "canceled";
   if (task.status === "failed" || task.reportedOutcome === "needs_attention") {
@@ -59,14 +59,14 @@ export function goatTaskBoardColumn(task: {
 
 // User-facing status for workflow tasks: the worker owns `status`; the agent's
 // post-run report decides done vs needs-attention on top of a succeeded run.
-export type GoatWorkflowTaskDisplayStatus =
+export type WorkflowTaskDisplayStatus =
   | "running"
   | "failed"
   | "done"
   | "canceled"
   | "needs-attention";
 
-export const GOAT_WORKFLOW_TASK_STATUS_COPY: Record<GoatWorkflowTaskDisplayStatus, string> = {
+export const GOAT_WORKFLOW_TASK_STATUS_COPY: Record<WorkflowTaskDisplayStatus, string> = {
   running: "Running",
   failed: "Failed",
   done: "Done",
@@ -74,7 +74,7 @@ export const GOAT_WORKFLOW_TASK_STATUS_COPY: Record<GoatWorkflowTaskDisplayStatu
   "needs-attention": "Needs attention",
 };
 
-export const GOAT_WORKFLOW_TASK_STATUS_DOT_CLASS: Record<GoatWorkflowTaskDisplayStatus, string> = {
+export const GOAT_WORKFLOW_TASK_STATUS_DOT_CLASS: Record<WorkflowTaskDisplayStatus, string> = {
   running: "bg-ink/40 animate-pulse",
   failed: "bg-danger",
   done: "bg-success",
@@ -82,19 +82,19 @@ export const GOAT_WORKFLOW_TASK_STATUS_DOT_CLASS: Record<GoatWorkflowTaskDisplay
   "needs-attention": "bg-warning",
 };
 
-export function goatWorkflowTaskDisplayStatus(task: {
-  status: GoatTaskStatus;
-  reportedOutcome?: GoatTaskReportedOutcome | null;
-}): GoatWorkflowTaskDisplayStatus {
+export function workflowTaskDisplayStatus(task: {
+  status: TaskStatus;
+  reportedOutcome?: TaskReportedOutcome | null;
+}): WorkflowTaskDisplayStatus {
   if (task.status === "queued" || task.status === "running") return "running";
   if (task.status === "failed") return "failed";
   if (task.status === "canceled") return "canceled";
   return task.reportedOutcome === "needs_attention" ? "needs-attention" : "done";
 }
 
-export function goatTaskBoardStatusCopy(task: {
-  status: GoatTaskStatus;
-  reportedOutcome?: GoatTaskReportedOutcome | null;
+export function taskBoardStatusCopy(task: {
+  status: TaskStatus;
+  reportedOutcome?: TaskReportedOutcome | null;
 }): string {
   if (task.status === "succeeded" && task.reportedOutcome === "needs_attention") {
     return GOAT_WORKFLOW_TASK_STATUS_COPY["needs-attention"];
@@ -102,20 +102,20 @@ export function goatTaskBoardStatusCopy(task: {
   return GOAT_STATUS_COPY[task.status];
 }
 
-export function toGoatTaskTitle(text: string): string {
+export function toTaskTitle(text: string): string {
   const trimmed = text.trim().replace(/[.!]+$/, "");
   const clipped = trimmed.length > 64 ? `${trimmed.slice(0, 64).trimEnd()}...` : trimmed;
   return clipped.charAt(0).toUpperCase() + clipped.slice(1);
 }
 
-export function normalizeGoatTaskName(input: unknown, fallbackPrompt: string): string {
+export function normalizeTaskName(input: unknown, fallbackPrompt: string): string {
   if (typeof input === "string" && input.trim()) {
-    return toGoatTaskName(input);
+    return toTaskName(input);
   }
-  return toGoatTaskName(fallbackPrompt);
+  return toTaskName(fallbackPrompt);
 }
 
-export function toGoatTaskName(text: string): string {
+export function toTaskName(text: string): string {
   const firstLine =
     text
       .split(/\r?\n/)
@@ -133,7 +133,7 @@ export function toGoatTaskName(text: string): string {
   return fallback.charAt(0).toUpperCase() + fallback.slice(1);
 }
 
-export function formatGoatStartedAt(value: Date | string) {
+export function formatStartedAt(value: Date | string) {
   const date = typeof value === "string" ? new Date(value) : value;
   return new Intl.DateTimeFormat("en", {
     dateStyle: "medium",
@@ -141,16 +141,16 @@ export function formatGoatStartedAt(value: Date | string) {
   }).format(date);
 }
 
-export function formatGoatTaskDuration(createdAt: Date | string, updatedAt: Date | string): string {
+export function formatTaskDuration(createdAt: Date | string, updatedAt: Date | string): string {
   const started =
     typeof createdAt === "string" ? new Date(createdAt).getTime() : createdAt.getTime();
   const finished =
     typeof updatedAt === "string" ? new Date(updatedAt).getTime() : updatedAt.getTime();
   if (!Number.isFinite(started) || !Number.isFinite(finished)) return "—";
-  return formatGoatTaskDurationMs(finished - started);
+  return formatTaskDurationMs(finished - started);
 }
 
-export function formatGoatTaskDurationMs(durationMs: number): string {
+export function formatTaskDurationMs(durationMs: number): string {
   if (!Number.isFinite(durationMs)) return "—";
   const totalSeconds = Math.max(0, Math.floor(durationMs / 1_000));
   const hours = Math.floor(totalSeconds / 3_600);

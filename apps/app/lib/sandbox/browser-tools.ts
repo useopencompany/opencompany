@@ -15,18 +15,18 @@ import {
   type ConnectedBrowserProfile,
 } from "@/lib/browser-profiles";
 import {
-  goatChatScreenshotBlobPath,
-  goatChatScreenshotFilename,
-  goatChatScreenshotUrl,
+  chatScreenshotBlobPath,
+  chatScreenshotFilename,
+  chatScreenshotUrl,
 } from "@/lib/chat-screenshot-storage";
 import type { BrowserToolOutput } from "@/lib/chat-ui";
 import {
+  type ChatSandbox,
+  chatSandboxName,
   GOAT_CHAT_SANDBOX_ACTION_POLICY_PATH,
   GOAT_CHAT_SANDBOX_AGENT_BROWSER_BIN,
   GOAT_CHAT_SANDBOX_SCREENSHOT_DIR,
-  type GoatChatSandbox,
-  getGoatChatSandbox,
-  goatChatSandboxName,
+  getChatSandbox,
   runSandboxCommand,
   sandboxBrowserEnvironment,
 } from "./chat-sandbox";
@@ -74,10 +74,10 @@ export function createChatBrowserToolSession(input: {
   createBrowserProfileAgentSession?: (profileId: string) => Promise<BrowserProfileAgentSession>;
   endBrowserProfileAgentSession?: (session: BrowserProfileAgentSession) => Promise<void>;
 }): ChatBrowserToolSession {
-  const browserSessionId = goatChatSandboxName(input.chatSessionId);
+  const browserSessionId = chatSandboxName(input.chatSessionId);
   const budget = createBrowserObservationBudget();
-  let sandboxPromise: Promise<GoatChatSandbox> | null = null;
-  let sandbox: GoatChatSandbox | null = null;
+  let sandboxPromise: Promise<ChatSandbox> | null = null;
+  let sandbox: ChatSandbox | null = null;
   let startedAt: Date | null = null;
   let commandCount = 0;
   let queue = Promise.resolve();
@@ -87,7 +87,7 @@ export function createChatBrowserToolSession(input: {
 
   const getSandbox = () => {
     startedAt ??= new Date();
-    sandboxPromise ??= getGoatChatSandbox({
+    sandboxPromise ??= getChatSandbox({
       chatSessionId: input.chatSessionId,
       signal: input.signal,
     }).then((value) => {
@@ -181,8 +181,7 @@ export function createChatBrowserToolSession(input: {
         error: "Authenticated browser profiles are temporarily disabled.",
       };
     }
-    const screenshotFilename =
-      name === "browser_screenshot" ? goatChatScreenshotFilename() : undefined;
+    const screenshotFilename = name === "browser_screenshot" ? chatScreenshotFilename() : undefined;
     const screenshotPath = screenshotFilename
       ? `${GOAT_CHAT_SANDBOX_SCREENSHOT_DIR}/${screenshotFilename}`
       : undefined;
@@ -229,7 +228,7 @@ export function createChatBrowserToolSession(input: {
           };
         }
         await put(
-          goatChatScreenshotBlobPath({
+          chatScreenshotBlobPath({
             userWorkosId: input.userWorkosId,
             chatSessionId: input.chatSessionId,
             filename: screenshotFilename,
@@ -243,7 +242,7 @@ export function createChatBrowserToolSession(input: {
         );
         return {
           ...modelOutput,
-          screenshotUrl: goatChatScreenshotUrl({
+          screenshotUrl: chatScreenshotUrl({
             chatSessionId: input.chatSessionId,
             filename: screenshotFilename,
           }),
@@ -327,7 +326,7 @@ export function createChatBrowserToolSession(input: {
 }
 
 async function executeBrowserCommand(
-  sandbox: GoatChatSandbox,
+  sandbox: ChatSandbox,
   input: {
     name: BrowserToolName;
     args: unknown;
@@ -371,7 +370,7 @@ async function executeBrowserCommand(
 }
 
 async function executeBrowserRead(
-  sandbox: GoatChatSandbox,
+  sandbox: ChatSandbox,
   input: {
     args: unknown;
     browserSessionId: string;
@@ -450,7 +449,7 @@ function browserActionRequiresIrreversibleApproval(
 }
 
 async function runBrowserArgv(
-  sandbox: GoatChatSandbox,
+  sandbox: ChatSandbox,
   name: BrowserToolName,
   argv: string[],
   signal: AbortSignal,

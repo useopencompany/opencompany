@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { GoatAuthContext } from "@/lib/auth";
-import { currentGoatUser } from "@/lib/auth";
-import { resolveGoatCodexChatInteraction } from "@/lib/codex-chat-interactions";
+import type { AuthContext } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
+import { resolveCodexChatInteraction } from "@/lib/codex-chat-interactions";
 import { POST } from "./route";
 
-vi.mock("@/lib/auth", () => ({ currentGoatUser: vi.fn() }));
+vi.mock("@/lib/auth", () => ({ currentUser: vi.fn() }));
 vi.mock("@/lib/codex-chat-interactions", () => ({
-  resolveGoatCodexChatInteraction: vi.fn(),
+  resolveCodexChatInteraction: vi.fn(),
 }));
 
 vi.mock("next/server", () => ({
@@ -23,10 +23,10 @@ const interactionId = "goat_codex_chat_interaction_123e4567-e89b-12d3-a456-42661
 
 describe("POST /api/codex-chat/interactions/[interactionId]", () => {
   beforeEach(() => {
-    vi.mocked(currentGoatUser).mockResolvedValue({
+    vi.mocked(currentUser).mockResolvedValue({
       user: { workosUserId: "user_1" },
-    } as GoatAuthContext);
-    vi.mocked(resolveGoatCodexChatInteraction).mockResolvedValue({
+    } as AuthContext);
+    vi.mocked(resolveCodexChatInteraction).mockResolvedValue({
       ok: true,
       response: { answers: { scope: { answers: ["Foundational"] } } },
     });
@@ -39,7 +39,7 @@ describe("POST /api/codex-chat/interactions/[interactionId]", () => {
     });
 
     expect(response.status).toBe(202);
-    expect(resolveGoatCodexChatInteraction).toHaveBeenCalledWith({
+    expect(resolveCodexChatInteraction).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       interactionId,
       answers,
@@ -47,7 +47,7 @@ describe("POST /api/codex-chat/interactions/[interactionId]", () => {
   });
 
   it("rejects unauthenticated and malformed interaction requests", async () => {
-    vi.mocked(currentGoatUser).mockResolvedValueOnce(null as never);
+    vi.mocked(currentUser).mockResolvedValueOnce(null as never);
     const unauthorized = await POST(jsonRequest({ answers: {} }), {
       params: Promise.resolve({ interactionId }),
     });
@@ -57,11 +57,11 @@ describe("POST /api/codex-chat/interactions/[interactionId]", () => {
       params: Promise.resolve({ interactionId: "not-an-interaction" }),
     });
     expect(malformed.status).toBe(404);
-    expect(resolveGoatCodexChatInteraction).not.toHaveBeenCalled();
+    expect(resolveCodexChatInteraction).not.toHaveBeenCalled();
   });
 
   it("preserves stale-question conflicts from the durable resolver", async () => {
-    vi.mocked(resolveGoatCodexChatInteraction).mockResolvedValueOnce({
+    vi.mocked(resolveCodexChatInteraction).mockResolvedValueOnce({
       ok: false,
       status: 409,
       error: "This Codex question is no longer waiting.",

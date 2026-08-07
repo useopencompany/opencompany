@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   effectiveCapabilityMode,
   GOAT_PROVIDER_CAPABILITIES,
-  isGoatCapabilityId,
-  isGoatCapabilityMode,
+  isCapabilityId,
+  isCapabilityMode,
   providerCapability,
 } from "@/lib/actions/capabilities";
 
@@ -91,19 +91,19 @@ describe("effectiveCapabilityMode", () => {
 
 describe("mode helpers", () => {
   it("validates capability modes", () => {
-    expect(isGoatCapabilityMode("on")).toBe(true);
-    expect(isGoatCapabilityMode("ask")).toBe(true);
-    expect(isGoatCapabilityMode("off")).toBe(true);
-    expect(isGoatCapabilityMode("enabled")).toBe(false);
-    expect(isGoatCapabilityMode(undefined)).toBe(false);
+    expect(isCapabilityMode("on")).toBe(true);
+    expect(isCapabilityMode("ask")).toBe(true);
+    expect(isCapabilityMode("off")).toBe(true);
+    expect(isCapabilityMode("enabled")).toBe(false);
+    expect(isCapabilityMode(undefined)).toBe(false);
   });
 
   it("recognizes provider-specific capability ids", () => {
-    expect(isGoatCapabilityId("read")).toBe(true);
-    expect(isGoatCapabilityId("query")).toBe(true);
-    expect(isGoatCapabilityId("draft")).toBe(true);
-    expect(isGoatCapabilityId("write")).toBe(true);
-    expect(isGoatCapabilityId("send")).toBe(false);
+    expect(isCapabilityId("read")).toBe(true);
+    expect(isCapabilityId("query")).toBe(true);
+    expect(isCapabilityId("draft")).toBe(true);
+    expect(isCapabilityId("write")).toBe(true);
+    expect(isCapabilityId("send")).toBe(false);
   });
 
   it("looks up registered capabilities", () => {

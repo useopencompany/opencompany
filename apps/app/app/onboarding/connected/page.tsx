@@ -5,14 +5,14 @@ import { Suspense, useEffect } from "react";
 import {
   GOAT_ONBOARDING_CONNECTION_MESSAGE,
   GOAT_ONBOARDING_CONNECTION_STORAGE_KEY,
-  type GoatOnboardingConnectionMessage,
+  type OnboardingConnectionMessage,
 } from "@/lib/onboarding-integrations";
 
 function ConnectionNotifier() {
   const params = useSearchParams();
 
   useEffect(() => {
-    const message: GoatOnboardingConnectionMessage = {
+    const message: OnboardingConnectionMessage = {
       type: GOAT_ONBOARDING_CONNECTION_MESSAGE,
       provider: params.get("integration"),
       status: params.get("setup"),

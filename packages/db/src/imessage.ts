@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import {
-  type GoatImessageSendSource,
-  type GoatImessageSendStatus,
-  goatImessagePairingChallenges,
-  goatImessageSends,
-  goatIntegrations,
-  goatUsers,
+  type ImessageSendSource,
+  type ImessageSendStatus,
+  imessagePairingChallenges,
+  imessageSends,
+  integrations,
+  users,
 } from "./schema";
 
 type DbLike = any;
@@ -17,11 +17,11 @@ export const IMESSAGE_PROVIDER = "imessage" as const;
 // One iMessage pairing per user: the paired phone lives on a single personal
 // integration row keyed on this stable sentinel, so re-pairing with a new
 // number updates the row in place instead of minting a sibling.
-export function goatImessageExternalIdForUser(userWorkosId: string) {
+export function imessageExternalIdForUser(userWorkosId: string) {
   return `imessage:${userWorkosId}`;
 }
 
-export type GoatImessageDelivery = {
+export type ImessageDelivery = {
   integrationId: string;
   phoneE164: string;
 };
@@ -29,24 +29,24 @@ export type GoatImessageDelivery = {
 // The single availability gate for the send_user_message tool: the user's
 // feature flag is on AND a paired, connected integration row exists. Every
 // surface (chat route, runner task executors) must use this same resolver.
-export async function resolveGoatImessageDelivery(
+export async function resolveImessageDelivery(
   userWorkosId: string,
   db: DbLike = getDb(),
-): Promise<GoatImessageDelivery | null> {
+): Promise<ImessageDelivery | null> {
   const [row] = await db
     .select({
-      integrationId: goatIntegrations.id,
-      phoneE164: goatIntegrations.accountName,
+      integrationId: integrations.id,
+      phoneE164: integrations.accountName,
     })
-    .from(goatIntegrations)
-    .innerJoin(goatUsers, eq(goatUsers.workosUserId, goatIntegrations.userWorkosId))
+    .from(integrations)
+    .innerJoin(users, eq(users.workosUserId, integrations.userWorkosId))
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, IMESSAGE_PROVIDER),
-        eq(goatIntegrations.status, "connected"),
-        sql`${goatIntegrations.workspaceId} IS NULL`,
-        eq(goatUsers.imessageEnabled, true),
+        eq(integrations.userWorkosId, userWorkosId),
+        eq(integrations.provider, IMESSAGE_PROVIDER),
+        eq(integrations.status, "connected"),
+        sql`${integrations.workspaceId} IS NULL`,
+        eq(users.imessageEnabled, true),
       ),
     )
     .limit(1);
@@ -54,7 +54,7 @@ export async function resolveGoatImessageDelivery(
   return { integrationId: row.integrationId, phoneE164: row.phoneE164 };
 }
 
-export type GoatImessagePairingChallengeRow = {
+export type ImessagePairingChallengeRow = {
   id: string;
   userWorkosId: string;
   phoneE164: string;
@@ -65,19 +65,19 @@ export type GoatImessagePairingChallengeRow = {
   createdAt: Date;
 };
 
-export async function getGoatImessagePairingChallenge(
+export async function getImessagePairingChallenge(
   userWorkosId: string,
   db: DbLike = getDb(),
-): Promise<GoatImessagePairingChallengeRow | null> {
+): Promise<ImessagePairingChallengeRow | null> {
   const [row] = await db
     .select()
-    .from(goatImessagePairingChallenges)
-    .where(eq(goatImessagePairingChallenges.userWorkosId, userWorkosId))
+    .from(imessagePairingChallenges)
+    .where(eq(imessagePairingChallenges.userWorkosId, userWorkosId))
     .limit(1);
   return row ?? null;
 }
 
-export async function upsertGoatImessagePairingChallenge(
+export async function upsertImessagePairingChallenge(
   input: {
     userWorkosId: string;
     phoneE164: string;
@@ -89,7 +89,7 @@ export async function upsertGoatImessagePairingChallenge(
 ): Promise<void> {
   const now = input.now ?? new Date();
   await db
-    .insert(goatImessagePairingChallenges)
+    .insert(imessagePairingChallenges)
     .values({
       id: `gimc_${randomUUID().replace(/-/g, "")}`,
       userWorkosId: input.userWorkosId,
@@ -101,7 +101,7 @@ export async function upsertGoatImessagePairingChallenge(
       createdAt: now,
     })
     .onConflictDoUpdate({
-      target: [goatImessagePairingChallenges.userWorkosId],
+      target: [imessagePairingChallenges.userWorkosId],
       set: {
         phoneE164: input.phoneE164,
         codeHash: input.codeHash,
@@ -113,70 +113,65 @@ export async function upsertGoatImessagePairingChallenge(
     });
 }
 
-export async function incrementGoatImessageChallengeAttempts(
+export async function incrementImessageChallengeAttempts(
   challengeId: string,
   db: DbLike = getDb(),
 ): Promise<void> {
   await db
-    .update(goatImessagePairingChallenges)
-    .set({ attemptCount: sql`${goatImessagePairingChallenges.attemptCount} + 1` })
-    .where(eq(goatImessagePairingChallenges.id, challengeId));
+    .update(imessagePairingChallenges)
+    .set({ attemptCount: sql`${imessagePairingChallenges.attemptCount} + 1` })
+    .where(eq(imessagePairingChallenges.id, challengeId));
 }
 
-export async function consumeGoatImessageChallenge(
+export async function consumeImessageChallenge(
   challengeId: string,
   db: DbLike = getDb(),
 ): Promise<void> {
   await db
-    .update(goatImessagePairingChallenges)
+    .update(imessagePairingChallenges)
     .set({ consumedAt: new Date() })
-    .where(eq(goatImessagePairingChallenges.id, challengeId));
+    .where(eq(imessagePairingChallenges.id, challengeId));
 }
 
-export async function countGoatImessageSendsSince(
+export async function countImessageSendsSince(
   userWorkosId: string,
   since: Date,
   db: DbLike = getDb(),
 ): Promise<number> {
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
-    .from(goatImessageSends)
-    .where(
-      and(
-        eq(goatImessageSends.userWorkosId, userWorkosId),
-        gte(goatImessageSends.createdAt, since),
-      ),
-    );
+    .from(imessageSends)
+    .where(and(eq(imessageSends.userWorkosId, userWorkosId), gte(imessageSends.createdAt, since)));
   return row?.count ?? 0;
 }
 
-export async function getSuccessfulGoatImessageSendForTurn(
+export async function getSuccessfulImessageSendForTurn(
   turnId: string,
   db: DbLike = getDb(),
 ): Promise<{ id: string; createdAt: Date } | null> {
   const [row] = await db
     .select({
-      id: goatImessageSends.id,
-      createdAt: goatImessageSends.createdAt,
+      id: imessageSends.id,
+      createdAt: imessageSends.createdAt,
     })
-    .from(goatImessageSends)
-    .where(and(eq(goatImessageSends.turnId, turnId), eq(goatImessageSends.status, "sent")))
+    .from(imessageSends)
+    .where(and(eq(imessageSends.turnId, turnId), eq(imessageSends.status, "sent")))
     .limit(1);
   return row ?? null;
 }
 
-export async function recordGoatImessageSend(
+export async function recordImessageSend(
   input: {
     userWorkosId: string;
-    source: GoatImessageSendSource;
-    status: GoatImessageSendStatus;
+    source: ImessageSendSource;
+    status: ImessageSendStatus;
     chatSessionId?: string | null;
     turnId?: string | null;
     errorReason?: string | null;
   },
   db: DbLike = getDb(),
 ): Promise<void> {
-  await db.insert(goatImessageSends).values({
+  await db.insert(imessageSends).values({
     id: `gims_${randomUUID().replace(/-/g, "")}`,
     userWorkosId: input.userWorkosId,
     source: input.source,

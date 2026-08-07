@@ -27,9 +27,9 @@ export const GOAT_CHAT_SANDBOX_NETWORK_POLICY: NetworkPolicy = {
 const AGENT_BROWSER_VERSION = "0.27.3";
 const SANDBOX_COMMAND_OUTPUT_LIMIT = 20_000;
 
-export type GoatChatSandbox = Sandbox;
+export type ChatSandbox = Sandbox;
 
-export function goatChatSandboxName(chatSessionId: string) {
+export function chatSandboxName(chatSessionId: string) {
   const normalized = chatSessionId
     .trim()
     .replace(/[^a-zA-Z0-9_-]/g, "-")
@@ -38,10 +38,10 @@ export function goatChatSandboxName(chatSessionId: string) {
   return `goat-chat-${normalized}`;
 }
 
-export async function getGoatChatSandbox(input: { chatSessionId: string; signal: AbortSignal }) {
+export async function getChatSandbox(input: { chatSessionId: string; signal: AbortSignal }) {
   const image = process.env.CHAT_SANDBOX_IMAGE?.trim();
   return Sandbox.getOrCreate({
-    name: goatChatSandboxName(input.chatSessionId),
+    name: chatSandboxName(input.chatSessionId),
     ...(image ? { image } : { runtime: "node24" as const }),
     persistent: true,
     timeout: GOAT_CHAT_SANDBOX_TIMEOUT_MS,
@@ -65,7 +65,7 @@ export async function getGoatChatSandbox(input: { chatSessionId: string; signal:
 }
 
 export async function provisionChatSandbox(
-  sandbox: GoatChatSandbox,
+  sandbox: ChatSandbox,
   input: { installAgentBrowser: boolean; signal: AbortSignal },
 ) {
   const directories = await runSandboxCommand(sandbox, {
@@ -131,7 +131,7 @@ export type SandboxCommandResult = {
 };
 
 export async function runSandboxCommand(
-  sandbox: Pick<GoatChatSandbox, "runCommand">,
+  sandbox: Pick<ChatSandbox, "runCommand">,
   input: {
     cmd: string;
     args: string[];

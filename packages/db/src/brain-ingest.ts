@@ -2,36 +2,36 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import {
-  type GoatBrainHydratablePointerProvider,
-  isNormalizedGoatBrainPointerSourceItem,
-  isNormalizedGoatChatCaptureSourceItem,
+  type BrainHydratablePointerProvider,
+  isNormalizedBrainPointerSourceItem,
+  isNormalizedChatCaptureSourceItem,
   type NormalizedBrainSourceItem,
 } from "../../brain/src/index";
-import { reserveGoatWorkspaceIngestion } from "./billing";
+import { reserveWorkspaceIngestion } from "./billing";
 import { getDb } from "./client";
 import {
-  type GoatBrainIngestJobKind,
-  type GoatBrainIngestJobStatus,
-  goatBrainIngestJobs,
-  goatBrainSourceItems,
-  goatBrains,
+  type BrainIngestJobKind,
+  type BrainIngestJobStatus,
+  brainIngestJobs,
+  brainSourceItems,
+  brains,
 } from "./schema";
 
 type DbLike = any;
-type PersistedGoatBrainIngestJob = {
+type PersistedBrainIngestJob = {
   id: string;
   brainRef: string | null;
-  status: GoatBrainIngestJobStatus;
+  status: BrainIngestJobStatus;
   completedAt: Date | null;
   lastError: string | null;
 };
 
-export const GOAT_BRAIN_SOURCE_ITEM_INGEST_JOB_KIND: GoatBrainIngestJobKind =
+export const GOAT_BRAIN_SOURCE_ITEM_INGEST_JOB_KIND: BrainIngestJobKind =
   "brain_source_item_ingest";
-export const GOAT_BRAIN_AGENT_INGEST_JOB_KIND: GoatBrainIngestJobKind = "brain_agent_ingest";
-export const GOAT_BRAIN_POINTER_HYDRATE_JOB_KIND: GoatBrainIngestJobKind = "brain_pointer_hydrate";
+export const GOAT_BRAIN_AGENT_INGEST_JOB_KIND: BrainIngestJobKind = "brain_agent_ingest";
+export const GOAT_BRAIN_POINTER_HYDRATE_JOB_KIND: BrainIngestJobKind = "brain_pointer_hydrate";
 
-export type UpsertGoatBrainSourceItemResult = {
+export type UpsertBrainSourceItemResult = {
   sourceItemId: string;
   jobId: string | null;
   jobIds: string[];
@@ -39,69 +39,69 @@ export type UpsertGoatBrainSourceItemResult = {
   skipped: boolean;
   paused?: boolean;
   pausedWorkspaceIds?: string[];
-  quotaUpdates?: GoatIngestionQuotaUpdate[];
+  quotaUpdates?: IngestionQuotaUpdate[];
 };
 
-export type GoatIngestionQuotaUpdate = {
+export type IngestionQuotaUpdate = {
   workspaceId: string;
   pendingUnits: number;
   paused: boolean;
 };
 
-export type ExistingGoatBrainPointerIngest = {
+export type ExistingBrainPointerIngest = {
   jobId: string;
-  status: GoatBrainIngestJobStatus;
+  status: BrainIngestJobStatus;
   planPaused: boolean;
   draftBrainId: string;
   draftFolder: string;
   title: string;
 };
 
-export type ExistingGoatBrainChatCaptureIngest = {
+export type ExistingBrainChatCaptureIngest = {
   jobId: string;
-  status: GoatBrainIngestJobStatus;
+  status: BrainIngestJobStatus;
   planPaused: boolean;
   draftBrainId: string;
   draftFolder: string;
   title: string;
 };
 
-export async function findExistingGoatBrainChatCaptureIngest(input: {
+export async function findExistingBrainChatCaptureIngest(input: {
   userWorkosId: string;
   sourceConnectionId: string;
   externalId: string;
   brainRef: string;
   db?: DbLike;
-}): Promise<ExistingGoatBrainChatCaptureIngest | null> {
+}): Promise<ExistingBrainChatCaptureIngest | null> {
   const db = input.db ?? getDb();
   const [row] = await db
     .select({
-      normalizedPayload: goatBrainSourceItems.normalizedPayload,
-      jobId: goatBrainIngestJobs.id,
-      status: goatBrainIngestJobs.status,
-      planPaused: goatBrainIngestJobs.planPaused,
+      normalizedPayload: brainSourceItems.normalizedPayload,
+      jobId: brainIngestJobs.id,
+      status: brainIngestJobs.status,
+      planPaused: brainIngestJobs.planPaused,
     })
-    .from(goatBrainSourceItems)
+    .from(brainSourceItems)
     .innerJoin(
-      goatBrainIngestJobs,
+      brainIngestJobs,
       and(
-        eq(goatBrainIngestJobs.sourceItemId, goatBrainSourceItems.id),
-        eq(goatBrainIngestJobs.kind, GOAT_BRAIN_AGENT_INGEST_JOB_KIND),
-        eq(goatBrainIngestJobs.brainRef, input.brainRef),
+        eq(brainIngestJobs.sourceItemId, brainSourceItems.id),
+        eq(brainIngestJobs.kind, GOAT_BRAIN_AGENT_INGEST_JOB_KIND),
+        eq(brainIngestJobs.brainRef, input.brainRef),
       ),
     )
     .where(
       and(
-        eq(goatBrainSourceItems.userWorkosId, input.userWorkosId),
-        eq(goatBrainSourceItems.sourceProvider, "goat-chat"),
-        eq(goatBrainSourceItems.sourceConnectionId, input.sourceConnectionId),
-        eq(goatBrainSourceItems.sourceType, "capture"),
-        eq(goatBrainSourceItems.externalId, input.externalId),
+        eq(brainSourceItems.userWorkosId, input.userWorkosId),
+        eq(brainSourceItems.sourceProvider, "goat-chat"),
+        eq(brainSourceItems.sourceConnectionId, input.sourceConnectionId),
+        eq(brainSourceItems.sourceType, "capture"),
+        eq(brainSourceItems.externalId, input.externalId),
       ),
     )
-    .orderBy(desc(goatBrainIngestJobs.createdAt))
+    .orderBy(desc(brainIngestJobs.createdAt))
     .limit(1);
-  if (!row || !isNormalizedGoatChatCaptureSourceItem(row.normalizedPayload)) return null;
+  if (!row || !isNormalizedChatCaptureSourceItem(row.normalizedPayload)) return null;
   const capture = row.normalizedPayload.content.capture;
   return {
     jobId: row.jobId,
@@ -113,43 +113,43 @@ export async function findExistingGoatBrainChatCaptureIngest(input: {
   };
 }
 
-export async function findExistingGoatBrainPointerIngest(input: {
+export async function findExistingBrainPointerIngest(input: {
   userWorkosId: string;
   integrationId: string;
-  provider: GoatBrainHydratablePointerProvider;
+  provider: BrainHydratablePointerProvider;
   sourceRef: string;
   brainRef: string;
   db?: DbLike;
-}): Promise<ExistingGoatBrainPointerIngest | null> {
+}): Promise<ExistingBrainPointerIngest | null> {
   const db = input.db ?? getDb();
   const [row] = await db
     .select({
-      normalizedPayload: goatBrainSourceItems.normalizedPayload,
-      jobId: goatBrainIngestJobs.id,
-      status: goatBrainIngestJobs.status,
-      planPaused: goatBrainIngestJobs.planPaused,
+      normalizedPayload: brainSourceItems.normalizedPayload,
+      jobId: brainIngestJobs.id,
+      status: brainIngestJobs.status,
+      planPaused: brainIngestJobs.planPaused,
     })
-    .from(goatBrainSourceItems)
+    .from(brainSourceItems)
     .innerJoin(
-      goatBrainIngestJobs,
+      brainIngestJobs,
       and(
-        eq(goatBrainIngestJobs.sourceItemId, goatBrainSourceItems.id),
-        eq(goatBrainIngestJobs.kind, GOAT_BRAIN_POINTER_HYDRATE_JOB_KIND),
-        eq(goatBrainIngestJobs.brainRef, input.brainRef),
+        eq(brainIngestJobs.sourceItemId, brainSourceItems.id),
+        eq(brainIngestJobs.kind, GOAT_BRAIN_POINTER_HYDRATE_JOB_KIND),
+        eq(brainIngestJobs.brainRef, input.brainRef),
       ),
     )
     .where(
       and(
-        eq(goatBrainSourceItems.userWorkosId, input.userWorkosId),
-        eq(goatBrainSourceItems.integrationId, input.integrationId),
-        eq(goatBrainSourceItems.sourceProvider, input.provider),
-        eq(goatBrainSourceItems.sourceType, "pointer"),
-        eq(goatBrainSourceItems.sourceRef, input.sourceRef),
+        eq(brainSourceItems.userWorkosId, input.userWorkosId),
+        eq(brainSourceItems.integrationId, input.integrationId),
+        eq(brainSourceItems.sourceProvider, input.provider),
+        eq(brainSourceItems.sourceType, "pointer"),
+        eq(brainSourceItems.sourceRef, input.sourceRef),
       ),
     )
-    .orderBy(desc(goatBrainIngestJobs.createdAt))
+    .orderBy(desc(brainIngestJobs.createdAt))
     .limit(1);
-  if (!row || !isNormalizedGoatBrainPointerSourceItem(row.normalizedPayload)) return null;
+  if (!row || !isNormalizedBrainPointerSourceItem(row.normalizedPayload)) return null;
   const pointer = row.normalizedPayload.content.pointer;
   return {
     jobId: row.jobId,
@@ -161,13 +161,13 @@ export async function findExistingGoatBrainPointerIngest(input: {
   };
 }
 
-export async function upsertGoatBrainSourceItemAndEnqueue(input: {
+export async function upsertBrainSourceItemAndEnqueue(input: {
   userWorkosId: string;
   sourceConnectionId: string;
   integrationId?: string | null;
   item: NormalizedBrainSourceItem;
   rawPayload: unknown;
-  kind?: GoatBrainIngestJobKind;
+  kind?: BrainIngestJobKind;
   importRunId?: string | null;
   brainRef?: string | null;
   // Target brains for fan-out; one ingest job per entry. Takes precedence over
@@ -185,7 +185,7 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
   rawEventKeysByBrainRef?: ReadonlyMap<string, readonly string[]>;
   now?: Date;
   db?: DbLike;
-}): Promise<UpsertGoatBrainSourceItemResult> {
+}): Promise<UpsertBrainSourceItemResult> {
   if (!input.db) {
     const db: DbLike = getDb();
     // The web app's getDb() is the neon-http driver, which has no interactive
@@ -193,10 +193,10 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
     // Run the mutation steps sequentially there; pooled callers (the runner) get
     // a real transaction. Mirrors runAtomically() in ./brain-files.
     if (db instanceof NeonHttpDatabase) {
-      return upsertGoatBrainSourceItemAndEnqueue({ ...input, db });
+      return upsertBrainSourceItemAndEnqueue({ ...input, db });
     }
     return db.transaction((tx: DbLike) =>
-      upsertGoatBrainSourceItemAndEnqueue({
+      upsertBrainSourceItemAndEnqueue({
         ...input,
         db: tx,
       }),
@@ -217,9 +217,9 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
   const brainRefs = uniqueBrainRefs(input.brainRefs ?? [input.brainRef ?? null]);
 
   const [sourceItem] = await db
-    .insert(goatBrainSourceItems)
+    .insert(brainSourceItems)
     .values({
-      id: newGoatBrainSourceItemId(),
+      id: newBrainSourceItemId(),
       userWorkosId: input.userWorkosId,
       sourceProvider: input.item.sourceProvider,
       sourceConnectionId: input.sourceConnectionId,
@@ -238,12 +238,12 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
     })
     .onConflictDoUpdate({
       target: [
-        goatBrainSourceItems.userWorkosId,
-        goatBrainSourceItems.sourceProvider,
-        goatBrainSourceItems.sourceConnectionId,
-        goatBrainSourceItems.sourceType,
-        goatBrainSourceItems.externalId,
-        goatBrainSourceItems.contentHash,
+        brainSourceItems.userWorkosId,
+        brainSourceItems.sourceProvider,
+        brainSourceItems.sourceConnectionId,
+        brainSourceItems.sourceType,
+        brainSourceItems.externalId,
+        brainSourceItems.contentHash,
       ],
       set: {
         integrationId,
@@ -259,7 +259,7 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
       },
     })
     .returning({
-      id: goatBrainSourceItems.id,
+      id: brainSourceItems.id,
     });
 
   if (!sourceItem) throw new Error("Could not persist Goat Brain source item.");
@@ -269,9 +269,9 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
     explicitBrainRefs.length === 0
       ? []
       : await db
-          .select({ id: goatBrains.id, workspaceId: goatBrains.workspaceId })
-          .from(goatBrains)
-          .where(inArray(goatBrains.id, explicitBrainRefs));
+          .select({ id: brains.id, workspaceId: brains.workspaceId })
+          .from(brains)
+          .where(inArray(brains.id, explicitBrainRefs));
   const workspaceByBrain = new Map(brainRows.map((row) => [row.id, row.workspaceId]));
   for (const brainRef of explicitBrainRefs) {
     if (!workspaceByBrain.has(brainRef)) {
@@ -281,14 +281,14 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
 
   // Dedup is enforced by partial unique indexes on (source_item_id, content_hash,
   // kind[, brain_ref]); the conflict target must stay unspecified so both apply.
-  const jobs: PersistedGoatBrainIngestJob[] =
+  const jobs: PersistedBrainIngestJob[] =
     brainRefs.length === 0
       ? []
       : await db
-          .insert(goatBrainIngestJobs)
+          .insert(brainIngestJobs)
           .values(
             brainRefs.map((brainRef) => ({
-              id: newGoatBrainIngestJobId(),
+              id: newBrainIngestJobId(),
               sourceItemId: sourceItem.id,
               userWorkosId: input.userWorkosId,
               sourceProvider: input.item.sourceProvider,
@@ -316,15 +316,15 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
           )
           .onConflictDoNothing()
           .returning({
-            id: goatBrainIngestJobs.id,
-            brainRef: goatBrainIngestJobs.brainRef,
-            status: goatBrainIngestJobs.status,
-            completedAt: goatBrainIngestJobs.completedAt,
-            lastError: goatBrainIngestJobs.lastError,
+            id: brainIngestJobs.id,
+            brainRef: brainIngestJobs.brainRef,
+            status: brainIngestJobs.status,
+            completedAt: brainIngestJobs.completedAt,
+            lastError: brainIngestJobs.lastError,
           });
 
   const workspaceIds = Array.from(new Set(brainRows.map((row) => row.workspaceId)));
-  const reservations: Awaited<ReturnType<typeof reserveGoatWorkspaceIngestion>>[] = [];
+  const reservations: Awaited<ReturnType<typeof reserveWorkspaceIngestion>>[] = [];
   if (!skipReason) {
     // A caller-provided db is often a live transaction. Keep its statements
     // sequential; Neon transactions do not support concurrent queries on the
@@ -338,7 +338,7 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
           })
         : rawEventCount;
       reservations.push(
-        await reserveGoatWorkspaceIngestion({
+        await reserveWorkspaceIngestion({
           workspaceId,
           sourceItemId: sourceItem.id,
           sourceProvider: input.item.sourceProvider,
@@ -354,13 +354,13 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
     .map((reservation) => reservation.reservation.workspaceId);
   for (const workspaceId of pausedWorkspaceIds) {
     await db
-      .update(goatBrainIngestJobs)
+      .update(brainIngestJobs)
       .set({ planPaused: true, updatedAt: now })
       .where(
         and(
-          eq(goatBrainIngestJobs.workspaceId, workspaceId),
-          eq(goatBrainIngestJobs.sourceItemId, sourceItem.id),
-          eq(goatBrainIngestJobs.status, "queued"),
+          eq(brainIngestJobs.workspaceId, workspaceId),
+          eq(brainIngestJobs.sourceItemId, sourceItem.id),
+          eq(brainIngestJobs.status, "queued"),
         ),
       );
   }
@@ -373,7 +373,7 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
     }));
 
   const persistedJobs = skipReason
-    ? await transitionQueuedGoatBrainIngestJobsToSkipped({
+    ? await transitionQueuedBrainIngestJobsToSkipped({
         db,
         sourceItemId: sourceItem.id,
         contentHash: input.item.contentHash,
@@ -387,7 +387,7 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
   const lastJob = persistedJobs.at(-1) ?? null;
   if (lastJob) {
     await db
-      .update(goatBrainSourceItems)
+      .update(brainSourceItems)
       .set({
         lastIngestJobId: lastJob.id,
         lastIngestStatus: sourceItemStatusForJob(lastJob.status),
@@ -395,10 +395,10 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
         lastIngestError: sourceItemErrorForJob(lastJob, skipReason),
         updatedAt: now,
       })
-      .where(eq(goatBrainSourceItems.id, sourceItem.id));
+      .where(eq(brainSourceItems.id, sourceItem.id));
   } else if (skipReason) {
     await db
-      .update(goatBrainSourceItems)
+      .update(brainSourceItems)
       .set({
         lastIngestJobId: null,
         lastIngestStatus: "skipped",
@@ -406,7 +406,7 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
         lastIngestError: skipReason,
         updatedAt: now,
       })
-      .where(eq(goatBrainSourceItems.id, sourceItem.id));
+      .where(eq(brainSourceItems.id, sourceItem.id));
   }
 
   return {
@@ -422,18 +422,18 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
   };
 }
 
-async function transitionQueuedGoatBrainIngestJobsToSkipped(input: {
+async function transitionQueuedBrainIngestJobsToSkipped(input: {
   db: DbLike;
   sourceItemId: string;
   contentHash: string;
-  kind: GoatBrainIngestJobKind;
+  kind: BrainIngestJobKind;
   brainRefs: (string | null)[];
   reason: string;
   now: Date;
-}): Promise<PersistedGoatBrainIngestJob[]> {
+}): Promise<PersistedBrainIngestJob[]> {
   if (input.brainRefs.length === 0) return [];
 
-  const targetWhere = goatBrainIngestJobTargetWhere({
+  const targetWhere = brainIngestJobTargetWhere({
     sourceItemId: input.sourceItemId,
     contentHash: input.contentHash,
     kind: input.kind,
@@ -442,7 +442,7 @@ async function transitionQueuedGoatBrainIngestJobsToSkipped(input: {
   const result = { skipped: true, reason: input.reason, summary: input.reason };
 
   await input.db
-    .update(goatBrainIngestJobs)
+    .update(brainIngestJobs)
     .set({
       status: "skipped",
       lastError: null,
@@ -450,41 +450,39 @@ async function transitionQueuedGoatBrainIngestJobsToSkipped(input: {
       completedAt: input.now,
       updatedAt: input.now,
     })
-    .where(and(targetWhere, eq(goatBrainIngestJobs.status, "queued")));
+    .where(and(targetWhere, eq(brainIngestJobs.status, "queued")));
 
-  const rows: PersistedGoatBrainIngestJob[] = await input.db
+  const rows: PersistedBrainIngestJob[] = await input.db
     .select({
-      id: goatBrainIngestJobs.id,
-      brainRef: goatBrainIngestJobs.brainRef,
-      status: goatBrainIngestJobs.status,
-      completedAt: goatBrainIngestJobs.completedAt,
-      lastError: goatBrainIngestJobs.lastError,
+      id: brainIngestJobs.id,
+      brainRef: brainIngestJobs.brainRef,
+      status: brainIngestJobs.status,
+      completedAt: brainIngestJobs.completedAt,
+      lastError: brainIngestJobs.lastError,
     })
-    .from(goatBrainIngestJobs)
+    .from(brainIngestJobs)
     .where(targetWhere);
 
   return orderJobsByBrainRefs(rows, input.brainRefs);
 }
 
-function goatBrainIngestJobTargetWhere(input: {
+function brainIngestJobTargetWhere(input: {
   sourceItemId: string;
   contentHash: string;
-  kind: GoatBrainIngestJobKind;
+  kind: BrainIngestJobKind;
   brainRefs: (string | null)[];
 }): SQL {
   const brainRefWhere = or(
     ...input.brainRefs.map((brainRef) =>
-      brainRef === null
-        ? isNull(goatBrainIngestJobs.brainRef)
-        : eq(goatBrainIngestJobs.brainRef, brainRef),
+      brainRef === null ? isNull(brainIngestJobs.brainRef) : eq(brainIngestJobs.brainRef, brainRef),
     ),
   );
   if (!brainRefWhere) throw new Error("Cannot build Goat Brain ingest job target without brains.");
 
   const targetWhere = and(
-    eq(goatBrainIngestJobs.sourceItemId, input.sourceItemId),
-    eq(goatBrainIngestJobs.contentHash, input.contentHash),
-    eq(goatBrainIngestJobs.kind, input.kind),
+    eq(brainIngestJobs.sourceItemId, input.sourceItemId),
+    eq(brainIngestJobs.contentHash, input.contentHash),
+    eq(brainIngestJobs.kind, input.kind),
     brainRefWhere,
   );
   if (!targetWhere) throw new Error("Cannot build Goat Brain ingest job target.");
@@ -526,32 +524,32 @@ function rawEventCountForWorkspace(input: {
   return keys.size;
 }
 
-function orderJobsByBrainRefs(rows: PersistedGoatBrainIngestJob[], brainRefs: (string | null)[]) {
+function orderJobsByBrainRefs(rows: PersistedBrainIngestJob[], brainRefs: (string | null)[]) {
   return brainRefs
     .map((brainRef) => rows.find((row) => row.brainRef === brainRef))
-    .filter((row): row is PersistedGoatBrainIngestJob => Boolean(row));
+    .filter((row): row is PersistedBrainIngestJob => Boolean(row));
 }
 
-function sourceItemStatusForJob(status: GoatBrainIngestJobStatus) {
+function sourceItemStatusForJob(status: BrainIngestJobStatus) {
   if (status === "queued" || status === "running") return "pending";
   return status;
 }
 
-function sourceItemIngestedAtForJob(job: PersistedGoatBrainIngestJob, now: Date) {
+function sourceItemIngestedAtForJob(job: PersistedBrainIngestJob, now: Date) {
   if (job.status === "queued" || job.status === "running") return null;
   return job.completedAt ?? now;
 }
 
-function sourceItemErrorForJob(job: PersistedGoatBrainIngestJob, skipReason: string | null) {
+function sourceItemErrorForJob(job: PersistedBrainIngestJob, skipReason: string | null) {
   if (job.status === "failed") return job.lastError;
   if (job.status === "skipped") return job.lastError ?? skipReason;
   return null;
 }
 
-export function newGoatBrainSourceItemId() {
+export function newBrainSourceItemId() {
   return `gbsrc_${randomUUID().replace(/-/g, "")}`;
 }
 
-export function newGoatBrainIngestJobId() {
+export function newBrainIngestJobId() {
   return `gbjob_${randomUUID().replace(/-/g, "")}`;
 }

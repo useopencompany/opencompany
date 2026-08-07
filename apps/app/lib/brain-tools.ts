@@ -1,5 +1,5 @@
 import * as z from "zod/v4-mini";
-import type { GoatBrainToolInput } from "@/lib/chat-ui";
+import type { BrainToolInput } from "@/lib/chat-ui";
 
 // Single source of truth for the flat, intent-named Goat Brain tool surface.
 //
@@ -9,7 +9,7 @@ import type { GoatBrainToolInput } from "@/lib/chat-ui";
 // model and instead guesses flat, semantically-named parameters (`query`, `id`, `brain`).
 //
 // This module defines flat tools whose parameters match what an agent guesses on the first
-// try, plus pure mappers that translate them into the existing `GoatBrainToolInput`. Flag
+// try, plus pure mappers that translate them into the existing `BrainToolInput`. Flag
 // names are emitted in the engine's expected vocabulary (camelCase is normalized to kebab and
 // validated against the per-command allow list downstream), so nothing in the engine changes.
 
@@ -87,7 +87,7 @@ export type SearchBrainArgs = BrainSelectorArgs & {
 export const SEARCH_BRAIN_TOOL_DESCRIPTION =
   'Search a knowledge brain by meaning and keyword. Curated pages are returned by default; set kind: "evidence" only when raw source material is explicitly needed. Pass "query" with the topic to find (e.g. { "query": "WorkOS sponsorship deal terms" }). Omit "query" and pass "since" (a relative window like 6h, 2d, 1w or an ISO-8601 timestamp) to browse recent pages. Each hit returns an id — follow the important ones with get_document, which exposes the page timeline and linked evidence. Results include pagination. When pagination.hasMore is true, call search_brain again with the same arguments and offset: pagination.nextOffset. "score" is a relative rank within this response, not absolute confidence — do not threshold on it. Trust hits whose "signals" include both "lexical" and "vector"; vector-only hits may be semantic noise, and "vectorSimilarity" (when present) is the absolute confidence. When browsing with "since" (no query), score reflects recency only. Set includeNeighbors: true to get linked pages per hit (get_document always returns full links). Set snippetChars (e.g. 150) to trim each snippet; snippetChars: 150 with the default no-neighbors gives concise output. Read-only.';
 
-export function searchBrainToToolInput(args: SearchBrainArgs): GoatBrainToolInput {
+export function searchBrainToToolInput(args: SearchBrainArgs): BrainToolInput {
   const query = args.query?.trim();
   return {
     command: "query",
@@ -139,7 +139,7 @@ export function coerceDocumentIds(args: GetDocumentArgs): string[] {
   return items.flatMap((item) => item.split(",").map((id) => id.trim())).filter(Boolean);
 }
 
-export function getDocumentToToolInput(args: GetDocumentArgs): GoatBrainToolInput {
+export function getDocumentToToolInput(args: GetDocumentArgs): BrainToolInput {
   const ids = coerceDocumentIds(args);
   return {
     command: "get",
@@ -173,7 +173,7 @@ export type ListDocumentsArgs = BrainSelectorArgs & {
 export const LIST_DOCUMENTS_TOOL_DESCRIPTION =
   'List documents in a brain for inventory or enumeration (not semantic search — use search_brain for that). Filter by "folder", "type", or "kind" (e.g. { "kind": "page", "folder": "people" }). Returns id, title, folder, and type per document. Read-only.';
 
-export function listDocumentsToToolInput(args: ListDocumentsArgs): GoatBrainToolInput {
+export function listDocumentsToToolInput(args: ListDocumentsArgs): BrainToolInput {
   return {
     command: "list",
     flags: {
@@ -205,7 +205,7 @@ export type GetTimelineArgs = BrainSelectorArgs & {
 export const GET_TIMELINE_TOOL_DESCRIPTION =
   'Get the dated history of a single brain document (how a page or record changed over time). Pass its "id" (e.g. { "id": "workos-sponsorship" }). Optionally narrow with "since" (relative window like 6h, 2d, 1w or an ISO-8601 timestamp). Read-only.';
 
-export function getTimelineToToolInput(args: GetTimelineArgs): GoatBrainToolInput {
+export function getTimelineToToolInput(args: GetTimelineArgs): BrainToolInput {
   return {
     command: "timeline",
     flags: {
@@ -231,16 +231,11 @@ export const SAVE_TO_BRAIN_TOOL_DESCRIPTION =
 
 // --- goat_brain (advanced escape hatch) -------------------------------------------------------
 
-const goatBrainFlagValueSchema = z.union([
-  z.string(),
-  z.number(),
-  z.boolean(),
-  z.array(z.string()),
-]);
+const brainFlagValueSchema = z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]);
 
-export const goatBrainAdvancedInputSchema = {
+export const brainAdvancedInputSchema = {
   command: z.enum(["help", "list", "get", "timeline", "query", "doctor"]),
-  flags: z.optional(z.record(z.string(), goatBrainFlagValueSchema)),
+  flags: z.optional(z.record(z.string(), brainFlagValueSchema)),
   stdin: z.optional(z.string()),
   ...brainSelectorSchema,
 };

@@ -1,18 +1,18 @@
-import type { GoatHarnessSpec } from "@opencompany/db/schema";
+import type { HarnessSpec } from "@opencompany/db/schema";
 
 const CODEX_CHAT_WAKE_TIMEOUT_MS = 5_000;
 const CODEX_CHAT_SANDBOX_STATUS_TIMEOUT_MS = 5_000;
 const CODING_WORKSPACE_RUNTIME_ACCESS_TIMEOUT_MS = 10_000;
 const GOAT_DICTATION_ACCESS_TIMEOUT_MS = 10_000;
 
-export type GoatCodexSandboxStatus = "running" | "sleeping" | "deleted";
-export type GoatCodingWorkspaceRuntimeAccess = {
+export type CodexSandboxStatus = "running" | "sleeping" | "deleted";
+export type CodingWorkspaceRuntimeAccess = {
   websocketUrl: string;
   ticket: string;
   expiresAt: number;
-  sandboxStatus: Exclude<GoatCodexSandboxStatus, "deleted">;
+  sandboxStatus: Exclude<CodexSandboxStatus, "deleted">;
 };
-export type GoatDictationAccess = {
+export type DictationAccess = {
   websocketUrl: string;
   ticket: string;
   expiresAt: number;
@@ -30,17 +30,17 @@ function runnerToken() {
 
 function runnerPublicBaseUrl() {
   const publicUrl = process.env.RUNNER_PUBLIC_URL?.trim().replace(/\/+$/, "");
-  const goatUrl = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, "");
-  if (!publicUrl || !goatUrl) return publicUrl;
+  const url = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, "");
+  if (!publicUrl || !url) return publicUrl;
   try {
     const runner = new URL(publicUrl);
-    const goat = new URL(goatUrl);
+    const goat = new URL(url);
     if (
       goat.protocol === "https:" &&
       runner.protocol === "http:" &&
       (runner.hostname === "localhost" || runner.hostname === "127.0.0.1")
     ) {
-      return goatUrl;
+      return url;
     }
   } catch {
     return publicUrl;
@@ -48,14 +48,14 @@ function runnerPublicBaseUrl() {
   return publicUrl;
 }
 
-export function goatRunnerConfigured() {
+export function runnerConfigured() {
   return Boolean(runnerInternalBaseUrl() && runnerToken());
 }
 
-export async function planGoatTaskHarness(input: {
+export async function planTaskHarness(input: {
   userWorkosId: string;
   prompt: string;
-}): Promise<GoatHarnessSpec> {
+}): Promise<HarnessSpec> {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
@@ -76,13 +76,13 @@ export async function planGoatTaskHarness(input: {
   }
 
   const body = (await response.json()) as { harnessSpec?: unknown };
-  if (!isGoatHarnessSpec(body.harnessSpec)) {
+  if (!isHarnessSpec(body.harnessSpec)) {
     throw new Error("Goat harness planning returned an invalid harness.");
   }
   return body.harnessSpec;
 }
 
-export async function triggerGoatCodexChatWake() {
+export async function triggerCodexChatWake() {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
@@ -113,9 +113,7 @@ export async function triggerGoatCodexChatWake() {
   }
 }
 
-export async function getGoatCodexSandboxStatus(
-  sandboxId: string,
-): Promise<GoatCodexSandboxStatus> {
+export async function getCodexSandboxStatus(sandboxId: string): Promise<CodexSandboxStatus> {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
@@ -152,10 +150,10 @@ export async function getGoatCodexSandboxStatus(
   return body.status;
 }
 
-export async function requestGoatCodingWorkspaceRuntimeAccess(input: {
+export async function requestCodingWorkspaceRuntimeAccess(input: {
   codingSessionId: string;
   userWorkosId: string;
-}): Promise<GoatCodingWorkspaceRuntimeAccess> {
+}): Promise<CodingWorkspaceRuntimeAccess> {
   const internalBaseUrl = runnerInternalBaseUrl();
   const publicBaseUrl = runnerPublicBaseUrl();
   const token = runnerToken();
@@ -186,7 +184,7 @@ export async function requestGoatCodingWorkspaceRuntimeAccess(input: {
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
     const message = typeof body?.error === "string" ? body.error : "Runtime access is unavailable.";
-    throw new GoatCodingWorkspaceRequestError(message, response.status);
+    throw new CodingWorkspaceRequestError(message, response.status);
   }
 
   const body = (await response.json()) as Record<string, unknown>;
@@ -208,9 +206,9 @@ export async function requestGoatCodingWorkspaceRuntimeAccess(input: {
   };
 }
 
-export async function requestGoatDictationAccess(input: {
+export async function requestDictationAccess(input: {
   userWorkosId: string;
-}): Promise<GoatDictationAccess> {
+}): Promise<DictationAccess> {
   const internalBaseUrl = runnerInternalBaseUrl();
   const publicBaseUrl = runnerPublicBaseUrl();
   const token = runnerToken();
@@ -255,17 +253,17 @@ export async function requestGoatDictationAccess(input: {
   };
 }
 
-export class GoatCodingWorkspaceRequestError extends Error {
+export class CodingWorkspaceRequestError extends Error {
   constructor(
     message: string,
     readonly statusCode: number,
   ) {
     super(message);
-    this.name = "GoatCodingWorkspaceRequestError";
+    this.name = "CodingWorkspaceRequestError";
   }
 }
 
-export async function killGoatCodexSandbox(sandboxId: string): Promise<boolean> {
+export async function killCodexSandbox(sandboxId: string): Promise<boolean> {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
@@ -299,7 +297,7 @@ export async function killGoatCodexSandbox(sandboxId: string): Promise<boolean> 
   return body.killed === true;
 }
 
-export async function triggerGoatBrainIngestWake() {
+export async function triggerBrainIngestWake() {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
@@ -322,7 +320,7 @@ export async function triggerGoatBrainIngestWake() {
   }
 }
 
-export async function triggerGoatGoogleDriveSyncWake() {
+export async function triggerGoogleDriveSyncWake() {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
@@ -342,7 +340,7 @@ export async function triggerGoatGoogleDriveSyncWake() {
   }
 }
 
-export async function triggerGoatBrainImportWake() {
+export async function triggerBrainImportWake() {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
@@ -361,7 +359,7 @@ export async function triggerGoatBrainImportWake() {
   }
 }
 
-function isGoatHarnessSpec(value: unknown): value is GoatHarnessSpec {
+function isHarnessSpec(value: unknown): value is HarnessSpec {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
   return (

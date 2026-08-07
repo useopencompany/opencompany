@@ -1,18 +1,13 @@
 import { type AgentModelDefinition, getAgentModelDefinition } from "@opencompany/agent-runtime";
-import type {
-  GoatHarnessEngine,
-  GoatHarnessSpec,
-  GoatTaskSkillId,
-  GoatTaskToolName,
-} from "@opencompany/db/schema";
+import type { HarnessEngine, HarnessSpec, TaskSkillId, TaskToolName } from "@opencompany/db/schema";
 
-export type GoatHarnessModelOption = AgentModelDefinition & {
+export type HarnessModelOption = AgentModelDefinition & {
   guidance: string;
   default?: boolean;
 };
 
-export type GoatHarnessEngineOption = {
-  id: GoatHarnessEngine;
+export type HarnessEngineOption = {
+  id: HarnessEngine;
   label: string;
   guidance: string;
   default?: boolean;
@@ -31,10 +26,10 @@ export const GOAT_HARNESS_ENGINE_OPTIONS = [
     guidance:
       "Use for coding tasks, repository edits, tests, debugging, code review, and any coding task where the user explicitly asks for Codex.",
   },
-] as const satisfies readonly GoatHarnessEngineOption[];
+] as const satisfies readonly HarnessEngineOption[];
 
-export type GoatHarnessSkillOption = {
-  id: GoatTaskSkillId;
+export type HarnessSkillOption = {
+  id: TaskSkillId;
   label: string;
   guidance: string;
 };
@@ -66,12 +61,12 @@ const GOAT_HARNESS_MODEL_CONFIG = [
     guidance: "Use for coding-related work, sharper analysis, and deeper thinking.",
   },
 ] as const satisfies readonly {
-  id: GoatHarnessSpec["model"];
+  id: HarnessSpec["model"];
   guidance: string;
   default?: boolean;
 }[];
 
-export const GOAT_HARNESS_MODEL_OPTIONS: readonly GoatHarnessModelOption[] =
+export const GOAT_HARNESS_MODEL_OPTIONS: readonly HarnessModelOption[] =
   GOAT_HARNESS_MODEL_CONFIG.map((option) => ({
     ...requireAgentModelDefinition(option.id),
     ...option,
@@ -90,9 +85,9 @@ export const GOAT_HARNESS_SKILL_OPTIONS = [
     guidance:
       "Use for founder, startup strategy, product, MVP, users, growth, fundraising, hiring, or prioritization tasks that benefit from a YC-style office-hours loop.",
   },
-] as const satisfies readonly GoatHarnessSkillOption[];
+] as const satisfies readonly HarnessSkillOption[];
 
-function requireAgentModelDefinition(modelId: GoatHarnessSpec["model"]) {
+function requireAgentModelDefinition(modelId: HarnessSpec["model"]) {
   const model = getAgentModelDefinition(modelId);
   if (!model) {
     throw new Error(`Harness model "${modelId}" is missing from the agent model catalog.`);
@@ -114,7 +109,7 @@ function promptList(name: string, itemName: string, values: readonly string[]) {
   );
 }
 
-function promptModelOptions(values: readonly GoatHarnessModelOption[]) {
+function promptModelOptions(values: readonly HarnessModelOption[]) {
   return promptBlock(
     "execution_model_options",
     values.map((option) =>
@@ -128,7 +123,7 @@ function promptModelOptions(values: readonly GoatHarnessModelOption[]) {
   );
 }
 
-function promptEngineOptions(values: readonly GoatHarnessEngineOption[]) {
+function promptEngineOptions(values: readonly HarnessEngineOption[]) {
   return promptBlock(
     "execution_engine_options",
     values.map((option) =>
@@ -142,7 +137,7 @@ function promptEngineOptions(values: readonly GoatHarnessEngineOption[]) {
   );
 }
 
-function promptSkillOptions(values: readonly GoatHarnessSkillOption[]) {
+function promptSkillOptions(values: readonly HarnessSkillOption[]) {
   return promptBlock(
     "available_skills",
     values.map((option) =>
@@ -244,13 +239,13 @@ export const GOAT_HARNESS_CREATION_SYSTEM_PROMPT = promptBlock("goat_harness_pla
   GOAT_HARNESS_CREATION_RESULT_CONTRACT,
 ]);
 
-export function buildGoatHarnessCreationPrompt(input: {
+export function buildHarnessCreationPrompt(input: {
   taskPrompt: string;
-  requestedEngine?: GoatHarnessEngine | null;
-  executionEngineOptions: readonly GoatHarnessEngineOption[];
-  executionModelOptions: readonly GoatHarnessModelOption[];
-  availableOperationTools: readonly GoatTaskToolName[];
-  availableSkills: readonly GoatHarnessSkillOption[];
+  requestedEngine?: HarnessEngine | null;
+  executionEngineOptions: readonly HarnessEngineOption[];
+  executionModelOptions: readonly HarnessModelOption[];
+  availableOperationTools: readonly TaskToolName[];
+  availableSkills: readonly HarnessSkillOption[];
   githubRepositories?: readonly string[];
   defaultMaxModelSteps: number;
 }) {
@@ -269,7 +264,7 @@ export function buildGoatHarnessCreationPrompt(input: {
   ]);
 }
 
-export function buildGoatHarnessSkillSystemPrompt(skillIds: readonly GoatTaskSkillId[]) {
+export function buildHarnessSkillSystemPrompt(skillIds: readonly TaskSkillId[]) {
   const blocks = skillIds.flatMap((skillId) => {
     switch (skillId) {
       case "first-principles":

@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { executeGoatCodexBrainCaptureGateway } from "@/lib/codex-brain-capture";
+import { executeCodexBrainCaptureGateway } from "@/lib/codex-brain-capture";
 import { POST } from "./route";
 
 vi.mock("@/lib/codex-brain-capture", () => ({
-  executeGoatCodexBrainCaptureGateway: vi.fn(),
+  executeCodexBrainCaptureGateway: vi.fn(),
 }));
 
 vi.mock("next/server", () => ({
@@ -20,7 +20,7 @@ describe("POST /api/internal/codex-brain-capture", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("RUNNER_INTERNAL_TOKEN", "shared-secret");
-    vi.mocked(executeGoatCodexBrainCaptureGateway).mockResolvedValue({
+    vi.mocked(executeCodexBrainCaptureGateway).mockResolvedValue({
       ok: true,
       status: "captured",
       draftId: "launch-decision",
@@ -33,7 +33,7 @@ describe("POST /api/internal/codex-brain-capture", () => {
     const response = await POST(request());
 
     expect(response.status).toBe(401);
-    expect(executeGoatCodexBrainCaptureGateway).not.toHaveBeenCalled();
+    expect(executeCodexBrainCaptureGateway).not.toHaveBeenCalled();
   });
 
   it("accepts only bounded host identity and capture fields", async () => {
@@ -45,7 +45,7 @@ describe("POST /api/internal/codex-brain-capture", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(executeGoatCodexBrainCaptureGateway).toHaveBeenCalledWith({
+    expect(executeCodexBrainCaptureGateway).toHaveBeenCalledWith({
       request: {
         codexChatSessionId: "session_1",
         codexChatTurnId: "turn_1",
@@ -64,7 +64,7 @@ describe("POST /api/internal/codex-brain-capture", () => {
     );
 
     expect(response.status).toBe(400);
-    expect(executeGoatCodexBrainCaptureGateway).not.toHaveBeenCalled();
+    expect(executeCodexBrainCaptureGateway).not.toHaveBeenCalled();
   });
 
   it("rejects oversized content instead of silently falling back to a source pointer", async () => {
@@ -77,7 +77,7 @@ describe("POST /api/internal/codex-brain-capture", () => {
     );
 
     expect(response.status).toBe(400);
-    expect(executeGoatCodexBrainCaptureGateway).not.toHaveBeenCalled();
+    expect(executeCodexBrainCaptureGateway).not.toHaveBeenCalled();
   });
 });
 

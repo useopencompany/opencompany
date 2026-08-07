@@ -1,7 +1,7 @@
 import {
-  type Attributes,
   context,
   metrics,
+  type Attributes as OtelAttributes,
   type Span,
   SpanStatusCode,
   trace,
@@ -62,11 +62,11 @@ export const GOAT_METRICS = {
   modelCostUsdMicros: "goat.model_cost_usd_micros",
 } as const;
 
-export type GoatRunSurface = "chat" | "task" | "brain_ingest";
-export type GoatSignupSource = "user_sync";
-export type GoatOutcome = "success" | "failure" | "skipped" | "aborted";
+export type RunSurface = "chat" | "task" | "brain_ingest";
+export type SignupSource = "user_sync";
+export type Outcome = "success" | "failure" | "skipped" | "aborted";
 
-export type GoatFailureCategory =
+export type FailureCategory =
   | "model_provider"
   | "tool"
   | "auth"
@@ -80,9 +80,9 @@ export type GoatFailureCategory =
   | "bug"
   | "unknown";
 
-export type GoatAttributeValue = string | number | boolean | null | undefined;
-export type GoatAttributes = Record<string, GoatAttributeValue>;
-export type GoatGatewayFeature =
+export type AttributeValue = string | number | boolean | null | undefined;
+export type Attributes = Record<string, AttributeValue>;
+export type GatewayFeature =
   | "chat"
   | "chat-router"
   | "chat-title"
@@ -91,24 +91,24 @@ export type GoatGatewayFeature =
   | "brain-query"
   | "slack-bot";
 
-export type GoatGatewayAttribution = {
+export type GatewayAttribution = {
   user?: string;
   tags: string[];
 };
 
-type GoatGatewayJsonValue =
+type GatewayJsonValue =
   | string
   | number
   | boolean
   | null
-  | GoatGatewayJsonValue[]
-  | { [key: string]: GoatGatewayJsonValue };
-type GoatGatewayProviderOptionValue = { [key: string]: GoatGatewayJsonValue };
-export type GoatGatewayProviderOptions = { [key: string]: { [key: string]: GoatGatewayJsonValue } };
+  | GatewayJsonValue[]
+  | { [key: string]: GatewayJsonValue };
+type GatewayProviderOptionValue = { [key: string]: GatewayJsonValue };
+export type GatewayProviderOptions = { [key: string]: { [key: string]: GatewayJsonValue } };
 
-export type GoatGatewayAttributionInput = {
+export type GatewayAttributionInput = {
   userWorkosId?: string | null | undefined;
-  feature: GoatGatewayFeature;
+  feature: GatewayFeature;
   env?: string | null | undefined;
   chatSessionId?: string | null | undefined;
   taskId?: string | null | undefined;
@@ -117,11 +117,11 @@ export type GoatGatewayAttributionInput = {
   tags?: readonly string[];
 };
 
-export type GoatSpanHandle = {
-  setAttributes(attributes: GoatAttributes): void;
+export type SpanHandle = {
+  setAttributes(attributes: Attributes): void;
   runInContext<T>(run: () => T): T;
-  fail(error: unknown, attributes?: GoatAttributes): GoatFailureCategory;
-  end(attributes?: GoatAttributes): void;
+  fail(error: unknown, attributes?: Attributes): FailureCategory;
+  end(attributes?: Attributes): void;
 };
 
 const meter = metrics.getMeter("opencompany-goat-observability");
@@ -179,11 +179,11 @@ const LOW_CARDINAL_METRIC_ATTRIBUTE_KEYS = new Set([
   "goat.signup_source",
 ]);
 
-export function isGoatObservabilityEnabled(env: EnvLike = readEnv()) {
+export function isObservabilityEnabled(env: EnvLike = readEnv()) {
   return enabledFromEnv(env.TELEMETRY_ENABLED);
 }
 
-export function hashGoatUserId(userWorkosId: string | null | undefined) {
+export function hashUserId(userWorkosId: string | null | undefined) {
   const value = userWorkosId?.trim();
   if (!value) return undefined;
   let hash = 0xcbf29ce484222325n;
@@ -195,15 +195,13 @@ export function hashGoatUserId(userWorkosId: string | null | undefined) {
   return hash.toString(16).padStart(16, "0");
 }
 
-export function goatGatewayReportingUser(userWorkosId: string | null | undefined) {
-  const hash = hashGoatUserId(userWorkosId);
+export function gatewayReportingUser(userWorkosId: string | null | undefined) {
+  const hash = hashUserId(userWorkosId);
   return hash ? `goat-${hash}` : undefined;
 }
 
-export function createGoatGatewayAttribution(
-  input: GoatGatewayAttributionInput,
-): GoatGatewayAttribution {
-  const user = goatGatewayReportingUser(input.userWorkosId);
+export function createGatewayAttribution(input: GatewayAttributionInput): GatewayAttribution {
+  const user = gatewayReportingUser(input.userWorkosId);
   const env = readEnv();
   return {
     ...(user ? { user } : {}),
@@ -220,13 +218,13 @@ export function createGoatGatewayAttribution(
   };
 }
 
-export function goatGatewayProviderOptions(
-  attribution: GoatGatewayAttribution,
-  existing?: GoatGatewayProviderOptions,
-): GoatGatewayProviderOptions {
+export function gatewayProviderOptions(
+  attribution: GatewayAttribution,
+  existing?: GatewayProviderOptions,
+): GatewayProviderOptions {
   const existingGateway =
     existing && isPlainRecord(existing.gateway)
-      ? (existing.gateway as GoatGatewayProviderOptionValue)
+      ? (existing.gateway as GatewayProviderOptionValue)
       : undefined;
   return {
     ...(existing ?? {}),
@@ -238,18 +236,16 @@ export function goatGatewayProviderOptions(
   };
 }
 
-export function goatGatewayReportingHeaders(
-  attribution: GoatGatewayAttribution,
-): Record<string, string> {
+export function gatewayReportingHeaders(attribution: GatewayAttribution): Record<string, string> {
   return {
     ...(attribution.user ? { "ai-reporting-user": attribution.user } : {}),
     ...(attribution.tags.length > 0 ? { "ai-reporting-tags": attribution.tags.join(",") } : {}),
   };
 }
 
-export function sanitizeGoatAttributes(attributes: GoatAttributes | undefined): Attributes {
+export function sanitizeAttributes(attributes: Attributes | undefined): OtelAttributes {
   if (!attributes) return {};
-  const sanitized: Attributes = {};
+  const sanitized: OtelAttributes = {};
   for (const [key, value] of Object.entries(attributes)) {
     if (!isSafeAttributeKey(key)) continue;
     if (value === null || value === undefined) continue;
@@ -260,9 +256,9 @@ export function sanitizeGoatAttributes(attributes: GoatAttributes | undefined): 
   return sanitized;
 }
 
-export function sanitizeGoatMetricAttributes(attributes: GoatAttributes | undefined): Attributes {
+export function sanitizeMetricAttributes(attributes: Attributes | undefined): OtelAttributes {
   if (!attributes) return {};
-  const sanitized: Attributes = {};
+  const sanitized: OtelAttributes = {};
   for (const [key, value] of Object.entries(attributes)) {
     if (!LOW_CARDINAL_METRIC_ATTRIBUTE_KEYS.has(key)) continue;
     if (value === null || value === undefined) continue;
@@ -273,7 +269,7 @@ export function sanitizeGoatMetricAttributes(attributes: GoatAttributes | undefi
   return sanitized;
 }
 
-export function categorizeGoatFailure(error: unknown): GoatFailureCategory {
+export function categorizeFailure(error: unknown): FailureCategory {
   const message = errorMessage(error).toLowerCase();
   const name = error instanceof Error ? error.name.toLowerCase() : "";
 
@@ -346,25 +342,25 @@ export function categorizeGoatFailure(error: unknown): GoatFailureCategory {
   return "unknown";
 }
 
-export function startGoatSpan(name: string, attributes?: GoatAttributes): GoatSpanHandle {
-  if (!isGoatObservabilityEnabled()) return noopSpanHandle;
+export function startSpan(name: string, attributes?: Attributes): SpanHandle {
+  if (!isObservabilityEnabled()) return noopSpanHandle;
   const span = tracer.startSpan(
     name,
-    { attributes: sanitizeGoatAttributes(attributes) },
+    { attributes: sanitizeAttributes(attributes) },
     context.active(),
   );
   return createSpanHandle(span);
 }
 
-export async function withGoatSpan<T>(
+export async function withSpan<T>(
   name: string,
-  attributes: GoatAttributes | undefined,
-  run: (span: GoatSpanHandle) => Promise<T>,
+  attributes: Attributes | undefined,
+  run: (span: SpanHandle) => Promise<T>,
 ): Promise<T> {
-  if (!isGoatObservabilityEnabled()) return run(noopSpanHandle);
+  if (!isObservabilityEnabled()) return run(noopSpanHandle);
   return tracer.startActiveSpan(
     name,
-    { attributes: sanitizeGoatAttributes(attributes) },
+    { attributes: sanitizeAttributes(attributes) },
     async (span) => {
       const handle = createSpanHandle(span);
       try {
@@ -381,172 +377,170 @@ export async function withGoatSpan<T>(
   );
 }
 
-export async function timeGoatSpan<T>(
+export async function timeSpan<T>(
   name: string,
-  attributes: GoatAttributes | undefined,
+  attributes: Attributes | undefined,
   histogramName: string,
   run: () => Promise<T>,
 ): Promise<T> {
   const startedAt = performance.now();
   try {
-    return await withGoatSpan(name, attributes, () => run());
+    return await withSpan(name, attributes, () => run());
   } finally {
-    recordGoatHistogram(histogramName, Math.round(performance.now() - startedAt), attributes);
+    recordHistogram(histogramName, Math.round(performance.now() - startedAt), attributes);
   }
 }
 
-export function recordGoatCounter(name: string, value = 1, attributes?: GoatAttributes) {
-  if (!isGoatObservabilityEnabled()) return;
+export function recordCounter(name: string, value = 1, attributes?: Attributes) {
+  if (!isObservabilityEnabled()) return;
   const counter = counters.get(name) ?? meter.createCounter(name);
   counters.set(name, counter);
-  counter.add(value, sanitizeGoatMetricAttributes(attributes));
+  counter.add(value, sanitizeMetricAttributes(attributes));
 }
 
-export function recordGoatHistogram(name: string, value: number, attributes?: GoatAttributes) {
-  if (!isGoatObservabilityEnabled()) return;
+export function recordHistogram(name: string, value: number, attributes?: Attributes) {
+  if (!isObservabilityEnabled()) return;
   const histogram = histograms.get(name) ?? meter.createHistogram(name, { unit: "ms" });
   histograms.set(name, histogram);
-  histogram.record(value, sanitizeGoatMetricAttributes(attributes));
+  histogram.record(value, sanitizeMetricAttributes(attributes));
 }
 
-export function recordGoatRunOutcome(input: {
-  surface: GoatRunSurface;
+export function recordRunOutcome(input: {
+  surface: RunSurface;
   durationMs: number;
-  outcome: GoatOutcome;
-  attributes?: GoatAttributes;
+  outcome: Outcome;
+  attributes?: Attributes;
 }) {
   const attributes = {
     ...input.attributes,
     "goat.surface": input.surface,
     "goat.outcome": input.outcome,
   };
-  recordGoatCounter(GOAT_METRICS.runsTotal, 1, attributes);
-  recordGoatHistogram(GOAT_METRICS.runDurationMs, input.durationMs, attributes);
+  recordCounter(GOAT_METRICS.runsTotal, 1, attributes);
+  recordHistogram(GOAT_METRICS.runDurationMs, input.durationMs, attributes);
 
   if (input.surface === "chat") {
-    recordGoatCounter(GOAT_METRICS.chatTurnsTotal, 1, attributes);
-    recordGoatHistogram(GOAT_METRICS.chatTurnDurationMs, input.durationMs, attributes);
+    recordCounter(GOAT_METRICS.chatTurnsTotal, 1, attributes);
+    recordHistogram(GOAT_METRICS.chatTurnDurationMs, input.durationMs, attributes);
     return;
   }
 
   if (input.surface === "task") {
-    recordGoatCounter(GOAT_METRICS.taskRunsTotal, 1, attributes);
-    recordGoatHistogram(GOAT_METRICS.taskRunDurationMs, input.durationMs, attributes);
+    recordCounter(GOAT_METRICS.taskRunsTotal, 1, attributes);
+    recordHistogram(GOAT_METRICS.taskRunDurationMs, input.durationMs, attributes);
     return;
   }
 
-  recordGoatCounter(GOAT_METRICS.brainIngestRunsTotal, 1, attributes);
-  recordGoatHistogram(GOAT_METRICS.brainIngestRunDurationMs, input.durationMs, attributes);
+  recordCounter(GOAT_METRICS.brainIngestRunsTotal, 1, attributes);
+  recordHistogram(GOAT_METRICS.brainIngestRunDurationMs, input.durationMs, attributes);
 }
 
-export function recordGoatSignup(
-  input: { source?: GoatSignupSource; attributes?: GoatAttributes } = {},
-) {
-  const attributes: GoatAttributes = {
+export function recordSignup(input: { source?: SignupSource; attributes?: Attributes } = {}) {
+  const attributes: Attributes = {
     ...input.attributes,
     "goat.signup_source": input.source ?? "user_sync",
     "goat.outcome": "success",
   };
-  const span = startGoatSpan(GOAT_SPANS.signupCompleted, attributes);
+  const span = startSpan(GOAT_SPANS.signupCompleted, attributes);
   span.end(attributes);
-  recordGoatCounter(GOAT_METRICS.signupsTotal, 1, attributes);
+  recordCounter(GOAT_METRICS.signupsTotal, 1, attributes);
 }
 
-export function recordGoatChatTurn(input: {
+export function recordChatTurn(input: {
   durationMs: number;
-  outcome: GoatOutcome;
-  attributes?: GoatAttributes;
+  outcome: Outcome;
+  attributes?: Attributes;
 }) {
-  recordGoatRunOutcome({ ...input, surface: "chat" });
+  recordRunOutcome({ ...input, surface: "chat" });
 }
 
-export function recordGoatTaskDispatch(input: {
+export function recordTaskDispatch(input: {
   durationMs: number;
-  outcome: GoatOutcome;
-  attributes?: GoatAttributes;
+  outcome: Outcome;
+  attributes?: Attributes;
 }) {
   const attributes = { ...input.attributes, "goat.outcome": input.outcome };
-  recordGoatCounter(GOAT_METRICS.taskDispatchesTotal, 1, attributes);
-  recordGoatHistogram(GOAT_METRICS.taskDispatchDurationMs, input.durationMs, attributes);
+  recordCounter(GOAT_METRICS.taskDispatchesTotal, 1, attributes);
+  recordHistogram(GOAT_METRICS.taskDispatchDurationMs, input.durationMs, attributes);
 }
 
-export function recordGoatTaskRun(input: {
+export function recordTaskRun(input: {
   durationMs: number;
-  outcome: GoatOutcome;
-  attributes?: GoatAttributes;
+  outcome: Outcome;
+  attributes?: Attributes;
 }) {
-  recordGoatRunOutcome({ ...input, surface: "task" });
+  recordRunOutcome({ ...input, surface: "task" });
 }
 
-export function recordGoatBrainIngestRun(input: {
+export function recordBrainIngestRun(input: {
   durationMs: number;
-  outcome: GoatOutcome;
-  attributes?: GoatAttributes;
+  outcome: Outcome;
+  attributes?: Attributes;
 }) {
-  recordGoatRunOutcome({ ...input, surface: "brain_ingest" });
+  recordRunOutcome({ ...input, surface: "brain_ingest" });
 }
 
-export function recordGoatBrainIngestSpend(input: {
+export function recordBrainIngestSpend(input: {
   costUsdMicros: number;
   source: "model" | "brain_query" | "web_search";
-  attributes?: GoatAttributes;
+  attributes?: Attributes;
 }) {
   if (!Number.isFinite(input.costUsdMicros) || input.costUsdMicros <= 0) return;
-  recordGoatCounter(GOAT_METRICS.brainIngestSpendUsdMicros, Math.round(input.costUsdMicros), {
+  recordCounter(GOAT_METRICS.brainIngestSpendUsdMicros, Math.round(input.costUsdMicros), {
     ...input.attributes,
     "goat.surface": "brain_ingest",
     "goat.cost_source": input.source,
   });
 }
 
-export function recordGoatBrainIngestBudgetExhausted(attributes?: GoatAttributes) {
-  recordGoatCounter(GOAT_METRICS.brainIngestBudgetExhaustionsTotal, 1, {
+export function recordBrainIngestBudgetExhausted(attributes?: Attributes) {
+  recordCounter(GOAT_METRICS.brainIngestBudgetExhaustionsTotal, 1, {
     ...attributes,
     "goat.surface": "brain_ingest",
     "goat.budget_exhausted": true,
   });
 }
 
-export function recordGoatToolCall(input: {
+export function recordToolCall(input: {
   durationMs: number;
-  outcome: GoatOutcome;
-  attributes?: GoatAttributes;
+  outcome: Outcome;
+  attributes?: Attributes;
 }) {
   const attributes = { ...input.attributes, "goat.outcome": input.outcome };
-  recordGoatCounter(GOAT_METRICS.toolCallsTotal, 1, attributes);
-  recordGoatHistogram(GOAT_METRICS.toolCallDurationMs, input.durationMs, attributes);
+  recordCounter(GOAT_METRICS.toolCallsTotal, 1, attributes);
+  recordHistogram(GOAT_METRICS.toolCallDurationMs, input.durationMs, attributes);
 }
 
-export function recordGoatModelUsageTokens(input: {
+export function recordModelUsageTokens(input: {
   tokens: number;
   direction: "input" | "output" | "total";
-  attributes?: GoatAttributes;
+  attributes?: Attributes;
 }) {
-  recordGoatCounter(GOAT_METRICS.modelUsageTokens, input.tokens, {
+  recordCounter(GOAT_METRICS.modelUsageTokens, input.tokens, {
     ...input.attributes,
     "goat.token_direction": input.direction,
   });
 }
 
-export function recordGoatModelCost(input: { costUsdMicros: number; attributes?: GoatAttributes }) {
+export function recordModelCost(input: { costUsdMicros: number; attributes?: Attributes }) {
   if (!Number.isFinite(input.costUsdMicros) || input.costUsdMicros <= 0) return;
-  recordGoatCounter(GOAT_METRICS.modelCostUsdMicros, Math.round(input.costUsdMicros), {
+  recordCounter(GOAT_METRICS.modelCostUsdMicros, Math.round(input.costUsdMicros), {
     ...input.attributes,
   });
 }
 
-function createSpanHandle(span: Span): GoatSpanHandle {
+function createSpanHandle(span: Span): SpanHandle {
   return {
     setAttributes(attributes) {
-      span.setAttributes(sanitizeGoatAttributes(attributes));
+      span.setAttributes(sanitizeAttributes(attributes));
     },
     runInContext(run) {
       return context.with(trace.setSpan(context.active(), span), run);
     },
     fail(error, attributes) {
-      const failureCategory = categorizeGoatFailure(error);
+      const failureCategory = categorizeFailure(error);
       span.setAttributes(
-        sanitizeGoatAttributes({
+        sanitizeAttributes({
           ...attributes,
           "goat.outcome": "failure",
           "goat.failure_category": failureCategory,
@@ -557,19 +551,19 @@ function createSpanHandle(span: Span): GoatSpanHandle {
       return failureCategory;
     },
     end(attributes) {
-      if (attributes) span.setAttributes(sanitizeGoatAttributes(attributes));
+      if (attributes) span.setAttributes(sanitizeAttributes(attributes));
       span.end();
     },
   };
 }
 
-const noopSpanHandle: GoatSpanHandle = {
+const noopSpanHandle: SpanHandle = {
   setAttributes() {},
   runInContext(run) {
     return run();
   },
   fail(error) {
-    return categorizeGoatFailure(error);
+    return categorizeFailure(error);
   },
   end() {},
 };

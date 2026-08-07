@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { createGoatCodexChatMessage } from "@/lib/codex-chat";
+import { createCodexChatMessage } from "@/lib/codex-chat";
 
 export const runtime = "nodejs";
 
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   const parsed = await parseRequest(request);
   if (!parsed.ok) return jsonError(400, parsed.error);
 
-  const result = await createGoatCodexChatMessage({
+  const result = await createCodexChatMessage({
     ...parsed.value,
     engine: "opencompany",
   });

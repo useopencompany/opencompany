@@ -1,8 +1,5 @@
 import { captureException } from "@opencompany/observability";
-import {
-  unsubscribeGoatOnboardingEmails,
-  verifyGoatEmailUnsubscribeToken,
-} from "@/lib/email/unsubscribe";
+import { unsubscribeOnboardingEmails, verifyEmailUnsubscribeToken } from "@/lib/email/unsubscribe";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +30,7 @@ export async function GET(request: Request) {
   const token = tokenFromRequest(request);
 
   try {
-    const result = await unsubscribeGoatOnboardingEmails({ token });
+    const result = await unsubscribeOnboardingEmails({ token });
     return htmlResponse(
       `<main><h1 style="font-size:20px;margin:0 0 12px">You're unsubscribed</h1><p style="margin:0">We won't send any more onboarding emails to ${escapeHtml(result.email)}.</p></main>`,
     );
@@ -50,8 +47,8 @@ export async function POST(request: Request) {
   const token = tokenFromRequest(request);
 
   try {
-    verifyGoatEmailUnsubscribeToken(token);
-    await unsubscribeGoatOnboardingEmails({ token });
+    verifyEmailUnsubscribeToken(token);
+    await unsubscribeOnboardingEmails({ token });
     return new Response(null, { status: 200 });
   } catch (error) {
     captureException(error, { event: "opencompany.goat_email_unsubscribe_failed", method: "POST" });

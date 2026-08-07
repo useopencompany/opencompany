@@ -4,8 +4,8 @@ import { Check } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { disconnectGoatIntegrationAccountAction } from "@/lib/integration-account-actions";
-import type { GoatGranolaProviderState } from "@/lib/integration-state";
+import { disconnectIntegrationAccountAction } from "@/lib/integration-account-actions";
+import type { GranolaProviderState } from "@/lib/integration-state";
 import { saveGranolaApiKeyAction } from "@/lib/integrations/granola-actions";
 
 export function GranolaIntegrationSetup({
@@ -14,7 +14,7 @@ export function GranolaIntegrationSetup({
   variant = "settings",
   onSaved,
 }: {
-  initialState: GoatGranolaProviderState;
+  initialState: GranolaProviderState;
   brainSourcesHref?: string | null;
   // "modal" embeds the form in the onboarding connect dialog: the Status
   // section (which duplicates the dialog title) is dropped.
@@ -47,7 +47,7 @@ export function GranolaIntegrationSetup({
     if (!state.integrationId) return;
     setError(null);
     startTransition(async () => {
-      const result = await disconnectGoatIntegrationAccountAction(state.integrationId as string);
+      const result = await disconnectIntegrationAccountAction(state.integrationId as string);
       if (!result.ok) {
         setError(result.error);
         return;
@@ -180,7 +180,7 @@ export function GranolaIntegrationSetup({
   );
 }
 
-function setupStatus(state: GoatGranolaProviderState) {
+function setupStatus(state: GranolaProviderState) {
   if (state.connected) {
     return {
       label: state.accountEmail ? `Connected as ${state.accountEmail}` : "Granola is connected",

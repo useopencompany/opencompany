@@ -1,15 +1,15 @@
 import { createHash } from "node:crypto";
 import {
-  formatGoatBrainEvidenceLink,
-  goatBrainTimelineEntryFromParts,
+  brainTimelineEntryFromParts,
+  formatBrainEvidenceLink,
   type NormalizedJamieMeetingSourceItem,
   type NormalizedJamieMeetingTranscriptSegment,
+  normalizeBrainId,
   normalizeEvidenceId,
-  normalizeGoatBrainId,
 } from "@opencompany/brain";
 import {
-  createGoatBrainMarkdownContent,
-  goatBrainFilePathFor,
+  brainFilePathFor,
+  createBrainMarkdownContent,
   MAX_GOAT_BRAIN_FILE_BYTES,
 } from "@opencompany/db/brain-files";
 
@@ -27,9 +27,9 @@ export type JamieMeetingIds = {
 export function buildJamieMeetingIds(item: NormalizedJamieMeetingSourceItem): JamieMeetingIds {
   const meeting = item.content.meeting;
   const date = item.occurredAt.slice(0, 10);
-  const titleSlug = (normalizeGoatBrainId(meeting.title) || "meeting").slice(0, 42);
+  const titleSlug = (normalizeBrainId(meeting.title) || "meeting").slice(0, 42);
   const meetingBrainId =
-    normalizeGoatBrainId(`meeting-${date}-${titleSlug}-${shortHash(item.externalId)}`) ||
+    normalizeBrainId(`meeting-${date}-${titleSlug}-${shortHash(item.externalId)}`) ||
     `meeting-${shortHash(item.sourceRef)}`;
   const evidenceBrainId = normalizeEvidenceId(
     `ev-jamie-${shortHash(`${item.externalId}:${item.contentHash}`, 18)}`,
@@ -83,7 +83,7 @@ export function buildJamieMeetingEvidenceWrite(
   return {
     meetingBrainId,
     evidenceBrainId,
-    evidencePath: goatBrainFilePathFor(JAMIE_EVIDENCE_FOLDER, evidenceBrainId),
+    evidencePath: brainFilePathFor(JAMIE_EVIDENCE_FOLDER, evidenceBrainId),
     evidenceContent,
     truncatedTranscript,
   };
@@ -95,7 +95,7 @@ export function buildJamieMeetingBrainWrites(item: NormalizedJamieMeetingSourceI
   const source = jamieMeetingSource(item);
   const summaryMarkdown = truncateByBytes(meeting.summaryMarkdown, 120_000);
 
-  const evidenceLink = formatGoatBrainEvidenceLink(evidence.evidenceBrainId, "Jamie meeting notes");
+  const evidenceLink = formatBrainEvidenceLink(evidence.evidenceBrainId, "Jamie meeting notes");
   const meetingCompiledTruth = [
     "Imported from Jamie.",
     "## Summary",
@@ -108,7 +108,7 @@ export function buildJamieMeetingBrainWrites(item: NormalizedJamieMeetingSourceI
     `- ${evidenceLink}`,
   ].join("\n\n");
 
-  const meetingContent = createGoatBrainMarkdownContent({
+  const meetingContent = createBrainMarkdownContent({
     id: evidence.meetingBrainId,
     folderPath: JAMIE_MEETING_FOLDER,
     title: meeting.title,
@@ -117,7 +117,7 @@ export function buildJamieMeetingBrainWrites(item: NormalizedJamieMeetingSourceI
     compiledTruth: meetingCompiledTruth,
     sources: [source],
     timeline: [
-      goatBrainTimelineEntryFromParts({
+      brainTimelineEntryFromParts({
         evidenceId: evidence.evidenceBrainId,
         at: item.occurredAt,
         summary: `Jamie notes imported for ${meeting.title}.`,
@@ -184,7 +184,7 @@ function createEvidenceContent(input: {
       : input.transcriptMarkdown,
   ].join("\n\n");
 
-  return createGoatBrainMarkdownContent({
+  return createBrainMarkdownContent({
     id: input.evidenceBrainId,
     folderPath: JAMIE_EVIDENCE_FOLDER,
     title: `Jamie notes: ${meeting.title}`,

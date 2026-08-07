@@ -1,7 +1,7 @@
-import type { GoatTask } from "@opencompany/db/schema";
+import type { Task } from "@opencompany/db/schema";
 
-export type GoatTaskStepInput = Pick<
-  GoatTask,
+export type TaskStepInput = Pick<
+  Task,
   "status" | "stage" | "result" | "error" | "harnessSpec" | "debugTrace" | "sandboxId"
 >;
 
@@ -24,7 +24,7 @@ type SearchEvent = {
   error: string | null;
 };
 
-export function deriveGoatTaskSteps(task: GoatTaskStepInput): string[] {
+export function deriveTaskSteps(task: TaskStepInput): string[] {
   const steps: string[] = [];
   const toolEvents = readToolEvents(task.debugTrace);
   const searchEvents = readSearchEvents(toolEvents);
@@ -52,7 +52,7 @@ export function deriveGoatTaskSteps(task: GoatTaskStepInput): string[] {
   return steps.slice(0, MAX_STEPS);
 }
 
-function addStageSteps(steps: string[], task: GoatTaskStepInput) {
+function addStageSteps(steps: string[], task: TaskStepInput) {
   const hasPlannerTrace = Boolean(readRecord(task.debugTrace)?.planner);
   const hasHarnessSpec = hasObjectKeys(task.harnessSpec);
 
@@ -191,7 +191,7 @@ function pushStep(steps: string[], step: string) {
   steps.push(normalized);
 }
 
-function fallbackStepForStage(stage: GoatTaskStepInput["stage"]) {
+function fallbackStepForStage(stage: TaskStepInput["stage"]) {
   switch (stage) {
     case "queued":
       return "Waiting for the runner to start the task.";

@@ -1,16 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { localGoatHttpsRedirectUrl } from "@/lib/local-https-redirect";
+import { localHttpsRedirectUrl } from "@/lib/local-https-redirect";
 import { isUnauthenticatedPath } from "./proxy";
 
 afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("localGoatHttpsRedirectUrl", () => {
+describe("localHttpsRedirectUrl", () => {
   it("redirects local HTTP document requests to the configured Goat HTTPS origin", () => {
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://localhost:3443");
 
-    const redirect = localGoatHttpsRedirectUrl(
+    const redirect = localHttpsRedirectUrl(
       request("http://localhost:3002/tasks/TASK-1?tab=run", {
         accept: "text/html",
         host: "localhost:3002",
@@ -23,7 +23,7 @@ describe("localGoatHttpsRedirectUrl", () => {
   it("does not redirect when the request already targets the configured HTTPS host", () => {
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://localhost:3443");
 
-    const redirect = localGoatHttpsRedirectUrl(
+    const redirect = localHttpsRedirectUrl(
       request("http://localhost:3002/tasks/TASK-1", {
         accept: "text/html",
         host: "localhost:3443",
@@ -37,7 +37,7 @@ describe("localGoatHttpsRedirectUrl", () => {
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://localhost:3443");
 
     expect(
-      localGoatHttpsRedirectUrl(
+      localHttpsRedirectUrl(
         request("http://localhost:3002/api/healthz", {
           accept: "application/json",
           host: "localhost:3002",
@@ -45,7 +45,7 @@ describe("localGoatHttpsRedirectUrl", () => {
       ),
     ).toBeNull();
     expect(
-      localGoatHttpsRedirectUrl(
+      localHttpsRedirectUrl(
         request("http://localhost:3002/tasks/TASK-1", {
           accept: "text/html",
           host: "localhost:3002",
@@ -54,7 +54,7 @@ describe("localGoatHttpsRedirectUrl", () => {
       ),
     ).toBeNull();
     expect(
-      localGoatHttpsRedirectUrl(
+      localHttpsRedirectUrl(
         request("http://localhost:3002/tasks/TASK-1", {
           accept: "text/html",
           host: "localhost:3002",
@@ -67,7 +67,7 @@ describe("localGoatHttpsRedirectUrl", () => {
   it("does not redirect non-local configured app origins", () => {
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://goat.example.com");
 
-    const redirect = localGoatHttpsRedirectUrl(
+    const redirect = localHttpsRedirectUrl(
       request("http://localhost:3002/tasks/TASK-1", {
         accept: "text/html",
         host: "localhost:3002",
@@ -111,5 +111,5 @@ function request(url: string, headers: Record<string, string>) {
   return {
     headers: new Headers(headers),
     nextUrl: new URL(url),
-  } as Parameters<typeof localGoatHttpsRedirectUrl>[0];
+  } as Parameters<typeof localHttpsRedirectUrl>[0];
 }

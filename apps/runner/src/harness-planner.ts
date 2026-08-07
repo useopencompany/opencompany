@@ -1,9 +1,9 @@
-import type { GoatTaskToolName } from "@opencompany/db/schema";
-import { goatIntegrationResources, goatIntegrations } from "@opencompany/db/schema";
+import type { TaskToolName } from "@opencompany/db/schema";
+import { integrationResources, integrations } from "@opencompany/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "./db";
 
-const TOOL_PROVIDER_MAP: Record<string, GoatTaskToolName[]> = {
+const TOOL_PROVIDER_MAP: Record<string, TaskToolName[]> = {
   gmail: ["gmail_search", "gmail_get_message", "gmail_list_threads", "gmail_get_thread"],
   google_calendar: [
     "calendar_list_calendars",
@@ -29,8 +29,8 @@ const GOAT_BROWSER_TOOLS = [
   "browser_scroll",
   "browser_screenshot",
   "browser_close",
-] as const satisfies readonly GoatTaskToolName[];
-const X_TOOLS: GoatTaskToolName[] = [
+] as const satisfies readonly TaskToolName[];
+const X_TOOLS: TaskToolName[] = [
   "x_search_posts",
   "x_get_profile",
   "x_get_user_posts",
@@ -38,22 +38,22 @@ const X_TOOLS: GoatTaskToolName[] = [
   "social_get_job",
 ];
 
-export async function getGoatAvailableHarnessToolsForRunner(
+export async function getAvailableHarnessToolsForRunner(
   userWorkosId: string,
   options: { browserEnabled?: boolean } = {},
-): Promise<GoatTaskToolName[]> {
+): Promise<TaskToolName[]> {
   const rows = await getDb()
-    .select({ provider: goatIntegrations.provider })
-    .from(goatIntegrations)
+    .select({ provider: integrations.provider })
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.status, "connected"),
-        inArray(goatIntegrations.provider, [...PLANNABLE_PROVIDERS]),
+        eq(integrations.userWorkosId, userWorkosId),
+        eq(integrations.status, "connected"),
+        inArray(integrations.provider, [...PLANNABLE_PROVIDERS]),
       ),
     );
 
-  const tools = new Set<GoatTaskToolName>(["exa_search"]);
+  const tools = new Set<TaskToolName>(["exa_search"]);
   if (options.browserEnabled) {
     for (const toolName of GOAT_BROWSER_TOOLS) tools.add(toolName);
   }
@@ -68,45 +68,45 @@ export async function getGoatAvailableHarnessToolsForRunner(
   return [...tools];
 }
 
-export async function getGoatHarnessPlannerContextForRunner(
+export async function getHarnessPlannerContextForRunner(
   userWorkosId: string,
   options: { browserEnabled?: boolean } = {},
 ): Promise<{
-  availableTools: GoatTaskToolName[];
+  availableTools: TaskToolName[];
   githubRepositories: string[];
 }> {
   const [availableTools, githubRepositories] = await Promise.all([
-    getGoatAvailableHarnessToolsForRunner(userWorkosId, options),
-    getGoatAvailableGitHubRepositoryNamesForRunner(userWorkosId),
+    getAvailableHarnessToolsForRunner(userWorkosId, options),
+    getAvailableGitHubRepositoryNamesForRunner(userWorkosId),
   ]);
   return { availableTools, githubRepositories };
 }
 
-export async function getGoatAvailableGitHubRepositoryNamesForRunner(
+export async function getAvailableGitHubRepositoryNamesForRunner(
   userWorkosId: string,
 ): Promise<string[]> {
   const rows = await getDb()
-    .select({ name: goatIntegrationResources.name })
-    .from(goatIntegrationResources)
+    .select({ name: integrationResources.name })
+    .from(integrationResources)
     .innerJoin(
-      goatIntegrations,
+      integrations,
       and(
-        eq(goatIntegrationResources.integrationId, goatIntegrations.id),
-        eq(goatIntegrationResources.userWorkosId, goatIntegrations.userWorkosId),
-        eq(goatIntegrationResources.provider, goatIntegrations.provider),
+        eq(integrationResources.integrationId, integrations.id),
+        eq(integrationResources.userWorkosId, integrations.userWorkosId),
+        eq(integrationResources.provider, integrations.provider),
       ),
     )
     .where(
       and(
-        eq(goatIntegrationResources.userWorkosId, userWorkosId),
-        eq(goatIntegrationResources.provider, "github"),
-        eq(goatIntegrationResources.resourceType, "repository"),
-        eq(goatIntegrationResources.status, "available"),
-        eq(goatIntegrations.provider, "github"),
-        eq(goatIntegrations.status, "connected"),
+        eq(integrationResources.userWorkosId, userWorkosId),
+        eq(integrationResources.provider, "github"),
+        eq(integrationResources.resourceType, "repository"),
+        eq(integrationResources.status, "available"),
+        eq(integrations.provider, "github"),
+        eq(integrations.status, "connected"),
       ),
     )
-    .orderBy(goatIntegrationResources.name);
+    .orderBy(integrationResources.name);
 
   return [...new Set(rows.map((row) => row.name).filter(Boolean))];
 }

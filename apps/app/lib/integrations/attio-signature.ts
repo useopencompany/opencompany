@@ -6,7 +6,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 // window applies; the buffer's delivery-id uniqueness absorbs replays of
 // stable-id events. Kept free of db/auth imports so the webhook route and its
 // tests stay light.
-export function verifyGoatAttioWebhookSignature(input: {
+export function verifyAttioWebhookSignature(input: {
   rawBody: string;
   signature: string | null;
   secret: string | null | undefined;

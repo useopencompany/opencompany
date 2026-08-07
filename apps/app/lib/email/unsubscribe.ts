@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { skipPendingGoatOnboardingEmailsForEmail } from "@opencompany/db/onboarding-emails";
-import { getGoatAppUrl } from "@/lib/app-url";
+import { skipPendingOnboardingEmailsForEmail } from "@opencompany/db/onboarding-emails";
+import { getAppUrl } from "@/lib/app-url";
 import { trimmed } from "@/lib/email/client";
 
 // Signed one-click unsubscribe, mirrored from apps/web/lib/email/unsubscribe.ts.
@@ -61,7 +61,7 @@ function parsePayload(value: unknown): EmailUnsubscribeTokenPayload {
   };
 }
 
-export function createGoatEmailUnsubscribeToken(input: { email: string; secret?: string }) {
+export function createEmailUnsubscribeToken(input: { email: string; secret?: string }) {
   const email = input.email.trim().toLowerCase();
   if (!email.includes("@")) throw new Error("A valid email is required for unsubscribe links.");
 
@@ -75,7 +75,7 @@ export function createGoatEmailUnsubscribeToken(input: { email: string; secret?:
   return `${payload}.${signature}`;
 }
 
-export function verifyGoatEmailUnsubscribeToken(token: string, secret = getEmailSecret()) {
+export function verifyEmailUnsubscribeToken(token: string, secret = getEmailSecret()) {
   const [encodedPayload, signature, extra] = token.split(".");
   if (!encodedPayload || !signature || extra) throw new Error("Invalid unsubscribe token.");
 
@@ -85,16 +85,16 @@ export function verifyGoatEmailUnsubscribeToken(token: string, secret = getEmail
   return parsePayload(decodeJson(encodedPayload));
 }
 
-export function createGoatEmailUnsubscribeUrl(input: {
+export function createEmailUnsubscribeUrl(input: {
   email: string;
   baseUrl?: string;
   secret?: string;
 }) {
-  const base = input.baseUrl ?? getGoatAppUrl();
+  const base = input.baseUrl ?? getAppUrl();
   const url = new URL("/api/email/unsubscribe", base);
   url.searchParams.set(
     "token",
-    createGoatEmailUnsubscribeToken({
+    createEmailUnsubscribeToken({
       email: input.email,
       ...(input.secret ? { secret: input.secret } : {}),
     }),
@@ -102,8 +102,8 @@ export function createGoatEmailUnsubscribeUrl(input: {
   return url.toString();
 }
 
-export async function unsubscribeGoatOnboardingEmails(input: { token: string }) {
-  const payload = verifyGoatEmailUnsubscribeToken(input.token);
-  const skipped = await skipPendingGoatOnboardingEmailsForEmail(payload.email);
+export async function unsubscribeOnboardingEmails(input: { token: string }) {
+  const payload = verifyEmailUnsubscribeToken(input.token);
+  const skipped = await skipPendingOnboardingEmailsForEmail(payload.email);
   return { status: "unsubscribed" as const, email: payload.email, skipped };
 }

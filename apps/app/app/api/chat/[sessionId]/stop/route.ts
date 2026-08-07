@@ -1,6 +1,6 @@
-import { currentGoatUser } from "@/lib/auth";
-import { createDbGoatChatStore } from "@/lib/chat";
-import { isGoatChatResumeEnabled, requestGoatChatStop } from "@/lib/chat-streams";
+import { currentUser } from "@/lib/auth";
+import { createDbChatStore } from "@/lib/chat";
+import { isChatResumeEnabled, requestChatStop } from "@/lib/chat-streams";
 
 // Explicit stop for a resumable chat turn. With resume enabled, closing the
 // HTTP connection is just a disconnect, so the stop button additionally posts
@@ -11,16 +11,16 @@ export async function POST(
   { params }: { params: Promise<{ sessionId: string }> },
 ): Promise<Response> {
   const { sessionId } = await params;
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return new Response("Unauthorized", { status: 401 });
-  if (!isGoatChatResumeEnabled()) return Response.json({ ok: true, stopped: false });
+  if (!isChatResumeEnabled()) return Response.json({ ok: true, stopped: false });
 
-  const session = await createDbGoatChatStore().findOpenSession({
+  const session = await createDbChatStore().findOpenSession({
     userWorkosId: context.user.workosUserId,
     sessionId,
   });
   if (!session) return Response.json({ ok: true, stopped: false });
 
-  const stopped = await requestGoatChatStop(session.id);
+  const stopped = await requestChatStop(session.id);
   return Response.json({ ok: true, stopped });
 }

@@ -13,18 +13,18 @@ import {
 import { parse } from "dotenv";
 import { and, asc, eq } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import type * as goatSchema from "./schema";
-import { goatIntegrationResources, goatIntegrations, goatRepoConfigs } from "./schema";
+import type * as schema from "./schema";
+import { integrationResources, integrations, repoConfigs } from "./schema";
 
 const REPO_CONFIG_ENCRYPTION_KEY_VERSION = DEFAULT_ENCRYPTION_KEY_VERSION;
 
-type DbSchema = typeof goatSchema;
-export type GoatRepoConfigDb = Pick<
+type DbSchema = typeof schema;
+export type RepoConfigDb = Pick<
   PgDatabase<PgQueryResultHKT, DbSchema>,
   "delete" | "insert" | "select" | "update"
 >;
 
-export type GoatRepoConfigView = {
+export type RepoConfigView = {
   repositoryExternalId: string;
   repositoryFullName: string;
   envKeys: string[];
@@ -32,11 +32,11 @@ export type GoatRepoConfigView = {
   updatedAt: Date;
 };
 
-export type DecryptedGoatRepoConfig = GoatRepoConfigView & {
+export type DecryptedRepoConfig = RepoConfigView & {
   envContent: string | null;
 };
 
-export type GoatWorkspaceRepository = {
+export type WorkspaceRepository = {
   repositoryExternalId: string;
   repositoryFullName: string;
   private: boolean;
@@ -51,21 +51,21 @@ export function isValidGitHubRepositoryFullName(value: string): boolean {
   return value.split("/").every((segment) => segment !== "." && segment !== "..");
 }
 
-export async function listGoatRepoConfigs(input: {
-  db: GoatRepoConfigDb;
+export async function listRepoConfigs(input: {
+  db: RepoConfigDb;
   workspaceId: string;
-}): Promise<GoatRepoConfigView[]> {
+}): Promise<RepoConfigView[]> {
   const rows = await input.db
     .select({
-      repositoryExternalId: goatRepoConfigs.repositoryExternalId,
-      repositoryFullName: goatRepoConfigs.repositoryFullName,
-      envKeys: goatRepoConfigs.envKeys,
-      setupInstructions: goatRepoConfigs.setupInstructions,
-      updatedAt: goatRepoConfigs.updatedAt,
+      repositoryExternalId: repoConfigs.repositoryExternalId,
+      repositoryFullName: repoConfigs.repositoryFullName,
+      envKeys: repoConfigs.envKeys,
+      setupInstructions: repoConfigs.setupInstructions,
+      updatedAt: repoConfigs.updatedAt,
     })
-    .from(goatRepoConfigs)
-    .where(eq(goatRepoConfigs.workspaceId, input.workspaceId))
-    .orderBy(asc(goatRepoConfigs.repositoryFullName));
+    .from(repoConfigs)
+    .where(eq(repoConfigs.workspaceId, input.workspaceId))
+    .orderBy(asc(repoConfigs.repositoryFullName));
 
   return rows.map((row) => ({
     repositoryExternalId: row.repositoryExternalId,
@@ -76,44 +76,44 @@ export async function listGoatRepoConfigs(input: {
   }));
 }
 
-export async function listDecryptedGoatRepoConfigs(input: {
-  db: GoatRepoConfigDb;
+export async function listDecryptedRepoConfigs(input: {
+  db: RepoConfigDb;
   workspaceId: string;
-}): Promise<DecryptedGoatRepoConfig[]> {
+}): Promise<DecryptedRepoConfig[]> {
   const rows = await input.db
     .select({
-      workspaceId: goatRepoConfigs.workspaceId,
-      repositoryExternalId: goatRepoConfigs.repositoryExternalId,
-      repositoryFullName: goatIntegrationResources.name,
-      encryptedEnvPayload: goatRepoConfigs.encryptedEnvPayload,
-      encryptionKeyVersion: goatRepoConfigs.encryptionKeyVersion,
-      envKeys: goatRepoConfigs.envKeys,
-      setupInstructions: goatRepoConfigs.setupInstructions,
-      updatedAt: goatRepoConfigs.updatedAt,
+      workspaceId: repoConfigs.workspaceId,
+      repositoryExternalId: repoConfigs.repositoryExternalId,
+      repositoryFullName: integrationResources.name,
+      encryptedEnvPayload: repoConfigs.encryptedEnvPayload,
+      encryptionKeyVersion: repoConfigs.encryptionKeyVersion,
+      envKeys: repoConfigs.envKeys,
+      setupInstructions: repoConfigs.setupInstructions,
+      updatedAt: repoConfigs.updatedAt,
     })
-    .from(goatRepoConfigs)
+    .from(repoConfigs)
     .innerJoin(
-      goatIntegrationResources,
+      integrationResources,
       and(
-        eq(goatIntegrationResources.externalId, goatRepoConfigs.repositoryExternalId),
-        eq(goatIntegrationResources.provider, "github"),
-        eq(goatIntegrationResources.resourceType, "repository"),
-        eq(goatIntegrationResources.status, "available"),
+        eq(integrationResources.externalId, repoConfigs.repositoryExternalId),
+        eq(integrationResources.provider, "github"),
+        eq(integrationResources.resourceType, "repository"),
+        eq(integrationResources.status, "available"),
       ),
     )
     .innerJoin(
-      goatIntegrations,
+      integrations,
       and(
-        eq(goatIntegrations.id, goatIntegrationResources.integrationId),
-        eq(goatIntegrations.workspaceId, goatRepoConfigs.workspaceId),
-        eq(goatIntegrations.provider, "github"),
-        eq(goatIntegrations.status, "connected"),
+        eq(integrations.id, integrationResources.integrationId),
+        eq(integrations.workspaceId, repoConfigs.workspaceId),
+        eq(integrations.provider, "github"),
+        eq(integrations.status, "connected"),
       ),
     )
-    .where(eq(goatRepoConfigs.workspaceId, input.workspaceId))
-    .orderBy(asc(goatIntegrationResources.name));
+    .where(eq(repoConfigs.workspaceId, input.workspaceId))
+    .orderBy(asc(integrationResources.name));
 
-  const configs = new Map<string, DecryptedGoatRepoConfig>();
+  const configs = new Map<string, DecryptedRepoConfig>();
   for (const row of rows) {
     if (configs.has(row.repositoryExternalId)) continue;
     try {
@@ -154,31 +154,31 @@ export async function listDecryptedGoatRepoConfigs(input: {
   return [...configs.values()];
 }
 
-export async function listGoatWorkspaceRepositories(input: {
-  db: GoatRepoConfigDb;
+export async function listWorkspaceRepositories(input: {
+  db: RepoConfigDb;
   workspaceId: string;
-}): Promise<GoatWorkspaceRepository[]> {
+}): Promise<WorkspaceRepository[]> {
   const rows = await input.db
     .select({
-      repositoryExternalId: goatIntegrationResources.externalId,
-      repositoryFullName: goatIntegrationResources.name,
-      metadata: goatIntegrationResources.metadata,
+      repositoryExternalId: integrationResources.externalId,
+      repositoryFullName: integrationResources.name,
+      metadata: integrationResources.metadata,
     })
-    .from(goatIntegrationResources)
-    .innerJoin(goatIntegrations, eq(goatIntegrationResources.integrationId, goatIntegrations.id))
+    .from(integrationResources)
+    .innerJoin(integrations, eq(integrationResources.integrationId, integrations.id))
     .where(
       and(
-        eq(goatIntegrations.workspaceId, input.workspaceId),
-        eq(goatIntegrations.provider, "github"),
-        eq(goatIntegrations.status, "connected"),
-        eq(goatIntegrationResources.provider, "github"),
-        eq(goatIntegrationResources.resourceType, "repository"),
-        eq(goatIntegrationResources.status, "available"),
+        eq(integrations.workspaceId, input.workspaceId),
+        eq(integrations.provider, "github"),
+        eq(integrations.status, "connected"),
+        eq(integrationResources.provider, "github"),
+        eq(integrationResources.resourceType, "repository"),
+        eq(integrationResources.status, "available"),
       ),
     )
-    .orderBy(asc(goatIntegrationResources.name));
+    .orderBy(asc(integrationResources.name));
 
-  const repositories = new Map<string, GoatWorkspaceRepository>();
+  const repositories = new Map<string, WorkspaceRepository>();
   for (const row of rows) {
     if (!isValidGitHubRepositoryExternalId(row.repositoryExternalId)) continue;
     if (!isValidGitHubRepositoryFullName(row.repositoryFullName)) continue;
@@ -197,8 +197,8 @@ export async function listGoatWorkspaceRepositories(input: {
   );
 }
 
-export async function upsertGoatRepoConfig(input: {
-  db: GoatRepoConfigDb;
+export async function upsertRepoConfig(input: {
+  db: RepoConfigDb;
   workspaceId: string;
   repositoryExternalId: string;
   repositoryFullName: string;
@@ -206,7 +206,7 @@ export async function upsertGoatRepoConfig(input: {
   env?: { content: string } | null;
   setupInstructions?: string;
   now?: Date;
-}): Promise<GoatRepoConfigView> {
+}): Promise<RepoConfigView> {
   if (!isValidGitHubRepositoryExternalId(input.repositoryExternalId)) {
     throw new Error("Invalid GitHub repository id.");
   }
@@ -239,7 +239,7 @@ export async function upsertGoatRepoConfig(input: {
           };
 
   const [config] = await input.db
-    .insert(goatRepoConfigs)
+    .insert(repoConfigs)
     .values({
       id: `goat_repo_config_${randomUUID()}`,
       workspaceId: input.workspaceId,
@@ -253,7 +253,7 @@ export async function upsertGoatRepoConfig(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: [goatRepoConfigs.workspaceId, goatRepoConfigs.repositoryExternalId],
+      target: [repoConfigs.workspaceId, repoConfigs.repositoryExternalId],
       set: {
         repositoryFullName: input.repositoryFullName,
         ...(envColumns ?? {}),
@@ -264,11 +264,11 @@ export async function upsertGoatRepoConfig(input: {
       },
     })
     .returning({
-      repositoryExternalId: goatRepoConfigs.repositoryExternalId,
-      repositoryFullName: goatRepoConfigs.repositoryFullName,
-      envKeys: goatRepoConfigs.envKeys,
-      setupInstructions: goatRepoConfigs.setupInstructions,
-      updatedAt: goatRepoConfigs.updatedAt,
+      repositoryExternalId: repoConfigs.repositoryExternalId,
+      repositoryFullName: repoConfigs.repositoryFullName,
+      envKeys: repoConfigs.envKeys,
+      setupInstructions: repoConfigs.setupInstructions,
+      updatedAt: repoConfigs.updatedAt,
     });
 
   if (!config) throw new Error("Could not persist repository configuration.");
@@ -281,20 +281,20 @@ export async function upsertGoatRepoConfig(input: {
   };
 }
 
-export async function deleteGoatRepoConfig(input: {
-  db: GoatRepoConfigDb;
+export async function deleteRepoConfig(input: {
+  db: RepoConfigDb;
   workspaceId: string;
   repositoryExternalId: string;
 }): Promise<boolean> {
   const rows = await input.db
-    .delete(goatRepoConfigs)
+    .delete(repoConfigs)
     .where(
       and(
-        eq(goatRepoConfigs.workspaceId, input.workspaceId),
-        eq(goatRepoConfigs.repositoryExternalId, input.repositoryExternalId),
+        eq(repoConfigs.workspaceId, input.workspaceId),
+        eq(repoConfigs.repositoryExternalId, input.repositoryExternalId),
       ),
     )
-    .returning({ id: goatRepoConfigs.id });
+    .returning({ id: repoConfigs.id });
   return rows.length > 0;
 }
 

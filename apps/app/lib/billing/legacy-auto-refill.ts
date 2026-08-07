@@ -11,7 +11,7 @@ import {
   markAutoRefillAttemptFailed,
   saveAutoRefillPaymentMethod,
 } from "@/lib/billing/legacy-credits";
-import { getGoatStripe } from "@/lib/billing/stripe";
+import { getStripe } from "@/lib/billing/stripe";
 
 function stripeIdOf(value: string | { id: string } | null | undefined): string | null {
   if (!value) return null;
@@ -27,7 +27,7 @@ export async function completeAutoRefillSetup(session: Stripe.Checkout.Session) 
   const setupIntentId = stripeIdOf(session.setup_intent);
   if (!workspaceId || !customerId || !setupIntentId) return;
 
-  const stripe = getGoatStripe();
+  const stripe = getStripe();
   const setupIntent = await stripe.setupIntents.retrieve(setupIntentId);
   const paymentMethodId = stripeIdOf(setupIntent.payment_method);
   if (!paymentMethodId) return;

@@ -2,18 +2,18 @@
 
 import {
   GOAT_MANAGED_CAPABILITY_SOURCES,
-  setGoatCapabilitySessionBudget,
-  setGoatWorkspaceCapability,
+  setCapabilitySessionBudget,
+  setWorkspaceCapability,
 } from "@opencompany/db/capabilities";
-import type { GoatManagedCapabilitySource } from "@opencompany/db/schema";
+import type { ManagedCapabilitySource } from "@opencompany/db/schema";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 
 export async function setWorkspaceCapabilityAction(input: {
-  source: GoatManagedCapabilitySource;
+  source: ManagedCapabilitySource;
   enabled: boolean;
 }) {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   if (context.role !== "admin") {
     return {
       ok: false as const,
@@ -27,7 +27,7 @@ export async function setWorkspaceCapabilityAction(input: {
   ) {
     return { ok: false as const, error: "Invalid capability setting." };
   }
-  const row = await setGoatWorkspaceCapability({
+  const row = await setWorkspaceCapability({
     workspaceId: context.workspace.id,
     source: input.source,
     enabled: input.enabled,
@@ -40,7 +40,7 @@ export async function setWorkspaceCapabilityAction(input: {
 export async function setWorkspaceCapabilitySessionBudgetAction(input: {
   budgetUsd: number | null;
 }) {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   if (context.role !== "admin") {
     return {
       ok: false as const,
@@ -59,7 +59,7 @@ export async function setWorkspaceCapabilitySessionBudgetAction(input: {
   }
   const budgetUsdMicros =
     input.budgetUsd === null ? null : Math.max(1, Math.round(input.budgetUsd * 1_000_000));
-  const effectiveBudgetUsdMicros = await setGoatCapabilitySessionBudget({
+  const effectiveBudgetUsdMicros = await setCapabilitySessionBudget({
     workspaceId: context.workspace.id,
     budgetUsdMicros,
   });

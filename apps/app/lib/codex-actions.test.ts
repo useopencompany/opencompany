@@ -1,6 +1,6 @@
 import {
+  type ActionGatewayRequest,
   GOAT_ACTION_MAX_CALLS_PER_TURN,
-  type GoatActionGatewayRequest,
 } from "@opencompany/agent-runtime";
 import {
   GOAT_ACTION_EFFECTS_METERED_READ,
@@ -8,10 +8,10 @@ import {
   GOAT_ACTION_EFFECTS_WRITE,
 } from "@opencompany/core/actions/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { GoatResolvedActionCatalog, ResolvedGoatAction } from "@/lib/actions/types";
-import { executeGoatActionGateway } from "@/lib/codex-actions";
+import type { ResolvedAction, ResolvedActionCatalog } from "@/lib/actions/types";
+import { executeActionGateway } from "@/lib/codex-actions";
 
-function listRequest(source?: string): GoatActionGatewayRequest {
+function listRequest(source?: string): ActionGatewayRequest {
   return {
     operation: "list",
     sessionId: "codex_session_1",
@@ -27,14 +27,14 @@ const context = {
   userTimezone: "Europe/Paris",
 };
 
-describe("executeGoatActionGateway", () => {
+describe("executeActionGateway", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
   });
 
   it("lists connected integration reads and enabled managed capability reads", async () => {
     const readAction = createReadAction();
-    const catalog: GoatResolvedActionCatalog = {
+    const catalog: ResolvedActionCatalog = {
       providers: [
         { id: "gmail", label: "Gmail", description: "Email" },
         { id: "slack", kind: "integration", label: "Slack", description: "Messages" },
@@ -69,7 +69,7 @@ describe("executeGoatActionGateway", () => {
         },
       ],
     };
-    const response = await executeGoatActionGateway({
+    const response = await executeActionGateway({
       request: listRequest(),
       signal: new AbortController().signal,
       dependencies: {
@@ -91,13 +91,13 @@ describe("executeGoatActionGateway", () => {
   it("includes Neon row queries only after their read-only permission is On", async () => {
     const queryAction = createReadAction("neon.run_sql", "neon");
     queryAction.capability = "query";
-    const catalog: GoatResolvedActionCatalog = {
+    const catalog: ResolvedActionCatalog = {
       providers: [{ id: "neon", kind: "integration", label: "Neon", description: "Database" }],
       actions: [queryAction],
     };
 
     await expect(
-      executeGoatActionGateway({
+      executeActionGateway({
         request: listRequest(),
         signal: new AbortController().signal,
         dependencies: {
@@ -112,7 +112,7 @@ describe("executeGoatActionGateway", () => {
 
     queryAction.permissionMode = "ask";
     await expect(
-      executeGoatActionGateway({
+      executeActionGateway({
         request: listRequest(),
         signal: new AbortController().signal,
         dependencies: {
@@ -125,11 +125,11 @@ describe("executeGoatActionGateway", () => {
 
   it("reuses the canonical executor with host-derived identity", async () => {
     const readAction = createReadAction();
-    const catalog: GoatResolvedActionCatalog = {
+    const catalog: ResolvedActionCatalog = {
       providers: [{ id: "gmail", kind: "integration", label: "Gmail", description: "Email" }],
       actions: [readAction],
     };
-    const response = await executeGoatActionGateway({
+    const response = await executeActionGateway({
       request: {
         operation: "execute",
         sessionId: "codex_session_1",
@@ -173,7 +173,7 @@ describe("executeGoatActionGateway", () => {
       turnState.quotedTotalUsdMicros += 10;
       return { quotedTotalUsdMicros: turnState.quotedTotalUsdMicros };
     });
-    const catalog: GoatResolvedActionCatalog = {
+    const catalog: ResolvedActionCatalog = {
       providers: [{ id: "linkedin", kind: "managed", label: "LinkedIn", description: "Paid" }],
       actions: [managedAction],
     };
@@ -199,12 +199,12 @@ describe("executeGoatActionGateway", () => {
       now: () => new Date("2026-07-28T12:00:00.000Z"),
     };
 
-    const first = await executeGoatActionGateway({
+    const first = await executeActionGateway({
       request,
       signal: new AbortController().signal,
       dependencies,
     });
-    const second = await executeGoatActionGateway({
+    const second = await executeActionGateway({
       request: { ...request, invocationId: "call_2" },
       signal: new AbortController().signal,
       dependencies,
@@ -224,7 +224,7 @@ describe("executeGoatActionGateway", () => {
 
   it("rejects call 17 through the shared gateway budget", async () => {
     const readAction = createReadAction();
-    const catalog: GoatResolvedActionCatalog = {
+    const catalog: ResolvedActionCatalog = {
       providers: [{ id: "gmail", label: "Gmail", description: "Email" }],
       actions: [readAction],
     };
@@ -244,7 +244,7 @@ describe("executeGoatActionGateway", () => {
 
     for (let call = 1; call <= GOAT_ACTION_MAX_CALLS_PER_TURN; call += 1) {
       await expect(
-        executeGoatActionGateway({
+        executeActionGateway({
           request: {
             operation: "execute",
             sessionId: "session_budget",
@@ -260,7 +260,7 @@ describe("executeGoatActionGateway", () => {
     }
 
     await expect(
-      executeGoatActionGateway({
+      executeActionGateway({
         request: {
           operation: "execute",
           sessionId: "session_budget",
@@ -277,7 +277,7 @@ describe("executeGoatActionGateway", () => {
 
   it("does not redispatch an admitted invocation after a transport retry", async () => {
     const action = createReadAction();
-    const response = await executeGoatActionGateway({
+    const response = await executeActionGateway({
       request: {
         operation: "execute",
         sessionId: "session_retry",
@@ -313,7 +313,7 @@ describe("executeGoatActionGateway", () => {
 
   it("returns a structured internal error when durable governance is unavailable", async () => {
     const action = createReadAction();
-    const response = await executeGoatActionGateway({
+    const response = await executeActionGateway({
       request: listRequest("gmail"),
       signal: new AbortController().signal,
       dependencies: {
@@ -333,7 +333,7 @@ describe("executeGoatActionGateway", () => {
 
   it("fails closed when the turn no longer authorizes access", async () => {
     const resolveCatalog = vi.fn();
-    const response = await executeGoatActionGateway({
+    const response = await executeActionGateway({
       request: listRequest(),
       signal: new AbortController().signal,
       dependencies: {
@@ -352,8 +352,8 @@ describe("executeGoatActionGateway", () => {
 
 function createReadAction(
   id = "gmail.search",
-  provider: ResolvedGoatAction["provider"] = "gmail",
-): ResolvedGoatAction {
+  provider: ResolvedAction["provider"] = "gmail",
+): ResolvedAction {
   return {
     id,
     provider,

@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  deleteGoatRepoConfigAction,
-  saveGoatRepoEnvAction,
-  saveGoatRepoSetupInstructionsAction,
+  deleteRepoConfigAction,
+  saveRepoEnvAction,
+  saveRepoSetupInstructionsAction,
 } from "./repo-config-actions";
 
 const mocks = vi.hoisted(() => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
   deleteConfig: vi.fn(),
   listRepositories: vi.fn(),
   upsertConfig: vi.fn(),
@@ -21,9 +21,9 @@ vi.mock("@opencompany/db/repo-configs", async (importOriginal) => {
   const original = await importOriginal<typeof import("@opencompany/db/repo-configs")>();
   return {
     ...original,
-    deleteGoatRepoConfig: mocks.deleteConfig,
-    listGoatWorkspaceRepositories: mocks.listRepositories,
-    upsertGoatRepoConfig: mocks.upsertConfig,
+    deleteRepoConfig: mocks.deleteConfig,
+    listWorkspaceRepositories: mocks.listRepositories,
+    upsertRepoConfig: mocks.upsertConfig,
   };
 });
 
@@ -32,13 +32,13 @@ vi.mock("next/cache", () => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: mocks.currentGoatUser,
+  currentUser: mocks.currentUser,
 }));
 
 describe("repository config actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.currentGoatUser.mockResolvedValue(authContext("admin"));
+    mocks.currentUser.mockResolvedValue(authContext("admin"));
     mocks.listRepositories.mockResolvedValue([
       {
         repositoryExternalId: "123",
@@ -51,10 +51,10 @@ describe("repository config actions", () => {
   });
 
   it("rejects repository mutations from non-admin workspace members", async () => {
-    mocks.currentGoatUser.mockResolvedValue(authContext("member"));
+    mocks.currentUser.mockResolvedValue(authContext("member"));
 
     await expect(
-      saveGoatRepoEnvAction({
+      saveRepoEnvAction({
         repositoryExternalId: "123",
         envContent: "API_TOKEN=secret-value",
       }),
@@ -68,7 +68,7 @@ describe("repository config actions", () => {
 
   it("resolves by stable id, refreshes the catalog name, and lets the database derive keys", async () => {
     await expect(
-      saveGoatRepoEnvAction({
+      saveRepoEnvAction({
         repositoryExternalId: "123",
         envContent: 'DATABASE_URL="database-secret-value"\nAPI_TOKEN=token_secret',
       }),
@@ -91,7 +91,7 @@ describe("repository config actions", () => {
     mocks.listRepositories.mockResolvedValue([]);
 
     await expect(
-      saveGoatRepoSetupInstructionsAction({
+      saveRepoSetupInstructionsAction({
         repositoryExternalId: "123",
         setupInstructions: "Run bun install.",
       }),
@@ -104,7 +104,7 @@ describe("repository config actions", () => {
   });
 
   it("removes stale repository configurations by stable id", async () => {
-    await expect(deleteGoatRepoConfigAction({ repositoryExternalId: "123" })).resolves.toEqual({
+    await expect(deleteRepoConfigAction({ repositoryExternalId: "123" })).resolves.toEqual({
       ok: true,
       repositoryExternalId: "123",
     });
@@ -123,7 +123,7 @@ describe("repository config actions", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     await expect(
-      saveGoatRepoSetupInstructionsAction({
+      saveRepoSetupInstructionsAction({
         repositoryExternalId: "123",
         setupInstructions: instructions,
       }),

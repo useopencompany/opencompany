@@ -1,14 +1,14 @@
 import {
-  GoatRevolutApiError,
-  type GoatRevolutBusinessConnection,
-  loadGoatRevolutBusinessConnection,
-  requestGoatRevolutBusinessApi,
+  loadRevolutBusinessConnection,
+  RevolutApiError,
+  type RevolutBusinessConnection,
+  requestRevolutBusinessApi,
 } from "../integrations/revolut";
 import {
+  ActionAuthError,
+  ActionInvalidParamsError,
+  type ActionProviderCatalog,
   GOAT_ACTION_EFFECTS_READ,
-  GoatActionAuthError,
-  GoatActionInvalidParamsError,
-  type GoatActionProviderCatalog,
   optionalNumberParam,
   optionalStringParam,
   truncateText,
@@ -54,8 +54,8 @@ type RevolutExpense = {
 
 export async function resolveRevolutActions(
   workspaceId: string,
-): Promise<GoatActionProviderCatalog | null> {
-  const connection = loadGoatRevolutBusinessConnection(workspaceId);
+): Promise<ActionProviderCatalog | null> {
+  const connection = loadRevolutBusinessConnection(workspaceId);
   if (!connection) return null;
 
   return {
@@ -80,7 +80,7 @@ export async function resolveRevolutActions(
         execute: async (params, context) => {
           validateAllowedParams(params, new Set());
           const accounts = await withRevolutAuth(connection, () =>
-            requestGoatRevolutBusinessApi<RevolutAccount[]>({
+            requestRevolutBusinessApi<RevolutAccount[]>({
               connection,
               path: "/accounts",
               signal: context.signal,
@@ -149,7 +149,7 @@ export async function resolveRevolutActions(
           const transactionType = optionalSafeFilter(params, "transactionType");
           const onlyMissingReceipts = optionalBooleanParam(params, "onlyMissingReceipts") ?? false;
           const expenses = await withRevolutAuth(connection, () =>
-            requestGoatRevolutBusinessApi<RevolutExpense[]>({
+            requestRevolutBusinessApi<RevolutExpense[]>({
               connection,
               path: "/expenses",
               params: {
@@ -209,7 +209,7 @@ export async function resolveRevolutActions(
           validateAllowedParams(params, new Set(["expenseId"]));
           const expenseId = requiredUuidLikeParam(params, "expenseId");
           const expense = await withRevolutAuth(connection, () =>
-            requestGoatRevolutBusinessApi<RevolutExpense>({
+            requestRevolutBusinessApi<RevolutExpense>({
               connection,
               path: `/expenses/${encodeURIComponent(expenseId)}`,
               signal: context.signal,
@@ -226,14 +226,14 @@ export async function resolveRevolutActions(
 }
 
 async function withRevolutAuth<T>(
-  connection: GoatRevolutBusinessConnection,
+  connection: RevolutBusinessConnection,
   operation: () => Promise<T>,
 ) {
   try {
     return await operation();
   } catch (error) {
-    if (error instanceof GoatRevolutApiError && (error.status === 401 || error.status === 403)) {
-      throw new GoatActionAuthError(
+    if (error instanceof RevolutApiError && (error.status === 401 || error.status === 403)) {
+      throw new ActionAuthError(
         "auth_expired",
         "revolut",
         `Revolut Business rejected the configured API token for ${connection.accountLabel}. Generate a fresh READ-scoped access token and update REVOLUT_BUSINESS_API_TOKEN.`,
@@ -246,7 +246,7 @@ async function withRevolutAuth<T>(
 function validateAllowedParams(params: Record<string, unknown>, allowed: ReadonlySet<string>) {
   const unexpected = Object.keys(params).find((key) => !allowed.has(key));
   if (unexpected) {
-    throw new GoatActionInvalidParamsError(`Unexpected parameter ${JSON.stringify(unexpected)}.`);
+    throw new ActionInvalidParamsError(`Unexpected parameter ${JSON.stringify(unexpected)}.`);
   }
 }
 
@@ -254,7 +254,7 @@ function expenseLimit(params: Record<string, unknown>) {
   const value = optionalNumberParam(params, "limit");
   if (value === undefined) return DEFAULT_EXPENSE_LIMIT;
   if (!Number.isInteger(value) || value < 1 || value > MAX_EXPENSE_LIMIT) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"limit" must be an integer from 1 to ${MAX_EXPENSE_LIMIT}.`,
     );
   }
@@ -274,10 +274,10 @@ function resolveExpensePeriod(params: Record<string, unknown>, currentDate: Date
   const toDate = new Date(`${to}T00:00:00.000Z`);
   const durationMs = toDate.getTime() - fromDate.getTime();
   if (durationMs <= 0) {
-    throw new GoatActionInvalidParamsError('"from" must be earlier than the exclusive "to".');
+    throw new ActionInvalidParamsError('"from" must be earlier than the exclusive "to".');
   }
   if (durationMs > MAX_EXPENSE_PERIOD_DAYS * 24 * 60 * 60 * 1_000) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `The expense period must be ${MAX_EXPENSE_PERIOD_DAYS} days or less.`,
     );
   }
@@ -287,13 +287,13 @@ function resolveExpensePeriod(params: Record<string, unknown>, currentDate: Date
 function normalizeDateParam(value: string, key: string) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
   if (!/(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"${key}" must be YYYY-MM-DD or an ISO 8601 instant ending in Z or a numeric UTC offset.`,
     );
   }
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime())) {
-    throw new GoatActionInvalidParamsError(`"${key}" is not a valid date.`);
+    throw new ActionInvalidParamsError(`"${key}" is not a valid date.`);
   }
   return formatUtcDate(parsed);
 }
@@ -302,7 +302,7 @@ function optionalSafeFilter(params: Record<string, unknown>, key: string) {
   const value = optionalStringParam(params, key);
   if (value === undefined) return undefined;
   if (!/^[a-z][a-z0-9_]{0,80}$/.test(value)) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"${key}" must contain only lowercase letters, numbers, and underscores.`,
     );
   }
@@ -313,7 +313,7 @@ function optionalBooleanParam(params: Record<string, unknown>, key: string) {
   const value = params[key];
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "boolean") {
-    throw new GoatActionInvalidParamsError(`"${key}" must be a boolean.`);
+    throw new ActionInvalidParamsError(`"${key}" must be a boolean.`);
   }
   return value;
 }
@@ -321,10 +321,10 @@ function optionalBooleanParam(params: Record<string, unknown>, key: string) {
 function requiredUuidLikeParam(params: Record<string, unknown>, key: string) {
   const value = optionalStringParam(params, key);
   if (!value) {
-    throw new GoatActionInvalidParamsError(`"${key}" is required and must be a non-empty string.`);
+    throw new ActionInvalidParamsError(`"${key}" is required and must be a non-empty string.`);
   }
   if (!/^[a-zA-Z0-9_-]{8,120}$/.test(value)) {
-    throw new GoatActionInvalidParamsError(`"${key}" is not a valid Revolut id.`);
+    throw new ActionInvalidParamsError(`"${key}" is not a valid Revolut id.`);
   }
   return value;
 }
@@ -409,7 +409,7 @@ function compactReceiptIds(value: unknown) {
   });
 }
 
-function connectionSummary(connection: GoatRevolutBusinessConnection) {
+function connectionSummary(connection: RevolutBusinessConnection) {
   return {
     label: connection.accountLabel,
     environment: connection.environment,

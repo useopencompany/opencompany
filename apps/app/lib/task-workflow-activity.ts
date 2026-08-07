@@ -1,10 +1,6 @@
-import type {
-  GoatHarnessEngine,
-  GoatTaskReportedOutcome,
-  GoatTaskStatus,
-} from "@opencompany/db/schema";
+import type { HarnessEngine, TaskReportedOutcome, TaskStatus } from "@opencompany/db/schema";
 
-export type GoatTaskWorkflowStepStatus =
+export type TaskWorkflowStepStatus =
   | "pending"
   | "running"
   | "completed"
@@ -12,19 +8,19 @@ export type GoatTaskWorkflowStepStatus =
   | "failed"
   | "canceled";
 
-export type GoatTaskWorkflowStepView = {
+export type TaskWorkflowStepView = {
   id: string;
   index: number;
   total: number;
   title: string;
-  engine: GoatHarnessEngine;
-  status: GoatTaskWorkflowStepStatus;
+  engine: HarnessEngine;
+  status: TaskWorkflowStepStatus;
 };
 
-export function deriveGoatTaskWorkflowSteps(input: {
+export function deriveTaskWorkflowSteps(input: {
   harnessSpec: unknown;
-  taskStatus: GoatTaskStatus;
-}): GoatTaskWorkflowStepView[] {
+  taskStatus: TaskStatus;
+}): TaskWorkflowStepView[] {
   const workflow = readRecord(readRecord(input.harnessSpec)?.workflow);
   const rawSteps = Array.isArray(workflow?.steps) ? workflow.steps : [];
   if (rawSteps.length <= 1) return [];
@@ -66,9 +62,9 @@ function workflowStepStatus(input: {
   index: number;
   currentStepIndex: number;
   completedStepCount: number;
-  taskStatus: GoatTaskStatus;
-  lastOutcome: GoatTaskReportedOutcome | null;
-}): GoatTaskWorkflowStepStatus {
+  taskStatus: TaskStatus;
+  lastOutcome: TaskReportedOutcome | null;
+}): TaskWorkflowStepStatus {
   const lastCompletedIndex = input.completedStepCount - 1;
   if (input.index < input.completedStepCount) {
     if (input.index === lastCompletedIndex && input.lastOutcome === "needs_attention") {
@@ -85,7 +81,7 @@ function workflowStepStatus(input: {
   return "pending";
 }
 
-function readLastStepOutcome(value: unknown): GoatTaskReportedOutcome | null {
+function readLastStepOutcome(value: unknown): TaskReportedOutcome | null {
   const outcome = readRecord(value)?.reportedOutcome;
   return outcome === "done" || outcome === "needs_attention" ? outcome : null;
 }
@@ -95,7 +91,7 @@ function readCheckpoint(value: unknown, min: number, max: number, fallback: numb
   return Math.min(max, Math.max(min, value as number));
 }
 
-function readEngine(value: unknown): GoatHarnessEngine {
+function readEngine(value: unknown): HarnessEngine {
   return value === "codex" || value === "claude_code" ? value : "opencompany";
 }
 

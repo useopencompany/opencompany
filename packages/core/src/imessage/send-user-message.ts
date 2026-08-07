@@ -1,10 +1,10 @@
 import {
-  countGoatImessageSendsSince,
-  getSuccessfulGoatImessageSendForTurn,
-  recordGoatImessageSend,
+  countImessageSendsSince,
+  getSuccessfulImessageSendForTurn,
+  recordImessageSend,
 } from "@opencompany/db/imessage";
-import type { GoatImessageSendSource } from "@opencompany/db/schema";
-import { resolveGoatImessageProvider } from "./provider";
+import type { ImessageSendSource } from "@opencompany/db/schema";
+import { resolveImessageProvider } from "./provider";
 
 const DEFAULT_DAILY_SEND_CAP = 30;
 const MAX_MESSAGE_LENGTH = 500;
@@ -21,10 +21,10 @@ function dailySendCap(): number {
 // Shared executor behind the send_user_message tool: same rate limit, audit
 // trail, and error surface across the chat route and runner task executors.
 // Never throws — failures come back as tool output for the model to relay.
-export function createGoatSendUserMessageRunner(input: {
+export function createSendUserMessageRunner(input: {
   userWorkosId: string;
   phoneE164: string;
-  source: Exclude<GoatImessageSendSource, "pairing">;
+  source: Exclude<ImessageSendSource, "pairing">;
   chatSessionId?: string;
   turnId?: string;
   signal?: AbortSignal;
@@ -35,17 +35,17 @@ export function createGoatSendUserMessageRunner(input: {
       if (!text) {
         return { ok: false, error: "Message text is empty." };
       }
-      const provider = resolveGoatImessageProvider();
+      const provider = resolveImessageProvider();
       if (!provider) {
         return { ok: false, error: "iMessage sending is not available right now." };
       }
       if (input.turnId) {
-        const existingSend = await getSuccessfulGoatImessageSendForTurn(input.turnId);
+        const existingSend = await getSuccessfulImessageSendForTurn(input.turnId);
         if (existingSend) return { ok: true, delivered: true };
       }
       const cap = dailySendCap();
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const sentToday = await countGoatImessageSendsSince(input.userWorkosId, since);
+      const sentToday = await countImessageSendsSince(input.userWorkosId, since);
       if (sentToday >= cap) {
         return {
           ok: false,
@@ -57,7 +57,7 @@ export function createGoatSendUserMessageRunner(input: {
         text,
         ...(input.signal ? { signal: input.signal } : {}),
       });
-      await recordGoatImessageSend({
+      await recordImessageSend({
         userWorkosId: input.userWorkosId,
         source: input.source,
         status: result.ok ? "sent" : "failed",

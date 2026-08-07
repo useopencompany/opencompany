@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { exchangeGoatHubspotCode, fetchGoatHubspotIdentity } from "./hubspot-ingest";
+import { exchangeHubspotCode, fetchHubspotIdentity } from "./hubspot-ingest";
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -26,7 +26,7 @@ describe("Goat HubSpot OAuth", () => {
       }),
     );
 
-    const result = await exchangeGoatHubspotCode("authorization-code");
+    const result = await exchangeHubspotCode("authorization-code");
 
     expect(result).toMatchObject({
       accessToken: "access-token",
@@ -59,7 +59,7 @@ describe("Goat HubSpot OAuth", () => {
       }),
     );
 
-    await expect(fetchGoatHubspotIdentity("sensitive-access-token")).resolves.toEqual({
+    await expect(fetchHubspotIdentity("sensitive-access-token")).resolves.toEqual({
       portalId: "62515",
       hubDomain: "acme.example",
       userEmail: "owner@acme.example",
@@ -86,8 +86,6 @@ describe("Goat HubSpot OAuth", () => {
   it("rejects inactive access tokens", async () => {
     fetchMock.mockResolvedValueOnce(Response.json({ active: false }));
 
-    await expect(fetchGoatHubspotIdentity("inactive-token")).rejects.toThrow(
-      "inactive access token",
-    );
+    await expect(fetchHubspotIdentity("inactive-token")).rejects.toThrow("inactive access token");
   });
 });

@@ -16,8 +16,8 @@ export type RunnerEnv = {
   // Platform OpenAI key used only by the runner-hosted Goat voice dictation relay.
   // It is never sent to the browser; the Goat app mints short-lived runner tickets instead.
   openaiApiKey?: string | undefined;
-  goatDictationRealtimeModel?: string | undefined;
-  goatDictationFinalModel?: string | undefined;
+  dictationRealtimeModel?: string | undefined;
+  dictationFinalModel?: string | undefined;
   // Public base URL of this runner (Render's RENDER_EXTERNAL_URL, or
   // RUNNER_LLM_BROKER_PUBLIC_URL to override). E2B cloud sandboxes use it to call back
   // into runner-hosted routes: the LLM broker and Goat's Google tool bridge. Unset
@@ -31,12 +31,12 @@ export type RunnerEnv = {
   previewProtocol?: "http" | "https" | undefined;
   // Public Goat origin used only by the runner host to call private, bearer-protected
   // endpoints. Integration credentials and this bearer token never enter Codex sandboxes.
-  goatAppUrl?: string | undefined;
+  appUrl?: string | undefined;
   // Kill switch for the LLM broker: set RUNNER_LLM_BROKER_ENABLED=false to revert to
   // direct key injection without a deploy.
   llmBrokerEnabled: boolean;
   exaApiKey: string | undefined;
-  goatBrowserEnabled: boolean;
+  browserEnabled: boolean;
   // Google OAuth client, shared by the Gmail, Google Calendar, and Google Drive integrations. The runner
   // needs it to refresh per-account access tokens against Google's token endpoint.
   googleOAuthClientId?: string | undefined;
@@ -57,7 +57,7 @@ export type RunnerEnv = {
   // Idle timeout for persistent Goat codex-chat sandboxes. Unlike per-task sandboxes (killed after
   // each run), a chat sandbox stays alive across turns so files and the app-server daemon survive;
   // on idle timeout E2B pauses it and Sandbox.connect auto-resumes on the next message.
-  goatCodexChatIdleTimeoutMs: number;
+  codexChatIdleTimeoutMs: number;
   // Delivery-lease TTL for runner jobs. The lease heartbeats every 5s while a job runs, so this only
   // matters when the heartbeat stops (deploy, instance recycle, GC, network blip). The old 90s was
   // shorter than such gaps during a long blocking tool call, letting another instance re-claim the
@@ -65,10 +65,10 @@ export type RunnerEnv = {
   jobLeaseTtlMs: number;
   // Durable Goat chat turn lease TTL. Kept shorter than the generic job delivery lease so a dead
   // worker's chat turn can be reclaimed quickly without changing the older job queue's deploy buffer.
-  goatCodexChatLeaseTtlMs?: number | undefined;
+  codexChatLeaseTtlMs?: number | undefined;
   // Explicit opt-in for the experimental Goat task worker. Defaults off so normal runner
   // deployments keep serving existing agent work without polling Goat tables or exposing Goat tools.
-  goatTaskWorkerEnabled: boolean;
+  taskWorkerEnabled: boolean;
   workerConcurrency: number;
   port: number;
   allowedOrigins: string[];
@@ -88,15 +88,15 @@ export function loadEnv(): RunnerEnv {
     vercelAiGatewayApiKey: requiredEnv("VERCEL_AI_GATEWAY_API_KEY"),
     openaiCodexApiKey: optionalEnv("OPENAI_CODEX_API_KEY"),
     openaiApiKey: optionalEnv("OPENAI_API_KEY"),
-    goatDictationRealtimeModel: optionalEnv("DICTATION_REALTIME_MODEL"),
-    goatDictationFinalModel: optionalEnv("DICTATION_FINAL_MODEL"),
+    dictationRealtimeModel: optionalEnv("DICTATION_REALTIME_MODEL"),
+    dictationFinalModel: optionalEnv("DICTATION_FINAL_MODEL"),
     publicUrl: optionalEnv("RUNNER_LLM_BROKER_PUBLIC_URL") ?? optionalEnv("RENDER_EXTERNAL_URL"),
     previewBaseDomain: optionalPreviewBaseDomainEnv(),
     previewProtocol: optionalPreviewProtocolEnv(),
-    goatAppUrl: optionalEnv("NEXT_PUBLIC_APP_URL"),
+    appUrl: optionalEnv("NEXT_PUBLIC_APP_URL"),
     llmBrokerEnabled: optionalBooleanEnv("RUNNER_LLM_BROKER_ENABLED", true),
     exaApiKey: optionalEnv("EXA_API_KEY"),
-    goatBrowserEnabled: optionalBooleanEnv("RUNNER_BROWSER_ENABLED", false),
+    browserEnabled: optionalBooleanEnv("RUNNER_BROWSER_ENABLED", false),
     googleOAuthClientId: optionalEnv("GOOGLE_OAUTH_CLIENT_ID"),
     googleOAuthClientSecret: optionalEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
     hubspotOAuthClientId: optionalEnv("HUBSPOT_CLIENT_ID"),
@@ -107,13 +107,13 @@ export function loadEnv(): RunnerEnv {
     blobReadWriteToken: optionalEnv("BLOB_READ_WRITE_TOKEN"),
     codexTimeoutMs: optionalPositiveIntegerEnv("RUNNER_CODEX_TIMEOUT_MS", DEFAULT_CODEX_TIMEOUT_MS),
     codexModel: optionalEnv("RUNNER_CODEX_MODEL") ?? "gpt-5.6-sol",
-    goatCodexChatIdleTimeoutMs: optionalPositiveIntegerEnv(
+    codexChatIdleTimeoutMs: optionalPositiveIntegerEnv(
       "RUNNER_CODEX_CHAT_IDLE_TIMEOUT_MS",
       5 * 60_000,
     ),
     jobLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_JOB_LEASE_TTL_MS", 300_000),
-    goatCodexChatLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_CODEX_CHAT_LEASE_TTL_MS", 90_000),
-    goatTaskWorkerEnabled: optionalBooleanEnv("RUNNER_WORKERS_ENABLED", false),
+    codexChatLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_CODEX_CHAT_LEASE_TTL_MS", 90_000),
+    taskWorkerEnabled: optionalBooleanEnv("RUNNER_WORKERS_ENABLED", false),
     // Max parallel sessions this instance runs. Sessions are I/O-bound (mostly waiting on
     // model token streaming + remote E2B sandboxes), so this is bounded by the single
     // event loop, the E2B concurrent-sandbox quota, and model-gateway rate limits — not

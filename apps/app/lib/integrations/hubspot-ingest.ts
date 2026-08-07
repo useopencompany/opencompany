@@ -1,24 +1,24 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
-import { goatIntegrations } from "@opencompany/db/schema";
+import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq } from "drizzle-orm";
-import type { GoatHubspotSourceProviderState } from "@/lib/integration-state";
-import { getGoatAppUrl } from "@/lib/workos";
+import type { HubspotSourceProviderState } from "@/lib/integration-state";
+import { getAppUrl } from "@/lib/workos";
 
-export type GoatHubspotIngestStatePayload = {
+export type HubspotIngestStatePayload = {
   userWorkosId: string;
   returnTo: string;
   expiresAt: number;
   nonce: string;
 };
 
-export type GoatHubspotOAuthResult = {
+export type HubspotOAuthResult = {
   accessToken: string;
   refreshToken: string;
   expiresAt: Date | null;
 };
 
-export type GoatHubspotIdentity = {
+export type HubspotIdentity = {
   portalId: string;
   hubDomain: string | null;
   userEmail: string | null;
@@ -45,31 +45,28 @@ export const HUBSPOT_INGEST_SCOPES = [
   "oauth",
 ] as const;
 
-export function isGoatHubspotIngestConfigured() {
+export function isHubspotIngestConfigured() {
   return HUBSPOT_INGEST_ENVS.every((name) => Boolean(process.env[name]?.trim()));
 }
 
 // The HubSpot brain-source connection state for the acting user (most recently
 // updated portal connection).
-export async function getGoatHubspotSourceIntegrationState(
+export async function getHubspotSourceIntegrationState(
   userWorkosId: string,
-): Promise<GoatHubspotSourceProviderState> {
+): Promise<HubspotSourceProviderState> {
   const [row] = await getDb()
     .select({
-      id: goatIntegrations.id,
-      status: goatIntegrations.status,
-      accountEmail: goatIntegrations.accountEmail,
-      connectionLabel: goatIntegrations.connectionLabel,
-      statusReason: goatIntegrations.statusReason,
+      id: integrations.id,
+      status: integrations.status,
+      accountEmail: integrations.accountEmail,
+      connectionLabel: integrations.connectionLabel,
+      statusReason: integrations.statusReason,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
-      and(
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, HUBSPOT_PROVIDER),
-      ),
+      and(eq(integrations.userWorkosId, userWorkosId), eq(integrations.provider, HUBSPOT_PROVIDER)),
     )
-    .orderBy(desc(goatIntegrations.updatedAt))
+    .orderBy(desc(integrations.updatedAt))
     .limit(1);
 
   if (!row || row.status === "disconnected") {
@@ -95,10 +92,10 @@ export async function getGoatHubspotSourceIntegrationState(
   };
 }
 
-export function createGoatHubspotIngestState(
-  input: Omit<GoatHubspotIngestStatePayload, "expiresAt" | "nonce">,
+export function createHubspotIngestState(
+  input: Omit<HubspotIngestStatePayload, "expiresAt" | "nonce">,
 ) {
-  const payload: GoatHubspotIngestStatePayload = {
+  const payload: HubspotIngestStatePayload = {
     ...input,
     returnTo: sanitizeReturnTo(input.returnTo),
     expiresAt: Date.now() + 10 * 60 * 1000,
@@ -108,14 +105,14 @@ export function createGoatHubspotIngestState(
   return `${body}.${signStateBody(body)}`;
 }
 
-export function verifyGoatHubspotIngestState(state: string): GoatHubspotIngestStatePayload {
+export function verifyHubspotIngestState(state: string): HubspotIngestStatePayload {
   const [body, signature] = state.split(".");
   if (!body || !signature || !safeEqual(signature, signStateBody(body))) {
     throw new Error("Invalid HubSpot integration state.");
   }
 
   const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as unknown;
-  if (!isGoatHubspotIngestStatePayload(payload)) {
+  if (!isHubspotIngestStatePayload(payload)) {
     throw new Error("Invalid HubSpot integration state payload.");
   }
   if (payload.expiresAt < Date.now()) {
@@ -128,16 +125,16 @@ export function verifyGoatHubspotIngestState(state: string): GoatHubspotIngestSt
   };
 }
 
-export function buildGoatHubspotAuthorizationUrl(state: string) {
+export function buildHubspotAuthorizationUrl(state: string) {
   const url = new URL("https://app.hubspot.com/oauth/authorize");
   url.searchParams.set("client_id", requiredEnv("HUBSPOT_CLIENT_ID"));
-  url.searchParams.set("redirect_uri", goatHubspotIngestCallbackUrl());
+  url.searchParams.set("redirect_uri", hubspotIngestCallbackUrl());
   url.searchParams.set("scope", HUBSPOT_INGEST_SCOPES.join(" "));
   url.searchParams.set("state", state);
   return url.toString();
 }
 
-export async function exchangeGoatHubspotCode(code: string): Promise<GoatHubspotOAuthResult> {
+export async function exchangeHubspotCode(code: string): Promise<HubspotOAuthResult> {
   const response = await fetch(HUBSPOT_OAUTH_TOKEN_ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -145,7 +142,7 @@ export async function exchangeGoatHubspotCode(code: string): Promise<GoatHubspot
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code,
-      redirect_uri: goatHubspotIngestCallbackUrl(),
+      redirect_uri: hubspotIngestCallbackUrl(),
       client_id: requiredEnv("HUBSPOT_CLIENT_ID"),
       client_secret: requiredEnv("HUBSPOT_CLIENT_SECRET"),
     }).toString(),
@@ -174,7 +171,7 @@ export async function exchangeGoatHubspotCode(code: string): Promise<GoatHubspot
   };
 }
 
-export async function fetchGoatHubspotIdentity(accessToken: string): Promise<GoatHubspotIdentity> {
+export async function fetchHubspotIdentity(accessToken: string): Promise<HubspotIdentity> {
   const response = await fetch(HUBSPOT_OAUTH_INTROSPECT_ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -213,23 +210,23 @@ export async function fetchGoatHubspotIdentity(accessToken: string): Promise<Goa
   };
 }
 
-export function appendGoatHubspotIngestStatus(
+export function appendHubspotIngestStatus(
   returnTo: string,
   status: "connected" | "error",
   reason?: string,
 ) {
-  const url = new URL(sanitizeReturnTo(returnTo), getGoatAppUrl());
+  const url = new URL(sanitizeReturnTo(returnTo), getAppUrl());
   url.searchParams.set("integration", HUBSPOT_PROVIDER);
   url.searchParams.set("setup", status);
   if (status === "error" && reason) url.searchParams.set("reason", reason);
   return `${url.pathname}${url.search}`;
 }
 
-function goatHubspotIngestCallbackUrl() {
-  return `${getGoatAppUrl()}/api/integrations/hubspot/callback`;
+function hubspotIngestCallbackUrl() {
+  return `${getAppUrl()}/api/integrations/hubspot/callback`;
 }
 
-function isGoatHubspotIngestStatePayload(value: unknown): value is GoatHubspotIngestStatePayload {
+function isHubspotIngestStatePayload(value: unknown): value is HubspotIngestStatePayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return (

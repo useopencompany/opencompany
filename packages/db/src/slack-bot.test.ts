@@ -1,8 +1,8 @@
 import { drizzle } from "drizzle-orm/neon-http";
 import { describe, expect, it, vi } from "vitest";
-import { claimGoatSlackBotEvent, getGoatSlackBotThreadParticipation } from "./slack-bot";
+import { claimSlackBotEvent, getSlackBotThreadParticipation } from "./slack-bot";
 
-describe("claimGoatSlackBotEvent", () => {
+describe("claimSlackBotEvent", () => {
   it("claims a new event with a lease that only stale unfinished deliveries can replace", async () => {
     const query = vi.fn(async (_statement: string, _params: unknown[], _options: object) => ({
       rows: [["Ev123"]],
@@ -10,7 +10,7 @@ describe("claimGoatSlackBotEvent", () => {
     const db = drizzle(query as never);
     const now = new Date("2026-07-16T10:00:00.000Z");
 
-    const claim = await claimGoatSlackBotEvent({ eventId: "Ev123", teamId: "T123", now }, db);
+    const claim = await claimSlackBotEvent({ eventId: "Ev123", teamId: "T123", now }, db);
 
     expect(claim).toMatchObject({ eventId: "Ev123" });
     expect(claim?.claimId).toMatch(/^gsbec_[a-f0-9]{32}$/);
@@ -28,20 +28,18 @@ describe("claimGoatSlackBotEvent", () => {
     }));
     const db = drizzle(query as never);
 
-    await expect(
-      claimGoatSlackBotEvent({ eventId: "Ev123", teamId: "T123" }, db),
-    ).resolves.toBeNull();
+    await expect(claimSlackBotEvent({ eventId: "Ev123", teamId: "T123" }, db)).resolves.toBeNull();
   });
 });
 
-describe("getGoatSlackBotThreadParticipation", () => {
+describe("getSlackBotThreadParticipation", () => {
   it("excludes threads whose latest bot reply is older than the participation TTL", async () => {
     const query = vi.fn(async (_statement: string, _params: unknown[], _options: object) => ({
       rows: [],
     }));
     const db = drizzle(query as never);
 
-    await getGoatSlackBotThreadParticipation(
+    await getSlackBotThreadParticipation(
       {
         teamId: "T123",
         channelId: "C123",

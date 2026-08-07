@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "./client";
 import {
-  type GoatAttioEventAction,
-  type GoatAttioObjectType,
-  type GoatIntegrationStatus,
-  goatAttioObjectEvents,
-  goatBrainSources,
-  goatIntegrations,
+  type AttioEventAction,
+  type AttioObjectType,
+  attioObjectEvents,
+  brainSources,
+  type IntegrationStatus,
+  integrations,
 } from "./schema";
 
 type DbLike = any;
@@ -18,14 +18,14 @@ export const GOAT_ATTIO_CREDENTIAL_KIND = "api_key" as const;
 export const GOAT_ATTIO_OBJECT_TYPES = ["person", "company", "deal"] as const;
 
 // Attio's standard-object api slugs, keyed by our object type.
-export const GOAT_ATTIO_OBJECT_SLUGS: Record<GoatAttioObjectType, string> = {
+export const GOAT_ATTIO_OBJECT_SLUGS: Record<AttioObjectType, string> = {
   person: "people",
   company: "companies",
   deal: "deals",
 };
 
-export type GoatAttioObjectTypeRef = {
-  id: GoatAttioObjectType;
+export type AttioObjectTypeRef = {
+  id: AttioObjectType;
 };
 
 export const GOAT_ATTIO_EVENT_TYPES = ["object_created", "object_updated", "note_added"] as const;
@@ -38,10 +38,10 @@ export const GOAT_ATTIO_DEFAULT_EVENT_TYPES = ["object_created", "note_added"] a
 // changes to one attribute for an entire day.
 export const GOAT_ATTIO_UPDATE_CLAIM_BUCKET_MS = 5 * 60_000;
 
-export type GoatAttioEventType = (typeof GOAT_ATTIO_EVENT_TYPES)[number];
+export type AttioEventType = (typeof GOAT_ATTIO_EVENT_TYPES)[number];
 
-export type GoatAttioEventRef = {
-  id: GoatAttioEventType;
+export type AttioEventRef = {
+  id: AttioEventType;
 };
 
 // The whole Attio connection lives in one api_key credential: the workspace
@@ -49,13 +49,13 @@ export type GoatAttioEventRef = {
 // secret signs inbound deliveries), and the workspace's object UUIDs so the
 // webhook receiver can map event object ids to our object types without an
 // API call.
-export type GoatAttioApiKeyCredentialPayload = {
+export type AttioApiKeyCredentialPayload = {
   apiKey: string;
   workspaceId: string;
   authorizedByWorkspaceMemberId?: string | null;
   webhookId: string | null;
   webhookSecret: string | null;
-  objectIdBySlug: Partial<Record<GoatAttioObjectType, string>>;
+  objectIdBySlug: Partial<Record<AttioObjectType, string>>;
   createdAt: string;
 };
 
@@ -63,38 +63,38 @@ export type GoatAttioApiKeyCredentialPayload = {
 // the flush worker: CRM activity is buffered/ingested only when its object
 // type and derived event type appear in the enabled brain-source config for
 // the integration.
-export type GoatAttioBrainSourceConfig = {
-  objectTypes?: GoatAttioObjectTypeRef[];
-  events?: GoatAttioEventRef[];
+export type AttioBrainSourceConfig = {
+  objectTypes?: AttioObjectTypeRef[];
+  events?: AttioEventRef[];
 };
 
-export type GoatAttioIntegrationForWorkspace = {
+export type AttioIntegrationForWorkspace = {
   id: string;
   userWorkosId: string;
-  status: GoatIntegrationStatus;
+  status: IntegrationStatus;
 };
 
-export type GoatAttioBrainSourceRoute = {
+export type AttioBrainSourceRoute = {
   integrationId: string;
   brainRef: string;
-  config: GoatAttioBrainSourceConfig;
+  config: AttioBrainSourceConfig;
 };
 
-export type GoatAttioObjectEventInsert = {
+export type AttioObjectEventInsert = {
   integrationId: string;
   userWorkosId: string;
   workspaceId: string;
-  objectType: GoatAttioObjectType;
+  objectType: AttioObjectType;
   recordId: string;
   deliveryId: string;
-  action: GoatAttioEventAction;
+  action: AttioEventAction;
   attributeId?: string | null;
   noteId?: string | null;
   payload: Record<string, unknown>;
   eventTime: Date;
 };
 
-export function parseGoatAttioBrainSourceConfig(value: unknown): GoatAttioBrainSourceConfig {
+export function parseAttioBrainSourceConfig(value: unknown): AttioBrainSourceConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const record = value as Record<string, unknown>;
   const objectTypes = parseObjectTypeRefs(record.objectTypes);
@@ -105,41 +105,37 @@ export function parseGoatAttioBrainSourceConfig(value: unknown): GoatAttioBrainS
   };
 }
 
-export function goatAttioSelectedObjectTypes(
-  config: GoatAttioBrainSourceConfig,
-): Set<GoatAttioObjectType> {
-  const ids = new Set<GoatAttioObjectType>();
+export function attioSelectedObjectTypes(config: AttioBrainSourceConfig): Set<AttioObjectType> {
+  const ids = new Set<AttioObjectType>();
   for (const ref of config.objectTypes ?? []) ids.add(ref.id);
   return ids;
 }
 
-export function goatAttioSelectedEventTypes(
-  config: GoatAttioBrainSourceConfig,
-): Set<GoatAttioEventType> {
+export function attioSelectedEventTypes(config: AttioBrainSourceConfig): Set<AttioEventType> {
   return new Set(
     (config.events ?? GOAT_ATTIO_DEFAULT_EVENT_TYPES.map((id) => ({ id }))).map((ref) => ref.id),
   );
 }
 
-export function goatAttioRouteMatchesEvent(
-  config: GoatAttioBrainSourceConfig,
-  eventType: GoatAttioEventType,
+export function attioRouteMatchesEvent(
+  config: AttioBrainSourceConfig,
+  eventType: AttioEventType,
   context: { actorType?: string | null } = {},
 ) {
-  const selected = goatAttioSelectedEventTypes(config);
+  const selected = attioSelectedEventTypes(config);
   if (!selected.has(eventType)) return false;
   // Attio recalculates enrichment and relationship fields across many records
   // as actor "system". These provider-managed updates are never Brain events.
   return !(eventType === "object_updated" && context.actorType?.trim().toLowerCase() === "system");
 }
 
-export function goatAttioEventTypeFor(action: GoatAttioEventAction): GoatAttioEventType {
+export function attioEventTypeFor(action: AttioEventAction): AttioEventType {
   if (action === "create") return "object_created";
   if (action === "note") return "note_added";
   return "object_updated";
 }
 
-export function isGoatAttioObjectType(value: unknown): value is GoatAttioObjectType {
+export function isAttioObjectType(value: unknown): value is AttioObjectType {
   return (
     typeof value === "string" && (GOAT_ATTIO_OBJECT_TYPES as readonly string[]).includes(value)
   );
@@ -150,11 +146,11 @@ export function isGoatAttioObjectType(value: unknown): value is GoatAttioObjectT
 // note and creation events have stable native ids; attribute updates use a
 // short receipt-time bucket so the same update coalesces across member
 // webhooks without suppressing a later, distinct activity window.
-export function goatAttioEventClaimKey(event: {
+export function attioEventClaimKey(event: {
   workspaceId: string;
-  objectType: GoatAttioObjectType;
+  objectType: AttioObjectType;
   recordId: string;
-  action: GoatAttioEventAction;
+  action: AttioEventAction;
   attributeId?: string | null;
   noteId?: string | null;
   eventTime: Date;
@@ -169,66 +165,66 @@ export function goatAttioEventClaimKey(event: {
   return `${scope}:updated:${event.attributeId ?? "unknown"}:${bucketStart}`;
 }
 
-export async function listGoatAttioIntegrationsForWorkspace(
+export async function listAttioIntegrationsForWorkspace(
   workspaceId: string,
   db: DbLike = getDb(),
-): Promise<GoatAttioIntegrationForWorkspace[]> {
+): Promise<AttioIntegrationForWorkspace[]> {
   return await db
     .select({
-      id: goatIntegrations.id,
-      userWorkosId: goatIntegrations.userWorkosId,
-      status: goatIntegrations.status,
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      status: integrations.status,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.provider, GOAT_ATTIO_PROVIDER),
+        eq(integrations.provider, GOAT_ATTIO_PROVIDER),
         // Integration rows key external_id on the Attio workspace id, so
         // inbound webhooks route by the event's workspace_id.
-        eq(goatIntegrations.externalId, workspaceId),
+        eq(integrations.externalId, workspaceId),
       ),
     );
 }
 
-export async function listEnabledGoatAttioBrainSourceRoutes(
+export async function listEnabledAttioBrainSourceRoutes(
   integrationIds: readonly string[],
   db: DbLike = getDb(),
-): Promise<GoatAttioBrainSourceRoute[]> {
+): Promise<AttioBrainSourceRoute[]> {
   if (integrationIds.length === 0) return [];
   const rows = await db
     .select({
-      integrationId: goatBrainSources.integrationId,
-      brainRef: goatBrainSources.brainId,
-      config: goatBrainSources.config,
+      integrationId: brainSources.integrationId,
+      brainRef: brainSources.brainId,
+      config: brainSources.config,
     })
-    .from(goatBrainSources)
+    .from(brainSources)
     .where(
       and(
-        eq(goatBrainSources.provider, GOAT_ATTIO_PROVIDER),
-        eq(goatBrainSources.enabled, true),
-        inArray(goatBrainSources.integrationId, [...integrationIds]),
+        eq(brainSources.provider, GOAT_ATTIO_PROVIDER),
+        eq(brainSources.enabled, true),
+        inArray(brainSources.integrationId, [...integrationIds]),
       ),
     );
 
   return rows.map((row: { integrationId: string; brainRef: string; config: unknown }) => ({
     integrationId: row.integrationId,
     brainRef: row.brainRef,
-    config: parseGoatAttioBrainSourceConfig(row.config),
+    config: parseAttioBrainSourceConfig(row.config),
   }));
 }
 
-export async function insertGoatAttioObjectEvents(
-  events: readonly GoatAttioObjectEventInsert[],
+export async function insertAttioObjectEvents(
+  events: readonly AttioObjectEventInsert[],
   db: DbLike = getDb(),
 ): Promise<number> {
   if (events.length === 0) return 0;
   // Attio redelivers on non-2xx responses; the unique (integration, delivery
   // id) index makes redeliveries of stable-id events no-ops.
   const rows = await db
-    .insert(goatAttioObjectEvents)
+    .insert(attioObjectEvents)
     .values(
       events.map((event) => ({
-        id: newGoatAttioObjectEventId(),
+        id: newAttioObjectEventId(),
         integrationId: event.integrationId,
         userWorkosId: event.userWorkosId,
         workspaceId: event.workspaceId,
@@ -243,21 +239,21 @@ export async function insertGoatAttioObjectEvents(
       })),
     )
     .onConflictDoNothing()
-    .returning({ id: goatAttioObjectEvents.id });
+    .returning({ id: attioObjectEvents.id });
   return rows.length;
 }
 
-export function newGoatAttioObjectEventId() {
+export function newAttioObjectEventId() {
   return `gattevt_${randomUUID().replace(/-/g, "")}`;
 }
 
-export function newGoatAttioObjectWindowId() {
+export function newAttioObjectWindowId() {
   return `gattwin_${randomUUID().replace(/-/g, "")}`;
 }
 
-function parseObjectTypeRefs(value: unknown): GoatAttioObjectTypeRef[] | undefined {
+function parseObjectTypeRefs(value: unknown): AttioObjectTypeRef[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const seen = new Set<GoatAttioObjectType>();
+  const seen = new Set<AttioObjectType>();
   const refs = value.flatMap((entry) => {
     const id =
       typeof entry === "string"
@@ -265,16 +261,16 @@ function parseObjectTypeRefs(value: unknown): GoatAttioObjectTypeRef[] | undefin
         : entry && typeof entry === "object" && !Array.isArray(entry)
           ? (entry as Record<string, unknown>).id
           : null;
-    if (!isGoatAttioObjectType(id) || seen.has(id)) return [];
+    if (!isAttioObjectType(id) || seen.has(id)) return [];
     seen.add(id);
     return [{ id }];
   });
   return refs.length > 0 ? refs : undefined;
 }
 
-function parseEventRefs(value: unknown): GoatAttioEventRef[] | undefined {
+function parseEventRefs(value: unknown): AttioEventRef[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const seen = new Set<GoatAttioEventType>();
+  const seen = new Set<AttioEventType>();
   const refs = value.flatMap((entry) => {
     const id =
       typeof entry === "string"
@@ -282,13 +278,13 @@ function parseEventRefs(value: unknown): GoatAttioEventRef[] | undefined {
         : entry && typeof entry === "object" && !Array.isArray(entry)
           ? (entry as Record<string, unknown>).id
           : null;
-    if (!isGoatAttioEventType(id) || seen.has(id)) return [];
+    if (!isAttioEventType(id) || seen.has(id)) return [];
     seen.add(id);
     return [{ id }];
   });
   return refs;
 }
 
-function isGoatAttioEventType(value: unknown): value is GoatAttioEventType {
+function isAttioEventType(value: unknown): value is AttioEventType {
   return typeof value === "string" && (GOAT_ATTIO_EVENT_TYPES as readonly string[]).includes(value);
 }

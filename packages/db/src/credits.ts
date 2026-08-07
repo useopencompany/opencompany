@@ -1,8 +1,8 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
-import { goatIncludedUsageAllowanceCents } from "./billing-constants";
+import { includedUsageAllowanceCents } from "./billing-constants";
 import { getDb } from "./client";
-import type { GoatCreditLedgerSource, GoatWorkspacePlan } from "./schema";
-import { goatCreditLedger, goatStripeCheckoutSessions } from "./schema";
+import type { CreditLedgerSource, WorkspacePlan } from "./schema";
+import { creditLedger, stripeCheckoutSessions } from "./schema";
 
 type DbLike = any;
 
@@ -11,7 +11,7 @@ type DbLike = any;
 // billing dependency).
 export const GOAT_USD_MICROS_PER_CENT = 10_000;
 
-export function goatUsdMicrosToCents(micros: number) {
+export function usdMicrosToCents(micros: number) {
   return Math.round(micros / GOAT_USD_MICROS_PER_CENT);
 }
 
@@ -28,7 +28,7 @@ function rowsFromExecute<T extends Record<string, unknown>>(result: unknown): T[
   return [];
 }
 
-export async function getGoatCreditPoolsUsdMicros(
+export async function getCreditPoolsUsdMicros(
   workspaceId: string,
   db?: DbLike,
 ): Promise<{
@@ -63,25 +63,22 @@ export async function getGoatCreditPoolsUsdMicros(
   return { balanceUsdMicros, includedBalanceUsdMicros, topUpBalanceUsdMicros };
 }
 
-export async function getGoatCreditBalanceUsdMicros(
-  workspaceId: string,
-  db?: DbLike,
-): Promise<number> {
-  return (await getGoatCreditPoolsUsdMicros(workspaceId, db)).balanceUsdMicros;
+export async function getCreditBalanceUsdMicros(workspaceId: string, db?: DbLike): Promise<number> {
+  return (await getCreditPoolsUsdMicros(workspaceId, db)).balanceUsdMicros;
 }
 
-export async function hasPositiveGoatCreditBalance(workspaceId: string, db?: DbLike) {
-  return (await getGoatCreditBalanceUsdMicros(workspaceId, db)) > 0;
+export async function hasPositiveCreditBalance(workspaceId: string, db?: DbLike) {
+  return (await getCreditBalanceUsdMicros(workspaceId, db)) > 0;
 }
 
-export type GoatCreditDebitInput = {
+export type CreditDebitInput = {
   workspaceId: string;
   userWorkosId?: string | null;
   // v4 debit sources only; "frontier_ingest"/"ingest_overage" are legacy
   // read-only history and "ingest_fee" is written by the admission CTE in
   // ./billing, never through this function.
   source: Extract<
-    GoatCreditLedgerSource,
+    CreditLedgerSource,
     "chat_model_usage" | "ingest_model_usage" | "capability_usage"
   >;
   idempotencyKey: string;
@@ -100,7 +97,7 @@ export type GoatCreditDebitInput = {
 // funds. The aggregate balance may go negative (a turn that finishes after the
 // balance hit zero still gets charged), matching the web credit system. The
 // unique idempotency_key index turns replays into no-ops.
-export async function recordGoatCreditDebit(input: GoatCreditDebitInput) {
+export async function recordCreditDebit(input: CreditDebitInput) {
   if (input.totalCostUsdMicros <= 0) {
     return { ok: false as const, reason: "zero_cost" as const };
   }
@@ -125,7 +122,7 @@ export async function recordGoatCreditDebit(input: GoatCreditDebitInput) {
       VALUES (
         ${input.workspaceId},
         ${input.userWorkosId ?? null},
-        ${-goatUsdMicrosToCents(input.totalCostUsdMicros)},
+        ${-usdMicrosToCents(input.totalCostUsdMicros)},
         ${-input.totalCostUsdMicros},
         ${input.source},
         ${input.idempotencyKey},
@@ -172,7 +169,7 @@ export async function recordGoatCreditDebit(input: GoatCreditDebitInput) {
       )
       SELECT
         workspace_id,
-        ${-goatUsdMicrosToCents(input.totalCostUsdMicros)},
+        ${-usdMicrosToCents(input.totalCostUsdMicros)},
         amount_usd_micros,
         0,
         ${-input.totalCostUsdMicros},
@@ -204,9 +201,9 @@ export async function recordGoatCreditDebit(input: GoatCreditDebitInput) {
 // its full $20 immediately while removing and re-adding a seat cannot mint the
 // same allowance twice. Top-up and historical starter-grant funds are never
 // expired or changed here.
-export async function grantGoatMonthlyIncludedUsage(input: {
+export async function grantMonthlyIncludedUsage(input: {
   workspaceId: string;
-  plan: GoatWorkspacePlan;
+  plan: WorkspacePlan;
   seatQuantity: number;
   periodStart: Date;
   periodEnd: Date;
@@ -219,7 +216,7 @@ export async function grantGoatMonthlyIncludedUsage(input: {
   if (!(input.periodStart < input.periodEnd)) {
     throw new Error("Monthly included usage requires a valid billing period.");
   }
-  const targetAllowanceCents = goatIncludedUsageAllowanceCents(input.plan, input.seatQuantity);
+  const targetAllowanceCents = includedUsageAllowanceCents(input.plan, input.seatQuantity);
   const db = input.db ?? getDb();
   const grantKey = `included_usage_grant:${input.workspaceId}:${input.periodStart.toISOString()}:${targetAllowanceCents}`;
   const expireKey = `included_usage_expiration:${input.workspaceId}:${input.periodStart.toISOString()}`;
@@ -364,7 +361,7 @@ export async function grantGoatMonthlyIncludedUsage(input: {
   };
 }
 
-export async function createGoatPendingCheckoutRecord(input: {
+export async function createPendingCheckoutRecord(input: {
   id: string;
   workspaceId: string;
   userWorkosId: string;
@@ -372,14 +369,14 @@ export async function createGoatPendingCheckoutRecord(input: {
   db?: DbLike;
 }) {
   const db = input.db ?? getDb();
-  await db.insert(goatStripeCheckoutSessions).values({
+  await db.insert(stripeCheckoutSessions).values({
     id: input.id,
     workspaceId: input.workspaceId,
     userWorkosId: input.userWorkosId,
     amountCents: input.amountCents,
     status: "pending",
     metadata: {
-      goatWorkspaceId: input.workspaceId,
+      workspaceId: input.workspaceId,
       userWorkosId: input.userWorkosId,
       amountCents: String(input.amountCents),
       checkoutRecordId: input.id,
@@ -387,7 +384,7 @@ export async function createGoatPendingCheckoutRecord(input: {
   });
 }
 
-export async function markGoatCheckoutRecordOpen(input: {
+export async function markCheckoutRecordOpen(input: {
   id: string;
   stripeCheckoutSessionId: string;
   metadata: Record<string, unknown>;
@@ -395,37 +392,30 @@ export async function markGoatCheckoutRecordOpen(input: {
 }) {
   const db = input.db ?? getDb();
   await db
-    .update(goatStripeCheckoutSessions)
+    .update(stripeCheckoutSessions)
     .set({
       stripeCheckoutSessionId: input.stripeCheckoutSessionId,
       status: "open",
       metadata: input.metadata,
       updatedAt: new Date(),
     })
-    .where(eq(goatStripeCheckoutSessions.id, input.id));
+    .where(eq(stripeCheckoutSessions.id, input.id));
 }
 
-export async function markGoatCheckoutRecordFailed(input: {
-  id: string;
-  error: string;
-  db?: DbLike;
-}) {
+export async function markCheckoutRecordFailed(input: { id: string; error: string; db?: DbLike }) {
   const db = input.db ?? getDb();
   await db
-    .update(goatStripeCheckoutSessions)
+    .update(stripeCheckoutSessions)
     .set({ status: "failed", metadata: { error: input.error }, updatedAt: new Date() })
     .where(
-      and(
-        eq(goatStripeCheckoutSessions.id, input.id),
-        isNull(goatStripeCheckoutSessions.fulfilledAt),
-      ),
+      and(eq(stripeCheckoutSessions.id, input.id), isNull(stripeCheckoutSessions.fulfilledAt)),
     );
 }
 
 // Called from the shared Stripe webhook for immediate or delayed successful
 // Goat top-up Checkout events. The `fulfilled_at IS NULL` guard is the
 // idempotency: overlapping event types and Stripe retries no-op.
-export async function fulfillGoatTopUpCheckoutSession(
+export async function fulfillTopUpCheckoutSession(
   session: {
     id: string;
     payment_status: string | null;
@@ -443,7 +433,7 @@ export async function fulfillGoatTopUpCheckoutSession(
     return { ok: false as const, reason: "not_paid" as const };
   }
   const checkoutRecordId = session.metadata?.checkoutRecordId;
-  const workspaceId = session.metadata?.goatWorkspaceId;
+  const workspaceId = session.metadata?.workspaceId;
   const userWorkosId = session.metadata?.userWorkosId;
   const amountCents = Number(session.metadata?.amountCents);
   if (!checkoutRecordId || !workspaceId || !userWorkosId || !Number.isSafeInteger(amountCents)) {
@@ -532,7 +522,7 @@ export async function fulfillGoatTopUpCheckoutSession(
 // Off-session auto-refill fulfillment. The unique idempotency key on the
 // PaymentIntent id makes the synchronous confirm path and the
 // payment_intent.succeeded webhook safe to both run.
-export async function recordGoatAutoRefillCredit(input: {
+export async function recordAutoRefillCredit(input: {
   workspaceId: string;
   amountCents: number;
   paymentIntentId: string;
@@ -591,11 +581,11 @@ export async function recordGoatAutoRefillCredit(input: {
   };
 }
 
-export type GoatSpendCategory = "chat" | "ingestion" | "capabilities" | "other";
+export type SpendCategory = "chat" | "ingestion" | "capabilities" | "other";
 
-export type GoatSpendBreakdownRow = {
+export type SpendBreakdownRow = {
   day: string;
-  category: GoatSpendCategory;
+  category: SpendCategory;
   spendUsdMicros: number;
   providerCostUsdMicros: number;
   platformFeeUsdMicros: number;
@@ -604,10 +594,10 @@ export type GoatSpendBreakdownRow = {
 // Daily debit totals by category with the raw-model-cost vs platform-fee
 // split, for the usage dashboard. Legacy v3 sources map into "ingestion" so
 // history stays visible.
-export async function loadGoatSpendBreakdown(
+export async function loadSpendBreakdown(
   workspaceId: string,
   options: { days?: number; now?: Date; db?: DbLike } = {},
-): Promise<GoatSpendBreakdownRow[]> {
+): Promise<SpendBreakdownRow[]> {
   const db = options.db ?? getDb();
   const now = options.now ?? new Date();
   const since = new Date(now.getTime() - (options.days ?? 30) * 24 * 60 * 60 * 1000);
@@ -633,7 +623,7 @@ export async function loadGoatSpendBreakdown(
   `);
   return rowsFromExecute<{
     day: string;
-    category: GoatSpendCategory;
+    category: SpendCategory;
     spendUsdMicros: number | string;
     providerCostUsdMicros: number | string;
     platformFeeUsdMicros: number | string;
@@ -646,34 +636,34 @@ export async function loadGoatSpendBreakdown(
   }));
 }
 
-export type GoatCreditLedgerEntryView = {
+export type CreditLedgerEntryView = {
   id: number;
   amountUsdMicros: number;
-  source: GoatCreditLedgerSource;
+  source: CreditLedgerSource;
   providerCostUsdMicros: number;
   platformFeeUsdMicros: number;
   metadata: Record<string, unknown>;
   createdAt: Date;
 };
 
-export type GoatCreditOverview = {
+export type CreditOverview = {
   balanceUsdMicros: number;
   spendThisMonthUsdMicros: number;
-  spendThisMonthByCategory: Record<Exclude<GoatSpendCategory, "other">, number>;
-  recentEntries: GoatCreditLedgerEntryView[];
+  spendThisMonthByCategory: Record<Exclude<SpendCategory, "other">, number>;
+  recentEntries: CreditLedgerEntryView[];
 };
 
-export async function loadGoatCreditOverview(
+export async function loadCreditOverview(
   workspaceId: string,
   options: { now?: Date; db?: DbLike } = {},
-): Promise<GoatCreditOverview> {
+): Promise<CreditOverview> {
   const db = options.db ?? getDb();
   const now = options.now ?? new Date();
   const monthStart = new Date(now);
   monthStart.setUTCDate(1);
   monthStart.setUTCHours(0, 0, 0, 0);
 
-  const balanceUsdMicros = await getGoatCreditBalanceUsdMicros(workspaceId, db);
+  const balanceUsdMicros = await getCreditBalanceUsdMicros(workspaceId, db);
   const spendResult = await db.execute(sql`
     SELECT COALESCE(-SUM(amount_usd_micros), 0) AS "spendUsdMicros"
     FROM goat.credit_ledger
@@ -698,7 +688,7 @@ export async function loadGoatCreditOverview(
     GROUP BY 1
   `);
   const categorySpendRows = rowsFromExecute<{
-    category: GoatSpendCategory;
+    category: SpendCategory;
     spendUsdMicros: number | string;
   }>(categorySpendResult);
   const spendThisMonthByCategory = {
@@ -713,17 +703,17 @@ export async function loadGoatCreditOverview(
   }
   const entries = await db
     .select({
-      id: goatCreditLedger.id,
-      amountUsdMicros: goatCreditLedger.amountUsdMicros,
-      source: goatCreditLedger.source,
-      providerCostUsdMicros: goatCreditLedger.providerCostUsdMicros,
-      platformFeeUsdMicros: goatCreditLedger.platformFeeUsdMicros,
-      metadata: goatCreditLedger.metadata,
-      createdAt: goatCreditLedger.createdAt,
+      id: creditLedger.id,
+      amountUsdMicros: creditLedger.amountUsdMicros,
+      source: creditLedger.source,
+      providerCostUsdMicros: creditLedger.providerCostUsdMicros,
+      platformFeeUsdMicros: creditLedger.platformFeeUsdMicros,
+      metadata: creditLedger.metadata,
+      createdAt: creditLedger.createdAt,
     })
-    .from(goatCreditLedger)
-    .where(eq(goatCreditLedger.workspaceId, workspaceId))
-    .orderBy(desc(goatCreditLedger.createdAt), desc(goatCreditLedger.id))
+    .from(creditLedger)
+    .where(eq(creditLedger.workspaceId, workspaceId))
+    .orderBy(desc(creditLedger.createdAt), desc(creditLedger.id))
     .limit(20);
 
   return {

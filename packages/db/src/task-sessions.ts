@@ -7,13 +7,13 @@ import {
 import type { SQL } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { getDb } from "./client";
-import type { GoatChatMessageAttachment, GoatHarnessSpec, GoatTask } from "./schema";
+import type { ChatMessageAttachment, HarnessSpec, Task } from "./schema";
 
-type GoatTaskSessionDb = {
+type TaskSessionDb = {
   execute(query: SQL): Promise<unknown>;
 };
 
-export type GoatTaskSessionSkillSnapshot = {
+export type TaskSessionSkillSnapshot = {
   id: string;
   brainRef: string;
   name: string;
@@ -21,28 +21,28 @@ export type GoatTaskSessionSkillSnapshot = {
   instructions: string;
 };
 
-export type CreateGoatTaskSessionInput = {
+export type CreateTaskSessionInput = {
   userWorkosId: string;
   workspaceId?: string | null;
   brainRef?: string | null;
   prompt: string;
   name: string;
-  harnessSpec: GoatHarnessSpec;
+  harnessSpec: HarnessSpec;
   scheduleId?: string | null;
   scheduledFor?: Date | null;
   workflowId?: string | null;
   workflowBrainRef?: string | null;
-  attachments?: GoatChatMessageAttachment[] | null;
+  attachments?: ChatMessageAttachment[] | null;
   attachmentTexts?: Record<string, string> | null;
   now?: Date;
 };
 
 // The one write path for every new session-backed task. Callers remain responsible
 // for validating product permissions and waking the durable turn worker.
-export async function createGoatTaskSession(
-  input: CreateGoatTaskSessionInput,
-  db: GoatTaskSessionDb = getDb() as GoatTaskSessionDb,
-): Promise<GoatTask> {
+export async function createTaskSession(
+  input: CreateTaskSessionInput,
+  db: TaskSessionDb = getDb() as TaskSessionDb,
+): Promise<Task> {
   const taskId = `goat_task_${randomUUID()}`;
   const chatSessionId = `goat_chat_${randomUUID()}`;
   const runtimeSessionId = `goat_codex_chat_${randomUUID()}`;
@@ -66,7 +66,7 @@ export async function createGoatTaskSession(
   const settings = turnSettingsFromHarness(harnessSpec);
   const assistantDebugTrace = emptyAssistantDebugTrace(engine, runtimeModel);
 
-  const task = rowsFromExecute<GoatTaskRow>(
+  const task = rowsFromExecute<TaskRow>(
     await db.execute(sql`
       WITH enabled_user AS MATERIALIZED (
         SELECT "user".workos_user_id
@@ -312,19 +312,19 @@ export async function createGoatTaskSession(
   if (!task) {
     throw new Error("Unable to create Goat task session.");
   }
-  return goatTaskFromRow(task);
+  return taskFromRow(task);
 }
 
-export async function enqueueGoatTaskSessionTurn(
+export async function enqueueTaskSessionTurn(
   input: {
     taskId: string;
     userWorkosId: string;
     prompt: string;
-    skills?: GoatTaskSessionSkillSnapshot[] | null | undefined;
+    skills?: TaskSessionSkillSnapshot[] | null | undefined;
     clientMessageId?: string | null | undefined;
     now?: Date;
   },
-  db: GoatTaskSessionDb = getDb() as GoatTaskSessionDb,
+  db: TaskSessionDb = getDb() as TaskSessionDb,
 ) {
   const userMessageId = safeChatMessageId(input.clientMessageId) ?? `goat_chat_msg_${randomUUID()}`;
   const assistantMessageId = `goat_chat_msg_${randomUUID()}`;
@@ -511,7 +511,7 @@ export async function enqueueGoatTaskSessionTurn(
   return rowsFromExecute<{ id: string; task_id: string }>(result)[0] ?? null;
 }
 
-function turnSettingsFromHarness(harnessSpec: GoatHarnessSpec) {
+function turnSettingsFromHarness(harnessSpec: HarnessSpec) {
   const codex = harnessSpec.codex;
   return {
     ...(codex?.reasoningEffort ? { reasoningEffort: codex.reasoningEffort } : {}),
@@ -519,17 +519,17 @@ function turnSettingsFromHarness(harnessSpec: GoatHarnessSpec) {
   };
 }
 
-function runtimeModelNameForHarness(engine: GoatHarnessSpec["engine"], model: string) {
+function runtimeModelNameForHarness(engine: HarnessSpec["engine"], model: string) {
   if (engine === "codex") return codexCliModelNameForModelId(model);
   if (engine === "claude_code") return claudeCodeCliModelNameForModelId(model);
   return model;
 }
 
-function attachmentsJsonbValue(attachments: GoatChatMessageAttachment[]) {
+function attachmentsJsonbValue(attachments: ChatMessageAttachment[]) {
   return attachments.length > 0 ? JSON.stringify(attachments) : null;
 }
 
-function taskSessionSkillsJsonbValue(skills: GoatTaskSessionSkillSnapshot[]) {
+function taskSessionSkillsJsonbValue(skills: TaskSessionSkillSnapshot[]) {
   return JSON.stringify(
     skills.map((skill) => ({
       skill_id: skill.id,
@@ -547,7 +547,7 @@ function attachmentTextsJsonbValue(attachmentTexts: Record<string, string> | nul
     : null;
 }
 
-function emptyAssistantDebugTrace(engine: GoatHarnessSpec["engine"], model: string) {
+function emptyAssistantDebugTrace(engine: HarnessSpec["engine"], model: string) {
   return {
     schemaVersion:
       engine === "opencompany" ? "opencompany.chat.debug.v1" : "goat.codex_chat.debug.v1",
@@ -561,8 +561,8 @@ function safeChatMessageId(value: string | null | undefined) {
   return trimmed && /^goat_chat_msg_[0-9a-f-]{36}$/i.test(trimmed) ? trimmed : null;
 }
 
-type GoatTaskRow = Omit<
-  GoatTask,
+type TaskRow = Omit<
+  Task,
   "scheduledFor" | "nextRunAt" | "leaseExpiresAt" | "archivedAt" | "createdAt" | "updatedAt"
 > & {
   scheduledFor: Date | string | null;
@@ -573,7 +573,7 @@ type GoatTaskRow = Omit<
   updatedAt: Date | string;
 };
 
-function goatTaskFromRow(row: GoatTaskRow): GoatTask {
+function taskFromRow(row: TaskRow): Task {
   return {
     ...row,
     scheduledFor: row.scheduledFor ? toDate(row.scheduledFor) : null,

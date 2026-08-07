@@ -1,13 +1,11 @@
-export type ValidatedGoatClaudeCodeToken =
-  | { ok: true; token: string }
-  | { ok: false; error: string };
+export type ValidatedClaudeCodeToken = { ok: true; token: string } | { ok: false; error: string };
 
 // Long-lived OAuth tokens from `claude setup-token` are prefixed sk-ant-oat.
 const CLAUDE_CODE_TOKEN_PREFIX = "sk-ant-oat";
 const CLAUDE_CODE_TOKEN_MIN_LENGTH = 32;
 const CLAUDE_CODE_TOKEN_MAX_LENGTH = 512;
 
-export function validateGoatClaudeCodeToken(value: string): ValidatedGoatClaudeCodeToken {
+export function validateClaudeCodeToken(value: string): ValidatedClaudeCodeToken {
   // Setup tokens are often copied from wrapped terminal output. Whitespace is not
   // part of the token alphabet, so remove it before validating the credential.
   const token = value.replace(/\s+/g, "");

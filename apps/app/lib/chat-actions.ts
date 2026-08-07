@@ -1,43 +1,39 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import {
-  closeGoatChatSessionForUser,
-  markGoatChatSessionSeenForUser,
-  reopenGoatChatSessionForUser,
-  setGoatChatSessionPinnedForUser,
+  closeChatSessionForUser,
+  markChatSessionSeenForUser,
+  reopenChatSessionForUser,
+  setChatSessionPinnedForUser,
 } from "@/lib/chat";
 import {
-  ensureGoatChatShareForUser,
-  findGoatChatShareForUser,
-  revokeGoatChatShareForUser,
+  ensureChatShareForUser,
+  findChatShareForUser,
+  revokeChatShareForUser,
 } from "@/lib/chat-sharing";
-import { closeGoatCodexChatSessionForChat } from "@/lib/codex-chat";
+import { closeCodexChatSessionForChat } from "@/lib/codex-chat";
 
-export type CloseGoatChatResult = {
+export type CloseChatResult = {
   ok: boolean;
   error: string | null;
 };
 
-export type CreateGoatChatShareResult =
-  | { ok: true; shareId: string }
-  | { ok: false; error: string };
+export type CreateChatShareResult = { ok: true; shareId: string } | { ok: false; error: string };
 
-export type GetGoatChatShareResult =
+export type GetChatShareResult =
   | { ok: true; shareId: string | null }
   | { ok: false; error: string };
 
-export type RevokeGoatChatShareResult = { ok: true } | { ok: false; error: string };
+export type RevokeChatShareResult = { ok: true } | { ok: false; error: string };
 
-export async function getGoatChatShareAction(
-  sessionId: string | null,
-): Promise<GetGoatChatShareResult> {
+export async function getChatShareAction(sessionId: string | null): Promise<GetChatShareResult> {
   const trimmed = sessionId?.trim();
   if (!trimmed) return { ok: false, error: "Could not load sharing settings." };
 
-  const { user, workspace } = await currentGoatUser();
-  const share = await findGoatChatShareForUser({
+  const { user, workspace } = await currentUser();
+  const share = await findChatShareForUser({
     userWorkosId: user.workosUserId,
     workspaceId: workspace.id,
     chatSessionId: trimmed,
@@ -45,14 +41,14 @@ export async function getGoatChatShareAction(
   return { ok: true, shareId: share?.id ?? null };
 }
 
-export async function createGoatChatShareAction(
+export async function createChatShareAction(
   sessionId: string | null,
-): Promise<CreateGoatChatShareResult> {
+): Promise<CreateChatShareResult> {
   const trimmed = sessionId?.trim();
   if (!trimmed) return { ok: false, error: "Could not share that chat." };
 
-  const { user, workspace } = await currentGoatUser();
-  const share = await ensureGoatChatShareForUser({
+  const { user, workspace } = await currentUser();
+  const share = await ensureChatShareForUser({
     userWorkosId: user.workosUserId,
     workspaceId: workspace.id,
     chatSessionId: trimmed,
@@ -62,14 +58,14 @@ export async function createGoatChatShareAction(
   return { ok: true, shareId: share.id };
 }
 
-export async function revokeGoatChatShareAction(
+export async function revokeChatShareAction(
   sessionId: string | null,
-): Promise<RevokeGoatChatShareResult> {
+): Promise<RevokeChatShareResult> {
   const trimmed = sessionId?.trim();
   if (!trimmed) return { ok: false, error: "Could not stop sharing that chat." };
 
-  const { user, workspace } = await currentGoatUser();
-  const revoked = await revokeGoatChatShareForUser({
+  const { user, workspace } = await currentUser();
+  const revoked = await revokeChatShareForUser({
     userWorkosId: user.workosUserId,
     workspaceId: workspace.id,
     chatSessionId: trimmed,
@@ -79,14 +75,12 @@ export async function revokeGoatChatShareAction(
   return { ok: true };
 }
 
-export async function closeGoatChatSessionAction(
-  sessionId: string | null,
-): Promise<CloseGoatChatResult> {
+export async function closeChatSessionAction(sessionId: string | null): Promise<CloseChatResult> {
   const trimmed = sessionId?.trim();
   if (!trimmed) return { ok: true, error: null };
 
-  const { user } = await currentGoatUser();
-  const closed = await closeGoatChatSessionForUser({
+  const { user } = await currentUser();
+  const closed = await closeChatSessionForUser({
     userWorkosId: user.workosUserId,
     sessionId: trimmed,
   });
@@ -96,7 +90,7 @@ export async function closeGoatChatSessionAction(
 
   // Best-effort engine cleanup; the chat close itself must not fail on it. No-op for
   // non-Codex chats (there is no matching engine session row).
-  await closeGoatCodexChatSessionForChat({
+  await closeCodexChatSessionForChat({
     userWorkosId: user.workosUserId,
     chatSessionId: trimmed,
   }).catch((error) => {
@@ -111,14 +105,12 @@ export async function closeGoatChatSessionAction(
   return { ok: true, error: null };
 }
 
-export async function reopenGoatChatSessionAction(
-  sessionId: string | null,
-): Promise<CloseGoatChatResult> {
+export async function reopenChatSessionAction(sessionId: string | null): Promise<CloseChatResult> {
   const trimmed = sessionId?.trim();
   if (!trimmed) return { ok: false, error: "Could not restore that chat." };
 
-  const { user } = await currentGoatUser();
-  const reopened = await reopenGoatChatSessionForUser({
+  const { user } = await currentUser();
+  const reopened = await reopenChatSessionForUser({
     userWorkosId: user.workosUserId,
     sessionId: trimmed,
   });
@@ -130,15 +122,15 @@ export async function reopenGoatChatSessionAction(
   return { ok: true, error: null };
 }
 
-export async function setGoatChatPinnedAction(
+export async function setChatPinnedAction(
   sessionId: string | null,
   pinned: boolean,
-): Promise<CloseGoatChatResult> {
+): Promise<CloseChatResult> {
   const trimmed = sessionId?.trim();
   if (!trimmed) return { ok: true, error: null };
 
-  const { user } = await currentGoatUser();
-  const updated = await setGoatChatSessionPinnedForUser({
+  const { user } = await currentUser();
+  const updated = await setChatSessionPinnedForUser({
     userWorkosId: user.workosUserId,
     sessionId: trimmed,
     pinned,
@@ -151,14 +143,12 @@ export async function setGoatChatPinnedAction(
   return { ok: true, error: null };
 }
 
-export async function markGoatChatSeenAction(
-  sessionId: string | null,
-): Promise<CloseGoatChatResult> {
+export async function markChatSeenAction(sessionId: string | null): Promise<CloseChatResult> {
   const trimmed = sessionId?.trim();
   if (!trimmed) return { ok: true, error: null };
 
-  const { user } = await currentGoatUser();
-  const updated = await markGoatChatSessionSeenForUser({
+  const { user } = await currentUser();
+  const updated = await markChatSessionSeenForUser({
     userWorkosId: user.workosUserId,
     sessionId: trimmed,
   });

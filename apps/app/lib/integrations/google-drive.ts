@@ -1,17 +1,17 @@
 import { getDb } from "@opencompany/db/client";
 import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-  refreshGoatIntegrationCredential,
+  loadIntegrationCredential,
+  markIntegrationStatus,
+  refreshIntegrationCredential,
 } from "@opencompany/db/integrations";
-import { goatIntegrations } from "@opencompany/db/schema";
+import { integrations } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
 
 const DRIVE_BASE = "https://www.googleapis.com/drive/v3";
 const REFRESH_SKEW_MS = 60_000;
 export const GOOGLE_DRIVE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 
-export type GoatGoogleDriveFile = {
+export type GoogleDriveFile = {
   id: string;
   name: string;
   mimeType: string;
@@ -24,12 +24,12 @@ export type GoatGoogleDriveFile = {
   canDownload: boolean;
 };
 
-export type GoatGoogleDrivePage = {
-  files: GoatGoogleDriveFile[];
+export type GoogleDrivePage = {
+  files: GoogleDriveFile[];
   nextPageToken: string | null;
 };
 
-export type GoatGoogleSharedDrive = { id: string; name: string };
+export type GoogleSharedDrive = { id: string; name: string };
 
 type GoogleDriveAccount = {
   integrationId: string;
@@ -44,34 +44,34 @@ type StoredTokens = {
   token_type?: string;
 };
 
-export class GoatGoogleDriveRequestError extends Error {
+export class GoogleDriveRequestError extends Error {
   constructor(
     message: string,
     readonly status: number,
   ) {
     super(message);
-    this.name = "GoatGoogleDriveRequestError";
+    this.name = "GoogleDriveRequestError";
   }
 }
 
-export async function loadOwnGoatGoogleDriveAccount(
+export async function loadOwnGoogleDriveAccount(
   userWorkosId: string,
   integrationId: string,
 ): Promise<GoogleDriveAccount | null> {
   const [row] = await getDb()
     .select({
-      integrationId: goatIntegrations.id,
-      userWorkosId: goatIntegrations.userWorkosId,
-      accountEmail: goatIntegrations.accountEmail,
-      status: goatIntegrations.status,
-      workspaceId: goatIntegrations.workspaceId,
+      integrationId: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      accountEmail: integrations.accountEmail,
+      status: integrations.status,
+      workspaceId: integrations.workspaceId,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.id, integrationId),
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, "google_drive"),
+        eq(integrations.id, integrationId),
+        eq(integrations.userWorkosId, userWorkosId),
+        eq(integrations.provider, "google_drive"),
       ),
     )
     .limit(1);
@@ -83,13 +83,13 @@ export async function loadOwnGoatGoogleDriveAccount(
   };
 }
 
-export async function listGoatGoogleDriveFiles(input: {
+export async function listGoogleDriveFiles(input: {
   account: GoogleDriveAccount;
   parentId?: string;
   query?: string;
   pageToken?: string;
   signal?: AbortSignal;
-}): Promise<GoatGoogleDrivePage> {
+}): Promise<GoogleDrivePage> {
   const url = new URL(`${DRIVE_BASE}/files`);
   url.searchParams.set("pageSize", "100");
   url.searchParams.set("orderBy", "folder,name_natural");
@@ -108,7 +108,7 @@ export async function listGoatGoogleDriveFiles(input: {
   url.searchParams.set("q", query.join(" and "));
   if (input.pageToken) url.searchParams.set("pageToken", input.pageToken);
 
-  const data = await goatGoogleDriveJsonRequest<Record<string, unknown>>({
+  const data = await googleDriveJsonRequest<Record<string, unknown>>({
     account: input.account,
     url,
     ...(input.signal ? { signal: input.signal } : {}),
@@ -122,18 +122,18 @@ export async function listGoatGoogleDriveFiles(input: {
   };
 }
 
-export async function listGoatGoogleSharedDrives(input: {
+export async function listGoogleSharedDrives(input: {
   account: GoogleDriveAccount;
   signal?: AbortSignal;
-}): Promise<GoatGoogleSharedDrive[]> {
-  const drives: GoatGoogleSharedDrive[] = [];
+}): Promise<GoogleSharedDrive[]> {
+  const drives: GoogleSharedDrive[] = [];
   let pageToken: string | null = null;
   do {
     const url = new URL(`${DRIVE_BASE}/drives`);
     url.searchParams.set("pageSize", "100");
     url.searchParams.set("fields", "nextPageToken,drives(id,name)");
     if (pageToken) url.searchParams.set("pageToken", pageToken);
-    const data = await goatGoogleDriveJsonRequest<Record<string, unknown>>({
+    const data = await googleDriveJsonRequest<Record<string, unknown>>({
       account: input.account,
       url,
       ...(input.signal ? { signal: input.signal } : {}),
@@ -151,18 +151,18 @@ export async function listGoatGoogleSharedDrives(input: {
   return drives;
 }
 
-export async function getGoatGoogleDriveFile(input: {
+export async function getGoogleDriveFile(input: {
   account: GoogleDriveAccount;
   fileId: string;
   signal?: AbortSignal;
-}): Promise<GoatGoogleDriveFile> {
+}): Promise<GoogleDriveFile> {
   const url = new URL(`${DRIVE_BASE}/files/${encodeURIComponent(input.fileId)}`);
   url.searchParams.set("supportsAllDrives", "true");
   url.searchParams.set(
     "fields",
     "id,name,mimeType,driveId,webViewLink,parents,modifiedTime,version,trashed,capabilities(canDownload)",
   );
-  const value = await goatGoogleDriveJsonRequest<unknown>({
+  const value = await googleDriveJsonRequest<unknown>({
     account: input.account,
     url,
     ...(input.signal ? { signal: input.signal } : {}),
@@ -172,7 +172,7 @@ export async function getGoatGoogleDriveFile(input: {
   return file;
 }
 
-export async function getGoatGoogleDriveStartPageToken(input: {
+export async function getGoogleDriveStartPageToken(input: {
   account: GoogleDriveAccount;
   driveId?: string | null;
   signal?: AbortSignal;
@@ -180,7 +180,7 @@ export async function getGoatGoogleDriveStartPageToken(input: {
   const url = new URL(`${DRIVE_BASE}/changes/startPageToken`);
   url.searchParams.set("supportsAllDrives", "true");
   if (input.driveId) url.searchParams.set("driveId", input.driveId);
-  const data = await goatGoogleDriveJsonRequest<Record<string, unknown>>({
+  const data = await googleDriveJsonRequest<Record<string, unknown>>({
     account: input.account,
     url,
     ...(input.signal ? { signal: input.signal } : {}),
@@ -190,7 +190,7 @@ export async function getGoatGoogleDriveStartPageToken(input: {
   return startPageToken;
 }
 
-async function goatGoogleDriveJsonRequest<T>(input: {
+async function googleDriveJsonRequest<T>(input: {
   account: GoogleDriveAccount;
   url: URL;
   signal?: AbortSignal;
@@ -200,14 +200,14 @@ async function goatGoogleDriveJsonRequest<T>(input: {
       headers: { Authorization: `Bearer ${accessToken}` },
       ...(input.signal ? { signal: input.signal } : {}),
     });
-  let accessToken = await getGoatGoogleDriveAccessToken(input.account, input.signal);
+  let accessToken = await getGoogleDriveAccessToken(input.account, input.signal);
   let response = await run(accessToken);
   if (response.status === 401) {
-    accessToken = await getGoatGoogleDriveAccessToken(input.account, input.signal, true);
+    accessToken = await getGoogleDriveAccessToken(input.account, input.signal, true);
     response = await run(accessToken);
   }
   if (!response.ok) {
-    throw new GoatGoogleDriveRequestError(
+    throw new GoogleDriveRequestError(
       `Google Drive API request failed with ${response.status}.`,
       response.status,
     );
@@ -215,12 +215,12 @@ async function goatGoogleDriveJsonRequest<T>(input: {
   return (await response.json()) as T;
 }
 
-async function getGoatGoogleDriveAccessToken(
+async function getGoogleDriveAccessToken(
   account: GoogleDriveAccount,
   signal?: AbortSignal,
   forceRefresh = false,
 ) {
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId: account.userWorkosId,
     integrationId: account.integrationId,
     provider: "google_drive",
@@ -268,7 +268,7 @@ async function getGoatGoogleDriveAccessToken(
     scope: result.scope ?? tokens.scope,
     token_type: result.token_type ?? tokens.token_type,
   };
-  await refreshGoatIntegrationCredential({
+  await refreshIntegrationCredential({
     userWorkosId: account.userWorkosId,
     integrationId: account.integrationId,
     provider: "google_drive",
@@ -286,7 +286,7 @@ async function getGoatGoogleDriveAccessToken(
 }
 
 async function markNeedsReauth(account: GoogleDriveAccount, reason: string) {
-  await markGoatIntegrationStatus({
+  await markIntegrationStatus({
     userWorkosId: account.userWorkosId,
     integrationId: account.integrationId,
     provider: "google_drive",
@@ -296,7 +296,7 @@ async function markNeedsReauth(account: GoogleDriveAccount, reason: string) {
   });
 }
 
-function parseDriveFile(value: unknown): GoatGoogleDriveFile | null {
+function parseDriveFile(value: unknown): GoogleDriveFile | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   const id = readString(row.id);

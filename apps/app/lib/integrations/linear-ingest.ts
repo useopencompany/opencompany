@@ -1,24 +1,24 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
 import { GOAT_LINEAR_MCP_EXTERNAL_ID } from "@opencompany/db/linear";
-import { goatIntegrations } from "@opencompany/db/schema";
+import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq, ne } from "drizzle-orm";
-import type { GoatLinearSourceProviderState } from "@/lib/integration-state";
-import { getGoatAppUrl } from "@/lib/workos";
+import type { LinearSourceProviderState } from "@/lib/integration-state";
+import { getAppUrl } from "@/lib/workos";
 
-export type GoatLinearIngestStatePayload = {
+export type LinearIngestStatePayload = {
   userWorkosId: string;
   returnTo: string;
   expiresAt: number;
   nonce: string;
 };
 
-export type GoatLinearOAuthResult = {
+export type LinearOAuthResult = {
   accessToken: string;
   scopes: string[];
 };
 
-export type GoatLinearIdentity = {
+export type LinearIdentity = {
   organizationId: string;
   organizationName: string | null;
   organizationUrlKey: string | null;
@@ -39,32 +39,32 @@ const GOAT_LINEAR_INGEST_ENVS = [
 // enrich ingestion. Writes never happen through this connection.
 export const GOAT_LINEAR_INGEST_SCOPES = ["read"] as const;
 
-export function isGoatLinearIngestConfigured() {
+export function isLinearIngestConfigured() {
   return GOAT_LINEAR_INGEST_ENVS.every((name) => Boolean(process.env[name]?.trim()));
 }
 
 // The ingestion connection only; the Linear MCP connector shares provider
 // "linear" but keys external_id on the "linear_mcp" sentinel and is excluded.
-export async function getGoatLinearSourceIntegrationState(
+export async function getLinearSourceIntegrationState(
   userWorkosId: string,
-): Promise<GoatLinearSourceProviderState> {
+): Promise<LinearSourceProviderState> {
   const [row] = await getDb()
     .select({
-      id: goatIntegrations.id,
-      status: goatIntegrations.status,
-      accountName: goatIntegrations.accountName,
-      connectionLabel: goatIntegrations.connectionLabel,
-      statusReason: goatIntegrations.statusReason,
+      id: integrations.id,
+      status: integrations.status,
+      accountName: integrations.accountName,
+      connectionLabel: integrations.connectionLabel,
+      statusReason: integrations.statusReason,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, LINEAR_PROVIDER),
-        ne(goatIntegrations.externalId, GOAT_LINEAR_MCP_EXTERNAL_ID),
+        eq(integrations.userWorkosId, userWorkosId),
+        eq(integrations.provider, LINEAR_PROVIDER),
+        ne(integrations.externalId, GOAT_LINEAR_MCP_EXTERNAL_ID),
       ),
     )
-    .orderBy(desc(goatIntegrations.updatedAt))
+    .orderBy(desc(integrations.updatedAt))
     .limit(1);
 
   if (!row || row.status === "disconnected") {
@@ -90,10 +90,10 @@ export async function getGoatLinearSourceIntegrationState(
   };
 }
 
-export function createGoatLinearIngestState(
-  input: Omit<GoatLinearIngestStatePayload, "expiresAt" | "nonce">,
+export function createLinearIngestState(
+  input: Omit<LinearIngestStatePayload, "expiresAt" | "nonce">,
 ) {
-  const payload: GoatLinearIngestStatePayload = {
+  const payload: LinearIngestStatePayload = {
     ...input,
     returnTo: sanitizeReturnTo(input.returnTo),
     expiresAt: Date.now() + 10 * 60 * 1000,
@@ -103,14 +103,14 @@ export function createGoatLinearIngestState(
   return `${body}.${signStateBody(body)}`;
 }
 
-export function verifyGoatLinearIngestState(state: string): GoatLinearIngestStatePayload {
+export function verifyLinearIngestState(state: string): LinearIngestStatePayload {
   const [body, signature] = state.split(".");
   if (!body || !signature || !safeEqual(signature, signStateBody(body))) {
     throw new Error("Invalid Linear integration state.");
   }
 
   const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as unknown;
-  if (!isGoatLinearIngestStatePayload(payload)) {
+  if (!isLinearIngestStatePayload(payload)) {
     throw new Error("Invalid Linear integration state payload.");
   }
   if (payload.expiresAt < Date.now()) {
@@ -123,10 +123,10 @@ export function verifyGoatLinearIngestState(state: string): GoatLinearIngestStat
   };
 }
 
-export function buildGoatLinearAuthorizationUrl(state: string) {
+export function buildLinearAuthorizationUrl(state: string) {
   const url = new URL("https://linear.app/oauth/authorize");
   url.searchParams.set("client_id", requiredEnv("GOAT_LINEAR_CLIENT_ID"));
-  url.searchParams.set("redirect_uri", goatLinearIngestCallbackUrl());
+  url.searchParams.set("redirect_uri", linearIngestCallbackUrl());
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", GOAT_LINEAR_INGEST_SCOPES.join(","));
   url.searchParams.set("state", state);
@@ -135,14 +135,14 @@ export function buildGoatLinearAuthorizationUrl(state: string) {
   return url.toString();
 }
 
-export async function exchangeGoatLinearCode(code: string): Promise<GoatLinearOAuthResult> {
+export async function exchangeLinearCode(code: string): Promise<LinearOAuthResult> {
   const response = await fetch("https://api.linear.app/oauth/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code,
-      redirect_uri: goatLinearIngestCallbackUrl(),
+      redirect_uri: linearIngestCallbackUrl(),
       client_id: requiredEnv("GOAT_LINEAR_CLIENT_ID"),
       client_secret: requiredEnv("GOAT_LINEAR_CLIENT_SECRET"),
     }).toString(),
@@ -162,13 +162,13 @@ export async function exchangeGoatLinearCode(code: string): Promise<GoatLinearOA
   };
 }
 
-export async function fetchGoatLinearIdentity(accessToken: string): Promise<GoatLinearIdentity> {
+export async function fetchLinearIdentity(accessToken: string): Promise<LinearIdentity> {
   const data = await linearGraphqlRequest<{
     viewer?: { id?: string; name?: string; displayName?: string; email?: string };
     organization?: { id?: string; name?: string; urlKey?: string };
   }>({
     token: accessToken,
-    query: `query GoatLinearIdentity {
+    query: `query LinearIdentity {
       viewer { id name displayName email }
       organization { id name urlKey }
     }`,
@@ -189,12 +189,12 @@ export async function fetchGoatLinearIdentity(accessToken: string): Promise<Goat
   };
 }
 
-export function appendGoatLinearIngestStatus(
+export function appendLinearIngestStatus(
   returnTo: string,
   status: "connected" | "error",
   reason?: string,
 ) {
-  const url = new URL(sanitizeReturnTo(returnTo), getGoatAppUrl());
+  const url = new URL(sanitizeReturnTo(returnTo), getAppUrl());
   url.searchParams.set("integration", LINEAR_PROVIDER);
   url.searchParams.set("setup", status);
   if (status === "error" && reason) url.searchParams.set("reason", reason);
@@ -234,11 +234,11 @@ export async function linearGraphqlRequest<T>(input: {
   return result.data;
 }
 
-function goatLinearIngestCallbackUrl() {
-  return `${getGoatAppUrl()}/api/integrations/linear-ingest/callback`;
+function linearIngestCallbackUrl() {
+  return `${getAppUrl()}/api/integrations/linear-ingest/callback`;
 }
 
-function isGoatLinearIngestStatePayload(value: unknown): value is GoatLinearIngestStatePayload {
+function isLinearIngestStatePayload(value: unknown): value is LinearIngestStatePayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return (

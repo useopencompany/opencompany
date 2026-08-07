@@ -1,5 +1,5 @@
-import { registerGoatNextObservability } from "@opencompany/telemetry/next";
+import { registerNextObservability } from "@opencompany/telemetry/next";
 
 export function register() {
-  registerGoatNextObservability({ serviceName: "opencompany-goat" });
+  registerNextObservability({ serviceName: "opencompany-goat" });
 }

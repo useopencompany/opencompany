@@ -1,36 +1,36 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
-import type { GoatGranolaProviderState } from "@/lib/integration-state";
+import { currentUser } from "@/lib/auth";
+import type { GranolaProviderState } from "@/lib/integration-state";
 import {
-  connectGoatGranolaIntegration,
-  getGoatGranolaIntegrationState,
+  connectGranolaIntegration,
+  getGranolaIntegrationState,
   isValidGranolaApiKey,
-  validateGoatGranolaApiKey,
+  validateGranolaApiKey,
 } from "@/lib/integrations/granola";
 
 export type GranolaConnectActionResult =
-  | { ok: true; state: GoatGranolaProviderState }
+  | { ok: true; state: GranolaProviderState }
   | { ok: false; error: string };
 
 export async function saveGranolaApiKeyAction(apiKey: string): Promise<GranolaConnectActionResult> {
-  const { user } = await currentGoatUser();
+  const { user } = await currentUser();
   const trimmed = apiKey.trim();
   if (!isValidGranolaApiKey(trimmed)) {
     return { ok: false, error: "Granola API keys start with grn_. Check the key and try again." };
   }
   try {
-    const validation = await validateGoatGranolaApiKey(trimmed);
+    const validation = await validateGranolaApiKey(trimmed);
     if (!validation.ok) return { ok: false, error: validation.error };
-    await connectGoatGranolaIntegration({
+    await connectGranolaIntegration({
       userWorkosId: user.workosUserId,
       apiKey: trimmed,
       accountEmail: validation.accountEmail,
       accountName: validation.accountName,
     });
     revalidatePath("/", "layout");
-    return { ok: true, state: await getGoatGranolaIntegrationState(user.workosUserId) };
+    return { ok: true, state: await getGranolaIntegrationState(user.workosUserId) };
   } catch (error) {
     console.error("[goat-granola] Failed to save Granola API key", error);
     return {

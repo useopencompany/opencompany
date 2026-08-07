@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  closeGoatCodexChatSessionForChat,
-  createGoatCodexChatMessage as createGoatCodexChatMessageImpl,
-  createGoatCodingWorkspaceRuntimeAccess,
-  getGoatCodexChatSandboxStatus,
-  interruptGoatCodexChatSession,
+  closeCodexChatSessionForChat,
+  createCodexChatMessage as createCodexChatMessageImpl,
+  createCodingWorkspaceRuntimeAccess,
+  getCodexChatSandboxStatus,
+  interruptCodexChatSession,
 } from "@/lib/codex-chat";
 
-const createGoatCodexChatMessage = (
-  input: Omit<Parameters<typeof createGoatCodexChatMessageImpl>[0], "workspaceId">,
-) => createGoatCodexChatMessageImpl({ ...input, workspaceId: "workspace_1" });
+const createCodexChatMessage = (
+  input: Omit<Parameters<typeof createCodexChatMessageImpl>[0], "workspaceId">,
+) => createCodexChatMessageImpl({ ...input, workspaceId: "workspace_1" });
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
@@ -34,17 +34,17 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@/lib/codex-auth", () => ({
-  isGoatCodexConnectedForUser: mocks.codexConnected,
+  isCodexConnectedForUser: mocks.codexConnected,
 }));
 
 // Pulls in @/lib/auth (authkit), which vitest cannot resolve.
 vi.mock("@/lib/claude-code-auth", () => ({
-  isGoatClaudeCodeConnectedForUser: mocks.claudeConnected,
+  isClaudeCodeConnectedForUser: mocks.claudeConnected,
 }));
 
 vi.mock("@/lib/task-runner", () => ({
-  requestGoatCodingWorkspaceRuntimeAccess: mocks.runtimeAccess,
-  GoatCodingWorkspaceRequestError: class GoatCodingWorkspaceRequestError extends Error {
+  requestCodingWorkspaceRuntimeAccess: mocks.runtimeAccess,
+  CodingWorkspaceRequestError: class CodingWorkspaceRequestError extends Error {
     constructor(
       message: string,
       readonly statusCode: number,
@@ -52,13 +52,13 @@ vi.mock("@/lib/task-runner", () => ({
       super(message);
     }
   },
-  getGoatCodexSandboxStatus: mocks.getSandboxStatus,
-  killGoatCodexSandbox: mocks.killSandbox,
-  triggerGoatCodexChatWake: mocks.wake,
+  getCodexSandboxStatus: mocks.getSandboxStatus,
+  killCodexSandbox: mocks.killSandbox,
+  triggerCodexChatWake: mocks.wake,
 }));
 
 vi.mock("@/lib/chat", () => ({
-  newGoatChatMessageId: vi.fn(() => "goat_chat_msg_mock"),
+  newChatMessageId: vi.fn(() => "goat_chat_msg_mock"),
 }));
 
 function sqlText(query: unknown) {
@@ -88,7 +88,7 @@ function createUpdateBuilder(rows: unknown[]) {
   return builder;
 }
 
-describe("createGoatCodexChatMessage", () => {
+describe("createCodexChatMessage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.selectResults.length = 0;
@@ -100,17 +100,18 @@ describe("createGoatCodexChatMessage", () => {
   });
 
   it("rejects empty and oversized prompts", async () => {
+    expect(await createCodexChatMessage({ userWorkosId: "user_1", prompt: "   " })).toMatchObject({
+      ok: false,
+      status: 400,
+    });
     expect(
-      await createGoatCodexChatMessage({ userWorkosId: "user_1", prompt: "   " }),
-    ).toMatchObject({ ok: false, status: 400 });
-    expect(
-      await createGoatCodexChatMessage({ userWorkosId: "user_1", prompt: "x".repeat(10_001) }),
+      await createCodexChatMessage({ userWorkosId: "user_1", prompt: "x".repeat(10_001) }),
     ).toMatchObject({ ok: false, status: 400 });
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 
   it("rejects invalid Codex settings before writing", async () => {
-    const result = await createGoatCodexChatMessage({
+    const result = await createCodexChatMessage({
       userWorkosId: "user_1",
       prompt: "hello",
       settings: { reasoningEffort: "extreme" },
@@ -126,7 +127,7 @@ describe("createGoatCodexChatMessage", () => {
   });
 
   it("rejects models outside the supported Codex catalog", async () => {
-    const result = await createGoatCodexChatMessage({
+    const result = await createCodexChatMessage({
       userWorkosId: "user_1",
       prompt: "hello",
       model: "openai/gpt-5.4-nano",
@@ -142,7 +143,7 @@ describe("createGoatCodexChatMessage", () => {
   });
 
   it("rejects invalid Claude settings before writing", async () => {
-    const result = await createGoatCodexChatMessage({
+    const result = await createCodexChatMessage({
       userWorkosId: "user_1",
       prompt: "hello",
       engine: "claude_code",
@@ -159,14 +160,14 @@ describe("createGoatCodexChatMessage", () => {
 
   it("rejects sends while Codex is disconnected", async () => {
     mocks.codexConnected.mockResolvedValue(false);
-    const result = await createGoatCodexChatMessage({ userWorkosId: "user_1", prompt: "hello" });
+    const result = await createCodexChatMessage({ userWorkosId: "user_1", prompt: "hello" });
     expect(result).toMatchObject({ ok: false, status: 409 });
     expect(mocks.execute).not.toHaveBeenCalled();
     expect(mocks.wake).not.toHaveBeenCalled();
   });
 
   it("creates a new session atomically and wakes the runner", async () => {
-    const result = await createGoatCodexChatMessage({
+    const result = await createCodexChatMessage({
       userWorkosId: "user_1",
       brainRef: "brain_1",
       prompt: "clone my repo",
@@ -190,7 +191,7 @@ describe("createGoatCodexChatMessage", () => {
   });
 
   it("persists immutable native skill snapshots with the first session turn", async () => {
-    await createGoatCodexChatMessage({
+    await createCodexChatMessage({
       userWorkosId: "user_1",
       prompt: "Implement this",
       skills: [
@@ -213,7 +214,7 @@ describe("createGoatCodexChatMessage", () => {
   });
 
   it("persists attachments and allows an attachment-only first turn", async () => {
-    const result = await createGoatCodexChatMessage({
+    const result = await createCodexChatMessage({
       userWorkosId: "user_1",
       prompt: "",
       attachments: [
@@ -243,7 +244,7 @@ describe("createGoatCodexChatMessage", () => {
   });
 
   it("persists the selected Codex model on a new chat and engine session", async () => {
-    const result = await createGoatCodexChatMessage({
+    const result = await createCodexChatMessage({
       userWorkosId: "user_1",
       prompt: "clone my repo",
       model: "openai/gpt-5.6-terra",
@@ -264,7 +265,7 @@ describe("createGoatCodexChatMessage", () => {
   });
 
   it("persists the selected Claude model and effort on a new chat", async () => {
-    const result = await createGoatCodexChatMessage({
+    const result = await createCodexChatMessage({
       userWorkosId: "user_1",
       prompt: "clone my repo",
       engine: "claude_code",
@@ -288,7 +289,7 @@ describe("createGoatCodexChatMessage", () => {
   });
 
   it("enqueues an internal OpenCompany turn without coding credentials or sandbox state", async () => {
-    const result = await createGoatCodexChatMessage({
+    const result = await createCodexChatMessage({
       userWorkosId: "user_1",
       prompt: "Summarize the launch notes",
       engine: "opencompany",
@@ -314,7 +315,7 @@ describe("createGoatCodexChatMessage", () => {
   });
 
   it("rejects unsupported models for an internal OpenCompany enqueue", async () => {
-    const result = await createGoatCodexChatMessage({
+    const result = await createCodexChatMessage({
       userWorkosId: "user_1",
       prompt: "hello",
       engine: "opencompany",
@@ -331,7 +332,7 @@ describe("createGoatCodexChatMessage", () => {
 
   it("returns 404 for an unknown or foreign session", async () => {
     mocks.selectResults.push([]);
-    const result = await createGoatCodexChatMessage({
+    const result = await createCodexChatMessage({
       userWorkosId: "user_1",
       sessionId: "goat_chat_other",
       prompt: "hello",
@@ -355,7 +356,7 @@ describe("createGoatCodexChatMessage", () => {
         },
       },
     ]);
-    const result = await createGoatCodexChatMessage({
+    const result = await createCodexChatMessage({
       userWorkosId: "user_1",
       sessionId: "goat_chat_1",
       prompt: "also do this",
@@ -390,7 +391,7 @@ describe("createGoatCodexChatMessage", () => {
       },
     ]);
 
-    await createGoatCodexChatMessage({
+    await createCodexChatMessage({
       userWorkosId: "user_1",
       sessionId: "goat_chat_1",
       prompt: "I have an update",
@@ -421,7 +422,7 @@ describe("createGoatCodexChatMessage", () => {
         },
       },
     ]);
-    await createGoatCodexChatMessage({
+    await createCodexChatMessage({
       userWorkosId: "user_1",
       sessionId: "goat_chat_1",
       prompt: "Implement this",
@@ -464,7 +465,7 @@ describe("createGoatCodexChatMessage", () => {
       },
     ]);
 
-    const result = await createGoatCodexChatMessage({
+    const result = await createCodexChatMessage({
       userWorkosId: "user_1",
       sessionId: "goat_chat_1",
       prompt: "try again",
@@ -480,12 +481,12 @@ describe("createGoatCodexChatMessage", () => {
 
   it("still succeeds when the runner wake fails", async () => {
     mocks.wake.mockRejectedValue(new Error("runner offline"));
-    const result = await createGoatCodexChatMessage({ userWorkosId: "user_1", prompt: "hello" });
+    const result = await createCodexChatMessage({ userWorkosId: "user_1", prompt: "hello" });
     expect(result).toMatchObject({ ok: true });
   });
 });
 
-describe("interruptGoatCodexChatSession", () => {
+describe("interruptCodexChatSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.selectResults.length = 0;
@@ -495,7 +496,7 @@ describe("interruptGoatCodexChatSession", () => {
 
   it("returns 404 for an unknown session", async () => {
     mocks.selectResults.push([]);
-    const result = await interruptGoatCodexChatSession({
+    const result = await interruptCodexChatSession({
       userWorkosId: "user_1",
       chatSessionId: "goat_chat_unknown",
     });
@@ -516,7 +517,7 @@ describe("interruptGoatCodexChatSession", () => {
         },
       },
     ]);
-    const result = await interruptGoatCodexChatSession({
+    const result = await interruptCodexChatSession({
       userWorkosId: "user_1",
       chatSessionId: "goat_chat_1",
     });
@@ -542,7 +543,7 @@ describe("interruptGoatCodexChatSession", () => {
       },
     ]);
 
-    await interruptGoatCodexChatSession({
+    await interruptCodexChatSession({
       userWorkosId: "user_1",
       chatSessionId: "goat_chat_1",
     });
@@ -566,7 +567,7 @@ describe("interruptGoatCodexChatSession", () => {
         },
       },
     ]);
-    const result = await interruptGoatCodexChatSession({
+    const result = await interruptCodexChatSession({
       userWorkosId: "user_1",
       chatSessionId: "goat_chat_1",
     });
@@ -579,7 +580,7 @@ describe("interruptGoatCodexChatSession", () => {
   });
 });
 
-describe("closeGoatCodexChatSessionForChat", () => {
+describe("closeCodexChatSessionForChat", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.updateResults.length = 0;
@@ -591,7 +592,7 @@ describe("closeGoatCodexChatSessionForChat", () => {
   it("settles a settled session to closed and kills its sandbox", async () => {
     mocks.updateResults.push([{ sandboxId: "sbx_123" }]);
 
-    await closeGoatCodexChatSessionForChat({
+    await closeCodexChatSessionForChat({
       userWorkosId: "user_1",
       chatSessionId: "goat_chat_1",
     });
@@ -604,13 +605,13 @@ describe("closeGoatCodexChatSessionForChat", () => {
 
   it("skips the kill when no engine session matched or none has a sandbox", async () => {
     mocks.updateResults.push([]);
-    await closeGoatCodexChatSessionForChat({
+    await closeCodexChatSessionForChat({
       userWorkosId: "user_1",
       chatSessionId: "goat_chat_plain",
     });
 
     mocks.updateResults.push([{ sandboxId: null }]);
-    await closeGoatCodexChatSessionForChat({
+    await closeCodexChatSessionForChat({
       userWorkosId: "user_1",
       chatSessionId: "goat_chat_no_sandbox",
     });
@@ -623,7 +624,7 @@ describe("closeGoatCodexChatSessionForChat", () => {
     mocks.killSandbox.mockRejectedValue(new Error("runner down"));
 
     await expect(
-      closeGoatCodexChatSessionForChat({
+      closeCodexChatSessionForChat({
         userWorkosId: "user_1",
         chatSessionId: "goat_chat_1",
       }),
@@ -631,7 +632,7 @@ describe("closeGoatCodexChatSessionForChat", () => {
   });
 });
 
-describe("getGoatCodexChatSandboxStatus", () => {
+describe("getCodexChatSandboxStatus", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.selectResults.length = 0;
@@ -655,7 +656,7 @@ describe("getGoatCodexChatSandboxStatus", () => {
     ]);
 
     await expect(
-      getGoatCodexChatSandboxStatus({
+      getCodexChatSandboxStatus({
         userWorkosId: "user_1",
         chatSessionId: "goat_chat_1",
       }),
@@ -680,7 +681,7 @@ describe("getGoatCodexChatSandboxStatus", () => {
     mocks.getSandboxStatus.mockResolvedValue("sleeping");
 
     await expect(
-      getGoatCodexChatSandboxStatus({
+      getCodexChatSandboxStatus({
         userWorkosId: "user_1",
         chatSessionId: "goat_chat_1",
       }),
@@ -689,7 +690,7 @@ describe("getGoatCodexChatSandboxStatus", () => {
   });
 });
 
-describe("createGoatCodingWorkspaceRuntimeAccess", () => {
+describe("createCodingWorkspaceRuntimeAccess", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.selectResults.length = 0;
@@ -719,7 +720,7 @@ describe("createGoatCodingWorkspaceRuntimeAccess", () => {
       sandboxStatus: "sleeping",
     });
 
-    const result = await createGoatCodingWorkspaceRuntimeAccess({
+    const result = await createCodingWorkspaceRuntimeAccess({
       userWorkosId: "user_1",
       chatSessionId: "goat_chat_1",
     });
@@ -739,7 +740,7 @@ describe("createGoatCodingWorkspaceRuntimeAccess", () => {
     mocks.selectResults.push([]);
 
     await expect(
-      createGoatCodingWorkspaceRuntimeAccess({
+      createCodingWorkspaceRuntimeAccess({
         userWorkosId: "user_other",
         chatSessionId: "goat_chat_1",
       }),
@@ -772,7 +773,7 @@ describe("createGoatCodingWorkspaceRuntimeAccess", () => {
     });
 
     await expect(
-      createGoatCodingWorkspaceRuntimeAccess({
+      createCodingWorkspaceRuntimeAccess({
         userWorkosId: "user_1",
         chatSessionId: "goat_chat_1",
       }),
@@ -808,7 +809,7 @@ describe("createGoatCodingWorkspaceRuntimeAccess", () => {
     ]);
 
     await expect(
-      createGoatCodingWorkspaceRuntimeAccess({
+      createCodingWorkspaceRuntimeAccess({
         userWorkosId: "user_1",
         chatSessionId: "goat_chat_1",
       }),

@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  claimGoatActionAsyncRun,
-  claimGoatActionInvocation,
-  storeGoatActionCapabilityQuote,
+  claimActionAsyncRun,
+  claimActionInvocation,
+  storeActionCapabilityQuote,
 } from "./action-governance";
 
 const turn = {
@@ -29,7 +29,7 @@ describe("Goat action turn governance", () => {
     });
 
     await expect(
-      claimGoatActionInvocation({
+      claimActionInvocation({
         turn,
         sourceId: "gmail",
         invocationId: "invocation_1",
@@ -41,7 +41,7 @@ describe("Goat action turn governance", () => {
 
   it("distinguishes discovery failures from the shared call budget", async () => {
     await expect(
-      claimGoatActionInvocation({
+      claimActionInvocation({
         turn,
         sourceId: "gmail",
         invocationId: "invocation_1",
@@ -54,7 +54,7 @@ describe("Goat action turn governance", () => {
     ).resolves.toEqual({ ok: false, reason: "list_required" });
 
     await expect(
-      claimGoatActionInvocation({
+      claimActionInvocation({
         turn,
         sourceId: "gmail",
         invocationId: "invocation_17",
@@ -77,7 +77,7 @@ describe("Goat action turn governance", () => {
     };
 
     await expect(
-      storeGoatActionCapabilityQuote({
+      storeActionCapabilityQuote({
         turn,
         invocationId: "invocation_1",
         quote,
@@ -87,7 +87,7 @@ describe("Goat action turn governance", () => {
       }),
     ).resolves.toBe(false);
     await expect(
-      storeGoatActionCapabilityQuote({
+      storeActionCapabilityQuote({
         turn,
         invocationId: "invocation_1",
         quote,
@@ -97,7 +97,7 @@ describe("Goat action turn governance", () => {
       }),
     ).resolves.toBe(true);
     await expect(
-      claimGoatActionAsyncRun({
+      claimActionAsyncRun({
         turn,
         invocationId: "invocation_1",
         maxRuns: 6,

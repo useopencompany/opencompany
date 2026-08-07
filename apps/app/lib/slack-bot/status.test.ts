@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { slackApiRequest } from "@/lib/integrations/slack";
-import { createGoatSlackBotStatusReporter } from "./status";
+import { createSlackBotStatusReporter } from "./status";
 
 vi.mock("@/lib/integrations/slack", () => ({
   slackApiRequest: vi.fn(async () => ({ ok: true, ts: "111.222" })),
@@ -26,7 +26,7 @@ const BASE = {
   threadTs: "1784196000.000100",
 };
 
-describe("createGoatSlackBotStatusReporter", () => {
+describe("createSlackBotStatusReporter", () => {
   beforeEach(() => {
     vi.mocked(slackApiRequest).mockClear();
     vi.mocked(slackApiRequest).mockResolvedValue({ ok: true, ts: "111.222" });
@@ -34,7 +34,7 @@ describe("createGoatSlackBotStatusReporter", () => {
 
   it("reacts with eyes, posts a status message, and swaps it for the answer", async () => {
     let nowValue = 0;
-    const status = createGoatSlackBotStatusReporter({
+    const status = createSlackBotStatusReporter({
       ...BASE,
       canReact: true,
       nowMs: () => nowValue,
@@ -71,7 +71,7 @@ describe("createGoatSlackBotStatusReporter", () => {
 
   it("drops phase updates inside the throttle window and repeats of the same phase", async () => {
     let nowValue = 0;
-    const status = createGoatSlackBotStatusReporter({
+    const status = createSlackBotStatusReporter({
       ...BASE,
       canReact: false,
       nowMs: () => nowValue,
@@ -104,7 +104,7 @@ describe("createGoatSlackBotStatusReporter", () => {
       return { ok: true, ts: "111.222" };
     });
 
-    const status = createGoatSlackBotStatusReporter({ ...BASE, canReact: false });
+    const status = createSlackBotStatusReporter({ ...BASE, canReact: false });
     await flush();
     status.setPhase("Searching the brain…");
     await flush();
@@ -125,7 +125,7 @@ describe("createGoatSlackBotStatusReporter", () => {
   });
 
   it("skips reactions when the install lacks the scope", async () => {
-    const status = createGoatSlackBotStatusReporter({ ...BASE, canReact: false });
+    const status = createSlackBotStatusReporter({ ...BASE, canReact: false });
     await status.finish("done");
     expect(calls().every((call) => !call.method.startsWith("reactions."))).toBe(true);
   });
@@ -135,7 +135,7 @@ describe("createGoatSlackBotStatusReporter", () => {
     vi.mocked(slackApiRequest).mockRejectedValueOnce(new Error("channel_not_found")); // postMessage
     vi.mocked(slackApiRequest).mockResolvedValue({ ok: true, ts: "999.111" });
 
-    const status = createGoatSlackBotStatusReporter({ ...BASE, canReact: true });
+    const status = createSlackBotStatusReporter({ ...BASE, canReact: true });
     await flush();
     const { replyTs } = await status.finish("the answer");
 
@@ -145,7 +145,7 @@ describe("createGoatSlackBotStatusReporter", () => {
   });
 
   it("marks failures with a warning reaction and an apology update", async () => {
-    const status = createGoatSlackBotStatusReporter({ ...BASE, canReact: true });
+    const status = createSlackBotStatusReporter({ ...BASE, canReact: true });
     await flush();
     await status.fail("Something went wrong.");
 

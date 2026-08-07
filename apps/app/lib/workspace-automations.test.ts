@@ -1,16 +1,8 @@
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
-import {
-  listGoatSkillCatalog,
-  resolveGoatSkillMentions,
-  validateGoatSkillFields,
-} from "@/lib/skills";
-import {
-  GoatWorkflowMentionError,
-  listGoatWorkflowCatalog,
-  resolveGoatWorkflowMention,
-} from "@/lib/workflows";
+import { listSkillCatalog, resolveSkillMentions, validateSkillFields } from "@/lib/skills";
+import { listWorkflowCatalog, resolveWorkflowMention, WorkflowMentionError } from "@/lib/workflows";
 
 const pgDialect = new PgDialect();
 
@@ -28,7 +20,7 @@ describe("workspace automation lifecycle", () => {
     ]);
     const db = { select: vi.fn(() => builder) };
 
-    await expect(listGoatWorkflowCatalog("workspace_1", db as never)).resolves.toEqual([
+    await expect(listWorkflowCatalog("workspace_1", db as never)).resolves.toEqual([
       { id: "launch-brief", name: "Launch brief", description: "Prepare the brief" },
     ]);
     expect(renderQuery(builder.whereValue).params).toContain("active");
@@ -49,12 +41,12 @@ describe("workspace automation lifecycle", () => {
     const db = { select: vi.fn(() => builder) };
 
     await expect(
-      resolveGoatWorkflowMention({
+      resolveWorkflowMention({
         workspaceId: "workspace_1",
         mention: { id: "launch-brief" },
         db: db as never,
       }),
-    ).rejects.toBeInstanceOf(GoatWorkflowMentionError);
+    ).rejects.toBeInstanceOf(WorkflowMentionError);
   });
 
   it("refuses to fire an active workflow before it has runnable instructions", async () => {
@@ -72,12 +64,12 @@ describe("workspace automation lifecycle", () => {
     const db = { select: vi.fn(() => builder) };
 
     await expect(
-      resolveGoatWorkflowMention({
+      resolveWorkflowMention({
         workspaceId: "workspace_1",
         mention: { id: "launch-brief" },
         db: db as never,
       }),
-    ).rejects.toBeInstanceOf(GoatWorkflowMentionError);
+    ).rejects.toBeInstanceOf(WorkflowMentionError);
   });
 
   it("only lists and resolves active skills", async () => {
@@ -96,11 +88,11 @@ describe("workspace automation lifecycle", () => {
       select: vi.fn().mockReturnValueOnce(catalogBuilder).mockReturnValueOnce(resolveBuilder),
     };
 
-    await expect(listGoatSkillCatalog("workspace_1", db as never)).resolves.toEqual([
+    await expect(listSkillCatalog("workspace_1", db as never)).resolves.toEqual([
       { id: "legal-review", name: "Legal review", description: "Check legal language" },
     ]);
     await expect(
-      resolveGoatSkillMentions({
+      resolveSkillMentions({
         workspaceId: "workspace_1",
         mentions: [{ id: "legal-review" }],
         db: db as never,
@@ -120,7 +112,7 @@ describe("workspace automation lifecycle", () => {
 
   it("requires instructions before a skill can become active", () => {
     expect(
-      validateGoatSkillFields({
+      validateSkillFields({
         name: "Legal review",
         description: "",
         instructions: "",

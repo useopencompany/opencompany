@@ -4,19 +4,19 @@ import { randomUUID } from "node:crypto";
 import type { AuthenticationResponse } from "@workos-inc/node";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { completeGoatAuthentication } from "@/lib/auth";
+import { completeAuthentication } from "@/lib/auth";
 import {
-  clearGoatOrganizationSelection,
+  clearOrganizationSelection,
   organizationSelectionFromError,
-  readPendingGoatOrganizationSelection,
-  safeGoatReturnPathname,
-  setGoatOAuthStateCookie,
-  setGoatOrganizationSelection,
+  readPendingOrganizationSelection,
+  safeReturnPathname,
+  setOAuthStateCookie,
+  setOrganizationSelection,
 } from "@/lib/auth-methods";
-import { getGoatAppUrl, getGoatWorkOSRedirectUri } from "@/lib/workos";
+import { getAppUrl, getWorkOSRedirectUri } from "@/lib/workos";
 import { getWorkOSClient } from "@/lib/workos-client";
 
-type GoatAuthActionResult = { ok: true } | { ok: false; error: string };
+type AuthActionResult = { ok: true } | { ok: false; error: string };
 
 // authkit-nextjs's getWorkOS() doesn't thread WORKOS_CLIENT_ID down into
 // userManagement's per-call default, so calls made directly against the SDK
@@ -40,10 +40,10 @@ export async function startGoogleAuth(formData: FormData) {
   const returnPathname = formData.get("returnPathname");
 
   const state = randomUUID();
-  await setGoatOAuthStateCookie({
+  await setOAuthStateCookie({
     state,
     ...(typeof invitationToken === "string" ? { invitationToken } : {}),
-    returnPathname: safeGoatReturnPathname(returnPathname),
+    returnPathname: safeReturnPathname(returnPathname),
   });
   // screenHint (sign-in vs sign-up) only applies to WorkOS's own hosted
   // "authkit" provider picker; Google's authorize screen has no such concept,
@@ -51,7 +51,7 @@ export async function startGoogleAuth(formData: FormData) {
   const url = getWorkOSClient().userManagement.getAuthorizationUrl({
     clientId: WORKOS_CLIENT_ID,
     provider: "GoogleOAuth",
-    redirectUri: getGoatWorkOSRedirectUri(),
+    redirectUri: getWorkOSRedirectUri(),
     state,
   });
   redirect(url);
@@ -60,7 +60,7 @@ export async function startGoogleAuth(formData: FormData) {
 export async function requestMagicCode(input: {
   email: string;
   invitationToken?: string;
-}): Promise<GoatAuthActionResult> {
+}): Promise<AuthActionResult> {
   const email = input.email.trim().toLowerCase();
   if (!email) return { ok: false, error: "Enter your email address." };
 
@@ -80,7 +80,7 @@ export async function verifyMagicCode(input: {
   email: string;
   code: string;
   invitationToken?: string;
-}): Promise<GoatAuthActionResult> {
+}): Promise<AuthActionResult> {
   const email = input.email.trim().toLowerCase();
   const code = input.code.trim();
   if (!code) return { ok: false, error: "Enter the code from your email." };
@@ -98,21 +98,21 @@ export async function verifyMagicCode(input: {
   } catch (error) {
     const selection = organizationSelectionFromError(error);
     if (selection) {
-      await setGoatOrganizationSelection(selection);
+      await setOrganizationSelection(selection);
       return redirect("/signin");
     }
     console.error("[goat] Failed to verify a magic sign-in code", error);
     return { ok: false, error: "That code is invalid or expired. Request a new one." };
   }
 
-  await completeGoatAuthentication(authResponse, getGoatAppUrl());
+  await completeAuthentication(authResponse, getAppUrl());
   redirect("/");
 }
 
 export async function selectOrganization(input: {
   organizationId: string;
-}): Promise<GoatAuthActionResult> {
-  const selection = await readPendingGoatOrganizationSelection();
+}): Promise<AuthActionResult> {
+  const selection = await readPendingOrganizationSelection();
   if (!selection) {
     return { ok: false, error: "Your sign-in session expired. Start again." };
   }
@@ -136,12 +136,12 @@ export async function selectOrganization(input: {
     return { ok: false, error: "We couldn't open that workspace. Try signing in again." };
   }
 
-  await clearGoatOrganizationSelection();
-  await completeGoatAuthentication(authResponse, getGoatAppUrl());
+  await clearOrganizationSelection();
+  await completeAuthentication(authResponse, getAppUrl());
   redirect(selection.returnPathname);
 }
 
 export async function restartAuthentication() {
-  await clearGoatOrganizationSelection();
+  await clearOrganizationSelection();
   redirect("/signin");
 }

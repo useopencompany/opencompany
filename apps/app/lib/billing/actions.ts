@@ -1,50 +1,50 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { captureServerEvent } from "@opencompany/analytics/server";
+import { captureServerEvent } from "@opencompany/analytics/shared-server";
 import {
   GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
   GOAT_PRO_STRIPE_PRODUCT_KEY,
-  loadGoatBillingOverview,
-  setGoatAutoRefillConfig,
-  setGoatStripeCustomerId,
+  loadBillingOverview,
+  setAutoRefillConfig,
+  setStripeCustomerId,
 } from "@opencompany/db/billing";
 import {
   GOAT_MAX_TOP_UP_USD_CENTS,
   GOAT_MIN_TOP_UP_USD_CENTS,
 } from "@opencompany/db/billing-constants";
 import {
-  createGoatPendingCheckoutRecord,
-  markGoatCheckoutRecordFailed,
-  markGoatCheckoutRecordOpen,
+  createPendingCheckoutRecord,
+  markCheckoutRecordFailed,
+  markCheckoutRecordOpen,
 } from "@opencompany/db/credits";
 import { redirect } from "next/navigation";
-import { currentGoatUser } from "@/lib/auth";
-import { assertGoatCheckoutEnabled, getGoatAppUrl, getGoatStripe } from "@/lib/billing/stripe";
+import { currentUser } from "@/lib/auth";
+import { assertCheckoutEnabled, getAppUrl, getStripe } from "@/lib/billing/stripe";
 
-export type GoatBillingActionResult = { ok: false; error: string } | never;
+export type BillingActionResult = { ok: false; error: string } | never;
 
-function billingError(error: unknown, fallback: string): GoatBillingActionResult {
+function billingError(error: unknown, fallback: string): BillingActionResult {
   return {
     ok: false,
     error: error instanceof Error ? error.message : fallback,
   };
 }
 
-async function ensureGoatStripeCustomerId(context: {
+async function ensureStripeCustomerId(context: {
   workspaceId: string;
   workspaceName: string;
   email: string;
   existingCustomerId: string | null;
 }) {
   if (context.existingCustomerId) return context.existingCustomerId;
-  const customer = await getGoatStripe().customers.create({
+  const customer = await getStripe().customers.create({
     email: context.email,
     name: context.workspaceName,
-    metadata: { goatWorkspaceId: context.workspaceId },
+    metadata: { workspaceId: context.workspaceId },
   });
   return (
-    (await setGoatStripeCustomerId({
+    (await setStripeCustomerId({
       workspaceId: context.workspaceId,
       stripeCustomerId: customer.id,
     })) ?? customer.id
@@ -53,10 +53,8 @@ async function ensureGoatStripeCustomerId(context: {
 
 // Purchased credits are a Pro entitlement and change shared workspace billing,
 // so only workspace admins may start Checkout.
-export async function createGoatCreditTopUpAction(
-  amountCents: number,
-): Promise<GoatBillingActionResult> {
-  const context = await currentGoatUser();
+export async function createCreditTopUpAction(amountCents: number): Promise<BillingActionResult> {
+  const context = await currentUser();
   if (context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can add credits." };
   }
@@ -73,25 +71,25 @@ export async function createGoatCreditTopUpAction(
   let checkoutUrl: string;
   const checkoutRecordId = `goat_chk_${randomUUID().replace(/-/g, "")}`;
   try {
-    const overview = await loadGoatBillingOverview(context.workspace.id);
+    const overview = await loadBillingOverview(context.workspace.id);
     if (overview.billing.plan !== "pro") {
       return { ok: false, error: "Upgrade this workspace to Pro before adding credits." };
     }
-    assertGoatCheckoutEnabled();
-    const customerId = await ensureGoatStripeCustomerId({
+    assertCheckoutEnabled();
+    const customerId = await ensureStripeCustomerId({
       workspaceId: context.workspace.id,
       workspaceName: context.workspace.name,
       email: context.authUser.email,
       existingCustomerId: overview.billing.stripeCustomerId,
     });
-    await createGoatPendingCheckoutRecord({
+    await createPendingCheckoutRecord({
       id: checkoutRecordId,
       workspaceId: context.workspace.id,
       userWorkosId: context.user.workosUserId,
       amountCents,
     });
-    const appUrl = getGoatAppUrl();
-    const session = await getGoatStripe().checkout.sessions.create({
+    const appUrl = getAppUrl();
+    const session = await getStripe().checkout.sessions.create({
       mode: "payment",
       customer: customerId,
       allow_promotion_codes: true,
@@ -119,24 +117,24 @@ export async function createGoatCreditTopUpAction(
       ],
       metadata: {
         billingProduct: "goat_topup",
-        goatWorkspaceId: context.workspace.id,
+        workspaceId: context.workspace.id,
         userWorkosId: context.user.workosUserId,
         checkoutRecordId,
         amountCents: String(amountCents),
       },
     });
     if (!session.url) {
-      await markGoatCheckoutRecordFailed({
+      await markCheckoutRecordFailed({
         id: checkoutRecordId,
         error: "Stripe did not return a Checkout URL.",
       });
       return { ok: false, error: "Stripe did not return a Checkout URL." };
     }
-    await markGoatCheckoutRecordOpen({
+    await markCheckoutRecordOpen({
       id: checkoutRecordId,
       stripeCheckoutSessionId: session.id,
       metadata: {
-        goatWorkspaceId: context.workspace.id,
+        workspaceId: context.workspace.id,
         userWorkosId: context.user.workosUserId,
         checkoutRecordId,
         amountCents: String(amountCents),
@@ -149,7 +147,7 @@ export async function createGoatCreditTopUpAction(
     });
     checkoutUrl = session.url;
   } catch (error) {
-    await markGoatCheckoutRecordFailed({
+    await markCheckoutRecordFailed({
       id: checkoutRecordId,
       error: error instanceof Error ? error.message : "Top-up checkout failed to start.",
     }).catch(() => undefined);
@@ -158,16 +156,16 @@ export async function createGoatCreditTopUpAction(
   redirect(checkoutUrl);
 }
 
-export async function createGoatProCheckoutAction(): Promise<GoatBillingActionResult> {
-  const context = await currentGoatUser();
+export async function createProCheckoutAction(): Promise<BillingActionResult> {
+  const context = await currentUser();
   if (context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can change the plan." };
   }
 
   let checkoutUrl: string;
   try {
-    assertGoatCheckoutEnabled();
-    const overview = await loadGoatBillingOverview(context.workspace.id);
+    assertCheckoutEnabled();
+    const overview = await loadBillingOverview(context.workspace.id);
     if (overview.billing.plan === "pro") {
       return { ok: false, error: "This workspace already has an active seat subscription." };
     }
@@ -182,13 +180,13 @@ export async function createGoatProCheckoutAction(): Promise<GoatBillingActionRe
       };
     }
 
-    const customerId = await ensureGoatStripeCustomerId({
+    const customerId = await ensureStripeCustomerId({
       workspaceId: context.workspace.id,
       workspaceName: context.workspace.name,
       email: context.authUser.email,
       existingCustomerId: overview.billing.stripeCustomerId,
     });
-    const stripe = getGoatStripe();
+    const stripe = getStripe();
     const subscriptions = await stripe.subscriptions.list({
       customer: customerId,
       status: "all",
@@ -207,7 +205,7 @@ export async function createGoatProCheckoutAction(): Promise<GoatBillingActionRe
       };
     }
     const seatQuantity = Math.max(1, Math.floor(overview.memberCount ?? 1));
-    const appUrl = getGoatAppUrl();
+    const appUrl = getAppUrl();
     const session = await stripe.checkout.sessions.create(
       {
         mode: "subscription",
@@ -236,12 +234,12 @@ export async function createGoatProCheckoutAction(): Promise<GoatBillingActionRe
         ],
         metadata: {
           billingProduct: GOAT_PRO_STRIPE_PRODUCT_KEY,
-          goatWorkspaceId: context.workspace.id,
+          workspaceId: context.workspace.id,
         },
         subscription_data: {
           metadata: {
             billingProduct: GOAT_PRO_STRIPE_PRODUCT_KEY,
-            goatWorkspaceId: context.workspace.id,
+            workspaceId: context.workspace.id,
           },
         },
       },
@@ -264,11 +262,11 @@ export async function createGoatProCheckoutAction(): Promise<GoatBillingActionRe
 }
 
 // v5: recurring auto-top-up schedules; v4 only refills at the fixed threshold.
-export async function setGoatAutoRefillAction(input: {
+export async function setAutoRefillAction(input: {
   enabled: boolean;
   amountCents: number;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   if (context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can manage auto-refill." };
   }
@@ -283,11 +281,11 @@ export async function setGoatAutoRefillAction(input: {
     };
   }
   try {
-    const overview = await loadGoatBillingOverview(context.workspace.id);
+    const overview = await loadBillingOverview(context.workspace.id);
     if (overview.billing.plan !== "pro") {
       return { ok: false, error: "Upgrade this workspace to Pro before enabling auto-refill." };
     }
-    const updated = await setGoatAutoRefillConfig({
+    const updated = await setAutoRefillConfig({
       workspaceId: context.workspace.id,
       enabled: input.enabled,
       amountCents: input.amountCents,
@@ -307,23 +305,23 @@ export async function setGoatAutoRefillAction(input: {
   }
 }
 
-export async function createGoatBillingPortalAction(): Promise<GoatBillingActionResult> {
-  const context = await currentGoatUser();
+export async function createBillingPortalAction(): Promise<BillingActionResult> {
+  const context = await currentUser();
   if (context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can manage billing." };
   }
   let portalUrl: string;
   try {
-    const { billing } = await loadGoatBillingOverview(context.workspace.id);
+    const { billing } = await loadBillingOverview(context.workspace.id);
     if (!billing.stripeCustomerId) {
       return {
         ok: false,
         error: "This workspace does not have a Stripe billing account yet.",
       };
     }
-    const session = await getGoatStripe().billingPortal.sessions.create({
+    const session = await getStripe().billingPortal.sessions.create({
       customer: billing.stripeCustomerId,
-      return_url: `${getGoatAppUrl()}/settings/workspace/billing`,
+      return_url: `${getAppUrl()}/settings/workspace/billing`,
     });
     portalUrl = session.url;
   } catch (error) {

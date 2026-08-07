@@ -1,0 +1,143 @@
+"use client";
+
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@opencompany/ui/components/select";
+import { DatabaseZap, FilePlus2, RadioTower } from "lucide-react";
+import { useState } from "react";
+import { type BrainActivityFilter, BrainRecentActivity } from "@/components/BrainActivity";
+import type { BrainOverviewStats } from "@/lib/brain-overview";
+
+const ACTIVITY_FILTER_OPTIONS = [
+  "filed",
+  "received",
+  "skipped",
+  "all",
+] as const satisfies readonly BrainActivityFilter[];
+
+const ACTIVITY_FILTER_LABELS: Record<BrainActivityFilter, string> = {
+  filed: "Filed",
+  received: "Received",
+  skipped: "Skipped",
+  all: "All activity",
+};
+
+export function BrainOverview({
+  brainName,
+  brainRef,
+  stats,
+}: {
+  brainName: string;
+  brainRef: string;
+  stats: BrainOverviewStats;
+}) {
+  const [activityFilter, setActivityFilter] = useState<BrainActivityFilter>("filed");
+
+  const metrics = [
+    {
+      label: "Items added",
+      value: stats.itemsAddedLast7Days,
+      description: "Last 7 days",
+      icon: FilePlus2,
+    },
+    {
+      label: "Retrievals",
+      value: stats.retrievalsLast7Days,
+      description: "Successful reads, last 7 days",
+      icon: DatabaseZap,
+    },
+    {
+      label: "Active sources",
+      value: stats.activeSources,
+      description: "Feeding this brain now",
+      icon: RadioTower,
+    },
+  ];
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto bg-canvas">
+      <div className="mx-auto flex w-full max-w-[880px] flex-col gap-9 px-6 pb-20 pt-10 sm:px-10 sm:pt-14">
+        <section aria-labelledby="brain-overview-title" className="flex flex-col gap-6">
+          <div className="flex flex-col gap-1.5">
+            <h1
+              id="brain-overview-title"
+              className="text-[22px] font-semibold tracking-[-0.02em] text-ink"
+            >
+              {brainName}
+            </h1>
+            <p className="text-[13px] leading-5 text-ink-muted">
+              A quick look at how your brain is growing and being used.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {metrics.map((metric) => {
+              const Icon = metric.icon;
+              return (
+                <div
+                  key={metric.label}
+                  className="flex min-h-[126px] flex-col justify-between rounded-xl border border-border-subtle bg-surface px-4 py-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[12px] font-medium text-ink-muted">{metric.label}</span>
+                    <span className="flex h-7 w-7 items-center justify-center rounded-md bg-surface-muted text-ink-subtle">
+                      <Icon size={14} strokeWidth={1.8} />
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[28px] font-semibold leading-none tracking-[-0.03em] text-ink tabular-nums">
+                      {metric.value.toLocaleString()}
+                    </span>
+                    <span className="text-[11.5px] text-ink-subtle">{metric.description}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <section aria-labelledby="brain-recent-activity-title" className="flex flex-col gap-4">
+          <div className="flex items-end justify-between gap-4">
+            <div className="flex flex-col gap-1">
+              <h2 id="brain-recent-activity-title" className="text-[14px] font-semibold text-ink">
+                Recent activity
+              </h2>
+              <p className="text-[12px] leading-5 text-ink-subtle">
+                The latest activity from your brain sources.
+              </p>
+            </div>
+            <Select
+              value={activityFilter}
+              onValueChange={(value) => {
+                if (isActivityFilter(value)) setActivityFilter(value);
+              }}
+            >
+              <SelectTrigger
+                aria-label="Filter recent activity"
+                className="h-7 w-[116px] shrink-0 border-border-subtle bg-surface px-2 text-[11.5px] text-ink shadow-none"
+              >
+                <SelectValue>{ACTIVITY_FILTER_LABELS[activityFilter]}</SelectValue>
+              </SelectTrigger>
+              <SelectContent className="min-w-[132px]">
+                {ACTIVITY_FILTER_OPTIONS.map((option) => (
+                  <SelectItem key={option} value={option} className="text-[12px]">
+                    {ACTIVITY_FILTER_LABELS[option]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <BrainRecentActivity brainRef={brainRef} filter={activityFilter} />
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function isActivityFilter(value: unknown): value is BrainActivityFilter {
+  return ACTIVITY_FILTER_OPTIONS.some((option) => option === value);
+}

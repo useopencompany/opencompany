@@ -24,18 +24,18 @@ export const CODEX_MODELS = CODEX_AGENT_MODEL_IDS.map(requireAgentModelDefinitio
 
 export const CLAUDE_CODE_MODELS = CLAUDE_CODE_AGENT_MODEL_IDS.map(requireAgentModelDefinition);
 
-export type GoatModelOption = (typeof GOAT_MODELS)[number];
+export type ModelOption = (typeof GOAT_MODELS)[number];
 
 export const DEFAULT_GOAT_MODEL: AgentModelId = "moonshotai/kimi-k3";
 
-export function normalizeGoatModel(value: unknown): AgentModelId {
+export function normalizeModel(value: unknown): AgentModelId {
   if (typeof value === "string" && GOAT_MODEL_ID_SET.has(value)) {
     return value as AgentModelId;
   }
   return DEFAULT_GOAT_MODEL;
 }
 
-export function goatModelContextWindowTokens(modelId: string): number {
+export function modelContextWindowTokens(modelId: string): number {
   return getAgentModelDefinition(modelId)?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
 }
 

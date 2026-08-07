@@ -19,7 +19,7 @@ let jwksCache:
     }
   | undefined;
 
-export function resolveGoatAuthKitDomain(
+export function resolveAuthKitDomain(
   value = process.env[AUTHKIT_DOMAIN_ENV],
 ): { ok: true; domain: string } | { ok: false; error: string } {
   const trimmed = value?.trim();
@@ -38,11 +38,11 @@ export function resolveGoatAuthKitDomain(
   }
 }
 
-export function buildGoatUserMcpResourceMetadataPath() {
+export function buildUserMcpResourceMetadataPath() {
   return `/.well-known/oauth-protected-resource${GOAT_USER_MCP_ENDPOINT_PATH}`;
 }
 
-export function goatMcpResourceUrlFromMetadataRequest(request: Request) {
+export function mcpResourceUrlFromMetadataRequest(request: Request) {
   const publicUrl = getPublicUrl(request);
   publicUrl.pathname = publicUrl.pathname.replace(/^\/\.well-known\/oauth-protected-resource/, "");
   publicUrl.search = "";
@@ -54,7 +54,7 @@ export function goatMcpResourceUrlFromMetadataRequest(request: Request) {
   return publicUrl.toString();
 }
 
-export function goatMcpResourceIndicatorUrlFromRequest(request: Request) {
+export function mcpResourceIndicatorUrlFromRequest(request: Request) {
   const publicUrl = getPublicUrl(request);
   publicUrl.pathname = GOAT_USER_MCP_ENDPOINT_PATH;
   publicUrl.search = "";
@@ -62,23 +62,23 @@ export function goatMcpResourceIndicatorUrlFromRequest(request: Request) {
   return publicUrl.toString();
 }
 
-export function goatMcpProtectedResourceMetadata(request: Request, authKitDomain: string) {
+export function mcpProtectedResourceMetadata(request: Request, authKitDomain: string) {
   return generateProtectedResourceMetadata({
     authServerUrls: [authKitDomain],
-    resourceUrl: goatMcpResourceIndicatorUrlFromRequest(request),
+    resourceUrl: mcpResourceIndicatorUrlFromRequest(request),
     additionalMetadata: {
       bearer_methods_supported: ["header"],
     },
   });
 }
 
-export async function verifyGoatMcpBearerToken(
+export async function verifyMcpBearerToken(
   _request: Request,
   bearerToken?: string,
 ): Promise<AuthInfo | undefined> {
   if (!bearerToken) return undefined;
 
-  const domain = resolveGoatAuthKitDomain();
+  const domain = resolveAuthKitDomain();
   if (!domain.ok) {
     throw new Error(domain.error);
   }
@@ -86,7 +86,7 @@ export async function verifyGoatMcpBearerToken(
   try {
     const { payload } = await jwtVerify(bearerToken, jwksForAuthKitDomain(domain.domain), {
       issuer: domain.domain,
-      audience: goatMcpResourceIndicatorUrlFromRequest(_request),
+      audience: mcpResourceIndicatorUrlFromRequest(_request),
     });
     const userWorkosId = workosUserIdFromPayload(payload);
     if (!userWorkosId) return undefined;
@@ -109,7 +109,7 @@ export async function verifyGoatMcpBearerToken(
     console.warn("[goat-mcp] bearer token rejected", {
       code: typeof details?.code === "string" ? details.code : undefined,
       claim: typeof details?.claim === "string" ? details.claim : undefined,
-      expectedAudience: goatMcpResourceIndicatorUrlFromRequest(_request),
+      expectedAudience: mcpResourceIndicatorUrlFromRequest(_request),
       expectedIssuer: domain.domain,
     });
     return undefined;

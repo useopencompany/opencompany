@@ -1,21 +1,21 @@
 import { createHash } from "node:crypto";
 import { put } from "@vercel/blob";
-import { createGoatBrainAssetForUser, goatBrainAssetUploadPrefix } from "@/lib/brain-assets";
+import { brainAssetUploadPrefix, createBrainAssetForUser } from "@/lib/brain-assets";
 import { GOAT_BRAIN_CAPTURE_FOLDER } from "@/lib/brain-capture";
-import { downloadGoatChatAttachment } from "@/lib/chat-attachments";
-import type { GoatStoredChatMessage, SaveToBrainToolOutput } from "@/lib/chat-ui";
-import { triggerGoatBrainIngestWake } from "@/lib/task-runner";
+import { downloadChatAttachment } from "@/lib/chat-attachments";
+import type { SaveToBrainToolOutput, StoredChatMessage } from "@/lib/chat-ui";
+import { triggerBrainIngestWake } from "@/lib/task-runner";
 
 // save_to_brain with attachmentIds: files attached in the chat become brain
 // asset documents. Copy-at-boundary — the chat blob stays under the user's
 // goat-chat/ prefix; the brain gets its own copy under goat-brain/{brainRef}/
 // assets/, so per-brain isolation (and the prefix check in
-// createGoatBrainAssetForUser) holds without exceptions.
-export async function saveChatAttachmentsToGoatBrain(input: {
+// createBrainAssetForUser) holds without exceptions.
+export async function saveChatAttachmentsToBrain(input: {
   brainRef: string;
   userWorkosId: string;
   attachmentIds: string[];
-  sessionMessages: readonly Pick<GoatStoredChatMessage, "role" | "attachments">[];
+  sessionMessages: readonly Pick<StoredChatMessage, "role" | "attachments">[];
 }): Promise<SaveToBrainToolOutput> {
   const attachmentsById = new Map(
     input.sessionMessages
@@ -37,14 +37,14 @@ export async function saveChatAttachmentsToGoatBrain(input: {
 
     let bytes: Buffer;
     try {
-      bytes = await downloadGoatChatAttachment(attachment.blobUrl);
+      bytes = await downloadChatAttachment(attachment.blobUrl);
     } catch {
       return { ok: false, error: `Attachment "${attachment.filename}" could not be loaded.` };
     }
     const contentSha256 = createHash("sha256").update(bytes).digest("hex");
 
     const copy = await put(
-      `${goatBrainAssetUploadPrefix(input.brainRef)}${attachment.filename}`,
+      `${brainAssetUploadPrefix(input.brainRef)}${attachment.filename}`,
       bytes,
       {
         access: "private",
@@ -53,7 +53,7 @@ export async function saveChatAttachmentsToGoatBrain(input: {
       },
     );
 
-    const created = await createGoatBrainAssetForUser({
+    const created = await createBrainAssetForUser({
       brainRef: input.brainRef,
       userWorkosId: input.userWorkosId,
       folderPath: GOAT_BRAIN_CAPTURE_FOLDER,
@@ -75,7 +75,7 @@ export async function saveChatAttachmentsToGoatBrain(input: {
     });
   }
 
-  triggerGoatBrainIngestWake().catch((error) => {
+  triggerBrainIngestWake().catch((error) => {
     console.warn("Goat chat attachment capture failed to wake the ingest worker.", {
       event: "goat.chat_attachment_capture_wake_failed",
       error: error instanceof Error ? error.message : String(error),

@@ -26,60 +26,60 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useHydrated } from "@/components/useHydrated";
 import {
+  type CapabilityMode,
   effectiveCapabilityMode,
-  type GoatCapabilityMode,
-  type GoatProviderCapability,
+  type ProviderCapability,
   providerCapabilities,
 } from "@/lib/actions/capabilities";
-import { disconnectGoatClaudeCodeAuth, saveGoatClaudeCodeToken } from "@/lib/claude-code-auth";
+import { disconnectClaudeCodeAuth, saveClaudeCodeToken } from "@/lib/claude-code-auth";
 import {
-  disconnectGoatCodexAuth,
-  type GoatCodexDeviceAuthFlow,
-  pollGoatCodexDeviceAuth,
-  startGoatCodexDeviceAuth,
+  type CodexDeviceAuthFlow,
+  disconnectCodexAuth,
+  pollCodexDeviceAuth,
+  startCodexDeviceAuth,
 } from "@/lib/codex-auth";
 import {
-  completeGoatInfisicalAuth,
-  disconnectGoatInfisicalAuth,
-  type GoatInfisicalAuthFlow,
-  startGoatInfisicalAuth,
+  completeInfisicalAuth,
+  disconnectInfisicalAuth,
+  type InfisicalAuthFlow,
+  startInfisicalAuth,
 } from "@/lib/infisical-auth";
 import {
-  disconnectGoatIntegrationAccountAction,
-  getGoatIntegrationAccountUsageAction,
-  setGoatIntegrationCapabilityModeAction,
+  disconnectIntegrationAccountAction,
+  getIntegrationAccountUsageAction,
+  setIntegrationCapabilityModeAction,
 } from "@/lib/integration-account-actions";
 import {
-  type GoatClaudeCodeProviderState,
-  type GoatCodexProviderState,
-  type GoatGitHubProviderState,
-  type GoatGoogleProviderState,
-  type GoatImessageProviderState,
-  type GoatInfisicalProviderState,
-  type GoatIntegrationAccountView,
-  type GoatIntegrationState,
-  type GoatJamieProviderState,
-  type GoatLinearProviderState,
-  type GoatPersonalAccountProvider,
-  type GoatPostHogProviderState,
-  type GoatSlackProviderState,
-  type GoatStripeProviderState,
-  goatIntegrationStateFromRows,
+  type ClaudeCodeProviderState,
+  type CodexProviderState,
+  type GitHubProviderState,
+  type GoogleProviderState,
+  type ImessageProviderState,
+  type InfisicalProviderState,
+  type IntegrationAccountView,
+  type IntegrationState,
+  integrationStateFromRows,
+  type JamieProviderState,
+  type LinearProviderState,
+  type PersonalAccountProvider,
+  type PostHogProviderState,
+  type SlackProviderState,
+  type StripeProviderState,
 } from "@/lib/integration-state";
-import { hasGoatGmailDraftScope, hasGoatGmailSendScope } from "@/lib/integrations/gmail-scopes";
-import { hasGoatGoogleDriveWriteScope } from "@/lib/integrations/google-drive-scopes";
+import { hasGmailDraftScope, hasGmailSendScope } from "@/lib/integrations/gmail-scopes";
+import { hasGoogleDriveWriteScope } from "@/lib/integrations/google-drive-scopes";
 import {
-  goatIntegrationConnectionError,
-  goatIntegrationConnectionSuccess,
+  integrationConnectionError,
+  integrationConnectionSuccess,
 } from "@/lib/onboarding-integrations";
-import { createGoatCollections, type GoatIntegrationRow } from "@/lib/task-collections";
+import { createCollections, type IntegrationRow } from "@/lib/task-collections";
 
 // Presentation metadata for each integration card: the real brand logo (or a
 // monogram fallback where no square vector mark exists), the colored logo tile,
 // and a short connection-focused description. Keyed by provider so the card
 // components derive everything from the provider string.
 type IntegrationMetaKey =
-  | GoatPersonalAccountProvider
+  | PersonalAccountProvider
   | "github"
   | "jamie"
   | "posthog"
@@ -222,7 +222,7 @@ export function SettingsIntegrationsPanel({
   imessageEnabled = false,
   browserProfilesEnabled = false,
 }: {
-  initialIntegrations: GoatIntegrationState;
+  initialIntegrations: IntegrationState;
   isWorkspaceAdmin: boolean;
   // The iMessage card only exists for users who turned the beta flag on in
   // Preferences; pairing state alone must not surface it.
@@ -265,9 +265,9 @@ function IntegrationSetupFeedback() {
     handled.current = true;
     const provider = url.searchParams.get("integration");
     if (status === "error") {
-      toast.error(goatIntegrationConnectionError(provider, url.searchParams.get("reason")));
+      toast.error(integrationConnectionError(provider, url.searchParams.get("reason")));
     } else {
-      toast.success(goatIntegrationConnectionSuccess(provider));
+      toast.success(integrationConnectionSuccess(provider));
     }
 
     url.searchParams.delete("integration");
@@ -289,18 +289,18 @@ function LiveSettingsIntegrations({
   imessageEnabled,
   browserProfilesEnabled,
 }: {
-  initialIntegrations: GoatIntegrationState;
+  initialIntegrations: IntegrationState;
   isWorkspaceAdmin: boolean;
   imessageEnabled: boolean;
   browserProfilesEnabled: boolean;
 }) {
-  const collections = useMemo(() => createGoatCollections(), []);
+  const collections = useMemo(() => createCollections(), []);
   const { data: rows, isLoading } = useLiveQuery((q) =>
     q.from({ integration: collections.integrations }),
   );
   const integrations = useMemo(() => {
     if (isLoading && !rows?.length) return initialIntegrations;
-    const liveIntegrations = goatIntegrationStateFromRows((rows ?? []) as GoatIntegrationRow[]);
+    const liveIntegrations = integrationStateFromRows((rows ?? []) as IntegrationRow[]);
     return {
       ...liveIntegrations,
       codex: initialIntegrations.codex,
@@ -335,7 +335,7 @@ const WORKSPACE_ACCOUNT_PROVIDERS = [
   "attio",
   "granola",
   "fathom",
-] as const satisfies readonly GoatPersonalAccountProvider[];
+] as const satisfies readonly PersonalAccountProvider[];
 
 const PERSONAL_ACCOUNT_PROVIDERS = [
   "gmail",
@@ -344,11 +344,11 @@ const PERSONAL_ACCOUNT_PROVIDERS = [
   "slack",
   "latitude",
   "neon",
-] as const satisfies readonly GoatPersonalAccountProvider[];
+] as const satisfies readonly PersonalAccountProvider[];
 
 function countConnectedAccounts(
-  integrations: GoatIntegrationState,
-  providers: readonly GoatPersonalAccountProvider[],
+  integrations: IntegrationState,
+  providers: readonly PersonalAccountProvider[],
 ) {
   let count = 0;
   for (const provider of providers) {
@@ -357,7 +357,7 @@ function countConnectedAccounts(
   return count;
 }
 
-function countWorkspaceConnected(integrations: GoatIntegrationState) {
+function countWorkspaceConnected(integrations: IntegrationState) {
   return (
     (integrationStatus(integrations.github) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.jamie) === "Connected" ? 1 : 0) +
@@ -369,7 +369,7 @@ function countWorkspaceConnected(integrations: GoatIntegrationState) {
   );
 }
 
-function countPersonalConnected(integrations: GoatIntegrationState, includeImessage: boolean) {
+function countPersonalConnected(integrations: IntegrationState, includeImessage: boolean) {
   return (
     countConnectedAccounts(integrations, PERSONAL_ACCOUNT_PROVIDERS) +
     (integrations.codex.connected ? 1 : 0) +
@@ -384,7 +384,7 @@ function IntegrationCards({
   imessageEnabled,
   browserProfilesEnabled,
 }: {
-  integrations: GoatIntegrationState;
+  integrations: IntegrationState;
   isWorkspaceAdmin: boolean;
   imessageEnabled: boolean;
   browserProfilesEnabled: boolean;
@@ -858,13 +858,13 @@ function IntegrationCardRow({
   canConnect = true,
 }: {
   integration:
-    | GoatGoogleProviderState
-    | GoatLinearProviderState
-    | GoatPostHogProviderState
-    | GoatGitHubProviderState
-    | GoatJamieProviderState
-    | GoatSlackProviderState
-    | GoatStripeProviderState;
+    | GoogleProviderState
+    | LinearProviderState
+    | PostHogProviderState
+    | GitHubProviderState
+    | JamieProviderState
+    | SlackProviderState
+    | StripeProviderState;
   canConnect?: boolean;
 }) {
   const meta = INTEGRATION_META[integration.provider];
@@ -954,8 +954,8 @@ function IntegrationProviderGroupCard({
   provider,
   accounts,
 }: {
-  provider: GoatPersonalAccountProvider;
-  accounts: GoatIntegrationAccountView[];
+  provider: PersonalAccountProvider;
+  accounts: IntegrationAccountView[];
 }) {
   const meta = INTEGRATION_META[provider];
   const connectHref = integrationConnectHref(provider);
@@ -990,7 +990,7 @@ function IntegrationProviderGroupCard({
   );
 }
 
-function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountView }) {
+function IntegrationAccountRow({ account }: { account: IntegrationAccountView }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirming, setConfirming] = useState<{
@@ -1013,11 +1013,11 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
   const needsGoogleDriveWriteScope =
     account.provider === "google_drive" &&
     account.connected &&
-    !hasGoatGoogleDriveWriteScope(account.scopes);
+    !hasGoogleDriveWriteScope(account.scopes);
   const needsReconnect = account.status === "needs_reauth" || account.status === "sync_failed";
   const gmailScopeUpgradeLabel =
-    account.provider === "gmail" && account.connected && !hasGoatGmailDraftScope(account.scopes)
-      ? hasGoatGmailSendScope(account.scopes)
+    account.provider === "gmail" && account.connected && !hasGmailDraftScope(account.scopes)
+      ? hasGmailSendScope(account.scopes)
         ? "Enable drafts"
         : "Enable drafts & sending"
       : null;
@@ -1025,7 +1025,7 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
   const beginDisconnect = () => {
     setError(null);
     startTransition(async () => {
-      const usage = await getGoatIntegrationAccountUsageAction(account.integrationId);
+      const usage = await getIntegrationAccountUsageAction(account.integrationId);
       if (!usage.ok) {
         setError(usage.error);
         return;
@@ -1036,7 +1036,7 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
         });
         return;
       }
-      const result = await disconnectGoatIntegrationAccountAction(account.integrationId);
+      const result = await disconnectIntegrationAccountAction(account.integrationId);
       if (!result.ok) setError(result.error);
       else router.refresh();
     });
@@ -1045,7 +1045,7 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
   const confirmDisconnect = () => {
     setError(null);
     startTransition(async () => {
-      const result = await disconnectGoatIntegrationAccountAction(account.integrationId);
+      const result = await disconnectIntegrationAccountAction(account.integrationId);
       if (!result.ok) setError(result.error);
       else {
         setConfirming(null);
@@ -1163,7 +1163,7 @@ function CapabilityModeRows({
   capabilityModes,
 }: {
   integrationId: string;
-  provider: GoatPersonalAccountProvider | "posthog";
+  provider: PersonalAccountProvider | "posthog";
   capabilityModes: Record<string, unknown>;
 }) {
   const capabilities = providerCapabilities(provider);
@@ -1183,7 +1183,7 @@ function CapabilityModeRows({
 }
 
 const CAPABILITY_MODE_OPTIONS: Array<{
-  mode: GoatCapabilityMode;
+  mode: CapabilityMode;
   label: string;
 }> = [
   { mode: "on", label: "On" },
@@ -1197,21 +1197,21 @@ function CapabilityModeRow({
   mode,
 }: {
   integrationId: string;
-  capability: GoatProviderCapability;
-  mode: GoatCapabilityMode;
+  capability: ProviderCapability;
+  mode: CapabilityMode;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   // Optimistic selection so the pill flips immediately; the Electric row (or
   // router refresh) confirms it.
-  const [pendingMode, setPendingMode] = useState<GoatCapabilityMode | null>(null);
+  const [pendingMode, setPendingMode] = useState<CapabilityMode | null>(null);
   const currentMode = pendingMode ?? mode;
 
-  const select = (nextMode: GoatCapabilityMode) => {
+  const select = (nextMode: CapabilityMode) => {
     if (nextMode === currentMode || isPending) return;
     setPendingMode(nextMode);
     startTransition(async () => {
-      const result = await setGoatIntegrationCapabilityModeAction(
+      const result = await setIntegrationCapabilityModeAction(
         integrationId,
         capability.id,
         nextMode,
@@ -1269,11 +1269,11 @@ function InfisicalIntegrationCard({
   integration,
   canManage,
 }: {
-  integration: GoatInfisicalProviderState;
+  integration: InfisicalProviderState;
   canManage: boolean;
 }) {
   const router = useRouter();
-  const [flow, setFlow] = useState<GoatInfisicalAuthFlow | null>(null);
+  const [flow, setFlow] = useState<InfisicalAuthFlow | null>(null);
   const [browserToken, setBrowserToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -1282,7 +1282,7 @@ function InfisicalIntegrationCard({
     setError(null);
     setBrowserToken("");
     startTransition(async () => {
-      const result = await startGoatInfisicalAuth();
+      const result = await startInfisicalAuth();
       if (result.ok) setFlow(result.flow);
       else setError(result.error);
     });
@@ -1292,7 +1292,7 @@ function InfisicalIntegrationCard({
     if (!flow) return;
     setError(null);
     startTransition(async () => {
-      const result = await completeGoatInfisicalAuth({ flowId: flow.id, browserToken });
+      const result = await completeInfisicalAuth({ flowId: flow.id, browserToken });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -1318,7 +1318,7 @@ function InfisicalIntegrationCard({
     }
     setError(null);
     startTransition(async () => {
-      const result = await disconnectGoatInfisicalAuth();
+      const result = await disconnectInfisicalAuth();
       if (!result.ok) {
         setError(result.error);
         return;
@@ -1437,9 +1437,9 @@ function InfisicalIntegrationCard({
   );
 }
 
-function CodexIntegrationCard({ integration }: { integration: GoatCodexProviderState }) {
+function CodexIntegrationCard({ integration }: { integration: CodexProviderState }) {
   const router = useRouter();
-  const [flow, setFlow] = useState<GoatCodexDeviceAuthFlow | null>(null);
+  const [flow, setFlow] = useState<CodexDeviceAuthFlow | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPolling, setIsPolling] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -1463,7 +1463,7 @@ function CodexIntegrationCard({ integration }: { integration: GoatCodexProviderS
       setIsPolling(true);
       void (async () => {
         try {
-          const result = await pollGoatCodexDeviceAuth(flow.id);
+          const result = await pollCodexDeviceAuth(flow.id);
           if (!active) return;
           if (result.ok) {
             if (result.flow.status === "completed") {
@@ -1493,7 +1493,7 @@ function CodexIntegrationCard({ integration }: { integration: GoatCodexProviderS
   const startAuth = () => {
     setError(null);
     startTransition(async () => {
-      const result = await startGoatCodexDeviceAuth();
+      const result = await startCodexDeviceAuth();
       if (result.ok) {
         if (result.flow.status === "completed") {
           setFlow(null);
@@ -1511,7 +1511,7 @@ function CodexIntegrationCard({ integration }: { integration: GoatCodexProviderS
     setError(null);
     setIsPolling(false);
     startTransition(async () => {
-      await disconnectGoatCodexAuth();
+      await disconnectCodexAuth();
       setFlow(null);
       router.refresh();
     });
@@ -1578,7 +1578,7 @@ function CodexIntegrationCard({ integration }: { integration: GoatCodexProviderS
   );
 }
 
-function ClaudeCodeIntegrationCard({ integration }: { integration: GoatClaudeCodeProviderState }) {
+function ClaudeCodeIntegrationCard({ integration }: { integration: ClaudeCodeProviderState }) {
   const router = useRouter();
   const [token, setToken] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -1588,7 +1588,7 @@ function ClaudeCodeIntegrationCard({ integration }: { integration: GoatClaudeCod
   const submitToken = () => {
     setError(null);
     startTransition(async () => {
-      const result = await saveGoatClaudeCodeToken(token);
+      const result = await saveClaudeCodeToken(token);
       if (result.ok) {
         setToken("");
         setShowForm(false);
@@ -1602,7 +1602,7 @@ function ClaudeCodeIntegrationCard({ integration }: { integration: GoatClaudeCod
   const disconnect = () => {
     setError(null);
     startTransition(async () => {
-      await disconnectGoatClaudeCodeAuth();
+      await disconnectClaudeCodeAuth();
       setShowForm(false);
       router.refresh();
     });
@@ -1698,7 +1698,7 @@ function ClaudeCodeIntegrationCard({ integration }: { integration: GoatClaudeCod
   );
 }
 
-function IMessageIntegrationCard({ integration }: { integration: GoatImessageProviderState }) {
+function IMessageIntegrationCard({ integration }: { integration: ImessageProviderState }) {
   return (
     <IntegrationCard
       meta={INTEGRATION_META.imessage}
@@ -1725,13 +1725,13 @@ function IMessageIntegrationCard({ integration }: { integration: GoatImessagePro
 
 function integrationStatus(
   integration:
-    | GoatGoogleProviderState
-    | GoatLinearProviderState
-    | GoatPostHogProviderState
-    | GoatGitHubProviderState
-    | GoatJamieProviderState
-    | GoatSlackProviderState
-    | GoatStripeProviderState,
+    | GoogleProviderState
+    | LinearProviderState
+    | PostHogProviderState
+    | GitHubProviderState
+    | JamieProviderState
+    | SlackProviderState
+    | StripeProviderState,
 ) {
   if (integration.status === "connected") return "Connected";
   if (integration.provider === "jamie" && integration.apiKeyConfigured) return "Connected";
@@ -1745,26 +1745,26 @@ function integrationStatus(
 
 function integrationNeedsReconnect(
   integration:
-    | GoatGoogleProviderState
-    | GoatLinearProviderState
-    | GoatPostHogProviderState
-    | GoatGitHubProviderState
-    | GoatJamieProviderState
-    | GoatSlackProviderState
-    | GoatStripeProviderState,
+    | GoogleProviderState
+    | LinearProviderState
+    | PostHogProviderState
+    | GitHubProviderState
+    | JamieProviderState
+    | SlackProviderState
+    | StripeProviderState,
 ) {
   return integration.status === "needs_reauth" || integration.status === "sync_failed";
 }
 
 function integrationStatusReason(
   integration:
-    | GoatGoogleProviderState
-    | GoatLinearProviderState
-    | GoatPostHogProviderState
-    | GoatGitHubProviderState
-    | GoatJamieProviderState
-    | GoatSlackProviderState
-    | GoatStripeProviderState,
+    | GoogleProviderState
+    | LinearProviderState
+    | PostHogProviderState
+    | GitHubProviderState
+    | JamieProviderState
+    | SlackProviderState
+    | StripeProviderState,
 ) {
   return "statusReason" in integration ? integration.statusReason : null;
 }

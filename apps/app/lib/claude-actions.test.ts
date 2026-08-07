@@ -2,17 +2,14 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { McpServer as McpServerType } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { type ActionGatewayRequest, GOAT_ACTION_TOOL_CONTRACT } from "@opencompany/agent-runtime";
 import {
-  GOAT_ACTION_TOOL_CONTRACT,
-  type GoatActionGatewayRequest,
-} from "@opencompany/agent-runtime";
-import {
-  createInMemoryGoatActionTurnGovernance,
-  serveGoatActionRequest,
+  createInMemoryActionTurnGovernance,
+  serveActionRequest,
 } from "@opencompany/core/actions/service";
 import { describe, expect, it, vi } from "vitest";
-import { registerGoatClaudeActionTools } from "./claude-actions";
-import type { executeGoatActionGateway } from "./codex-actions";
+import { registerClaudeActionTools } from "./claude-actions";
+import type { executeActionGateway } from "./codex-actions";
 
 type RegisteredTool = {
   config: Record<string, unknown>;
@@ -26,7 +23,7 @@ type RegisteredTool = {
   }>;
 };
 
-function registerTools(executeAction: typeof executeGoatActionGateway) {
+function registerTools(executeAction: typeof executeActionGateway) {
   const tools = new Map<string, RegisteredTool>();
   const server = {
     registerTool: vi.fn(
@@ -35,7 +32,7 @@ function registerTools(executeAction: typeof executeGoatActionGateway) {
       },
     ),
   } as unknown as McpServerType;
-  registerGoatClaudeActionTools(
+  registerClaudeActionTools(
     server,
     { codexChatSessionId: "codex_session_1", codexChatTurnId: "codex_turn_1" },
     { executeAction },
@@ -49,9 +46,9 @@ function getTool(tools: Map<string, RegisteredTool>, name: string): RegisteredTo
   return tool;
 }
 
-describe("registerGoatClaudeActionTools", () => {
+describe("registerClaudeActionTools", () => {
   it("registers list_actions and use_action", () => {
-    const tools = registerTools(vi.fn<typeof executeGoatActionGateway>());
+    const tools = registerTools(vi.fn<typeof executeActionGateway>());
     expect([...tools.keys()]).toEqual(["list_actions", "use_action"]);
     expect(getTool(tools, "list_actions").config.annotations).toEqual(
       GOAT_ACTION_TOOL_CONTRACT.list.annotations,
@@ -63,7 +60,7 @@ describe("registerGoatClaudeActionTools", () => {
   });
 
   it("translates a list_actions call into a gateway list request", async () => {
-    const executeAction = vi.fn<typeof executeGoatActionGateway>(async () => ({
+    const executeAction = vi.fn<typeof executeActionGateway>(async () => ({
       ok: true,
       sources: [{ id: "gmail", label: "Gmail", description: "Email" }],
     }));
@@ -78,7 +75,7 @@ describe("registerGoatClaudeActionTools", () => {
       sessionId: "codex_session_1",
       turnId: "codex_turn_1",
       source: "gmail",
-    } satisfies GoatActionGatewayRequest);
+    } satisfies ActionGatewayRequest);
     expect(result.isError).toBe(false);
     expect(result.structuredContent).toEqual({
       ok: true,
@@ -87,7 +84,7 @@ describe("registerGoatClaudeActionTools", () => {
   });
 
   it("derives stable, distinct invocation ids from separate MCP requests", async () => {
-    const executeAction = vi.fn<typeof executeGoatActionGateway>(async () => ({
+    const executeAction = vi.fn<typeof executeActionGateway>(async () => ({
       ok: true,
       action: "gmail.list",
       result: [],
@@ -134,9 +131,9 @@ describe("registerGoatClaudeActionTools", () => {
   });
 
   it("surfaces call_budget on call 17 from the shared service", async () => {
-    const governance = createInMemoryGoatActionTurnGovernance();
-    const executeAction = vi.fn<typeof executeGoatActionGateway>(async ({ request }) =>
-      serveGoatActionRequest({
+    const governance = createInMemoryActionTurnGovernance();
+    const executeAction = vi.fn<typeof executeActionGateway>(async ({ request }) =>
+      serveActionRequest({
         request,
         catalog: {
           sources: [{ id: "gmail", label: "Gmail", description: "Email" }],
@@ -176,7 +173,7 @@ describe("registerGoatClaudeActionTools", () => {
   });
 
   it("marks the MCP result as an error when the gateway response is not ok", async () => {
-    const executeAction = vi.fn<typeof executeGoatActionGateway>(async () => ({
+    const executeAction = vi.fn<typeof executeActionGateway>(async () => ({
       ok: false,
       error: { code: "not_permitted", message: "nope" },
     }));
@@ -195,11 +192,11 @@ describe("registerGoatClaudeActionTools", () => {
   // wouldn't slip through.
   it("survives a real MCP client/server round-trip", async () => {
     const server = new McpServer({ name: "test", version: "0.1.0" });
-    registerGoatClaudeActionTools(
+    registerClaudeActionTools(
       server,
       { codexChatSessionId: "codex_session_1", codexChatTurnId: "codex_turn_1" },
       {
-        executeAction: vi.fn<typeof executeGoatActionGateway>(async ({ request }) =>
+        executeAction: vi.fn<typeof executeActionGateway>(async ({ request }) =>
           request.operation === "list"
             ? { ok: true, sources: [{ id: "gmail", label: "Gmail", description: "d" }] }
             : { ok: true, action: request.action, result: { echoedParams: request.params } },

@@ -1,27 +1,25 @@
-import type { ParsedGoatBrainDocument } from "./document";
+import type { ParsedBrainDocument } from "./document";
 import { GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER } from "./document";
-import { isValidGoatBrainId, normalizeGoatBrainFolder } from "./schema";
+import { isValidBrainId, normalizeBrainFolder } from "./schema";
 
 export const GOAT_BRAIN_SKILLS_ZONE = "skills";
 export const GOAT_BRAIN_SKILL_NAME_MAX_LENGTH = 64;
 export const GOAT_BRAIN_SKILL_DESCRIPTION_MAX_LENGTH = 1024;
 
-export type GoatBrainSkill = {
+export type BrainSkill = {
   id: string;
   name: string;
   description: string;
   instructions: string;
 };
 
-export function isGoatBrainSkillFolder(value: string): boolean {
-  const folder = normalizeGoatBrainFolder(value);
+export function isBrainSkillFolder(value: string): boolean {
+  const folder = normalizeBrainFolder(value);
   return folder === GOAT_BRAIN_SKILLS_ZONE || folder.startsWith(`${GOAT_BRAIN_SKILLS_ZONE}/`);
 }
 
-export function goatBrainSkillFromDocument(
-  document: ParsedGoatBrainDocument,
-): GoatBrainSkill | null {
-  if (!document.frontmatter.folder || !isGoatBrainSkillFolder(document.frontmatter.folder)) {
+export function brainSkillFromDocument(document: ParsedBrainDocument): BrainSkill | null {
+  if (!document.frontmatter.folder || !isBrainSkillFolder(document.frontmatter.folder)) {
     return null;
   }
   if (document.frontmatter.kind !== "page") return null;
@@ -33,9 +31,9 @@ export function goatBrainSkillFromDocument(
   const description = document.frontmatter.description?.trim() ?? "";
   const instructions = document.compiledTruth.trim();
   if (
-    !isValidGoatBrainSkillId(id) ||
+    !isValidBrainSkillId(id) ||
     !name ||
-    !isValidOptionalGoatBrainSkillDescription(description) ||
+    !isValidOptionalBrainSkillDescription(description) ||
     !instructions ||
     instructions === GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER
   ) {
@@ -44,7 +42,7 @@ export function goatBrainSkillFromDocument(
   return { id, name, description, instructions };
 }
 
-export function serializeGoatBrainSkillMarkdown(skill: GoatBrainSkill): string {
+export function serializeBrainSkillMarkdown(skill: BrainSkill): string {
   return [
     "---",
     // Native skill runtimes use the frontmatter name as the invocation id. Keep the human title
@@ -58,11 +56,11 @@ export function serializeGoatBrainSkillMarkdown(skill: GoatBrainSkill): string {
   ].join("\n");
 }
 
-export function isValidGoatBrainSkillId(value: unknown): value is string {
-  return isValidGoatBrainId(value) && value.length <= GOAT_BRAIN_SKILL_NAME_MAX_LENGTH;
+export function isValidBrainSkillId(value: unknown): value is string {
+  return isValidBrainId(value) && value.length <= GOAT_BRAIN_SKILL_NAME_MAX_LENGTH;
 }
 
-function isValidOptionalGoatBrainSkillDescription(value: string) {
+function isValidOptionalBrainSkillDescription(value: string) {
   return (
     value.length <= GOAT_BRAIN_SKILL_DESCRIPTION_MAX_LENGTH &&
     !value.includes("<") &&

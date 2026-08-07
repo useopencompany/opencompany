@@ -15,7 +15,7 @@ function shapeProxyUrl(): string {
 type ShapeParams = Record<string, string>;
 type ElectricOpts<TRow extends Record<string, unknown>> = ElectricCollectionConfig<TRow>;
 
-export function createGoatElectricCollection<TRow extends Record<string, unknown>>(config: {
+export function createElectricCollection<TRow extends Record<string, unknown>>(config: {
   id: string;
   table: string;
   getKey: (row: TRow) => string | number;
@@ -42,6 +42,6 @@ export function createGoatElectricCollection<TRow extends Record<string, unknown
   );
 }
 
-export type GoatElectricCollection<TRow extends Record<string, unknown>> = ReturnType<
-  typeof createGoatElectricCollection<TRow>
+export type ElectricCollection<TRow extends Record<string, unknown>> = ReturnType<
+  typeof createElectricCollection<TRow>
 >;

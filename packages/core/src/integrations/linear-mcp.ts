@@ -1,12 +1,9 @@
-import {
-  createGoatRemoteMcpIntegration,
-  type GoatRemoteMcpProviderState,
-} from "./remote-mcp-oauth";
+import { createRemoteMcpIntegration, type RemoteMcpProviderState } from "./remote-mcp-oauth";
 
 export const GOAT_LINEAR_MCP_ENDPOINT_URL = "https://mcp.linear.app/mcp";
 const GOAT_LINEAR_PROVIDER = "linear" as const;
 
-const linearMcpIntegration = createGoatRemoteMcpIntegration({
+const linearMcpIntegration = createRemoteMcpIntegration({
   provider: GOAT_LINEAR_PROVIDER,
   displayName: "Linear",
   endpointUrl: GOAT_LINEAR_MCP_ENDPOINT_URL,
@@ -18,11 +15,11 @@ const linearMcpIntegration = createGoatRemoteMcpIntegration({
   acceptLegacyStateWithoutProvider: true,
 });
 
-export type GoatLinearProviderState = GoatRemoteMcpProviderState<"linear">;
+export type LinearProviderState = RemoteMcpProviderState<"linear">;
 
-export const getGoatLinearIntegrationState = linearMcpIntegration.getState;
-export const loadGoatLinearMcpWorkerConnection = linearMcpIntegration.loadWorkerConnection;
-export const startGoatLinearMcpOAuth = linearMcpIntegration.start;
-export const completeGoatLinearMcpOAuth = linearMcpIntegration.complete;
-export const verifyGoatLinearMcpState = linearMcpIntegration.verifyState;
-export const appendGoatLinearMcpStatus = linearMcpIntegration.appendStatus;
+export const getLinearIntegrationState = linearMcpIntegration.getState;
+export const loadLinearMcpWorkerConnection = linearMcpIntegration.loadWorkerConnection;
+export const startLinearMcpOAuth = linearMcpIntegration.start;
+export const completeLinearMcpOAuth = linearMcpIntegration.complete;
+export const verifyLinearMcpState = linearMcpIntegration.verifyState;
+export const appendLinearMcpStatus = linearMcpIntegration.appendStatus;

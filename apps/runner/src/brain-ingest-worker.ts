@@ -1,71 +1,64 @@
 import { randomUUID } from "node:crypto";
-import {
-  captureGoatModelSpendRecorded,
-  captureGoatServerEvent,
-} from "@opencompany/analytics/goat/server";
+import { captureModelSpendRecorded, captureServerEvent } from "@opencompany/analytics/server";
 import { calculateModelUsageCost, calculatePlatformFeeUsdMicros } from "@opencompany/billing";
 import {
   isNormalizedAttioObjectSourceItem,
+  isNormalizedBrainPointerSourceItem,
+  isNormalizedChatCaptureSourceItem,
   isNormalizedFathomMeetingSourceItem,
   isNormalizedGitHubActivitySourceItem,
   isNormalizedGmailThreadSourceItem,
-  isNormalizedGoatBrainPointerSourceItem,
-  isNormalizedGoatChatCaptureSourceItem,
-  isNormalizedGoatImportSourceItem,
   isNormalizedGoogleDriveDocumentSourceItem,
   isNormalizedGranolaMeetingSourceItem,
   isNormalizedHubspotObjectSourceItem,
+  isNormalizedImportSourceItem,
   isNormalizedJamieMeetingSourceItem,
   isNormalizedLinearIssueSourceItem,
   isNormalizedSlackConversationSourceItem,
   isNormalizedUploadAssetSourceItem,
+  type NormalizedBrainPointerSourceItem,
   type NormalizedBrainSourceItem,
-  type NormalizedGoatBrainPointerSourceItem,
   type NormalizedJamieMeetingSourceItem,
 } from "@opencompany/brain";
-import { releasePendingGoatIngestionReservations } from "@opencompany/db/billing";
+import { releasePendingIngestionReservations } from "@opencompany/db/billing";
+import { brainFilePathFor, listBrainFiles, upsertBrainFile } from "@opencompany/db/brain-files";
+import { normalizeBrainIngestTrace } from "@opencompany/db/brain-ingest-trace";
+import { recordCreditDebit } from "@opencompany/db/credits";
 import {
-  goatBrainFilePathFor,
-  listGoatBrainFiles,
-  upsertGoatBrainFile,
-} from "@opencompany/db/brain-files";
-import { normalizeGoatBrainIngestTrace } from "@opencompany/db/brain-ingest-trace";
-import { recordGoatCreditDebit } from "@opencompany/db/credits";
-import {
-  type GoatBrainIngestJob,
-  type GoatBrainIngestJobKind,
-  type GoatBrainSourceProvider,
-  type GoatBrainSourceType,
+  type BrainIngestJob,
+  type BrainIngestJobKind,
+  type BrainSourceProvider,
+  type BrainSourceType,
 } from "@opencompany/db/schema";
-import { getDefaultGoatBrainForUser } from "@opencompany/db/workspaces";
+import { getDefaultBrainForUser } from "@opencompany/db/workspaces";
 import { captureException, createLogger } from "@opencompany/observability";
 import { flushBraintrust, traceBraintrust } from "@opencompany/observability/braintrust";
 import {
+  type Attributes,
   GOAT_SPANS,
-  type GoatAttributes,
-  hashGoatUserId,
-  recordGoatBrainIngestRun,
-  recordGoatModelCost,
-  startGoatSpan,
-  withGoatSpan,
+  hashUserId,
+  recordBrainIngestRun,
+  recordModelCost,
+  startSpan,
+  withSpan,
 } from "@opencompany/telemetry";
 import { flushLatitude } from "@opencompany/telemetry/latitude";
 import { sql } from "drizzle-orm";
 import {
+  type BrainAgentIngestEnv,
+  BrainAgentOutcomeError,
+  BrainIngestBudgetError,
   GOAT_BRAIN_AGENT_INGEST_TIMEOUT_MS,
   GOAT_BRAIN_AGENT_SKIP_SENTINEL,
-  type GoatBrainAgentIngestEnv,
-  GoatBrainAgentOutcomeError,
-  GoatBrainIngestBudgetError,
   runAttioObjectAgentIngest,
+  runChatCaptureAgentIngest,
   runFathomMeetingAgentIngest,
   runGitHubActivityAgentIngest,
   runGmailThreadAgentIngest,
-  runGoatChatCaptureAgentIngest,
-  runGoatImportAgentIngest,
   runGoogleDriveDocumentAgentIngest,
   runGranolaMeetingAgentIngest,
   runHubspotObjectAgentIngest,
+  runImportAgentIngest,
   runJamieMeetingAgentIngest,
   runLinearIssueAgentIngest,
   runSlackConversationAgentIngest,
@@ -76,7 +69,7 @@ import {
   JAMIE_EVIDENCE_FOLDER,
   JAMIE_MEETING_FOLDER,
 } from "./brain-jamie-writes";
-import { runGoatBrainPointerHydrate } from "./brain-pointer-hydrators";
+import { runBrainPointerHydrate } from "./brain-pointer-hydrators";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { rowsFromExecute } from "./sql-exec";
@@ -108,24 +101,24 @@ const GOAT_BRAIN_INGEST_POLL_INTERVAL_MS = 5_000;
 // still lives in last_error.
 const ATTEMPT_ERROR_MAX_CHARS = 500;
 
-export type GoatBrainIngestJobWithSource = Omit<
-  GoatBrainIngestJob,
+export type BrainIngestJobWithSource = Omit<
+  BrainIngestJob,
   "workspaceId" | "planPaused" | "importRunId"
 > & {
   workspaceId?: string | null;
   planPaused?: boolean;
   importRunId?: string | null;
-  sourceType: GoatBrainSourceType;
+  sourceType: BrainSourceType;
   normalizedPayload: unknown;
 };
 
-export type GoatBrainIngestJobDescriptor = {
-  kind: GoatBrainIngestJobKind;
-  sourceProvider: GoatBrainSourceProvider;
-  sourceType: GoatBrainSourceType;
+export type BrainIngestJobDescriptor = {
+  kind: BrainIngestJobKind;
+  sourceProvider: BrainSourceProvider;
+  sourceType: BrainSourceType;
 };
 
-export type GoatBrainIngestHandlerInput<
+export type BrainIngestHandlerInput<
   TItem extends NormalizedBrainSourceItem = NormalizedBrainSourceItem,
 > = {
   jobId: string;
@@ -137,16 +130,16 @@ export type GoatBrainIngestHandlerInput<
   integrationId: string | null;
   importRunId?: string | null;
   item: TItem;
-  env: GoatBrainAgentIngestEnv;
+  env: BrainAgentIngestEnv;
   signal?: AbortSignal;
 };
 
-export type GoatBrainIngestHandler<
+export type BrainIngestHandler<
   TItem extends NormalizedBrainSourceItem = NormalizedBrainSourceItem,
 > = {
-  descriptor: GoatBrainIngestJobDescriptor;
+  descriptor: BrainIngestJobDescriptor;
   isPayload(value: unknown): value is TItem;
-  run(input: GoatBrainIngestHandlerInput<TItem>): Promise<Record<string, unknown>>;
+  run(input: BrainIngestHandlerInput<TItem>): Promise<Record<string, unknown>>;
 };
 
 // Legacy deterministic template writer; kept registered so already-queued jobs
@@ -155,31 +148,31 @@ const JAMIE_MEETING_INGEST_DESCRIPTOR = {
   kind: "brain_source_item_ingest",
   sourceProvider: "jamie",
   sourceType: "meeting",
-} as const satisfies GoatBrainIngestJobDescriptor;
+} as const satisfies BrainIngestJobDescriptor;
 
 const JAMIE_MEETING_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "jamie",
   sourceType: "meeting",
-} as const satisfies GoatBrainIngestJobDescriptor;
+} as const satisfies BrainIngestJobDescriptor;
 
 const GRANOLA_MEETING_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "granola",
   sourceType: "meeting",
-} as const satisfies GoatBrainIngestJobDescriptor;
+} as const satisfies BrainIngestJobDescriptor;
 
 const FATHOM_MEETING_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "fathom",
   sourceType: "meeting",
-} as const satisfies GoatBrainIngestJobDescriptor;
+} as const satisfies BrainIngestJobDescriptor;
 
 const GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "goat-chat",
   sourceType: "capture",
-} as const satisfies GoatBrainIngestJobDescriptor;
+} as const satisfies BrainIngestJobDescriptor;
 
 const POINTER_HYDRATE_DESCRIPTORS = [
   {
@@ -197,156 +190,156 @@ const POINTER_HYDRATE_DESCRIPTORS = [
     sourceProvider: "linear",
     sourceType: "pointer",
   },
-] as const satisfies readonly GoatBrainIngestJobDescriptor[];
+] as const satisfies readonly BrainIngestJobDescriptor[];
 
 const UPLOAD_ASSET_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "upload",
   sourceType: "asset",
-} as const satisfies GoatBrainIngestJobDescriptor;
+} as const satisfies BrainIngestJobDescriptor;
 
 const SLACK_CONVERSATION_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "slack",
   sourceType: "conversation",
-} as const satisfies GoatBrainIngestJobDescriptor;
+} as const satisfies BrainIngestJobDescriptor;
 
 const LINEAR_ISSUE_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "linear",
   sourceType: "issue",
-} as const satisfies GoatBrainIngestJobDescriptor;
+} as const satisfies BrainIngestJobDescriptor;
 
 const GITHUB_ACTIVITY_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "github",
   sourceType: "activity",
-} as const satisfies GoatBrainIngestJobDescriptor;
+} as const satisfies BrainIngestJobDescriptor;
 
 const HUBSPOT_OBJECT_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "hubspot",
   sourceType: "activity",
-} as const satisfies GoatBrainIngestJobDescriptor;
+} as const satisfies BrainIngestJobDescriptor;
 
 const ATTIO_OBJECT_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "attio",
   sourceType: "activity",
-} as const satisfies GoatBrainIngestJobDescriptor;
+} as const satisfies BrainIngestJobDescriptor;
 
 const GMAIL_THREAD_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "gmail",
   sourceType: "thread",
-} as const satisfies GoatBrainIngestJobDescriptor;
+} as const satisfies BrainIngestJobDescriptor;
 
 const GOOGLE_DRIVE_DOCUMENT_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "google_drive",
   sourceType: "document",
-} as const satisfies GoatBrainIngestJobDescriptor;
+} as const satisfies BrainIngestJobDescriptor;
 
 const GOAT_IMPORT_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "goat-import",
   sourceType: "run",
-} as const satisfies GoatBrainIngestJobDescriptor;
+} as const satisfies BrainIngestJobDescriptor;
 
-const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
+const GOAT_BRAIN_INGEST_HANDLERS: readonly BrainIngestHandler[] = [
   {
     descriptor: JAMIE_MEETING_INGEST_DESCRIPTOR,
     isPayload: isNormalizedJamieMeetingSourceItem,
-    run: runTypedGoatBrainIngestHandler(writeJamieMeetingToBrain),
+    run: runTypedBrainIngestHandler(writeJamieMeetingToBrain),
   },
   {
     descriptor: JAMIE_MEETING_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedJamieMeetingSourceItem,
-    run: runTypedGoatBrainIngestHandler(runJamieMeetingAgentIngest),
+    run: runTypedBrainIngestHandler(runJamieMeetingAgentIngest),
   },
   {
     descriptor: GRANOLA_MEETING_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedGranolaMeetingSourceItem,
-    run: runTypedGoatBrainIngestHandler(runGranolaMeetingAgentIngest),
+    run: runTypedBrainIngestHandler(runGranolaMeetingAgentIngest),
   },
   {
     descriptor: FATHOM_MEETING_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedFathomMeetingSourceItem,
-    run: runTypedGoatBrainIngestHandler(runFathomMeetingAgentIngest),
+    run: runTypedBrainIngestHandler(runFathomMeetingAgentIngest),
   },
   {
     descriptor: GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR,
-    isPayload: isNormalizedGoatChatCaptureSourceItem,
-    run: runTypedGoatBrainIngestHandler(runGoatChatCaptureAgentIngest),
+    isPayload: isNormalizedChatCaptureSourceItem,
+    run: runTypedBrainIngestHandler(runChatCaptureAgentIngest),
   },
   ...POINTER_HYDRATE_DESCRIPTORS.map(
-    (descriptor): GoatBrainIngestHandler<NormalizedGoatBrainPointerSourceItem> => ({
+    (descriptor): BrainIngestHandler<NormalizedBrainPointerSourceItem> => ({
       descriptor,
-      isPayload: isNormalizedGoatBrainPointerSourceItem,
-      run: runGoatBrainPointerHydrate,
+      isPayload: isNormalizedBrainPointerSourceItem,
+      run: runBrainPointerHydrate,
     }),
   ),
   {
     descriptor: UPLOAD_ASSET_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedUploadAssetSourceItem,
-    run: runTypedGoatBrainIngestHandler(runUploadAssetAgentIngest),
+    run: runTypedBrainIngestHandler(runUploadAssetAgentIngest),
   },
   {
     descriptor: SLACK_CONVERSATION_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedSlackConversationSourceItem,
-    run: runTypedGoatBrainIngestHandler(runSlackConversationAgentIngest),
+    run: runTypedBrainIngestHandler(runSlackConversationAgentIngest),
   },
   {
     descriptor: LINEAR_ISSUE_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedLinearIssueSourceItem,
-    run: runTypedGoatBrainIngestHandler(runLinearIssueAgentIngest),
+    run: runTypedBrainIngestHandler(runLinearIssueAgentIngest),
   },
   {
     descriptor: GITHUB_ACTIVITY_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedGitHubActivitySourceItem,
-    run: runTypedGoatBrainIngestHandler(runGitHubActivityAgentIngest),
+    run: runTypedBrainIngestHandler(runGitHubActivityAgentIngest),
   },
   {
     descriptor: HUBSPOT_OBJECT_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedHubspotObjectSourceItem,
-    run: runTypedGoatBrainIngestHandler(runHubspotObjectAgentIngest),
+    run: runTypedBrainIngestHandler(runHubspotObjectAgentIngest),
   },
   {
     descriptor: ATTIO_OBJECT_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedAttioObjectSourceItem,
-    run: runTypedGoatBrainIngestHandler(runAttioObjectAgentIngest),
+    run: runTypedBrainIngestHandler(runAttioObjectAgentIngest),
   },
   {
     descriptor: GMAIL_THREAD_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedGmailThreadSourceItem,
-    run: runTypedGoatBrainIngestHandler(runGmailThreadAgentIngest),
+    run: runTypedBrainIngestHandler(runGmailThreadAgentIngest),
   },
   {
     descriptor: GOOGLE_DRIVE_DOCUMENT_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedGoogleDriveDocumentSourceItem,
-    run: runTypedGoatBrainIngestHandler(runGoogleDriveDocumentAgentIngest),
+    run: runTypedBrainIngestHandler(runGoogleDriveDocumentAgentIngest),
   },
   {
     descriptor: GOAT_IMPORT_AGENT_INGEST_DESCRIPTOR,
-    isPayload: isNormalizedGoatImportSourceItem,
-    run: runTypedGoatBrainIngestHandler(runGoatImportAgentIngest),
+    isPayload: isNormalizedImportSourceItem,
+    run: runTypedBrainIngestHandler(runImportAgentIngest),
   },
 ];
 
-function runTypedGoatBrainIngestHandler<TItem extends NormalizedBrainSourceItem>(
-  run: (input: GoatBrainIngestHandlerInput<TItem>) => Promise<Record<string, unknown>>,
-): GoatBrainIngestHandler["run"] {
-  return (input) => run(input as GoatBrainIngestHandlerInput<TItem>);
+function runTypedBrainIngestHandler<TItem extends NormalizedBrainSourceItem>(
+  run: (input: BrainIngestHandlerInput<TItem>) => Promise<Record<string, unknown>>,
+): BrainIngestHandler["run"] {
+  return (input) => run(input as BrainIngestHandlerInput<TItem>);
 }
 
-export type GoatBrainIngestStore = {
+export type BrainIngestStore = {
   claimNext(input: {
     leaseId: string;
     leaseOwner: string;
     now: Date;
     leaseExpiresAt: Date;
-    supportedJobs: readonly GoatBrainIngestJobDescriptor[];
-  }): Promise<GoatBrainIngestJobWithSource | null>;
+    supportedJobs: readonly BrainIngestJobDescriptor[];
+  }): Promise<BrainIngestJobWithSource | null>;
   heartbeat(input: {
     id: string;
     leaseId: string;
@@ -384,7 +377,7 @@ export type GoatBrainIngestStore = {
   }): Promise<boolean>;
 };
 
-export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
+export function createDbBrainIngestStore(): BrainIngestStore {
   return {
     async claimNext(input) {
       const supportedJobsWhere = supportedJobDescriptorsWhere(input.supportedJobs);
@@ -451,7 +444,7 @@ export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
               updated_at = ${input.now}
           FROM candidate
           WHERE job.id = candidate.id
-          RETURNING ${goatBrainIngestJobColumnsSql}
+          RETURNING ${brainIngestJobColumnsSql}
         )
         SELECT
           claimed.*,
@@ -460,7 +453,7 @@ export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
         FROM claimed
         INNER JOIN goat.brain_source_items AS source ON source.id = claimed."sourceItemId"
       `);
-      return rowsFromExecute<GoatBrainIngestJobWithSource>(result)[0] ?? null;
+      return rowsFromExecute<BrainIngestJobWithSource>(result)[0] ?? null;
     },
 
     async heartbeat(input) {
@@ -604,31 +597,31 @@ export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
   };
 }
 
-let registeredGoatBrainIngestWakeup: (() => void) | null = null;
+let registeredBrainIngestWakeup: (() => void) | null = null;
 
-export function setGoatBrainIngestWakeup(wake: (() => void) | null) {
-  registeredGoatBrainIngestWakeup = wake;
+export function setBrainIngestWakeup(wake: (() => void) | null) {
+  registeredBrainIngestWakeup = wake;
 }
 
-export function wakeGoatBrainIngestWorker() {
-  registeredGoatBrainIngestWakeup?.();
+export function wakeBrainIngestWorker() {
+  registeredBrainIngestWakeup?.();
 }
 
-export async function claimNextGoatBrainIngestJob(input: {
+export async function claimNextBrainIngestJob(input: {
   leaseOwner: string;
-  supportedJobs: readonly GoatBrainIngestJobDescriptor[];
-  store?: GoatBrainIngestStore;
+  supportedJobs: readonly BrainIngestJobDescriptor[];
+  store?: BrainIngestStore;
   leaseTtlMs?: number;
   releasePendingReservations?: boolean;
 }) {
   const now = new Date();
-  const leaseId = newGoatBrainIngestLeaseId();
-  const store = input.store ?? createDbGoatBrainIngestStore();
+  const leaseId = newBrainIngestLeaseId();
+  const store = input.store ?? createDbBrainIngestStore();
   // The long-running worker creates one DB store and passes it into every
   // claim. Keep backlog release explicit so that test-store injection does not
   // accidentally disable the production sweep.
   if (input.releasePendingReservations ?? !input.store) {
-    await releasePendingGoatIngestionReservations({ now, maxWorkspaces: 50 });
+    await releasePendingIngestionReservations({ now, maxWorkspaces: 50 });
   }
   return store.claimNext({
     leaseId,
@@ -639,23 +632,23 @@ export async function claimNextGoatBrainIngestJob(input: {
   });
 }
 
-export async function runClaimedGoatBrainIngestJob(input: {
-  job: GoatBrainIngestJobWithSource;
+export async function runClaimedBrainIngestJob(input: {
+  job: BrainIngestJobWithSource;
   env: Pick<RunnerEnv, "jobLeaseTtlMs" | "vercelAiGatewayApiKey"> & {
     blobReadWriteToken?: RunnerEnv["blobReadWriteToken"];
     exaApiKey?: RunnerEnv["exaApiKey"];
     googleOAuthClientId?: RunnerEnv["googleOAuthClientId"];
     googleOAuthClientSecret?: RunnerEnv["googleOAuthClientSecret"];
   };
-  handlers?: readonly GoatBrainIngestHandler[];
-  store?: GoatBrainIngestStore;
+  handlers?: readonly BrainIngestHandler[];
+  store?: BrainIngestStore;
 }) {
   const runStartedAt = performance.now();
-  const store = input.store ?? createDbGoatBrainIngestStore();
+  const store = input.store ?? createDbBrainIngestStore();
   const handlers = input.handlers ?? GOAT_BRAIN_INGEST_HANDLERS;
   const leaseId = requireJobLease(input.job, "leaseId");
   const leaseOwner = requireJobLease(input.job, "leaseOwner");
-  const userIdHash = hashGoatUserId(input.job.userWorkosId);
+  const userIdHash = hashUserId(input.job.userWorkosId);
   const baseAttributes = {
     ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
     "goat.brain_ingest_job_id": input.job.id,
@@ -667,8 +660,8 @@ export async function runClaimedGoatBrainIngestJob(input: {
     "goat.status": input.job.status,
     "goat.attempt": input.job.attempts,
     "goat.lease_owner": leaseOwner,
-  } satisfies GoatAttributes;
-  const runSpan = startGoatSpan(GOAT_SPANS.brainIngestRun, baseAttributes);
+  } satisfies Attributes;
+  const runSpan = startSpan(GOAT_SPANS.brainIngestRun, baseAttributes);
   let leaseActive = true;
   let telemetryFinished = false;
   const runAbort = new AbortController();
@@ -681,7 +674,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
 
   const finishTelemetry = (
     outcome: "success" | "failure" | "aborted" | "skipped",
-    attributes: GoatAttributes = {},
+    attributes: Attributes = {},
     error?: unknown,
   ) => {
     if (telemetryFinished) return;
@@ -691,14 +684,14 @@ export async function runClaimedGoatBrainIngestJob(input: {
       outcome === "failure" && error
         ? runSpan.fail(error, attributes)
         : (attributes["goat.failure_category"] as string | undefined);
-    const finalAttributes: GoatAttributes = {
+    const finalAttributes: Attributes = {
       ...baseAttributes,
       "goat.outcome": outcome,
       ...(failureCategory ? { "goat.failure_category": failureCategory } : {}),
       ...attributes,
     };
     runSpan.end(finalAttributes);
-    recordGoatBrainIngestRun({
+    recordBrainIngestRun({
       durationMs,
       outcome,
       attributes: finalAttributes,
@@ -771,7 +764,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
       });
       return;
     }
-    const handler = findGoatBrainIngestHandler(handlers, input.job);
+    const handler = findBrainIngestHandler(handlers, input.job);
     if (!handler) {
       throw new Error(
         `Unsupported Goat Brain ingest source: ${input.job.kind}/${input.job.sourceProvider}/${input.job.sourceType}`,
@@ -830,7 +823,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
           }),
       ),
     );
-    const resultWithDuration = withGoatBrainIngestRunDuration(result, runStartedAt);
+    const resultWithDuration = withBrainIngestRunDuration(result, runStartedAt);
     recordBrainIngestModelCost(result);
     await debitIngestModelCost(input.job, result);
     if (!leaseActive) {
@@ -842,7 +835,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
     }
     if (isSkippedIngestResult(resultWithDuration)) {
       const skipped = await runSpan.runInContext(() =>
-        withGoatSpan(GOAT_SPANS.brainIngestComplete, baseAttributes, () =>
+        withSpan(GOAT_SPANS.brainIngestComplete, baseAttributes, () =>
           store.skip({
             id: input.job.id,
             sourceItemId: input.job.sourceItemId,
@@ -864,12 +857,12 @@ export async function runClaimedGoatBrainIngestJob(input: {
       }
       finishTelemetry("skipped", {
         "goat.status": "skipped",
-        ...goatBrainIngestBudgetAttributes(result),
+        ...brainIngestBudgetAttributes(result),
       });
       return;
     }
     const completed = await runSpan.runInContext(() =>
-      withGoatSpan(GOAT_SPANS.brainIngestComplete, baseAttributes, () =>
+      withSpan(GOAT_SPANS.brainIngestComplete, baseAttributes, () =>
         store.complete({
           id: input.job.id,
           sourceItemId: input.job.sourceItemId,
@@ -889,7 +882,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
       return;
     }
     if (input.job.kind !== "brain_pointer_hydrate" && input.job.workspaceId && input.job.brainRef) {
-      await captureGoatServerEvent(
+      await captureServerEvent(
         "brain_ingestion_completed",
         input.job.userWorkosId,
         {
@@ -903,10 +896,10 @@ export async function runClaimedGoatBrainIngestJob(input: {
     }
     finishTelemetry("success", {
       "goat.status": "succeeded",
-      ...goatBrainIngestBudgetAttributes(result),
+      ...brainIngestBudgetAttributes(result),
     });
   } catch (error) {
-    if (error instanceof GoatBrainIngestBudgetError) {
+    if (error instanceof BrainIngestBudgetError) {
       recordBrainIngestModelCost(error.result);
       // The agent ran and spent real provider money before the budget error;
       // frontier pass-through still charges it.
@@ -921,18 +914,18 @@ export async function runClaimedGoatBrainIngestJob(input: {
     }
     const message = errorMessage(error);
     const maxAttempts =
-      error instanceof GoatBrainIngestBudgetError
+      error instanceof BrainIngestBudgetError
         ? 1
-        : error instanceof GoatBrainAgentOutcomeError
+        : error instanceof BrainAgentOutcomeError
           ? GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS
           : GOAT_BRAIN_INGEST_MAX_ATTEMPTS;
     const terminal = input.job.attempts >= maxAttempts;
     const failureResult =
-      error instanceof GoatBrainIngestBudgetError
-        ? withGoatBrainIngestRunDuration({ ...error.result }, runStartedAt)
+      error instanceof BrainIngestBudgetError
+        ? withBrainIngestRunDuration({ ...error.result }, runStartedAt)
         : undefined;
     const active = await runSpan.runInContext(() =>
-      withGoatSpan(GOAT_SPANS.brainIngestFail, baseAttributes, () =>
+      withSpan(GOAT_SPANS.brainIngestFail, baseAttributes, () =>
         store.fail({
           id: input.job.id,
           sourceItemId: input.job.sourceItemId,
@@ -957,8 +950,8 @@ export async function runClaimedGoatBrainIngestJob(input: {
       "failure",
       {
         "goat.status": terminal ? "failed" : "queued",
-        ...(error instanceof GoatBrainIngestBudgetError
-          ? goatBrainIngestBudgetAttributes(error.result)
+        ...(error instanceof BrainIngestBudgetError
+          ? brainIngestBudgetAttributes(error.result)
           : {}),
       },
       error,
@@ -973,7 +966,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
   }
 }
 
-function withGoatBrainIngestRunDuration<T extends Record<string, unknown>>(
+function withBrainIngestRunDuration<T extends Record<string, unknown>>(
   result: T,
   runStartedAt: number,
 ) {
@@ -991,14 +984,14 @@ function withGoatBrainIngestRunDuration<T extends Record<string, unknown>>(
 // attempt, so charging only completed jobs would eat retried attempts' real
 // spend — with `ingest_model:{jobId}:{attempt}` as the replay guard. The flat
 // per-item ingestion fee is charged separately, once per reservation, at
-// admission time (see tryAdmitGoatIngestion in @opencompany/db).
+// admission time (see tryAdmitIngestion in @opencompany/db).
 async function debitIngestModelCost(
-  job: GoatBrainIngestJobWithSource,
+  job: BrainIngestJobWithSource,
   result: Record<string, unknown>,
 ) {
   try {
     if (!job.workspaceId) return;
-    const trace = normalizeGoatBrainIngestTrace(result.trace);
+    const trace = normalizeBrainIngestTrace(result.trace);
     if (!trace) return;
     const budget = trace.budget;
     const modelCostUsdMicros = budget?.modelCostUsdMicros ?? 0;
@@ -1010,7 +1003,7 @@ async function debitIngestModelCost(
       return;
     }
     const platformFeeUsdMicros = calculatePlatformFeeUsdMicros(providerCostUsdMicros);
-    const debit = await recordGoatCreditDebit({
+    const debit = await recordCreditDebit({
       workspaceId: job.workspaceId,
       userWorkosId: job.userWorkosId,
       source: "ingest_model_usage",
@@ -1040,7 +1033,7 @@ async function debitIngestModelCost(
       },
     });
     if (debit.ok) {
-      await captureGoatModelSpendRecorded({
+      await captureModelSpendRecorded({
         userWorkosId: job.userWorkosId,
         workspaceId: job.workspaceId,
         billingSource: "ingest_model_usage",
@@ -1066,7 +1059,7 @@ async function debitIngestModelCost(
 }
 
 function recordBrainIngestModelCost(result: Record<string, unknown>) {
-  const trace = normalizeGoatBrainIngestTrace(result.trace);
+  const trace = normalizeBrainIngestTrace(result.trace);
   if (!trace) return;
 
   if (trace.triage) {
@@ -1099,7 +1092,7 @@ function recordBrainIngestModelUsageCost(
     outputTokens: usage.outputTokens ?? 0,
   });
 
-  recordGoatModelCost({
+  recordModelCost({
     costUsdMicros: cost.totalCostUsdMicros,
     attributes: {
       "goat.model": model,
@@ -1108,15 +1101,15 @@ function recordBrainIngestModelUsageCost(
   });
 }
 
-export function startGoatBrainIngestWorker(
+export function startBrainIngestWorker(
   env: RunnerEnv,
   options: {
-    store?: GoatBrainIngestStore;
+    store?: BrainIngestStore;
     concurrency?: number;
     pollIntervalMs?: number;
   } = {},
 ) {
-  const store = options.store ?? createDbGoatBrainIngestStore();
+  const store = options.store ?? createDbBrainIngestStore();
   const handlers = GOAT_BRAIN_INGEST_HANDLERS;
   const supportedJobs = handlers.map((handler) => handler.descriptor);
   const concurrency = Math.max(1, options.concurrency ?? Math.min(2, env.workerConcurrency));
@@ -1156,7 +1149,7 @@ export function startGoatBrainIngestWorker(
     while (!stopped) {
       try {
         while (!stopped && active.size < concurrency) {
-          const job = await claimNextGoatBrainIngestJob({
+          const job = await claimNextBrainIngestJob({
             leaseOwner: env.instanceId,
             supportedJobs,
             store,
@@ -1164,7 +1157,7 @@ export function startGoatBrainIngestWorker(
             releasePendingReservations: true,
           });
           if (!job) break;
-          const running = runClaimedGoatBrainIngestJob({
+          const running = runClaimedBrainIngestJob({
             job,
             env,
             handlers,
@@ -1215,33 +1208,32 @@ export async function writeJamieMeetingToBrain(input: {
   userWorkosId: string;
   brainRef: string | null;
   item: NormalizedJamieMeetingSourceItem;
-  env: GoatBrainAgentIngestEnv;
+  env: BrainAgentIngestEnv;
 }) {
   const writes = buildJamieMeetingBrainWrites(input.item);
   const db = getDb();
   // Legacy jobs predate per-job brain refs; they land in the user's default
   // ("General") brain.
-  const brainRef =
-    input.brainRef ?? (await getDefaultGoatBrainForUser(input.userWorkosId, { db }))?.id;
+  const brainRef = input.brainRef ?? (await getDefaultBrainForUser(input.userWorkosId, { db }))?.id;
   if (!brainRef) {
     throw new Error(`No accessible Goat brain found for user ${input.userWorkosId}.`);
   }
-  const existingRows = await listGoatBrainFiles({ brainRef }, { db });
+  const existingRows = await listBrainFiles({ brainRef }, { db });
   const meetingAlreadyExists = existingRows.some((row) => row.brainId === writes.meetingBrainId);
-  const evidence = await upsertGoatBrainFile(
+  const evidence = await upsertBrainFile(
     {
       brainRef,
       userWorkosId: input.userWorkosId,
-      path: goatBrainFilePathFor(JAMIE_EVIDENCE_FOLDER, writes.evidenceBrainId),
+      path: brainFilePathFor(JAMIE_EVIDENCE_FOLDER, writes.evidenceBrainId),
       content: writes.evidenceContent,
     },
     { db },
   );
-  const meeting = await upsertGoatBrainFile(
+  const meeting = await upsertBrainFile(
     {
       brainRef,
       userWorkosId: input.userWorkosId,
-      path: goatBrainFilePathFor(JAMIE_MEETING_FOLDER, writes.meetingBrainId),
+      path: brainFilePathFor(JAMIE_MEETING_FOLDER, writes.meetingBrainId),
       content: writes.meetingContent,
     },
     { db },
@@ -1267,7 +1259,7 @@ export async function writeJamieMeetingToBrain(input: {
   };
 }
 
-function requireJobLease(job: GoatBrainIngestJobWithSource, field: "leaseId" | "leaseOwner") {
+function requireJobLease(job: BrainIngestJobWithSource, field: "leaseId" | "leaseOwner") {
   const value = job[field];
   if (!value) throw new Error(`Claimed Goat Brain ingest job ${job.id} is missing ${field}.`);
   return value;
@@ -1278,7 +1270,7 @@ function nextRetryAt(now: Date, attempts: number) {
   return new Date(now.getTime() + delayMs);
 }
 
-function newGoatBrainIngestLeaseId() {
+function newBrainIngestLeaseId() {
   return `goat_brain_ingest_${randomUUID()}`;
 }
 
@@ -1286,7 +1278,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown Goat Brain ingest error.";
 }
 
-function goatBrainIngestBudgetAttributes(result: Record<string, unknown>): GoatAttributes {
+function brainIngestBudgetAttributes(result: Record<string, unknown>): Attributes {
   const budget = result.budget;
   if (!budget || typeof budget !== "object" || Array.isArray(budget)) return {};
   const record = budget as Record<string, unknown>;
@@ -1324,9 +1316,9 @@ function skippedIngestReason(result: Record<string, unknown>) {
   return null;
 }
 
-function findGoatBrainIngestHandler(
-  handlers: readonly GoatBrainIngestHandler[],
-  job: Pick<GoatBrainIngestJobWithSource, "kind" | "sourceProvider" | "sourceType">,
+function findBrainIngestHandler(
+  handlers: readonly BrainIngestHandler[],
+  job: Pick<BrainIngestJobWithSource, "kind" | "sourceProvider" | "sourceType">,
 ) {
   return handlers.find(
     (handler) =>
@@ -1336,7 +1328,7 @@ function findGoatBrainIngestHandler(
   );
 }
 
-function supportedJobDescriptorsWhere(descriptors: readonly GoatBrainIngestJobDescriptor[]) {
+function supportedJobDescriptorsWhere(descriptors: readonly BrainIngestJobDescriptor[]) {
   if (descriptors.length === 0) return sql`FALSE`;
   return sql.join(
     descriptors.map(
@@ -1352,7 +1344,7 @@ function supportedJobDescriptorsWhere(descriptors: readonly GoatBrainIngestJobDe
   );
 }
 
-const goatBrainIngestJobColumnsSql = sql`
+const brainIngestJobColumnsSql = sql`
   job.id,
   job.source_item_id AS "sourceItemId",
   job.user_workos_id AS "userWorkosId",

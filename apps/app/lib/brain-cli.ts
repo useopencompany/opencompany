@@ -4,40 +4,40 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  type BrainKind,
   GOAT_BRAIN_ENTITY_TYPES,
-  type GoatBrainKind,
-  isBuiltInGoatBrainEntityType,
-  isValidGoatBrainKind,
-  normalizeGoatBrainFolderForV1,
+  isBuiltInBrainEntityType,
+  isValidBrainKind,
+  normalizeBrainFolderForV1,
 } from "@opencompany/brain";
-import { getGoatBrainCliSource } from "@opencompany/brain/cli-bundle";
+import { getBrainCliSource } from "@opencompany/brain/cli-bundle";
 import {
-  type MaterializedGoatBrainFile,
-  materializeGoatBrainFilesToRoot,
-  syncGoatBrainFilesFromRoot,
+  type MaterializedBrainFile,
+  materializeBrainFilesToRoot,
+  syncBrainFilesFromRoot,
 } from "@opencompany/db/brain-files";
 import {
-  type GoatBrainDocumentRead,
-  type GoatBrainReadContext,
-  type GoatBrainSearchHit,
-  getGoatBrainDocuments,
-  getGoatBrainTimeline,
-  listGoatBrainDocuments,
-  searchGoatBrain,
+  type BrainDocumentRead,
+  type BrainReadContext,
+  type BrainSearchHit,
+  getBrainDocuments,
+  getBrainTimeline,
+  listBrainDocuments,
+  searchBrain,
 } from "@opencompany/db/brain-read";
 import { getDb } from "@opencompany/db/client";
 import { createPooledDb } from "@opencompany/db/pool";
-import { goatBrainToolRuns, goatUsers } from "@opencompany/db/schema";
-import { createGoatGatewayAttribution } from "@opencompany/telemetry";
+import { brainToolRuns, users } from "@opencompany/db/schema";
+import { createGatewayAttribution } from "@opencompany/telemetry";
 import { and, eq, isNull } from "drizzle-orm";
 import { GOAT_BRAIN_READ_PLANE_COMMANDS } from "@/lib/brain-surface";
 import type {
-  GoatBrainCliCommand,
-  GoatBrainToolFlagValue,
-  GoatBrainToolInput,
-  GoatBrainToolOutput,
+  BrainCliCommand,
+  BrainToolFlagValue,
+  BrainToolInput,
+  BrainToolOutput,
 } from "@/lib/chat-ui";
-import { isGoatMcpSetupCompletionRun } from "@/lib/mcp-setup";
+import { isMcpSetupCompletionRun } from "@/lib/mcp-setup";
 
 const GOAT_BRAIN_CHAT_CLI_TIMEOUT_MS = 60_000;
 const GOAT_BRAIN_TRACE_SCHEMA_VERSION = "goat.brain.cli-run.v2";
@@ -46,7 +46,7 @@ const MAX_GOAT_BRAIN_QUERY_LIMIT = 50;
 const GOAT_BRAIN_TOOL_HELP =
   'Use goat_brain as { command, flags, stdin? }. For command-specific usage, call { command: "help", flags: { topic: "<command>" } }. Common commands: list, query, get, create, append-evidence, timeline-add, rewrite, alias, link, merge, move, delete, folder, doctor. The brain has required folders inbox, skills, people, companies, and evidence; core folders such as thoughts, projects, meetings, research, decisions, and concepts are adjustable and can be recreated with folder create when needed. Skills are excluded from default list/query retrieval; pass folder: "skills" (or a descendant) to retrieve them explicitly, while get remains available by id. query returns curated pages by default; pass kind: "evidence" only when raw evidence is explicitly needed. query supports type/kind/folder filters, hops for graph expansion, and offset pagination; when pagination.hasMore is true, repeat the same query with offset set to pagination.nextOffset. Hits list linked pages — follow them with get. get accepts one id or a list of ids (aliases resolve too). Use append-evidence to create sourced evidence records linked to a subject. Use includeMerged when you need merged records and includeArchived when you need archived ones.';
 
-const READ_ONLY_GOAT_BRAIN_COMMANDS = new Set<GoatBrainCliCommand>([
+const READ_ONLY_GOAT_BRAIN_COMMANDS = new Set<BrainCliCommand>([
   "help",
   "list",
   "get",
@@ -58,41 +58,41 @@ const READ_ONLY_GOAT_BRAIN_COMMANDS = new Set<GoatBrainCliCommand>([
 // Commands served by the DB read plane (@opencompany/db/brain-read) — indexed SQL, no brain
 // materialization, no CLI spawn. `help`/`folder`/`doctor` stay on the CLI: help is static text and
 // doctor legitimately wants the full corpus.
-const READ_PLANE_GOAT_BRAIN_COMMANDS = new Set<GoatBrainCliCommand>(GOAT_BRAIN_READ_PLANE_COMMANDS);
+const READ_PLANE_GOAT_BRAIN_COMMANDS = new Set<BrainCliCommand>(GOAT_BRAIN_READ_PLANE_COMMANDS);
 const GOAT_BRAIN_MUTATION_QUEUES = new Map<string, Promise<void>>();
 
-type GoatBrainCliTraceContext = {
+type BrainCliTraceContext = {
   sourceRef: string;
-  toolInput: GoatBrainToolInput;
+  toolInput: BrainToolInput;
   chatSessionId?: string;
   userMessageId?: string;
   assistantMessageId?: string;
   toolCallId?: string;
 };
 
-type ResolvedGoatBrainCliArgs = {
+type ResolvedBrainCliArgs = {
   argv: string[];
   display: string;
 };
 
-type GoatBrainCliProcessResult = GoatBrainToolOutput & {
+type BrainCliProcessResult = BrainToolOutput & {
   rawStdout: string;
   rawStderr: string;
   timedOut?: boolean;
   aborted?: boolean;
 };
 
-export async function runGoatBrainCliForUser(input: {
+export async function runBrainCliForUser(input: {
   brainRef: string;
   userWorkosId: string;
   args?: string;
   argv?: string[];
   gatewayApiKey: string;
   stdin?: string;
-  trace?: GoatBrainCliTraceContext;
+  trace?: BrainCliTraceContext;
   signal?: AbortSignal;
-}): Promise<GoatBrainToolOutput> {
-  const resolved = resolveGoatBrainCliArgs(input);
+}): Promise<BrainToolOutput> {
+  const resolved = resolveBrainCliArgs(input);
   if (!resolved) {
     return {
       ok: false,
@@ -104,20 +104,20 @@ export async function runGoatBrainCliForUser(input: {
     };
   }
 
-  const command = normalizeResolvedGoatBrainCommand(resolved.argv[0]);
-  if (command && !goatBrainCommandIsReadOnly(command)) {
+  const command = normalizeResolvedBrainCommand(resolved.argv[0]);
+  if (command && !brainCommandIsReadOnly(command)) {
     // Queue keyed by brain: shared brains serialize mutations across users.
-    return enqueueGoatBrainMutation(input.brainRef, () =>
-      runResolvedGoatBrainCliForUser(input, resolved, command),
+    return enqueueBrainMutation(input.brainRef, () =>
+      runResolvedBrainCliForUser(input, resolved, command),
     );
   }
-  return runResolvedGoatBrainCliForUser(input, resolved, command);
+  return runResolvedBrainCliForUser(input, resolved, command);
 }
 
-export async function runGoatBrainToolForUser(input: {
+export async function runBrainToolForUser(input: {
   brainRef: string;
   userWorkosId: string;
-  toolInput: GoatBrainToolInput;
+  toolInput: BrainToolInput;
   gatewayApiKey: string;
   sourceRef: string;
   chatSessionId?: string;
@@ -125,10 +125,10 @@ export async function runGoatBrainToolForUser(input: {
   assistantMessageId?: string;
   toolCallId?: string;
   signal?: AbortSignal;
-}): Promise<GoatBrainToolOutput> {
+}): Promise<BrainToolOutput> {
   let invocation: { argv: string[]; stdin?: string };
   try {
-    invocation = goatBrainToolInvocation(input.toolInput, input.sourceRef);
+    invocation = brainToolInvocation(input.toolInput, input.sourceRef);
   } catch (error) {
     return {
       ok: false,
@@ -140,12 +140,12 @@ export async function runGoatBrainToolForUser(input: {
     };
   }
   if (READ_PLANE_GOAT_BRAIN_COMMANDS.has(input.toolInput.command)) {
-    return runGoatBrainReadCommandForUser(input, {
+    return runBrainReadCommandForUser(input, {
       argv: invocation.argv,
       display: formatCliDisplay(invocation.argv),
     });
   }
-  return runGoatBrainCliForUser({
+  return runBrainCliForUser({
     brainRef: input.brainRef,
     userWorkosId: input.userWorkosId,
     argv: invocation.argv,
@@ -163,40 +163,40 @@ export async function runGoatBrainToolForUser(input: {
   });
 }
 
-async function runResolvedGoatBrainCliForUser(
+async function runResolvedBrainCliForUser(
   input: {
     brainRef: string;
     userWorkosId: string;
     gatewayApiKey: string;
     stdin?: string;
-    trace?: GoatBrainCliTraceContext;
+    trace?: BrainCliTraceContext;
     signal?: AbortSignal;
   },
-  resolved: ResolvedGoatBrainCliArgs,
-  command: GoatBrainCliCommand | null,
-): Promise<GoatBrainToolOutput> {
-  const shouldSync = Boolean(command && !goatBrainCommandIsReadOnly(command));
+  resolved: ResolvedBrainCliArgs,
+  command: BrainCliCommand | null,
+): Promise<BrainToolOutput> {
+  const shouldSync = Boolean(command && !brainCommandIsReadOnly(command));
   const root = await mkdtemp(path.join(os.tmpdir(), "goat-chat-brain-"));
   const startedAt = new Date();
   const startedAtMs = Date.now();
   const traceId = `goat_brain_run_${randomUUID()}`;
-  let materialized: MaterializedGoatBrainFile[] = [];
-  let processResult: GoatBrainCliProcessResult | null = null;
+  let materialized: MaterializedBrainFile[] = [];
+  let processResult: BrainCliProcessResult | null = null;
   let syncResult: { ok: true } | { ok: false; error: string } | null = null;
-  let output: GoatBrainToolOutput;
+  let output: BrainToolOutput;
 
   try {
-    materialized = await materializeGoatBrainFilesToRoot({
+    materialized = await materializeBrainFilesToRoot({
       brainRef: input.brainRef,
       root,
-      cliSource: getGoatBrainCliSource(),
+      cliSource: getBrainCliSource(),
     });
     processResult = await runCliProcess({
       cliPath: path.join(root, "goat-brain.mjs"),
       argv: resolved.argv,
       root,
       gatewayApiKey: input.gatewayApiKey,
-      reporting: createGoatGatewayAttribution({
+      reporting: createGatewayAttribution({
         userWorkosId: input.userWorkosId,
         feature: "brain-query",
         brainRef: input.brainRef,
@@ -206,9 +206,9 @@ async function runResolvedGoatBrainCliForUser(
       ...(input.signal ? { signal: input.signal } : {}),
     });
 
-    output = publicGoatBrainCliOutput(processResult, resolved);
+    output = publicBrainCliOutput(processResult, resolved);
     if (shouldSync && processResult.ok) {
-      const synced = await syncGoatBrainFilesFromRootWithTransactionDb({
+      const synced = await syncBrainFilesFromRootWithTransactionDb({
         brainRef: input.brainRef,
         userWorkosId: input.userWorkosId,
         root,
@@ -251,7 +251,7 @@ async function runResolvedGoatBrainCliForUser(
     traceId,
     durationMs,
   };
-  await recordGoatBrainToolRun({
+  await recordBrainToolRun({
     traceId,
     brainRef: input.brainRef,
     userWorkosId: input.userWorkosId,
@@ -274,11 +274,11 @@ async function runResolvedGoatBrainCliForUser(
 // payload only; returning the equivalent human rendering as `stdout` would duplicate every result
 // in the model context. Every run is still traced.
 
-async function runGoatBrainReadCommandForUser(
+async function runBrainReadCommandForUser(
   input: {
     brainRef: string;
     userWorkosId: string;
-    toolInput: GoatBrainToolInput;
+    toolInput: BrainToolInput;
     gatewayApiKey: string;
     sourceRef: string;
     chatSessionId?: string;
@@ -286,15 +286,15 @@ async function runGoatBrainReadCommandForUser(
     assistantMessageId?: string;
     toolCallId?: string;
   },
-  resolved: ResolvedGoatBrainCliArgs,
-): Promise<GoatBrainToolOutput> {
+  resolved: ResolvedBrainCliArgs,
+): Promise<BrainToolOutput> {
   const startedAt = new Date();
   const startedAtMs = Date.now();
   const traceId = `goat_brain_run_${randomUUID()}`;
-  const ctx: GoatBrainReadContext = {
+  const ctx: BrainReadContext = {
     brainRef: input.brainRef,
     gatewayApiKey: input.gatewayApiKey,
-    reporting: createGoatGatewayAttribution({
+    reporting: createGatewayAttribution({
       userWorkosId: input.userWorkosId,
       feature: "brain-query",
       brainRef: input.brainRef,
@@ -303,9 +303,9 @@ async function runGoatBrainReadCommandForUser(
   };
   const flags = normalizeCliToolFlags(input.toolInput.flags ?? {});
 
-  let output: GoatBrainToolOutput;
+  let output: BrainToolOutput;
   try {
-    const result = await executeGoatBrainReadCommand(ctx, input.toolInput.command, flags);
+    const result = await executeBrainReadCommand(ctx, input.toolInput.command, flags);
     output = {
       ok: true,
       exitCode: 0,
@@ -330,7 +330,7 @@ async function runGoatBrainReadCommandForUser(
 
   const durationMs = Date.now() - startedAtMs;
   output = { ...output, brainRef: input.brainRef, traceId, durationMs };
-  await recordGoatBrainToolRun({
+  await recordBrainToolRun({
     traceId,
     brainRef: input.brainRef,
     userWorkosId: input.userWorkosId,
@@ -354,10 +354,10 @@ async function runGoatBrainReadCommandForUser(
   return output;
 }
 
-async function executeGoatBrainReadCommand(
-  ctx: GoatBrainReadContext,
-  command: GoatBrainCliCommand,
-  flags: Record<string, GoatBrainToolFlagValue>,
+async function executeBrainReadCommand(
+  ctx: BrainReadContext,
+  command: BrainCliCommand,
+  flags: Record<string, BrainToolFlagValue>,
 ): Promise<{ stdout: string; parsed: unknown }> {
   switch (command) {
     case "query": {
@@ -371,11 +371,11 @@ async function executeGoatBrainReadCommand(
       const includeNeighbors = flagBoolean(flags["include-neighbors"]);
       const snippetChars = flagNumber(flags["snippet-chars"]);
       const text = flagString(flags.text) ?? "";
-      const candidates = await searchGoatBrain(ctx, {
+      const candidates = await searchBrain(ctx, {
         text,
-        ...(folder ? { folder: normalizeGoatBrainFolderForV1(folder) } : {}),
+        ...(folder ? { folder: normalizeBrainFolderForV1(folder) } : {}),
         ...(type ? { type } : {}),
-        kind: kind as GoatBrainKind,
+        kind: kind as BrainKind,
         ...(since ? { since } : {}),
         limit: limit + 1,
         offset,
@@ -409,7 +409,7 @@ async function executeGoatBrainReadCommand(
       if (!["all", "frontmatter", "truth", "timeline"].includes(section)) {
         throw new Error("`section` must be all, frontmatter, truth, or timeline.");
       }
-      const result = await getGoatBrainDocuments(ctx, ids);
+      const result = await getBrainDocuments(ctx, ids);
       if (result.documents.length === 0) {
         throw new Error(
           `No brain doc found with id ${ids.map((id) => `"${id}"`).join(", ")}. Search for it to find the right id.`,
@@ -425,7 +425,7 @@ async function executeGoatBrainReadCommand(
       if (!id) throw new Error("goat_brain timeline requires an id.");
       const since = flagString(flags.since);
       const limit = flagNumber(flags.limit);
-      const result = await getGoatBrainTimeline(ctx, id, {
+      const result = await getBrainTimeline(ctx, id, {
         ...(since ? { since } : {}),
         ...(limit !== undefined ? { limit } : {}),
       });
@@ -454,10 +454,10 @@ async function executeGoatBrainReadCommand(
       const type = readEntityTypeFlag(flags.type);
       const kind = readKindFlag(flags.kind);
       const limit = flagNumber(flags.limit);
-      const documents = await listGoatBrainDocuments(ctx, {
-        ...(folder ? { folder: normalizeGoatBrainFolderForV1(folder) } : {}),
+      const documents = await listBrainDocuments(ctx, {
+        ...(folder ? { folder: normalizeBrainFolderForV1(folder) } : {}),
         ...(type ? { type } : {}),
-        ...(kind ? { kind: kind as GoatBrainKind } : {}),
+        ...(kind ? { kind: kind as BrainKind } : {}),
         ...(limit !== undefined ? { limit } : {}),
         ...(flagBoolean(flags["include-merged"]) ? { includeMerged: true } : {}),
         ...(flagBoolean(flags["include-conflicts"]) ? { includeConflicts: true } : {}),
@@ -477,7 +477,7 @@ async function executeGoatBrainReadCommand(
   }
 }
 
-type GoatBrainQueryPagination = {
+type BrainQueryPagination = {
   limit: number;
   offset: number;
   returned: number;
@@ -491,7 +491,7 @@ function queryPagination(input: {
   offset: number;
   returned: number;
   hasMore: boolean;
-}): GoatBrainQueryPagination {
+}): BrainQueryPagination {
   if (!input.hasMore) return input;
   const nextOffset = input.offset + input.returned;
   return {
@@ -501,7 +501,7 @@ function queryPagination(input: {
   };
 }
 
-function renderQueryHits(hits: GoatBrainSearchHit[], pagination: GoatBrainQueryPagination): string {
+function renderQueryHits(hits: BrainSearchHit[], pagination: BrainQueryPagination): string {
   const renderedHits = hits.length
     ? hits
         .map((hit, index) => {
@@ -526,7 +526,7 @@ function renderQueryHits(hits: GoatBrainSearchHit[], pagination: GoatBrainQueryP
 }
 
 function renderDocuments(
-  documents: GoatBrainDocumentRead[],
+  documents: BrainDocumentRead[],
   missing: string[],
   section: string,
 ): string {
@@ -537,7 +537,7 @@ function renderDocuments(
   return parts.join("\n\n---\n\n");
 }
 
-function renderDocument(doc: GoatBrainDocumentRead, section: string): string {
+function renderDocument(doc: BrainDocumentRead, section: string): string {
   if (section === "truth") return doc.compiledTruth || "_No compiled truth yet._";
   if (section === "frontmatter") {
     return JSON.stringify(
@@ -597,19 +597,19 @@ function renderDocument(doc: GoatBrainDocumentRead, section: string): string {
     .join("\n\n");
 }
 
-function flagString(value: GoatBrainToolFlagValue | undefined): string | undefined {
+function flagString(value: BrainToolFlagValue | undefined): string | undefined {
   if (typeof value === "string" && value.trim()) return value.trim();
   if (typeof value === "number") return String(value);
   return undefined;
 }
 
-function flagStringList(value: GoatBrainToolFlagValue | undefined): string[] {
+function flagStringList(value: BrainToolFlagValue | undefined): string[] {
   if (Array.isArray(value)) return value.map((item) => item.trim()).filter(Boolean);
   const single = flagString(value);
   return single ? [single] : [];
 }
 
-function flagNumber(value: GoatBrainToolFlagValue | undefined): number | undefined {
+function flagNumber(value: BrainToolFlagValue | undefined): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim()) {
     const parsed = Number(value);
@@ -618,7 +618,7 @@ function flagNumber(value: GoatBrainToolFlagValue | undefined): number | undefin
   return undefined;
 }
 
-function readQueryLimit(value: GoatBrainToolFlagValue | undefined): number {
+function readQueryLimit(value: BrainToolFlagValue | undefined): number {
   const parsed = flagNumber(value);
   const limit = parsed ?? DEFAULT_GOAT_BRAIN_QUERY_LIMIT;
   if (
@@ -632,7 +632,7 @@ function readQueryLimit(value: GoatBrainToolFlagValue | undefined): number {
   return limit;
 }
 
-function readQueryOffset(value: GoatBrainToolFlagValue | undefined): number {
+function readQueryOffset(value: BrainToolFlagValue | undefined): number {
   const parsed = flagNumber(value);
   const offset = parsed ?? 0;
   if (
@@ -645,7 +645,7 @@ function readQueryOffset(value: GoatBrainToolFlagValue | undefined): number {
   return offset;
 }
 
-function flagBoolean(value: GoatBrainToolFlagValue | undefined): boolean | undefined {
+function flagBoolean(value: BrainToolFlagValue | undefined): boolean | undefined {
   if (typeof value === "boolean") return value;
   if (typeof value === "string") {
     if (value.trim().toLowerCase() === "true") return true;
@@ -654,10 +654,10 @@ function flagBoolean(value: GoatBrainToolFlagValue | undefined): boolean | undef
   return undefined;
 }
 
-function readEntityTypeFlag(value: GoatBrainToolFlagValue | undefined): string | undefined {
+function readEntityTypeFlag(value: BrainToolFlagValue | undefined): string | undefined {
   const type = flagString(value);
   if (!type) return undefined;
-  if (!isBuiltInGoatBrainEntityType(type)) {
+  if (!isBuiltInBrainEntityType(type)) {
     throw new Error(
       `Unsupported Goat Brain entity type "${type}". Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(", ")}.`,
     );
@@ -665,24 +665,24 @@ function readEntityTypeFlag(value: GoatBrainToolFlagValue | undefined): string |
   return type;
 }
 
-function readKindFlag(value: GoatBrainToolFlagValue | undefined): string | undefined {
+function readKindFlag(value: BrainToolFlagValue | undefined): string | undefined {
   const kind = flagString(value);
   if (!kind) return undefined;
-  if (!isValidGoatBrainKind(kind)) {
+  if (!isValidBrainKind(kind)) {
     throw new Error('kind must be "page" or "evidence".');
   }
   return kind;
 }
 
-async function syncGoatBrainFilesFromRootWithTransactionDb(input: {
+async function syncBrainFilesFromRootWithTransactionDb(input: {
   brainRef: string;
   userWorkosId: string;
   root: string;
-  baseSnapshot: MaterializedGoatBrainFile[];
+  baseSnapshot: MaterializedBrainFile[];
 }) {
   const pooled = createPooledDb(undefined, { max: 1 });
   try {
-    return await syncGoatBrainFilesFromRoot({
+    return await syncBrainFilesFromRoot({
       ...input,
       db: pooled.db,
     });
@@ -691,18 +691,18 @@ async function syncGoatBrainFilesFromRootWithTransactionDb(input: {
   }
 }
 
-function goatBrainToolInvocation(
-  input: GoatBrainToolInput,
+function brainToolInvocation(
+  input: BrainToolInput,
   sourceRef: string,
 ): { argv: string[]; stdin?: string } {
-  const rendered = renderGoatBrainToolCommand(input, sourceRef);
+  const rendered = renderBrainToolCommand(input, sourceRef);
   return {
     argv: rendered.argv,
     ...(rendered.stdin ? { stdin: rendered.stdin } : {}),
   };
 }
 
-const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string[]> = {
+const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<BrainCliCommand, readonly string[]> = {
   help: ["topic", "command", "json"],
   create: [
     "folder",
@@ -795,26 +795,26 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
   doctor: ["json"],
 };
 
-export function renderGoatBrainToolCommand(
-  input: GoatBrainToolInput,
+export function renderBrainToolCommand(
+  input: BrainToolInput,
   sourceRef: string,
 ): { argv: string[]; stdin?: string } {
   const allowed = GOAT_BRAIN_TOOL_COMMAND_FLAGS[input.command];
-  if (!allowed) throw goatBrainToolInputError(`Unsupported goat_brain command "${input.command}".`);
+  if (!allowed) throw brainToolInputError(`Unsupported goat_brain command "${input.command}".`);
 
   const flags = normalizeCliToolFlags(input.flags ?? {});
   applyImplicitStdinFlags(input.command, flags, input.stdin);
   const allowedSet = new Set(allowed);
   const unknown = Object.keys(flags).find((name) => !allowedSet.has(name));
   if (unknown) {
-    throw goatBrainToolInputError(
+    throw brainToolInputError(
       `Unsupported goat_brain flag "--${unknown}" for command "${input.command}".`,
       input.command,
     );
   }
 
   if (input.command === "delete" && flags.force === true) {
-    throw goatBrainToolInputError("The chat tool may only preview deletes. Use dryRun: true.", [
+    throw brainToolInputError("The chat tool may only preview deletes. Use dryRun: true.", [
       "delete",
     ]);
   }
@@ -835,7 +835,7 @@ export function renderGoatBrainToolCommand(
   }
   if (input.command === "delete") flags["dry-run"] = true;
 
-  injectGoatBrainSourceRef(input.command, flags, sourceRef);
+  injectBrainSourceRef(input.command, flags, sourceRef);
   for (const [name, value] of Object.entries(flags)) {
     if (name === "force") continue;
     appendCliFlag(argv, name, value);
@@ -843,13 +843,13 @@ export function renderGoatBrainToolCommand(
   return { argv, ...(input.stdin ? { stdin: input.stdin } : {}) };
 }
 
-function cliCommandForToolCommand(command: GoatBrainCliCommand): string {
+function cliCommandForToolCommand(command: BrainCliCommand): string {
   return command;
 }
 
 function applyImplicitStdinFlags(
-  command: GoatBrainCliCommand,
-  flags: Record<string, GoatBrainToolFlagValue>,
+  command: BrainCliCommand,
+  flags: Record<string, BrainToolFlagValue>,
   stdin: string | undefined,
 ) {
   if (!stdin?.trim()) return;
@@ -872,8 +872,8 @@ function applyImplicitStdinFlags(
   }
 }
 
-function normalizeCliToolFlags(input: Record<string, GoatBrainToolFlagValue>) {
-  const out: Record<string, GoatBrainToolFlagValue> = {};
+function normalizeCliToolFlags(input: Record<string, BrainToolFlagValue>) {
+  const out: Record<string, BrainToolFlagValue> = {};
   for (const [rawName, value] of Object.entries(input)) {
     const name = rawName
       .trim()
@@ -886,9 +886,9 @@ function normalizeCliToolFlags(input: Record<string, GoatBrainToolFlagValue>) {
   return out;
 }
 
-function injectGoatBrainSourceRef(
-  command: GoatBrainCliCommand,
-  flags: Record<string, GoatBrainToolFlagValue>,
+function injectBrainSourceRef(
+  command: BrainCliCommand,
+  flags: Record<string, BrainToolFlagValue>,
   sourceRef: string,
 ) {
   if (
@@ -901,19 +901,16 @@ function injectGoatBrainSourceRef(
   }
 }
 
-function validateCreateFlags(
-  flags: Record<string, GoatBrainToolFlagValue>,
-  stdin: string | undefined,
-) {
+function validateCreateFlags(flags: Record<string, BrainToolFlagValue>, stdin: string | undefined) {
   const type = typeof flags.type === "string" ? flags.type.trim() : "";
   if (!type) {
-    throw goatBrainToolInputError(
+    throw brainToolInputError(
       `goat_brain create requires a type. Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(", ")}.`,
       "create",
     );
   }
-  if (!isBuiltInGoatBrainEntityType(type)) {
-    throw goatBrainToolInputError(
+  if (!isBuiltInBrainEntityType(type)) {
+    throw brainToolInputError(
       `Unsupported Goat Brain entity type "${type}". Use one of: ${GOAT_BRAIN_ENTITY_TYPES.join(
         ", ",
       )}.`,
@@ -924,21 +921,21 @@ function validateCreateFlags(
     (typeof flags.truth === "string" && flags.truth.trim().length > 0) ||
     (flags["truth-stdin"] === true && Boolean(stdin?.trim()));
   if (!hasTruth) {
-    throw goatBrainToolInputError(
+    throw brainToolInputError(
       "goat_brain create requires compiled truth via truth or non-empty truthStdin.",
       "create",
     );
   }
   const kind = typeof flags.kind === "string" ? flags.kind.trim() : "";
-  if (kind && !isValidGoatBrainKind(kind)) {
-    throw goatBrainToolInputError(
+  if (kind && !isValidBrainKind(kind)) {
+    throw brainToolInputError(
       'goat_brain create kind must be "page" or "evidence". Evidence documents live under the "evidence/" folder zone; folders are otherwise free-form.',
       "create",
     );
   }
 }
 
-function goatBrainToolInputError(message: string, command?: GoatBrainCliCommand | string[]) {
+function brainToolInputError(message: string, command?: BrainCliCommand | string[]) {
   const topics =
     typeof command === "string" ? [command] : Array.isArray(command) ? command : undefined;
   const topicHelp = topics?.length
@@ -947,7 +944,7 @@ function goatBrainToolInputError(message: string, command?: GoatBrainCliCommand 
   return new Error(`${message}\n\n${GOAT_BRAIN_TOOL_HELP}${topicHelp}`);
 }
 
-function appendCliFlag(argv: string[], name: string, value: GoatBrainToolFlagValue) {
+function appendCliFlag(argv: string[], name: string, value: BrainToolFlagValue) {
   if (typeof value === "boolean") {
     if (value) argv.push(`--${name}`);
     return;
@@ -959,7 +956,7 @@ function appendCliFlag(argv: string[], name: string, value: GoatBrainToolFlagVal
   argv.push(`--${name}`, String(value));
 }
 
-function resolveGoatBrainCliArgs(input: { args?: string; argv?: string[] }) {
+function resolveBrainCliArgs(input: { args?: string; argv?: string[] }) {
   if (input.argv) {
     const argv = input.argv.map((item) => item.trim()).filter(Boolean);
     return argv.length > 0 ? { argv, display: formatCliDisplay(argv) } : null;
@@ -970,22 +967,22 @@ function resolveGoatBrainCliArgs(input: { args?: string; argv?: string[] }) {
   return argv.length > 0 ? { argv, display: rawArgs } : null;
 }
 
-function normalizeResolvedGoatBrainCommand(value: string | undefined): GoatBrainCliCommand | null {
-  return isGoatBrainCliCommand(value) ? value : null;
+function normalizeResolvedBrainCommand(value: string | undefined): BrainCliCommand | null {
+  return isBrainCliCommand(value) ? value : null;
 }
 
-function isGoatBrainCliCommand(value: unknown): value is GoatBrainCliCommand {
+function isBrainCliCommand(value: unknown): value is BrainCliCommand {
   return (
     typeof value === "string" &&
-    Object.hasOwn(GOAT_BRAIN_TOOL_COMMAND_FLAGS, value as GoatBrainCliCommand)
+    Object.hasOwn(GOAT_BRAIN_TOOL_COMMAND_FLAGS, value as BrainCliCommand)
   );
 }
 
-function goatBrainCommandIsReadOnly(command: GoatBrainCliCommand): boolean {
+function brainCommandIsReadOnly(command: BrainCliCommand): boolean {
   return READ_ONLY_GOAT_BRAIN_COMMANDS.has(command);
 }
 
-async function enqueueGoatBrainMutation<T>(brainRef: string, run: () => Promise<T>): Promise<T> {
+async function enqueueBrainMutation<T>(brainRef: string, run: () => Promise<T>): Promise<T> {
   const previous = GOAT_BRAIN_MUTATION_QUEUES.get(brainRef) ?? Promise.resolve();
   let release: () => void = () => {};
   const current = previous.then(run, run);
@@ -1012,7 +1009,7 @@ async function runCliProcess(input: {
   reporting?: { user?: string; tags: string[] };
   stdin?: string;
   signal?: AbortSignal;
-}): Promise<GoatBrainCliProcessResult> {
+}): Promise<BrainCliProcessResult> {
   const child = spawn(process.execPath, [input.cliPath, ...input.argv, "--report-usage"], {
     env: childBrainCliEnv(input),
     stdio: [input.stdin ? "pipe" : "ignore", "pipe", "pipe"],
@@ -1128,10 +1125,10 @@ function childBrainCliEnv(input: {
   };
 }
 
-function publicGoatBrainCliOutput(
-  result: GoatBrainCliProcessResult,
-  resolved: ResolvedGoatBrainCliArgs,
-): GoatBrainToolOutput {
+function publicBrainCliOutput(
+  result: BrainCliProcessResult,
+  resolved: ResolvedBrainCliArgs,
+): BrainToolOutput {
   const stdout = cleanCliStdout(result.rawStdout);
   const stderr = truncate(result.rawStderr, 20_000);
   const parsed = parseCliJson(stdout);
@@ -1158,23 +1155,23 @@ function readParsedCliError(parsed: unknown): string | null {
   return typeof error === "string" && error.trim() ? error.trim() : null;
 }
 
-async function recordGoatBrainToolRun(input: {
+async function recordBrainToolRun(input: {
   traceId: string;
   brainRef: string;
   userWorkosId: string;
-  command: GoatBrainCliCommand | null;
-  resolved: ResolvedGoatBrainCliArgs;
+  command: BrainCliCommand | null;
+  resolved: ResolvedBrainCliArgs;
   startedAt: Date;
   durationMs: number;
-  materialized: MaterializedGoatBrainFile[];
-  processResult: GoatBrainCliProcessResult | null;
-  output: GoatBrainToolOutput;
-  traceContext: GoatBrainCliTraceContext | null;
+  materialized: MaterializedBrainFile[];
+  processResult: BrainCliProcessResult | null;
+  output: BrainToolOutput;
+  traceContext: BrainCliTraceContext | null;
   syncResult: { ok: true } | { ok: false; error: string } | null;
 }) {
   try {
     const db = getDb();
-    const insertToolRun = db.insert(goatBrainToolRuns).values({
+    const insertToolRun = db.insert(brainToolRuns).values({
       id: input.traceId,
       brainRef: input.brainRef,
       userWorkosId: input.userWorkosId,
@@ -1211,7 +1208,7 @@ async function recordGoatBrainToolRun(input: {
         toolInput: input.traceContext?.toolInput ?? null,
       },
     });
-    const completesMcpSetup = isGoatMcpSetupCompletionRun({
+    const completesMcpSetup = isMcpSetupCompletionRun({
       sourceRef: input.traceContext?.sourceRef,
       command: input.command,
       ok: input.output.ok,
@@ -1228,14 +1225,9 @@ async function recordGoatBrainToolRun(input: {
     await db.batch([
       insertToolRun,
       db
-        .update(goatUsers)
+        .update(users)
         .set({ mcpSetupCompletedAt: input.startedAt, updatedAt: new Date() })
-        .where(
-          and(
-            eq(goatUsers.workosUserId, input.userWorkosId),
-            isNull(goatUsers.mcpSetupCompletedAt),
-          ),
-        ),
+        .where(and(eq(users.workosUserId, input.userWorkosId), isNull(users.mcpSetupCompletedAt))),
     ] as const);
   } catch (error) {
     if (process.env.NODE_ENV !== "test") {

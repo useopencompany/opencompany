@@ -1,8 +1,8 @@
 import { drizzle } from "drizzle-orm/neon-http";
 import { describe, expect, it, vi } from "vitest";
-import { getGoatBrainOverviewStats } from "./brain-overview";
+import { getBrainOverviewStats } from "./brain-overview";
 
-describe("getGoatBrainOverviewStats", () => {
+describe("getBrainOverviewStats", () => {
   it("does not count Slack bot destinations as active ingestion sources", async () => {
     const query = vi.fn(async (statement: string, params: unknown[]) => {
       void params;
@@ -17,7 +17,7 @@ describe("getGoatBrainOverviewStats", () => {
     const db = drizzle(query as never);
 
     await expect(
-      getGoatBrainOverviewStats(
+      getBrainOverviewStats(
         "brain_123",
         new Date("2026-07-16T10:00:00.000Z"),
         db as unknown as ReturnType<typeof import("@opencompany/db/client").getDb>,

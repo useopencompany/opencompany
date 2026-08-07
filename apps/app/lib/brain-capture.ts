@@ -1,33 +1,33 @@
-import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
+import { captureIngestionQuotaAnalytics } from "@opencompany/analytics/app";
 import {
-  isValidGoatBrainSourceRef,
-  normalizeGoatBrainId,
-  normalizeGoatBrainPointerCapture,
-  normalizeGoatChatCapture,
+  isValidBrainSourceRef,
+  normalizeBrainId,
+  normalizeBrainPointerCapture,
+  normalizeChatCapture,
   nowIso,
-  parseGoatBrainSourceRef,
+  parseBrainSourceRef,
 } from "@opencompany/brain";
 import {
-  createGoatBrainMarkdownContent,
-  goatBrainFilePathFor,
-  upsertGoatBrainFile,
+  brainFilePathFor,
+  createBrainMarkdownContent,
+  upsertBrainFile,
 } from "@opencompany/db/brain-files";
 import {
-  findExistingGoatBrainChatCaptureIngest,
-  findExistingGoatBrainPointerIngest,
+  findExistingBrainChatCaptureIngest,
+  findExistingBrainPointerIngest,
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
   GOAT_BRAIN_POINTER_HYDRATE_JOB_KIND,
-  upsertGoatBrainSourceItemAndEnqueue,
+  upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
-import { nextAvailableGoatBrainId } from "@/lib/brain";
-import { triggerGoatBrainIngestWake } from "@/lib/task-runner";
+import { nextAvailableBrainId } from "@/lib/brain";
+import { triggerBrainIngestWake } from "@/lib/task-runner";
 
 export const GOAT_BRAIN_CAPTURE_FOLDER = "inbox";
 const CAPTURE_TITLE_MAX_LENGTH = 80;
 const CAPTURE_TEXT_MAX_BYTES = 64_000;
 const POINTER_FALLBACK_MAX_BYTES = 2_000;
 
-export type GoatBrainCaptureResult =
+export type BrainCaptureResult =
   | {
       ok: true;
       draftBrainId: string;
@@ -43,14 +43,14 @@ export type GoatBrainCaptureResult =
       error: string;
     };
 
-export type GoatBrainCaptureSource =
+export type BrainCaptureSource =
   | { kind: "chat"; connectionId: string; itemId: string; idempotencyKey?: string }
   | { kind: "mcp"; connectionId: string; itemId: string };
 
 // Explicit saves from Goat chat or MCP are capture-first: persist a draft page
 // in inbox/ immediately so nothing is lost, then enqueue the durable ingestion
 // agent to curate it (type, title, folder, links, promotion) in the background.
-export async function captureToGoatBrainInbox(input: {
+export async function captureToBrainInbox(input: {
   brainRef: string;
   userWorkosId: string;
   text?: string;
@@ -59,12 +59,12 @@ export async function captureToGoatBrainInbox(input: {
   sourceRef?: string;
   integrationId?: string;
   fallbackText?: string;
-  source: GoatBrainCaptureSource;
-}): Promise<GoatBrainCaptureResult> {
+  source: BrainCaptureSource;
+}): Promise<BrainCaptureResult> {
   const text = input.text?.trim() ?? "";
   const fallbackText = input.fallbackText?.trim() ?? "";
   const sourceRef = input.sourceRef?.trim();
-  if (sourceRef && !isValidGoatBrainSourceRef(sourceRef)) {
+  if (sourceRef && !isValidBrainSourceRef(sourceRef)) {
     return {
       ok: false,
       error: "Capture sourceRef must be a valid provider:id or URL.",
@@ -103,7 +103,7 @@ export async function captureToGoatBrainInbox(input: {
   const idempotencyKey =
     input.source.kind === "chat" ? input.source.idempotencyKey?.trim() : undefined;
   if (!isPointerCapture && idempotencyKey) {
-    const existing = await findExistingGoatBrainChatCaptureIngest({
+    const existing = await findExistingBrainChatCaptureIngest({
       userWorkosId: input.userWorkosId,
       sourceConnectionId: input.source.connectionId,
       externalId: idempotencyKey,
@@ -113,7 +113,7 @@ export async function captureToGoatBrainInbox(input: {
       return {
         ok: true,
         draftBrainId: existing.draftBrainId,
-        path: goatBrainFilePathFor(existing.draftFolder, existing.draftBrainId),
+        path: brainFilePathFor(existing.draftFolder, existing.draftBrainId),
         title: existing.title,
         jobId: existing.jobId,
         enqueued: false,
@@ -124,7 +124,7 @@ export async function captureToGoatBrainInbox(input: {
   }
 
   if (isPointerCapture) {
-    const existing = await findExistingGoatBrainPointerIngest({
+    const existing = await findExistingBrainPointerIngest({
       userWorkosId: input.userWorkosId,
       integrationId: integrationId!,
       provider: pointerProvider!,
@@ -135,7 +135,7 @@ export async function captureToGoatBrainInbox(input: {
       return {
         ok: true,
         draftBrainId: existing.draftBrainId,
-        path: goatBrainFilePathFor(existing.draftFolder, existing.draftBrainId),
+        path: brainFilePathFor(existing.draftFolder, existing.draftBrainId),
         title: existing.title,
         jobId: existing.jobId,
         enqueued: false,
@@ -147,15 +147,15 @@ export async function captureToGoatBrainInbox(input: {
 
   const capturedAt = nowIso();
   const title = input.title?.trim() || deriveCaptureTitle(text || sourceRef || "Saved source");
-  const draftBrainId = await nextAvailableGoatBrainId(input.brainRef, normalizeGoatBrainId(title));
+  const draftBrainId = await nextAvailableBrainId(input.brainRef, normalizeBrainId(title));
   const resolvedSourceRef =
     sourceRef ?? `${input.source.kind === "mcp" ? "mcp" : "goat-chat"}:${input.source.itemId}`;
-  const path = goatBrainFilePathFor(GOAT_BRAIN_CAPTURE_FOLDER, draftBrainId);
-  await upsertGoatBrainFile({
+  const path = brainFilePathFor(GOAT_BRAIN_CAPTURE_FOLDER, draftBrainId);
+  await upsertBrainFile({
     brainRef: input.brainRef,
     userWorkosId: input.userWorkosId,
     path,
-    content: createGoatBrainMarkdownContent({
+    content: createBrainMarkdownContent({
       id: draftBrainId,
       folderPath: GOAT_BRAIN_CAPTURE_FOLDER,
       title,
@@ -178,7 +178,7 @@ export async function captureToGoatBrainInbox(input: {
   });
 
   const item = isPointerCapture
-    ? normalizeGoatBrainPointerCapture({
+    ? normalizeBrainPointerCapture({
         sourceRef: resolvedSourceRef,
         title,
         ...(fallbackText ? { fallbackText } : {}),
@@ -188,7 +188,7 @@ export async function captureToGoatBrainInbox(input: {
         draftFolder: GOAT_BRAIN_CAPTURE_FOLDER,
         capturedAt,
       })
-    : normalizeGoatChatCapture({
+    : normalizeChatCapture({
         text,
         title,
         ...(input.intent?.trim() ? { intent: input.intent.trim() } : {}),
@@ -200,7 +200,7 @@ export async function captureToGoatBrainInbox(input: {
         sourceRef: resolvedSourceRef,
         ...(idempotencyKey ? { externalId: idempotencyKey } : {}),
       });
-  const result = await upsertGoatBrainSourceItemAndEnqueue({
+  const result = await upsertBrainSourceItemAndEnqueue({
     userWorkosId: input.userWorkosId,
     sourceConnectionId: isPointerCapture ? integrationId! : input.source.connectionId,
     ...(isPointerCapture ? { integrationId: integrationId! } : {}),
@@ -209,10 +209,10 @@ export async function captureToGoatBrainInbox(input: {
     kind: isPointerCapture ? GOAT_BRAIN_POINTER_HYDRATE_JOB_KIND : GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
     brainRef: input.brainRef,
   });
-  captureGoatIngestionQuotaAnalytics(result.quotaUpdates);
+  captureIngestionQuotaAnalytics(result.quotaUpdates);
 
   if (result.enqueued) {
-    triggerGoatBrainIngestWake().catch((error) => {
+    triggerBrainIngestWake().catch((error) => {
       console.warn("Goat Brain capture failed to wake the ingest worker.", {
         event: "goat.brain_capture_wake_failed",
         error: error instanceof Error ? error.message : String(error),
@@ -232,7 +232,7 @@ export async function captureToGoatBrainInbox(input: {
 }
 
 function hydratablePointerProvider(sourceRef: string) {
-  const provider = parseGoatBrainSourceRef(sourceRef)?.provider;
+  const provider = parseBrainSourceRef(sourceRef)?.provider;
   return provider === "slack" || provider === "gmail" || provider === "linear" ? provider : null;
 }
 

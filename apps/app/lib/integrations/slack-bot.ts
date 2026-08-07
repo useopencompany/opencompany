@@ -1,12 +1,12 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import { getGoatAppUrl } from "@/lib/workos";
+import { getAppUrl } from "@/lib/workos";
 import { slackApiRequest } from "./slack";
 
 // The Slack answer bot is a second, separate Slack app from the user-token
 // ingestion app: it has a bot presence, receives app_mention events, and
 // posts answers back into channels. Installed once per workspace by an admin.
 
-export type GoatSlackBotStatePayload = {
+export type SlackBotStatePayload = {
   userWorkosId: string;
   workspaceId: string;
   returnTo: string;
@@ -14,7 +14,7 @@ export type GoatSlackBotStatePayload = {
   nonce: string;
 };
 
-export type GoatSlackBotOAuthResult = {
+export type SlackBotOAuthResult = {
   teamId: string;
   teamName: string | null;
   botUserId: string;
@@ -48,30 +48,28 @@ export const SLACK_BOT_SCOPES = [
 
 // Installs made before a scope was added keep working for mentions; the
 // settings UI surfaces a reconnect banner until the granted set catches up.
-export function goatSlackBotScopesSatisfied(grantedScopes: readonly string[]): boolean {
+export function slackBotScopesSatisfied(grantedScopes: readonly string[]): boolean {
   const granted = new Set(grantedScopes);
   return SLACK_BOT_SCOPES.every((scope) => granted.has(scope));
 }
 
-export function goatSlackBotHasScope(
+export function slackBotHasScope(
   grantedScopes: readonly string[],
   scope: (typeof SLACK_BOT_SCOPES)[number],
 ): boolean {
   return grantedScopes.includes(scope);
 }
 
-export function isGoatSlackBotConfigured() {
+export function isSlackBotConfigured() {
   return SLACK_BOT_ENVS.every((name) => Boolean(process.env[name]?.trim()));
 }
 
-export function goatSlackBotSigningSecret() {
+export function slackBotSigningSecret() {
   return process.env.SLACK_BOT_SIGNING_SECRET?.trim();
 }
 
-export function createGoatSlackBotState(
-  input: Omit<GoatSlackBotStatePayload, "expiresAt" | "nonce">,
-) {
-  const payload: GoatSlackBotStatePayload = {
+export function createSlackBotState(input: Omit<SlackBotStatePayload, "expiresAt" | "nonce">) {
+  const payload: SlackBotStatePayload = {
     ...input,
     returnTo: sanitizeReturnTo(input.returnTo),
     expiresAt: Date.now() + 10 * 60 * 1000,
@@ -81,14 +79,14 @@ export function createGoatSlackBotState(
   return `${body}.${signStateBody(body)}`;
 }
 
-export function verifyGoatSlackBotState(state: string): GoatSlackBotStatePayload {
+export function verifySlackBotState(state: string): SlackBotStatePayload {
   const [body, signature] = state.split(".");
   if (!body || !signature || !safeEqual(signature, signStateBody(body))) {
     throw new Error("Invalid Slack bot integration state.");
   }
 
   const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as unknown;
-  if (!isGoatSlackBotStatePayload(payload)) {
+  if (!isSlackBotStatePayload(payload)) {
     throw new Error("Invalid Slack bot integration state payload.");
   }
   if (payload.expiresAt < Date.now()) {
@@ -101,17 +99,17 @@ export function verifyGoatSlackBotState(state: string): GoatSlackBotStatePayload
   };
 }
 
-export function buildGoatSlackBotAuthorizationUrl(state: string) {
+export function buildSlackBotAuthorizationUrl(state: string) {
   const url = new URL("https://slack.com/oauth/v2/authorize");
   url.searchParams.set("client_id", requiredEnv("SLACK_BOT_CLIENT_ID"));
   // scope (not user_scope): we request a bot token only.
   url.searchParams.set("scope", SLACK_BOT_SCOPES.join(","));
-  url.searchParams.set("redirect_uri", goatSlackBotCallbackUrl());
+  url.searchParams.set("redirect_uri", slackBotCallbackUrl());
   url.searchParams.set("state", state);
   return url.toString();
 }
 
-export async function exchangeGoatSlackBotCode(code: string): Promise<GoatSlackBotOAuthResult> {
+export async function exchangeSlackBotCode(code: string): Promise<SlackBotOAuthResult> {
   // Bot installs return the token at the top level of oauth.v2.access,
   // unlike user-token installs which nest it under authed_user.
   const result = await slackApiRequest<{
@@ -125,7 +123,7 @@ export async function exchangeGoatSlackBotCode(code: string): Promise<GoatSlackB
       client_id: requiredEnv("SLACK_BOT_CLIENT_ID"),
       client_secret: requiredEnv("SLACK_BOT_CLIENT_SECRET"),
       code,
-      redirect_uri: goatSlackBotCallbackUrl(),
+      redirect_uri: slackBotCallbackUrl(),
     },
   });
 
@@ -145,23 +143,23 @@ export async function exchangeGoatSlackBotCode(code: string): Promise<GoatSlackB
   };
 }
 
-export function appendGoatSlackBotSetupStatus(
+export function appendSlackBotSetupStatus(
   returnTo: string,
   status: "connected" | "error",
   reason?: string,
 ) {
-  const url = new URL(sanitizeReturnTo(returnTo), getGoatAppUrl());
+  const url = new URL(sanitizeReturnTo(returnTo), getAppUrl());
   url.searchParams.set("integration", "slack_bot");
   url.searchParams.set("setup", status);
   if (status === "error" && reason) url.searchParams.set("reason", reason);
   return `${url.pathname}${url.search}`;
 }
 
-function goatSlackBotCallbackUrl() {
-  return `${getGoatAppUrl()}/api/integrations/slack-bot/callback`;
+function slackBotCallbackUrl() {
+  return `${getAppUrl()}/api/integrations/slack-bot/callback`;
 }
 
-function isGoatSlackBotStatePayload(value: unknown): value is GoatSlackBotStatePayload {
+function isSlackBotStatePayload(value: unknown): value is SlackBotStatePayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return (

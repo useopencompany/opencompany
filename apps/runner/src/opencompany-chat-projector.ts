@@ -1,18 +1,15 @@
-import {
-  captureGoatLlmUsageRecorded,
-  captureGoatModelSpendRecorded,
-} from "@opencompany/analytics/goat/server";
+import { captureLlmUsageRecorded, captureModelSpendRecorded } from "@opencompany/analytics/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
-import { recordGoatCreditDebit } from "@opencompany/db/credits";
-import type { GoatChatMessageDebugTrace } from "@opencompany/db/schema";
+import { recordCreditDebit } from "@opencompany/db/credits";
+import type { ChatMessageDebugTrace } from "@opencompany/db/schema";
 import { createLogger } from "@opencompany/observability";
-import { recordGoatModelCost, recordGoatModelUsageTokens } from "@opencompany/telemetry";
+import { recordModelCost, recordModelUsageTokens } from "@opencompany/telemetry";
 import type { LanguageModelUsage } from "ai";
 import { sql } from "drizzle-orm";
-import { GoatCodexChatLeaseLostError } from "./codex-chat-errors";
+import { CodexChatLeaseLostError } from "./codex-chat-errors";
 import { getDb } from "./db";
 import { rowsFromExecute } from "./sql-exec";
-import { type GoatTaskTurnCompletion, settleGoatDurableTurn } from "./task-turn";
+import { settleDurableTurn, type TaskTurnCompletion } from "./task-turn";
 
 const OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION = "opencompany.chat.debug.v1" as const;
 
@@ -21,31 +18,31 @@ const logger = createLogger({
   runtime: "goat-opencompany-chat-projector",
 });
 
-export type GoatOpenCompanyChatUiPart = {
+export type OpenCompanyChatUiPart = {
   type: string;
   [key: string]: unknown;
 };
 
-type GoatOpenCompanyChatUsage = Partial<
+type OpenCompanyChatUsage = Partial<
   Pick<LanguageModelUsage, "inputTokens" | "outputTokens" | "totalTokens">
 >;
 
-export type GoatOpenCompanyChatProjection = {
-  parts: GoatOpenCompanyChatUiPart[];
-  usage?: GoatOpenCompanyChatUsage;
+export type OpenCompanyChatProjection = {
+  parts: OpenCompanyChatUiPart[];
+  usage?: OpenCompanyChatUsage;
   finishReason?: string;
 };
 
-export class GoatOpenCompanyChatInterruptedError extends Error {
+export class OpenCompanyChatInterruptedError extends Error {
   constructor() {
     super("OpenCompany chat turn was interrupted.");
-    this.name = "GoatOpenCompanyChatInterruptedError";
+    this.name = "OpenCompanyChatInterruptedError";
   }
 }
 
-export type GoatOpenCompanyChatProjector = ReturnType<typeof createGoatOpenCompanyChatProjector>;
+export type OpenCompanyChatProjector = ReturnType<typeof createOpenCompanyChatProjector>;
 
-export function createGoatOpenCompanyChatProjector(input: {
+export function createOpenCompanyChatProjector(input: {
   target: {
     userWorkosId: string;
     codexChatSessionId: string;
@@ -75,7 +72,7 @@ export function createGoatOpenCompanyChatProjector(input: {
   `;
 
   const writeAssistantMessage = async (
-    projection: GoatOpenCompanyChatProjection,
+    projection: OpenCompanyChatProjection,
     options: {
       error?: string;
       aborted?: boolean;
@@ -90,7 +87,7 @@ export function createGoatOpenCompanyChatProjector(input: {
       .flatMap((part) => (part.type === "text" && typeof part.text === "string" ? [part.text] : []))
       .join("")
       .trim();
-    const debugTrace: GoatChatMessageDebugTrace = {
+    const debugTrace: ChatMessageDebugTrace = {
       schemaVersion: OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION,
       model: target.model,
       uiMessageParts: effectiveProjection.parts,
@@ -127,8 +124,8 @@ export function createGoatOpenCompanyChatProjector(input: {
   };
 
   const hydrateEmptyProjectionFromPersistedMessage = async (
-    projection: GoatOpenCompanyChatProjection,
-  ): Promise<GoatOpenCompanyChatProjection> => {
+    projection: OpenCompanyChatProjection,
+  ): Promise<OpenCompanyChatProjection> => {
     if (projection.parts.length > 0) return projection;
     const result = await getDb().execute(sql`
       SELECT content, debug_trace
@@ -141,9 +138,9 @@ export function createGoatOpenCompanyChatProjector(input: {
     `);
     const row = rowsFromExecute<{
       content: string | null;
-      debug_trace: GoatChatMessageDebugTrace | null;
+      debug_trace: ChatMessageDebugTrace | null;
     }>(result)[0];
-    if (!row) throw new GoatCodexChatLeaseLostError();
+    if (!row) throw new CodexChatLeaseLostError();
     const persistedParts = parsePersistedUiMessageParts(row.debug_trace?.uiMessageParts);
     const content = row.content?.trim() ?? "";
     const parts =
@@ -176,7 +173,7 @@ export function createGoatOpenCompanyChatProjector(input: {
       );
     },
 
-    project(projection: GoatOpenCompanyChatProjection) {
+    project(projection: OpenCompanyChatProjection) {
       return writeAssistantMessage(projection);
     },
 
@@ -207,20 +204,20 @@ export function createGoatOpenCompanyChatProjector(input: {
         LIMIT 1
       `);
       const row = rowsFromExecute<{ interrupt_requested_at: Date | string | null }>(result)[0];
-      if (!row) throw new GoatCodexChatLeaseLostError();
-      if (row.interrupt_requested_at) throw new GoatOpenCompanyChatInterruptedError();
+      if (!row) throw new CodexChatLeaseLostError();
+      if (row.interrupt_requested_at) throw new OpenCompanyChatInterruptedError();
     },
 
     async completed(
-      projection: GoatOpenCompanyChatProjection,
-      taskCompletion?: GoatTaskTurnCompletion | null,
+      projection: OpenCompanyChatProjection,
+      taskCompletion?: TaskTurnCompletion | null,
     ) {
       const completedAt = new Date();
       const durationMs = elapsedTurnDurationMs(target.turnStartedAt, completedAt);
       await writeAssistantMessage(projection, {
         ...(durationMs !== undefined ? { durationMs } : {}),
       });
-      await settleGoatDurableTurn({
+      await settleDurableTurn({
         target,
         turnStatus: "completed",
         sessionStatus: "idle",
@@ -231,8 +228,8 @@ export function createGoatOpenCompanyChatProjector(input: {
     },
 
     async interrupted(
-      projection: GoatOpenCompanyChatProjection,
-      taskCompletion?: GoatTaskTurnCompletion | null,
+      projection: OpenCompanyChatProjection,
+      taskCompletion?: TaskTurnCompletion | null,
     ) {
       const completedAt = new Date();
       const durationMs = elapsedTurnDurationMs(target.turnStartedAt, completedAt);
@@ -241,7 +238,7 @@ export function createGoatOpenCompanyChatProjector(input: {
         preservePersistedOnEmpty: true,
         ...(durationMs !== undefined ? { durationMs } : {}),
       });
-      await settleGoatDurableTurn({
+      await settleDurableTurn({
         target,
         turnStatus: "interrupted",
         sessionStatus: "interrupted",
@@ -253,8 +250,8 @@ export function createGoatOpenCompanyChatProjector(input: {
 
     async failed(
       error: string,
-      projection: GoatOpenCompanyChatProjection,
-      taskCompletion?: GoatTaskTurnCompletion | null,
+      projection: OpenCompanyChatProjection,
+      taskCompletion?: TaskTurnCompletion | null,
     ) {
       const completedAt = new Date();
       const durationMs = elapsedTurnDurationMs(target.turnStartedAt, completedAt);
@@ -263,7 +260,7 @@ export function createGoatOpenCompanyChatProjector(input: {
         preservePersistedOnEmpty: true,
         ...(durationMs !== undefined ? { durationMs } : {}),
       });
-      await settleGoatDurableTurn({
+      await settleDurableTurn({
         target,
         turnStatus: "failed",
         sessionStatus: "idle",
@@ -296,7 +293,7 @@ async function recordOpenCompanyChatModelCost(input: {
     inputCacheWriteTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheWriteTokens),
     outputTokens,
   });
-  recordGoatModelCost({
+  recordModelCost({
     costUsdMicros: cost.totalCostUsdMicros,
     attributes: {
       "goat.model": input.model,
@@ -309,7 +306,7 @@ async function recordOpenCompanyChatModelCost(input: {
     "goat.model": input.model,
     "goat.engine": "opencompany",
   });
-  await captureGoatLlmUsageRecorded({
+  await captureLlmUsageRecorded({
     distinctId: input.userWorkosId,
     workspaceId: input.workspaceId,
     surface: input.taskId ? "task" : "chat",
@@ -340,7 +337,7 @@ async function recordOpenCompanyChatModelCost(input: {
 
   if (!cost.billable || !input.workspaceId) return;
   try {
-    const debit = await recordGoatCreditDebit({
+    const debit = await recordCreditDebit({
       workspaceId: input.workspaceId,
       userWorkosId: input.userWorkosId,
       source: "chat_model_usage",
@@ -358,7 +355,7 @@ async function recordOpenCompanyChatModelCost(input: {
       db: getDb(),
     });
     if (debit.ok) {
-      await captureGoatModelSpendRecorded({
+      await captureModelSpendRecorded({
         userWorkosId: input.userWorkosId,
         workspaceId: input.workspaceId,
         billingSource: "chat_model_usage",
@@ -387,7 +384,7 @@ async function recordOpenCompanyChatModelCost(input: {
   }
 }
 
-function compactUsage(usage: GoatOpenCompanyChatUsage) {
+function compactUsage(usage: OpenCompanyChatUsage) {
   return {
     inputTokens: readUsageNumber(usage.inputTokens),
     outputTokens: readUsageNumber(usage.outputTokens),
@@ -403,13 +400,13 @@ function recordUsageMetrics(
   const outputTokens = readUsageNumber(usage.outputTokens);
   const totalTokens = readUsageNumber(usage.totalTokens);
   if (inputTokens) {
-    recordGoatModelUsageTokens({ tokens: inputTokens, direction: "input", attributes });
+    recordModelUsageTokens({ tokens: inputTokens, direction: "input", attributes });
   }
   if (outputTokens) {
-    recordGoatModelUsageTokens({ tokens: outputTokens, direction: "output", attributes });
+    recordModelUsageTokens({ tokens: outputTokens, direction: "output", attributes });
   }
   if (totalTokens) {
-    recordGoatModelUsageTokens({ tokens: totalTokens, direction: "total", attributes });
+    recordModelUsageTokens({ tokens: totalTokens, direction: "total", attributes });
   }
 }
 
@@ -422,18 +419,18 @@ function elapsedTurnDurationMs(startedAt: Date | undefined, completedAt: Date) {
   return Math.max(0, completedAt.getTime() - startedAt.getTime());
 }
 
-function isProjectionOutputEmpty(projection: GoatOpenCompanyChatProjection) {
+function isProjectionOutputEmpty(projection: OpenCompanyChatProjection) {
   return !projection.parts.some((part) => hasNonEmptyText(part));
 }
 
-function hasNonEmptyText(part: GoatOpenCompanyChatUiPart) {
+function hasNonEmptyText(part: OpenCompanyChatUiPart) {
   return part.type === "text" && typeof part.text === "string" && part.text.trim().length > 0;
 }
 
-function parsePersistedUiMessageParts(value: unknown): GoatOpenCompanyChatUiPart[] {
+function parsePersistedUiMessageParts(value: unknown): OpenCompanyChatUiPart[] {
   if (!Array.isArray(value)) return [];
   return value.filter(
-    (part): part is GoatOpenCompanyChatUiPart => isRecord(part) && typeof part.type === "string",
+    (part): part is OpenCompanyChatUiPart => isRecord(part) && typeof part.type === "string",
   );
 }
 
@@ -479,6 +476,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function assertRowsChanged(result: unknown) {
   if (rowsFromExecute(result).length === 0) {
-    throw new GoatCodexChatLeaseLostError();
+    throw new CodexChatLeaseLostError();
   }
 }

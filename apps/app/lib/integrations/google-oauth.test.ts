@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  buildGoatGoogleAuthorizationUrl,
-  createGoatGoogleIntegrationState,
+  buildGoogleAuthorizationUrl,
+  createGoogleIntegrationState,
   GOAT_GOOGLE_PROVIDER_CONFIG,
-  goatGoogleOAuthRedirectUri,
-  goatGoogleOAuthTargetOriginForState,
-  verifyGoatGoogleIntegrationState,
+  googleOAuthRedirectUri,
+  googleOAuthTargetOriginForState,
+  verifyGoogleIntegrationState,
 } from "./google-oauth";
 
 describe("Goat Google OAuth", () => {
@@ -20,13 +20,13 @@ describe("Goat Google OAuth", () => {
   });
 
   it("round-trips signed state for the Goat user", () => {
-    const state = createGoatGoogleIntegrationState({
+    const state = createGoogleIntegrationState({
       provider: "gmail",
       userWorkosId: "user_123",
       returnTo: "/settings",
     });
 
-    expect(verifyGoatGoogleIntegrationState(state)).toMatchObject({
+    expect(verifyGoogleIntegrationState(state)).toMatchObject({
       provider: "gmail",
       userWorkosId: "user_123",
       returnTo: "/settings",
@@ -35,13 +35,13 @@ describe("Goat Google OAuth", () => {
 
   it("requests draft-capable Gmail, writable Calendar, and read-plus-edit Drive scopes", () => {
     const gmailUrl = new URL(
-      buildGoatGoogleAuthorizationUrl(GOAT_GOOGLE_PROVIDER_CONFIG.gmail, "state"),
+      buildGoogleAuthorizationUrl(GOAT_GOOGLE_PROVIDER_CONFIG.gmail, "state"),
     );
     const calendarUrl = new URL(
-      buildGoatGoogleAuthorizationUrl(GOAT_GOOGLE_PROVIDER_CONFIG.google_calendar, "state"),
+      buildGoogleAuthorizationUrl(GOAT_GOOGLE_PROVIDER_CONFIG.google_calendar, "state"),
     );
     const driveUrl = new URL(
-      buildGoatGoogleAuthorizationUrl(GOAT_GOOGLE_PROVIDER_CONFIG.google_drive, "state"),
+      buildGoogleAuthorizationUrl(GOAT_GOOGLE_PROVIDER_CONFIG.google_drive, "state"),
     );
 
     const gmailScopes = gmailUrl.searchParams.get("scope")?.split(" ") ?? [];
@@ -73,36 +73,34 @@ describe("Goat Google OAuth", () => {
     vi.stubEnv("GOOGLE_OAUTH_CALLBACK_URL", "https://oauth.opencompany.cloud/api/google/callback");
 
     expect(
-      Object.values(GOAT_GOOGLE_PROVIDER_CONFIG).map((config) =>
-        goatGoogleOAuthRedirectUri(config),
-      ),
+      Object.values(GOAT_GOOGLE_PROVIDER_CONFIG).map((config) => googleOAuthRedirectUri(config)),
     ).toEqual([
       "https://opencompany.chat/api/integrations/gmail/callback",
       "https://opencompany.chat/api/integrations/google-calendar/callback",
       "https://opencompany.chat/api/integrations/google-drive/callback",
     ]);
-    expect(goatGoogleOAuthTargetOriginForState()).toBeUndefined();
+    expect(googleOAuthTargetOriginForState()).toBeUndefined();
   });
 
   it("keeps the stable broker for hosted previews and signs the preview target", () => {
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://pr-42.preview.opencompany.cloud/");
     vi.stubEnv("GOOGLE_OAUTH_CALLBACK_URL", "https://oauth.opencompany.cloud/api/google/callback");
 
-    expect(goatGoogleOAuthRedirectUri(GOAT_GOOGLE_PROVIDER_CONFIG.gmail)).toBe(
+    expect(googleOAuthRedirectUri(GOAT_GOOGLE_PROVIDER_CONFIG.gmail)).toBe(
       "https://oauth.opencompany.cloud/api/google/callback",
     );
-    const targetOrigin = goatGoogleOAuthTargetOriginForState();
+    const targetOrigin = googleOAuthTargetOriginForState();
     expect(targetOrigin).toBe("https://pr-42.preview.opencompany.cloud");
     if (!targetOrigin) throw new Error("Expected a preview target origin.");
 
-    const state = createGoatGoogleIntegrationState({
+    const state = createGoogleIntegrationState({
       provider: "gmail",
       userWorkosId: "user_123",
       returnTo: "/settings",
       oauthRedirectUri: "https://oauth.opencompany.cloud/api/google/callback",
       targetOrigin,
     });
-    expect(verifyGoatGoogleIntegrationState(state).targetOrigin).toBe(
+    expect(verifyGoogleIntegrationState(state).targetOrigin).toBe(
       "https://pr-42.preview.opencompany.cloud",
     );
   });

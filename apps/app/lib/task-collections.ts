@@ -1,24 +1,24 @@
 import type {
-  GoatBrainFolderSource,
-  GoatBrainImportDiscoverySummary,
-  GoatBrainImportSourceSelection,
-  GoatBrainImportStatus,
-  GoatChatMessageAttachment,
-  GoatIntegrationProvider,
-  GoatIntegrationStatus,
-  GoatTaskEventType,
-  GoatTaskMessageRole,
-  GoatTaskMessageStatus,
-  GoatTaskReportedOutcome,
-  GoatTaskStage,
-  GoatTaskStatus,
-  GoatTaskToolName,
+  BrainFolderSource,
+  BrainImportDiscoverySummary,
+  BrainImportSourceSelection,
+  BrainImportStatus,
+  ChatMessageAttachment,
+  IntegrationProvider,
+  IntegrationStatus,
+  TaskEventType,
+  TaskMessageRole,
+  TaskMessageStatus,
+  TaskReportedOutcome,
+  TaskStage,
+  TaskStatus,
+  TaskToolName,
 } from "@opencompany/db/schema";
-import { createGoatElectricCollection } from "@/lib/electric-collection";
+import { createElectricCollection } from "@/lib/electric-collection";
 
 type ElectricNumber = number | string;
 
-export type GoatTaskRow = {
+export type TaskRow = {
   id: string;
   display_id: string;
   name: string;
@@ -31,11 +31,11 @@ export type GoatTaskRow = {
   scheduled_for: string | null;
   workflow_id: string | null;
   workflow_brain_ref: string | null;
-  status: GoatTaskStatus;
-  stage: GoatTaskStage;
+  status: TaskStatus;
+  stage: TaskStage;
   result: string | null;
   error: string | null;
-  reported_outcome: GoatTaskReportedOutcome | null;
+  reported_outcome: TaskReportedOutcome | null;
   outcome_comment: string | null;
   harness_spec: unknown;
   debug_trace: unknown;
@@ -50,7 +50,7 @@ export type GoatTaskRow = {
   updated_at: string;
 };
 
-export type GoatTaskScheduleRow = {
+export type TaskScheduleRow = {
   id: string;
   user_workos_id: string;
   name: string;
@@ -67,19 +67,19 @@ export type GoatTaskScheduleRow = {
   updated_at: string;
 };
 
-export type GoatChatMessageRow = {
+export type ChatMessageRow = {
   id: string;
   session_id: string;
   role: "user" | "assistant";
   content: string;
   task_id: string | null;
   debug_trace: Record<string, unknown> | null;
-  attachments: GoatChatMessageAttachment[] | null;
+  attachments: ChatMessageAttachment[] | null;
   created_at: string;
   updated_at: string;
 };
 
-export type GoatChatSessionRow = {
+export type ChatSessionRow = {
   id: string;
   user_workos_id: string;
   title: string;
@@ -93,7 +93,7 @@ export type GoatChatSessionRow = {
   updated_at: string;
 };
 
-export type GoatCodexChatSessionRow = {
+export type CodexChatSessionRow = {
   id: string;
   user_workos_id: string;
   chat_session_id: string;
@@ -105,25 +105,25 @@ export type GoatCodexChatSessionRow = {
   updated_at: string;
 };
 
-export type GoatBrainFolderRow = {
+export type BrainFolderRow = {
   id: string;
   user_workos_id: string;
   brain_ref: string;
   path: string;
-  source: GoatBrainFolderSource;
+  source: BrainFolderSource;
   created_at: string;
   updated_at: string;
 };
 
-export type GoatTaskMessageRow = {
+export type TaskMessageRow = {
   id: string;
   task_id: string;
   user_workos_id: string;
-  role: GoatTaskMessageRole;
-  status: GoatTaskMessageStatus;
+  role: TaskMessageRole;
+  status: TaskMessageStatus;
   content: string;
   model_message: unknown | null;
-  tool_name: GoatTaskToolName | null;
+  tool_name: TaskToolName | null;
   tool_call_id: string | null;
   response_to_message_id: string | null;
   created_at: string;
@@ -131,17 +131,17 @@ export type GoatTaskMessageRow = {
   completed_at: string | null;
 };
 
-export type GoatTaskEventRow = {
+export type TaskEventRow = {
   id: number;
   task_id: string;
   user_workos_id: string;
   message_id: string | null;
-  type: GoatTaskEventType;
+  type: TaskEventType;
   payload: Record<string, unknown>;
   created_at: string;
 };
 
-export type GoatTaskModelUsageRow = {
+export type TaskModelUsageRow = {
   id: number;
   task_id: string;
   user_workos_id: string;
@@ -172,7 +172,7 @@ export type GoatTaskModelUsageRow = {
   created_at: string;
 };
 
-export type GoatTaskToolUsageRow = {
+export type TaskToolUsageRow = {
   id: number;
   task_id: string;
   user_workos_id: string;
@@ -191,7 +191,7 @@ export type GoatTaskToolUsageRow = {
   created_at: string;
 };
 
-export type GoatTaskSandboxUsageRow = {
+export type TaskSandboxUsageRow = {
   id: number;
   task_id: string;
   user_workos_id: string;
@@ -212,18 +212,18 @@ export type GoatTaskSandboxUsageRow = {
   created_at: string;
 };
 
-export type GoatIntegrationRow = {
+export type IntegrationRow = {
   id: string;
   user_workos_id: string;
   workspace_id: string | null;
   shared_with_workspace: boolean;
-  provider: GoatIntegrationProvider;
+  provider: IntegrationProvider;
   external_id: string;
   connection_label: string | null;
   account_name: string | null;
   account_email: string | null;
   account_type: string | null;
-  status: GoatIntegrationStatus;
+  status: IntegrationStatus;
   status_reason: string | null;
   scopes: string[];
   capability_modes: Record<string, unknown>;
@@ -232,7 +232,7 @@ export type GoatIntegrationRow = {
   updated_at: string;
 };
 
-export type GoatBrainDocumentRow = {
+export type BrainDocumentRow = {
   id: string;
   user_workos_id: string;
   created_by_workos_id: string | null;
@@ -270,7 +270,7 @@ export type GoatBrainDocumentRow = {
   updated_at: string;
 };
 
-export type GoatBrainTimelineEntryRow = {
+export type BrainTimelineEntryRow = {
   id: number;
   document_id: string;
   user_workos_id: string;
@@ -285,7 +285,7 @@ export type GoatBrainTimelineEntryRow = {
   created_at: string;
 };
 
-export type GoatBrainEdgeRow = {
+export type BrainEdgeRow = {
   id: string;
   user_workos_id: string;
   brain_ref: string;
@@ -298,7 +298,7 @@ export type GoatBrainEdgeRow = {
   updated_at: string;
 };
 
-export type GoatBrainIngestJobRow = {
+export type BrainIngestJobRow = {
   id: string;
   source_item_id: string;
   user_workos_id: string;
@@ -323,7 +323,7 @@ export type GoatBrainIngestJobRow = {
   updated_at: string;
 };
 
-export type GoatBrainImportRunRow = {
+export type BrainImportRunRow = {
   id: string;
   brain_ref: string;
   user_workos_id: string;
@@ -333,10 +333,10 @@ export type GoatBrainImportRunRow = {
   focus: string | null;
   history_start_at: string;
   history_end_at: string;
-  source_selection: GoatBrainImportSourceSelection;
-  discovery_summary: GoatBrainImportDiscoverySummary;
+  source_selection: BrainImportSourceSelection;
+  discovery_summary: BrainImportDiscoverySummary;
   result: Record<string, unknown>;
-  status: GoatBrainImportStatus;
+  status: BrainImportStatus;
   next_run_at: string;
   lease_id: string | null;
   lease_owner: string | null;
@@ -349,7 +349,7 @@ export type GoatBrainImportRunRow = {
 };
 
 // Slim projection: the shape proxy strips the raw/normalized payload columns.
-export type GoatBrainSourceItemRow = {
+export type BrainSourceItemRow = {
   id: string;
   user_workos_id: string;
   source_provider: string;
@@ -369,31 +369,31 @@ export type GoatBrainSourceItemRow = {
 
 function createTaskRunCollections(taskId: string) {
   return {
-    messages: createGoatElectricCollection<GoatTaskMessageRow>({
+    messages: createElectricCollection<TaskMessageRow>({
       id: `goat:task_messages:${taskId}`,
       table: "goat.task_messages",
       params: { task_id: taskId },
       getKey: (row) => row.id,
     }),
-    events: createGoatElectricCollection<GoatTaskEventRow>({
+    events: createElectricCollection<TaskEventRow>({
       id: `goat:task_events:${taskId}`,
       table: "goat.task_events",
       params: { task_id: taskId },
       getKey: (row) => row.id,
     }),
-    modelUsage: createGoatElectricCollection<GoatTaskModelUsageRow>({
+    modelUsage: createElectricCollection<TaskModelUsageRow>({
       id: `goat:task_model_usage:${taskId}`,
       table: "goat.task_model_usage",
       params: { task_id: taskId },
       getKey: (row) => row.id,
     }),
-    toolUsage: createGoatElectricCollection<GoatTaskToolUsageRow>({
+    toolUsage: createElectricCollection<TaskToolUsageRow>({
       id: `goat:task_tool_usage:${taskId}`,
       table: "goat.task_tool_usage",
       params: { task_id: taskId },
       getKey: (row) => row.id,
     }),
-    sandboxUsage: createGoatElectricCollection<GoatTaskSandboxUsageRow>({
+    sandboxUsage: createElectricCollection<TaskSandboxUsageRow>({
       id: `goat:task_sandbox_usage:${taskId}`,
       table: "goat.task_sandbox_usage",
       params: { task_id: taskId },
@@ -406,37 +406,37 @@ function createTaskRunCollections(taskId: string) {
 // user before forwarding, so each brain gets its own shape subscription.
 function createBrainCollections(brainRef: string) {
   return {
-    folders: createGoatElectricCollection<GoatBrainFolderRow>({
+    folders: createElectricCollection<BrainFolderRow>({
       id: `goat:brain_folders:${brainRef}`,
       table: "goat.brain_folders",
       params: { brain_ref: brainRef },
       getKey: (row) => row.id,
     }),
-    documents: createGoatElectricCollection<GoatBrainDocumentRow>({
+    documents: createElectricCollection<BrainDocumentRow>({
       id: `goat:brain_documents:${brainRef}`,
       table: "goat.brain_documents",
       params: { brain_ref: brainRef },
       getKey: (row) => row.id,
     }),
-    timelineEntries: createGoatElectricCollection<GoatBrainTimelineEntryRow>({
+    timelineEntries: createElectricCollection<BrainTimelineEntryRow>({
       id: `goat:brain_timeline_entries:${brainRef}`,
       table: "goat.brain_timeline_entries",
       params: { brain_ref: brainRef },
       getKey: (row) => row.id,
     }),
-    edges: createGoatElectricCollection<GoatBrainEdgeRow>({
+    edges: createElectricCollection<BrainEdgeRow>({
       id: `goat:brain_edges:${brainRef}`,
       table: "goat.brain_edges",
       params: { brain_ref: brainRef },
       getKey: (row) => row.id,
     }),
-    ingestJobs: createGoatElectricCollection<GoatBrainIngestJobRow>({
+    ingestJobs: createElectricCollection<BrainIngestJobRow>({
       id: `goat:brain_ingest_jobs:${brainRef}`,
       table: "goat.brain_ingest_jobs",
       params: { brain_ref: brainRef },
       getKey: (row) => row.id,
     }),
-    importRuns: createGoatElectricCollection<GoatBrainImportRunRow>({
+    importRuns: createElectricCollection<BrainImportRunRow>({
       id: `goat:brain_import_runs:${brainRef}`,
       table: "goat.brain_import_runs",
       params: { brain_ref: brainRef },
@@ -446,7 +446,7 @@ function createBrainCollections(brainRef: string) {
 }
 
 function createChatMessageCollection(sessionId: string) {
-  return createGoatElectricCollection<GoatChatMessageRow>({
+  return createElectricCollection<ChatMessageRow>({
     id: `goat:chat_messages:${sessionId}`,
     table: "goat.chat_messages",
     params: { session_id: sessionId },
@@ -488,45 +488,45 @@ function getChatMessageCollection(sessionId: string) {
   return collection;
 }
 
-function buildGoatCollections() {
-  const tasks = createGoatElectricCollection<GoatTaskRow>({
+function buildCollections() {
+  const tasks = createElectricCollection<TaskRow>({
     id: "goat:tasks",
     table: "goat.tasks",
     getKey: (row) => row.id,
   });
 
-  const taskSchedules = createGoatElectricCollection<GoatTaskScheduleRow>({
+  const taskSchedules = createElectricCollection<TaskScheduleRow>({
     id: "goat:task_schedules",
     table: "goat.task_schedules",
     getKey: (row) => row.id,
   });
 
-  const chatSessions = createGoatElectricCollection<GoatChatSessionRow>({
+  const chatSessions = createElectricCollection<ChatSessionRow>({
     id: "goat:chat_sessions",
     table: "goat.chat_sessions",
     getKey: (row) => row.id,
   });
 
-  const codexChatSessions = createGoatElectricCollection<GoatCodexChatSessionRow>({
+  const codexChatSessions = createElectricCollection<CodexChatSessionRow>({
     id: "goat:codex_chat_sessions",
     table: "goat.codex_chat_sessions",
     getKey: (row) => row.id,
   });
 
-  const integrations = createGoatElectricCollection<GoatIntegrationRow>({
+  const integrations = createElectricCollection<IntegrationRow>({
     id: "goat:integrations",
     table: "goat.integrations",
     getKey: (row) => row.id,
   });
 
   // User-scoped (not per-brain): jobs join to these by source_item_id.
-  const brainSourceItems = createGoatElectricCollection<GoatBrainSourceItemRow>({
+  const brainSourceItems = createElectricCollection<BrainSourceItemRow>({
     id: "goat:brain_source_items",
     table: "goat.brain_source_items",
     getKey: (row) => row.id,
   });
 
-  const pendingBrainCaptureSourceItems = createGoatElectricCollection<GoatBrainSourceItemRow>({
+  const pendingBrainCaptureSourceItems = createElectricCollection<BrainSourceItemRow>({
     id: "goat:brain_source_items:goat-chat:capture:pending-failed",
     table: "goat.brain_source_items",
     params: {
@@ -551,14 +551,14 @@ function buildGoatCollections() {
   };
 }
 
-let cachedGoatCollections: ReturnType<typeof buildGoatCollections> | null = null;
+let cachedCollections: ReturnType<typeof buildCollections> | null = null;
 
-export function createGoatCollections() {
-  cachedGoatCollections ??= buildGoatCollections();
-  return cachedGoatCollections;
+export function createCollections() {
+  cachedCollections ??= buildCollections();
+  return cachedCollections;
 }
 
-export const createGoatTaskCollections = createGoatCollections;
+export const createTaskCollections = createCollections;
 
-export type GoatCollections = ReturnType<typeof createGoatCollections>;
-export type GoatTaskCollections = GoatCollections;
+export type Collections = ReturnType<typeof createCollections>;
+export type TaskCollections = Collections;

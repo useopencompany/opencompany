@@ -9,10 +9,10 @@ import {
 } from "@opencompany/crypto";
 import { getDb } from "@opencompany/db/client";
 import {
-  type GoatBrowserProfile,
-  type GoatBrowserProfileStatus,
-  goatBrowserProfileSessions,
-  goatBrowserProfiles,
+  type BrowserProfile,
+  type BrowserProfileStatus,
+  browserProfileSessions,
+  browserProfiles,
 } from "@opencompany/db/schema";
 import { and, desc, eq, isNull } from "drizzle-orm";
 
@@ -39,7 +39,7 @@ export type BrowserProfileView = {
   name: string;
   siteHost: string;
   allowedHosts: string[];
-  status: GoatBrowserProfileStatus;
+  status: BrowserProfileStatus;
   active: boolean;
   lastUsedAt: string | null;
   createdAt: string;
@@ -76,28 +76,25 @@ export function browserProfilesAvailable() {
 export async function listBrowserProfilesForUser(userWorkosId: string) {
   const rows = await getDb()
     .select()
-    .from(goatBrowserProfiles)
-    .where(eq(goatBrowserProfiles.userWorkosId, userWorkosId))
-    .orderBy(desc(goatBrowserProfiles.updatedAt));
+    .from(browserProfiles)
+    .where(eq(browserProfiles.userWorkosId, userWorkosId))
+    .orderBy(desc(browserProfiles.updatedAt));
   return rows.map(toBrowserProfileView);
 }
 
 export async function listConnectedBrowserProfilesForUser(userWorkosId: string) {
   const rows = await getDb()
     .select({
-      id: goatBrowserProfiles.id,
-      name: goatBrowserProfiles.name,
-      siteHost: goatBrowserProfiles.siteHost,
-      allowedHosts: goatBrowserProfiles.allowedHosts,
+      id: browserProfiles.id,
+      name: browserProfiles.name,
+      siteHost: browserProfiles.siteHost,
+      allowedHosts: browserProfiles.allowedHosts,
     })
-    .from(goatBrowserProfiles)
+    .from(browserProfiles)
     .where(
-      and(
-        eq(goatBrowserProfiles.userWorkosId, userWorkosId),
-        eq(goatBrowserProfiles.status, "connected"),
-      ),
+      and(eq(browserProfiles.userWorkosId, userWorkosId), eq(browserProfiles.status, "connected")),
     )
-    .orderBy(goatBrowserProfiles.name);
+    .orderBy(browserProfiles.name);
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
@@ -126,7 +123,7 @@ export async function createBrowserProfile(input: {
       contextId: context.id,
     });
     const [row] = await getDb()
-      .insert(goatBrowserProfiles)
+      .insert(browserProfiles)
       .values({
         id: profileId,
         userWorkosId: input.userWorkosId,
@@ -163,7 +160,7 @@ export async function createLoginSession(input: { userWorkosId: string; profileI
     browserbaseSessionId = session.id;
     const live = await browserbase().sessions.debug(session.id);
     await getDb()
-      .update(goatBrowserProfiles)
+      .update(browserProfiles)
       .set({
         activeSessionId: session.id,
         lastLoginSessionId: session.id,
@@ -171,8 +168,8 @@ export async function createLoginSession(input: { userWorkosId: string; profileI
       })
       .where(
         and(
-          eq(goatBrowserProfiles.id, input.profileId),
-          eq(goatBrowserProfiles.userWorkosId, input.userWorkosId),
+          eq(browserProfiles.id, input.profileId),
+          eq(browserProfiles.userWorkosId, input.userWorkosId),
         ),
       );
     await recordBrowserbaseSession({
@@ -206,7 +203,7 @@ export async function completeLoginSession(input: {
   await requestSessionRelease(input.sessionId);
   const now = new Date();
   await getDb()
-    .update(goatBrowserProfiles)
+    .update(browserProfiles)
     .set({
       status: "connected",
       activeSessionId: null,
@@ -215,8 +212,8 @@ export async function completeLoginSession(input: {
     })
     .where(
       and(
-        eq(goatBrowserProfiles.id, input.profileId),
-        eq(goatBrowserProfiles.userWorkosId, input.userWorkosId),
+        eq(browserProfiles.id, input.profileId),
+        eq(browserProfiles.userWorkosId, input.userWorkosId),
       ),
     );
   await finishBrowserbaseSession({
@@ -250,7 +247,7 @@ export async function createAgentSession(input: {
     );
     browserbaseSessionId = session.id;
     await getDb()
-      .update(goatBrowserProfiles)
+      .update(browserProfiles)
       .set({
         activeSessionId: session.id,
         lastUsedAt: new Date(),
@@ -258,8 +255,8 @@ export async function createAgentSession(input: {
       })
       .where(
         and(
-          eq(goatBrowserProfiles.id, input.profileId),
-          eq(goatBrowserProfiles.userWorkosId, input.userWorkosId),
+          eq(browserProfiles.id, input.profileId),
+          eq(browserProfiles.userWorkosId, input.userWorkosId),
         ),
       );
     await recordBrowserbaseSession({
@@ -314,11 +311,11 @@ export async function deleteBrowserProfile(input: { userWorkosId: string; profil
     .contexts.delete(contextId)
     .catch(() => undefined);
   await getDb()
-    .delete(goatBrowserProfiles)
+    .delete(browserProfiles)
     .where(
       and(
-        eq(goatBrowserProfiles.id, input.profileId),
-        eq(goatBrowserProfiles.userWorkosId, input.userWorkosId),
+        eq(browserProfiles.id, input.profileId),
+        eq(browserProfiles.userWorkosId, input.userWorkosId),
       ),
     );
   return { ok: true };
@@ -352,7 +349,7 @@ function browserbaseProjectBody() {
 }
 
 function browserbaseSessionParams(
-  profile: Pick<GoatBrowserProfile, "id" | "siteHost" | "allowedHosts">,
+  profile: Pick<BrowserProfile, "id" | "siteHost" | "allowedHosts">,
   contextId: string,
   kind: "login" | "agent",
 ) {
@@ -399,7 +396,7 @@ function encryptBrowserbaseContextId(input: {
 
 function decryptBrowserbaseContextId(
   profile: Pick<
-    GoatBrowserProfile,
+    BrowserProfile,
     "id" | "userWorkosId" | "encryptedBrowserbaseContextId" | "encryptionKeyVersion"
   >,
 ) {
@@ -421,13 +418,8 @@ function browserProfileAad(userWorkosId: string, profileId: string) {
 async function loadOwnedProfile(userWorkosId: string, profileId: string) {
   const [profile] = await getDb()
     .select()
-    .from(goatBrowserProfiles)
-    .where(
-      and(
-        eq(goatBrowserProfiles.id, profileId),
-        eq(goatBrowserProfiles.userWorkosId, userWorkosId),
-      ),
-    )
+    .from(browserProfiles)
+    .where(and(eq(browserProfiles.id, profileId), eq(browserProfiles.userWorkosId, userWorkosId)))
     .limit(1);
   if (!profile) throw new Error("Browser profile not found.");
   return profile;
@@ -435,28 +427,28 @@ async function loadOwnedProfile(userWorkosId: string, profileId: string) {
 
 async function claimProfileSession(userWorkosId: string, profileId: string) {
   const [row] = await getDb()
-    .update(goatBrowserProfiles)
+    .update(browserProfiles)
     .set({ activeSessionId: "starting", updatedAt: new Date() })
     .where(
       and(
-        eq(goatBrowserProfiles.id, profileId),
-        eq(goatBrowserProfiles.userWorkosId, userWorkosId),
-        isNull(goatBrowserProfiles.activeSessionId),
+        eq(browserProfiles.id, profileId),
+        eq(browserProfiles.userWorkosId, userWorkosId),
+        isNull(browserProfiles.activeSessionId),
       ),
     )
-    .returning({ id: goatBrowserProfiles.id });
+    .returning({ id: browserProfiles.id });
   return Boolean(row);
 }
 
 async function releaseProfileSession(userWorkosId: string, profileId: string, sessionId?: string) {
   await getDb()
-    .update(goatBrowserProfiles)
+    .update(browserProfiles)
     .set({ activeSessionId: null, updatedAt: new Date() })
     .where(
       and(
-        eq(goatBrowserProfiles.id, profileId),
-        eq(goatBrowserProfiles.userWorkosId, userWorkosId),
-        sessionId ? eq(goatBrowserProfiles.activeSessionId, sessionId) : undefined,
+        eq(browserProfiles.id, profileId),
+        eq(browserProfiles.userWorkosId, userWorkosId),
+        sessionId ? eq(browserProfiles.activeSessionId, sessionId) : undefined,
       ),
     );
 }
@@ -480,7 +472,7 @@ async function recordBrowserbaseSession(input: {
   startedAt: Date;
 }) {
   await getDb()
-    .insert(goatBrowserProfileSessions)
+    .insert(browserProfileSessions)
     .values({
       userWorkosId: input.userWorkosId,
       profileId: input.profileId,
@@ -500,13 +492,13 @@ async function finishBrowserbaseSession(input: {
   endedAt: Date;
 }) {
   const [row] = await getDb()
-    .select({ startedAt: goatBrowserProfileSessions.startedAt })
-    .from(goatBrowserProfileSessions)
+    .select({ startedAt: browserProfileSessions.startedAt })
+    .from(browserProfileSessions)
     .where(
       and(
-        eq(goatBrowserProfileSessions.userWorkosId, input.userWorkosId),
-        eq(goatBrowserProfileSessions.profileId, input.profileId),
-        eq(goatBrowserProfileSessions.browserbaseSessionId, input.browserbaseSessionId),
+        eq(browserProfileSessions.userWorkosId, input.userWorkosId),
+        eq(browserProfileSessions.profileId, input.profileId),
+        eq(browserProfileSessions.browserbaseSessionId, input.browserbaseSessionId),
       ),
     )
     .limit(1);
@@ -514,18 +506,18 @@ async function finishBrowserbaseSession(input: {
     ? Math.max(0, input.endedAt.getTime() - row.startedAt.getTime())
     : 0;
   await getDb()
-    .update(goatBrowserProfileSessions)
+    .update(browserProfileSessions)
     .set({ endedAt: input.endedAt, durationMs })
     .where(
       and(
-        eq(goatBrowserProfileSessions.userWorkosId, input.userWorkosId),
-        eq(goatBrowserProfileSessions.profileId, input.profileId),
-        eq(goatBrowserProfileSessions.browserbaseSessionId, input.browserbaseSessionId),
+        eq(browserProfileSessions.userWorkosId, input.userWorkosId),
+        eq(browserProfileSessions.profileId, input.profileId),
+        eq(browserProfileSessions.browserbaseSessionId, input.browserbaseSessionId),
       ),
     );
 }
 
-function toBrowserProfileView(row: GoatBrowserProfile): BrowserProfileView {
+function toBrowserProfileView(row: BrowserProfile): BrowserProfileView {
   return {
     id: row.id,
     name: row.name,
@@ -540,7 +532,7 @@ function toBrowserProfileView(row: GoatBrowserProfile): BrowserProfileView {
 }
 
 function toConnectedBrowserProfile(
-  row: Pick<GoatBrowserProfile, "id" | "name" | "siteHost" | "allowedHosts">,
+  row: Pick<BrowserProfile, "id" | "name" | "siteHost" | "allowedHosts">,
 ): ConnectedBrowserProfile {
   return {
     id: row.id,

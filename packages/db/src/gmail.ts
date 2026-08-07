@@ -2,20 +2,20 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import {
-  type GoatGmailMessageDirection,
-  goatBrainSources,
-  goatGmailMessageEvents,
-  goatGmailSyncState,
+  brainSources,
+  type GmailMessageDirection,
+  gmailMessageEvents,
+  gmailSyncState,
 } from "./schema";
 
 type DbLike = any;
 
 export const GOAT_GMAIL_EVENT_TYPES = ["email_received", "email_sent"] as const;
 
-export type GoatGmailEventType = (typeof GOAT_GMAIL_EVENT_TYPES)[number];
+export type GmailEventType = (typeof GOAT_GMAIL_EVENT_TYPES)[number];
 
-export type GoatGmailEventRef = {
-  id: GoatGmailEventType;
+export type GmailEventRef = {
+  id: GmailEventType;
 };
 
 export const GOAT_GMAIL_INSTRUCTIONS_MAX_LENGTH = 2000;
@@ -25,18 +25,18 @@ export const GOAT_GMAIL_INSTRUCTIONS_MAX_LENGTH = 2000;
 // direction matches the enabled brain-source event selection; `instructions`
 // is the owner's free-form tuning prompt the ingest agent applies when judging
 // what is brain-worthy.
-export type GoatGmailBrainSourceConfig = {
-  events?: GoatGmailEventRef[];
+export type GmailBrainSourceConfig = {
+  events?: GmailEventRef[];
   instructions?: string;
 };
 
-export type GoatGmailBrainSourceRoute = {
+export type GmailBrainSourceRoute = {
   integrationId: string;
   brainRef: string;
-  config: GoatGmailBrainSourceConfig;
+  config: GmailBrainSourceConfig;
 };
 
-export type GoatGmailMessageEventInsert = {
+export type GmailMessageEventInsert = {
   integrationId: string;
   userWorkosId: string;
   threadId: string;
@@ -44,119 +44,114 @@ export type GoatGmailMessageEventInsert = {
   // RFC822 Message-ID header — the cross-mailbox identity used for
   // cross-member brain dedup; null when the header is absent.
   rfc822MessageId?: string | null;
-  direction: GoatGmailMessageDirection;
+  direction: GmailMessageDirection;
   subject?: string | null;
   fromHeader?: string | null;
   payload: Record<string, unknown>;
   eventTime: Date;
 };
 
-export type GoatGmailSyncStateRow = {
+export type GmailSyncStateRow = {
   integrationId: string;
   userWorkosId: string;
   emailAddress: string | null;
   historyId: string | null;
 };
 
-export function goatGmailEventTypeForDirection(
-  direction: GoatGmailMessageDirection,
-): GoatGmailEventType {
+export function gmailEventTypeForDirection(direction: GmailMessageDirection): GmailEventType {
   return direction === "sent" ? "email_sent" : "email_received";
 }
 
-export function parseGoatGmailBrainSourceConfig(value: unknown): GoatGmailBrainSourceConfig {
+export function parseGmailBrainSourceConfig(value: unknown): GmailBrainSourceConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const record = value as Record<string, unknown>;
   const events = parseEventRefs(record.events);
-  const instructions = sanitizeGoatGmailInstructions(record.instructions);
+  const instructions = sanitizeGmailInstructions(record.instructions);
   return {
     ...(events ? { events } : {}),
     ...(instructions ? { instructions } : {}),
   };
 }
 
-export function sanitizeGoatGmailInstructions(value: unknown): string | undefined {
+export function sanitizeGmailInstructions(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   return trimmed.slice(0, GOAT_GMAIL_INSTRUCTIONS_MAX_LENGTH);
 }
 
-export function goatGmailSelectedEventTypes(
-  config: GoatGmailBrainSourceConfig,
-): Set<GoatGmailEventType> | null {
+export function gmailSelectedEventTypes(
+  config: GmailBrainSourceConfig,
+): Set<GmailEventType> | null {
   if (!config.events) return null;
   return new Set(config.events.map((ref) => ref.id));
 }
 
-export function goatGmailRouteMatchesEvent(
-  config: GoatGmailBrainSourceConfig,
-  eventType: GoatGmailEventType,
-) {
-  const selected = goatGmailSelectedEventTypes(config);
+export function gmailRouteMatchesEvent(config: GmailBrainSourceConfig, eventType: GmailEventType) {
+  const selected = gmailSelectedEventTypes(config);
   return selected === null || selected.has(eventType);
 }
 
-export async function listEnabledGoatGmailBrainSourceRoutes(
+export async function listEnabledGmailBrainSourceRoutes(
   integrationIds: readonly string[],
   db: DbLike = getDb(),
-): Promise<GoatGmailBrainSourceRoute[]> {
+): Promise<GmailBrainSourceRoute[]> {
   if (integrationIds.length === 0) return [];
   const rows = await db
     .select({
-      integrationId: goatBrainSources.integrationId,
-      brainRef: goatBrainSources.brainId,
-      config: goatBrainSources.config,
+      integrationId: brainSources.integrationId,
+      brainRef: brainSources.brainId,
+      config: brainSources.config,
     })
-    .from(goatBrainSources)
+    .from(brainSources)
     .where(
       and(
-        eq(goatBrainSources.provider, "gmail"),
-        eq(goatBrainSources.enabled, true),
-        inArray(goatBrainSources.integrationId, [...integrationIds]),
+        eq(brainSources.provider, "gmail"),
+        eq(brainSources.enabled, true),
+        inArray(brainSources.integrationId, [...integrationIds]),
       ),
     );
 
   return rows.map((row: { integrationId: string; brainRef: string; config: unknown }) => ({
     integrationId: row.integrationId,
     brainRef: row.brainRef,
-    config: parseGoatGmailBrainSourceConfig(row.config),
+    config: parseGmailBrainSourceConfig(row.config),
   }));
 }
 
 // Live lookup at ingest time so instruction edits apply to already-queued jobs
 // (the job content hash covers only the normalized item, never instructions).
-export async function getGoatGmailBrainSourceInstructions(
+export async function getGmailBrainSourceInstructions(
   input: { integrationId: string; brainRef: string },
   db: DbLike = getDb(),
 ): Promise<string | null> {
   const rows = await db
-    .select({ config: goatBrainSources.config })
-    .from(goatBrainSources)
+    .select({ config: brainSources.config })
+    .from(brainSources)
     .where(
       and(
-        eq(goatBrainSources.provider, "gmail"),
-        eq(goatBrainSources.brainId, input.brainRef),
-        eq(goatBrainSources.integrationId, input.integrationId),
+        eq(brainSources.provider, "gmail"),
+        eq(brainSources.brainId, input.brainRef),
+        eq(brainSources.integrationId, input.integrationId),
       ),
     )
     .limit(1);
   if (rows.length === 0) return null;
-  return parseGoatGmailBrainSourceConfig(rows[0]?.config).instructions ?? null;
+  return parseGmailBrainSourceConfig(rows[0]?.config).instructions ?? null;
 }
 
-export async function insertGoatGmailMessageEvents(
-  events: readonly GoatGmailMessageEventInsert[],
+export async function insertGmailMessageEvents(
+  events: readonly GmailMessageEventInsert[],
   db: DbLike = getDb(),
 ): Promise<number> {
   if (events.length === 0) return 0;
   // History polling can re-report a message across overlapping windows; the
   // unique (integration, message id) index makes re-discovery a no-op.
   const rows = await db
-    .insert(goatGmailMessageEvents)
+    .insert(gmailMessageEvents)
     .values(
       events.map((event) => ({
-        id: newGoatGmailMessageEventId(),
+        id: newGmailMessageEventId(),
         integrationId: event.integrationId,
         userWorkosId: event.userWorkosId,
         threadId: event.threadId,
@@ -170,16 +165,16 @@ export async function insertGoatGmailMessageEvents(
       })),
     )
     .onConflictDoNothing()
-    .returning({ id: goatGmailMessageEvents.id });
+    .returning({ id: gmailMessageEvents.id });
   return rows.length;
 }
 
-export async function ensureGoatGmailSyncState(
+export async function ensureGmailSyncState(
   input: { integrationId: string; userWorkosId: string },
   db: DbLike = getDb(),
 ): Promise<void> {
   await db
-    .insert(goatGmailSyncState)
+    .insert(gmailSyncState)
     .values({ integrationId: input.integrationId, userWorkosId: input.userWorkosId })
     .onConflictDoNothing();
 }
@@ -188,36 +183,33 @@ export async function ensureGoatGmailSyncState(
 // hasn't been polled within the cooldown, so concurrent runner replicas skip
 // each other. Returns the cursor on success, null when another replica holds
 // the slot.
-export async function claimGoatGmailSyncState(
+export async function claimGmailSyncState(
   input: { integrationId: string; cooldownMs: number },
   db: DbLike = getDb(),
-): Promise<GoatGmailSyncStateRow | null> {
+): Promise<GmailSyncStateRow | null> {
   const cooldownSeconds = Math.max(1, Math.floor(input.cooldownMs / 1000));
   const rows = await db
-    .update(goatGmailSyncState)
+    .update(gmailSyncState)
     .set({ lastPolledAt: sql`now()`, updatedAt: sql`now()` })
     .where(
       and(
-        eq(goatGmailSyncState.integrationId, input.integrationId),
+        eq(gmailSyncState.integrationId, input.integrationId),
         or(
-          isNull(goatGmailSyncState.lastPolledAt),
-          lt(
-            goatGmailSyncState.lastPolledAt,
-            sql`now() - make_interval(secs => ${cooldownSeconds})`,
-          ),
+          isNull(gmailSyncState.lastPolledAt),
+          lt(gmailSyncState.lastPolledAt, sql`now() - make_interval(secs => ${cooldownSeconds})`),
         ),
       ),
     )
     .returning({
-      integrationId: goatGmailSyncState.integrationId,
-      userWorkosId: goatGmailSyncState.userWorkosId,
-      emailAddress: goatGmailSyncState.emailAddress,
-      historyId: goatGmailSyncState.historyId,
+      integrationId: gmailSyncState.integrationId,
+      userWorkosId: gmailSyncState.userWorkosId,
+      emailAddress: gmailSyncState.emailAddress,
+      historyId: gmailSyncState.historyId,
     });
   return rows[0] ?? null;
 }
 
-export async function updateGoatGmailSyncCursor(
+export async function updateGmailSyncCursor(
   input: {
     integrationId: string;
     historyId: string;
@@ -227,14 +219,14 @@ export async function updateGoatGmailSyncCursor(
   db: DbLike = getDb(),
 ): Promise<void> {
   await db
-    .update(goatGmailSyncState)
+    .update(gmailSyncState)
     .set({
       historyId: input.historyId,
       ...(input.emailAddress !== undefined ? { emailAddress: input.emailAddress } : {}),
       ...(input.reset ? { lastResetAt: sql`now()` } : {}),
       updatedAt: sql`now()`,
     })
-    .where(eq(goatGmailSyncState.integrationId, input.integrationId));
+    .where(eq(gmailSyncState.integrationId, input.integrationId));
 }
 
 // Cross-member dedup key for one email. The RFC822 Message-ID header is the
@@ -242,7 +234,7 @@ export async function updateGoatGmailSyncCursor(
 // Gmail's own message ids are per-mailbox. When the header is missing (rare),
 // fall back to a per-mailbox key so dedup degrades to at-most-once per
 // integration instead of colliding.
-export function goatGmailEventClaimKey(input: {
+export function gmailEventClaimKey(input: {
   rfc822MessageId: string | null | undefined;
   integrationId: string;
   gmailMessageId: string;
@@ -258,17 +250,17 @@ export function normalizeRfc822MessageId(value: string | null | undefined): stri
   return trimmed || null;
 }
 
-export function newGoatGmailMessageEventId() {
+export function newGmailMessageEventId() {
   return `ggmevt_${randomUUID().replace(/-/g, "")}`;
 }
 
-export function newGoatGmailThreadWindowId() {
+export function newGmailThreadWindowId() {
   return `ggmwin_${randomUUID().replace(/-/g, "")}`;
 }
 
-function parseEventRefs(value: unknown): GoatGmailEventRef[] | undefined {
+function parseEventRefs(value: unknown): GmailEventRef[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const seen = new Set<GoatGmailEventType>();
+  const seen = new Set<GmailEventType>();
   const refs = value.flatMap((entry) => {
     const id =
       typeof entry === "string"
@@ -276,13 +268,13 @@ function parseEventRefs(value: unknown): GoatGmailEventRef[] | undefined {
         : entry && typeof entry === "object" && !Array.isArray(entry)
           ? (entry as Record<string, unknown>).id
           : null;
-    if (!isGoatGmailEventType(id) || seen.has(id)) return [];
+    if (!isGmailEventType(id) || seen.has(id)) return [];
     seen.add(id);
     return [{ id }];
   });
   return refs;
 }
 
-function isGoatGmailEventType(value: unknown): value is GoatGmailEventType {
+function isGmailEventType(value: unknown): value is GmailEventType {
   return typeof value === "string" && (GOAT_GMAIL_EVENT_TYPES as readonly string[]).includes(value);
 }

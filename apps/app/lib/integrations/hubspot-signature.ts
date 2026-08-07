@@ -9,7 +9,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 // its tests stay light.
 export const HUBSPOT_SIGNATURE_MAX_AGE_MS = 5 * 60_000;
 
-export function verifyGoatHubspotWebhookSignature(input: {
+export function verifyHubspotWebhookSignature(input: {
   method: string;
   candidateUris: readonly string[];
   rawBody: string;

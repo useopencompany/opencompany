@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { getGoatAppUrl } from "@/lib/workos";
+import { getAppUrl } from "@/lib/workos";
 import { getWorkOSClient } from "@/lib/workos-client";
 
 function privateRedirect(url: string | URL) {
@@ -17,10 +17,10 @@ function privateRedirect(url: string | URL) {
 export async function GET(request: NextRequest) {
   const invitationToken = request.nextUrl.searchParams.get("invitation_token")?.trim();
   if (!invitationToken) {
-    return privateRedirect(new URL("/signin", getGoatAppUrl()));
+    return privateRedirect(new URL("/signin", getAppUrl()));
   }
 
-  const url = new URL("/signup", getGoatAppUrl());
+  const url = new URL("/signup", getAppUrl());
   url.searchParams.set("invitation_token", invitationToken);
 
   try {

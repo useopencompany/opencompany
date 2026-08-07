@@ -2,12 +2,12 @@ import { decryptJson } from "@opencompany/crypto";
 import { drizzle } from "drizzle-orm/neon-http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  connectGoatSlackBotIntegration,
-  goatCredentialAad,
-  refreshGoatIntegrationCredential,
+  connectSlackBotIntegration,
+  credentialAad,
+  refreshIntegrationCredential,
 } from "./integrations";
 
-describe("refreshGoatIntegrationCredential", () => {
+describe("refreshIntegrationCredential", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -26,7 +26,7 @@ describe("refreshGoatIntegrationCredential", () => {
     const db = drizzle(client as never);
 
     await expect(
-      refreshGoatIntegrationCredential({
+      refreshIntegrationCredential({
         userWorkosId: "user_123",
         integrationId: "gint_123",
         provider: "google_drive",
@@ -75,7 +75,7 @@ describe("refreshGoatIntegrationCredential", () => {
     const db = drizzle(client as never);
 
     await expect(
-      refreshGoatIntegrationCredential({
+      refreshIntegrationCredential({
         userWorkosId: "user_123",
         integrationId: "gint_missing",
         provider: "google_drive",
@@ -92,7 +92,7 @@ describe("refreshGoatIntegrationCredential", () => {
   });
 });
 
-describe("connectGoatSlackBotIntegration", () => {
+describe("connectSlackBotIntegration", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -113,7 +113,7 @@ describe("connectGoatSlackBotIntegration", () => {
     const db = drizzle(client as never);
 
     await expect(
-      connectGoatSlackBotIntegration({
+      connectSlackBotIntegration({
         userWorkosId: "user_reconnecting",
         workspaceId: "workspace_123",
         teamId: "T_NEW",
@@ -161,7 +161,7 @@ describe("connectGoatSlackBotIntegration", () => {
     expect(
       decryptJson(JSON.parse(encryptedParam as string), {
         key: encryptionKey,
-        aad: goatCredentialAad({
+        aad: credentialAad({
           userWorkosId: "user_original",
           integrationId: "gint_existing",
           provider: "slack_bot",

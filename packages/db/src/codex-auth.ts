@@ -9,26 +9,26 @@ import {
 } from "@opencompany/crypto";
 import { eq } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import type * as goatSchema from "./schema";
+import type * as schema from "./schema";
 import {
-  type GoatCodexCredentialStatus,
-  type GoatIntegrationCredentialEncryptedPayload,
-  goatCodexCredentials,
+  type CodexCredentialStatus,
+  codexCredentials,
+  type IntegrationCredentialEncryptedPayload,
 } from "./schema";
 
 const ENCRYPTION_KEY_VERSION = 1;
 
-type DbSchema = typeof goatSchema;
-type GoatCodexAuthDb = Pick<
+type DbSchema = typeof schema;
+type CodexAuthDb = Pick<
   PgDatabase<PgQueryResultHKT, DbSchema>,
   "delete" | "insert" | "select" | "update"
 >;
 
-export type GoatCodexAuthJson = Record<string, unknown>;
+export type CodexAuthJson = Record<string, unknown>;
 
-export type LoadedGoatCodexCredential = {
-  authJson: GoatCodexAuthJson;
-  status: GoatCodexCredentialStatus;
+export type LoadedCodexCredential = {
+  authJson: CodexAuthJson;
+  status: CodexCredentialStatus;
   statusReason: string | null;
   lastValidatedAt: Date | null;
   lastRotatedAt: Date | null;
@@ -36,15 +36,15 @@ export type LoadedGoatCodexCredential = {
   encryptionKeyVersion: number;
 };
 
-export function newGoatCodexDeviceAuthFlowId() {
+export function newCodexDeviceAuthFlowId() {
   return `gcodf_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 }
 
-export async function saveGoatCodexCredential(input: {
-  db: GoatCodexAuthDb;
+export async function saveCodexCredential(input: {
+  db: CodexAuthDb;
   userWorkosId: string;
-  authJson: GoatCodexAuthJson;
-  status?: GoatCodexCredentialStatus;
+  authJson: CodexAuthJson;
+  status?: CodexCredentialStatus;
   statusReason?: string | null;
   validatedAt?: Date | null;
   now?: Date;
@@ -58,7 +58,7 @@ export async function saveGoatCodexCredential(input: {
   const status = input.status ?? "connected";
 
   const [credential] = await input.db
-    .insert(goatCodexCredentials)
+    .insert(codexCredentials)
     .values({
       userWorkosId: input.userWorkosId,
       encryptedAuthJson,
@@ -70,7 +70,7 @@ export async function saveGoatCodexCredential(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: goatCodexCredentials.userWorkosId,
+      target: codexCredentials.userWorkosId,
       set: {
         encryptedAuthJson,
         encryptionKeyVersion: ENCRYPTION_KEY_VERSION,
@@ -82,20 +82,20 @@ export async function saveGoatCodexCredential(input: {
       },
     })
     .returning({
-      userWorkosId: goatCodexCredentials.userWorkosId,
-      lastValidatedAt: goatCodexCredentials.lastValidatedAt,
-      lastRotatedAt: goatCodexCredentials.lastRotatedAt,
-      updatedAt: goatCodexCredentials.updatedAt,
+      userWorkosId: codexCredentials.userWorkosId,
+      lastValidatedAt: codexCredentials.lastValidatedAt,
+      lastRotatedAt: codexCredentials.lastRotatedAt,
+      updatedAt: codexCredentials.updatedAt,
     });
 
   if (!credential) throw new Error("Could not persist Goat Codex credential.");
   return credential;
 }
 
-export async function rotateGoatCodexCredential(input: {
-  db: GoatCodexAuthDb;
+export async function rotateCodexCredential(input: {
+  db: CodexAuthDb;
   userWorkosId: string;
-  authJson: GoatCodexAuthJson;
+  authJson: CodexAuthJson;
   validatedAt?: Date | null;
   now?: Date;
 }) {
@@ -106,7 +106,7 @@ export async function rotateGoatCodexCredential(input: {
     ENCRYPTION_KEY_VERSION,
   );
   const [credential] = await input.db
-    .update(goatCodexCredentials)
+    .update(codexCredentials)
     .set({
       encryptedAuthJson,
       encryptionKeyVersion: ENCRYPTION_KEY_VERSION,
@@ -116,44 +116,44 @@ export async function rotateGoatCodexCredential(input: {
       lastRotatedAt: now,
       updatedAt: now,
     })
-    .where(eq(goatCodexCredentials.userWorkosId, input.userWorkosId))
-    .returning({ userWorkosId: goatCodexCredentials.userWorkosId });
+    .where(eq(codexCredentials.userWorkosId, input.userWorkosId))
+    .returning({ userWorkosId: codexCredentials.userWorkosId });
   return Boolean(credential);
 }
 
-export async function markGoatCodexCredentialNeedsReauth(input: {
-  db: GoatCodexAuthDb;
+export async function markCodexCredentialNeedsReauth(input: {
+  db: CodexAuthDb;
   userWorkosId: string;
   statusReason: string;
   now?: Date;
 }) {
   await input.db
-    .update(goatCodexCredentials)
+    .update(codexCredentials)
     .set({
       status: "needs_reauth",
       statusReason: input.statusReason,
       updatedAt: input.now ?? new Date(),
     })
-    .where(eq(goatCodexCredentials.userWorkosId, input.userWorkosId));
+    .where(eq(codexCredentials.userWorkosId, input.userWorkosId));
 }
 
-export async function loadGoatCodexCredential(input: {
-  db: GoatCodexAuthDb;
+export async function loadCodexCredential(input: {
+  db: CodexAuthDb;
   userWorkosId: string;
-}): Promise<LoadedGoatCodexCredential | null> {
+}): Promise<LoadedCodexCredential | null> {
   const [credential] = await input.db
     .select({
-      userWorkosId: goatCodexCredentials.userWorkosId,
-      encryptedAuthJson: goatCodexCredentials.encryptedAuthJson,
-      encryptionKeyVersion: goatCodexCredentials.encryptionKeyVersion,
-      status: goatCodexCredentials.status,
-      statusReason: goatCodexCredentials.statusReason,
-      lastValidatedAt: goatCodexCredentials.lastValidatedAt,
-      lastRotatedAt: goatCodexCredentials.lastRotatedAt,
-      updatedAt: goatCodexCredentials.updatedAt,
+      userWorkosId: codexCredentials.userWorkosId,
+      encryptedAuthJson: codexCredentials.encryptedAuthJson,
+      encryptionKeyVersion: codexCredentials.encryptionKeyVersion,
+      status: codexCredentials.status,
+      statusReason: codexCredentials.statusReason,
+      lastValidatedAt: codexCredentials.lastValidatedAt,
+      lastRotatedAt: codexCredentials.lastRotatedAt,
+      updatedAt: codexCredentials.updatedAt,
     })
-    .from(goatCodexCredentials)
-    .where(eq(goatCodexCredentials.userWorkosId, input.userWorkosId))
+    .from(codexCredentials)
+    .where(eq(codexCredentials.userWorkosId, input.userWorkosId))
     .limit(1);
 
   if (!credential) return null;
@@ -176,20 +176,17 @@ export async function loadGoatCodexCredential(input: {
   };
 }
 
-export async function deleteGoatCodexCredential(input: {
-  db: GoatCodexAuthDb;
-  userWorkosId: string;
-}) {
+export async function deleteCodexCredential(input: { db: CodexAuthDb; userWorkosId: string }) {
   await input.db
-    .delete(goatCodexCredentials)
-    .where(eq(goatCodexCredentials.userWorkosId, input.userWorkosId));
+    .delete(codexCredentials)
+    .where(eq(codexCredentials.userWorkosId, input.userWorkosId));
 }
 
 function encryptAuthJson(
-  authJson: GoatCodexAuthJson,
+  authJson: CodexAuthJson,
   context: { userWorkosId: string },
   keyVersion: number,
-): GoatIntegrationCredentialEncryptedPayload {
+): IntegrationCredentialEncryptedPayload {
   return encryptJson(authJson, {
     key: loadEncryptionKey(keyVersion),
     aad: authenticatedData(context, keyVersion),
@@ -197,10 +194,10 @@ function encryptAuthJson(
 }
 
 function decryptAuthJson(
-  encryptedAuthJson: GoatIntegrationCredentialEncryptedPayload,
+  encryptedAuthJson: IntegrationCredentialEncryptedPayload,
   context: { userWorkosId: string },
   keyVersion: number,
-): GoatCodexAuthJson {
+): CodexAuthJson {
   if (encryptedAuthJson.algorithm !== ENCRYPTION_ALGORITHM) {
     throw new Error(
       `Unsupported Goat Codex credential encryption algorithm ${encryptedAuthJson.algorithm}.`,

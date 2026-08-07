@@ -2,22 +2,22 @@ export const GOAT_ONBOARDING_CONNECTION_MESSAGE = "goat-onboarding-connection" a
 export const GOAT_ONBOARDING_CONNECTION_STORAGE_KEY = "goat-onboarding-connection-result";
 export const GOAT_ONBOARDING_CONNECTION_RETURN_TO = "/onboarding/connected";
 
-export type GoatOnboardingConnectionMessage = {
+export type OnboardingConnectionMessage = {
   type: typeof GOAT_ONBOARDING_CONNECTION_MESSAGE;
   provider: string | null;
   status: string | null;
   reason: string | null;
 };
 
-export type GoatOnboardingConnectionResult = Omit<GoatOnboardingConnectionMessage, "type">;
+export type OnboardingConnectionResult = Omit<OnboardingConnectionMessage, "type">;
 
-export function goatOnboardingConnectHref(connectHref: string) {
+export function onboardingConnectHref(connectHref: string) {
   const url = new URL(connectHref, "https://goat.local");
   url.searchParams.set("returnTo", GOAT_ONBOARDING_CONNECTION_RETURN_TO);
   return `${url.pathname}${url.search}`;
 }
 
-export function goatIntegrationConnectionError(provider: string | null, reason: string | null) {
+export function integrationConnectionError(provider: string | null, reason: string | null) {
   const name = providerName(provider);
   switch (reason) {
     case "admin_required":
@@ -44,9 +44,9 @@ export function goatIntegrationConnectionError(provider: string | null, reason: 
   }
 }
 
-export const goatOnboardingConnectionError = goatIntegrationConnectionError;
+export const onboardingConnectionError = integrationConnectionError;
 
-export function goatIntegrationConnectionSuccess(provider: string | null) {
+export function integrationConnectionSuccess(provider: string | null) {
   const name = providerName(provider);
   return name === "This source" ? "Integration connected." : `${name} connected.`;
 }

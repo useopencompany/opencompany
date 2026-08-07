@@ -1,4 +1,4 @@
-import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
+import { captureIngestionQuotaAnalytics } from "@opencompany/analytics/app";
 import {
   type NormalizedAttioObjectActivity,
   type NormalizedAttioObjectNote,
@@ -6,26 +6,22 @@ import {
   normalizeAttioObjectWindow,
 } from "@opencompany/brain";
 import {
-  goatAttioEventClaimKey,
-  goatAttioEventTypeFor,
-  goatAttioRouteMatchesEvent,
-  goatAttioSelectedObjectTypes,
-  listEnabledGoatAttioBrainSourceRoutes,
-  newGoatAttioObjectWindowId,
+  attioEventClaimKey,
+  attioEventTypeFor,
+  attioRouteMatchesEvent,
+  attioSelectedObjectTypes,
+  listEnabledAttioBrainSourceRoutes,
+  newAttioObjectWindowId,
 } from "@opencompany/db/attio";
 import {
-  attributeGoatBrainSourceEventClaims,
-  claimGoatBrainSourceEvents,
+  attributeBrainSourceEventClaims,
+  claimBrainSourceEvents,
 } from "@opencompany/db/brain-event-claims";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
-  upsertGoatBrainSourceItemAndEnqueue,
+  upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
-import type {
-  GoatAttioEventAction,
-  GoatAttioObjectType,
-  GoatIntegrationStatus,
-} from "@opencompany/db/schema";
+import type { AttioEventAction, AttioObjectType, IntegrationStatus } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import {
@@ -37,7 +33,7 @@ import {
   loadAttioApiKey,
   markAttioNeedsReauth,
 } from "./attio-api";
-import { wakeGoatBrainIngestWorker } from "./brain-ingest-worker";
+import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { getDb } from "./db";
 import { rowsFromExecute } from "./sql-exec";
 
@@ -55,29 +51,29 @@ export const GOAT_ATTIO_MAX_WINDOW_EVENTS = 200;
 export const GOAT_ATTIO_MAX_NOTES_PER_WINDOW = 5;
 const GOAT_ATTIO_FLUSH_POLL_INTERVAL_MS = 60_000;
 
-export type GoatAttioDueWindow = {
+export type AttioDueWindow = {
   integrationId: string;
   userWorkosId: string;
   workspaceId: string;
-  objectType: GoatAttioObjectType;
+  objectType: AttioObjectType;
   recordId: string;
 };
 
 type BufferedAttioEventRow = {
   id: string;
   deliveryId: string;
-  action: GoatAttioEventAction;
+  action: AttioEventAction;
   attributeId: string | null;
   noteId: string | null;
   payload: Record<string, unknown>;
   eventTime: string | Date;
 };
 
-export async function listDueGoatAttioObjectWindows(input: {
+export async function listDueAttioObjectWindows(input: {
   now?: Date;
   quietPeriodMs?: number;
   maxWaitMs?: number;
-}): Promise<GoatAttioDueWindow[]> {
+}): Promise<AttioDueWindow[]> {
   const now = input.now ?? new Date();
   const quietCutoff = new Date(now.getTime() - (input.quietPeriodMs ?? GOAT_ATTIO_QUIET_PERIOD_MS));
   const maxWaitCutoff = new Date(now.getTime() - (input.maxWaitMs ?? GOAT_ATTIO_MAX_WAIT_MS));
@@ -93,7 +89,7 @@ export async function listDueGoatAttioObjectWindows(input: {
     GROUP BY 1, 2, 3, 4, 5
     HAVING max(received_at) < ${quietCutoff} OR min(received_at) < ${maxWaitCutoff}
   `);
-  return rowsFromExecute<GoatAttioDueWindow>(result);
+  return rowsFromExecute<AttioDueWindow>(result);
 }
 
 type AttioWindowEnrichment = {
@@ -110,7 +106,7 @@ type AttioRoutedEventGroup = {
   eventKeysByBrainRef: Map<string, string[]>;
 };
 
-export async function flushGoatAttioObjectWindow(window: GoatAttioDueWindow): Promise<{
+export async function flushAttioObjectWindow(window: AttioDueWindow): Promise<{
   sourceItemId: string;
   eventCount: number;
   enqueued: boolean;
@@ -165,11 +161,11 @@ export async function flushGoatAttioObjectWindow(window: GoatAttioDueWindow): Pr
       ? await loadAttioIntegrationStatus(window, tx)
       : status;
     const routes = canRouteAttioWindow(currentStatus, enrichment.routingEnabled)
-      ? await listEnabledGoatAttioBrainSourceRoutes([window.integrationId], tx)
+      ? await listEnabledAttioBrainSourceRoutes([window.integrationId], tx)
       : [];
     const routableRoutes = hasUsableAttioRecordIdentity(enrichment.snapshot)
       ? routes.filter((route) => {
-          const selected = goatAttioSelectedObjectTypes(route.config);
+          const selected = attioSelectedObjectTypes(route.config);
           if (selected.size === 0) return false;
           return selected.has(window.objectType);
         })
@@ -181,7 +177,7 @@ export async function flushGoatAttioObjectWindow(window: GoatAttioDueWindow): Pr
     // all lose (record window already ingested via another member's
     // integration) is skipped — no job, no billing.
     const eventKeys = claimed.map((row) =>
-      goatAttioEventClaimKey({
+      attioEventClaimKey({
         workspaceId: window.workspaceId,
         objectType: window.objectType,
         recordId: window.recordId,
@@ -195,14 +191,14 @@ export async function flushGoatAttioObjectWindow(window: GoatAttioDueWindow): Pr
     const groups = new Map<string, AttioRoutedEventGroup>();
     for (const route of routableRoutes) {
       const matchingEventKeys = claimed.flatMap((row, index) =>
-        goatAttioRouteMatchesEvent(route.config, goatAttioEventTypeFor(row.action), {
+        attioRouteMatchesEvent(route.config, attioEventTypeFor(row.action), {
           actorType: attioActorType(row),
         })
           ? [eventKeys[index]!]
           : [],
       );
       if (matchingEventKeys.length === 0) continue;
-      const { claimedEventKeys } = await claimGoatBrainSourceEvents({
+      const { claimedEventKeys } = await claimBrainSourceEvents({
         brainRef: route.brainRef,
         sourceProvider: "attio",
         eventKeys: matchingEventKeys,
@@ -233,10 +229,9 @@ export async function flushGoatAttioObjectWindow(window: GoatAttioDueWindow): Pr
     // so a Brain subscribed only to notes never sees an update that another
     // Brain explicitly opted into.
     const sourceItemIdByEventId = new Map<string, string>();
-    const upsertedGroups: Array<Awaited<ReturnType<typeof upsertGoatBrainSourceItemAndEnqueue>>> =
-      [];
+    const upsertedGroups: Array<Awaited<ReturnType<typeof upsertBrainSourceItemAndEnqueue>>> = [];
     for (const group of groups.values()) {
-      const upserted = await upsertGoatBrainSourceItemAndEnqueue({
+      const upserted = await upsertBrainSourceItemAndEnqueue({
         userWorkosId: window.userWorkosId,
         sourceConnectionId: window.integrationId,
         integrationId: window.integrationId,
@@ -262,7 +257,7 @@ export async function flushGoatAttioObjectWindow(window: GoatAttioDueWindow): Pr
         }
       }
       for (const brainRef of group.brainRefs) {
-        await attributeGoatBrainSourceEventClaims({
+        await attributeBrainSourceEventClaims({
           brainRef,
           sourceProvider: "attio",
           eventKeys: group.eventKeysByBrainRef.get(brainRef) ?? [],
@@ -276,7 +271,7 @@ export async function flushGoatAttioObjectWindow(window: GoatAttioDueWindow): Pr
     // Brain job, and use source_item_id as the durable flushed marker.
     const unrouted = claimed.filter((row) => !sourceItemIdByEventId.has(row.id));
     if (unrouted.length > 0) {
-      const upserted = await upsertGoatBrainSourceItemAndEnqueue({
+      const upserted = await upsertBrainSourceItemAndEnqueue({
         userWorkosId: window.userWorkosId,
         sourceConnectionId: window.integrationId,
         integrationId: window.integrationId,
@@ -324,15 +319,15 @@ export async function flushGoatAttioObjectWindow(window: GoatAttioDueWindow): Pr
     };
   });
 
-  captureGoatIngestionQuotaAnalytics(result?.quotaUpdates);
-  if (result?.enqueued) wakeGoatBrainIngestWorker();
+  captureIngestionQuotaAnalytics(result?.quotaUpdates);
+  if (result?.enqueued) wakeBrainIngestWorker();
   return result;
 }
 
 async function enrichAttioWindow(
-  window: GoatAttioDueWindow,
+  window: AttioDueWindow,
   events: readonly BufferedAttioEventRow[],
-  status: GoatIntegrationStatus | "unknown",
+  status: IntegrationStatus | "unknown",
 ): Promise<AttioWindowEnrichment> {
   const empty: AttioWindowEnrichment = {
     snapshot: null,
@@ -382,7 +377,7 @@ async function enrichAttioWindow(
 }
 
 export function buildAttioObjectWindowItem(input: {
-  window: GoatAttioDueWindow;
+  window: AttioDueWindow;
   events: readonly BufferedAttioEventRow[];
   enrichment: AttioWindowEnrichment;
   flushedAt: Date;
@@ -398,7 +393,7 @@ export function buildAttioObjectWindowItem(input: {
   );
 
   return normalizeAttioObjectWindow({
-    windowId: newGoatAttioObjectWindowId(),
+    windowId: newAttioObjectWindowId(),
     workspaceId: window.workspaceId,
     objectType: window.objectType,
     recordId: window.recordId,
@@ -417,7 +412,7 @@ export function buildAttioObjectWindowItem(input: {
   });
 }
 
-export function selectAttioWindowEventsForFlush<T extends { action: GoatAttioEventAction }>(
+export function selectAttioWindowEventsForFlush<T extends { action: AttioEventAction }>(
   events: readonly T[],
   maxNotes = GOAT_ATTIO_MAX_NOTES_PER_WINDOW,
 ): T[] {
@@ -434,7 +429,7 @@ export function selectAttioWindowEventsForFlush<T extends { action: GoatAttioEve
 }
 
 export function canRouteAttioWindow(
-  status: GoatIntegrationStatus | "unknown",
+  status: IntegrationStatus | "unknown",
   enrichmentRoutingEnabled: boolean,
 ) {
   return enrichmentRoutingEnabled && status === "connected";
@@ -448,7 +443,7 @@ function attioActorType(row: BufferedAttioEventRow): string | null {
   return typeof row.payload.actorType === "string" ? row.payload.actorType : null;
 }
 
-export function startGoatAttioFlushWorker(options: { pollIntervalMs?: number } = {}) {
+export function startAttioFlushWorker(options: { pollIntervalMs?: number } = {}) {
   const pollIntervalMs = Math.max(
     1_000,
     options.pollIntervalMs ?? GOAT_ATTIO_FLUSH_POLL_INTERVAL_MS,
@@ -474,10 +469,10 @@ export function startGoatAttioFlushWorker(options: { pollIntervalMs?: number } =
   const loop = (async () => {
     while (!stopped) {
       try {
-        const due = await listDueGoatAttioObjectWindows({});
+        const due = await listDueAttioObjectWindows({});
         for (const window of due) {
           if (stopped) break;
-          const flushed = await flushGoatAttioObjectWindow(window).catch((error) => {
+          const flushed = await flushAttioObjectWindow(window).catch((error) => {
             captureException(error, {
               event: "opencompany.goat_attio_flush_failed",
               integration_id: window.integrationId,
@@ -528,7 +523,7 @@ export function startGoatAttioFlushWorker(options: { pollIntervalMs?: number } =
   };
 }
 
-async function previewBufferedAttioEvents(window: GoatAttioDueWindow) {
+async function previewBufferedAttioEvents(window: AttioDueWindow) {
   return rowsFromExecute<BufferedAttioEventRow>(
     await getDb().execute(sql`
       SELECT
@@ -551,10 +546,10 @@ async function previewBufferedAttioEvents(window: GoatAttioDueWindow) {
 }
 
 async function loadAttioIntegrationStatus(
-  window: GoatAttioDueWindow,
+  window: AttioDueWindow,
   db: DbLike = getDb(),
-): Promise<GoatIntegrationStatus | "unknown"> {
-  const statusRows = rowsFromExecute<{ status: GoatIntegrationStatus }>(
+): Promise<IntegrationStatus | "unknown"> {
+  const statusRows = rowsFromExecute<{ status: IntegrationStatus }>(
     await db.execute(sql`
       SELECT status FROM goat.integrations WHERE id = ${window.integrationId}
     `),

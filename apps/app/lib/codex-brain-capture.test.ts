@@ -1,9 +1,9 @@
-import type { GoatCodexBrainCaptureGatewayRequest } from "@opencompany/agent-runtime";
+import type { CodexBrainCaptureGatewayRequest } from "@opencompany/agent-runtime";
 import { describe, expect, it, vi } from "vitest";
-import type { captureToGoatBrainInbox } from "@/lib/brain-capture";
-import { executeGoatCodexBrainCaptureGateway } from "@/lib/codex-brain-capture";
+import type { captureToBrainInbox } from "@/lib/brain-capture";
+import { executeCodexBrainCaptureGateway } from "@/lib/codex-brain-capture";
 
-const request: GoatCodexBrainCaptureGatewayRequest = {
+const request: CodexBrainCaptureGatewayRequest = {
   codexChatSessionId: "codex_session_1",
   codexChatTurnId: "codex_turn_1",
   content: "The team approved the launch plan.",
@@ -18,9 +18,9 @@ const context = {
   userMessageId: "message_1",
 };
 
-describe("executeGoatCodexBrainCaptureGateway", () => {
+describe("executeCodexBrainCaptureGateway", () => {
   it("uses the pinned Brain and the existing capture-first pipeline", async () => {
-    const capture = vi.fn<typeof captureToGoatBrainInbox>(async () => ({
+    const capture = vi.fn<typeof captureToBrainInbox>(async () => ({
       ok: true as const,
       draftBrainId: "launch-decision",
       path: "inbox/launch-decision.md",
@@ -29,7 +29,7 @@ describe("executeGoatCodexBrainCaptureGateway", () => {
       enqueued: true,
     }));
 
-    const response = await executeGoatCodexBrainCaptureGateway({
+    const response = await executeCodexBrainCaptureGateway({
       request,
       dependencies: {
         loadContext: vi.fn(async () => context),
@@ -62,7 +62,7 @@ describe("executeGoatCodexBrainCaptureGateway", () => {
   });
 
   it("uses a content-derived key so a recovered call is idempotent", async () => {
-    const capture = vi.fn<typeof captureToGoatBrainInbox>(async () => ({
+    const capture = vi.fn<typeof captureToBrainInbox>(async () => ({
       ok: true as const,
       draftBrainId: "launch-decision",
       path: "inbox/launch-decision.md",
@@ -77,8 +77,8 @@ describe("executeGoatCodexBrainCaptureGateway", () => {
       capture,
     };
 
-    const first = await executeGoatCodexBrainCaptureGateway({ request, dependencies });
-    const recovered = await executeGoatCodexBrainCaptureGateway({
+    const first = await executeCodexBrainCaptureGateway({ request, dependencies });
+    const recovered = await executeCodexBrainCaptureGateway({
       request,
       dependencies,
     });
@@ -97,7 +97,7 @@ describe("executeGoatCodexBrainCaptureGateway", () => {
 
   it("fails closed when the pinned Brain no longer belongs to an accessible workspace", async () => {
     const capture = vi.fn();
-    const response = await executeGoatCodexBrainCaptureGateway({
+    const response = await executeCodexBrainCaptureGateway({
       request,
       dependencies: {
         loadContext: vi.fn(async () => context),

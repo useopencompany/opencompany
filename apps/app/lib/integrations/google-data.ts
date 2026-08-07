@@ -1,18 +1,18 @@
 import { getDb } from "@opencompany/db/client";
-import type { GoatIntegrationProvider, GoatTaskToolName } from "@opencompany/db/schema";
-import { goatIntegrations } from "@opencompany/db/schema";
+import type { IntegrationProvider, TaskToolName } from "@opencompany/db/schema";
+import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type {
-  GoatGmailSourceProviderState,
-  GoatGoogleDriveSourceProviderState,
-  GoatGoogleProviderState,
+  GmailSourceProviderState,
+  GoogleDriveSourceProviderState,
+  GoogleProviderState,
 } from "@/lib/integration-state";
-import { goatGoogleIntegrationStateFromRows } from "@/lib/integration-state";
-import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
-import { getGoatLatitudeIntegrationState } from "@/lib/integrations/latitude-mcp";
-import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
+import { googleIntegrationStateFromRows } from "@/lib/integration-state";
+import { getGitHubIntegrationState } from "@/lib/integrations/github";
+import { getLatitudeIntegrationState } from "@/lib/integrations/latitude-mcp";
+import { getLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 
-const GOOGLE_PROVIDERS: GoatIntegrationProvider[] = ["gmail", "google_calendar", "google_drive"];
+const GOOGLE_PROVIDERS: IntegrationProvider[] = ["gmail", "google_calendar", "google_drive"];
 const GOAT_BROWSER_TOOLS = [
   "browser_open",
   "browser_snapshot",
@@ -25,47 +25,45 @@ const GOAT_BROWSER_TOOLS = [
   "browser_scroll",
   "browser_screenshot",
   "browser_close",
-] as const satisfies readonly GoatTaskToolName[];
+] as const satisfies readonly TaskToolName[];
 
-export async function getGoatGoogleIntegrationState(userWorkosId: string) {
+export async function getGoogleIntegrationState(userWorkosId: string) {
   const rows = await getDb()
     .select({
-      provider: goatIntegrations.provider,
-      accountEmail: goatIntegrations.accountEmail,
-      accountName: goatIntegrations.accountName,
-      status: goatIntegrations.status,
-      updatedAt: goatIntegrations.updatedAt,
+      provider: integrations.provider,
+      accountEmail: integrations.accountEmail,
+      accountName: integrations.accountName,
+      status: integrations.status,
+      updatedAt: integrations.updatedAt,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        inArray(goatIntegrations.provider, GOOGLE_PROVIDERS),
+        eq(integrations.userWorkosId, userWorkosId),
+        inArray(integrations.provider, GOOGLE_PROVIDERS),
       ),
     )
-    .orderBy(goatIntegrations.provider, goatIntegrations.updatedAt);
+    .orderBy(integrations.provider, integrations.updatedAt);
 
-  return goatGoogleIntegrationStateFromRows(rows);
+  return googleIntegrationStateFromRows(rows);
 }
 
 // Gmail-as-a-brain-source state: same integration rows as the Gmail tool
 // connection, but exposed with the integration id the brain-source picker and
 // save action key config rows on.
-export async function getGoatGmailSourceIntegrationState(
+export async function getGmailSourceIntegrationState(
   userWorkosId: string,
-): Promise<GoatGmailSourceProviderState> {
+): Promise<GmailSourceProviderState> {
   const [row] = await getDb()
     .select({
-      id: goatIntegrations.id,
-      status: goatIntegrations.status,
-      accountEmail: goatIntegrations.accountEmail,
-      statusReason: goatIntegrations.statusReason,
+      id: integrations.id,
+      status: integrations.status,
+      accountEmail: integrations.accountEmail,
+      statusReason: integrations.statusReason,
     })
-    .from(goatIntegrations)
-    .where(
-      and(eq(goatIntegrations.userWorkosId, userWorkosId), eq(goatIntegrations.provider, "gmail")),
-    )
-    .orderBy(desc(goatIntegrations.updatedAt))
+    .from(integrations)
+    .where(and(eq(integrations.userWorkosId, userWorkosId), eq(integrations.provider, "gmail")))
+    .orderBy(desc(integrations.updatedAt))
     .limit(1);
 
   if (!row || row.status === "disconnected") {
@@ -89,24 +87,21 @@ export async function getGoatGmailSourceIntegrationState(
   };
 }
 
-export async function getGoatGoogleDriveSourceIntegrationState(
+export async function getGoogleDriveSourceIntegrationState(
   userWorkosId: string,
-): Promise<GoatGoogleDriveSourceProviderState> {
+): Promise<GoogleDriveSourceProviderState> {
   const [row] = await getDb()
     .select({
-      id: goatIntegrations.id,
-      status: goatIntegrations.status,
-      accountEmail: goatIntegrations.accountEmail,
-      statusReason: goatIntegrations.statusReason,
+      id: integrations.id,
+      status: integrations.status,
+      accountEmail: integrations.accountEmail,
+      statusReason: integrations.statusReason,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
-      and(
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, "google_drive"),
-      ),
+      and(eq(integrations.userWorkosId, userWorkosId), eq(integrations.provider, "google_drive")),
     )
-    .orderBy(desc(goatIntegrations.updatedAt))
+    .orderBy(desc(integrations.updatedAt))
     .limit(1);
 
   if (!row || row.status === "disconnected") {
@@ -130,16 +125,14 @@ export async function getGoatGoogleDriveSourceIntegrationState(
   };
 }
 
-export async function getGoatAvailableHarnessTools(
-  userWorkosId: string,
-): Promise<GoatTaskToolName[]> {
+export async function getAvailableHarnessTools(userWorkosId: string): Promise<TaskToolName[]> {
   const [state, linear, latitude, github] = await Promise.all([
-    getGoatGoogleIntegrationState(userWorkosId),
-    getGoatLinearIntegrationState(userWorkosId),
-    getGoatLatitudeIntegrationState(userWorkosId),
-    getGoatGitHubIntegrationState(userWorkosId),
+    getGoogleIntegrationState(userWorkosId),
+    getLinearIntegrationState(userWorkosId),
+    getLatitudeIntegrationState(userWorkosId),
+    getGitHubIntegrationState(userWorkosId),
   ]);
-  const tools: GoatTaskToolName[] = ["exa_search"];
+  const tools: TaskToolName[] = ["exa_search"];
   if (process.env.RUNNER_BROWSER_ENABLED?.trim().toLowerCase() === "true") {
     tools.push(...GOAT_BROWSER_TOOLS);
   }
@@ -180,4 +173,4 @@ export async function getGoatAvailableHarnessTools(
   return tools;
 }
 
-export type { GoatGoogleProviderState };
+export type { GoogleProviderState };

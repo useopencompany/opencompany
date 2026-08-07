@@ -1,8 +1,8 @@
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import { createBrowserProfile, listBrowserProfilesForUser } from "@/lib/browser-profiles";
 
 export async function GET() {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return new Response(null, { status: 401 });
 
   const profiles = await listBrowserProfilesForUser(context.user.workosUserId);
@@ -10,7 +10,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return new Response(null, { status: 401 });
 
   try {

@@ -1,0 +1,282 @@
+import { render, screen } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AppDataProvider, type AppInitialData, useAppData } from "@/components/AppDataProvider";
+
+const mocks = vi.hoisted(() => {
+  const liveQueryResult: { data: unknown[]; isLoading: boolean } = {
+    data: [],
+    isLoading: true,
+  };
+  return {
+    useLiveQuery: vi.fn(() => liveQueryResult),
+  };
+});
+
+vi.mock("@tanstack/react-db", () => ({
+  useLiveQuery: mocks.useLiveQuery,
+}));
+
+vi.mock("@/lib/task-collections", () => ({
+  createCollections: () => ({
+    tasks: {},
+    taskSchedules: {},
+    chatSessions: {},
+    codexChatSessions: {},
+    integrations: {},
+  }),
+}));
+
+describe("AppDataProvider", () => {
+  beforeEach(() => {
+    mocks.useLiveQuery.mockClear();
+  });
+
+  it("server-renders from initial data without starting live queries", () => {
+    const html = renderToString(
+      <AppDataProvider initialData={initialData()}>
+        <DataProbe />
+      </AppDataProvider>,
+    );
+
+    expect(html).toContain("louis@example.com:0");
+    expect(mocks.useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("starts live queries in the browser", () => {
+    render(
+      <AppDataProvider initialData={initialData()}>
+        <DataProbe />
+      </AppDataProvider>,
+    );
+
+    expect(mocks.useLiveQuery).toHaveBeenCalled();
+  });
+
+  it("attaches codex_chat runtime to Claude Code chats so the home card is not stuck 'Connecting'", () => {
+    const now = new Date().toISOString();
+    const chatRow = {
+      id: "goat_chat_claude_1",
+      user_workos_id: "user_1",
+      title: "Claude task",
+      model: "anthropic/claude-sonnet-5",
+      engine: "claude_code" as const,
+      closed_at: null,
+      pinned_at: null,
+      last_seen_at: now,
+      created_at: now,
+      updated_at: now,
+    };
+    const runtimeRow = {
+      id: "goat_codex_chat_1",
+      user_workos_id: "user_1",
+      chat_session_id: "goat_chat_claude_1",
+      model: "claude-sonnet-5",
+      sandbox_id: "sbx_1",
+      codex_thread_id: null,
+      active_turn_id: null,
+      status: "idle" as const,
+      error: null,
+      created_at: now,
+      updated_at: now,
+    };
+    // useLiveQuery is called once per collection per render, in a fixed order:
+    // tasks, schedules, chatSessions, codexChatSessions, integrations. Only the
+    // chat collections carry live data here; the rest stay loading so their memos
+    // fall back to (empty) initial data instead of dereferencing it.
+    const perCollection = [
+      { data: [], isLoading: true },
+      { data: [], isLoading: true },
+      { data: [chatRow], isLoading: false },
+      { data: [runtimeRow], isLoading: false },
+      { data: [], isLoading: true },
+    ];
+    let call = 0;
+    mocks.useLiveQuery.mockImplementation(() => {
+      const result = perCollection[call % perCollection.length] ?? { data: [], isLoading: true };
+      call += 1;
+      return result;
+    });
+
+    render(
+      <AppDataProvider initialData={initialData()}>
+        <RecentChatsProbe />
+      </AppDataProvider>,
+    );
+
+    // Before the fix this read "claude_code:null" (runtime dropped for non-codex
+    // engines) which rendered as the null-runtime "Connecting" label.
+    expect(screen.getByTestId("recent").textContent).toBe("claude_code:idle");
+  });
+
+  it("keeps active-turn runtimes in recent chats as working when status lags", () => {
+    const now = new Date().toISOString();
+    const old = "2026-07-01T10:00:00.000Z";
+    const chatRow = {
+      id: "goat_chat_active_turn",
+      user_workos_id: "user_1",
+      title: "Lagging runtime",
+      model: "anthropic/claude-sonnet-5",
+      engine: "opencompany" as const,
+      kind: "chat" as const,
+      closed_at: null,
+      pinned_at: null,
+      last_seen_at: "2026-07-01T09:59:00.000Z",
+      created_at: old,
+      updated_at: old,
+    };
+    const runtimeRow = {
+      id: "goat_codex_chat_1",
+      user_workos_id: "user_1",
+      chat_session_id: "goat_chat_active_turn",
+      model: "gpt-5.5",
+      active_turn_id: "goat_codex_chat_turn_1",
+      status: "idle" as const,
+      error: null,
+      created_at: now,
+      updated_at: now,
+    };
+    const perCollection = [
+      { data: [], isLoading: false },
+      { data: [], isLoading: false },
+      { data: [chatRow], isLoading: false },
+      { data: [runtimeRow], isLoading: false },
+      { data: [], isLoading: true },
+    ];
+    let call = 0;
+    mocks.useLiveQuery.mockImplementation(() => {
+      const result = perCollection[call % perCollection.length] ?? { data: [], isLoading: false };
+      call += 1;
+      return result;
+    });
+
+    render(
+      <AppDataProvider initialData={initialData()}>
+        <RecentChatStateProbe />
+      </AppDataProvider>,
+    );
+
+    expect(screen.getByTestId("recent").textContent).toBe("Lagging runtime:working");
+  });
+
+  it("keeps same-workspace live data during a server data refresh", () => {
+    const now = new Date().toISOString();
+    const chatRow = {
+      id: "goat_chat_live",
+      user_workos_id: "user_1",
+      title: "Live chat",
+      model: "anthropic/claude-sonnet-5",
+      engine: "opencompany" as const,
+      kind: "chat" as const,
+      closed_at: null,
+      pinned_at: null,
+      last_seen_at: now,
+      created_at: now,
+      updated_at: now,
+    };
+    const perCollection = [
+      { data: [], isLoading: false },
+      { data: [], isLoading: false },
+      { data: [chatRow], isLoading: false },
+      { data: [], isLoading: false },
+      { data: [], isLoading: true },
+    ];
+    let call = 0;
+    mocks.useLiveQuery.mockImplementation(() => {
+      const result = perCollection[call % perCollection.length] ?? { data: [], isLoading: false };
+      call += 1;
+      return result;
+    });
+
+    const observations: string[] = [];
+    const { rerender } = render(
+      <AppDataProvider initialData={initialData()}>
+        <RecentChatTitleProbe onRender={(value) => observations.push(value)} />
+      </AppDataProvider>,
+    );
+
+    expect(screen.getByTestId("recent").textContent).toBe("Live chat");
+    observations.length = 0;
+
+    rerender(
+      <AppDataProvider
+        initialData={{
+          ...initialData(),
+          recentChats: [
+            {
+              id: "goat_chat_server",
+              title: "Server refresh",
+              model: "anthropic/claude-sonnet-5",
+              engine: "opencompany",
+              codexComposerSettings: null,
+              codexRuntime: null,
+              preview: "Stale server snapshot",
+              updatedAt: now,
+              lastSeenAt: now,
+              pinnedAt: null,
+            },
+          ],
+        }}
+      >
+        <RecentChatTitleProbe onRender={(value) => observations.push(value)} />
+      </AppDataProvider>,
+    );
+
+    expect(screen.getByTestId("recent").textContent).toBe("Live chat");
+    expect(observations).not.toContain("Server refresh");
+  });
+});
+
+function RecentChatsProbe() {
+  const data = useAppData();
+  const chat = data.recentChats[0];
+  return (
+    <div data-testid="recent">
+      {chat ? `${chat.engine}:${chat.codexRuntime?.status ?? "null"}` : "empty"}
+    </div>
+  );
+}
+
+function RecentChatTitleProbe({ onRender }: { onRender: (value: string) => void }) {
+  const data = useAppData();
+  const title = data.recentChats[0]?.title ?? "empty";
+  onRender(title);
+  return <div data-testid="recent">{title}</div>;
+}
+
+function RecentChatStateProbe() {
+  const data = useAppData();
+  const chat = data.recentChats[0];
+  return <div data-testid="recent">{chat ? `${chat.title}:${chat.state}` : "empty"}</div>;
+}
+
+function DataProbe() {
+  const data = useAppData();
+  return <div>{`${data.user.email}:${data.archivedChats.length}`}</div>;
+}
+
+function initialData(): AppInitialData {
+  return {
+    user: {
+      workosUserId: "user_1",
+      email: "louis@example.com",
+      firstName: "Louis",
+      lastName: null,
+      avatarUrl: null,
+    },
+    workspace: { id: "workspace_1", name: "Acme", role: "admin" },
+    workspaces: [],
+    workspaceMembers: [],
+    brains: [],
+    activeBrain: null,
+    tasks: [],
+    schedules: [],
+    recentChats: [],
+    integrations: {} as AppInitialData["integrations"],
+    featureFlags: { taskSpawning: false, autoModelRouting: false, imessage: false },
+    codexConnected: false,
+    claudeCodeConnected: false,
+    chatResumeEnabled: false,
+    mcpSetup: { preferredClient: null, completedAt: null },
+  };
+}

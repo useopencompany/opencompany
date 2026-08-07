@@ -1,11 +1,8 @@
 import { getDb } from "@opencompany/db/client";
 import { revalidatePath } from "next/cache";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { currentGoatUser } from "@/lib/auth";
-import {
-  updateGoatAutoModelRoutingAction,
-  updateGoatTaskViewModeAction,
-} from "@/lib/user-preferences";
+import { currentUser } from "@/lib/auth";
+import { updateAutoModelRoutingAction, updateTaskViewModeAction } from "@/lib/user-preferences";
 
 const dbMocks = vi.hoisted(() => ({
   update: vi.fn(),
@@ -19,14 +16,14 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
 
-describe("updateGoatAutoModelRoutingAction", () => {
+describe("updateAutoModelRoutingAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getDb).mockReturnValue({ update: dbMocks.update } as never);
@@ -38,7 +35,7 @@ describe("updateGoatAutoModelRoutingAction", () => {
   });
 
   it("updates the per-user flag and refreshes the app", async () => {
-    const result = await updateGoatAutoModelRoutingAction(true);
+    const result = await updateAutoModelRoutingAction(true);
 
     expect(result).toEqual({ ok: true, enabled: true });
     expect(dbMocks.set).toHaveBeenCalledWith({
@@ -52,7 +49,7 @@ describe("updateGoatAutoModelRoutingAction", () => {
   it("skips the write when the preference already matches", async () => {
     mockCurrentUser(true);
 
-    await expect(updateGoatAutoModelRoutingAction(true)).resolves.toEqual({
+    await expect(updateAutoModelRoutingAction(true)).resolves.toEqual({
       ok: true,
       enabled: true,
     });
@@ -62,7 +59,7 @@ describe("updateGoatAutoModelRoutingAction", () => {
   });
 });
 
-describe("updateGoatTaskViewModeAction", () => {
+describe("updateTaskViewModeAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getDb).mockReturnValue({ update: dbMocks.update } as never);
@@ -74,7 +71,7 @@ describe("updateGoatTaskViewModeAction", () => {
   });
 
   it("updates the per-user view mode and revalidates the tasks page", async () => {
-    const result = await updateGoatTaskViewModeAction("list");
+    const result = await updateTaskViewModeAction("list");
 
     expect(result).toEqual({ ok: true, mode: "list" });
     expect(dbMocks.set).toHaveBeenCalledWith({
@@ -87,7 +84,7 @@ describe("updateGoatTaskViewModeAction", () => {
   it("skips the write when the preference already matches", async () => {
     mockCurrentUser(false, "list");
 
-    await expect(updateGoatTaskViewModeAction("list")).resolves.toEqual({
+    await expect(updateTaskViewModeAction("list")).resolves.toEqual({
       ok: true,
       mode: "list",
     });
@@ -97,7 +94,7 @@ describe("updateGoatTaskViewModeAction", () => {
   });
 
   it("rejects a mode outside the known set instead of hitting the database", async () => {
-    await expect(updateGoatTaskViewModeAction("kanban" as never)).resolves.toEqual({
+    await expect(updateTaskViewModeAction("kanban" as never)).resolves.toEqual({
       ok: false,
       mode: "board",
     });
@@ -107,7 +104,7 @@ describe("updateGoatTaskViewModeAction", () => {
 });
 
 function mockCurrentUser(autoModelRoutingEnabled: boolean, taskViewMode = "board") {
-  vi.mocked(currentGoatUser).mockResolvedValue({
+  vi.mocked(currentUser).mockResolvedValue({
     user: {
       workosUserId: "user_1",
       autoModelRoutingEnabled,

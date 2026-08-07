@@ -1,38 +1,38 @@
 import { randomUUID } from "node:crypto";
-import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
+import { captureIngestionQuotaAnalytics } from "@opencompany/analytics/app";
 import {
-  isGoatBrainSkillFolder,
-  isValidGoatBrainFolder,
-  normalizeGoatBrainFolderForV1,
-  normalizeGoatBrainId,
+  isBrainSkillFolder,
+  isValidBrainFolder,
+  normalizeBrainFolderForV1,
+  normalizeBrainId,
   normalizeUploadAsset,
   nowIso,
 } from "@opencompany/brain";
 import {
-  createGoatBrainAssetDocument,
-  goatBrainFilePathFor,
-  replaceGoatBrainAssetFile,
+  brainFilePathFor,
+  createBrainAssetDocument,
+  replaceBrainAssetFile,
 } from "@opencompany/db/brain-files";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
-  upsertGoatBrainSourceItemAndEnqueue,
+  upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
   type BrainMutationResult,
   documentViewFromFileRow,
-  nextAvailableGoatBrainId,
+  nextAvailableBrainId,
 } from "@/lib/brain";
 import {
   GOAT_CHAT_SRT_MIME_TYPE,
-  normalizedGoatChatAttachmentMediaType,
-  validateGoatChatAttachmentCandidate,
+  normalizedChatAttachmentMediaType,
+  validateChatAttachmentCandidate,
 } from "@/lib/chat-attachment-formats";
 
 export const GOAT_BRAIN_ASSET_MAX_BYTES = 20 * 1024 * 1024;
 // Claude's per-image limit is 5 MB; the ingestion agent sees images natively.
 export const GOAT_BRAIN_ASSET_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 
-export type GoatBrainAssetFormat =
+export type BrainAssetFormat =
   | "pdf"
   | "docx"
   | "xlsx"
@@ -43,7 +43,7 @@ export type GoatBrainAssetFormat =
   | "text"
   | "image";
 
-const CONTENT_TYPE_FORMATS: Record<string, GoatBrainAssetFormat> = {
+const CONTENT_TYPE_FORMATS: Record<string, BrainAssetFormat> = {
   "application/pdf": "pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
@@ -60,11 +60,11 @@ const CONTENT_TYPE_FORMATS: Record<string, GoatBrainAssetFormat> = {
 
 export const GOAT_BRAIN_ASSET_CONTENT_TYPES = Object.keys(CONTENT_TYPE_FORMATS);
 
-export function goatBrainAssetUploadPrefix(brainRef: string): string {
+export function brainAssetUploadPrefix(brainRef: string): string {
   return `goat-brain/${brainRef}/assets/`;
 }
 
-export type GoatBrainAssetUploadInput = {
+export type BrainAssetUploadInput = {
   folderPath: string;
   blobUrl: string;
   originalFileName: string;
@@ -75,8 +75,8 @@ export type GoatBrainAssetUploadInput = {
   contentSha256: string;
 };
 
-export async function createGoatBrainAssetForUser(
-  input: GoatBrainAssetUploadInput & {
+export async function createBrainAssetForUser(
+  input: BrainAssetUploadInput & {
     brainRef: string;
     userWorkosId: string;
   },
@@ -84,21 +84,21 @@ export async function createGoatBrainAssetForUser(
   const validated = validateAssetUpload(input.brainRef, input);
   if (!validated.ok) return validated;
 
-  const folderPath = normalizeGoatBrainFolderForV1(input.folderPath);
-  if (!isValidGoatBrainFolder(folderPath)) {
+  const folderPath = normalizeBrainFolderForV1(input.folderPath);
+  if (!isValidBrainFolder(folderPath)) {
     return { ok: false, message: "Folder paths must be lowercase slugs separated by /." };
   }
-  if (isGoatBrainSkillFolder(folderPath)) {
+  if (isBrainSkillFolder(folderPath)) {
     return { ok: false, message: "Skills are Markdown-only and cannot contain uploads." };
   }
 
   const fileName = input.originalFileName.trim() || "upload";
   const title = fileName.replace(/\.[a-z0-9]+$/i, "").trim() || fileName;
-  const baseId = normalizeGoatBrainId(title) || "upload";
-  const brainId = await nextAvailableGoatBrainId(input.brainRef, baseId);
+  const baseId = normalizeBrainId(title) || "upload";
+  const brainId = await nextAvailableBrainId(input.brainRef, baseId);
   const documentId = `goat_brain_doc_${randomUUID()}`;
 
-  const row = await createGoatBrainAssetDocument({
+  const row = await createBrainAssetDocument({
     brainRef: input.brainRef,
     userWorkosId: input.userWorkosId,
     id: documentId,
@@ -128,14 +128,14 @@ export async function createGoatBrainAssetForUser(
 
   return {
     ok: true,
-    path: goatBrainFilePathFor(row.folderPath, row.brainId),
+    path: brainFilePathFor(row.folderPath, row.brainId),
     document: documentViewFromFileRow(row),
     quotaPaused: Boolean(ingest.paused),
   };
 }
 
-export async function replaceGoatBrainAssetForUser(
-  input: GoatBrainAssetUploadInput & {
+export async function replaceBrainAssetForUser(
+  input: BrainAssetUploadInput & {
     brainRef: string;
     userWorkosId: string;
     documentId: string;
@@ -145,9 +145,9 @@ export async function replaceGoatBrainAssetForUser(
   if (!validated.ok) return validated;
 
   const fileName = input.originalFileName.trim() || "upload";
-  let row: Awaited<ReturnType<typeof replaceGoatBrainAssetFile>>;
+  let row: Awaited<ReturnType<typeof replaceBrainAssetFile>>;
   try {
-    row = await replaceGoatBrainAssetFile({
+    row = await replaceBrainAssetFile({
       brainRef: input.brainRef,
       userWorkosId: input.userWorkosId,
       fileId: input.documentId,
@@ -175,7 +175,7 @@ export async function replaceGoatBrainAssetForUser(
 
   return {
     ok: true,
-    path: goatBrainFilePathFor(row.folderPath, row.brainId),
+    path: brainFilePathFor(row.folderPath, row.brainId),
     document: documentViewFromFileRow(row),
     quotaPaused: Boolean(ingest.paused),
   };
@@ -183,13 +183,13 @@ export async function replaceGoatBrainAssetForUser(
 
 function validateAssetUpload(
   brainRef: string,
-  input: GoatBrainAssetUploadInput,
-): { ok: true; format: GoatBrainAssetFormat; mediaType: string } | { ok: false; message: string } {
-  const mediaType = normalizedGoatChatAttachmentMediaType({
+  input: BrainAssetUploadInput,
+): { ok: true; format: BrainAssetFormat; mediaType: string } | { ok: false; message: string } {
+  const mediaType = normalizedChatAttachmentMediaType({
     mediaType: input.mimeType,
     filename: input.originalFileName,
   });
-  const candidate = validateGoatChatAttachmentCandidate({
+  const candidate = validateChatAttachmentCandidate({
     mediaType,
     filename: input.originalFileName,
     sizeBytes: input.sizeBytes,
@@ -220,7 +220,7 @@ function validateAssetUpload(
   }
   // The upload route only mints tokens for this brain's prefix; re-checking
   // here stops a crafted action call from attaching someone else's blob.
-  if (!pathname.startsWith(goatBrainAssetUploadPrefix(brainRef))) {
+  if (!pathname.startsWith(brainAssetUploadPrefix(brainRef))) {
     return { ok: false, message: "Upload does not belong to this brain." };
   }
   return { ok: true, format, mediaType };
@@ -249,7 +249,7 @@ async function enqueueAssetIngest(input: {
     contentSha256: input.contentSha256,
     uploadedAt: nowIso(),
   });
-  const result = await upsertGoatBrainSourceItemAndEnqueue({
+  const result = await upsertBrainSourceItemAndEnqueue({
     userWorkosId: input.userWorkosId,
     sourceConnectionId: input.brainRef,
     item,
@@ -257,6 +257,6 @@ async function enqueueAssetIngest(input: {
     kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
     brainRefs: [input.brainRef],
   });
-  captureGoatIngestionQuotaAnalytics(result.quotaUpdates);
+  captureIngestionQuotaAnalytics(result.quotaUpdates);
   return result;
 }

@@ -1,18 +1,16 @@
-import type { GoatChatUiMessage } from "@/lib/chat-ui";
-import type { GoatHarnessRunToolCall, GoatHarnessRunViewModel } from "@/lib/task-harness-run";
+import type { ChatUiMessage } from "@/lib/chat-ui";
+import type { HarnessRunToolCall, HarnessRunViewModel } from "@/lib/task-harness-run";
 
 // Read-only compatibility projection for task rows created before tasks became
 // native chat sessions. New tasks render their chat_messages directly.
-export function legacyGoatHarnessRunToChatMessages(
-  run: GoatHarnessRunViewModel,
-): GoatChatUiMessage[] {
+export function legacyHarnessRunToChatMessages(run: HarnessRunViewModel): ChatUiMessage[] {
   const conversation = run.messages.filter(
     (message) => message.role === "user" || message.role === "assistant",
   );
   if (conversation.length === 0) return legacyTaskMessages(run);
 
   const lastAssistantId = conversation.findLast((message) => message.role === "assistant")?.id;
-  const messages: GoatChatUiMessage[] = [];
+  const messages: ChatUiMessage[] = [];
   for (const [index, message] of conversation.entries()) {
     if (message.role === "user") {
       if (!message.content.trim()) continue;
@@ -20,7 +18,7 @@ export function legacyGoatHarnessRunToChatMessages(
         id: message.id,
         role: "user",
         parts: [{ type: "text", text: message.content }],
-      } as GoatChatUiMessage);
+      } as ChatUiMessage);
       continue;
     }
 
@@ -50,7 +48,7 @@ export function legacyGoatHarnessRunToChatMessages(
       role: "assistant",
       parts: parts.length > 0 ? parts : [{ type: "text", text: "" }],
       ...(error ? { metadata: { error } } : {}),
-    } as unknown as GoatChatUiMessage);
+    } as unknown as ChatUiMessage);
   }
 
   const fallbackAssistantContent = run.task.result.trim();
@@ -68,21 +66,21 @@ export function legacyGoatHarnessRunToChatMessages(
       role: "assistant",
       parts: parts.length > 0 ? parts : [{ type: "text", text: "" }],
       ...(error ? { metadata: { error } } : {}),
-    } as unknown as GoatChatUiMessage);
+    } as unknown as ChatUiMessage);
   }
 
   return messages;
 }
 
-function legacyTaskMessages(run: GoatHarnessRunViewModel): GoatChatUiMessage[] {
-  const messages: GoatChatUiMessage[] = [];
+function legacyTaskMessages(run: HarnessRunViewModel): ChatUiMessage[] {
+  const messages: ChatUiMessage[] = [];
   const userContent = run.task.prompt.trim();
   if (userContent) {
     messages.push({
       id: `${run.task.id}-user`,
       role: "user",
       parts: [{ type: "text", text: userContent }],
-    } as GoatChatUiMessage);
+    } as ChatUiMessage);
   }
 
   const assistantContent = run.task.result.trim();
@@ -93,7 +91,7 @@ function legacyTaskMessages(run: GoatHarnessRunViewModel): GoatChatUiMessage[] {
       role: "assistant",
       parts: [{ type: "text", text: assistantContent }],
       ...(error ? { metadata: { error } } : {}),
-    } as unknown as GoatChatUiMessage);
+    } as unknown as ChatUiMessage);
   }
   return messages;
 }
@@ -115,7 +113,7 @@ function timestamp(value: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function toolPartFromToolCall(toolCall: GoatHarnessRunToolCall): Record<string, unknown> {
+function toolPartFromToolCall(toolCall: HarnessRunToolCall): Record<string, unknown> {
   const state =
     toolCall.status === "completed"
       ? "output-available"

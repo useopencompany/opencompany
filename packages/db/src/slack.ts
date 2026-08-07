@@ -2,16 +2,16 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "./client";
 import {
-  type GoatIntegrationStatus,
-  type GoatSlackChannelType,
-  goatBrainSources,
-  goatIntegrations,
-  goatSlackMessageEvents,
+  brainSources,
+  type IntegrationStatus,
+  integrations,
+  type SlackChannelType,
+  slackMessageEvents,
 } from "./schema";
 
 type DbLike = any;
 
-export type GoatSlackConversationRef = {
+export type SlackConversationRef = {
   id: string;
   name: string;
 };
@@ -19,29 +19,29 @@ export type GoatSlackConversationRef = {
 // The routing contract between the channel picker, the events webhook, and the
 // flush worker: a message is buffered/ingested only when its channel id appears
 // in the enabled brain-source config for the integration.
-export type GoatSlackBrainSourceConfig = {
-  channels?: GoatSlackConversationRef[];
-  dms?: GoatSlackConversationRef[];
+export type SlackBrainSourceConfig = {
+  channels?: SlackConversationRef[];
+  dms?: SlackConversationRef[];
 };
 
-export type GoatSlackIntegrationForTeam = {
+export type SlackIntegrationForTeam = {
   id: string;
   userWorkosId: string;
-  status: GoatIntegrationStatus;
+  status: IntegrationStatus;
 };
 
-export type GoatSlackBrainSourceRoute = {
+export type SlackBrainSourceRoute = {
   integrationId: string;
   brainRef: string;
-  config: GoatSlackBrainSourceConfig;
+  config: SlackBrainSourceConfig;
 };
 
-export type GoatSlackMessageEventInsert = {
+export type SlackMessageEventInsert = {
   integrationId: string;
   userWorkosId: string;
   teamId: string;
   channelId: string;
-  channelType: GoatSlackChannelType;
+  channelType: SlackChannelType;
   messageTs: string;
   threadTs?: string | null;
   slackUserId?: string | null;
@@ -51,7 +51,7 @@ export type GoatSlackMessageEventInsert = {
   eventTime: Date;
 };
 
-export function parseGoatSlackBrainSourceConfig(value: unknown): GoatSlackBrainSourceConfig {
+export function parseSlackBrainSourceConfig(value: unknown): SlackBrainSourceConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const record = value as Record<string, unknown>;
   const channels = parseConversationRefs(record.channels);
@@ -62,66 +62,66 @@ export function parseGoatSlackBrainSourceConfig(value: unknown): GoatSlackBrainS
   };
 }
 
-export function goatSlackSelectedConversationIds(config: GoatSlackBrainSourceConfig): Set<string> {
+export function slackSelectedConversationIds(config: SlackBrainSourceConfig): Set<string> {
   const ids = new Set<string>();
   for (const ref of config.channels ?? []) ids.add(ref.id);
   for (const ref of config.dms ?? []) ids.add(ref.id);
   return ids;
 }
 
-export async function listGoatSlackIntegrationsForTeam(
+export async function listSlackIntegrationsForTeam(
   teamId: string,
   db: DbLike = getDb(),
-): Promise<GoatSlackIntegrationForTeam[]> {
+): Promise<SlackIntegrationForTeam[]> {
   return await db
     .select({
-      id: goatIntegrations.id,
-      userWorkosId: goatIntegrations.userWorkosId,
-      status: goatIntegrations.status,
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      status: integrations.status,
     })
-    .from(goatIntegrations)
-    .where(and(eq(goatIntegrations.provider, "slack"), eq(goatIntegrations.externalId, teamId)));
+    .from(integrations)
+    .where(and(eq(integrations.provider, "slack"), eq(integrations.externalId, teamId)));
 }
 
-export async function listEnabledGoatSlackBrainSourceRoutes(
+export async function listEnabledSlackBrainSourceRoutes(
   integrationIds: readonly string[],
   db: DbLike = getDb(),
-): Promise<GoatSlackBrainSourceRoute[]> {
+): Promise<SlackBrainSourceRoute[]> {
   if (integrationIds.length === 0) return [];
   const rows = await db
     .select({
-      integrationId: goatBrainSources.integrationId,
-      brainRef: goatBrainSources.brainId,
-      config: goatBrainSources.config,
+      integrationId: brainSources.integrationId,
+      brainRef: brainSources.brainId,
+      config: brainSources.config,
     })
-    .from(goatBrainSources)
+    .from(brainSources)
     .where(
       and(
-        eq(goatBrainSources.provider, "slack"),
-        eq(goatBrainSources.enabled, true),
-        inArray(goatBrainSources.integrationId, [...integrationIds]),
+        eq(brainSources.provider, "slack"),
+        eq(brainSources.enabled, true),
+        inArray(brainSources.integrationId, [...integrationIds]),
       ),
     );
 
   return rows.map((row: { integrationId: string; brainRef: string; config: unknown }) => ({
     integrationId: row.integrationId,
     brainRef: row.brainRef,
-    config: parseGoatSlackBrainSourceConfig(row.config),
+    config: parseSlackBrainSourceConfig(row.config),
   }));
 }
 
-export async function insertGoatSlackMessageEvents(
-  events: readonly GoatSlackMessageEventInsert[],
+export async function insertSlackMessageEvents(
+  events: readonly SlackMessageEventInsert[],
   db: DbLike = getDb(),
 ): Promise<number> {
   if (events.length === 0) return 0;
   // Slack redelivers events on retry; the unique (integration, channel, ts)
   // index makes redeliveries no-ops.
   const rows = await db
-    .insert(goatSlackMessageEvents)
+    .insert(slackMessageEvents)
     .values(
       events.map((event) => ({
-        id: newGoatSlackMessageEventId(),
+        id: newSlackMessageEventId(),
         integrationId: event.integrationId,
         userWorkosId: event.userWorkosId,
         teamId: event.teamId,
@@ -137,19 +137,19 @@ export async function insertGoatSlackMessageEvents(
       })),
     )
     .onConflictDoNothing()
-    .returning({ id: goatSlackMessageEvents.id });
+    .returning({ id: slackMessageEvents.id });
   return rows.length;
 }
 
-export function newGoatSlackMessageEventId() {
+export function newSlackMessageEventId() {
   return `gslkmsg_${randomUUID().replace(/-/g, "")}`;
 }
 
-export function newGoatSlackConversationWindowId() {
+export function newSlackConversationWindowId() {
   return `gslkwin_${randomUUID().replace(/-/g, "")}`;
 }
 
-function parseConversationRefs(value: unknown): GoatSlackConversationRef[] | undefined {
+function parseConversationRefs(value: unknown): SlackConversationRef[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const refs = value.flatMap((entry) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];

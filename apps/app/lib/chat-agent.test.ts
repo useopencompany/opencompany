@@ -17,9 +17,9 @@ import {
   MAX_WEB_SEARCH_CALLS_PER_TURN,
 } from "@/lib/chat-limits";
 import {
+  type BrainToolInput,
+  type ChatActionCatalog,
   GOAT_BRAIN_TOOL_NAME,
-  type GoatBrainToolInput,
-  type GoatChatActionCatalog,
   LIST_ACTIONS_TOOL_NAME,
   LIST_SKILLS_TOOL_NAME,
   type ListActionsToolInput,
@@ -614,7 +614,7 @@ describe("runOpenCompanyChatAgent", () => {
 
   it("can call the personal brain CLI inside the chat loop", async () => {
     const startTask = vi.fn();
-    const runBrainCli = vi.fn(async (input: GoatBrainToolInput) => ({
+    const runBrainCli = vi.fn(async (input: BrainToolInput) => ({
       ok: true,
       exitCode: 0,
       stdout: "1. [inbox] Hiring note (hiring-note, score 1, updated 2026-01-01T00:00:00.000Z)",
@@ -629,16 +629,16 @@ describe("runOpenCompanyChatAgent", () => {
       startTask,
       runBrainCli,
       generateTextImpl: (async (options: unknown) => {
-        expect(extractGoatBrainToolDescription(options)).toContain("Read-only");
-        expect(extractGoatBrainToolDescription(options)).not.toContain("ingest");
-        expect(extractGoatBrainToolDescription(options)).not.toContain("append-evidence");
-        const commandEnum = extractGoatBrainCommandEnum(options);
+        expect(extractBrainToolDescription(options)).toContain("Read-only");
+        expect(extractBrainToolDescription(options)).not.toContain("ingest");
+        expect(extractBrainToolDescription(options)).not.toContain("append-evidence");
+        const commandEnum = extractBrainCommandEnum(options);
         expect(commandEnum).toContain("query");
         expect(commandEnum).not.toContain("create");
         expect(commandEnum).not.toContain("append-evidence");
         expect(commandEnum).not.toContain("rewrite");
         expect(commandEnum).not.toContain("delete");
-        const toolResult = await executeGoatBrainTool(options, {
+        const toolResult = await executeBrainTool(options, {
           command: "query",
           flags: {
             text: "hiring",
@@ -698,7 +698,7 @@ describe("runOpenCompanyChatAgent", () => {
           "delete",
         ]) {
           await expect(
-            executeGoatBrainTool(options, {
+            executeBrainTool(options, {
               command,
               flags: { id: "acme" },
             }),
@@ -718,7 +718,7 @@ describe("runOpenCompanyChatAgent", () => {
 
   it("allows listing personal brain docs without semantic search", async () => {
     const startTask = vi.fn();
-    const runBrainCli = vi.fn(async (input: GoatBrainToolInput) => ({
+    const runBrainCli = vi.fn(async (input: BrainToolInput) => ({
       ok: true,
       exitCode: 0,
       stdout: "[projects] Launch plan (launch-plan, updated 2026-01-01T00:00:00.000Z)",
@@ -741,7 +741,7 @@ describe("runOpenCompanyChatAgent", () => {
             {
               toolCalls: [{ toolName: GOAT_BRAIN_TOOL_NAME }],
               toolResults: [
-                await executeGoatBrainTool(options, {
+                await executeBrainTool(options, {
                   command: "list",
                   flags: { limit: 50, json: true },
                 }),
@@ -1172,7 +1172,7 @@ describe("list_skills and use_skill tools", () => {
 });
 
 describe("list_actions and use_action tools", () => {
-  const catalog: GoatChatActionCatalog = {
+  const catalog: ChatActionCatalog = {
     sources: [
       {
         id: "slack",
@@ -1272,7 +1272,7 @@ describe("list_actions and use_action tools", () => {
 
   it("delegates native approval checks only for discovered non-write actions", async () => {
     const needsApproval = vi.fn(async () => true);
-    const approvalCatalog: GoatChatActionCatalog = {
+    const approvalCatalog: ChatActionCatalog = {
       sources: catalog.sources,
       actions: [
         catalog.actions[0]!,
@@ -1660,7 +1660,7 @@ describe("list_actions and use_action tools", () => {
   });
 
   it("repairs direct catalog action calls through use_action", async () => {
-    const repairCatalog: GoatChatActionCatalog = {
+    const repairCatalog: ChatActionCatalog = {
       ...catalog,
       actions: [
         ...catalog.actions,
@@ -1780,14 +1780,14 @@ function extractStartTaskToolDescription(options: unknown) {
   return (options as ToolOptions).tools?.[START_TASK_TOOL_NAME]?.description ?? "";
 }
 
-function extractGoatBrainToolDescription(options: unknown) {
+function extractBrainToolDescription(options: unknown) {
   type ToolOptions = {
     tools?: Record<typeof GOAT_BRAIN_TOOL_NAME, { description?: string }>;
   };
   return (options as ToolOptions).tools?.[GOAT_BRAIN_TOOL_NAME]?.description ?? "";
 }
 
-function extractGoatBrainCommandEnum(options: unknown) {
+function extractBrainCommandEnum(options: unknown) {
   type CommandSchema = { properties?: { command?: { enum?: string[] } } };
   type ToolOptions = {
     tools?: Record<
@@ -1836,7 +1836,7 @@ async function executeStartTaskTool(
   return tool.execute(input);
 }
 
-async function executeGoatBrainTool(options: unknown, input: Record<string, unknown>) {
+async function executeBrainTool(options: unknown, input: Record<string, unknown>) {
   type ToolOptions = {
     tools?: Record<typeof GOAT_BRAIN_TOOL_NAME, { execute?: unknown }>;
   };

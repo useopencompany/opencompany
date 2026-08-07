@@ -15,17 +15,17 @@ const STOP_POLL_INTERVAL_MS = 1_000;
 // its turn by much when cleanup is missed.
 const STOP_WATCH_MAX_MS = 250_000;
 
-export function isGoatChatResumeEnabled() {
+export function isChatResumeEnabled() {
   return Boolean(redisUrl());
 }
 
-export function newGoatChatStreamId() {
+export function newChatStreamId() {
   return `goat_chat_stream_${randomUUID()}`;
 }
 
 let streamContext: ResumableStreamContext | null = null;
 
-export function getGoatChatStreamContext() {
+export function getChatStreamContext() {
   streamContext ??= createResumableStreamContext({
     waitUntil: after,
     keyPrefix: "goat:chat:resumable",
@@ -33,12 +33,12 @@ export function getGoatChatStreamContext() {
   return streamContext;
 }
 
-export async function setActiveGoatChatStream(sessionId: string, streamId: string) {
+export async function setActiveChatStream(sessionId: string, streamId: string) {
   const redis = await getRedis();
   await redis.set(activeStreamKey(sessionId), streamId, { EX: ACTIVE_STREAM_TTL_SECONDS });
 }
 
-export async function getActiveGoatChatStream(sessionId: string) {
+export async function getActiveChatStream(sessionId: string) {
   try {
     const redis = await getRedis();
     return await redis.get(activeStreamKey(sessionId));
@@ -49,7 +49,7 @@ export async function getActiveGoatChatStream(sessionId: string) {
 }
 
 /** Clears the active-stream pointer unless a newer stream already replaced it. */
-export async function clearActiveGoatChatStream(sessionId: string, streamId: string) {
+export async function clearActiveChatStream(sessionId: string, streamId: string) {
   try {
     const redis = await getRedis();
     const active = await redis.get(activeStreamKey(sessionId));
@@ -63,7 +63,7 @@ export async function clearActiveGoatChatStream(sessionId: string, streamId: str
  * Records an explicit stop request for the session's active stream. Returns
  * false when there is nothing to stop (no active stream or Redis unavailable).
  */
-export async function requestGoatChatStop(sessionId: string) {
+export async function requestChatStop(sessionId: string) {
   try {
     const redis = await getRedis();
     const streamId = await redis.get(activeStreamKey(sessionId));
@@ -81,7 +81,7 @@ export async function requestGoatChatStop(sessionId: string) {
  * Polls for a stop request against the given stream and invokes `onStop` once
  * when it appears. Returns a cleanup function.
  */
-export function watchGoatChatStop(streamId: string, onStop: () => void) {
+export function watchChatStop(streamId: string, onStop: () => void) {
   const startedAt = Date.now();
   let stopped = false;
   const interval = setInterval(() => {
@@ -119,22 +119,22 @@ function redisUrl() {
 
 // Minimal view of the redis client so the generic client type (which fights
 // exactOptionalPropertyTypes) stays out of our signatures.
-type GoatRedisClient = {
+type RedisClient = {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, options?: { EX?: number }): Promise<unknown>;
   del(key: string): Promise<unknown>;
 };
 
-let redisClientPromise: Promise<GoatRedisClient> | null = null;
+let redisClientPromise: Promise<RedisClient> | null = null;
 
-function getRedis(): Promise<GoatRedisClient> {
+function getRedis(): Promise<RedisClient> {
   redisClientPromise ??= (async () => {
     const url = redisUrl();
     if (!url) throw new Error("Goat chat resume requires REDIS_URL (or KV_URL).");
     const client = createClient({ url });
     client.on("error", (error) => warnOnce("goat.chat_stream_redis_error", error));
     await client.connect();
-    return client as unknown as GoatRedisClient;
+    return client as unknown as RedisClient;
   })().catch((error) => {
     // Allow the next caller to retry the connection instead of caching failure.
     redisClientPromise = null;

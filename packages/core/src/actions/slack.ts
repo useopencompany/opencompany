@@ -1,23 +1,23 @@
-import { isValidGoatBrainSourceRef } from "@opencompany/brain";
+import { isValidBrainSourceRef } from "@opencompany/brain";
 import { getDb } from "@opencompany/db/client";
 import {
-  type GoatSlackOAuthCredentialPayload,
-  loadGoatIntegrationCredential,
+  loadIntegrationCredential,
+  type SlackOAuthCredentialPayload,
 } from "@opencompany/db/integrations";
-import { goatIntegrations } from "@opencompany/db/schema";
+import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq } from "drizzle-orm";
 import { slackApiRequest } from "../integrations/slack";
 import { effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  ActionAuthError,
+  type ActionExecuteContext,
+  ActionInvalidParamsError,
+  type ActionProviderCatalog,
   clampCount,
   GOAT_ACTION_EFFECTS_READ,
-  GoatActionAuthError,
-  type GoatActionExecuteContext,
-  GoatActionInvalidParamsError,
-  type GoatActionProviderCatalog,
   optionalNumberParam,
   optionalStringParam,
-  type ResolvedGoatAction,
+  type ResolvedAction,
   requiredStringParam,
   truncateText,
 } from "./types";
@@ -66,7 +66,7 @@ type SlackConversation = {
 
 export async function resolveSlackActions(
   userWorkosId: string,
-): Promise<GoatActionProviderCatalog | null> {
+): Promise<ActionProviderCatalog | null> {
   const connection = await loadSlackConnection(userWorkosId);
   if (!connection) return null;
   if (effectiveCapabilityMode("slack", "read", connection.capabilityModes) === "off") return null;
@@ -75,7 +75,7 @@ export async function resolveSlackActions(
   // The credential is loaded lazily on first execute so catalog resolution
   // never touches secrets; memoized per catalog (one chat request).
   let credentialPromise: Promise<SlackCredential> | null = null;
-  const getCredential = (context: GoatActionExecuteContext) => {
+  const getCredential = (context: ActionExecuteContext) => {
     credentialPromise ??= loadSlackCredential(context.userWorkosId, connection).catch((error) => {
       credentialPromise = null;
       throw error;
@@ -86,13 +86,13 @@ export async function resolveSlackActions(
   let conversationIndexPromise: Promise<SlackConversationIndex> | null = null;
   const resolveConversationId = async (
     value: string,
-    context: GoatActionExecuteContext,
+    context: ActionExecuteContext,
     credential: SlackCredential,
   ) => {
     if (SLACK_CONVERSATION_ID_PATTERN.test(value)) return value;
     const normalizedName = normalizeConversationName(value);
     if (!normalizedName) {
-      throw new GoatActionInvalidParamsError('"channel" must be a conversation id or name.');
+      throw new ActionInvalidParamsError('"channel" must be a conversation id or name.');
     }
     conversationIndexPromise ??= loadSlackConversationIndex(credential.token, context.signal).catch(
       (error) => {
@@ -103,12 +103,12 @@ export async function resolveSlackActions(
     const index = await conversationIndexPromise;
     const matches = index.byName.get(normalizedName) ?? [];
     if (matches.length === 0) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `No Slack conversation named ${JSON.stringify(value)} was found across ${index.searched} conversations. Try slack.list_conversations to inspect available names and ids.`,
       );
     }
     if (matches.length > 1) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `Multiple Slack conversations match ${JSON.stringify(value)}: ${matches
           .map((match) => `${match.name} (${match.id})`)
           .join(", ")}. Pass the conversation id instead.`,
@@ -117,7 +117,7 @@ export async function resolveSlackActions(
     return matches[0]!.id;
   };
 
-  const actions: ResolvedGoatAction[] = [
+  const actions: ResolvedAction[] = [
     {
       id: "slack.list_conversations",
       provider: "slack",
@@ -420,17 +420,15 @@ export async function resolveSlackActions(
 async function loadSlackConnection(userWorkosId: string): Promise<SlackConnection | null> {
   const [row] = await getDb()
     .select({
-      id: goatIntegrations.id,
-      status: goatIntegrations.status,
-      connectionLabel: goatIntegrations.connectionLabel,
-      scopes: goatIntegrations.scopes,
-      capabilityModes: goatIntegrations.capabilityModes,
+      id: integrations.id,
+      status: integrations.status,
+      connectionLabel: integrations.connectionLabel,
+      scopes: integrations.scopes,
+      capabilityModes: integrations.capabilityModes,
     })
-    .from(goatIntegrations)
-    .where(
-      and(eq(goatIntegrations.userWorkosId, userWorkosId), eq(goatIntegrations.provider, "slack")),
-    )
-    .orderBy(desc(goatIntegrations.updatedAt))
+    .from(integrations)
+    .where(and(eq(integrations.userWorkosId, userWorkosId), eq(integrations.provider, "slack")))
+    .orderBy(desc(integrations.updatedAt))
     .limit(1);
 
   if (!row || row.status !== "connected") return null;
@@ -444,7 +442,7 @@ async function loadSlackConnection(userWorkosId: string): Promise<SlackConnectio
 
 function slackReadPermission(
   connection: SlackConnection,
-): Pick<ResolvedGoatAction, "permissionMode" | "permission"> {
+): Pick<ResolvedAction, "permissionMode" | "permission"> {
   if (effectiveCapabilityMode("slack", "read", connection.capabilityModes) !== "ask") {
     return { permissionMode: "on" };
   }
@@ -463,17 +461,17 @@ async function loadSlackCredential(
   userWorkosId: string,
   connection: SlackConnection,
 ): Promise<SlackCredential> {
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId,
     integrationId: connection.integrationId,
     provider: "slack",
     kind: "oauth_token",
   });
-  const payload = credential?.payload as GoatSlackOAuthCredentialPayload | undefined;
+  const payload = credential?.payload as SlackOAuthCredentialPayload | undefined;
   const token = payload?.access_token;
   const teamId = payload?.team_id;
   if (!token || !teamId) {
-    throw new GoatActionAuthError(
+    throw new ActionAuthError(
       "auth_expired",
       "slack",
       "The Slack connection has no usable token; reconnect Slack in Settings → Integrations.",
@@ -548,7 +546,7 @@ function normalizeConversationName(value: string) {
 function boundedOptionalString(params: Record<string, unknown>, key: string, maxChars: number) {
   const value = optionalStringParam(params, key);
   if (value && value.length > maxChars) {
-    throw new GoatActionInvalidParamsError(`"${key}" must be at most ${maxChars} characters.`);
+    throw new ActionInvalidParamsError(`"${key}" must be at most ${maxChars} characters.`);
   }
   return value;
 }
@@ -582,7 +580,7 @@ function compactMessages(
 
 function slackSourceRef(teamId: string, channelId: string, ts: string) {
   const sourceRef = `slack:conversation:${teamId}:${channelId}:${ts}`;
-  if (!isValidGoatBrainSourceRef(sourceRef)) {
+  if (!isValidBrainSourceRef(sourceRef)) {
     throw new Error("Slack returned identifiers that cannot form a Brain source reference.");
   }
   return sourceRef;
@@ -596,7 +594,7 @@ function slackPermalink(teamDomain: string | null, channel: string, ts: string |
 function isoToSlackTs(iso: string) {
   const parsed = Date.parse(iso);
   if (Number.isNaN(parsed)) {
-    throw new GoatActionInvalidParamsError(`Invalid ISO timestamp: ${iso}`);
+    throw new ActionInvalidParamsError(`Invalid ISO timestamp: ${iso}`);
   }
   return String(parsed / 1000);
 }

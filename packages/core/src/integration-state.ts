@@ -1,6 +1,6 @@
-import type { GoatIntegrationProvider, GoatIntegrationStatus } from "@opencompany/db/schema";
+import type { IntegrationProvider, IntegrationStatus } from "@opencompany/db/schema";
 
-export type GoatGoogleProviderState = {
+export type GoogleProviderState = {
   provider: "gmail" | "google_calendar" | "google_drive";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
@@ -8,7 +8,7 @@ export type GoatGoogleProviderState = {
   accountName: string | null;
 };
 
-export type GoatGoogleDriveSourceProviderState = {
+export type GoogleDriveSourceProviderState = {
   provider: "google_drive";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
@@ -17,10 +17,10 @@ export type GoatGoogleDriveSourceProviderState = {
   statusReason: string | null;
 };
 
-// The Gmail brain-source connection view: unlike GoatGoogleProviderState it
+// The Gmail brain-source connection view: unlike GoogleProviderState it
 // carries the integration id, which the brain-source picker and save action
 // need to key config rows on.
-export type GoatGmailSourceProviderState = {
+export type GmailSourceProviderState = {
   provider: "gmail";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
@@ -29,7 +29,7 @@ export type GoatGmailSourceProviderState = {
   statusReason: string | null;
 };
 
-export type GoatLinearProviderState = {
+export type LinearProviderState = {
   provider: "linear";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
@@ -39,7 +39,7 @@ export type GoatLinearProviderState = {
   capabilityModes: Record<string, unknown>;
 };
 
-export type GoatPostHogProviderState = {
+export type PostHogProviderState = {
   provider: "posthog";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
@@ -50,10 +50,10 @@ export type GoatPostHogProviderState = {
 };
 
 // The Linear brain-source connection (a Linear OAuth app with webhooks), as
-// opposed to GoatLinearProviderState which describes the MCP connector. Both
+// opposed to LinearProviderState which describes the MCP connector. Both
 // share provider "linear"; rows are told apart by external_id ("linear_mcp"
 // for MCP, the Linear organization id for the source connection).
-export type GoatLinearSourceProviderState = {
+export type LinearSourceProviderState = {
   provider: "linear";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
@@ -65,7 +65,7 @@ export type GoatLinearSourceProviderState = {
 
 // The HubSpot brain-source connection (a HubSpot OAuth app with webhooks).
 // Rows key external_id on the HubSpot portal id.
-export type GoatHubspotSourceProviderState = {
+export type HubspotSourceProviderState = {
   provider: "hubspot";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
@@ -75,7 +75,7 @@ export type GoatHubspotSourceProviderState = {
   statusReason: string | null;
 };
 
-export type GoatGitHubProviderState = {
+export type GitHubProviderState = {
   provider: "github";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
@@ -83,7 +83,7 @@ export type GoatGitHubProviderState = {
   statusReason: string | null;
 };
 
-export type GoatJamieProviderState = {
+export type JamieProviderState = {
   provider: "jamie";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
@@ -97,7 +97,7 @@ export type GoatJamieProviderState = {
 // Granola connects with a personal API key minted in the Granola app; the
 // integration id is what the brain-source picker and save action key config
 // rows on.
-export type GoatGranolaProviderState = {
+export type GranolaProviderState = {
   provider: "granola";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
@@ -110,7 +110,7 @@ export type GoatGranolaProviderState = {
 // iMessage pairs the user's own phone number (verified with a one-time code
 // sent over iMessage); the E.164 number lives in account_name. There is no
 // credential row — the send transport is platform-level.
-export type GoatImessageProviderState = {
+export type ImessageProviderState = {
   provider: "imessage";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
@@ -122,7 +122,7 @@ export type GoatImessageProviderState = {
 // Fathom connects with a personal API key minted in Fathom's user settings;
 // the integration id is what the brain-source picker and save action key
 // config rows on.
-export type GoatFathomProviderState = {
+export type FathomProviderState = {
   provider: "fathom";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
@@ -136,7 +136,7 @@ export type GoatFathomProviderState = {
 // settings; connect also mints the Attio webhook that feeds ingestion. Rows
 // key external_id on the Attio workspace id so inbound webhooks route by the
 // event's workspace_id.
-export type GoatAttioProviderState = {
+export type AttioProviderState = {
   provider: "attio";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
@@ -145,7 +145,7 @@ export type GoatAttioProviderState = {
   statusReason: string | null;
 };
 
-export type GoatStripeProviderState = {
+export type StripeProviderState = {
   provider: "stripe";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
@@ -155,7 +155,7 @@ export type GoatStripeProviderState = {
   statusReason: string | null;
 };
 
-export type GoatSlackProviderState = {
+export type SlackProviderState = {
   provider: "slack";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
@@ -165,7 +165,7 @@ export type GoatSlackProviderState = {
   statusReason: string | null;
 };
 
-export type GoatCodexProviderState = {
+export type CodexProviderState = {
   provider: "codex";
   connected: boolean;
   status: "connected" | "needs_reauth" | "not_connected";
@@ -173,7 +173,7 @@ export type GoatCodexProviderState = {
   lastValidatedAt: string | null;
 };
 
-export type GoatClaudeCodeProviderState = {
+export type ClaudeCodeProviderState = {
   provider: "claude_code";
   connected: boolean;
   status: "connected" | "needs_reauth" | "not_connected";
@@ -181,7 +181,7 @@ export type GoatClaudeCodeProviderState = {
   lastValidatedAt: string | null;
 };
 
-export type GoatInfisicalProviderState = {
+export type InfisicalProviderState = {
   provider: "infisical";
   connected: boolean;
   status: "connected" | "needs_reauth" | "disconnected" | "not_connected";
@@ -194,10 +194,10 @@ export type GoatInfisicalProviderState = {
 // accounts per provider (two Gmails, two Slack workspaces) — uniqueness in the
 // DB is (user, provider, external_id), so a second OAuth pass creates a
 // second row rather than replacing the first.
-export type GoatIntegrationAccountView = {
+export type IntegrationAccountView = {
   integrationId: string;
-  provider: GoatPersonalAccountProvider;
-  status: GoatIntegrationStatus;
+  provider: PersonalAccountProvider;
+  status: IntegrationStatus;
   connected: boolean;
   accountEmail: string | null;
   accountName: string | null;
@@ -208,7 +208,7 @@ export type GoatIntegrationAccountView = {
   capabilityModes: Record<string, unknown>;
 };
 
-export type GoatPersonalAccountProvider =
+export type PersonalAccountProvider =
   | "gmail"
   | "google_calendar"
   | "google_drive"
@@ -221,32 +221,32 @@ export type GoatPersonalAccountProvider =
   | "latitude"
   | "neon";
 
-export type GoatIntegrationState = {
-  gmail: GoatGoogleProviderState;
-  google_calendar: GoatGoogleProviderState;
-  google_drive: GoatGoogleProviderState;
-  linear: GoatLinearProviderState;
-  posthog: GoatPostHogProviderState;
-  github: GoatGitHubProviderState;
-  jamie: GoatJamieProviderState;
-  slack: GoatSlackProviderState;
-  granola: GoatGranolaProviderState;
-  fathom: GoatFathomProviderState;
-  attio: GoatAttioProviderState;
-  stripe: GoatStripeProviderState;
-  imessage: GoatImessageProviderState;
-  codex: GoatCodexProviderState;
-  claude_code: GoatClaudeCodeProviderState;
-  infisical: GoatInfisicalProviderState;
+export type IntegrationState = {
+  gmail: GoogleProviderState;
+  google_calendar: GoogleProviderState;
+  google_drive: GoogleProviderState;
+  linear: LinearProviderState;
+  posthog: PostHogProviderState;
+  github: GitHubProviderState;
+  jamie: JamieProviderState;
+  slack: SlackProviderState;
+  granola: GranolaProviderState;
+  fathom: FathomProviderState;
+  attio: AttioProviderState;
+  stripe: StripeProviderState;
+  imessage: ImessageProviderState;
+  codex: CodexProviderState;
+  claude_code: ClaudeCodeProviderState;
+  infisical: InfisicalProviderState;
   // All of the user's connected accounts per personal provider. The
   // single-account states above remain the "primary connection" view used by
   // onboarding and zero states; multi-account UI reads this instead.
-  personalAccounts: Record<GoatPersonalAccountProvider, GoatIntegrationAccountView[]>;
+  personalAccounts: Record<PersonalAccountProvider, IntegrationAccountView[]>;
 };
 
 type IntegrationStateRow = {
   id?: string;
-  provider: GoatIntegrationProvider;
+  provider: IntegrationProvider;
   workspaceId?: string | null;
   workspace_id?: string | null;
   externalId?: string | null;
@@ -261,7 +261,7 @@ type IntegrationStateRow = {
   connection_label?: string | null;
   statusReason?: string | null;
   status_reason?: string | null;
-  status: GoatIntegrationStatus;
+  status: IntegrationStatus;
   scopes?: string[] | null;
   capabilityModes?: Record<string, unknown> | null;
   capability_modes?: Record<string, unknown> | null;
@@ -272,10 +272,10 @@ const JAMIE_API_KEY_EXTERNAL_ID_PREFIX = "jamie_api_key_sha256:";
 // Collects every personal (non-workspace) account row per provider. The
 // Linear ingest connections count as accounts; the MCP connector row
 // (external_id "linear_mcp") never does.
-export function goatPersonalAccountsFromRows(
+export function personalAccountsFromRows(
   rows: readonly IntegrationStateRow[],
-): Record<GoatPersonalAccountProvider, GoatIntegrationAccountView[]> {
-  const personalAccounts: Record<GoatPersonalAccountProvider, GoatIntegrationAccountView[]> = {
+): Record<PersonalAccountProvider, IntegrationAccountView[]> {
+  const personalAccounts: Record<PersonalAccountProvider, IntegrationAccountView[]> = {
     gmail: [],
     google_calendar: [],
     google_drive: [],
@@ -315,10 +315,8 @@ export function goatPersonalAccountsFromRows(
   return personalAccounts;
 }
 
-export function goatIntegrationStateFromRows(
-  rows: readonly IntegrationStateRow[],
-): GoatIntegrationState {
-  const byProvider = new Map<GoatIntegrationProvider, IntegrationStateRow>();
+export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): IntegrationState {
+  const byProvider = new Map<IntegrationProvider, IntegrationStateRow>();
   for (const row of rows) {
     if (row.status === "disconnected") continue;
     // Provider "linear" covers two kinds of rows; the MCP card must only ever
@@ -338,7 +336,7 @@ export function goatIntegrationStateFromRows(
     }
     byProvider.set(row.provider, row);
   }
-  const personalAccounts = goatPersonalAccountsFromRows(rows);
+  const personalAccounts = personalAccountsFromRows(rows);
 
   return {
     gmail: googleProviderState("gmail", byProvider.get("gmail")),
@@ -381,9 +379,9 @@ export function goatIntegrationStateFromRows(
 }
 
 function accountViewFromRow(
-  provider: GoatPersonalAccountProvider,
+  provider: PersonalAccountProvider,
   row: IntegrationStateRow,
-): GoatIntegrationAccountView {
+): IntegrationAccountView {
   return {
     integrationId: row.id ?? "",
     provider,
@@ -400,12 +398,12 @@ function accountViewFromRow(
   };
 }
 
-export const goatGoogleIntegrationStateFromRows = goatIntegrationStateFromRows;
+export const googleIntegrationStateFromRows = integrationStateFromRows;
 
 function googleProviderState(
   provider: "gmail" | "google_calendar" | "google_drive",
   row: IntegrationStateRow | undefined,
-): GoatGoogleProviderState {
+): GoogleProviderState {
   if (!row) {
     return {
       provider,
@@ -425,7 +423,7 @@ function googleProviderState(
   };
 }
 
-function linearProviderState(row: IntegrationStateRow | undefined): GoatLinearProviderState {
+function linearProviderState(row: IntegrationStateRow | undefined): LinearProviderState {
   if (!row) {
     return {
       provider: "linear",
@@ -449,7 +447,7 @@ function linearProviderState(row: IntegrationStateRow | undefined): GoatLinearPr
   };
 }
 
-function posthogProviderState(row: IntegrationStateRow | undefined): GoatPostHogProviderState {
+function posthogProviderState(row: IntegrationStateRow | undefined): PostHogProviderState {
   if (!row) {
     return {
       provider: "posthog",
@@ -473,7 +471,7 @@ function posthogProviderState(row: IntegrationStateRow | undefined): GoatPostHog
   };
 }
 
-function githubProviderState(row: IntegrationStateRow | undefined): GoatGitHubProviderState {
+function githubProviderState(row: IntegrationStateRow | undefined): GitHubProviderState {
   if (!row) {
     return {
       provider: "github",
@@ -493,7 +491,7 @@ function githubProviderState(row: IntegrationStateRow | undefined): GoatGitHubPr
   };
 }
 
-function slackProviderState(row: IntegrationStateRow | undefined): GoatSlackProviderState {
+function slackProviderState(row: IntegrationStateRow | undefined): SlackProviderState {
   if (!row || row.status === "disconnected") {
     return {
       provider: "slack",
@@ -517,7 +515,7 @@ function slackProviderState(row: IntegrationStateRow | undefined): GoatSlackProv
   };
 }
 
-function granolaProviderState(row: IntegrationStateRow | undefined): GoatGranolaProviderState {
+function granolaProviderState(row: IntegrationStateRow | undefined): GranolaProviderState {
   if (!row || row.status === "disconnected") {
     return {
       provider: "granola",
@@ -541,7 +539,7 @@ function granolaProviderState(row: IntegrationStateRow | undefined): GoatGranola
   };
 }
 
-function imessageProviderState(row: IntegrationStateRow | undefined): GoatImessageProviderState {
+function imessageProviderState(row: IntegrationStateRow | undefined): ImessageProviderState {
   if (!row || row.status === "disconnected") {
     return {
       provider: "imessage",
@@ -563,7 +561,7 @@ function imessageProviderState(row: IntegrationStateRow | undefined): GoatImessa
   };
 }
 
-function fathomProviderState(row: IntegrationStateRow | undefined): GoatFathomProviderState {
+function fathomProviderState(row: IntegrationStateRow | undefined): FathomProviderState {
   if (!row || row.status === "disconnected") {
     return {
       provider: "fathom",
@@ -587,7 +585,7 @@ function fathomProviderState(row: IntegrationStateRow | undefined): GoatFathomPr
   };
 }
 
-function attioProviderState(row: IntegrationStateRow | undefined): GoatAttioProviderState {
+function attioProviderState(row: IntegrationStateRow | undefined): AttioProviderState {
   if (!row || row.status === "disconnected") {
     return {
       provider: "attio",
@@ -609,7 +607,7 @@ function attioProviderState(row: IntegrationStateRow | undefined): GoatAttioProv
   };
 }
 
-function stripeProviderState(row: IntegrationStateRow | undefined): GoatStripeProviderState {
+function stripeProviderState(row: IntegrationStateRow | undefined): StripeProviderState {
   if (!row || row.status === "disconnected") {
     return {
       provider: "stripe",
@@ -639,7 +637,7 @@ function stripeProviderState(row: IntegrationStateRow | undefined): GoatStripePr
   };
 }
 
-function jamieProviderState(row: IntegrationStateRow | undefined): GoatJamieProviderState {
+function jamieProviderState(row: IntegrationStateRow | undefined): JamieProviderState {
   if (!row) {
     return {
       provider: "jamie",

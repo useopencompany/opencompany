@@ -1,21 +1,21 @@
-import { connectGoatSlackBotIntegration } from "@opencompany/db/integrations";
+import { connectSlackBotIntegration } from "@opencompany/db/integrations";
 import { NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import {
-  appendGoatSlackBotSetupStatus,
-  exchangeGoatSlackBotCode,
-  isGoatSlackBotConfigured,
-  verifyGoatSlackBotState,
+  appendSlackBotSetupStatus,
+  exchangeSlackBotCode,
+  isSlackBotConfigured,
+  verifySlackBotState,
 } from "@/lib/integrations/slack-bot";
 
 export async function GET(request: Request) {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   const url = new URL(request.url);
   const stateValue = url.searchParams.get("state") ?? "";
 
   let state;
   try {
-    state = verifyGoatSlackBotState(stateValue);
+    state = verifySlackBotState(stateValue);
   } catch {
     return NextResponse.redirect(
       new URL(
@@ -31,34 +31,34 @@ export async function GET(request: Request) {
     context.role !== "admin"
   ) {
     return NextResponse.redirect(
-      new URL(appendGoatSlackBotSetupStatus(state.returnTo, "error", "session_mismatch"), url),
+      new URL(appendSlackBotSetupStatus(state.returnTo, "error", "session_mismatch"), url),
     );
   }
 
-  if (!isGoatSlackBotConfigured()) {
+  if (!isSlackBotConfigured()) {
     return NextResponse.redirect(
-      new URL(appendGoatSlackBotSetupStatus(state.returnTo, "error", "not_configured"), url),
+      new URL(appendSlackBotSetupStatus(state.returnTo, "error", "not_configured"), url),
     );
   }
 
   const oauthError = url.searchParams.get("error");
   if (oauthError) {
     return NextResponse.redirect(
-      new URL(appendGoatSlackBotSetupStatus(state.returnTo, "error", "slack_denied"), url),
+      new URL(appendSlackBotSetupStatus(state.returnTo, "error", "slack_denied"), url),
     );
   }
 
   const code = url.searchParams.get("code");
   if (!code) {
     return NextResponse.redirect(
-      new URL(appendGoatSlackBotSetupStatus(state.returnTo, "error", "missing_code"), url),
+      new URL(appendSlackBotSetupStatus(state.returnTo, "error", "missing_code"), url),
     );
   }
 
   try {
-    const oauth = await exchangeGoatSlackBotCode(code);
+    const oauth = await exchangeSlackBotCode(code);
 
-    await connectGoatSlackBotIntegration({
+    await connectSlackBotIntegration({
       userWorkosId: context.user.workosUserId,
       workspaceId: context.workspace.id,
       teamId: oauth.teamId,
@@ -69,14 +69,11 @@ export async function GET(request: Request) {
     });
 
     return NextResponse.redirect(
-      new URL(appendGoatSlackBotSetupStatus(state.returnTo, "connected"), url),
+      new URL(appendSlackBotSetupStatus(state.returnTo, "connected"), url),
     );
   } catch {
     return NextResponse.redirect(
-      new URL(
-        appendGoatSlackBotSetupStatus(state.returnTo, "error", "connection_sync_failed"),
-        url,
-      ),
+      new URL(appendSlackBotSetupStatus(state.returnTo, "error", "connection_sync_failed"), url),
     );
   }
 }

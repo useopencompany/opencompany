@@ -1,41 +1,41 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { GoatAuthContext } from "@/lib/auth";
-import { currentGoatUser } from "@/lib/auth";
-import { isGoatClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
-import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
+import type { AuthContext } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
+import { isClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
+import { isCodexConnectedForUser } from "@/lib/codex-auth";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
-import { createGoatTaskForUser } from "@/lib/tasks";
+import { createTaskForUser } from "@/lib/tasks";
 import { POST } from "./route";
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
 }));
 
 vi.mock("@/lib/codex-auth", () => ({
-  isGoatCodexConnectedForUser: vi.fn(),
+  isCodexConnectedForUser: vi.fn(),
 }));
 
 vi.mock("@/lib/claude-code-auth", () => ({
-  isGoatClaudeCodeConnectedForUser: vi.fn(),
+  isClaudeCodeConnectedForUser: vi.fn(),
 }));
 
 vi.mock("@/lib/tasks", () => ({
-  createGoatTaskForUser: vi.fn(),
+  createTaskForUser: vi.fn(),
 }));
 
 describe("POST /api/tasks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(currentGoatUser).mockResolvedValue({
+    vi.mocked(currentUser).mockResolvedValue({
       user: {
         workosUserId: "user_1",
         taskSpawningEnabled: true,
       },
       workspace: { id: "workspace_1" },
-    } as GoatAuthContext);
-    vi.mocked(isGoatCodexConnectedForUser).mockResolvedValue(true);
-    vi.mocked(isGoatClaudeCodeConnectedForUser).mockResolvedValue(true);
-    vi.mocked(createGoatTaskForUser).mockResolvedValue({
+    } as AuthContext);
+    vi.mocked(isCodexConnectedForUser).mockResolvedValue(true);
+    vi.mocked(isClaudeCodeConnectedForUser).mockResolvedValue(true);
+    vi.mocked(createTaskForUser).mockResolvedValue({
       id: "goat_task_1",
       displayId: "TASK-1",
       name: "Research the market",
@@ -58,7 +58,7 @@ describe("POST /api/tasks", () => {
         name: "Research the market",
       },
     });
-    expect(createGoatTaskForUser).toHaveBeenCalledWith({
+    expect(createTaskForUser).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
       prompt: "Research the market",
@@ -69,7 +69,7 @@ describe("POST /api/tasks", () => {
   it("uses the normal default for an invalid model selection", async () => {
     await POST(jsonRequest({ description: "#task Research the market", model: "auto" }));
 
-    expect(createGoatTaskForUser).toHaveBeenCalledWith(
+    expect(createTaskForUser).toHaveBeenCalledWith(
       expect.objectContaining({ model: DEFAULT_GOAT_MODEL }),
     );
   });
@@ -83,9 +83,7 @@ describe("POST /api/tasks", () => {
       }),
     );
 
-    expect(createGoatTaskForUser).toHaveBeenCalledWith(
-      expect.objectContaining({ engine: "codex" }),
-    );
+    expect(createTaskForUser).toHaveBeenCalledWith(expect.objectContaining({ engine: "codex" }));
   });
 
   it("supports an explicitly selected connected Claude Code engine", async () => {
@@ -97,15 +95,15 @@ describe("POST /api/tasks", () => {
       }),
     );
 
-    expect(isGoatCodexConnectedForUser).not.toHaveBeenCalled();
-    expect(isGoatClaudeCodeConnectedForUser).toHaveBeenCalledWith("user_1");
-    expect(createGoatTaskForUser).toHaveBeenCalledWith(
+    expect(isCodexConnectedForUser).not.toHaveBeenCalled();
+    expect(isClaudeCodeConnectedForUser).toHaveBeenCalledWith("user_1");
+    expect(createTaskForUser).toHaveBeenCalledWith(
       expect.objectContaining({ engine: "claude_code" }),
     );
   });
 
   it("rejects Codex tasks when Codex is not connected", async () => {
-    vi.mocked(isGoatCodexConnectedForUser).mockResolvedValueOnce(false);
+    vi.mocked(isCodexConnectedForUser).mockResolvedValueOnce(false);
 
     const response = await POST(
       jsonRequest({
@@ -119,11 +117,11 @@ describe("POST /api/tasks", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Codex is not connected. Connect Codex in Settings first.",
     });
-    expect(createGoatTaskForUser).not.toHaveBeenCalled();
+    expect(createTaskForUser).not.toHaveBeenCalled();
   });
 
   it("rejects Claude Code tasks when Claude Code is not connected", async () => {
-    vi.mocked(isGoatClaudeCodeConnectedForUser).mockResolvedValueOnce(false);
+    vi.mocked(isClaudeCodeConnectedForUser).mockResolvedValueOnce(false);
 
     const response = await POST(
       jsonRequest({
@@ -137,7 +135,7 @@ describe("POST /api/tasks", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Claude Code is not connected. Connect Claude Code in Settings first.",
     });
-    expect(createGoatTaskForUser).not.toHaveBeenCalled();
+    expect(createTaskForUser).not.toHaveBeenCalled();
   });
 
   it("rejects unknown task engines", async () => {
@@ -151,7 +149,7 @@ describe("POST /api/tasks", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "Invalid task engine." });
-    expect(createGoatTaskForUser).not.toHaveBeenCalled();
+    expect(createTaskForUser).not.toHaveBeenCalled();
   });
 
   it("rejects empty task descriptions", async () => {
@@ -161,11 +159,11 @@ describe("POST /api/tasks", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Enter a task before starting a run.",
     });
-    expect(createGoatTaskForUser).not.toHaveBeenCalled();
+    expect(createTaskForUser).not.toHaveBeenCalled();
   });
 
   it("requires an authenticated Goat user", async () => {
-    vi.mocked(currentGoatUser).mockResolvedValueOnce(null as never);
+    vi.mocked(currentUser).mockResolvedValueOnce(null as never);
 
     const response = await POST(
       jsonRequest({ description: "#task Research the market", model: DEFAULT_GOAT_MODEL }),
@@ -173,24 +171,24 @@ describe("POST /api/tasks", () => {
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({ error: "Unauthorized" });
-    expect(createGoatTaskForUser).not.toHaveBeenCalled();
+    expect(createTaskForUser).not.toHaveBeenCalled();
   });
 
   it("honors the Tasks & Workflows preference", async () => {
-    vi.mocked(currentGoatUser).mockResolvedValueOnce({
+    vi.mocked(currentUser).mockResolvedValueOnce({
       user: {
         workosUserId: "user_1",
         taskSpawningEnabled: false,
       },
       workspace: { id: "workspace_1" },
-    } as GoatAuthContext);
+    } as AuthContext);
 
     const response = await POST(
       jsonRequest({ description: "#task Research the market", model: DEFAULT_GOAT_MODEL }),
     );
 
     expect(response.status).toBe(403);
-    expect(createGoatTaskForUser).not.toHaveBeenCalled();
+    expect(createTaskForUser).not.toHaveBeenCalled();
   });
 });
 

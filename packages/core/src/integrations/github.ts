@@ -1,8 +1,8 @@
 import { createHmac, createSign, randomUUID, timingSafeEqual } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
-import { goatIntegrationResources, goatIntegrations } from "@opencompany/db/schema";
+import { integrationResources, integrations } from "@opencompany/db/schema";
 import { and, desc, eq, notInArray, sql } from "drizzle-orm";
-import { getGoatAppUrl } from "../app-url";
+import { getAppUrl } from "../app-url";
 
 type GitHubInstallation = {
   id: number | string;
@@ -27,31 +27,31 @@ type GitHubInstallationRepositories = {
   repositories?: GitHubRepo[];
 };
 
-export type GoatGitHubRepository = {
+export type GitHubRepository = {
   githubRepoId: string;
   fullName: string;
   defaultBranch: string;
   private: boolean;
 };
 
-export type GoatGitHubConnectedInstallation = {
+export type GitHubConnectedInstallation = {
   installationId: string;
   accountName: string | null;
 };
 
-export class GoatGitHubApiError extends Error {
+export class GitHubApiError extends Error {
   readonly status: number;
   readonly operation: "installation_token" | "request";
 
   constructor(status: number, operation: "installation_token" | "request" = "request") {
     super(`GitHub API request failed with ${status}.`);
-    this.name = "GoatGitHubApiError";
+    this.name = "GitHubApiError";
     this.status = status;
     this.operation = operation;
   }
 }
 
-export type GoatGitHubProviderState = {
+export type GitHubProviderState = {
   provider: "github";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
@@ -60,7 +60,7 @@ export type GoatGitHubProviderState = {
   statusReason: string | null;
 };
 
-export type GoatGitHubIntegrationStatePayload = {
+export type GitHubIntegrationStatePayload = {
   userWorkosId: string;
   // GitHub App installations are workspace-owned: the workspace the connecting
   // admin was acting in when the flow started.
@@ -83,24 +83,19 @@ const GITHUB_WORK_INTEGRATION_ENVS = [
   "GITHUB_INTEGRATION_STATE_SECRET",
 ] as const;
 
-export async function getGoatGitHubIntegrationState(
-  workspaceId: string,
-): Promise<GoatGitHubProviderState> {
+export async function getGitHubIntegrationState(workspaceId: string): Promise<GitHubProviderState> {
   const [row] = await getDb()
     .select({
-      id: goatIntegrations.id,
-      status: goatIntegrations.status,
-      accountName: goatIntegrations.accountName,
-      statusReason: goatIntegrations.statusReason,
+      id: integrations.id,
+      status: integrations.status,
+      accountName: integrations.accountName,
+      statusReason: integrations.statusReason,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
-      and(
-        eq(goatIntegrations.workspaceId, workspaceId),
-        eq(goatIntegrations.provider, GITHUB_PROVIDER),
-      ),
+      and(eq(integrations.workspaceId, workspaceId), eq(integrations.provider, GITHUB_PROVIDER)),
     )
-    .orderBy(desc(goatIntegrations.updatedAt))
+    .orderBy(desc(integrations.updatedAt))
     .limit(1);
 
   if (!row || row.status === "disconnected") {
@@ -124,23 +119,20 @@ export async function getGoatGitHubIntegrationState(
   };
 }
 
-export async function listConnectedGoatGitHubInstallations(
+export async function listConnectedGitHubInstallations(
   workspaceId: string,
-): Promise<GoatGitHubConnectedInstallation[]> {
+): Promise<GitHubConnectedInstallation[]> {
   const rows = await getDb()
     .select({
-      installationId: goatIntegrations.externalId,
-      accountName: goatIntegrations.accountName,
-      status: goatIntegrations.status,
+      installationId: integrations.externalId,
+      accountName: integrations.accountName,
+      status: integrations.status,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
-      and(
-        eq(goatIntegrations.workspaceId, workspaceId),
-        eq(goatIntegrations.provider, GITHUB_PROVIDER),
-      ),
+      and(eq(integrations.workspaceId, workspaceId), eq(integrations.provider, GITHUB_PROVIDER)),
     )
-    .orderBy(desc(goatIntegrations.updatedAt));
+    .orderBy(desc(integrations.updatedAt));
 
   return rows.flatMap((row) => {
     const installationId = row.installationId?.trim();
@@ -149,14 +141,14 @@ export async function listConnectedGoatGitHubInstallations(
   });
 }
 
-export function isGoatGitHubIntegrationConfigured() {
+export function isGitHubIntegrationConfigured() {
   return GITHUB_WORK_INTEGRATION_ENVS.every((name) => Boolean(process.env[name]?.trim()));
 }
 
-export function createGoatGitHubIntegrationState(
-  input: Omit<GoatGitHubIntegrationStatePayload, "expiresAt" | "nonce">,
+export function createGitHubIntegrationState(
+  input: Omit<GitHubIntegrationStatePayload, "expiresAt" | "nonce">,
 ) {
-  const payload: GoatGitHubIntegrationStatePayload = {
+  const payload: GitHubIntegrationStatePayload = {
     ...input,
     returnTo: sanitizeReturnTo(input.returnTo),
     expiresAt: Date.now() + 10 * 60 * 1000,
@@ -166,14 +158,14 @@ export function createGoatGitHubIntegrationState(
   return `${body}.${signStateBody(body)}`;
 }
 
-export function verifyGoatGitHubIntegrationState(state: string): GoatGitHubIntegrationStatePayload {
+export function verifyGitHubIntegrationState(state: string): GitHubIntegrationStatePayload {
   const [body, signature] = state.split(".");
   if (!body || !signature || !safeEqual(signature, signStateBody(body))) {
     throw new Error("Invalid GitHub integration state.");
   }
 
   const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as unknown;
-  if (!isGoatGitHubIntegrationStatePayload(payload)) {
+  if (!isGitHubIntegrationStatePayload(payload)) {
     throw new Error("Invalid GitHub integration state payload.");
   }
   if (payload.expiresAt < Date.now()) {
@@ -186,22 +178,22 @@ export function verifyGoatGitHubIntegrationState(state: string): GoatGitHubInteg
   };
 }
 
-export function buildGoatGitHubInstallUrl(state: string) {
+export function buildGitHubInstallUrl(state: string) {
   const slug = requiredEnv("GITHUB_INTEGRATION_APP_SLUG");
   const url = new URL(`https://github.com/apps/${slug}/installations/new`);
   url.searchParams.set("state", state);
   return url.toString();
 }
 
-export function buildGoatGitHubUserAuthorizationUrl(state: string) {
+export function buildGitHubUserAuthorizationUrl(state: string) {
   const url = new URL("https://github.com/login/oauth/authorize");
   url.searchParams.set("client_id", requiredEnv("GITHUB_INTEGRATION_APP_CLIENT_ID"));
-  url.searchParams.set("redirect_uri", goatGitHubCallbackUrl());
+  url.searchParams.set("redirect_uri", gitHubCallbackUrl());
   url.searchParams.set("state", state);
   return url.toString();
 }
 
-export async function exchangeGoatGitHubUserCode(code: string) {
+export async function exchangeGitHubUserCode(code: string) {
   const response = await fetch("https://github.com/login/oauth/access_token", {
     method: "POST",
     headers: {
@@ -212,7 +204,7 @@ export async function exchangeGoatGitHubUserCode(code: string) {
       client_id: requiredEnv("GITHUB_INTEGRATION_APP_CLIENT_ID"),
       client_secret: requiredEnv("GITHUB_INTEGRATION_APP_CLIENT_SECRET"),
       code,
-      redirect_uri: goatGitHubCallbackUrl(),
+      redirect_uri: gitHubCallbackUrl(),
     }),
   });
 
@@ -234,7 +226,7 @@ export async function exchangeGoatGitHubUserCode(code: string) {
   return result.access_token;
 }
 
-export async function verifyGoatGitHubUserInstallation(input: {
+export async function verifyGitHubUserInstallation(input: {
   userToken: string;
   installationId: string;
 }) {
@@ -255,7 +247,7 @@ export async function verifyGoatGitHubUserInstallation(input: {
   return installation;
 }
 
-export async function getGoatGitHubInstallation(input: { installationId: string }) {
+export async function getGitHubInstallation(input: { installationId: string }) {
   return githubRequest<GitHubInstallation>({
     token: createAppJwt(),
     authScheme: "Bearer",
@@ -264,11 +256,11 @@ export async function getGoatGitHubInstallation(input: { installationId: string 
   });
 }
 
-export async function listGoatGitHubInstallationRepositories(input: {
+export async function listGitHubInstallationRepositories(input: {
   installationId: string;
   signal?: AbortSignal;
 }) {
-  const token = await getGoatGitHubInstallationToken(input.installationId, input.signal);
+  const token = await getGitHubInstallationToken(input.installationId, input.signal);
   const repositories = await githubPaginatedRequest<GitHubInstallationRepositories, GitHubRepo>({
     token,
     path: "/installation/repositories",
@@ -276,10 +268,10 @@ export async function listGoatGitHubInstallationRepositories(input: {
     ...(input.signal ? { signal: input.signal } : {}),
   });
 
-  return repositories.map(toGoatGitHubRepository);
+  return repositories.map(toGitHubRepository);
 }
 
-export async function getGoatGitHubInstallationToken(installationId: string, signal?: AbortSignal) {
+export async function getGitHubInstallationToken(installationId: string, signal?: AbortSignal) {
   const result = await githubRequest<{ token?: string }>({
     token: createAppJwt(),
     authScheme: "Bearer",
@@ -296,13 +288,13 @@ export async function getGoatGitHubInstallationToken(installationId: string, sig
   return result.token;
 }
 
-export async function searchGoatGitHubIssues(input: {
+export async function searchGitHubIssues(input: {
   installationId: string;
   query: string;
   limit: number;
   signal: AbortSignal;
 }): Promise<unknown> {
-  const token = await getGoatGitHubInstallationToken(input.installationId, input.signal);
+  const token = await getGitHubInstallationToken(input.installationId, input.signal);
   const search = new URLSearchParams({ q: input.query, per_page: String(input.limit) });
   return githubRequest<unknown>({
     token,
@@ -312,13 +304,13 @@ export async function searchGoatGitHubIssues(input: {
   });
 }
 
-export async function syncGoatGitHubIntegrationRepositories(input: {
+export async function syncGitHubIntegrationRepositories(input: {
   userWorkosId: string;
   workspaceId: string;
   installationId: string;
   accountLogin: string | null;
   accountType: string | null;
-  repositories: GoatGitHubRepository[];
+  repositories: GitHubRepository[];
 }) {
   const db = getDb();
   const now = new Date();
@@ -336,9 +328,9 @@ export async function syncGoatGitHubIntegrationRepositories(input: {
   };
 
   const [integration] = await db
-    .insert(goatIntegrations)
+    .insert(integrations)
     .values({
-      id: newGoatIntegrationId(),
+      id: newIntegrationId(),
       userWorkosId: input.userWorkosId,
       workspaceId: input.workspaceId,
       provider: GITHUB_PROVIDER,
@@ -354,22 +346,18 @@ export async function syncGoatGitHubIntegrationRepositories(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: [
-        goatIntegrations.workspaceId,
-        goatIntegrations.provider,
-        goatIntegrations.externalId,
-      ],
-      targetWhere: sql`${goatIntegrations.workspaceId} IS NOT NULL`,
+      target: [integrations.workspaceId, integrations.provider, integrations.externalId],
+      targetWhere: sql`${integrations.workspaceId} IS NOT NULL`,
       set: incompleteIntegrationUpdate,
     })
-    .returning({ id: goatIntegrations.id, userWorkosId: goatIntegrations.userWorkosId });
+    .returning({ id: integrations.id, userWorkosId: integrations.userWorkosId });
 
   if (!integration) {
     throw new Error("Could not persist Goat GitHub integration.");
   }
 
   const resourceValues = input.repositories.map((repository) => ({
-    id: newGoatIntegrationResourceId(),
+    id: newIntegrationResourceId(),
     userWorkosId: integration.userWorkosId,
     integrationId: integration.id,
     provider: GITHUB_PROVIDER,
@@ -389,13 +377,13 @@ export async function syncGoatGitHubIntegrationRepositories(input: {
 
   if (resourceValues.length > 0) {
     await db
-      .insert(goatIntegrationResources)
+      .insert(integrationResources)
       .values(resourceValues)
       .onConflictDoUpdate({
         target: [
-          goatIntegrationResources.integrationId,
-          goatIntegrationResources.resourceType,
-          goatIntegrationResources.externalId,
+          integrationResources.integrationId,
+          integrationResources.resourceType,
+          integrationResources.externalId,
         ],
         set: {
           userWorkosId: integration.userWorkosId,
@@ -421,31 +409,31 @@ export async function syncGoatGitHubIntegrationRepositories(input: {
   };
 
   const staleWhere = and(
-    eq(goatIntegrationResources.integrationId, integration.id),
-    eq(goatIntegrationResources.userWorkosId, integration.userWorkosId),
-    eq(goatIntegrationResources.provider, GITHUB_PROVIDER),
-    eq(goatIntegrationResources.resourceType, GITHUB_REPOSITORY_RESOURCE_TYPE),
+    eq(integrationResources.integrationId, integration.id),
+    eq(integrationResources.userWorkosId, integration.userWorkosId),
+    eq(integrationResources.provider, GITHUB_PROVIDER),
+    eq(integrationResources.resourceType, GITHUB_REPOSITORY_RESOURCE_TYPE),
   );
 
   if (input.repositories.length > 0) {
     await db
-      .update(goatIntegrationResources)
+      .update(integrationResources)
       .set(staleResourceUpdate)
       .where(
         and(
           staleWhere,
           notInArray(
-            goatIntegrationResources.externalId,
+            integrationResources.externalId,
             input.repositories.map((repository) => repository.githubRepoId),
           ),
         ),
       );
   } else {
-    await db.update(goatIntegrationResources).set(staleResourceUpdate).where(staleWhere);
+    await db.update(integrationResources).set(staleResourceUpdate).where(staleWhere);
   }
 
   await db
-    .update(goatIntegrations)
+    .update(integrations)
     .set({
       status: "connected",
       statusReason: null,
@@ -454,30 +442,30 @@ export async function syncGoatGitHubIntegrationRepositories(input: {
     })
     .where(
       and(
-        eq(goatIntegrations.workspaceId, input.workspaceId),
-        eq(goatIntegrations.provider, GITHUB_PROVIDER),
-        eq(goatIntegrations.id, integration.id),
+        eq(integrations.workspaceId, input.workspaceId),
+        eq(integrations.provider, GITHUB_PROVIDER),
+        eq(integrations.id, integration.id),
       ),
     );
 }
 
-export function appendGoatGitHubIntegrationStatus(
+export function appendGitHubIntegrationStatus(
   returnTo: string,
   status: "connected" | "error",
   reason?: string,
 ) {
-  const url = new URL(sanitizeReturnTo(returnTo), getGoatAppUrl());
+  const url = new URL(sanitizeReturnTo(returnTo), getAppUrl());
   url.searchParams.set("integration", GITHUB_PROVIDER);
   url.searchParams.set("setup", status);
   if (status === "error" && reason) url.searchParams.set("reason", reason);
   return `${url.pathname}${url.search}`;
 }
 
-function goatGitHubCallbackUrl() {
-  return `${getGoatAppUrl()}/api/integrations/github/callback`;
+function gitHubCallbackUrl() {
+  return `${getAppUrl()}/api/integrations/github/callback`;
 }
 
-function toGoatGitHubRepository(repository: GitHubRepo): GoatGitHubRepository {
+function toGitHubRepository(repository: GitHubRepo): GitHubRepository {
   return {
     githubRepoId: String(repository.id),
     fullName: repository.full_name,
@@ -506,7 +494,7 @@ async function githubRequest<T>(input: {
   });
 
   if (!response.ok) {
-    throw new GoatGitHubApiError(response.status, input.operation);
+    throw new GitHubApiError(response.status, input.operation);
   }
 
   return (await response.json()) as T;
@@ -538,9 +526,7 @@ async function githubPaginatedRequest<TPage, TItem>(input: {
   }
 }
 
-function isGoatGitHubIntegrationStatePayload(
-  value: unknown,
-): value is GoatGitHubIntegrationStatePayload {
+function isGitHubIntegrationStatePayload(value: unknown): value is GitHubIntegrationStatePayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return (
@@ -606,10 +592,10 @@ function base64Url(value: string | Buffer) {
     .replace(/\//g, "_");
 }
 
-function newGoatIntegrationId() {
+function newIntegrationId() {
   return `gint_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 }
 
-function newGoatIntegrationResourceId() {
+function newIntegrationResourceId() {
   return `gres_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 }

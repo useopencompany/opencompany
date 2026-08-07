@@ -2,12 +2,12 @@ import { createHash } from "node:crypto";
 import {
   type NormalizedGranolaMeetingSourceItem,
   type NormalizedGranolaMeetingTranscriptSegment,
+  normalizeBrainId,
   normalizeEvidenceId,
-  normalizeGoatBrainId,
 } from "@opencompany/brain";
 import {
-  createGoatBrainMarkdownContent,
-  goatBrainFilePathFor,
+  brainFilePathFor,
+  createBrainMarkdownContent,
   MAX_GOAT_BRAIN_FILE_BYTES,
 } from "@opencompany/db/brain-files";
 import { truncateByBytes } from "./brain-jamie-writes";
@@ -28,9 +28,9 @@ export function buildGranolaMeetingIds(
 ): GranolaMeetingIds {
   const meeting = item.content.meeting;
   const date = item.occurredAt.slice(0, 10);
-  const titleSlug = (normalizeGoatBrainId(meeting.title) || "meeting").slice(0, 42);
+  const titleSlug = (normalizeBrainId(meeting.title) || "meeting").slice(0, 42);
   const meetingBrainId =
-    normalizeGoatBrainId(`meeting-${date}-${titleSlug}-${shortHash(item.externalId)}`) ||
+    normalizeBrainId(`meeting-${date}-${titleSlug}-${shortHash(item.externalId)}`) ||
     `meeting-${shortHash(item.sourceRef)}`;
   const evidenceBrainId = normalizeEvidenceId(
     `ev-granola-${shortHash(`${item.externalId}:${item.contentHash}`, 18)}`,
@@ -84,7 +84,7 @@ export function buildGranolaMeetingEvidenceWrite(
   return {
     meetingBrainId,
     evidenceBrainId,
-    evidencePath: goatBrainFilePathFor(GRANOLA_EVIDENCE_FOLDER, evidenceBrainId),
+    evidencePath: brainFilePathFor(GRANOLA_EVIDENCE_FOLDER, evidenceBrainId),
     evidenceContent,
     truncatedTranscript,
   };
@@ -133,7 +133,7 @@ function createEvidenceContent(input: {
       : input.transcriptMarkdown,
   ].join("\n\n");
 
-  return createGoatBrainMarkdownContent({
+  return createBrainMarkdownContent({
     id: input.evidenceBrainId,
     folderPath: GRANOLA_EVIDENCE_FOLDER,
     title: `Granola notes: ${meeting.title}`,

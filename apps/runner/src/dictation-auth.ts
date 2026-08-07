@@ -2,13 +2,13 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 const DICTATION_TICKET_VERSION = 1;
 
-type GoatDictationTicketPayload = {
+type DictationTicketPayload = {
   v: 1;
   userWorkosId: string;
   expiresAt: number;
 };
 
-export function createGoatDictationTicket(input: {
+export function createDictationTicket(input: {
   userWorkosId: string;
   secret: string;
   now?: number;
@@ -20,18 +20,18 @@ export function createGoatDictationTicket(input: {
       v: DICTATION_TICKET_VERSION,
       userWorkosId: input.userWorkosId,
       expiresAt,
-    } satisfies GoatDictationTicketPayload),
+    } satisfies DictationTicketPayload),
   ).toString("base64url");
   const signature = sign("goat-dictation-ticket", encodedPayload, input.secret);
 
   return { ticket: `${encodedPayload}.${signature}`, expiresAt };
 }
 
-export function verifyGoatDictationTicket(input: {
+export function verifyDictationTicket(input: {
   ticket: string;
   secret: string;
   now?: number;
-}): GoatDictationTicketPayload | null {
+}): DictationTicketPayload | null {
   const separator = input.ticket.lastIndexOf(".");
   if (separator <= 0) return null;
 
@@ -44,7 +44,7 @@ export function verifyGoatDictationTicket(input: {
   try {
     const value = JSON.parse(
       Buffer.from(encodedPayload, "base64url").toString("utf8"),
-    ) as Partial<GoatDictationTicketPayload>;
+    ) as Partial<DictationTicketPayload>;
     if (
       value.v !== DICTATION_TICKET_VERSION ||
       typeof value.userWorkosId !== "string" ||
@@ -55,7 +55,7 @@ export function verifyGoatDictationTicket(input: {
     ) {
       return null;
     }
-    return value as GoatDictationTicketPayload;
+    return value as DictationTicketPayload;
   } catch {
     return null;
   }

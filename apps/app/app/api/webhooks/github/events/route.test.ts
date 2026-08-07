@@ -1,44 +1,44 @@
-import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
-import { upsertGoatBrainSourceItemAndEnqueue } from "@opencompany/db/brain-ingest";
+import { captureIngestionQuotaAnalytics } from "@opencompany/analytics/app";
+import { upsertBrainSourceItemAndEnqueue } from "@opencompany/db/brain-ingest";
 import {
-  insertGoatGitHubPullRequestEvents,
-  listEnabledGoatGitHubBrainSourceRoutes,
-  listGoatGitHubIntegrationsForInstallation,
+  insertGitHubPullRequestEvents,
+  listEnabledGitHubBrainSourceRoutes,
+  listGitHubIntegrationsForInstallation,
 } from "@opencompany/db/github";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { verifyGoatGitHubWebhookSignature } from "@/lib/integrations/github-signature";
-import { triggerGoatBrainIngestWake } from "@/lib/task-runner";
+import { verifyGitHubWebhookSignature } from "@/lib/integrations/github-signature";
+import { triggerBrainIngestWake } from "@/lib/task-runner";
 import { POST } from "./route";
 
-vi.mock("@opencompany/analytics/goat", () => ({
-  captureGoatIngestionQuotaAnalytics: vi.fn(),
+vi.mock("@opencompany/analytics/app", () => ({
+  captureIngestionQuotaAnalytics: vi.fn(),
 }));
 vi.mock("@opencompany/db/brain-ingest", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  upsertGoatBrainSourceItemAndEnqueue: vi.fn(),
+  upsertBrainSourceItemAndEnqueue: vi.fn(),
 }));
 vi.mock("@opencompany/db/github", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  insertGoatGitHubPullRequestEvents: vi.fn(),
-  listEnabledGoatGitHubBrainSourceRoutes: vi.fn(),
-  listGoatGitHubIntegrationsForInstallation: vi.fn(),
+  insertGitHubPullRequestEvents: vi.fn(),
+  listEnabledGitHubBrainSourceRoutes: vi.fn(),
+  listGitHubIntegrationsForInstallation: vi.fn(),
 }));
 vi.mock("@/lib/integrations/github-signature", () => ({
-  verifyGoatGitHubWebhookSignature: vi.fn(),
+  verifyGitHubWebhookSignature: vi.fn(),
 }));
 vi.mock("@/lib/task-runner", () => ({
-  triggerGoatBrainIngestWake: vi.fn(),
+  triggerBrainIngestWake: vi.fn(),
 }));
 
 describe("POST /api/webhooks/github/events", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.mocked(verifyGoatGitHubWebhookSignature).mockReturnValue(true);
-    vi.mocked(listGoatGitHubIntegrationsForInstallation).mockResolvedValue([
+    vi.mocked(verifyGitHubWebhookSignature).mockReturnValue(true);
+    vi.mocked(listGitHubIntegrationsForInstallation).mockResolvedValue([
       { id: "gint_github_1", userWorkosId: "user_1", status: "connected" },
     ]);
-    vi.mocked(listEnabledGoatGitHubBrainSourceRoutes).mockResolvedValue([
+    vi.mocked(listEnabledGitHubBrainSourceRoutes).mockResolvedValue([
       {
         integrationId: "gint_github_1",
         brainRef: "gbrain_1",
@@ -54,15 +54,15 @@ describe("POST /api/webhooks/github/events", () => {
         },
       },
     ]);
-    vi.mocked(insertGoatGitHubPullRequestEvents).mockResolvedValue(1);
-    vi.mocked(upsertGoatBrainSourceItemAndEnqueue).mockResolvedValue({
+    vi.mocked(insertGitHubPullRequestEvents).mockResolvedValue(1);
+    vi.mocked(upsertBrainSourceItemAndEnqueue).mockResolvedValue({
       sourceItemId: "gbsrc_1",
       jobId: "gbjob_1",
       jobIds: ["gbjob_1"],
       enqueued: true,
       skipped: false,
     });
-    vi.mocked(triggerGoatBrainIngestWake).mockResolvedValue(undefined);
+    vi.mocked(triggerBrainIngestWake).mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -74,7 +74,7 @@ describe("POST /api/webhooks/github/events", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, buffered: 1 });
-    expect(insertGoatGitHubPullRequestEvents).toHaveBeenCalledWith([
+    expect(insertGitHubPullRequestEvents).toHaveBeenCalledWith([
       expect.objectContaining({
         integrationId: "gint_github_1",
         userWorkosId: "user_1",
@@ -85,8 +85,8 @@ describe("POST /api/webhooks/github/events", () => {
         eventType: "pull_request_opened",
       }),
     ]);
-    expect(upsertGoatBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
-    expect(captureGoatIngestionQuotaAnalytics).not.toHaveBeenCalled();
+    expect(upsertBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
+    expect(captureIngestionQuotaAnalytics).not.toHaveBeenCalled();
   });
 
   it("buffers pull-request discussion under the parent PR window", async () => {
@@ -94,14 +94,14 @@ describe("POST /api/webhooks/github/events", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, buffered: 1 });
-    expect(insertGoatGitHubPullRequestEvents).toHaveBeenCalledWith([
+    expect(insertGitHubPullRequestEvents).toHaveBeenCalledWith([
       expect.objectContaining({
         repositoryId: "4242",
         pullRequestNumber: 123,
         eventType: "pull_request_commented",
       }),
     ]);
-    expect(upsertGoatBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
+    expect(upsertBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
   });
 
   it("keeps issue activity on the immediate ingest path", async () => {
@@ -109,18 +109,18 @@ describe("POST /api/webhooks/github/events", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, enqueued: 1 });
-    expect(insertGoatGitHubPullRequestEvents).not.toHaveBeenCalled();
-    expect(upsertGoatBrainSourceItemAndEnqueue).toHaveBeenCalledWith(
+    expect(insertGitHubPullRequestEvents).not.toHaveBeenCalled();
+    expect(upsertBrainSourceItemAndEnqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         integrationId: "gint_github_1",
         brainRefs: ["gbrain_1"],
       }),
     );
-    expect(triggerGoatBrainIngestWake).toHaveBeenCalledOnce();
+    expect(triggerBrainIngestWake).toHaveBeenCalledOnce();
   });
 
   it("returns a retryable response when pull-request buffering fails", async () => {
-    vi.mocked(insertGoatGitHubPullRequestEvents).mockRejectedValueOnce(
+    vi.mocked(insertGitHubPullRequestEvents).mockRejectedValueOnce(
       new Error("database unavailable"),
     );
 

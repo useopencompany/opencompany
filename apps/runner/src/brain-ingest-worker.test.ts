@@ -2,71 +2,71 @@ import { calculateModelUsageCost } from "@opencompany/billing";
 import { normalizeJamieMeetingCompletedWebhook } from "@opencompany/brain";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  BrainAgentOutcomeError,
+  BrainIngestBudgetError,
   GOAT_BRAIN_AGENT_SKIP_SENTINEL,
-  GoatBrainAgentOutcomeError,
-  GoatBrainIngestBudgetError,
 } from "./brain-agent-ingest";
 import {
+  type BrainIngestStore,
   GOAT_BRAIN_INGEST_MAX_ATTEMPTS,
   GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS,
-  type GoatBrainIngestStore,
-  runClaimedGoatBrainIngestJob,
-  startGoatBrainIngestWorker,
+  runClaimedBrainIngestJob,
+  startBrainIngestWorker,
 } from "./brain-ingest-worker";
 import { buildJamieMeetingBrainWrites } from "./brain-jamie-writes";
 
 const analytics = vi.hoisted(() => ({
-  captureGoatModelSpendRecorded: vi.fn(async () => undefined),
-  captureGoatServerEvent: vi.fn(async () => undefined),
+  captureModelSpendRecorded: vi.fn(async () => undefined),
+  captureServerEvent: vi.fn(async () => undefined),
 }));
 
-vi.mock("@opencompany/analytics/goat/server", () => ({
-  captureGoatModelSpendRecorded: analytics.captureGoatModelSpendRecorded,
-  captureGoatServerEvent: analytics.captureGoatServerEvent,
+vi.mock("@opencompany/analytics/server", () => ({
+  captureModelSpendRecorded: analytics.captureModelSpendRecorded,
+  captureServerEvent: analytics.captureServerEvent,
 }));
 
 const telemetry = vi.hoisted(() => ({
-  recordGoatBrainIngestRun: vi.fn(),
-  recordGoatModelCost: vi.fn(),
-  startGoatSpan: vi.fn(() => ({
+  recordBrainIngestRun: vi.fn(),
+  recordModelCost: vi.fn(),
+  startSpan: vi.fn(() => ({
     setAttributes: vi.fn(),
     runInContext: vi.fn((run: () => unknown) => run()),
     fail: vi.fn(() => "unknown"),
     end: vi.fn(),
   })),
-  withGoatSpan: vi.fn(async (_name: string, _attributes: unknown, run: () => Promise<unknown>) =>
+  withSpan: vi.fn(async (_name: string, _attributes: unknown, run: () => Promise<unknown>) =>
     run(),
   ),
 }));
 
 const billing = vi.hoisted(() => ({
-  releasePendingGoatIngestionReservations: vi.fn(async () => ({ released: 0, failed: 0 })),
+  releasePendingIngestionReservations: vi.fn(async () => ({ released: 0, failed: 0 })),
 }));
 
 const credits = vi.hoisted(() => ({
-  recordGoatCreditDebit: vi.fn(async () => ({ ok: true as const, ledgerId: 456 })),
+  recordCreditDebit: vi.fn(async () => ({ ok: true as const, ledgerId: 456 })),
 }));
 
 vi.mock("@opencompany/db/billing", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opencompany/db/billing")>();
   return {
     ...actual,
-    releasePendingGoatIngestionReservations: billing.releasePendingGoatIngestionReservations,
+    releasePendingIngestionReservations: billing.releasePendingIngestionReservations,
   };
 });
 
 vi.mock("@opencompany/db/credits", () => ({
-  recordGoatCreditDebit: credits.recordGoatCreditDebit,
+  recordCreditDebit: credits.recordCreditDebit,
 }));
 
 vi.mock("@opencompany/telemetry", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opencompany/telemetry")>();
   return {
     ...actual,
-    recordGoatBrainIngestRun: telemetry.recordGoatBrainIngestRun,
-    recordGoatModelCost: telemetry.recordGoatModelCost,
-    startGoatSpan: telemetry.startGoatSpan,
-    withGoatSpan: telemetry.withGoatSpan,
+    recordBrainIngestRun: telemetry.recordBrainIngestRun,
+    recordModelCost: telemetry.recordModelCost,
+    startSpan: telemetry.startSpan,
+    withSpan: telemetry.withSpan,
   };
 });
 
@@ -105,30 +105,30 @@ describe("Goat Brain ingest worker", () => {
 
   it("releases paused reservations before polling with the worker's shared store", async () => {
     let resolveRelease: (result: { released: number; failed: number }) => void = () => {};
-    billing.releasePendingGoatIngestionReservations.mockReturnValueOnce(
+    billing.releasePendingIngestionReservations.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveRelease = resolve;
       }),
     );
     const claimNext = vi.fn(async () => null);
-    const store: GoatBrainIngestStore = {
+    const store: BrainIngestStore = {
       claimNext,
       heartbeat: vi.fn(async () => true),
       complete: vi.fn(async () => true),
       skip: vi.fn(async () => true),
       fail: vi.fn(async () => true),
     };
-    const worker = startGoatBrainIngestWorker(
+    const worker = startBrainIngestWorker(
       {
         instanceId: "runner_test",
         workerConcurrency: 1,
-      } as Parameters<typeof startGoatBrainIngestWorker>[0],
+      } as Parameters<typeof startBrainIngestWorker>[0],
       { store, pollIntervalMs: 60_000 },
     );
 
     try {
       await vi.waitFor(() => {
-        expect(billing.releasePendingGoatIngestionReservations).toHaveBeenCalledOnce();
+        expect(billing.releasePendingIngestionReservations).toHaveBeenCalledOnce();
       });
       expect(claimNext).not.toHaveBeenCalled();
       resolveRelease({ released: 0, failed: 0 });
@@ -154,13 +154,13 @@ describe("Goat Brain ingest worker", () => {
           ]),
         }),
       );
-      expect(billing.releasePendingGoatIngestionReservations).toHaveBeenCalledWith({
+      expect(billing.releasePendingIngestionReservations).toHaveBeenCalledWith({
         now: expect.any(Date),
         maxWorkspaces: 50,
       });
-      expect(
-        billing.releasePendingGoatIngestionReservations.mock.invocationCallOrder[0],
-      ).toBeLessThan(claimNext.mock.invocationCallOrder[0] as number);
+      expect(billing.releasePendingIngestionReservations.mock.invocationCallOrder[0]).toBeLessThan(
+        claimNext.mock.invocationCallOrder[0] as number,
+      );
     } finally {
       resolveRelease({ released: 0, failed: 0 });
       await worker.stop();
@@ -215,7 +215,7 @@ describe("Goat Brain ingest worker", () => {
     const complete = vi.fn(async () => true);
     const skip = vi.fn(async () => true);
     const fail = vi.fn(async () => true);
-    const store: GoatBrainIngestStore = {
+    const store: BrainIngestStore = {
       claimNext: vi.fn(async () => null),
       heartbeat: vi.fn(async () => true),
       complete,
@@ -223,7 +223,7 @@ describe("Goat Brain ingest worker", () => {
       fail,
     };
 
-    await runClaimedGoatBrainIngestJob({
+    await runClaimedBrainIngestJob({
       env: { jobLeaseTtlMs: 30_000, vercelAiGatewayApiKey: "gw_test" },
       store,
       handlers: [
@@ -280,7 +280,7 @@ describe("Goat Brain ingest worker", () => {
         result: expect.objectContaining({ handled: true, durationMs: expect.any(Number) }),
       }),
     );
-    expect(analytics.captureGoatServerEvent).toHaveBeenCalledWith(
+    expect(analytics.captureServerEvent).toHaveBeenCalledWith(
       "brain_ingestion_completed",
       "user_123",
       {
@@ -291,7 +291,7 @@ describe("Goat Brain ingest worker", () => {
       },
       { workspaceId: "goat_ws_user_123" },
     );
-    expect(telemetry.recordGoatBrainIngestRun).toHaveBeenCalledWith(
+    expect(telemetry.recordBrainIngestRun).toHaveBeenCalledWith(
       expect.objectContaining({
         outcome: "success",
         attributes: expect.objectContaining({
@@ -306,7 +306,7 @@ describe("Goat Brain ingest worker", () => {
     );
     expect(skip).not.toHaveBeenCalled();
     expect(fail).not.toHaveBeenCalled();
-    expect(telemetry.recordGoatModelCost).not.toHaveBeenCalled();
+    expect(telemetry.recordModelCost).not.toHaveBeenCalled();
   });
 
   it("aborts in-flight handlers when their source revokes the job lease", async () => {
@@ -341,12 +341,12 @@ describe("Goat Brain ingest worker", () => {
         },
       );
       const heartbeat = vi
-        .fn<GoatBrainIngestStore["heartbeat"]>()
+        .fn<BrainIngestStore["heartbeat"]>()
         .mockResolvedValueOnce(true)
         .mockResolvedValueOnce(false);
       const complete = vi.fn(async () => true);
       const fail = vi.fn(async () => true);
-      const store: GoatBrainIngestStore = {
+      const store: BrainIngestStore = {
         claimNext: vi.fn(async () => null),
         heartbeat,
         complete,
@@ -354,7 +354,7 @@ describe("Goat Brain ingest worker", () => {
         fail,
       };
 
-      const processing = runClaimedGoatBrainIngestJob({
+      const processing = runClaimedBrainIngestJob({
         env: { jobLeaseTtlMs: 30_000, vercelAiGatewayApiKey: "gw_test" },
         store,
         handlers: [
@@ -403,7 +403,7 @@ describe("Goat Brain ingest worker", () => {
       );
       expect(complete).not.toHaveBeenCalled();
       expect(fail).not.toHaveBeenCalled();
-      expect(telemetry.recordGoatBrainIngestRun).toHaveBeenCalledWith(
+      expect(telemetry.recordBrainIngestRun).toHaveBeenCalledWith(
         expect.objectContaining({
           outcome: "aborted",
           attributes: expect.objectContaining({ "goat.failure_category": "lease_lost" }),
@@ -449,7 +449,7 @@ describe("Goat Brain ingest worker", () => {
         createdAt: "2026-01-01T10:01:00.000Z",
       },
     };
-    const store: GoatBrainIngestStore = {
+    const store: BrainIngestStore = {
       claimNext: vi.fn(async () => null),
       heartbeat: vi.fn(async () => true),
       complete: vi.fn(async () => true),
@@ -457,7 +457,7 @@ describe("Goat Brain ingest worker", () => {
       fail: vi.fn(async () => true),
     };
 
-    await runClaimedGoatBrainIngestJob({
+    await runClaimedBrainIngestJob({
       env: { jobLeaseTtlMs: 30_000, vercelAiGatewayApiKey: "gw_test" },
       store,
       handlers: [
@@ -506,8 +506,8 @@ describe("Goat Brain ingest worker", () => {
       inputCacheWriteTokens: usage.cacheWriteInputTokens,
       outputTokens: usage.outputTokens,
     });
-    expect(telemetry.recordGoatModelCost).toHaveBeenCalledOnce();
-    expect(telemetry.recordGoatModelCost).toHaveBeenCalledWith({
+    expect(telemetry.recordModelCost).toHaveBeenCalledOnce();
+    expect(telemetry.recordModelCost).toHaveBeenCalledWith({
       costUsdMicros: expectedCost.totalCostUsdMicros,
       attributes: {
         "goat.model": "anthropic/claude-sonnet-5",
@@ -550,7 +550,7 @@ describe("Goat Brain ingest worker", () => {
       const complete = vi.fn(async () => true);
       const skip = vi.fn(async () => true);
       const fail = vi.fn(async () => true);
-      const store: GoatBrainIngestStore = {
+      const store: BrainIngestStore = {
         claimNext: vi.fn(async () => null),
         heartbeat: vi.fn(async () => true),
         complete,
@@ -558,7 +558,7 @@ describe("Goat Brain ingest worker", () => {
         fail,
       };
 
-      await runClaimedGoatBrainIngestJob({
+      await runClaimedBrainIngestJob({
         env: { jobLeaseTtlMs: 30_000, vercelAiGatewayApiKey: "gw_test" },
         store,
         handlers: [
@@ -604,7 +604,7 @@ describe("Goat Brain ingest worker", () => {
           reason,
         }),
       );
-      expect(telemetry.recordGoatBrainIngestRun).toHaveBeenCalledWith(
+      expect(telemetry.recordBrainIngestRun).toHaveBeenCalledWith(
         expect.objectContaining({
           outcome: "skipped",
           attributes: expect.objectContaining({
@@ -617,7 +617,7 @@ describe("Goat Brain ingest worker", () => {
       expect(complete).not.toHaveBeenCalled();
       expect(fail).not.toHaveBeenCalled();
     }
-    expect(analytics.captureGoatServerEvent).not.toHaveBeenCalled();
+    expect(analytics.captureServerEvent).not.toHaveBeenCalled();
   });
 
   it("records failed brain ingest attempts with investigation ids", async () => {
@@ -639,7 +639,7 @@ describe("Goat Brain ingest worker", () => {
     const complete = vi.fn(async () => true);
     const skip = vi.fn(async () => true);
     const fail = vi.fn(async () => true);
-    const store: GoatBrainIngestStore = {
+    const store: BrainIngestStore = {
       claimNext: vi.fn(async () => null),
       heartbeat: vi.fn(async () => true),
       complete,
@@ -648,7 +648,7 @@ describe("Goat Brain ingest worker", () => {
     };
 
     await expect(
-      runClaimedGoatBrainIngestJob({
+      runClaimedBrainIngestJob({
         env: { jobLeaseTtlMs: 30_000, vercelAiGatewayApiKey: "gw_test" },
         store,
         handlers: [
@@ -698,7 +698,7 @@ describe("Goat Brain ingest worker", () => {
         maxAttempts: GOAT_BRAIN_INGEST_MAX_ATTEMPTS,
       }),
     );
-    expect(telemetry.recordGoatBrainIngestRun).toHaveBeenCalledWith(
+    expect(telemetry.recordBrainIngestRun).toHaveBeenCalledWith(
       expect.objectContaining({
         outcome: "failure",
         attributes: expect.objectContaining({
@@ -727,12 +727,12 @@ describe("Goat Brain ingest worker", () => {
       content: {},
     };
     const run = vi.fn(async () => {
-      throw new GoatBrainAgentOutcomeError(
+      throw new BrainAgentOutcomeError(
         "Goat Brain ingestion agent finished without writing to the brain and did not skip.",
       );
     });
     const fail = vi.fn(async () => true);
-    const store: GoatBrainIngestStore = {
+    const store: BrainIngestStore = {
       claimNext: vi.fn(async () => null),
       heartbeat: vi.fn(async () => true),
       complete: vi.fn(async () => true),
@@ -741,7 +741,7 @@ describe("Goat Brain ingest worker", () => {
     };
 
     await expect(
-      runClaimedGoatBrainIngestJob({
+      runClaimedBrainIngestJob({
         env: { jobLeaseTtlMs: 30_000, vercelAiGatewayApiKey: "gw_test" },
         store,
         handlers: [
@@ -789,7 +789,7 @@ describe("Goat Brain ingest worker", () => {
       }),
     );
     // attempts >= the outcome cap: telemetry records this run as terminal.
-    expect(telemetry.recordGoatBrainIngestRun).toHaveBeenCalledWith(
+    expect(telemetry.recordBrainIngestRun).toHaveBeenCalledWith(
       expect.objectContaining({
         outcome: "failure",
         attributes: expect.objectContaining({ "goat.status": "failed" }),
@@ -842,10 +842,10 @@ describe("Goat Brain ingest worker", () => {
       mutations: 0,
     };
     const run = vi.fn(async () => {
-      throw new GoatBrainIngestBudgetError("Goat Brain ingestion budget exhausted.", failureResult);
+      throw new BrainIngestBudgetError("Goat Brain ingestion budget exhausted.", failureResult);
     });
     const fail = vi.fn(async () => true);
-    const store: GoatBrainIngestStore = {
+    const store: BrainIngestStore = {
       claimNext: vi.fn(async () => null),
       heartbeat: vi.fn(async () => true),
       complete: vi.fn(async () => true),
@@ -854,7 +854,7 @@ describe("Goat Brain ingest worker", () => {
     };
 
     await expect(
-      runClaimedGoatBrainIngestJob({
+      runClaimedBrainIngestJob({
         env: { jobLeaseTtlMs: 30_000, vercelAiGatewayApiKey: "gw_test" },
         store,
         handlers: [
@@ -906,7 +906,7 @@ describe("Goat Brain ingest worker", () => {
         }),
       }),
     );
-    expect(telemetry.recordGoatBrainIngestRun).toHaveBeenCalledWith(
+    expect(telemetry.recordBrainIngestRun).toHaveBeenCalledWith(
       expect.objectContaining({
         outcome: "failure",
         attributes: expect.objectContaining({
@@ -924,15 +924,15 @@ describe("Goat Brain ingest worker", () => {
       inputCacheWriteTokens: 0,
       outputTokens: usage.outputTokens,
     });
-    expect(telemetry.recordGoatModelCost).toHaveBeenCalledOnce();
-    expect(telemetry.recordGoatModelCost).toHaveBeenCalledWith({
+    expect(telemetry.recordModelCost).toHaveBeenCalledOnce();
+    expect(telemetry.recordModelCost).toHaveBeenCalledWith({
       costUsdMicros: expectedCost.totalCostUsdMicros,
       attributes: {
         "goat.model": failureResult.trace.model,
         "goat.surface": "brain_ingest",
       },
     });
-    expect(credits.recordGoatCreditDebit).toHaveBeenCalledWith(
+    expect(credits.recordCreditDebit).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceId: "goat_ws_user_123",
         source: "ingest_model_usage",
@@ -941,7 +941,7 @@ describe("Goat Brain ingest worker", () => {
         totalCostUsdMicros: 451_500,
       }),
     );
-    expect(analytics.captureGoatModelSpendRecorded).toHaveBeenCalledWith(
+    expect(analytics.captureModelSpendRecorded).toHaveBeenCalledWith(
       expect.objectContaining({
         userWorkosId: "user_123",
         workspaceId: "goat_ws_user_123",

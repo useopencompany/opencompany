@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
-import { resolveGoatCodexChatInteraction } from "@/lib/codex-chat-interactions";
+import { currentUser } from "@/lib/auth";
+import { resolveCodexChatInteraction } from "@/lib/codex-chat-interactions";
 
 export const runtime = "nodejs";
 
@@ -12,7 +12,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ interactionId: string }> },
 ) {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return new Response("Unauthorized", { status: 401 });
 
   const body = await readJsonBody<InteractionResponseBody>(request);
@@ -21,7 +21,7 @@ export async function POST(
   if (!/^goat_codex_chat_interaction_[0-9a-f-]{36}$/.test(interactionId)) {
     return new Response("Codex question not found.", { status: 404 });
   }
-  const result = await resolveGoatCodexChatInteraction({
+  const result = await resolveCodexChatInteraction({
     userWorkosId: context.user.workosUserId,
     interactionId,
     answers: body.value.answers,

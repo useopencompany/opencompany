@@ -1,5 +1,5 @@
-import { GoatAttioSettingsRoute } from "@/components/GoatRoutes";
+import { AttioSettingsRoute } from "@/components/AppRoutes";
 
 export default function AttioSettingsPage() {
-  return <GoatAttioSettingsRoute />;
+  return <AttioSettingsRoute />;
 }

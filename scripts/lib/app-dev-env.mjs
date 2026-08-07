@@ -2,51 +2,51 @@
 // Purpose: resolves Goat dev environment without letting public tunnels replace
 // local WorkOS callbacks.
 
-export function resolveGoatDevEnv({
+export function resolveDevEnv({
   port = "3002",
   processEnv = process.env,
   tunnelEnv = {},
-  goatHttpsEnv = {},
+  httpsEnv = {},
 } = {}) {
   const localHttpAppUrl = `http://localhost:${port}`;
-  const configuredAppUrl = configuredGoatAppUrl(processEnv, goatHttpsEnv);
-  const goatAppUrl =
-    trimmed(goatHttpsEnv.NEXT_PUBLIC_APP_URL) ||
+  const configuredAppUrl = configuredAppUrl(processEnv, httpsEnv);
+  const appUrl =
+    trimmed(httpsEnv.NEXT_PUBLIC_APP_URL) ||
     trimmed(tunnelEnv.NEXT_PUBLIC_APP_URL) ||
     trimmed(tunnelEnv.NEXT_PUBLIC_APP_URL) ||
     configuredAppUrl ||
     localHttpAppUrl;
 
   const localRedirectAppUrl =
-    trimmed(goatHttpsEnv.NEXT_PUBLIC_APP_URL) || configuredAppUrl || localHttpAppUrl;
-  const goatRedirectUri =
-    trimmed(goatHttpsEnv.NEXT_PUBLIC_WORKOS_REDIRECT_URI) ||
-    configuredGoatRedirectUri(processEnv, goatHttpsEnv) ||
+    trimmed(httpsEnv.NEXT_PUBLIC_APP_URL) || configuredAppUrl || localHttpAppUrl;
+  const redirectUri =
+    trimmed(httpsEnv.NEXT_PUBLIC_WORKOS_REDIRECT_URI) ||
+    configuredRedirectUri(processEnv, httpsEnv) ||
     `${localRedirectAppUrl}/auth/callback`;
 
   return {
-    NEXT_PUBLIC_APP_URL: goatAppUrl,
-    NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
-    NEXT_PUBLIC_APP_URL: goatAppUrl,
-    NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
-    WORKOS_REDIRECT_URI: goatRedirectUri,
+    NEXT_PUBLIC_APP_URL: appUrl,
+    NEXT_PUBLIC_WORKOS_REDIRECT_URI: redirectUri,
+    NEXT_PUBLIC_APP_URL: appUrl,
+    NEXT_PUBLIC_WORKOS_REDIRECT_URI: redirectUri,
+    WORKOS_REDIRECT_URI: redirectUri,
     RUNNER_WORKERS_ENABLED: "true",
     RUNNER_ALLOWED_ORIGINS: appendCsvValues(
       processEnv.RUNNER_ALLOWED_ORIGINS,
-      [goatAppUrl, tunnelEnv.NEXT_PUBLIC_APP_URL, tunnelEnv.NEXT_PUBLIC_APP_URL].filter(Boolean),
+      [appUrl, tunnelEnv.NEXT_PUBLIC_APP_URL, tunnelEnv.NEXT_PUBLIC_APP_URL].filter(Boolean),
     ),
     RUNNER_PREVIEW_BASE_DOMAIN:
       trimmed(processEnv.RUNNER_PREVIEW_BASE_DOMAIN) ||
-      localPreviewBaseDomain(goatAppUrl, processEnv.RUNNER_PUBLIC_URL),
+      localPreviewBaseDomain(appUrl, processEnv.RUNNER_PUBLIC_URL),
     RUNNER_PREVIEW_PROTOCOL:
       trimmed(processEnv.RUNNER_PREVIEW_PROTOCOL) ||
-      previewProtocol(goatAppUrl, processEnv.RUNNER_PUBLIC_URL),
+      previewProtocol(appUrl, processEnv.RUNNER_PUBLIC_URL),
   };
 }
 
-function previewProtocol(goatAppUrl, runnerPublicUrl) {
+function previewProtocol(appUrl, runnerPublicUrl) {
   try {
-    const appUrl = new URL(goatAppUrl);
+    const appUrl = new URL(appUrl);
     if (appUrl.hostname === "localhost") return appUrl.protocol === "https:" ? "https" : "http";
   } catch {
     // Fall through to the runner origin.
@@ -61,9 +61,9 @@ function previewProtocol(goatAppUrl, runnerPublicUrl) {
   return "http";
 }
 
-function localPreviewBaseDomain(goatAppUrl, runnerPublicUrl) {
+function localPreviewBaseDomain(appUrl, runnerPublicUrl) {
   try {
-    const appUrl = new URL(goatAppUrl);
+    const appUrl = new URL(appUrl);
     if (appUrl.protocol === "https:" && appUrl.hostname === "localhost") {
       return `preview.localhost:${appUrl.port || "443"}`;
     }
@@ -77,19 +77,19 @@ function localPreviewBaseDomain(goatAppUrl, runnerPublicUrl) {
   }
 }
 
-function configuredGoatAppUrl(env, goatHttpsEnv) {
+function configuredAppUrl(env, httpsEnv) {
   const configured = env.NEXT_PUBLIC_APP_URL?.trim();
   if (!configured) return null;
-  if (configured.startsWith("https://localhost") && !goatHttpsEnv.NEXT_PUBLIC_APP_URL) {
+  if (configured.startsWith("https://localhost") && !httpsEnv.NEXT_PUBLIC_APP_URL) {
     return null;
   }
   return configured;
 }
 
-function configuredGoatRedirectUri(env, goatHttpsEnv) {
+function configuredRedirectUri(env, httpsEnv) {
   const configured = env.NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim();
   if (!configured) return null;
-  if (configured.startsWith("https://localhost") && !goatHttpsEnv.NEXT_PUBLIC_WORKOS_REDIRECT_URI) {
+  if (configured.startsWith("https://localhost") && !httpsEnv.NEXT_PUBLIC_WORKOS_REDIRECT_URI) {
     return null;
   }
   return configured;

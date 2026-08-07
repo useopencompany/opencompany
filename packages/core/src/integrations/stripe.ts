@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
 import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-  saveGoatIntegrationCredential,
+  loadIntegrationCredential,
+  markIntegrationStatus,
+  saveIntegrationCredential,
 } from "@opencompany/db/integrations";
-import { goatIntegrations } from "@opencompany/db/schema";
+import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq, sql } from "drizzle-orm";
-import type { GoatStripeProviderState } from "../integration-state";
-import { captureGoatIntegrationAddedAnalytics } from "./analytics";
+import type { StripeProviderState } from "../integration-state";
+import { captureIntegrationAddedAnalytics } from "./analytics";
 
 export const GOAT_STRIPE_PROVIDER = "stripe" as const;
 export const GOAT_STRIPE_CREDENTIAL_KIND = "api_key" as const;
@@ -24,14 +24,14 @@ export const GOAT_STRIPE_REQUIRED_READ_PERMISSIONS = [
   "invoice_read",
 ] as const;
 
-export type GoatStripeCredentialPayload = {
+export type StripeCredentialPayload = {
   apiKey: string;
   accountId: string;
   livemode: boolean;
   connectedAt: string;
 };
 
-export type GoatStripeAccountIdentity = {
+export type StripeAccountIdentity = {
   accountId: string;
   accountName: string;
   accountEmail: string | null;
@@ -39,7 +39,7 @@ export type GoatStripeAccountIdentity = {
   livemode: boolean;
 };
 
-export type GoatStripeConnection = {
+export type StripeConnection = {
   integrationId: string;
   userWorkosId: string;
   accountId: string;
@@ -56,32 +56,32 @@ type StripeApiErrorPayload = {
   };
 };
 
-export class GoatStripeApiError extends Error {
+export class StripeApiError extends Error {
   readonly status: number;
   readonly code: string | undefined;
   readonly detail: string | undefined;
 
   constructor(status: number, path: string, payload?: StripeApiErrorPayload | null) {
     super(`Stripe API GET ${path} failed (${status}).`);
-    this.name = "GoatStripeApiError";
+    this.name = "StripeApiError";
     this.status = status;
     this.code = boundedStripeErrorString(payload?.error?.code);
     this.detail = boundedStripeErrorString(payload?.error?.message);
   }
 }
 
-export function isValidGoatStripeRestrictedApiKey(apiKey: string) {
+export function isValidStripeRestrictedApiKey(apiKey: string) {
   return /^rk_(?:test|live)_[^\s]{16,500}$/.test(apiKey);
 }
 
-export function goatStripeKeyIsLive(apiKey: string) {
+export function stripeKeyIsLive(apiKey: string) {
   return apiKey.startsWith("rk_live_");
 }
 
-export async function validateGoatStripeRestrictedApiKey(
+export async function validateStripeRestrictedApiKey(
   apiKey: string,
-): Promise<{ ok: true; identity: GoatStripeAccountIdentity } | { ok: false; error: string }> {
-  if (!isValidGoatStripeRestrictedApiKey(apiKey)) {
+): Promise<{ ok: true; identity: StripeAccountIdentity } | { ok: false; error: string }> {
+  if (!isValidStripeRestrictedApiKey(apiKey)) {
     return {
       ok: false,
       error:
@@ -97,7 +97,7 @@ export async function validateGoatStripeRestrictedApiKey(
     settings?: { dashboard?: { display_name?: string | null } };
   };
   try {
-    account = await requestGoatStripeApi({
+    account = await requestStripeApi({
       apiKey,
       path: "/account",
       signal: AbortSignal.timeout(STRIPE_API_TIMEOUT_MS),
@@ -128,7 +128,7 @@ export async function validateGoatStripeRestrictedApiKey(
 
   for (const check of permissionChecks) {
     try {
-      await requestGoatStripeApi({
+      await requestStripeApi({
         apiKey,
         path: check.path,
         ...("params" in check ? { params: check.params } : {}),
@@ -152,16 +152,16 @@ export async function validateGoatStripeRestrictedApiKey(
       accountName,
       accountEmail: cleanStripeLabel(account.email),
       country: cleanStripeLabel(account.country),
-      livemode: goatStripeKeyIsLive(apiKey),
+      livemode: stripeKeyIsLive(apiKey),
     },
   };
 }
 
-export async function connectGoatStripeIntegration(input: {
+export async function connectStripeIntegration(input: {
   userWorkosId: string;
   workspaceId: string;
   apiKey: string;
-  identity: GoatStripeAccountIdentity;
+  identity: StripeAccountIdentity;
   now?: Date;
 }): Promise<{ integrationId: string }> {
   const db = getDb();
@@ -182,22 +182,22 @@ export async function connectGoatStripeIntegration(input: {
   };
 
   const [integration] = await db
-    .insert(goatIntegrations)
+    .insert(integrations)
     .values({
-      id: newGoatStripeIntegrationId(),
+      id: newStripeIntegrationId(),
       userWorkosId: input.userWorkosId,
       workspaceId: input.workspaceId,
       provider: GOAT_STRIPE_PROVIDER,
       ...values,
     })
     .onConflictDoUpdate({
-      target: [goatIntegrations.workspaceId, goatIntegrations.provider],
-      targetWhere: sql`${goatIntegrations.workspaceId} IS NOT NULL AND ${goatIntegrations.provider} = 'stripe'`,
+      target: [integrations.workspaceId, integrations.provider],
+      targetWhere: sql`${integrations.workspaceId} IS NOT NULL AND ${integrations.provider} = 'stripe'`,
       set: values,
     })
     .returning({
-      id: goatIntegrations.id,
-      userWorkosId: goatIntegrations.userWorkosId,
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
     });
 
   if (!integration) throw new Error("Could not persist the Stripe integration.");
@@ -206,7 +206,7 @@ export async function connectGoatStripeIntegration(input: {
   // credential AAD includes user_workos_id. A different admin can rotate the
   // key without changing that encryption identity.
   try {
-    await saveGoatIntegrationCredential({
+    await saveIntegrationCredential({
       userWorkosId: integration.userWorkosId,
       integrationId: integration.id,
       provider: GOAT_STRIPE_PROVIDER,
@@ -216,13 +216,13 @@ export async function connectGoatStripeIntegration(input: {
         accountId: input.identity.accountId,
         livemode: input.identity.livemode,
         connectedAt: now.toISOString(),
-      } satisfies GoatStripeCredentialPayload,
+      } satisfies StripeCredentialPayload,
       expiresAt: null,
       db,
       now,
     });
   } catch (error) {
-    await markGoatIntegrationStatus({
+    await markIntegrationStatus({
       userWorkosId: integration.userWorkosId,
       integrationId: integration.id,
       provider: GOAT_STRIPE_PROVIDER,
@@ -234,7 +234,7 @@ export async function connectGoatStripeIntegration(input: {
     throw error;
   }
 
-  await captureGoatIntegrationAddedAnalytics({
+  await captureIntegrationAddedAnalytics({
     userWorkosId: input.userWorkosId,
     workspaceId: input.workspaceId,
     provider: GOAT_STRIPE_PROVIDER,
@@ -243,28 +243,26 @@ export async function connectGoatStripeIntegration(input: {
   return { integrationId: integration.id };
 }
 
-export async function getGoatStripeIntegrationState(
-  workspaceId: string,
-): Promise<GoatStripeProviderState> {
+export async function getStripeIntegrationState(workspaceId: string): Promise<StripeProviderState> {
   const [row] = await getDb()
     .select({
-      id: goatIntegrations.id,
-      status: goatIntegrations.status,
-      accountName: goatIntegrations.accountName,
-      accountType: goatIntegrations.accountType,
-      statusReason: goatIntegrations.statusReason,
+      id: integrations.id,
+      status: integrations.status,
+      accountName: integrations.accountName,
+      accountType: integrations.accountType,
+      statusReason: integrations.statusReason,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.workspaceId, workspaceId),
-        eq(goatIntegrations.provider, GOAT_STRIPE_PROVIDER),
+        eq(integrations.workspaceId, workspaceId),
+        eq(integrations.provider, GOAT_STRIPE_PROVIDER),
       ),
     )
-    .orderBy(desc(goatIntegrations.updatedAt))
+    .orderBy(desc(integrations.updatedAt))
     .limit(1);
 
-  if (!row || row.status === "disconnected") return emptyGoatStripeProviderState();
+  if (!row || row.status === "disconnected") return emptyStripeProviderState();
 
   return {
     provider: GOAT_STRIPE_PROVIDER,
@@ -277,35 +275,33 @@ export async function getGoatStripeIntegrationState(
   };
 }
 
-export async function loadGoatStripeConnection(
-  workspaceId: string,
-): Promise<GoatStripeConnection | null> {
+export async function loadStripeConnection(workspaceId: string): Promise<StripeConnection | null> {
   const [integration] = await getDb()
     .select({
-      id: goatIntegrations.id,
-      userWorkosId: goatIntegrations.userWorkosId,
-      externalId: goatIntegrations.externalId,
-      accountName: goatIntegrations.accountName,
-      status: goatIntegrations.status,
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      externalId: integrations.externalId,
+      accountName: integrations.accountName,
+      status: integrations.status,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.workspaceId, workspaceId),
-        eq(goatIntegrations.provider, GOAT_STRIPE_PROVIDER),
+        eq(integrations.workspaceId, workspaceId),
+        eq(integrations.provider, GOAT_STRIPE_PROVIDER),
       ),
     )
-    .orderBy(desc(goatIntegrations.updatedAt))
+    .orderBy(desc(integrations.updatedAt))
     .limit(1);
 
   if (!integration || integration.status !== "connected") return null;
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId: integration.userWorkosId,
     integrationId: integration.id,
     provider: GOAT_STRIPE_PROVIDER,
     kind: GOAT_STRIPE_CREDENTIAL_KIND,
   });
-  const payload = parseGoatStripeCredential(credential?.payload);
+  const payload = parseStripeCredential(credential?.payload);
   if (!payload || payload.accountId !== integration.externalId) return null;
 
   return {
@@ -318,21 +314,21 @@ export async function loadGoatStripeConnection(
   };
 }
 
-export async function disconnectGoatStripeIntegration(workspaceId: string): Promise<boolean> {
+export async function disconnectStripeIntegration(workspaceId: string): Promise<boolean> {
   const deleted = await getDb()
-    .delete(goatIntegrations)
+    .delete(integrations)
     .where(
       and(
-        eq(goatIntegrations.workspaceId, workspaceId),
-        eq(goatIntegrations.provider, GOAT_STRIPE_PROVIDER),
+        eq(integrations.workspaceId, workspaceId),
+        eq(integrations.provider, GOAT_STRIPE_PROVIDER),
       ),
     )
-    .returning({ id: goatIntegrations.id });
+    .returning({ id: integrations.id });
   return deleted.length > 0;
 }
 
-export async function markGoatStripeConnectionNeedsReauth(connection: GoatStripeConnection) {
-  await markGoatIntegrationStatus({
+export async function markStripeConnectionNeedsReauth(connection: StripeConnection) {
+  await markIntegrationStatus({
     userWorkosId: connection.userWorkosId,
     integrationId: connection.integrationId,
     provider: GOAT_STRIPE_PROVIDER,
@@ -341,7 +337,7 @@ export async function markGoatStripeConnectionNeedsReauth(connection: GoatStripe
   });
 }
 
-export async function requestGoatStripeApi<T>(input: {
+export async function requestStripeApi<T>(input: {
   apiKey: string;
   path: string;
   params?: Readonly<Record<string, string | number | boolean | undefined>>;
@@ -373,17 +369,17 @@ export async function requestGoatStripeApi<T>(input: {
   }
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as StripeApiErrorPayload | null;
-    throw new GoatStripeApiError(response.status, input.path, payload);
+    throw new StripeApiError(response.status, input.path, payload);
   }
   return (await response.json()) as T;
 }
 
-function parseGoatStripeCredential(value: unknown): GoatStripeCredentialPayload | null {
+function parseStripeCredential(value: unknown): StripeCredentialPayload | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const payload = value as Record<string, unknown>;
   if (
     typeof payload.apiKey !== "string" ||
-    !isValidGoatStripeRestrictedApiKey(payload.apiKey) ||
+    !isValidStripeRestrictedApiKey(payload.apiKey) ||
     typeof payload.accountId !== "string" ||
     !payload.accountId.startsWith("acct_") ||
     typeof payload.livemode !== "boolean" ||
@@ -400,7 +396,7 @@ function parseGoatStripeCredential(value: unknown): GoatStripeCredentialPayload 
 }
 
 function stripeValidationError(error: unknown, permission: string) {
-  if (error instanceof GoatStripeApiError) {
+  if (error instanceof StripeApiError) {
     if (error.status === 401) return "Stripe rejected this restricted key. Check it and try again.";
     if (error.status === 403) {
       return `This restricted key needs read access to ${permission}. Update the key's permissions in Stripe and try again.`;
@@ -428,11 +424,11 @@ function boundedStripeErrorString(value: unknown): string | undefined {
     : normalized;
 }
 
-function newGoatStripeIntegrationId() {
+function newStripeIntegrationId() {
   return `gint_${randomUUID().replace(/-/g, "")}`;
 }
 
-function emptyGoatStripeProviderState(): GoatStripeProviderState {
+function emptyStripeProviderState(): StripeProviderState {
   return {
     provider: GOAT_STRIPE_PROVIDER,
     connected: false,

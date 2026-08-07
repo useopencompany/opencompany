@@ -11,7 +11,7 @@ export const GOAT_ONBOARDING_ROLE_IDS = [
   "research",
 ] as const;
 
-export type GoatOnboardingRole = (typeof GOAT_ONBOARDING_ROLE_IDS)[number];
+export type OnboardingRole = (typeof GOAT_ONBOARDING_ROLE_IDS)[number];
 
 export const GOAT_ONBOARDING_ROLE_FOLDERS = {
   founder: ["thoughts", "projects", "product", "meetings", "decisions", "fundraising", "metrics"],
@@ -22,23 +22,23 @@ export const GOAT_ONBOARDING_ROLE_FOLDERS = {
   investing: ["deals", "meetings", "research", "thesis", "portfolio", "notes"],
   consulting: ["clients", "projects", "meetings", "deliverables", "research", "notes"],
   research: ["research", "sources", "notes", "concepts", "meetings", "reports"],
-} as const satisfies Record<GoatOnboardingRole, readonly string[]>;
+} as const satisfies Record<OnboardingRole, readonly string[]>;
 
 export const GOAT_ONBOARDING_COMPANY_URL_MAX_LENGTH = 2_048;
 
 const GOAT_ONBOARDING_ROLES = new Set<string>(GOAT_ONBOARDING_ROLE_IDS);
 
-export function isGoatOnboardingRole(value: unknown): value is GoatOnboardingRole {
+export function isOnboardingRole(value: unknown): value is OnboardingRole {
   return typeof value === "string" && GOAT_ONBOARDING_ROLES.has(value);
 }
 
-export function goatOnboardingFoldersForRole(role: unknown): string[] {
-  return isGoatOnboardingRole(role)
+export function onboardingFoldersForRole(role: unknown): string[] {
+  return isOnboardingRole(role)
     ? [...GOAT_ONBOARDING_ROLE_FOLDERS[role]]
     : [...ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS];
 }
 
-export function normalizeGoatOnboardingCompanyUrl(value: unknown): string | null {
+export function normalizeOnboardingCompanyUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!trimmed || trimmed.length > GOAT_ONBOARDING_COMPANY_URL_MAX_LENGTH) return null;
@@ -66,18 +66,18 @@ export function normalizeGoatOnboardingCompanyUrl(value: unknown): string | null
   }
 }
 
-export function parseGoatOnboardingProfile(input: {
+export function parseOnboardingProfile(input: {
   role: unknown;
   companyUrl: unknown;
-}): { ok: true; role: GoatOnboardingRole; companyUrl: string } | { ok: false; error: string } {
-  if (!isGoatOnboardingRole(input.role)) {
+}): { ok: true; role: OnboardingRole; companyUrl: string } | { ok: false; error: string } {
+  if (!isOnboardingRole(input.role)) {
     return { ok: false, error: "Choose the role that best describes you." };
   }
   if (typeof input.companyUrl !== "string" || !input.companyUrl.trim()) {
     return { ok: false, error: "Enter your company URL." };
   }
 
-  const companyUrl = normalizeGoatOnboardingCompanyUrl(input.companyUrl);
+  const companyUrl = normalizeOnboardingCompanyUrl(input.companyUrl);
   if (!companyUrl) return { ok: false, error: "Enter a valid company URL." };
 
   return { ok: true, role: input.role, companyUrl };

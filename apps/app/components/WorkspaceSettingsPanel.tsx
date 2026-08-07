@@ -4,14 +4,14 @@ import { toast } from "@opencompany/ui/components/sonner";
 import { Mail, Trash2, UserRound, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
+import { SettingsContent } from "@/components/SettingsChrome";
 import {
-  type GoatWorkspaceInvitationView,
-  type GoatWorkspaceMemberView,
-  inviteToGoatWorkspaceAction,
-  removeGoatWorkspaceMemberAction,
-  revokeGoatWorkspaceInvitationAction,
-  updateGoatWorkspaceNameAction,
+  inviteToWorkspaceAction,
+  removeWorkspaceMemberAction,
+  revokeWorkspaceInvitationAction,
+  updateWorkspaceNameAction,
+  type WorkspaceInvitationView,
+  type WorkspaceMemberView,
 } from "@/lib/workspace-actions";
 
 type WorkspaceSettings = {
@@ -19,8 +19,8 @@ type WorkspaceSettings = {
   role: "admin" | "member";
   plan: "hobby" | "pro";
   memberCap: number;
-  members: GoatWorkspaceMemberView[];
-  invitations: GoatWorkspaceInvitationView[];
+  members: WorkspaceMemberView[];
+  invitations: WorkspaceInvitationView[];
 };
 
 export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings }) {
@@ -35,7 +35,7 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
   const saveName = () => {
     if (name.trim() === initial.workspace.name) return;
     startTransition(async () => {
-      const result = await updateGoatWorkspaceNameAction(name);
+      const result = await updateWorkspaceNameAction(name);
       if (!result.ok) {
         toast.error(result.error);
         return;
@@ -49,7 +49,7 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
     const email = inviteEmail.trim();
     if (!email) return;
     startTransition(async () => {
-      const result = await inviteToGoatWorkspaceAction(email);
+      const result = await inviteToWorkspaceAction(email);
       if (!result.ok) {
         toast.error(result.error);
         return;
@@ -62,7 +62,7 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
 
   const revokeInvitation = (invitationId: string) => {
     startTransition(async () => {
-      const result = await revokeGoatWorkspaceInvitationAction(invitationId);
+      const result = await revokeWorkspaceInvitationAction(invitationId);
       if (!result.ok) {
         toast.error(result.error);
         return;
@@ -71,9 +71,9 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
     });
   };
 
-  const removeMember = (member: GoatWorkspaceMemberView) => {
+  const removeMember = (member: WorkspaceMemberView) => {
     startTransition(async () => {
-      const result = await removeGoatWorkspaceMemberAction(member.userWorkosId);
+      const result = await removeWorkspaceMemberAction(member.userWorkosId);
       if (!result.ok) {
         toast.error(result.error);
         return;
@@ -85,7 +85,7 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
   };
 
   return (
-    <GoatSettingsContent
+    <SettingsContent
       title="Members"
       description="Manage the people who share this workspace and its brains."
     >
@@ -231,6 +231,6 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
           </div>
         ))}
       </section>
-    </GoatSettingsContent>
+    </SettingsContent>
   );
 }

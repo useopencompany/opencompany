@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
-  type GoatBrainEntry,
-  goatBrainEntryFromLegacyMarkdown,
-  goatBrainPayloadRelativePath,
-  goatBrainSidecarRelativePath,
-  parseGoatBrainSidecar,
-  serializeGoatBrainPayload,
-  serializeGoatBrainSidecar,
-  serializeLegacyGoatBrainEntry,
-  validateGoatBrainSidecar,
+  type BrainEntry,
+  brainEntryFromLegacyMarkdown,
+  brainPayloadRelativePath,
+  brainSidecarRelativePath,
+  parseBrainSidecar,
+  serializeBrainPayload,
+  serializeBrainSidecar,
+  serializeLegacyBrainEntry,
+  validateBrainSidecar,
 } from "./entry";
 
-const entry: GoatBrainEntry = {
+const entry: BrainEntry = {
   id: "launch-plan",
   folder: "concepts",
   title: "Launch plan",
@@ -38,8 +38,8 @@ const entry: GoatBrainEntry = {
 
 describe("goat brain canonical entries", () => {
   it("parses legacy embedded markdown into canonical body and timeline fields", () => {
-    const legacy = serializeLegacyGoatBrainEntry(entry);
-    const parsed = goatBrainEntryFromLegacyMarkdown(legacy);
+    const legacy = serializeLegacyBrainEntry(entry);
+    const parsed = brainEntryFromLegacyMarkdown(legacy);
 
     expect(parsed).toMatchObject({
       id: "launch-plan",
@@ -65,12 +65,12 @@ describe("goat brain canonical entries", () => {
   });
 
   it("serializes body-only payloads with hidden sidecar details", () => {
-    const payload = serializeGoatBrainPayload(entry);
-    const sidecar = parseGoatBrainSidecar(serializeGoatBrainSidecar(entry));
+    const payload = serializeBrainPayload(entry);
+    const sidecar = parseBrainSidecar(serializeBrainSidecar(entry));
 
     expect(payload).toBe("Launch should start with founder-led beta.");
-    expect(goatBrainPayloadRelativePath(entry.folder, entry.id)).toBe("concepts/launch-plan.md");
-    expect(goatBrainSidecarRelativePath(entry.folder, entry.id)).toBe(
+    expect(brainPayloadRelativePath(entry.folder, entry.id)).toBe("concepts/launch-plan.md");
+    expect(brainSidecarRelativePath(entry.folder, entry.id)).toBe(
       "concepts/.brain/launch-plan.json",
     );
     expect(sidecar).toMatchObject({
@@ -90,14 +90,14 @@ describe("goat brain canonical entries", () => {
   });
 
   it("serializes nested legacy markdown payloads as body-only text", () => {
-    const nested = serializeLegacyGoatBrainEntry(entry);
+    const nested = serializeLegacyBrainEntry(entry);
 
-    expect(serializeGoatBrainPayload({ ...entry, body: nested })).toBe(entry.body);
+    expect(serializeBrainPayload({ ...entry, body: nested })).toBe(entry.body);
   });
 
   it("validates sidecar payload path, size, and hash", () => {
-    const sidecar = parseGoatBrainSidecar(serializeGoatBrainSidecar(entry));
-    const valid = validateGoatBrainSidecar({
+    const sidecar = parseBrainSidecar(serializeBrainSidecar(entry));
+    const valid = validateBrainSidecar({
       sidecar,
       payloadContent: entry.body,
       payloadRelativePath: "concepts/launch-plan.md",
@@ -105,14 +105,14 @@ describe("goat brain canonical entries", () => {
 
     expect(valid).toMatchObject({ ok: true, entry: { body: entry.body } });
     expect(
-      validateGoatBrainSidecar({
+      validateBrainSidecar({
         sidecar,
         payloadContent: `${entry.body}\nChanged.`,
         payloadRelativePath: "concepts/launch-plan.md",
       }),
     ).toMatchObject({ ok: false });
     expect(
-      validateGoatBrainSidecar({
+      validateBrainSidecar({
         sidecar,
         payloadContent: entry.body,
         payloadRelativePath: "concepts/other.md",
@@ -121,10 +121,10 @@ describe("goat brain canonical entries", () => {
   });
 
   it("returns validation errors for malformed sidecar field types", () => {
-    const sidecar = parseGoatBrainSidecar(serializeGoatBrainSidecar(entry));
+    const sidecar = parseBrainSidecar(serializeBrainSidecar(entry));
     if (!sidecar) throw new Error("Expected serialized sidecar to parse.");
     expect(
-      validateGoatBrainSidecar({
+      validateBrainSidecar({
         sidecar: {
           ...sidecar,
           title: 42,
@@ -145,11 +145,11 @@ describe("goat brain canonical entries", () => {
   });
 
   it("rejects malformed evidence sidecar folders without throwing", () => {
-    const sidecar = parseGoatBrainSidecar(serializeGoatBrainSidecar(entry));
+    const sidecar = parseBrainSidecar(serializeBrainSidecar(entry));
     if (!sidecar) throw new Error("Expected serialized sidecar to parse.");
 
     expect(() =>
-      validateGoatBrainSidecar({
+      validateBrainSidecar({
         sidecar: {
           ...sidecar,
           kind: "evidence",
@@ -160,7 +160,7 @@ describe("goat brain canonical entries", () => {
       }),
     ).not.toThrow();
     expect(
-      validateGoatBrainSidecar({
+      validateBrainSidecar({
         sidecar: {
           ...sidecar,
           kind: "evidence",
@@ -176,11 +176,11 @@ describe("goat brain canonical entries", () => {
   });
 
   it("rejects sidecar folder/kind mismatches and invalid kinds", () => {
-    const sidecar = parseGoatBrainSidecar(serializeGoatBrainSidecar(entry));
+    const sidecar = parseBrainSidecar(serializeBrainSidecar(entry));
     if (!sidecar) throw new Error("Expected serialized sidecar to parse.");
 
     expect(
-      validateGoatBrainSidecar({
+      validateBrainSidecar({
         sidecar: { ...sidecar, kind: "evidence" } as never,
         payloadContent: entry.body,
         payloadRelativePath: "concepts/launch-plan.md",
@@ -192,7 +192,7 @@ describe("goat brain canonical entries", () => {
       ]),
     });
     expect(
-      validateGoatBrainSidecar({
+      validateBrainSidecar({
         sidecar: { ...sidecar, kind: "markdown" } as never,
         payloadContent: entry.body,
         payloadRelativePath: "concepts/launch-plan.md",
@@ -202,7 +202,7 @@ describe("goat brain canonical entries", () => {
       errors: expect.arrayContaining(['sidecar.kind must be "page" or "evidence".']),
     });
     expect(
-      validateGoatBrainSidecar({
+      validateBrainSidecar({
         sidecar: { ...sidecar, format: "binary" } as never,
         payloadContent: entry.body,
         payloadRelativePath: "concepts/launch-plan.md",
@@ -214,11 +214,11 @@ describe("goat brain canonical entries", () => {
   });
 
   it("rejects malformed legacy markdown at the entry boundary", () => {
-    expect(() => goatBrainEntryFromLegacyMarkdown("# Missing frontmatter")).toThrow(
+    expect(() => brainEntryFromLegacyMarkdown("# Missing frontmatter")).toThrow(
       "Brain document is missing a valid frontmatter.id.",
     );
     expect(() =>
-      goatBrainEntryFromLegacyMarkdown(
+      brainEntryFromLegacyMarkdown(
         [
           "---",
           "id: launch-plan",
@@ -237,7 +237,7 @@ describe("goat brain canonical entries", () => {
       ),
     ).toThrow("Brain document is missing a valid frontmatter.type.");
     expect(() =>
-      goatBrainEntryFromLegacyMarkdown(
+      brainEntryFromLegacyMarkdown(
         [
           "---",
           "id: launch-plan",

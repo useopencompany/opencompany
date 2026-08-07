@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GoatCodexChatLeaseLostError } from "./codex-chat-errors";
-import { createGoatOpenCompanyChatProjector } from "./opencompany-chat-projector";
+import { CodexChatLeaseLostError } from "./codex-chat-errors";
+import { createOpenCompanyChatProjector } from "./opencompany-chat-projector";
 
 const dbMock = vi.hoisted(() => ({
   execute: vi.fn(),
@@ -18,20 +18,20 @@ vi.mock("./db", () => ({
 }));
 
 vi.mock("@opencompany/db/credits", () => ({
-  recordGoatCreditDebit: usageMocks.recordCreditDebit,
+  recordCreditDebit: usageMocks.recordCreditDebit,
 }));
 
-vi.mock("@opencompany/analytics/goat/server", () => ({
-  captureGoatModelSpendRecorded: usageMocks.captureModelSpend,
-  captureGoatLlmUsageRecorded: usageMocks.captureLlmUsage,
+vi.mock("@opencompany/analytics/server", () => ({
+  captureModelSpendRecorded: usageMocks.captureModelSpend,
+  captureLlmUsageRecorded: usageMocks.captureLlmUsage,
 }));
 
 vi.mock("@opencompany/telemetry", () => ({
-  recordGoatModelCost: usageMocks.recordModelCost,
-  recordGoatModelUsageTokens: usageMocks.recordModelUsageTokens,
+  recordModelCost: usageMocks.recordModelCost,
+  recordModelUsageTokens: usageMocks.recordModelUsageTokens,
 }));
 
-describe("createGoatOpenCompanyChatProjector", () => {
+describe("createOpenCompanyChatProjector", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dbMock.execute.mockResolvedValue({ rows: [{ id: "updated" }] });
@@ -57,9 +57,7 @@ describe("createGoatOpenCompanyChatProjector", () => {
   it("treats a missing lease row as lease loss before the stream can continue", async () => {
     dbMock.execute.mockResolvedValueOnce({ rows: [] });
 
-    await expect(createProjector().checkAbort()).rejects.toBeInstanceOf(
-      GoatCodexChatLeaseLostError,
-    );
+    await expect(createProjector().checkAbort()).rejects.toBeInstanceOf(CodexChatLeaseLostError);
   });
 
   it("persists partial output as aborted and settles an interrupted turn", async () => {
@@ -185,7 +183,7 @@ describe("createGoatOpenCompanyChatProjector", () => {
 });
 
 function createProjector() {
-  return createGoatOpenCompanyChatProjector({
+  return createOpenCompanyChatProjector({
     target: {
       userWorkosId: "user_1",
       codexChatSessionId: "goat_codex_chat_1",

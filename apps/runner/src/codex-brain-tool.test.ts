@@ -1,6 +1,6 @@
 import { GOAT_CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
 import { describe, expect, it, vi } from "vitest";
-import { createGoatCodexBrainDynamicTool, executeGoatCodexBrainTool } from "./codex-brain-tool";
+import { createCodexBrainDynamicTool, executeCodexBrainTool } from "./codex-brain-tool";
 
 function context() {
   return {
@@ -25,7 +25,7 @@ function call(argumentsValue: unknown) {
   };
 }
 
-function responseJson(response: Awaited<ReturnType<typeof executeGoatCodexBrainTool>>) {
+function responseJson(response: Awaited<ReturnType<typeof executeCodexBrainTool>>) {
   const item = response.contentItems[0];
   if (item?.type !== "inputText") throw new Error("Expected a text tool response.");
   return JSON.parse(item.text) as unknown;
@@ -65,7 +65,7 @@ function dependencies() {
 
 describe("Codex Brain dynamic tool", () => {
   it("publishes the read-only Brain contract", () => {
-    const tool = createGoatCodexBrainDynamicTool(context());
+    const tool = createCodexBrainDynamicTool(context());
 
     expect(GOAT_CODEX_BRAIN_TOOL_CONTRACT_VERSION).toBe("goat-codex-brain.v1");
     expect(tool.spec).toMatchObject({
@@ -91,7 +91,7 @@ describe("Codex Brain dynamic tool", () => {
 
   it("rechecks access, executes a read, and writes an auditable tool run", async () => {
     const deps = dependencies();
-    const result = await executeGoatCodexBrainTool({
+    const result = await executeCodexBrainTool({
       context: context(),
       call: call({
         command: "query",
@@ -145,7 +145,7 @@ describe("Codex Brain dynamic tool", () => {
     const deps = dependencies();
     deps.getBrainAccess.mockResolvedValueOnce(null as never);
 
-    const result = await executeGoatCodexBrainTool({
+    const result = await executeCodexBrainTool({
       context: context(),
       call: call({ command: "query", flags: { text: "pricing" } }),
       dependencies: deps as never,
@@ -163,7 +163,7 @@ describe("Codex Brain dynamic tool", () => {
   it("rejects non-retrieval commands before touching the read plane", async () => {
     const deps = dependencies();
 
-    const result = await executeGoatCodexBrainTool({
+    const result = await executeCodexBrainTool({
       context: context(),
       call: call({ command: "doctor" }),
       dependencies: deps as never,

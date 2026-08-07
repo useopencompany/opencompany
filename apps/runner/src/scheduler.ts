@@ -1,11 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { latestCronRunAt, nextCronRunAt } from "@opencompany/agent-runtime";
-import {
-  type CaptureGoatTaskSpawnedInput,
-  captureGoatTaskSpawned,
-} from "@opencompany/analytics/goat/server";
-import type { GoatHarnessSpec } from "@opencompany/db/schema";
-import { createGoatTaskSession } from "@opencompany/db/task-sessions";
+import { type CaptureTaskSpawnedInput, captureTaskSpawned } from "@opencompany/analytics/server";
+import type { HarnessSpec } from "@opencompany/db/schema";
+import { createTaskSession } from "@opencompany/db/task-sessions";
 import { captureException } from "@opencompany/observability";
 import { type SQL, sql } from "drizzle-orm";
 import { getDb } from "./db";
@@ -19,7 +16,7 @@ type DueScheduleRow = {
   cron: string;
   timezone: string;
   prompt: string;
-  plannedHarnessSpec: GoatHarnessSpec;
+  plannedHarnessSpec: HarnessSpec;
   nextRunAt: Date | string;
 };
 
@@ -32,7 +29,7 @@ type DueWorkflowScheduleRow = {
   cron: string;
   timezone: string;
   prompt: string;
-  scheduleHarnessSpec: GoatHarnessSpec;
+  scheduleHarnessSpec: HarnessSpec;
   nextRunAt: Date | string;
 };
 
@@ -40,12 +37,12 @@ type ScheduleTransaction = {
   execute(query: SQL): Promise<unknown>;
 };
 
-export type GoatTaskScheduleWorker = {
+export type TaskScheduleWorker = {
   notify: () => void;
   stop: () => Promise<void>;
 };
 
-export async function sweepDueGoatTaskSchedules(
+export async function sweepDueTaskSchedules(
   input: { now?: Date; onTaskCreated?: () => void } = {},
 ) {
   const now = input.now ?? new Date();
@@ -59,7 +56,7 @@ export async function sweepDueGoatTaskSchedules(
     if (result.status === "created") {
       created += 1;
       input.onTaskCreated?.();
-      await captureGoatTaskSpawned(result.analytics).catch((error) => {
+      await captureTaskSpawned(result.analytics).catch((error) => {
         console.warn("Goat scheduled task spawned analytics failed.", {
           event: "goat.scheduled_task_spawned_analytics_failed",
           task_id: result.taskId,
@@ -72,7 +69,7 @@ export async function sweepDueGoatTaskSchedules(
   return { checked, created };
 }
 
-export function startGoatTaskScheduleWorker(input: { onTaskCreated?: () => void } = {}) {
+export function startTaskScheduleWorker(input: { onTaskCreated?: () => void } = {}) {
   let stopped = false;
   let pendingWake = false;
   let wake: (() => void) | null = null;
@@ -105,7 +102,7 @@ export function startGoatTaskScheduleWorker(input: { onTaskCreated?: () => void 
 
   const loop = (async () => {
     while (!stopped) {
-      await sweepDueGoatTaskSchedules({
+      await sweepDueTaskSchedules({
         ...(input.onTaskCreated ? { onTaskCreated: input.onTaskCreated } : {}),
       }).catch((error) => {
         captureException(error, { event: "opencompany.goat_task_schedule_sweep_failed" });
@@ -125,7 +122,7 @@ export function startGoatTaskScheduleWorker(input: { onTaskCreated?: () => void 
       notify();
       await loop;
     },
-  } satisfies GoatTaskScheduleWorker;
+  } satisfies TaskScheduleWorker;
 }
 
 async function claimAndCreateOneDueScheduleRun(now: Date) {
@@ -365,14 +362,14 @@ async function createScheduledTask(
     workspaceId?: string | null;
     prompt: string;
     name: string;
-    harnessSpec: GoatHarnessSpec;
+    harnessSpec: HarnessSpec;
     scheduleId?: string | null;
     workflowId?: string | null;
     scheduledFor: Date;
     now: Date;
   },
-): Promise<CaptureGoatTaskSpawnedInput> {
-  const task = await createGoatTaskSession(
+): Promise<CaptureTaskSpawnedInput> {
+  const task = await createTaskSession(
     {
       userWorkosId: input.userWorkosId,
       workspaceId: input.workspaceId ?? null,

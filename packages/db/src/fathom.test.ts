@@ -2,9 +2,9 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
 import {
-  ensureGoatFathomSyncState,
-  listGoatFathomPendingMeetings,
-  upsertGoatFathomPendingMeeting,
+  ensureFathomSyncState,
+  listFathomPendingMeetings,
+  upsertFathomPendingMeeting,
 } from "./fathom";
 
 describe("Goat Fathom persistence", () => {
@@ -14,7 +14,7 @@ describe("Goat Fathom persistence", () => {
     const db = { insert: vi.fn(() => ({ values })) };
     const connectedAt = new Date("2026-07-16T10:00:00.000Z");
 
-    await ensureGoatFathomSyncState(
+    await ensureFathomSyncState(
       {
         integrationId: "gint_123",
         userWorkosId: "user_123",
@@ -37,7 +37,7 @@ describe("Goat Fathom persistence", () => {
     const db = { insert: vi.fn(() => ({ values })) };
     const meetingCreatedAt = new Date("2026-07-16T09:30:00.000Z");
 
-    await upsertGoatFathomPendingMeeting(
+    await upsertFathomPendingMeeting(
       {
         integrationId: "gint_123",
         recordingId: "456",
@@ -69,7 +69,7 @@ describe("Goat Fathom persistence", () => {
     const from = vi.fn(() => ({ where }));
     const db = { select: vi.fn(() => ({ from })) };
 
-    await listGoatFathomPendingMeetings({ integrationId: "gint_123" }, db);
+    await listFathomPendingMeetings({ integrationId: "gint_123" }, db);
 
     const call = orderBy.mock.calls[0];
     if (!call) throw new Error("Expected a pending-meeting order clause.");

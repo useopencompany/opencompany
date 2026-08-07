@@ -5,8 +5,8 @@ import {
   normalizeEvidenceId,
 } from "@opencompany/brain";
 import {
-  createGoatBrainMarkdownContent,
-  goatBrainFilePathFor,
+  brainFilePathFor,
+  createBrainMarkdownContent,
   MAX_GOAT_BRAIN_FILE_BYTES,
 } from "@opencompany/db/brain-files";
 import { truncateByBytes } from "./brain-jamie-writes";
@@ -49,7 +49,7 @@ export function buildGmailThreadEvidenceWrite(
 
   return {
     evidenceBrainId,
-    evidencePath: goatBrainFilePathFor(GMAIL_EVIDENCE_FOLDER, evidenceBrainId),
+    evidencePath: brainFilePathFor(GMAIL_EVIDENCE_FOLDER, evidenceBrainId),
     evidenceContent,
     truncatedBodies,
   };
@@ -93,7 +93,7 @@ function createGmailEvidenceContent(input: {
     .filter((section): section is string => section !== null)
     .join("\n\n");
 
-  return createGoatBrainMarkdownContent({
+  return createBrainMarkdownContent({
     id: input.evidenceBrainId,
     folderPath: GMAIL_EVIDENCE_FOLDER,
     title: `Email: ${thread.subject}`,

@@ -1,32 +1,29 @@
-import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
+import { captureIngestionQuotaAnalytics } from "@opencompany/analytics/app";
 import { normalizeGranolaMeetingNote } from "@opencompany/brain";
 import {
-  attributeGoatBrainSourceEventClaims,
-  claimGoatBrainSourceEvents,
-  listGoatBrainSourceEventClaimedBrainRefs,
+  attributeBrainSourceEventClaims,
+  claimBrainSourceEvents,
+  listBrainSourceEventClaimedBrainRefs,
 } from "@opencompany/db/brain-event-claims";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
-  upsertGoatBrainSourceItemAndEnqueue,
+  upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
-  claimGoatGranolaSyncState,
-  completeGoatGranolaSyncPages,
-  ensureGoatGranolaSyncState,
+  claimGranolaSyncState,
+  completeGranolaSyncPages,
+  ensureGranolaSyncState,
   GOAT_GRANOLA_CREDENTIAL_KIND,
   GOAT_GRANOLA_PROVIDER,
-  goatGranolaEventClaimKey,
-  listEnabledGoatGranolaBrainSourceRoutes,
-  updateGoatGranolaSyncCursor,
-  updateGoatGranolaSyncPage,
+  granolaEventClaimKey,
+  listEnabledGranolaBrainSourceRoutes,
+  updateGranolaSyncCursor,
+  updateGranolaSyncPage,
 } from "@opencompany/db/granola";
-import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-} from "@opencompany/db/integrations";
+import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
-import { wakeGoatBrainIngestWorker } from "./brain-ingest-worker";
+import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { getDb } from "./db";
 import {
   fetchGranolaNote,
@@ -58,7 +55,7 @@ type GranolaPollCandidate = {
   userWorkosId: string;
 };
 
-export async function listGoatGranolaPollCandidates(): Promise<GranolaPollCandidate[]> {
+export async function listGranolaPollCandidates(): Promise<GranolaPollCandidate[]> {
   const result = await getDb().execute(sql`
     SELECT
       i.id AS "integrationId",
@@ -76,21 +73,21 @@ export async function listGoatGranolaPollCandidates(): Promise<GranolaPollCandid
   return rowsFromExecute<GranolaPollCandidate>(result);
 }
 
-export async function pollGoatGranolaIntegration(input: {
+export async function pollGranolaIntegration(input: {
   candidate: GranolaPollCandidate;
   signal: AbortSignal;
   cooldownMs?: number;
 }): Promise<{ enqueued: number; seen: number } | null> {
   const { candidate } = input;
   const db = getDb();
-  await ensureGoatGranolaSyncState(
+  await ensureGranolaSyncState(
     {
       integrationId: candidate.integrationId,
       userWorkosId: candidate.userWorkosId,
     },
     db,
   );
-  const state = await claimGoatGranolaSyncState(
+  const state = await claimGranolaSyncState(
     {
       integrationId: candidate.integrationId,
       cooldownMs: input.cooldownMs ?? GOAT_GRANOLA_POLL_COOLDOWN_MS,
@@ -101,14 +98,14 @@ export async function pollGoatGranolaIntegration(input: {
 
   // First poll after connect: anchor the cursor at "now" — no backfill.
   if (!state.updatedAfterCursor) {
-    await updateGoatGranolaSyncCursor(
+    await updateGranolaSyncCursor(
       { integrationId: candidate.integrationId, updatedAfterCursor: new Date() },
       db,
     );
     return { enqueued: 0, seen: 0 };
   }
 
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId: candidate.userWorkosId,
     integrationId: candidate.integrationId,
     provider: GOAT_GRANOLA_PROVIDER,
@@ -138,7 +135,7 @@ export async function pollGoatGranolaIntegration(input: {
   }
   const { notes } = batch;
 
-  const routes = await listEnabledGoatGranolaBrainSourceRoutes([candidate.integrationId], db);
+  const routes = await listEnabledGranolaBrainSourceRoutes([candidate.integrationId], db);
   const routedBrainRefs = [...new Set(routes.map((route) => route.brainRef))];
 
   let enqueued = 0;
@@ -166,7 +163,7 @@ export async function pollGoatGranolaIntegration(input: {
   }, null);
   const pendingUpdatedAfterCursor = latestDate(state.pendingUpdatedAfterCursor, batchMaxUpdatedAt);
   if (batch.nextCursor) {
-    await updateGoatGranolaSyncPage(
+    await updateGranolaSyncPage(
       {
         integrationId: candidate.integrationId,
         expectedUpdatedAfterCursor: state.updatedAfterCursor,
@@ -177,7 +174,7 @@ export async function pollGoatGranolaIntegration(input: {
       db,
     );
   } else {
-    await completeGoatGranolaSyncPages(
+    await completeGranolaSyncPages(
       {
         integrationId: candidate.integrationId,
         expectedUpdatedAfterCursor: state.updatedAfterCursor,
@@ -243,11 +240,11 @@ async function ingestGranolaNote(input: {
 }): Promise<{ enqueued: boolean }> {
   const { candidate, note } = input;
   const db = getDb();
-  const eventKey = goatGranolaEventClaimKey(note.id);
+  const eventKey = granolaEventClaimKey(note.id);
 
   // Cheap pre-check before the transcript fetch: a note every routed brain has
   // already claimed (an earlier poll, or an edit bumping updated_at) is a no-op.
-  const alreadyClaimed = await listGoatBrainSourceEventClaimedBrainRefs({
+  const alreadyClaimed = await listBrainSourceEventClaimedBrainRefs({
     brainRefs: input.routedBrainRefs,
     sourceProvider: GOAT_GRANOLA_PROVIDER,
     eventKey,
@@ -269,7 +266,7 @@ async function ingestGranolaNote(input: {
     const brainRefs: string[] = [];
     const claimedEventKeysByBrainRef = new Map<string, string[]>();
     for (const brainRef of pendingBrainRefs) {
-      const { claimedEventKeys } = await claimGoatBrainSourceEvents({
+      const { claimedEventKeys } = await claimBrainSourceEvents({
         brainRef,
         sourceProvider: GOAT_GRANOLA_PROVIDER,
         eventKeys: [eventKey],
@@ -281,7 +278,7 @@ async function ingestGranolaNote(input: {
     }
     if (brainRefs.length === 0) return null;
 
-    const upserted = await upsertGoatBrainSourceItemAndEnqueue({
+    const upserted = await upsertBrainSourceItemAndEnqueue({
       userWorkosId: candidate.userWorkosId,
       sourceConnectionId: candidate.integrationId,
       integrationId: candidate.integrationId,
@@ -293,7 +290,7 @@ async function ingestGranolaNote(input: {
       db: tx,
     });
     for (const brainRef of brainRefs) {
-      await attributeGoatBrainSourceEventClaims({
+      await attributeBrainSourceEventClaims({
         brainRef,
         sourceProvider: GOAT_GRANOLA_PROVIDER,
         eventKeys: claimedEventKeysByBrainRef.get(brainRef) ?? [],
@@ -304,8 +301,8 @@ async function ingestGranolaNote(input: {
     return upserted;
   });
 
-  captureGoatIngestionQuotaAnalytics(result?.quotaUpdates);
-  if (result?.enqueued) wakeGoatBrainIngestWorker();
+  captureIngestionQuotaAnalytics(result?.quotaUpdates);
+  if (result?.enqueued) wakeBrainIngestWorker();
   return { enqueued: Boolean(result?.enqueued) };
 }
 
@@ -314,7 +311,7 @@ async function markGranolaNeedsReauth(candidate: GranolaPollCandidate, reason: s
     event: "opencompany.goat_granola_needs_reauth",
     integration_id: candidate.integrationId,
   });
-  await markGoatIntegrationStatus({
+  await markIntegrationStatus({
     userWorkosId: candidate.userWorkosId,
     integrationId: candidate.integrationId,
     provider: GOAT_GRANOLA_PROVIDER,
@@ -324,7 +321,7 @@ async function markGranolaNeedsReauth(candidate: GranolaPollCandidate, reason: s
   });
 }
 
-export function startGoatGranolaPollWorker(options: { pollIntervalMs?: number } = {}) {
+export function startGranolaPollWorker(options: { pollIntervalMs?: number } = {}) {
   const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? GOAT_GRANOLA_POLL_INTERVAL_MS);
   const abort = new AbortController();
   let stopped = false;
@@ -348,10 +345,10 @@ export function startGoatGranolaPollWorker(options: { pollIntervalMs?: number } 
   const loop = (async () => {
     while (!stopped) {
       try {
-        const candidates = await listGoatGranolaPollCandidates();
+        const candidates = await listGranolaPollCandidates();
         for (const candidate of candidates) {
           if (stopped) break;
-          const polled = await pollGoatGranolaIntegration({
+          const polled = await pollGranolaIntegration({
             candidate,
             signal: abort.signal,
           }).catch((error) => {

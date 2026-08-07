@@ -3,9 +3,9 @@ import {
   GOAT_BRAIN_RETRIEVAL_COMMANDS as GOAT_BRAIN_READ_PLANE_COMMANDS,
   GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
   GOAT_BRAIN_TOOL_FLAG_VALUE_JSON_SCHEMA,
-  normalizeGoatBrainReadToolInput as normalizeSharedGoatBrainReadToolInput,
+  normalizeBrainReadToolInput as normalizeSharedBrainReadToolInput,
 } from "@opencompany/brain";
-import type { GoatBrainToolInput } from "./chat-ui";
+import type { BrainToolInput } from "./chat-ui";
 
 // Shared read-only Goat Brain tool surface for main chat and the per-brain MCP connector.
 // Keep command and input normalization here so both consumers expose the same retrieval contract.
@@ -18,7 +18,7 @@ export {
   GOAT_BRAIN_TOOL_FLAG_VALUE_JSON_SCHEMA,
 };
 
-export type GoatBrainMultiBrainTarget = {
+export type BrainMultiBrainTarget = {
   brainRef: string;
   brainName: string;
 };
@@ -26,7 +26,7 @@ export type GoatBrainMultiBrainTarget = {
 // Single-brain surfaces use the shared read-tool schema unchanged; when
 // several brains are in scope the model must pick one per call via a required
 // `brain` enum (one tool, not N mangled tool names).
-export function buildGoatBrainMultiBrainToolSchema(brains: readonly GoatBrainMultiBrainTarget[]) {
+export function buildBrainMultiBrainToolSchema(brains: readonly BrainMultiBrainTarget[]) {
   if (brains.length <= 1) return GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA;
   return {
     ...GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
@@ -44,6 +44,6 @@ export function buildGoatBrainMultiBrainToolSchema(brains: readonly GoatBrainMul
   };
 }
 
-export function normalizeGoatBrainReadToolInput(input: unknown): GoatBrainToolInput {
-  return normalizeSharedGoatBrainReadToolInput(input) as GoatBrainToolInput;
+export function normalizeBrainReadToolInput(input: unknown): BrainToolInput {
+  return normalizeSharedBrainReadToolInput(input) as BrainToolInput;
 }

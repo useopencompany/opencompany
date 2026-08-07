@@ -1,13 +1,13 @@
 "use server";
 
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 
 // A small feedback report from the sidebar widget. Bug / Feedback / Idea only —
 // enough for Linear Triage Intelligence to sort, without asking the user to pick
 // a team or priority.
-type GoatFeedbackKind = "bug" | "feedback" | "idea";
+type FeedbackKind = "bug" | "feedback" | "idea";
 
-export type GoatFeedbackActionState = { ok: true } | { ok: false; error: string };
+export type FeedbackActionState = { ok: true } | { ok: false; error: string };
 
 type LinearIssueResponse = {
   issueCreate?: {
@@ -39,7 +39,7 @@ type LinearLabelCreateResponse = {
   } | null;
 };
 
-const KIND_LABELS: Record<GoatFeedbackKind, string> = {
+const KIND_LABELS: Record<FeedbackKind, string> = {
   bug: "bug",
   feedback: "feedback",
   idea: "idea",
@@ -52,7 +52,7 @@ const LABEL_COLORS: Record<string, string> = {
   "source:goat": "#f59e0b",
 };
 
-function isGoatFeedbackKind(value: string): value is GoatFeedbackKind {
+function isFeedbackKind(value: string): value is FeedbackKind {
   return value === "bug" || value === "feedback" || value === "idea";
 }
 
@@ -74,7 +74,7 @@ function uniqueLabels(labels: string[]) {
   return Array.from(new Set(labels.map((label) => label.toLowerCase())));
 }
 
-function titlePrefix(kind: GoatFeedbackKind) {
+function titlePrefix(kind: FeedbackKind) {
   switch (kind) {
     case "bug":
       return "Bug";
@@ -85,7 +85,7 @@ function titlePrefix(kind: GoatFeedbackKind) {
   }
 }
 
-function titleFromMessage(kind: GoatFeedbackKind, message: string) {
+function titleFromMessage(kind: FeedbackKind, message: string) {
   const firstLine = message
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -103,7 +103,7 @@ function buildDescription({
   workspace,
 }: {
   message: string;
-  kind: GoatFeedbackKind;
+  kind: FeedbackKind;
   user: { email: string; firstName?: string | null; lastName?: string | null };
   workspace: { id: string; name: string };
 }) {
@@ -165,7 +165,7 @@ async function resolveTriageStateId(teamId: string): Promise<string | null> {
   try {
     const data = await linearGraphql<LinearTeamStatesResponse>(
       `
-        query GoatFeedbackTriageState($teamId: String!) {
+        query FeedbackTriageState($teamId: String!) {
           team(id: $teamId) {
             states {
               nodes {
@@ -188,7 +188,7 @@ async function resolveTriageStateId(teamId: string): Promise<string | null> {
 async function resolveLabelIds(teamId: string, names: string[]) {
   const data = await linearGraphql<LinearLabelsResponse>(
     `
-      query GoatFeedbackLabels($teamId: String!) {
+      query FeedbackLabels($teamId: String!) {
         team(id: $teamId) {
           labels {
             nodes {
@@ -215,7 +215,7 @@ async function resolveLabelIds(teamId: string, names: string[]) {
     try {
       const created = await linearGraphql<LinearLabelCreateResponse>(
         `
-          mutation GoatFeedbackCreateLabel($input: IssueLabelCreateInput!) {
+          mutation FeedbackCreateLabel($input: IssueLabelCreateInput!) {
             issueLabelCreate(input: $input) {
               success
               issueLabel {
@@ -248,7 +248,7 @@ async function createLinearIssue({
 }: {
   title: string;
   description: string;
-  kind: GoatFeedbackKind;
+  kind: FeedbackKind;
 }) {
   const teamId = process.env.FEEDBACK_LINEAR_TEAM_ID;
   if (!teamId) {
@@ -268,7 +268,7 @@ async function createLinearIssue({
 
   const data = await linearGraphql<LinearIssueResponse>(
     `
-      mutation GoatFeedbackCreateIssue($input: IssueCreateInput!) {
+      mutation FeedbackCreateIssue($input: IssueCreateInput!) {
         issueCreate(input: $input) {
           success
           issue {
@@ -300,13 +300,13 @@ async function createLinearIssue({
   return issue;
 }
 
-export async function submitGoatFeedback(
-  _previousState: GoatFeedbackActionState | null,
+export async function submitFeedback(
+  _previousState: FeedbackActionState | null,
   formData: FormData,
-): Promise<GoatFeedbackActionState> {
+): Promise<FeedbackActionState> {
   const rawKind = readString(formData, "kind");
   const message = readString(formData, "message");
-  const kind = isGoatFeedbackKind(rawKind) ? rawKind : "feedback";
+  const kind = isFeedbackKind(rawKind) ? rawKind : "feedback";
 
   if (message.length < 3) {
     return { ok: false, error: "Enter a bit more detail." };
@@ -315,7 +315,7 @@ export async function submitGoatFeedback(
     return { ok: false, error: "Keep feedback under 4,000 characters." };
   }
 
-  const { authUser, workspace } = await currentGoatUser();
+  const { authUser, workspace } = await currentUser();
 
   const title = titleFromMessage(kind, message);
   const description = buildDescription({ message, kind, user: authUser, workspace });

@@ -1,40 +1,40 @@
 "use server";
 
 import {
-  deleteGoatClaudeCodeCredential,
-  saveGoatClaudeCodeCredential,
+  deleteClaudeCodeCredential,
+  saveClaudeCodeCredential,
 } from "@opencompany/db/claude-code-auth";
 import { getDb } from "@opencompany/db/client";
-import { goatClaudeCodeCredentials } from "@opencompany/db/schema";
+import { claudeCodeCredentials } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
-import { validateGoatClaudeCodeToken } from "@/lib/claude-code-token";
+import { currentUser } from "@/lib/auth";
+import { validateClaudeCodeToken } from "@/lib/claude-code-token";
 
-export type GoatClaudeCodeAuthSettings = {
+export type ClaudeCodeAuthSettings = {
   status: "connected" | "needs_reauth" | null;
   statusReason: string | null;
   lastValidatedAt: string | null;
   lastRotatedAt: string | null;
 };
 
-export async function loadCurrentGoatClaudeCodeAuthSettings(): Promise<GoatClaudeCodeAuthSettings> {
-  const { user } = await currentGoatUser();
-  return loadGoatClaudeCodeAuthSettingsForUser(user.workosUserId);
+export async function loadCurrentClaudeCodeAuthSettings(): Promise<ClaudeCodeAuthSettings> {
+  const { user } = await currentUser();
+  return loadClaudeCodeAuthSettingsForUser(user.workosUserId);
 }
 
-export async function loadGoatClaudeCodeAuthSettingsForUser(
+export async function loadClaudeCodeAuthSettingsForUser(
   userWorkosId: string,
-): Promise<GoatClaudeCodeAuthSettings> {
+): Promise<ClaudeCodeAuthSettings> {
   const [row] = await getDb()
     .select({
-      status: goatClaudeCodeCredentials.status,
-      statusReason: goatClaudeCodeCredentials.statusReason,
-      lastValidatedAt: goatClaudeCodeCredentials.lastValidatedAt,
-      lastRotatedAt: goatClaudeCodeCredentials.lastRotatedAt,
+      status: claudeCodeCredentials.status,
+      statusReason: claudeCodeCredentials.statusReason,
+      lastValidatedAt: claudeCodeCredentials.lastValidatedAt,
+      lastRotatedAt: claudeCodeCredentials.lastRotatedAt,
     })
-    .from(goatClaudeCodeCredentials)
-    .where(eq(goatClaudeCodeCredentials.userWorkosId, userWorkosId))
+    .from(claudeCodeCredentials)
+    .where(eq(claudeCodeCredentials.userWorkosId, userWorkosId))
     .limit(1);
 
   return {
@@ -45,17 +45,17 @@ export async function loadGoatClaudeCodeAuthSettingsForUser(
   };
 }
 
-export async function isGoatClaudeCodeConnectedForUser(userWorkosId: string) {
-  const settings = await loadGoatClaudeCodeAuthSettingsForUser(userWorkosId);
+export async function isClaudeCodeConnectedForUser(userWorkosId: string) {
+  const settings = await loadClaudeCodeAuthSettingsForUser(userWorkosId);
   return settings.status === "connected";
 }
 
-export async function saveGoatClaudeCodeToken(token: string) {
-  const validated = validateGoatClaudeCodeToken(token);
+export async function saveClaudeCodeToken(token: string) {
+  const validated = validateClaudeCodeToken(token);
   if (!validated.ok) return validated;
 
-  const { user } = await currentGoatUser();
-  await saveGoatClaudeCodeCredential({
+  const { user } = await currentUser();
+  await saveClaudeCodeCredential({
     db: getDb(),
     userWorkosId: user.workosUserId,
     authJson: { token: validated.token },
@@ -65,9 +65,9 @@ export async function saveGoatClaudeCodeToken(token: string) {
   return { ok: true as const };
 }
 
-export async function disconnectGoatClaudeCodeAuth() {
-  const { user } = await currentGoatUser();
-  await deleteGoatClaudeCodeCredential({ db: getDb(), userWorkosId: user.workosUserId });
+export async function disconnectClaudeCodeAuth() {
+  const { user } = await currentUser();
+  await deleteClaudeCodeCredential({ db: getDb(), userWorkosId: user.workosUserId });
   revalidatePath("/settings");
   return { ok: true as const };
 }

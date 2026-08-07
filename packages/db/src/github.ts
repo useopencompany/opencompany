@@ -6,19 +6,19 @@ import {
 } from "../../brain/src/source-items";
 import { getDb } from "./client";
 import {
-  type GoatGitHubPullRequestEventType,
-  type GoatIntegrationStatus,
-  goatBrainSources,
-  goatGitHubPullRequestEvents,
-  goatIntegrationResources,
-  goatIntegrations,
+  brainSources,
+  type GitHubPullRequestEventType,
+  gitHubPullRequestEvents,
+  type IntegrationStatus,
+  integrationResources,
+  integrations,
 } from "./schema";
 
 type DbLike = any;
 
 // Repository ids are GitHub's numeric repo ids (stringified) — stable across
 // renames and transfers, unlike full names, which are kept only for display.
-export type GoatGitHubRepositoryRef = {
+export type GitHubRepositoryRef = {
   id: string;
   fullName: string;
 };
@@ -28,36 +28,36 @@ export type GoatGitHubRepositoryRef = {
 // appears in the enabled brain-source config for the integration AND its
 // event type is subscribed there. A missing `events` key means all supported
 // event types (the picker's default state), not none.
-export type GoatGitHubBrainSourceConfig = {
-  repos?: GoatGitHubRepositoryRef[];
+export type GitHubBrainSourceConfig = {
+  repos?: GitHubRepositoryRef[];
   events?: GitHubActivityEventType[];
 };
 
-export type GoatGitHubIntegrationForInstallation = {
+export type GitHubIntegrationForInstallation = {
   id: string;
   userWorkosId: string;
-  status: GoatIntegrationStatus;
+  status: IntegrationStatus;
 };
 
-export type GoatGitHubBrainSourceRoute = {
+export type GitHubBrainSourceRoute = {
   integrationId: string;
   brainRef: string;
-  config: GoatGitHubBrainSourceConfig;
+  config: GitHubBrainSourceConfig;
 };
 
-export type GoatGitHubPullRequestEventInsert = {
+export type GitHubPullRequestEventInsert = {
   integrationId: string;
   userWorkosId: string;
   installationId: string;
   repositoryId: string;
   pullRequestNumber: number;
   deliveryId: string;
-  eventType: GoatGitHubPullRequestEventType;
+  eventType: GitHubPullRequestEventType;
   payload: Record<string, unknown>;
   eventTime: Date;
 };
 
-export function parseGoatGitHubBrainSourceConfig(value: unknown): GoatGitHubBrainSourceConfig {
+export function parseGitHubBrainSourceConfig(value: unknown): GitHubBrainSourceConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const record = value as Record<string, unknown>;
   const repos = parseRepositoryRefs(record.repos);
@@ -68,73 +68,71 @@ export function parseGoatGitHubBrainSourceConfig(value: unknown): GoatGitHubBrai
   };
 }
 
-export function goatGitHubSelectedRepoIds(config: GoatGitHubBrainSourceConfig): Set<string> {
+export function gitHubSelectedRepoIds(config: GitHubBrainSourceConfig): Set<string> {
   return new Set((config.repos ?? []).map((repo) => repo.id));
 }
 
-export function goatGitHubEnabledEventTypes(
-  config: GoatGitHubBrainSourceConfig,
+export function gitHubEnabledEventTypes(
+  config: GitHubBrainSourceConfig,
 ): Set<GitHubActivityEventType> {
   // Configs written before the event filter existed have no `events` key;
   // treat that as everything so enabling repos alone keeps working.
   return new Set(config.events ?? GITHUB_ACTIVITY_EVENT_TYPES);
 }
 
-export async function listGoatGitHubIntegrationsForInstallation(
+export async function listGitHubIntegrationsForInstallation(
   installationId: string,
   db: DbLike = getDb(),
-): Promise<GoatGitHubIntegrationForInstallation[]> {
+): Promise<GitHubIntegrationForInstallation[]> {
   return await db
     .select({
-      id: goatIntegrations.id,
-      userWorkosId: goatIntegrations.userWorkosId,
-      status: goatIntegrations.status,
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      status: integrations.status,
     })
-    .from(goatIntegrations)
-    .where(
-      and(eq(goatIntegrations.provider, "github"), eq(goatIntegrations.externalId, installationId)),
-    );
+    .from(integrations)
+    .where(and(eq(integrations.provider, "github"), eq(integrations.externalId, installationId)));
 }
 
-export async function listEnabledGoatGitHubBrainSourceRoutes(
+export async function listEnabledGitHubBrainSourceRoutes(
   integrationIds: readonly string[],
   db: DbLike = getDb(),
-): Promise<GoatGitHubBrainSourceRoute[]> {
+): Promise<GitHubBrainSourceRoute[]> {
   if (integrationIds.length === 0) return [];
   const rows = await db
     .select({
-      integrationId: goatBrainSources.integrationId,
-      brainRef: goatBrainSources.brainId,
-      config: goatBrainSources.config,
+      integrationId: brainSources.integrationId,
+      brainRef: brainSources.brainId,
+      config: brainSources.config,
     })
-    .from(goatBrainSources)
+    .from(brainSources)
     .where(
       and(
-        eq(goatBrainSources.provider, "github"),
-        eq(goatBrainSources.enabled, true),
-        inArray(goatBrainSources.integrationId, [...integrationIds]),
+        eq(brainSources.provider, "github"),
+        eq(brainSources.enabled, true),
+        inArray(brainSources.integrationId, [...integrationIds]),
       ),
     );
 
   return rows.map((row: { integrationId: string; brainRef: string; config: unknown }) => ({
     integrationId: row.integrationId,
     brainRef: row.brainRef,
-    config: parseGoatGitHubBrainSourceConfig(row.config),
+    config: parseGitHubBrainSourceConfig(row.config),
   }));
 }
 
-export async function insertGoatGitHubPullRequestEvents(
-  events: readonly GoatGitHubPullRequestEventInsert[],
+export async function insertGitHubPullRequestEvents(
+  events: readonly GitHubPullRequestEventInsert[],
   db: DbLike = getDb(),
 ): Promise<number> {
   if (events.length === 0) return 0;
   // GitHub retries deliveries with the same X-GitHub-Delivery UUID; the
   // per-integration unique index makes redeliveries no-ops.
   const rows = await db
-    .insert(goatGitHubPullRequestEvents)
+    .insert(gitHubPullRequestEvents)
     .values(
       events.map((event) => ({
-        id: newGoatGitHubPullRequestEventId(),
+        id: newGitHubPullRequestEventId(),
         integrationId: event.integrationId,
         userWorkosId: event.userWorkosId,
         installationId: event.installationId,
@@ -147,30 +145,30 @@ export async function insertGoatGitHubPullRequestEvents(
       })),
     )
     .onConflictDoNothing()
-    .returning({ id: goatGitHubPullRequestEvents.id });
+    .returning({ id: gitHubPullRequestEvents.id });
   return rows.length;
 }
 
 // Repositories the integration's installation can see, synced into
 // integration_resources at connect time — the repo picker reads from here so
 // it needs no GitHub API call.
-export async function listGoatGitHubIntegrationRepositories(
+export async function listGitHubIntegrationRepositories(
   integrationId: string,
   db: DbLike = getDb(),
-): Promise<Array<GoatGitHubRepositoryRef & { private: boolean }>> {
+): Promise<Array<GitHubRepositoryRef & { private: boolean }>> {
   const rows = await db
     .select({
-      externalId: goatIntegrationResources.externalId,
-      name: goatIntegrationResources.name,
-      metadata: goatIntegrationResources.metadata,
+      externalId: integrationResources.externalId,
+      name: integrationResources.name,
+      metadata: integrationResources.metadata,
     })
-    .from(goatIntegrationResources)
+    .from(integrationResources)
     .where(
       and(
-        eq(goatIntegrationResources.integrationId, integrationId),
-        eq(goatIntegrationResources.provider, "github"),
-        eq(goatIntegrationResources.resourceType, "repository"),
-        eq(goatIntegrationResources.status, "available"),
+        eq(integrationResources.integrationId, integrationId),
+        eq(integrationResources.provider, "github"),
+        eq(integrationResources.resourceType, "repository"),
+        eq(integrationResources.status, "available"),
       ),
     );
 
@@ -186,9 +184,7 @@ export async function listGoatGitHubIntegrationRepositories(
         private: metadata.private === true,
       };
     })
-    .sort((a: GoatGitHubRepositoryRef, b: GoatGitHubRepositoryRef) =>
-      a.fullName.localeCompare(b.fullName),
-    );
+    .sort((a: GitHubRepositoryRef, b: GitHubRepositoryRef) => a.fullName.localeCompare(b.fullName));
 }
 
 function parseEventTypes(value: unknown): GitHubActivityEventType[] | undefined {
@@ -204,7 +200,7 @@ function parseEventTypes(value: unknown): GitHubActivityEventType[] | undefined 
   return events;
 }
 
-function parseRepositoryRefs(value: unknown): GoatGitHubRepositoryRef[] | undefined {
+function parseRepositoryRefs(value: unknown): GitHubRepositoryRef[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const refs = value.flatMap((entry) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
@@ -217,10 +213,10 @@ function parseRepositoryRefs(value: unknown): GoatGitHubRepositoryRef[] | undefi
   return refs.length > 0 ? refs : undefined;
 }
 
-export function newGoatGitHubPullRequestEventId() {
+export function newGitHubPullRequestEventId() {
   return `gghprevt_${randomUUID().replace(/-/g, "")}`;
 }
 
-export function newGoatGitHubPullRequestWindowId() {
+export function newGitHubPullRequestWindowId() {
   return `gghprwin_${randomUUID().replace(/-/g, "")}`;
 }

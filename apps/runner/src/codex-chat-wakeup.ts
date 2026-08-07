@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { emptyAssistantDebugTrace, nextGoatChatMessageCreatedAt } from "@opencompany/core/chat-ui";
-import type { GoatCodexChatTurn, GoatCodexChatTurnSettings } from "@opencompany/db/schema";
+import { emptyAssistantDebugTrace, nextChatMessageCreatedAt } from "@opencompany/core/chat-ui";
+import type { CodexChatTurn, CodexChatTurnSettings } from "@opencompany/db/schema";
 import { createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
-import { GoatCodexChatLeaseLostError } from "./codex-chat-errors";
+import { CodexChatLeaseLostError } from "./codex-chat-errors";
 import { getDb } from "./db";
 import { rowsFromExecute } from "./sql-exec";
 
@@ -11,16 +11,16 @@ export const GOAT_CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS = 60;
 export const GOAT_CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS = 3_600;
 export const GOAT_CODEX_CHAT_WAKEUP_MAX_CHAIN = 5;
 
-export type GoatCodexChatScheduledWakeup = {
+export type CodexChatScheduledWakeup = {
   delaySeconds: number;
   reason: string;
   prompt: string;
 };
 
-export type PreparedGoatCodexChatScheduledWakeup = {
+export type PreparedCodexChatScheduledWakeup = {
   dueAt: Date;
   prompt: string;
-  settings: GoatCodexChatTurnSettings;
+  settings: CodexChatTurnSettings;
   userDebugTrace: {
     scheduledWakeup: {
       reason: string;
@@ -32,7 +32,7 @@ export type PreparedGoatCodexChatScheduledWakeup = {
 };
 
 type WakeupParentTurn = Pick<
-  GoatCodexChatTurn,
+  CodexChatTurn,
   "id" | "userWorkosId" | "codexChatSessionId" | "chatSessionId" | "createdAt" | "settings"
 >;
 
@@ -41,13 +41,13 @@ const logger = createLogger({
   runtime: "goat-codex-chat-wakeup",
 });
 
-export async function enqueueGoatCodexChatWakeup(input: {
+export async function enqueueCodexChatWakeup(input: {
   parentTurn: WakeupParentTurn;
   model: string;
-  wakeup: GoatCodexChatScheduledWakeup;
+  wakeup: CodexChatScheduledWakeup;
   now?: Date;
 }): Promise<"enqueued" | "chain_capped" | "superseded"> {
-  const prepared = prepareGoatCodexChatScheduledWakeup({
+  const prepared = prepareCodexChatScheduledWakeup({
     parentSettings: input.parentTurn.settings,
     wakeup: input.wakeup,
     ...(input.now ? { now: input.now } : {}),
@@ -63,7 +63,7 @@ export async function enqueueGoatCodexChatWakeup(input: {
   }
 
   const now = input.now ?? new Date();
-  const assistantCreatedAt = nextGoatChatMessageCreatedAt(now);
+  const assistantCreatedAt = nextChatMessageCreatedAt(now);
   const userMessageId = `goat_chat_msg_${randomUUID()}`;
   const assistantMessageId = `goat_chat_msg_${randomUUID()}`;
   const turnId = `goat_codex_chat_turn_${randomUUID()}`;
@@ -159,11 +159,11 @@ export async function enqueueGoatCodexChatWakeup(input: {
   return rowsFromExecute<{ id: string }>(result).length > 0 ? "enqueued" : "superseded";
 }
 
-export function prepareGoatCodexChatScheduledWakeup(input: {
-  parentSettings: GoatCodexChatTurnSettings;
-  wakeup: GoatCodexChatScheduledWakeup;
+export function prepareCodexChatScheduledWakeup(input: {
+  parentSettings: CodexChatTurnSettings;
+  wakeup: CodexChatScheduledWakeup;
   now?: Date;
-}): PreparedGoatCodexChatScheduledWakeup | null {
+}): PreparedCodexChatScheduledWakeup | null {
   const wakeupChain = validWakeupChain(input.parentSettings) + 1;
   if (wakeupChain > GOAT_CODEX_CHAT_WAKEUP_MAX_CHAIN) return null;
 
@@ -174,7 +174,7 @@ export function prepareGoatCodexChatScheduledWakeup(input: {
   );
   const dueAt = new Date(now.getTime() + delaySeconds * 1_000);
   const reason = input.wakeup.reason.trim();
-  const settings: GoatCodexChatTurnSettings = {
+  const settings: CodexChatTurnSettings = {
     ...input.parentSettings,
     wakeupChain,
   };
@@ -198,13 +198,13 @@ export function prepareGoatCodexChatScheduledWakeup(input: {
   };
 }
 
-export async function persistGoatCodexChatScheduledWakeup(input: {
+export async function persistCodexChatScheduledWakeup(input: {
   turnId: string;
   userWorkosId: string;
   codexChatSessionId: string;
   leaseId: string;
   leaseOwner: string;
-  wakeup: GoatCodexChatScheduledWakeup;
+  wakeup: CodexChatScheduledWakeup;
   now?: Date;
 }) {
   const now = input.now ?? new Date();
@@ -225,12 +225,12 @@ export async function persistGoatCodexChatScheduledWakeup(input: {
       AND status = 'running'
     RETURNING id
   `);
-  if (rowsFromExecute(result).length === 0) throw new GoatCodexChatLeaseLostError();
+  if (rowsFromExecute(result).length === 0) throw new CodexChatLeaseLostError();
 }
 
 export function scheduledWakeupFromTurnSettings(
-  settings: GoatCodexChatTurnSettings,
-): GoatCodexChatScheduledWakeup | null {
+  settings: CodexChatTurnSettings,
+): CodexChatScheduledWakeup | null {
   const wakeup = settings.scheduledWakeup;
   if (
     !wakeup ||
@@ -253,7 +253,7 @@ export function scheduledWakeupFromTurnSettings(
   };
 }
 
-function validWakeupChain(settings: GoatCodexChatTurnSettings) {
+function validWakeupChain(settings: CodexChatTurnSettings) {
   const chain = settings.wakeupChain;
   return typeof chain === "number" && Number.isInteger(chain) && chain >= 0 ? chain : 0;
 }

@@ -1,24 +1,21 @@
 import { getDb } from "@opencompany/db/client";
-import { goatBrainSources } from "@opencompany/db/schema";
-import { getGoatSlackBotIntegrationForWorkspace } from "@opencompany/db/slack-bot";
+import { brainSources } from "@opencompany/db/schema";
+import { getSlackBotIntegrationForWorkspace } from "@opencompany/db/slack-bot";
 import { and, count, eq } from "drizzle-orm";
-import { GoatSlackBotSettings } from "@/components/GoatSlackBotSettings";
-import { currentGoatUser } from "@/lib/auth";
-import {
-  goatSlackBotScopesSatisfied,
-  isGoatSlackBotConfigured,
-} from "@/lib/integrations/slack-bot";
+import { SlackBotSettings } from "@/components/SlackBotSettings";
+import { currentUser } from "@/lib/auth";
+import { isSlackBotConfigured, slackBotScopesSatisfied } from "@/lib/integrations/slack-bot";
 
 export default async function WorkspaceSlackBotSettingsPage({
   searchParams,
 }: {
   searchParams: Promise<{ setup?: string; reason?: string }>;
 }) {
-  const [context, params] = await Promise.all([currentGoatUser(), searchParams]);
+  const [context, params] = await Promise.all([currentUser(), searchParams]);
   const isAdmin = context.role === "admin";
 
   const integration = isAdmin
-    ? await getGoatSlackBotIntegrationForWorkspace(context.workspace.id)
+    ? await getSlackBotIntegrationForWorkspace(context.workspace.id)
     : null;
   const installed = Boolean(integration && integration.status !== "disconnected");
 
@@ -26,29 +23,29 @@ export default async function WorkspaceSlackBotSettingsPage({
   if (integration && installed) {
     const [row] = await getDb()
       .select({ value: count() })
-      .from(goatBrainSources)
+      .from(brainSources)
       .where(
         and(
-          eq(goatBrainSources.integrationId, integration.id),
-          eq(goatBrainSources.provider, "slack_bot"),
-          eq(goatBrainSources.enabled, true),
+          eq(brainSources.integrationId, integration.id),
+          eq(brainSources.provider, "slack_bot"),
+          eq(brainSources.enabled, true),
         ),
       );
     destinationCount = row?.value ?? 0;
   }
 
   return (
-    <GoatSlackBotSettings
+    <SlackBotSettings
       data={{
         isAdmin,
-        configured: isGoatSlackBotConfigured(),
+        configured: isSlackBotConfigured(),
         installed,
         status: integration && installed ? integration.status : "not_connected",
         needsScopeUpgrade: Boolean(
           integration &&
             installed &&
             integration.status === "connected" &&
-            !goatSlackBotScopesSatisfied(integration.scopes),
+            !slackBotScopesSatisfied(integration.scopes),
         ),
         teamName: integration?.connectionLabel ?? null,
         statusReason: integration?.statusReason ?? null,

@@ -2,9 +2,9 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  createGoatChatShareAction,
-  getGoatChatShareAction,
-  revokeGoatChatShareAction,
+  createChatShareAction,
+  getChatShareAction,
+  revokeChatShareAction,
 } from "@/lib/chat-actions";
 import { ChatShareButton } from "./ChatShareButton";
 
@@ -20,9 +20,9 @@ vi.mock("@opencompany/ui/components/sonner", () => ({
 }));
 
 vi.mock("@/lib/chat-actions", () => ({
-  createGoatChatShareAction: vi.fn(),
-  getGoatChatShareAction: vi.fn(),
-  revokeGoatChatShareAction: vi.fn(),
+  createChatShareAction: vi.fn(),
+  getChatShareAction: vi.fn(),
+  revokeChatShareAction: vi.fn(),
 }));
 
 describe("ChatShareButton", () => {
@@ -33,10 +33,10 @@ describe("ChatShareButton", () => {
     writeText.mockResolvedValue(undefined);
     toastMock.success.mockReset();
     toastMock.error.mockReset();
-    vi.mocked(createGoatChatShareAction).mockReset();
-    vi.mocked(getGoatChatShareAction).mockReset();
-    vi.mocked(revokeGoatChatShareAction).mockReset();
-    vi.mocked(getGoatChatShareAction).mockResolvedValue({ ok: true, shareId: null });
+    vi.mocked(createChatShareAction).mockReset();
+    vi.mocked(getChatShareAction).mockReset();
+    vi.mocked(revokeChatShareAction).mockReset();
+    vi.mocked(getChatShareAction).mockResolvedValue({ ok: true, shareId: null });
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText },
@@ -48,7 +48,7 @@ describe("ChatShareButton", () => {
   });
 
   it("explains the live read-only link before creating and copying it", async () => {
-    vi.mocked(createGoatChatShareAction).mockResolvedValue({
+    vi.mocked(createChatShareAction).mockResolvedValue({
       ok: true,
       shareId: SHARE_ID,
     });
@@ -62,7 +62,7 @@ describe("ChatShareButton", () => {
     ).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Create & copy link" }));
 
-    expect(createGoatChatShareAction).toHaveBeenCalledWith("chat_1");
+    expect(createChatShareAction).toHaveBeenCalledWith("chat_1");
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/share/${SHARE_ID}`),
     );
@@ -76,8 +76,8 @@ describe("ChatShareButton", () => {
   });
 
   it("confirms before revoking an existing link and leaves the chat ready to share again", async () => {
-    vi.mocked(getGoatChatShareAction).mockResolvedValue({ ok: true, shareId: SHARE_ID });
-    vi.mocked(revokeGoatChatShareAction).mockResolvedValue({ ok: true });
+    vi.mocked(getChatShareAction).mockResolvedValue({ ok: true, shareId: SHARE_ID });
+    vi.mocked(revokeChatShareAction).mockResolvedValue({ ok: true });
     render(<ChatShareButton chatSessionId="chat_1" />);
 
     fireEvent.click(screen.getByRole("button", { name: "Share chat" }));
@@ -89,7 +89,7 @@ describe("ChatShareButton", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Stop sharing" }));
 
-    await waitFor(() => expect(revokeGoatChatShareAction).toHaveBeenCalledWith("chat_1"));
+    await waitFor(() => expect(revokeChatShareAction).toHaveBeenCalledWith("chat_1"));
     expect(await screen.findByRole("heading", { name: "Share this chat" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create & copy link" })).toBeEnabled();
     expect(toastMock.success).toHaveBeenCalledWith("Chat is no longer shared", {
@@ -98,7 +98,7 @@ describe("ChatShareButton", () => {
   });
 
   it("uses task run copy when sharing a task-backed session", async () => {
-    vi.mocked(createGoatChatShareAction).mockResolvedValue({
+    vi.mocked(createChatShareAction).mockResolvedValue({
       ok: true,
       shareId: SHARE_ID,
     });
@@ -130,7 +130,7 @@ describe("ChatShareButton", () => {
     "Codex chat",
     "Claude Code chat",
   ] as const)("uses %s copy when sharing cloud coding sessions", async (subject) => {
-    vi.mocked(createGoatChatShareAction).mockResolvedValue({
+    vi.mocked(createChatShareAction).mockResolvedValue({
       ok: true,
       shareId: SHARE_ID,
     });
@@ -165,8 +165,8 @@ describe("ChatShareButton", () => {
   });
 
   it("keeps a failed revocation open so the owner can retry", async () => {
-    vi.mocked(getGoatChatShareAction).mockResolvedValue({ ok: true, shareId: SHARE_ID });
-    vi.mocked(revokeGoatChatShareAction).mockResolvedValue({
+    vi.mocked(getChatShareAction).mockResolvedValue({ ok: true, shareId: SHARE_ID });
+    vi.mocked(revokeChatShareAction).mockResolvedValue({
       ok: false,
       error: "Could not stop sharing that chat.",
     });
@@ -184,7 +184,7 @@ describe("ChatShareButton", () => {
   });
 
   it("keeps the unshared state and surfaces a share failure", async () => {
-    vi.mocked(createGoatChatShareAction).mockResolvedValue({
+    vi.mocked(createChatShareAction).mockResolvedValue({
       ok: false,
       error: "Could not share that chat.",
     });

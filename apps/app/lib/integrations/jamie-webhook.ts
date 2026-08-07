@@ -1,32 +1,32 @@
-import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
+import { captureIngestionQuotaAnalytics } from "@opencompany/analytics/app";
 import {
   BrainSourceNormalizationError,
   normalizeJamieMeetingCompletedWebhook,
 } from "@opencompany/brain";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
-  upsertGoatBrainSourceItemAndEnqueue,
+  upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
   hasAnyBrainSourceForIntegration,
   listEnabledBrainRefsForIntegration,
 } from "@opencompany/db/brain-sources";
-import { getDefaultGoatBrainForUser } from "@opencompany/db/workspaces";
+import { getDefaultBrainForUser } from "@opencompany/db/workspaces";
 import { NextResponse } from "next/server";
 import {
-  type GoatJamieWebhookContext,
-  markGoatJamieWebhookConnected,
-  verifyGoatJamieWebhookApiKey,
+  type JamieWebhookContext,
+  markJamieWebhookConnected,
+  verifyJamieWebhookApiKey,
 } from "@/lib/integrations/jamie";
 import {
   GOAT_JAMIE_WEBHOOK_EVENT_HEADER,
   GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
 } from "@/lib/integrations/jamie-constants";
-import { triggerGoatBrainIngestWake } from "@/lib/task-runner";
+import { triggerBrainIngestWake } from "@/lib/task-runner";
 
-export async function handleGoatJamieWebhookDelivery(input: {
+export async function handleJamieWebhookDelivery(input: {
   request: Request;
-  webhookContext: GoatJamieWebhookContext | null;
+  webhookContext: JamieWebhookContext | null;
   missingContextStatus: 401 | 404;
 }) {
   const { request, webhookContext } = input;
@@ -43,7 +43,7 @@ export async function handleGoatJamieWebhookDelivery(input: {
   }
 
   const apiKey = request.headers.get(GOAT_JAMIE_WEBHOOK_SECRET_HEADER);
-  const apiKeyVerification = verifyGoatJamieWebhookApiKey({
+  const apiKeyVerification = verifyJamieWebhookApiKey({
     candidate: apiKey,
     apiKeyHash: webhookContext.apiKeyHash,
     legacySecretHash: webhookContext.legacySecretHash,
@@ -87,11 +87,11 @@ export async function handleGoatJamieWebhookDelivery(input: {
   if (enabledBrainRefs.length === 0) {
     const configured = await hasAnyBrainSourceForIntegration(webhookContext.integrationId);
     if (!configured) {
-      const defaultBrain = await getDefaultGoatBrainForUser(webhookContext.userWorkosId);
+      const defaultBrain = await getDefaultBrainForUser(webhookContext.userWorkosId);
       brainRefs = [defaultBrain?.id ?? null];
     }
   }
-  const result = await upsertGoatBrainSourceItemAndEnqueue({
+  const result = await upsertBrainSourceItemAndEnqueue({
     userWorkosId: webhookContext.userWorkosId,
     sourceConnectionId: webhookContext.integrationId,
     integrationId: webhookContext.integrationId,
@@ -101,16 +101,16 @@ export async function handleGoatJamieWebhookDelivery(input: {
     brainRefs,
     now: receivedAt,
   });
-  captureGoatIngestionQuotaAnalytics(result.quotaUpdates);
+  captureIngestionQuotaAnalytics(result.quotaUpdates);
 
-  await markGoatJamieWebhookConnected({
+  await markJamieWebhookConnected({
     integrationId: webhookContext.integrationId,
     userWorkosId: webhookContext.userWorkosId,
     now: receivedAt,
   });
 
   if (result.enqueued) {
-    triggerGoatBrainIngestWake().catch((error) => {
+    triggerBrainIngestWake().catch((error) => {
       console.warn("[goat-jamie] Failed to wake Goat Brain ingest worker", {
         error: error instanceof Error ? error.message : String(error),
       });

@@ -1,36 +1,33 @@
-import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
+import { captureIngestionQuotaAnalytics } from "@opencompany/analytics/app";
 import { normalizeFathomMeeting } from "@opencompany/brain";
 import {
-  attributeGoatBrainSourceEventClaims,
-  claimGoatBrainSourceEvents,
-  listGoatBrainSourceEventClaimedBrainRefs,
+  attributeBrainSourceEventClaims,
+  claimBrainSourceEvents,
+  listBrainSourceEventClaimedBrainRefs,
 } from "@opencompany/db/brain-event-claims";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
-  upsertGoatBrainSourceItemAndEnqueue,
+  upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
-  claimGoatFathomSyncState,
-  completeGoatFathomSyncPages,
-  deleteGoatFathomPendingMeeting,
-  ensureGoatFathomSyncState,
+  claimFathomSyncState,
+  completeFathomSyncPages,
+  deleteFathomPendingMeeting,
+  ensureFathomSyncState,
+  fathomEventClaimKey,
   GOAT_FATHOM_CREDENTIAL_KIND,
   GOAT_FATHOM_PROVIDER,
-  goatFathomEventClaimKey,
-  listEnabledGoatFathomBrainSourceRoutes,
-  listGoatFathomPendingMeetings,
-  recordGoatFathomPendingMeetingAttempt,
-  updateGoatFathomSyncCursor,
-  updateGoatFathomSyncPage,
-  upsertGoatFathomPendingMeeting,
+  listEnabledFathomBrainSourceRoutes,
+  listFathomPendingMeetings,
+  recordFathomPendingMeetingAttempt,
+  updateFathomSyncCursor,
+  updateFathomSyncPage,
+  upsertFathomPendingMeeting,
 } from "@opencompany/db/fathom";
-import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-} from "@opencompany/db/integrations";
+import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
-import { wakeGoatBrainIngestWorker } from "./brain-ingest-worker";
+import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { getDb } from "./db";
 import {
   FathomApiError,
@@ -72,7 +69,7 @@ type FathomPollCandidate = {
   userWorkosId: string;
 };
 
-export async function listGoatFathomPollCandidates(): Promise<FathomPollCandidate[]> {
+export async function listFathomPollCandidates(): Promise<FathomPollCandidate[]> {
   const result = await getDb().execute(sql`
     SELECT
       i.id AS "integrationId",
@@ -90,7 +87,7 @@ export async function listGoatFathomPollCandidates(): Promise<FathomPollCandidat
   return rowsFromExecute<FathomPollCandidate>(result);
 }
 
-export async function pollGoatFathomIntegration(input: {
+export async function pollFathomIntegration(input: {
   candidate: FathomPollCandidate;
   signal: AbortSignal;
   cooldownMs?: number;
@@ -98,14 +95,14 @@ export async function pollGoatFathomIntegration(input: {
 }): Promise<{ enqueued: number; seen: number } | null> {
   const { candidate } = input;
   const db = getDb();
-  await ensureGoatFathomSyncState(
+  await ensureFathomSyncState(
     {
       integrationId: candidate.integrationId,
       userWorkosId: candidate.userWorkosId,
     },
     db,
   );
-  const state = await claimGoatFathomSyncState(
+  const state = await claimFathomSyncState(
     {
       integrationId: candidate.integrationId,
       cooldownMs: input.cooldownMs ?? GOAT_FATHOM_POLL_COOLDOWN_MS,
@@ -116,14 +113,14 @@ export async function pollGoatFathomIntegration(input: {
 
   // First poll after connect: anchor the cursor at "now" — no backfill.
   if (!state.createdAfterCursor) {
-    await updateGoatFathomSyncCursor(
+    await updateFathomSyncCursor(
       { integrationId: candidate.integrationId, createdAfterCursor: new Date() },
       db,
     );
     return { enqueued: 0, seen: 0 };
   }
 
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId: candidate.userWorkosId,
     integrationId: candidate.integrationId,
     provider: GOAT_FATHOM_PROVIDER,
@@ -136,7 +133,7 @@ export async function pollGoatFathomIntegration(input: {
     return null;
   }
 
-  const routes = await listEnabledGoatFathomBrainSourceRoutes([candidate.integrationId], db);
+  const routes = await listEnabledFathomBrainSourceRoutes([candidate.integrationId], db);
   const routedBrainRefs = [...new Set(routes.map((route) => route.brainRef))];
 
   let pendingResult: { enqueued: number; seen: number };
@@ -190,7 +187,7 @@ export async function pollGoatFathomIntegration(input: {
       if (!meetingCreatedAt || !Number.isFinite(meetingCreatedAt.getTime())) {
         throw new Error(`Fathom meeting ${meeting.recordingId} has no valid created_at timestamp.`);
       }
-      await upsertGoatFathomPendingMeeting(
+      await upsertFathomPendingMeeting(
         {
           integrationId: candidate.integrationId,
           recordingId: meeting.recordingId,
@@ -215,7 +212,7 @@ export async function pollGoatFathomIntegration(input: {
   // with the window bound it was minted for; a later poll resumes without
   // skipping the pages that have not been processed yet.
   if (batch.nextCursor) {
-    await updateGoatFathomSyncPage(
+    await updateFathomSyncPage(
       {
         integrationId: candidate.integrationId,
         expectedCreatedAfterCursor: state.createdAfterCursor,
@@ -229,7 +226,7 @@ export async function pollGoatFathomIntegration(input: {
     // Fathom applies both timestamp filters strictly. Leave a 1 ms overlap
     // between adjacent windows so a meeting exactly on this upper bound is
     // included next time; event claims make the overlap idempotent.
-    await completeGoatFathomSyncPages(
+    await completeFathomSyncPages(
       {
         integrationId: candidate.integrationId,
         expectedCreatedAfterCursor: state.createdAfterCursor,
@@ -293,11 +290,11 @@ async function ingestFathomMeeting(input: {
 }): Promise<{ enqueued: boolean }> {
   const { candidate, meeting } = input;
   const db = getDb();
-  const eventKey = goatFathomEventClaimKey(meeting.recordingId);
+  const eventKey = fathomEventClaimKey(meeting.recordingId);
 
   // Cheap pre-check before normalization: a meeting every routed brain has
   // already claimed (e.g. an overlapping window replay) is a no-op.
-  const alreadyClaimed = await listGoatBrainSourceEventClaimedBrainRefs({
+  const alreadyClaimed = await listBrainSourceEventClaimedBrainRefs({
     brainRefs: input.routedBrainRefs,
     sourceProvider: GOAT_FATHOM_PROVIDER,
     eventKey,
@@ -317,7 +314,7 @@ async function ingestFathomMeeting(input: {
     const brainRefs: string[] = [];
     const claimedEventKeysByBrainRef = new Map<string, string[]>();
     for (const brainRef of pendingBrainRefs) {
-      const { claimedEventKeys } = await claimGoatBrainSourceEvents({
+      const { claimedEventKeys } = await claimBrainSourceEvents({
         brainRef,
         sourceProvider: GOAT_FATHOM_PROVIDER,
         eventKeys: [eventKey],
@@ -329,7 +326,7 @@ async function ingestFathomMeeting(input: {
     }
     if (brainRefs.length === 0) return null;
 
-    const upserted = await upsertGoatBrainSourceItemAndEnqueue({
+    const upserted = await upsertBrainSourceItemAndEnqueue({
       userWorkosId: candidate.userWorkosId,
       sourceConnectionId: candidate.integrationId,
       integrationId: candidate.integrationId,
@@ -341,7 +338,7 @@ async function ingestFathomMeeting(input: {
       db: tx,
     });
     for (const brainRef of brainRefs) {
-      await attributeGoatBrainSourceEventClaims({
+      await attributeBrainSourceEventClaims({
         brainRef,
         sourceProvider: GOAT_FATHOM_PROVIDER,
         eventKeys: claimedEventKeysByBrainRef.get(brainRef) ?? [],
@@ -352,8 +349,8 @@ async function ingestFathomMeeting(input: {
     return upserted;
   });
 
-  captureGoatIngestionQuotaAnalytics(result?.quotaUpdates);
-  if (result?.enqueued) wakeGoatBrainIngestWorker();
+  captureIngestionQuotaAnalytics(result?.quotaUpdates);
+  if (result?.enqueued) wakeBrainIngestWorker();
   return { enqueued: Boolean(result?.enqueued) };
 }
 
@@ -365,7 +362,7 @@ async function retryPendingFathomMeetings(input: {
 }): Promise<{ enqueued: number; seen: number }> {
   if (input.routedBrainRefs.length === 0) return { enqueued: 0, seen: 0 };
   const db = getDb();
-  const pending = await listGoatFathomPendingMeetings(
+  const pending = await listFathomPendingMeetings(
     {
       integrationId: input.candidate.integrationId,
       limit: GOAT_FATHOM_MAX_PENDING_MEETINGS_PER_POLL,
@@ -399,7 +396,7 @@ async function retryPendingFathomMeetings(input: {
         attempt_count: meeting.attemptCount + 1,
         error,
       });
-      await recordGoatFathomPendingMeetingAttempt(
+      await recordFathomPendingMeetingAttempt(
         {
           integrationId: meeting.integrationId,
           recordingId: meeting.recordingId,
@@ -411,7 +408,7 @@ async function retryPendingFathomMeetings(input: {
     }
     const rawPayload = mergeFathomRecordingContent(meeting.rawPayload, content);
     if (!hasFathomMeetingContent(rawPayload)) {
-      await recordGoatFathomPendingMeetingAttempt(
+      await recordFathomPendingMeetingAttempt(
         {
           integrationId: meeting.integrationId,
           recordingId: meeting.recordingId,
@@ -431,7 +428,7 @@ async function retryPendingFathomMeetings(input: {
       },
       routedBrainRefs: input.routedBrainRefs,
     });
-    await deleteGoatFathomPendingMeeting(
+    await deleteFathomPendingMeeting(
       { integrationId: meeting.integrationId, recordingId: meeting.recordingId },
       db,
     );
@@ -450,7 +447,7 @@ async function markFathomNeedsReauth(candidate: FathomPollCandidate, reason: str
     event: "opencompany.goat_fathom_needs_reauth",
     integration_id: candidate.integrationId,
   });
-  await markGoatIntegrationStatus({
+  await markIntegrationStatus({
     userWorkosId: candidate.userWorkosId,
     integrationId: candidate.integrationId,
     provider: GOAT_FATHOM_PROVIDER,
@@ -460,7 +457,7 @@ async function markFathomNeedsReauth(candidate: FathomPollCandidate, reason: str
   });
 }
 
-export function startGoatFathomPollWorker(options: { pollIntervalMs?: number } = {}) {
+export function startFathomPollWorker(options: { pollIntervalMs?: number } = {}) {
   const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? GOAT_FATHOM_POLL_INTERVAL_MS);
   const abort = new AbortController();
   let stopped = false;
@@ -484,10 +481,10 @@ export function startGoatFathomPollWorker(options: { pollIntervalMs?: number } =
   const loop = (async () => {
     while (!stopped) {
       try {
-        const candidates = await listGoatFathomPollCandidates();
+        const candidates = await listFathomPollCandidates();
         for (const candidate of candidates) {
           if (stopped) break;
-          const polled = await pollGoatFathomIntegration({
+          const polled = await pollFathomIntegration({
             candidate,
             signal: abort.signal,
           }).catch((error) => {

@@ -1,20 +1,20 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
 import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-  saveGoatIntegrationCredential,
+  loadIntegrationCredential,
+  markIntegrationStatus,
+  saveIntegrationCredential,
 } from "@opencompany/db/integrations";
-import { goatIntegrations } from "@opencompany/db/schema";
+import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq, ne } from "drizzle-orm";
-import type { GoatJamieProviderState } from "@/lib/integration-state";
+import type { JamieProviderState } from "@/lib/integration-state";
 import {
   GOAT_JAMIE_CREDENTIAL_KIND,
   GOAT_JAMIE_PROVIDER,
   GOAT_JAMIE_WEBHOOK_EVENT_HEADER,
   GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
 } from "@/lib/integrations/jamie-constants";
-import { getGoatAppUrl } from "@/lib/workos";
+import { getAppUrl } from "@/lib/workos";
 
 export {
   GOAT_JAMIE_CREDENTIAL_KIND,
@@ -34,43 +34,41 @@ type JamieWebhookCredentialPayload = {
   createdAt: string;
 };
 
-export type GoatJamieWebhookSetup = {
+export type JamieWebhookSetup = {
   integrationId: string;
   webhookUrl: string;
   headerName: typeof GOAT_JAMIE_WEBHOOK_SECRET_HEADER;
   apiKeyConfigured: boolean;
 };
 
-export type GoatJamieWebhookContext = {
+export type JamieWebhookContext = {
   integrationId: string;
   userWorkosId: string;
   apiKeyHash: string | null;
   legacySecretHash: string | null;
 };
 
-export type GoatJamieWebhookApiKeyVerification =
+export type JamieWebhookApiKeyVerification =
   | { valid: true; apiKey: string }
   | { valid: false; apiKey: null };
 
-export async function getGoatJamieIntegrationState(
-  workspaceId: string,
-): Promise<GoatJamieProviderState> {
+export async function getJamieIntegrationState(workspaceId: string): Promise<JamieProviderState> {
   const [row] = await getDb()
     .select({
-      id: goatIntegrations.id,
-      externalId: goatIntegrations.externalId,
-      status: goatIntegrations.status,
-      accountName: goatIntegrations.accountName,
-      statusReason: goatIntegrations.statusReason,
+      id: integrations.id,
+      externalId: integrations.externalId,
+      status: integrations.status,
+      accountName: integrations.accountName,
+      statusReason: integrations.statusReason,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.workspaceId, workspaceId),
-        eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
+        eq(integrations.workspaceId, workspaceId),
+        eq(integrations.provider, GOAT_JAMIE_PROVIDER),
       ),
     )
-    .orderBy(desc(goatIntegrations.updatedAt))
+    .orderBy(desc(integrations.updatedAt))
     .limit(1);
 
   if (!row || row.status === "disconnected") {
@@ -93,40 +91,40 @@ export async function getGoatJamieIntegrationState(
     accountName: row.accountName,
     statusReason: row.statusReason,
     integrationId: row.id,
-    webhookUrl: goatJamieWebhookUrl(),
-    apiKeyConfigured: isGoatJamieWebhookApiKeyConfigured({
+    webhookUrl: jamieWebhookUrl(),
+    apiKeyConfigured: isJamieWebhookApiKeyConfigured({
       status: row.status,
       externalId: row.externalId,
     }),
   };
 }
 
-export function isGoatJamieWebhookApiKeyConfigured(input: { status: string; externalId: string }) {
+export function isJamieWebhookApiKeyConfigured(input: { status: string; externalId: string }) {
   return (
     input.status === "connected" || input.externalId.startsWith(JAMIE_API_KEY_EXTERNAL_ID_PREFIX)
   );
 }
 
-export async function createOrResetGoatJamieWebhookEndpoint(input: {
+export async function createOrResetJamieWebhookEndpoint(input: {
   userWorkosId: string;
   workspaceId: string;
-}): Promise<GoatJamieWebhookSetup> {
+}): Promise<JamieWebhookSetup> {
   const db = getDb();
   const now = new Date();
   const [existing] = await db
-    .select({ id: goatIntegrations.id, userWorkosId: goatIntegrations.userWorkosId })
-    .from(goatIntegrations)
+    .select({ id: integrations.id, userWorkosId: integrations.userWorkosId })
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.workspaceId, input.workspaceId),
-        eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
-        ne(goatIntegrations.status, "disconnected"),
+        eq(integrations.workspaceId, input.workspaceId),
+        eq(integrations.provider, GOAT_JAMIE_PROVIDER),
+        ne(integrations.status, "disconnected"),
       ),
     )
-    .orderBy(desc(goatIntegrations.updatedAt))
+    .orderBy(desc(integrations.updatedAt))
     .limit(1);
 
-  const integrationId = existing?.id ?? newGoatIntegrationId();
+  const integrationId = existing?.id ?? newIntegrationId();
   // A reset by a different admin keeps the original connector on the row: the
   // credential AAD and brain_sources composite FK are keyed on it.
   const connectorWorkosId = existing?.userWorkosId ?? input.userWorkosId;
@@ -144,20 +142,20 @@ export async function createOrResetGoatJamieWebhookEndpoint(input: {
   const integration = existing
     ? (
         await db
-          .update(goatIntegrations)
+          .update(integrations)
           .set(integrationValues)
           .where(
             and(
-              eq(goatIntegrations.id, integrationId),
-              eq(goatIntegrations.workspaceId, input.workspaceId),
-              eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
+              eq(integrations.id, integrationId),
+              eq(integrations.workspaceId, input.workspaceId),
+              eq(integrations.provider, GOAT_JAMIE_PROVIDER),
             ),
           )
-          .returning({ id: goatIntegrations.id })
+          .returning({ id: integrations.id })
       )[0]
     : (
         await db
-          .insert(goatIntegrations)
+          .insert(integrations)
           .values({
             id: integrationId,
             userWorkosId: connectorWorkosId,
@@ -165,13 +163,13 @@ export async function createOrResetGoatJamieWebhookEndpoint(input: {
             provider: GOAT_JAMIE_PROVIDER,
             ...integrationValues,
           })
-          .returning({ id: goatIntegrations.id })
+          .returning({ id: integrations.id })
       )[0];
 
   if (!integration) throw new Error("Could not persist Jamie integration.");
 
   try {
-    await saveGoatIntegrationCredential({
+    await saveIntegrationCredential({
       userWorkosId: connectorWorkosId,
       integrationId: integration.id,
       provider: GOAT_JAMIE_PROVIDER,
@@ -185,7 +183,7 @@ export async function createOrResetGoatJamieWebhookEndpoint(input: {
       now,
     });
   } catch (error) {
-    await markGoatIntegrationStatus({
+    await markIntegrationStatus({
       userWorkosId: connectorWorkosId,
       integrationId: integration.id,
       provider: GOAT_JAMIE_PROVIDER,
@@ -199,16 +197,16 @@ export async function createOrResetGoatJamieWebhookEndpoint(input: {
 
   return {
     integrationId: integration.id,
-    webhookUrl: goatJamieWebhookUrl(),
+    webhookUrl: jamieWebhookUrl(),
     headerName: GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
     apiKeyConfigured: false,
   };
 }
 
-export async function saveGoatJamieWebhookApiKey(input: {
+export async function saveJamieWebhookApiKey(input: {
   workspaceId: string;
   apiKey: string;
-}): Promise<GoatJamieWebhookSetup> {
+}): Promise<JamieWebhookSetup> {
   const apiKey = input.apiKey.trim();
   if (!isValidJamieProviderApiKey(apiKey)) {
     throw new Error("Jamie API keys must start with sk_ followed by 64 lowercase hex characters.");
@@ -217,16 +215,16 @@ export async function saveGoatJamieWebhookApiKey(input: {
   const db = getDb();
   const now = new Date();
   const [integration] = await db
-    .select({ id: goatIntegrations.id, userWorkosId: goatIntegrations.userWorkosId })
-    .from(goatIntegrations)
+    .select({ id: integrations.id, userWorkosId: integrations.userWorkosId })
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.workspaceId, input.workspaceId),
-        eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
-        ne(goatIntegrations.status, "disconnected"),
+        eq(integrations.workspaceId, input.workspaceId),
+        eq(integrations.provider, GOAT_JAMIE_PROVIDER),
+        ne(integrations.status, "disconnected"),
       ),
     )
-    .orderBy(desc(goatIntegrations.updatedAt))
+    .orderBy(desc(integrations.updatedAt))
     .limit(1);
 
   if (!integration) {
@@ -236,13 +234,13 @@ export async function saveGoatJamieWebhookApiKey(input: {
   try {
     // Credential ops key on the row's original connector, not the acting
     // admin: the encrypted payload AAD is bound to that user id.
-    await saveGoatIntegrationCredential({
+    await saveIntegrationCredential({
       userWorkosId: integration.userWorkosId,
       integrationId: integration.id,
       provider: GOAT_JAMIE_PROVIDER,
       kind: GOAT_JAMIE_CREDENTIAL_KIND,
       payload: {
-        apiKeyHash: hashGoatJamieWebhookApiKey(apiKey),
+        apiKeyHash: hashJamieWebhookApiKey(apiKey),
         headerName: GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
         createdAt: now.toISOString(),
       },
@@ -250,7 +248,7 @@ export async function saveGoatJamieWebhookApiKey(input: {
       now,
     });
     await db
-      .update(goatIntegrations)
+      .update(integrations)
       .set({
         externalId: jamieExternalIdForApiKey(apiKey),
         connectionLabel: "Jamie",
@@ -262,13 +260,13 @@ export async function saveGoatJamieWebhookApiKey(input: {
       })
       .where(
         and(
-          eq(goatIntegrations.id, integration.id),
-          eq(goatIntegrations.workspaceId, input.workspaceId),
-          eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
+          eq(integrations.id, integration.id),
+          eq(integrations.workspaceId, input.workspaceId),
+          eq(integrations.provider, GOAT_JAMIE_PROVIDER),
         ),
       );
   } catch (error) {
-    await markGoatIntegrationStatus({
+    await markIntegrationStatus({
       userWorkosId: integration.userWorkosId,
       integrationId: integration.id,
       provider: GOAT_JAMIE_PROVIDER,
@@ -282,51 +280,51 @@ export async function saveGoatJamieWebhookApiKey(input: {
 
   return {
     integrationId: integration.id,
-    webhookUrl: goatJamieWebhookUrl(),
+    webhookUrl: jamieWebhookUrl(),
     headerName: GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
     apiKeyConfigured: true,
   };
 }
 
-export async function loadGoatJamieWebhookContext(
+export async function loadJamieWebhookContext(
   integrationId: string,
-): Promise<GoatJamieWebhookContext | null> {
+): Promise<JamieWebhookContext | null> {
   const [integration] = await getDb()
     .select({
-      id: goatIntegrations.id,
-      userWorkosId: goatIntegrations.userWorkosId,
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.id, integrationId),
-        eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
-        ne(goatIntegrations.status, "disconnected"),
+        eq(integrations.id, integrationId),
+        eq(integrations.provider, GOAT_JAMIE_PROVIDER),
+        ne(integrations.status, "disconnected"),
       ),
     )
     .limit(1);
 
   if (!integration) return null;
 
-  return loadGoatJamieWebhookContextForIntegration(integration);
+  return loadJamieWebhookContextForIntegration(integration);
 }
 
-export async function loadGoatJamieWebhookContextForApiKey(
+export async function loadJamieWebhookContextForApiKey(
   apiKey: string | null,
-): Promise<GoatJamieWebhookContext | null> {
+): Promise<JamieWebhookContext | null> {
   if (!apiKey || !isValidJamieProviderApiKey(apiKey)) return null;
 
   const directIntegrations = await getDb()
     .select({
-      id: goatIntegrations.id,
-      userWorkosId: goatIntegrations.userWorkosId,
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
-        eq(goatIntegrations.externalId, jamieExternalIdForApiKey(apiKey)),
-        ne(goatIntegrations.status, "disconnected"),
+        eq(integrations.provider, GOAT_JAMIE_PROVIDER),
+        eq(integrations.externalId, jamieExternalIdForApiKey(apiKey)),
+        ne(integrations.status, "disconnected"),
       ),
     )
     .limit(2);
@@ -334,27 +332,24 @@ export async function loadGoatJamieWebhookContextForApiKey(
   if (directIntegrations.length > 1) return null;
   const [directIntegration] = directIntegrations;
   if (directIntegration) {
-    return loadGoatJamieWebhookContextForIntegration(directIntegration);
+    return loadJamieWebhookContextForIntegration(directIntegration);
   }
 
-  const integrations = await getDb()
+  const candidateIntegrations = await getDb()
     .select({
-      id: goatIntegrations.id,
-      userWorkosId: goatIntegrations.userWorkosId,
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
-      and(
-        eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
-        ne(goatIntegrations.status, "disconnected"),
-      ),
+      and(eq(integrations.provider, GOAT_JAMIE_PROVIDER), ne(integrations.status, "disconnected")),
     );
 
-  const matches: GoatJamieWebhookContext[] = [];
-  for (const integration of integrations) {
-    const context = await loadGoatJamieWebhookContextForIntegration(integration);
+  const matches: JamieWebhookContext[] = [];
+  for (const integration of candidateIntegrations) {
+    const context = await loadJamieWebhookContextForIntegration(integration);
     if (!context) continue;
-    const verification = verifyGoatJamieWebhookApiKey({
+    const verification = verifyJamieWebhookApiKey({
       candidate: apiKey,
       apiKeyHash: context.apiKeyHash,
       legacySecretHash: context.legacySecretHash,
@@ -368,16 +363,16 @@ export async function loadGoatJamieWebhookContextForApiKey(
 
   try {
     await getDb()
-      .update(goatIntegrations)
+      .update(integrations)
       .set({
         externalId: jamieExternalIdForApiKey(apiKey),
         updatedAt: new Date(),
       })
       .where(
         and(
-          eq(goatIntegrations.id, matched.integrationId),
-          eq(goatIntegrations.userWorkosId, matched.userWorkosId),
-          eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
+          eq(integrations.id, matched.integrationId),
+          eq(integrations.userWorkosId, matched.userWorkosId),
+          eq(integrations.provider, GOAT_JAMIE_PROVIDER),
         ),
       );
   } catch (error) {
@@ -389,11 +384,11 @@ export async function loadGoatJamieWebhookContextForApiKey(
   return matched;
 }
 
-async function loadGoatJamieWebhookContextForIntegration(integration: {
+async function loadJamieWebhookContextForIntegration(integration: {
   id: string;
   userWorkosId: string;
-}): Promise<GoatJamieWebhookContext | null> {
-  const credential = await loadGoatIntegrationCredential({
+}): Promise<JamieWebhookContext | null> {
+  const credential = await loadIntegrationCredential({
     userWorkosId: integration.userWorkosId,
     integrationId: integration.id,
     provider: GOAT_JAMIE_PROVIDER,
@@ -412,14 +407,14 @@ async function loadGoatJamieWebhookContextForIntegration(integration: {
   };
 }
 
-export async function markGoatJamieWebhookConnected(input: {
+export async function markJamieWebhookConnected(input: {
   integrationId: string;
   userWorkosId: string;
   now?: Date;
 }) {
   const now = input.now ?? new Date();
   await getDb()
-    .update(goatIntegrations)
+    .update(integrations)
     .set({
       status: "connected",
       statusReason: null,
@@ -431,18 +426,18 @@ export async function markGoatJamieWebhookConnected(input: {
     })
     .where(
       and(
-        eq(goatIntegrations.id, input.integrationId),
-        eq(goatIntegrations.userWorkosId, input.userWorkosId),
-        eq(goatIntegrations.provider, GOAT_JAMIE_PROVIDER),
+        eq(integrations.id, input.integrationId),
+        eq(integrations.userWorkosId, input.userWorkosId),
+        eq(integrations.provider, GOAT_JAMIE_PROVIDER),
       ),
     );
 }
 
-export function verifyGoatJamieWebhookApiKey(input: {
+export function verifyJamieWebhookApiKey(input: {
   candidate: string | null;
   apiKeyHash: string | null;
   legacySecretHash?: string | null;
-}): GoatJamieWebhookApiKeyVerification {
+}): JamieWebhookApiKeyVerification {
   if (!input.candidate) return { valid: false, apiKey: null };
 
   if (input.apiKeyHash) {
@@ -458,7 +453,7 @@ export function verifyGoatJamieWebhookApiKey(input: {
   return { valid: false, apiKey: null };
 }
 
-export function hashGoatJamieWebhookApiKey(apiKey: string) {
+export function hashJamieWebhookApiKey(apiKey: string) {
   return createHash("sha256").update(apiKey, "utf8").digest("hex");
 }
 
@@ -467,14 +462,14 @@ export function isValidJamieProviderApiKey(apiKey: string) {
 }
 
 function timingSafeHashMatch(candidate: string, expectedHash: string) {
-  const candidateHash = hashGoatJamieWebhookApiKey(candidate);
+  const candidateHash = hashJamieWebhookApiKey(candidate);
   const expected = Buffer.from(expectedHash, "hex");
   const actual = Buffer.from(candidateHash, "hex");
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
-export function goatJamieWebhookUrl() {
-  return `${getGoatAppUrl()}/api/webhooks/jamie`;
+export function jamieWebhookUrl() {
+  return `${getAppUrl()}/api/webhooks/jamie`;
 }
 
 function parseJamieWebhookCredentialPayload(
@@ -515,7 +510,7 @@ function parseJamieWebhookCredentialPayload(
   };
 }
 
-function newGoatIntegrationId() {
+function newIntegrationId() {
   return `gint_${randomUUID().replace(/-/g, "")}`;
 }
 
@@ -524,5 +519,5 @@ function unboundJamieExternalId(integrationId: string) {
 }
 
 function jamieExternalIdForApiKey(apiKey: string) {
-  return `${JAMIE_API_KEY_EXTERNAL_ID_PREFIX}${hashGoatJamieWebhookApiKey(apiKey)}`;
+  return `${JAMIE_API_KEY_EXTERNAL_ID_PREFIX}${hashJamieWebhookApiKey(apiKey)}`;
 }

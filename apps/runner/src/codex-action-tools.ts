@@ -1,8 +1,8 @@
 import {
+  type ActionGatewayRequest,
+  type ActionGatewayResponse,
   GOAT_ACTION_GATEWAY_TIMEOUT_MS,
   GOAT_ACTION_TOOL_CONTRACT,
-  type GoatActionGatewayRequest,
-  type GoatActionGatewayResponse,
 } from "@opencompany/agent-runtime";
 import type {
   CodexAppServerDynamicTool,
@@ -13,24 +13,24 @@ import type { RunnerEnv } from "./env";
 
 const GOAT_ACTION_GATEWAY_PATH = "/api/internal/action-gateway";
 
-type GoatCodexActionToolContext = {
+type CodexActionToolContext = {
   codexChatSessionId: string;
   codexChatTurnId: string;
-  env: Pick<RunnerEnv, "goatAppUrl" | "internalToken">;
+  env: Pick<RunnerEnv, "appUrl" | "internalToken">;
   checkAbort: () => Promise<void>;
 };
 
-type GoatCodexActionToolDependencies = {
+type CodexActionToolDependencies = {
   fetch: typeof fetch;
 };
 
-const defaultDependencies: GoatCodexActionToolDependencies = {
+const defaultDependencies: CodexActionToolDependencies = {
   fetch: globalThis.fetch,
 };
 
-export function createGoatCodexActionDynamicTools(
-  context: GoatCodexActionToolContext,
-  dependencies: Partial<GoatCodexActionToolDependencies> = {},
+export function createCodexActionDynamicTools(
+  context: CodexActionToolContext,
+  dependencies: Partial<CodexActionToolDependencies> = {},
 ): CodexAppServerDynamicTool[] {
   const resolvedDependencies = { ...defaultDependencies, ...dependencies };
   return [
@@ -69,13 +69,13 @@ export function createGoatCodexActionDynamicTools(
 }
 
 async function executeGatewayCall(input: {
-  context: GoatCodexActionToolContext;
-  dependencies: GoatCodexActionToolDependencies;
-  request: GoatActionGatewayRequest | { invalid: GoatActionGatewayResponse };
+  context: CodexActionToolContext;
+  dependencies: CodexActionToolDependencies;
+  request: ActionGatewayRequest | { invalid: ActionGatewayResponse };
 }): Promise<CodexAppServerDynamicToolResponse> {
   if ("invalid" in input.request) return modelResponse(input.request.invalid);
 
-  const appUrl = input.context.env.goatAppUrl?.trim();
+  const appUrl = input.context.env.appUrl?.trim();
   if (!appUrl) {
     return modelResponse({
       ok: false,
@@ -115,9 +115,9 @@ async function executeGatewayCall(input: {
 }
 
 function listRequest(
-  context: GoatCodexActionToolContext,
+  context: CodexActionToolContext,
   value: unknown,
-): GoatActionGatewayRequest | { invalid: GoatActionGatewayResponse } {
+): ActionGatewayRequest | { invalid: ActionGatewayResponse } {
   if (!isRecord(value)) return invalidParams("list_actions expects an object.");
   const source = optionalString(value.source);
   if (value.source !== undefined && !source) {
@@ -132,11 +132,9 @@ function listRequest(
 }
 
 function executeRequest(
-  context: GoatCodexActionToolContext,
+  context: CodexActionToolContext,
   call: CodexAppServerDynamicToolCall,
-):
-  | { ok: true; request: GoatActionGatewayRequest }
-  | { ok: false; response: GoatActionGatewayResponse } {
+): { ok: true; request: ActionGatewayRequest } | { ok: false; response: ActionGatewayResponse } {
   if (!isRecord(call.arguments)) {
     return { ok: false, response: invalidParamsResponse("use_action expects an object.") };
   }
@@ -160,7 +158,7 @@ function executeRequest(
   };
 }
 
-async function readGatewayResponse(response: Response): Promise<GoatActionGatewayResponse> {
+async function readGatewayResponse(response: Response): Promise<ActionGatewayResponse> {
   try {
     const value = (await response.json()) as unknown;
     if (isGatewayResponse(value)) return value;
@@ -176,19 +174,19 @@ async function readGatewayResponse(response: Response): Promise<GoatActionGatewa
   };
 }
 
-function isGatewayResponse(value: unknown): value is GoatActionGatewayResponse {
+function isGatewayResponse(value: unknown): value is ActionGatewayResponse {
   return isRecord(value) && typeof value.ok === "boolean";
 }
 
-function invalidParams(message: string): { invalid: GoatActionGatewayResponse } {
+function invalidParams(message: string): { invalid: ActionGatewayResponse } {
   return { invalid: invalidParamsResponse(message) };
 }
 
-function invalidParamsResponse(message: string): GoatActionGatewayResponse {
+function invalidParamsResponse(message: string): ActionGatewayResponse {
   return { ok: false, error: { code: "invalid_params", message } };
 }
 
-function modelResponse(response: GoatActionGatewayResponse): CodexAppServerDynamicToolResponse {
+function modelResponse(response: ActionGatewayResponse): CodexAppServerDynamicToolResponse {
   return {
     success: response.ok,
     contentItems: [{ type: "inputText", text: JSON.stringify(response) }],

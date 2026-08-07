@@ -1,21 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
-  appendGoatBrainAssetTextBlock,
-  extractGoatBrainAssetText,
-  normalizeGoatBrainBody,
-  normalizeGoatBrainCompiledTruth,
-  parseGoatBrainDocument,
-  replaceGoatBrainCompiledTruth,
-  serializeGoatBrainDocument,
-  stripGoatBrainAssetTextBlock,
+  appendBrainAssetTextBlock,
+  extractBrainAssetText,
+  normalizeBrainBody,
+  normalizeBrainCompiledTruth,
+  parseBrainDocument,
+  replaceBrainCompiledTruth,
+  serializeBrainDocument,
+  stripBrainAssetTextBlock,
 } from "./document";
-import type { GoatBrainDocument } from "./schema";
-import { goatBrainTimelineEntryFromParts } from "./timeline";
-import { validateGoatBrainDocument } from "./validate";
+import type { BrainDocument } from "./schema";
+import { brainTimelineEntryFromParts } from "./timeline";
+import { validateBrainDocument } from "./validate";
 
 describe("goat brain document", () => {
   it("round-trips frontmatter, compiled truth, and timeline", () => {
-    const doc: GoatBrainDocument = {
+    const doc: BrainDocument = {
       frontmatter: {
         id: "acme",
         folder: "companies",
@@ -40,11 +40,11 @@ describe("goat brain document", () => {
       ],
     };
 
-    const parsed = parseGoatBrainDocument(serializeGoatBrainDocument(doc));
+    const parsed = parseBrainDocument(serializeBrainDocument(doc));
 
     expect(parsed.frontmatter).toMatchObject(doc.frontmatter);
-    expect(serializeGoatBrainDocument(doc)).toContain("related:");
-    expect(serializeGoatBrainDocument(doc)).not.toContain("relations:");
+    expect(serializeBrainDocument(doc)).toContain("related:");
+    expect(serializeBrainDocument(doc)).not.toContain("relations:");
     expect(parsed.title).toBe("Acme");
     expect(parsed.compiledTruth).toBe("Acme is evaluating the product.[^ev:ev-initial-note]");
     expect(parsed.timeline).toEqual(doc.timeline);
@@ -76,10 +76,10 @@ Old truth.
 Original timeline body.
 `;
 
-    const updated = replaceGoatBrainCompiledTruth(source, "New truth.", {
+    const updated = replaceBrainCompiledTruth(source, "New truth.", {
       updatedAt: "2026-01-02T00:00:00.000Z",
     });
-    const parsed = parseGoatBrainDocument(updated);
+    const parsed = parseBrainDocument(updated);
 
     expect(parsed.frontmatter.relations).toEqual([{ type: "employs", to: "jane-doe" }]);
     expect(parsed.compiledTruth).toBe("New truth.");
@@ -93,7 +93,7 @@ Original timeline body.
   });
 
   it("preserves descriptions when replacing compiled truth", () => {
-    const source = serializeGoatBrainDocument({
+    const source = serializeBrainDocument({
       frontmatter: {
         id: "coding-work",
         folder: "skills",
@@ -111,9 +111,7 @@ Original timeline body.
       timeline: [],
     });
 
-    const updated = parseGoatBrainDocument(
-      replaceGoatBrainCompiledTruth(source, "New instructions."),
-    );
+    const updated = parseBrainDocument(replaceBrainCompiledTruth(source, "New instructions."));
     expect(updated.frontmatter.description).toBe("How coding work should happen.");
     expect(updated.compiledTruth).toBe("New instructions.");
   });
@@ -126,8 +124,8 @@ Original timeline body.
 Original timeline body.
 `;
 
-    const updated = replaceGoatBrainCompiledTruth(source, "New truth.");
-    const parsed = parseGoatBrainDocument(updated);
+    const updated = replaceBrainCompiledTruth(source, "New truth.");
+    const parsed = parseBrainDocument(updated);
 
     expect(parsed.compiledTruth).toBe("New truth.");
     expect(parsed.timeline).toEqual([
@@ -140,7 +138,7 @@ Original timeline body.
   });
 
   it("unwraps a nested legacy brain document body to compiled truth", () => {
-    const nested = serializeGoatBrainDocument({
+    const nested = serializeBrainDocument({
       frontmatter: {
         id: "nested-note",
         folder: "inbox",
@@ -163,20 +161,20 @@ Original timeline body.
       ],
     });
 
-    expect(normalizeGoatBrainBody(nested)).toBe("Only this truth belongs in the editable body.");
+    expect(normalizeBrainBody(nested)).toBe("Only this truth belongs in the editable body.");
   });
 
   it("removes a leading duplicate title heading from compiled truth", () => {
     expect(
-      normalizeGoatBrainCompiledTruth(
+      normalizeBrainCompiledTruth(
         "# Acme\n\nAcme evaluates Goat Brain.\n\n## Notes\nKeep this section.",
         "Acme",
       ),
     ).toBe("Acme evaluates Goat Brain.\n\n## Notes\nKeep this section.");
-    expect(
-      normalizeGoatBrainCompiledTruth("## **Acme**\n\nAcme evaluates Goat Brain.", "Acme"),
-    ).toBe("Acme evaluates Goat Brain.");
-    expect(normalizeGoatBrainCompiledTruth("# Acme overview\n\nBody.", "Acme")).toBe(
+    expect(normalizeBrainCompiledTruth("## **Acme**\n\nAcme evaluates Goat Brain.", "Acme")).toBe(
+      "Acme evaluates Goat Brain.",
+    );
+    expect(normalizeBrainCompiledTruth("# Acme overview\n\nBody.", "Acme")).toBe(
       "# Acme overview\n\nBody.",
     );
   });
@@ -188,7 +186,7 @@ title: Example
 
 This is a user-authored Markdown note, not a full Goat Brain document.`;
 
-    expect(normalizeGoatBrainBody(markdown)).toBe(markdown);
+    expect(normalizeBrainBody(markdown)).toBe(markdown);
   });
 
   it("does not nest frontmatter when replacing compiled truth with a legacy document", () => {
@@ -213,7 +211,7 @@ Old truth.
 
 ## Timeline
 `;
-    const nested = serializeGoatBrainDocument({
+    const nested = serializeBrainDocument({
       frontmatter: {
         id: "nested-note",
         folder: "inbox",
@@ -230,8 +228,8 @@ Old truth.
       timeline: [],
     });
 
-    const updated = replaceGoatBrainCompiledTruth(source, nested);
-    const parsed = parseGoatBrainDocument(updated);
+    const updated = replaceBrainCompiledTruth(source, nested);
+    const parsed = parseBrainDocument(updated);
 
     expect(parsed.compiledTruth).toBe("Replacement truth.");
     expect(parsed.compiledTruth).not.toContain("---");
@@ -239,7 +237,7 @@ Old truth.
   });
 
   it("rejects documents whose folder does not match the kind", () => {
-    const pageInEvidenceZone = serializeGoatBrainDocument({
+    const pageInEvidenceZone = serializeBrainDocument({
       frontmatter: {
         id: "acme",
         folder: "evidence/email",
@@ -257,11 +255,7 @@ Old truth.
     });
 
     expect(
-      validateGoatBrainDocument(
-        parseGoatBrainDocument(pageInEvidenceZone),
-        "acme",
-        pageInEvidenceZone,
-      ),
+      validateBrainDocument(parseBrainDocument(pageInEvidenceZone), "acme", pageInEvidenceZone),
     ).toEqual({
       ok: false,
       errors: expect.arrayContaining([
@@ -269,7 +263,7 @@ Old truth.
       ]),
     });
 
-    const evidenceOutsideZone = serializeGoatBrainDocument({
+    const evidenceOutsideZone = serializeBrainDocument({
       frontmatter: {
         id: "ev-acme-email",
         folder: "companies",
@@ -287,8 +281,8 @@ Old truth.
     });
 
     expect(
-      validateGoatBrainDocument(
-        parseGoatBrainDocument(evidenceOutsideZone),
+      validateBrainDocument(
+        parseBrainDocument(evidenceOutsideZone),
         "ev-acme-email",
         evidenceOutsideZone,
       ),
@@ -302,13 +296,13 @@ Old truth.
 
   it("normalizes and validates generated timeline timestamps", () => {
     expect(
-      goatBrainTimelineEntryFromParts({
+      brainTimelineEntryFromParts({
         at: "2026-01-01T00:00:00Z",
         summary: "Captured source information.",
       }),
     ).toMatchObject({ at: "2026-01-01T00:00:00.000Z" });
     expect(() =>
-      goatBrainTimelineEntryFromParts({
+      brainTimelineEntryFromParts({
         at: "not-a-date",
         summary: "Captured source information.",
       }),
@@ -316,7 +310,7 @@ Old truth.
   });
 
   it("validates inline links in timeline bodies", () => {
-    const source = serializeGoatBrainDocument({
+    const source = serializeBrainDocument({
       frontmatter: {
         id: "acme",
         folder: "companies",
@@ -339,7 +333,7 @@ Old truth.
       ],
     });
 
-    expect(validateGoatBrainDocument(parseGoatBrainDocument(source), "acme", source)).toEqual({
+    expect(validateBrainDocument(parseBrainDocument(source), "acme", source)).toEqual({
       ok: false,
       errors: expect.arrayContaining(['source link target "no-provider-id" is invalid.']),
     });
@@ -347,7 +341,7 @@ Old truth.
 });
 
 describe("goat brain asset text block", () => {
-  const base = serializeGoatBrainDocument({
+  const base = serializeBrainDocument({
     frontmatter: {
       id: "q3-board-deck",
       folder: "sources",
@@ -365,24 +359,24 @@ describe("goat brain asset text block", () => {
   });
 
   it("appends, extracts, and strips the generated block", () => {
-    const projected = appendGoatBrainAssetTextBlock(base, "Revenue grew 40% QoQ.\n\nHiring plan.");
+    const projected = appendBrainAssetTextBlock(base, "Revenue grew 40% QoQ.\n\nHiring plan.");
     expect(projected).toContain("## Extracted text");
-    expect(extractGoatBrainAssetText(projected)).toBe("Revenue grew 40% QoQ.\n\nHiring plan.");
-    expect(stripGoatBrainAssetTextBlock(projected)).toBe(base);
+    expect(extractBrainAssetText(projected)).toBe("Revenue grew 40% QoQ.\n\nHiring plan.");
+    expect(stripBrainAssetTextBlock(projected)).toBe(base);
   });
 
   it("appends nothing for empty asset text", () => {
-    expect(appendGoatBrainAssetTextBlock(base, "   ")).toBe(base);
-    expect(extractGoatBrainAssetText(base)).toBe("");
-    expect(stripGoatBrainAssetTextBlock(base)).toBe(base);
+    expect(appendBrainAssetTextBlock(base, "   ")).toBe(base);
+    expect(extractBrainAssetText(base)).toBe("");
+    expect(stripBrainAssetTextBlock(base)).toBe(base);
   });
 
   it("parses documents ignoring the generated block, including edits inside it", () => {
-    const projected = appendGoatBrainAssetTextBlock(
+    const projected = appendBrainAssetTextBlock(
       base,
       "### ev-fake - 2026-07-02T00:00:00.000Z\nlooks like a timeline entry",
     );
-    const parsed = parseGoatBrainDocument(projected);
+    const parsed = parseBrainDocument(projected);
     expect(parsed.compiledTruth).toBe("Uploaded file `deck.pdf`. Ingestion pending.");
     expect(parsed.timeline).toEqual([]);
     expect(parsed.frontmatter.id).toBe("q3-board-deck");

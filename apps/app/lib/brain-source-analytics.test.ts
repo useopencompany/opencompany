@@ -1,18 +1,18 @@
-import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
-import { upsertGoatBrainSource } from "@opencompany/db/brain-sources";
+import { captureServerEvent } from "@opencompany/analytics/server";
+import { upsertBrainSource } from "@opencompany/db/brain-sources";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { upsertGoatBrainSourceWithAnalytics } from "./brain-source-analytics";
+import { upsertBrainSourceWithAnalytics } from "./brain-source-analytics";
 
-vi.mock("@opencompany/analytics/goat/server", () => ({
-  captureGoatServerEvent: vi.fn(async () => undefined),
+vi.mock("@opencompany/analytics/server", () => ({
+  captureServerEvent: vi.fn(async () => undefined),
 }));
 
 vi.mock("@opencompany/db/brain-sources", () => ({
-  upsertGoatBrainSource: vi.fn(),
+  upsertBrainSource: vi.fn(),
 }));
 
-const captureGoatServerEventMock = vi.mocked(captureGoatServerEvent);
-const upsertGoatBrainSourceMock = vi.mocked(upsertGoatBrainSource);
+const captureServerEventMock = vi.mocked(captureServerEvent);
+const upsertBrainSourceMock = vi.mocked(upsertBrainSource);
 
 const input = {
   workspaceId: "workspace_123",
@@ -24,23 +24,23 @@ const input = {
   enabled: true,
 };
 
-describe("upsertGoatBrainSourceWithAnalytics", () => {
+describe("upsertBrainSourceWithAnalytics", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("captures a newly enabled Brain source", async () => {
-    upsertGoatBrainSourceMock.mockResolvedValue({
+    upsertBrainSourceMock.mockResolvedValue({
       id: "source_123",
       created: true,
     });
 
-    await expect(upsertGoatBrainSourceWithAnalytics(input)).resolves.toEqual({
+    await expect(upsertBrainSourceWithAnalytics(input)).resolves.toEqual({
       id: "source_123",
       created: true,
     });
 
-    expect(upsertGoatBrainSourceMock).toHaveBeenCalledWith({
+    expect(upsertBrainSourceMock).toHaveBeenCalledWith({
       brainRef: "brain_123",
       provider: "slack",
       integrationId: "integration_123",
@@ -48,7 +48,7 @@ describe("upsertGoatBrainSourceWithAnalytics", () => {
       createdByWorkosId: "user_123",
       enabled: true,
     });
-    expect(captureGoatServerEventMock).toHaveBeenCalledWith("brain_source_added", "user_123", {
+    expect(captureServerEventMock).toHaveBeenCalledWith("brain_source_added", "user_123", {
       workspace_id: "workspace_123",
       brain_id: "brain_123",
       provider: "slack",
@@ -56,18 +56,18 @@ describe("upsertGoatBrainSourceWithAnalytics", () => {
   });
 
   it("does not capture updates or newly disabled rows", async () => {
-    upsertGoatBrainSourceMock.mockResolvedValueOnce({
+    upsertBrainSourceMock.mockResolvedValueOnce({
       id: "source_123",
       created: false,
     });
-    await upsertGoatBrainSourceWithAnalytics(input);
+    await upsertBrainSourceWithAnalytics(input);
 
-    upsertGoatBrainSourceMock.mockResolvedValueOnce({
+    upsertBrainSourceMock.mockResolvedValueOnce({
       id: "source_456",
       created: true,
     });
-    await upsertGoatBrainSourceWithAnalytics({ ...input, enabled: false });
+    await upsertBrainSourceWithAnalytics({ ...input, enabled: false });
 
-    expect(captureGoatServerEventMock).not.toHaveBeenCalled();
+    expect(captureServerEventMock).not.toHaveBeenCalled();
   });
 });

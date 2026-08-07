@@ -1,11 +1,11 @@
 import { createMCPClient } from "@ai-sdk/mcp";
 import {
-  getGoatNeonIntegrationState,
-  loadGoatNeonMcpWorkerConnection,
+  getNeonIntegrationState,
+  loadNeonMcpWorkerConnection,
 } from "@opencompany/core/integrations/neon-mcp";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveNeonActions } from "@/lib/actions/neon";
-import { GoatActionInvalidParamsError, GoatActionPermissionError } from "@/lib/actions/types";
+import { ActionInvalidParamsError, ActionPermissionError } from "@/lib/actions/types";
 
 const clientMocks = vi.hoisted(() => ({
   listTools: vi.fn(),
@@ -24,8 +24,8 @@ vi.mock("@ai-sdk/mcp", () => ({
 vi.mock("@opencompany/core/integrations/neon-mcp", () => ({
   GOAT_NEON_MCP_ENDPOINT_URL:
     "https://mcp.neon.tech/mcp?readonly=true&category=projects&category=branches&category=schema&category=querying",
-  getGoatNeonIntegrationState: vi.fn(),
-  loadGoatNeonMcpWorkerConnection: vi.fn(),
+  getNeonIntegrationState: vi.fn(),
+  loadNeonMcpWorkerConnection: vi.fn(),
 }));
 
 const definitions = {
@@ -91,7 +91,7 @@ const TEST_POSTGRES_URL = [
 describe("Neon actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getGoatNeonIntegrationState).mockResolvedValue({
+    vi.mocked(getNeonIntegrationState).mockResolvedValue({
       provider: "neon",
       connected: true,
       status: "connected",
@@ -100,7 +100,7 @@ describe("Neon actions", () => {
       statusReason: null,
       capabilityModes: {},
     });
-    vi.mocked(loadGoatNeonMcpWorkerConnection).mockResolvedValue({
+    vi.mocked(loadNeonMcpWorkerConnection).mockResolvedValue({
       ok: true,
       integrationId: "gint_neon",
       authProvider: {} as never,
@@ -218,13 +218,13 @@ describe("Neon actions", () => {
 
     await expect(
       action?.execute({ projectId: "project_1", sql: "DELETE FROM users" }, actionContext),
-    ).rejects.toBeInstanceOf(GoatActionInvalidParamsError);
+    ).rejects.toBeInstanceOf(ActionInvalidParamsError);
     await expect(
       action?.execute(
         { projectId: "project_1", sql: "SELECT pg_terminate_backend(123)" },
         actionContext,
       ),
-    ).rejects.toBeInstanceOf(GoatActionInvalidParamsError);
+    ).rejects.toBeInstanceOf(ActionInvalidParamsError);
     expect(clientMocks.executeRunSql).not.toHaveBeenCalled();
   });
 
@@ -240,14 +240,12 @@ describe("Neon actions", () => {
     const catalog = await resolveNeonActions("user_1");
     const action = catalog?.actions.find((entry) => entry.id === "neon.list_projects");
 
-    await expect(action?.execute({}, actionContext)).rejects.toBeInstanceOf(
-      GoatActionPermissionError,
-    );
+    await expect(action?.execute({}, actionContext)).rejects.toBeInstanceOf(ActionPermissionError);
     expect(clientMocks.executeListProjects).not.toHaveBeenCalled();
   });
 
   it("removes database querying when the connection permission is Off", async () => {
-    vi.mocked(getGoatNeonIntegrationState).mockResolvedValue({
+    vi.mocked(getNeonIntegrationState).mockResolvedValue({
       provider: "neon",
       connected: true,
       status: "connected",

@@ -1,27 +1,27 @@
 import { NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import {
-  appendGoatHubspotIngestStatus,
-  buildGoatHubspotAuthorizationUrl,
-  createGoatHubspotIngestState,
-  isGoatHubspotIngestConfigured,
+  appendHubspotIngestStatus,
+  buildHubspotAuthorizationUrl,
+  createHubspotIngestState,
+  isHubspotIngestConfigured,
 } from "@/lib/integrations/hubspot-ingest";
 
 export async function GET(request: Request) {
-  const { user } = await currentGoatUser();
+  const { user } = await currentUser();
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
 
-  if (!isGoatHubspotIngestConfigured()) {
+  if (!isHubspotIngestConfigured()) {
     return NextResponse.redirect(
-      new URL(appendGoatHubspotIngestStatus(returnTo, "error", "not_configured"), url),
+      new URL(appendHubspotIngestStatus(returnTo, "error", "not_configured"), url),
     );
   }
 
-  const state = createGoatHubspotIngestState({
+  const state = createHubspotIngestState({
     userWorkosId: user.workosUserId,
     returnTo,
   });
 
-  return NextResponse.redirect(buildGoatHubspotAuthorizationUrl(state));
+  return NextResponse.redirect(buildHubspotAuthorizationUrl(state));
 }

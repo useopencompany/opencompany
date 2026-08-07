@@ -8,32 +8,32 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@opencompany/db/integrations", () => ({
-  connectGoatLinearIngestIntegration: mocks.connectIntegration,
+  connectLinearIngestIntegration: mocks.connectIntegration,
 }));
 
 vi.mock("@/lib/app-url", () => ({
-  getGoatAppUrl: () => "https://localhost:3443",
+  getAppUrl: () => "https://localhost:3443",
 }));
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: () =>
+  currentUser: () =>
     Promise.resolve({
       user: { workosUserId: "user_123" },
     }),
 }));
 
 vi.mock("@/lib/integrations/linear-ingest", () => ({
-  appendGoatLinearIngestStatus: (returnTo: string, status: string, reason?: string) => {
+  appendLinearIngestStatus: (returnTo: string, status: string, reason?: string) => {
     const url = new URL(returnTo, "https://localhost:3443");
     url.searchParams.set("integration", "linear");
     url.searchParams.set("setup", status);
     if (reason) url.searchParams.set("reason", reason);
     return `${url.pathname}${url.search}`;
   },
-  exchangeGoatLinearCode: mocks.exchangeCode,
-  fetchGoatLinearIdentity: mocks.fetchIdentity,
-  isGoatLinearIngestConfigured: () => true,
-  verifyGoatLinearIngestState: () => ({
+  exchangeLinearCode: mocks.exchangeCode,
+  fetchLinearIdentity: mocks.fetchIdentity,
+  isLinearIngestConfigured: () => true,
+  verifyLinearIngestState: () => ({
     userWorkosId: "user_123",
     returnTo: "/onboarding/connected",
   }),

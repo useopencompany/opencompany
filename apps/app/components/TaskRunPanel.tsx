@@ -5,22 +5,22 @@ import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { useHydrated } from "@/components/useHydrated";
 import {
-  createGoatCollections,
-  type GoatTaskEventRow,
-  type GoatTaskMessageRow,
-  type GoatTaskModelUsageRow,
-  type GoatTaskRow,
-  type GoatTaskSandboxUsageRow,
-  type GoatTaskToolUsageRow,
+  createCollections,
+  type TaskEventRow,
+  type TaskMessageRow,
+  type TaskModelUsageRow,
+  type TaskRow,
+  type TaskSandboxUsageRow,
+  type TaskToolUsageRow,
 } from "@/lib/task-collections";
-import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
+import { buildHarnessRun, type HarnessRunViewModel } from "@/lib/task-harness-run";
 
 export function TaskRunLiveProvider({
   initialRun,
   children,
 }: {
-  initialRun: GoatHarnessRunViewModel;
-  children: (run: GoatHarnessRunViewModel) => ReactNode;
+  initialRun: HarnessRunViewModel;
+  children: (run: HarnessRunViewModel) => ReactNode;
 }) {
   const hydrated = useHydrated();
   if (!hydrated) return children(initialRun);
@@ -31,10 +31,10 @@ function LiveTaskRunProvider({
   initialRun,
   children,
 }: {
-  initialRun: GoatHarnessRunViewModel;
-  children: (run: GoatHarnessRunViewModel) => ReactNode;
+  initialRun: HarnessRunViewModel;
+  children: (run: HarnessRunViewModel) => ReactNode;
 }) {
-  const collections = useMemo(() => createGoatCollections(), []);
+  const collections = useMemo(() => createCollections(), []);
   const scoped = useMemo(
     () => collections.taskRunCollections(initialRun.task.id),
     [collections, initialRun.task.id],
@@ -72,11 +72,11 @@ function LiveTaskRunProvider({
     const liveTask = (taskRows ?? []).find(
       (task) => task.id === initialRun.task.id || task.display_id === initialRun.task.displayId,
     );
-    const liveMessages = (messageRows ?? []) as GoatTaskMessageRow[];
-    const liveEvents = (eventRows ?? []) as GoatTaskEventRow[];
-    const liveModelUsage = (modelUsageRows ?? []) as GoatTaskModelUsageRow[];
-    const liveToolUsage = (toolUsageRows ?? []) as GoatTaskToolUsageRow[];
-    const liveSandboxUsage = (sandboxUsageRows ?? []) as GoatTaskSandboxUsageRow[];
+    const liveMessages = (messageRows ?? []) as TaskMessageRow[];
+    const liveEvents = (eventRows ?? []) as TaskEventRow[];
+    const liveModelUsage = (modelUsageRows ?? []) as TaskModelUsageRow[];
+    const liveToolUsage = (toolUsageRows ?? []) as TaskToolUsageRow[];
+    const liveSandboxUsage = (sandboxUsageRows ?? []) as TaskSandboxUsageRow[];
     const costRowsLoading = modelUsageLoading || toolUsageLoading || sandboxUsageLoading;
     const hasLiveCostRows =
       liveModelUsage.length > 0 || liveToolUsage.length > 0 || liveSandboxUsage.length > 0;
@@ -90,8 +90,8 @@ function LiveTaskRunProvider({
     ) {
       return initialRun;
     }
-    const liveRun = buildGoatHarnessRun({
-      task: (liveTask ?? taskFromInitialRun(initialRun)) as GoatTaskRow,
+    const liveRun = buildHarnessRun({
+      task: (liveTask ?? taskFromInitialRun(initialRun)) as TaskRow,
       messages: liveMessages,
       events: liveEvents,
       modelUsage: costRowsLoading ? [] : liveModelUsage,
@@ -121,9 +121,9 @@ function LiveTaskRunProvider({
 }
 
 export function applyInitialCostFloor(
-  liveRun: GoatHarnessRunViewModel,
-  initialRun: GoatHarnessRunViewModel,
-): GoatHarnessRunViewModel {
+  liveRun: HarnessRunViewModel,
+  initialRun: HarnessRunViewModel,
+): HarnessRunViewModel {
   if (liveRun.cost.totalCostUsdMicros >= initialRun.cost.totalCostUsdMicros) {
     return liveRun;
   }
@@ -134,7 +134,7 @@ export function applyInitialCostFloor(
   };
 }
 
-function taskFromInitialRun(run: GoatHarnessRunViewModel): GoatTaskRow {
+function taskFromInitialRun(run: HarnessRunViewModel): TaskRow {
   return {
     id: run.task.id,
     display_id: run.task.displayId,

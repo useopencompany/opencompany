@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   GOAT_FINISHED_TASK_SANDBOX_IDLE_TIMEOUT_MS,
-  settledGoatCodingSandboxIdleTimeoutMs,
+  settledCodingSandboxIdleTimeoutMs,
 } from "./coding-sandbox-lifecycle";
 
-describe("settledGoatCodingSandboxIdleTimeoutMs", () => {
+describe("settledCodingSandboxIdleTimeoutMs", () => {
   it("keeps the configured timeout for interactive coding chats", () => {
     expect(
-      settledGoatCodingSandboxIdleTimeoutMs({
+      settledCodingSandboxIdleTimeoutMs({
         configuredIdleTimeoutMs: 30 * 60 * 1000,
         taskSession: false,
       }),
@@ -16,7 +16,7 @@ describe("settledGoatCodingSandboxIdleTimeoutMs", () => {
 
   it("caps finished task sandboxes at five minutes", () => {
     expect(
-      settledGoatCodingSandboxIdleTimeoutMs({
+      settledCodingSandboxIdleTimeoutMs({
         configuredIdleTimeoutMs: 30 * 60 * 1000,
         taskSession: true,
       }),
@@ -25,7 +25,7 @@ describe("settledGoatCodingSandboxIdleTimeoutMs", () => {
 
   it("does not extend a shorter configured task timeout", () => {
     expect(
-      settledGoatCodingSandboxIdleTimeoutMs({
+      settledCodingSandboxIdleTimeoutMs({
         configuredIdleTimeoutMs: 60_000,
         taskSession: true,
       }),

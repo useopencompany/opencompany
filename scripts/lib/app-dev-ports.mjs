@@ -9,7 +9,7 @@ const DEFAULT_RUNNER_PORT = "3040";
 const DEFAULT_APP_HTTPS_PORT = "3443";
 const DEFAULT_DURABLE_STREAMS_PORT = "4150";
 
-export function resolveGoatDevPorts({ env = process.env } = {}) {
+export function resolveDevPorts({ env = process.env } = {}) {
   const conductorBase = optionalPort(env.CONDUCTOR_PORT, "CONDUCTOR_PORT");
   if (conductorBase) {
     return {
@@ -22,25 +22,25 @@ export function resolveGoatDevPorts({ env = process.env } = {}) {
     };
   }
 
-  return resolveConventionalGoatDevPorts({ env });
+  return resolveConventionalDevPorts({ env });
 }
 
-export function selectGoatDevPorts({
+export function selectDevPorts({
   env = process.env,
   httpsDisabled = false,
   portIsAvailable = (port) => findPortListeners(port).length === 0,
 } = {}) {
-  const allocated = resolveGoatDevPorts({ env });
+  const allocated = resolveDevPorts({ env });
   if (!allocated.isolated) return allocated;
 
-  const conventional = resolveConventionalGoatDevPorts({ env });
+  const conventional = resolveConventionalDevPorts({ env });
   const requiredPorts = [conventional.app, conventional.runner, conventional.durableStreams];
   if (!httpsDisabled) requiredPorts.push(conventional.https);
 
   return requiredPorts.every((port) => portIsAvailable(port)) ? conventional : allocated;
 }
 
-function resolveConventionalGoatDevPorts({ env }) {
+function resolveConventionalDevPorts({ env }) {
   return {
     app: optionalPort(env.APP_PORT, "APP_PORT") ?? DEFAULT_APP_PORT,
     runner: configuredRunnerPort(env) ?? DEFAULT_RUNNER_PORT,
@@ -52,7 +52,7 @@ function resolveConventionalGoatDevPorts({ env }) {
   };
 }
 
-export function isolatedGoatDevEnvironment(ports, { httpsDisabled = false } = {}) {
+export function isolatedDevEnvironment(ports, { httpsDisabled = false } = {}) {
   if (!ports.isolated) return {};
 
   const httpOrigin = `http://localhost:${ports.app}`;

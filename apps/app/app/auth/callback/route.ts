@@ -1,13 +1,13 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { completeGoatAuthentication } from "@/lib/auth";
+import { completeAuthentication } from "@/lib/auth";
 import {
-  consumeGoatOAuthStateCookie,
+  consumeOAuthStateCookie,
   organizationSelectionFromError,
-  safeGoatReturnPathname,
-  setGoatOrganizationSelection,
+  safeReturnPathname,
+  setOrganizationSelection,
 } from "@/lib/auth-methods";
-import { getGoatAppUrl } from "@/lib/workos";
+import { getAppUrl } from "@/lib/workos";
 import { getWorkOSClient } from "@/lib/workos-client";
 
 // authkit-nextjs's getWorkOS() doesn't thread WORKOS_CLIENT_ID down into
@@ -16,7 +16,7 @@ import { getWorkOSClient } from "@/lib/workos-client";
 const WORKOS_CLIENT_ID = process.env.WORKOS_CLIENT_ID ?? "";
 
 function signInErrorRedirect(reason: string) {
-  const url = new URL("/signin", getGoatAppUrl());
+  const url = new URL("/signin", getAppUrl());
   url.searchParams.set("error", reason);
   return NextResponse.redirect(url);
 }
@@ -29,7 +29,7 @@ function signInErrorRedirect(reason: string) {
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
   const state = request.nextUrl.searchParams.get("state");
-  const statePayload = await consumeGoatOAuthStateCookie();
+  const statePayload = await consumeOAuthStateCookie();
 
   if (!code || !state || !statePayload || state !== statePayload.state) {
     return signInErrorRedirect("oauth_state");
@@ -46,18 +46,18 @@ export async function GET(request: NextRequest) {
       ...(ipAddress ? { ipAddress } : {}),
       ...(userAgent ? { userAgent } : {}),
     });
-    await completeGoatAuthentication(authResponse, request);
+    await completeAuthentication(authResponse, request);
     return NextResponse.redirect(
-      new URL(safeGoatReturnPathname(statePayload.returnPathname), getGoatAppUrl()),
+      new URL(safeReturnPathname(statePayload.returnPathname), getAppUrl()),
     );
   } catch (error) {
     const selection = organizationSelectionFromError(error);
     if (selection) {
-      await setGoatOrganizationSelection({
+      await setOrganizationSelection({
         ...selection,
-        returnPathname: safeGoatReturnPathname(statePayload.returnPathname),
+        returnPathname: safeReturnPathname(statePayload.returnPathname),
       });
-      return NextResponse.redirect(new URL("/signin", getGoatAppUrl()));
+      return NextResponse.redirect(new URL("/signin", getAppUrl()));
     }
     console.error("[goat] Failed to complete Google sign-in", error);
     return signInErrorRedirect("oauth_failed");

@@ -1,10 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import type {
-  GoatActionGatewayRequest,
-  GoatActionGatewayResponse,
-} from "@opencompany/agent-runtime";
+import type { ActionGatewayRequest, ActionGatewayResponse } from "@opencompany/agent-runtime";
 import { NextResponse } from "next/server";
-import { executeGoatActionGateway } from "@/lib/codex-actions";
+import { executeActionGateway } from "@/lib/codex-actions";
 
 export const runtime = "nodejs";
 export const maxDuration = 150;
@@ -21,7 +18,7 @@ export async function POST(request: Request) {
   const parsed = await parseRequest(request);
   if (!parsed.ok) return jsonError(400, "invalid_params", parsed.error);
 
-  const response = await executeGoatActionGateway({
+  const response = await executeActionGateway({
     request: parsed.value,
     signal: request.signal,
   });
@@ -37,7 +34,7 @@ function validBearerToken(authorization: string | null, expectedToken: string) {
 
 async function parseRequest(
   request: Request,
-): Promise<{ ok: true; value: GoatActionGatewayRequest } | { ok: false; error: string }> {
+): Promise<{ ok: true; value: ActionGatewayRequest } | { ok: false; error: string }> {
   let value: unknown;
   try {
     value = await request.json();
@@ -94,7 +91,7 @@ async function parseRequest(
 }
 
 function jsonError(status: number, code: string, message: string) {
-  const body: GoatActionGatewayResponse = { ok: false, error: { code, message } };
+  const body: ActionGatewayResponse = { ok: false, error: { code, message } };
   return NextResponse.json(body, { status });
 }
 

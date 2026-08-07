@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "exports": {
+    ".": "./src/app.ts",
+    "./app": "./src/app.ts",
+    "./client": "./src/client.tsx",
     "./events": "./src/events.ts",
-    "./goat": "./src/goat.ts",
-    "./goat/client": "./src/goat-client.tsx",
-    "./goat/events": "./src/goat-events.ts",
-    "./goat/server": "./src/goat-server.ts",
-    "./server": "./src/server.ts"
+    "./server": "./src/server.ts",
+    "./shared-events": "./src/shared-events.ts",
+    "./shared-server": "./src/shared-server.ts"
   },
   "scripts": {
     "lint": "eslint .",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildGoatSlackContextMessages,
+  buildSlackContextMessages,
   formatSpeaker,
   SLACK_CONTEXT_MESSAGE_LIMIT,
   SLACK_CONTEXT_TOTAL_MAX_CHARS,
@@ -8,9 +8,9 @@ import {
 
 const BOT = "UBOT";
 
-describe("buildGoatSlackContextMessages", () => {
+describe("buildSlackContextMessages", () => {
   it("maps the bot's own messages to assistant turns and humans to prefixed user turns", () => {
-    const messages = buildGoatSlackContextMessages(
+    const messages = buildSlackContextMessages(
       [
         { user: "U1", text: "what did we learn this week?", ts: "1" },
         { user: BOT, text: "Three customer calls happened.", ts: "2" },
@@ -27,7 +27,7 @@ describe("buildGoatSlackContextMessages", () => {
   });
 
   it("excludes the triggering message, subtypes, other-bot noise prefixes, and empty texts", () => {
-    const messages = buildGoatSlackContextMessages(
+    const messages = buildSlackContextMessages(
       [
         { user: "U1", text: "keep me", ts: "1" },
         { user: "U1", text: "channel join", ts: "2", subtype: "channel_join" },
@@ -44,7 +44,7 @@ describe("buildGoatSlackContextMessages", () => {
   });
 
   it("strips bot mentions from human messages", () => {
-    const messages = buildGoatSlackContextMessages(
+    const messages = buildSlackContextMessages(
       [{ user: "U1", text: `<@${BOT}> what changed?`, ts: "1" }],
       { botUserId: BOT },
     );
@@ -52,7 +52,7 @@ describe("buildGoatSlackContextMessages", () => {
   });
 
   it("merges consecutive same-role messages", () => {
-    const messages = buildGoatSlackContextMessages(
+    const messages = buildSlackContextMessages(
       [
         { user: "U1", text: "first", ts: "1" },
         { user: "U2", text: "second", ts: "2" },
@@ -71,7 +71,7 @@ describe("buildGoatSlackContextMessages", () => {
       text: `message ${index}`,
       ts: String(index),
     }));
-    const messages = buildGoatSlackContextMessages(many, { botUserId: BOT });
+    const messages = buildSlackContextMessages(many, { botUserId: BOT });
     const joined = messages.map((message) => message.content).join("\n");
     expect(joined).not.toContain("message 9 ");
     expect(joined).toContain(`message ${SLACK_CONTEXT_MESSAGE_LIMIT + 9}`);
@@ -81,7 +81,7 @@ describe("buildGoatSlackContextMessages", () => {
       text: `${index}:${"x".repeat(5000)}`,
       ts: String(index),
     }));
-    const capped = buildGoatSlackContextMessages(huge, { botUserId: BOT });
+    const capped = buildSlackContextMessages(huge, { botUserId: BOT });
     const total = capped.reduce((sum, message) => sum + message.content.length, 0);
     expect(total).toBeLessThanOrEqual(SLACK_CONTEXT_TOTAL_MAX_CHARS + 100);
     const cappedJoined = capped.map((message) => message.content).join("\n");

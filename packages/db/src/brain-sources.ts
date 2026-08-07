@@ -3,11 +3,11 @@ import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { getDb } from "./client";
 import {
-  type GoatBrainSourceConfigProvider,
-  type GoatIntegrationStatus,
-  goatBrainSources,
-  goatIntegrations,
-  goatUsers,
+  type BrainSourceConfigProvider,
+  brainSources,
+  type IntegrationStatus,
+  integrations,
+  users,
 } from "./schema";
 
 type DbLike = any;
@@ -24,15 +24,15 @@ function runAtomically<T>(db: DbLike, fn: (tx: DbLike) => Promise<T>): Promise<T
 export const GOAT_BRAIN_SOURCE_DISABLED_INGEST_REASON =
   "Stopped because this Brain source was disabled.";
 
-export type GoatBrainSourceWithIntegration = {
+export type BrainSourceWithIntegration = {
   id: string;
   brainRef: string;
-  provider: GoatBrainSourceConfigProvider;
+  provider: BrainSourceConfigProvider;
   integrationId: string;
   userWorkosId: string;
   enabled: boolean;
   config: Record<string, unknown>;
-  integrationStatus: GoatIntegrationStatus;
+  integrationStatus: IntegrationStatus;
   integrationAccountName: string | null;
   integrationAccountEmail: string | null;
   integrationConnectionLabel: string | null;
@@ -44,33 +44,33 @@ export type GoatBrainSourceWithIntegration = {
   ownerAvatarUrl: string | null;
 };
 
-export async function listGoatBrainSourcesForBrain(
+export async function listBrainSourcesForBrain(
   brainRef: string,
   db: DbLike = getDb(),
-): Promise<GoatBrainSourceWithIntegration[]> {
+): Promise<BrainSourceWithIntegration[]> {
   const rows = await db
     .select({
-      id: goatBrainSources.id,
-      brainRef: goatBrainSources.brainId,
-      provider: goatBrainSources.provider,
-      integrationId: goatBrainSources.integrationId,
-      userWorkosId: goatBrainSources.userWorkosId,
-      enabled: goatBrainSources.enabled,
-      config: goatBrainSources.config,
-      integrationStatus: goatIntegrations.status,
-      integrationAccountName: goatIntegrations.accountName,
-      integrationAccountEmail: goatIntegrations.accountEmail,
-      integrationConnectionLabel: goatIntegrations.connectionLabel,
-      integrationWorkspaceId: goatIntegrations.workspaceId,
-      ownerFirstName: goatUsers.firstName,
-      ownerLastName: goatUsers.lastName,
-      ownerEmail: goatUsers.email,
-      ownerAvatarUrl: goatUsers.avatarUrl,
+      id: brainSources.id,
+      brainRef: brainSources.brainId,
+      provider: brainSources.provider,
+      integrationId: brainSources.integrationId,
+      userWorkosId: brainSources.userWorkosId,
+      enabled: brainSources.enabled,
+      config: brainSources.config,
+      integrationStatus: integrations.status,
+      integrationAccountName: integrations.accountName,
+      integrationAccountEmail: integrations.accountEmail,
+      integrationConnectionLabel: integrations.connectionLabel,
+      integrationWorkspaceId: integrations.workspaceId,
+      ownerFirstName: users.firstName,
+      ownerLastName: users.lastName,
+      ownerEmail: users.email,
+      ownerAvatarUrl: users.avatarUrl,
     })
-    .from(goatBrainSources)
-    .innerJoin(goatIntegrations, eq(goatBrainSources.integrationId, goatIntegrations.id))
-    .innerJoin(goatUsers, eq(goatBrainSources.userWorkosId, goatUsers.workosUserId))
-    .where(eq(goatBrainSources.brainId, brainRef));
+    .from(brainSources)
+    .innerJoin(integrations, eq(brainSources.integrationId, integrations.id))
+    .innerJoin(users, eq(brainSources.userWorkosId, users.workosUserId))
+    .where(eq(brainSources.brainId, brainRef));
 
   return rows.map((row: (typeof rows)[number]) => ({
     id: row.id,
@@ -96,11 +96,9 @@ export async function listEnabledBrainRefsForIntegration(
   db: DbLike = getDb(),
 ): Promise<string[]> {
   const rows = await db
-    .select({ brainRef: goatBrainSources.brainId })
-    .from(goatBrainSources)
-    .where(
-      and(eq(goatBrainSources.integrationId, integrationId), eq(goatBrainSources.enabled, true)),
-    );
+    .select({ brainRef: brainSources.brainId })
+    .from(brainSources)
+    .where(and(eq(brainSources.integrationId, integrationId), eq(brainSources.enabled, true)));
   return rows.map((row: { brainRef: string }) => row.brainRef);
 }
 
@@ -109,16 +107,16 @@ export async function hasAnyBrainSourceForIntegration(
   db: DbLike = getDb(),
 ): Promise<boolean> {
   const rows = await db
-    .select({ id: goatBrainSources.id })
-    .from(goatBrainSources)
-    .where(eq(goatBrainSources.integrationId, integrationId))
+    .select({ id: brainSources.id })
+    .from(brainSources)
+    .where(eq(brainSources.integrationId, integrationId))
     .limit(1);
   return rows.length > 0;
 }
 
-export async function upsertGoatBrainSource(input: {
+export async function upsertBrainSource(input: {
   brainRef: string;
-  provider: GoatBrainSourceConfigProvider;
+  provider: BrainSourceConfigProvider;
   integrationId: string;
   userWorkosId: string;
   createdByWorkosId: string;
@@ -132,13 +130,13 @@ export async function upsertGoatBrainSource(input: {
 }): Promise<{ id: string; created: boolean }> {
   if (!input.db) {
     const db = getDb();
-    return await runAtomically(db, (tx) => upsertGoatBrainSource({ ...input, db: tx }));
+    return await runAtomically(db, (tx) => upsertBrainSource({ ...input, db: tx }));
   }
   const db = input.db;
   const now = input.now ?? new Date();
 
   const values = {
-    id: newGoatBrainSourceId(),
+    id: newBrainSourceId(),
     brainId: input.brainRef,
     provider: input.provider,
     integrationId: input.integrationId,
@@ -149,17 +147,17 @@ export async function upsertGoatBrainSource(input: {
     updatedAt: now,
   };
   const [inserted] = await db
-    .insert(goatBrainSources)
+    .insert(brainSources)
     .values(values)
     .onConflictDoNothing({
-      target: [goatBrainSources.brainId, goatBrainSources.integrationId],
+      target: [brainSources.brainId, brainSources.integrationId],
     })
-    .returning({ id: goatBrainSources.id });
+    .returning({ id: brainSources.id });
 
   const [row] = inserted
     ? [inserted]
     : await db
-        .update(goatBrainSources)
+        .update(brainSources)
         .set({
           enabled: input.enabled,
           ...(input.config !== undefined ? { config: input.config } : {}),
@@ -167,15 +165,15 @@ export async function upsertGoatBrainSource(input: {
         })
         .where(
           and(
-            eq(goatBrainSources.brainId, input.brainRef),
-            eq(goatBrainSources.integrationId, input.integrationId),
+            eq(brainSources.brainId, input.brainRef),
+            eq(brainSources.integrationId, input.integrationId),
           ),
         )
-        .returning({ id: goatBrainSources.id });
+        .returning({ id: brainSources.id });
 
   if (!row) throw new Error("Could not persist Goat Brain source.");
   if (!input.enabled) {
-    await cancelActiveGoatBrainIngestJobsForSource({
+    await cancelActiveBrainIngestJobsForSource({
       brainRef: input.brainRef,
       integrationId: input.integrationId,
       now,
@@ -185,7 +183,7 @@ export async function upsertGoatBrainSource(input: {
   return { id: row.id, created: Boolean(inserted) };
 }
 
-export async function setGoatBrainSourceEnabled(input: {
+export async function setBrainSourceEnabled(input: {
   brainRef: string;
   sourceId: string;
   enabled: boolean;
@@ -194,23 +192,21 @@ export async function setGoatBrainSourceEnabled(input: {
 }): Promise<boolean> {
   if (!input.db) {
     const db = getDb();
-    return await runAtomically(db, (tx) => setGoatBrainSourceEnabled({ ...input, db: tx }));
+    return await runAtomically(db, (tx) => setBrainSourceEnabled({ ...input, db: tx }));
   }
   const db = input.db;
   const now = input.now ?? new Date();
   const [source] = await db
-    .update(goatBrainSources)
+    .update(brainSources)
     .set({ enabled: input.enabled, updatedAt: now })
-    .where(
-      and(eq(goatBrainSources.id, input.sourceId), eq(goatBrainSources.brainId, input.brainRef)),
-    )
+    .where(and(eq(brainSources.id, input.sourceId), eq(brainSources.brainId, input.brainRef)))
     .returning({
-      id: goatBrainSources.id,
-      integrationId: goatBrainSources.integrationId,
+      id: brainSources.id,
+      integrationId: brainSources.integrationId,
     });
   if (!source) return false;
   if (!input.enabled) {
-    await cancelActiveGoatBrainIngestJobsForSource({
+    await cancelActiveBrainIngestJobsForSource({
       brainRef: input.brainRef,
       integrationId: source.integrationId,
       now,
@@ -220,26 +216,24 @@ export async function setGoatBrainSourceEnabled(input: {
   return true;
 }
 
-export async function deleteGoatBrainSource(input: {
+export async function deleteBrainSource(input: {
   brainRef: string;
   sourceId: string;
   db?: DbLike;
 }): Promise<boolean> {
   if (!input.db) {
     const db = getDb();
-    return await runAtomically(db, (tx) => deleteGoatBrainSource({ ...input, db: tx }));
+    return await runAtomically(db, (tx) => deleteBrainSource({ ...input, db: tx }));
   }
   const db = input.db;
   const now = new Date();
   const rows = await db
-    .delete(goatBrainSources)
-    .where(
-      and(eq(goatBrainSources.id, input.sourceId), eq(goatBrainSources.brainId, input.brainRef)),
-    )
-    .returning({ id: goatBrainSources.id, integrationId: goatBrainSources.integrationId });
+    .delete(brainSources)
+    .where(and(eq(brainSources.id, input.sourceId), eq(brainSources.brainId, input.brainRef)))
+    .returning({ id: brainSources.id, integrationId: brainSources.integrationId });
   const source = rows[0];
   if (source) {
-    await cancelActiveGoatBrainIngestJobsForSource({
+    await cancelActiveBrainIngestJobsForSource({
       brainRef: input.brainRef,
       integrationId: source.integrationId,
       now,
@@ -249,7 +243,7 @@ export async function deleteGoatBrainSource(input: {
   return rows.length > 0;
 }
 
-async function cancelActiveGoatBrainIngestJobsForSource(input: {
+async function cancelActiveBrainIngestJobsForSource(input: {
   brainRef: string;
   integrationId: string;
   now: Date;
@@ -299,15 +293,15 @@ async function cancelActiveGoatBrainIngestJobsForSource(input: {
 // the pool of accounts they can attach to a brain. Excludes disconnected rows
 // and the Linear MCP connector row (provider "linear" is shared with MCP; only
 // the ingest connection keyed on the organization id can feed brains).
-export async function listGoatPersonalIntegrationAccounts(input: {
+export async function listPersonalIntegrationAccounts(input: {
   userWorkosId: string;
-  provider: GoatBrainSourceConfigProvider;
+  provider: BrainSourceConfigProvider;
   excludeExternalId?: string;
   db?: DbLike;
 }): Promise<
   Array<{
     integrationId: string;
-    status: GoatIntegrationStatus;
+    status: IntegrationStatus;
     accountEmail: string | null;
     accountName: string | null;
     connectionLabel: string | null;
@@ -317,29 +311,27 @@ export async function listGoatPersonalIntegrationAccounts(input: {
   const db = input.db ?? getDb();
   const rows = await db
     .select({
-      integrationId: goatIntegrations.id,
-      status: goatIntegrations.status,
-      accountEmail: goatIntegrations.accountEmail,
-      accountName: goatIntegrations.accountName,
-      connectionLabel: goatIntegrations.connectionLabel,
-      externalId: goatIntegrations.externalId,
+      integrationId: integrations.id,
+      status: integrations.status,
+      accountEmail: integrations.accountEmail,
+      accountName: integrations.accountName,
+      connectionLabel: integrations.connectionLabel,
+      externalId: integrations.externalId,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, input.userWorkosId),
-        eq(goatIntegrations.provider, input.provider),
-        isNull(goatIntegrations.workspaceId),
-        ne(goatIntegrations.status, "disconnected"),
-        ...(input.excludeExternalId
-          ? [ne(goatIntegrations.externalId, input.excludeExternalId)]
-          : []),
+        eq(integrations.userWorkosId, input.userWorkosId),
+        eq(integrations.provider, input.provider),
+        isNull(integrations.workspaceId),
+        ne(integrations.status, "disconnected"),
+        ...(input.excludeExternalId ? [ne(integrations.externalId, input.excludeExternalId)] : []),
       ),
     )
-    .orderBy(goatIntegrations.createdAt);
+    .orderBy(integrations.createdAt);
   return rows;
 }
 
-export function newGoatBrainSourceId() {
+export function newBrainSourceId() {
   return `gbscfg_${randomUUID().replace(/-/g, "")}`;
 }

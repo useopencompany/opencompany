@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
-  compareGoatBrainFolderPaths,
-  defaultGoatBrainFolderManifestEntries,
-  goatBrainFolderSourceForPath,
-  normalizeGoatBrainFolderEntries,
-  parseGoatBrainFolderManifest,
+  brainFolderSourceForPath,
+  compareBrainFolderPaths,
+  defaultBrainFolderManifestEntries,
+  normalizeBrainFolderEntries,
+  parseBrainFolderManifest,
 } from "./folders";
 
 describe("Goat Brain folder taxonomy", () => {
   it("orders the hard and adjustable defaults in the designed root order", () => {
-    expect(defaultGoatBrainFolderManifestEntries().map((entry) => entry.path)).toEqual([
+    expect(defaultBrainFolderManifestEntries().map((entry) => entry.path)).toEqual([
       "inbox",
       "thoughts",
       "projects",
@@ -24,20 +24,20 @@ describe("Goat Brain folder taxonomy", () => {
   });
 
   it("marks only hard roots as system folders", () => {
-    expect(goatBrainFolderSourceForPath("inbox")).toBe("system");
-    expect(goatBrainFolderSourceForPath("people")).toBe("system");
-    expect(goatBrainFolderSourceForPath("companies")).toBe("system");
-    expect(goatBrainFolderSourceForPath("evidence")).toBe("system");
-    expect(goatBrainFolderSourceForPath("thoughts")).toBe("custom");
-    expect(goatBrainFolderSourceForPath("research")).toBe("custom");
+    expect(brainFolderSourceForPath("inbox")).toBe("system");
+    expect(brainFolderSourceForPath("people")).toBe("system");
+    expect(brainFolderSourceForPath("companies")).toBe("system");
+    expect(brainFolderSourceForPath("evidence")).toBe("system");
+    expect(brainFolderSourceForPath("thoughts")).toBe("custom");
+    expect(brainFolderSourceForPath("research")).toBe("custom");
     // Workflows/skills are no longer Brain folders (extracted to their own tables).
-    expect(goatBrainFolderSourceForPath("skills")).toBe("custom");
-    expect(goatBrainFolderSourceForPath("workflows")).toBe("custom");
-    expect(goatBrainFolderSourceForPath("people/acme")).toBe("custom");
+    expect(brainFolderSourceForPath("skills")).toBe("custom");
+    expect(brainFolderSourceForPath("workflows")).toBe("custom");
+    expect(brainFolderSourceForPath("people/acme")).toBe("custom");
   });
 
   it("does not recreate adjustable defaults when a manifest exists", () => {
-    const entries = parseGoatBrainFolderManifest(
+    const entries = parseBrainFolderManifest(
       JSON.stringify({
         schemaVersion: "goat.brain.folders.v1",
         folders: [{ path: "partners", source: "custom" }],
@@ -56,7 +56,7 @@ describe("Goat Brain folder taxonomy", () => {
 
   it("normalizes source values and sorts custom roots before people and companies", () => {
     expect(
-      normalizeGoatBrainFolderEntries([
+      normalizeBrainFolderEntries([
         { path: "people", source: "custom" },
         { path: "research", source: "system" },
         { path: "zeta", source: "custom" },
@@ -76,7 +76,7 @@ describe("Goat Brain folder taxonomy", () => {
   it("compares nested paths within their ordered roots", () => {
     expect(
       ["people/ada", "projects/app", "evidence/chat", "inbox/todo"].toSorted(
-        compareGoatBrainFolderPaths,
+        compareBrainFolderPaths,
       ),
     ).toEqual(["inbox/todo", "projects/app", "people/ada", "evidence/chat"]);
   });

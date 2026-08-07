@@ -1,32 +1,32 @@
-import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
+import { captureIngestionQuotaAnalytics } from "@opencompany/analytics/app";
 import {
   type NormalizedHubspotObjectActivity,
   type NormalizedHubspotObjectSourceItem,
   normalizeHubspotObjectWindow,
 } from "@opencompany/brain";
 import {
-  attributeGoatBrainSourceEventClaims,
-  claimGoatBrainSourceEvents,
+  attributeBrainSourceEventClaims,
+  claimBrainSourceEvents,
 } from "@opencompany/db/brain-event-claims";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
-  upsertGoatBrainSourceItemAndEnqueue,
+  upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
-  goatHubspotEventTypeFor,
-  goatHubspotRouteMatchesEvent,
-  goatHubspotSelectedObjectTypes,
-  listEnabledGoatHubspotBrainSourceRoutes,
-  newGoatHubspotObjectWindowId,
+  hubspotEventTypeFor,
+  hubspotRouteMatchesEvent,
+  hubspotSelectedObjectTypes,
+  listEnabledHubspotBrainSourceRoutes,
+  newHubspotObjectWindowId,
 } from "@opencompany/db/hubspot";
 import type {
-  GoatHubspotEventAction,
-  GoatHubspotObjectType,
-  GoatIntegrationStatus,
+  HubspotEventAction,
+  HubspotObjectType,
+  IntegrationStatus,
 } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
-import { wakeGoatBrainIngestWorker } from "./brain-ingest-worker";
+import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import {
@@ -52,34 +52,34 @@ const ACTIVITY_PROPERTY_VALUE_MAX_CHARS = 500;
 
 // Name-carrying properties, newest buffered value wins when the live snapshot
 // is unavailable.
-const NAME_PROPERTIES: Record<GoatHubspotObjectType, readonly string[]> = {
+const NAME_PROPERTIES: Record<HubspotObjectType, readonly string[]> = {
   contact: ["firstname", "lastname", "email"],
   company: ["name", "domain"],
   deal: ["dealname"],
 };
 
-export type GoatHubspotDueWindow = {
+export type HubspotDueWindow = {
   integrationId: string;
   userWorkosId: string;
   portalId: string;
-  objectType: GoatHubspotObjectType;
+  objectType: HubspotObjectType;
   objectId: string;
 };
 
 type BufferedHubspotEventRow = {
   id: string;
   deliveryId: string;
-  action: GoatHubspotEventAction;
+  action: HubspotEventAction;
   propertyName: string | null;
   payload: Record<string, unknown>;
   eventTime: string | Date;
 };
 
-export async function listDueGoatHubspotObjectWindows(input: {
+export async function listDueHubspotObjectWindows(input: {
   now?: Date;
   quietPeriodMs?: number;
   maxWaitMs?: number;
-}): Promise<GoatHubspotDueWindow[]> {
+}): Promise<HubspotDueWindow[]> {
   const now = input.now ?? new Date();
   const quietCutoff = new Date(now.getTime() - (input.quietPeriodMs ?? HUBSPOT_QUIET_PERIOD_MS));
   const maxWaitCutoff = new Date(now.getTime() - (input.maxWaitMs ?? HUBSPOT_MAX_WAIT_MS));
@@ -95,11 +95,11 @@ export async function listDueGoatHubspotObjectWindows(input: {
     GROUP BY 1, 2, 3, 4, 5
     HAVING max(received_at) < ${quietCutoff} OR min(received_at) < ${maxWaitCutoff}
   `);
-  return rowsFromExecute<GoatHubspotDueWindow>(result);
+  return rowsFromExecute<HubspotDueWindow>(result);
 }
 
-export async function flushGoatHubspotObjectWindow(
-  window: GoatHubspotDueWindow,
+export async function flushHubspotObjectWindow(
+  window: HubspotDueWindow,
   env: RunnerEnv,
 ): Promise<{
   sourceItemId: string;
@@ -172,11 +172,11 @@ export async function flushGoatHubspotObjectWindow(
     // so the buffer never wedges on a dead token.
     const routes =
       status === "connected"
-        ? await listEnabledGoatHubspotBrainSourceRoutes([window.integrationId], tx)
+        ? await listEnabledHubspotBrainSourceRoutes([window.integrationId], tx)
         : [];
     const candidateBrainRefs = routes
       .filter((route) => {
-        const selected = goatHubspotSelectedObjectTypes(route.config);
+        const selected = hubspotSelectedObjectTypes(route.config);
         if (selected.size === 0) return false;
         if (!selected.has(window.objectType)) return false;
         return eventsMatchHubspotRoute(route.config, claimed);
@@ -194,7 +194,7 @@ export async function flushGoatHubspotObjectWindow(
     const claimedEventKeysByBrainRef = new Map<string, string[]>();
     const newlyClaimedEventKeys = new Set<string>();
     for (const brainRef of new Set(candidateBrainRefs)) {
-      const { claimedEventKeys } = await claimGoatBrainSourceEvents({
+      const { claimedEventKeys } = await claimBrainSourceEvents({
         brainRef,
         sourceProvider: "hubspot",
         eventKeys,
@@ -206,7 +206,7 @@ export async function flushGoatHubspotObjectWindow(
       for (const eventKey of claimedEventKeys) newlyClaimedEventKeys.add(eventKey);
     }
 
-    const upserted = await upsertGoatBrainSourceItemAndEnqueue({
+    const upserted = await upsertBrainSourceItemAndEnqueue({
       userWorkosId: window.userWorkosId,
       sourceConnectionId: window.integrationId,
       integrationId: window.integrationId,
@@ -230,7 +230,7 @@ export async function flushGoatHubspotObjectWindow(
       )})
     `);
     for (const brainRef of brainRefs) {
-      await attributeGoatBrainSourceEventClaims({
+      await attributeBrainSourceEventClaims({
         brainRef,
         sourceProvider: "hubspot",
         eventKeys: claimedEventKeysByBrainRef.get(brainRef) ?? [],
@@ -248,13 +248,13 @@ export async function flushGoatHubspotObjectWindow(
     };
   });
 
-  captureGoatIngestionQuotaAnalytics(result?.quotaUpdates);
-  if (result?.enqueued) wakeGoatBrainIngestWorker();
+  captureIngestionQuotaAnalytics(result?.quotaUpdates);
+  if (result?.enqueued) wakeBrainIngestWorker();
   return result;
 }
 
 export function buildHubspotObjectWindowItem(input: {
-  window: GoatHubspotDueWindow;
+  window: HubspotDueWindow;
   events: readonly BufferedHubspotEventRow[];
   snapshot: HubspotObjectSnapshot | null;
   flushedAt: Date;
@@ -263,7 +263,7 @@ export function buildHubspotObjectWindowItem(input: {
   const activity = events.map((row) => toNormalizedActivity(row));
 
   return normalizeHubspotObjectWindow({
-    windowId: newGoatHubspotObjectWindowId(),
+    windowId: newHubspotObjectWindowId(),
     portalId: window.portalId,
     objectType: window.objectType,
     objectId: window.objectId,
@@ -292,10 +292,7 @@ export function buildHubspotObjectWindowItem(input: {
   });
 }
 
-export function startGoatHubspotFlushWorker(
-  env: RunnerEnv,
-  options: { pollIntervalMs?: number } = {},
-) {
+export function startHubspotFlushWorker(env: RunnerEnv, options: { pollIntervalMs?: number } = {}) {
   const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? HUBSPOT_FLUSH_POLL_INTERVAL_MS);
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -318,10 +315,10 @@ export function startGoatHubspotFlushWorker(
   const loop = (async () => {
     while (!stopped) {
       try {
-        const due = await listDueGoatHubspotObjectWindows({});
+        const due = await listDueHubspotObjectWindows({});
         for (const window of due) {
           if (stopped) break;
-          const flushed = await flushGoatHubspotObjectWindow(window, env).catch((error) => {
+          const flushed = await flushHubspotObjectWindow(window, env).catch((error) => {
             captureException(error, {
               event: "opencompany.goat_hubspot_flush_failed",
               integration_id: window.integrationId,
@@ -372,7 +369,7 @@ export function startGoatHubspotFlushWorker(
   };
 }
 
-async function previewBufferedHubspotEvents(window: GoatHubspotDueWindow) {
+async function previewBufferedHubspotEvents(window: HubspotDueWindow) {
   return rowsFromExecute<BufferedHubspotEventRow>(
     await getDb().execute(sql`
       SELECT
@@ -394,9 +391,9 @@ async function previewBufferedHubspotEvents(window: GoatHubspotDueWindow) {
 }
 
 async function loadHubspotIntegrationStatus(
-  window: GoatHubspotDueWindow,
-): Promise<GoatIntegrationStatus | "unknown"> {
-  const statusRows = rowsFromExecute<{ status: GoatIntegrationStatus }>(
+  window: HubspotDueWindow,
+): Promise<IntegrationStatus | "unknown"> {
+  const statusRows = rowsFromExecute<{ status: IntegrationStatus }>(
     await getDb().execute(sql`
       SELECT status FROM goat.integrations WHERE id = ${window.integrationId}
     `),
@@ -425,13 +422,13 @@ function toNormalizedActivity(row: BufferedHubspotEventRow): NormalizedHubspotOb
 }
 
 function eventsMatchHubspotRoute(
-  config: Parameters<typeof goatHubspotRouteMatchesEvent>[0],
+  config: Parameters<typeof hubspotRouteMatchesEvent>[0],
   events: readonly BufferedHubspotEventRow[],
 ) {
   return events.some((row) =>
-    goatHubspotRouteMatchesEvent(
+    hubspotRouteMatchesEvent(
       config,
-      goatHubspotEventTypeFor({ action: row.action, propertyName: row.propertyName }),
+      hubspotEventTypeFor({ action: row.action, propertyName: row.propertyName }),
     ),
   );
 }
@@ -439,7 +436,7 @@ function eventsMatchHubspotRoute(
 // Fallback when the live snapshot is unavailable: the buffered property
 // changes may carry the record's name; the newest value wins.
 function nameFromBufferedEvents(
-  objectType: GoatHubspotObjectType,
+  objectType: HubspotObjectType,
   events: readonly BufferedHubspotEventRow[],
 ): string | null {
   const nameProperties = NAME_PROPERTIES[objectType];
@@ -461,7 +458,7 @@ function nameFromBufferedEvents(
   return values.get("dealname") ?? null;
 }
 
-export type GoatHubspotObjectWindowIngestDecision =
+export type HubspotObjectWindowIngestDecision =
   | { action: "ingest" }
   | { action: "skip"; reason: "routine_hubspot_property_update" };
 
@@ -488,7 +485,7 @@ const ROUTINE_HUBSPOT_UPDATE_PROPERTIES = new Set([
 
 export function classifyHubspotObjectWindowForIngest(
   item: NormalizedHubspotObjectSourceItem,
-): GoatHubspotObjectWindowIngestDecision {
+): HubspotObjectWindowIngestDecision {
   const object = item.content.object;
   for (const activity of object.activity) {
     if (activity.action !== "update") return { action: "ingest" };

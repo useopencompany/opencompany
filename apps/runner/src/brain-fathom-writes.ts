@@ -2,12 +2,12 @@ import { createHash } from "node:crypto";
 import {
   type NormalizedFathomMeetingSourceItem,
   type NormalizedFathomMeetingTranscriptSegment,
+  normalizeBrainId,
   normalizeEvidenceId,
-  normalizeGoatBrainId,
 } from "@opencompany/brain";
 import {
-  createGoatBrainMarkdownContent,
-  goatBrainFilePathFor,
+  brainFilePathFor,
+  createBrainMarkdownContent,
   MAX_GOAT_BRAIN_FILE_BYTES,
 } from "@opencompany/db/brain-files";
 import { truncateByBytes } from "./brain-jamie-writes";
@@ -26,9 +26,9 @@ export type FathomMeetingIds = {
 export function buildFathomMeetingIds(item: NormalizedFathomMeetingSourceItem): FathomMeetingIds {
   const meeting = item.content.meeting;
   const date = item.occurredAt.slice(0, 10);
-  const titleSlug = (normalizeGoatBrainId(meeting.title) || "meeting").slice(0, 42);
+  const titleSlug = (normalizeBrainId(meeting.title) || "meeting").slice(0, 42);
   const meetingBrainId =
-    normalizeGoatBrainId(`meeting-${date}-${titleSlug}-${shortHash(item.externalId)}`) ||
+    normalizeBrainId(`meeting-${date}-${titleSlug}-${shortHash(item.externalId)}`) ||
     `meeting-${shortHash(item.sourceRef)}`;
   const evidenceBrainId = normalizeEvidenceId(
     `ev-fathom-${shortHash(`${item.externalId}:${item.contentHash}`, 18)}`,
@@ -82,7 +82,7 @@ export function buildFathomMeetingEvidenceWrite(
   return {
     meetingBrainId,
     evidenceBrainId,
-    evidencePath: goatBrainFilePathFor(FATHOM_EVIDENCE_FOLDER, evidenceBrainId),
+    evidencePath: brainFilePathFor(FATHOM_EVIDENCE_FOLDER, evidenceBrainId),
     evidenceContent,
     truncatedTranscript,
   };
@@ -133,7 +133,7 @@ function createEvidenceContent(input: {
       : input.transcriptMarkdown,
   ].join("\n\n");
 
-  return createGoatBrainMarkdownContent({
+  return createBrainMarkdownContent({
     id: input.evidenceBrainId,
     folderPath: FATHOM_EVIDENCE_FOLDER,
     title: `Fathom notes: ${meeting.title}`,

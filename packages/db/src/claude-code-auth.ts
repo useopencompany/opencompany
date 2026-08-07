@@ -8,17 +8,17 @@ import {
 } from "@opencompany/crypto";
 import { and, eq } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import type * as goatSchema from "./schema";
+import type * as schema from "./schema";
 import {
-  type GoatCodexCredentialStatus,
-  type GoatIntegrationCredentialEncryptedPayload,
-  goatClaudeCodeCredentials,
+  type CodexCredentialStatus,
+  claudeCodeCredentials,
+  type IntegrationCredentialEncryptedPayload,
 } from "./schema";
 
 const ENCRYPTION_KEY_VERSION = 1;
 
-type DbSchema = typeof goatSchema;
-type GoatClaudeCodeAuthDb = Pick<
+type DbSchema = typeof schema;
+type ClaudeCodeAuthDb = Pick<
   PgDatabase<PgQueryResultHKT, DbSchema>,
   "delete" | "insert" | "select" | "update"
 >;
@@ -26,15 +26,15 @@ type GoatClaudeCodeAuthDb = Pick<
 // Payload shape stored encrypted: the long-lived `claude setup-token` OAuth token,
 // plus optional subscription hints needed for entitlement checks under token auth
 // (see CLAUDE_CODE_SUBSCRIPTION_TYPE / CLAUDE_CODE_RATE_LIMIT_TIER).
-export type GoatClaudeCodeAuthJson = {
+export type ClaudeCodeAuthJson = {
   token: string;
   subscriptionType?: string;
   rateLimitTier?: string;
 };
 
-export type LoadedGoatClaudeCodeCredential = {
-  authJson: GoatClaudeCodeAuthJson;
-  status: GoatCodexCredentialStatus;
+export type LoadedClaudeCodeCredential = {
+  authJson: ClaudeCodeAuthJson;
+  status: CodexCredentialStatus;
   statusReason: string | null;
   lastValidatedAt: Date | null;
   lastRotatedAt: Date | null;
@@ -42,11 +42,11 @@ export type LoadedGoatClaudeCodeCredential = {
   encryptionKeyVersion: number;
 };
 
-export async function saveGoatClaudeCodeCredential(input: {
-  db: GoatClaudeCodeAuthDb;
+export async function saveClaudeCodeCredential(input: {
+  db: ClaudeCodeAuthDb;
   userWorkosId: string;
-  authJson: GoatClaudeCodeAuthJson;
-  status?: GoatCodexCredentialStatus;
+  authJson: ClaudeCodeAuthJson;
+  status?: CodexCredentialStatus;
   statusReason?: string | null;
   validatedAt?: Date | null;
   now?: Date;
@@ -61,7 +61,7 @@ export async function saveGoatClaudeCodeCredential(input: {
   const lastValidatedAt = input.validatedAt ?? null;
 
   const [credential] = await input.db
-    .insert(goatClaudeCodeCredentials)
+    .insert(claudeCodeCredentials)
     .values({
       userWorkosId: input.userWorkosId,
       encryptedAuthJson,
@@ -73,7 +73,7 @@ export async function saveGoatClaudeCodeCredential(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: goatClaudeCodeCredentials.userWorkosId,
+      target: claudeCodeCredentials.userWorkosId,
       set: {
         encryptedAuthJson,
         encryptionKeyVersion: ENCRYPTION_KEY_VERSION,
@@ -85,25 +85,25 @@ export async function saveGoatClaudeCodeCredential(input: {
       },
     })
     .returning({
-      userWorkosId: goatClaudeCodeCredentials.userWorkosId,
-      lastValidatedAt: goatClaudeCodeCredentials.lastValidatedAt,
-      lastRotatedAt: goatClaudeCodeCredentials.lastRotatedAt,
-      updatedAt: goatClaudeCodeCredentials.updatedAt,
+      userWorkosId: claudeCodeCredentials.userWorkosId,
+      lastValidatedAt: claudeCodeCredentials.lastValidatedAt,
+      lastRotatedAt: claudeCodeCredentials.lastRotatedAt,
+      updatedAt: claudeCodeCredentials.updatedAt,
     });
 
   if (!credential) throw new Error("Could not persist Goat Claude Code credential.");
   return credential;
 }
 
-export async function markGoatClaudeCodeCredentialValidated(input: {
-  db: GoatClaudeCodeAuthDb;
+export async function markClaudeCodeCredentialValidated(input: {
+  db: ClaudeCodeAuthDb;
   userWorkosId: string;
   expectedUpdatedAt: Date;
   now?: Date;
 }) {
   const now = input.now ?? new Date();
   const [credential] = await input.db
-    .update(goatClaudeCodeCredentials)
+    .update(claudeCodeCredentials)
     .set({
       status: "connected",
       statusReason: null,
@@ -112,47 +112,47 @@ export async function markGoatClaudeCodeCredentialValidated(input: {
     })
     .where(
       and(
-        eq(goatClaudeCodeCredentials.userWorkosId, input.userWorkosId),
-        eq(goatClaudeCodeCredentials.updatedAt, input.expectedUpdatedAt),
+        eq(claudeCodeCredentials.userWorkosId, input.userWorkosId),
+        eq(claudeCodeCredentials.updatedAt, input.expectedUpdatedAt),
       ),
     )
-    .returning({ userWorkosId: goatClaudeCodeCredentials.userWorkosId });
+    .returning({ userWorkosId: claudeCodeCredentials.userWorkosId });
   return Boolean(credential);
 }
 
-export async function markGoatClaudeCodeCredentialNeedsReauth(input: {
-  db: GoatClaudeCodeAuthDb;
+export async function markClaudeCodeCredentialNeedsReauth(input: {
+  db: ClaudeCodeAuthDb;
   userWorkosId: string;
   statusReason: string;
   now?: Date;
 }) {
   await input.db
-    .update(goatClaudeCodeCredentials)
+    .update(claudeCodeCredentials)
     .set({
       status: "needs_reauth",
       statusReason: input.statusReason,
       updatedAt: input.now ?? new Date(),
     })
-    .where(eq(goatClaudeCodeCredentials.userWorkosId, input.userWorkosId));
+    .where(eq(claudeCodeCredentials.userWorkosId, input.userWorkosId));
 }
 
-export async function loadGoatClaudeCodeCredential(input: {
-  db: GoatClaudeCodeAuthDb;
+export async function loadClaudeCodeCredential(input: {
+  db: ClaudeCodeAuthDb;
   userWorkosId: string;
-}): Promise<LoadedGoatClaudeCodeCredential | null> {
+}): Promise<LoadedClaudeCodeCredential | null> {
   const [credential] = await input.db
     .select({
-      userWorkosId: goatClaudeCodeCredentials.userWorkosId,
-      encryptedAuthJson: goatClaudeCodeCredentials.encryptedAuthJson,
-      encryptionKeyVersion: goatClaudeCodeCredentials.encryptionKeyVersion,
-      status: goatClaudeCodeCredentials.status,
-      statusReason: goatClaudeCodeCredentials.statusReason,
-      lastValidatedAt: goatClaudeCodeCredentials.lastValidatedAt,
-      lastRotatedAt: goatClaudeCodeCredentials.lastRotatedAt,
-      updatedAt: goatClaudeCodeCredentials.updatedAt,
+      userWorkosId: claudeCodeCredentials.userWorkosId,
+      encryptedAuthJson: claudeCodeCredentials.encryptedAuthJson,
+      encryptionKeyVersion: claudeCodeCredentials.encryptionKeyVersion,
+      status: claudeCodeCredentials.status,
+      statusReason: claudeCodeCredentials.statusReason,
+      lastValidatedAt: claudeCodeCredentials.lastValidatedAt,
+      lastRotatedAt: claudeCodeCredentials.lastRotatedAt,
+      updatedAt: claudeCodeCredentials.updatedAt,
     })
-    .from(goatClaudeCodeCredentials)
-    .where(eq(goatClaudeCodeCredentials.userWorkosId, input.userWorkosId))
+    .from(claudeCodeCredentials)
+    .where(eq(claudeCodeCredentials.userWorkosId, input.userWorkosId))
     .limit(1);
 
   if (!credential) return null;
@@ -175,20 +175,20 @@ export async function loadGoatClaudeCodeCredential(input: {
   };
 }
 
-export async function deleteGoatClaudeCodeCredential(input: {
-  db: GoatClaudeCodeAuthDb;
+export async function deleteClaudeCodeCredential(input: {
+  db: ClaudeCodeAuthDb;
   userWorkosId: string;
 }) {
   await input.db
-    .delete(goatClaudeCodeCredentials)
-    .where(eq(goatClaudeCodeCredentials.userWorkosId, input.userWorkosId));
+    .delete(claudeCodeCredentials)
+    .where(eq(claudeCodeCredentials.userWorkosId, input.userWorkosId));
 }
 
 function encryptAuthJson(
-  authJson: GoatClaudeCodeAuthJson,
+  authJson: ClaudeCodeAuthJson,
   context: { userWorkosId: string },
   keyVersion: number,
-): GoatIntegrationCredentialEncryptedPayload {
+): IntegrationCredentialEncryptedPayload {
   return encryptJson(authJson, {
     key: loadEncryptionKey(keyVersion),
     aad: authenticatedData(context, keyVersion),
@@ -196,10 +196,10 @@ function encryptAuthJson(
 }
 
 function decryptAuthJson(
-  encryptedAuthJson: GoatIntegrationCredentialEncryptedPayload,
+  encryptedAuthJson: IntegrationCredentialEncryptedPayload,
   context: { userWorkosId: string },
   keyVersion: number,
-): GoatClaudeCodeAuthJson {
+): ClaudeCodeAuthJson {
   if (encryptedAuthJson.algorithm !== ENCRYPTION_ALGORITHM) {
     throw new Error(
       `Unsupported Goat Claude Code credential encryption algorithm ${encryptedAuthJson.algorithm}.`,
@@ -230,7 +230,7 @@ function decryptAuthJson(
   if (typeof decrypted.token !== "string" || !decrypted.token) {
     throw new Error("Goat Claude Code credential payload is missing its token.");
   }
-  return decrypted as GoatClaudeCodeAuthJson;
+  return decrypted as ClaudeCodeAuthJson;
 }
 
 function authenticatedData(context: { userWorkosId: string }, keyVersion: number) {

@@ -1,9 +1,9 @@
-import { GoatSkillsSettingsRoute } from "@/components/GoatRoutes";
-import { currentGoatUser } from "@/lib/auth";
-import { listGoatSkills } from "@/lib/skills";
+import { SkillsSettingsRoute } from "@/components/AppRoutes";
+import { currentUser } from "@/lib/auth";
+import { listSkills } from "@/lib/skills";
 
 export default async function SkillsSettingsPage() {
-  const context = await currentGoatUser();
-  const skills = await listGoatSkills(context.workspace.id);
-  return <GoatSkillsSettingsRoute skills={skills} canEdit={context.role === "admin"} />;
+  const context = await currentUser();
+  const skills = await listSkills(context.workspace.id);
+  return <SkillsSettingsRoute skills={skills} canEdit={context.role === "admin"} />;
 }

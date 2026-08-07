@@ -1,21 +1,21 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
-import type { GoatFathomProviderState } from "@/lib/integration-state";
+import { currentUser } from "@/lib/auth";
+import type { FathomProviderState } from "@/lib/integration-state";
 import {
-  connectGoatFathomIntegration,
-  getGoatFathomIntegrationState,
+  connectFathomIntegration,
+  getFathomIntegrationState,
   isValidFathomApiKey,
-  validateGoatFathomApiKey,
+  validateFathomApiKey,
 } from "@/lib/integrations/fathom";
 
 export type FathomConnectActionResult =
-  | { ok: true; state: GoatFathomProviderState }
+  | { ok: true; state: FathomProviderState }
   | { ok: false; error: string };
 
 export async function saveFathomApiKeyAction(apiKey: string): Promise<FathomConnectActionResult> {
-  const { user } = await currentGoatUser();
+  const { user } = await currentUser();
   const trimmed = apiKey.trim();
   if (!isValidFathomApiKey(trimmed)) {
     return {
@@ -24,14 +24,14 @@ export async function saveFathomApiKeyAction(apiKey: string): Promise<FathomConn
     };
   }
   try {
-    const validation = await validateGoatFathomApiKey(trimmed);
+    const validation = await validateFathomApiKey(trimmed);
     if (!validation.ok) return { ok: false, error: validation.error };
-    await connectGoatFathomIntegration({
+    await connectFathomIntegration({
       userWorkosId: user.workosUserId,
       apiKey: trimmed,
     });
     revalidatePath("/", "layout");
-    return { ok: true, state: await getGoatFathomIntegrationState(user.workosUserId) };
+    return { ok: true, state: await getFathomIntegrationState(user.workosUserId) };
   } catch (error) {
     console.error("[goat-fathom] Failed to save Fathom API key", error);
     return {

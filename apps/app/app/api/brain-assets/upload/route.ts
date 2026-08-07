@@ -1,18 +1,18 @@
 import { type HandleUploadBody, handleUpload } from "@vercel/blob/client";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import {
+  brainAssetUploadPrefix,
   GOAT_BRAIN_ASSET_CONTENT_TYPES,
   GOAT_BRAIN_ASSET_MAX_BYTES,
-  goatBrainAssetUploadPrefix,
 } from "@/lib/brain-assets";
 
 // Mints short-lived client-upload tokens so the browser uploads brain assets
 // directly to the private Blob store (bypasses the serverless body limit).
 // Auth + brain scope + content-type + size are enforced here; the document
-// row is written by uploadGoatBrainAssetAction after the upload completes
+// row is written by uploadBrainAssetAction after the upload completes
 // (onUploadCompleted does not fire on localhost, so we do not rely on it).
 export async function POST(request: Request): Promise<Response> {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return new Response(null, { status: 401 });
 
   const accessibleBrainRefs = new Set(context.brains.map((brain) => brain.id));
@@ -50,7 +50,7 @@ function brainRefFromAssetPathname(pathname: string): string | null {
   const match = /^goat-brain\/([^/]+)\/assets\/.+/.exec(pathname.replace(/^\/+/, ""));
   const brainRef = match?.[1];
   if (!brainRef) return null;
-  return pathname.replace(/^\/+/, "").startsWith(goatBrainAssetUploadPrefix(brainRef))
+  return pathname.replace(/^\/+/, "").startsWith(brainAssetUploadPrefix(brainRef))
     ? brainRef
     : null;
 }

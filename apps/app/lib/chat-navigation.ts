@@ -1,17 +1,17 @@
 export const GOAT_HOME_NAVIGATION_EVENT = "goat:home-navigation";
 export const GOAT_CHAT_COMPOSER_FOCUS_EVENT = "goat:chat-composer-focus";
 
-let pendingGoatChatComposerFocusSessionId: string | null = null;
+let pendingChatComposerFocusSessionId: string | null = null;
 
 const GOAT_CHAT_SESSION_ID_PATTERN =
   /^goat_chat_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export function newOptimisticGoatChatSessionId() {
+export function newOptimisticChatSessionId() {
   return `goat_chat_${crypto.randomUUID()}`;
 }
 
-export function requestGoatChatComposerFocus(sessionId: string) {
-  pendingGoatChatComposerFocusSessionId = sessionId;
+export function requestChatComposerFocus(sessionId: string) {
+  pendingChatComposerFocusSessionId = sessionId;
   if (typeof window === "undefined") return;
   window.dispatchEvent(
     new CustomEvent(GOAT_CHAT_COMPOSER_FOCUS_EVENT, {
@@ -20,13 +20,13 @@ export function requestGoatChatComposerFocus(sessionId: string) {
   );
 }
 
-export function consumePendingGoatChatComposerFocus(sessionId: string | null | undefined) {
-  if (!sessionId || pendingGoatChatComposerFocusSessionId !== sessionId) return false;
-  pendingGoatChatComposerFocusSessionId = null;
+export function consumePendingChatComposerFocus(sessionId: string | null | undefined) {
+  if (!sessionId || pendingChatComposerFocusSessionId !== sessionId) return false;
+  pendingChatComposerFocusSessionId = null;
   return true;
 }
 
-export function parseOptimisticGoatChatSessionId(value: unknown) {
+export function parseOptimisticChatSessionId(value: unknown) {
   if (value === undefined || value === null) {
     return { ok: true as const, sessionId: null };
   }

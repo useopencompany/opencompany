@@ -1,45 +1,45 @@
 import {
-  type GoatActionApprovalView,
-  GoatActionAuthError,
-  type GoatActionErrorCode,
-  GoatActionExecutionError,
-  GoatActionInvalidParamsError,
-  GoatActionPermissionError,
-  type GoatActionSourceId,
-  type GoatCapabilityTurnState,
-  type GoatResolvedActionCatalog,
+  type ActionApprovalView,
+  ActionAuthError,
+  type ActionErrorCode,
+  ActionExecutionError,
+  ActionInvalidParamsError,
+  ActionPermissionError,
+  type ActionSourceId,
+  type CapabilityTurnState,
+  type ResolvedActionCatalog,
 } from "./types";
 
 export const GOAT_ACTION_TIMEOUT_MS = 20_000;
 export const MAX_ACTION_RESULT_CHARS = 16_000;
 export const MAX_EXPANDED_ACTION_RESULT_CHARS = 256_000;
 
-export type GoatActionResult =
+export type ActionResult =
   | { ok: true; action: string; result: unknown }
   | {
       ok: false;
       action: string;
       error: {
-        code: GoatActionErrorCode;
-        source?: GoatActionSourceId;
+        code: ActionErrorCode;
+        source?: ActionSourceId;
         message: string;
-        approval?: GoatActionApprovalView;
+        approval?: ActionApprovalView;
       };
     };
 
-export async function executeGoatAction(input: {
-  catalog: GoatResolvedActionCatalog;
+export async function executeAction(input: {
+  catalog: ResolvedActionCatalog;
   actionId: string;
   params: Record<string, unknown>;
   userWorkosId: string;
   workspaceId?: string;
   chatSessionId?: string;
   toolCallId?: string;
-  capabilityTurnState?: GoatCapabilityTurnState;
+  capabilityTurnState?: CapabilityTurnState;
   signal: AbortSignal;
   currentDate: Date;
   userTimezone: string;
-}): Promise<GoatActionResult> {
+}): Promise<ActionResult> {
   const action = input.catalog.actions.find((entry) => entry.id === input.actionId);
   if (!action) {
     return {
@@ -81,14 +81,14 @@ export async function executeGoatAction(input: {
     // A parent-chat abort is not an action failure; let the turn's own
     // cancellation handling deal with it.
     if (input.signal.aborted) throw error;
-    if (error instanceof GoatActionAuthError) {
+    if (error instanceof ActionAuthError) {
       return {
         ok: false,
         action: action.id,
         error: { code: error.code, source: error.provider, message: error.message },
       };
     }
-    if (error instanceof GoatActionExecutionError) {
+    if (error instanceof ActionExecutionError) {
       return {
         ok: false,
         action: action.id,
@@ -99,14 +99,14 @@ export async function executeGoatAction(input: {
         },
       };
     }
-    if (error instanceof GoatActionPermissionError) {
+    if (error instanceof ActionPermissionError) {
       return {
         ok: false,
         action: action.id,
         error: { code: "not_permitted", source: error.provider, message: error.message },
       };
     }
-    if (error instanceof GoatActionInvalidParamsError) {
+    if (error instanceof ActionInvalidParamsError) {
       return {
         ok: false,
         action: action.id,

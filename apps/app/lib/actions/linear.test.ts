@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  getGoatLinearIntegrationState: vi.fn(),
-  loadGoatLinearMcpWorkerConnection: vi.fn(),
+  getLinearIntegrationState: vi.fn(),
+  loadLinearMcpWorkerConnection: vi.fn(),
   createMCPClient: vi.fn(),
 }));
 
 vi.mock("@opencompany/core/integrations/linear-mcp", () => ({
   GOAT_LINEAR_MCP_ENDPOINT_URL: "https://mcp.linear.app/mcp",
-  getGoatLinearIntegrationState: mocks.getGoatLinearIntegrationState,
-  loadGoatLinearMcpWorkerConnection: mocks.loadGoatLinearMcpWorkerConnection,
+  getLinearIntegrationState: mocks.getLinearIntegrationState,
+  loadLinearMcpWorkerConnection: mocks.loadLinearMcpWorkerConnection,
 }));
 vi.mock("@ai-sdk/mcp", () => ({
   createMCPClient: mocks.createMCPClient,
@@ -23,12 +23,12 @@ import {
   resolveLinearActions,
 } from "@/lib/actions/linear";
 import {
-  GoatActionAuthError,
-  type GoatActionExecuteContext,
-  GoatActionPermissionError,
+  ActionAuthError,
+  type ActionExecuteContext,
+  ActionPermissionError,
 } from "@/lib/actions/types";
 
-const CONTEXT: GoatActionExecuteContext = {
+const CONTEXT: ActionExecuteContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-18T00:00:00.000Z"),
@@ -60,7 +60,7 @@ function mockClient(remoteTools: Record<string, { execute?: unknown }>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.getGoatLinearIntegrationState.mockResolvedValue(connectedLinearState());
+  mocks.getLinearIntegrationState.mockResolvedValue(connectedLinearState());
 });
 
 describe("normalizeLinearListIssuesInput", () => {
@@ -262,7 +262,7 @@ describe("normalizeLinearCreateCommentInput", () => {
 
 describe("resolveLinearActions", () => {
   it("is absent when Linear is not connected", async () => {
-    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce({
+    mocks.getLinearIntegrationState.mockResolvedValueOnce({
       ...connectedLinearState(),
       connected: false,
       status: "not_connected",
@@ -324,23 +324,17 @@ describe("resolveLinearActions", () => {
   });
 
   it("honors read and write permission modes", async () => {
-    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce(
-      connectedLinearState({ write: "on" }),
-    );
+    mocks.getLinearIntegrationState.mockResolvedValueOnce(connectedLinearState({ write: "on" }));
     let catalog = await resolveLinearActions("user_1");
     expect(catalog?.actions.find((action) => action.id === "linear.create_issue")).toMatchObject({
       permissionMode: "on",
     });
 
-    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce(
-      connectedLinearState({ write: "off" }),
-    );
+    mocks.getLinearIntegrationState.mockResolvedValueOnce(connectedLinearState({ write: "off" }));
     catalog = await resolveLinearActions("user_1");
     expect(catalog?.actions.some((action) => action.capability === "write")).toBe(false);
 
-    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce(
-      connectedLinearState({ read: "off" }),
-    );
+    mocks.getLinearIntegrationState.mockResolvedValueOnce(connectedLinearState({ read: "off" }));
     catalog = await resolveLinearActions("user_1");
     expect(catalog?.actions.map((action) => action.id)).toEqual([
       "linear.create_issue",
@@ -348,7 +342,7 @@ describe("resolveLinearActions", () => {
       "linear.create_comment",
     ]);
 
-    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce(
+    mocks.getLinearIntegrationState.mockResolvedValueOnce(
       connectedLinearState({ read: "off", write: "off" }),
     );
     expect(await resolveLinearActions("user_1")).toBeNull();
@@ -356,18 +350,18 @@ describe("resolveLinearActions", () => {
 });
 
 describe("linear action execution", () => {
-  it("maps auth failures to GoatActionAuthError", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValueOnce({
+  it("maps auth failures to ActionAuthError", async () => {
+    mocks.loadLinearMcpWorkerConnection.mockResolvedValueOnce({
       ok: false,
       reason: "not_connected",
     });
     const catalog = await resolveLinearActions("user_1");
     const listIssues = catalog?.actions.find((action) => action.id === "linear.list_issues");
-    await expect(listIssues?.execute({}, CONTEXT)).rejects.toBeInstanceOf(GoatActionAuthError);
+    await expect(listIssues?.execute({}, CONTEXT)).rejects.toBeInstanceOf(ActionAuthError);
   });
 
   it("normalizes list_issues input, calls the remote tool, and closes the client", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+    mocks.loadLinearMcpWorkerConnection.mockResolvedValue({
       ok: true,
       integrationId: "gint_linear_1",
       authProvider: {},
@@ -399,7 +393,7 @@ describe("linear action execution", () => {
   });
 
   it("fails as a provider error when the remote tool is missing and still closes the client", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+    mocks.loadLinearMcpWorkerConnection.mockResolvedValue({
       ok: true,
       integrationId: "gint_linear_1",
       authProvider: {},
@@ -415,7 +409,7 @@ describe("linear action execution", () => {
   });
 
   it("surfaces MCP isError results as thrown provider errors", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+    mocks.loadLinearMcpWorkerConnection.mockResolvedValue({
       ok: true,
       integrationId: "gint_linear_1",
       authProvider: {},
@@ -432,7 +426,7 @@ describe("linear action execution", () => {
   });
 
   it("creates an issue with selected fields and returns canonical source metadata", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+    mocks.loadLinearMcpWorkerConnection.mockResolvedValue({
       ok: true,
       integrationId: "gint_linear_1",
       authProvider: {},
@@ -481,7 +475,7 @@ describe("linear action execution", () => {
   });
 
   it("updates an issue through save_issue and returns canonical source metadata", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+    mocks.loadLinearMcpWorkerConnection.mockResolvedValue({
       ok: true,
       integrationId: "gint_linear_1",
       authProvider: {},
@@ -526,7 +520,7 @@ describe("linear action execution", () => {
   });
 
   it("removes an issue's project through save_issue", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+    mocks.loadLinearMcpWorkerConnection.mockResolvedValue({
       ok: true,
       integrationId: "gint_linear_1",
       authProvider: {},
@@ -563,7 +557,7 @@ describe("linear action execution", () => {
   });
 
   it("adds a comment through save_comment", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+    mocks.loadLinearMcpWorkerConnection.mockResolvedValue({
       ok: true,
       integrationId: "gint_linear_1",
       authProvider: {},
@@ -590,14 +584,12 @@ describe("linear action execution", () => {
 
   it("blocks a stale write when Linear writes were turned off after catalog resolution", async () => {
     const catalog = await resolveLinearActions("user_1");
-    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce(
-      connectedLinearState({ write: "off" }),
-    );
+    mocks.getLinearIntegrationState.mockResolvedValueOnce(connectedLinearState({ write: "off" }));
     const createIssue = catalog?.actions.find((action) => action.id === "linear.create_issue");
 
     await expect(
       createIssue?.execute({ title: "Should not happen", team: "GOAT" }, CONTEXT),
-    ).rejects.toBeInstanceOf(GoatActionPermissionError);
+    ).rejects.toBeInstanceOf(ActionPermissionError);
     expect(mocks.createMCPClient).not.toHaveBeenCalled();
   });
 });

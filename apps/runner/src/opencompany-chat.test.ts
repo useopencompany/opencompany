@@ -1,33 +1,33 @@
-import type { GoatStoredChatMessage } from "@opencompany/core/chat-ui";
-import { ensureGoatMonthlyIncludedUsage } from "@opencompany/db/billing";
-import { hasPositiveGoatCreditBalance } from "@opencompany/db/credits";
-import type { GoatChatMessage, GoatChatMessageAttachment } from "@opencompany/db/schema";
+import type { StoredChatMessage } from "@opencompany/core/chat-ui";
+import { ensureMonthlyIncludedUsage } from "@opencompany/db/billing";
+import { hasPositiveCreditBalance } from "@opencompany/db/credits";
+import type { ChatMessage, ChatMessageAttachment } from "@opencompany/db/schema";
 import type { LanguageModelUsage } from "ai";
 import { describe, expect, it, vi } from "vitest";
-import { GoatCodexChatLeaseLostError } from "./codex-chat-errors";
+import { CodexChatLeaseLostError } from "./codex-chat-errors";
 import {
-  consumeGoatOpenCompanyChatStream,
-  goatOpenCompanyModelMessagesFromStored,
-  hasGoatHostedTurnCredits,
+  consumeOpenCompanyChatStream,
+  hasHostedTurnCredits,
+  openCompanyModelMessagesFromStored,
 } from "./opencompany-chat";
 import {
-  GoatOpenCompanyChatInterruptedError,
-  type GoatOpenCompanyChatProjection,
+  OpenCompanyChatInterruptedError,
+  type OpenCompanyChatProjection,
 } from "./opencompany-chat-projector";
 
 vi.mock("@opencompany/db/billing", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@opencompany/db/billing")>()),
-  ensureGoatMonthlyIncludedUsage: vi.fn(),
+  ensureMonthlyIncludedUsage: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/credits", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@opencompany/db/credits")>()),
-  hasPositiveGoatCreditBalance: vi.fn(),
+  hasPositiveCreditBalance: vi.fn(),
 }));
 
 describe("hosted turn credit gate", () => {
   it("refreshes the calendar-month allowance before reading the balance", async () => {
-    vi.mocked(ensureGoatMonthlyIncludedUsage).mockResolvedValue({
+    vi.mocked(ensureMonthlyIncludedUsage).mockResolvedValue({
       ok: true,
       plan: "hobby",
       seatQuantity: 1,
@@ -36,26 +36,24 @@ describe("hosted turn credit gate", () => {
       balanceUsdMicros: 5_000_000,
       allowanceCents: 500,
     });
-    vi.mocked(hasPositiveGoatCreditBalance).mockResolvedValue(true);
+    vi.mocked(hasPositiveCreditBalance).mockResolvedValue(true);
     const db = {} as never;
 
-    await expect(hasGoatHostedTurnCredits("goat_ws_1", db)).resolves.toBe(true);
-    expect(ensureGoatMonthlyIncludedUsage).toHaveBeenCalledWith("goat_ws_1", { db });
-    expect(ensureGoatMonthlyIncludedUsage).toHaveBeenCalledBefore(
-      vi.mocked(hasPositiveGoatCreditBalance),
-    );
+    await expect(hasHostedTurnCredits("goat_ws_1", db)).resolves.toBe(true);
+    expect(ensureMonthlyIncludedUsage).toHaveBeenCalledWith("goat_ws_1", { db });
+    expect(ensureMonthlyIncludedUsage).toHaveBeenCalledBefore(vi.mocked(hasPositiveCreditBalance));
   });
 });
 
-describe("consumeGoatOpenCompanyChatStream", () => {
+describe("consumeOpenCompanyChatStream", () => {
   it("accumulates throttled text, reasoning, and the complete tool lifecycle", async () => {
     let clock = 0;
-    const project = vi.fn(async (_projection: GoatOpenCompanyChatProjection) => undefined);
+    const project = vi.fn(async (_projection: OpenCompanyChatProjection) => undefined);
     const recordStepUsage = vi.fn(
       async (_input: { stepIndex: number; usage: LanguageModelUsage }) => undefined,
     );
 
-    const result = await consumeGoatOpenCompanyChatStream({
+    const result = await consumeOpenCompanyChatStream({
       fullStream: streamParts(
         { type: "text-start", id: "text_1" },
         { type: "text-delta", id: "text_1", text: "Hello" },
@@ -185,12 +183,12 @@ describe("consumeGoatOpenCompanyChatStream", () => {
 
   it("aborts without projecting newer output after the owning lease is lost", async () => {
     const controller = new AbortController();
-    const leaseLost = new GoatCodexChatLeaseLostError();
+    const leaseLost = new CodexChatLeaseLostError();
     controller.abort(leaseLost);
     const project = vi.fn(async () => undefined);
 
     await expect(
-      consumeGoatOpenCompanyChatStream({
+      consumeOpenCompanyChatStream({
         fullStream: streamParts({ type: "text-delta", id: "text_1", text: "stale" }),
         sink: {
           project,
@@ -204,8 +202,8 @@ describe("consumeGoatOpenCompanyChatStream", () => {
 
   it("force-flushes the newest throttled text when the user interrupts", async () => {
     const controller = new AbortController();
-    const interrupted = new GoatOpenCompanyChatInterruptedError();
-    const project = vi.fn(async (_projection: GoatOpenCompanyChatProjection) => undefined);
+    const interrupted = new OpenCompanyChatInterruptedError();
+    const project = vi.fn(async (_projection: OpenCompanyChatProjection) => undefined);
     async function* interruptedStream() {
       yield { type: "text-start", id: "text_1" };
       yield { type: "text-delta", id: "text_1", text: "Partial text" };
@@ -215,7 +213,7 @@ describe("consumeGoatOpenCompanyChatStream", () => {
     }
 
     await expect(
-      consumeGoatOpenCompanyChatStream({
+      consumeOpenCompanyChatStream({
         fullStream: interruptedStream(),
         sink: {
           project,
@@ -232,7 +230,7 @@ describe("consumeGoatOpenCompanyChatStream", () => {
   });
 });
 
-describe("goatOpenCompanyModelMessagesFromStored", () => {
+describe("openCompanyModelMessagesFromStored", () => {
   it("keeps completed tool calls and results in follow-up model history", async () => {
     const messages = [
       storedMessage({
@@ -272,7 +270,7 @@ describe("goatOpenCompanyModelMessagesFromStored", () => {
       }),
     ];
 
-    const modelMessages = await goatOpenCompanyModelMessagesFromStored(messages, "user_2");
+    const modelMessages = await openCompanyModelMessagesFromStored(messages, "user_2");
 
     expect(modelMessages.map((message) => message.role)).toEqual([
       "user",
@@ -295,7 +293,7 @@ describe("goatOpenCompanyModelMessagesFromStored", () => {
       }),
     ];
 
-    const modelMessages = await goatOpenCompanyModelMessagesFromStored(messages, "user_1", {
+    const modelMessages = await openCompanyModelMessagesFromStored(messages, "user_1", {
       modelId: "anthropic/claude-sonnet-5",
     });
 
@@ -326,7 +324,7 @@ describe("goatOpenCompanyModelMessagesFromStored", () => {
       }),
     ];
 
-    const modelMessages = await goatOpenCompanyModelMessagesFromStored(messages, "user_2", {
+    const modelMessages = await openCompanyModelMessagesFromStored(messages, "user_2", {
       modelId: "anthropic/claude-sonnet-5",
     });
     const serialized = JSON.stringify(modelMessages);
@@ -345,9 +343,9 @@ async function* streamParts(
 }
 
 function storedMessage(
-  input: Pick<GoatChatMessage, "id" | "role" | "content"> &
-    Partial<Pick<GoatChatMessage, "debugTrace" | "attachments" | "attachmentTexts">>,
-): GoatStoredChatMessage {
+  input: Pick<ChatMessage, "id" | "role" | "content"> &
+    Partial<Pick<ChatMessage, "debugTrace" | "attachments" | "attachmentTexts">>,
+): StoredChatMessage {
   return {
     id: input.id,
     sessionId: "goat_chat_1",
@@ -366,7 +364,7 @@ function storedMessage(
   };
 }
 
-const attachment: GoatChatMessageAttachment = {
+const attachment: ChatMessageAttachment = {
   id: "goat_chat_att_1",
   kind: "docx",
   mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

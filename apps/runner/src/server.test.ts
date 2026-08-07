@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mintGoatCodingWorkspaceAccess } from "./coding-workspace-runtime";
-import { verifyGoatDictationTicket } from "./dictation-auth";
+import { mintCodingWorkspaceAccess } from "./coding-workspace-runtime";
+import { verifyDictationTicket } from "./dictation-auth";
 import { getSandboxLifecycleStatus, killSandbox } from "./sandbox";
 import { createServer } from "./server";
 
@@ -8,7 +8,7 @@ vi.mock("./coding-workspace-runtime", async (importOriginal) => {
   const original = await importOriginal<typeof import("./coding-workspace-runtime")>();
   return {
     ...original,
-    mintGoatCodingWorkspaceAccess: vi.fn(async () => ({
+    mintCodingWorkspaceAccess: vi.fn(async () => ({
       ticket: "ticket_1",
       expiresAt: 60_000,
       sandboxStatus: "sleeping",
@@ -28,28 +28,28 @@ const env = {
   vercelAiGatewayApiKey: "gateway",
   openaiCodexApiKey: undefined,
   openaiApiKey: "openai",
-  goatDictationRealtimeModel: undefined,
-  goatDictationFinalModel: undefined,
+  dictationRealtimeModel: undefined,
+  dictationFinalModel: undefined,
   publicUrl: undefined,
   llmBrokerEnabled: true,
   exaApiKey: undefined,
-  goatBrowserEnabled: false,
+  browserEnabled: false,
   ampE2bTemplate: undefined,
   codexE2bTemplate: undefined,
   e2bSandboxIdleTimeoutMs: 30_000,
   codexTimeoutMs: 1_200_000,
   codexModel: "gpt-5.5",
-  goatCodexChatIdleTimeoutMs: 1_800_000,
+  codexChatIdleTimeoutMs: 1_800_000,
   jobLeaseTtlMs: 300_000,
-  goatTaskWorkerEnabled: false,
+  taskWorkerEnabled: false,
   workerConcurrency: 2,
   port: 3040,
   allowedOrigins: ["https://app.example.com"],
   instanceId: "runner-test",
 };
-const goatEnv = {
+const workerEnv = {
   ...env,
-  goatTaskWorkerEnabled: true,
+  taskWorkerEnabled: true,
 };
 
 const servers: Array<ReturnType<typeof createServer>> = [];
@@ -103,7 +103,7 @@ describe("Goat coding workspace access", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(mintGoatCodingWorkspaceAccess).not.toHaveBeenCalled();
+    expect(mintCodingWorkspaceAccess).not.toHaveBeenCalled();
   });
 
   it("requires internal auth and passes the claimed owner to ticket minting", async () => {
@@ -129,7 +129,7 @@ describe("Goat coding workspace access", () => {
       ticket: "ticket_1",
       sandboxStatus: "sleeping",
     });
-    expect(mintGoatCodingWorkspaceAccess).toHaveBeenCalledWith({
+    expect(mintCodingWorkspaceAccess).toHaveBeenCalledWith({
       codingSessionId: "goat_codex_chat_1",
       userWorkosId: "user_1",
       env,
@@ -167,7 +167,7 @@ describe("Goat dictation access", () => {
     const body = response.json() as { ticket: string; expiresAt: number };
     expect(body.expiresAt).toBeGreaterThan(Date.now());
     expect(
-      verifyGoatDictationTicket({
+      verifyDictationTicket({
         ticket: body.ticket,
         secret: env.streamTokenSecret,
       }),
@@ -178,13 +178,13 @@ describe("Goat dictation access", () => {
 describe("internal Goat Codex sandbox status endpoint", () => {
   it("returns the E2B sandbox lifecycle status", async () => {
     vi.mocked(getSandboxLifecycleStatus).mockResolvedValue("sleeping");
-    const server = createServer(goatEnv);
+    const server = createServer(workerEnv);
     servers.push(server);
 
     const response = await server.inject({
       method: "GET",
       url: "/internal/goat/codex-chat/sandboxes/sbx_123/status",
-      headers: { authorization: `Bearer ${goatEnv.internalToken}` },
+      headers: { authorization: `Bearer ${workerEnv.internalToken}` },
     });
 
     expect(response.statusCode).toBe(200);
@@ -195,13 +195,13 @@ describe("internal Goat Codex sandbox status endpoint", () => {
 
 describe("internal Goat Codex sandbox kill endpoint", () => {
   it("kills the E2B sandbox", async () => {
-    const server = createServer(goatEnv);
+    const server = createServer(workerEnv);
     servers.push(server);
 
     const response = await server.inject({
       method: "DELETE",
       url: "/internal/goat/codex-chat/sandboxes/sbx_123",
-      headers: { authorization: `Bearer ${goatEnv.internalToken}` },
+      headers: { authorization: `Bearer ${workerEnv.internalToken}` },
     });
 
     expect(response.statusCode).toBe(200);
@@ -210,7 +210,7 @@ describe("internal Goat Codex sandbox kill endpoint", () => {
   });
 
   it("rejects unauthenticated kills", async () => {
-    const server = createServer(goatEnv);
+    const server = createServer(workerEnv);
     servers.push(server);
 
     const response = await server.inject({

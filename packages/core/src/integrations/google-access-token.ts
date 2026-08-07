@@ -1,10 +1,10 @@
 import { getDb } from "@opencompany/db/client";
 import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-  refreshGoatIntegrationCredential,
+  loadIntegrationCredential,
+  markIntegrationStatus,
+  refreshIntegrationCredential,
 } from "@opencompany/db/integrations";
-import type { GoatIntegrationProvider } from "@opencompany/db/schema";
+import type { IntegrationProvider } from "@opencompany/db/schema";
 
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const REFRESH_SKEW_MS = 60_000;
@@ -20,7 +20,7 @@ type StoredGoogleTokens = {
 export type GoogleAccessConnection = {
   userWorkosId: string;
   integrationId: string;
-  provider: GoatIntegrationProvider;
+  provider: IntegrationProvider;
 };
 
 // Thrown when the stored Google credential cannot authenticate anymore. The
@@ -82,7 +82,7 @@ export async function getGoogleAccessToken(
   connection: GoogleAccessConnection,
   options?: { signal?: AbortSignal; forceRefresh?: boolean },
 ): Promise<string> {
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId: connection.userWorkosId,
     integrationId: connection.integrationId,
     provider: connection.provider,
@@ -134,7 +134,7 @@ export async function getGoogleAccessToken(
       ? { token_type: refreshed.token_type ?? tokens.token_type }
       : {}),
   };
-  await refreshGoatIntegrationCredential({
+  await refreshIntegrationCredential({
     userWorkosId: connection.userWorkosId,
     integrationId: connection.integrationId,
     provider: connection.provider,
@@ -152,7 +152,7 @@ export async function getGoogleAccessToken(
 }
 
 async function markGoogleNeedsReauth(connection: GoogleAccessConnection, reason: string) {
-  await markGoatIntegrationStatus({
+  await markIntegrationStatus({
     userWorkosId: connection.userWorkosId,
     integrationId: connection.integrationId,
     provider: connection.provider,

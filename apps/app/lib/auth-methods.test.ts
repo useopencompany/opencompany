@@ -2,12 +2,12 @@ import { AuthenticationException } from "@workos-inc/node";
 import { cookies } from "next/headers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  consumeGoatOAuthStateCookie,
+  consumeOAuthStateCookie,
   organizationSelectionFromError,
-  readLastGoatAuthMethod,
-  recordLastGoatAuthMethod,
-  safeGoatReturnPathname,
-  setGoatOAuthStateCookie,
+  readLastAuthMethod,
+  recordLastAuthMethod,
+  safeReturnPathname,
+  setOAuthStateCookie,
 } from "@/lib/auth-methods";
 
 vi.mock("next/headers", () => ({
@@ -16,7 +16,7 @@ vi.mock("next/headers", () => ({
 
 const cookiesMock = vi.mocked(cookies);
 
-describe("safeGoatReturnPathname", () => {
+describe("safeReturnPathname", () => {
   it.each([
     ["/", "/"],
     ["/brain?view=recent#today", "/brain?view=recent#today"],
@@ -25,7 +25,7 @@ describe("safeGoatReturnPathname", () => {
     ["/\\attacker.example/steal", "/"],
     [undefined, "/"],
   ])("normalizes %s to %s", (input, expected) => {
-    expect(safeGoatReturnPathname(input)).toBe(expected);
+    expect(safeReturnPathname(input)).toBe(expected);
   });
 });
 
@@ -65,7 +65,7 @@ describe("organizationSelectionFromError", () => {
   });
 });
 
-describe("recordLastGoatAuthMethod / readLastGoatAuthMethod", () => {
+describe("recordLastAuthMethod / readLastAuthMethod", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -74,10 +74,10 @@ describe("recordLastGoatAuthMethod / readLastGoatAuthMethod", () => {
     const set = vi.fn();
     cookiesMock.mockResolvedValue({ set } as never);
 
-    await recordLastGoatAuthMethod("GoogleOAuth");
+    await recordLastAuthMethod("GoogleOAuth");
     expect(set).toHaveBeenCalledWith("goat-last-auth-method", "google", expect.any(Object));
 
-    await recordLastGoatAuthMethod("MagicAuth");
+    await recordLastAuthMethod("MagicAuth");
     expect(set).toHaveBeenCalledWith("goat-last-auth-method", "magic_link", expect.any(Object));
   });
 
@@ -85,8 +85,8 @@ describe("recordLastGoatAuthMethod / readLastGoatAuthMethod", () => {
     const set = vi.fn();
     cookiesMock.mockResolvedValue({ set } as never);
 
-    await recordLastGoatAuthMethod(undefined);
-    await recordLastGoatAuthMethod("SSO");
+    await recordLastAuthMethod(undefined);
+    await recordLastAuthMethod("SSO");
 
     expect(set).not.toHaveBeenCalled();
   });
@@ -95,16 +95,16 @@ describe("recordLastGoatAuthMethod / readLastGoatAuthMethod", () => {
     cookiesMock.mockResolvedValue({
       get: () => ({ value: "google" }),
     } as never);
-    await expect(readLastGoatAuthMethod()).resolves.toBe("google");
+    await expect(readLastAuthMethod()).resolves.toBe("google");
 
     cookiesMock.mockResolvedValue({
       get: () => ({ value: "not-a-real-method" }),
     } as never);
-    await expect(readLastGoatAuthMethod()).resolves.toBeNull();
+    await expect(readLastAuthMethod()).resolves.toBeNull();
   });
 });
 
-describe("setGoatOAuthStateCookie / consumeGoatOAuthStateCookie", () => {
+describe("setOAuthStateCookie / consumeOAuthStateCookie", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -115,14 +115,14 @@ describe("setGoatOAuthStateCookie / consumeGoatOAuthStateCookie", () => {
     const del = vi.fn();
     cookiesMock.mockResolvedValue({ set, get, delete: del } as never);
 
-    await setGoatOAuthStateCookie({ state: "abc" });
+    await setOAuthStateCookie({ state: "abc" });
     expect(set).toHaveBeenCalledWith(
       "goat-oauth-state",
       JSON.stringify({ state: "abc" }),
       expect.objectContaining({ path: "/", httpOnly: true }),
     );
 
-    const payload = await consumeGoatOAuthStateCookie();
+    const payload = await consumeOAuthStateCookie();
     expect(payload).toEqual({ state: "abc" });
     expect(del).toHaveBeenCalledWith({ name: "goat-oauth-state", path: "/" });
   });
@@ -132,18 +132,18 @@ describe("setGoatOAuthStateCookie / consumeGoatOAuthStateCookie", () => {
       get: () => undefined,
       delete: vi.fn(),
     } as never);
-    await expect(consumeGoatOAuthStateCookie()).resolves.toBeNull();
+    await expect(consumeOAuthStateCookie()).resolves.toBeNull();
 
     cookiesMock.mockResolvedValue({
       get: () => ({ value: "not json" }),
       delete: vi.fn(),
     } as never);
-    await expect(consumeGoatOAuthStateCookie()).resolves.toBeNull();
+    await expect(consumeOAuthStateCookie()).resolves.toBeNull();
 
     cookiesMock.mockResolvedValue({
       get: () => ({ value: JSON.stringify({ no: "state field" }) }),
       delete: vi.fn(),
     } as never);
-    await expect(consumeGoatOAuthStateCookie()).resolves.toBeNull();
+    await expect(consumeOAuthStateCookie()).resolves.toBeNull();
   });
 });

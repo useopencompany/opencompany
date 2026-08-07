@@ -1,8 +1,8 @@
 import {
-  getGoatCapabilityApprovalByToolCall,
-  getGoatCapabilitySessionBudgetUsdMicros,
+  getCapabilityApprovalByToolCall,
+  getCapabilitySessionBudgetUsdMicros,
 } from "@opencompany/db/capabilities";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -10,16 +10,16 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ toolCallId: string }> },
 ) {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const { toolCallId } = await params;
   const [row, sessionBudgetUsdMicros] = await Promise.all([
-    getGoatCapabilityApprovalByToolCall({
+    getCapabilityApprovalByToolCall({
       toolCallId,
       userWorkosId: context.user.workosUserId,
       workspaceId: context.workspace.id,
     }),
-    getGoatCapabilitySessionBudgetUsdMicros(context.workspace.id),
+    getCapabilitySessionBudgetUsdMicros(context.workspace.id),
   ]);
   if (!row) return Response.json({ error: "Approval not found" }, { status: 404 });
   return Response.json({

@@ -42,7 +42,7 @@ export type LinearIssueSnapshot = {
   }>;
 };
 
-const ISSUE_SNAPSHOT_QUERY = `query GoatLinearIssueSnapshot($id: String!, $commentLimit: Int!) {
+const ISSUE_SNAPSHOT_QUERY = `query LinearIssueSnapshot($id: String!, $commentLimit: Int!) {
   issue(id: $id) {
     id
     identifier

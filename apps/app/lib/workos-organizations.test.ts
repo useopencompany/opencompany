@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ensureGoatWorkspaceOrganization } from "@/lib/workos-organizations";
+import { ensureWorkspaceOrganization } from "@/lib/workos-organizations";
 
 const mocks = vi.hoisted(() => {
   const workos = {
@@ -16,8 +16,8 @@ const mocks = vi.hoisted(() => {
   };
   return {
     workos,
-    listGoatWorkspaceMembers: vi.fn(),
-    setGoatWorkspaceOrganizationId: vi.fn(),
+    listWorkspaceMembers: vi.fn(),
+    setWorkspaceOrganizationId: vi.fn(),
   };
 });
 
@@ -26,14 +26,14 @@ vi.mock("@/lib/workos-client", () => ({
 }));
 
 vi.mock("@opencompany/db/workspaces", () => ({
-  listGoatWorkspaceMembers: mocks.listGoatWorkspaceMembers,
-  setGoatWorkspaceOrganizationId: mocks.setGoatWorkspaceOrganizationId,
+  listWorkspaceMembers: mocks.listWorkspaceMembers,
+  setWorkspaceOrganizationId: mocks.setWorkspaceOrganizationId,
 }));
 
-describe("ensureGoatWorkspaceOrganization", () => {
+describe("ensureWorkspaceOrganization", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.listGoatWorkspaceMembers.mockResolvedValue([workspaceMember("user_1", "admin")]);
+    mocks.listWorkspaceMembers.mockResolvedValue([workspaceMember("user_1", "admin")]);
     mocks.workos.userManagement.listOrganizationMemberships.mockResolvedValue({ data: [] });
     mocks.workos.userManagement.createOrganizationMembership.mockResolvedValue({});
     mocks.workos.userManagement.updateOrganizationMembership.mockResolvedValue({});
@@ -43,7 +43,7 @@ describe("ensureGoatWorkspaceOrganization", () => {
     mocks.workos.organizations.getOrganizationByExternalId.mockRejectedValueOnce({ status: 404 });
     mocks.workos.organizations.createOrganization.mockResolvedValueOnce({ id: "org_new" });
 
-    await expect(ensureGoatWorkspaceOrganization(workspace())).resolves.toBe("org_new");
+    await expect(ensureWorkspaceOrganization(workspace())).resolves.toBe("org_new");
 
     expect(mocks.workos.organizations.createOrganization).toHaveBeenCalledWith(
       {
@@ -60,7 +60,7 @@ describe("ensureGoatWorkspaceOrganization", () => {
       userId: "user_1",
       roleSlug: "admin",
     });
-    expect(mocks.setGoatWorkspaceOrganizationId).toHaveBeenCalledWith({
+    expect(mocks.setWorkspaceOrganizationId).toHaveBeenCalledWith({
       workspaceId: "goat_ws_1",
       workosOrganizationId: "org_new",
     });
@@ -80,13 +80,13 @@ describe("ensureGoatWorkspaceOrganization", () => {
       ],
     });
 
-    await expect(ensureGoatWorkspaceOrganization(workspace())).resolves.toBe("org_existing");
+    await expect(ensureWorkspaceOrganization(workspace())).resolves.toBe("org_existing");
 
     expect(mocks.workos.organizations.createOrganization).not.toHaveBeenCalled();
     expect(mocks.workos.userManagement.updateOrganizationMembership).toHaveBeenCalledWith("om_1", {
       roleSlug: "admin",
     });
-    expect(mocks.setGoatWorkspaceOrganizationId).toHaveBeenCalledWith({
+    expect(mocks.setWorkspaceOrganizationId).toHaveBeenCalledWith({
       workspaceId: "goat_ws_1",
       workosOrganizationId: "org_existing",
     });

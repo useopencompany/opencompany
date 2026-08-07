@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { TasksWorkflowsDisabledRoute } from "@/components/GoatRoutes";
-import { GoatWorkflowEditor } from "@/components/GoatWorkflowEditor";
-import { currentGoatUser } from "@/lib/auth";
-import { listGoatSkillCatalog } from "@/lib/skills";
-import { getGoatWorkflow } from "@/lib/workflows";
+import { TasksWorkflowsDisabledRoute } from "@/components/AppRoutes";
+import { WorkflowEditor } from "@/components/WorkflowEditor";
+import { currentUser } from "@/lib/auth";
+import { listSkillCatalog } from "@/lib/skills";
+import { getWorkflow } from "@/lib/workflows";
 
 type WorkflowEditorPageProps = {
   params: Promise<{ slug: string }>;
@@ -11,14 +11,14 @@ type WorkflowEditorPageProps = {
 
 export default async function WorkflowEditorPage({ params }: WorkflowEditorPageProps) {
   const { slug } = await params;
-  const context = await currentGoatUser();
+  const context = await currentUser();
   if (!context.user.taskSpawningEnabled) {
     return <TasksWorkflowsDisabledRoute />;
   }
 
   const [workflow, skillCatalog] = await Promise.all([
-    getGoatWorkflow(context.workspace.id, slug),
-    listGoatSkillCatalog(context.workspace.id),
+    getWorkflow(context.workspace.id, slug),
+    listSkillCatalog(context.workspace.id),
   ]);
 
   if (!workflow) {
@@ -43,5 +43,5 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
     );
   }
 
-  return <GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={skillCatalog} />;
+  return <WorkflowEditor workflow={workflow} canEdit skillCatalog={skillCatalog} />;
 }

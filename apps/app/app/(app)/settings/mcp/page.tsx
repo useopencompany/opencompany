@@ -1,5 +1,5 @@
-import { GoatMcpSettingsRoute } from "@/components/GoatRoutes";
+import { McpSettingsRoute } from "@/components/AppRoutes";
 
 export default function McpSettingsPage() {
-  return <GoatMcpSettingsRoute />;
+  return <McpSettingsRoute />;
 }

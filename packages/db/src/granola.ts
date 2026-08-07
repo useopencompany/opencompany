@@ -1,18 +1,18 @@
 import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb } from "./client";
-import { goatBrainSources, goatGranolaSyncState } from "./schema";
+import { brainSources, granolaSyncState } from "./schema";
 
 type DbLike = any;
 
 export const GOAT_GRANOLA_PROVIDER = "granola" as const;
 export const GOAT_GRANOLA_CREDENTIAL_KIND = "api_key" as const;
 
-export type GoatGranolaBrainSourceRoute = {
+export type GranolaBrainSourceRoute = {
   integrationId: string;
   brainRef: string;
 };
 
-export type GoatGranolaSyncStateRow = {
+export type GranolaSyncStateRow = {
   integrationId: string;
   userWorkosId: string;
   updatedAfterCursor: Date | null;
@@ -20,33 +20,33 @@ export type GoatGranolaSyncStateRow = {
   pendingUpdatedAfterCursor: Date | null;
 };
 
-export async function listEnabledGoatGranolaBrainSourceRoutes(
+export async function listEnabledGranolaBrainSourceRoutes(
   integrationIds: readonly string[],
   db: DbLike = getDb(),
-): Promise<GoatGranolaBrainSourceRoute[]> {
+): Promise<GranolaBrainSourceRoute[]> {
   if (integrationIds.length === 0) return [];
   const rows = await db
     .select({
-      integrationId: goatBrainSources.integrationId,
-      brainRef: goatBrainSources.brainId,
+      integrationId: brainSources.integrationId,
+      brainRef: brainSources.brainId,
     })
-    .from(goatBrainSources)
+    .from(brainSources)
     .where(
       and(
-        eq(goatBrainSources.provider, GOAT_GRANOLA_PROVIDER),
-        eq(goatBrainSources.enabled, true),
-        inArray(goatBrainSources.integrationId, [...integrationIds]),
+        eq(brainSources.provider, GOAT_GRANOLA_PROVIDER),
+        eq(brainSources.enabled, true),
+        inArray(brainSources.integrationId, [...integrationIds]),
       ),
     );
   return rows;
 }
 
-export async function ensureGoatGranolaSyncState(
+export async function ensureGranolaSyncState(
   input: { integrationId: string; userWorkosId: string },
   db: DbLike = getDb(),
 ): Promise<void> {
   await db
-    .insert(goatGranolaSyncState)
+    .insert(granolaSyncState)
     .values({ integrationId: input.integrationId, userWorkosId: input.userWorkosId })
     .onConflictDoNothing();
 }
@@ -55,37 +55,34 @@ export async function ensureGoatGranolaSyncState(
 // hasn't been polled within the cooldown, so concurrent runner replicas skip
 // each other. Returns the cursor on success, null when another replica holds
 // the slot.
-export async function claimGoatGranolaSyncState(
+export async function claimGranolaSyncState(
   input: { integrationId: string; cooldownMs: number },
   db: DbLike = getDb(),
-): Promise<GoatGranolaSyncStateRow | null> {
+): Promise<GranolaSyncStateRow | null> {
   const cooldownSeconds = Math.max(1, Math.floor(input.cooldownMs / 1000));
   const rows = await db
-    .update(goatGranolaSyncState)
+    .update(granolaSyncState)
     .set({ lastPolledAt: sql`now()`, updatedAt: sql`now()` })
     .where(
       and(
-        eq(goatGranolaSyncState.integrationId, input.integrationId),
+        eq(granolaSyncState.integrationId, input.integrationId),
         or(
-          isNull(goatGranolaSyncState.lastPolledAt),
-          lt(
-            goatGranolaSyncState.lastPolledAt,
-            sql`now() - make_interval(secs => ${cooldownSeconds})`,
-          ),
+          isNull(granolaSyncState.lastPolledAt),
+          lt(granolaSyncState.lastPolledAt, sql`now() - make_interval(secs => ${cooldownSeconds})`),
         ),
       ),
     )
     .returning({
-      integrationId: goatGranolaSyncState.integrationId,
-      userWorkosId: goatGranolaSyncState.userWorkosId,
-      updatedAfterCursor: goatGranolaSyncState.updatedAfterCursor,
-      pageCursor: goatGranolaSyncState.pageCursor,
-      pendingUpdatedAfterCursor: goatGranolaSyncState.pendingUpdatedAfterCursor,
+      integrationId: granolaSyncState.integrationId,
+      userWorkosId: granolaSyncState.userWorkosId,
+      updatedAfterCursor: granolaSyncState.updatedAfterCursor,
+      pageCursor: granolaSyncState.pageCursor,
+      pendingUpdatedAfterCursor: granolaSyncState.pendingUpdatedAfterCursor,
     });
   return rows[0] ?? null;
 }
 
-export async function updateGoatGranolaSyncPage(
+export async function updateGranolaSyncPage(
   input: {
     integrationId: string;
     expectedUpdatedAfterCursor: Date;
@@ -96,7 +93,7 @@ export async function updateGoatGranolaSyncPage(
   db: DbLike = getDb(),
 ): Promise<boolean> {
   const rows = await db
-    .update(goatGranolaSyncState)
+    .update(granolaSyncState)
     .set({
       pageCursor: input.pageCursor,
       pendingUpdatedAfterCursor: input.pendingUpdatedAfterCursor,
@@ -104,18 +101,18 @@ export async function updateGoatGranolaSyncPage(
     })
     .where(
       and(
-        eq(goatGranolaSyncState.integrationId, input.integrationId),
-        eq(goatGranolaSyncState.updatedAfterCursor, input.expectedUpdatedAfterCursor),
+        eq(granolaSyncState.integrationId, input.integrationId),
+        eq(granolaSyncState.updatedAfterCursor, input.expectedUpdatedAfterCursor),
         input.expectedPageCursor
-          ? eq(goatGranolaSyncState.pageCursor, input.expectedPageCursor)
-          : isNull(goatGranolaSyncState.pageCursor),
+          ? eq(granolaSyncState.pageCursor, input.expectedPageCursor)
+          : isNull(granolaSyncState.pageCursor),
       ),
     )
-    .returning({ integrationId: goatGranolaSyncState.integrationId });
+    .returning({ integrationId: granolaSyncState.integrationId });
   return rows.length > 0;
 }
 
-export async function completeGoatGranolaSyncPages(
+export async function completeGranolaSyncPages(
   input: {
     integrationId: string;
     expectedUpdatedAfterCursor: Date;
@@ -125,7 +122,7 @@ export async function completeGoatGranolaSyncPages(
   db: DbLike = getDb(),
 ): Promise<boolean> {
   const rows = await db
-    .update(goatGranolaSyncState)
+    .update(granolaSyncState)
     .set({
       updatedAfterCursor: input.updatedAfterCursor,
       pageCursor: null,
@@ -134,35 +131,35 @@ export async function completeGoatGranolaSyncPages(
     })
     .where(
       and(
-        eq(goatGranolaSyncState.integrationId, input.integrationId),
-        eq(goatGranolaSyncState.updatedAfterCursor, input.expectedUpdatedAfterCursor),
+        eq(granolaSyncState.integrationId, input.integrationId),
+        eq(granolaSyncState.updatedAfterCursor, input.expectedUpdatedAfterCursor),
         input.expectedPageCursor
-          ? eq(goatGranolaSyncState.pageCursor, input.expectedPageCursor)
-          : isNull(goatGranolaSyncState.pageCursor),
+          ? eq(granolaSyncState.pageCursor, input.expectedPageCursor)
+          : isNull(granolaSyncState.pageCursor),
       ),
     )
-    .returning({ integrationId: goatGranolaSyncState.integrationId });
+    .returning({ integrationId: granolaSyncState.integrationId });
   return rows.length > 0;
 }
 
-export async function updateGoatGranolaSyncCursor(
+export async function updateGranolaSyncCursor(
   input: { integrationId: string; updatedAfterCursor: Date },
   db: DbLike = getDb(),
 ): Promise<void> {
   await db
-    .update(goatGranolaSyncState)
+    .update(granolaSyncState)
     .set({
       updatedAfterCursor: input.updatedAfterCursor,
       pageCursor: null,
       pendingUpdatedAfterCursor: null,
       updatedAt: sql`now()`,
     })
-    .where(eq(goatGranolaSyncState.integrationId, input.integrationId));
+    .where(eq(granolaSyncState.integrationId, input.integrationId));
 }
 
 // Cross-member dedup key for one Granola note. Note ids are stable per note,
 // so two members whose keys can both read a shared note converge on one claim
 // per brain.
-export function goatGranolaEventClaimKey(noteId: string): string {
+export function granolaEventClaimKey(noteId: string): string {
   return `note:${noteId}`;
 }

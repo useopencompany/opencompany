@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { claimGoatBrainSourceEvents } from "./brain-event-claims";
+import { claimBrainSourceEvents } from "./brain-event-claims";
 
-describe("claimGoatBrainSourceEvents", () => {
+describe("claimBrainSourceEvents", () => {
   it("returns the exact provider event keys inserted by the unique claim", async () => {
     const returning = vi.fn(async () => [{ eventKey: "message:new" }]);
     let insertedValues: unknown;
@@ -14,7 +14,7 @@ describe("claimGoatBrainSourceEvents", () => {
     const db = { insert: vi.fn(() => ({ values })) };
 
     await expect(
-      claimGoatBrainSourceEvents({
+      claimBrainSourceEvents({
         brainRef: "brain_123",
         sourceProvider: "slack",
         eventKeys: ["message:existing", "message:new", "message:new"],
@@ -31,7 +31,7 @@ describe("claimGoatBrainSourceEvents", () => {
     const db = { insert: vi.fn() };
 
     await expect(
-      claimGoatBrainSourceEvents({
+      claimBrainSourceEvents({
         brainRef: "brain_123",
         sourceProvider: "gmail",
         eventKeys: ["", "  "],

@@ -1,43 +1,35 @@
 "use server";
 
-import { getGoatWorkspacePlan, goatWorkspaceMemberCap } from "@opencompany/db/billing";
+import { getWorkspacePlan, workspaceMemberCap } from "@opencompany/db/billing";
 import { getDb } from "@opencompany/db/client";
+import { type BrainIntelligence, type BrainVisibility, workspaces } from "@opencompany/db/schema";
 import {
-  type GoatBrainIntelligence,
-  type GoatBrainVisibility,
-  goatWorkspaces,
-} from "@opencompany/db/schema";
-import {
-  createGoatBrain,
-  createGoatWorkspaceForUser,
+  createBrain,
+  createWorkspaceForUser,
   DEFAULT_GOAT_BRAIN_SLUG,
-  getGoatBrainAccess,
-  hasOwnedGoatHobbyWorkspace,
-  listAccessibleGoatBrains,
-  listGoatBrainMemberIds,
-  listGoatWorkspaceMembers,
-  listGoatWorkspacesForUser,
-  newGoatWorkspaceId,
-  removeGoatWorkspaceMember,
-  replaceGoatBrainMembers,
-  updateGoatBrainEnrichmentEnabled,
-  updateGoatBrainIntelligence,
-  updateGoatBrainVisibility,
-  updateGoatWorkspaceName,
+  getBrainAccess,
+  hasOwnedHobbyWorkspace,
+  listAccessibleBrains,
+  listBrainMemberIds,
+  listWorkspaceMembers,
+  listWorkspacesForUser,
+  newWorkspaceId,
+  removeWorkspaceMember,
+  replaceBrainMembers,
+  updateBrainEnrichmentEnabled,
+  updateBrainIntelligence,
+  updateBrainVisibility,
+  updateWorkspaceName,
 } from "@opencompany/db/workspaces";
 import { switchToOrganization } from "@workos-inc/authkit-nextjs";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
-import {
-  currentGoatUser,
-  GOAT_ACTIVE_BRAIN_COOKIE,
-  GOAT_ACTIVE_WORKSPACE_COOKIE,
-} from "@/lib/auth";
-import { syncGoatStripeSeatQuantityForWorkspace } from "@/lib/billing/seats";
+import { currentUser, GOAT_ACTIVE_BRAIN_COOKIE, GOAT_ACTIVE_WORKSPACE_COOKIE } from "@/lib/auth";
+import { syncStripeSeatQuantityForWorkspace } from "@/lib/billing/seats";
 import { getWorkOSClient } from "@/lib/workos-client";
-import { ensureGoatWorkspaceOrganization } from "@/lib/workos-organizations";
+import { ensureWorkspaceOrganization } from "@/lib/workos-organizations";
 
 const MEMBER_ROLE = "member";
 const ADMIN_ROLE = "admin";
@@ -47,15 +39,13 @@ const ACTIVATE_WORKSPACE_ERROR_MESSAGE = "Could not switch organizations. Please
 const ACTIVATE_CREATED_WORKSPACE_ERROR_MESSAGE =
   "The organization was created, but could not be activated. Please try switching to it.";
 
-export type GoatWorkspaceActionResult =
-  | { ok: true; warning?: string }
-  | { ok: false; error: string };
+export type WorkspaceActionResult = { ok: true; warning?: string } | { ok: false; error: string };
 
-export type GoatWorkspaceCreateResult =
+export type WorkspaceCreateResult =
   | { ok: true; workspaceId: string }
   | { ok: false; error: string };
 
-export type GoatWorkspaceMemberView = {
+export type WorkspaceMemberView = {
   userWorkosId: string;
   email: string;
   name: string;
@@ -63,13 +53,13 @@ export type GoatWorkspaceMemberView = {
   role: "admin" | "member";
 };
 
-export type GoatWorkspaceView = {
+export type WorkspaceView = {
   id: string;
   name: string;
   role: "admin" | "member";
 };
 
-export type GoatWorkspaceInvitationView = {
+export type WorkspaceInvitationView = {
   id: string;
   email: string;
   state: string;
@@ -92,7 +82,7 @@ function validateWorkspaceName(name: unknown) {
   return { ok: true as const, name: trimmed };
 }
 
-async function activateGoatWorkspace(input: {
+async function activateWorkspace(input: {
   workspaceId: string;
   workosOrganizationId: string;
   brainId: string | null;
@@ -121,9 +111,9 @@ async function activateGoatWorkspace(input: {
   }
 }
 
-export async function switchGoatBrainAction(brainRef: string): Promise<GoatWorkspaceActionResult> {
-  const { user } = await currentGoatUser();
-  const access = await getGoatBrainAccess({ userWorkosId: user.workosUserId, brainRef });
+export async function switchBrainAction(brainRef: string): Promise<WorkspaceActionResult> {
+  const { user } = await currentUser();
+  const access = await getBrainAccess({ userWorkosId: user.workosUserId, brainRef });
   if (!access) return { ok: false, error: "You do not have access to that brain." };
 
   const cookieStore = await cookies();
@@ -136,18 +126,16 @@ export async function switchGoatBrainAction(brainRef: string): Promise<GoatWorks
   return { ok: true };
 }
 
-export async function switchGoatWorkspaceAction(
-  workspaceId: string,
-): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
-  const workspaces = await listGoatWorkspacesForUser(context.user.workosUserId);
+export async function switchWorkspaceAction(workspaceId: string): Promise<WorkspaceActionResult> {
+  const context = await currentUser();
+  const workspaces = await listWorkspacesForUser(context.user.workosUserId);
   const target = workspaces.find((entry) => entry.workspace.id === workspaceId);
   if (!target) return { ok: false, error: "You do not have access to that workspace." };
   if (!target.workspace.workosOrganizationId) {
     return { ok: false, error: "That workspace is not linked to a WorkOS organization." };
   }
 
-  const brains = await listAccessibleGoatBrains({
+  const brains = await listAccessibleBrains({
     userWorkosId: context.user.workosUserId,
     workspaceId: target.workspace.id,
   });
@@ -155,7 +143,7 @@ export async function switchGoatWorkspaceAction(
     brains.find((brain) => brain.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
 
   try {
-    await activateGoatWorkspace({
+    await activateWorkspace({
       workspaceId: target.workspace.id,
       workosOrganizationId: target.workspace.workosOrganizationId,
       brainId: activeBrain?.id ?? null,
@@ -177,13 +165,13 @@ export async function switchGoatWorkspaceAction(
   return { ok: true };
 }
 
-export async function createGoatWorkspaceAction(name: unknown): Promise<GoatWorkspaceCreateResult> {
+export async function createWorkspaceAction(name: unknown): Promise<WorkspaceCreateResult> {
   const validation = validateWorkspaceName(name);
   if (!validation.ok) return validation;
 
-  const context = await currentGoatUser();
+  const context = await currentUser();
   try {
-    if (await hasOwnedGoatHobbyWorkspace(context.user.workosUserId)) {
+    if (await hasOwnedHobbyWorkspace(context.user.workosUserId)) {
       return {
         ok: false,
         error:
@@ -194,11 +182,11 @@ export async function createGoatWorkspaceAction(name: unknown): Promise<GoatWork
     console.error("[goat] Failed to verify Hobby workspace ownership", error);
     return { ok: false, error: CREATE_WORKSPACE_ERROR_MESSAGE };
   }
-  const workspaceId = newGoatWorkspaceId();
+  const workspaceId = newWorkspaceId();
   const workos = getWorkOSClient();
   let workosOrganizationId: string | null = null;
   let localWorkspacePersisted = false;
-  let created: Awaited<ReturnType<typeof createGoatWorkspaceForUser>> | null = null;
+  let created: Awaited<ReturnType<typeof createWorkspaceForUser>> | null = null;
 
   try {
     const organization = await workos.organizations.createOrganization(
@@ -219,7 +207,7 @@ export async function createGoatWorkspaceAction(name: unknown): Promise<GoatWork
       roleSlug: ADMIN_ROLE,
     });
 
-    created = await createGoatWorkspaceForUser({
+    created = await createWorkspaceForUser({
       workspaceId,
       workosOrganizationId: organization.id,
       userWorkosId: context.user.workosUserId,
@@ -248,7 +236,7 @@ export async function createGoatWorkspaceAction(name: unknown): Promise<GoatWork
   }
 
   try {
-    await activateGoatWorkspace({
+    await activateWorkspace({
       workspaceId: created.workspace.id,
       workosOrganizationId: created.workspace.workosOrganizationId ?? workosOrganizationId,
       brainId: created.brain.id,
@@ -270,17 +258,17 @@ export async function createGoatWorkspaceAction(name: unknown): Promise<GoatWork
   return { ok: true, workspaceId: created.workspace.id };
 }
 
-export async function createGoatBrainAction(input: {
+export async function createBrainAction(input: {
   name: string;
-  visibility: GoatBrainVisibility;
+  visibility: BrainVisibility;
   description?: string;
-}): Promise<GoatWorkspaceActionResult & { brainRef?: string }> {
-  const context = await currentGoatUser();
+}): Promise<WorkspaceActionResult & { brainRef?: string }> {
+  const context = await currentUser();
   if (context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can create brains." };
   }
   try {
-    const brain = await createGoatBrain({
+    const brain = await createBrain({
       workspaceId: context.workspace.id,
       name: input.name,
       visibility: input.visibility,
@@ -300,16 +288,16 @@ export async function createGoatBrainAction(input: {
   }
 }
 
-export async function setGoatBrainAccessAction(input: {
+export async function setBrainAccessAction(input: {
   brainRef: string;
-  visibility: GoatBrainVisibility;
+  visibility: BrainVisibility;
   memberWorkosIds: string[];
-}): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
+}): Promise<WorkspaceActionResult> {
+  const context = await currentUser();
   if (context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can change brain access." };
   }
-  const access = await getGoatBrainAccess({
+  const access = await getBrainAccess({
     userWorkosId: context.user.workosUserId,
     brainRef: input.brainRef,
   });
@@ -318,7 +306,7 @@ export async function setGoatBrainAccessAction(input: {
   }
 
   try {
-    await updateGoatBrainVisibility({
+    await updateBrainVisibility({
       brainRef: input.brainRef,
       visibility: input.visibility,
       actingUserWorkosId: context.user.workosUserId,
@@ -327,7 +315,7 @@ export async function setGoatBrainAccessAction(input: {
       const memberIds = new Set(input.memberWorkosIds);
       // The acting admin always keeps access so the brain cannot be orphaned.
       memberIds.add(context.user.workosUserId);
-      await replaceGoatBrainMembers({
+      await replaceBrainMembers({
         brainRef: input.brainRef,
         userWorkosIds: [...memberIds],
         addedByWorkosId: context.user.workosUserId,
@@ -340,22 +328,22 @@ export async function setGoatBrainAccessAction(input: {
   }
 }
 
-export async function getGoatBrainAccessDetailsAction(brainRef: string): Promise<{
-  visibility: GoatBrainVisibility;
+export async function getBrainAccessDetailsAction(brainRef: string): Promise<{
+  visibility: BrainVisibility;
   memberWorkosIds: string[];
-  workspaceMembers: GoatWorkspaceMemberView[];
+  workspaceMembers: WorkspaceMemberView[];
 } | null> {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   if (context.role !== "admin") return null;
-  const access = await getGoatBrainAccess({
+  const access = await getBrainAccess({
     userWorkosId: context.user.workosUserId,
     brainRef,
   });
   if (!access || access.brain.workspaceId !== context.workspace.id) return null;
 
   const [memberWorkosIds, workspaceMembers] = await Promise.all([
-    listGoatBrainMemberIds(brainRef),
-    listGoatWorkspaceMembersAction(),
+    listBrainMemberIds(brainRef),
+    listWorkspaceMembersAction(),
   ]);
   return {
     visibility: access.brain.visibility,
@@ -364,12 +352,12 @@ export async function getGoatBrainAccessDetailsAction(brainRef: string): Promise
   };
 }
 
-export async function getGoatBrainEnrichmentEnabledAction(
+export async function getBrainEnrichmentEnabledAction(
   brainRef: string,
 ): Promise<{ enabled: boolean } | null> {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   if (context.role !== "admin") return null;
-  const access = await getGoatBrainAccess({
+  const access = await getBrainAccess({
     userWorkosId: context.user.workosUserId,
     brainRef,
   });
@@ -377,15 +365,15 @@ export async function getGoatBrainEnrichmentEnabledAction(
   return { enabled: access.brain.enrichmentEnabled };
 }
 
-export async function setGoatBrainEnrichmentAction(input: {
+export async function setBrainEnrichmentAction(input: {
   brainRef: string;
   enabled: boolean;
-}): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
+}): Promise<WorkspaceActionResult> {
+  const context = await currentUser();
   if (context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can change enrichment." };
   }
-  const access = await getGoatBrainAccess({
+  const access = await getBrainAccess({
     userWorkosId: context.user.workosUserId,
     brainRef: input.brainRef,
   });
@@ -393,7 +381,7 @@ export async function setGoatBrainEnrichmentAction(input: {
     return { ok: false, error: "Brain not found in this workspace." };
   }
   try {
-    await updateGoatBrainEnrichmentEnabled({
+    await updateBrainEnrichmentEnabled({
       brainRef: input.brainRef,
       enabled: input.enabled,
     });
@@ -404,12 +392,12 @@ export async function setGoatBrainEnrichmentAction(input: {
   }
 }
 
-export async function getGoatBrainIntelligenceAction(
+export async function getBrainIntelligenceAction(
   brainRef: string,
-): Promise<{ intelligence: GoatBrainIntelligence } | null> {
-  const context = await currentGoatUser();
+): Promise<{ intelligence: BrainIntelligence } | null> {
+  const context = await currentUser();
   if (context.role !== "admin") return null;
-  const access = await getGoatBrainAccess({
+  const access = await getBrainAccess({
     userWorkosId: context.user.workosUserId,
     brainRef,
   });
@@ -417,18 +405,18 @@ export async function getGoatBrainIntelligenceAction(
   return { intelligence: access.brain.intelligence };
 }
 
-export async function setGoatBrainIntelligenceAction(input: {
+export async function setBrainIntelligenceAction(input: {
   brainRef: string;
-  intelligence: GoatBrainIntelligence;
-}): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
+  intelligence: BrainIntelligence;
+}): Promise<WorkspaceActionResult> {
+  const context = await currentUser();
   if (context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can change intelligence." };
   }
   if (input.intelligence !== "basic" && input.intelligence !== "frontier") {
     return { ok: false, error: "Unknown intelligence tier." };
   }
-  const access = await getGoatBrainAccess({
+  const access = await getBrainAccess({
     userWorkosId: context.user.workosUserId,
     brainRef: input.brainRef,
   });
@@ -436,7 +424,7 @@ export async function setGoatBrainIntelligenceAction(input: {
     return { ok: false, error: "Brain not found in this workspace." };
   }
   try {
-    await updateGoatBrainIntelligence({
+    await updateBrainIntelligence({
       brainRef: input.brainRef,
       intelligence: input.intelligence,
     });
@@ -447,9 +435,9 @@ export async function setGoatBrainIntelligenceAction(input: {
   }
 }
 
-export async function listGoatWorkspaceMembersAction(): Promise<GoatWorkspaceMemberView[]> {
-  const context = await currentGoatUser();
-  const members = await listGoatWorkspaceMembers(context.workspace.id);
+export async function listWorkspaceMembersAction(): Promise<WorkspaceMemberView[]> {
+  const context = await currentUser();
+  const members = await listWorkspaceMembers(context.workspace.id);
   return members.map((entry) => ({
     userWorkosId: entry.user.workosUserId,
     email: entry.user.email,
@@ -461,10 +449,8 @@ export async function listGoatWorkspaceMembersAction(): Promise<GoatWorkspaceMem
   }));
 }
 
-export async function inviteToGoatWorkspaceAction(
-  email: string,
-): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
+export async function inviteToWorkspaceAction(email: string): Promise<WorkspaceActionResult> {
+  const context = await currentUser();
   if (context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can invite members." };
   }
@@ -479,11 +465,11 @@ export async function inviteToGoatWorkspaceAction(
     // — the adoption path deliberately never blocks a sign-in — so this check
     // plus the members-panel over-cap banner is the enforcement.
     const [members, invitations, plan] = await Promise.all([
-      listGoatWorkspaceMembers(context.workspace.id),
-      listGoatWorkspaceInvitationsAction(),
-      getGoatWorkspacePlan(context.workspace.id),
+      listWorkspaceMembers(context.workspace.id),
+      listWorkspaceInvitationsAction(),
+      getWorkspacePlan(context.workspace.id),
     ]);
-    const memberCap = goatWorkspaceMemberCap(plan);
+    const memberCap = workspaceMemberCap(plan);
     if (members.length + invitations.length >= memberCap) {
       return {
         ok: false,
@@ -493,7 +479,7 @@ export async function inviteToGoatWorkspaceAction(
             : `Workspaces allow up to ${memberCap} members (including pending invites). Remove a member or revoke an invite first.`,
       };
     }
-    const organizationId = await ensureGoatWorkspaceOrganization(context.workspace);
+    const organizationId = await ensureWorkspaceOrganization(context.workspace);
     await getWorkOSClient().userManagement.sendInvitation({
       email: trimmed,
       organizationId,
@@ -508,8 +494,8 @@ export async function inviteToGoatWorkspaceAction(
   }
 }
 
-export async function listGoatWorkspaceInvitationsAction(): Promise<GoatWorkspaceInvitationView[]> {
-  const context = await currentGoatUser();
+export async function listWorkspaceInvitationsAction(): Promise<WorkspaceInvitationView[]> {
+  const context = await currentUser();
   if (context.role !== "admin" || !context.workspace.workosOrganizationId) return [];
 
   try {
@@ -530,10 +516,10 @@ export async function listGoatWorkspaceInvitationsAction(): Promise<GoatWorkspac
   }
 }
 
-export async function revokeGoatWorkspaceInvitationAction(
+export async function revokeWorkspaceInvitationAction(
   invitationId: string,
-): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
+): Promise<WorkspaceActionResult> {
+  const context = await currentUser();
   if (context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can revoke invitations." };
   }
@@ -546,10 +532,10 @@ export async function revokeGoatWorkspaceInvitationAction(
   }
 }
 
-export async function removeGoatWorkspaceMemberAction(
+export async function removeWorkspaceMemberAction(
   userWorkosId: string,
-): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
+): Promise<WorkspaceActionResult> {
+  const context = await currentUser();
   if (context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can remove members." };
   }
@@ -568,11 +554,11 @@ export async function removeGoatWorkspaceMemberAction(
         await workos.userManagement.deleteOrganizationMembership(membership.id);
       }
     }
-    await removeGoatWorkspaceMember({
+    await removeWorkspaceMember({
       workspaceId: context.workspace.id,
       userWorkosId,
     });
-    await syncGoatStripeSeatQuantityForWorkspace(context.workspace.id).catch((error) => {
+    await syncStripeSeatQuantityForWorkspace(context.workspace.id).catch((error) => {
       console.error("[goat] Failed to sync Stripe seat quantity after member removal", error);
     });
     revalidatePath("/", "layout");
@@ -582,10 +568,8 @@ export async function removeGoatWorkspaceMemberAction(
   }
 }
 
-export async function updateGoatWorkspaceNameAction(
-  name: string,
-): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
+export async function updateWorkspaceNameAction(name: string): Promise<WorkspaceActionResult> {
+  const context = await currentUser();
   if (context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can rename the workspace." };
   }
@@ -600,7 +584,7 @@ export async function updateGoatWorkspaceNameAction(
         name: trimmed,
       });
     }
-    await updateGoatWorkspaceName({ workspaceId: context.workspace.id, name: trimmed });
+    await updateWorkspaceName({ workspaceId: context.workspace.id, name: trimmed });
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
@@ -608,25 +592,25 @@ export async function updateGoatWorkspaceNameAction(
   }
 }
 
-export async function getGoatWorkspaceSettingsAction(): Promise<{
+export async function getWorkspaceSettingsAction(): Promise<{
   workspace: { id: string; name: string };
   role: "admin" | "member";
   plan: "hobby" | "pro";
   memberCap: number;
-  members: GoatWorkspaceMemberView[];
-  invitations: GoatWorkspaceInvitationView[];
+  members: WorkspaceMemberView[];
+  invitations: WorkspaceInvitationView[];
 }> {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   const db = getDb();
   const [workspaceRow] = await db
     .select()
-    .from(goatWorkspaces)
-    .where(eq(goatWorkspaces.id, context.workspace.id))
+    .from(workspaces)
+    .where(eq(workspaces.id, context.workspace.id))
     .limit(1);
   const [members, invitations, plan] = await Promise.all([
-    listGoatWorkspaceMembersAction(),
-    listGoatWorkspaceInvitationsAction(),
-    getGoatWorkspacePlan(context.workspace.id),
+    listWorkspaceMembersAction(),
+    listWorkspaceInvitationsAction(),
+    getWorkspacePlan(context.workspace.id),
   ]);
   return {
     workspace: {
@@ -635,7 +619,7 @@ export async function getGoatWorkspaceSettingsAction(): Promise<{
     },
     role: context.role,
     plan,
-    memberCap: goatWorkspaceMemberCap(plan),
+    memberCap: workspaceMemberCap(plan),
     members,
     invitations,
   };

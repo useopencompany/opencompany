@@ -1,11 +1,11 @@
-import type { GoatChatMessageAttachment } from "@opencompany/db/schema";
+import type { ChatMessageAttachment } from "@opencompany/db/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  extractGoatChatAttachmentTexts,
-  hydrateGoatChatAttachmentParts,
-  parseGoatChatAttachmentsInput,
+  extractChatAttachmentTexts,
+  hydrateChatAttachmentParts,
+  parseChatAttachmentsInput,
 } from "@/lib/chat-attachments";
-import type { GoatChatUiMessage } from "@/lib/chat-ui";
+import type { ChatUiMessage } from "@/lib/chat-ui";
 
 const getMock = vi.hoisted(() => vi.fn());
 vi.mock("@vercel/blob", () => ({
@@ -34,9 +34,9 @@ function submittedAttachment(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-describe("parseGoatChatAttachmentsInput", () => {
+describe("parseChatAttachmentsInput", () => {
   it("accepts a valid attachment and re-mints the id", () => {
-    const parsed = parseGoatChatAttachmentsInput([submittedAttachment()], "user_1");
+    const parsed = parseChatAttachmentsInput([submittedAttachment()], "user_1");
     if (!parsed.ok) throw new Error(parsed.error);
     expect(parsed.attachments).toHaveLength(1);
     const attachment = parsed.attachments[0];
@@ -46,7 +46,7 @@ describe("parseGoatChatAttachmentsInput", () => {
   });
 
   it("accepts and canonicalizes SRT attachment metadata", () => {
-    const parsed = parseGoatChatAttachmentsInput(
+    const parsed = parseChatAttachmentsInput(
       [
         submittedAttachment({
           mediaType: "text/plain",
@@ -65,7 +65,7 @@ describe("parseGoatChatAttachmentsInput", () => {
   });
 
   it("accepts and canonicalizes CSV attachment metadata", () => {
-    const parsed = parseGoatChatAttachmentsInput(
+    const parsed = parseChatAttachmentsInput(
       [
         submittedAttachment({
           mediaType: "application/vnd.ms-excel",
@@ -84,7 +84,7 @@ describe("parseGoatChatAttachmentsInput", () => {
   });
 
   it("rejects blobs outside the caller's prefix", () => {
-    const parsed = parseGoatChatAttachmentsInput(
+    const parsed = parseChatAttachmentsInput(
       [
         submittedAttachment({
           blobUrl: "https://blob.example.com/goat-chat/user_2/report.pdf",
@@ -97,41 +97,36 @@ describe("parseGoatChatAttachmentsInput", () => {
 
   it("rejects unsupported types and over-cap counts", () => {
     expect(
-      parseGoatChatAttachmentsInput(
-        [submittedAttachment({ mediaType: "application/zip" })],
-        "user_1",
-      ),
+      parseChatAttachmentsInput([submittedAttachment({ mediaType: "application/zip" })], "user_1"),
     ).toMatchObject({ ok: false });
     const six = Array.from({ length: 6 }, (_, index) =>
       submittedAttachment({
         blobUrl: `https://blob.example.com/goat-chat/user_1/file-${index}.pdf`,
       }),
     );
-    expect(parseGoatChatAttachmentsInput(six, "user_1")).toMatchObject({ ok: false });
+    expect(parseChatAttachmentsInput(six, "user_1")).toMatchObject({ ok: false });
   });
 
   it("dedupes repeated blob urls and allows absent attachments", () => {
-    const parsed = parseGoatChatAttachmentsInput(
+    const parsed = parseChatAttachmentsInput(
       [submittedAttachment(), submittedAttachment()],
       "user_1",
     );
     if (!parsed.ok) throw new Error(parsed.error);
     expect(parsed.attachments).toHaveLength(1);
-    expect(parseGoatChatAttachmentsInput(undefined, "user_1")).toEqual({
+    expect(parseChatAttachmentsInput(undefined, "user_1")).toEqual({
       ok: true,
       attachments: [],
     });
   });
 });
 
-describe("hydrateGoatChatAttachmentParts", () => {
+describe("hydrateChatAttachmentParts", () => {
   beforeEach(() => {
     getMock.mockReset();
   });
 
-  function storedAttachment(
-    overrides: Partial<GoatChatMessageAttachment> = {},
-  ): GoatChatMessageAttachment {
+  function storedAttachment(overrides: Partial<ChatMessageAttachment> = {}): ChatMessageAttachment {
     return {
       id: "goat_chat_att_1",
       kind: "pdf",
@@ -144,7 +139,7 @@ describe("hydrateGoatChatAttachmentParts", () => {
     };
   }
 
-  function userMessage(id: string): GoatChatUiMessage {
+  function userMessage(id: string): ChatUiMessage {
     return { id, role: "user", parts: [{ type: "text", text: "look at this" }] };
   }
 
@@ -153,7 +148,7 @@ describe("hydrateGoatChatAttachmentParts", () => {
       statusCode: 200,
       stream: blobStream(new Uint8Array([1, 2, 3])),
     });
-    const hydrated = await hydrateGoatChatAttachmentParts({
+    const hydrated = await hydrateChatAttachmentParts({
       uiMessages: [userMessage("m1")],
       storedMessages: [
         { id: "m1", role: "user", attachments: [storedAttachment()], attachmentTexts: null },
@@ -171,7 +166,7 @@ describe("hydrateGoatChatAttachmentParts", () => {
   });
 
   it("substitutes a placeholder when the model lacks the capability", async () => {
-    const hydrated = await hydrateGoatChatAttachmentParts({
+    const hydrated = await hydrateChatAttachmentParts({
       uiMessages: [userMessage("m1")],
       storedMessages: [
         { id: "m1", role: "user", attachments: [storedAttachment()], attachmentTexts: null },
@@ -195,7 +190,7 @@ describe("hydrateGoatChatAttachmentParts", () => {
       mediaType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       filename: "numbers.xlsx",
     });
-    const hydrated = await hydrateGoatChatAttachmentParts({
+    const hydrated = await hydrateChatAttachmentParts({
       uiMessages: [userMessage("m1")],
       storedMessages: [
         {
@@ -228,11 +223,11 @@ describe("hydrateGoatChatAttachmentParts", () => {
       blobUrl: "https://blob.example.com/goat-chat/user_1/captions.srt",
     });
 
-    const attachmentTexts = await extractGoatChatAttachmentTexts([attachment]);
+    const attachmentTexts = await extractChatAttachmentTexts([attachment]);
     expect(attachmentTexts).toEqual({ goat_chat_att_srt: subtitle });
 
     getMock.mockClear();
-    const hydrated = await hydrateGoatChatAttachmentParts({
+    const hydrated = await hydrateChatAttachmentParts({
       uiMessages: [userMessage("m1")],
       storedMessages: [
         {
@@ -266,11 +261,11 @@ describe("hydrateGoatChatAttachmentParts", () => {
       blobUrl: "https://blob.example.com/goat-chat/user_1/customers.csv",
     });
 
-    const attachmentTexts = await extractGoatChatAttachmentTexts([attachment]);
+    const attachmentTexts = await extractChatAttachmentTexts([attachment]);
     expect(attachmentTexts).toEqual({ goat_chat_att_csv: csv });
 
     getMock.mockClear();
-    const hydrated = await hydrateGoatChatAttachmentParts({
+    const hydrated = await hydrateChatAttachmentParts({
       uiMessages: [userMessage("m1")],
       storedMessages: [
         {
@@ -290,7 +285,7 @@ describe("hydrateGoatChatAttachmentParts", () => {
 
   it("leaves messages without attachments untouched", async () => {
     const message = userMessage("m1");
-    const hydrated = await hydrateGoatChatAttachmentParts({
+    const hydrated = await hydrateChatAttachmentParts({
       uiMessages: [message],
       storedMessages: [{ id: "m1", role: "user", attachments: null, attachmentTexts: null }],
       modelId: "anthropic/claude-sonnet-5",

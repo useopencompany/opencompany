@@ -1,19 +1,19 @@
 import {
-  claimGoatSlackBotEvent,
-  completeGoatSlackBotEvent,
-  type GoatSlackBotEventClaim,
-  getGoatSlackBotThreadParticipation,
-  markGoatSlackBotIntegrationStatusForTeam,
-  releaseGoatSlackBotEvent,
+  claimSlackBotEvent,
+  completeSlackBotEvent,
+  getSlackBotThreadParticipation,
+  markSlackBotIntegrationStatusForTeam,
+  releaseSlackBotEvent,
+  type SlackBotEventClaim,
 } from "@opencompany/db/slack-bot";
 import { after, NextResponse } from "next/server";
-import { goatSlackBotSigningSecret } from "@/lib/integrations/slack-bot";
-import { verifyGoatSlackEventSignature } from "@/lib/integrations/slack-signature";
+import { slackBotSigningSecret } from "@/lib/integrations/slack-bot";
+import { verifySlackEventSignature } from "@/lib/integrations/slack-signature";
 import {
-  type GoatSlackBotEventInput,
-  processGoatSlackBotDirectMessage,
-  processGoatSlackBotMention,
-  processGoatSlackBotThreadFollowUp,
+  processSlackBotDirectMessage,
+  processSlackBotMention,
+  processSlackBotThreadFollowUp,
+  type SlackBotEventInput,
 } from "@/lib/slack-bot/answer";
 import { mentionsOtherHuman } from "@/lib/slack-bot/format";
 
@@ -31,11 +31,11 @@ type SlackEnvelope = {
 
 export async function POST(request: Request) {
   const rawBody = await request.text();
-  const verified = verifyGoatSlackEventSignature({
+  const verified = verifySlackEventSignature({
     rawBody,
     timestamp: request.headers.get("x-slack-request-timestamp"),
     signature: request.headers.get("x-slack-signature"),
-    secret: goatSlackBotSigningSecret(),
+    secret: slackBotSigningSecret(),
   });
   if (!verified) {
     return NextResponse.json({ error: "Invalid Slack signature." }, { status: 401 });
@@ -76,7 +76,7 @@ async function handleEventCallback(
   event: Record<string, unknown>,
 ) {
   if (event.type === "tokens_revoked" || event.type === "app_uninstalled") {
-    await markGoatSlackBotIntegrationStatusForTeam({
+    await markSlackBotIntegrationStatusForTeam({
       teamId,
       status: "needs_reauth",
       statusReason:
@@ -111,7 +111,7 @@ async function handleEventCallback(
       // person. Both checks run before claiming to keep the claims table lean.
       if (!threadTs) return { ok: true, ignored: true };
       if (mentionsOtherHuman(text, null)) return { ok: true, ignored: true };
-      const participation = await getGoatSlackBotThreadParticipation({
+      const participation = await getSlackBotThreadParticipation({
         teamId,
         channelId,
         threadTs,
@@ -129,7 +129,7 @@ async function handleEventCallback(
       return { ok: true, dropped: true };
     }
 
-    const claim = await claimGoatSlackBotEvent({ eventId, teamId });
+    const claim = await claimSlackBotEvent({ eventId, teamId });
     if (!claim) return { ok: true, skipped: "duplicate" };
 
     after(
@@ -149,20 +149,20 @@ async function handleEventCallback(
 }
 
 async function processClaimedEvent(
-  claim: GoatSlackBotEventClaim,
+  claim: SlackBotEventClaim,
   kind: "mention" | "follow_up" | "dm",
-  input: GoatSlackBotEventInput,
+  input: SlackBotEventInput,
 ) {
   try {
     if (kind === "mention") {
-      await processGoatSlackBotMention(input);
+      await processSlackBotMention(input);
     } else if (kind === "follow_up") {
-      await processGoatSlackBotThreadFollowUp(input);
+      await processSlackBotThreadFollowUp(input);
     } else {
-      await processGoatSlackBotDirectMessage(input);
+      await processSlackBotDirectMessage(input);
     }
   } catch (error) {
-    await releaseGoatSlackBotEvent(claim).catch((releaseError) => {
+    await releaseSlackBotEvent(claim).catch((releaseError) => {
       console.error("[goat-slack-bot] Failed to release Slack event claim", {
         eventId: claim.eventId,
         error: releaseError instanceof Error ? releaseError.message : String(releaseError),
@@ -177,7 +177,7 @@ async function processClaimedEvent(
     return;
   }
 
-  await completeGoatSlackBotEvent(claim).catch((error) => {
+  await completeSlackBotEvent(claim).catch((error) => {
     // Keep the live lease if completion persistence fails. Releasing it after
     // an answer was posted would let a Slack retry double-post immediately.
     console.error("[goat-slack-bot] Failed to complete Slack event claim", {

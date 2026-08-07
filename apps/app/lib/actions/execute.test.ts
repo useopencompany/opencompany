@@ -2,21 +2,21 @@ import { GOAT_ACTION_EFFECTS_READ } from "@opencompany/core/actions/types";
 import { describe, expect, it, vi } from "vitest";
 import {
   clampActionResult,
-  executeGoatAction,
+  executeAction,
   MAX_ACTION_RESULT_CHARS,
   MAX_EXPANDED_ACTION_RESULT_CHARS,
 } from "@/lib/actions/execute";
 import {
-  GoatActionAuthError,
-  GoatActionInvalidParamsError,
-  type GoatResolvedActionCatalog,
-  type ResolvedGoatAction,
+  ActionAuthError,
+  ActionInvalidParamsError,
+  type ResolvedAction,
+  type ResolvedActionCatalog,
 } from "@/lib/actions/types";
 
 function catalogWith(
-  execute: ResolvedGoatAction["execute"],
-  options: Pick<ResolvedGoatAction, "maxResultChars"> = {},
-): GoatResolvedActionCatalog {
+  execute: ResolvedAction["execute"],
+  options: Pick<ResolvedAction, "maxResultChars"> = {},
+): ResolvedActionCatalog {
   return {
     providers: [{ id: "slack", label: "Slack", description: "Read Slack messages." }],
     actions: [
@@ -35,7 +35,7 @@ function catalogWith(
   };
 }
 
-function baseInput(catalog: GoatResolvedActionCatalog) {
+function baseInput(catalog: ResolvedActionCatalog) {
   return {
     catalog,
     actionId: "slack.fetch_history",
@@ -47,10 +47,10 @@ function baseInput(catalog: GoatResolvedActionCatalog) {
   };
 }
 
-describe("executeGoatAction", () => {
+describe("executeAction", () => {
   it("returns invalid_params for unknown action ids without executing", async () => {
     const execute = vi.fn();
-    const result = await executeGoatAction({
+    const result = await executeAction({
       ...baseInput(catalogWith(execute)),
       actionId: "gmail.get_message",
     });
@@ -64,7 +64,7 @@ describe("executeGoatAction", () => {
 
   it("returns the clamped result on success", async () => {
     const execute = vi.fn(async () => ({ messages: ["hi"] }));
-    const result = await executeGoatAction(baseInput(catalogWith(execute)));
+    const result = await executeAction(baseInput(catalogWith(execute)));
     expect(result).toEqual({
       ok: true,
       action: "slack.fetch_history",
@@ -78,7 +78,7 @@ describe("executeGoatAction", () => {
 
   it("honors an action-specific expanded result allowance", async () => {
     const expanded = { transcript: "x".repeat(MAX_ACTION_RESULT_CHARS + 100) };
-    const result = await executeGoatAction(
+    const result = await executeAction(
       baseInput(
         catalogWith(async () => expanded, {
           maxResultChars: MAX_EXPANDED_ACTION_RESULT_CHARS,
@@ -94,10 +94,10 @@ describe("executeGoatAction", () => {
   });
 
   it("maps auth errors to structured results with the reconnect hint", async () => {
-    const result = await executeGoatAction(
+    const result = await executeAction(
       baseInput(
         catalogWith(async () => {
-          throw new GoatActionAuthError("auth_expired", "slack", "Reconnect Slack in Settings.");
+          throw new ActionAuthError("auth_expired", "slack", "Reconnect Slack in Settings.");
         }),
       ),
     );
@@ -113,10 +113,10 @@ describe("executeGoatAction", () => {
   });
 
   it("maps validation errors to invalid_params and other errors to provider_error", async () => {
-    const invalid = await executeGoatAction(
+    const invalid = await executeAction(
       baseInput(
         catalogWith(async () => {
-          throw new GoatActionInvalidParamsError('"channel" is required.');
+          throw new ActionInvalidParamsError('"channel" is required.');
         }),
       ),
     );
@@ -126,7 +126,7 @@ describe("executeGoatAction", () => {
       expect(invalid.error.message).toContain('"channel" is required.');
     }
 
-    const provider = await executeGoatAction(
+    const provider = await executeAction(
       baseInput(
         catalogWith(async () => {
           throw new Error("Slack API request failed with 500.");
@@ -148,7 +148,7 @@ describe("executeGoatAction", () => {
       ),
       signal: controller.signal,
     };
-    await expect(executeGoatAction(input)).rejects.toBeDefined();
+    await expect(executeAction(input)).rejects.toBeDefined();
   });
 });
 

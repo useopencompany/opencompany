@@ -13,7 +13,7 @@ type CodingWorkspaceTicketPayload = {
   expiresAt: number;
 };
 
-export function createGoatCodingWorkspaceTicket(input: {
+export function createCodingWorkspaceTicket(input: {
   codingSessionId: string;
   userWorkosId: string;
   secret: string;
@@ -34,7 +34,7 @@ export function createGoatCodingWorkspaceTicket(input: {
   return { ticket: `${encodedPayload}.${signature}`, expiresAt };
 }
 
-export function verifyGoatCodingWorkspaceTicket(input: {
+export function verifyCodingWorkspaceTicket(input: {
   ticket: string;
   secret: string;
   now?: number;
@@ -75,7 +75,7 @@ export function verifyGoatCodingWorkspaceTicket(input: {
   }
 }
 
-export function createGoatCodingWorkspacePreviewCapability(input: {
+export function createCodingWorkspacePreviewCapability(input: {
   codingSessionId: string;
   port: number;
   secret: string;
@@ -104,7 +104,7 @@ export function createGoatCodingWorkspacePreviewCapability(input: {
   };
 }
 
-export function verifyGoatCodingWorkspacePreviewCapability(input: {
+export function verifyCodingWorkspacePreviewCapability(input: {
   capability: string;
   secret: string;
   now?: number;

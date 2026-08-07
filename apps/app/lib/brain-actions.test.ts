@@ -1,64 +1,64 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { currentGoatBrainByRef } from "@/lib/auth";
+import { currentBrainByRef } from "@/lib/auth";
 import {
-  createGoatBrainDocumentForUser,
-  createGoatBrainFolderForUser,
-  deleteGoatBrainDocumentForUser,
-  updateGoatBrainDocumentForUser,
+  createBrainDocumentForUser,
+  createBrainFolderForUser,
+  deleteBrainDocumentForUser,
+  updateBrainDocumentForUser,
 } from "@/lib/brain";
 import {
-  createGoatBrainDocumentAction,
-  createGoatBrainFolderAction,
-  deleteGoatBrainDocumentAction,
-  updateGoatBrainDocumentAction,
+  createBrainDocumentAction,
+  createBrainFolderAction,
+  deleteBrainDocumentAction,
+  updateBrainDocumentAction,
 } from "@/lib/brain-actions";
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatBrainByRef: vi.fn(),
+  currentBrainByRef: vi.fn(),
 }));
 
 vi.mock("@/lib/brain", () => ({
-  createGoatBrainDocumentForUser: vi.fn(),
-  createGoatBrainFolderForUser: vi.fn(),
-  deleteGoatBrainDocumentForUser: vi.fn(),
-  deleteGoatBrainFolderForUser: vi.fn(),
-  moveGoatBrainDocumentForUser: vi.fn(),
-  renameGoatBrainDocumentForUser: vi.fn(),
-  renameGoatBrainFolderForUser: vi.fn(),
-  updateGoatBrainDocumentForUser: vi.fn(),
+  createBrainDocumentForUser: vi.fn(),
+  createBrainFolderForUser: vi.fn(),
+  deleteBrainDocumentForUser: vi.fn(),
+  deleteBrainFolderForUser: vi.fn(),
+  moveBrainDocumentForUser: vi.fn(),
+  renameBrainDocumentForUser: vi.fn(),
+  renameBrainFolderForUser: vi.fn(),
+  updateBrainDocumentForUser: vi.fn(),
 }));
 
 vi.mock("@/lib/brain-assets", () => ({
-  createGoatBrainAssetForUser: vi.fn(),
-  replaceGoatBrainAssetForUser: vi.fn(),
+  createBrainAssetForUser: vi.fn(),
+  replaceBrainAssetForUser: vi.fn(),
 }));
 
 describe("brain actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(currentGoatBrainByRef).mockResolvedValue({
+    vi.mocked(currentBrainByRef).mockResolvedValue({
       context: { role: "admin", user: { workosUserId: "user_1" } },
       brain: { id: "goat_brain_team" },
-    } as Awaited<ReturnType<typeof currentGoatBrainByRef>>);
-    vi.mocked(updateGoatBrainDocumentForUser).mockResolvedValue({ ok: true });
-    vi.mocked(deleteGoatBrainDocumentForUser).mockResolvedValue({ ok: true });
-    vi.mocked(createGoatBrainDocumentForUser).mockResolvedValue({
+    } as Awaited<ReturnType<typeof currentBrainByRef>>);
+    vi.mocked(updateBrainDocumentForUser).mockResolvedValue({ ok: true });
+    vi.mocked(deleteBrainDocumentForUser).mockResolvedValue({ ok: true });
+    vi.mocked(createBrainDocumentForUser).mockResolvedValue({
       ok: true,
       path: "projects/roadmap.md",
     });
-    vi.mocked(createGoatBrainFolderForUser).mockResolvedValue({ ok: true, path: "projects" });
+    vi.mocked(createBrainFolderForUser).mockResolvedValue({ ok: true, path: "projects" });
   });
 
   it("updates documents in the explicitly authorized brain", async () => {
-    await updateGoatBrainDocumentAction({
+    await updateBrainDocumentAction({
       brainRef: "goat_brain_requested",
       documentId: "doc_1",
       body: "Updated truth.",
       expectedContentHash: "hash_1",
     });
 
-    expect(currentGoatBrainByRef).toHaveBeenCalledWith("goat_brain_requested");
-    expect(updateGoatBrainDocumentForUser).toHaveBeenCalledWith({
+    expect(currentBrainByRef).toHaveBeenCalledWith("goat_brain_requested");
+    expect(updateBrainDocumentForUser).toHaveBeenCalledWith({
       brainRef: "goat_brain_team",
       userWorkosId: "user_1",
       documentId: "doc_1",
@@ -68,21 +68,21 @@ describe("brain actions", () => {
   });
 
   it("passes explicit brain authorization through destructive mutations", async () => {
-    await deleteGoatBrainDocumentAction({
+    await deleteBrainDocumentAction({
       brainRef: "goat_brain_requested",
       documentId: "doc_1",
     });
-    await createGoatBrainFolderAction({
+    await createBrainFolderAction({
       brainRef: "goat_brain_requested",
       folderPath: "projects",
     });
 
-    expect(deleteGoatBrainDocumentForUser).toHaveBeenCalledWith({
+    expect(deleteBrainDocumentForUser).toHaveBeenCalledWith({
       brainRef: "goat_brain_team",
       userWorkosId: "user_1",
       documentId: "doc_1",
     });
-    expect(createGoatBrainFolderForUser).toHaveBeenCalledWith({
+    expect(createBrainFolderForUser).toHaveBeenCalledWith({
       brainRef: "goat_brain_team",
       userWorkosId: "user_1",
       folderPath: "projects",
@@ -90,13 +90,13 @@ describe("brain actions", () => {
   });
 
   it("creates manual Markdown files in the explicitly authorized brain", async () => {
-    await createGoatBrainDocumentAction({
+    await createBrainDocumentAction({
       brainRef: "goat_brain_requested",
       folderPath: "projects",
       fileName: "Roadmap.md",
     });
 
-    expect(createGoatBrainDocumentForUser).toHaveBeenCalledWith({
+    expect(createBrainDocumentForUser).toHaveBeenCalledWith({
       brainRef: "goat_brain_team",
       userWorkosId: "user_1",
       folderPath: "projects",
@@ -105,64 +105,64 @@ describe("brain actions", () => {
   });
 
   it("rejects manual Markdown creation when the requested brain is inaccessible", async () => {
-    vi.mocked(currentGoatBrainByRef).mockRejectedValueOnce(
+    vi.mocked(currentBrainByRef).mockRejectedValueOnce(
       new Error("You do not have access to that brain."),
     );
 
-    const result = await createGoatBrainDocumentAction({
+    const result = await createBrainDocumentAction({
       brainRef: "goat_brain_denied",
       folderPath: "projects",
       fileName: "Roadmap.md",
     });
 
     expect(result).toEqual({ ok: false, message: "You do not have access to that brain." });
-    expect(createGoatBrainDocumentForUser).not.toHaveBeenCalled();
+    expect(createBrainDocumentForUser).not.toHaveBeenCalled();
   });
 
   it("rejects manual Markdown creation for non-admin workspace members", async () => {
-    vi.mocked(currentGoatBrainByRef).mockResolvedValueOnce({
+    vi.mocked(currentBrainByRef).mockResolvedValueOnce({
       context: { role: "member", user: { workosUserId: "user_1" } },
       brain: { id: "goat_brain_team" },
-    } as Awaited<ReturnType<typeof currentGoatBrainByRef>>);
+    } as Awaited<ReturnType<typeof currentBrainByRef>>);
 
-    const result = await createGoatBrainDocumentAction({
+    const result = await createBrainDocumentAction({
       brainRef: "goat_brain_team",
       folderPath: "projects",
       fileName: "Roadmap.md",
     });
 
     expect(result).toEqual({ ok: false, message: "Only workspace admins can edit the brain." });
-    expect(createGoatBrainDocumentForUser).not.toHaveBeenCalled();
+    expect(createBrainDocumentForUser).not.toHaveBeenCalled();
   });
 
   it("returns a mutation error without writing when the requested brain is inaccessible", async () => {
-    vi.mocked(currentGoatBrainByRef).mockRejectedValueOnce(
+    vi.mocked(currentBrainByRef).mockRejectedValueOnce(
       new Error("You do not have access to that brain."),
     );
 
-    const result = await updateGoatBrainDocumentAction({
+    const result = await updateBrainDocumentAction({
       brainRef: "goat_brain_denied",
       documentId: "doc_1",
       body: "Updated truth.",
     });
 
     expect(result).toEqual({ ok: false, message: "You do not have access to that brain." });
-    expect(updateGoatBrainDocumentForUser).not.toHaveBeenCalled();
+    expect(updateBrainDocumentForUser).not.toHaveBeenCalled();
   });
 
   it("rejects non-admin brain mutations without writing", async () => {
-    vi.mocked(currentGoatBrainByRef).mockResolvedValueOnce({
+    vi.mocked(currentBrainByRef).mockResolvedValueOnce({
       context: { role: "member", user: { workosUserId: "user_1" } },
       brain: { id: "goat_brain_team" },
-    } as Awaited<ReturnType<typeof currentGoatBrainByRef>>);
+    } as Awaited<ReturnType<typeof currentBrainByRef>>);
 
-    const result = await updateGoatBrainDocumentAction({
+    const result = await updateBrainDocumentAction({
       brainRef: "goat_brain_team",
       documentId: "doc_1",
       body: "Updated truth.",
     });
 
     expect(result).toEqual({ ok: false, message: "Only workspace admins can edit the brain." });
-    expect(updateGoatBrainDocumentForUser).not.toHaveBeenCalled();
+    expect(updateBrainDocumentForUser).not.toHaveBeenCalled();
   });
 });

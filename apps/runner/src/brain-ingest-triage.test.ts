@@ -21,7 +21,7 @@ import {
   GOAT_BRAIN_INGEST_TRIAGE_MODEL,
   GOAT_BRAIN_INGEST_TRIAGE_SOURCE_BYTES,
   GOAT_BRAIN_INGEST_TRIAGE_SYSTEM_PROMPT,
-  runGoatBrainIngestTriage,
+  runBrainIngestTriage,
   truncateTriageSource,
 } from "./brain-ingest-triage";
 
@@ -29,7 +29,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("runGoatBrainIngestTriage", () => {
+describe("runBrainIngestTriage", () => {
   it("uses one bounded nano-model structured-output call and prices its usage", async () => {
     aiMock.generateObject.mockResolvedValueOnce({
       object: {
@@ -44,7 +44,7 @@ describe("runGoatBrainIngestTriage", () => {
       },
     });
 
-    const result = await runGoatBrainIngestTriage({
+    const result = await runBrainIngestTriage({
       prompt: "Classify this source.",
       gatewayApiKey: "gw_test",
       userWorkosId: "user_123",

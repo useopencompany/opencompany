@@ -1,21 +1,21 @@
-import { getGoatWorkspacePlan } from "@opencompany/db/billing";
+import { getWorkspacePlan } from "@opencompany/db/billing";
 import {
-  createGoatWorkspaceForUser,
-  hasOwnedGoatHobbyWorkspace,
-  listAccessibleGoatBrains,
-  listGoatWorkspaceMembers,
-  listGoatWorkspacesForUser,
-  newGoatWorkspaceId,
+  createWorkspaceForUser,
+  hasOwnedHobbyWorkspace,
+  listAccessibleBrains,
+  listWorkspaceMembers,
+  listWorkspacesForUser,
+  newWorkspaceId,
 } from "@opencompany/db/workspaces";
 import { switchToOrganization } from "@workos-inc/authkit-nextjs";
 import { revalidatePath } from "next/cache";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import { getWorkOSClient } from "@/lib/workos-client";
 import {
-  createGoatWorkspaceAction,
-  inviteToGoatWorkspaceAction,
-  switchGoatWorkspaceAction,
+  createWorkspaceAction,
+  inviteToWorkspaceAction,
+  switchWorkspaceAction,
 } from "./workspace-actions";
 
 const cookieStore = vi.hoisted(() => ({
@@ -28,27 +28,27 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@opencompany/db/billing", () => ({
-  getGoatWorkspacePlan: vi.fn().mockResolvedValue("hobby"),
-  goatWorkspaceMemberCap: (plan: string) => (plan === "pro" ? 10 : 1),
+  getWorkspacePlan: vi.fn().mockResolvedValue("hobby"),
+  workspaceMemberCap: (plan: string) => (plan === "pro" ? 10 : 1),
 }));
 
 vi.mock("@opencompany/db/workspaces", () => ({
-  createGoatBrain: vi.fn(),
-  createGoatWorkspaceForUser: vi.fn(),
+  createBrain: vi.fn(),
+  createWorkspaceForUser: vi.fn(),
   DEFAULT_GOAT_BRAIN_SLUG: "general",
-  getGoatBrainAccess: vi.fn(),
-  hasOwnedGoatHobbyWorkspace: vi.fn().mockResolvedValue(false),
-  listAccessibleGoatBrains: vi.fn(),
-  listGoatBrainMemberIds: vi.fn(),
-  listGoatWorkspaceMembers: vi.fn(),
-  listGoatWorkspacesForUser: vi.fn(),
-  newGoatWorkspaceId: vi.fn(),
-  removeGoatWorkspaceMember: vi.fn(),
-  replaceGoatBrainMembers: vi.fn(),
-  updateGoatBrainEnrichmentEnabled: vi.fn(),
-  updateGoatBrainIntelligence: vi.fn(),
-  updateGoatBrainVisibility: vi.fn(),
-  updateGoatWorkspaceName: vi.fn(),
+  getBrainAccess: vi.fn(),
+  hasOwnedHobbyWorkspace: vi.fn().mockResolvedValue(false),
+  listAccessibleBrains: vi.fn(),
+  listBrainMemberIds: vi.fn(),
+  listWorkspaceMembers: vi.fn(),
+  listWorkspacesForUser: vi.fn(),
+  newWorkspaceId: vi.fn(),
+  removeWorkspaceMember: vi.fn(),
+  replaceBrainMembers: vi.fn(),
+  updateBrainEnrichmentEnabled: vi.fn(),
+  updateBrainIntelligence: vi.fn(),
+  updateBrainVisibility: vi.fn(),
+  updateWorkspaceName: vi.fn(),
 }));
 
 vi.mock("@workos-inc/authkit-nextjs", () => ({
@@ -64,28 +64,28 @@ vi.mock("next/headers", () => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
   GOAT_ACTIVE_BRAIN_COOKIE: "goat-active-brain",
   GOAT_ACTIVE_WORKSPACE_COOKIE: "goat-active-workspace",
 }));
 
 vi.mock("@/lib/billing/seats", () => ({
-  syncGoatStripeSeatQuantityForWorkspace: vi.fn().mockResolvedValue({ ok: true, changed: false }),
+  syncStripeSeatQuantityForWorkspace: vi.fn().mockResolvedValue({ ok: true, changed: false }),
 }));
 
 vi.mock("@/lib/workos-client", () => ({
   getWorkOSClient: vi.fn(),
 }));
 
-const createGoatWorkspaceForUserMock = vi.mocked(createGoatWorkspaceForUser);
-const getGoatWorkspacePlanMock = vi.mocked(getGoatWorkspacePlan);
-const hasOwnedGoatHobbyWorkspaceMock = vi.mocked(hasOwnedGoatHobbyWorkspace);
-const currentGoatUserMock = vi.mocked(currentGoatUser);
+const createWorkspaceForUserMock = vi.mocked(createWorkspaceForUser);
+const getWorkspacePlanMock = vi.mocked(getWorkspacePlan);
+const hasOwnedHobbyWorkspaceMock = vi.mocked(hasOwnedHobbyWorkspace);
+const currentUserMock = vi.mocked(currentUser);
 const getWorkOSClientMock = vi.mocked(getWorkOSClient);
-const listAccessibleGoatBrainsMock = vi.mocked(listAccessibleGoatBrains);
-const listGoatWorkspacesForUserMock = vi.mocked(listGoatWorkspacesForUser);
-const listGoatWorkspaceMembersMock = vi.mocked(listGoatWorkspaceMembers);
-const newGoatWorkspaceIdMock = vi.mocked(newGoatWorkspaceId);
+const listAccessibleBrainsMock = vi.mocked(listAccessibleBrains);
+const listWorkspacesForUserMock = vi.mocked(listWorkspacesForUser);
+const listWorkspaceMembersMock = vi.mocked(listWorkspaceMembers);
+const newWorkspaceIdMock = vi.mocked(newWorkspaceId);
 const revalidatePathMock = vi.mocked(revalidatePath);
 const switchToOrganizationMock = vi.mocked(switchToOrganization);
 
@@ -115,14 +115,14 @@ const workos = {
   },
 };
 
-describe("createGoatWorkspaceAction", () => {
+describe("createWorkspaceAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    currentGoatUserMock.mockResolvedValue(context as never);
+    currentUserMock.mockResolvedValue(context as never);
     getWorkOSClientMock.mockReturnValue(workos as never);
-    newGoatWorkspaceIdMock.mockReturnValue("goat_ws_new");
-    hasOwnedGoatHobbyWorkspaceMock.mockResolvedValue(false);
-    createGoatWorkspaceForUserMock.mockResolvedValue({
+    newWorkspaceIdMock.mockReturnValue("goat_ws_new");
+    hasOwnedHobbyWorkspaceMock.mockResolvedValue(false);
+    createWorkspaceForUserMock.mockResolvedValue({
       workspace: {
         id: "goat_ws_new",
         workosOrganizationId: "org_new",
@@ -134,25 +134,25 @@ describe("createGoatWorkspaceAction", () => {
   });
 
   it("validates the organization name before calling WorkOS", async () => {
-    await expect(createGoatWorkspaceAction("   ")).resolves.toEqual({
+    await expect(createWorkspaceAction("   ")).resolves.toEqual({
       ok: false,
       error: "Name cannot be empty.",
     });
-    await expect(createGoatWorkspaceAction(null)).resolves.toEqual({
+    await expect(createWorkspaceAction(null)).resolves.toEqual({
       ok: false,
       error: "Name cannot be empty.",
     });
-    await expect(createGoatWorkspaceAction("x".repeat(81))).resolves.toEqual({
+    await expect(createWorkspaceAction("x".repeat(81))).resolves.toEqual({
       ok: false,
       error: "Name is too long (max 80 chars).",
     });
 
-    expect(currentGoatUserMock).not.toHaveBeenCalled();
+    expect(currentUserMock).not.toHaveBeenCalled();
     expect(getWorkOSClientMock).not.toHaveBeenCalled();
   });
 
   it("creates a WorkOS organization and membership, persists Goat resources, and activates it", async () => {
-    const result = await createGoatWorkspaceAction("  Analytical Co  ");
+    const result = await createWorkspaceAction("  Analytical Co  ");
 
     expect(result).toEqual({ ok: true, workspaceId: "goat_ws_new" });
     expect(workos.organizations.createOrganization).toHaveBeenCalledWith(
@@ -168,7 +168,7 @@ describe("createGoatWorkspaceAction", () => {
       userId: "user_123",
       roleSlug: "admin",
     });
-    expect(createGoatWorkspaceForUserMock).toHaveBeenCalledWith({
+    expect(createWorkspaceForUserMock).toHaveBeenCalledWith({
       workspaceId: "goat_ws_new",
       workosOrganizationId: "org_new",
       userWorkosId: "user_123",
@@ -191,9 +191,9 @@ describe("createGoatWorkspaceAction", () => {
   });
 
   it("keeps each owner to one Hobby workspace", async () => {
-    hasOwnedGoatHobbyWorkspaceMock.mockResolvedValue(true);
+    hasOwnedHobbyWorkspaceMock.mockResolvedValue(true);
 
-    await expect(createGoatWorkspaceAction("Another workspace")).resolves.toEqual({
+    await expect(createWorkspaceAction("Another workspace")).resolves.toEqual({
       ok: false,
       error: "Hobby includes one workspace. Upgrade your Hobby workspace to Pro to create another.",
     });
@@ -201,10 +201,10 @@ describe("createGoatWorkspaceAction", () => {
   });
 
   it("deletes a newly created WorkOS organization when local persistence fails", async () => {
-    createGoatWorkspaceForUserMock.mockRejectedValue(new Error("database unavailable"));
+    createWorkspaceForUserMock.mockRejectedValue(new Error("database unavailable"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(createGoatWorkspaceAction("Analytical Co")).resolves.toEqual({
+    await expect(createWorkspaceAction("Analytical Co")).resolves.toEqual({
       ok: false,
       error: "Could not create the organization. Please try again.",
     });
@@ -218,13 +218,13 @@ describe("createGoatWorkspaceAction", () => {
     switchToOrganizationMock.mockRejectedValue(new Error("session refresh unavailable"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(createGoatWorkspaceAction("Analytical Co")).resolves.toEqual({
+    await expect(createWorkspaceAction("Analytical Co")).resolves.toEqual({
       ok: false,
       error:
         "The organization was created, but could not be activated. Please try switching to it.",
     });
 
-    expect(createGoatWorkspaceForUserMock).toHaveBeenCalledOnce();
+    expect(createWorkspaceForUserMock).toHaveBeenCalledOnce();
     expect(workos.organizations.deleteOrganization).not.toHaveBeenCalled();
     expect(cookieStore.set).not.toHaveBeenCalled();
     expect(revalidatePathMock).toHaveBeenCalledWith("/", "layout");
@@ -232,12 +232,12 @@ describe("createGoatWorkspaceAction", () => {
   });
 });
 
-describe("switchGoatWorkspaceAction", () => {
+describe("switchWorkspaceAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    currentGoatUserMock.mockResolvedValue(context as never);
+    currentUserMock.mockResolvedValue(context as never);
     switchToOrganizationMock.mockResolvedValue({} as never);
-    listGoatWorkspacesForUserMock.mockResolvedValue([
+    listWorkspacesForUserMock.mockResolvedValue([
       {
         workspace: {
           id: "goat_ws_next",
@@ -247,13 +247,11 @@ describe("switchGoatWorkspaceAction", () => {
         role: "member",
       },
     ] as never);
-    listAccessibleGoatBrainsMock.mockResolvedValue([
-      { id: "general-next", slug: "general" },
-    ] as never);
+    listAccessibleBrainsMock.mockResolvedValue([{ id: "general-next", slug: "general" }] as never);
   });
 
   it("switches the WorkOS session before updating Goat's active cookies", async () => {
-    await expect(switchGoatWorkspaceAction("goat_ws_next")).resolves.toEqual({ ok: true });
+    await expect(switchWorkspaceAction("goat_ws_next")).resolves.toEqual({ ok: true });
 
     expect(switchToOrganizationMock).toHaveBeenCalledWith("org_next", {
       revalidationStrategy: "none",
@@ -274,9 +272,9 @@ describe("switchGoatWorkspaceAction", () => {
   });
 
   it("rejects a workspace that is not one of the user's memberships", async () => {
-    listGoatWorkspacesForUserMock.mockResolvedValue([]);
+    listWorkspacesForUserMock.mockResolvedValue([]);
 
-    await expect(switchGoatWorkspaceAction("goat_ws_other")).resolves.toEqual({
+    await expect(switchWorkspaceAction("goat_ws_other")).resolves.toEqual({
       ok: false,
       error: "You do not have access to that workspace.",
     });
@@ -289,7 +287,7 @@ describe("switchGoatWorkspaceAction", () => {
     switchToOrganizationMock.mockRejectedValue(new Error("session refresh unavailable"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(switchGoatWorkspaceAction("goat_ws_next")).resolves.toEqual({
+    await expect(switchWorkspaceAction("goat_ws_next")).resolves.toEqual({
       ok: false,
       error: "Could not switch organizations. Please try again.",
     });
@@ -305,27 +303,27 @@ describe("switchGoatWorkspaceAction", () => {
     });
     switchToOrganizationMock.mockRejectedValue(redirectError);
 
-    await expect(switchGoatWorkspaceAction("goat_ws_next")).rejects.toBe(redirectError);
+    await expect(switchWorkspaceAction("goat_ws_next")).rejects.toBe(redirectError);
 
     expect(cookieStore.set).not.toHaveBeenCalled();
     expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 });
 
-describe("inviteToGoatWorkspaceAction", () => {
+describe("inviteToWorkspaceAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    currentGoatUserMock.mockResolvedValue(context as never);
+    currentUserMock.mockResolvedValue(context as never);
     getWorkOSClientMock.mockReturnValue(workos as never);
-    listGoatWorkspaceMembersMock.mockResolvedValue([
+    listWorkspaceMembersMock.mockResolvedValue([
       { member: { role: "admin" }, user: { workosUserId: "user_123" } },
     ] as never);
   });
 
   it("keeps Hobby to its owner-only member cap", async () => {
-    getGoatWorkspacePlanMock.mockResolvedValue("hobby");
+    getWorkspacePlanMock.mockResolvedValue("hobby");
 
-    await expect(inviteToGoatWorkspaceAction("teammate@example.com")).resolves.toEqual({
+    await expect(inviteToWorkspaceAction("teammate@example.com")).resolves.toEqual({
       ok: false,
       error: "Hobby includes one member. Upgrade to Pro to invite teammates.",
     });
@@ -333,9 +331,9 @@ describe("inviteToGoatWorkspaceAction", () => {
   });
 
   it("allows a Pro admin to invite within the small-team cap", async () => {
-    getGoatWorkspacePlanMock.mockResolvedValue("pro");
+    getWorkspacePlanMock.mockResolvedValue("pro");
 
-    await expect(inviteToGoatWorkspaceAction("teammate@example.com")).resolves.toEqual({
+    await expect(inviteToWorkspaceAction("teammate@example.com")).resolves.toEqual({
       ok: true,
     });
     expect(workos.userManagement.sendInvitation).toHaveBeenCalledWith({

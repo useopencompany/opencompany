@@ -1,39 +1,35 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { currentGoatUser } from "@/lib/auth";
-import { createDbGoatChatStore } from "@/lib/chat";
-import {
-  getActiveGoatChatStream,
-  getGoatChatStreamContext,
-  isGoatChatResumeEnabled,
-} from "@/lib/chat-streams";
+import { currentUser } from "@/lib/auth";
+import { createDbChatStore } from "@/lib/chat";
+import { getActiveChatStream, getChatStreamContext, isChatResumeEnabled } from "@/lib/chat-streams";
 import { GET } from "./route";
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
 }));
 
 vi.mock("@/lib/chat", () => ({
-  createDbGoatChatStore: vi.fn(),
+  createDbChatStore: vi.fn(),
 }));
 
 vi.mock("@/lib/chat-streams", () => ({
-  getActiveGoatChatStream: vi.fn(),
-  getGoatChatStreamContext: vi.fn(),
-  isGoatChatResumeEnabled: vi.fn(),
+  getActiveChatStream: vi.fn(),
+  getChatStreamContext: vi.fn(),
+  isChatResumeEnabled: vi.fn(),
 }));
 
 describe("GET /api/chat/[sessionId]/stream", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(currentGoatUser as unknown as () => Promise<unknown>).mockResolvedValue({
+    vi.mocked(currentUser as unknown as () => Promise<unknown>).mockResolvedValue({
       user: { workosUserId: "user_1" },
     });
-    vi.mocked(isGoatChatResumeEnabled).mockReturnValue(true);
+    vi.mocked(isChatResumeEnabled).mockReturnValue(true);
     mockFindOpenSession({ id: "session_1" });
   });
 
   it("rejects unauthenticated requests", async () => {
-    vi.mocked(currentGoatUser as unknown as () => Promise<unknown>).mockResolvedValue(null);
+    vi.mocked(currentUser as unknown as () => Promise<unknown>).mockResolvedValue(null);
 
     const response = await GET(streamRequest(), params("session_1"));
 
@@ -41,7 +37,7 @@ describe("GET /api/chat/[sessionId]/stream", () => {
   });
 
   it("returns 204 when resume is not configured", async () => {
-    vi.mocked(isGoatChatResumeEnabled).mockReturnValue(false);
+    vi.mocked(isChatResumeEnabled).mockReturnValue(false);
 
     const response = await GET(streamRequest(), params("session_1"));
 
@@ -54,11 +50,11 @@ describe("GET /api/chat/[sessionId]/stream", () => {
     const response = await GET(streamRequest(), params("session_1"));
 
     expect(response.status).toBe(204);
-    expect(getActiveGoatChatStream).not.toHaveBeenCalled();
+    expect(getActiveChatStream).not.toHaveBeenCalled();
   });
 
   it("returns 204 when the session has no active stream", async () => {
-    vi.mocked(getActiveGoatChatStream).mockResolvedValue(null);
+    vi.mocked(getActiveChatStream).mockResolvedValue(null);
 
     const response = await GET(streamRequest(), params("session_1"));
 
@@ -66,9 +62,9 @@ describe("GET /api/chat/[sessionId]/stream", () => {
   });
 
   it("replays the active resumable stream", async () => {
-    vi.mocked(getActiveGoatChatStream).mockResolvedValue("goat_chat_stream_1");
+    vi.mocked(getActiveChatStream).mockResolvedValue("goat_chat_stream_1");
     const resumeExistingStream = vi.fn(async () => stringStream(['data: {"type":"start"}\n\n']));
-    vi.mocked(getGoatChatStreamContext).mockReturnValue({
+    vi.mocked(getChatStreamContext).mockReturnValue({
       resumeExistingStream,
     } as never);
 
@@ -90,7 +86,7 @@ function streamRequest() {
 }
 
 function mockFindOpenSession(session: { id: string } | null) {
-  vi.mocked(createDbGoatChatStore).mockReturnValue({
+  vi.mocked(createDbChatStore).mockReturnValue({
     findOpenSession: vi.fn(async () => session),
   } as never);
 }

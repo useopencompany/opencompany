@@ -8,36 +8,30 @@ import {
 } from "@opencompany/observability";
 import { flushBraintrust } from "@opencompany/observability/braintrust";
 import { flushLatitude } from "@opencompany/telemetry/latitude";
-import {
-  registerGoatNodeObservability,
-  shutdownGoatNodeObservability,
-} from "@opencompany/telemetry/node";
+import { registerNodeObservability, shutdownNodeObservability } from "@opencompany/telemetry/node";
 import * as Sentry from "@sentry/bun";
-import { startGoatAttioFlushWorker } from "./attio-flush-worker";
-import { setGoatBrainImportWakeup, startGoatBrainImportWorker } from "./brain-import-worker";
-import { setGoatBrainIngestWakeup, startGoatBrainIngestWorker } from "./brain-ingest-worker";
+import { startAttioFlushWorker } from "./attio-flush-worker";
+import { setBrainImportWakeup, startBrainImportWorker } from "./brain-import-worker";
+import { setBrainIngestWakeup, startBrainIngestWorker } from "./brain-ingest-worker";
 import { assertRunnerDbConfig, closeDb } from "./db";
 import { loadEnv } from "./env";
-import { startGoatFathomPollWorker } from "./fathom-poll-worker";
-import { startGoatGitHubFlushWorker } from "./github-flush-worker";
-import { startGoatGmailFlushWorker } from "./gmail-flush-worker";
-import { startGoatGmailPollWorker } from "./gmail-poll-worker";
-import {
-  setGoatGoogleDriveSyncWakeup,
-  startGoatGoogleDriveSyncWorker,
-} from "./google-drive-sync-worker";
-import { startGoatGranolaPollWorker } from "./granola-poll-worker";
-import { startGoatHubspotFlushWorker } from "./hubspot-flush-worker";
-import { startGoatLinearFlushWorker } from "./linear-flush-worker";
+import { startFathomPollWorker } from "./fathom-poll-worker";
+import { startGitHubFlushWorker } from "./github-flush-worker";
+import { startGmailFlushWorker } from "./gmail-flush-worker";
+import { startGmailPollWorker } from "./gmail-poll-worker";
+import { setGoogleDriveSyncWakeup, startGoogleDriveSyncWorker } from "./google-drive-sync-worker";
+import { startGranolaPollWorker } from "./granola-poll-worker";
+import { startHubspotFlushWorker } from "./hubspot-flush-worker";
+import { startLinearFlushWorker } from "./linear-flush-worker";
 import { settleExpiredBrokerTokens } from "./llm-broker-tokens";
 import { assertPreviewIdentity } from "./preview-guard";
-import { startGoatTaskScheduleWorker } from "./scheduler";
+import { startTaskScheduleWorker } from "./scheduler";
 import { createServer } from "./server";
-import { startGoatSlackFlushWorker } from "./slack-flush-worker";
+import { startSlackFlushWorker } from "./slack-flush-worker";
 import {
-  setGoatCodexChatWakeup,
-  startGoatCodexChatWorker,
-  sweepTerminalGoatCodexChatSandboxes,
+  setCodexChatWakeup,
+  startCodexChatWorker,
+  sweepTerminalCodexChatSandboxes,
 } from "./turn-worker";
 
 const logger = createLogger({
@@ -52,7 +46,7 @@ const RENDER_SHUTDOWN_DRAIN_MS = 240_000;
 const RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS = 30_000;
 
 initializeExceptionReporting();
-registerGoatNodeObservability({ serviceName: "opencompany-runner-goat" });
+registerNodeObservability({ serviceName: "opencompany-runner-goat" });
 installProcessErrorBackstop();
 
 const env = loadEnv();
@@ -82,51 +76,49 @@ const llmBrokerSweepTimer = setInterval(() => {
       });
     });
 }, LLM_BROKER_SWEEP_INTERVAL_MS);
-const goatCodexChatWorker = env.goatTaskWorkerEnabled
-  ? startGoatCodexChatWorker(env, {
+const codexChatWorker = env.taskWorkerEnabled
+  ? startCodexChatWorker(env, {
       sandboxSweep: () =>
-        sweepTerminalGoatCodexChatSandboxes({
-          idleTimeoutMs: env.goatCodexChatIdleTimeoutMs,
+        sweepTerminalCodexChatSandboxes({
+          idleTimeoutMs: env.codexChatIdleTimeoutMs,
         }),
     })
   : null;
-const goatBrainIngestWorker = env.goatTaskWorkerEnabled ? startGoatBrainIngestWorker(env) : null;
-const goatBrainImportWorker = env.goatTaskWorkerEnabled ? startGoatBrainImportWorker(env) : null;
-const goatSlackFlushWorker = env.goatTaskWorkerEnabled ? startGoatSlackFlushWorker() : null;
-const goatLinearFlushWorker = env.goatTaskWorkerEnabled ? startGoatLinearFlushWorker() : null;
-const goatGitHubFlushWorker = env.goatTaskWorkerEnabled ? startGoatGitHubFlushWorker() : null;
-const goatHubspotFlushWorker = env.goatTaskWorkerEnabled ? startGoatHubspotFlushWorker(env) : null;
-const goatAttioFlushWorker = env.goatTaskWorkerEnabled ? startGoatAttioFlushWorker() : null;
-const goatGmailPollWorker = env.goatTaskWorkerEnabled ? startGoatGmailPollWorker(env) : null;
-const goatGmailFlushWorker = env.goatTaskWorkerEnabled ? startGoatGmailFlushWorker(env) : null;
-const goatGranolaPollWorker = env.goatTaskWorkerEnabled ? startGoatGranolaPollWorker() : null;
-const goatFathomPollWorker = env.goatTaskWorkerEnabled ? startGoatFathomPollWorker() : null;
-const goatGoogleDriveSyncWorker = env.goatTaskWorkerEnabled
-  ? startGoatGoogleDriveSyncWorker(env)
-  : null;
-const goatTaskScheduleWorker = goatCodexChatWorker
-  ? startGoatTaskScheduleWorker({
+const brainIngestWorker = env.taskWorkerEnabled ? startBrainIngestWorker(env) : null;
+const brainImportWorker = env.taskWorkerEnabled ? startBrainImportWorker(env) : null;
+const slackFlushWorker = env.taskWorkerEnabled ? startSlackFlushWorker() : null;
+const linearFlushWorker = env.taskWorkerEnabled ? startLinearFlushWorker() : null;
+const gitHubFlushWorker = env.taskWorkerEnabled ? startGitHubFlushWorker() : null;
+const hubspotFlushWorker = env.taskWorkerEnabled ? startHubspotFlushWorker(env) : null;
+const attioFlushWorker = env.taskWorkerEnabled ? startAttioFlushWorker() : null;
+const gmailPollWorker = env.taskWorkerEnabled ? startGmailPollWorker(env) : null;
+const gmailFlushWorker = env.taskWorkerEnabled ? startGmailFlushWorker(env) : null;
+const granolaPollWorker = env.taskWorkerEnabled ? startGranolaPollWorker() : null;
+const fathomPollWorker = env.taskWorkerEnabled ? startFathomPollWorker() : null;
+const googleDriveSyncWorker = env.taskWorkerEnabled ? startGoogleDriveSyncWorker(env) : null;
+const taskScheduleWorker = codexChatWorker
+  ? startTaskScheduleWorker({
       onTaskCreated: () => {
-        goatCodexChatWorker.notify();
+        codexChatWorker.notify();
       },
     })
   : null;
-if (!goatCodexChatWorker) {
+if (!codexChatWorker) {
   logger.info("Goat task worker disabled", {
     event: "opencompany.goat_task_worker_disabled",
   });
 }
-setGoatBrainIngestWakeup(() => {
-  goatBrainIngestWorker?.notify();
+setBrainIngestWakeup(() => {
+  brainIngestWorker?.notify();
 });
-setGoatGoogleDriveSyncWakeup(() => {
-  goatGoogleDriveSyncWorker?.notify();
+setGoogleDriveSyncWakeup(() => {
+  googleDriveSyncWorker?.notify();
 });
-setGoatBrainImportWakeup(() => {
-  goatBrainImportWorker?.notify();
+setBrainImportWakeup(() => {
+  brainImportWorker?.notify();
 });
-setGoatCodexChatWakeup(() => {
-  goatCodexChatWorker?.notify();
+setCodexChatWakeup(() => {
+  codexChatWorker?.notify();
 });
 const server = createServer(env);
 
@@ -135,17 +127,17 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     logger.info("Runner shutdown started", {
       event: "opencompany.runner_shutdown_started",
       signal,
-      active_goat_brain_ingest_count: goatBrainIngestWorker?.activeCount() ?? 0,
-      active_goat_google_drive_sync_count: goatGoogleDriveSyncWorker?.activeCount() ?? 0,
-      active_goat_brain_import_count: goatBrainImportWorker?.activeCount() ?? 0,
-      active_goat_codex_chat_count: goatCodexChatWorker?.activeCount() ?? 0,
+      active_goat_brain_ingest_count: brainIngestWorker?.activeCount() ?? 0,
+      active_goat_google_drive_sync_count: googleDriveSyncWorker?.activeCount() ?? 0,
+      active_goat_brain_import_count: brainImportWorker?.activeCount() ?? 0,
+      active_goat_codex_chat_count: codexChatWorker?.activeCount() ?? 0,
     });
     clearInterval(llmBrokerSweepTimer);
     // Stop accepting work and drain in-flight requests first, then close the DB pool so
     // no checked-out connection is cut mid-query, then flush telemetry.
     void Promise.allSettled([
-      goatTaskScheduleWorker?.stop() ?? Promise.resolve(),
-      goatCodexChatWorker?.stop({
+      taskScheduleWorker?.stop() ?? Promise.resolve(),
+      codexChatWorker?.stop({
         handoffAfterMs: RENDER_SHUTDOWN_DRAIN_MS,
         postHandoffWaitMs: RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS,
         onHandoff: (activeCount) => {
@@ -155,18 +147,18 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
           });
         },
       }) ?? Promise.resolve(),
-      goatBrainIngestWorker?.stop() ?? Promise.resolve(),
-      goatBrainImportWorker?.stop() ?? Promise.resolve(),
-      goatSlackFlushWorker?.stop() ?? Promise.resolve(),
-      goatLinearFlushWorker?.stop() ?? Promise.resolve(),
-      goatGitHubFlushWorker?.stop() ?? Promise.resolve(),
-      goatHubspotFlushWorker?.stop() ?? Promise.resolve(),
-      goatAttioFlushWorker?.stop() ?? Promise.resolve(),
-      goatGmailPollWorker?.stop() ?? Promise.resolve(),
-      goatGmailFlushWorker?.stop() ?? Promise.resolve(),
-      goatGranolaPollWorker?.stop() ?? Promise.resolve(),
-      goatFathomPollWorker?.stop() ?? Promise.resolve(),
-      goatGoogleDriveSyncWorker?.stop() ?? Promise.resolve(),
+      brainIngestWorker?.stop() ?? Promise.resolve(),
+      brainImportWorker?.stop() ?? Promise.resolve(),
+      slackFlushWorker?.stop() ?? Promise.resolve(),
+      linearFlushWorker?.stop() ?? Promise.resolve(),
+      gitHubFlushWorker?.stop() ?? Promise.resolve(),
+      hubspotFlushWorker?.stop() ?? Promise.resolve(),
+      attioFlushWorker?.stop() ?? Promise.resolve(),
+      gmailPollWorker?.stop() ?? Promise.resolve(),
+      gmailFlushWorker?.stop() ?? Promise.resolve(),
+      granolaPollWorker?.stop() ?? Promise.resolve(),
+      fathomPollWorker?.stop() ?? Promise.resolve(),
+      googleDriveSyncWorker?.stop() ?? Promise.resolve(),
       server.close(),
     ])
       .then(() => Promise.allSettled([closeDb()]))
@@ -179,7 +171,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
           flushObservability(),
           flushBraintrust(),
           flushLatitude(),
-          shutdownGoatNodeObservability(),
+          shutdownNodeObservability(),
         ]);
       })
       .finally(() => {

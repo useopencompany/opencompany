@@ -1,14 +1,11 @@
 import {
+  type AttioApiKeyCredentialPayload,
   GOAT_ATTIO_CREDENTIAL_KIND,
   GOAT_ATTIO_OBJECT_SLUGS,
   GOAT_ATTIO_PROVIDER,
-  type GoatAttioApiKeyCredentialPayload,
 } from "@opencompany/db/attio";
-import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-} from "@opencompany/db/integrations";
-import type { GoatAttioObjectType } from "@opencompany/db/schema";
+import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
+import type { AttioObjectType } from "@opencompany/db/schema";
 import { createLogger } from "@opencompany/observability";
 import { getDb } from "./db";
 
@@ -51,7 +48,7 @@ export async function loadAttioApiKey(input: {
   userWorkosId: string;
   integrationId: string;
 }): Promise<string | null> {
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId: input.userWorkosId,
     integrationId: input.integrationId,
     provider: GOAT_ATTIO_PROVIDER,
@@ -66,7 +63,7 @@ export async function loadAttioApiKey(input: {
     return null;
   });
   if (!credential) return null;
-  const payload = credential.payload as GoatAttioApiKeyCredentialPayload;
+  const payload = credential.payload as AttioApiKeyCredentialPayload;
   return typeof payload.apiKey === "string" && payload.apiKey ? payload.apiKey : null;
 }
 
@@ -74,7 +71,7 @@ export async function markAttioNeedsReauth(
   input: { userWorkosId: string; integrationId: string },
   reason: string,
 ) {
-  await markGoatIntegrationStatus({
+  await markIntegrationStatus({
     userWorkosId: input.userWorkosId,
     integrationId: input.integrationId,
     provider: GOAT_ATTIO_PROVIDER,
@@ -96,7 +93,7 @@ export async function markAttioNeedsReauth(
 // integration.
 export async function fetchAttioRecordSnapshot(input: {
   apiKey: string;
-  objectType: GoatAttioObjectType;
+  objectType: AttioObjectType;
   recordId: string;
 }): Promise<AttioRecordSnapshot | null> {
   try {
@@ -145,7 +142,7 @@ export async function fetchAttioRecordSnapshot(input: {
 // an empty map on failure; activity lines then fall back to "an attribute".
 export async function fetchAttioAttributeTitles(input: {
   apiKey: string;
-  objectType: GoatAttioObjectType;
+  objectType: AttioObjectType;
 }): Promise<Map<string, string>> {
   const titles = new Map<string, string>();
   try {

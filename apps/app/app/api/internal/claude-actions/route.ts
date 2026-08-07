@@ -1,6 +1,6 @@
-import { verifyGoatClaudeActionGatewayTicket } from "@opencompany/agent-runtime";
+import { verifyClaudeActionGatewayTicket } from "@opencompany/agent-runtime";
 import { createMcpHandler } from "mcp-handler";
-import { registerGoatClaudeActionTools } from "@/lib/claude-actions";
+import { registerClaudeActionTools } from "@/lib/claude-actions";
 
 export const runtime = "nodejs";
 export const maxDuration = 150;
@@ -23,7 +23,7 @@ async function handleClaudeActionsRequest(request: Request) {
 
   const ticket = request.headers.get("x-goat-action-ticket");
   const payload = ticket
-    ? verifyGoatClaudeActionGatewayTicket({ ticket, secret: internalToken })
+    ? verifyClaudeActionGatewayTicket({ ticket, secret: internalToken })
     : null;
   if (!payload) {
     return Response.json({ error: "Unauthorized." }, { status: 401 });
@@ -31,7 +31,7 @@ async function handleClaudeActionsRequest(request: Request) {
 
   const handler = createMcpHandler(
     (server) => {
-      registerGoatClaudeActionTools(server, {
+      registerClaudeActionTools(server, {
         codexChatSessionId: payload.codexChatSessionId,
         codexChatTurnId: payload.codexChatTurnId,
         signal: request.signal,

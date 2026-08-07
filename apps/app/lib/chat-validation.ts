@@ -1,5 +1,5 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import { normalizeGoatModel } from "@/lib/model-options";
+import { normalizeModel } from "@/lib/model-options";
 
 export const GOAT_CHAT_PROMPT_MAX_LENGTH = 10_000;
 
@@ -8,19 +8,19 @@ export const GOAT_CHAT_PROMPT_MAX_LENGTH = 10_000;
 export const GOAT_CHAT_OUT_OF_CREDITS_MESSAGE =
   "Your workspace is out of credits. Hobby usage refreshes on the first of the month; Pro admins can add credits in Settings → Billing.";
 
-export type GoatChatInput = {
+export type ChatInput = {
   prompt: string;
   model: AgentModelId;
   sessionId: string | null;
 };
 
-export function validateGoatChatInput(input: {
+export function validateChatInput(input: {
   prompt: unknown;
   model: unknown;
   sessionId?: unknown;
   // Attachment-only sends are allowed: the file parts carry the payload.
   hasAttachments?: boolean;
-}): { ok: true; value: GoatChatInput } | { ok: false; error: string } {
+}): { ok: true; value: ChatInput } | { ok: false; error: string } {
   const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
   if (!prompt && !input.hasAttachments) {
     return { ok: false, error: "Enter a message before sending." };
@@ -38,7 +38,7 @@ export function validateGoatChatInput(input: {
     ok: true,
     value: {
       prompt,
-      model: normalizeGoatModel(input.model),
+      model: normalizeModel(input.model),
       sessionId: rawSessionId || null,
     },
   };

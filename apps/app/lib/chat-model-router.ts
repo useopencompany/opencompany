@@ -1,11 +1,11 @@
 import type { AgentModelId } from "@opencompany/agent-runtime";
 import type {
-  GoatChatModelRoutingErrorCategory,
-  GoatChatModelRoutingOutcome,
-  GoatChatModelRoutingReason,
-  GoatChatModelRoutingTier,
+  ChatModelRoutingErrorCategory,
+  ChatModelRoutingOutcome,
+  ChatModelRoutingReason,
+  ChatModelRoutingTier,
 } from "@opencompany/db/schema";
-import { createGoatGatewayAttribution, goatGatewayProviderOptions } from "@opencompany/telemetry";
+import { createGatewayAttribution, gatewayProviderOptions } from "@opencompany/telemetry";
 import { latitudeTelemetry } from "@opencompany/telemetry/latitude";
 import {
   APICallError,
@@ -63,16 +63,16 @@ Choose "frontier" for:
 
 Return only the requested structured result.`;
 
-export type GoatChatModelRoutingResult = {
+export type ChatModelRoutingResult = {
   model: AgentModelId;
-  tier: GoatChatModelRoutingTier;
-  reason: GoatChatModelRoutingReason;
+  tier: ChatModelRoutingTier;
+  reason: ChatModelRoutingReason;
   classifier: {
     model: typeof GOAT_CHAT_ROUTER_MODEL;
     durationMs: number;
-    outcome: GoatChatModelRoutingOutcome;
+    outcome: ChatModelRoutingOutcome;
     usage?: LanguageModelUsage;
-    errorCategory?: GoatChatModelRoutingErrorCategory | undefined;
+    errorCategory?: ChatModelRoutingErrorCategory | undefined;
     finishReason?: string | undefined;
     providerStatusCode?: number | undefined;
     providerRetryable?: boolean | undefined;
@@ -81,7 +81,7 @@ export type GoatChatModelRoutingResult = {
 
 type GenerateObject = typeof generateObject;
 
-export async function resolveAutoGoatModel(
+export async function resolveAutoModel(
   input: {
     prompt: string;
     attachments: readonly { kind: string }[];
@@ -93,12 +93,12 @@ export async function resolveAutoGoatModel(
     generateObjectImpl?: GenerateObject;
     timeoutMs?: number;
   } = {},
-): Promise<GoatChatModelRoutingResult> {
+): Promise<ChatModelRoutingResult> {
   const startedAt = performance.now();
   const skipped = (
     model: AgentModelId,
     reason: "pdf_attachment" | "attachment",
-  ): GoatChatModelRoutingResult => ({
+  ): ChatModelRoutingResult => ({
     model,
     tier: "frontier",
     reason,
@@ -127,8 +127,8 @@ export async function resolveAutoGoatModel(
       maxOutputTokens: 100,
       temperature: 0,
       abortSignal,
-      providerOptions: goatGatewayProviderOptions(
-        createGoatGatewayAttribution({
+      providerOptions: gatewayProviderOptions(
+        createGatewayAttribution({
           userWorkosId: input.userWorkosId,
           feature: "chat-router",
           tags: ["stage:routing"],
@@ -207,8 +207,8 @@ export async function resolveAutoGoatModel(
   }
 }
 
-type GoatChatModelRoutingErrorDetails = {
-  errorCategory: GoatChatModelRoutingErrorCategory;
+type ChatModelRoutingErrorDetails = {
+  errorCategory: ChatModelRoutingErrorCategory;
   finishReason?: string | undefined;
   providerStatusCode?: number | undefined;
   providerRetryable?: boolean | undefined;
@@ -218,8 +218,8 @@ function fallback(
   startedAt: number,
   outcome: "timeout" | "error" | "invalid",
   usage?: LanguageModelUsage,
-  details?: GoatChatModelRoutingErrorDetails,
-): GoatChatModelRoutingResult {
+  details?: ChatModelRoutingErrorDetails,
+): ChatModelRoutingResult {
   return {
     model: GOAT_CHAT_FRONTIER_MODEL,
     tier: "frontier",
@@ -244,10 +244,7 @@ function isRouterTier(value: unknown): value is "standard" | "frontier" {
 
 function isRouterReason(
   value: unknown,
-): value is Exclude<
-  GoatChatModelRoutingReason,
-  "pdf_attachment" | "attachment" | "router_fallback"
-> {
+): value is Exclude<ChatModelRoutingReason, "pdf_attachment" | "attachment" | "router_fallback"> {
   return (
     value === "simple_answer" ||
     value === "summarization" ||

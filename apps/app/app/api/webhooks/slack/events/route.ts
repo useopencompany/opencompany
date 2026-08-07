@@ -1,17 +1,14 @@
+import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
+import type { SlackChannelType } from "@opencompany/db/schema";
 import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-} from "@opencompany/db/integrations";
-import type { GoatSlackChannelType } from "@opencompany/db/schema";
-import {
-  type GoatSlackMessageEventInsert,
-  goatSlackSelectedConversationIds,
-  insertGoatSlackMessageEvents,
-  listEnabledGoatSlackBrainSourceRoutes,
-  listGoatSlackIntegrationsForTeam,
+  insertSlackMessageEvents,
+  listEnabledSlackBrainSourceRoutes,
+  listSlackIntegrationsForTeam,
+  type SlackMessageEventInsert,
+  slackSelectedConversationIds,
 } from "@opencompany/db/slack";
 import { NextResponse } from "next/server";
-import { verifyGoatSlackEventSignature } from "@/lib/integrations/slack-signature";
+import { verifySlackEventSignature } from "@/lib/integrations/slack-signature";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,7 +33,7 @@ type SlackEnvelope = {
 
 export async function POST(request: Request) {
   const rawBody = await request.text();
-  const verified = verifyGoatSlackEventSignature({
+  const verified = verifySlackEventSignature({
     rawBody,
     timestamp: request.headers.get("x-slack-request-timestamp"),
     signature: request.headers.get("x-slack-signature"),
@@ -91,14 +88,14 @@ async function handleEventCallback(teamId: string, event: Record<string, unknown
 }
 
 async function handleRevocation(teamId: string, event: Record<string, unknown>) {
-  const integrations = await listGoatSlackIntegrationsForTeam(teamId);
+  const integrations = await listSlackIntegrationsForTeam(teamId);
   const revokedUserIds = event.type === "tokens_revoked" ? extractRevokedOauthUserIds(event) : null;
 
   let marked = 0;
   for (const integration of integrations) {
     if (integration.status === "disconnected") continue;
     if (revokedUserIds) {
-      const credential = await loadGoatIntegrationCredential({
+      const credential = await loadIntegrationCredential({
         userWorkosId: integration.userWorkosId,
         integrationId: integration.id,
         provider: "slack",
@@ -107,7 +104,7 @@ async function handleRevocation(teamId: string, event: Record<string, unknown>) 
       const authedUserId = credential?.payload.authed_user_id;
       if (typeof authedUserId !== "string" || !revokedUserIds.has(authedUserId)) continue;
     }
-    await markGoatIntegrationStatus({
+    await markIntegrationStatus({
       userWorkosId: integration.userWorkosId,
       integrationId: integration.id,
       provider: "slack",
@@ -140,29 +137,29 @@ async function handleMessage(teamId: string, event: Record<string, unknown>) {
     return { ok: true, dropped: true };
   }
 
-  const integrations = await listGoatSlackIntegrationsForTeam(teamId);
+  const integrations = await listSlackIntegrationsForTeam(teamId);
   const connected = integrations.filter((integration) => integration.status === "connected");
   if (connected.length === 0) return { ok: true, dropped: true };
 
-  const routes = await listEnabledGoatSlackBrainSourceRoutes(
+  const routes = await listEnabledSlackBrainSourceRoutes(
     connected.map((integration) => integration.id),
   );
   const matchedIntegrationIds = new Set(
     routes
-      .filter((route) => goatSlackSelectedConversationIds(route.config).has(channelId))
+      .filter((route) => slackSelectedConversationIds(route.config).has(channelId))
       .map((route) => route.integrationId),
   );
   if (matchedIntegrationIds.size === 0) return { ok: true, dropped: true };
 
   const eventTimeSeconds = Number(messageTs);
-  const inserts: GoatSlackMessageEventInsert[] = connected
+  const inserts: SlackMessageEventInsert[] = connected
     .filter((integration) => matchedIntegrationIds.has(integration.id))
     .map((integration) => ({
       integrationId: integration.id,
       userWorkosId: integration.userWorkosId,
       teamId,
       channelId,
-      channelType: channelType as GoatSlackChannelType,
+      channelType: channelType as SlackChannelType,
       messageTs,
       threadTs: typeof event.thread_ts === "string" ? event.thread_ts : null,
       slackUserId,
@@ -172,7 +169,7 @@ async function handleMessage(teamId: string, event: Record<string, unknown>) {
       eventTime: Number.isFinite(eventTimeSeconds) ? new Date(eventTimeSeconds * 1000) : new Date(),
     }));
 
-  const buffered = await insertGoatSlackMessageEvents(inserts);
+  const buffered = await insertSlackMessageEvents(inserts);
   return { ok: true, buffered };
 }
 

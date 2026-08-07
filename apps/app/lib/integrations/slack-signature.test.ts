@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { verifyGoatSlackEventSignature } from "./slack-signature";
+import { verifySlackEventSignature } from "./slack-signature";
 
 const DEFAULT_SECRET = "ingestion-secret";
 const BOT_SECRET = "bot-secret";
@@ -9,7 +9,7 @@ function sign(rawBody: string, timestamp: string, secret: string) {
   return `v0=${createHmac("sha256", secret).update(`v0:${timestamp}:${rawBody}`).digest("hex")}`;
 }
 
-describe("verifyGoatSlackEventSignature", () => {
+describe("verifySlackEventSignature", () => {
   const nowMs = 1_700_000_000_000;
   const timestamp = String(Math.floor(nowMs / 1000));
 
@@ -23,7 +23,7 @@ describe("verifyGoatSlackEventSignature", () => {
   it("verifies against the env secret by default", () => {
     const rawBody = JSON.stringify({ type: "event_callback" });
     expect(
-      verifyGoatSlackEventSignature({
+      verifySlackEventSignature({
         rawBody,
         timestamp,
         signature: sign(rawBody, timestamp, DEFAULT_SECRET),
@@ -35,7 +35,7 @@ describe("verifyGoatSlackEventSignature", () => {
   it("verifies against an explicit secret when provided", () => {
     const rawBody = "{}";
     expect(
-      verifyGoatSlackEventSignature({
+      verifySlackEventSignature({
         rawBody,
         timestamp,
         signature: sign(rawBody, timestamp, BOT_SECRET),
@@ -45,7 +45,7 @@ describe("verifyGoatSlackEventSignature", () => {
     ).toBe(true);
     // The explicit secret replaces the env secret rather than augmenting it.
     expect(
-      verifyGoatSlackEventSignature({
+      verifySlackEventSignature({
         rawBody,
         timestamp,
         signature: sign(rawBody, timestamp, DEFAULT_SECRET),
@@ -59,7 +59,7 @@ describe("verifyGoatSlackEventSignature", () => {
     const rawBody = "{}";
     delete process.env.SLACK_SIGNING_SECRET;
     expect(
-      verifyGoatSlackEventSignature({
+      verifySlackEventSignature({
         rawBody,
         timestamp,
         signature: sign(rawBody, timestamp, BOT_SECRET),
@@ -73,7 +73,7 @@ describe("verifyGoatSlackEventSignature", () => {
     const rawBody = "{}";
     const staleTimestamp = String(Math.floor(nowMs / 1000) - 600);
     expect(
-      verifyGoatSlackEventSignature({
+      verifySlackEventSignature({
         rawBody,
         timestamp: staleTimestamp,
         signature: sign(rawBody, staleTimestamp, BOT_SECRET),

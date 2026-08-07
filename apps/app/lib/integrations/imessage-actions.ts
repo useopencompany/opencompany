@@ -1,23 +1,23 @@
 "use server";
 
 import { randomInt } from "node:crypto";
-import { resolveGoatImessageProvider } from "@opencompany/core/imessage/provider";
+import { resolveImessageProvider } from "@opencompany/core/imessage/provider";
 import {
-  consumeGoatImessageChallenge,
-  getGoatImessagePairingChallenge,
-  incrementGoatImessageChallengeAttempts,
-  recordGoatImessageSend,
-  upsertGoatImessagePairingChallenge,
+  consumeImessageChallenge,
+  getImessagePairingChallenge,
+  incrementImessageChallengeAttempts,
+  recordImessageSend,
+  upsertImessagePairingChallenge,
 } from "@opencompany/db/imessage";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
-import type { GoatImessageProviderState } from "@/lib/integration-state";
+import { currentUser } from "@/lib/auth";
+import type { ImessageProviderState } from "@/lib/integration-state";
 import {
-  connectGoatImessageIntegration,
-  getGoatImessageIntegrationState,
-  hashGoatImessagePairingCode,
+  connectImessageIntegration,
+  getImessageIntegrationState,
+  hashImessagePairingCode,
   normalizeImessagePhoneE164,
-  verifyGoatImessagePairingCode,
+  verifyImessagePairingCode,
 } from "@/lib/integrations/imessage";
 
 const CODE_TTL_MS = 10 * 60 * 1000;
@@ -27,17 +27,17 @@ const MAX_CONFIRM_ATTEMPTS = 5;
 export type ImessagePairingActionResult = { ok: true } | { ok: false; error: string };
 
 export type ImessageConfirmActionResult =
-  | { ok: true; state: GoatImessageProviderState }
+  | { ok: true; state: ImessageProviderState }
   | { ok: false; error: string };
 
 export async function startImessagePairingAction(
   phone: string,
 ): Promise<ImessagePairingActionResult> {
-  const { user } = await currentGoatUser();
+  const { user } = await currentUser();
   if (!user.imessageEnabled) {
     return { ok: false, error: "Enable iMessage notifications in Preferences first." };
   }
-  const provider = resolveGoatImessageProvider();
+  const provider = resolveImessageProvider();
   if (!provider) {
     return { ok: false, error: "iMessage sending is not configured on this environment." };
   }
@@ -50,7 +50,7 @@ export async function startImessagePairingAction(
   }
 
   try {
-    const existing = await getGoatImessagePairingChallenge(user.workosUserId);
+    const existing = await getImessagePairingChallenge(user.workosUserId);
     if (
       existing &&
       !existing.consumedAt &&
@@ -63,10 +63,10 @@ export async function startImessagePairingAction(
     }
 
     const code = String(randomInt(100000, 1000000));
-    await upsertGoatImessagePairingChallenge({
+    await upsertImessagePairingChallenge({
       userWorkosId: user.workosUserId,
       phoneE164,
-      codeHash: hashGoatImessagePairingCode({
+      codeHash: hashImessagePairingCode({
         code,
         userWorkosId: user.workosUserId,
         phoneE164,
@@ -78,7 +78,7 @@ export async function startImessagePairingAction(
       to: phoneE164,
       text: `Your OpenCompany verification code is ${code}. It expires in 10 minutes.`,
     });
-    await recordGoatImessageSend({
+    await recordImessageSend({
       userWorkosId: user.workosUserId,
       source: "pairing",
       status: sendResult.ok ? "sent" : "failed",
@@ -97,14 +97,14 @@ export async function startImessagePairingAction(
 export async function confirmImessagePairingAction(
   code: string,
 ): Promise<ImessageConfirmActionResult> {
-  const { user } = await currentGoatUser();
+  const { user } = await currentUser();
   const trimmed = code.trim();
   if (!/^\d{6}$/.test(trimmed)) {
     return { ok: false, error: "Enter the 6-digit code from the message." };
   }
 
   try {
-    const challenge = await getGoatImessagePairingChallenge(user.workosUserId);
+    const challenge = await getImessagePairingChallenge(user.workosUserId);
     if (!challenge || challenge.consumedAt) {
       return { ok: false, error: "No pending verification. Request a new code." };
     }
@@ -115,14 +115,14 @@ export async function confirmImessagePairingAction(
       return { ok: false, error: "Too many attempts. Request a new code." };
     }
     if (
-      !verifyGoatImessagePairingCode({
+      !verifyImessagePairingCode({
         code: trimmed,
         userWorkosId: user.workosUserId,
         phoneE164: challenge.phoneE164,
         expectedHash: challenge.codeHash,
       })
     ) {
-      await incrementGoatImessageChallengeAttempts(challenge.id);
+      await incrementImessageChallengeAttempts(challenge.id);
       const remaining = MAX_CONFIRM_ATTEMPTS - challenge.attemptCount - 1;
       return {
         ok: false,
@@ -133,13 +133,13 @@ export async function confirmImessagePairingAction(
       };
     }
 
-    await consumeGoatImessageChallenge(challenge.id);
-    await connectGoatImessageIntegration({
+    await consumeImessageChallenge(challenge.id);
+    await connectImessageIntegration({
       userWorkosId: user.workosUserId,
       phoneE164: challenge.phoneE164,
     });
     revalidatePath("/", "layout");
-    return { ok: true, state: await getGoatImessageIntegrationState(user.workosUserId) };
+    return { ok: true, state: await getImessageIntegrationState(user.workosUserId) };
   } catch (error) {
     console.error("[goat-imessage] Failed to confirm pairing", error);
     return { ok: false, error: "Could not verify the code." };

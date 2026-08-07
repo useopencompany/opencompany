@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 
 const mocks = vi.hoisted(() => ({
   getDb: vi.fn(),
@@ -15,7 +15,7 @@ vi.mock("@vercel/blob", () => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
 }));
 
 import { GET } from "./route";
@@ -23,7 +23,7 @@ import { GET } from "./route";
 describe("GET /api/chat-screenshots/[sessionId]/[filename]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(currentGoatUser).mockResolvedValue({
+    vi.mocked(currentUser).mockResolvedValue({
       user: { workosUserId: "user_1" },
     } as never);
     mocks.getDb.mockReturnValue(queryDb([{ userWorkosId: "user_1" }]));
@@ -39,7 +39,7 @@ describe("GET /api/chat-screenshots/[sessionId]/[filename]", () => {
   });
 
   it("requires authentication before resolving private storage", async () => {
-    vi.mocked(currentGoatUser).mockResolvedValue(null as never);
+    vi.mocked(currentUser).mockResolvedValue(null as never);
 
     const response = await requestScreenshot();
 

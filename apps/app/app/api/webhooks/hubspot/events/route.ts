@@ -1,16 +1,16 @@
 import {
-  type GoatHubspotObjectEventInsert,
-  goatHubspotEventTypeFor,
-  goatHubspotRouteMatchesEvent,
-  goatHubspotSelectedObjectTypes,
-  insertGoatHubspotObjectEvents,
-  listEnabledGoatHubspotBrainSourceRoutes,
-  listGoatHubspotIntegrationsForPortal,
+  type HubspotObjectEventInsert,
+  hubspotEventTypeFor,
+  hubspotRouteMatchesEvent,
+  hubspotSelectedObjectTypes,
+  insertHubspotObjectEvents,
+  listEnabledHubspotBrainSourceRoutes,
+  listHubspotIntegrationsForPortal,
 } from "@opencompany/db/hubspot";
-import type { GoatHubspotEventAction, GoatHubspotObjectType } from "@opencompany/db/schema";
+import type { HubspotEventAction, HubspotObjectType } from "@opencompany/db/schema";
 import { NextResponse } from "next/server";
-import { verifyGoatHubspotWebhookSignature } from "@/lib/integrations/hubspot-signature";
-import { getGoatAppUrl } from "@/lib/workos";
+import { verifyHubspotWebhookSignature } from "@/lib/integrations/hubspot-signature";
+import { getAppUrl } from "@/lib/workos";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,9 +65,9 @@ export async function POST(request: Request) {
   const requestUrl = new URL(request.url);
   const canonicalUrl = new URL(
     `${requestUrl.pathname}${requestUrl.search}`,
-    getGoatAppUrl(),
+    getAppUrl(),
   ).toString();
-  const verified = verifyGoatHubspotWebhookSignature({
+  const verified = verifyHubspotWebhookSignature({
     method: "POST",
     candidateUris: request.url === canonicalUrl ? [request.url] : [request.url, canonicalUrl],
     rawBody,
@@ -117,28 +117,28 @@ async function handleHubspotEvents(events: HubspotWebhookEvent[]) {
 
   let buffered = 0;
   for (const [portalId, portalEvents] of byPortal) {
-    const integrations = await listGoatHubspotIntegrationsForPortal(portalId);
+    const integrations = await listHubspotIntegrationsForPortal(portalId);
     const connected = integrations.filter((integration) => integration.status === "connected");
     if (connected.length === 0) continue;
 
-    const routes = await listEnabledGoatHubspotBrainSourceRoutes(
+    const routes = await listEnabledHubspotBrainSourceRoutes(
       connected.map((integration) => integration.id),
     );
 
-    const inserts: GoatHubspotObjectEventInsert[] = [];
+    const inserts: HubspotObjectEventInsert[] = [];
     for (const event of portalEvents) {
       if (!event) continue;
-      const eventType = goatHubspotEventTypeFor({
+      const eventType = hubspotEventTypeFor({
         action: event.action,
         propertyName: event.propertyName,
       });
       const matchedIntegrationIds = new Set(
         routes
           .filter((route) => {
-            const selected = goatHubspotSelectedObjectTypes(route.config);
+            const selected = hubspotSelectedObjectTypes(route.config);
             if (selected.size === 0) return false;
             if (!selected.has(event.objectType)) return false;
-            return goatHubspotRouteMatchesEvent(route.config, eventType);
+            return hubspotRouteMatchesEvent(route.config, eventType);
           })
           .map((route) => route.integrationId),
       );
@@ -161,7 +161,7 @@ async function handleHubspotEvents(events: HubspotWebhookEvent[]) {
       }
     }
 
-    buffered += await insertGoatHubspotObjectEvents(inserts);
+    buffered += await insertHubspotObjectEvents(inserts);
   }
 
   return { ok: true, buffered };
@@ -169,10 +169,10 @@ async function handleHubspotEvents(events: HubspotWebhookEvent[]) {
 
 function parseHubspotEvent(event: HubspotWebhookEvent): {
   portalId: string;
-  objectType: GoatHubspotObjectType;
+  objectType: HubspotObjectType;
   objectId: string;
   deliveryId: string;
-  action: GoatHubspotEventAction;
+  action: HubspotEventAction;
   propertyName: string | null;
   payload: Record<string, unknown>;
   eventTime: Date;
@@ -229,8 +229,8 @@ function parseHubspotEvent(event: HubspotWebhookEvent): {
 }
 
 function parseSubscriptionType(value: string | undefined): {
-  objectType: GoatHubspotObjectType;
-  action: GoatHubspotEventAction;
+  objectType: HubspotObjectType;
+  action: HubspotEventAction;
 } | null {
   if (!value) return null;
   const [objectPart, actionPart] = value.split(".");

@@ -3,10 +3,10 @@ import { buildGitHubActivityAgentIngestPrompt } from "./brain-agent-ingest";
 import {
   type BufferedGitHubPullRequestEventRow,
   buildGitHubPullRequestWindowItem,
-  type GoatGitHubDueWindow,
+  type GitHubDueWindow,
 } from "./github-flush-worker";
 
-const window: GoatGitHubDueWindow = {
+const window: GitHubDueWindow = {
   integrationId: "gint_github_1",
   userWorkosId: "user_1",
   installationId: "777",

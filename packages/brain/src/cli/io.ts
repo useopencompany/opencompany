@@ -1,11 +1,11 @@
-import type { GoatBrainUsageEntry } from "../usage";
+import type { BrainUsageEntry } from "../usage";
 import type { ParsedArgs } from "./args";
 
 export type CommandResult = {
   code: number;
   data: unknown;
   text: string;
-  usage?: GoatBrainUsageEntry[];
+  usage?: BrainUsageEntry[];
 };
 
 export type CommandContext = {

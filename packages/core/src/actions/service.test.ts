@@ -1,12 +1,12 @@
 import { GOAT_ACTION_MAX_CALLS_PER_TURN } from "@opencompany/agent-runtime";
 import { describe, expect, it, vi } from "vitest";
 import {
-  createInMemoryGoatActionTurnGovernance,
-  type GoatActionServiceCatalog,
-  serveGoatActionRequest,
+  type ActionServiceCatalog,
+  createInMemoryActionTurnGovernance,
+  serveActionRequest,
 } from "./service";
 
-const catalog: GoatActionServiceCatalog = {
+const catalog: ActionServiceCatalog = {
   sources: [{ id: "gmail", label: "Gmail", description: "Email" }],
   actions: [
     {
@@ -18,9 +18,9 @@ const catalog: GoatActionServiceCatalog = {
   ],
 };
 
-describe("serveGoatActionRequest", () => {
+describe("serveActionRequest", () => {
   it("owns discovery, retry-safe identity, and the shared call budget", async () => {
-    const governance = createInMemoryGoatActionTurnGovernance();
+    const governance = createInMemoryActionTurnGovernance();
     const execute = vi.fn(async ({ action }: { action: string }) => ({
       ok: true as const,
       action,
@@ -28,7 +28,7 @@ describe("serveGoatActionRequest", () => {
     }));
 
     await expect(
-      serveGoatActionRequest({
+      serveActionRequest({
         request: executeRequest("before_discovery"),
         catalog,
         governance,
@@ -37,7 +37,7 @@ describe("serveGoatActionRequest", () => {
     ).resolves.toMatchObject({ ok: false, error: { code: "invalid_params" } });
 
     await expect(
-      serveGoatActionRequest({
+      serveActionRequest({
         request: {
           operation: "list",
           sessionId: "session_1",
@@ -52,7 +52,7 @@ describe("serveGoatActionRequest", () => {
 
     for (let call = 1; call <= GOAT_ACTION_MAX_CALLS_PER_TURN; call += 1) {
       await expect(
-        serveGoatActionRequest({
+        serveActionRequest({
           request: executeRequest(`call_${call}`),
           catalog,
           governance,
@@ -62,7 +62,7 @@ describe("serveGoatActionRequest", () => {
     }
 
     await expect(
-      serveGoatActionRequest({
+      serveActionRequest({
         request: executeRequest("call_17"),
         catalog,
         governance,
@@ -72,7 +72,7 @@ describe("serveGoatActionRequest", () => {
     expect(execute).toHaveBeenCalledTimes(GOAT_ACTION_MAX_CALLS_PER_TURN);
 
     await expect(
-      serveGoatActionRequest({
+      serveActionRequest({
         request: executeRequest("call_1"),
         catalog,
         governance,
@@ -84,7 +84,7 @@ describe("serveGoatActionRequest", () => {
 
   it("returns the same structured catalog errors to every adapter", async () => {
     await expect(
-      serveGoatActionRequest({
+      serveActionRequest({
         request: {
           operation: "list",
           sessionId: "session_1",
@@ -92,7 +92,7 @@ describe("serveGoatActionRequest", () => {
           source: "missing",
         },
         catalog,
-        governance: createInMemoryGoatActionTurnGovernance(),
+        governance: createInMemoryActionTurnGovernance(),
         execute: vi.fn(),
       }),
     ).resolves.toEqual({

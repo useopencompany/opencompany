@@ -2,121 +2,115 @@
 
 import { GITHUB_ACTIVITY_EVENT_TYPES, type GitHubActivityEventType } from "@opencompany/brain";
 import {
+  type AttioEventRef,
+  type AttioEventType,
+  type AttioObjectTypeRef,
   GOAT_ATTIO_EVENT_TYPES,
-  type GoatAttioEventRef,
-  type GoatAttioEventType,
-  type GoatAttioObjectTypeRef,
-  isGoatAttioObjectType,
+  isAttioObjectType,
 } from "@opencompany/db/attio";
 import {
-  deleteGoatBrainSource,
+  deleteBrainSource,
   hasAnyBrainSourceForIntegration,
-  listGoatBrainSourcesForBrain,
-  listGoatPersonalIntegrationAccounts,
-  setGoatBrainSourceEnabled,
-  upsertGoatBrainSource,
+  listBrainSourcesForBrain,
+  listPersonalIntegrationAccounts,
+  setBrainSourceEnabled,
+  upsertBrainSource,
 } from "@opencompany/db/brain-sources";
 import { getDb } from "@opencompany/db/client";
 import {
-  type GoatGitHubRepositoryRef,
-  listGoatGitHubIntegrationRepositories,
+  type GitHubRepositoryRef,
+  listGitHubIntegrationRepositories,
 } from "@opencompany/db/github";
 import {
+  type GmailEventRef,
+  type GmailEventType,
   GOAT_GMAIL_EVENT_TYPES,
-  type GoatGmailEventRef,
-  type GoatGmailEventType,
-  sanitizeGoatGmailInstructions,
+  sanitizeGmailInstructions,
 } from "@opencompany/db/gmail";
 import {
   GOAT_GOOGLE_DRIVE_FOLDER_MIME_TYPE,
-  type GoatGoogleDriveAllFilesRef,
-  type GoatGoogleDriveCorpusKey,
-  type GoatGoogleDriveResourceRef,
-  readGoatGoogleDriveAllFiles,
-  readGoatGoogleDriveResources,
-  upsertGoatGoogleDriveSyncCursor,
+  type GoogleDriveAllFilesRef,
+  type GoogleDriveCorpusKey,
+  type GoogleDriveResourceRef,
+  readGoogleDriveAllFiles,
+  readGoogleDriveResources,
+  upsertGoogleDriveSyncCursor,
 } from "@opencompany/db/google-drive";
 import {
-  type GoatHubspotEventRef,
-  type GoatHubspotEventType,
-  type GoatHubspotObjectTypeRef,
   HUBSPOT_EVENT_TYPES,
-  isGoatHubspotObjectType,
+  type HubspotEventRef,
+  type HubspotEventType,
+  type HubspotObjectTypeRef,
+  isHubspotObjectType,
 } from "@opencompany/db/hubspot";
-import { loadGoatIntegrationCredential } from "@opencompany/db/integrations";
+import { loadIntegrationCredential } from "@opencompany/db/integrations";
 import {
   GOAT_LINEAR_EVENT_TYPES,
   GOAT_LINEAR_MCP_EXTERNAL_ID,
-  type GoatLinearEventRef,
-  type GoatLinearEventType,
-  type GoatLinearTeamRef,
+  type LinearEventRef,
+  type LinearEventType,
+  type LinearTeamRef,
 } from "@opencompany/db/linear";
 import {
-  type GoatBrainSourceConfigProvider,
-  type GoatIntegrationProvider,
-  type GoatIntegrationStatus,
-  goatBrainSources,
-  goatIntegrations,
-  isWorkspaceOwnedGoatIntegrationProvider,
+  type BrainSourceConfigProvider,
+  brainSources,
+  type IntegrationProvider,
+  type IntegrationStatus,
+  integrations,
+  isWorkspaceOwnedIntegrationProvider,
 } from "@opencompany/db/schema";
-import type { GoatSlackConversationRef } from "@opencompany/db/slack";
-import { getDefaultGoatBrainForUser, getGoatBrainAccess } from "@opencompany/db/workspaces";
+import type { SlackConversationRef } from "@opencompany/db/slack";
+import { getBrainAccess, getDefaultBrainForUser } from "@opencompany/db/workspaces";
 import { and, eq, isNull, ne, type SQL } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
-import { upsertGoatBrainSourceWithAnalytics } from "@/lib/brain-source-analytics";
+import { currentUser } from "@/lib/auth";
+import { upsertBrainSourceWithAnalytics } from "@/lib/brain-source-analytics";
 import type {
-  GoatAttioProviderState,
-  GoatFathomProviderState,
-  GoatGmailSourceProviderState,
-  GoatGoogleDriveSourceProviderState,
-  GoatGranolaProviderState,
-  GoatHubspotSourceProviderState,
-  GoatJamieProviderState,
-  GoatLinearSourceProviderState,
-  GoatSlackProviderState,
+  AttioProviderState,
+  FathomProviderState,
+  GmailSourceProviderState,
+  GoogleDriveSourceProviderState,
+  GranolaProviderState,
+  HubspotSourceProviderState,
+  JamieProviderState,
+  LinearSourceProviderState,
+  SlackProviderState,
 } from "@/lib/integration-state";
-import { getGoatAttioIntegrationState } from "@/lib/integrations/attio";
-import { getGoatFathomIntegrationState } from "@/lib/integrations/fathom";
+import { getAttioIntegrationState } from "@/lib/integrations/attio";
+import { getFathomIntegrationState } from "@/lib/integrations/fathom";
+import { type GitHubProviderState, getGitHubIntegrationState } from "@/lib/integrations/github";
 import {
-  type GoatGitHubProviderState,
-  getGoatGitHubIntegrationState,
-} from "@/lib/integrations/github";
-import {
-  getGoatGmailSourceIntegrationState,
-  getGoatGoogleDriveSourceIntegrationState,
+  getGmailSourceIntegrationState,
+  getGoogleDriveSourceIntegrationState,
 } from "@/lib/integrations/google-data";
 import {
-  GoatGoogleDriveRequestError,
-  getGoatGoogleDriveFile,
-  getGoatGoogleDriveStartPageToken,
-  listGoatGoogleDriveFiles,
-  listGoatGoogleSharedDrives,
-  loadOwnGoatGoogleDriveAccount,
+  GoogleDriveRequestError,
+  getGoogleDriveFile,
+  getGoogleDriveStartPageToken,
+  listGoogleDriveFiles,
+  listGoogleSharedDrives,
+  loadOwnGoogleDriveAccount,
 } from "@/lib/integrations/google-drive";
-import { getGoatGranolaIntegrationState } from "@/lib/integrations/granola";
-import { getGoatHubspotSourceIntegrationState } from "@/lib/integrations/hubspot-ingest";
+import { getGranolaIntegrationState } from "@/lib/integrations/granola";
+import { getHubspotSourceIntegrationState } from "@/lib/integrations/hubspot-ingest";
+import { getJamieIntegrationState, isJamieWebhookApiKeyConfigured } from "@/lib/integrations/jamie";
 import {
-  getGoatJamieIntegrationState,
-  isGoatJamieWebhookApiKeyConfigured,
-} from "@/lib/integrations/jamie";
-import {
-  getGoatLinearSourceIntegrationState,
+  getLinearSourceIntegrationState,
   linearGraphqlRequest,
 } from "@/lib/integrations/linear-ingest";
-import { getGoatSlackIntegrationState } from "@/lib/integrations/slack";
+import { getSlackIntegrationState } from "@/lib/integrations/slack";
 import {
-  type GoatSlackChannelOption,
-  type GoatSlackDmOption,
-  listGoatSlackConversationOptions,
+  listSlackConversationOptions,
+  type SlackChannelOption,
+  type SlackDmOption,
 } from "@/lib/integrations/slack-conversations";
-import { triggerGoatGoogleDriveSyncWake } from "@/lib/task-runner";
-import { getGoatAppUrl } from "@/lib/workos";
-import type { GoatWorkspaceActionResult } from "@/lib/workspace-actions";
+import { triggerGoogleDriveSyncWake } from "@/lib/task-runner";
+import { getAppUrl } from "@/lib/workos";
+import type { WorkspaceActionResult } from "@/lib/workspace-actions";
 
-export type GoatBrainSourceView = {
+export type BrainSourceView = {
   sourceId: string;
-  provider: GoatBrainSourceConfigProvider;
+  provider: BrainSourceConfigProvider;
   integrationId: string;
   enabled: boolean;
   connectedByName: string;
@@ -138,35 +132,35 @@ export type GoatBrainSourceView = {
   canConfigure: boolean;
   canToggle: boolean;
   canRemove: boolean;
-  integrationStatus: GoatIntegrationStatus;
+  integrationStatus: IntegrationStatus;
   config: Record<string, unknown>;
 };
 
-export type GoatOwnSourceAccount = {
+export type OwnSourceAccount = {
   integrationId: string;
-  status: GoatIntegrationStatus;
+  status: IntegrationStatus;
   accountEmail: string | null;
   accountName: string | null;
   connectionLabel: string | null;
 };
 
-export type GoatBrainSourcesDetails = {
+export type BrainSourcesDetails = {
   viewer: { workosUserId: string; isAdmin: boolean };
-  sources: GoatBrainSourceView[];
+  sources: BrainSourceView[];
   // The viewer's connected personal accounts per provider — the pool the
   // add-source flow offers (the UI filters out accounts already on the brain).
   ownAccounts: {
-    slack: GoatOwnSourceAccount[];
-    linear: GoatOwnSourceAccount[];
-    gmail: GoatOwnSourceAccount[];
-    google_drive: GoatOwnSourceAccount[];
-    hubspot: GoatOwnSourceAccount[];
-    granola: GoatOwnSourceAccount[];
-    fathom: GoatOwnSourceAccount[];
-    attio: GoatOwnSourceAccount[];
+    slack: OwnSourceAccount[];
+    linear: OwnSourceAccount[];
+    gmail: OwnSourceAccount[];
+    google_drive: OwnSourceAccount[];
+    hubspot: OwnSourceAccount[];
+    granola: OwnSourceAccount[];
+    fathom: OwnSourceAccount[];
+    attio: OwnSourceAccount[];
   };
   jamie: {
-    integration: GoatJamieProviderState;
+    integration: JamieProviderState;
     // No explicit per-brain rows exist yet for the user's Jamie integration, so
     // deliveries still follow the legacy default-brain routing.
     legacyDefaultDelivery: boolean;
@@ -174,37 +168,35 @@ export type GoatBrainSourcesDetails = {
     isDefaultBrain: boolean;
   };
   slack: {
-    integration: GoatSlackProviderState;
+    integration: SlackProviderState;
   };
   linear: {
-    integration: GoatLinearSourceProviderState;
+    integration: LinearSourceProviderState;
   };
   github: {
-    integration: GoatGitHubProviderState;
+    integration: GitHubProviderState;
   };
   gmail: {
-    integration: GoatGmailSourceProviderState;
+    integration: GmailSourceProviderState;
   };
   googleDrive: {
-    integration: GoatGoogleDriveSourceProviderState;
+    integration: GoogleDriveSourceProviderState;
   };
   hubspot: {
-    integration: GoatHubspotSourceProviderState;
+    integration: HubspotSourceProviderState;
   };
   granola: {
-    integration: GoatGranolaProviderState;
+    integration: GranolaProviderState;
   };
   fathom: {
-    integration: GoatFathomProviderState;
+    integration: FathomProviderState;
   };
   attio: {
-    integration: GoatAttioProviderState;
+    integration: AttioProviderState;
   };
 };
 
-function integrationProviderFor(
-  provider: GoatBrainSourceConfigProvider,
-): GoatIntegrationProvider | null {
+function integrationProviderFor(provider: BrainSourceConfigProvider): IntegrationProvider | null {
   switch (provider) {
     case "jamie":
     case "gmail":
@@ -227,8 +219,8 @@ function integrationProviderFor(
 // sources; admins can additionally toggle/remove any source (but never edit a
 // member-owned config).
 async function requireBrainSourceContext(brainRef: string) {
-  const context = await currentGoatUser();
-  const access = await getGoatBrainAccess({
+  const context = await currentUser();
+  const access = await getBrainAccess({
     userWorkosId: context.user.workosUserId,
     brainRef,
   });
@@ -249,14 +241,14 @@ type AdminBrainContext = NonNullable<Awaited<ReturnType<typeof requireAdminBrain
 // providers (github, jamie) are available to every admin of the workspace;
 // identity-bound providers only to the member who connected them.
 function sourceIntegrationOwnerWhere(
-  provider: GoatIntegrationProvider,
+  provider: IntegrationProvider,
   context: Pick<AdminBrainContext, "user" | "workspace">,
 ): SQL | undefined {
-  return isWorkspaceOwnedGoatIntegrationProvider(provider)
-    ? eq(goatIntegrations.workspaceId, context.workspace.id)
+  return isWorkspaceOwnedIntegrationProvider(provider)
+    ? eq(integrations.workspaceId, context.workspace.id)
     : and(
-        eq(goatIntegrations.userWorkosId, context.user.workosUserId),
-        isNull(goatIntegrations.workspaceId),
+        eq(integrations.userWorkosId, context.user.workosUserId),
+        isNull(integrations.workspaceId),
       );
 }
 
@@ -265,26 +257,26 @@ function sourceIntegrationOwnerWhere(
 // for workspace-owned rows that is the original connector, not the actor.
 async function loadSourceIntegrationForContext(input: {
   integrationId: string;
-  provider: GoatIntegrationProvider;
+  provider: IntegrationProvider;
   context: Pick<AdminBrainContext, "user" | "workspace">;
 }) {
   const [integration] = await getDb()
     .select({
-      id: goatIntegrations.id,
-      userWorkosId: goatIntegrations.userWorkosId,
-      externalId: goatIntegrations.externalId,
-      status: goatIntegrations.status,
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      externalId: integrations.externalId,
+      status: integrations.status,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.id, input.integrationId),
-        eq(goatIntegrations.provider, input.provider),
+        eq(integrations.id, input.integrationId),
+        eq(integrations.provider, input.provider),
         sourceIntegrationOwnerWhere(input.provider, input.context),
         // Provider "linear" also covers the MCP connector row; only the
         // ingestion connection (keyed on the organization id) can feed brains.
         ...(input.provider === "linear"
-          ? [ne(goatIntegrations.externalId, GOAT_LINEAR_MCP_EXTERNAL_ID)]
+          ? [ne(integrations.externalId, GOAT_LINEAR_MCP_EXTERNAL_ID)]
           : []),
       ),
     )
@@ -304,18 +296,13 @@ async function loadExistingBrainSource(
 ): Promise<ExistingBrainSourceRow | null> {
   const [row] = await getDb()
     .select({
-      id: goatBrainSources.id,
-      userWorkosId: goatBrainSources.userWorkosId,
-      integrationWorkspaceId: goatIntegrations.workspaceId,
+      id: brainSources.id,
+      userWorkosId: brainSources.userWorkosId,
+      integrationWorkspaceId: integrations.workspaceId,
     })
-    .from(goatBrainSources)
-    .innerJoin(goatIntegrations, eq(goatBrainSources.integrationId, goatIntegrations.id))
-    .where(
-      and(
-        eq(goatBrainSources.brainId, brainRef),
-        eq(goatBrainSources.integrationId, integrationId),
-      ),
-    )
+    .from(brainSources)
+    .innerJoin(integrations, eq(brainSources.integrationId, integrations.id))
+    .where(and(eq(brainSources.brainId, brainRef), eq(brainSources.integrationId, integrationId)))
     .limit(1);
   return row ?? null;
 }
@@ -336,10 +323,10 @@ function brainSourceCapabilities(
   return { canConfigure: isOwn, canToggle: isOwn || isAdmin, canRemove: isOwn || isAdmin };
 }
 
-export async function removeGoatBrainSourceAction(input: {
+export async function removeBrainSourceAction(input: {
   brainRef: string;
   integrationId: string;
-}): Promise<GoatWorkspaceActionResult> {
+}): Promise<WorkspaceActionResult> {
   const context = await requireBrainSourceContext(input.brainRef);
   if (!context) {
     return { ok: false, error: "You don't have access to this brain." };
@@ -351,7 +338,7 @@ export async function removeGoatBrainSourceAction(input: {
     return { ok: false, error: "Only the source owner or a workspace admin can remove this." };
   }
   try {
-    await deleteGoatBrainSource({ brainRef: input.brainRef, sourceId: existing.id });
+    await deleteBrainSource({ brainRef: input.brainRef, sourceId: existing.id });
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
@@ -362,9 +349,7 @@ export async function removeGoatBrainSourceAction(input: {
   }
 }
 
-export async function getGoatBrainSourcesAction(
-  brainRef: string,
-): Promise<GoatBrainSourcesDetails | null> {
+export async function getBrainSourcesAction(brainRef: string): Promise<BrainSourcesDetails | null> {
   const context = await requireBrainSourceContext(brainRef);
   if (!context) return null;
   const isAdmin = context.role === "admin";
@@ -390,47 +375,47 @@ export async function getGoatBrainSourcesAction(
     ownFathomAccounts,
     ownAttioAccounts,
   ] = await Promise.all([
-    listGoatBrainSourcesForBrain(brainRef),
-    getGoatJamieIntegrationState(context.workspace.id),
-    getGoatSlackIntegrationState(context.user.workosUserId),
-    getGoatLinearSourceIntegrationState(context.user.workosUserId),
-    getGoatGitHubIntegrationState(context.workspace.id),
-    getGoatGmailSourceIntegrationState(context.user.workosUserId),
-    getGoatGoogleDriveSourceIntegrationState(context.user.workosUserId),
-    getGoatHubspotSourceIntegrationState(context.user.workosUserId),
-    getGoatGranolaIntegrationState(context.user.workosUserId),
-    getGoatFathomIntegrationState(context.user.workosUserId),
-    getGoatAttioIntegrationState(context.user.workosUserId),
-    listGoatPersonalIntegrationAccounts({
+    listBrainSourcesForBrain(brainRef),
+    getJamieIntegrationState(context.workspace.id),
+    getSlackIntegrationState(context.user.workosUserId),
+    getLinearSourceIntegrationState(context.user.workosUserId),
+    getGitHubIntegrationState(context.workspace.id),
+    getGmailSourceIntegrationState(context.user.workosUserId),
+    getGoogleDriveSourceIntegrationState(context.user.workosUserId),
+    getHubspotSourceIntegrationState(context.user.workosUserId),
+    getGranolaIntegrationState(context.user.workosUserId),
+    getFathomIntegrationState(context.user.workosUserId),
+    getAttioIntegrationState(context.user.workosUserId),
+    listPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
       provider: "slack",
     }),
-    listGoatPersonalIntegrationAccounts({
+    listPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
       provider: "linear",
       excludeExternalId: GOAT_LINEAR_MCP_EXTERNAL_ID,
     }),
-    listGoatPersonalIntegrationAccounts({
+    listPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
       provider: "gmail",
     }),
-    listGoatPersonalIntegrationAccounts({
+    listPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
       provider: "google_drive",
     }),
-    listGoatPersonalIntegrationAccounts({
+    listPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
       provider: "hubspot",
     }),
-    listGoatPersonalIntegrationAccounts({
+    listPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
       provider: "granola",
     }),
-    listGoatPersonalIntegrationAccounts({
+    listPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
       provider: "fathom",
     }),
-    listGoatPersonalIntegrationAccounts({
+    listPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
       provider: "attio",
     }),
@@ -442,7 +427,7 @@ export async function getGoatBrainSourcesAction(
   // Legacy Jamie routing delivers to the *connector's* default brain (the
   // webhook handler resolves it the same way), which may not be the actor's.
   const jamieOwnerDefaultBrain = jamieState.integrationId
-    ? await getDefaultGoatBrainForIntegrationOwner(jamieState.integrationId)
+    ? await getDefaultBrainForIntegrationOwner(jamieState.integrationId)
     : null;
 
   return {
@@ -517,12 +502,12 @@ export async function getGoatBrainSourcesAction(
   };
 }
 
-export async function setGoatBrainSourceEnabledAction(input: {
+export async function setBrainSourceEnabledAction(input: {
   brainRef: string;
-  provider: GoatBrainSourceConfigProvider;
+  provider: BrainSourceConfigProvider;
   integrationId: string;
   enabled: boolean;
-}): Promise<GoatWorkspaceActionResult> {
+}): Promise<WorkspaceActionResult> {
   const context = await requireBrainSourceContext(input.brainRef);
   if (!context) {
     return { ok: false, error: "You don't have access to this brain." };
@@ -544,7 +529,7 @@ export async function setGoatBrainSourceEnabledAction(input: {
       return { ok: false, error: "Only the source owner or a workspace admin can change this." };
     }
     try {
-      await setGoatBrainSourceEnabled({
+      await setBrainSourceEnabled({
         brainRef: input.brainRef,
         sourceId: existing.id,
         enabled: input.enabled,
@@ -561,7 +546,7 @@ export async function setGoatBrainSourceEnabledAction(input: {
 
   // Creating a row: members attach their own personal connections; the
   // workspace-owned providers (github, jamie) stay admin-only.
-  if (isWorkspaceOwnedGoatIntegrationProvider(integrationProvider) && context.role !== "admin") {
+  if (isWorkspaceOwnedIntegrationProvider(integrationProvider) && context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can configure this source." };
   }
   const integration = await loadSourceIntegrationForContext({
@@ -574,7 +559,7 @@ export async function setGoatBrainSourceEnabledAction(input: {
   }
   if (
     input.provider === "jamie" &&
-    !isGoatJamieWebhookApiKeyConfigured({
+    !isJamieWebhookApiKeyConfigured({
       status: integration.status,
       externalId: integration.externalId,
     })
@@ -590,9 +575,9 @@ export async function setGoatBrainSourceEnabledAction(input: {
     // silently stop. Only Jamie ever had that implicit routing, and it targets
     // the connector's default brain (the webhook resolves it the same way).
     if (!hadExplicitConfig && input.provider === "jamie") {
-      const defaultBrain = await getDefaultGoatBrainForUser(integration.userWorkosId);
+      const defaultBrain = await getDefaultBrainForUser(integration.userWorkosId);
       if (defaultBrain && defaultBrain.id !== input.brainRef) {
-        await upsertGoatBrainSource({
+        await upsertBrainSource({
           brainRef: defaultBrain.id,
           provider: input.provider,
           integrationId: input.integrationId,
@@ -603,7 +588,7 @@ export async function setGoatBrainSourceEnabledAction(input: {
       }
     }
 
-    await upsertGoatBrainSourceWithAnalytics({
+    await upsertBrainSourceWithAnalytics({
       workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: input.provider,
@@ -623,35 +608,35 @@ export async function setGoatBrainSourceEnabledAction(input: {
   }
 }
 
-export type GoatSlackConversationListResult =
+export type SlackConversationListResult =
   | {
       ok: true;
-      channels: GoatSlackChannelOption[];
-      dms: GoatSlackDmOption[];
+      channels: SlackChannelOption[];
+      dms: SlackDmOption[];
       partial: boolean;
     }
   | { ok: false; error: string };
 
-export async function listGoatSlackConversationsAction(
+export async function listSlackConversationsAction(
   integrationId: string,
-): Promise<GoatSlackConversationListResult> {
-  const context = await currentGoatUser();
+): Promise<SlackConversationListResult> {
+  const context = await currentUser();
   const account = await loadOwnSlackAccount(context.user.workosUserId, integrationId);
   if (!account) {
     return { ok: false, error: "Connect Slack in your settings first." };
   }
 
-  const options = await listGoatSlackConversationOptions(account);
+  const options = await listSlackConversationOptions(account);
   return { ok: true, ...options };
 }
 
-export async function setGoatBrainSlackSourceAction(input: {
+export async function setBrainSlackSourceAction(input: {
   brainRef: string;
   integrationId: string;
   enabled: boolean;
-  channels: GoatSlackConversationRef[];
-  dms: GoatSlackConversationRef[];
-}): Promise<GoatWorkspaceActionResult> {
+  channels: SlackConversationRef[];
+  dms: SlackConversationRef[];
+}): Promise<WorkspaceActionResult> {
   const context = await requireBrainSourceContext(input.brainRef);
   if (!context) {
     return { ok: false, error: "You don't have access to this brain." };
@@ -669,7 +654,7 @@ export async function setGoatBrainSlackSourceAction(input: {
   }
 
   try {
-    await upsertGoatBrainSourceWithAnalytics({
+    await upsertBrainSourceWithAnalytics({
       workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: "slack",
@@ -693,20 +678,18 @@ export async function setGoatBrainSlackSourceAction(input: {
   }
 }
 
-export type GoatLinearTeamListResult =
-  | { ok: true; teams: GoatLinearTeamRef[]; partial: boolean }
+export type LinearTeamListResult =
+  | { ok: true; teams: LinearTeamRef[]; partial: boolean }
   | { ok: false; error: string };
 
-export async function listGoatLinearTeamsAction(
-  integrationId: string,
-): Promise<GoatLinearTeamListResult> {
-  const context = await currentGoatUser();
+export async function listLinearTeamsAction(integrationId: string): Promise<LinearTeamListResult> {
+  const context = await currentUser();
   const token = await loadOwnLinearAccessToken(context.user.workosUserId, integrationId);
   if (!token) {
     return { ok: false, error: "Connect Linear in your settings first." };
   }
 
-  const teams: GoatLinearTeamRef[] = [];
+  const teams: LinearTeamRef[] = [];
   let cursor: string | undefined;
   let partial = false;
 
@@ -719,7 +702,7 @@ export async function listGoatLinearTeamsAction(
         };
       }>({
         token,
-        query: `query GoatLinearTeams($after: String) {
+        query: `query LinearTeams($after: String) {
           teams(first: 100, after: $after) {
             nodes { id key name }
             pageInfo { hasNextPage endCursor }
@@ -749,13 +732,13 @@ export async function listGoatLinearTeamsAction(
   return { ok: true, teams, partial };
 }
 
-export async function setGoatBrainLinearSourceAction(input: {
+export async function setBrainLinearSourceAction(input: {
   brainRef: string;
   integrationId: string;
   enabled: boolean;
-  teams: GoatLinearTeamRef[];
-  events: GoatLinearEventRef[];
-}): Promise<GoatWorkspaceActionResult> {
+  teams: LinearTeamRef[];
+  events: LinearEventRef[];
+}): Promise<WorkspaceActionResult> {
   const context = await requireBrainSourceContext(input.brainRef);
   if (!context) {
     return { ok: false, error: "You don't have access to this brain." };
@@ -771,7 +754,7 @@ export async function setGoatBrainLinearSourceAction(input: {
   }
 
   try {
-    await upsertGoatBrainSourceWithAnalytics({
+    await upsertBrainSourceWithAnalytics({
       workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: "linear",
@@ -795,13 +778,13 @@ export async function setGoatBrainLinearSourceAction(input: {
   }
 }
 
-export async function setGoatBrainHubspotSourceAction(input: {
+export async function setBrainHubspotSourceAction(input: {
   brainRef: string;
   integrationId: string;
   enabled: boolean;
-  objectTypes: GoatHubspotObjectTypeRef[];
-  events: GoatHubspotEventRef[];
-}): Promise<GoatWorkspaceActionResult> {
+  objectTypes: HubspotObjectTypeRef[];
+  events: HubspotEventRef[];
+}): Promise<WorkspaceActionResult> {
   const context = await requireBrainSourceContext(input.brainRef);
   if (!context) {
     return { ok: false, error: "You don't have access to this brain." };
@@ -817,7 +800,7 @@ export async function setGoatBrainHubspotSourceAction(input: {
   }
 
   try {
-    await upsertGoatBrainSourceWithAnalytics({
+    await upsertBrainSourceWithAnalytics({
       workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: "hubspot",
@@ -841,13 +824,13 @@ export async function setGoatBrainHubspotSourceAction(input: {
   }
 }
 
-export async function setGoatBrainAttioSourceAction(input: {
+export async function setBrainAttioSourceAction(input: {
   brainRef: string;
   integrationId: string;
   enabled: boolean;
-  objectTypes: GoatAttioObjectTypeRef[];
-  events: GoatAttioEventRef[];
-}): Promise<GoatWorkspaceActionResult> {
+  objectTypes: AttioObjectTypeRef[];
+  events: AttioEventRef[];
+}): Promise<WorkspaceActionResult> {
   const context = await requireBrainSourceContext(input.brainRef);
   if (!context) {
     return { ok: false, error: "You don't have access to this brain." };
@@ -863,7 +846,7 @@ export async function setGoatBrainAttioSourceAction(input: {
   }
 
   try {
-    await upsertGoatBrainSourceWithAnalytics({
+    await upsertBrainSourceWithAnalytics({
       workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: "attio",
@@ -887,14 +870,14 @@ export async function setGoatBrainAttioSourceAction(input: {
   }
 }
 
-export type GoatGitHubRepositoryListResult =
-  | { ok: true; repos: Array<GoatGitHubRepositoryRef & { private: boolean }> }
+export type GitHubRepositoryListResult =
+  | { ok: true; repos: Array<GitHubRepositoryRef & { private: boolean }> }
   | { ok: false; error: string };
 
-export async function listGoatGitHubRepositoriesAction(
+export async function listGitHubRepositoriesAction(
   integrationId: string,
-): Promise<GoatGitHubRepositoryListResult> {
-  const context = await currentGoatUser();
+): Promise<GitHubRepositoryListResult> {
+  const context = await currentUser();
   if (context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can configure brain sources." };
   }
@@ -909,17 +892,17 @@ export async function listGoatGitHubRepositoriesAction(
 
   // Repositories were synced into integration resources at connect time; the
   // picker reads that catalog instead of calling GitHub.
-  const repos = await listGoatGitHubIntegrationRepositories(integrationId);
+  const repos = await listGitHubIntegrationRepositories(integrationId);
   return { ok: true, repos };
 }
 
-export async function setGoatBrainGitHubSourceAction(input: {
+export async function setBrainGitHubSourceAction(input: {
   brainRef: string;
   integrationId: string;
   enabled: boolean;
-  repos: GoatGitHubRepositoryRef[];
+  repos: GitHubRepositoryRef[];
   events: GitHubActivityEventType[];
-}): Promise<GoatWorkspaceActionResult> {
+}): Promise<WorkspaceActionResult> {
   const context = await requireAdminBrainContext(input.brainRef);
   if (!context) {
     return { ok: false, error: "Only workspace admins can configure brain sources." };
@@ -935,7 +918,7 @@ export async function setGoatBrainGitHubSourceAction(input: {
   }
 
   try {
-    await upsertGoatBrainSourceWithAnalytics({
+    await upsertBrainSourceWithAnalytics({
       workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: "github",
@@ -959,13 +942,13 @@ export async function setGoatBrainGitHubSourceAction(input: {
   }
 }
 
-export async function setGoatBrainGmailSourceAction(input: {
+export async function setBrainGmailSourceAction(input: {
   brainRef: string;
   integrationId: string;
   enabled: boolean;
-  events: GoatGmailEventRef[];
+  events: GmailEventRef[];
   instructions: string;
-}): Promise<GoatWorkspaceActionResult> {
+}): Promise<WorkspaceActionResult> {
   const context = await requireBrainSourceContext(input.brainRef);
   if (!context) {
     return { ok: false, error: "You don't have access to this brain." };
@@ -981,8 +964,8 @@ export async function setGoatBrainGmailSourceAction(input: {
   }
 
   try {
-    const instructions = sanitizeGoatGmailInstructions(input.instructions);
-    await upsertGoatBrainSourceWithAnalytics({
+    const instructions = sanitizeGmailInstructions(input.instructions);
+    await upsertBrainSourceWithAnalytics({
       workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: "gmail",
@@ -1006,7 +989,7 @@ export async function setGoatBrainGmailSourceAction(input: {
   }
 }
 
-export type GoatGoogleDriveResourceListResult =
+export type GoogleDriveResourceListResult =
   | {
       ok: true;
       files: Array<{
@@ -1021,13 +1004,13 @@ export type GoatGoogleDriveResourceListResult =
     }
   | { ok: false; error: string };
 
-export async function listGoatGoogleDriveResourcesAction(input: {
+export async function listGoogleDriveResourcesAction(input: {
   integrationId: string;
   parentId?: string;
   query?: string;
   pageToken?: string;
-}): Promise<GoatGoogleDriveResourceListResult> {
-  const context = await currentGoatUser();
+}): Promise<GoogleDriveResourceListResult> {
+  const context = await currentUser();
   const parentId = input.parentId?.trim();
   const query = input.query?.trim();
   const pageToken = input.pageToken?.trim();
@@ -1038,20 +1021,17 @@ export async function listGoatGoogleDriveResourcesAction(input: {
   ) {
     return { ok: false, error: "Invalid Google Drive browse request." };
   }
-  const account = await loadOwnGoatGoogleDriveAccount(
-    context.user.workosUserId,
-    input.integrationId,
-  );
+  const account = await loadOwnGoogleDriveAccount(context.user.workosUserId, input.integrationId);
   if (!account) return { ok: false, error: "Connect Google Drive in Settings first." };
   try {
-    const page = await listGoatGoogleDriveFiles({
+    const page = await listGoogleDriveFiles({
       account,
       ...(parentId ? { parentId } : {}),
       ...(query ? { query } : {}),
       ...(pageToken ? { pageToken } : {}),
     });
     const sharedDrives =
-      !parentId && !query && !pageToken ? await listGoatGoogleSharedDrives({ account }) : [];
+      !parentId && !query && !pageToken ? await listGoogleSharedDrives({ account }) : [];
     return {
       ok: true,
       files: [
@@ -1085,13 +1065,13 @@ export async function listGoatGoogleDriveResourcesAction(input: {
   }
 }
 
-export async function setGoatBrainGoogleDriveSourceAction(input: {
+export async function setBrainGoogleDriveSourceAction(input: {
   brainRef: string;
   integrationId: string;
   enabled: boolean;
   allFiles?: boolean;
   resourceIds: string[];
-}): Promise<GoatWorkspaceActionResult> {
+}): Promise<WorkspaceActionResult> {
   const context = await requireBrainSourceContext(input.brainRef);
   if (!context) {
     return { ok: false, error: "You don't have access to this brain." };
@@ -1116,19 +1096,19 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
 
   try {
     const [existing] = await getDb()
-      .select({ config: goatBrainSources.config, enabled: goatBrainSources.enabled })
-      .from(goatBrainSources)
+      .select({ config: brainSources.config, enabled: brainSources.enabled })
+      .from(brainSources)
       .where(
         and(
-          eq(goatBrainSources.brainId, input.brainRef),
-          eq(goatBrainSources.integrationId, input.integrationId),
+          eq(brainSources.brainId, input.brainRef),
+          eq(brainSources.integrationId, input.integrationId),
         ),
       )
       .limit(1);
     const existingResources = new Map(
-      readGoatGoogleDriveResources(existing?.config).map((resource) => [resource.id, resource]),
+      readGoogleDriveResources(existing?.config).map((resource) => [resource.id, resource]),
     );
-    const existingAllFiles = readGoatGoogleDriveAllFiles(existing?.config);
+    const existingAllFiles = readGoogleDriveAllFiles(existing?.config);
 
     // Disabling must remain possible after token revocation or access loss.
     // Retain only server-known resources; the editor passes an empty list when
@@ -1136,7 +1116,7 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
     if (!input.enabled) {
       const resources = resourceIds.flatMap((id) => existingResources.get(id) ?? []);
       const allFiles = input.allFiles ? existingAllFiles : null;
-      await upsertGoatBrainSourceWithAnalytics({
+      await upsertBrainSourceWithAnalytics({
         workspaceId: context.workspace.id,
         brainRef: input.brainRef,
         provider: "google_drive",
@@ -1153,22 +1133,19 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
     if (integration.status === "disconnected") {
       return { ok: false, error: "Reconnect Google Drive in Settings first." };
     }
-    const account = await loadOwnGoatGoogleDriveAccount(
-      context.user.workosUserId,
-      input.integrationId,
-    );
+    const account = await loadOwnGoogleDriveAccount(context.user.workosUserId, input.integrationId);
     if (!account) {
       return { ok: false, error: "Only the connection owner can configure this source." };
     }
     const files = input.allFiles
       ? []
-      : await Promise.all(resourceIds.map((fileId) => getGoatGoogleDriveFile({ account, fileId })));
+      : await Promise.all(resourceIds.map((fileId) => getGoogleDriveFile({ account, fileId })));
     if (files.some((file) => file.trashed)) {
       return { ok: false, error: "Remove trashed Drive items before saving." };
     }
 
     const resetSelectionTimes = Boolean(existing && !existing.enabled && input.enabled);
-    const sharedDrives = input.allFiles ? await listGoatGoogleSharedDrives({ account }) : [];
+    const sharedDrives = input.allFiles ? await listGoogleSharedDrives({ account }) : [];
     const driveIds = [
       ...new Set([
         ...files.flatMap((file) => (file.driveId ? [file.driveId] : [])),
@@ -1179,12 +1156,12 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
     await Promise.all(
       driveIds.map(async (driveId) => {
         try {
-          sharedTokens.set(driveId, await getGoatGoogleDriveStartPageToken({ account, driveId }));
+          sharedTokens.set(driveId, await getGoogleDriveStartPageToken({ account, driveId }));
         } catch (error) {
           // A directly shared file can carry a driveId without granting access
           // to that Shared Drive's change log; the user corpus tracks it.
           if (
-            !(error instanceof GoatGoogleDriveRequestError) ||
+            !(error instanceof GoogleDriveRequestError) ||
             (error.status !== 403 && error.status !== 404)
           ) {
             throw error;
@@ -1195,16 +1172,16 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
 
     // The account-level log covers My Drive and directly shared files and is
     // always maintained alongside any selected Shared Drive logs.
-    const userToken = await getGoatGoogleDriveStartPageToken({ account });
-    const webhookAddress = `${getGoatAppUrl()}/api/webhooks/google-drive`;
-    const cursors = new Map<GoatGoogleDriveCorpusKey, { driveId: string | null; token: string }>();
+    const userToken = await getGoogleDriveStartPageToken({ account });
+    const webhookAddress = `${getAppUrl()}/api/webhooks/google-drive`;
+    const cursors = new Map<GoogleDriveCorpusKey, { driveId: string | null; token: string }>();
     cursors.set("user", { driveId: null, token: userToken });
     for (const [driveId, token] of sharedTokens) {
       cursors.set(`drive:${driveId}`, { driveId, token });
     }
     await Promise.all(
       [...cursors].map(([corpusKey, cursor]) =>
-        upsertGoatGoogleDriveSyncCursor({
+        upsertGoogleDriveSyncCursor({
           integrationId: input.integrationId,
           userWorkosId: integration.userWorkosId,
           corpusKey,
@@ -1219,14 +1196,14 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
     // token acquisition is either before selection (filtered) or after it
     // (present in the durable feed), so the no-backfill boundary has no gap.
     const selectedAt = new Date().toISOString();
-    const allFiles: GoatGoogleDriveAllFilesRef | null = input.allFiles
+    const allFiles: GoogleDriveAllFilesRef | null = input.allFiles
       ? {
           selectedAt:
             !resetSelectionTimes && existingAllFiles ? existingAllFiles.selectedAt : selectedAt,
         }
       : null;
-    const resources: GoatGoogleDriveResourceRef[] = files.map((file) => {
-      const corpusKey: GoatGoogleDriveCorpusKey =
+    const resources: GoogleDriveResourceRef[] = files.map((file) => {
+      const corpusKey: GoogleDriveCorpusKey =
         file.driveId && sharedTokens.has(file.driveId) ? `drive:${file.driveId}` : "user";
       const previous = existingResources.get(file.id);
       return {
@@ -1241,7 +1218,7 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
       };
     });
 
-    await upsertGoatBrainSourceWithAnalytics({
+    await upsertBrainSourceWithAnalytics({
       workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: "google_drive",
@@ -1251,7 +1228,7 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
       enabled: true,
       config: { ...(allFiles ? { allFiles } : {}), resources },
     });
-    triggerGoatGoogleDriveSyncWake().catch((error) => {
+    triggerGoogleDriveSyncWake().catch((error) => {
       console.warn("Could not wake Goat Google Drive sync worker.", {
         event: "goat.google_drive_source_wake_failed",
         error: error instanceof Error ? error.message : String(error),
@@ -1267,45 +1244,45 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
   }
 }
 
-function sanitizeGmailEventRefs(refs: GoatGmailEventRef[]): GoatGmailEventRef[] {
-  const allowed = new Set<GoatGmailEventType>(GOAT_GMAIL_EVENT_TYPES);
-  const seen = new Set<GoatGmailEventType>();
-  const sanitized: GoatGmailEventRef[] = [];
+function sanitizeGmailEventRefs(refs: GmailEventRef[]): GmailEventRef[] {
+  const allowed = new Set<GmailEventType>(GOAT_GMAIL_EVENT_TYPES);
+  const seen = new Set<GmailEventType>();
+  const sanitized: GmailEventRef[] = [];
   for (const ref of refs) {
     const id = typeof ref.id === "string" ? ref.id : "";
-    if (!allowed.has(id as GoatGmailEventType) || seen.has(id as GoatGmailEventType)) continue;
-    seen.add(id as GoatGmailEventType);
-    sanitized.push({ id: id as GoatGmailEventType });
+    if (!allowed.has(id as GmailEventType) || seen.has(id as GmailEventType)) continue;
+    seen.add(id as GmailEventType);
+    sanitized.push({ id: id as GmailEventType });
   }
   return sanitized;
 }
 
-async function getDefaultGoatBrainForIntegrationOwner(integrationId: string) {
+async function getDefaultBrainForIntegrationOwner(integrationId: string) {
   const [row] = await getDb()
-    .select({ userWorkosId: goatIntegrations.userWorkosId })
-    .from(goatIntegrations)
-    .where(eq(goatIntegrations.id, integrationId))
+    .select({ userWorkosId: integrations.userWorkosId })
+    .from(integrations)
+    .where(eq(integrations.id, integrationId))
     .limit(1);
   if (!row) return null;
-  return getDefaultGoatBrainForUser(row.userWorkosId);
+  return getDefaultBrainForUser(row.userWorkosId);
 }
 
 async function loadOwnLinearAccessToken(userWorkosId: string, integrationId: string) {
   const [integration] = await getDb()
-    .select({ id: goatIntegrations.id, status: goatIntegrations.status })
-    .from(goatIntegrations)
+    .select({ id: integrations.id, status: integrations.status })
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.id, integrationId),
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, "linear"),
-        ne(goatIntegrations.externalId, GOAT_LINEAR_MCP_EXTERNAL_ID),
+        eq(integrations.id, integrationId),
+        eq(integrations.userWorkosId, userWorkosId),
+        eq(integrations.provider, "linear"),
+        ne(integrations.externalId, GOAT_LINEAR_MCP_EXTERNAL_ID),
       ),
     )
     .limit(1);
   if (!integration || integration.status !== "connected") return null;
 
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId,
     integrationId,
     provider: "linear",
@@ -1315,9 +1292,9 @@ async function loadOwnLinearAccessToken(userWorkosId: string, integrationId: str
   return typeof token === "string" && token ? token : null;
 }
 
-function sanitizeTeamRefs(refs: GoatLinearTeamRef[]): GoatLinearTeamRef[] {
+function sanitizeTeamRefs(refs: LinearTeamRef[]): LinearTeamRef[] {
   const seen = new Set<string>();
-  const sanitized: GoatLinearTeamRef[] = [];
+  const sanitized: LinearTeamRef[] = [];
   for (const ref of refs) {
     const id = typeof ref.id === "string" ? ref.id.trim() : "";
     if (!id || seen.has(id)) continue;
@@ -1329,65 +1306,63 @@ function sanitizeTeamRefs(refs: GoatLinearTeamRef[]): GoatLinearTeamRef[] {
   return sanitized;
 }
 
-function sanitizeLinearEventRefs(refs: GoatLinearEventRef[]): GoatLinearEventRef[] {
-  const allowed = new Set<GoatLinearEventType>(GOAT_LINEAR_EVENT_TYPES);
-  const seen = new Set<GoatLinearEventType>();
-  const sanitized: GoatLinearEventRef[] = [];
+function sanitizeLinearEventRefs(refs: LinearEventRef[]): LinearEventRef[] {
+  const allowed = new Set<LinearEventType>(GOAT_LINEAR_EVENT_TYPES);
+  const seen = new Set<LinearEventType>();
+  const sanitized: LinearEventRef[] = [];
   for (const ref of refs) {
     const id = typeof ref.id === "string" ? ref.id : "";
-    if (!allowed.has(id as GoatLinearEventType) || seen.has(id as GoatLinearEventType)) continue;
-    seen.add(id as GoatLinearEventType);
-    sanitized.push({ id: id as GoatLinearEventType });
+    if (!allowed.has(id as LinearEventType) || seen.has(id as LinearEventType)) continue;
+    seen.add(id as LinearEventType);
+    sanitized.push({ id: id as LinearEventType });
   }
   return sanitized;
 }
 
-function sanitizeHubspotObjectTypeRefs(
-  refs: GoatHubspotObjectTypeRef[],
-): GoatHubspotObjectTypeRef[] {
+function sanitizeHubspotObjectTypeRefs(refs: HubspotObjectTypeRef[]): HubspotObjectTypeRef[] {
   const seen = new Set<string>();
-  const sanitized: GoatHubspotObjectTypeRef[] = [];
+  const sanitized: HubspotObjectTypeRef[] = [];
   for (const ref of refs) {
-    if (!isGoatHubspotObjectType(ref.id) || seen.has(ref.id)) continue;
+    if (!isHubspotObjectType(ref.id) || seen.has(ref.id)) continue;
     seen.add(ref.id);
     sanitized.push({ id: ref.id });
   }
   return sanitized;
 }
 
-function sanitizeHubspotEventRefs(refs: GoatHubspotEventRef[]): GoatHubspotEventRef[] {
-  const allowed = new Set<GoatHubspotEventType>(HUBSPOT_EVENT_TYPES);
-  const seen = new Set<GoatHubspotEventType>();
-  const sanitized: GoatHubspotEventRef[] = [];
+function sanitizeHubspotEventRefs(refs: HubspotEventRef[]): HubspotEventRef[] {
+  const allowed = new Set<HubspotEventType>(HUBSPOT_EVENT_TYPES);
+  const seen = new Set<HubspotEventType>();
+  const sanitized: HubspotEventRef[] = [];
   for (const ref of refs) {
     const id = typeof ref.id === "string" ? ref.id : "";
-    if (!allowed.has(id as GoatHubspotEventType) || seen.has(id as GoatHubspotEventType)) continue;
-    seen.add(id as GoatHubspotEventType);
-    sanitized.push({ id: id as GoatHubspotEventType });
+    if (!allowed.has(id as HubspotEventType) || seen.has(id as HubspotEventType)) continue;
+    seen.add(id as HubspotEventType);
+    sanitized.push({ id: id as HubspotEventType });
   }
   return sanitized;
 }
 
-function sanitizeAttioObjectTypeRefs(refs: GoatAttioObjectTypeRef[]): GoatAttioObjectTypeRef[] {
+function sanitizeAttioObjectTypeRefs(refs: AttioObjectTypeRef[]): AttioObjectTypeRef[] {
   const seen = new Set<string>();
-  const sanitized: GoatAttioObjectTypeRef[] = [];
+  const sanitized: AttioObjectTypeRef[] = [];
   for (const ref of refs) {
-    if (!isGoatAttioObjectType(ref.id) || seen.has(ref.id)) continue;
+    if (!isAttioObjectType(ref.id) || seen.has(ref.id)) continue;
     seen.add(ref.id);
     sanitized.push({ id: ref.id });
   }
   return sanitized;
 }
 
-function sanitizeAttioEventRefs(refs: GoatAttioEventRef[]): GoatAttioEventRef[] {
-  const allowed = new Set<GoatAttioEventType>(GOAT_ATTIO_EVENT_TYPES);
-  const seen = new Set<GoatAttioEventType>();
-  const sanitized: GoatAttioEventRef[] = [];
+function sanitizeAttioEventRefs(refs: AttioEventRef[]): AttioEventRef[] {
+  const allowed = new Set<AttioEventType>(GOAT_ATTIO_EVENT_TYPES);
+  const seen = new Set<AttioEventType>();
+  const sanitized: AttioEventRef[] = [];
   for (const ref of refs) {
     const id = typeof ref.id === "string" ? ref.id : "";
-    if (!allowed.has(id as GoatAttioEventType) || seen.has(id as GoatAttioEventType)) continue;
-    seen.add(id as GoatAttioEventType);
-    sanitized.push({ id: id as GoatAttioEventType });
+    if (!allowed.has(id as AttioEventType) || seen.has(id as AttioEventType)) continue;
+    seen.add(id as AttioEventType);
+    sanitized.push({ id: id as AttioEventType });
   }
   return sanitized;
 }
@@ -1397,9 +1372,9 @@ function sanitizeEventTypes(events: GitHubActivityEventType[]): GitHubActivityEv
   return [...new Set(events)].filter((event) => known.has(event));
 }
 
-function sanitizeRepositoryRefs(refs: GoatGitHubRepositoryRef[]): GoatGitHubRepositoryRef[] {
+function sanitizeRepositoryRefs(refs: GitHubRepositoryRef[]): GitHubRepositoryRef[] {
   const seen = new Set<string>();
-  const sanitized: GoatGitHubRepositoryRef[] = [];
+  const sanitized: GitHubRepositoryRef[] = [];
   for (const ref of refs) {
     const id = typeof ref.id === "string" ? ref.id.trim() : "";
     if (!id || seen.has(id)) continue;
@@ -1413,22 +1388,22 @@ function sanitizeRepositoryRefs(refs: GoatGitHubRepositoryRef[]): GoatGitHubRepo
 async function loadOwnSlackAccount(userWorkosId: string, integrationId: string) {
   const [integration] = await getDb()
     .select({
-      id: goatIntegrations.id,
-      status: goatIntegrations.status,
-      externalId: goatIntegrations.externalId,
+      id: integrations.id,
+      status: integrations.status,
+      externalId: integrations.externalId,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.id, integrationId),
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, "slack"),
+        eq(integrations.id, integrationId),
+        eq(integrations.userWorkosId, userWorkosId),
+        eq(integrations.provider, "slack"),
       ),
     )
     .limit(1);
   if (!integration || integration.status !== "connected") return null;
 
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId,
     integrationId,
     provider: "slack",
@@ -1450,9 +1425,9 @@ async function loadOwnSlackAccount(userWorkosId: string, integrationId: string) 
   return { token, teamId, authedUserId };
 }
 
-function sanitizeConversationRefs(refs: GoatSlackConversationRef[]): GoatSlackConversationRef[] {
+function sanitizeConversationRefs(refs: SlackConversationRef[]): SlackConversationRef[] {
   const seen = new Set<string>();
-  const sanitized: GoatSlackConversationRef[] = [];
+  const sanitized: SlackConversationRef[] = [];
   for (const ref of refs) {
     const id = typeof ref.id === "string" ? ref.id.trim() : "";
     if (!id || seen.has(id)) continue;

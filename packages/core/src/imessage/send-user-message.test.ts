@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createGoatSendUserMessageRunner } from "./send-user-message";
+import { createSendUserMessageRunner } from "./send-user-message";
 
 const dbMocks = vi.hoisted(() => ({
-  countGoatImessageSendsSince: vi.fn(async () => 0),
-  getSuccessfulGoatImessageSendForTurn: vi.fn(
+  countImessageSendsSince: vi.fn(async () => 0),
+  getSuccessfulImessageSendForTurn: vi.fn(
     async (): Promise<{ id: string; createdAt: Date } | null> => null,
   ),
-  recordGoatImessageSend: vi.fn(async () => undefined),
+  recordImessageSend: vi.fn(async () => undefined),
 }));
 
 const providerMocks = vi.hoisted(() => ({
@@ -14,25 +14,25 @@ const providerMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@opencompany/db/imessage", () => ({
-  countGoatImessageSendsSince: dbMocks.countGoatImessageSendsSince,
-  getSuccessfulGoatImessageSendForTurn: dbMocks.getSuccessfulGoatImessageSendForTurn,
-  recordGoatImessageSend: dbMocks.recordGoatImessageSend,
+  countImessageSendsSince: dbMocks.countImessageSendsSince,
+  getSuccessfulImessageSendForTurn: dbMocks.getSuccessfulImessageSendForTurn,
+  recordImessageSend: dbMocks.recordImessageSend,
 }));
 
 vi.mock("./provider", () => ({
-  resolveGoatImessageProvider: () => ({ name: "log", send: providerMocks.send }),
+  resolveImessageProvider: () => ({ name: "log", send: providerMocks.send }),
 }));
 
-describe("createGoatSendUserMessageRunner", () => {
+describe("createSendUserMessageRunner", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    dbMocks.countGoatImessageSendsSince.mockResolvedValue(0);
-    dbMocks.getSuccessfulGoatImessageSendForTurn.mockResolvedValue(null);
+    dbMocks.countImessageSendsSince.mockResolvedValue(0);
+    dbMocks.getSuccessfulImessageSendForTurn.mockResolvedValue(null);
     providerMocks.send.mockResolvedValue({ ok: true, providerMessageId: "msg_1" });
   });
 
   it("records the durable turn id for sent task messages", async () => {
-    const runner = createGoatSendUserMessageRunner({
+    const runner = createSendUserMessageRunner({
       userWorkosId: "user_1",
       phoneE164: "+15551234567",
       source: "task",
@@ -49,7 +49,7 @@ describe("createGoatSendUserMessageRunner", () => {
       to: "+15551234567",
       text: "Ship the briefing.",
     });
-    expect(dbMocks.recordGoatImessageSend).toHaveBeenCalledWith({
+    expect(dbMocks.recordImessageSend).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       source: "task",
       status: "sent",
@@ -60,11 +60,11 @@ describe("createGoatSendUserMessageRunner", () => {
   });
 
   it("returns an existing successful durable turn send without replaying the provider call", async () => {
-    dbMocks.getSuccessfulGoatImessageSendForTurn.mockResolvedValue({
+    dbMocks.getSuccessfulImessageSendForTurn.mockResolvedValue({
       id: "gims_1",
       createdAt: new Date("2026-08-01T05:23:36.000Z"),
     });
-    const runner = createGoatSendUserMessageRunner({
+    const runner = createSendUserMessageRunner({
       userWorkosId: "user_1",
       phoneE164: "+15551234567",
       source: "task",
@@ -77,9 +77,9 @@ describe("createGoatSendUserMessageRunner", () => {
       delivered: true,
     });
 
-    expect(dbMocks.getSuccessfulGoatImessageSendForTurn).toHaveBeenCalledWith("turn_1");
-    expect(dbMocks.countGoatImessageSendsSince).not.toHaveBeenCalled();
+    expect(dbMocks.getSuccessfulImessageSendForTurn).toHaveBeenCalledWith("turn_1");
+    expect(dbMocks.countImessageSendsSince).not.toHaveBeenCalled();
     expect(providerMocks.send).not.toHaveBeenCalled();
-    expect(dbMocks.recordGoatImessageSend).not.toHaveBeenCalled();
+    expect(dbMocks.recordImessageSend).not.toHaveBeenCalled();
   });
 });

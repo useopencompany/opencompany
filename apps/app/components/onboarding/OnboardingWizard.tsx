@@ -3,7 +3,7 @@
 import {
   ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS,
   HARD_DEFAULT_GOAT_BRAIN_FOLDERS,
-  normalizeGoatBrainFolder,
+  normalizeBrainFolder,
 } from "@opencompany/brain/schema";
 import {
   Dialog,
@@ -48,45 +48,42 @@ import {
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
-import {
-  goatBrainSourceHasScope,
-  resolveGoatBrainSourceState,
-} from "@/components/GoatBrainSourceCards";
+import { brainSourceHasScope, resolveBrainSourceState } from "@/components/BrainSourceCards";
 import { ConnectIntegrationModal } from "@/components/onboarding/ConnectIntegrationModal";
 import { OnboardingSourceCard } from "@/components/onboarding/OnboardingSourceCard";
 import { SourceConfigSheet } from "@/components/onboarding/SourceConfigSheet";
 import {
-  type GoatBrainSourcesDetails,
-  getGoatBrainSourcesAction,
-  setGoatBrainSourceEnabledAction,
+  type BrainSourcesDetails,
+  getBrainSourcesAction,
+  setBrainSourceEnabledAction,
 } from "@/lib/brain-source-actions";
 import {
+  type BrainSourceProviderDef,
+  brainSourceNeedsConfig,
   GOAT_BRAIN_SOURCE_PROVIDERS,
-  type GoatBrainSourceProviderDef,
-  goatBrainSourceNeedsConfig,
 } from "@/lib/brain-sources/registry";
 import {
-  checkGoatWorkspaceSlugAction,
-  finishGoatOnboardingAction,
-  saveGoatOnboardingBrainFoldersAction,
-  saveGoatOnboardingProfileAction,
-  saveGoatOnboardingWorkspaceAction,
+  checkWorkspaceSlugAction,
+  finishOnboardingAction,
+  saveOnboardingBrainFoldersAction,
+  saveOnboardingProfileAction,
+  saveOnboardingWorkspaceAction,
 } from "@/lib/onboarding-actions";
 import {
   GOAT_ONBOARDING_CONNECTION_MESSAGE,
   GOAT_ONBOARDING_CONNECTION_STORAGE_KEY,
-  type GoatOnboardingConnectionMessage,
-  type GoatOnboardingConnectionResult,
-  goatOnboardingConnectHref,
-  goatOnboardingConnectionError,
+  type OnboardingConnectionMessage,
+  type OnboardingConnectionResult,
+  onboardingConnectHref,
+  onboardingConnectionError,
 } from "@/lib/onboarding-integrations";
-import { queueGoatOnboardingKickoff } from "@/lib/onboarding-kickoff";
+import { queueOnboardingKickoff } from "@/lib/onboarding-kickoff";
 import {
   GOAT_ONBOARDING_COMPANY_URL_MAX_LENGTH,
-  type GoatOnboardingRole,
-  goatOnboardingFoldersForRole,
-  isGoatOnboardingRole,
-  normalizeGoatOnboardingCompanyUrl,
+  isOnboardingRole,
+  normalizeOnboardingCompanyUrl,
+  type OnboardingRole,
+  onboardingFoldersForRole,
 } from "@/lib/onboarding-profile";
 
 type OnboardingUser = {
@@ -122,28 +119,28 @@ const MEMBER_STEPS: StepDef[] = [
 const SOURCE_GOAL = 4;
 
 // A source only counts as "feeding" once it is both enabled and has enough scope
-// selected to actually ingest (see goatBrainSourceHasScope). Everything in
+// selected to actually ingest (see brainSourceHasScope). Everything in
 // onboarding reasons about this — never bare "enabled", which for the
 // scope-required providers can be true while nothing flows.
-function isGoatSourceFeeding(
-  providerId: GoatBrainSourceProviderDef["id"],
-  details: GoatBrainSourcesDetails | null,
+function isSourceFeeding(
+  providerId: BrainSourceProviderDef["id"],
+  details: BrainSourcesDetails | null,
 ): boolean {
-  const state = resolveGoatBrainSourceState(providerId, details);
-  return state.enabled && goatBrainSourceHasScope(providerId, state.source?.config);
+  const state = resolveBrainSourceState(providerId, details);
+  return state.enabled && brainSourceHasScope(providerId, state.source?.config);
 }
 
-function countGoatSourcesFeeding(details: GoatBrainSourcesDetails | null): number {
-  return GOAT_BRAIN_SOURCE_PROVIDERS.filter((provider) => isGoatSourceFeeding(provider.id, details))
+function countSourcesFeeding(details: BrainSourcesDetails | null): number {
+  return GOAT_BRAIN_SOURCE_PROVIDERS.filter((provider) => isSourceFeeding(provider.id, details))
     .length;
 }
 
 // Sources the user authorized but that aren't feeding the brain yet — the exact
 // "landed with no sources" gap we surface before leaving the step.
-function countGoatSourcesAuthorizedNotFeeding(details: GoatBrainSourcesDetails | null): number {
+function countSourcesAuthorizedNotFeeding(details: BrainSourcesDetails | null): number {
   return GOAT_BRAIN_SOURCE_PROVIDERS.filter((provider) => {
-    const state = resolveGoatBrainSourceState(provider.id, details);
-    return state.connected && !isGoatSourceFeeding(provider.id, details);
+    const state = resolveBrainSourceState(provider.id, details);
+    return state.connected && !isSourceFeeding(provider.id, details);
   }).length;
 }
 
@@ -152,7 +149,7 @@ function countGoatSourcesAuthorizedNotFeeding(details: GoatBrainSourcesDetails |
 // hard defaults inbox/people/companies/evidence are always added on top). Every
 // folder here must satisfy GOAT_BRAIN_FOLDER_PATTERN (lowercase, single word).
 type RoleProfile = {
-  id: GoatOnboardingRole;
+  id: OnboardingRole;
   label: string;
   hint: string;
   icon: LucideIcon;
@@ -211,8 +208,8 @@ const ROLE_PROFILES: RoleProfile[] = [
 
 // Folders to seed the brain step with for a given role — falls back to the
 // generic adjustable defaults when no role is chosen or recognized.
-function foldersForRole(role: GoatOnboardingRole | null): string[] {
-  return goatOnboardingFoldersForRole(role);
+function foldersForRole(role: OnboardingRole | null): string[] {
+  return onboardingFoldersForRole(role);
 }
 
 // ---------------------------------------------------------------------------
@@ -244,12 +241,12 @@ export function OnboardingWizard({
   initialRole: string | null;
   initialCompanyUrl: string;
   initialReferral: string | null;
-  initialSourceDetails: GoatBrainSourcesDetails | null;
-  initialConnectionResult: GoatOnboardingConnectionResult | null;
+  initialSourceDetails: BrainSourcesDetails | null;
+  initialConnectionResult: OnboardingConnectionResult | null;
 }) {
   const router = useRouter();
   const STEPS = variant === "member" ? MEMBER_STEPS : OWNER_STEPS;
-  const normalizedInitialRole = isGoatOnboardingRole(initialRole) ? initialRole : null;
+  const normalizedInitialRole = isOnboardingRole(initialRole) ? initialRole : null;
   const [stepIndex, setStepIndex] = useState(() =>
     Math.min(Math.max(initialStep, 0), STEPS.length - 1),
   );
@@ -258,7 +255,7 @@ export function OnboardingWizard({
   const [slugTouched, setSlugTouched] = useState(Boolean(initialSlug));
   const [slug, setSlug] = useState(initialSlug);
   const [referral, setReferral] = useState<string | null>(initialReferral);
-  const [role, setRole] = useState<GoatOnboardingRole | null>(normalizedInitialRole);
+  const [role, setRole] = useState<OnboardingRole | null>(normalizedInitialRole);
   const [companyUrl, setCompanyUrl] = useState(initialCompanyUrl);
   const [workingFolders, setWorkingFolders] = useState<string[]>(() =>
     foldersForRole(normalizedInitialRole),
@@ -276,20 +273,20 @@ export function OnboardingWizard({
 
   const reloadSourceDetails = useCallback(async () => {
     if (!brainRef) return null;
-    const next = await getGoatBrainSourcesAction(brainRef);
+    const next = await getBrainSourcesAction(brainRef);
     setSourceDetails(next);
     return next;
   }, [brainRef]);
 
   const authorizedNotFeeding = useMemo(
-    () => countGoatSourcesAuthorizedNotFeeding(sourceDetails),
+    () => countSourcesAuthorizedNotFeeding(sourceDetails),
     [sourceDetails],
   );
 
   const step = STEPS[stepIndex] ?? STEPS[0]!;
   const isLast = stepIndex === STEPS.length - 1;
   const effectiveSlug = slugTouched ? slug : slugify(workspaceName);
-  const normalizedCompanyUrl = normalizeGoatOnboardingCompanyUrl(companyUrl);
+  const normalizedCompanyUrl = normalizeOnboardingCompanyUrl(companyUrl);
   const companyUrlStatus: CompanyUrlStatus = !companyUrl.trim()
     ? "idle"
     : normalizedCompanyUrl
@@ -314,7 +311,7 @@ export function OnboardingWizard({
   useEffect(() => {
     if (!shouldCheckSlug) return;
     const timer = window.setTimeout(() => {
-      void checkGoatWorkspaceSlugAction(effectiveSlug).then((result) => {
+      void checkWorkspaceSlugAction(effectiveSlug).then((result) => {
         setSlugCheck({ slug: effectiveSlug, available: result.available });
       });
     }, 400);
@@ -324,24 +321,24 @@ export function OnboardingWizard({
   // Saves the current step server-side; returns false (and toasts) on rejection.
   const persistCurrentStep = async (): Promise<boolean> => {
     if (step.key === "profile") {
-      const r = await saveGoatOnboardingProfileAction({ role, companyUrl });
+      const r = await saveOnboardingProfileAction({ role, companyUrl });
       return r.ok || toastFail(r.error);
     }
     if (step.key === "workspace") {
-      const r = await saveGoatOnboardingWorkspaceAction({
+      const r = await saveOnboardingWorkspaceAction({
         name: workspaceName,
         slug: effectiveSlug,
       });
       return r.ok || toastFail(r.error);
     }
     if (step.key === "brain") {
-      const r = await saveGoatOnboardingBrainFoldersAction({
+      const r = await saveOnboardingBrainFoldersAction({
         folders: workingFolders,
       });
       return r.ok || toastFail(r.error);
     }
     if (step.key === "finish") {
-      const r = await finishGoatOnboardingAction({ referralSource: referral });
+      const r = await finishOnboardingAction({ referralSource: referral });
       return r.ok || toastFail(r.error);
     }
     return true;
@@ -352,7 +349,7 @@ export function OnboardingWizard({
       if (!(await persistCurrentStep())) return;
       if (isLast) {
         if (variant === "owner" && normalizedCompanyUrl) {
-          if (!queueGoatOnboardingKickoff(normalizedCompanyUrl)) {
+          if (!queueOnboardingKickoff(normalizedCompanyUrl)) {
             toast.error("Onboarding finished, but the first Brain run could not be started.");
           }
         }
@@ -378,7 +375,7 @@ export function OnboardingWizard({
   // Picking a role re-seeds the brain folders with that role's preset. We only
   // reseed on an actual change so a user who tweaked folders and stepped back
   // doesn't lose their edits by re-clicking the role they already had.
-  const selectRole = (next: GoatOnboardingRole) => {
+  const selectRole = (next: OnboardingRole) => {
     if (next === role) return;
     setRole(next);
     setWorkingFolders(foldersForRole(next));
@@ -629,8 +626,8 @@ function ProfileStep({
   companyUrlStatus,
 }: {
   user: OnboardingUser;
-  role: GoatOnboardingRole | null;
-  onRole: (id: GoatOnboardingRole) => void;
+  role: OnboardingRole | null;
+  onRole: (id: OnboardingRole) => void;
   companyUrl: string;
   onCompanyUrl: (v: string) => void;
   companyUrlStatus: CompanyUrlStatus;
@@ -856,7 +853,7 @@ function HighlightRow({
 // Step — Brain folders (mini file tree)
 // ---------------------------------------------------------------------------
 
-// Icon mapping mirrors the real brain tree in GoatBrainView so the step feels
+// Icon mapping mirrors the real brain tree in BrainView so the step feels
 // like the app's own file tree.
 function FolderIcon({ path }: { path: string }) {
   const [root] = path.split("/");
@@ -902,7 +899,7 @@ function BrainStep({
   const [overIndex, setOverIndex] = useState<number | null>(null);
 
   const tryAdd = (value: string) => {
-    const normalized = normalizeGoatBrainFolder(value);
+    const normalized = normalizeBrainFolder(value);
     const reserved = new Set<string>([...HARD_DEFAULT_GOAT_BRAIN_FOLDERS, ...workingFolders]);
     if (!normalized || reserved.has(normalized)) return false;
     onChange([...workingFolders, normalized]);
@@ -1122,26 +1119,23 @@ function SourcesStep({
   initialConnectionResult,
 }: {
   brainRef: string | null;
-  details: GoatBrainSourcesDetails | null;
-  reload: () => Promise<GoatBrainSourcesDetails | null>;
-  initialConnectionResult: GoatOnboardingConnectionResult | null;
+  details: BrainSourcesDetails | null;
+  reload: () => Promise<BrainSourcesDetails | null>;
+  initialConnectionResult: OnboardingConnectionResult | null;
 }) {
   const [connectingId, setConnectingId] = useState<string | null>(null);
   // The api_key/webhook providers connect inside a modal rather than navigating
   // out of the wizard.
-  const [modalProvider, setModalProvider] = useState<GoatBrainSourceProviderDef | null>(null);
+  const [modalProvider, setModalProvider] = useState<BrainSourceProviderDef | null>(null);
   // The focused config surface that opens the moment a scope-required source
   // authorizes, so the user picks what to ingest in one continuous motion.
-  const [configProvider, setConfigProvider] = useState<GoatBrainSourceProviderDef | null>(null);
+  const [configProvider, setConfigProvider] = useState<BrainSourceProviderDef | null>(null);
   // When the OAuth popup is blocked we surface an in-wizard notice with a plain
   // anchor instead of a same-tab redirect that would drop wizard state.
   const [popupBlocked, setPopupBlocked] = useState<{ name: string; href: string } | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(() =>
     initialConnectionResult?.status === "error"
-      ? goatOnboardingConnectionError(
-          initialConnectionResult.provider,
-          initialConnectionResult.reason,
-        )
+      ? onboardingConnectionError(initialConnectionResult.provider, initialConnectionResult.reason)
       : null,
   );
   const [connectionNotice, setConnectionNotice] = useState<string | null>(null);
@@ -1160,21 +1154,21 @@ function SourcesStep({
       const provider = GOAT_BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === providerId) ?? null;
       const next = await reload();
       if (!provider) return;
-      const state = resolveGoatBrainSourceState(provider.id, next);
+      const state = resolveBrainSourceState(provider.id, next);
       if (!state.connected) {
         setConnectionNotice(null);
         setConnectionError(`${provider.name} authorization was not completed.`);
         return;
       }
       setConnectionError(null);
-      if (goatBrainSourceNeedsConfig(provider.id)) {
+      if (brainSourceNeedsConfig(provider.id)) {
         setConnectionNotice(null);
         setConfigProvider(provider);
         return;
       }
       // Nothing to scope — enable it so meetings/notes flow into this brain now.
       if (brainRef && state.integrationId && !state.enabled) {
-        const result = await setGoatBrainSourceEnabledAction({
+        const result = await setBrainSourceEnabledAction({
           brainRef,
           provider: provider.id,
           integrationId: state.integrationId,
@@ -1192,7 +1186,7 @@ function SourcesStep({
   );
 
   useEffect(() => {
-    function handleConnection(message: GoatOnboardingConnectionMessage | undefined) {
+    function handleConnection(message: OnboardingConnectionMessage | undefined) {
       if (!message || message.type !== GOAT_ONBOARDING_CONNECTION_MESSAGE) return;
       if (connectingRef.current && message.provider !== connectingRef.current) return;
 
@@ -1205,19 +1199,19 @@ function SourcesStep({
         void onSourceConnected(message.provider);
       } else {
         setConnectionNotice(null);
-        setConnectionError(goatOnboardingConnectionError(message.provider, message.reason));
+        setConnectionError(onboardingConnectionError(message.provider, message.reason));
       }
     }
 
     function onMessage(event: MessageEvent) {
       if (event.origin !== window.location.origin) return;
-      handleConnection(event.data as GoatOnboardingConnectionMessage | undefined);
+      handleConnection(event.data as OnboardingConnectionMessage | undefined);
     }
 
     function onStorage(event: StorageEvent) {
       if (event.key !== GOAT_ONBOARDING_CONNECTION_STORAGE_KEY || !event.newValue) return;
       try {
-        handleConnection(JSON.parse(event.newValue) as GoatOnboardingConnectionMessage);
+        handleConnection(JSON.parse(event.newValue) as OnboardingConnectionMessage);
       } catch {
         // Ignore malformed local state; OAuth state remains server-verified.
       }
@@ -1251,7 +1245,7 @@ function SourcesStep({
     }
   }, [initialConnectionResult, onSourceConnected]);
 
-  const openConnection = (provider: GoatBrainSourceProviderDef) => {
+  const openConnection = (provider: BrainSourceProviderDef) => {
     setConnectionError(null);
     setConnectionNotice(null);
     setPopupBlocked(null);
@@ -1262,7 +1256,7 @@ function SourcesStep({
       return;
     }
 
-    const connectHref = goatOnboardingConnectHref(provider.connectHref);
+    const connectHref = onboardingConnectHref(provider.connectHref);
     const left = window.screenX + Math.max(0, (window.outerWidth - POPUP_WIDTH) / 2);
     const top = window.screenY + Math.max(0, (window.outerHeight - POPUP_HEIGHT) / 2);
     const popup = window.open(
@@ -1296,9 +1290,9 @@ function SourcesStep({
     }, 500);
   };
 
-  const feedingCount = countGoatSourcesFeeding(details);
+  const feedingCount = countSourcesFeeding(details);
   const authorizedCount = GOAT_BRAIN_SOURCE_PROVIDERS.filter(
-    (provider) => resolveGoatBrainSourceState(provider.id, details).connected,
+    (provider) => resolveBrainSourceState(provider.id, details).connected,
   ).length;
   const pct = Math.min(100, (feedingCount / SOURCE_GOAL) * 100);
 

@@ -1,59 +1,114 @@
-// Typed catalog for the events still sent to the legacy "web" PostHog project.
-// The shared Stripe webhook and the goat billing/ingestion paths are the only
-// remaining emitters; everything else moved to the goat project (goat-events.ts).
+// Goat's product analytics are deliberately small. A new chat is derived from
+// chat_message_sent.is_first_message instead of emitting a second event for the same action.
+export type TaskSpawnKind = "adhoc" | "workflow" | "scheduled_task" | "scheduled_workflow";
+export type TaskSpawnOrigin = "adhoc" | "workflow";
+export type TaskSpawnTrigger = "manual" | "schedule";
+export type AnalyticsEngine = "opencompany" | "codex" | "claude_code";
+export type AnalyticsUsageSource = "owned_platform" | "external_harness";
+
 export type AnalyticsEventPropertiesByName = {
-  // Legacy-product credit fulfillment, still emitted by the shared Stripe webhook
-  // when a legacy checkout session completes.
-  credit_top_up_completed: {
-    user_id: string;
+  app_opened: {
     workspace_id: string;
-    checkout_record_id: string;
-    ledger_id: number;
-    amount_cents: number;
-    balance_cents: number;
   };
-  goat_billing_topup_started: {
-    user_id: string;
-    workspace_id: string;
-    amount_cents: number;
+  signup_completed: {
+    source: "user_sync";
   };
-  goat_billing_topup_completed: {
+  chat_message_sent: {
     workspace_id: string;
-    checkout_record_id: string;
+    session_id: string;
+    is_first_message: boolean;
+    engine: AnalyticsEngine;
+    usage_source: AnalyticsUsageSource;
+    model: string;
+    message_length: number;
+    selection_mode?: "manual" | "auto";
+    routing_tier?: "standard" | "frontier";
+    routing_reason?: string;
+    routing_outcome?: string;
+    routing_duration_ms?: number;
+  };
+  llm_usage_recorded: {
+    workspace_id?: string;
+    surface: "chat" | "task";
+    stage: "generation" | "routing" | "planner" | "execution" | "closer";
+    session_id?: string;
+    message_id?: string;
+    task_id?: string;
+    turn_id?: string;
+    step_index?: number;
+    model_provider: string;
+    model: string;
+    response_model?: string;
+    engine: AnalyticsEngine;
+    usage_source: AnalyticsUsageSource;
+    input_tokens: number;
+    input_no_cache_tokens: number;
+    input_cache_read_tokens: number;
+    input_cache_write_tokens: number;
+    output_tokens: number;
+    output_text_tokens: number;
+    output_reasoning_tokens: number;
+    total_tokens: number;
+    provider_cost_usd_micros: number;
+    platform_fee_usd_micros: number;
+    charged_cost_usd_micros: number;
+    billable: boolean;
+    finish_reason?: string;
+  };
+  task_spawned: {
+    workspace_id?: string;
+    task_id: string;
+    display_id?: string;
+    task_kind: TaskSpawnKind;
+    task_origin: TaskSpawnOrigin;
+    task_trigger: TaskSpawnTrigger;
+    engine: AnalyticsEngine;
+    model: string;
+    has_workflow: boolean;
+    has_schedule: boolean;
+    workflow_id?: string;
+    schedule_id?: string;
+  };
+  integration_added: {
+    workspace_id?: string;
+    provider: string;
+  };
+  brain_source_added: {
+    workspace_id: string;
+    brain_id: string;
+    provider: string;
+  };
+  brain_ingestion_completed: {
+    workspace_id: string;
+    brain_id: string;
+    provider: string;
+    source_type: string;
+  };
+  billing_topup_completed: {
+    workspace_id: string;
+    topup_type: "manual" | "auto_refill";
     amount_cents: number;
     amount_usd: number;
     balance_cents: number;
   };
-  goat_billing_pro_checkout_started: {
+  model_spend_recorded: {
     user_id: string;
-    workspace_id: string;
-    monthly_price_usd_cents: number;
-  };
-  goat_billing_plan_changed: {
-    workspace_id: string;
-    plan: "hobby" | "pro";
-    subscription_status: string;
-  };
-  goat_billing_payment_failed: {
-    workspace_id: string;
-    subscription_id: string;
-  };
-  goat_billing_auto_refill_succeeded: {
-    workspace_id: string;
-    amount_cents: number;
-  };
-  goat_billing_auto_refill_failed: {
-    workspace_id: string;
-    amount_cents: number;
-    reason: string;
-  };
-  goat_ingestion_paused: {
-    workspace_id: string;
-    pending_units: number;
-  };
-  goat_ingestion_backlog_size: {
-    workspace_id: string;
-    pending_units: number;
+    workspace_id?: string;
+    billing_source: "chat_model_usage" | "ingest_model_usage" | "task_model_usage";
+    surface: "chat" | "task" | "slack_bot" | "brain_ingest";
+    model: string;
+    stage?: string;
+    engine?: AnalyticsEngine;
+    usage_source?: AnalyticsUsageSource;
+    provider_cost_usd_micros: number;
+    platform_fee_usd_micros: number;
+    total_cost_usd_micros: number;
+    model_cost_usd_micros: number;
+    ledger_id?: number;
+    chat_session_id?: string;
+    ingest_job_id?: string;
+    task_id?: string;
+    message_id?: string;
   };
 };
 
@@ -61,3 +116,135 @@ export type AnalyticsEventName = keyof AnalyticsEventPropertiesByName;
 
 export type AnalyticsEventProperties<EventName extends AnalyticsEventName> =
   AnalyticsEventPropertiesByName[EventName];
+
+type AnalyticsEventDefinition<EventName extends AnalyticsEventName> = {
+  name: EventName;
+  description: string;
+  safeProperties: ReadonlyArray<keyof AnalyticsEventProperties<EventName>>;
+};
+
+export const analyticsEvents = {
+  app_opened: {
+    name: "app_opened",
+    description: "A signed-in user opened Goat.",
+    safeProperties: ["workspace_id"],
+  },
+  signup_completed: {
+    name: "signup_completed",
+    description: "A WorkOS user was synced into Goat for the first time.",
+    safeProperties: ["source"],
+  },
+  chat_message_sent: {
+    name: "chat_message_sent",
+    description: "A user sent a message in Goat main chat.",
+    safeProperties: [
+      "workspace_id",
+      "session_id",
+      "is_first_message",
+      "engine",
+      "usage_source",
+      "model",
+      "message_length",
+      "selection_mode",
+      "routing_tier",
+      "routing_reason",
+      "routing_outcome",
+      "routing_duration_ms",
+    ],
+  },
+  llm_usage_recorded: {
+    name: "llm_usage_recorded",
+    description: "A Goat LLM call reported token and cost usage.",
+    safeProperties: [
+      "workspace_id",
+      "surface",
+      "stage",
+      "session_id",
+      "message_id",
+      "task_id",
+      "turn_id",
+      "step_index",
+      "model_provider",
+      "model",
+      "response_model",
+      "engine",
+      "usage_source",
+      "input_tokens",
+      "input_no_cache_tokens",
+      "input_cache_read_tokens",
+      "input_cache_write_tokens",
+      "output_tokens",
+      "output_text_tokens",
+      "output_reasoning_tokens",
+      "total_tokens",
+      "provider_cost_usd_micros",
+      "platform_fee_usd_micros",
+      "charged_cost_usd_micros",
+      "billable",
+      "finish_reason",
+    ],
+  },
+  task_spawned: {
+    name: "task_spawned",
+    description: "A durable Goat task was created and queued.",
+    safeProperties: [
+      "workspace_id",
+      "task_id",
+      "display_id",
+      "task_kind",
+      "task_origin",
+      "task_trigger",
+      "engine",
+      "model",
+      "has_workflow",
+      "has_schedule",
+      "workflow_id",
+      "schedule_id",
+    ],
+  },
+  integration_added: {
+    name: "integration_added",
+    description: "A user connected an integration.",
+    safeProperties: ["workspace_id", "provider"],
+  },
+  brain_source_added: {
+    name: "brain_source_added",
+    description: "A user added an enabled integration source to a Brain.",
+    safeProperties: ["workspace_id", "brain_id", "provider"],
+  },
+  brain_ingestion_completed: {
+    name: "brain_ingestion_completed",
+    description: "A full Brain ingestion job completed successfully.",
+    safeProperties: ["workspace_id", "brain_id", "provider", "source_type"],
+  },
+  billing_topup_completed: {
+    name: "billing_topup_completed",
+    description: "A manual or automatic billing top-up credited a Goat workspace.",
+    safeProperties: ["workspace_id", "topup_type", "amount_cents", "amount_usd", "balance_cents"],
+  },
+  model_spend_recorded: {
+    name: "model_spend_recorded",
+    description: "A billable Goat model-cost usage row was recorded.",
+    safeProperties: [
+      "user_id",
+      "workspace_id",
+      "billing_source",
+      "surface",
+      "model",
+      "stage",
+      "engine",
+      "usage_source",
+      "provider_cost_usd_micros",
+      "platform_fee_usd_micros",
+      "total_cost_usd_micros",
+      "model_cost_usd_micros",
+      "ledger_id",
+      "chat_session_id",
+      "ingest_job_id",
+      "task_id",
+      "message_id",
+    ],
+  },
+} as const satisfies {
+  [EventName in AnalyticsEventName]: AnalyticsEventDefinition<EventName>;
+};

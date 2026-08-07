@@ -3,19 +3,19 @@ import type { JSONSchema7, ToolExecutionOptions, ToolSet } from "ai";
 import Ajv, { type AnySchema } from "ajv";
 import {
   GOAT_POSTHOG_MCP_ENDPOINT_URL,
-  getGoatPostHogIntegrationState,
-  loadGoatPostHogMcpWorkerConnection,
+  getPostHogIntegrationState,
+  loadPostHogMcpWorkerConnection,
 } from "../integrations/posthog-mcp";
-import { effectiveCapabilityMode, type GoatCapabilityId, providerCapability } from "./capabilities";
+import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  ActionAuthError,
+  type ActionExecuteContext,
+  ActionInvalidParamsError,
+  ActionPermissionError,
+  type ActionProviderCatalog,
   GOAT_ACTION_EFFECTS_READ,
   GOAT_ACTION_EFFECTS_WRITE,
-  GoatActionAuthError,
-  type GoatActionExecuteContext,
-  GoatActionInvalidParamsError,
-  GoatActionPermissionError,
-  type GoatActionProviderCatalog,
-  type ResolvedGoatAction,
+  type ResolvedAction,
 } from "./types";
 
 type PostHogToolDefinition = {
@@ -43,7 +43,7 @@ const POSTHOG_ACTION_CAPABILITIES = {
   "query-stickiness": "read",
   "query-lifecycle": "read",
   "insight-create": "write",
-} as const satisfies Record<string, GoatCapabilityId>;
+} as const satisfies Record<string, CapabilityId>;
 
 type PostHogActionToolName = keyof typeof POSTHOG_ACTION_CAPABILITIES;
 
@@ -51,8 +51,8 @@ const posthogSchemaValidator = new Ajv({ allErrors: true, strict: false });
 
 export async function resolvePostHogActions(
   userWorkosId: string,
-): Promise<GoatActionProviderCatalog | null> {
-  const state = await getGoatPostHogIntegrationState(userWorkosId);
+): Promise<ActionProviderCatalog | null> {
+  const state = await getPostHogIntegrationState(userWorkosId);
   const integrationId = state.integrationId;
   if (!state.connected || !integrationId) return null;
 
@@ -60,7 +60,7 @@ export async function resolvePostHogActions(
   const writeEnabled = effectiveCapabilityMode("posthog", "write", state.capabilityModes) !== "off";
   if (!readEnabled && !writeEnabled) return null;
 
-  const connection = await loadGoatPostHogMcpWorkerConnection({
+  const connection = await loadPostHogMcpWorkerConnection({
     userWorkosId,
     onAuthorizationRequired: () => {
       throw posthogAuthError();
@@ -79,7 +79,7 @@ export async function resolvePostHogActions(
     await client.close().catch(() => {});
   }
 
-  const actions: ResolvedGoatAction[] = definitions.flatMap((definition) => {
+  const actions: ResolvedAction[] = definitions.flatMap((definition) => {
     if (!isPostHogActionToolName(definition.name)) return [];
     const remoteName = definition.name;
     const capability = POSTHOG_ACTION_CAPABILITIES[remoteName];
@@ -125,9 +125,9 @@ export async function resolvePostHogActions(
 }
 
 function permissionAnnotation(
-  capabilityId: GoatCapabilityId,
+  capabilityId: CapabilityId,
   state: { integrationId: string; capabilityModes: unknown },
-): Pick<ResolvedGoatAction, "permissionMode" | "permission"> {
+): Pick<ResolvedAction, "permissionMode" | "permission"> {
   if (effectiveCapabilityMode("posthog", capabilityId, state.capabilityModes) !== "ask") {
     return { permissionMode: "on" };
   }
@@ -144,15 +144,15 @@ function permissionAnnotation(
 
 async function executePostHogAction(input: {
   remoteName: PostHogActionToolName;
-  expectedCapability: GoatCapabilityId;
+  expectedCapability: CapabilityId;
   expectedIntegrationId: string;
   params: Record<string, unknown>;
-  context: GoatActionExecuteContext;
+  context: ActionExecuteContext;
 }) {
-  const state = await getGoatPostHogIntegrationState(input.context.userWorkosId);
+  const state = await getPostHogIntegrationState(input.context.userWorkosId);
   if (!state.connected || !state.integrationId) throw posthogAuthError();
   if (state.integrationId !== input.expectedIntegrationId) {
-    throw new GoatActionPermissionError(
+    throw new ActionPermissionError(
       "posthog",
       "The PostHog connection changed before this action could run. Retry so Goat can use the current connection and permission.",
     );
@@ -160,13 +160,13 @@ async function executePostHogAction(input: {
   if (
     effectiveCapabilityMode("posthog", input.expectedCapability, state.capabilityModes) === "off"
   ) {
-    throw new GoatActionPermissionError(
+    throw new ActionPermissionError(
       "posthog",
       `${input.expectedCapability === "read" ? "Reading from" : "Creating insights in"} PostHog is turned off. It can be changed under Settings → Integrations.`,
     );
   }
 
-  const connection = await loadGoatPostHogMcpWorkerConnection({
+  const connection = await loadPostHogMcpWorkerConnection({
     userWorkosId: input.context.userWorkosId,
     onAuthorizationRequired: () => {
       throw posthogAuthError();
@@ -174,7 +174,7 @@ async function executePostHogAction(input: {
   });
   if (!connection.ok) throw posthogAuthError();
   if (connection.integrationId !== input.expectedIntegrationId) {
-    throw new GoatActionPermissionError(
+    throw new ActionPermissionError(
       "posthog",
       "The PostHog connection changed before this action could run. Retry so Goat can use the current connection and permission.",
     );
@@ -195,13 +195,13 @@ async function executePostHogAction(input: {
       input.expectedCapability === "read" &&
       currentDefinition.annotations?.readOnlyHint !== true
     ) {
-      throw new GoatActionPermissionError(
+      throw new ActionPermissionError(
         "posthog",
         `PostHog changed the "${input.remoteName}" tool from read-only. Retry so Goat can request confirmation with the current permission.`,
       );
     }
     if (currentDefinition.annotations?.destructiveHint === true) {
-      throw new GoatActionPermissionError(
+      throw new ActionPermissionError(
         "posthog",
         `PostHog marked the "${input.remoteName}" tool as destructive, so Goat will not run it.`,
       );
@@ -211,7 +211,7 @@ async function executePostHogAction(input: {
       posthogInputSchema(currentDefinition.inputSchema) as AnySchema,
     );
     if (!validate(input.params)) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `The parameters for "${input.remoteName}" do not match PostHog's current schema.`,
       );
     }
@@ -261,12 +261,12 @@ function posthogInputSchema(value: Record<string, unknown>): JSONSchema7 & Recor
   } as JSONSchema7 & Record<string, unknown>;
 }
 
-function fallbackDescription(name: PostHogActionToolName, capability: GoatCapabilityId) {
+function fallbackDescription(name: PostHogActionToolName, capability: CapabilityId) {
   return `${capability === "read" ? "Run" : "Create"} ${name.replaceAll("-", " ")} in the connected PostHog project.`;
 }
 
 function posthogAuthError() {
-  return new GoatActionAuthError(
+  return new ActionAuthError(
     "auth_expired",
     "posthog",
     "The PostHog connection needs reauthorization; reconnect PostHog in Settings → Integrations.",

@@ -1,21 +1,21 @@
 import { createHash } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "./client";
-import { goatActionTurns } from "./schema";
+import { actionTurns } from "./schema";
 
 type DbLike = any;
 
-export type GoatActionTurnPolicy = "foregroundInteractive" | "cloudReadOnly" | "headless";
+export type ActionTurnPolicy = "foregroundInteractive" | "cloudReadOnly" | "headless";
 
-export type GoatActionTurnRef = {
+export type ActionTurnRef = {
   sessionId: string;
   turnId: string;
   userWorkosId: string;
   workspaceId: string;
-  policy: GoatActionTurnPolicy;
+  policy: ActionTurnPolicy;
 };
 
-export type GoatActionCapabilityQuoteRecord = {
+export type ActionCapabilityQuoteRecord = {
   inputHash: string;
   quoteProviderCostUsdMicros: number;
   quotePlatformFeeUsdMicros: number;
@@ -26,21 +26,21 @@ export type GoatActionCapabilityQuoteRecord = {
 
 const GOAT_ACTION_TURN_TTL_MS = 6 * 60 * 60 * 1000;
 
-export async function recordGoatActionSourceDiscovery(input: {
-  turn: GoatActionTurnRef;
+export async function recordActionSourceDiscovery(input: {
+  turn: ActionTurnRef;
   sourceId: string;
   db?: DbLike;
 }) {
   const db = input.db ?? getDb();
-  await ensureGoatActionTurn(input.turn, db);
+  await ensureActionTurn(input.turn, db);
   const sourceIds = JSON.stringify([input.sourceId]);
   await db
-    .update(goatActionTurns)
+    .update(actionTurns)
     .set({
       listedSourceIds: sql`CASE
-        WHEN ${goatActionTurns.listedSourceIds} @> ${sourceIds}::jsonb
-          THEN ${goatActionTurns.listedSourceIds}
-        ELSE ${goatActionTurns.listedSourceIds} || ${sourceIds}::jsonb
+        WHEN ${actionTurns.listedSourceIds} @> ${sourceIds}::jsonb
+          THEN ${actionTurns.listedSourceIds}
+        ELSE ${actionTurns.listedSourceIds} || ${sourceIds}::jsonb
       END`,
       updatedAt: new Date(),
       expiresAt: actionTurnExpiresAt(),
@@ -48,8 +48,8 @@ export async function recordGoatActionSourceDiscovery(input: {
     .where(actionTurnMatches(input.turn));
 }
 
-export async function claimGoatActionInvocation(input: {
-  turn: GoatActionTurnRef;
+export async function claimActionInvocation(input: {
+  turn: ActionTurnRef;
   sourceId: string;
   invocationId: string;
   maxCalls: number;
@@ -59,21 +59,21 @@ export async function claimGoatActionInvocation(input: {
   | { ok: false; reason: "list_required" | "call_budget" }
 > {
   const db = input.db ?? getDb();
-  await ensureGoatActionTurn(input.turn, db);
+  await ensureActionTurn(input.turn, db);
   const sourceIds = JSON.stringify([input.sourceId]);
   const invocationIds = JSON.stringify([input.invocationId]);
   const [claimed] = await db
-    .update(goatActionTurns)
+    .update(actionTurns)
     .set({
       actionCallCount: sql`CASE
-        WHEN ${goatActionTurns.invocationIds} @> ${invocationIds}::jsonb
-          THEN ${goatActionTurns.actionCallCount}
-        ELSE ${goatActionTurns.actionCallCount} + 1
+        WHEN ${actionTurns.invocationIds} @> ${invocationIds}::jsonb
+          THEN ${actionTurns.actionCallCount}
+        ELSE ${actionTurns.actionCallCount} + 1
       END`,
       invocationIds: sql`CASE
-        WHEN ${goatActionTurns.invocationIds} @> ${invocationIds}::jsonb
-          THEN ${goatActionTurns.invocationIds}
-        ELSE ${goatActionTurns.invocationIds} || ${invocationIds}::jsonb
+        WHEN ${actionTurns.invocationIds} @> ${invocationIds}::jsonb
+          THEN ${actionTurns.invocationIds}
+        ELSE ${actionTurns.invocationIds} || ${invocationIds}::jsonb
       END`,
       updatedAt: new Date(),
       expiresAt: actionTurnExpiresAt(),
@@ -81,21 +81,21 @@ export async function claimGoatActionInvocation(input: {
     .where(
       and(
         actionTurnMatches(input.turn),
-        sql`${goatActionTurns.listedSourceIds} @> ${sourceIds}::jsonb`,
-        sql`NOT (${goatActionTurns.invocationIds} @> ${invocationIds}::jsonb)`,
-        sql`${goatActionTurns.actionCallCount} < ${input.maxCalls}`,
+        sql`${actionTurns.listedSourceIds} @> ${sourceIds}::jsonb`,
+        sql`NOT (${actionTurns.invocationIds} @> ${invocationIds}::jsonb)`,
+        sql`${actionTurns.actionCallCount} < ${input.maxCalls}`,
       ),
     )
-    .returning({ callCount: goatActionTurns.actionCallCount });
+    .returning({ callCount: actionTurns.actionCallCount });
   if (claimed) return { ok: true, callCount: claimed.callCount, duplicate: false };
 
   const [state] = await db
     .select({
-      actionCallCount: goatActionTurns.actionCallCount,
-      invocationIds: goatActionTurns.invocationIds,
-      listedSourceIds: goatActionTurns.listedSourceIds,
+      actionCallCount: actionTurns.actionCallCount,
+      invocationIds: actionTurns.invocationIds,
+      listedSourceIds: actionTurns.listedSourceIds,
     })
-    .from(goatActionTurns)
+    .from(actionTurns)
     .where(actionTurnMatches(input.turn))
     .limit(1);
   if (state?.invocationIds.includes(input.invocationId)) {
@@ -106,64 +106,58 @@ export async function claimGoatActionInvocation(input: {
     : { ok: false, reason: "list_required" };
 }
 
-export async function getGoatActionCapabilityTurnState(input: {
-  turn: GoatActionTurnRef;
-  db?: DbLike;
-}) {
+export async function getActionCapabilityTurnState(input: { turn: ActionTurnRef; db?: DbLike }) {
   const db = input.db ?? getDb();
-  await ensureGoatActionTurn(input.turn, db);
+  await ensureActionTurn(input.turn, db);
   const [row] = await db
     .select({
-      quotedTotalUsdMicros: goatActionTurns.quotedTotalUsdMicros,
-      admittedInvocationIds: goatActionTurns.admittedInvocationIds,
-      capabilityQuotes: goatActionTurns.capabilityQuotes,
-      asyncRunsStarted: goatActionTurns.asyncRunsStarted,
+      quotedTotalUsdMicros: actionTurns.quotedTotalUsdMicros,
+      admittedInvocationIds: actionTurns.admittedInvocationIds,
+      capabilityQuotes: actionTurns.capabilityQuotes,
+      asyncRunsStarted: actionTurns.asyncRunsStarted,
     })
-    .from(goatActionTurns)
+    .from(actionTurns)
     .where(actionTurnMatches(input.turn))
     .limit(1);
   return {
     quotedTotalUsdMicros: Number(row?.quotedTotalUsdMicros ?? 0),
     admittedInvocationIds: row?.admittedInvocationIds ?? [],
-    capabilityQuotes: (row?.capabilityQuotes ?? {}) as Record<
-      string,
-      GoatActionCapabilityQuoteRecord
-    >,
+    capabilityQuotes: (row?.capabilityQuotes ?? {}) as Record<string, ActionCapabilityQuoteRecord>,
     asyncRunsStarted: row?.asyncRunsStarted ?? 0,
   };
 }
 
-export async function storeGoatActionCapabilityQuote(input: {
-  turn: GoatActionTurnRef;
+export async function storeActionCapabilityQuote(input: {
+  turn: ActionTurnRef;
   invocationId: string;
-  quote: GoatActionCapabilityQuoteRecord;
+  quote: ActionCapabilityQuoteRecord;
   admitted: boolean;
   maxQuotedTotalUsdMicros?: number;
   db?: DbLike;
 }) {
   const db = input.db ?? getDb();
-  await ensureGoatActionTurn(input.turn, db);
+  await ensureActionTurn(input.turn, db);
   const quoteJson = JSON.stringify({ [input.invocationId]: input.quote });
   const invocationIds = JSON.stringify([input.invocationId]);
   const [stored] = await db
-    .update(goatActionTurns)
+    .update(actionTurns)
     .set({
       capabilityQuotes: sql`CASE
-        WHEN ${goatActionTurns.capabilityQuotes} ? ${input.invocationId}
-          THEN ${goatActionTurns.capabilityQuotes}
-        ELSE ${goatActionTurns.capabilityQuotes} || ${quoteJson}::jsonb
+        WHEN ${actionTurns.capabilityQuotes} ? ${input.invocationId}
+          THEN ${actionTurns.capabilityQuotes}
+        ELSE ${actionTurns.capabilityQuotes} || ${quoteJson}::jsonb
       END`,
       ...(input.admitted
         ? {
             quotedTotalUsdMicros: sql`CASE
-              WHEN ${goatActionTurns.admittedInvocationIds} @> ${invocationIds}::jsonb
-                THEN ${goatActionTurns.quotedTotalUsdMicros}
-              ELSE ${goatActionTurns.quotedTotalUsdMicros} + ${input.quote.quoteTotalCostUsdMicros}
+              WHEN ${actionTurns.admittedInvocationIds} @> ${invocationIds}::jsonb
+                THEN ${actionTurns.quotedTotalUsdMicros}
+              ELSE ${actionTurns.quotedTotalUsdMicros} + ${input.quote.quoteTotalCostUsdMicros}
             END`,
             admittedInvocationIds: sql`CASE
-              WHEN ${goatActionTurns.admittedInvocationIds} @> ${invocationIds}::jsonb
-                THEN ${goatActionTurns.admittedInvocationIds}
-              ELSE ${goatActionTurns.admittedInvocationIds} || ${invocationIds}::jsonb
+              WHEN ${actionTurns.admittedInvocationIds} @> ${invocationIds}::jsonb
+                THEN ${actionTurns.admittedInvocationIds}
+              ELSE ${actionTurns.admittedInvocationIds} || ${invocationIds}::jsonb
             END`,
           }
         : {}),
@@ -175,19 +169,19 @@ export async function storeGoatActionCapabilityQuote(input: {
         actionTurnMatches(input.turn),
         input.admitted && input.maxQuotedTotalUsdMicros !== undefined
           ? sql`(
-              ${goatActionTurns.admittedInvocationIds} @> ${invocationIds}::jsonb
-              OR ${goatActionTurns.quotedTotalUsdMicros} + ${input.quote.quoteTotalCostUsdMicros}
+              ${actionTurns.admittedInvocationIds} @> ${invocationIds}::jsonb
+              OR ${actionTurns.quotedTotalUsdMicros} + ${input.quote.quoteTotalCostUsdMicros}
                 <= ${input.maxQuotedTotalUsdMicros}
             )`
           : undefined,
       ),
     )
-    .returning({ id: goatActionTurns.id });
+    .returning({ id: actionTurns.id });
   return Boolean(stored);
 }
 
-export async function releaseGoatActionCapabilityQuote(input: {
-  turn: GoatActionTurnRef;
+export async function releaseActionCapabilityQuote(input: {
+  turn: ActionTurnRef;
   invocationId: string;
   quoteTotalCostUsdMicros: number;
   db?: DbLike;
@@ -195,18 +189,18 @@ export async function releaseGoatActionCapabilityQuote(input: {
   const db = input.db ?? getDb();
   const invocationIds = JSON.stringify([input.invocationId]);
   await db
-    .update(goatActionTurns)
+    .update(actionTurns)
     .set({
-      capabilityQuotes: sql`${goatActionTurns.capabilityQuotes} - ${input.invocationId}`,
+      capabilityQuotes: sql`${actionTurns.capabilityQuotes} - ${input.invocationId}`,
       admittedInvocationIds: sql`coalesce((
         SELECT jsonb_agg(value)
-        FROM jsonb_array_elements(${goatActionTurns.admittedInvocationIds}) value
+        FROM jsonb_array_elements(${actionTurns.admittedInvocationIds}) value
         WHERE value <> to_jsonb(${input.invocationId}::text)
       ), '[]'::jsonb)`,
       quotedTotalUsdMicros: sql`CASE
-        WHEN ${goatActionTurns.admittedInvocationIds} @> ${invocationIds}::jsonb
-          THEN greatest(0, ${goatActionTurns.quotedTotalUsdMicros} - ${input.quoteTotalCostUsdMicros})
-        ELSE ${goatActionTurns.quotedTotalUsdMicros}
+        WHEN ${actionTurns.admittedInvocationIds} @> ${invocationIds}::jsonb
+          THEN greatest(0, ${actionTurns.quotedTotalUsdMicros} - ${input.quoteTotalCostUsdMicros})
+        ELSE ${actionTurns.quotedTotalUsdMicros}
       END`,
       updatedAt: new Date(),
       expiresAt: actionTurnExpiresAt(),
@@ -214,27 +208,27 @@ export async function releaseGoatActionCapabilityQuote(input: {
     .where(actionTurnMatches(input.turn));
 }
 
-export async function claimGoatActionAsyncRun(input: {
-  turn: GoatActionTurnRef;
+export async function claimActionAsyncRun(input: {
+  turn: ActionTurnRef;
   invocationId: string;
   maxRuns: number;
   db?: DbLike;
 }) {
   const db = input.db ?? getDb();
-  await ensureGoatActionTurn(input.turn, db);
+  await ensureActionTurn(input.turn, db);
   const invocationIds = JSON.stringify([input.invocationId]);
   const [claimed] = await db
-    .update(goatActionTurns)
+    .update(actionTurns)
     .set({
       asyncRunsStarted: sql`CASE
-        WHEN ${goatActionTurns.asyncInvocationIds} @> ${invocationIds}::jsonb
-          THEN ${goatActionTurns.asyncRunsStarted}
-        ELSE ${goatActionTurns.asyncRunsStarted} + 1
+        WHEN ${actionTurns.asyncInvocationIds} @> ${invocationIds}::jsonb
+          THEN ${actionTurns.asyncRunsStarted}
+        ELSE ${actionTurns.asyncRunsStarted} + 1
       END`,
       asyncInvocationIds: sql`CASE
-        WHEN ${goatActionTurns.asyncInvocationIds} @> ${invocationIds}::jsonb
-          THEN ${goatActionTurns.asyncInvocationIds}
-        ELSE ${goatActionTurns.asyncInvocationIds} || ${invocationIds}::jsonb
+        WHEN ${actionTurns.asyncInvocationIds} @> ${invocationIds}::jsonb
+          THEN ${actionTurns.asyncInvocationIds}
+        ELSE ${actionTurns.asyncInvocationIds} || ${invocationIds}::jsonb
       END`,
       updatedAt: new Date(),
       expiresAt: actionTurnExpiresAt(),
@@ -243,33 +237,33 @@ export async function claimGoatActionAsyncRun(input: {
       and(
         actionTurnMatches(input.turn),
         sql`(
-          ${goatActionTurns.asyncInvocationIds} @> ${invocationIds}::jsonb
-          OR ${goatActionTurns.asyncRunsStarted} < ${input.maxRuns}
+          ${actionTurns.asyncInvocationIds} @> ${invocationIds}::jsonb
+          OR ${actionTurns.asyncRunsStarted} < ${input.maxRuns}
         )`,
       ),
     )
-    .returning({ count: goatActionTurns.asyncRunsStarted });
+    .returning({ count: actionTurns.asyncRunsStarted });
   return Boolean(claimed);
 }
 
-export async function releaseGoatActionAsyncRun(input: {
-  turn: GoatActionTurnRef;
+export async function releaseActionAsyncRun(input: {
+  turn: ActionTurnRef;
   invocationId: string;
   db?: DbLike;
 }) {
   const db = input.db ?? getDb();
   const invocationIds = JSON.stringify([input.invocationId]);
   await db
-    .update(goatActionTurns)
+    .update(actionTurns)
     .set({
       asyncRunsStarted: sql`CASE
-        WHEN ${goatActionTurns.asyncInvocationIds} @> ${invocationIds}::jsonb
-          THEN greatest(0, ${goatActionTurns.asyncRunsStarted} - 1)
-        ELSE ${goatActionTurns.asyncRunsStarted}
+        WHEN ${actionTurns.asyncInvocationIds} @> ${invocationIds}::jsonb
+          THEN greatest(0, ${actionTurns.asyncRunsStarted} - 1)
+        ELSE ${actionTurns.asyncRunsStarted}
       END`,
       asyncInvocationIds: sql`coalesce((
         SELECT jsonb_agg(value)
-        FROM jsonb_array_elements(${goatActionTurns.asyncInvocationIds}) value
+        FROM jsonb_array_elements(${actionTurns.asyncInvocationIds}) value
         WHERE value <> to_jsonb(${input.invocationId}::text)
       ), '[]'::jsonb)`,
       updatedAt: new Date(),
@@ -278,12 +272,12 @@ export async function releaseGoatActionAsyncRun(input: {
     .where(actionTurnMatches(input.turn));
 }
 
-async function ensureGoatActionTurn(turn: GoatActionTurnRef, db: DbLike) {
+async function ensureActionTurn(turn: ActionTurnRef, db: DbLike) {
   const now = new Date();
   await db
-    .insert(goatActionTurns)
+    .insert(actionTurns)
     .values({
-      id: goatActionTurnId(turn.sessionId, turn.turnId),
+      id: actionTurnId(turn.sessionId, turn.turnId),
       sessionId: turn.sessionId,
       turnId: turn.turnId,
       userWorkosId: turn.userWorkosId,
@@ -297,21 +291,21 @@ async function ensureGoatActionTurn(turn: GoatActionTurnRef, db: DbLike) {
     // refresh turn state through the guarded update that follows, but it must
     // never be able to rewrite the principal attached to an existing turn.
     .onConflictDoNothing({
-      target: [goatActionTurns.sessionId, goatActionTurns.turnId],
+      target: [actionTurns.sessionId, actionTurns.turnId],
     });
 }
 
-function goatActionTurnId(sessionId: string, turnId: string) {
+function actionTurnId(sessionId: string, turnId: string) {
   return `gat_${createHash("sha256").update(sessionId).update("\0").update(turnId).digest("hex")}`;
 }
 
-function actionTurnMatches(turn: GoatActionTurnRef) {
+function actionTurnMatches(turn: ActionTurnRef) {
   return and(
-    eq(goatActionTurns.sessionId, turn.sessionId),
-    eq(goatActionTurns.turnId, turn.turnId),
-    eq(goatActionTurns.userWorkosId, turn.userWorkosId),
-    eq(goatActionTurns.workspaceId, turn.workspaceId),
-    eq(goatActionTurns.policy, turn.policy),
+    eq(actionTurns.sessionId, turn.sessionId),
+    eq(actionTurns.turnId, turn.turnId),
+    eq(actionTurns.userWorkosId, turn.userWorkosId),
+    eq(actionTurns.workspaceId, turn.workspaceId),
+    eq(actionTurns.policy, turn.policy),
   );
 }
 

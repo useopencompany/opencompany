@@ -17,7 +17,7 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
-export async function startGoatDevProxy({ appPort, runnerPort }) {
+export async function startDevProxy({ appPort, runnerPort }) {
   const appTarget = { label: "Goat app", port: String(appPort) };
   const runnerTarget = { label: "runner", port: String(runnerPort) };
 

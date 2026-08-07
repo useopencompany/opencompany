@@ -4,8 +4,8 @@ import { Check } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { disconnectGoatIntegrationAccountAction } from "@/lib/integration-account-actions";
-import type { GoatFathomProviderState } from "@/lib/integration-state";
+import { disconnectIntegrationAccountAction } from "@/lib/integration-account-actions";
+import type { FathomProviderState } from "@/lib/integration-state";
 import { saveFathomApiKeyAction } from "@/lib/integrations/fathom-actions";
 
 export function FathomIntegrationSetup({
@@ -14,7 +14,7 @@ export function FathomIntegrationSetup({
   variant = "settings",
   onSaved,
 }: {
-  initialState: GoatFathomProviderState;
+  initialState: FathomProviderState;
   brainSourcesHref?: string | null;
   // "modal" embeds the form in the onboarding connect dialog: the Status
   // section (which duplicates the dialog title) is dropped.
@@ -47,7 +47,7 @@ export function FathomIntegrationSetup({
     if (!state.integrationId) return;
     setError(null);
     startTransition(async () => {
-      const result = await disconnectGoatIntegrationAccountAction(state.integrationId as string);
+      const result = await disconnectIntegrationAccountAction(state.integrationId as string);
       if (!result.ok) {
         setError(result.error);
         return;
@@ -184,7 +184,7 @@ export function FathomIntegrationSetup({
   );
 }
 
-function setupStatus(state: GoatFathomProviderState) {
+function setupStatus(state: FathomProviderState) {
   if (state.connected) {
     return {
       label: state.accountEmail ? `Connected as ${state.accountEmail}` : "Fathom is connected",

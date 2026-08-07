@@ -1,32 +1,25 @@
 import { after, NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
-import {
-  extractGoatChatAttachmentTexts,
-  parseGoatChatAttachmentsInput,
-} from "@/lib/chat-attachments";
+import { currentUser } from "@/lib/auth";
+import { extractChatAttachmentTexts, parseChatAttachmentsInput } from "@/lib/chat-attachments";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
 import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
-import { GoatSkillMentionError } from "@/lib/skills";
-import { createGoatTaskFromWorkflow, generateGoatWorkflowTaskTitle } from "@/lib/workflow-tasks";
-import {
-  GoatWorkflowMentionError,
-  listGoatWorkflowCatalog,
-  readGoatWorkflowMentionRef,
-} from "@/lib/workflows";
+import { SkillMentionError } from "@/lib/skills";
+import { createTaskFromWorkflow, generateWorkflowTaskTitle } from "@/lib/workflow-tasks";
+import { listWorkflowCatalog, readWorkflowMentionRef, WorkflowMentionError } from "@/lib/workflows";
 
 export async function GET() {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!context.user.taskSpawningEnabled) {
     return NextResponse.json({ error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE }, { status: 403 });
   }
 
-  const workflows = await listGoatWorkflowCatalog(context.workspace.id);
+  const workflows = await listWorkflowCatalog(context.workspace.id);
   return NextResponse.json({ workflows });
 }
 
 export async function POST(request: Request) {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!context.user.taskSpawningEnabled) {
     return NextResponse.json({ error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE }, { status: 403 });
@@ -59,27 +52,24 @@ export async function POST(request: Request) {
     );
   }
 
-  const parsedMention = readGoatWorkflowMentionRef([input.workflow]);
+  const parsedMention = readWorkflowMentionRef([input.workflow]);
   if (!parsedMention.ok || !parsedMention.mention) {
     return NextResponse.json(
       { error: parsedMention.ok ? "A workflow is required." : parsedMention.error },
       { status: 400 },
     );
   }
-  const parsedAttachments = parseGoatChatAttachmentsInput(
-    input.attachments,
-    context.user.workosUserId,
-  );
+  const parsedAttachments = parseChatAttachmentsInput(input.attachments, context.user.workosUserId);
   if (!parsedAttachments.ok) {
     return NextResponse.json({ error: parsedAttachments.error }, { status: 400 });
   }
   const attachmentTexts =
     parsedAttachments.attachments.length > 0
-      ? await extractGoatChatAttachmentTexts(parsedAttachments.attachments)
+      ? await extractChatAttachmentTexts(parsedAttachments.attachments)
       : null;
 
   try {
-    const task = await createGoatTaskFromWorkflow({
+    const task = await createTaskFromWorkflow({
       userWorkosId: context.user.workosUserId,
       workspaceId: context.workspace.id,
       mention: parsedMention.mention,
@@ -88,7 +78,7 @@ export async function POST(request: Request) {
       attachmentTexts,
     });
     after(
-      generateGoatWorkflowTaskTitle({
+      generateWorkflowTaskTitle({
         taskId: task.id,
         userWorkosId: context.user.workosUserId,
         workflowName: task.name,
@@ -108,7 +98,7 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
-    if (error instanceof GoatWorkflowMentionError || error instanceof GoatSkillMentionError) {
+    if (error instanceof WorkflowMentionError || error instanceof SkillMentionError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
     throw error;

@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { shellQuote } from "@opencompany/agent-runtime";
 import {
-  type DecryptedGoatRepoConfig,
+  type DecryptedRepoConfig,
   isValidGitHubRepositoryExternalId,
-  listDecryptedGoatRepoConfigs,
+  listDecryptedRepoConfigs,
 } from "@opencompany/db/repo-configs";
-import { getGoatWorkspaceRole } from "@opencompany/db/workspaces";
+import { getWorkspaceRole } from "@opencompany/db/workspaces";
 import { parse } from "dotenv";
 import { getDb } from "./db";
 import type { SandboxHandle } from "./sandbox";
@@ -14,22 +14,22 @@ export const GOAT_REPO_CONFIG_ROOT = "/opt/oc/repos";
 const GOAT_REPO_CONFIG_FINGERPRINT_PATH = `${GOAT_REPO_CONFIG_ROOT}/.fingerprint`;
 const SECRET_LIKE_ENV_KEY = /(secret|token|key|passw|pwd|credential|auth|cert|private|dsn|salt)/i;
 
-export type GoatRepositoryBootstrap = {
-  configs: DecryptedGoatRepoConfig[];
+export type RepositoryBootstrap = {
+  configs: DecryptedRepoConfig[];
   promptFragment: string;
   secretValues: string[];
 };
 
-export async function loadGoatRepositoryBootstrap(
+export async function loadRepositoryBootstrap(
   workspaceId: string | null,
   userWorkosId: string,
-): Promise<GoatRepositoryBootstrap> {
+): Promise<RepositoryBootstrap> {
   if (!workspaceId) {
     return emptyRepositoryBootstrap();
   }
 
   const db = getDb();
-  const role = await getGoatWorkspaceRole({ userWorkosId, workspaceId }, { db });
+  const role = await getWorkspaceRole({ userWorkosId, workspaceId }, { db });
   if (role === null) {
     console.error("[goat] Repository bootstrap denied for non-member", {
       workspaceId,
@@ -38,24 +38,23 @@ export async function loadGoatRepositoryBootstrap(
     return emptyRepositoryBootstrap();
   }
 
-  const configs = await listDecryptedGoatRepoConfigs({
+  const configs = await listDecryptedRepoConfigs({
     db,
     workspaceId,
   });
   return {
     configs,
-    promptFragment: buildGoatRepositoryBootstrapPrompt(configs),
+    promptFragment: buildRepositoryBootstrapPrompt(configs),
     secretValues: repositoryBootstrapSecretValues(configs),
   };
 }
 
-export async function stageGoatRepositoryBootstrap(input: {
+export async function stageRepositoryBootstrap(input: {
   sandbox: SandboxHandle;
-  bootstrap: GoatRepositoryBootstrap;
+  bootstrap: RepositoryBootstrap;
 }) {
   const envConfigs = input.bootstrap.configs.filter(
-    (config): config is DecryptedGoatRepoConfig & { envContent: string } =>
-      config.envContent !== null,
+    (config): config is DecryptedRepoConfig & { envContent: string } => config.envContent !== null,
   );
   const directories = envConfigs.map((config) =>
     repositoryConfigDirectory(config.repositoryExternalId),
@@ -104,9 +103,7 @@ fi`,
   });
 }
 
-export function buildGoatRepositoryBootstrapPrompt(
-  configs: readonly DecryptedGoatRepoConfig[],
-): string {
+export function buildRepositoryBootstrapPrompt(configs: readonly DecryptedRepoConfig[]): string {
   const lines = configs.flatMap((config) => {
     const envPath =
       config.envContent === null
@@ -141,7 +138,7 @@ export function repositoryConfigDirectory(repositoryExternalId: string): string 
   return `${GOAT_REPO_CONFIG_ROOT}/${repositoryExternalId}`;
 }
 
-function repositoryBootstrapSecretValues(configs: readonly DecryptedGoatRepoConfig[]): string[] {
+function repositoryBootstrapSecretValues(configs: readonly DecryptedRepoConfig[]): string[] {
   const values = new Set<string>();
   for (const config of configs) {
     if (config.envContent === null) continue;
@@ -157,7 +154,7 @@ function repositoryBootstrapSecretValues(configs: readonly DecryptedGoatRepoConf
   return [...values];
 }
 
-function repositoryBootstrapFingerprint(configs: readonly DecryptedGoatRepoConfig[]): string {
+function repositoryBootstrapFingerprint(configs: readonly DecryptedRepoConfig[]): string {
   const fingerprintInput = configs
     .map((config) => [
       config.repositoryExternalId,
@@ -171,7 +168,7 @@ function repositoryBootstrapFingerprint(configs: readonly DecryptedGoatRepoConfi
   return createHash("sha256").update(JSON.stringify(fingerprintInput)).digest("hex");
 }
 
-function emptyRepositoryBootstrap(): GoatRepositoryBootstrap {
+function emptyRepositoryBootstrap(): RepositoryBootstrap {
   return { configs: [], promptFragment: "", secretValues: [] };
 }
 

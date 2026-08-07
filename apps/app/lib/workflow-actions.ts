@@ -1,20 +1,20 @@
 "use server";
 
-import { isValidGoatBrainId } from "@opencompany/brain";
-import type { GoatHarnessSpec, GoatWorkflowStep } from "@opencompany/db/schema";
+import { isValidBrainId } from "@opencompany/brain";
+import type { HarnessSpec, WorkflowStep } from "@opencompany/db/schema";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
-import { GoatSkillMentionError } from "@/lib/skills";
-import { prepareGoatWorkflowRunForUser } from "@/lib/workflow-tasks";
+import { currentUser } from "@/lib/auth";
+import { SkillMentionError } from "@/lib/skills";
+import { prepareWorkflowRunForUser } from "@/lib/workflow-tasks";
 import {
-  archiveGoatWorkflow,
-  createGoatWorkflow,
+  archiveWorkflow,
+  createWorkflow,
   DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT,
-  GoatWorkflowMentionError,
-  type GoatWorkflowMutationResult,
-  type GoatWorkflowTriggerInput,
-  updateGoatWorkflow,
-  validateGoatWorkflowFields,
+  updateWorkflow,
+  validateWorkflowFields,
+  WorkflowMentionError,
+  type WorkflowMutationResult,
+  type WorkflowTriggerInput,
 } from "@/lib/workflows";
 
 // Workflows are workspace-public for now: every member can author the shared
@@ -22,15 +22,15 @@ import {
 async function requireWorkspaceMember(): Promise<
   { ok: false; message: string } | { ok: true; workspaceId: string; userWorkosId: string }
 > {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return { ok: false, message: "You must be signed in." };
   return { ok: true, workspaceId: context.workspace.id, userWorkosId: context.user.workosUserId };
 }
 
-export async function createGoatWorkflowAction(input: {
+export async function createWorkflowAction(input: {
   name: string;
   description?: string;
-}): Promise<GoatWorkflowMutationResult> {
+}): Promise<WorkflowMutationResult> {
   if (
     !input ||
     typeof input.name !== "string" ||
@@ -40,7 +40,7 @@ export async function createGoatWorkflowAction(input: {
   }
   const gate = await requireWorkspaceMember();
   if (!gate.ok) return gate;
-  const result = await createGoatWorkflow({
+  const result = await createWorkflow({
     workspaceId: gate.workspaceId,
     createdByWorkosId: gate.userWorkosId,
     name: input.name,
@@ -50,39 +50,39 @@ export async function createGoatWorkflowAction(input: {
   return result;
 }
 
-export async function updateGoatWorkflowAction(input: {
+export async function updateWorkflowAction(input: {
   slug: string;
   name: string;
   description: string;
-  steps: GoatWorkflowStep[];
+  steps: WorkflowStep[];
   status: "draft" | "active";
-  trigger?: GoatWorkflowTriggerInput;
-}): Promise<GoatWorkflowMutationResult> {
+  trigger?: WorkflowTriggerInput;
+}): Promise<WorkflowMutationResult> {
   if (
     !input ||
-    !isValidGoatBrainId(input.slug) ||
+    !isValidBrainId(input.slug) ||
     typeof input.name !== "string" ||
     typeof input.description !== "string" ||
     !Array.isArray(input.steps) ||
-    !input.steps.every(isGoatWorkflowStep) ||
+    !input.steps.every(isWorkflowStep) ||
     (input.status !== "draft" && input.status !== "active") ||
-    !isGoatWorkflowTriggerInput(input.trigger)
+    !isWorkflowTriggerInput(input.trigger)
   ) {
     return { ok: false, message: "Invalid workflow details." };
   }
   const gate = await requireWorkspaceMember();
   if (!gate.ok) return gate;
 
-  const invalid = validateGoatWorkflowFields(input);
+  const invalid = validateWorkflowFields(input);
   if (invalid) return { ok: false, message: invalid };
 
-  let scheduleHarnessSpec: GoatHarnessSpec | null = null;
+  let scheduleHarnessSpec: HarnessSpec | null = null;
   if (input.trigger?.type === "schedule" && input.status === "active") {
     if (input.steps.length === 0 || input.steps.some((step) => !step.instructions.trim())) {
       return { ok: false, message: "Scheduled workflows need instructions in every step." };
     }
     try {
-      const prepared = await prepareGoatWorkflowRunForUser({
+      const prepared = await prepareWorkflowRunForUser({
         userWorkosId: gate.userWorkosId,
         workspaceId: gate.workspaceId,
         workflow: {
@@ -95,14 +95,14 @@ export async function updateGoatWorkflowAction(input: {
       });
       scheduleHarnessSpec = prepared.harnessSpec;
     } catch (error) {
-      if (error instanceof GoatWorkflowMentionError || error instanceof GoatSkillMentionError) {
+      if (error instanceof WorkflowMentionError || error instanceof SkillMentionError) {
         return { ok: false, message: error.message };
       }
       throw error;
     }
   }
 
-  const result = await updateGoatWorkflow({
+  const result = await updateWorkflow({
     workspaceId: gate.workspaceId,
     ...input,
     scheduleHarnessSpec,
@@ -115,7 +115,7 @@ export async function updateGoatWorkflowAction(input: {
   return result;
 }
 
-function isGoatWorkflowStep(value: unknown): value is GoatWorkflowStep {
+function isWorkflowStep(value: unknown): value is WorkflowStep {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const step = value as Record<string, unknown>;
   return (
@@ -126,7 +126,7 @@ function isGoatWorkflowStep(value: unknown): value is GoatWorkflowStep {
   );
 }
 
-function isGoatWorkflowTriggerInput(value: unknown): value is GoatWorkflowTriggerInput | undefined {
+function isWorkflowTriggerInput(value: unknown): value is WorkflowTriggerInput | undefined {
   if (value === undefined) return true;
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const trigger = value as Record<string, unknown>;
@@ -141,15 +141,15 @@ function isGoatWorkflowTriggerInput(value: unknown): value is GoatWorkflowTrigge
   );
 }
 
-export async function archiveGoatWorkflowAction(input: {
+export async function archiveWorkflowAction(input: {
   slug: string;
-}): Promise<GoatWorkflowMutationResult> {
-  if (!input || !isValidGoatBrainId(input.slug)) {
+}): Promise<WorkflowMutationResult> {
+  if (!input || !isValidBrainId(input.slug)) {
     return { ok: false, message: "Invalid workflow." };
   }
   const gate = await requireWorkspaceMember();
   if (!gate.ok) return gate;
-  const result = await archiveGoatWorkflow({ workspaceId: gate.workspaceId, slug: input.slug });
+  const result = await archiveWorkflow({ workspaceId: gate.workspaceId, slug: input.slug });
   if (result.ok) revalidatePath("/workflows");
   return result;
 }

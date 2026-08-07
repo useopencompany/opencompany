@@ -1,27 +1,27 @@
 import { NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import {
-  appendGoatSlackIntegrationStatus,
-  buildGoatSlackAuthorizationUrl,
-  createGoatSlackIntegrationState,
-  isGoatSlackIntegrationConfigured,
+  appendSlackIntegrationStatus,
+  buildSlackAuthorizationUrl,
+  createSlackIntegrationState,
+  isSlackIntegrationConfigured,
 } from "@/lib/integrations/slack";
 
 export async function GET(request: Request) {
-  const { user } = await currentGoatUser();
+  const { user } = await currentUser();
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
 
-  if (!isGoatSlackIntegrationConfigured()) {
+  if (!isSlackIntegrationConfigured()) {
     return NextResponse.redirect(
-      new URL(appendGoatSlackIntegrationStatus(returnTo, "error", "not_configured"), url),
+      new URL(appendSlackIntegrationStatus(returnTo, "error", "not_configured"), url),
     );
   }
 
-  const state = createGoatSlackIntegrationState({
+  const state = createSlackIntegrationState({
     userWorkosId: user.workosUserId,
     returnTo,
   });
 
-  return NextResponse.redirect(buildGoatSlackAuthorizationUrl(state));
+  return NextResponse.redirect(buildSlackAuthorizationUrl(state));
 }

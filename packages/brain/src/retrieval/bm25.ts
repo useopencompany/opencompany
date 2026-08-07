@@ -11,9 +11,9 @@ const FIELD_BOOSTS = {
   assetText: 1,
 };
 
-export type GoatBrainLexicalIndex = MiniSearch<IndexRecord>;
+export type BrainLexicalIndex = MiniSearch<IndexRecord>;
 
-export function createLexicalIndex(records: IndexRecord[]): GoatBrainLexicalIndex {
+export function createLexicalIndex(records: IndexRecord[]): BrainLexicalIndex {
   const index = new MiniSearch<IndexRecord>({
     idField: "id",
     fields: [
@@ -33,7 +33,7 @@ export function createLexicalIndex(records: IndexRecord[]): GoatBrainLexicalInde
 }
 
 export function lexicalSearch(
-  index: GoatBrainLexicalIndex,
+  index: BrainLexicalIndex,
   query: string,
 ): Array<{ id: string; score: number }> {
   const trimmed = query.trim();

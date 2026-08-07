@@ -1,6 +1,6 @@
 "use client";
 
-import type { GoatMcpClient } from "@opencompany/db/schema";
+import type { McpClient } from "@opencompany/db/schema";
 import { toast } from "@opencompany/ui/components/sonner";
 import { AnthropicIcon, type LucideIcon as IconComponent, OpenAIIcon } from "@opencompany/ui/icons";
 import { Check, CheckCircle2, Code2, Copy, ExternalLink, Loader2 } from "lucide-react";
@@ -10,17 +10,14 @@ import { useHydrated } from "@/components/useHydrated";
 import {
   buildCursorMcpConfig,
   buildCursorMcpDeeplink,
-  buildGoatMcpFirstPrompt,
+  buildMcpFirstPrompt,
   GOAT_USER_MCP_ENDPOINT_PATH,
   OPENCOMPANY_MCP_SERVER_NAME,
 } from "@/lib/mcp-setup";
-import {
-  checkGoatMcpSetupStatusAction,
-  savePreferredGoatMcpClientAction,
-} from "@/lib/mcp-setup-actions";
+import { checkMcpSetupStatusAction, savePreferredMcpClientAction } from "@/lib/mcp-setup-actions";
 
 type ClientDefinition = {
-  id: GoatMcpClient;
+  id: McpClient;
   label: string;
   description: string;
   docsUrl: string;
@@ -85,13 +82,13 @@ export function McpSetupGuide({
 }: {
   displayName: string;
   workspaceName: string;
-  initialClient: GoatMcpClient | null;
+  initialClient: McpClient | null;
   initialCompletedAt: string | null;
   hideHeader?: boolean;
 }) {
   const router = useRouter();
   const hydrated = useHydrated();
-  const [client, setClient] = useState<GoatMcpClient | null>(initialClient);
+  const [client, setClient] = useState<McpClient | null>(initialClient);
   const [copied, setCopied] = useState<CopiedValue>(null);
   const [waiting, setWaiting] = useState(false);
   const [completedAt, setCompletedAt] = useState(initialCompletedAt);
@@ -115,7 +112,7 @@ export function McpSetupGuide({
   const cursorDeeplink = hydrated
     ? buildCursorMcpDeeplink({ name: OPENCOMPANY_MCP_SERVER_NAME, url: connectorUrl })
     : "";
-  const firstPrompt = buildGoatMcpFirstPrompt({ displayName, workspaceName });
+  const firstPrompt = buildMcpFirstPrompt({ displayName, workspaceName });
 
   useEffect(() => {
     if (!waiting || completedAt) return;
@@ -126,7 +123,7 @@ export function McpSetupGuide({
       if (pollInFlight || document.visibilityState === "hidden") return;
       pollInFlight = true;
       try {
-        const status = await checkGoatMcpSetupStatusAction();
+        const status = await checkMcpSetupStatusAction();
         if (!active) return;
         setPollError(false);
         if (status.complete) {
@@ -149,11 +146,11 @@ export function McpSetupGuide({
     };
   }, [completedAt, router, waiting]);
 
-  const chooseClient = (nextClient: GoatMcpClient) => {
+  const chooseClient = (nextClient: McpClient) => {
     const previousClient = client;
     setClient(nextClient);
     startSavingClient(async () => {
-      const result = await savePreferredGoatMcpClientAction(nextClient);
+      const result = await savePreferredMcpClientAction(nextClient);
       if (!result.ok) {
         setClient(previousClient);
         toast.error(result.error);

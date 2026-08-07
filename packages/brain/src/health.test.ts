@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { serializeGoatBrainDocument } from "./document";
-import { checkGoatBrainHealth } from "./health";
+import { serializeBrainDocument } from "./document";
+import { checkBrainHealth } from "./health";
 
 let root: string;
 
@@ -15,11 +15,11 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-describe("checkGoatBrainHealth", () => {
+describe("checkBrainHealth", () => {
   it("does not report weak provenance for first-class evidence records", async () => {
     await writeDoc(
       "evidence/email/ev-acme-email.md",
-      serializeGoatBrainDocument({
+      serializeBrainDocument({
         title: "Acme email",
         compiledTruth: "Acme asked for enterprise pricing.",
         timeline: [],
@@ -37,7 +37,7 @@ describe("checkGoatBrainHealth", () => {
       }),
     );
 
-    const report = await checkGoatBrainHealth(root);
+    const report = await checkBrainHealth(root);
 
     expect(report.findings).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ code: "weak_provenance" })]),
@@ -47,7 +47,7 @@ describe("checkGoatBrainHealth", () => {
   it("warns on frontmatter source refs that are not provider:id shaped", async () => {
     await writeDoc(
       "people/ada.md",
-      serializeGoatBrainDocument({
+      serializeBrainDocument({
         title: "Ada",
         compiledTruth: "",
         timeline: [],
@@ -66,7 +66,7 @@ describe("checkGoatBrainHealth", () => {
       }),
     );
 
-    const report = await checkGoatBrainHealth(root);
+    const report = await checkBrainHealth(root);
 
     const refFindings = report.findings.filter(
       (finding) => finding.code === "nonstandard_source_ref",

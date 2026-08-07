@@ -1,4 +1,4 @@
-import { GoatActionInvalidParamsError } from "@/lib/actions/types";
+import { ActionInvalidParamsError } from "@/lib/actions/types";
 
 export type ShapedCompanyEmployeesOutput = {
   companyUrl: string;
@@ -17,7 +17,7 @@ export function shapeCompanyEmployeesOutput(
   const employees = employeeRows(output).map(shapeEmployeeRow).filter(hasUsefulEmployeeData);
 
   if (employees.length === 0) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `No employees were returned for ${companyUrl}. Verify that companyUrl is the canonical LinkedIn company URL, for example https://www.linkedin.com/company/<company-slug>, and retry with a smaller or broader query.`,
     );
   }

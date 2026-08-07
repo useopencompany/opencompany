@@ -1,24 +1,24 @@
 import { and, asc, desc, eq, gte, inArray, isNull, like, ne, or, type SQL, sql } from "drizzle-orm";
 import {
+  type BrainEntityType,
+  type BrainGraphHop,
+  type BrainKind,
+  type BrainSource,
+  type BrainUsageEntry,
+  brainFreshness,
   createGateway,
   GOAT_BRAIN_WEIGHT_FRESHNESS,
   GOAT_BRAIN_WEIGHT_RELEVANCE,
-  type GoatBrainEntityType,
-  type GoatBrainGraphHop,
-  type GoatBrainKind,
-  type GoatBrainSource,
-  type GoatBrainUsageEntry,
-  goatBrainFreshness,
-  parseGoatBrainDocument,
+  parseBrainDocument,
   reciprocalRankFusion,
   titleTagMatch,
 } from "../../brain/src/index";
 import { getDb } from "./client";
 import {
-  goatBrainDocumentEmbeddings,
-  goatBrainDocuments,
-  goatBrainEdges,
-  goatBrainTimelineEntries,
+  brainDocumentEmbeddings,
+  brainDocuments,
+  brainEdges,
+  brainTimelineEntries,
 } from "./schema";
 
 // Goat Brain read plane. Every DB-backed consumer (chat tool, MCP connector, HTTP surfaces)
@@ -94,22 +94,22 @@ type ReadPlaneGraphEdge = {
   direction: "out" | "in";
 };
 
-export type GoatBrainReadContext = {
+export type BrainReadContext = {
   brainRef: string; // already access-checked by the caller's authz layer
   gatewayApiKey?: string; // absent → lexical-only ranking
   db?: DbClient;
-  onUsage?: (entry: GoatBrainUsageEntry) => void;
+  onUsage?: (entry: BrainUsageEntry) => void;
   reporting?: {
     user?: string;
     tags?: readonly string[];
   };
 };
 
-export type GoatBrainSearchOptions = {
+export type BrainSearchOptions = {
   text: string;
   folder?: string;
   type?: string;
-  kind?: GoatBrainKind;
+  kind?: BrainKind;
   since?: string;
   limit?: number;
   offset?: number;
@@ -128,9 +128,9 @@ export type GoatBrainSearchOptions = {
   snippetChars?: number;
 };
 
-export type GoatBrainSearchSignal = "lexical" | "name" | "vector" | "graph";
+export type BrainSearchSignal = "lexical" | "name" | "vector" | "graph";
 
-export type GoatBrainSearchHit = {
+export type BrainSearchHit = {
   id: string;
   title: string;
   type: string;
@@ -139,18 +139,18 @@ export type GoatBrainSearchHit = {
   status: string;
   updatedAt: string;
   score: number;
-  signals: GoatBrainSearchSignal[];
+  signals: BrainSearchSignal[];
   // Absolute cosine similarity (1 - distance) for hits that surfaced via the vector index. The
   // relative `score` is a within-response rank; this is the trustworthy confidence number.
   vectorSimilarity?: number;
   snippet: string;
-  neighbors: GoatBrainDocumentLink[];
-  via?: GoatBrainGraphHop[];
+  neighbors: BrainDocumentLink[];
+  via?: BrainGraphHop[];
 };
 
 type VectorCandidate = { id: string; distance: number };
 
-export type GoatBrainDocumentLink = {
+export type BrainDocumentLink = {
   id: string;
   title: string;
   kind: string;
@@ -162,7 +162,7 @@ export type GoatBrainDocumentLink = {
   direction: "out" | "in";
 };
 
-export type GoatBrainDocumentRead = {
+export type BrainDocumentRead = {
   requestedId: string;
   id: string;
   resolvedVia: "id" | "alias" | "merged";
@@ -178,14 +178,14 @@ export type GoatBrainDocumentRead = {
   compiledTruth: string;
   // Machine-extracted text for file-backed documents, capped for tool output.
   assetText?: string;
-  // Chronological tail of the timeline; fetch the full history via getGoatBrainTimeline.
+  // Chronological tail of the timeline; fetch the full history via getBrainTimeline.
   timeline: Array<{ at: string; evidenceId: string; body: string }>;
   timelineTotal: number;
-  sources: GoatBrainSource[];
-  links: GoatBrainDocumentLink[];
+  sources: BrainSource[];
+  links: BrainDocumentLink[];
 };
 
-export type GoatBrainTimelineRead = {
+export type BrainTimelineRead = {
   at: string;
   evidenceId: string;
   summary: string;
@@ -194,7 +194,7 @@ export type GoatBrainTimelineRead = {
   sourceTitle: string | null;
 };
 
-export type GoatBrainDocumentSummary = {
+export type BrainDocumentSummary = {
   id: string;
   title: string;
   type: string;
@@ -204,11 +204,11 @@ export type GoatBrainDocumentSummary = {
   updatedAt: string;
 };
 
-export async function searchGoatBrain(
-  ctx: GoatBrainReadContext,
-  options: GoatBrainSearchOptions,
+export async function searchBrain(
+  ctx: BrainReadContext,
+  options: BrainSearchOptions,
   now: number = Date.now(),
-): Promise<GoatBrainSearchHit[]> {
+): Promise<BrainSearchHit[]> {
   const db = ctx.db ?? getDb();
   const text = options.text?.trim() ?? "";
   const limit = clamp(options.limit ?? DEFAULT_SEARCH_LIMIT, 1, MAX_SEARCH_LIMIT);
@@ -236,7 +236,7 @@ export async function searchGoatBrain(
           rows.map((row) => row.brainId),
           null,
         )
-      : new Map<string, GoatBrainDocumentLink[]>();
+      : new Map<string, BrainDocumentLink[]>();
     return rows.map((row) => ({
       ...hitFromMeta(row, blendScore(1, 1, row.updatedAt, now), snippetChars),
       neighbors: neighborsById.get(row.brainId) ?? [],
@@ -257,12 +257,12 @@ export async function searchGoatBrain(
 
   const lists = [ftsIds, nameIds, vectorIds].filter((list) => list.length > 0);
   const relevance = reciprocalRankFusion(lists);
-  const signalsById = new Map<string, Set<GoatBrainSearchSignal>>();
+  const signalsById = new Map<string, Set<BrainSearchSignal>>();
   addSignal(signalsById, ftsIds, "lexical");
   addSignal(signalsById, nameIds, "name");
   addSignal(signalsById, vectorIds, "vector");
 
-  const graphPaths = new Map<string, GoatBrainGraphHop[]>();
+  const graphPaths = new Map<string, BrainGraphHop[]>();
   let adjacency: Map<string, ReadPlaneGraphEdge[]> | null = null;
   if (hops > 0 && relevance.size > 0) {
     adjacency = await loadAdjacency(db, ctx.brainRef);
@@ -293,7 +293,7 @@ export async function searchGoatBrain(
         ranked.map(({ record }) => record.brainId),
         adjacency,
       )
-    : new Map<string, GoatBrainDocumentLink[]>();
+    : new Map<string, BrainDocumentLink[]>();
 
   return ranked.map(({ record, score }) => {
     const via = graphPaths.get(record.brainId);
@@ -308,10 +308,10 @@ export async function searchGoatBrain(
   });
 }
 
-export async function getGoatBrainDocuments(
-  ctx: GoatBrainReadContext,
+export async function getBrainDocuments(
+  ctx: BrainReadContext,
   ids: string[],
-): Promise<{ documents: GoatBrainDocumentRead[]; missing: string[] }> {
+): Promise<{ documents: BrainDocumentRead[]; missing: string[] }> {
   const db = ctx.db ?? getDb();
   const requested = [...new Set(ids.map((id) => id.trim()).filter(Boolean))].slice(0, MAX_GET_IDS);
   if (requested.length === 0) return { documents: [], missing: [] };
@@ -319,12 +319,9 @@ export async function getGoatBrainDocuments(
   const resolved = new Map<string, { row: DocumentRow; resolvedVia: "id" | "alias" | "merged" }>();
   const exact: DocumentRow[] = await db
     .select()
-    .from(goatBrainDocuments)
+    .from(brainDocuments)
     .where(
-      and(
-        eq(goatBrainDocuments.brainRef, ctx.brainRef),
-        inArray(goatBrainDocuments.brainId, requested),
-      ),
+      and(eq(brainDocuments.brainRef, ctx.brainRef), inArray(brainDocuments.brainId, requested)),
     );
   for (const row of exact) resolved.set(row.brainId, { row, resolvedVia: "id" });
 
@@ -333,12 +330,12 @@ export async function getGoatBrainDocuments(
     const lowered = unresolved.map((id) => id.toLowerCase());
     const aliasRows: DocumentRow[] = await db
       .select()
-      .from(goatBrainDocuments)
+      .from(brainDocuments)
       .where(
         and(
-          eq(goatBrainDocuments.brainRef, ctx.brainRef),
+          eq(brainDocuments.brainRef, ctx.brainRef),
           sql`EXISTS (
-            SELECT 1 FROM jsonb_array_elements_text(${goatBrainDocuments.aliases}) AS alias(value)
+            SELECT 1 FROM jsonb_array_elements_text(${brainDocuments.aliases}) AS alias(value)
             WHERE lower(alias.value) IN (${sql.join(
               lowered.map((value) => sql`${value}`),
               sql`, `,
@@ -365,11 +362,11 @@ export async function getGoatBrainDocuments(
   if (mergeTargets.size > 0) {
     const targetRows: DocumentRow[] = await db
       .select()
-      .from(goatBrainDocuments)
+      .from(brainDocuments)
       .where(
         and(
-          eq(goatBrainDocuments.brainRef, ctx.brainRef),
-          inArray(goatBrainDocuments.brainId, [...new Set(mergeTargets.values())]),
+          eq(brainDocuments.brainRef, ctx.brainRef),
+          inArray(brainDocuments.brainId, [...new Set(mergeTargets.values())]),
         ),
       );
     const targetsById = new Map(targetRows.map((row) => [row.brainId, row]));
@@ -419,7 +416,7 @@ export async function getGoatBrainDocuments(
         timelineTotal: timeline.length,
         sources: row.sources ?? [],
         links: linksById.get(row.brainId) ?? [],
-      } satisfies GoatBrainDocumentRead,
+      } satisfies BrainDocumentRead,
     ];
   });
 
@@ -429,36 +426,36 @@ export async function getGoatBrainDocuments(
   };
 }
 
-export async function getGoatBrainTimeline(
-  ctx: GoatBrainReadContext,
+export async function getBrainTimeline(
+  ctx: BrainReadContext,
   id: string,
   options: { since?: string; limit?: number } = {},
-): Promise<{ id: string; entries: GoatBrainTimelineRead[] } | null> {
+): Promise<{ id: string; entries: BrainTimelineRead[] } | null> {
   const db = ctx.db ?? getDb();
-  const { documents } = await getGoatBrainDocuments(ctx, [id]);
+  const { documents } = await getBrainDocuments(ctx, [id]);
   const doc = documents[0];
   if (!doc) return null;
   const limit = clamp(options.limit ?? DEFAULT_TIMELINE_LIMIT, 1, MAX_TIMELINE_LIMIT);
-  const since = options.since ? resolveGoatBrainSince(options.since) : null;
+  const since = options.since ? resolveBrainSince(options.since) : null;
 
   const rows = await db
     .select({
-      at: goatBrainTimelineEntries.at,
-      evidenceId: goatBrainTimelineEntries.evidenceId,
-      summary: goatBrainTimelineEntries.summary,
-      detail: goatBrainTimelineEntries.detail,
-      sourceRef: goatBrainTimelineEntries.sourceRef,
-      sourceTitle: goatBrainTimelineEntries.sourceTitle,
+      at: brainTimelineEntries.at,
+      evidenceId: brainTimelineEntries.evidenceId,
+      summary: brainTimelineEntries.summary,
+      detail: brainTimelineEntries.detail,
+      sourceRef: brainTimelineEntries.sourceRef,
+      sourceTitle: brainTimelineEntries.sourceTitle,
     })
-    .from(goatBrainTimelineEntries)
+    .from(brainTimelineEntries)
     .where(
       and(
-        eq(goatBrainTimelineEntries.brainRef, ctx.brainRef),
-        eq(goatBrainTimelineEntries.brainId, doc.id),
-        ...(since ? [gte(goatBrainTimelineEntries.at, since)] : []),
+        eq(brainTimelineEntries.brainRef, ctx.brainRef),
+        eq(brainTimelineEntries.brainId, doc.id),
+        ...(since ? [gte(brainTimelineEntries.at, since)] : []),
       ),
     )
-    .orderBy(desc(goatBrainTimelineEntries.at))
+    .orderBy(desc(brainTimelineEntries.at))
     .limit(limit);
 
   return {
@@ -483,18 +480,18 @@ export async function getGoatBrainTimeline(
   };
 }
 
-export async function listGoatBrainDocuments(
-  ctx: GoatBrainReadContext,
+export async function listBrainDocuments(
+  ctx: BrainReadContext,
   options: {
     folder?: string;
     type?: string;
-    kind?: GoatBrainKind;
+    kind?: BrainKind;
     limit?: number;
     includeMerged?: boolean;
     includeArchived?: boolean;
     includeConflicts?: boolean;
   } = {},
-): Promise<GoatBrainDocumentSummary[]> {
+): Promise<BrainDocumentSummary[]> {
   const db = ctx.db ?? getDb();
   const limit = clamp(options.limit ?? DEFAULT_LIST_LIMIT, 1, MAX_LIST_LIMIT);
   const conditions = documentFilters(ctx.brainRef, options, 0, Date.now());
@@ -515,48 +512,48 @@ export async function listGoatBrainDocuments(
 function documentFilters(
   brainRef: string,
   options: Pick<
-    GoatBrainSearchOptions,
+    BrainSearchOptions,
     "folder" | "type" | "kind" | "since" | "includeMerged" | "includeArchived" | "includeConflicts"
   >,
   hops: number,
   now: number,
 ): SQL[] {
-  const conditions: (SQL | undefined)[] = [eq(goatBrainDocuments.brainRef, brainRef)];
+  const conditions: (SQL | undefined)[] = [eq(brainDocuments.brainRef, brainRef)];
   if (options.folder) {
     conditions.push(
       or(
-        eq(goatBrainDocuments.folderPath, options.folder),
-        like(goatBrainDocuments.folderPath, `${options.folder}/%`),
+        eq(brainDocuments.folderPath, options.folder),
+        like(brainDocuments.folderPath, `${options.folder}/%`),
       ),
     );
   } else {
     conditions.push(
       and(
-        ne(goatBrainDocuments.folderPath, "skills"),
-        sql`${goatBrainDocuments.folderPath} NOT LIKE 'skills/%'`,
+        ne(brainDocuments.folderPath, "skills"),
+        sql`${brainDocuments.folderPath} NOT LIKE 'skills/%'`,
       ),
     );
   }
   if (options.type) {
-    conditions.push(eq(goatBrainDocuments.entityType, options.type as GoatBrainEntityType));
+    conditions.push(eq(brainDocuments.entityType, options.type as BrainEntityType));
   }
   // CLI parity: graph expansion works over pages; evidence stays reachable via links and the
   // explicit kind filter.
   const kind = options.kind ?? (hops > 0 ? "page" : undefined);
-  if (kind) conditions.push(eq(goatBrainDocuments.kind, kind));
+  if (kind) conditions.push(eq(brainDocuments.kind, kind));
   if (options.since) {
-    conditions.push(gte(goatBrainDocuments.updatedAt, resolveGoatBrainSince(options.since, now)));
+    conditions.push(gte(brainDocuments.updatedAt, resolveBrainSince(options.since, now)));
   }
-  if (!options.includeMerged) conditions.push(ne(goatBrainDocuments.status, "merged"));
-  if (!options.includeArchived) conditions.push(ne(goatBrainDocuments.status, "archived"));
+  if (!options.includeMerged) conditions.push(ne(brainDocuments.status, "merged"));
+  if (!options.includeArchived) conditions.push(ne(brainDocuments.status, "archived"));
   if (!options.includeConflicts) {
     // A conflict copy declares a conflicts_with relation to the canonical page
     // (see upsertConflictDocument); the projection turns that into a brain_edges
     // row, so exclusion is a plain anti-join.
     conditions.push(
       sql`NOT EXISTS (
-        SELECT 1 FROM ${goatBrainEdges} AS conflict_edge
-        WHERE conflict_edge.document_id = ${goatBrainDocuments.id}
+        SELECT 1 FROM ${brainEdges} AS conflict_edge
+        WHERE conflict_edge.document_id = ${brainDocuments.id}
           AND conflict_edge.relation_type = 'conflicts_with'
           AND conflict_edge.source_kind = 'relation'
       )`,
@@ -565,7 +562,7 @@ function documentFilters(
   return conditions.filter((condition): condition is SQL => condition !== undefined);
 }
 
-export function resolveGoatBrainSince(raw: string, now: number = Date.now()): Date {
+export function resolveBrainSince(raw: string, now: number = Date.now()): Date {
   const trimmed = raw.trim();
   const relative = RELATIVE_SINCE.exec(trimmed) ?? NATURAL_RELATIVE_SINCE.exec(trimmed);
   if (relative) {
@@ -585,14 +582,14 @@ export function resolveGoatBrainSince(raw: string, now: number = Date.now()): Da
 }
 
 async function ftsCandidates(db: DbClient, conditions: SQL[], text: string): Promise<string[]> {
-  const rank = sql`ts_rank_cd(${goatBrainDocuments.searchTsv}, websearch_to_tsquery('english', ${text}))`;
+  const rank = sql`ts_rank_cd(${brainDocuments.searchTsv}, websearch_to_tsquery('english', ${text}))`;
   const rows: Array<{ id: string }> = await db
-    .select({ id: goatBrainDocuments.brainId })
-    .from(goatBrainDocuments)
+    .select({ id: brainDocuments.brainId })
+    .from(brainDocuments)
     .where(
       and(
         ...conditions,
-        sql`websearch_to_tsquery('english', ${text}) @@ ${goatBrainDocuments.searchTsv}`,
+        sql`websearch_to_tsquery('english', ${text}) @@ ${brainDocuments.searchTsv}`,
       ),
     )
     .orderBy(desc(rank))
@@ -601,11 +598,11 @@ async function ftsCandidates(db: DbClient, conditions: SQL[], text: string): Pro
 }
 
 async function nameCandidates(db: DbClient, conditions: SQL[], text: string): Promise<string[]> {
-  const similarity = sql`word_similarity(${text}, ${goatBrainDocuments.nameText})`;
+  const similarity = sql`word_similarity(${text}, ${brainDocuments.nameText})`;
   const rows: Array<{ id: string }> = await db
-    .select({ id: goatBrainDocuments.brainId })
-    .from(goatBrainDocuments)
-    .where(and(...conditions, sql`${text} <% ${goatBrainDocuments.nameText}`))
+    .select({ id: brainDocuments.brainId })
+    .from(brainDocuments)
+    .where(and(...conditions, sql`${text} <% ${brainDocuments.nameText}`))
     .orderBy(desc(similarity))
     .limit(NAME_CANDIDATE_LIMIT);
   return rows.map((row) => row.id);
@@ -626,7 +623,7 @@ function vectorMaxDistance(): number {
 
 async function vectorCandidates(
   db: DbClient,
-  ctx: GoatBrainReadContext,
+  ctx: BrainReadContext,
   conditions: SQL[],
   text: string,
 ): Promise<VectorCandidate[]> {
@@ -635,9 +632,9 @@ async function vectorCandidates(
   try {
     const model = process.env.BRAIN_EMBEDDING_MODEL?.trim() || DEFAULT_EMBEDDING_MODEL;
     const embeddingJoin = and(
-      eq(goatBrainDocumentEmbeddings.documentId, goatBrainDocuments.id),
-      eq(goatBrainDocumentEmbeddings.contentHash, goatBrainDocuments.contentHash),
-      eq(goatBrainDocumentEmbeddings.model, model),
+      eq(brainDocumentEmbeddings.documentId, brainDocuments.id),
+      eq(brainDocumentEmbeddings.contentHash, brainDocuments.contentHash),
+      eq(brainDocumentEmbeddings.model, model),
     );
 
     const missing: Array<{
@@ -648,15 +645,15 @@ async function vectorCandidates(
       body: string;
     }> = await db
       .select({
-        documentId: goatBrainDocuments.id,
-        contentHash: goatBrainDocuments.contentHash,
-        title: goatBrainDocuments.title,
-        aliases: goatBrainDocuments.aliases,
-        body: goatBrainDocuments.body,
+        documentId: brainDocuments.id,
+        contentHash: brainDocuments.contentHash,
+        title: brainDocuments.title,
+        aliases: brainDocuments.aliases,
+        body: brainDocuments.body,
       })
-      .from(goatBrainDocuments)
-      .leftJoin(goatBrainDocumentEmbeddings, embeddingJoin)
-      .where(and(...conditions, isNull(goatBrainDocumentEmbeddings.documentId)))
+      .from(brainDocuments)
+      .leftJoin(brainDocumentEmbeddings, embeddingJoin)
+      .where(and(...conditions, isNull(brainDocumentEmbeddings.documentId)))
       .limit(EMBED_BACKFILL_LIMIT);
 
     const gateway = createGateway({
@@ -693,10 +690,10 @@ async function vectorCandidates(
     });
     if (upserts.length > 0) {
       await db
-        .insert(goatBrainDocumentEmbeddings)
+        .insert(brainDocumentEmbeddings)
         .values(upserts)
         .onConflictDoUpdate({
-          target: goatBrainDocumentEmbeddings.documentId,
+          target: brainDocumentEmbeddings.documentId,
           set: {
             contentHash: sql`excluded.content_hash`,
             model: sql`excluded.model`,
@@ -706,18 +703,18 @@ async function vectorCandidates(
         });
     }
 
-    const distanceExpr = sql<number>`${goatBrainDocumentEmbeddings.embedding} <=> ${JSON.stringify(queryVector)}::vector`;
+    const distanceExpr = sql<number>`${brainDocumentEmbeddings.embedding} <=> ${JSON.stringify(queryVector)}::vector`;
     const rows: Array<{ id: string; distance: number }> = await db
-      .select({ id: goatBrainDocuments.brainId, distance: distanceExpr })
-      .from(goatBrainDocumentEmbeddings)
+      .select({ id: brainDocuments.brainId, distance: distanceExpr })
+      .from(brainDocumentEmbeddings)
       .innerJoin(
-        goatBrainDocuments,
+        brainDocuments,
         and(
-          eq(goatBrainDocuments.id, goatBrainDocumentEmbeddings.documentId),
-          eq(goatBrainDocuments.contentHash, goatBrainDocumentEmbeddings.contentHash),
+          eq(brainDocuments.id, brainDocumentEmbeddings.documentId),
+          eq(brainDocuments.contentHash, brainDocumentEmbeddings.contentHash),
         ),
       )
-      .where(and(...conditions, eq(goatBrainDocumentEmbeddings.model, model)))
+      .where(and(...conditions, eq(brainDocumentEmbeddings.model, model)))
       .orderBy(distanceExpr)
       .limit(VECTOR_CANDIDATE_LIMIT);
     // Distance can arrive as a numeric string over some drivers; coerce before the cutoff.
@@ -741,13 +738,13 @@ async function loadAdjacency(
 ): Promise<Map<string, ReadPlaneGraphEdge[]>> {
   const rows: Array<{ from: string; to: string; type: string; sourceKind: string }> = await db
     .select({
-      from: goatBrainEdges.fromBrainId,
-      to: goatBrainEdges.toBrainId,
-      type: goatBrainEdges.relationType,
-      sourceKind: goatBrainEdges.sourceKind,
+      from: brainEdges.fromBrainId,
+      to: brainEdges.toBrainId,
+      type: brainEdges.relationType,
+      sourceKind: brainEdges.sourceKind,
     })
-    .from(goatBrainEdges)
-    .where(eq(goatBrainEdges.brainRef, brainRef));
+    .from(brainEdges)
+    .where(eq(brainEdges.brainRef, brainRef));
 
   const adjacency = new Map<string, ReadPlaneGraphEdge[]>();
   const push = (key: string, hop: ReadPlaneGraphEdge) => {
@@ -765,7 +762,7 @@ async function loadAdjacency(
 
 function expandAlongGraph(
   relevance: Map<string, number>,
-  graphPaths: Map<string, GoatBrainGraphHop[]>,
+  graphPaths: Map<string, BrainGraphHop[]>,
   adjacency: Map<string, ReadPlaneGraphEdge[]>,
   allowed: Set<string>,
   hops: number,
@@ -773,10 +770,10 @@ function expandAlongGraph(
   let frontier = [...relevance.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, GRAPH_SEED_LIMIT)
-    .map(([id, score]) => ({ id, score, path: [] as GoatBrainGraphHop[] }));
+    .map(([id, score]) => ({ id, score, path: [] as BrainGraphHop[] }));
 
   for (let hop = 0; hop < hops && frontier.length > 0; hop++) {
-    const next: Array<{ id: string; score: number; path: GoatBrainGraphHop[] }> = [];
+    const next: Array<{ id: string; score: number; path: BrainGraphHop[] }> = [];
     for (const { id, score, path } of frontier) {
       const boosted = score * HOP_DECAY;
       for (const edge of adjacency.get(id) ?? []) {
@@ -795,8 +792,8 @@ function expandAlongGraph(
 
 async function filteredIdSet(db: DbClient, conditions: SQL[]): Promise<Set<string>> {
   const rows: Array<{ id: string }> = await db
-    .select({ id: goatBrainDocuments.brainId })
-    .from(goatBrainDocuments)
+    .select({ id: brainDocuments.brainId })
+    .from(brainDocuments)
     .where(and(...conditions));
   return new Set(rows.map((row) => row.id));
 }
@@ -806,26 +803,23 @@ async function fetchNeighbors(
   brainRef: string,
   hitIds: string[],
   preloaded: Map<string, ReadPlaneGraphEdge[]> | null,
-): Promise<Map<string, GoatBrainDocumentLink[]>> {
+): Promise<Map<string, BrainDocumentLink[]>> {
   if (hitIds.length === 0) return new Map();
   const adjacency =
     preloaded ??
     (await (async () => {
       const rows: Array<{ from: string; to: string; type: string; sourceKind: string }> = await db
         .select({
-          from: goatBrainEdges.fromBrainId,
-          to: goatBrainEdges.toBrainId,
-          type: goatBrainEdges.relationType,
-          sourceKind: goatBrainEdges.sourceKind,
+          from: brainEdges.fromBrainId,
+          to: brainEdges.toBrainId,
+          type: brainEdges.relationType,
+          sourceKind: brainEdges.sourceKind,
         })
-        .from(goatBrainEdges)
+        .from(brainEdges)
         .where(
           and(
-            eq(goatBrainEdges.brainRef, brainRef),
-            or(
-              inArray(goatBrainEdges.fromBrainId, hitIds),
-              inArray(goatBrainEdges.toBrainId, hitIds),
-            ),
+            eq(brainEdges.brainRef, brainRef),
+            or(inArray(brainEdges.fromBrainId, hitIds), inArray(brainEdges.toBrainId, hitIds)),
           ),
         );
       const map = new Map<string, ReadPlaneGraphEdge[]>();
@@ -853,20 +847,20 @@ async function fetchLinks(
   brainRef: string,
   ids: string[],
   limitPerDoc: number,
-): Promise<Map<string, GoatBrainDocumentLink[]>> {
+): Promise<Map<string, BrainDocumentLink[]>> {
   if (ids.length === 0) return new Map();
   const rows: Array<{ from: string; to: string; type: string; sourceKind: string }> = await db
     .select({
-      from: goatBrainEdges.fromBrainId,
-      to: goatBrainEdges.toBrainId,
-      type: goatBrainEdges.relationType,
-      sourceKind: goatBrainEdges.sourceKind,
+      from: brainEdges.fromBrainId,
+      to: brainEdges.toBrainId,
+      type: brainEdges.relationType,
+      sourceKind: brainEdges.sourceKind,
     })
-    .from(goatBrainEdges)
+    .from(brainEdges)
     .where(
       and(
-        eq(goatBrainEdges.brainRef, brainRef),
-        or(inArray(goatBrainEdges.fromBrainId, ids), inArray(goatBrainEdges.toBrainId, ids)),
+        eq(brainEdges.brainRef, brainRef),
+        or(inArray(brainEdges.fromBrainId, ids), inArray(brainEdges.toBrainId, ids)),
       ),
     );
   const adjacency = new Map<string, ReadPlaneGraphEdge[]>();
@@ -904,7 +898,7 @@ async function linksFromAdjacency(
   ids: string[],
   adjacency: Map<string, ReadPlaneGraphEdge[]>,
   limitPerDoc: number,
-): Promise<Map<string, GoatBrainDocumentLink[]>> {
+): Promise<Map<string, BrainDocumentLink[]>> {
   const targetIds = new Set<string>();
   for (const id of ids) for (const hop of adjacency.get(id) ?? []) targetIds.add(hop.neighborId);
   if (targetIds.size === 0) return new Map();
@@ -918,26 +912,23 @@ async function linksFromAdjacency(
     status: string;
   }> = await db
     .select({
-      id: goatBrainDocuments.brainId,
-      title: goatBrainDocuments.title,
-      kind: goatBrainDocuments.kind,
-      type: goatBrainDocuments.entityType,
-      folder: goatBrainDocuments.folderPath,
-      status: goatBrainDocuments.status,
+      id: brainDocuments.brainId,
+      title: brainDocuments.title,
+      kind: brainDocuments.kind,
+      type: brainDocuments.entityType,
+      folder: brainDocuments.folderPath,
+      status: brainDocuments.status,
     })
-    .from(goatBrainDocuments)
+    .from(brainDocuments)
     .where(
-      and(
-        eq(goatBrainDocuments.brainRef, brainRef),
-        inArray(goatBrainDocuments.brainId, [...targetIds]),
-      ),
+      and(eq(brainDocuments.brainRef, brainRef), inArray(brainDocuments.brainId, [...targetIds])),
     );
   const targets = new Map(targetRows.map((row) => [row.id, row]));
 
-  const links = new Map<string, GoatBrainDocumentLink[]>();
+  const links = new Map<string, BrainDocumentLink[]>();
   for (const id of ids) {
     const seen = new Set<string>();
-    const entries: GoatBrainDocumentLink[] = [];
+    const entries: BrainDocumentLink[] = [];
     for (const hop of adjacency.get(id) ?? []) {
       const target = targets.get(hop.neighborId);
       if (!target) continue;
@@ -977,19 +968,19 @@ type DocumentMetaRow = {
   bodyLength: number;
 };
 
-type DocumentRow = typeof goatBrainDocuments.$inferSelect;
+type DocumentRow = typeof brainDocuments.$inferSelect;
 
 const documentMetaSelection = {
-  brainId: goatBrainDocuments.brainId,
-  folderPath: goatBrainDocuments.folderPath,
-  title: goatBrainDocuments.title,
-  entityType: goatBrainDocuments.entityType,
-  kind: goatBrainDocuments.kind,
-  status: goatBrainDocuments.status,
-  aliases: goatBrainDocuments.aliases,
-  updatedAt: goatBrainDocuments.updatedAt,
-  snippetSource: sql<string>`left(${goatBrainDocuments.body}, ${SNIPPET_MAX_CHARS + 100})`,
-  bodyLength: sql<number>`length(${goatBrainDocuments.body})`,
+  brainId: brainDocuments.brainId,
+  folderPath: brainDocuments.folderPath,
+  title: brainDocuments.title,
+  entityType: brainDocuments.entityType,
+  kind: brainDocuments.kind,
+  status: brainDocuments.status,
+  aliases: brainDocuments.aliases,
+  updatedAt: brainDocuments.updatedAt,
+  snippetSource: sql<string>`left(${brainDocuments.body}, ${SNIPPET_MAX_CHARS + 100})`,
+  bodyLength: sql<number>`length(${brainDocuments.body})`,
 };
 
 async function fetchDocumentMetaByIds(
@@ -1000,10 +991,8 @@ async function fetchDocumentMetaByIds(
   if (ids.length === 0) return new Map();
   const rows: DocumentMetaRow[] = await db
     .select(documentMetaSelection)
-    .from(goatBrainDocuments)
-    .where(
-      and(eq(goatBrainDocuments.brainRef, brainRef), inArray(goatBrainDocuments.brainId, ids)),
-    );
+    .from(brainDocuments)
+    .where(and(eq(brainDocuments.brainRef, brainRef), inArray(brainDocuments.brainId, ids)));
   return new Map(rows.map((row) => [row.brainId, row]));
 }
 
@@ -1015,9 +1004,9 @@ async function fetchDocumentMetaWhere(
 ): Promise<DocumentMetaRow[]> {
   return db
     .select(documentMetaSelection)
-    .from(goatBrainDocuments)
+    .from(brainDocuments)
     .where(where)
-    .orderBy(desc(goatBrainDocuments.updatedAt), asc(goatBrainDocuments.brainId))
+    .orderBy(desc(brainDocuments.updatedAt), asc(brainDocuments.brainId))
     .offset(offset)
     .limit(limit);
 }
@@ -1042,15 +1031,11 @@ function applyNameBoost(
 function blendScore(relevance: number, maxRelevance: number, updatedAt: Date, now: number): number {
   return (
     GOAT_BRAIN_WEIGHT_RELEVANCE * (relevance / maxRelevance) +
-    GOAT_BRAIN_WEIGHT_FRESHNESS * goatBrainFreshness(updatedAt, now)
+    GOAT_BRAIN_WEIGHT_FRESHNESS * brainFreshness(updatedAt, now)
   );
 }
 
-function hitFromMeta(
-  record: DocumentMetaRow,
-  score: number,
-  snippetChars: number,
-): GoatBrainSearchHit {
+function hitFromMeta(record: DocumentMetaRow, score: number, snippetChars: number): BrainSearchHit {
   return {
     id: record.brainId,
     title: record.title ?? record.brainId,
@@ -1076,16 +1061,16 @@ function snippetFor(record: DocumentMetaRow, maxChars: number): string {
 
 function mergedInto(row: DocumentRow): string | null {
   try {
-    return parseGoatBrainDocument(row.content).frontmatter.mergedInto ?? null;
+    return parseBrainDocument(row.content).frontmatter.mergedInto ?? null;
   } catch {
     return null;
   }
 }
 
 function addSignal(
-  signals: Map<string, Set<GoatBrainSearchSignal>>,
+  signals: Map<string, Set<BrainSearchSignal>>,
   ids: string[],
-  signal: GoatBrainSearchSignal,
+  signal: BrainSearchSignal,
 ): void {
   for (const id of ids) {
     const existing = signals.get(id);

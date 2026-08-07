@@ -1,6 +1,6 @@
 "use client";
 
-import type { GoatTaskStatus } from "@opencompany/db/schema";
+import type { TaskStatus } from "@opencompany/db/schema";
 import { AlertCircle, CheckCircle2, CircleDotDashed, Clock, FileText, X } from "lucide-react";
 import Link from "next/link";
 import { GOAT_STATUS_COPY } from "@/lib/task-display";
@@ -51,7 +51,7 @@ export function TaskCard({
   );
 }
 
-export function getChatTaskCardMeta(status: GoatTaskStatus | null): {
+export function getChatTaskCardMeta(status: TaskStatus | null): {
   icon: typeof FileText;
   className: string;
   label: string;

@@ -16,30 +16,30 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@opencompany/db/capabilities", () => ({
-  consumeGoatCapabilityApprovalByToolCall: mocks.consumeApproval,
-  createGoatCapabilityRun: mocks.createRun,
-  getGoatCapabilitySessionBudgetUsdMicros: mocks.getBudget,
-  isGoatWorkspaceCapabilityEnabled: mocks.isWorkspaceCapabilityEnabled,
-  markGoatCapabilityRunStarted: mocks.markStarted,
-  markGoatCapabilityRunSettlementFailure: mocks.markSettlementFailure,
-  markGoatCapabilityRunStopping: mocks.markStopping,
-  settleGoatCapabilityRun: mocks.settleRun,
-  sumGoatCapabilitySessionSpendUsdMicros: mocks.sumSpend,
+  consumeCapabilityApprovalByToolCall: mocks.consumeApproval,
+  createCapabilityRun: mocks.createRun,
+  getCapabilitySessionBudgetUsdMicros: mocks.getBudget,
+  isWorkspaceCapabilityEnabled: mocks.isWorkspaceCapabilityEnabled,
+  markCapabilityRunStarted: mocks.markStarted,
+  markCapabilityRunSettlementFailure: mocks.markSettlementFailure,
+  markCapabilityRunStopping: mocks.markStopping,
+  settleCapabilityRun: mocks.settleRun,
+  sumCapabilitySessionSpendUsdMicros: mocks.sumSpend,
 }));
 vi.mock("@opencompany/db/billing", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@opencompany/db/billing")>()),
-  ensureGoatMonthlyIncludedUsage: vi.fn().mockResolvedValue({ ok: false, reason: "current" }),
+  ensureMonthlyIncludedUsage: vi.fn().mockResolvedValue({ ok: false, reason: "current" }),
 }));
 vi.mock("@opencompany/db/credits", () => ({
-  getGoatCreditBalanceUsdMicros: mocks.getBalance,
-  recordGoatCreditDebit: mocks.recordDebit,
+  getCreditBalanceUsdMicros: mocks.getBalance,
+  recordCreditDebit: mocks.recordDebit,
 }));
 vi.mock("@/lib/billing/auto-refill", () => ({
-  maybeTriggerGoatAutoRefill: mocks.autoRefill,
+  maybeTriggerAutoRefill: mocks.autoRefill,
 }));
 
-import type { GoatActionExecuteContext } from "@/lib/actions/types";
-import { GoatActionInvalidParamsError } from "@/lib/actions/types";
+import type { ActionExecuteContext } from "@/lib/actions/types";
+import { ActionInvalidParamsError } from "@/lib/actions/types";
 import type { ManagedCapabilityActionSpec } from "@/lib/capabilities/catalog";
 import {
   evaluateManagedCapabilityApproval,
@@ -225,7 +225,7 @@ describe("executeManagedCapability", () => {
     const action = {
       ...spec(),
       mapOutput: () => {
-        throw new GoatActionInvalidParamsError("Use the canonical LinkedIn company URL.");
+        throw new ActionInvalidParamsError("Use the canonical LinkedIn company URL.");
       },
     };
     const client = fakeClient({
@@ -240,7 +240,7 @@ describe("executeManagedCapability", () => {
         context: context(),
         client,
       }),
-    ).rejects.toMatchObject({ name: "GoatActionInvalidParamsError" });
+    ).rejects.toMatchObject({ name: "ActionInvalidParamsError" });
 
     expect(mocks.recordDebit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -801,7 +801,7 @@ describe("executeManagedCapability", () => {
   });
 });
 
-function context(): GoatActionExecuteContext {
+function context(): ActionExecuteContext {
   return {
     userWorkosId: "user_1",
     workspaceId: "workspace_1",

@@ -1,33 +1,33 @@
 import { GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runtime";
-import type { GoatCodexChatTurn, GoatHarnessSpec, GoatTask } from "@opencompany/db/schema";
+import type { CodexChatTurn, HarnessSpec, Task } from "@opencompany/db/schema";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GoatTaskTurnTerminalError } from "./codex-chat-errors";
+import { TaskTurnTerminalError } from "./codex-chat-errors";
 import {
-  buildGoatTaskTurnCompletion,
-  type GoatTaskTurnContext,
-  markGoatTaskTurnRunning,
-  settleGoatDurableTurn,
+  buildTaskTurnCompletion,
+  markTaskTurnRunning,
+  settleDurableTurn,
+  type TaskTurnContext,
 } from "./task-turn";
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
 }));
 const analyticsMocks = vi.hoisted(() => ({
-  captureGoatLlmUsageRecorded: vi.fn(async () => undefined),
-  captureGoatModelSpendRecorded: vi.fn(async () => undefined),
-  captureGoatServerEvent: vi.fn(async () => undefined),
+  captureLlmUsageRecorded: vi.fn(async () => undefined),
+  captureModelSpendRecorded: vi.fn(async () => undefined),
+  captureServerEvent: vi.fn(async () => undefined),
 }));
 
 vi.mock("./db", () => ({
   getDb: () => ({ execute: mocks.execute }),
 }));
 
-vi.mock("@opencompany/analytics/goat/server", () => ({
-  captureGoatLlmUsageRecorded: analyticsMocks.captureGoatLlmUsageRecorded,
-  captureGoatModelSpendRecorded: analyticsMocks.captureGoatModelSpendRecorded,
-  captureGoatServerEvent: analyticsMocks.captureGoatServerEvent,
-  goatAnalyticsUsageSourceForEngine: (engine: "opencompany" | "codex" | "claude_code") =>
+vi.mock("@opencompany/analytics/server", () => ({
+  captureLlmUsageRecorded: analyticsMocks.captureLlmUsageRecorded,
+  captureModelSpendRecorded: analyticsMocks.captureModelSpendRecorded,
+  captureServerEvent: analyticsMocks.captureServerEvent,
+  analyticsUsageSourceForEngine: (engine: "opencompany" | "codex" | "claude_code") =>
     engine === "opencompany" ? "owned_platform" : "external_harness",
 }));
 
@@ -44,7 +44,7 @@ describe("session-backed task turns", () => {
       ...spec.workflow!.steps![1]!,
       reasoningEffort: "xhigh",
     };
-    const completion = buildGoatTaskTurnCompletion({
+    const completion = buildTaskTurnCompletion({
       context: context(spec),
       result: "Repository audit complete.",
       reportedOutcome: "done",
@@ -86,7 +86,7 @@ describe("session-backed task turns", () => {
     nextStep.engine = "opencompany";
     nextStep.model = "moonshotai/kimi-k2.6";
 
-    const completion = buildGoatTaskTurnCompletion({
+    const completion = buildTaskTurnCompletion({
       context: context(spec),
       result: "Repository audit complete.",
       reportedOutcome: "done",
@@ -111,7 +111,7 @@ describe("session-backed task turns", () => {
       model: "anthropic/claude-sonnet-5",
       reasoningEffort: "medium",
     };
-    const completion = buildGoatTaskTurnCompletion({
+    const completion = buildTaskTurnCompletion({
       context: context(spec),
       result: "Repository audit complete.",
       reportedOutcome: "done",
@@ -133,7 +133,7 @@ describe("session-backed task turns", () => {
   });
 
   it("halts a workflow on needs_attention and labels the blocking step", () => {
-    const completion = buildGoatTaskTurnCompletion({
+    const completion = buildTaskTurnCompletion({
       context: context(workflowSpec()),
       result: "Credentials are missing.",
       reportedOutcome: "needs_attention",
@@ -149,7 +149,7 @@ describe("session-backed task turns", () => {
   });
 
   it("continues a successful workflow turn when no outcome was reported", () => {
-    const completion = buildGoatTaskTurnCompletion({
+    const completion = buildTaskTurnCompletion({
       context: context(workflowSpec()),
       result: "Repository audit complete.",
     });
@@ -171,7 +171,7 @@ describe("session-backed task turns", () => {
       engine: "claude_code",
       model: "anthropic/claude-sonnet-5",
     };
-    const completion = buildGoatTaskTurnCompletion({
+    const completion = buildTaskTurnCompletion({
       context: context(spec),
       result: "PR opened; CI is still running.",
       reportedOutcome: "needs_attention",
@@ -212,7 +212,7 @@ describe("session-backed task turns", () => {
     expect(completion.nextTurn?.prompt).toContain("Automated scheduled wakeup");
     expect(completion.nextTurn?.settings).not.toHaveProperty("scheduledWakeup");
 
-    await settleGoatDurableTurn({
+    await settleDurableTurn({
       target: {
         userWorkosId: "user_1",
         workspaceId: "workspace_1",
@@ -241,11 +241,11 @@ describe("session-backed task turns", () => {
     mocks.execute.mockResolvedValueOnce({ rows: [{ outcome: "terminal" }] });
 
     await expect(
-      markGoatTaskTurnRunning({
+      markTaskTurnRunning({
         context: context(workflowSpec()),
         turn: durableTurn(),
       }),
-    ).rejects.toBeInstanceOf(GoatTaskTurnTerminalError);
+    ).rejects.toBeInstanceOf(TaskTurnTerminalError);
 
     const statement = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]).sql;
     expect(statement).toContain("task.status IN ('succeeded', 'failed', 'canceled')");
@@ -253,7 +253,7 @@ describe("session-backed task turns", () => {
   });
 
   it("settles the current lease, projects the task, queues the next workflow step in a fresh session, and dedupes notification", async () => {
-    const completion = buildGoatTaskTurnCompletion({
+    const completion = buildTaskTurnCompletion({
       context: context(workflowSpec()),
       result: "Repository audit complete.",
       reportedOutcome: "done",
@@ -264,7 +264,7 @@ describe("session-backed task turns", () => {
       codexChatSessionId: expect.stringMatching(/^goat_codex_chat_/),
     });
 
-    await settleGoatDurableTurn({
+    await settleDurableTurn({
       target: {
         userWorkosId: "user_1",
         workspaceId: "workspace_1",
@@ -309,23 +309,19 @@ describe("session-backed task turns", () => {
     expect(statement).toContain("existing.debug_trace->'taskNotification'->>'taskId'");
     expect(statement).not.toContain("goat.task_messages");
     expect(statement).not.toContain("goat.task_events");
-    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
-      "chat_message_sent",
-      "user_1",
-      {
-        workspace_id: "workspace_1",
-        session_id: completion.nextTurn?.chatSessionId,
-        is_first_message: true,
-        engine: "codex",
-        usage_source: "external_harness",
-        model: completion.nextTurn?.chatModel,
-        message_length: completion.nextTurn?.prompt.length,
-      },
-    );
+    expect(analyticsMocks.captureServerEvent).toHaveBeenCalledWith("chat_message_sent", "user_1", {
+      workspace_id: "workspace_1",
+      session_id: completion.nextTurn?.chatSessionId,
+      is_first_message: true,
+      engine: "codex",
+      usage_source: "external_harness",
+      model: completion.nextTurn?.chatModel,
+      message_length: completion.nextTurn?.prompt.length,
+    });
   });
 });
 
-function durableTurn(): GoatCodexChatTurn {
+function durableTurn(): CodexChatTurn {
   const now = new Date("2026-07-30T09:00:00.000Z");
   return {
     id: "turn_1",
@@ -354,7 +350,7 @@ function durableTurn(): GoatCodexChatTurn {
   };
 }
 
-function workflowSpec(): GoatHarnessSpec {
+function workflowSpec(): HarnessSpec {
   return {
     schemaVersion: "goat.harness.v1",
     engine: "opencompany",
@@ -396,14 +392,14 @@ function workflowSpec(): GoatHarnessSpec {
   };
 }
 
-function context(harnessSpec: GoatHarnessSpec): GoatTaskTurnContext {
+function context(harnessSpec: HarnessSpec): TaskTurnContext {
   return {
     task: task(harnessSpec),
     harnessSpec,
   };
 }
 
-function task(harnessSpec: GoatHarnessSpec): GoatTask {
+function task(harnessSpec: HarnessSpec): Task {
   const now = new Date("2026-07-30T09:00:00.000Z");
   return {
     id: "goat_task_1",

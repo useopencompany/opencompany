@@ -1,29 +1,29 @@
 import { put } from "@vercel/blob";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createGoatBrainAssetForUser } from "@/lib/brain-assets";
-import { downloadGoatChatAttachment } from "@/lib/chat-attachments";
-import { saveChatAttachmentsToGoatBrain } from "./chat-attachment-capture";
+import { createBrainAssetForUser } from "@/lib/brain-assets";
+import { downloadChatAttachment } from "@/lib/chat-attachments";
+import { saveChatAttachmentsToBrain } from "./chat-attachment-capture";
 
 vi.mock("@vercel/blob", () => ({ put: vi.fn() }));
 vi.mock("@/lib/brain-assets", () => ({
-  createGoatBrainAssetForUser: vi.fn(),
-  goatBrainAssetUploadPrefix: vi.fn(() => "goat-brain/brain_1/assets/"),
+  createBrainAssetForUser: vi.fn(),
+  brainAssetUploadPrefix: vi.fn(() => "goat-brain/brain_1/assets/"),
 }));
 vi.mock("@/lib/brain-capture", () => ({ GOAT_BRAIN_CAPTURE_FOLDER: "inbox" }));
-vi.mock("@/lib/chat-attachments", () => ({ downloadGoatChatAttachment: vi.fn() }));
+vi.mock("@/lib/chat-attachments", () => ({ downloadChatAttachment: vi.fn() }));
 vi.mock("@/lib/task-runner", () => ({
-  triggerGoatBrainIngestWake: vi.fn().mockResolvedValue(undefined),
+  triggerBrainIngestWake: vi.fn().mockResolvedValue(undefined),
 }));
 
-describe("saveChatAttachmentsToGoatBrain", () => {
+describe("saveChatAttachmentsToBrain", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(downloadGoatChatAttachment).mockResolvedValue(Buffer.from("file"));
+    vi.mocked(downloadChatAttachment).mockResolvedValue(Buffer.from("file"));
     vi.mocked(put).mockResolvedValue({ url: "https://blob.example/file.pdf" } as never);
   });
 
   it("returns an explicit plan-paused result for a preserved upload", async () => {
-    vi.mocked(createGoatBrainAssetForUser).mockResolvedValue({
+    vi.mocked(createBrainAssetForUser).mockResolvedValue({
       ok: true,
       path: "inbox/file.pdf",
       quotaPaused: true,
@@ -33,7 +33,7 @@ describe("saveChatAttachmentsToGoatBrain", () => {
       },
     } as never);
 
-    const result = await saveChatAttachmentsToGoatBrain({
+    const result = await saveChatAttachmentsToBrain({
       brainRef: "brain_1",
       userWorkosId: "user_1",
       attachmentIds: ["attachment_1"],

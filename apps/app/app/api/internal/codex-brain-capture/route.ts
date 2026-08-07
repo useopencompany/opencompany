@@ -1,10 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type {
-  GoatCodexBrainCaptureGatewayRequest,
-  GoatCodexBrainCaptureGatewayResponse,
+  CodexBrainCaptureGatewayRequest,
+  CodexBrainCaptureGatewayResponse,
 } from "@opencompany/agent-runtime";
 import { NextResponse } from "next/server";
-import { executeGoatCodexBrainCaptureGateway } from "@/lib/codex-brain-capture";
+import { executeCodexBrainCaptureGateway } from "@/lib/codex-brain-capture";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   const parsed = await parseRequest(request);
   if (!parsed.ok) return jsonError(400, parsed.error);
 
-  const response = await executeGoatCodexBrainCaptureGateway({
+  const response = await executeCodexBrainCaptureGateway({
     request: parsed.value,
   });
   return NextResponse.json(response);
@@ -36,9 +36,7 @@ function validBearerToken(authorization: string | null, expectedToken: string) {
 
 async function parseRequest(
   request: Request,
-): Promise<
-  { ok: true; value: GoatCodexBrainCaptureGatewayRequest } | { ok: false; error: string }
-> {
+): Promise<{ ok: true; value: CodexBrainCaptureGatewayRequest } | { ok: false; error: string }> {
   let value: unknown;
   try {
     value = await request.json();
@@ -107,7 +105,7 @@ async function parseRequest(
 }
 
 function jsonError(status: number, error: string) {
-  const body: GoatCodexBrainCaptureGatewayResponse = { ok: false, error };
+  const body: CodexBrainCaptureGatewayResponse = { ok: false, error };
   return NextResponse.json(body, { status });
 }
 

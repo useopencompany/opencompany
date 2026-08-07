@@ -1,7 +1,7 @@
-import { getGoatWorkspaceRole } from "@opencompany/db/workspaces";
+import { getWorkspaceRole } from "@opencompany/db/workspaces";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { slackApiRequest } from "@/lib/integrations/slack";
-import { clearGoatSlackSenderCacheForTests, resolveGoatSlackSender } from "./identity";
+import { clearSlackSenderCacheForTests, resolveSlackSender } from "./identity";
 
 const dbState = vi.hoisted(() => ({ rows: [] as unknown[] }));
 
@@ -16,7 +16,7 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@opencompany/db/workspaces", () => ({
-  getGoatWorkspaceRole: vi.fn(async () => null),
+  getWorkspaceRole: vi.fn(async () => null),
 }));
 
 vi.mock("@/lib/integrations/slack", () => ({
@@ -38,20 +38,20 @@ const INPUT = {
   workspaceId: "ws_1",
 };
 
-describe("resolveGoatSlackSender", () => {
+describe("resolveSlackSender", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    clearGoatSlackSenderCacheForTests();
+    clearSlackSenderCacheForTests();
     dbState.rows = [GOAT_USER];
     vi.mocked(slackApiRequest).mockResolvedValue({
       ok: true,
       user: { is_bot: false, profile: { email: "Jane@Acme.com" } },
     });
-    vi.mocked(getGoatWorkspaceRole).mockResolvedValue("member");
+    vi.mocked(getWorkspaceRole).mockResolvedValue("member");
   });
 
   it("maps a Slack sender to the goat workspace member by email, case-insensitively", async () => {
-    const resolution = await resolveGoatSlackSender(INPUT);
+    const resolution = await resolveSlackSender(INPUT);
     expect(resolution).toEqual({
       kind: "member",
       member: { ...GOAT_USER, role: "member" },
@@ -61,35 +61,35 @@ describe("resolveGoatSlackSender", () => {
   it("caches resolutions per team/workspace/user until the TTL expires", async () => {
     let nowValue = 0;
     const now = () => nowValue;
-    await resolveGoatSlackSender({ ...INPUT, now });
-    await resolveGoatSlackSender({ ...INPUT, now });
+    await resolveSlackSender({ ...INPUT, now });
+    await resolveSlackSender({ ...INPUT, now });
     expect(slackApiRequest).toHaveBeenCalledTimes(1);
 
     nowValue = 11 * 60 * 1000;
-    await resolveGoatSlackSender({ ...INPUT, now });
+    await resolveSlackSender({ ...INPUT, now });
     expect(slackApiRequest).toHaveBeenCalledTimes(2);
   });
 
   it("treats bots, missing emails, and ambiguous matches as unmapped", async () => {
     vi.mocked(slackApiRequest).mockResolvedValueOnce({ ok: true, user: { is_bot: true } });
-    expect(await resolveGoatSlackSender(INPUT)).toEqual({ kind: "unmapped", reason: "bot" });
+    expect(await resolveSlackSender(INPUT)).toEqual({ kind: "unmapped", reason: "bot" });
 
-    clearGoatSlackSenderCacheForTests();
+    clearSlackSenderCacheForTests();
     vi.mocked(slackApiRequest).mockResolvedValueOnce({ ok: true, user: { profile: {} } });
-    expect(await resolveGoatSlackSender(INPUT)).toEqual({ kind: "unmapped", reason: "no_email" });
+    expect(await resolveSlackSender(INPUT)).toEqual({ kind: "unmapped", reason: "no_email" });
 
-    clearGoatSlackSenderCacheForTests();
+    clearSlackSenderCacheForTests();
     dbState.rows = [GOAT_USER, { ...GOAT_USER, workosUserId: "user_2" }];
-    expect(await resolveGoatSlackSender(INPUT)).toEqual({ kind: "unmapped", reason: "no_match" });
+    expect(await resolveSlackSender(INPUT)).toEqual({ kind: "unmapped", reason: "no_match" });
 
-    clearGoatSlackSenderCacheForTests();
+    clearSlackSenderCacheForTests();
     dbState.rows = [];
-    expect(await resolveGoatSlackSender(INPUT)).toEqual({ kind: "unmapped", reason: "no_match" });
+    expect(await resolveSlackSender(INPUT)).toEqual({ kind: "unmapped", reason: "no_match" });
   });
 
   it("treats goat users outside the installing workspace as unmapped", async () => {
-    vi.mocked(getGoatWorkspaceRole).mockResolvedValue(null);
-    expect(await resolveGoatSlackSender(INPUT)).toEqual({
+    vi.mocked(getWorkspaceRole).mockResolvedValue(null);
+    expect(await resolveSlackSender(INPUT)).toEqual({
       kind: "unmapped",
       reason: "not_in_workspace",
     });
@@ -97,13 +97,13 @@ describe("resolveGoatSlackSender", () => {
 
   it("does not cache transient lookup failures", async () => {
     vi.mocked(slackApiRequest).mockRejectedValueOnce(new Error("ratelimited"));
-    expect(await resolveGoatSlackSender(INPUT)).toEqual({
+    expect(await resolveSlackSender(INPUT)).toEqual({
       kind: "unmapped",
       reason: "lookup_failed",
     });
 
     // The next call retries Slack instead of serving the failure from cache.
-    expect(await resolveGoatSlackSender(INPUT)).toEqual({
+    expect(await resolveSlackSender(INPUT)).toEqual({
       kind: "member",
       member: { ...GOAT_USER, role: "member" },
     });

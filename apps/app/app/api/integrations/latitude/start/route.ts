@@ -1,29 +1,24 @@
 import { NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
-import {
-  appendGoatLatitudeMcpStatus,
-  startGoatLatitudeMcpOAuth,
-} from "@/lib/integrations/latitude-mcp";
+import { currentUser } from "@/lib/auth";
+import { appendLatitudeMcpStatus, startLatitudeMcpOAuth } from "@/lib/integrations/latitude-mcp";
 
 export async function GET(request: Request) {
-  const { user } = await currentGoatUser();
+  const { user } = await currentUser();
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
 
   try {
-    const result = await startGoatLatitudeMcpOAuth({
+    const result = await startLatitudeMcpOAuth({
       userWorkosId: user.workosUserId,
       returnTo,
     });
     if (result.status === "connected") {
-      return NextResponse.redirect(
-        new URL(appendGoatLatitudeMcpStatus(returnTo, "connected"), url),
-      );
+      return NextResponse.redirect(new URL(appendLatitudeMcpStatus(returnTo, "connected"), url));
     }
     return NextResponse.redirect(result.redirectUrl);
   } catch {
     return NextResponse.redirect(
-      new URL(appendGoatLatitudeMcpStatus(returnTo, "error", "start_failed"), url),
+      new URL(appendLatitudeMcpStatus(returnTo, "error", "start_failed"), url),
     );
   }
 }

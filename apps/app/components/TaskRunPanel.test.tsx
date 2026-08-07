@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildGoatHarnessRun } from "@/lib/task-harness-run";
+import { buildHarnessRun } from "@/lib/task-harness-run";
 import { applyInitialCostFloor } from "./TaskRunPanel";
 
 describe("applyInitialCostFloor", () => {
   it("keeps the server cost when partial live cost rows would regress it to zero", () => {
-    const initialRun = buildGoatHarnessRun({
+    const initialRun = buildHarnessRun({
       task: task(),
       messages: [],
       events: [],
@@ -16,7 +16,7 @@ describe("applyInitialCostFloor", () => {
         }),
       ],
     });
-    const liveRun = buildGoatHarnessRun({
+    const liveRun = buildHarnessRun({
       task: task({ status: "succeeded", stage: "completed" }),
       messages: [],
       events: [],
@@ -32,13 +32,13 @@ describe("applyInitialCostFloor", () => {
   });
 
   it("uses live cost once it exceeds the server snapshot", () => {
-    const initialRun = buildGoatHarnessRun({
+    const initialRun = buildHarnessRun({
       task: task(),
       messages: [],
       events: [],
       modelUsage: [modelUsage({ total_cost_usd_micros: 100 })],
     });
-    const liveRun = buildGoatHarnessRun({
+    const liveRun = buildHarnessRun({
       task: task(),
       messages: [],
       events: [],

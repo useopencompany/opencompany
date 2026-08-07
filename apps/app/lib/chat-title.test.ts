@@ -1,23 +1,23 @@
 import { generateText } from "ai";
 import { describe, expect, it, vi } from "vitest";
-import { generateGoatChatTitle, sanitizeGoatChatTitle } from "@/lib/chat-title";
+import { generateChatTitle, sanitizeChatTitle } from "@/lib/chat-title";
 
 vi.mock("ai", () => ({
   createGateway: vi.fn(() => (model: string) => ({ model })),
   generateText: vi.fn(async () => ({ text: "Generated title" })),
 }));
 
-describe("sanitizeGoatChatTitle", () => {
+describe("sanitizeChatTitle", () => {
   it("removes wrapper quotes and trailing punctuation", () => {
-    expect(sanitizeGoatChatTitle('"Compare pricing."', "Fallback")).toBe("Compare pricing");
+    expect(sanitizeChatTitle('"Compare pricing."', "Fallback")).toBe("Compare pricing");
   });
 
   it("falls back and caps titles at 60 characters", () => {
-    expect(sanitizeGoatChatTitle("   ", "x".repeat(80))).toBe(`${"x".repeat(57)}...`);
+    expect(sanitizeChatTitle("   ", "x".repeat(80))).toBe(`${"x".repeat(57)}...`);
   });
 
   it("stamps Gateway attribution on title generation", async () => {
-    await generateGoatChatTitle({
+    await generateChatTitle({
       content: "What did I say about hiring?",
       fallbackTitle: "Hiring",
       apiKey: "test-key",

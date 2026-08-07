@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-export type GoatTaskSummary = {
+export type TaskSummary = {
   cost: {
     hasRecordedCosts: boolean;
     totalCostUsdMicros: number;
@@ -10,15 +10,15 @@ export type GoatTaskSummary = {
   durationMs: number | null;
 };
 
-type GoatTaskSummaryState = {
+type TaskSummaryState = {
   requestKey: string;
-  summary: GoatTaskSummary | null;
+  summary: TaskSummary | null;
   error: Error | null;
 };
 
-export function useGoatTaskSummary(taskId: string, terminal: boolean) {
+export function useTaskSummary(taskId: string, terminal: boolean) {
   const requestKey = `${taskId}:${terminal}`;
-  const [state, setState] = useState<GoatTaskSummaryState | null>(null);
+  const [state, setState] = useState<TaskSummaryState | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -28,7 +28,7 @@ export function useGoatTaskSummary(taskId: string, terminal: boolean) {
       signal: controller.signal,
     })
       .then(async (response) => {
-        if (response.ok) return (await response.json()) as GoatTaskSummary;
+        if (response.ok) return (await response.json()) as TaskSummary;
         const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
         throw new Error(
           typeof body?.error === "string" ? body.error : "Could not load task summary.",

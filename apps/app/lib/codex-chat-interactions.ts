@@ -1,5 +1,5 @@
 import { getDb } from "@opencompany/db/client";
-import { goatCodexChatInteractions, goatCodexChatTurns } from "@opencompany/db/schema";
+import { codexChatInteractions, codexChatTurns } from "@opencompany/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 
 const MAX_QUESTIONS = 3;
@@ -11,7 +11,7 @@ export type CodexUserInputResponse = {
   answers: Record<string, { answers: string[] }>;
 };
 
-export async function resolveGoatCodexChatInteraction(input: {
+export async function resolveCodexChatInteraction(input: {
   userWorkosId: string;
   interactionId: string;
   answers: unknown;
@@ -21,20 +21,17 @@ export async function resolveGoatCodexChatInteraction(input: {
 > {
   const [interaction] = await getDb()
     .select({
-      request: goatCodexChatInteractions.request,
-      status: goatCodexChatInteractions.status,
-      turnStatus: goatCodexChatTurns.status,
+      request: codexChatInteractions.request,
+      status: codexChatInteractions.status,
+      turnStatus: codexChatTurns.status,
     })
-    .from(goatCodexChatInteractions)
-    .innerJoin(
-      goatCodexChatTurns,
-      eq(goatCodexChatTurns.id, goatCodexChatInteractions.codexChatTurnId),
-    )
+    .from(codexChatInteractions)
+    .innerJoin(codexChatTurns, eq(codexChatTurns.id, codexChatInteractions.codexChatTurnId))
     .where(
       and(
-        eq(goatCodexChatInteractions.id, input.interactionId),
-        eq(goatCodexChatInteractions.userWorkosId, input.userWorkosId),
-        eq(goatCodexChatInteractions.leaseId, goatCodexChatTurns.leaseId),
+        eq(codexChatInteractions.id, input.interactionId),
+        eq(codexChatInteractions.userWorkosId, input.userWorkosId),
+        eq(codexChatInteractions.leaseId, codexChatTurns.leaseId),
       ),
     )
     .limit(1);
@@ -48,7 +45,7 @@ export async function resolveGoatCodexChatInteraction(input: {
 
   const now = new Date();
   const [resolved] = await getDb()
-    .update(goatCodexChatInteractions)
+    .update(codexChatInteractions)
     .set({
       status: "resolved",
       response: parsed.response,
@@ -57,19 +54,19 @@ export async function resolveGoatCodexChatInteraction(input: {
     })
     .where(
       and(
-        eq(goatCodexChatInteractions.id, input.interactionId),
-        eq(goatCodexChatInteractions.userWorkosId, input.userWorkosId),
-        eq(goatCodexChatInteractions.status, "pending"),
+        eq(codexChatInteractions.id, input.interactionId),
+        eq(codexChatInteractions.userWorkosId, input.userWorkosId),
+        eq(codexChatInteractions.status, "pending"),
         sql`EXISTS (
           SELECT 1
-          FROM ${goatCodexChatTurns} AS current_turn
-          WHERE current_turn.id = ${goatCodexChatInteractions.codexChatTurnId}
+          FROM ${codexChatTurns} AS current_turn
+          WHERE current_turn.id = ${codexChatInteractions.codexChatTurnId}
             AND current_turn.status = 'running'
-            AND current_turn.lease_id = ${goatCodexChatInteractions.leaseId}
+            AND current_turn.lease_id = ${codexChatInteractions.leaseId}
         )`,
       ),
     )
-    .returning({ id: goatCodexChatInteractions.id });
+    .returning({ id: codexChatInteractions.id });
   if (!resolved) {
     return { ok: false, status: 409, error: "This Codex question was already answered." };
   }

@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 // Slack signs `v0:{timestamp}:{raw body}` with the app signing secret; the
 // timestamp window guards against replays of captured requests. Kept free of
 // db/auth imports so the webhook route and its tests stay light.
-export function verifyGoatSlackEventSignature(input: {
+export function verifySlackEventSignature(input: {
   rawBody: string;
   timestamp: string | null;
   signature: string | null;

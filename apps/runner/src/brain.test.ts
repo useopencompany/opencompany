@@ -3,13 +3,13 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
-  type GoatBrainEntityType,
-  goatBrainEntryFromLegacyMarkdown,
-  goatBrainKindForFolder,
-  goatBrainSidecarRelativePath,
-  serializeGoatBrainDocument,
-  serializeGoatBrainPayload,
-  serializeGoatBrainSidecar,
+  type BrainEntityType,
+  brainEntryFromLegacyMarkdown,
+  brainKindForFolder,
+  brainSidecarRelativePath,
+  serializeBrainDocument,
+  serializeBrainPayload,
+  serializeBrainSidecar,
 } from "@opencompany/brain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -29,7 +29,7 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@opencompany/db/workspaces", () => ({
-  getDefaultGoatBrainForUser: vi.fn(async () => ({
+  getDefaultBrainForUser: vi.fn(async () => ({
     id: "goat_brain_user_1",
     workspaceId: "goat_ws_user_1",
     name: "General",
@@ -43,17 +43,17 @@ vi.mock("@opencompany/db/workspaces", () => ({
 }));
 
 import {
-  createGoatBrainMarkdownReportForTask,
-  type MaterializedGoatBrainSnapshot,
-  materializeGoatBrainToLocalRoot,
-  syncGoatBrainFromLocalRoot,
+  createBrainMarkdownReportForTask,
+  type MaterializedBrainSnapshot,
+  materializeBrainToLocalRoot,
+  syncBrainFromLocalRoot,
 } from "./brain";
 
 afterEach(() => {
   vi.resetAllMocks();
 });
 
-describe("materializeGoatBrainToLocalRoot", () => {
+describe("materializeBrainToLocalRoot", () => {
   it("writes the bundled CLI and payload/sidecar docs to a local root", async () => {
     const root = await tempRoot();
     const content = brainDoc({
@@ -62,7 +62,7 @@ describe("materializeGoatBrainToLocalRoot", () => {
       title: "Market map",
       truth: "Known market context.",
     });
-    const db = createGoatBrainDb({
+    const db = createBrainDb({
       selectResults: [
         [
           brainRow({
@@ -78,7 +78,7 @@ describe("materializeGoatBrainToLocalRoot", () => {
     dbMocks.getDb.mockReturnValue(db);
 
     try {
-      const snapshot = await materializeGoatBrainToLocalRoot({
+      const snapshot = await materializeBrainToLocalRoot({
         root,
         userWorkosId: "user_1",
       });
@@ -113,12 +113,12 @@ describe("materializeGoatBrainToLocalRoot", () => {
   });
 });
 
-describe("createGoatBrainMarkdownReportForTask", () => {
+describe("createBrainMarkdownReportForTask", () => {
   it("creates a markdown report artifact in the research brain folder", async () => {
-    const db = createGoatBrainDb({ selectResults: [[]] });
+    const db = createBrainDb({ selectResults: [[]] });
     dbMocks.getDb.mockReturnValue(db);
 
-    const artifact = await createGoatBrainMarkdownReportForTask({
+    const artifact = await createBrainMarkdownReportForTask({
       userWorkosId: "user_1",
       taskId: "goat_task_1",
       taskTurnId: "goat_codex_chat_turn_1",
@@ -204,11 +204,11 @@ describe("createGoatBrainMarkdownReportForTask", () => {
         },
       ],
     };
-    const db = createGoatBrainDb({ selectResults: [[existing]] });
+    const db = createBrainDb({ selectResults: [[existing]] });
     dbMocks.getDb.mockReturnValue(db);
 
     await expect(
-      createGoatBrainMarkdownReportForTask({
+      createBrainMarkdownReportForTask({
         userWorkosId: "user_1",
         taskId: "goat_task_1",
         taskTurnId: "goat_codex_chat_turn_1",
@@ -224,7 +224,7 @@ describe("createGoatBrainMarkdownReportForTask", () => {
   });
 });
 
-describe("syncGoatBrainFromLocalRoot", () => {
+describe("syncBrainFromLocalRoot", () => {
   it("inserts a new valid sandbox doc and ensures its folder", async () => {
     const root = await tempRoot();
     const content = brainDoc({
@@ -233,12 +233,12 @@ describe("syncGoatBrainFromLocalRoot", () => {
       title: "Customer call",
       truth: "Customer wants a faster onboarding path.",
     });
-    const db = createGoatBrainDb({ selectResults: [[]] });
+    const db = createBrainDb({ selectResults: [[]] });
     dbMocks.getDb.mockReturnValue(db);
 
     try {
       await writeBrainFile(root, "meetings/customer-call.md", content);
-      await syncGoatBrainFromLocalRoot({
+      await syncBrainFromLocalRoot({
         root,
         userWorkosId: "user_1",
         taskId: "task_1",
@@ -270,7 +270,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
 
   it("rejects page documents placed inside the evidence zone", async () => {
     const root = await tempRoot();
-    const content = serializeGoatBrainDocument({
+    const content = serializeBrainDocument({
       frontmatter: {
         id: "launch-idea",
         folder: "evidence/chat",
@@ -286,13 +286,13 @@ describe("syncGoatBrainFromLocalRoot", () => {
       compiledTruth: "Launch should start with founder-led beta.",
       timeline: [],
     });
-    const db = createGoatBrainDb({ selectResults: [[]] });
+    const db = createBrainDb({ selectResults: [[]] });
     dbMocks.getDb.mockReturnValue(db);
 
     try {
       await writeBrainFile(root, "evidence/chat/launch-idea.md", content);
       await expect(
-        syncGoatBrainFromLocalRoot({
+        syncBrainFromLocalRoot({
           root,
           userWorkosId: "user_1",
           taskId: "task_1",
@@ -325,12 +325,12 @@ describe("syncGoatBrainFromLocalRoot", () => {
       folderPath: "decisions",
       content: oldContent,
     });
-    const db = createGoatBrainDb({ selectResults: [[current], [current]] });
+    const db = createBrainDb({ selectResults: [[current], [current]] });
     dbMocks.getDb.mockReturnValue(db);
 
     try {
       await writeBrainFile(root, "decisions/pricing-decision.md", newContent);
-      await syncGoatBrainFromLocalRoot({
+      await syncBrainFromLocalRoot({
         root,
         userWorkosId: "user_1",
         taskId: "task_1",
@@ -388,11 +388,11 @@ describe("syncGoatBrainFromLocalRoot", () => {
       folderPath: "inbox",
       content,
     });
-    const db = createGoatBrainDb({ selectResults: [[current], [current]] });
+    const db = createBrainDb({ selectResults: [[current], [current]] });
     dbMocks.getDb.mockReturnValue(db);
 
     try {
-      await syncGoatBrainFromLocalRoot({
+      await syncBrainFromLocalRoot({
         root,
         userWorkosId: "user_1",
         taskId: "task_1",
@@ -447,14 +447,14 @@ describe("syncGoatBrainFromLocalRoot", () => {
       content: liveContent,
       contentHash: hash(liveContent),
     };
-    const db = createGoatBrainDb({
+    const db = createBrainDb({
       selectResults: [[current], []],
     });
     dbMocks.getDb.mockReturnValue(db);
 
     try {
       await writeBrainFile(root, "projects/roadmap.md", sandboxContent);
-      await syncGoatBrainFromLocalRoot({
+      await syncBrainFromLocalRoot({
         root,
         userWorkosId: "user_1",
         taskId: "task_1",
@@ -502,7 +502,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
       content: baseContent,
     });
     const entry = {
-      ...goatBrainEntryFromLegacyMarkdown(baseContent),
+      ...brainEntryFromLegacyMarkdown(baseContent),
       body: "Edited body.",
       timeline: [
         {
@@ -513,17 +513,17 @@ describe("syncGoatBrainFromLocalRoot", () => {
       ],
       updatedAt: "2026-01-02T00:00:00.000Z",
     };
-    const db = createGoatBrainDb({ selectResults: [[base], [base]] });
+    const db = createBrainDb({ selectResults: [[base], [base]] });
     dbMocks.getDb.mockReturnValue(db);
 
     try {
-      await writeBrainFile(root, "research/research-note.md", serializeGoatBrainPayload(entry));
+      await writeBrainFile(root, "research/research-note.md", serializeBrainPayload(entry));
       await writeBrainFile(
         root,
-        goatBrainSidecarRelativePath("research", "research-note"),
-        serializeGoatBrainSidecar(entry),
+        brainSidecarRelativePath("research", "research-note"),
+        serializeBrainSidecar(entry),
       );
-      await syncGoatBrainFromLocalRoot({
+      await syncBrainFromLocalRoot({
         root,
         userWorkosId: "user_1",
         taskId: "task_1",
@@ -564,18 +564,18 @@ describe("syncGoatBrainFromLocalRoot", () => {
       folderPath: "research",
       content,
     });
-    const db = createGoatBrainDb({ selectResults: [[current]] });
+    const db = createBrainDb({ selectResults: [[current]] });
     dbMocks.getDb.mockReturnValue(db);
 
     try {
       await writeBrainFile(root, "research/research-note.md", "Edited body.");
       await writeBrainFile(
         root,
-        goatBrainSidecarRelativePath("research", "research-note"),
+        brainSidecarRelativePath("research", "research-note"),
         JSON.stringify({ schemaVersion: "goat.brain.entry.v2", id: "research-note" }),
       );
       await expect(
-        syncGoatBrainFromLocalRoot({
+        syncBrainFromLocalRoot({
           root,
           userWorkosId: "user_1",
           taskId: "task_1",
@@ -592,7 +592,7 @@ describe("syncGoatBrainFromLocalRoot", () => {
   });
 });
 
-function createGoatBrainDb(input: { selectResults: unknown[][] }) {
+function createBrainDb(input: { selectResults: unknown[][] }) {
   const selectResults = [...input.selectResults];
   const insertedValues: Array<Record<string, unknown>> = [];
   const updatedValues: Array<Record<string, unknown>> = [];
@@ -666,11 +666,11 @@ function createGoatBrainDb(input: { selectResults: unknown[][] }) {
 
 function brainDoc(input: { id: string; folder: string; title: string; truth: string }) {
   const at = "2026-01-01T00:00:00.000Z";
-  return serializeGoatBrainDocument({
+  return serializeBrainDocument({
     frontmatter: {
       id: input.id,
       folder: input.folder,
-      kind: goatBrainKindForFolder(input.folder),
+      kind: brainKindForFolder(input.folder),
       type: typeForTestFolder(input.folder),
       status: "draft",
       title: input.title,
@@ -684,7 +684,7 @@ function brainDoc(input: { id: string; folder: string; title: string; truth: str
   });
 }
 
-function typeForTestFolder(folder: string): GoatBrainEntityType {
+function typeForTestFolder(folder: string): BrainEntityType {
   const root = folder.split("/")[0];
   if (root === "research") return "analysis";
   if (root === "projects") return "project";
@@ -706,15 +706,15 @@ function brainRow(input: {
     folderPath: input.folderPath,
     title: input.brainId,
     content: input.content,
-    body: goatBrainEntryFromLegacyMarkdown(input.content).body,
-    timeline: goatBrainEntryFromLegacyMarkdown(input.content).timeline,
+    body: brainEntryFromLegacyMarkdown(input.content).body,
+    timeline: brainEntryFromLegacyMarkdown(input.content).timeline,
     format: "markdown",
     mimeType: "text/markdown",
     originalFileName: null,
     assetStorageKey: null,
     relations: [],
     sources: [],
-    kind: goatBrainKindForFolder(input.folderPath),
+    kind: brainKindForFolder(input.folderPath),
     entityType: typeForTestFolder(input.folderPath),
     status: "draft",
     aliases: [],
@@ -725,7 +725,7 @@ function brainRow(input: {
   };
 }
 
-function snapshotFor(row: ReturnType<typeof brainRow>): MaterializedGoatBrainSnapshot {
+function snapshotFor(row: ReturnType<typeof brainRow>): MaterializedBrainSnapshot {
   return {
     files: [
       {

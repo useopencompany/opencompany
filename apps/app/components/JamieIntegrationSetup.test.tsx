@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
-import type { GoatJamieProviderState } from "@/lib/integration-state";
+import type { JamieProviderState } from "@/lib/integration-state";
 import { saveJamieWebhookApiKeyAction } from "@/lib/integrations/jamie-actions";
 import { GOAT_JAMIE_WEBHOOK_SECRET_HEADER } from "@/lib/integrations/jamie-constants";
 
@@ -119,7 +119,7 @@ describe("JamieIntegrationSetup", () => {
   });
 });
 
-function jamieState(overrides: Partial<GoatJamieProviderState> = {}): GoatJamieProviderState {
+function jamieState(overrides: Partial<JamieProviderState> = {}): JamieProviderState {
   return {
     provider: "jamie",
     connected: false,

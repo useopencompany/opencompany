@@ -1,16 +1,16 @@
-import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
-import { upsertGoatBrainSource } from "@opencompany/db/brain-sources";
+import { captureServerEvent } from "@opencompany/analytics/server";
+import { upsertBrainSource } from "@opencompany/db/brain-sources";
 
-type UpsertGoatBrainSourceInput = Parameters<typeof upsertGoatBrainSource>[0];
+type UpsertBrainSourceInput = Parameters<typeof upsertBrainSource>[0];
 
-export async function upsertGoatBrainSourceWithAnalytics(
-  input: UpsertGoatBrainSourceInput & { workspaceId: string },
+export async function upsertBrainSourceWithAnalytics(
+  input: UpsertBrainSourceInput & { workspaceId: string },
 ) {
   const { workspaceId, ...sourceInput } = input;
-  const result = await upsertGoatBrainSource(sourceInput);
+  const result = await upsertBrainSource(sourceInput);
 
   if (result.created && sourceInput.enabled) {
-    await captureGoatServerEvent("brain_source_added", sourceInput.createdByWorkosId, {
+    await captureServerEvent("brain_source_added", sourceInput.createdByWorkosId, {
       workspace_id: workspaceId,
       brain_id: sourceInput.brainRef,
       provider: sourceInput.provider,

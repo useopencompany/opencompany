@@ -1,17 +1,13 @@
-import type { GoatCodexChatEngine } from "@opencompany/db/schema";
+import type { CodexChatEngine } from "@opencompany/db/schema";
 import { after, NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
-import { captureGoatChatMessageSent } from "@/lib/chat-analytics";
-import { parseGoatChatAttachmentsInput } from "@/lib/chat-attachments";
-import { parseOptimisticGoatChatSessionId } from "@/lib/chat-navigation";
-import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
-import { type GoatChatUiMessage, textFromGoatChatUiMessage } from "@/lib/chat-ui";
-import { createGoatCodexChatMessage } from "@/lib/codex-chat";
-import {
-  GoatSkillMentionError,
-  readGoatSkillMentionRefs,
-  resolveGoatSkillMentions,
-} from "@/lib/skills";
+import { currentUser } from "@/lib/auth";
+import { captureChatMessageSent } from "@/lib/chat-analytics";
+import { parseChatAttachmentsInput } from "@/lib/chat-attachments";
+import { parseOptimisticChatSessionId } from "@/lib/chat-navigation";
+import { generateChatTitleForMessage } from "@/lib/chat-title";
+import { type ChatUiMessage, textFromChatUiMessage } from "@/lib/chat-ui";
+import { createCodexChatMessage } from "@/lib/codex-chat";
+import { readSkillMentionRefs, resolveSkillMentions, SkillMentionError } from "@/lib/skills";
 
 type CloudChatMessageBody = {
   sessionId?: unknown;
@@ -23,11 +19,11 @@ type CloudChatMessageBody = {
 };
 
 export function createCloudChatMessageHandler(input: {
-  engine: GoatCodexChatEngine;
+  engine: CodexChatEngine;
   invalidMessage: string;
 }) {
   return async function POST(request: Request) {
-    const context = await currentGoatUser({ optional: true });
+    const context = await currentUser({ optional: true });
     if (!context) return new Response("Unauthorized", { status: 401 });
 
     const body = await readJsonBody<CloudChatMessageBody>(request);
@@ -40,7 +36,7 @@ export function createCloudChatMessageHandler(input: {
     const messageMetadata = isUiMessage(body.value.message)
       ? body.value.message.metadata
       : undefined;
-    const parsedAttachments = parseGoatChatAttachmentsInput(
+    const parsedAttachments = parseChatAttachmentsInput(
       messageMetadata?.attachments,
       context.user.workosUserId,
     );
@@ -49,25 +45,25 @@ export function createCloudChatMessageHandler(input: {
       return new Response(input.invalidMessage, { status: 400 });
     }
 
-    const parsedSkillMentions = readGoatSkillMentionRefs(messageMetadata?.mentions);
+    const parsedSkillMentions = readSkillMentionRefs(messageMetadata?.mentions);
     if (!parsedSkillMentions.ok) {
       return new Response(parsedSkillMentions.error, { status: 400 });
     }
     let resolvedSkills;
     try {
-      resolvedSkills = await resolveGoatSkillMentions({
+      resolvedSkills = await resolveSkillMentions({
         workspaceId: context.workspace.id,
         mentions: parsedSkillMentions.mentions,
       });
     } catch (error) {
-      if (error instanceof GoatSkillMentionError) {
+      if (error instanceof SkillMentionError) {
         return new Response(error.message, { status: 400 });
       }
       throw error;
     }
 
     const sessionId = typeof body.value.sessionId === "string" ? body.value.sessionId.trim() : null;
-    const parsedNewSessionId = parseOptimisticGoatChatSessionId(body.value.newSessionId);
+    const parsedNewSessionId = parseOptimisticChatSessionId(body.value.newSessionId);
     if (!parsedNewSessionId.ok) return new Response(parsedNewSessionId.error, { status: 400 });
     if (sessionId && parsedNewSessionId.sessionId) {
       return new Response("A chat request cannot continue and create a session at the same time.", {
@@ -79,7 +75,7 @@ export function createCloudChatMessageHandler(input: {
         ? body.value.message.id
         : null;
 
-    const result = await createGoatCodexChatMessage({
+    const result = await createCodexChatMessage({
       userWorkosId: context.user.workosUserId,
       workspaceId: context.workspace.id,
       brainRef: context.activeBrain?.id ?? null,
@@ -104,7 +100,7 @@ export function createCloudChatMessageHandler(input: {
     const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
     if (!sessionId && prompt) {
       after(
-        generateGoatChatTitleForMessage({
+        generateChatTitleForMessage({
           sessionId: result.sessionId,
           messageId: result.userMessageId,
           ...(gatewayApiKey ? { apiKey: gatewayApiKey } : {}),
@@ -112,7 +108,7 @@ export function createCloudChatMessageHandler(input: {
       );
     }
     after(
-      captureGoatChatMessageSent({
+      captureChatMessageSent({
         user: context.user,
         workspaceId: context.workspace.id,
         sessionId: result.sessionId,
@@ -130,10 +126,10 @@ export function createCloudChatMessageHandler(input: {
 function readPrompt(body: CloudChatMessageBody) {
   if (typeof body.prompt === "string") return body.prompt.trim();
   if (!isUiMessage(body.message)) return "";
-  return textFromGoatChatUiMessage(body.message);
+  return textFromChatUiMessage(body.message);
 }
 
-function isUiMessage(value: unknown): value is GoatChatUiMessage {
+function isUiMessage(value: unknown): value is ChatUiMessage {
   if (!value || typeof value !== "object") return false;
   const message = value as { role?: unknown; parts?: unknown };
   return message.role === "user" && Array.isArray(message.parts);

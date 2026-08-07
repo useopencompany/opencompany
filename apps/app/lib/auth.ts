@@ -1,21 +1,16 @@
-import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
+import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
+import { type Brain, users, type Workspace, type WorkspaceRole } from "@opencompany/db/schema";
 import {
-  type GoatBrain,
-  type GoatWorkspace,
-  type GoatWorkspaceRole,
-  goatUsers,
-} from "@opencompany/db/schema";
-import {
-  adoptGoatWorkspaceMembershipsFromOrgs,
-  createDefaultGoatWorkspaceForUser,
+  adoptWorkspaceMembershipsFromOrgs,
+  createDefaultWorkspaceForUser,
   DEFAULT_GOAT_BRAIN_SLUG,
-  type GoatWorkspaceWithRole,
-  getGoatBrainAccess,
-  listAccessibleGoatBrains,
-  listGoatWorkspacesForUser,
+  getBrainAccess,
+  listAccessibleBrains,
+  listWorkspacesForUser,
+  type WorkspaceWithRole,
 } from "@opencompany/db/workspaces";
-import { recordGoatSignup } from "@opencompany/telemetry";
+import { recordSignup } from "@opencompany/telemetry";
 import { saveSession, withAuth } from "@workos-inc/authkit-nextjs";
 import type { AuthenticationResponse, User as WorkOSUser } from "@workos-inc/node";
 import { eq } from "drizzle-orm";
@@ -23,26 +18,26 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { NextRequest } from "next/server";
 import { cache } from "react";
-import { recordLastGoatAuthMethod } from "@/lib/auth-methods";
-import { syncGoatStripeSeatQuantityForWorkspace } from "@/lib/billing/seats";
+import { recordLastAuthMethod } from "@/lib/auth-methods";
+import { syncStripeSeatQuantityForWorkspace } from "@/lib/billing/seats";
 import { enrollOwnerInOnboardingEmails } from "@/lib/email/onboarding-emails";
 import { getWorkOSClient } from "@/lib/workos-client";
-import { ensureGoatWorkspaceOrganizationsForEntries } from "@/lib/workos-organizations";
+import { ensureWorkspaceOrganizationsForEntries } from "@/lib/workos-organizations";
 
 export const GOAT_ACTIVE_WORKSPACE_COOKIE = "goat-active-workspace";
 export const GOAT_ACTIVE_BRAIN_COOKIE = "goat-active-brain";
 
-export type GoatAuthContext = {
+export type AuthContext = {
   authUser: WorkOSUser;
-  user: typeof goatUsers.$inferSelect;
-  workspace: GoatWorkspace;
-  role: GoatWorkspaceRole;
-  workspaces: GoatWorkspaceWithRole[];
-  brains: GoatBrain[];
-  activeBrain: GoatBrain | null;
+  user: typeof users.$inferSelect;
+  workspace: Workspace;
+  role: WorkspaceRole;
+  workspaces: WorkspaceWithRole[];
+  brains: Brain[];
+  activeBrain: Brain | null;
 };
 
-export async function syncGoatUser(authUser: WorkOSUser) {
+export async function syncUser(authUser: WorkOSUser) {
   const db = getDb();
   const now = new Date();
   const values = {
@@ -55,14 +50,14 @@ export async function syncGoatUser(authUser: WorkOSUser) {
   };
 
   const [insertedUser] = await db
-    .insert(goatUsers)
+    .insert(users)
     .values(values)
-    .onConflictDoNothing({ target: goatUsers.workosUserId })
+    .onConflictDoNothing({ target: users.workosUserId })
     .returning();
 
   if (insertedUser) {
-    recordGoatSignup({ source: "user_sync" });
-    await captureGoatServerEvent(
+    recordSignup({ source: "user_sync" });
+    await captureServerEvent(
       "signup_completed",
       insertedUser.workosUserId,
       {
@@ -78,7 +73,7 @@ export async function syncGoatUser(authUser: WorkOSUser) {
   }
 
   const [updatedUser] = await db
-    .update(goatUsers)
+    .update(users)
     .set({
       email: values.email,
       firstName: values.firstName,
@@ -86,7 +81,7 @@ export async function syncGoatUser(authUser: WorkOSUser) {
       avatarUrl: values.avatarUrl,
       updatedAt: values.updatedAt,
     })
-    .where(eq(goatUsers.workosUserId, authUser.id))
+    .where(eq(users.workosUserId, authUser.id))
     .returning();
 
   if (!updatedUser) {
@@ -96,7 +91,7 @@ export async function syncGoatUser(authUser: WorkOSUser) {
   return updatedUser;
 }
 
-function defaultWorkspaceName(user: typeof goatUsers.$inferSelect) {
+function defaultWorkspaceName(user: typeof users.$inferSelect) {
   const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   const base = fullName || user.email.split("@")[0] || "My";
   return `${base}'s Workspace`;
@@ -113,7 +108,7 @@ export async function adoptWorkOSOrganizationMemberships(authUser: WorkOSUser) {
       userId: authUser.id,
       statuses: ["active"],
     });
-    const adopted = await adoptGoatWorkspaceMembershipsFromOrgs({
+    const adopted = await adoptWorkspaceMembershipsFromOrgs({
       userWorkosId: authUser.id,
       memberships: memberships.data.map((membership) => ({
         organizationId: membership.organizationId,
@@ -121,10 +116,10 @@ export async function adoptWorkOSOrganizationMemberships(authUser: WorkOSUser) {
       })),
     });
     if (adopted > 0) {
-      const workspaces = await listGoatWorkspacesForUser(authUser.id);
+      const workspaces = await listWorkspacesForUser(authUser.id);
       await Promise.all(
         workspaces.map((entry) =>
-          syncGoatStripeSeatQuantityForWorkspace(entry.workspace.id).catch((error) => {
+          syncStripeSeatQuantityForWorkspace(entry.workspace.id).catch((error) => {
             console.error(
               "[goat] Failed to sync Stripe seat quantity after invite adoption",
               error,
@@ -138,17 +133,17 @@ export async function adoptWorkOSOrganizationMemberships(authUser: WorkOSUser) {
   }
 }
 
-export async function activateGoatWorkspaceForOrganization(input: {
+export async function activateWorkspaceForOrganization(input: {
   userWorkosId: string;
   organizationId: string;
 }): Promise<boolean> {
-  const workspaces = await listGoatWorkspacesForUser(input.userWorkosId);
+  const workspaces = await listWorkspacesForUser(input.userWorkosId);
   const target = workspaces.find(
     (entry) => entry.workspace.workosOrganizationId === input.organizationId,
   );
   if (!target) return false;
 
-  const brains = await listAccessibleGoatBrains({
+  const brains = await listAccessibleBrains({
     userWorkosId: input.userWorkosId,
     workspaceId: target.workspace.id,
   });
@@ -178,17 +173,17 @@ export async function activateGoatWorkspaceForOrganization(input: {
 // server action): seals the WorkOS session into the same cookie withAuth() reads,
 // then runs the same sync/adopt/activate side effects the old hosted-AuthKit
 // onSuccess callback used to run.
-export async function completeGoatAuthentication(
+export async function completeAuthentication(
   authResponse: AuthenticationResponse,
   request: NextRequest | string,
 ) {
   await saveSession(authResponse, request);
-  await recordLastGoatAuthMethod(authResponse.authenticationMethod);
-  await syncGoatUser(authResponse.user);
+  await recordLastAuthMethod(authResponse.authenticationMethod);
+  await syncUser(authResponse.user);
   await adoptWorkOSOrganizationMemberships(authResponse.user);
   if (authResponse.organizationId) {
     try {
-      await activateGoatWorkspaceForOrganization({
+      await activateWorkspaceForOrganization({
         userWorkosId: authResponse.user.id,
         organizationId: authResponse.organizationId,
       });
@@ -198,18 +193,18 @@ export async function completeGoatAuthentication(
   }
 }
 
-async function ensureGoatWorkspaces(
+async function ensureWorkspaces(
   authUser: WorkOSUser,
-  user: typeof goatUsers.$inferSelect,
-): Promise<GoatWorkspaceWithRole[]> {
-  let workspaces = await listGoatWorkspacesForUser(user.workosUserId);
-  if (workspaces.length > 0) return ensureGoatWorkspaceOrganizationsForEntries(workspaces);
+  user: typeof users.$inferSelect,
+): Promise<WorkspaceWithRole[]> {
+  let workspaces = await listWorkspacesForUser(user.workosUserId);
+  if (workspaces.length > 0) return ensureWorkspaceOrganizationsForEntries(workspaces);
 
   await adoptWorkOSOrganizationMemberships(authUser);
-  workspaces = await listGoatWorkspacesForUser(user.workosUserId);
-  if (workspaces.length > 0) return ensureGoatWorkspaceOrganizationsForEntries(workspaces);
+  workspaces = await listWorkspacesForUser(user.workosUserId);
+  if (workspaces.length > 0) return ensureWorkspaceOrganizationsForEntries(workspaces);
 
-  await createDefaultGoatWorkspaceForUser({
+  await createDefaultWorkspaceForUser({
     userWorkosId: user.workosUserId,
     name: defaultWorkspaceName(user),
   });
@@ -220,23 +215,23 @@ async function ensureGoatWorkspaces(
   await enrollOwnerInOnboardingEmails({ workosUserId: user.workosUserId }).catch((error) => {
     console.error("[goat] Failed to enroll owner in onboarding emails", error);
   });
-  workspaces = await listGoatWorkspacesForUser(user.workosUserId);
-  return ensureGoatWorkspaceOrganizationsForEntries(workspaces);
+  workspaces = await listWorkspacesForUser(user.workosUserId);
+  return ensureWorkspaceOrganizationsForEntries(workspaces);
 }
 
-const resolveGoatAuthContext = cache(async (): Promise<GoatAuthContext | null> => {
+const resolveAuthContext = cache(async (): Promise<AuthContext | null> => {
   const session = await withAuth();
   if (!session.user) return null;
 
   const db = getDb();
   const [existingUser] = await db
     .select()
-    .from(goatUsers)
-    .where(eq(goatUsers.workosUserId, session.user.id))
+    .from(users)
+    .where(eq(users.workosUserId, session.user.id))
     .limit(1);
-  const user = existingUser ?? (await syncGoatUser(session.user));
+  const user = existingUser ?? (await syncUser(session.user));
 
-  const workspaces = await ensureGoatWorkspaces(session.user, user);
+  const workspaces = await ensureWorkspaces(session.user, user);
   const first = workspaces[0];
   if (!first) return null;
 
@@ -250,7 +245,7 @@ const resolveGoatAuthContext = cache(async (): Promise<GoatAuthContext | null> =
     workspaces.find((entry) => entry.workspace.id === requestedWorkspaceId) ??
     first;
 
-  const brains = await listAccessibleGoatBrains({
+  const brains = await listAccessibleBrains({
     userWorkosId: user.workosUserId,
     workspaceId: active.workspace.id,
   });
@@ -272,10 +267,10 @@ const resolveGoatAuthContext = cache(async (): Promise<GoatAuthContext | null> =
   };
 });
 
-export async function currentGoatUser(options: { optional: true }): Promise<GoatAuthContext | null>;
-export async function currentGoatUser(options?: { optional?: false }): Promise<GoatAuthContext>;
-export async function currentGoatUser(options: { optional?: boolean } = {}) {
-  const context = await resolveGoatAuthContext();
+export async function currentUser(options: { optional: true }): Promise<AuthContext | null>;
+export async function currentUser(options?: { optional?: false }): Promise<AuthContext>;
+export async function currentUser(options: { optional?: boolean } = {}) {
+  const context = await resolveAuthContext();
   if (!context) {
     if (options.optional) return null;
     redirect("/signin");
@@ -285,19 +280,19 @@ export async function currentGoatUser(options: { optional?: boolean } = {}) {
 
 // The active brain, or a thrown error when the user cannot access any brain
 // in the active workspace (e.g. every brain is restricted to other members).
-export async function currentGoatBrain(): Promise<{ context: GoatAuthContext; brain: GoatBrain }> {
-  const context = await currentGoatUser();
+export async function currentBrain(): Promise<{ context: AuthContext; brain: Brain }> {
+  const context = await currentUser();
   if (!context.activeBrain) {
     throw new Error("You do not have access to any brain in this workspace.");
   }
   return { context, brain: context.activeBrain };
 }
 
-export async function currentGoatBrainByRef(
+export async function currentBrainByRef(
   brainRef: string,
-): Promise<{ context: GoatAuthContext; brain: GoatBrain }> {
-  const context = await currentGoatUser();
-  const access = await getGoatBrainAccess({
+): Promise<{ context: AuthContext; brain: Brain }> {
+  const context = await currentUser();
+  const access = await getBrainAccess({
     userWorkosId: context.user.workosUserId,
     brainRef,
   });

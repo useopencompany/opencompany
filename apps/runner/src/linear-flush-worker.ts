@@ -1,4 +1,4 @@
-import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
+import { captureIngestionQuotaAnalytics } from "@opencompany/analytics/app";
 import {
   type NormalizedLinearIssueActivity,
   type NormalizedLinearIssueComment,
@@ -6,29 +6,29 @@ import {
   normalizeLinearIssueWindow,
 } from "@opencompany/brain";
 import {
-  attributeGoatBrainSourceEventClaims,
-  claimGoatBrainSourceEvents,
+  attributeBrainSourceEventClaims,
+  claimBrainSourceEvents,
 } from "@opencompany/db/brain-event-claims";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
-  upsertGoatBrainSourceItemAndEnqueue,
+  upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
-import { loadGoatIntegrationCredential } from "@opencompany/db/integrations";
+import { loadIntegrationCredential } from "@opencompany/db/integrations";
 import {
-  goatLinearEventTypeFor,
-  goatLinearRouteMatchesEvent,
-  goatLinearSelectedTeamIds,
-  listEnabledGoatLinearBrainSourceRoutes,
-  newGoatLinearIssueWindowId,
+  linearEventTypeFor,
+  linearRouteMatchesEvent,
+  linearSelectedTeamIds,
+  listEnabledLinearBrainSourceRoutes,
+  newLinearIssueWindowId,
 } from "@opencompany/db/linear";
 import type {
-  GoatIntegrationStatus,
-  GoatLinearEventAction,
-  GoatLinearEventEntityType,
+  IntegrationStatus,
+  LinearEventAction,
+  LinearEventEntityType,
 } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
-import { wakeGoatBrainIngestWorker } from "./brain-ingest-worker";
+import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { getDb } from "./db";
 import { fetchLinearIssueSnapshot, type LinearIssueSnapshot } from "./linear-api";
 import { rowsFromExecute } from "./sql-exec";
@@ -44,7 +44,7 @@ export const GOAT_LINEAR_MAX_WAIT_MS = 2 * 60 * 60_000;
 export const GOAT_LINEAR_MAX_WINDOW_EVENTS = 200;
 const GOAT_LINEAR_FLUSH_POLL_INTERVAL_MS = 60_000;
 
-export type GoatLinearDueWindow = {
+export type LinearDueWindow = {
   integrationId: string;
   userWorkosId: string;
   organizationId: string;
@@ -55,19 +55,19 @@ type BufferedLinearEventRow = {
   id: string;
   deliveryId: string;
   teamId: string | null;
-  entityType: GoatLinearEventEntityType;
-  action: GoatLinearEventAction;
+  entityType: LinearEventEntityType;
+  action: LinearEventAction;
   issueTitle: string | null;
   actorName: string | null;
   payload: Record<string, unknown>;
   eventTime: string | Date;
 };
 
-export async function listDueGoatLinearIssueWindows(input: {
+export async function listDueLinearIssueWindows(input: {
   now?: Date;
   quietPeriodMs?: number;
   maxWaitMs?: number;
-}): Promise<GoatLinearDueWindow[]> {
+}): Promise<LinearDueWindow[]> {
   const now = input.now ?? new Date();
   const quietCutoff = new Date(
     now.getTime() - (input.quietPeriodMs ?? GOAT_LINEAR_QUIET_PERIOD_MS),
@@ -84,10 +84,10 @@ export async function listDueGoatLinearIssueWindows(input: {
     GROUP BY 1, 2, 3, 4
     HAVING max(received_at) < ${quietCutoff} OR min(received_at) < ${maxWaitCutoff}
   `);
-  return rowsFromExecute<GoatLinearDueWindow>(result);
+  return rowsFromExecute<LinearDueWindow>(result);
 }
 
-export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): Promise<{
+export async function flushLinearIssueWindow(window: LinearDueWindow): Promise<{
   sourceItemId: string;
   eventCount: number;
   enqueued: boolean;
@@ -152,12 +152,12 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
     // buffer never wedges on a dead token.
     const routes =
       integration.status === "connected"
-        ? await listEnabledGoatLinearBrainSourceRoutes([window.integrationId], tx)
+        ? await listEnabledLinearBrainSourceRoutes([window.integrationId], tx)
         : [];
     const teamId = snapshot?.teamId ?? claimed.find((row) => row.teamId)?.teamId ?? null;
     const candidateBrainRefs = routes
       .filter((route) => {
-        const selected = goatLinearSelectedTeamIds(route.config);
+        const selected = linearSelectedTeamIds(route.config);
         if (selected.size === 0) return false;
         if (!eventsMatchLinearRoute(route.config, claimed)) return false;
         // Without a resolvable team (deleted issue with team-less buffered
@@ -178,7 +178,7 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
     const claimedEventKeysByBrainRef = new Map<string, string[]>();
     const newlyClaimedEventKeys = new Set<string>();
     for (const brainRef of new Set(candidateBrainRefs)) {
-      const { claimedEventKeys } = await claimGoatBrainSourceEvents({
+      const { claimedEventKeys } = await claimBrainSourceEvents({
         brainRef,
         sourceProvider: "linear",
         eventKeys,
@@ -190,7 +190,7 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
       for (const eventKey of claimedEventKeys) newlyClaimedEventKeys.add(eventKey);
     }
 
-    const upserted = await upsertGoatBrainSourceItemAndEnqueue({
+    const upserted = await upsertBrainSourceItemAndEnqueue({
       userWorkosId: window.userWorkosId,
       sourceConnectionId: window.integrationId,
       integrationId: window.integrationId,
@@ -214,7 +214,7 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
       )})
     `);
     for (const brainRef of brainRefs) {
-      await attributeGoatBrainSourceEventClaims({
+      await attributeBrainSourceEventClaims({
         brainRef,
         sourceProvider: "linear",
         eventKeys: claimedEventKeysByBrainRef.get(brainRef) ?? [],
@@ -232,13 +232,13 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
     };
   });
 
-  captureGoatIngestionQuotaAnalytics(result?.quotaUpdates);
-  if (result?.enqueued) wakeGoatBrainIngestWorker();
+  captureIngestionQuotaAnalytics(result?.quotaUpdates);
+  if (result?.enqueued) wakeBrainIngestWorker();
   return result;
 }
 
 export function buildLinearIssueWindowItem(input: {
-  window: GoatLinearDueWindow;
+  window: LinearDueWindow;
   events: readonly BufferedLinearEventRow[];
   snapshot: LinearIssueSnapshot | null;
   organizationUrlKey: string | null;
@@ -250,7 +250,7 @@ export function buildLinearIssueWindowItem(input: {
   const lastTitled = [...events].reverse().find((row) => row.issueTitle);
 
   return normalizeLinearIssueWindow({
-    windowId: newGoatLinearIssueWindowId(),
+    windowId: newLinearIssueWindowId(),
     organizationId: window.organizationId,
     issueId: window.issueId,
     title: snapshot?.title ?? lastTitled?.issueTitle ?? window.issueId,
@@ -289,7 +289,7 @@ export function buildLinearIssueWindowItem(input: {
   });
 }
 
-export function startGoatLinearFlushWorker(options: { pollIntervalMs?: number } = {}) {
+export function startLinearFlushWorker(options: { pollIntervalMs?: number } = {}) {
   const pollIntervalMs = Math.max(
     1_000,
     options.pollIntervalMs ?? GOAT_LINEAR_FLUSH_POLL_INTERVAL_MS,
@@ -315,10 +315,10 @@ export function startGoatLinearFlushWorker(options: { pollIntervalMs?: number } 
   const loop = (async () => {
     while (!stopped) {
       try {
-        const due = await listDueGoatLinearIssueWindows({});
+        const due = await listDueLinearIssueWindows({});
         for (const window of due) {
           if (stopped) break;
-          const flushed = await flushGoatLinearIssueWindow(window).catch((error) => {
+          const flushed = await flushLinearIssueWindow(window).catch((error) => {
             captureException(error, {
               event: "opencompany.goat_linear_flush_failed",
               integration_id: window.integrationId,
@@ -366,7 +366,7 @@ export function startGoatLinearFlushWorker(options: { pollIntervalMs?: number } 
   };
 }
 
-async function previewBufferedLinearEvents(window: GoatLinearDueWindow) {
+async function previewBufferedLinearEvents(window: LinearDueWindow) {
   return rowsFromExecute<BufferedLinearEventRow>(
     await getDb().execute(sql`
       SELECT
@@ -388,12 +388,12 @@ async function previewBufferedLinearEvents(window: GoatLinearDueWindow) {
   );
 }
 
-async function loadLinearIntegrationContext(window: GoatLinearDueWindow): Promise<{
-  status: GoatIntegrationStatus | "unknown";
+async function loadLinearIntegrationContext(window: LinearDueWindow): Promise<{
+  status: IntegrationStatus | "unknown";
   accessToken: string | null;
   organizationUrlKey: string | null;
 }> {
-  const statusRows = rowsFromExecute<{ status: GoatIntegrationStatus }>(
+  const statusRows = rowsFromExecute<{ status: IntegrationStatus }>(
     await getDb().execute(sql`
       SELECT status FROM goat.integrations WHERE id = ${window.integrationId}
     `),
@@ -402,7 +402,7 @@ async function loadLinearIntegrationContext(window: GoatLinearDueWindow): Promis
 
   const credential =
     status === "connected"
-      ? await loadGoatIntegrationCredential({
+      ? await loadIntegrationCredential({
           userWorkosId: window.userWorkosId,
           integrationId: window.integrationId,
           provider: "linear",
@@ -453,20 +453,20 @@ function toNormalizedActivity(row: BufferedLinearEventRow): NormalizedLinearIssu
 }
 
 function eventsMatchLinearRoute(
-  config: Parameters<typeof goatLinearRouteMatchesEvent>[0],
+  config: Parameters<typeof linearRouteMatchesEvent>[0],
   events: readonly BufferedLinearEventRow[],
 ) {
   return events.some((row) => {
-    const eventType = goatLinearEventTypeFor({
+    const eventType = linearEventTypeFor({
       entityType: row.entityType,
       action: row.action,
       updatedFrom: asRecord(row.payload.updatedFrom),
     });
-    return eventType ? goatLinearRouteMatchesEvent(config, eventType) : false;
+    return eventType ? linearRouteMatchesEvent(config, eventType) : false;
   });
 }
 
-export type GoatLinearIssueWindowIngestDecision =
+export type LinearIssueWindowIngestDecision =
   | { action: "ingest" }
   | { action: "skip"; reason: "routine_linear_status_change" | "routine_linear_metadata_update" };
 
@@ -500,7 +500,7 @@ const LINEAR_STATUS_FIELDS = new Set([
 
 export function classifyLinearIssueWindowForIngest(
   item: NormalizedLinearIssueSourceItem,
-): GoatLinearIssueWindowIngestDecision {
+): LinearIssueWindowIngestDecision {
   const issue = item.content.issue;
   if (issue.snapshotStale) return { action: "ingest" };
   if (issue.activity.length === 0) {

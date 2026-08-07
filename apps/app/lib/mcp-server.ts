@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { GoatBrainWithWorkspace } from "@opencompany/db/workspaces";
-import { getGoatBrainAccess, listAccessibleGoatBrainsForUser } from "@opencompany/db/workspaces";
+import type { BrainWithWorkspace } from "@opencompany/db/workspaces";
+import { getBrainAccess, listAccessibleBrainsForUser } from "@opencompany/db/workspaces";
 import * as z from "zod/v4-mini";
-import { captureToGoatBrainInbox } from "@/lib/brain-capture";
-import { runGoatBrainToolForUser } from "@/lib/brain-cli";
-import { normalizeGoatBrainReadToolInput } from "@/lib/brain-surface";
+import { captureToBrainInbox } from "@/lib/brain-capture";
+import { runBrainToolForUser } from "@/lib/brain-cli";
+import { normalizeBrainReadToolInput } from "@/lib/brain-surface";
 import {
   type BrainSelectorArgs,
+  brainAdvancedInputSchema,
   coerceDocumentIds,
   GET_DOCUMENT_TOOL_DESCRIPTION,
   GET_DOCUMENT_TOOL_NAME,
@@ -21,7 +22,6 @@ import {
   getDocumentToToolInput,
   getTimelineInputSchema,
   getTimelineToToolInput,
-  goatBrainAdvancedInputSchema,
   LIST_BRAINS_TOOL_NAME,
   LIST_DOCUMENTS_TOOL_DESCRIPTION,
   LIST_DOCUMENTS_TOOL_NAME,
@@ -38,7 +38,7 @@ import {
   searchBrainInputSchema,
   searchBrainToToolInput,
 } from "@/lib/brain-tools";
-import type { GoatBrainToolInput } from "@/lib/chat-ui";
+import type { BrainToolInput } from "@/lib/chat-ui";
 
 // Tool registration for the user-level Goat MCP connector: one surface spanning
 // every brain the token's user can access, addressed via an optional `brain`
@@ -49,7 +49,7 @@ import type { GoatBrainToolInput } from "@/lib/chat-ui";
 // get_document, list_documents, get_timeline) whose parameters match what an agent
 // guesses without a system prompt. They map to the shared read engine via the pure
 // mappers in brain-tools.ts. goat_brain remains as an advanced escape hatch.
-export type GoatMcpToolContext = {
+export type McpToolContext = {
   userWorkosId: string;
   gatewayApiKey: string;
   signal?: AbortSignal;
@@ -126,14 +126,14 @@ export function mcpTextToolResult(output: {
 }
 
 type BrainResolution =
-  | { ok: true; brain: GoatBrainWithWorkspace["brain"] }
+  | { ok: true; brain: BrainWithWorkspace["brain"] }
   | { ok: false; error: string };
 
 // Pure resolver for the `brain` argument: exact id first, then a unique slug
 // (the default "general" slug repeats across workspaces, so slug hits can be
 // ambiguous). Omitting the argument only works with one brain.
-export function resolveGoatMcpBrain(
-  accessible: GoatBrainWithWorkspace[],
+export function resolveMcpBrain(
+  accessible: BrainWithWorkspace[],
   brainParam: string | undefined,
 ): BrainResolution {
   const wanted = brainParam?.trim();
@@ -167,22 +167,22 @@ export function resolveGoatMcpBrain(
   };
 }
 
-function renderBrainList(brains: GoatBrainWithWorkspace[]) {
+function renderBrainList(brains: BrainWithWorkspace[]) {
   return brains
     .map(({ brain, workspace }) => `- ${brain.id} — "${brain.name}" (workspace: ${workspace.name})`)
     .join("\n");
 }
 
-export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContext) {
+export function registerBrainTools(server: McpServer, ctx: McpToolContext) {
   // Resolve the brain, then run a mapped read against the shared engine. Every flat read tool
   // funnels through here so brain resolution and error shaping stay identical.
-  const run = async (selector: BrainSelectorArgs, toolInput: GoatBrainToolInput) => {
-    const accessible = await listAccessibleGoatBrainsForUser(ctx.userWorkosId);
-    const resolved = resolveGoatMcpBrain(accessible, resolveBrainParam(selector));
+  const run = async (selector: BrainSelectorArgs, toolInput: BrainToolInput) => {
+    const accessible = await listAccessibleBrainsForUser(ctx.userWorkosId);
+    const resolved = resolveMcpBrain(accessible, resolveBrainParam(selector));
     if (!resolved.ok) {
       return mcpTextToolResult({ ok: false, stdout: "", stderr: "", error: resolved.error });
     }
-    const output = await runGoatBrainToolForUser({
+    const output = await runBrainToolForUser({
       brainRef: resolved.brain.id,
       userWorkosId: ctx.userWorkosId,
       toolInput,
@@ -195,7 +195,7 @@ export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContex
 
   // Wrap a mapper so any synchronous mapping/validation error becomes a tool error result
   // instead of a thrown exception the transport would surface as a raw failure.
-  const runMapped = async <A>(args: A, map: (args: A) => GoatBrainToolInput) => {
+  const runMapped = async <A>(args: A, map: (args: A) => BrainToolInput) => {
     try {
       return await run(args as BrainSelectorArgs, map(args));
     } catch (error) {
@@ -268,10 +268,10 @@ export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContex
     {
       title: "OpenCompany brain (advanced)",
       description: GOAT_BRAIN_ADVANCED_TOOL_DESCRIPTION,
-      inputSchema: goatBrainAdvancedInputSchema,
+      inputSchema: brainAdvancedInputSchema,
       annotations: READ_TOOL_ANNOTATIONS,
     },
-    async (args) => runMapped(args, normalizeGoatBrainReadToolInput),
+    async (args) => runMapped(args, normalizeBrainReadToolInput),
   );
 
   server.registerTool(
@@ -285,7 +285,7 @@ export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContex
       annotations: READ_TOOL_ANNOTATIONS,
     },
     async () => {
-      const accessible = await listAccessibleGoatBrainsForUser(ctx.userWorkosId);
+      const accessible = await listAccessibleBrainsForUser(ctx.userWorkosId);
       const workspaces = new Map<string, { name: string; brains: unknown[] }>();
       for (const { brain, workspace, workspaceRole } of accessible) {
         const entry = workspaces.get(workspace.id) ?? {
@@ -321,8 +321,8 @@ export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContex
     },
     async ({ content, title, intent, ...selector }) => {
       try {
-        const accessible = await listAccessibleGoatBrainsForUser(ctx.userWorkosId);
-        const resolved = resolveGoatMcpBrain(accessible, resolveBrainParam(selector));
+        const accessible = await listAccessibleBrainsForUser(ctx.userWorkosId);
+        const resolved = resolveMcpBrain(accessible, resolveBrainParam(selector));
         if (!resolved.ok) {
           return mcpTextToolResult({
             ok: false,
@@ -332,7 +332,7 @@ export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContex
           });
         }
 
-        const access = await getGoatBrainAccess({
+        const access = await getBrainAccess({
           userWorkosId: ctx.userWorkosId,
           brainRef: resolved.brain.id,
         });
@@ -346,7 +346,7 @@ export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContex
         }
 
         const itemId = `capture_${randomUUID()}`;
-        const captured = await captureToGoatBrainInbox({
+        const captured = await captureToBrainInbox({
           brainRef: resolved.brain.id,
           userWorkosId: ctx.userWorkosId,
           text: content,

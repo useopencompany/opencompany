@@ -2,38 +2,38 @@
 
 import { normalizeScheduleTimezone } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
-import { type GoatTaskViewMode, goatUsers } from "@opencompany/db/schema";
+import { type TaskViewMode, users } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
-import { isGoatTaskViewMode } from "@/lib/task-display";
+import { currentUser } from "@/lib/auth";
+import { isTaskViewMode } from "@/lib/task-display";
 
-export async function updateGoatTimezoneAction(timezone: string) {
-  const { user } = await currentGoatUser();
+export async function updateTimezoneAction(timezone: string) {
+  const { user } = await currentUser();
   const normalized = normalizeScheduleTimezone(timezone);
   if (normalized === user.timezone) return { ok: true, timezone: normalized } as const;
 
   const [updated] = await getDb()
-    .update(goatUsers)
+    .update(users)
     .set({ timezone: normalized, updatedAt: new Date() })
-    .where(eq(goatUsers.workosUserId, user.workosUserId))
-    .returning({ timezone: goatUsers.timezone });
+    .where(eq(users.workosUserId, user.workosUserId))
+    .returning({ timezone: users.timezone });
 
   return { ok: Boolean(updated), timezone: updated?.timezone ?? user.timezone } as const;
 }
 
-export async function updateGoatTaskSpawningAction(enabled: boolean) {
-  const { user } = await currentGoatUser();
+export async function updateTaskSpawningAction(enabled: boolean) {
+  const { user } = await currentUser();
   const nextEnabled = enabled === true;
   if (nextEnabled === user.taskSpawningEnabled) {
     return { ok: true, enabled: nextEnabled } as const;
   }
 
   const [updated] = await getDb()
-    .update(goatUsers)
+    .update(users)
     .set({ taskSpawningEnabled: nextEnabled, updatedAt: new Date() })
-    .where(eq(goatUsers.workosUserId, user.workosUserId))
-    .returning({ taskSpawningEnabled: goatUsers.taskSpawningEnabled });
+    .where(eq(users.workosUserId, user.workosUserId))
+    .returning({ taskSpawningEnabled: users.taskSpawningEnabled });
 
   revalidatePath("/");
   revalidatePath("/settings/preferences");
@@ -43,33 +43,33 @@ export async function updateGoatTaskSpawningAction(enabled: boolean) {
   } as const;
 }
 
-export async function updateGoatTaskViewModeAction(mode: GoatTaskViewMode) {
-  const { user } = await currentGoatUser();
-  if (!isGoatTaskViewMode(mode)) return { ok: false, mode: user.taskViewMode } as const;
+export async function updateTaskViewModeAction(mode: TaskViewMode) {
+  const { user } = await currentUser();
+  if (!isTaskViewMode(mode)) return { ok: false, mode: user.taskViewMode } as const;
   if (mode === user.taskViewMode) return { ok: true, mode } as const;
 
   const [updated] = await getDb()
-    .update(goatUsers)
+    .update(users)
     .set({ taskViewMode: mode, updatedAt: new Date() })
-    .where(eq(goatUsers.workosUserId, user.workosUserId))
-    .returning({ taskViewMode: goatUsers.taskViewMode });
+    .where(eq(users.workosUserId, user.workosUserId))
+    .returning({ taskViewMode: users.taskViewMode });
 
   revalidatePath("/tasks");
   return { ok: Boolean(updated), mode: updated?.taskViewMode ?? user.taskViewMode } as const;
 }
 
-export async function updateGoatImessageEnabledAction(enabled: boolean) {
-  const { user } = await currentGoatUser();
+export async function updateImessageEnabledAction(enabled: boolean) {
+  const { user } = await currentUser();
   const nextEnabled = enabled === true;
   if (nextEnabled === user.imessageEnabled) {
     return { ok: true, enabled: nextEnabled } as const;
   }
 
   const [updated] = await getDb()
-    .update(goatUsers)
+    .update(users)
     .set({ imessageEnabled: nextEnabled, updatedAt: new Date() })
-    .where(eq(goatUsers.workosUserId, user.workosUserId))
-    .returning({ imessageEnabled: goatUsers.imessageEnabled });
+    .where(eq(users.workosUserId, user.workosUserId))
+    .returning({ imessageEnabled: users.imessageEnabled });
 
   revalidatePath("/");
   revalidatePath("/settings/preferences");
@@ -80,18 +80,18 @@ export async function updateGoatImessageEnabledAction(enabled: boolean) {
   } as const;
 }
 
-export async function updateGoatAutoModelRoutingAction(enabled: boolean) {
-  const { user } = await currentGoatUser();
+export async function updateAutoModelRoutingAction(enabled: boolean) {
+  const { user } = await currentUser();
   const nextEnabled = enabled === true;
   if (nextEnabled === user.autoModelRoutingEnabled) {
     return { ok: true, enabled: nextEnabled } as const;
   }
 
   const [updated] = await getDb()
-    .update(goatUsers)
+    .update(users)
     .set({ autoModelRoutingEnabled: nextEnabled, updatedAt: new Date() })
-    .where(eq(goatUsers.workosUserId, user.workosUserId))
-    .returning({ autoModelRoutingEnabled: goatUsers.autoModelRoutingEnabled });
+    .where(eq(users.workosUserId, user.workosUserId))
+    .returning({ autoModelRoutingEnabled: users.autoModelRoutingEnabled });
 
   revalidatePath("/");
   revalidatePath("/settings/preferences");

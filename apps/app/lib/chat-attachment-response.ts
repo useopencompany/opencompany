@@ -1,9 +1,7 @@
-import type { GoatChatMessageAttachment } from "@opencompany/db/schema";
+import type { ChatMessageAttachment } from "@opencompany/db/schema";
 import { get } from "@vercel/blob";
 
-export async function goatChatAttachmentResponse(
-  attachment: GoatChatMessageAttachment,
-): Promise<Response> {
+export async function chatAttachmentResponse(attachment: ChatMessageAttachment): Promise<Response> {
   const result = await get(attachment.blobUrl, { access: "private", useCache: false });
   if (!result || result.statusCode !== 200 || !result.stream) {
     return new Response(null, { status: 404 });

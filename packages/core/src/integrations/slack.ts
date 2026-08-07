@@ -1,18 +1,18 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
-import { goatIntegrations } from "@opencompany/db/schema";
+import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq } from "drizzle-orm";
-import { getGoatAppUrl } from "../app-url";
-import type { GoatSlackProviderState } from "../integration-state";
+import { getAppUrl } from "../app-url";
+import type { SlackProviderState } from "../integration-state";
 
-export type GoatSlackIntegrationStatePayload = {
+export type SlackIntegrationStatePayload = {
   userWorkosId: string;
   returnTo: string;
   expiresAt: number;
   nonce: string;
 };
 
-export type GoatSlackOAuthResult = {
+export type SlackOAuthResult = {
   teamId: string;
   teamName: string | null;
   authedUserId: string;
@@ -46,29 +46,24 @@ export const SLACK_USER_SCOPES = [
   "search:read",
 ] as const;
 
-export function isGoatSlackIntegrationConfigured() {
+export function isSlackIntegrationConfigured() {
   return SLACK_INTEGRATION_ENVS.every((name) => Boolean(process.env[name]?.trim()));
 }
 
-export async function getGoatSlackIntegrationState(
-  userWorkosId: string,
-): Promise<GoatSlackProviderState> {
+export async function getSlackIntegrationState(userWorkosId: string): Promise<SlackProviderState> {
   const [row] = await getDb()
     .select({
-      id: goatIntegrations.id,
-      status: goatIntegrations.status,
-      accountName: goatIntegrations.accountName,
-      connectionLabel: goatIntegrations.connectionLabel,
-      statusReason: goatIntegrations.statusReason,
+      id: integrations.id,
+      status: integrations.status,
+      accountName: integrations.accountName,
+      connectionLabel: integrations.connectionLabel,
+      statusReason: integrations.statusReason,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
-      and(
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, SLACK_PROVIDER),
-      ),
+      and(eq(integrations.userWorkosId, userWorkosId), eq(integrations.provider, SLACK_PROVIDER)),
     )
-    .orderBy(desc(goatIntegrations.updatedAt))
+    .orderBy(desc(integrations.updatedAt))
     .limit(1);
 
   if (!row || row.status === "disconnected") {
@@ -94,10 +89,10 @@ export async function getGoatSlackIntegrationState(
   };
 }
 
-export function createGoatSlackIntegrationState(
-  input: Omit<GoatSlackIntegrationStatePayload, "expiresAt" | "nonce">,
+export function createSlackIntegrationState(
+  input: Omit<SlackIntegrationStatePayload, "expiresAt" | "nonce">,
 ) {
-  const payload: GoatSlackIntegrationStatePayload = {
+  const payload: SlackIntegrationStatePayload = {
     ...input,
     returnTo: sanitizeReturnTo(input.returnTo),
     expiresAt: Date.now() + 10 * 60 * 1000,
@@ -107,14 +102,14 @@ export function createGoatSlackIntegrationState(
   return `${body}.${signStateBody(body)}`;
 }
 
-export function verifyGoatSlackIntegrationState(state: string): GoatSlackIntegrationStatePayload {
+export function verifySlackIntegrationState(state: string): SlackIntegrationStatePayload {
   const [body, signature] = state.split(".");
   if (!body || !signature || !safeEqual(signature, signStateBody(body))) {
     throw new Error("Invalid Slack integration state.");
   }
 
   const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as unknown;
-  if (!isGoatSlackIntegrationStatePayload(payload)) {
+  if (!isSlackIntegrationStatePayload(payload)) {
     throw new Error("Invalid Slack integration state payload.");
   }
   if (payload.expiresAt < Date.now()) {
@@ -127,17 +122,17 @@ export function verifyGoatSlackIntegrationState(state: string): GoatSlackIntegra
   };
 }
 
-export function buildGoatSlackAuthorizationUrl(state: string) {
+export function buildSlackAuthorizationUrl(state: string) {
   const url = new URL("https://slack.com/oauth/v2/authorize");
   url.searchParams.set("client_id", requiredEnv("SLACK_CLIENT_ID"));
   // user_scope (not scope): we request a user token only, no bot token.
   url.searchParams.set("user_scope", SLACK_USER_SCOPES.join(","));
-  url.searchParams.set("redirect_uri", goatSlackCallbackUrl());
+  url.searchParams.set("redirect_uri", slackCallbackUrl());
   url.searchParams.set("state", state);
   return url.toString();
 }
 
-export async function exchangeGoatSlackCode(code: string): Promise<GoatSlackOAuthResult> {
+export async function exchangeSlackCode(code: string): Promise<SlackOAuthResult> {
   const result = await slackApiRequest<{
     team?: { id?: string; name?: string };
     authed_user?: { id?: string; access_token?: string; scope?: string; token_type?: string };
@@ -147,7 +142,7 @@ export async function exchangeGoatSlackCode(code: string): Promise<GoatSlackOAut
       client_id: requiredEnv("SLACK_CLIENT_ID"),
       client_secret: requiredEnv("SLACK_CLIENT_SECRET"),
       code,
-      redirect_uri: goatSlackCallbackUrl(),
+      redirect_uri: slackCallbackUrl(),
     },
   });
 
@@ -167,7 +162,7 @@ export async function exchangeGoatSlackCode(code: string): Promise<GoatSlackOAut
   };
 }
 
-export async function fetchGoatSlackIdentity(input: { accessToken: string; authedUserId: string }) {
+export async function fetchSlackIdentity(input: { accessToken: string; authedUserId: string }) {
   const [userResult, teamResult] = await Promise.all([
     slackApiRequest<{
       user?: { real_name?: string; name?: string; profile?: { email?: string } };
@@ -189,12 +184,12 @@ export async function fetchGoatSlackIdentity(input: { accessToken: string; authe
   };
 }
 
-export function appendGoatSlackIntegrationStatus(
+export function appendSlackIntegrationStatus(
   returnTo: string,
   status: "connected" | "error",
   reason?: string,
 ) {
-  const url = new URL(sanitizeReturnTo(returnTo), getGoatAppUrl());
+  const url = new URL(sanitizeReturnTo(returnTo), getAppUrl());
   url.searchParams.set("integration", SLACK_PROVIDER);
   url.searchParams.set("setup", status);
   if (status === "error" && reason) url.searchParams.set("reason", reason);
@@ -228,13 +223,11 @@ export async function slackApiRequest<T extends Record<string, unknown>>(input: 
   return result;
 }
 
-function goatSlackCallbackUrl() {
-  return `${getGoatAppUrl()}/api/integrations/slack/callback`;
+function slackCallbackUrl() {
+  return `${getAppUrl()}/api/integrations/slack/callback`;
 }
 
-function isGoatSlackIntegrationStatePayload(
-  value: unknown,
-): value is GoatSlackIntegrationStatePayload {
+function isSlackIntegrationStatePayload(value: unknown): value is SlackIntegrationStatePayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return (

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  disconnectGoatInfisicalConnection,
+  disconnectInfisicalConnection,
   GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
-  loadGoatInfisicalConnection,
-  saveGoatInfisicalConnection,
+  loadInfisicalConnection,
+  saveInfisicalConnection,
 } from "./infisical-auth";
 
 describe("Goat Infisical credentials", () => {
@@ -44,7 +44,7 @@ describe("Goat Infisical credentials", () => {
       redactionValues: ["signed.jwt.token"],
     };
 
-    await saveGoatInfisicalConnection({
+    await saveInfisicalConnection({
       db: insertDb as never,
       workspaceId: "workspace_1",
       authBundle: bundle,
@@ -67,12 +67,12 @@ describe("Goat Infisical credentials", () => {
     };
     const selectDb = selectDbReturning(row);
     await expect(
-      loadGoatInfisicalConnection({ db: selectDb as never, workspaceId: "workspace_1" }),
+      loadInfisicalConnection({ db: selectDb as never, workspaceId: "workspace_1" }),
     ).resolves.toMatchObject({ authBundle: bundle, status: "connected" });
 
     const copiedToOtherWorkspace = selectDbReturning({ ...row, workspaceId: "workspace_2" });
     await expect(
-      loadGoatInfisicalConnection({
+      loadInfisicalConnection({
         db: copiedToOtherWorkspace as never,
         workspaceId: "workspace_2",
       }),
@@ -85,7 +85,7 @@ describe("Goat Infisical credentials", () => {
     }));
     const db = { insert: vi.fn(() => ({ values })) };
 
-    const result = await disconnectGoatInfisicalConnection({
+    const result = await disconnectInfisicalConnection({
       db: db as never,
       workspaceId: "workspace_1",
     });

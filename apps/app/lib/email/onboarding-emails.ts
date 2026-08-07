@@ -1,16 +1,16 @@
 import {
-  type ClaimedGoatOnboardingEmail,
-  claimDueGoatOnboardingEmails,
-  enrollGoatOnboardingEmails,
-  failGoatOnboardingEmail,
+  type ClaimedOnboardingEmail,
+  claimDueOnboardingEmails,
+  enrollOnboardingEmails,
+  failOnboardingEmail,
   MAX_GOAT_ONBOARDING_EMAIL_ATTEMPTS,
-  markGoatOnboardingEmailSent,
-  rescheduleGoatOnboardingEmail,
+  markOnboardingEmailSent,
+  rescheduleOnboardingEmail,
 } from "@opencompany/db/onboarding-emails";
 import { captureException, createLogger } from "@opencompany/observability";
 import { assertResendResponse, getResendClient, trimmed } from "@/lib/email/client";
 import { renderOnboardingEmail } from "@/lib/email/templates/onboarding";
-import { createGoatEmailUnsubscribeUrl } from "@/lib/email/unsubscribe";
+import { createEmailUnsubscribeUrl } from "@/lib/email/unsubscribe";
 
 const logger = createLogger({ service: "opencompany-goat", runtime: "server" });
 
@@ -38,11 +38,11 @@ function getOnboardingEmailConfig(): OnboardingEmailConfig {
 }
 
 async function sendOnboardingEmail(
-  row: ClaimedGoatOnboardingEmail,
+  row: ClaimedOnboardingEmail,
   config: Extract<OnboardingEmailConfig, { enabled: true }>,
 ) {
   const client = getResendClient(config.apiKey);
-  const unsubscribeUrl = createGoatEmailUnsubscribeUrl({ email: row.email });
+  const unsubscribeUrl = createEmailUnsubscribeUrl({ email: row.email });
   const rendered = renderOnboardingEmail(row.step, {
     firstName: row.firstName,
     unsubscribeUrl,
@@ -104,7 +104,7 @@ export async function sweepDueOnboardingEmails({
     return { status: "skipped", reason: config.reason };
   }
 
-  const claimed = await claimDueGoatOnboardingEmails({
+  const claimed = await claimDueOnboardingEmails({
     limit,
     ...(workosUserId ? { workosUserId } : {}),
   });
@@ -115,7 +115,7 @@ export async function sweepDueOnboardingEmails({
   for (const row of claimed) {
     try {
       const result = await sendOnboardingEmail(row, config);
-      await markGoatOnboardingEmailSent(row.id);
+      await markOnboardingEmailSent(row.id);
       sent += 1;
       logger.info("Sent onboarding email", {
         event: "opencompany.goat_onboarding_email_sent",
@@ -132,10 +132,10 @@ export async function sweepDueOnboardingEmails({
         attempts: row.attempts,
       });
       if (row.attempts >= MAX_GOAT_ONBOARDING_EMAIL_ATTEMPTS) {
-        await failGoatOnboardingEmail({ id: row.id, error: message });
+        await failOnboardingEmail({ id: row.id, error: message });
         failed += 1;
       } else {
-        await rescheduleGoatOnboardingEmail({
+        await rescheduleOnboardingEmail({
           id: row.id,
           nextRunAt: new Date(Date.now() + backoffMs(row.attempts)),
           error: message,
@@ -153,7 +153,7 @@ export async function sweepDueOnboardingEmails({
 // blocks sign-in, and the hourly cron backstops both the welcome and the
 // delayed steps.
 export async function enrollOwnerInOnboardingEmails(user: { workosUserId: string }) {
-  await enrollGoatOnboardingEmails({ workosUserId: user.workosUserId });
+  await enrollOnboardingEmails({ workosUserId: user.workosUserId });
   // Scope to this owner so the inline send only ever delivers their welcome (one
   // Resend round-trip) and never processes another user's backlog during sign-in.
   await sweepDueOnboardingEmails({ limit: 4, workosUserId: user.workosUserId });

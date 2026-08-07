@@ -1,16 +1,16 @@
 import { getDb } from "@opencompany/db/client";
-import { goatBrainIngestJobs, goatBrainSourceItems } from "@opencompany/db/schema";
-import { getGoatBrainAccess } from "@opencompany/db/workspaces";
+import { brainIngestJobs, brainSourceItems } from "@opencompany/db/schema";
+import { getBrainAccess } from "@opencompany/db/workspaces";
 import { and, eq, inArray } from "drizzle-orm";
-import { currentGoatUser } from "@/lib/auth";
-import type { GoatBrainSourceItemRow } from "@/lib/task-collections";
+import { currentUser } from "@/lib/auth";
+import type { BrainSourceItemRow } from "@/lib/task-collections";
 
 export const runtime = "nodejs";
 
 const MAX_SOURCE_ITEM_IDS = 100;
 
 export async function GET(request: Request): Promise<Response> {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const url = new URL(request.url);
@@ -20,7 +20,7 @@ export async function GET(request: Request): Promise<Response> {
   const sourceItemIds = readSourceItemIds(url.searchParams.get("source_item_ids"));
   if (sourceItemIds.length === 0) return Response.json({ sourceItems: [] });
 
-  const access = await getGoatBrainAccess({
+  const access = await getBrainAccess({
     userWorkosId: context.user.workosUserId,
     brainRef,
   });
@@ -28,32 +28,29 @@ export async function GET(request: Request): Promise<Response> {
 
   const rows = await getDb()
     .select({
-      id: goatBrainSourceItems.id,
-      userWorkosId: goatBrainSourceItems.userWorkosId,
-      sourceProvider: goatBrainSourceItems.sourceProvider,
-      sourceType: goatBrainSourceItems.sourceType,
-      externalId: goatBrainSourceItems.externalId,
-      title: goatBrainSourceItems.title,
-      occurredAt: goatBrainSourceItems.occurredAt,
-      capturedAt: goatBrainSourceItems.capturedAt,
-      contentHash: goatBrainSourceItems.contentHash,
-      lastIngestJobId: goatBrainSourceItems.lastIngestJobId,
-      lastIngestStatus: goatBrainSourceItems.lastIngestStatus,
-      lastIngestError: goatBrainSourceItems.lastIngestError,
-      lastIngestedAt: goatBrainSourceItems.lastIngestedAt,
-      createdAt: goatBrainSourceItems.createdAt,
-      updatedAt: goatBrainSourceItems.updatedAt,
+      id: brainSourceItems.id,
+      userWorkosId: brainSourceItems.userWorkosId,
+      sourceProvider: brainSourceItems.sourceProvider,
+      sourceType: brainSourceItems.sourceType,
+      externalId: brainSourceItems.externalId,
+      title: brainSourceItems.title,
+      occurredAt: brainSourceItems.occurredAt,
+      capturedAt: brainSourceItems.capturedAt,
+      contentHash: brainSourceItems.contentHash,
+      lastIngestJobId: brainSourceItems.lastIngestJobId,
+      lastIngestStatus: brainSourceItems.lastIngestStatus,
+      lastIngestError: brainSourceItems.lastIngestError,
+      lastIngestedAt: brainSourceItems.lastIngestedAt,
+      createdAt: brainSourceItems.createdAt,
+      updatedAt: brainSourceItems.updatedAt,
     })
-    .from(goatBrainSourceItems)
-    .innerJoin(goatBrainIngestJobs, eq(goatBrainIngestJobs.sourceItemId, goatBrainSourceItems.id))
+    .from(brainSourceItems)
+    .innerJoin(brainIngestJobs, eq(brainIngestJobs.sourceItemId, brainSourceItems.id))
     .where(
-      and(
-        eq(goatBrainIngestJobs.brainRef, brainRef),
-        inArray(goatBrainSourceItems.id, sourceItemIds),
-      ),
+      and(eq(brainIngestJobs.brainRef, brainRef), inArray(brainSourceItems.id, sourceItemIds)),
     );
 
-  const sourceItemsById = new Map<string, GoatBrainSourceItemRow>();
+  const sourceItemsById = new Map<string, BrainSourceItemRow>();
   for (const row of rows) {
     sourceItemsById.set(row.id, {
       id: row.id,

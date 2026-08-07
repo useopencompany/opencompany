@@ -1,12 +1,12 @@
 import {
-  listGoatStripeSeatReconciliationCandidates,
-  loadGoatBillingOverview,
-  reconcileGoatStripeSeatQuantity,
+  listStripeSeatReconciliationCandidates,
+  loadBillingOverview,
+  reconcileStripeSeatQuantity,
 } from "@opencompany/db/billing";
-import { getGoatStripe } from "@/lib/billing/stripe";
+import { getStripe } from "@/lib/billing/stripe";
 
-export async function syncGoatStripeSeatQuantityForWorkspace(workspaceId: string) {
-  const overview = await loadGoatBillingOverview(workspaceId);
+export async function syncStripeSeatQuantityForWorkspace(workspaceId: string) {
+  const overview = await loadBillingOverview(workspaceId);
   const itemId = overview.billing.stripeSubscriptionItemId;
   const status = overview.billing.subscriptionStatus;
   if (
@@ -20,7 +20,7 @@ export async function syncGoatStripeSeatQuantityForWorkspace(workspaceId: string
   }
 
   const quantity = Math.max(1, overview.memberCount);
-  const stripe = getGoatStripe();
+  const stripe = getStripe();
   const item = await stripe.subscriptionItems.retrieve(itemId);
   const stripeQuantity = Math.max(1, item.quantity ?? 1);
   let changed = false;
@@ -32,21 +32,21 @@ export async function syncGoatStripeSeatQuantityForWorkspace(workspaceId: string
     changed = true;
   }
 
-  await reconcileGoatStripeSeatQuantity({
+  await reconcileStripeSeatQuantity({
     workspaceId,
     seatQuantity: quantity,
   });
   return { ok: true as const, changed, quantity };
 }
 
-export async function reconcileGoatStripeSeatQuantities(limit = 100) {
-  const candidates = await listGoatStripeSeatReconciliationCandidates({ limit });
+export async function reconcileStripeSeatQuantities(limit = 100) {
+  const candidates = await listStripeSeatReconciliationCandidates({ limit });
   let reconciled = 0;
   let changed = 0;
   let failed = 0;
   for (const workspaceId of candidates) {
     try {
-      const result = await syncGoatStripeSeatQuantityForWorkspace(workspaceId);
+      const result = await syncStripeSeatQuantityForWorkspace(workspaceId);
       if (result.ok) reconciled += 1;
       if (result.ok && result.changed) changed += 1;
     } catch (error) {

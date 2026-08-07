@@ -1,28 +1,28 @@
 import { TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK } from "@opencompany/core/chat-agent";
 import type {
-  GoatHarnessSpec,
-  GoatTaskDebugTrace,
-  GoatTaskSkillId,
-  GoatTaskToolName,
+  HarnessSpec,
+  TaskDebugTrace,
+  TaskSkillId,
+  TaskToolName,
 } from "@opencompany/db/schema";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import {
-  createGoatGatewayAttribution,
+  createGatewayAttribution,
   GOAT_SPANS,
-  goatGatewayProviderOptions,
-  withGoatSpan,
+  gatewayProviderOptions,
+  withSpan,
 } from "@opencompany/telemetry";
 import * as ai from "ai";
 import { createGateway, jsonSchema, type LanguageModelUsage } from "ai";
 import {
-  buildGoatHarnessCreationPrompt,
-  buildGoatHarnessSkillSystemPrompt,
+  buildHarnessCreationPrompt,
+  buildHarnessSkillSystemPrompt,
   GOAT_HARNESS_CREATION_SYSTEM_PROMPT,
   GOAT_HARNESS_ENGINE_OPTIONS,
   GOAT_HARNESS_MODEL_OPTIONS,
   GOAT_HARNESS_SKILL_OPTIONS,
 } from "./prompts/harness-creation";
-import { normalizeGoatTaskToolNames } from "./task-tool-names";
+import { normalizeTaskToolNames } from "./task-tool-names";
 
 export const GOAT_PLANNER_MODEL = "anthropic/claude-sonnet-4.6";
 const DEFAULT_GOAT_MAX_MODEL_STEPS = 16;
@@ -33,36 +33,36 @@ const DEFAULT_CODEX_GOAL_TOKEN_BUDGET = 200_000;
 const MIN_CODEX_GOAL_TOKEN_BUDGET = 1;
 const MAX_CODEX_GOAL_TOKEN_BUDGET = 1_000_000;
 
-export async function planGoatHarnessForTask(input: {
+export async function planHarnessForTask(input: {
   prompt: string;
-  model: GoatHarnessSpec["model"];
-  requestedEngine?: GoatHarnessSpec["engine"];
+  model: HarnessSpec["model"];
+  requestedEngine?: HarnessSpec["engine"];
   gatewayApiKey: string;
   userWorkosId?: string | null;
   taskId?: string | null;
-  availableTools: readonly GoatTaskToolName[];
+  availableTools: readonly TaskToolName[];
   githubRepositories?: readonly string[];
   signal?: AbortSignal;
 }): Promise<{
-  harnessSpec: GoatHarnessSpec;
-  debugTrace: GoatTaskDebugTrace;
+  harnessSpec: HarnessSpec;
+  debugTrace: TaskDebugTrace;
   usage?: LanguageModelUsage;
 }> {
-  const availableTools = normalizeGoatTaskToolNames(input.availableTools);
+  const availableTools = normalizeTaskToolNames(input.availableTools);
   const availableEngines = GOAT_HARNESS_ENGINE_OPTIONS.map((option) => option.id);
   const availableModels = GOAT_HARNESS_MODEL_OPTIONS.map((option) => option.id);
   const availableSkills = GOAT_HARNESS_SKILL_OPTIONS.map((option) => option.id);
   const requestedEngine = readRequestedHarnessEngine(input.requestedEngine, availableEngines);
   const gateway = createGateway({ apiKey: input.gatewayApiKey });
   const { generateObject } = getBraintrustAISDK(ai);
-  const schema = goatHarnessSpecResponseSchema(
+  const schema = harnessSpecResponseSchema(
     availableTools,
     availableEngines,
     availableModels,
     availableSkills,
   );
   const systemPrompt = GOAT_HARNESS_CREATION_SYSTEM_PROMPT;
-  const userPrompt = buildGoatHarnessCreationPrompt({
+  const userPrompt = buildHarnessCreationPrompt({
     taskPrompt: input.prompt,
     ...(requestedEngine ? { requestedEngine } : {}),
     executionEngineOptions: GOAT_HARNESS_ENGINE_OPTIONS,
@@ -72,13 +72,13 @@ export async function planGoatHarnessForTask(input: {
     githubRepositories: input.githubRepositories ?? [],
     defaultMaxModelSteps: DEFAULT_GOAT_MAX_MODEL_STEPS,
   });
-  const attribution = createGoatGatewayAttribution({
+  const attribution = createGatewayAttribution({
     userWorkosId: input.userWorkosId,
     feature: "task",
     ...(input.taskId ? { taskId: input.taskId } : {}),
   });
 
-  const result = await withGoatSpan(
+  const result = await withSpan(
     GOAT_SPANS.taskPlan,
     {
       "goat.model": input.model,
@@ -94,7 +94,7 @@ export async function planGoatHarnessForTask(input: {
         system: systemPrompt,
         prompt: userPrompt,
         ...(input.signal ? { abortSignal: input.signal } : {}),
-        providerOptions: goatGatewayProviderOptions(attribution),
+        providerOptions: gatewayProviderOptions(attribution),
       }),
   );
   const harnessSpec = normalizeHarnessSpec(
@@ -134,11 +134,11 @@ export async function planGoatHarnessForTask(input: {
   };
 }
 
-function goatHarnessSpecResponseSchema(
-  availableTools: readonly GoatTaskToolName[],
-  availableEngines: readonly GoatHarnessSpec["engine"][],
-  availableModels: readonly GoatHarnessSpec["model"][],
-  availableSkills: readonly GoatTaskSkillId[],
+function harnessSpecResponseSchema(
+  availableTools: readonly TaskToolName[],
+  availableEngines: readonly HarnessSpec["engine"][],
+  availableModels: readonly HarnessSpec["model"][],
+  availableSkills: readonly TaskSkillId[],
 ) {
   return {
     type: "object",
@@ -209,14 +209,14 @@ function normalizeHarnessSpec(
   value: unknown,
   fallback: {
     prompt: string;
-    requestedEngine?: GoatHarnessSpec["engine"];
+    requestedEngine?: HarnessSpec["engine"];
   },
-  availableTools: readonly GoatTaskToolName[],
-  availableEngines: readonly GoatHarnessSpec["engine"][],
-  availableModels: readonly GoatHarnessSpec["model"][],
-  availableSkills: readonly GoatTaskSkillId[],
+  availableTools: readonly TaskToolName[],
+  availableEngines: readonly HarnessSpec["engine"][],
+  availableModels: readonly HarnessSpec["model"][],
+  availableSkills: readonly TaskSkillId[],
   githubRepositories: readonly string[],
-): GoatHarnessSpec {
+): HarnessSpec {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const engine = fallback.requestedEngine ?? readHarnessEngine(record.engine, availableEngines);
   const model = readHarnessModel(record.model, availableModels, engine);
@@ -228,12 +228,11 @@ function normalizeHarnessSpec(
     throw new Error("Goat harness planner must return a non-empty systemPrompt.");
   }
   const initialUserMessage = readNonEmptyString(record.initialUserMessage) ?? fallback.prompt;
-  const selectedTools = normalizeGoatTaskToolNames(record.tools).filter((toolName) =>
+  const selectedTools = normalizeTaskToolNames(record.tools).filter((toolName) =>
     availableTools.includes(toolName),
   );
-  const tools =
-    selectedTools.length > 0 ? selectedTools : normalizeGoatTaskToolNames(availableTools);
-  const selectedSkills = normalizeGoatTaskSkillIds(record.skills).filter((skillId) =>
+  const tools = selectedTools.length > 0 ? selectedTools : normalizeTaskToolNames(availableTools);
+  const selectedSkills = normalizeTaskSkillIds(record.skills).filter((skillId) =>
     availableSkills.includes(skillId),
   );
   const requestedMaxModelSteps =
@@ -266,27 +265,27 @@ function normalizeHarnessSpec(
 
 function readHarnessEngine(
   value: unknown,
-  availableEngines: readonly GoatHarnessSpec["engine"][],
-): GoatHarnessSpec["engine"] {
+  availableEngines: readonly HarnessSpec["engine"][],
+): HarnessSpec["engine"] {
   const engine = readNonEmptyString(value);
-  return engine && availableEngines.includes(engine as GoatHarnessSpec["engine"])
-    ? (engine as GoatHarnessSpec["engine"])
+  return engine && availableEngines.includes(engine as HarnessSpec["engine"])
+    ? (engine as HarnessSpec["engine"])
     : "opencompany";
 }
 
 function readRequestedHarnessEngine(
   value: unknown,
-  availableEngines: readonly GoatHarnessSpec["engine"][],
-): GoatHarnessSpec["engine"] | undefined {
+  availableEngines: readonly HarnessSpec["engine"][],
+): HarnessSpec["engine"] | undefined {
   const engine = readNonEmptyString(value);
-  return engine && availableEngines.includes(engine as GoatHarnessSpec["engine"])
-    ? (engine as GoatHarnessSpec["engine"])
+  return engine && availableEngines.includes(engine as HarnessSpec["engine"])
+    ? (engine as HarnessSpec["engine"])
     : undefined;
 }
 
-function normalizeGoatTaskSkillIds(value: unknown): GoatTaskSkillId[] {
+function normalizeTaskSkillIds(value: unknown): TaskSkillId[] {
   if (!Array.isArray(value)) return [];
-  const ids = value.filter((item): item is GoatTaskSkillId =>
+  const ids = value.filter((item): item is TaskSkillId =>
     GOAT_HARNESS_SKILL_OPTIONS.some((option) => option.id === item),
   );
   return [...new Set(ids)];
@@ -294,16 +293,16 @@ function normalizeGoatTaskSkillIds(value: unknown): GoatTaskSkillId[] {
 
 function readHarnessModel(
   value: unknown,
-  availableModels: readonly GoatHarnessSpec["model"][],
-  engine: GoatHarnessSpec["engine"],
-): GoatHarnessSpec["model"] | null {
+  availableModels: readonly HarnessSpec["model"][],
+  engine: HarnessSpec["engine"],
+): HarnessSpec["model"] | null {
   const model = readNonEmptyString(value);
   if (engine === "codex") {
     const codexModel = availableModels.find((candidate) => candidate.startsWith("openai/"));
     return codexModel ?? null;
   }
-  return model && availableModels.includes(model as GoatHarnessSpec["model"])
-    ? (model as GoatHarnessSpec["model"])
+  return model && availableModels.includes(model as HarnessSpec["model"])
+    ? (model as HarnessSpec["model"])
     : null;
 }
 
@@ -311,7 +310,7 @@ function readCodexHarnessConfig(
   value: unknown,
   prompt: string,
   githubRepositories: readonly string[],
-): NonNullable<GoatHarnessSpec["codex"]> {
+): NonNullable<HarnessSpec["codex"]> {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const plannedRepository = normalizeGitHubRepositoryMention(readNonEmptyString(record.repository));
   const repository =
@@ -334,9 +333,7 @@ function readCodexReasoningEffort(value: unknown) {
     : "high";
 }
 
-function readCodexGoalMode(
-  value: unknown,
-): NonNullable<GoatHarnessSpec["codex"]>["goalMode"] | null {
+function readCodexGoalMode(value: unknown): NonNullable<HarnessSpec["codex"]>["goalMode"] | null {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
   if (!record) return null;
   const objective = readNonEmptyString(record.objective);
@@ -428,11 +425,11 @@ function readPullRequestIntent(prompt: string) {
 
 function augmentSystemPrompt(
   systemPrompt: string,
-  resultMode: GoatHarnessSpec["resultMode"],
-  skillIds: readonly GoatTaskSkillId[],
+  resultMode: HarnessSpec["resultMode"],
+  skillIds: readonly TaskSkillId[],
 ) {
-  const sections = [withGoatTaskSafetyPromptText(systemPrompt)];
-  const skillPrompt = buildGoatHarnessSkillSystemPrompt(skillIds);
+  const sections = [withTaskSafetyPromptText(systemPrompt)];
+  const skillPrompt = buildHarnessSkillSystemPrompt(skillIds);
   if (skillPrompt) sections.push(skillPrompt);
   if (resultMode === "brain_markdown_report") {
     sections.push(
@@ -449,7 +446,7 @@ function augmentSystemPrompt(
   return sections.join("\n\n");
 }
 
-function withGoatTaskSafetyPromptText(systemPrompt: string) {
+function withTaskSafetyPromptText(systemPrompt: string) {
   return systemPrompt.includes(TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK)
     ? systemPrompt
     : `${systemPrompt}\n\n${TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK}`;

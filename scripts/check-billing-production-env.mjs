@@ -3,31 +3,31 @@
 // Runs before production migrations when Goat is in the release scope. It
 // reads Vercel env values only to validate them and never prints them.
 
-const requiredGoatKeys = [
+const requiredKeys = [
   "STRIPE_API_KEY",
   "STRIPE_WEBHOOK_SECRET",
   "STRIPE_CHECKOUT_ENABLED",
   "CRON_SECRET",
 ];
 
-const goatProjectId = requiredProcessEnv("APP_VERCEL_PROJECT_ID");
+const projectId = requiredProcessEnv("APP_VERCEL_PROJECT_ID");
 const teamId = requiredProcessEnv("VERCEL_ORG_ID");
 const token = requiredProcessEnv("VERCEL_TOKEN");
 
-const goatEnv = await listProductionEnv(goatProjectId, "Goat");
-const goatValues = await readRequiredValues(goatProjectId, goatEnv, requiredGoatKeys, "Goat");
+const env = await listProductionEnv(projectId, "Goat");
+const values = await readRequiredValues(projectId, env, requiredKeys, "Goat");
 
 const invalid = [];
-if (!goatValues.STRIPE_API_KEY.startsWith("rk_live_")) {
+if (!values.STRIPE_API_KEY.startsWith("rk_live_")) {
   invalid.push("Goat STRIPE_API_KEY must be a live restricted Stripe key.");
 }
-if (!goatValues.STRIPE_WEBHOOK_SECRET.startsWith("whsec_")) {
+if (!values.STRIPE_WEBHOOK_SECRET.startsWith("whsec_")) {
   invalid.push("Goat STRIPE_WEBHOOK_SECRET must be a Stripe webhook signing secret.");
 }
-if (goatValues.STRIPE_CHECKOUT_ENABLED !== "true") {
+if (values.STRIPE_CHECKOUT_ENABLED !== "true") {
   invalid.push("Goat STRIPE_CHECKOUT_ENABLED must be true before a production billing release.");
 }
-if (goatValues.CRON_SECRET.length < 32) {
+if (values.CRON_SECRET.length < 32) {
   invalid.push("Goat CRON_SECRET must be at least 32 characters.");
 }
 if (invalid.length > 0) {

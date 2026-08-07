@@ -5,38 +5,38 @@ import {
   GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
   isCloudCodingEngine,
 } from "@opencompany/agent-runtime";
-import type { GoatBrainSkill } from "@opencompany/brain";
-import { emptyAssistantDebugTrace, nextGoatChatMessageCreatedAt } from "@opencompany/core/chat-ui";
+import type { BrainSkill } from "@opencompany/brain";
+import { emptyAssistantDebugTrace, nextChatMessageCreatedAt } from "@opencompany/core/chat-ui";
 import { getDb } from "@opencompany/db/client";
 import {
-  type GoatChatMessageAttachment,
-  type GoatChatSessionKind,
-  type GoatCodexChatEngine,
-  type GoatCodexChatTurnSettings,
-  goatChatSessions,
-  goatCodexChatSessions,
+  type ChatMessageAttachment,
+  type ChatSessionKind,
+  type CodexChatEngine,
+  type CodexChatTurnSettings,
+  chatSessions,
+  codexChatSessions,
 } from "@opencompany/db/schema";
 import { and, eq, isNull, notInArray, sql } from "drizzle-orm";
-import { newGoatChatMessageId } from "@/lib/chat";
+import { newChatMessageId } from "@/lib/chat";
 import { CLAUDE_CHAT_DEFAULT_MODEL_ID, parseClaudeChatModelId } from "@/lib/claude-chat-constants";
 import { parseClaudeChatSettings } from "@/lib/claude-chat-settings";
-import { isGoatClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
-import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
+import { isClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
+import { isCodexConnectedForUser } from "@/lib/codex-auth";
 import {
   CODEX_CHAT_DEFAULT_MODEL_ID,
   CODEX_CHAT_PROMPT_MAX_LENGTH,
   parseCodexChatModelId,
 } from "@/lib/codex-chat-constants";
 import { parseCodexChatSettings } from "@/lib/codex-chat-settings";
-import { DEFAULT_GOAT_MODEL, normalizeGoatModel } from "@/lib/model-options";
-import { toGoatTaskTitle } from "@/lib/task-display";
+import { DEFAULT_GOAT_MODEL, normalizeModel } from "@/lib/model-options";
+import { toTaskTitle } from "@/lib/task-display";
 import {
-  type GoatCodexSandboxStatus,
-  GoatCodingWorkspaceRequestError,
-  getGoatCodexSandboxStatus,
-  killGoatCodexSandbox,
-  requestGoatCodingWorkspaceRuntimeAccess,
-  triggerGoatCodexChatWake,
+  type CodexSandboxStatus,
+  CodingWorkspaceRequestError,
+  getCodexSandboxStatus,
+  killCodexSandbox,
+  requestCodingWorkspaceRuntimeAccess,
+  triggerCodexChatWake,
 } from "@/lib/task-runner";
 
 export { CODEX_CHAT_DEFAULT_MODEL, CODEX_PICKER_VALUE } from "@/lib/codex-chat-constants";
@@ -62,27 +62,27 @@ export type CodexChatMessageResult =
       mode: "started" | "queued";
       analytics: {
         isFirstMessage: boolean;
-        engine: GoatCodexChatEngine;
+        engine: CodexChatEngine;
         model: string;
       };
     }
   | { ok: false; status: number; error: string };
 
-export type GoatCodexChatSkillSnapshot = GoatBrainSkill & { brainRef: string };
+export type CodexChatSkillSnapshot = BrainSkill & { brainRef: string };
 
-export async function createGoatCodexChatMessage(input: {
+export async function createCodexChatMessage(input: {
   userWorkosId: string;
   workspaceId: string;
   brainRef?: string | null;
   sessionId?: string | null;
   newSessionId?: string | null;
   prompt: string;
-  skills?: GoatCodexChatSkillSnapshot[];
-  attachments?: GoatChatMessageAttachment[];
+  skills?: CodexChatSkillSnapshot[];
+  attachments?: ChatMessageAttachment[];
   clientMessageId?: string | null;
   settings?: unknown;
   model?: unknown;
-  engine?: GoatCodexChatEngine;
+  engine?: CodexChatEngine;
 }): Promise<CodexChatMessageResult> {
   const engine = input.engine ?? "codex";
   const prompt = input.prompt.trim();
@@ -98,14 +98,14 @@ export async function createGoatCodexChatMessage(input: {
   if (engine === "opencompany") {
     // Internal-only durable OpenCompany enqueues need no coding-CLI credential.
   } else if (engine === "claude_code") {
-    if (!(await isGoatClaudeCodeConnectedForUser(input.userWorkosId))) {
+    if (!(await isClaudeCodeConnectedForUser(input.userWorkosId))) {
       return { ok: false, status: 409, error: CLAUDE_CHAT_DISCONNECTED_MESSAGE };
     }
-  } else if (!(await isGoatCodexConnectedForUser(input.userWorkosId))) {
+  } else if (!(await isCodexConnectedForUser(input.userWorkosId))) {
     return { ok: false, status: 409, error: CODEX_CHAT_DISCONNECTED_MESSAGE };
   }
 
-  let settings: GoatCodexChatTurnSettings = {};
+  let settings: CodexChatTurnSettings = {};
   if (engine !== "opencompany") {
     const parsedSettings =
       engine === "claude_code"
@@ -116,7 +116,7 @@ export async function createGoatCodexChatMessage(input: {
   }
   const normalizedOpenCompanyModel =
     engine === "opencompany" && input.model !== undefined
-      ? normalizeGoatModel(input.model)
+      ? normalizeModel(input.model)
       : DEFAULT_GOAT_MODEL;
   const requestedModelId =
     engine === "opencompany"
@@ -182,7 +182,7 @@ export async function createGoatCodexChatMessage(input: {
 
   if (result.ok) {
     // Best-effort nudge; the runner worker's poll loop picks the turn up regardless.
-    await triggerGoatCodexChatWake().catch((error) => {
+    await triggerCodexChatWake().catch((error) => {
       console.warn("Goat codex chat wake failed.", {
         event: "goat.codex_chat_wake_failed",
         error,
@@ -192,7 +192,7 @@ export async function createGoatCodexChatMessage(input: {
   return result;
 }
 
-export async function interruptGoatCodexChatSession(input: {
+export async function interruptCodexChatSession(input: {
   userWorkosId: string;
   chatSessionId: string;
 }) {
@@ -257,12 +257,11 @@ export async function interruptGoatCodexChatSession(input: {
   return { ok: true, status: 202, error: null };
 }
 
-export async function getGoatCodexChatSandboxStatus(input: {
+export async function getCodexChatSandboxStatus(input: {
   userWorkosId: string;
   chatSessionId: string;
 }): Promise<
-  | { ok: true; status: GoatCodexSandboxStatus | null }
-  | { ok: false; statusCode: number; error: string }
+  { ok: true; status: CodexSandboxStatus | null } | { ok: false; statusCode: number; error: string }
 > {
   const session = await loadCodexChatSessionForChat({
     userWorkosId: input.userWorkosId,
@@ -274,7 +273,7 @@ export async function getGoatCodexChatSandboxStatus(input: {
   try {
     return {
       ok: true,
-      status: await getGoatCodexSandboxStatus(session.sandboxId),
+      status: await getCodexSandboxStatus(session.sandboxId),
     };
   } catch (error) {
     return {
@@ -285,7 +284,7 @@ export async function getGoatCodexChatSandboxStatus(input: {
   }
 }
 
-export async function createGoatCodingWorkspaceRuntimeAccess(input: {
+export async function createCodingWorkspaceRuntimeAccess(input: {
   userWorkosId: string;
   chatSessionId: string;
 }) {
@@ -306,7 +305,7 @@ export async function createGoatCodingWorkspaceRuntimeAccess(input: {
   try {
     return {
       ok: true as const,
-      access: await requestGoatCodingWorkspaceRuntimeAccess({
+      access: await requestCodingWorkspaceRuntimeAccess({
         codingSessionId: session.id,
         userWorkosId: input.userWorkosId,
       }),
@@ -314,7 +313,7 @@ export async function createGoatCodingWorkspaceRuntimeAccess(input: {
   } catch (error) {
     return {
       ok: false as const,
-      statusCode: error instanceof GoatCodingWorkspaceRequestError ? error.statusCode : 502,
+      statusCode: error instanceof CodingWorkspaceRequestError ? error.statusCode : 502,
       error: error instanceof Error ? error.message : "Unable to connect to the coding workspace.",
     };
   }
@@ -323,22 +322,22 @@ export async function createGoatCodingWorkspaceRuntimeAccess(input: {
 // Settles the engine session and kills its e2b sandbox after the parent chat is closed.
 // A session with in-flight work (queued/starting/running) is left alone: the runner settles it
 // and the sandbox idle timeout pauses the sandbox regardless, so nothing keeps running either way.
-export async function closeGoatCodexChatSessionForChat(input: {
+export async function closeCodexChatSessionForChat(input: {
   userWorkosId: string;
   chatSessionId: string;
 }) {
   const now = new Date();
   const [session] = await getDb()
-    .update(goatCodexChatSessions)
+    .update(codexChatSessions)
     .set({ status: "closed", activeTurnId: null, updatedAt: now })
     .where(
       and(
-        eq(goatCodexChatSessions.chatSessionId, input.chatSessionId),
-        eq(goatCodexChatSessions.userWorkosId, input.userWorkosId),
-        notInArray(goatCodexChatSessions.status, ["queued", "starting", "running", "closed"]),
+        eq(codexChatSessions.chatSessionId, input.chatSessionId),
+        eq(codexChatSessions.userWorkosId, input.userWorkosId),
+        notInArray(codexChatSessions.status, ["queued", "starting", "running", "closed"]),
       ),
     )
-    .returning({ sandboxId: goatCodexChatSessions.sandboxId });
+    .returning({ sandboxId: codexChatSessions.sandboxId });
   await cancelQueuedCodexChatWakeups({
     userWorkosId: input.userWorkosId,
     chatSessionId: input.chatSessionId,
@@ -348,7 +347,7 @@ export async function closeGoatCodexChatSessionForChat(input: {
 
   // Best-effort: a paused sandbox that outlives the kill only costs storage until e2b's
   // retention window deletes it.
-  await killGoatCodexSandbox(session.sandboxId).catch((error) => {
+  await killCodexSandbox(session.sandboxId).catch((error) => {
     console.warn("Goat codex sandbox kill on chat close failed.", {
       event: "goat.codex_chat_close_sandbox_kill_failed",
       chat_session_id: input.chatSessionId,
@@ -360,18 +359,18 @@ export async function closeGoatCodexChatSessionForChat(input: {
 async function loadCodexChatSessionForChat(input: {
   userWorkosId: string;
   chatSessionId: string;
-  kind?: GoatChatSessionKind;
+  kind?: ChatSessionKind;
 }) {
   const [row] = await getDb()
     .select()
-    .from(goatCodexChatSessions)
-    .innerJoin(goatChatSessions, eq(goatChatSessions.id, goatCodexChatSessions.chatSessionId))
+    .from(codexChatSessions)
+    .innerJoin(chatSessions, eq(chatSessions.id, codexChatSessions.chatSessionId))
     .where(
       and(
-        eq(goatCodexChatSessions.userWorkosId, input.userWorkosId),
-        eq(goatCodexChatSessions.chatSessionId, input.chatSessionId),
-        isNull(goatChatSessions.closedAt),
-        ...(input.kind ? [eq(goatChatSessions.kind, input.kind)] : []),
+        eq(codexChatSessions.userWorkosId, input.userWorkosId),
+        eq(codexChatSessions.chatSessionId, input.chatSessionId),
+        isNull(chatSessions.closedAt),
+        ...(input.kind ? [eq(chatSessions.kind, input.kind)] : []),
       ),
     )
     .limit(1);
@@ -389,21 +388,21 @@ async function createFirstCodexChatTurn(input: {
   workspaceId: string;
   brainRef: string | null;
   prompt: string;
-  skills: GoatCodexChatSkillSnapshot[];
+  skills: CodexChatSkillSnapshot[];
   clientMessageId: string | null;
-  attachments: GoatChatMessageAttachment[];
-  settings: GoatCodexChatTurnSettings;
+  attachments: ChatMessageAttachment[];
+  settings: CodexChatTurnSettings;
   modelId: string;
-  engine: GoatCodexChatEngine;
+  engine: CodexChatEngine;
 }): Promise<CodexChatMessageResult> {
   const chatSessionId = input.chatSessionId ?? `goat_chat_${randomUUID()}`;
   const codexChatSessionId = `goat_codex_chat_${randomUUID()}`;
   const turnId = `goat_codex_chat_turn_${randomUUID()}`;
-  const userMessageId = safeClientMessageId(input.clientMessageId) ?? newGoatChatMessageId();
-  const assistantMessageId = newGoatChatMessageId();
+  const userMessageId = safeClientMessageId(input.clientMessageId) ?? newChatMessageId();
+  const assistantMessageId = newChatMessageId();
   const now = new Date();
-  const assistantCreatedAt = nextGoatChatMessageCreatedAt(now);
-  const title = toGoatTaskTitle(input.prompt || input.attachments[0]?.filename || "Attachment");
+  const assistantCreatedAt = nextChatMessageCreatedAt(now);
+  const title = toTaskTitle(input.prompt || input.attachments[0]?.filename || "Attachment");
   const engineModel =
     input.engine === "opencompany"
       ? input.modelId
@@ -539,24 +538,24 @@ async function createFirstCodexChatTurn(input: {
 async function enqueueExistingCodexChatMessage(input: {
   userWorkosId: string;
   prompt: string;
-  skills: GoatCodexChatSkillSnapshot[];
+  skills: CodexChatSkillSnapshot[];
   clientMessageId: string | null;
-  attachments: GoatChatMessageAttachment[];
-  settings: GoatCodexChatTurnSettings;
+  attachments: ChatMessageAttachment[];
+  settings: CodexChatTurnSettings;
   session: {
     id: string;
     chatSessionId: string;
     status: string;
-    engine: GoatCodexChatEngine;
+    engine: CodexChatEngine;
     model: string;
     chatModel: string;
   };
 }): Promise<CodexChatMessageResult> {
   const turnId = `goat_codex_chat_turn_${randomUUID()}`;
-  const userMessageId = safeClientMessageId(input.clientMessageId) ?? newGoatChatMessageId();
-  const assistantMessageId = newGoatChatMessageId();
+  const userMessageId = safeClientMessageId(input.clientMessageId) ?? newChatMessageId();
+  const assistantMessageId = newChatMessageId();
   const now = new Date();
-  const assistantCreatedAt = nextGoatChatMessageCreatedAt(now);
+  const assistantCreatedAt = nextChatMessageCreatedAt(now);
   const active =
     input.session.status === "queued" ||
     input.session.status === "starting" ||
@@ -737,11 +736,11 @@ async function cancelQueuedCodexChatWakeups(
   `);
 }
 
-function attachmentsJsonbValue(attachments: GoatChatMessageAttachment[]) {
+function attachmentsJsonbValue(attachments: ChatMessageAttachment[]) {
   return attachments.length > 0 ? JSON.stringify(attachments) : null;
 }
 
-function skillsJsonbValue(skills: GoatCodexChatSkillSnapshot[]) {
+function skillsJsonbValue(skills: CodexChatSkillSnapshot[]) {
   return JSON.stringify(
     skills.map((skill) => ({
       skill_id: skill.id,
@@ -753,7 +752,7 @@ function skillsJsonbValue(skills: GoatCodexChatSkillSnapshot[]) {
   );
 }
 
-function emptyDurableAssistantDebugTrace(engine: GoatCodexChatEngine, model: string) {
+function emptyDurableAssistantDebugTrace(engine: CodexChatEngine, model: string) {
   if (engine === "opencompany") {
     return {
       schemaVersion: OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION,

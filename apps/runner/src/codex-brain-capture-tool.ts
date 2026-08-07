@@ -1,7 +1,7 @@
 import {
+  type CodexBrainCaptureGatewayRequest,
+  type CodexBrainCaptureGatewayResponse,
   GOAT_CODEX_SAVE_TO_BRAIN_TOOL_NAME,
-  type GoatCodexBrainCaptureGatewayRequest,
-  type GoatCodexBrainCaptureGatewayResponse,
 } from "@opencompany/agent-runtime";
 import {
   SAVE_TO_BRAIN_FALLBACK_CONTENT_DESCRIPTION,
@@ -20,24 +20,24 @@ import type { RunnerEnv } from "./env";
 const GOAT_CODEX_BRAIN_CAPTURE_GATEWAY_PATH = "/api/internal/codex-brain-capture";
 const GOAT_CODEX_BRAIN_CAPTURE_GATEWAY_TIMEOUT_MS = 30_000;
 
-type GoatCodexBrainCaptureToolContext = {
+type CodexBrainCaptureToolContext = {
   codexChatSessionId: string;
   codexChatTurnId: string;
-  env: Pick<RunnerEnv, "goatAppUrl" | "internalToken">;
+  env: Pick<RunnerEnv, "appUrl" | "internalToken">;
   checkAbort: () => Promise<void>;
 };
 
-type GoatCodexBrainCaptureToolDependencies = {
+type CodexBrainCaptureToolDependencies = {
   fetch: typeof fetch;
 };
 
-const defaultDependencies: GoatCodexBrainCaptureToolDependencies = {
+const defaultDependencies: CodexBrainCaptureToolDependencies = {
   fetch: globalThis.fetch,
 };
 
-export function createGoatCodexBrainCaptureDynamicTool(
-  context: GoatCodexBrainCaptureToolContext,
-  dependencies: Partial<GoatCodexBrainCaptureToolDependencies> = {},
+export function createCodexBrainCaptureDynamicTool(
+  context: CodexBrainCaptureToolContext,
+  dependencies: Partial<CodexBrainCaptureToolDependencies> = {},
 ): CodexAppServerDynamicTool {
   const resolvedDependencies = { ...defaultDependencies, ...dependencies };
   return {
@@ -97,11 +97,11 @@ export function createGoatCodexBrainCaptureDynamicTool(
 }
 
 async function executeGatewayCall(input: {
-  context: GoatCodexBrainCaptureToolContext;
-  dependencies: GoatCodexBrainCaptureToolDependencies;
-  request: GoatCodexBrainCaptureGatewayRequest;
+  context: CodexBrainCaptureToolContext;
+  dependencies: CodexBrainCaptureToolDependencies;
+  request: CodexBrainCaptureGatewayRequest;
 }): Promise<CodexAppServerDynamicToolResponse> {
-  const appUrl = input.context.env.goatAppUrl?.trim();
+  const appUrl = input.context.env.appUrl?.trim();
   if (!appUrl) {
     return modelResponse({
       ok: false,
@@ -138,11 +138,11 @@ async function executeGatewayCall(input: {
 }
 
 function captureRequest(
-  context: GoatCodexBrainCaptureToolContext,
+  context: CodexBrainCaptureToolContext,
   call: CodexAppServerDynamicToolCall,
 ):
-  | { ok: true; request: GoatCodexBrainCaptureGatewayRequest }
-  | { ok: false; response: GoatCodexBrainCaptureGatewayResponse } {
+  | { ok: true; request: CodexBrainCaptureGatewayRequest }
+  | { ok: false; response: CodexBrainCaptureGatewayResponse } {
   if (!isRecord(call.arguments)) {
     return invalidParams("save_to_brain expects an object.");
   }
@@ -195,9 +195,7 @@ function captureRequest(
   };
 }
 
-async function readGatewayResponse(
-  response: Response,
-): Promise<GoatCodexBrainCaptureGatewayResponse> {
+async function readGatewayResponse(response: Response): Promise<CodexBrainCaptureGatewayResponse> {
   try {
     const value = (await response.json()) as unknown;
     if (isGatewayResponse(value)) return value;
@@ -210,7 +208,7 @@ async function readGatewayResponse(
   };
 }
 
-function isGatewayResponse(value: unknown): value is GoatCodexBrainCaptureGatewayResponse {
+function isGatewayResponse(value: unknown): value is CodexBrainCaptureGatewayResponse {
   if (!isRecord(value) || typeof value.ok !== "boolean") return false;
   if (!value.ok) return typeof value.error === "string";
   return (
@@ -226,13 +224,13 @@ function isGatewayResponse(value: unknown): value is GoatCodexBrainCaptureGatewa
 
 function invalidParams(message: string): {
   ok: false;
-  response: GoatCodexBrainCaptureGatewayResponse;
+  response: CodexBrainCaptureGatewayResponse;
 } {
   return { ok: false, response: { ok: false, error: message } };
 }
 
 function modelResponse(
-  response: GoatCodexBrainCaptureGatewayResponse,
+  response: CodexBrainCaptureGatewayResponse,
 ): CodexAppServerDynamicToolResponse {
   return {
     success: response.ok,

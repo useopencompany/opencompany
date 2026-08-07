@@ -1,11 +1,11 @@
 import { PGlite } from "@electric-sql/pglite";
-import type { GoatHarnessSpec } from "@opencompany/db/schema";
+import type { HarnessSpec } from "@opencompany/db/schema";
 import type { SQL } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { sweepDueGoatTaskSchedules } from "./scheduler";
+import { sweepDueTaskSchedules } from "./scheduler";
 
 const mocks = vi.hoisted(() => ({
-  captureGoatTaskSpawned: vi.fn(async () => undefined),
+  captureTaskSpawned: vi.fn(async () => undefined),
   captureException: vi.fn(),
   db: undefined as
     | undefined
@@ -17,8 +17,8 @@ const mocks = vi.hoisted(() => ({
   transaction: vi.fn(),
 }));
 
-vi.mock("@opencompany/analytics/goat/server", () => ({
-  captureGoatTaskSpawned: mocks.captureGoatTaskSpawned,
+vi.mock("@opencompany/analytics/server", () => ({
+  captureTaskSpawned: mocks.captureTaskSpawned,
 }));
 
 vi.mock("@opencompany/observability", () => ({
@@ -32,7 +32,7 @@ vi.mock("./db", () => ({
     },
 }));
 
-const harnessSpec: GoatHarnessSpec = {
+const harnessSpec: HarnessSpec = {
   schemaVersion: "goat.harness.v1",
   engine: "opencompany",
   model: "moonshotai/kimi-k2.6",
@@ -44,7 +44,7 @@ const harnessSpec: GoatHarnessSpec = {
   resultMode: "assistant_final",
 };
 
-describe("sweepDueGoatTaskSchedules", () => {
+describe("sweepDueTaskSchedules", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.db = undefined;
@@ -184,7 +184,7 @@ describe("sweepDueGoatTaskSchedules", () => {
       };
 
       await expect(
-        sweepDueGoatTaskSchedules({ now: new Date("2026-06-03T12:00:00.000Z") }),
+        sweepDueTaskSchedules({ now: new Date("2026-06-03T12:00:00.000Z") }),
       ).resolves.toEqual({ checked: 1, created: 0 });
 
       const schedule = await pg.query<{ next_run_at: string }>(
@@ -254,14 +254,14 @@ describe("sweepDueGoatTaskSchedules", () => {
 
     const onTaskCreated = vi.fn();
     await expect(
-      sweepDueGoatTaskSchedules({
+      sweepDueTaskSchedules({
         now: new Date("2026-06-03T12:00:00.000Z"),
         onTaskCreated,
       }),
     ).resolves.toEqual({ checked: 1, created: 1 });
 
     expect(onTaskCreated).toHaveBeenCalledOnce();
-    expect(mocks.captureGoatTaskSpawned).toHaveBeenCalledWith(
+    expect(mocks.captureTaskSpawned).toHaveBeenCalledWith(
       expect.objectContaining({
         userWorkosId: "user_1",
         workspaceId: null,
@@ -300,16 +300,16 @@ describe("sweepDueGoatTaskSchedules", () => {
     mocks.transaction.mockImplementation(async (callback) => callback({ execute }));
 
     await expect(
-      sweepDueGoatTaskSchedules({ now: new Date("2026-06-03T12:00:00.000Z") }),
+      sweepDueTaskSchedules({ now: new Date("2026-06-03T12:00:00.000Z") }),
     ).resolves.toEqual({ checked: 1, created: 0 });
 
     expect(sqlTextFromExecuteCall(execute, 2)).toContain("UPDATE goat.task_schedules");
     expect(execute).toHaveBeenCalledTimes(5);
-    expect(mocks.captureGoatTaskSpawned).not.toHaveBeenCalled();
+    expect(mocks.captureTaskSpawned).not.toHaveBeenCalled();
   });
 
   it("creates a workflow task for a due workflow schedule", async () => {
-    const workflowHarnessSpec: GoatHarnessSpec = {
+    const workflowHarnessSpec: HarnessSpec = {
       ...harnessSpec,
       initialUserMessage: "Task: Weekly update\n\nDraft the weekday update.",
       workflow: {
@@ -378,14 +378,14 @@ describe("sweepDueGoatTaskSchedules", () => {
 
     const onTaskCreated = vi.fn();
     await expect(
-      sweepDueGoatTaskSchedules({
+      sweepDueTaskSchedules({
         now: new Date("2026-06-03T12:00:00.000Z"),
         onTaskCreated,
       }),
     ).resolves.toEqual({ checked: 1, created: 1 });
 
     expect(onTaskCreated).toHaveBeenCalledOnce();
-    expect(mocks.captureGoatTaskSpawned).toHaveBeenCalledWith(
+    expect(mocks.captureTaskSpawned).toHaveBeenCalledWith(
       expect.objectContaining({
         userWorkosId: "user_1",
         workspaceId: "workspace_1",

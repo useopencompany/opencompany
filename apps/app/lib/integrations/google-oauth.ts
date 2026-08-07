@@ -1,20 +1,20 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { GoatIntegrationProvider } from "@opencompany/db/schema";
+import type { IntegrationProvider } from "@opencompany/db/schema";
 import { GOAT_GMAIL_COMPOSE_SCOPE, GOAT_GMAIL_READ_SCOPE } from "@/lib/integrations/gmail-scopes";
 import {
   GOAT_GOOGLE_DOCS_WRITE_SCOPE,
   GOAT_GOOGLE_DRIVE_READ_SCOPE,
   GOAT_GOOGLE_SHEETS_WRITE_SCOPE,
 } from "@/lib/integrations/google-drive-scopes";
-import { getGoatAppUrl } from "@/lib/workos";
+import { getAppUrl } from "@/lib/workos";
 
-export type GoatGoogleIntegrationProvider = Extract<
-  GoatIntegrationProvider,
+export type GoogleIntegrationProvider = Extract<
+  IntegrationProvider,
   "gmail" | "google_calendar" | "google_drive"
 >;
 
-export type GoatGoogleProviderConfig = {
-  provider: GoatGoogleIntegrationProvider;
+export type GoogleProviderConfig = {
+  provider: GoogleIntegrationProvider;
   routeSegment: string;
   displayName: string;
   scopes: string[];
@@ -22,42 +22,40 @@ export type GoatGoogleProviderConfig = {
 
 const OPENID_SCOPES = ["openid", "email", "profile"];
 
-export const GOAT_GOOGLE_PROVIDER_CONFIG: Record<
-  GoatGoogleIntegrationProvider,
-  GoatGoogleProviderConfig
-> = {
-  gmail: {
-    provider: "gmail",
-    routeSegment: "gmail",
-    displayName: "Gmail",
-    // gmail.compose is the narrowest Gmail API scope that can create drafts.
-    // It also authorizes sending, which Goat gates separately in its own
-    // per-account permission model.
-    scopes: [GOAT_GMAIL_READ_SCOPE, GOAT_GMAIL_COMPOSE_SCOPE, ...OPENID_SCOPES],
-  },
-  google_calendar: {
-    provider: "google_calendar",
-    routeSegment: "google-calendar",
-    displayName: "Google Calendar",
-    scopes: [
-      "https://www.googleapis.com/auth/calendar.readonly",
-      "https://www.googleapis.com/auth/calendar.events",
-      "https://www.googleapis.com/auth/calendar.freebusy",
-      ...OPENID_SCOPES,
-    ],
-  },
-  google_drive: {
-    provider: "google_drive",
-    routeSegment: "google-drive",
-    displayName: "Google Drive",
-    scopes: [
-      GOAT_GOOGLE_DRIVE_READ_SCOPE,
-      GOAT_GOOGLE_DOCS_WRITE_SCOPE,
-      GOAT_GOOGLE_SHEETS_WRITE_SCOPE,
-      ...OPENID_SCOPES,
-    ],
-  },
-};
+export const GOAT_GOOGLE_PROVIDER_CONFIG: Record<GoogleIntegrationProvider, GoogleProviderConfig> =
+  {
+    gmail: {
+      provider: "gmail",
+      routeSegment: "gmail",
+      displayName: "Gmail",
+      // gmail.compose is the narrowest Gmail API scope that can create drafts.
+      // It also authorizes sending, which Goat gates separately in its own
+      // per-account permission model.
+      scopes: [GOAT_GMAIL_READ_SCOPE, GOAT_GMAIL_COMPOSE_SCOPE, ...OPENID_SCOPES],
+    },
+    google_calendar: {
+      provider: "google_calendar",
+      routeSegment: "google-calendar",
+      displayName: "Google Calendar",
+      scopes: [
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/calendar.events",
+        "https://www.googleapis.com/auth/calendar.freebusy",
+        ...OPENID_SCOPES,
+      ],
+    },
+    google_drive: {
+      provider: "google_drive",
+      routeSegment: "google-drive",
+      displayName: "Google Drive",
+      scopes: [
+        GOAT_GOOGLE_DRIVE_READ_SCOPE,
+        GOAT_GOOGLE_DOCS_WRITE_SCOPE,
+        GOAT_GOOGLE_SHEETS_WRITE_SCOPE,
+        ...OPENID_SCOPES,
+      ],
+    },
+  };
 
 const GOOGLE_INTEGRATION_ENVS = [
   "GOOGLE_OAUTH_CLIENT_ID",
@@ -66,7 +64,7 @@ const GOOGLE_INTEGRATION_ENVS = [
   "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
 ] as const;
 
-export type GoatGoogleOAuthTokens = {
+export type GoogleOAuthTokens = {
   access_token: string;
   refresh_token?: string;
   scope?: string;
@@ -74,20 +72,20 @@ export type GoatGoogleOAuthTokens = {
   id_token?: string;
 };
 
-export type GoatGoogleTokenExchangeResult = {
-  tokens: GoatGoogleOAuthTokens;
+export type GoogleTokenExchangeResult = {
+  tokens: GoogleOAuthTokens;
   expiresAt: Date | null;
 };
 
-export type GoatGoogleUserInfo = {
+export type GoogleUserInfo = {
   sub: string;
   email?: string;
   name?: string;
   picture?: string;
 };
 
-export type GoatGoogleIntegrationStatePayload = {
-  provider: GoatGoogleIntegrationProvider;
+export type GoogleIntegrationStatePayload = {
+  provider: GoogleIntegrationProvider;
   userWorkosId: string;
   returnTo: string;
   oauthRedirectUri?: string;
@@ -96,19 +94,16 @@ export type GoatGoogleIntegrationStatePayload = {
   nonce: string;
 };
 
-export function isGoatGoogleIntegrationConfigured() {
+export function isGoogleIntegrationConfigured() {
   return GOOGLE_INTEGRATION_ENVS.every((name) => Boolean(process.env[name]?.trim()));
 }
 
-export function createGoatGoogleIntegrationState(
-  input: Omit<GoatGoogleIntegrationStatePayload, "expiresAt" | "nonce">,
+export function createGoogleIntegrationState(
+  input: Omit<GoogleIntegrationStatePayload, "expiresAt" | "nonce">,
 ) {
-  const oauthRedirectUri = sanitizeGoatGoogleOAuthRedirectUri(
-    input.oauthRedirectUri,
-    input.provider,
-  );
+  const oauthRedirectUri = sanitizeGoogleOAuthRedirectUri(input.oauthRedirectUri, input.provider);
   const targetOrigin = sanitizeTargetOrigin(input.targetOrigin);
-  const payload: GoatGoogleIntegrationStatePayload = {
+  const payload: GoogleIntegrationStatePayload = {
     provider: input.provider,
     userWorkosId: input.userWorkosId,
     returnTo: sanitizeReturnTo(input.returnTo),
@@ -121,21 +116,21 @@ export function createGoatGoogleIntegrationState(
   return `${body}.${signStateBody(body)}`;
 }
 
-export function verifyGoatGoogleIntegrationState(state: string): GoatGoogleIntegrationStatePayload {
+export function verifyGoogleIntegrationState(state: string): GoogleIntegrationStatePayload {
   const [body, signature] = state.split(".");
   if (!body || !signature || !safeEqual(signature, signStateBody(body))) {
     throw new Error("Invalid Google integration state.");
   }
 
   const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as unknown;
-  if (!isGoatGoogleIntegrationStatePayload(payload)) {
+  if (!isGoogleIntegrationStatePayload(payload)) {
     throw new Error("Invalid Google integration state payload.");
   }
   if (payload.expiresAt < Date.now()) {
     throw new Error("Google integration state expired.");
   }
 
-  const oauthRedirectUri = sanitizeGoatGoogleOAuthRedirectUri(
+  const oauthRedirectUri = sanitizeGoogleOAuthRedirectUri(
     payload.oauthRedirectUri,
     payload.provider,
   );
@@ -151,10 +146,10 @@ export function verifyGoatGoogleIntegrationState(state: string): GoatGoogleInteg
   };
 }
 
-export function buildGoatGoogleAuthorizationUrl(
-  config: GoatGoogleProviderConfig,
+export function buildGoogleAuthorizationUrl(
+  config: GoogleProviderConfig,
   state: string,
-  redirectUri = goatGoogleOAuthRedirectUri(config),
+  redirectUri = googleOAuthRedirectUri(config),
 ) {
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", requiredEnv("GOOGLE_OAUTH_CLIENT_ID"));
@@ -168,11 +163,11 @@ export function buildGoatGoogleAuthorizationUrl(
   return url.toString();
 }
 
-export async function exchangeGoatGoogleCode(
-  config: GoatGoogleProviderConfig,
+export async function exchangeGoogleCode(
+  config: GoogleProviderConfig,
   code: string,
-  redirectUri = goatGoogleOAuthRedirectUri(config),
-): Promise<GoatGoogleTokenExchangeResult> {
+  redirectUri = googleOAuthRedirectUri(config),
+): Promise<GoogleTokenExchangeResult> {
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -191,7 +186,7 @@ export async function exchangeGoatGoogleCode(
     );
   }
 
-  const result = (await response.json()) as GoatGoogleOAuthTokens & { expires_in?: number };
+  const result = (await response.json()) as GoogleOAuthTokens & { expires_in?: number };
   if (!result.access_token) {
     throw new Error("Google did not return an access token.");
   }
@@ -199,14 +194,14 @@ export async function exchangeGoatGoogleCode(
   return { tokens: stripExpiry(result), expiresAt: toExpiresAt(result.expires_in) };
 }
 
-export async function fetchGoatGoogleUserInfo(accessToken: string): Promise<GoatGoogleUserInfo> {
+export async function fetchGoogleUserInfo(accessToken: string): Promise<GoogleUserInfo> {
   const response = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!response.ok) {
     throw new Error(`Google userinfo request failed with ${response.status}.`);
   }
-  const result = (await response.json()) as Partial<GoatGoogleUserInfo>;
+  const result = (await response.json()) as Partial<GoogleUserInfo>;
   if (!result.sub) {
     throw new Error("Google userinfo did not include an account id.");
   }
@@ -218,39 +213,36 @@ export async function fetchGoatGoogleUserInfo(accessToken: string): Promise<Goat
   };
 }
 
-export function appendGoatGoogleIntegrationStatus(
+export function appendGoogleIntegrationStatus(
   returnTo: string,
-  provider: GoatGoogleIntegrationProvider,
+  provider: GoogleIntegrationProvider,
   status: "connected" | "error",
 ) {
-  const url = new URL(sanitizeReturnTo(returnTo), getGoatAppUrl());
+  const url = new URL(sanitizeReturnTo(returnTo), getAppUrl());
   url.searchParams.set("integration", provider);
   url.searchParams.set("setup", status);
   return `${url.pathname}${url.search}`;
 }
 
-export function goatGoogleOAuthRedirectUri(config: GoatGoogleProviderConfig) {
-  const brokerCallbackUrl = goatGoogleOAuthBrokerCallbackUrl();
-  if (brokerCallbackUrl && isPreviewGoogleOAuthTargetOrigin(getGoatAppUrl())) {
+export function googleOAuthRedirectUri(config: GoogleProviderConfig) {
+  const brokerCallbackUrl = googleOAuthBrokerCallbackUrl();
+  if (brokerCallbackUrl && isPreviewGoogleOAuthTargetOrigin(getAppUrl())) {
     return brokerCallbackUrl;
   }
-  return goatGoogleDirectCallbackUrl(config);
+  return googleDirectCallbackUrl(config);
 }
 
-export function goatGoogleOAuthTargetOriginForState() {
-  if (!goatGoogleOAuthBrokerCallbackUrl()) return undefined;
-  const targetOrigin = sanitizeTargetOrigin(getGoatAppUrl());
+export function googleOAuthTargetOriginForState() {
+  if (!googleOAuthBrokerCallbackUrl()) return undefined;
+  const targetOrigin = sanitizeTargetOrigin(getAppUrl());
   return targetOrigin && isPreviewGoogleOAuthTargetOrigin(targetOrigin) ? targetOrigin : undefined;
 }
 
-export function goatGoogleDirectCallbackUrl(
-  config: GoatGoogleProviderConfig,
-  origin = getGoatAppUrl(),
-) {
+export function googleDirectCallbackUrl(config: GoogleProviderConfig, origin = getAppUrl()) {
   return `${origin.replace(/\/$/, "")}/api/integrations/${config.routeSegment}/callback`;
 }
 
-function stripExpiry(tokens: GoatGoogleOAuthTokens & { expires_in?: number }) {
+function stripExpiry(tokens: GoogleOAuthTokens & { expires_in?: number }) {
   const { access_token, refresh_token, scope, token_type, id_token } = tokens;
   return {
     access_token,
@@ -266,9 +258,7 @@ function toExpiresAt(expiresIn?: number) {
   return new Date(Date.now() + expiresIn * 1000);
 }
 
-function isGoatGoogleIntegrationStatePayload(
-  value: unknown,
-): value is GoatGoogleIntegrationStatePayload {
+function isGoogleIntegrationStatePayload(value: unknown): value is GoogleIntegrationStatePayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return (
@@ -289,7 +279,7 @@ function sanitizeReturnTo(value: string) {
   return value;
 }
 
-function goatGoogleOAuthBrokerCallbackUrl() {
+function googleOAuthBrokerCallbackUrl() {
   const value = process.env.GOOGLE_OAUTH_CALLBACK_URL?.trim();
   if (!value) return undefined;
   try {
@@ -318,10 +308,7 @@ function isPreviewGoogleOAuthTargetOrigin(origin: string) {
   return /^https:\/\/pr-\d+\.preview\.opencompany\.cloud$/.test(origin);
 }
 
-function sanitizeGoatGoogleOAuthRedirectUri(
-  value: unknown,
-  provider: GoatGoogleIntegrationProvider,
-) {
+function sanitizeGoogleOAuthRedirectUri(value: unknown, provider: GoogleIntegrationProvider) {
   if (typeof value !== "string" || !value.trim()) return undefined;
   try {
     const url = new URL(value.trim());

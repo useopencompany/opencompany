@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { executeGoatChatExaFetch, normalizePublicWebUrl } from "@/lib/chat-web-fetch";
+import { executeChatExaFetch, normalizePublicWebUrl } from "@/lib/chat-web-fetch";
 
-describe("executeGoatChatExaFetch", () => {
+describe("executeChatExaFetch", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -28,7 +28,7 @@ describe("executeGoatChatExaFetch", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const output = await executeGoatChatExaFetch({
+    const output = await executeChatExaFetch({
       toolInput: { url: "https://example.com/article#intro" },
       apiKey: "exa_test",
       signal: new AbortController().signal,
@@ -83,7 +83,7 @@ describe("executeGoatChatExaFetch", () => {
     );
 
     await expect(
-      executeGoatChatExaFetch({
+      executeChatExaFetch({
         toolInput: { url: "https://example.com/private" },
         apiKey: "exa_test",
         signal: new AbortController().signal,

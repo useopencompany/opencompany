@@ -1,12 +1,12 @@
-import type { ParsedGoatBrainDocument } from "./document";
+import type { ParsedBrainDocument } from "./document";
 import { GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER } from "./document";
-import { isValidGoatBrainId, normalizeGoatBrainFolder } from "./schema";
+import { isValidBrainId, normalizeBrainFolder } from "./schema";
 
 export const GOAT_BRAIN_WORKFLOWS_ZONE = "workflows";
 export const GOAT_BRAIN_WORKFLOW_NAME_MAX_LENGTH = 64;
 export const GOAT_BRAIN_WORKFLOW_DESCRIPTION_MAX_LENGTH = 1024;
 
-export type GoatBrainWorkflow = {
+export type BrainWorkflow = {
   id: string;
   name: string;
   description: string;
@@ -16,15 +16,13 @@ export type GoatBrainWorkflow = {
   model: string;
 };
 
-export function isGoatBrainWorkflowFolder(value: string): boolean {
-  const folder = normalizeGoatBrainFolder(value);
+export function isBrainWorkflowFolder(value: string): boolean {
+  const folder = normalizeBrainFolder(value);
   return folder === GOAT_BRAIN_WORKFLOWS_ZONE || folder.startsWith(`${GOAT_BRAIN_WORKFLOWS_ZONE}/`);
 }
 
-export function goatBrainWorkflowFromDocument(
-  document: ParsedGoatBrainDocument,
-): GoatBrainWorkflow | null {
-  if (!document.frontmatter.folder || !isGoatBrainWorkflowFolder(document.frontmatter.folder)) {
+export function brainWorkflowFromDocument(document: ParsedBrainDocument): BrainWorkflow | null {
+  if (!document.frontmatter.folder || !isBrainWorkflowFolder(document.frontmatter.folder)) {
     return null;
   }
   if (document.frontmatter.kind !== "page") return null;
@@ -37,9 +35,9 @@ export function goatBrainWorkflowFromDocument(
   const instructions = document.compiledTruth.trim();
   const model = document.frontmatter.model?.trim() ?? "";
   if (
-    !isValidGoatBrainWorkflowId(id) ||
+    !isValidBrainWorkflowId(id) ||
     !name ||
-    !isValidOptionalGoatBrainWorkflowDescription(description) ||
+    !isValidOptionalBrainWorkflowDescription(description) ||
     !instructions ||
     instructions === GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER
   ) {
@@ -48,11 +46,11 @@ export function goatBrainWorkflowFromDocument(
   return { id, name, description, instructions, model };
 }
 
-export function isValidGoatBrainWorkflowId(value: unknown): value is string {
-  return isValidGoatBrainId(value) && value.length <= GOAT_BRAIN_WORKFLOW_NAME_MAX_LENGTH;
+export function isValidBrainWorkflowId(value: unknown): value is string {
+  return isValidBrainId(value) && value.length <= GOAT_BRAIN_WORKFLOW_NAME_MAX_LENGTH;
 }
 
-function isValidOptionalGoatBrainWorkflowDescription(value: string) {
+function isValidOptionalBrainWorkflowDescription(value: string) {
   return (
     value.length <= GOAT_BRAIN_WORKFLOW_DESCRIPTION_MAX_LENGTH &&
     !value.includes("<") &&

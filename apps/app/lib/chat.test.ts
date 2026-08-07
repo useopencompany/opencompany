@@ -1,33 +1,29 @@
 import type {
-  GoatChatMessageDebugTrace,
-  GoatChatSession,
-  GoatCodexChatTurnSettings,
-  GoatTaskStatus,
+  ChatMessageDebugTrace,
+  ChatSession,
+  CodexChatTurnSettings,
+  TaskStatus,
 } from "@opencompany/db/schema";
 import { convertToModelMessages } from "ai";
 import { drizzle } from "drizzle-orm/neon-http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  closeGoatChatSessionForUser,
-  createDbGoatChatStore,
-  createGoatChatApprovalContinuationTurn,
-  createGoatChatUserTurn,
-  type GoatChatStore,
-  type GoatChatUiMessage,
-  listRecentGoatChatsForUser,
-  loadGoatChatSessionByIdForUser,
-  markGoatChatSessionSeenForUser,
-  persistGoatChatAssistantMessage,
-  setGoatChatSessionPinnedForUser,
-  settleStaleGoatChatToolCalls,
-  textFromGoatChatUiMessage,
+  type ChatStore,
+  type ChatUiMessage,
+  closeChatSessionForUser,
+  createChatApprovalContinuationTurn,
+  createChatUserTurn,
+  createDbChatStore,
+  listRecentChatsForUser,
+  loadChatSessionByIdForUser,
+  markChatSessionSeenForUser,
+  persistChatAssistantMessage,
+  setChatSessionPinnedForUser,
+  settleStaleChatToolCalls,
+  textFromChatUiMessage,
 } from "@/lib/chat";
 import { OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION } from "@/lib/chat-agent";
-import {
-  GOAT_PINNED_CHAT_LIMIT,
-  type GoatCodexRuntimeView,
-  START_TASK_TOOL_NAME,
-} from "@/lib/chat-ui";
+import { type CodexRuntimeView, GOAT_PINNED_CHAT_LIMIT, START_TASK_TOOL_NAME } from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 
 vi.mock("next/cache", () => ({
@@ -35,12 +31,12 @@ vi.mock("next/cache", () => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
 }));
 
-type StoredChatMessage = Awaited<ReturnType<GoatChatStore["listMessages"]>>[number];
+type StoredChatMessage = Awaited<ReturnType<ChatStore["listMessages"]>>[number];
 
-describe("createDbGoatChatStore", () => {
+describe("createDbChatStore", () => {
   it("loads active Codex sessions outside the recent-chat limit", async () => {
     const query = vi.fn(async (...[statement, params]: [string, unknown[], object]) => {
       void statement;
@@ -50,7 +46,7 @@ describe("createDbGoatChatStore", () => {
     const client = Object.assign(query, {
       transaction: vi.fn(async (queries: Promise<unknown>[]) => Promise.all(queries)),
     });
-    const store = createDbGoatChatStore(drizzle(client as never) as never);
+    const store = createDbChatStore(drizzle(client as never) as never);
 
     await store.listOpenSessions({
       userWorkosId: "user_1",
@@ -92,7 +88,7 @@ describe("createDbGoatChatStore", () => {
     }));
     const client = Object.assign(query, { transaction });
     const db = drizzle(client as never);
-    const store = createDbGoatChatStore(db as never);
+    const store = createDbChatStore(db as never);
 
     await expect(
       store.setSessionPinned({
@@ -120,7 +116,7 @@ describe("createDbGoatChatStore", () => {
       rows: statement.startsWith("select") ? [["user_1"]] : [],
     }));
     const client = Object.assign(query, { transaction });
-    const store = createDbGoatChatStore(drizzle(client as never) as never);
+    const store = createDbChatStore(drizzle(client as never) as never);
 
     await expect(
       store.setSessionPinned({
@@ -133,7 +129,7 @@ describe("createDbGoatChatStore", () => {
   });
 });
 
-describe("createGoatChatUserTurn", () => {
+describe("createChatUserTurn", () => {
   beforeEach(() => {
     vi.useRealTimers();
   });
@@ -141,7 +137,7 @@ describe("createGoatChatUserTurn", () => {
   it("creates a chat session and persists the user message immediately", async () => {
     const { store, sessions, messages } = createInMemoryChatStore();
 
-    const result = await createGoatChatUserTurn(
+    const result = await createChatUserTurn(
       {
         userWorkosId: "user_1",
         prompt: "what do you think of x?",
@@ -157,7 +153,7 @@ describe("createGoatChatUserTurn", () => {
       ["ui_user_1", "user", "what do you think of x?"],
     ]);
     expect(
-      result.messages.map((message) => [message.role, textFromGoatChatUiMessage(message)]),
+      result.messages.map((message) => [message.role, textFromChatUiMessage(message)]),
     ).toEqual([["user", "what do you think of x?"]]);
   });
 
@@ -165,7 +161,7 @@ describe("createGoatChatUserTurn", () => {
     const { store, sessions } = createInMemoryChatStore();
     const newSessionId = "goat_chat_123e4567-e89b-42d3-a456-426614174000";
 
-    const result = await createGoatChatUserTurn(
+    const result = await createChatUserTurn(
       {
         userWorkosId: "user_1",
         prompt: "open this chat immediately",
@@ -182,11 +178,11 @@ describe("createGoatChatUserTurn", () => {
   it("reuses an existing open session when a session id is provided", async () => {
     const { store, sessions, messages } = createInMemoryChatStore();
 
-    const first = await createGoatChatUserTurn(
+    const first = await createChatUserTurn(
       { userWorkosId: "user_1", prompt: "hello", model: DEFAULT_GOAT_MODEL },
       store,
     );
-    const second = await createGoatChatUserTurn(
+    const second = await createChatUserTurn(
       {
         userWorkosId: "user_1",
         prompt: "continue",
@@ -202,7 +198,7 @@ describe("createGoatChatUserTurn", () => {
       [first.session.id, "user", "hello"],
       [first.session.id, "user", "continue"],
     ]);
-    expect(second.messages.map((message) => textFromGoatChatUiMessage(message))).toEqual([
+    expect(second.messages.map((message) => textFromChatUiMessage(message))).toEqual([
       "hello",
       "continue",
     ]);
@@ -211,11 +207,11 @@ describe("createGoatChatUserTurn", () => {
   it("creates a new session when no session id is provided", async () => {
     const { store, sessions } = createInMemoryChatStore();
 
-    const first = await createGoatChatUserTurn(
+    const first = await createChatUserTurn(
       { userWorkosId: "user_1", prompt: "hello", model: DEFAULT_GOAT_MODEL },
       store,
     );
-    const second = await createGoatChatUserTurn(
+    const second = await createChatUserTurn(
       { userWorkosId: "user_1", prompt: "new topic", model: DEFAULT_GOAT_MODEL },
       store,
     );
@@ -227,15 +223,15 @@ describe("createGoatChatUserTurn", () => {
   it("creates a new session after the current session is closed", async () => {
     const { store, sessions } = createInMemoryChatStore();
 
-    const first = await createGoatChatUserTurn(
+    const first = await createChatUserTurn(
       { userWorkosId: "user_1", prompt: "hello", model: DEFAULT_GOAT_MODEL },
       store,
     );
-    const closed = await closeGoatChatSessionForUser(
+    const closed = await closeChatSessionForUser(
       { userWorkosId: "user_1", sessionId: first.session.id },
       store,
     );
-    const second = await createGoatChatUserTurn(
+    const second = await createChatUserTurn(
       { userWorkosId: "user_1", prompt: "new thread", model: DEFAULT_GOAT_MODEL },
       store,
     );
@@ -249,7 +245,7 @@ describe("createGoatChatUserTurn", () => {
   });
 });
 
-describe("persistGoatChatAssistantMessage", () => {
+describe("persistChatAssistantMessage", () => {
   it("stores final assistant text, task linkage, and debug metadata", async () => {
     const { store, messages } = createInMemoryChatStore({
       tasks: {
@@ -261,7 +257,7 @@ describe("persistGoatChatAssistantMessage", () => {
         },
       },
     });
-    const turn = await createGoatChatUserTurn(
+    const turn = await createChatUserTurn(
       {
         userWorkosId: "user_1",
         prompt: "research x",
@@ -270,7 +266,7 @@ describe("persistGoatChatAssistantMessage", () => {
       store,
     );
 
-    await persistGoatChatAssistantMessage(
+    await persistChatAssistantMessage(
       {
         sessionId: turn.session.id,
         messageId: "assistant_1",
@@ -315,7 +311,7 @@ function pendingApprovalPart(overrides: Record<string, unknown> = {}): Record<st
   };
 }
 
-function assistantApprovalTrace(parts: unknown[]): GoatChatMessageDebugTrace {
+function assistantApprovalTrace(parts: unknown[]): ChatMessageDebugTrace {
   return {
     schemaVersion: OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION,
     model: DEFAULT_GOAT_MODEL,
@@ -323,12 +319,12 @@ function assistantApprovalTrace(parts: unknown[]): GoatChatMessageDebugTrace {
   };
 }
 
-async function seedTurnAwaitingApproval(store: GoatChatStore, parts: unknown[]) {
-  const turn = await createGoatChatUserTurn(
+async function seedTurnAwaitingApproval(store: ChatStore, parts: unknown[]) {
+  const turn = await createChatUserTurn(
     { userWorkosId: "user_1", prompt: "add my sync", model: DEFAULT_GOAT_MODEL },
     store,
   );
-  const assistant = await persistGoatChatAssistantMessage(
+  const assistant = await persistChatAssistantMessage(
     {
       sessionId: turn.session.id,
       messageId: "assistant_1",
@@ -340,7 +336,7 @@ async function seedTurnAwaitingApproval(store: GoatChatStore, parts: unknown[]) 
   return { turn, assistant };
 }
 
-describe("createGoatChatApprovalContinuationTurn", () => {
+describe("createChatApprovalContinuationTurn", () => {
   it("merges only the approval decision, denies unanswered requests, and persists", async () => {
     const { store, messages } = createInMemoryChatStore();
     const { turn } = await seedTurnAwaitingApproval(store, [
@@ -348,7 +344,7 @@ describe("createGoatChatApprovalContinuationTurn", () => {
       pendingApprovalPart({ toolCallId: "call_2", approval: { id: "appr_2" } }),
     ]);
 
-    const result = await createGoatChatApprovalContinuationTurn(
+    const result = await createChatApprovalContinuationTurn(
       {
         userWorkosId: "user_1",
         sessionId: turn.session.id,
@@ -363,7 +359,7 @@ describe("createGoatChatApprovalContinuationTurn", () => {
               input: { action: "google_calendar.create_event", params: { summary: "HACKED" } },
             }),
           ],
-        } as unknown as GoatChatUiMessage,
+        } as unknown as ChatUiMessage,
       },
       store,
     );
@@ -398,7 +394,7 @@ describe("createGoatChatApprovalContinuationTurn", () => {
       const memory = createInMemoryChatStore();
       const { turn } = await seedTurnAwaitingApproval(memory.store, [pendingApprovalPart()]);
       // A newer user message makes assistant_1 stale.
-      const followUp = await createGoatChatUserTurn(
+      const followUp = await createChatUserTurn(
         {
           userWorkosId: "user_1",
           prompt: "actually nevermind",
@@ -410,7 +406,7 @@ describe("createGoatChatApprovalContinuationTurn", () => {
       return { store: memory.store, turnFollowUp: followUp };
     })();
 
-    const result = await createGoatChatApprovalContinuationTurn(
+    const result = await createChatApprovalContinuationTurn(
       {
         userWorkosId: "user_1",
         sessionId: turnFollowUp.session.id,
@@ -418,7 +414,7 @@ describe("createGoatChatApprovalContinuationTurn", () => {
           id: "assistant_1",
           role: "assistant",
           parts: [],
-        } as unknown as GoatChatUiMessage,
+        } as unknown as ChatUiMessage,
       },
       store,
     );
@@ -431,7 +427,7 @@ describe("createGoatChatApprovalContinuationTurn", () => {
       pendingApprovalPart({ state: "output-available", output: { ok: true } }),
     ]);
 
-    const noPending = await createGoatChatApprovalContinuationTurn(
+    const noPending = await createChatApprovalContinuationTurn(
       {
         userWorkosId: "user_1",
         sessionId: turn.session.id,
@@ -439,13 +435,13 @@ describe("createGoatChatApprovalContinuationTurn", () => {
           id: "assistant_1",
           role: "assistant",
           parts: [],
-        } as unknown as GoatChatUiMessage,
+        } as unknown as ChatUiMessage,
       },
       store,
     );
     expect(noPending).toMatchObject({ ok: false, error: expect.stringContaining("pending") });
 
-    const wrongSession = await createGoatChatApprovalContinuationTurn(
+    const wrongSession = await createChatApprovalContinuationTurn(
       {
         userWorkosId: "user_1",
         sessionId: "missing",
@@ -453,7 +449,7 @@ describe("createGoatChatApprovalContinuationTurn", () => {
           id: "assistant_1",
           role: "assistant",
           parts: [],
-        } as unknown as GoatChatUiMessage,
+        } as unknown as ChatUiMessage,
       },
       store,
     );
@@ -461,11 +457,11 @@ describe("createGoatChatApprovalContinuationTurn", () => {
   });
 });
 
-describe("settleStaleGoatChatToolCalls", () => {
+describe("settleStaleChatToolCalls", () => {
   it("denies pending approvals the user talked past and persists the rewrite", async () => {
     const { store, messages } = createInMemoryChatStore();
     const { turn } = await seedTurnAwaitingApproval(store, [pendingApprovalPart()]);
-    const followUp = await createGoatChatUserTurn(
+    const followUp = await createChatUserTurn(
       {
         userWorkosId: "user_1",
         prompt: "different question",
@@ -475,7 +471,7 @@ describe("settleStaleGoatChatToolCalls", () => {
       store,
     );
 
-    const result = await settleStaleGoatChatToolCalls(followUp, store);
+    const result = await settleStaleChatToolCalls(followUp, store);
     expect(result.changed).toBe(true);
     expect(result.toolCallIds).toEqual(["call_1"]);
 
@@ -501,7 +497,7 @@ describe("settleStaleGoatChatToolCalls", () => {
         input: { url: "https://example.com" },
       },
     ]);
-    const failedFollowUp = await createGoatChatUserTurn(
+    const failedFollowUp = await createChatUserTurn(
       {
         userWorkosId: "user_1",
         prompt: "give me results",
@@ -510,7 +506,7 @@ describe("settleStaleGoatChatToolCalls", () => {
       },
       store,
     );
-    await persistGoatChatAssistantMessage(
+    await persistChatAssistantMessage(
       {
         sessionId: turn.session.id,
         messageId: "assistant_failed_1",
@@ -523,7 +519,7 @@ describe("settleStaleGoatChatToolCalls", () => {
       },
       store,
     );
-    const followUp = await createGoatChatUserTurn(
+    const followUp = await createChatUserTurn(
       {
         userWorkosId: "user_1",
         prompt: "go",
@@ -533,7 +529,7 @@ describe("settleStaleGoatChatToolCalls", () => {
       store,
     );
 
-    const result = await settleStaleGoatChatToolCalls(followUp, store);
+    const result = await settleStaleChatToolCalls(followUp, store);
 
     expect(result.changed).toBe(true);
     expect(result.toolCallIds).toEqual(["browser_open_12"]);
@@ -572,7 +568,7 @@ describe("settleStaleGoatChatToolCalls", () => {
         state: "input-streaming",
       },
     ]);
-    const followUp = await createGoatChatUserTurn(
+    const followUp = await createChatUserTurn(
       {
         userWorkosId: "user_1",
         prompt: "continue",
@@ -582,7 +578,7 @@ describe("settleStaleGoatChatToolCalls", () => {
       store,
     );
 
-    const result = await settleStaleGoatChatToolCalls(followUp, store);
+    const result = await settleStaleChatToolCalls(followUp, store);
 
     expect(result.changed).toBe(true);
     expect(result.toolCallIds).toEqual(["browser_open_partial"]);
@@ -596,7 +592,7 @@ describe("settleStaleGoatChatToolCalls", () => {
     const { turn } = await seedTurnAwaitingApproval(store, [
       pendingApprovalPart({ state: "output-available", output: { ok: true } }),
     ]);
-    const result = await settleStaleGoatChatToolCalls(turn, store);
+    const result = await settleStaleChatToolCalls(turn, store);
     expect(result.changed).toBe(false);
     expect(result.toolCallIds).toEqual([]);
   });
@@ -608,26 +604,23 @@ describe("Goat chat history helpers", () => {
     vi.setSystemTime(new Date("2026-07-04T12:30:00.000Z"));
     const { store, sessions } = createInMemoryChatStore();
     try {
-      const first = await createGoatChatUserTurn(
+      const first = await createChatUserTurn(
         { userWorkosId: "user_1", prompt: "first chat", model: DEFAULT_GOAT_MODEL },
         store,
       );
-      const second = await createGoatChatUserTurn(
+      const second = await createChatUserTurn(
         { userWorkosId: "user_1", prompt: "second chat", model: DEFAULT_GOAT_MODEL },
         store,
       );
-      const old = await createGoatChatUserTurn(
+      const old = await createChatUserTurn(
         { userWorkosId: "user_1", prompt: "old chat", model: DEFAULT_GOAT_MODEL },
         store,
       );
-      await createGoatChatUserTurn(
+      await createChatUserTurn(
         { userWorkosId: "user_2", prompt: "other user chat", model: DEFAULT_GOAT_MODEL },
         store,
       );
-      await closeGoatChatSessionForUser(
-        { userWorkosId: "user_1", sessionId: first.session.id },
-        store,
-      );
+      await closeChatSessionForUser({ userWorkosId: "user_1", sessionId: first.session.id }, store);
       sessions.find((session) => session.id === second.session.id)!.updatedAt = new Date(
         "2026-07-04T12:00:00.000Z",
       );
@@ -635,10 +628,7 @@ describe("Goat chat history helpers", () => {
         "2026-07-02T12:00:00.000Z",
       );
 
-      const summaries = await listRecentGoatChatsForUser(
-        { userWorkosId: "user_1", limit: 8 },
-        store,
-      );
+      const summaries = await listRecentChatsForUser({ userWorkosId: "user_1", limit: 8 }, store);
 
       expect(summaries.map((summary) => summary.id)).toEqual([second.session.id]);
       expect(summaries[0]).toMatchObject({
@@ -657,13 +647,13 @@ describe("Goat chat history helpers", () => {
     const { store } = createInMemoryChatStore();
     try {
       vi.setSystemTime(new Date("2026-07-04T12:00:00.000Z"));
-      const turn = await createGoatChatUserTurn(
+      const turn = await createChatUserTurn(
         { userWorkosId: "user_1", prompt: "hello", model: DEFAULT_GOAT_MODEL },
         store,
       );
 
       vi.setSystemTime(new Date("2026-07-04T12:01:00.000Z"));
-      await persistGoatChatAssistantMessage(
+      await persistChatAssistantMessage(
         {
           sessionId: turn.session.id,
           content: "Done.",
@@ -671,7 +661,7 @@ describe("Goat chat history helpers", () => {
         store,
       );
 
-      const unseen = await listRecentGoatChatsForUser({ userWorkosId: "user_1", limit: 8 }, store);
+      const unseen = await listRecentChatsForUser({ userWorkosId: "user_1", limit: 8 }, store);
       expect(unseen[0]).toMatchObject({
         id: turn.session.id,
         state: "done_unseen",
@@ -681,13 +671,10 @@ describe("Goat chat history helpers", () => {
 
       vi.setSystemTime(new Date("2026-07-04T12:02:00.000Z"));
       await expect(
-        markGoatChatSessionSeenForUser(
-          { userWorkosId: "user_1", sessionId: turn.session.id },
-          store,
-        ),
+        markChatSessionSeenForUser({ userWorkosId: "user_1", sessionId: turn.session.id }, store),
       ).resolves.toBe(true);
 
-      const seen = await listRecentGoatChatsForUser({ userWorkosId: "user_1", limit: 8 }, store);
+      const seen = await listRecentChatsForUser({ userWorkosId: "user_1", limit: 8 }, store);
       expect(seen[0]).toMatchObject({
         id: turn.session.id,
         state: "done_seen",
@@ -704,11 +691,11 @@ describe("Goat chat history helpers", () => {
     vi.setSystemTime(new Date("2026-07-04T12:30:00.000Z"));
     const { store, sessions } = createInMemoryChatStore();
     try {
-      const recent = await createGoatChatUserTurn(
+      const recent = await createChatUserTurn(
         { userWorkosId: "user_1", prompt: "recent chat", model: DEFAULT_GOAT_MODEL },
         store,
       );
-      const old = await createGoatChatUserTurn(
+      const old = await createChatUserTurn(
         { userWorkosId: "user_1", prompt: "old pinned chat", model: DEFAULT_GOAT_MODEL },
         store,
       );
@@ -717,16 +704,13 @@ describe("Goat chat history helpers", () => {
       );
 
       await expect(
-        setGoatChatSessionPinnedForUser(
+        setChatSessionPinnedForUser(
           { userWorkosId: "user_1", sessionId: old.session.id, pinned: true },
           store,
         ),
       ).resolves.toBe(true);
 
-      const summaries = await listRecentGoatChatsForUser(
-        { userWorkosId: "user_1", limit: 8 },
-        store,
-      );
+      const summaries = await listRecentChatsForUser({ userWorkosId: "user_1", limit: 8 }, store);
       expect(summaries.map((summary) => summary.id)).toEqual([old.session.id, recent.session.id]);
       expect(summaries[0]).toMatchObject({
         title: "Old pinned chat",
@@ -734,20 +718,17 @@ describe("Goat chat history helpers", () => {
       });
 
       await expect(
-        setGoatChatSessionPinnedForUser(
+        setChatSessionPinnedForUser(
           { userWorkosId: "user_1", sessionId: old.session.id, pinned: false },
           store,
         ),
       ).resolves.toBe(true);
-      const afterUnpin = await listRecentGoatChatsForUser(
-        { userWorkosId: "user_1", limit: 8 },
-        store,
-      );
+      const afterUnpin = await listRecentChatsForUser({ userWorkosId: "user_1", limit: 8 }, store);
       expect(afterUnpin.map((summary) => summary.id)).toEqual([recent.session.id]);
 
       // Other users' sessions are not pinnable.
       await expect(
-        setGoatChatSessionPinnedForUser(
+        setChatSessionPinnedForUser(
           { userWorkosId: "user_2", sessionId: old.session.id, pinned: true },
           store,
         ),
@@ -759,7 +740,7 @@ describe("Goat chat history helpers", () => {
 
   it("bounds pinned chat hydration and rejects pins beyond the limit", async () => {
     const { store, sessions } = createInMemoryChatStore();
-    const candidate = await createGoatChatUserTurn(
+    const candidate = await createChatUserTurn(
       { userWorkosId: "user_1", prompt: "candidate", model: DEFAULT_GOAT_MODEL },
       store,
     );
@@ -773,10 +754,10 @@ describe("Goat chat history helpers", () => {
       });
     }
 
-    const summaries = await listRecentGoatChatsForUser({ userWorkosId: "user_1", limit: 8 }, store);
+    const summaries = await listRecentChatsForUser({ userWorkosId: "user_1", limit: 8 }, store);
     expect(summaries.filter((summary) => summary.pinnedAt)).toHaveLength(GOAT_PINNED_CHAT_LIMIT);
     await expect(
-      setGoatChatSessionPinnedForUser(
+      setChatSessionPinnedForUser(
         { userWorkosId: "user_1", sessionId: candidate.session.id, pinned: true },
         store,
       ),
@@ -785,11 +766,11 @@ describe("Goat chat history helpers", () => {
 
   it("keeps concurrent pin requests within the per-user limit", async () => {
     const { store, sessions } = createInMemoryChatStore();
-    const first = await createGoatChatUserTurn(
+    const first = await createChatUserTurn(
       { userWorkosId: "user_1", prompt: "first candidate", model: DEFAULT_GOAT_MODEL },
       store,
     );
-    const second = await createGoatChatUserTurn(
+    const second = await createChatUserTurn(
       { userWorkosId: "user_1", prompt: "second candidate", model: DEFAULT_GOAT_MODEL },
       store,
     );
@@ -804,11 +785,11 @@ describe("Goat chat history helpers", () => {
     }
 
     const results = await Promise.all([
-      setGoatChatSessionPinnedForUser(
+      setChatSessionPinnedForUser(
         { userWorkosId: "user_1", sessionId: first.session.id, pinned: true },
         store,
       ),
-      setGoatChatSessionPinnedForUser(
+      setChatSessionPinnedForUser(
         { userWorkosId: "user_1", sessionId: second.session.id, pinned: true },
         store,
       ),
@@ -817,7 +798,7 @@ describe("Goat chat history helpers", () => {
     expect(results).toEqual([true, false]);
     expect(sessions.filter((session) => session.pinnedAt)).toHaveLength(GOAT_PINNED_CHAT_LIMIT);
     await expect(
-      setGoatChatSessionPinnedForUser(
+      setChatSessionPinnedForUser(
         { userWorkosId: "user_1", sessionId: first.session.id, pinned: true },
         store,
       ),
@@ -826,23 +807,20 @@ describe("Goat chat history helpers", () => {
 
   it("loads only the requested user's open chat", async () => {
     const { store } = createInMemoryChatStore();
-    const own = await createGoatChatUserTurn(
+    const own = await createChatUserTurn(
       { userWorkosId: "user_1", prompt: "mine", model: DEFAULT_GOAT_MODEL },
       store,
     );
-    const other = await createGoatChatUserTurn(
+    const other = await createChatUserTurn(
       { userWorkosId: "user_2", prompt: "not mine", model: DEFAULT_GOAT_MODEL },
       store,
     );
 
     await expect(
-      loadGoatChatSessionByIdForUser({ userWorkosId: "user_1", sessionId: own.session.id }, store),
+      loadChatSessionByIdForUser({ userWorkosId: "user_1", sessionId: own.session.id }, store),
     ).resolves.toMatchObject({ id: own.session.id });
     await expect(
-      loadGoatChatSessionByIdForUser(
-        { userWorkosId: "user_1", sessionId: other.session.id },
-        store,
-      ),
+      loadChatSessionByIdForUser({ userWorkosId: "user_1", sessionId: other.session.id }, store),
     ).resolves.toBeNull();
   });
 
@@ -864,13 +842,10 @@ describe("Goat chat history helpers", () => {
     });
 
     await expect(
-      loadGoatChatSessionByIdForUser(
-        { userWorkosId: "user_1", sessionId: "goat_chat_task_1" },
-        store,
-      ),
+      loadChatSessionByIdForUser({ userWorkosId: "user_1", sessionId: "goat_chat_task_1" }, store),
     ).resolves.toBeNull();
     await expect(
-      loadGoatChatSessionByIdForUser(
+      loadChatSessionByIdForUser(
         { userWorkosId: "user_1", sessionId: "goat_chat_task_1", kind: "task" },
         store,
       ),
@@ -913,7 +888,7 @@ describe("Goat chat history helpers", () => {
       });
 
       await expect(
-        loadGoatChatSessionByIdForUser(
+        loadChatSessionByIdForUser(
           { userWorkosId: "user_1", sessionId: "goat_chat_codex_1" },
           store,
         ),
@@ -930,10 +905,7 @@ describe("Goat chat history helpers", () => {
         },
       });
 
-      const summaries = await listRecentGoatChatsForUser(
-        { userWorkosId: "user_1", limit: 8 },
-        store,
-      );
+      const summaries = await listRecentChatsForUser({ userWorkosId: "user_1", limit: 8 }, store);
       expect(summaries[0]).toMatchObject({
         id: "goat_chat_codex_1",
         codexComposerSettings: {
@@ -976,7 +948,7 @@ describe("Goat chat history helpers", () => {
     });
 
     await expect(
-      loadGoatChatSessionByIdForUser(
+      loadChatSessionByIdForUser(
         { userWorkosId: "user_1", sessionId: "goat_chat_claude_1" },
         store,
       ),
@@ -992,20 +964,17 @@ describe("Goat chat history helpers", () => {
 
 function createInMemoryChatStore(
   options: {
-    tasks?: Record<
-      string,
-      { displayId: string; name: string; prompt: string; status: GoatTaskStatus }
-    >;
-    codexSettingsBySessionId?: Record<string, GoatCodexChatTurnSettings | null>;
-    codexRuntimeBySessionId?: Record<string, GoatCodexRuntimeView | null>;
+    tasks?: Record<string, { displayId: string; name: string; prompt: string; status: TaskStatus }>;
+    codexSettingsBySessionId?: Record<string, CodexChatTurnSettings | null>;
+    codexRuntimeBySessionId?: Record<string, CodexRuntimeView | null>;
   } = {},
 ) {
-  const sessions: GoatChatSession[] = [];
+  const sessions: ChatSession[] = [];
   const messages: StoredChatMessage[] = [];
   let sessionCount = 0;
   let messageCount = 0;
 
-  const store: GoatChatStore = {
+  const store: ChatStore = {
     async findOpenSession(input) {
       const openSessions = sessions.filter(
         (session) =>
@@ -1044,7 +1013,7 @@ function createInMemoryChatStore(
 
     async createSession(input) {
       const now = new Date();
-      const session: GoatChatSession = {
+      const session: ChatSession = {
         id: input.id ?? `session_${++sessionCount}`,
         userWorkosId: input.userWorkosId,
         title: input.title,

@@ -1,6 +1,6 @@
-import { GoatIntegrationsSettingsRoute } from "@/components/GoatRoutes";
+import { IntegrationsSettingsRoute } from "@/components/AppRoutes";
 import { browserProfilesAvailable } from "@/lib/browser-profiles";
 
 export default function IntegrationsSettingsPage() {
-  return <GoatIntegrationsSettingsRoute browserProfilesEnabled={browserProfilesAvailable()} />;
+  return <IntegrationsSettingsRoute browserProfilesEnabled={browserProfilesAvailable()} />;
 }

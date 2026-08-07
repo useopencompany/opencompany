@@ -1,9 +1,9 @@
 import {
-  claimGoatGmailSyncState,
-  ensureGoatGmailSyncState,
-  type GoatGmailMessageEventInsert,
-  insertGoatGmailMessageEvents,
-  updateGoatGmailSyncCursor,
+  claimGmailSyncState,
+  ensureGmailSyncState,
+  type GmailMessageEventInsert,
+  insertGmailMessageEvents,
+  updateGmailSyncCursor,
 } from "@opencompany/db/gmail";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
@@ -41,7 +41,7 @@ type GmailPollCandidate = {
   accountEmail: string | null;
 };
 
-export async function listGoatGmailPollCandidates(): Promise<GmailPollCandidate[]> {
+export async function listGmailPollCandidates(): Promise<GmailPollCandidate[]> {
   const result = await getDb().execute(sql`
     SELECT
       i.id AS "integrationId",
@@ -60,7 +60,7 @@ export async function listGoatGmailPollCandidates(): Promise<GmailPollCandidate[
   return rowsFromExecute<GmailPollCandidate>(result);
 }
 
-export async function pollGoatGmailIntegration(input: {
+export async function pollGmailIntegration(input: {
   candidate: GmailPollCandidate;
   env: RunnerEnv;
   signal: AbortSignal;
@@ -68,14 +68,14 @@ export async function pollGoatGmailIntegration(input: {
 }): Promise<{ buffered: number } | null> {
   const { candidate } = input;
   const db = getDb();
-  await ensureGoatGmailSyncState(
+  await ensureGmailSyncState(
     {
       integrationId: candidate.integrationId,
       userWorkosId: candidate.userWorkosId,
     },
     db,
   );
-  const state = await claimGoatGmailSyncState(
+  const state = await claimGmailSyncState(
     {
       integrationId: candidate.integrationId,
       cooldownMs: input.cooldownMs ?? GOAT_GMAIL_POLL_COOLDOWN_MS,
@@ -102,7 +102,7 @@ export async function pollGoatGmailIntegration(input: {
   if (!state.historyId) {
     const profile = await fetchGmailProfile(call);
     if (!profile.historyId) throw new Error("Gmail profile returned no historyId.");
-    await updateGoatGmailSyncCursor(
+    await updateGmailSyncCursor(
       {
         integrationId: candidate.integrationId,
         historyId: profile.historyId,
@@ -119,7 +119,7 @@ export async function pollGoatGmailIntegration(input: {
     // only restart from "now". The interim mail is a documented gap.
     const profile = await fetchGmailProfile(call);
     if (!profile.historyId) throw new Error("Gmail profile returned no historyId.");
-    await updateGoatGmailSyncCursor(
+    await updateGmailSyncCursor(
       {
         integrationId: candidate.integrationId,
         historyId: profile.historyId,
@@ -135,7 +135,7 @@ export async function pollGoatGmailIntegration(input: {
     return { buffered: 0 };
   }
 
-  const inserts: GoatGmailMessageEventInsert[] = [];
+  const inserts: GmailMessageEventInsert[] = [];
   for (const discovered of history.messages) {
     if (discovered.labelIds.some((label) => SKIPPED_LABEL_IDS.has(label))) continue;
     const metadata = await fetchGmailMessageMetadata(call, discovered.id);
@@ -161,9 +161,9 @@ export async function pollGoatGmailIntegration(input: {
     });
   }
 
-  const buffered = await insertGoatGmailMessageEvents(inserts, db);
+  const buffered = await insertGmailMessageEvents(inserts, db);
   if (history.latestHistoryId) {
-    await updateGoatGmailSyncCursor(
+    await updateGmailSyncCursor(
       {
         integrationId: candidate.integrationId,
         historyId: history.latestHistoryId,
@@ -174,10 +174,7 @@ export async function pollGoatGmailIntegration(input: {
   return { buffered };
 }
 
-export function startGoatGmailPollWorker(
-  env: RunnerEnv,
-  options: { pollIntervalMs?: number } = {},
-) {
+export function startGmailPollWorker(env: RunnerEnv, options: { pollIntervalMs?: number } = {}) {
   const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? GOAT_GMAIL_POLL_INTERVAL_MS);
   const abort = new AbortController();
   let stopped = false;
@@ -207,10 +204,10 @@ export function startGoatGmailPollWorker(
     }
     while (!stopped) {
       try {
-        const candidates = await listGoatGmailPollCandidates();
+        const candidates = await listGmailPollCandidates();
         for (const candidate of candidates) {
           if (stopped) break;
-          const polled = await pollGoatGmailIntegration({
+          const polled = await pollGmailIntegration({
             candidate,
             env,
             signal: abort.signal,

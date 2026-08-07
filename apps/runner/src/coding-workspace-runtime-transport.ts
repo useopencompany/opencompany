@@ -9,17 +9,17 @@ import { CLOUD_CODING_ENGINE_CONFIG, shellQuote } from "@opencompany/agent-runti
 import { createLogger } from "@opencompany/observability";
 import WebSocket, { type RawData, WebSocketServer } from "ws";
 import {
-  discoverGoatCodingWorkspacePreviewPorts,
-  type GoatCodingWorkspaceSession,
+  type CodingWorkspaceSession,
+  discoverCodingWorkspacePreviewPorts,
   isAllowedPreviewPort,
-  loadGoatCodingWorkspaceSession,
+  loadCodingWorkspaceSession,
 } from "./coding-workspace-runtime";
 import {
-  createGoatCodingWorkspacePreviewCapability,
-  verifyGoatCodingWorkspacePreviewCapability,
-  verifyGoatCodingWorkspaceTicket,
+  createCodingWorkspacePreviewCapability,
+  verifyCodingWorkspacePreviewCapability,
+  verifyCodingWorkspaceTicket,
 } from "./coding-workspace-runtime-auth";
-import { createGoatDictationWebSocketServer, GOAT_DICTATION_PATH } from "./dictation-transport";
+import { createDictationWebSocketServer, GOAT_DICTATION_PATH } from "./dictation-transport";
 import type { RunnerEnv } from "./env";
 import {
   armSandboxIdleTimeout,
@@ -46,7 +46,7 @@ const TERMINAL_INPUT_BATCH_MS = 8;
 const runtimeToolInstalls = new Map<string, Promise<void>>();
 
 type PreviewTarget = {
-  session: GoatCodingWorkspaceSession;
+  session: CodingWorkspaceSession;
   sandbox: SandboxHandle;
   upstreamHost: string;
   port: number;
@@ -57,7 +57,7 @@ type RunnerServerFactory = (
   options: Record<string, unknown>,
 ) => http.Server;
 
-export function createGoatCodingWorkspaceTransport(env: RunnerEnv) {
+export function createCodingWorkspaceTransport(env: RunnerEnv) {
   const runtimeWebSockets = new WebSocketServer({
     noServer: true,
     maxPayload: 64 * 1_024,
@@ -66,7 +66,7 @@ export function createGoatCodingWorkspaceTransport(env: RunnerEnv) {
     },
   });
   const previewWebSockets = new WebSocketServer({ noServer: true });
-  const dictationWebSockets = createGoatDictationWebSocketServer(env);
+  const dictationWebSockets = createDictationWebSocketServer(env);
   const previewCache = new Map<string, { expiresAt: number; target: Promise<PreviewTarget> }>();
   let closePromise: Promise<void> | null = null;
 
@@ -130,7 +130,7 @@ async function acceptRuntimeWebSocket(
   webSocketServer: WebSocketServer,
 ) {
   const origin = request.headers.origin;
-  if (!isGoatCodingWorkspaceOriginAllowed(origin, env.allowedOrigins)) {
+  if (!isCodingWorkspaceOriginAllowed(origin, env.allowedOrigins)) {
     logRuntimeReject("origin_denied", { origin: origin ?? null });
     rejectUpgrade(socket, 403, "Forbidden");
     return;
@@ -141,7 +141,7 @@ async function acceptRuntimeWebSocket(
     .find((protocol) => protocol.startsWith(TICKET_PROTOCOL_PREFIX))
     ?.slice(TICKET_PROTOCOL_PREFIX.length);
   const ticket = encodedTicket
-    ? verifyGoatCodingWorkspaceTicket({ ticket: encodedTicket, secret: env.streamTokenSecret })
+    ? verifyCodingWorkspaceTicket({ ticket: encodedTicket, secret: env.streamTokenSecret })
     : null;
   if (!ticket || !protocols.includes(RUNTIME_PROTOCOL)) {
     logRuntimeReject("ticket_invalid", { has_ticket: Boolean(encodedTicket) });
@@ -149,7 +149,7 @@ async function acceptRuntimeWebSocket(
     return;
   }
 
-  const session = await loadGoatCodingWorkspaceSession({
+  const session = await loadCodingWorkspaceSession({
     codingSessionId: ticket.codingSessionId,
     userWorkosId: ticket.userWorkosId,
   }).catch((error) => {
@@ -222,7 +222,7 @@ function closeUpgradeWithError(
 export function attachRuntimeConnection(
   webSocket: WebSocket,
   sandbox: SandboxHandle,
-  session: GoatCodingWorkspaceSession,
+  session: CodingWorkspaceSession,
   env: RunnerEnv,
   restoreTimeout: typeof restoreSandboxTimeout = restoreSandboxTimeout,
 ) {
@@ -339,7 +339,7 @@ export function attachRuntimeConnection(
   };
 
   const refreshPorts = async () => {
-    const ports = await discoverGoatCodingWorkspacePreviewPorts(sandbox, { workDirectory });
+    const ports = await discoverCodingWorkspacePreviewPorts(sandbox, { workDirectory });
     sendControl({ type: "ports", ports });
   };
 
@@ -348,11 +348,11 @@ export function attachRuntimeConnection(
       throw new Error("Preview is not configured on this runner.");
     }
     if (!isAllowedPreviewPort(port)) throw new Error("That preview port is reserved or invalid.");
-    const ports = await discoverGoatCodingWorkspacePreviewPorts(sandbox, { workDirectory });
+    const ports = await discoverCodingWorkspacePreviewPorts(sandbox, { workDirectory });
     if (!ports.some((candidate) => candidate.port === port)) {
       throw new Error(`Nothing is listening on port ${port}.`);
     }
-    const signed = createGoatCodingWorkspacePreviewCapability({
+    const signed = createCodingWorkspacePreviewCapability({
       codingSessionId: session.id,
       port,
       secret: env.streamTokenSecret,
@@ -412,7 +412,7 @@ export function attachRuntimeConnection(
     pendingInputBytes = 0;
     clearInterval(heartbeat);
     void terminalHandle?.kill().catch(() => {});
-    void restoreTimeout(session.id, sandbox, env.goatCodexChatIdleTimeoutMs).catch((error) => {
+    void restoreTimeout(session.id, sandbox, env.codexChatIdleTimeoutMs).catch((error) => {
       logger.warn("Failed to restore coding workspace idle timeout", {
         event: "opencompany.goat_coding_workspace_idle_restore_failed",
         error,
@@ -542,7 +542,7 @@ async function proxyPreviewWebSocket(
         void restoreSandboxTimeout(
           target.session.id,
           target.sandbox,
-          env.goatCodexChatIdleTimeoutMs,
+          env.codexChatIdleTimeoutMs,
         ).catch(() => {});
       };
 
@@ -570,7 +570,7 @@ async function resolvePreviewTarget(
   env: RunnerEnv,
   cache: Map<string, { expiresAt: number; target: Promise<PreviewTarget> }>,
 ) {
-  const verified = verifyGoatCodingWorkspacePreviewCapability({
+  const verified = verifyCodingWorkspacePreviewCapability({
     capability,
     secret: env.streamTokenSecret,
   });
@@ -592,7 +592,7 @@ async function resolvePreviewTarget(
   }
 
   const target = (async () => {
-    const session = await loadGoatCodingWorkspaceSession({
+    const session = await loadCodingWorkspaceSession({
       codingSessionId: verified.codingSessionId,
     });
     if (!session) throw new Error("Preview session is closed.");
@@ -826,7 +826,7 @@ function forwardedProtocol(request: IncomingMessage): "http" | "https" {
   return first === "https" ? "https" : "http";
 }
 
-export function isGoatCodingWorkspaceOriginAllowed(
+export function isCodingWorkspaceOriginAllowed(
   origin: string | undefined,
   allowedOrigins: string[],
 ) {
@@ -906,7 +906,7 @@ async function restoreSandboxTimeout(
   sandbox: SandboxHandle,
   idleTimeoutMs: number,
 ) {
-  const current = await loadGoatCodingWorkspaceSession({ codingSessionId });
+  const current = await loadCodingWorkspaceSession({ codingSessionId });
   if (current && ["queued", "starting", "running"].includes(current.status)) {
     await keepSandboxActive(sandbox);
     return;

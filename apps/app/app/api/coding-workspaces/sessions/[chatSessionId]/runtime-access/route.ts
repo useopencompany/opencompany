@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
-import { createGoatCodingWorkspaceRuntimeAccess } from "@/lib/codex-chat";
+import { currentUser } from "@/lib/auth";
+import { createCodingWorkspaceRuntimeAccess } from "@/lib/codex-chat";
 
 export const runtime = "nodejs";
 
@@ -8,11 +8,11 @@ export async function POST(
   _request: Request,
   { params }: { params: Promise<{ chatSessionId: string }> },
 ) {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return new Response("Unauthorized", { status: 401 });
 
   const { chatSessionId } = await params;
-  const result = await createGoatCodingWorkspaceRuntimeAccess({
+  const result = await createCodingWorkspaceRuntimeAccess({
     userWorkosId: context.user.workosUserId,
     chatSessionId,
   });

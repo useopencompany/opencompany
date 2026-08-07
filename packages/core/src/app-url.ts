@@ -1,4 +1,4 @@
-export function getGoatAppUrl() {
+export function getAppUrl() {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
   if (appUrl && !/^\/+$/u.test(appUrl)) {
     return parseAppOrigin(appUrl, "NEXT_PUBLIC_APP_URL");

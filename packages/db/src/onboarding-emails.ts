@@ -1,8 +1,8 @@
 import { eq, sql } from "drizzle-orm";
 import { getDb } from "./client";
-import { type GoatOnboardingEmailStep, goatOnboardingEmails } from "./schema";
+import { type OnboardingEmailStep, onboardingEmails } from "./schema";
 
-export type { GoatOnboardingEmailStatus, GoatOnboardingEmailStep } from "./schema";
+export type { OnboardingEmailStatus, OnboardingEmailStep } from "./schema";
 
 type DbLike = any;
 
@@ -12,7 +12,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // feedback-call ask four days after that (five days from signup). Offsets are
 // applied at enrollment time; the cron sweep only ever compares `scheduled_at`.
 export const GOAT_ONBOARDING_EMAIL_SEQUENCE: Array<{
-  step: GoatOnboardingEmailStep;
+  step: OnboardingEmailStep;
   delayMs: number;
 }> = [
   { step: "welcome", delayMs: 0 },
@@ -39,10 +39,10 @@ function rowsFromExecute<T extends Record<string, unknown>>(result: unknown): T[
   return [];
 }
 
-export type ClaimedGoatOnboardingEmail = {
+export type ClaimedOnboardingEmail = {
   id: string;
   workosUserId: string;
-  step: GoatOnboardingEmailStep;
+  step: OnboardingEmailStep;
   attempts: number;
   email: string;
   firstName: string | null;
@@ -51,14 +51,14 @@ export type ClaimedGoatOnboardingEmail = {
 // Inserts the three sequence rows for a newly-owned workspace. Idempotent: the
 // unique (workos_user_id, step) index makes a repeat call (e.g. a re-run of the
 // auth path) a no-op rather than a duplicate enrollment.
-export async function enrollGoatOnboardingEmails(
+export async function enrollOnboardingEmails(
   input: { workosUserId: string; now?: Date },
   options: { db?: DbLike } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
   const now = input.now ?? new Date();
   await db
-    .insert(goatOnboardingEmails)
+    .insert(onboardingEmails)
     .values(
       GOAT_ONBOARDING_EMAIL_SEQUENCE.map((entry) => ({
         workosUserId: input.workosUserId,
@@ -67,7 +67,7 @@ export async function enrollGoatOnboardingEmails(
       })),
     )
     .onConflictDoNothing({
-      target: [goatOnboardingEmails.workosUserId, goatOnboardingEmails.step],
+      target: [onboardingEmails.workosUserId, onboardingEmails.step],
     });
 }
 
@@ -76,10 +76,10 @@ export async function enrollGoatOnboardingEmails(
 // rows already flipped to `sending`. Pass `workosUserId` to scope the claim to a
 // single owner (the inline welcome at signup) so it never picks up another
 // user's backlog; omit it for the global cron sweep.
-export async function claimDueGoatOnboardingEmails(
+export async function claimDueOnboardingEmails(
   input: { limit: number; workosUserId?: string },
   options: { db?: DbLike } = {},
-): Promise<ClaimedGoatOnboardingEmail[]> {
+): Promise<ClaimedOnboardingEmail[]> {
   const db = options.db ?? getDb();
   const userFilter = input.workosUserId ? sql`AND workos_user_id = ${input.workosUserId}` : sql``;
   const result = await db.execute(sql`
@@ -108,57 +108,57 @@ export async function claimDueGoatOnboardingEmails(
       u.email AS "email",
       u.first_name AS "firstName"
   `);
-  return rowsFromExecute<ClaimedGoatOnboardingEmail>(result).map((row) => ({
+  return rowsFromExecute<ClaimedOnboardingEmail>(result).map((row) => ({
     ...row,
     attempts: Number(row.attempts),
   }));
 }
 
-export async function markGoatOnboardingEmailSent(
+export async function markOnboardingEmailSent(
   id: string,
   options: { db?: DbLike } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
   const now = new Date();
   await db
-    .update(goatOnboardingEmails)
+    .update(onboardingEmails)
     .set({ status: "sent", sentAt: now, lastError: null, updatedAt: now })
-    .where(eq(goatOnboardingEmails.id, id));
+    .where(eq(onboardingEmails.id, id));
 }
 
 // Retryable failure: return the row to `pending` with a backed-off schedule so
 // the next sweep picks it up.
-export async function rescheduleGoatOnboardingEmail(
+export async function rescheduleOnboardingEmail(
   input: { id: string; nextRunAt: Date; error: string },
   options: { db?: DbLike } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
   await db
-    .update(goatOnboardingEmails)
+    .update(onboardingEmails)
     .set({
       status: "pending",
       scheduledAt: input.nextRunAt,
       lastError: input.error.slice(0, 2000),
       updatedAt: new Date(),
     })
-    .where(eq(goatOnboardingEmails.id, input.id));
+    .where(eq(onboardingEmails.id, input.id));
 }
 
 // Terminal failure: attempts exhausted, stop trying.
-export async function failGoatOnboardingEmail(
+export async function failOnboardingEmail(
   input: { id: string; error: string },
   options: { db?: DbLike } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
   await db
-    .update(goatOnboardingEmails)
+    .update(onboardingEmails)
     .set({ status: "failed", lastError: input.error.slice(0, 2000), updatedAt: new Date() })
-    .where(eq(goatOnboardingEmails.id, input.id));
+    .where(eq(onboardingEmails.id, input.id));
 }
 
 // Unsubscribe: stop the remaining sequence for whoever owns this email address.
 // Returns how many pending/sending rows were skipped.
-export async function skipPendingGoatOnboardingEmailsForEmail(
+export async function skipPendingOnboardingEmailsForEmail(
   email: string,
   options: { db?: DbLike } = {},
 ): Promise<number> {

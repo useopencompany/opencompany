@@ -1,15 +1,15 @@
 import { getDb } from "@opencompany/db/client";
-import { goatChatSessions } from "@opencompany/db/schema";
+import { chatSessions } from "@opencompany/db/schema";
 import { get } from "@vercel/blob";
 import { eq } from "drizzle-orm";
-import { currentGoatUser } from "@/lib/auth";
-import { goatChatScreenshotBlobPath, safeScreenshotFilename } from "@/lib/chat-screenshot-storage";
+import { currentUser } from "@/lib/auth";
+import { chatScreenshotBlobPath, safeScreenshotFilename } from "@/lib/chat-screenshot-storage";
 
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ sessionId: string; filename: string }> },
 ) {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return new Response(null, { status: 401 });
 
   const { sessionId, filename: rawFilename } = await params;
@@ -21,16 +21,16 @@ export async function GET(
   }
 
   const [session] = await getDb()
-    .select({ userWorkosId: goatChatSessions.userWorkosId })
-    .from(goatChatSessions)
-    .where(eq(goatChatSessions.id, sessionId))
+    .select({ userWorkosId: chatSessions.userWorkosId })
+    .from(chatSessions)
+    .where(eq(chatSessions.id, sessionId))
     .limit(1);
   if (!session || session.userWorkosId !== context.user.workosUserId) {
     return new Response(null, { status: 404 });
   }
 
   const result = await get(
-    goatChatScreenshotBlobPath({
+    chatScreenshotBlobPath({
       userWorkosId: context.user.workosUserId,
       chatSessionId: sessionId,
       filename,

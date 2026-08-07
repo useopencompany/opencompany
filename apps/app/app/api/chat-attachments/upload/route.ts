@@ -1,11 +1,11 @@
 import { type HandleUploadBody, handleUpload } from "@vercel/blob/client";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import {
   GOAT_CHAT_ATTACHMENT_CONTENT_TYPES,
   GOAT_CHAT_ATTACHMENT_MAX_BYTES,
 } from "@/lib/chat-attachment-formats";
 
-export function goatChatAttachmentUploadPrefix(userWorkosId: string): string {
+export function chatAttachmentUploadPrefix(userWorkosId: string): string {
   return `goat-chat/${userWorkosId}/`;
 }
 
@@ -15,10 +15,10 @@ export function goatChatAttachmentUploadPrefix(userWorkosId: string): string {
 // enforced here; the attachment metadata is persisted with the chat message
 // when the user sends it (onUploadCompleted does not fire on localhost).
 export async function POST(request: Request): Promise<Response> {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return new Response(null, { status: 401 });
 
-  const prefix = goatChatAttachmentUploadPrefix(context.user.workosUserId);
+  const prefix = chatAttachmentUploadPrefix(context.user.workosUserId);
   const body = (await request.json()) as HandleUploadBody;
   try {
     const jsonResponse = await handleUpload({

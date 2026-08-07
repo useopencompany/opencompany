@@ -1,13 +1,13 @@
 import { upload } from "@vercel/blob/client";
 import {
   GOAT_CHAT_ATTACHMENT_ACCEPT,
-  normalizedGoatChatAttachmentMediaType,
-  validateGoatChatAttachmentCandidate,
+  normalizedChatAttachmentMediaType,
+  validateChatAttachmentCandidate,
 } from "@/lib/chat-attachment-formats";
 
 // Client-side half of the brain asset upload: the browser uploads directly to
 // the private Blob store (token minted by /api/brain-assets/upload), then the
-// caller registers the document via uploadGoatBrainAssetAction. Limits mirror
+// caller registers the document via uploadBrainAssetAction. Limits mirror
 // the server-side checks in lib/brain-assets.ts; the accepted set is the same
 // core set the chat composer takes.
 export const BRAIN_ASSET_ACCEPT = GOAT_CHAT_ATTACHMENT_ACCEPT;
@@ -15,7 +15,7 @@ export const BRAIN_ASSET_MAX_BYTES = 20 * 1024 * 1024;
 
 export function validateBrainAssetFile(file: File): string | null {
   if (file.size === 0) return "That file is empty.";
-  const validation = validateGoatChatAttachmentCandidate({
+  const validation = validateChatAttachmentCandidate({
     mediaType: file.type,
     filename: file.name,
     sizeBytes: file.size,
@@ -27,7 +27,7 @@ export async function uploadBrainAssetBlob(
   brainRef: string,
   file: File,
 ): Promise<{ blobUrl: string; contentSha256: string; mediaType: string }> {
-  const mediaType = normalizedGoatChatAttachmentMediaType({
+  const mediaType = normalizedChatAttachmentMediaType({
     mediaType: file.type,
     filename: file.name,
   });

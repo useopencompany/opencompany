@@ -1,28 +1,28 @@
 import type { CodexCommandToolInput, CodexCommandToolOutput } from "@opencompany/agent-runtime";
 import {
+  type ActionExecutionResponse,
+  type ActionGatewayResponse,
   GOAT_ACTION_TOOL_CONTRACT,
-  type GoatActionExecutionResponse,
-  type GoatActionGatewayResponse,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { BrowserToolName } from "@opencompany/browser-tools";
 import type {
-  GoatChatAttachmentKind,
-  GoatChatEngine,
-  GoatChatMessage,
-  GoatCodexChatSessionStatus,
-  GoatHarnessEngine,
-  GoatTaskStatus,
+  ChatAttachmentKind,
+  ChatEngine,
+  ChatMessage,
+  CodexChatSessionStatus,
+  HarnessEngine,
+  TaskStatus,
 } from "@opencompany/db/schema";
 import type { UIMessage } from "ai";
 import type {
-  GoatActionApprovalView,
-  GoatActionErrorCode,
-  GoatActionSourceDescriptor,
-  GoatActionSourceId,
+  ActionApprovalView,
+  ActionErrorCode,
+  ActionSourceDescriptor,
+  ActionSourceId,
 } from "./actions/types";
 import { finiteDurationMs } from "./chat-timing";
-import type { GoatCodexComposerSettingsView } from "./codex-chat-settings";
+import type { CodexComposerSettingsView } from "./codex-chat-settings";
 
 export {
   CODEX_APPROVAL_TOOL_NAME,
@@ -116,14 +116,14 @@ export type BrowserUseProfileToolOutput = {
   error?: string;
 };
 
-export type GoatTaskCardMetadata = {
+export type TaskCardMetadata = {
   id: string;
   displayId?: string | null;
   title?: string | null;
-  status?: GoatTaskStatus | null;
+  status?: TaskStatus | null;
 };
 
-export type GoatChatMention =
+export type ChatMention =
   | {
       kind: "engine";
       id: "codex" | "claude";
@@ -143,9 +143,9 @@ export type GoatChatMention =
 // present client → server on submit (the server re-validates them); server →
 // client rehydration strips them — the client fetches bytes through
 // /api/chat-attachments/{messageId}/{attachmentId} instead.
-export type GoatChatUiAttachment = {
+export type ChatUiAttachment = {
   id: string;
-  kind: GoatChatAttachmentKind;
+  kind: ChatAttachmentKind;
   mediaType: string;
   filename: string;
   sizeBytes: number;
@@ -156,17 +156,17 @@ export type GoatChatUiAttachment = {
   previewUrl?: string;
 };
 
-export type GoatChatMessageMetadata = {
+export type ChatMessageMetadata = {
   sessionId?: string;
   model?: string;
   scheduledWakeup?: {
     reason: string;
     dueAt: string;
   };
-  mentions?: GoatChatMention[];
-  attachments?: GoatChatUiAttachment[];
+  mentions?: ChatMention[];
+  attachments?: ChatUiAttachment[];
   taskId?: string;
-  task?: GoatTaskCardMetadata | null;
+  task?: TaskCardMetadata | null;
   timing?: {
     createdAt?: string;
     updatedAt?: string;
@@ -182,7 +182,7 @@ export type GoatChatMessageMetadata = {
 export type StartTaskToolInput = {
   prompt: string;
   name: string;
-  engine?: GoatHarnessEngine;
+  engine?: HarnessEngine;
   reason?: string;
 };
 
@@ -194,7 +194,7 @@ export type StartTaskToolOutput = {
   prompt: string;
 };
 
-export type GoatChatWorkflowCatalogItem = {
+export type ChatWorkflowCatalogItem = {
   id: string;
   name: string;
   description: string;
@@ -272,7 +272,7 @@ export type DeleteTaskScheduleToolOutput =
       status: "not_found" | "ambiguous" | "invalid";
     };
 
-export type GoatBrainCliCommand =
+export type BrainCliCommand =
   | "help"
   | "create"
   | "list"
@@ -292,15 +292,15 @@ export type GoatBrainCliCommand =
   | "folder"
   | "doctor";
 
-export type GoatBrainToolFlagValue = string | number | boolean | string[];
+export type BrainToolFlagValue = string | number | boolean | string[];
 
-export type GoatBrainToolInput = {
-  command: GoatBrainCliCommand;
-  flags?: Record<string, GoatBrainToolFlagValue>;
+export type BrainToolInput = {
+  command: BrainCliCommand;
+  flags?: Record<string, BrainToolFlagValue>;
   stdin?: string;
 };
 
-export type GoatBrainToolOutput = {
+export type BrainToolOutput = {
   ok: boolean;
   brainRef?: string;
   exitCode: number | null;
@@ -400,11 +400,11 @@ export type WebSearchToolOutput =
       error: string;
     };
 
-export type GoatChatActionCatalog = {
-  sources: GoatActionSourceDescriptor[];
+export type ChatActionCatalog = {
+  sources: ActionSourceDescriptor[];
   actions: {
     id: string;
-    source: GoatActionSourceId;
+    source: ActionSourceId;
     description: string;
     params: unknown;
     // "ask" actions pause on a tool-approval request the user answers in chat;
@@ -414,23 +414,23 @@ export type GoatChatActionCatalog = {
 };
 
 export type ListActionsToolInput = {
-  source?: GoatActionSourceId;
+  source?: ActionSourceId;
 };
 
 export type ListActionsToolOutput =
-  | Extract<GoatActionGatewayResponse, { ok: true; sources: unknown }>
-  | Extract<GoatActionGatewayResponse, { ok: false }>
+  | Extract<ActionGatewayResponse, { ok: true; sources: unknown }>
+  | Extract<ActionGatewayResponse, { ok: false }>
   | {
       ok: true;
-      source: GoatActionSourceDescriptor;
-      actions: GoatChatActionCatalog["actions"];
+      source: ActionSourceDescriptor;
+      actions: ChatActionCatalog["actions"];
     }
   | {
       ok: false;
       error: {
         code: "unknown_source";
         message: string;
-        availableSources: GoatActionSourceId[];
+        availableSources: ActionSourceId[];
       };
     };
 
@@ -439,13 +439,13 @@ export type UseActionToolInput = {
   params?: Record<string, unknown>;
 };
 
-export type UseActionToolOutput = GoatActionExecutionResponse<
-  GoatActionSourceId,
-  GoatActionErrorCode,
-  GoatActionApprovalView
+export type UseActionToolOutput = ActionExecutionResponse<
+  ActionSourceId,
+  ActionErrorCode,
+  ActionApprovalView
 >;
 
-export type GoatChatSkillCatalogItem = {
+export type ChatSkillCatalogItem = {
   id: string;
   name: string;
   description: string;
@@ -457,7 +457,7 @@ export type ListSkillsToolInput = {
 
 export type ListSkillsToolOutput = {
   ok: true;
-  skills: GoatChatSkillCatalogItem[];
+  skills: ChatSkillCatalogItem[];
   total: number;
   truncated: boolean;
 };
@@ -469,7 +469,7 @@ export type UseSkillToolInput = {
 export type UseSkillToolOutput =
   | {
       ok: true;
-      skill: GoatChatSkillCatalogItem & {
+      skill: ChatSkillCatalogItem & {
         instructions: string;
       };
     }
@@ -482,14 +482,14 @@ export type UseSkillToolOutput =
       };
     };
 
-type GoatBrowserChatTools = {
+type BrowserChatTools = {
   [Name in BrowserToolName]: {
     input: BrowserToolInput;
     output: BrowserToolOutput;
   };
 };
 
-export type GoatChatTools = {
+export type ChatTools = {
   start_task: {
     input: StartTaskToolInput;
     output: StartTaskToolOutput;
@@ -511,8 +511,8 @@ export type GoatChatTools = {
     output: DeleteTaskScheduleToolOutput;
   };
   goat_brain: {
-    input: GoatBrainToolInput;
-    output: GoatBrainToolOutput;
+    input: BrainToolInput;
+    output: BrainToolOutput;
   };
   save_to_brain: {
     input: SaveToBrainToolInput;
@@ -550,18 +550,14 @@ export type GoatChatTools = {
     input: CodexCommandToolInput;
     output: CodexCommandToolOutput;
   };
-} & GoatBrowserChatTools;
+} & BrowserChatTools;
 
-export type GoatChatUiMessage = UIMessage<
-  GoatChatMessageMetadata,
-  Record<string, never>,
-  GoatChatTools
->;
+export type ChatUiMessage = UIMessage<ChatMessageMetadata, Record<string, never>, ChatTools>;
 
 export function listedActionSourceIdsFromMessages(
-  messages: readonly GoatChatUiMessage[],
-): GoatActionSourceId[] {
-  const sourceIds = new Set<GoatActionSourceId>();
+  messages: readonly ChatUiMessage[],
+): ActionSourceId[] {
+  const sourceIds = new Set<ActionSourceId>();
   for (const message of messages) {
     for (const part of message.parts) {
       if (
@@ -577,7 +573,7 @@ export function listedActionSourceIdsFromMessages(
   return [...sourceIds];
 }
 
-export function listedSkillIdsFromMessages(messages: readonly GoatChatUiMessage[]): string[] {
+export function listedSkillIdsFromMessages(messages: readonly ChatUiMessage[]): string[] {
   const skillIds = new Set<string>();
   for (const message of messages) {
     for (const part of message.parts) {
@@ -593,7 +589,7 @@ export function listedSkillIdsFromMessages(messages: readonly GoatChatUiMessage[
   return [...skillIds];
 }
 
-export function usedSkillIdsFromMessages(messages: readonly GoatChatUiMessage[]): string[] {
+export function usedSkillIdsFromMessages(messages: readonly ChatUiMessage[]): string[] {
   const skillIds = new Set<string>();
   for (const message of messages) {
     for (const part of message.parts) {
@@ -609,33 +605,33 @@ export function usedSkillIdsFromMessages(messages: readonly GoatChatUiMessage[])
   return [...skillIds];
 }
 
-export type GoatChatSessionView = {
+export type ChatSessionView = {
   id: string;
   title: string;
   model: AgentModelId;
-  engine?: GoatChatEngine;
-  codexComposerSettings?: GoatCodexComposerSettingsView | null;
-  codexRuntime?: GoatCodexRuntimeView | null;
-  messages: GoatChatUiMessage[];
+  engine?: ChatEngine;
+  codexComposerSettings?: CodexComposerSettingsView | null;
+  codexRuntime?: CodexRuntimeView | null;
+  messages: ChatUiMessage[];
 };
 
-export type GoatCodexRuntimeView = {
-  status: GoatCodexChatSessionStatus;
+export type CodexRuntimeView = {
+  status: CodexChatSessionStatus;
   activeTurnId?: string | null;
   error: string | null;
   updatedAt: string;
 };
 
-export type GoatChatState = "working" | "done_unseen" | "done_seen";
+export type ChatState = "working" | "done_unseen" | "done_seen";
 
-export type GoatChatSummaryView = {
+export type ChatSummaryView = {
   id: string;
   title: string;
   model: AgentModelId;
-  engine?: GoatChatEngine;
-  codexComposerSettings?: GoatCodexComposerSettingsView | null;
-  codexRuntime?: GoatCodexRuntimeView | null;
-  state?: GoatChatState;
+  engine?: ChatEngine;
+  codexComposerSettings?: CodexComposerSettingsView | null;
+  codexRuntime?: CodexRuntimeView | null;
+  state?: ChatState;
   preview: string;
   updatedAt: string;
   lastSeenAt?: string | null;
@@ -645,12 +641,12 @@ export type GoatChatSummaryView = {
 
 export const GOAT_PINNED_CHAT_LIMIT = 20;
 
-export function deriveGoatChatState(input: {
+export function deriveChatState(input: {
   updatedAt: string;
   lastSeenAt?: string | null;
   codexRuntime?: { status?: string | null; activeTurnId?: string | null } | null;
-}): GoatChatState {
-  if (isGoatChatRuntimeActive(input.codexRuntime)) return "working";
+}): ChatState {
+  if (isChatRuntimeActive(input.codexRuntime)) return "working";
   if (!input.lastSeenAt) return "done_unseen";
 
   const lastSeenAt = Date.parse(input.lastSeenAt);
@@ -659,16 +655,16 @@ export function deriveGoatChatState(input: {
   return lastSeenAt >= updatedAt ? "done_seen" : "done_unseen";
 }
 
-export function goatChatSummaryState(
-  chat: Pick<GoatChatSummaryView, "codexRuntime" | "lastSeenAt" | "state" | "updatedAt">,
-): GoatChatState {
-  if (isGoatChatRuntimeActive(chat.codexRuntime)) return "working";
+export function chatSummaryState(
+  chat: Pick<ChatSummaryView, "codexRuntime" | "lastSeenAt" | "state" | "updatedAt">,
+): ChatState {
+  if (isChatRuntimeActive(chat.codexRuntime)) return "working";
   if (chat.state) return chat.state;
   if (chat.lastSeenAt === undefined) return "done_seen";
-  return deriveGoatChatState(chat);
+  return deriveChatState(chat);
 }
 
-export function isGoatChatRuntimeActive(
+export function isChatRuntimeActive(
   runtime: { status?: string | null; activeTurnId?: string | null } | null | undefined,
 ): boolean {
   if (
@@ -684,8 +680,8 @@ export function isGoatChatRuntimeActive(
   );
 }
 
-export type GoatStoredChatMessage = Pick<
-  GoatChatMessage,
+export type StoredChatMessage = Pick<
+  ChatMessage,
   | "id"
   | "sessionId"
   | "role"
@@ -700,19 +696,16 @@ export type GoatStoredChatMessage = Pick<
   taskDisplayId: string | null;
   taskName: string | null;
   taskPrompt: string | null;
-  taskStatus: GoatTaskStatus | null;
+  taskStatus: TaskStatus | null;
 };
 
-export type GoatChatMessageOrderInput = {
+export type ChatMessageOrderInput = {
   id: string;
   role: "user" | "assistant";
   createdAt: Date | string;
 };
 
-export function compareGoatChatMessageOrder(
-  left: GoatChatMessageOrderInput,
-  right: GoatChatMessageOrderInput,
-) {
+export function compareChatMessageOrder(left: ChatMessageOrderInput, right: ChatMessageOrderInput) {
   const timeDiff = chatMessageCreatedAtMs(left.createdAt) - chatMessageCreatedAtMs(right.createdAt);
   if (timeDiff !== 0) return timeDiff;
 
@@ -722,7 +715,7 @@ export function compareGoatChatMessageOrder(
   return left.id.localeCompare(right.id);
 }
 
-export function nextGoatChatMessageCreatedAt(createdAt: Date) {
+export function nextChatMessageCreatedAt(createdAt: Date) {
   return new Date(createdAt.getTime() + 1);
 }
 
@@ -734,17 +727,14 @@ export function emptyAssistantDebugTrace(model: string) {
   };
 }
 
-export function textFromGoatChatUiMessage(message: Pick<GoatChatUiMessage, "parts">) {
+export function textFromChatUiMessage(message: Pick<ChatUiMessage, "parts">) {
   return message.parts
     .flatMap((part) => (part.type === "text" ? [part.text] : []))
     .join("")
     .trim();
 }
 
-export function replaceGoatChatUiMessageText(
-  message: GoatChatUiMessage,
-  text: string,
-): GoatChatUiMessage {
+export function replaceChatUiMessageText(message: ChatUiMessage, text: string): ChatUiMessage {
   let replaced = false;
   const parts = message.parts.map((part) => {
     if (part.type !== "text") return part;
@@ -758,19 +748,19 @@ export function replaceGoatChatUiMessageText(
   };
 }
 
-export function toGoatChatUiMessage(message: GoatStoredChatMessage): GoatChatUiMessage {
-  const metadata = toGoatChatMessageMetadata(message);
+export function toChatUiMessage(message: StoredChatMessage): ChatUiMessage {
+  const metadata = toChatMessageMetadata(message);
   return {
     id: message.id,
     role: message.role === "user" ? "user" : "assistant",
     ...(metadata ? { metadata } : {}),
-    parts: toGoatChatUiMessageParts(message, metadata),
+    parts: toChatUiMessageParts(message, metadata),
   };
 }
 
-export function toGoatChatMessageMetadata(
+export function toChatMessageMetadata(
   message: Pick<
-    GoatStoredChatMessage,
+    StoredChatMessage,
     | "sessionId"
     | "taskId"
     | "taskDisplayId"
@@ -781,7 +771,7 @@ export function toGoatChatMessageMetadata(
     | "createdAt"
     | "updatedAt"
   >,
-): GoatChatMessageMetadata | undefined {
+): ChatMessageMetadata | undefined {
   const task =
     message.taskId && message.taskName && message.taskDisplayId
       ? {
@@ -795,9 +785,9 @@ export function toGoatChatMessageMetadata(
   const model = message.debugTrace?.model;
   const scheduledWakeup = message.debugTrace?.scheduledWakeup;
   const aborted = message.debugTrace?.aborted === true;
-  const timing = toGoatChatMessageTiming(message);
-  const attachments = toGoatChatUiAttachments(message.attachments);
-  const contextTokens = goatChatContextTokensFromUsage(message.debugTrace?.usage);
+  const timing = toChatMessageTiming(message);
+  const attachments = toChatUiAttachments(message.attachments);
+  const contextTokens = chatContextTokensFromUsage(message.debugTrace?.usage);
 
   if (
     !message.sessionId &&
@@ -829,9 +819,9 @@ export function toGoatChatMessageMetadata(
 
 // Strips the private blob fields: the client fetches bytes through the
 // auth-scoped attachment route, never from the blob store directly.
-function toGoatChatUiAttachments(
-  attachments: GoatStoredChatMessage["attachments"],
-): GoatChatUiAttachment[] | null {
+function toChatUiAttachments(
+  attachments: StoredChatMessage["attachments"],
+): ChatUiAttachment[] | null {
   if (!attachments || attachments.length === 0) return null;
   return attachments.map((attachment) => ({
     id: attachment.id,
@@ -842,7 +832,7 @@ function toGoatChatUiAttachments(
   }));
 }
 
-export function goatChatContextTokensFromUsage(
+export function chatContextTokensFromUsage(
   usage:
     | {
         inputTokens?: number | undefined;
@@ -858,8 +848,8 @@ export function goatChatContextTokensFromUsage(
   return sum > 0 ? sum : undefined;
 }
 
-function toGoatChatMessageTiming(
-  message: Pick<GoatStoredChatMessage, "createdAt" | "updatedAt" | "debugTrace">,
+function toChatMessageTiming(
+  message: Pick<StoredChatMessage, "createdAt" | "updatedAt" | "debugTrace">,
 ) {
   const createdAt = serializeChatMessageTimestamp(message.createdAt);
   const updatedAt = serializeChatMessageTimestamp(message.updatedAt);
@@ -878,10 +868,10 @@ function serializeChatMessageTimestamp(value: Date | string) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-function toGoatChatUiMessageParts(
-  message: GoatStoredChatMessage,
-  metadata: GoatChatMessageMetadata | undefined,
-): GoatChatUiMessage["parts"] {
+function toChatUiMessageParts(
+  message: StoredChatMessage,
+  metadata: ChatMessageMetadata | undefined,
+): ChatUiMessage["parts"] {
   if (message.role !== "assistant") return textParts(message.content);
 
   const persistedParts = parseDebugTraceUiMessageParts(message.debugTrace?.uiMessageParts);
@@ -893,22 +883,22 @@ function toGoatChatUiMessageParts(
   return textParts(message.content);
 }
 
-function textParts(content: string): GoatChatUiMessage["parts"] {
+function textParts(content: string): ChatUiMessage["parts"] {
   return content ? [{ type: "text", text: content }] : [];
 }
 
 function withStoredContentFallback(
-  parts: GoatChatUiMessage["parts"],
+  parts: ChatUiMessage["parts"],
   content: string,
-): GoatChatUiMessage["parts"] {
+): ChatUiMessage["parts"] {
   if (!content || parts.some((part) => part.type === "text" && part.text.trim())) return parts;
   return [...parts, { type: "text", text: content }];
 }
 
-function parseDebugTraceUiMessageParts(value: unknown): GoatChatUiMessage["parts"] | null {
+function parseDebugTraceUiMessageParts(value: unknown): ChatUiMessage["parts"] | null {
   if (!Array.isArray(value)) return null;
 
-  const parts: GoatChatUiMessage["parts"] = [];
+  const parts: ChatUiMessage["parts"] = [];
   for (const part of value) {
     if (!isRecord(part)) continue;
     if (part.type === "text" && typeof part.text === "string") {
@@ -920,7 +910,7 @@ function parseDebugTraceUiMessageParts(value: unknown): GoatChatUiMessage["parts
       continue;
     }
     if (isPersistedToolPart(part)) {
-      parts.push(part as GoatChatUiMessage["parts"][number]);
+      parts.push(part as ChatUiMessage["parts"][number]);
     }
   }
 
@@ -1118,9 +1108,9 @@ function chatMessageRoleOrder(role: "user" | "assistant") {
 }
 
 function legacyTaskOrderedParts(
-  message: GoatStoredChatMessage,
-  task: GoatTaskCardMetadata | null,
-): GoatChatUiMessage["parts"] | null {
+  message: StoredChatMessage,
+  task: TaskCardMetadata | null,
+): ChatUiMessage["parts"] | null {
   const output = legacyStartTaskOutput(message, task);
   if (!output) return null;
 
@@ -1130,12 +1120,12 @@ function legacyTaskOrderedParts(
     state: "output-available",
     input: legacyStartTaskInput(message, output),
     output,
-  } as GoatChatUiMessage["parts"][number];
+  } as ChatUiMessage["parts"][number];
 
   const split = splitTaskContentAroundTaskNotice(message.content);
   if (!split) return [...textParts(message.content), part];
 
-  const parts: GoatChatUiMessage["parts"] = [];
+  const parts: ChatUiMessage["parts"] = [];
   if (split.before) parts.push({ type: "text", text: split.before });
   parts.push(part);
   if (split.after) parts.push({ type: "text", text: split.after });
@@ -1143,8 +1133,8 @@ function legacyTaskOrderedParts(
 }
 
 function legacyStartTaskOutput(
-  message: GoatStoredChatMessage,
-  task: GoatTaskCardMetadata | null,
+  message: StoredChatMessage,
+  task: TaskCardMetadata | null,
 ): StartTaskToolOutput | null {
   const toolResults = message.debugTrace?.toolResults;
   if (Array.isArray(toolResults)) {
@@ -1165,7 +1155,7 @@ function legacyStartTaskOutput(
 }
 
 function legacyStartTaskInput(
-  message: GoatStoredChatMessage,
+  message: StoredChatMessage,
   output: StartTaskToolOutput,
 ): StartTaskToolInput {
   const toolCalls = message.debugTrace?.toolCalls;

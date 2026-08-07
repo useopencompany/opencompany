@@ -2,28 +2,28 @@
 
 import { getDb } from "@opencompany/db/client";
 import {
-  deleteGoatRepoConfig,
-  type GoatRepoConfigView,
+  deleteRepoConfig,
   isValidGitHubRepositoryExternalId,
-  listGoatWorkspaceRepositories,
-  upsertGoatRepoConfig,
+  listWorkspaceRepositories,
+  type RepoConfigView,
+  upsertRepoConfig,
 } from "@opencompany/db/repo-configs";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
-import { normalizeGoatRepoSetupInstructions, validateGoatRepoEnv } from "@/lib/repo-env";
+import { currentUser } from "@/lib/auth";
+import { normalizeRepoSetupInstructions, validateRepoEnv } from "@/lib/repo-env";
 
-export type GoatRepoConfigMutationResult =
-  | { ok: true; config: GoatRepoConfigView }
+export type RepoConfigMutationResult =
+  | { ok: true; config: RepoConfigView }
   | { ok: false; message: string };
 
-export type GoatRepoConfigDeleteResult =
+export type RepoConfigDeleteResult =
   | { ok: true; repositoryExternalId: string }
   | { ok: false; message: string };
 
 async function requireWorkspaceAdmin(): Promise<
   { ok: false; message: string } | { ok: true; workspaceId: string; userWorkosId: string }
 > {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return { ok: false, message: "You must be signed in." };
   if (context.role !== "admin") {
     return {
@@ -39,7 +39,7 @@ async function resolveConfigurableRepository(input: {
   repositoryExternalId: string;
 }): Promise<{ repositoryExternalId: string; repositoryFullName: string } | null> {
   const db = getDb();
-  const repositories = await listGoatWorkspaceRepositories({
+  const repositories = await listWorkspaceRepositories({
     db,
     workspaceId: input.workspaceId,
   });
@@ -66,15 +66,15 @@ function isValidRepositoryMutationInput(input: unknown): input is {
   );
 }
 
-export async function saveGoatRepoEnvAction(input: {
+export async function saveRepoEnvAction(input: {
   repositoryExternalId: string;
   envContent: string;
-}): Promise<GoatRepoConfigMutationResult> {
+}): Promise<RepoConfigMutationResult> {
   if (!isValidRepositoryMutationInput(input) || typeof input.envContent !== "string") {
     return { ok: false, message: "Invalid repository environment." };
   }
 
-  const validation = validateGoatRepoEnv(input.envContent);
+  const validation = validateRepoEnv(input.envContent);
   if (!validation.ok) return validation;
   const gate = await requireWorkspaceAdmin();
   if (!gate.ok) return gate;
@@ -87,7 +87,7 @@ export async function saveGoatRepoEnvAction(input: {
     if (!repository) {
       return { ok: false, message: "This repository is not available to the workspace." };
     }
-    const config = await upsertGoatRepoConfig({
+    const config = await upsertRepoConfig({
       db: getDb(),
       workspaceId: gate.workspaceId,
       ...repository,
@@ -102,9 +102,9 @@ export async function saveGoatRepoEnvAction(input: {
   }
 }
 
-export async function clearGoatRepoEnvAction(input: {
+export async function clearRepoEnvAction(input: {
   repositoryExternalId: string;
-}): Promise<GoatRepoConfigMutationResult> {
+}): Promise<RepoConfigMutationResult> {
   if (!isValidRepositoryMutationInput(input)) {
     return { ok: false, message: "Invalid repository." };
   }
@@ -119,7 +119,7 @@ export async function clearGoatRepoEnvAction(input: {
     if (!repository) {
       return { ok: false, message: "Repository configuration not found." };
     }
-    const config = await upsertGoatRepoConfig({
+    const config = await upsertRepoConfig({
       db: getDb(),
       workspaceId: gate.workspaceId,
       ...repository,
@@ -134,14 +134,14 @@ export async function clearGoatRepoEnvAction(input: {
   }
 }
 
-export async function saveGoatRepoSetupInstructionsAction(input: {
+export async function saveRepoSetupInstructionsAction(input: {
   repositoryExternalId: string;
   setupInstructions: string;
-}): Promise<GoatRepoConfigMutationResult> {
+}): Promise<RepoConfigMutationResult> {
   if (!isValidRepositoryMutationInput(input) || typeof input.setupInstructions !== "string") {
     return { ok: false, message: "Invalid setup instructions." };
   }
-  const normalized = normalizeGoatRepoSetupInstructions(input.setupInstructions);
+  const normalized = normalizeRepoSetupInstructions(input.setupInstructions);
   if (!normalized.ok) return normalized;
   const gate = await requireWorkspaceAdmin();
   if (!gate.ok) return gate;
@@ -154,7 +154,7 @@ export async function saveGoatRepoSetupInstructionsAction(input: {
     if (!repository) {
       return { ok: false, message: "This repository is not available to the workspace." };
     }
-    const config = await upsertGoatRepoConfig({
+    const config = await upsertRepoConfig({
       db: getDb(),
       workspaceId: gate.workspaceId,
       ...repository,
@@ -169,9 +169,9 @@ export async function saveGoatRepoSetupInstructionsAction(input: {
   }
 }
 
-export async function deleteGoatRepoConfigAction(input: {
+export async function deleteRepoConfigAction(input: {
   repositoryExternalId: string;
-}): Promise<GoatRepoConfigDeleteResult> {
+}): Promise<RepoConfigDeleteResult> {
   if (!isValidRepositoryMutationInput(input)) {
     return { ok: false, message: "Invalid repository." };
   }
@@ -179,7 +179,7 @@ export async function deleteGoatRepoConfigAction(input: {
   if (!gate.ok) return gate;
 
   try {
-    const deleted = await deleteGoatRepoConfig({
+    const deleted = await deleteRepoConfig({
       db: getDb(),
       workspaceId: gate.workspaceId,
       repositoryExternalId: input.repositoryExternalId,

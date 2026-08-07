@@ -1,17 +1,13 @@
-import {
-  isValidGoatBrainEvidenceId,
-  isValidGoatBrainId,
-  isValidGoatBrainSourceRef,
-} from "./schema";
+import { isValidBrainEvidenceId, isValidBrainId, isValidBrainSourceRef } from "./schema";
 
 const BRACKET_LINK_PATTERN = /\[\[([^[\]\n|]+)(?:\|([^[\]\n]+))?\]\]/g;
 const LEGACY_EVIDENCE_CITATION_PATTERN = /\[\^ev:([^\]\n]+)\]/g;
 
-export type GoatBrainInlineLinkKind = "page" | "evidence" | "source";
+export type BrainInlineLinkKind = "page" | "evidence" | "source";
 
-export type GoatBrainInlineLink = {
+export type BrainInlineLink = {
   raw: string;
-  kind: GoatBrainInlineLinkKind;
+  kind: BrainInlineLinkKind;
   target: string;
   label: string;
   index: number;
@@ -19,8 +15,8 @@ export type GoatBrainInlineLink = {
   legacy: boolean;
 };
 
-export function parseGoatBrainInlineLinks(text: string): GoatBrainInlineLink[] {
-  const links: GoatBrainInlineLink[] = [];
+export function parseBrainInlineLinks(text: string): BrainInlineLink[] {
+  const links: BrainInlineLink[] = [];
   const ignoredRanges = markdownCodeRanges(text);
 
   for (const match of text.matchAll(BRACKET_LINK_PATTERN)) {
@@ -58,15 +54,15 @@ export function parseGoatBrainInlineLinks(text: string): GoatBrainInlineLink[] {
   return links.sort((a, b) => a.index - b.index || a.raw.localeCompare(b.raw));
 }
 
-export function formatGoatBrainPageLink(id: string, label?: string): string {
+export function formatBrainPageLink(id: string, label?: string): string {
   return formatBracketLink("page", id, label);
 }
 
-export function formatGoatBrainEvidenceLink(id: string, label?: string): string {
+export function formatBrainEvidenceLink(id: string, label?: string): string {
   return formatBracketLink("evidence", id, label);
 }
 
-export function formatGoatBrainSourceLink(ref: string, label?: string): string {
+export function formatBrainSourceLink(ref: string, label?: string): string {
   return formatBracketLink("source", ref, label);
 }
 
@@ -82,15 +78,12 @@ export function sourceLinkTargets(text: string): string[] {
   return inlineLinkTargets(text, "source");
 }
 
-export function isValidGoatBrainInlineLinkTarget(
-  kind: GoatBrainInlineLinkKind,
-  target: string,
-): boolean {
+export function isValidBrainInlineLinkTarget(kind: BrainInlineLinkKind, target: string): boolean {
   return isValidInlineLinkTarget(kind, target);
 }
 
 function parseBracketTarget(value: string): {
-  kind: GoatBrainInlineLinkKind;
+  kind: BrainInlineLinkKind;
   target: string;
   legacy: boolean;
 } {
@@ -106,7 +99,7 @@ function parseBracketTarget(value: string): {
 }
 
 function formatBracketLink(
-  kind: GoatBrainInlineLinkKind,
+  kind: BrainInlineLinkKind,
   target: string,
   label: string | undefined,
 ): string {
@@ -123,10 +116,10 @@ function formatBracketLink(
     : `[[${kind}:${normalizedTarget}]]`;
 }
 
-function inlineLinkTargets(text: string, kind: GoatBrainInlineLinkKind): string[] {
+function inlineLinkTargets(text: string, kind: BrainInlineLinkKind): string[] {
   const seen = new Set<string>();
   const targets: string[] = [];
-  for (const link of parseGoatBrainInlineLinks(text)) {
+  for (const link of parseBrainInlineLinks(text)) {
     if (link.kind !== kind || !link.valid || seen.has(link.target)) continue;
     seen.add(link.target);
     targets.push(link.target);
@@ -134,14 +127,14 @@ function inlineLinkTargets(text: string, kind: GoatBrainInlineLinkKind): string[
   return targets;
 }
 
-function isValidInlineLinkTarget(kind: GoatBrainInlineLinkKind, target: string): boolean {
+function isValidInlineLinkTarget(kind: BrainInlineLinkKind, target: string): boolean {
   switch (kind) {
     case "page":
-      return isValidGoatBrainId(target);
+      return isValidBrainId(target);
     case "evidence":
-      return isValidGoatBrainEvidenceId(target);
+      return isValidBrainEvidenceId(target);
     case "source":
-      return isValidGoatBrainSourceRef(target);
+      return isValidBrainSourceRef(target);
   }
 }
 

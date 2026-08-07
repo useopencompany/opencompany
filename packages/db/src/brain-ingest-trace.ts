@@ -10,7 +10,7 @@ export const GOAT_BRAIN_INGEST_TRIAGE_REASON_LENGTH = 500;
 export const GOAT_BRAIN_INGEST_TRIAGE_MAX_ENTITY_HINTS = 12;
 export const GOAT_BRAIN_INGEST_TRIAGE_ENTITY_HINT_LENGTH = 160;
 
-export type GoatBrainIngestTraceUsage = {
+export type BrainIngestTraceUsage = {
   inputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
@@ -21,7 +21,7 @@ export type GoatBrainIngestTraceUsage = {
   cacheWriteInputTokens?: number | null;
 };
 
-export type GoatBrainIngestBudget = {
+export type BrainIngestBudget = {
   limitUsdMicros: number;
   stopThresholdUsdMicros: number;
   modelCostUsdMicros: number;
@@ -32,24 +32,24 @@ export type GoatBrainIngestBudget = {
   exhausted: boolean;
 };
 
-export type GoatBrainIngestTriageTrace = {
+export type BrainIngestTriageTrace = {
   model: string;
   decision: "skip" | "ingest";
   reason: string;
   entityHints: string[];
-  usage: GoatBrainIngestTraceUsage;
+  usage: BrainIngestTraceUsage;
   modelCostUsdMicros: number;
 };
 
-export type GoatBrainIngestTraceToolCallStatus = "completed" | "failed" | "blocked";
+export type BrainIngestTraceToolCallStatus = "completed" | "failed" | "blocked";
 
-export type GoatBrainIngestTraceToolCall = {
+export type BrainIngestTraceToolCall = {
   id: string;
   toolName: "goat_brain";
   command: string;
   args: string[];
   stdinPreview: string | null;
-  status: GoatBrainIngestTraceToolCallStatus;
+  status: BrainIngestTraceToolCallStatus;
   mutating: boolean;
   exitCode: number | null;
   stdoutPreview: string;
@@ -59,15 +59,15 @@ export type GoatBrainIngestTraceToolCall = {
   completedAt: string;
 };
 
-export type GoatBrainIngestTrace = {
+export type BrainIngestTrace = {
   schemaVersion: typeof GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION;
   model: string;
   steps: number;
   toolCallCount: number;
   mutations: number;
-  usage: GoatBrainIngestTraceUsage;
+  usage: BrainIngestTraceUsage;
   finalText: string;
-  toolCalls: GoatBrainIngestTraceToolCall[];
+  toolCalls: BrainIngestTraceToolCall[];
   truncatedToolCalls: number;
   // Web-search enrichment usage for this ingest (0 when enrichment is disabled,
   // unavailable, or unused). Optional so existing v1 traces normalize cleanly.
@@ -75,20 +75,20 @@ export type GoatBrainIngestTrace = {
   webSearchCostUsdMicros?: number;
   // A source-only tiny-model pass that ran before any Brain materialization.
   // Optional so pre-triage v1 traces continue to normalize cleanly.
-  triage?: GoatBrainIngestTriageTrace;
+  triage?: BrainIngestTriageTrace;
   // Provider spend accumulated at step boundaries for the current worker
   // attempt. Optional so pre-budget traces continue to normalize.
-  budget?: GoatBrainIngestBudget;
+  budget?: BrainIngestBudget;
   createdAt: string;
 };
 
-export function normalizeGoatBrainIngestTrace(value: unknown): GoatBrainIngestTrace | null {
+export function normalizeBrainIngestTrace(value: unknown): BrainIngestTrace | null {
   const record = readRecord(value);
   if (!record || record.schemaVersion !== GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION) return null;
 
   const toolCalls = readArray(record.toolCalls)
     .slice(0, GOAT_BRAIN_INGEST_TRACE_MAX_TOOL_CALLS)
-    .flatMap((item): GoatBrainIngestTraceToolCall[] => {
+    .flatMap((item): BrainIngestTraceToolCall[] => {
       const toolCall = normalizeTraceToolCall(item);
       return toolCall ? [toolCall] : [];
     });
@@ -102,7 +102,7 @@ export function normalizeGoatBrainIngestTrace(value: unknown): GoatBrainIngestTr
     toolCallCount: readNonNegativeInteger(record.toolCallCount),
     mutations: readNonNegativeInteger(record.mutations),
     usage: normalizeTraceUsage(record.usage),
-    finalText: goatBrainIngestTracePreview(
+    finalText: brainIngestTracePreview(
       readString(record.finalText),
       GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH,
     ),
@@ -116,29 +116,29 @@ export function normalizeGoatBrainIngestTrace(value: unknown): GoatBrainIngestTr
   };
 }
 
-export function hasGoatBrainIngestTrace(value: unknown): boolean {
-  return normalizeGoatBrainIngestTrace(value) !== null;
+export function hasBrainIngestTrace(value: unknown): boolean {
+  return normalizeBrainIngestTrace(value) !== null;
 }
 
-export function sanitizeGoatBrainIngestTraceArgs(value: unknown): string[] {
+export function sanitizeBrainIngestTraceArgs(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
     .slice(0, GOAT_BRAIN_INGEST_TRACE_MAX_ARGS)
     .map((item) =>
-      goatBrainIngestTracePreview(
+      brainIngestTracePreview(
         typeof item === "string" ? item : String(item),
         GOAT_BRAIN_INGEST_TRACE_ARG_PREVIEW_LENGTH,
       ),
     );
 }
 
-export function goatBrainIngestTracePreview(value: unknown, limit: number): string {
+export function brainIngestTracePreview(value: unknown, limit: number): string {
   const text = typeof value === "string" ? value : value == null ? "" : String(value);
   if (text.length <= limit) return text;
   return `${text.slice(0, Math.max(0, limit - 14))}\n[truncated]`;
 }
 
-function normalizeTriageTrace(value: unknown): GoatBrainIngestTriageTrace | undefined {
+function normalizeTriageTrace(value: unknown): BrainIngestTriageTrace | undefined {
   const record = readRecord(value);
   if (!record || (record.decision !== "skip" && record.decision !== "ingest")) {
     return undefined;
@@ -149,12 +149,12 @@ function normalizeTriageTrace(value: unknown): GoatBrainIngestTriageTrace | unde
       if (typeof hint !== "string") return [];
       const normalized = hint.replace(/\s+/g, " ").trim();
       if (!normalized) return [];
-      return [goatBrainIngestTracePreview(normalized, GOAT_BRAIN_INGEST_TRIAGE_ENTITY_HINT_LENGTH)];
+      return [brainIngestTracePreview(normalized, GOAT_BRAIN_INGEST_TRIAGE_ENTITY_HINT_LENGTH)];
     });
   return {
     model: readString(record.model),
     decision: record.decision,
-    reason: goatBrainIngestTracePreview(
+    reason: brainIngestTracePreview(
       readString(record.reason).trim(),
       GOAT_BRAIN_INGEST_TRIAGE_REASON_LENGTH,
     ),
@@ -164,7 +164,7 @@ function normalizeTriageTrace(value: unknown): GoatBrainIngestTriageTrace | unde
   };
 }
 
-function normalizeTraceUsage(value: unknown): GoatBrainIngestTraceUsage {
+function normalizeTraceUsage(value: unknown): BrainIngestTraceUsage {
   const record = readRecord(value);
   return {
     inputTokens: readNullableNonNegativeInteger(record?.inputTokens),
@@ -175,7 +175,7 @@ function normalizeTraceUsage(value: unknown): GoatBrainIngestTraceUsage {
   };
 }
 
-function normalizeBudget(value: unknown): GoatBrainIngestBudget | undefined {
+function normalizeBudget(value: unknown): BrainIngestBudget | undefined {
   const record = readRecord(value);
   if (!record) return undefined;
   return {
@@ -190,7 +190,7 @@ function normalizeBudget(value: unknown): GoatBrainIngestBudget | undefined {
   };
 }
 
-function normalizeTraceToolCall(value: unknown): GoatBrainIngestTraceToolCall | null {
+function normalizeTraceToolCall(value: unknown): BrainIngestTraceToolCall | null {
   const record = readRecord(value);
   if (!record || record.toolName !== "goat_brain") return null;
   const status = normalizeTraceToolCallStatus(record.status);
@@ -200,26 +200,23 @@ function normalizeTraceToolCall(value: unknown): GoatBrainIngestTraceToolCall | 
     id: readString(record.id),
     toolName: "goat_brain",
     command: readString(record.command),
-    args: sanitizeGoatBrainIngestTraceArgs(record.args),
+    args: sanitizeBrainIngestTraceArgs(record.args),
     stdinPreview:
       typeof record.stdinPreview === "string"
-        ? goatBrainIngestTracePreview(
-            record.stdinPreview,
-            GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH,
-          )
+        ? brainIngestTracePreview(record.stdinPreview, GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH)
         : null,
     status,
     mutating: record.mutating === true,
     exitCode: readNullableInteger(record.exitCode),
-    stdoutPreview: goatBrainIngestTracePreview(
+    stdoutPreview: brainIngestTracePreview(
       readString(record.stdoutPreview),
       GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
     ),
-    stderrPreview: goatBrainIngestTracePreview(
+    stderrPreview: brainIngestTracePreview(
       readString(record.stderrPreview),
       GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
     ),
-    errorPreview: goatBrainIngestTracePreview(
+    errorPreview: brainIngestTracePreview(
       readString(record.errorPreview),
       GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
     ),
@@ -228,7 +225,7 @@ function normalizeTraceToolCall(value: unknown): GoatBrainIngestTraceToolCall | 
   };
 }
 
-function normalizeTraceToolCallStatus(value: unknown): GoatBrainIngestTraceToolCallStatus | null {
+function normalizeTraceToolCallStatus(value: unknown): BrainIngestTraceToolCallStatus | null {
   if (value === "completed" || value === "failed" || value === "blocked") return value;
   return null;
 }

@@ -3,22 +3,22 @@ import { isIP } from "node:net";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import {
-  type GoatBrainImportDiscoverySummary,
-  type GoatBrainImportProvider,
-  type GoatBrainImportSourceSelection,
-  goatBrainImportCandidates,
-  goatBrainImportRuns,
-  goatBrainIngestJobs,
-  goatBrainSourceItems,
+  type BrainImportDiscoverySummary,
+  type BrainImportProvider,
+  type BrainImportSourceSelection,
+  brainImportCandidates,
+  brainImportRuns,
+  brainIngestJobs,
+  brainSourceItems,
 } from "./schema";
 
 type DbLike = any;
 
 const IMPORT_TERMINAL_JOB_STATUSES = ["succeeded", "failed", "skipped"] as const;
 
-export type GoatBrainImportRun = typeof goatBrainImportRuns.$inferSelect;
+export type BrainImportRun = typeof brainImportRuns.$inferSelect;
 
-export function normalizeGoatCompanyUrl(value: string): {
+export function normalizeCompanyUrl(value: string): {
   url: string;
   domain: string;
 } {
@@ -44,24 +44,24 @@ export function normalizeGoatCompanyUrl(value: string): {
   return { url: `${parsed.protocol}//${domain}${port}`, domain };
 }
 
-export async function createGoatBrainImportRun(input: {
+export async function createBrainImportRun(input: {
   brainRef: string;
   userWorkosId: string;
   companyUrl: string;
   companyName?: string | null;
   focus?: string | null;
-  sourceSelection: GoatBrainImportSourceSelection;
+  sourceSelection: BrainImportSourceSelection;
   now?: Date;
   db?: DbLike;
-}): Promise<GoatBrainImportRun> {
+}): Promise<BrainImportRun> {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
-  const company = normalizeGoatCompanyUrl(input.companyUrl);
+  const company = normalizeCompanyUrl(input.companyUrl);
   const historyStartAt = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const [run] = await db
-    .insert(goatBrainImportRuns)
+    .insert(brainImportRuns)
     .values({
-      id: newGoatBrainImportRunId(),
+      id: newBrainImportRunId(),
       brainRef: input.brainRef,
       userWorkosId: input.userWorkosId,
       companyUrl: company.url,
@@ -80,22 +80,22 @@ export async function createGoatBrainImportRun(input: {
   return run;
 }
 
-export async function getLatestGoatBrainImportRun(
+export async function getLatestBrainImportRun(
   brainRef: string,
   db: DbLike = getDb(),
-): Promise<GoatBrainImportRun | null> {
+): Promise<BrainImportRun | null> {
   const [run] = await db
     .select()
-    .from(goatBrainImportRuns)
-    .where(eq(goatBrainImportRuns.brainRef, brainRef))
-    .orderBy(desc(goatBrainImportRuns.createdAt))
+    .from(brainImportRuns)
+    .where(eq(brainImportRuns.brainRef, brainRef))
+    .orderBy(desc(brainImportRuns.createdAt))
     .limit(1);
   return run ?? null;
 }
 
-export async function addGoatBrainImportCandidate(input: {
+export async function addBrainImportCandidate(input: {
   importRunId: string;
-  provider: GoatBrainImportProvider;
+  provider: BrainImportProvider;
   sourceItemId: string;
   entryCount?: number;
   rank?: number;
@@ -104,7 +104,7 @@ export async function addGoatBrainImportCandidate(input: {
 }) {
   const db = input.db ?? getDb();
   const [candidate] = await db
-    .insert(goatBrainImportCandidates)
+    .insert(brainImportCandidates)
     .values({
       id: `gbimpc_${randomUUID().replace(/-/g, "")}`,
       importRunId: input.importRunId,
@@ -115,7 +115,7 @@ export async function addGoatBrainImportCandidate(input: {
       selected: input.selected ?? true,
     })
     .onConflictDoUpdate({
-      target: [goatBrainImportCandidates.importRunId, goatBrainImportCandidates.sourceItemId],
+      target: [brainImportCandidates.importRunId, brainImportCandidates.sourceItemId],
       set: {
         provider: input.provider,
         entryCount: input.entryCount ?? 1,
@@ -129,9 +129,9 @@ export async function addGoatBrainImportCandidate(input: {
   return candidate;
 }
 
-export async function discoverStoredGoatBrainImportCandidates(input: {
-  run: GoatBrainImportRun;
-  provider: Exclude<GoatBrainImportProvider, "public_web">;
+export async function discoverStoredBrainImportCandidates(input: {
+  run: BrainImportRun;
+  provider: Exclude<BrainImportProvider, "public_web">;
   limit?: number;
   db?: DbLike;
 }): Promise<{
@@ -154,24 +154,24 @@ export async function discoverStoredGoatBrainImportCandidates(input: {
     throw new Error(`Import source ${input.provider} is missing its integration.`);
   }
   const filters = [
-    eq(goatBrainSourceItems.sourceProvider, sourceProvider),
-    eq(goatBrainSourceItems.integrationId, selection.integrationId),
-    sql`${goatBrainSourceItems.occurredAt} >= ${input.run.historyStartAt}`,
-    sql`${goatBrainSourceItems.occurredAt} <= ${input.run.historyEndAt}`,
+    eq(brainSourceItems.sourceProvider, sourceProvider),
+    eq(brainSourceItems.integrationId, selection.integrationId),
+    sql`${brainSourceItems.occurredAt} >= ${input.run.historyStartAt}`,
+    sql`${brainSourceItems.occurredAt} <= ${input.run.historyEndAt}`,
   ];
   const discoveredRows = await db
     .select({
-      id: goatBrainSourceItems.id,
-      occurredAt: goatBrainSourceItems.occurredAt,
-      normalizedPayload: goatBrainSourceItems.normalizedPayload,
+      id: brainSourceItems.id,
+      occurredAt: brainSourceItems.occurredAt,
+      normalizedPayload: brainSourceItems.normalizedPayload,
     })
-    .from(goatBrainSourceItems)
+    .from(brainSourceItems)
     .where(and(...filters))
-    .orderBy(desc(goatBrainSourceItems.occurredAt))
+    .orderBy(desc(brainSourceItems.occurredAt))
     .limit(500);
   const rows = discoveredRows
     .filter((row: { normalizedPayload: unknown }) =>
-      matchesGoatBrainImportSelectedScope(input.provider, row.normalizedPayload, selection.config),
+      matchesBrainImportSelectedScope(input.provider, row.normalizedPayload, selection.config),
     )
     .slice(0, 50);
   if (rows.length === 0)
@@ -183,13 +183,13 @@ export async function discoverStoredGoatBrainImportCandidates(input: {
     };
 
   const existingJobs = await db
-    .select({ sourceItemId: goatBrainIngestJobs.sourceItemId })
-    .from(goatBrainIngestJobs)
+    .select({ sourceItemId: brainIngestJobs.sourceItemId })
+    .from(brainIngestJobs)
     .where(
       and(
-        eq(goatBrainIngestJobs.brainRef, input.run.brainRef),
+        eq(brainIngestJobs.brainRef, input.run.brainRef),
         inArray(
-          goatBrainIngestJobs.sourceItemId,
+          brainIngestJobs.sourceItemId,
           rows.map((row: { id: string }) => row.id),
         ),
       ),
@@ -199,7 +199,7 @@ export async function discoverStoredGoatBrainImportCandidates(input: {
     .filter((row: { id: string; normalizedPayload: unknown }) => !known.has(row.id))
     .map((row: { id: string; occurredAt: Date; normalizedPayload: unknown }) => ({
       ...row,
-      score: rankStoredGoatBrainImportCandidate(input.provider, row.normalizedPayload),
+      score: rankStoredBrainImportCandidate(input.provider, row.normalizedPayload),
     }))
     .filter((row: { score: number }) => Number.isFinite(row.score))
     .sort(
@@ -208,7 +208,7 @@ export async function discoverStoredGoatBrainImportCandidates(input: {
     );
   const selected = eligible.slice(0, input.limit ?? 3);
   for (const [rank, row] of selected.entries()) {
-    await addGoatBrainImportCandidate({
+    await addBrainImportCandidate({
       importRunId: input.run.id,
       provider: input.provider,
       sourceItemId: row.id,
@@ -224,16 +224,16 @@ export async function discoverStoredGoatBrainImportCandidates(input: {
   };
 }
 
-export async function completeGoatBrainImportDiscovery(input: {
+export async function completeBrainImportDiscovery(input: {
   importRunId: string;
   leaseId: string;
-  discoverySummary: GoatBrainImportDiscoverySummary;
+  discoverySummary: BrainImportDiscoverySummary;
   companyName?: string | null;
   db?: DbLike;
 }) {
   const db = input.db ?? getDb();
   const [run] = await db
-    .update(goatBrainImportRuns)
+    .update(brainImportRuns)
     .set({
       status: "awaiting_confirmation",
       discoverySummary: input.discoverySummary,
@@ -246,9 +246,9 @@ export async function completeGoatBrainImportDiscovery(input: {
     })
     .where(
       and(
-        eq(goatBrainImportRuns.id, input.importRunId),
-        eq(goatBrainImportRuns.status, "discovering"),
-        eq(goatBrainImportRuns.leaseId, input.leaseId),
+        eq(brainImportRuns.id, input.importRunId),
+        eq(brainImportRuns.status, "discovering"),
+        eq(brainImportRuns.leaseId, input.leaseId),
       ),
     )
     .returning();
@@ -256,10 +256,10 @@ export async function completeGoatBrainImportDiscovery(input: {
   return run;
 }
 
-export async function confirmGoatBrainImport(input: {
+export async function confirmBrainImport(input: {
   importRunId: string;
   brainRef: string;
-  enabledProviders: GoatBrainImportProvider[];
+  enabledProviders: BrainImportProvider[];
   actingUserWorkosId: string;
   db?: DbLike;
 }) {
@@ -336,7 +336,7 @@ export async function confirmGoatBrainImport(input: {
   return row;
 }
 
-export async function cancelGoatBrainImport(input: {
+export async function cancelBrainImport(input: {
   importRunId: string;
   brainRef: string;
   db?: DbLike;
@@ -381,7 +381,7 @@ export async function cancelGoatBrainImport(input: {
   return row;
 }
 
-export async function retryGoatBrainImportDiscovery(input: {
+export async function retryBrainImportDiscovery(input: {
   importRunId: string;
   brainRef: string;
   db?: DbLike;
@@ -422,7 +422,7 @@ export async function retryGoatBrainImportDiscovery(input: {
   return row;
 }
 
-export async function getGoatBrainImportJobProgress(
+export async function getBrainImportJobProgress(
   importRunId: string,
   db: DbLike = getDb(),
 ): Promise<{
@@ -437,16 +437,16 @@ export async function getGoatBrainImportJobProgress(
 }> {
   const rows = await db
     .select({
-      status: goatBrainIngestJobs.status,
-      provider: goatBrainIngestJobs.sourceProvider,
-      sourceRef: goatBrainSourceItems.sourceRef,
-      result: goatBrainIngestJobs.result,
-      lastError: goatBrainIngestJobs.lastError,
+      status: brainIngestJobs.status,
+      provider: brainIngestJobs.sourceProvider,
+      sourceRef: brainSourceItems.sourceRef,
+      result: brainIngestJobs.result,
+      lastError: brainIngestJobs.lastError,
     })
-    .from(goatBrainIngestJobs)
-    .innerJoin(goatBrainSourceItems, eq(goatBrainSourceItems.id, goatBrainIngestJobs.sourceItemId))
-    .where(eq(goatBrainIngestJobs.importRunId, importRunId))
-    .orderBy(goatBrainIngestJobs.createdAt);
+    .from(brainIngestJobs)
+    .innerJoin(brainSourceItems, eq(brainSourceItems.id, brainIngestJobs.sourceItemId))
+    .where(eq(brainIngestJobs.importRunId, importRunId))
+    .orderBy(brainIngestJobs.createdAt);
   return {
     rows,
     terminal: rows.every((row: { status: string }) =>
@@ -457,7 +457,7 @@ export async function getGoatBrainImportJobProgress(
   };
 }
 
-export function newGoatBrainImportRunId() {
+export function newBrainImportRunId() {
   return `gbimp_${randomUUID().replace(/-/g, "")}`;
 }
 
@@ -517,8 +517,8 @@ function ipv4FromMappedIpv6(value: string) {
   return [high >> 8, high & 0xff, low >> 8, low & 0xff].join(".");
 }
 
-export function rankStoredGoatBrainImportCandidate(
-  provider: Exclude<GoatBrainImportProvider, "public_web">,
+export function rankStoredBrainImportCandidate(
+  provider: Exclude<BrainImportProvider, "public_web">,
   value: unknown,
 ) {
   const item = asRecord(value);
@@ -596,8 +596,8 @@ export function rankStoredGoatBrainImportCandidate(
   }
 }
 
-export function matchesGoatBrainImportSelectedScope(
-  provider: Exclude<GoatBrainImportProvider, "public_web">,
+export function matchesBrainImportSelectedScope(
+  provider: Exclude<BrainImportProvider, "public_web">,
   value: unknown,
   config: Record<string, unknown> | undefined,
 ) {

@@ -6,10 +6,10 @@ const mocks = vi.hoisted(() => ({
   getBudget: vi.fn(),
 }));
 
-vi.mock("@/lib/auth", () => ({ currentGoatUser: mocks.currentUser }));
+vi.mock("@/lib/auth", () => ({ currentUser: mocks.currentUser }));
 vi.mock("@opencompany/db/capabilities", () => ({
-  getGoatCapabilityApprovalByToolCall: mocks.getApproval,
-  getGoatCapabilitySessionBudgetUsdMicros: mocks.getBudget,
+  getCapabilityApprovalByToolCall: mocks.getApproval,
+  getCapabilitySessionBudgetUsdMicros: mocks.getBudget,
 }));
 
 import { GET } from "./route";

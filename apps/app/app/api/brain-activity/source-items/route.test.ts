@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
   getDb: vi.fn(),
-  getGoatBrainAccess: vi.fn(),
+  getBrainAccess: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: mocks.currentGoatUser,
+  currentUser: mocks.currentUser,
 }));
 
 vi.mock("@opencompany/db/client", () => ({
@@ -15,7 +15,7 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@opencompany/db/workspaces", () => ({
-  getGoatBrainAccess: mocks.getGoatBrainAccess,
+  getBrainAccess: mocks.getBrainAccess,
 }));
 
 describe("GET /api/brain-activity/source-items", () => {
@@ -24,8 +24,8 @@ describe("GET /api/brain-activity/source-items", () => {
   });
 
   it("returns slim source item metadata for an accessible brain", async () => {
-    mocks.currentGoatUser.mockResolvedValue({ user: { workosUserId: "user_member" } });
-    mocks.getGoatBrainAccess.mockResolvedValue({ brain: { id: "goat_brain_1" } });
+    mocks.currentUser.mockResolvedValue({ user: { workosUserId: "user_member" } });
+    mocks.getBrainAccess.mockResolvedValue({ brain: { id: "goat_brain_1" } });
     mocks.getDb.mockReturnValue(sourceItemDbMock([sourceItemRow(), sourceItemRow()]));
     const { GET } = await import("./route");
 
@@ -36,7 +36,7 @@ describe("GET /api/brain-activity/source-items", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.getGoatBrainAccess).toHaveBeenCalledWith({
+    expect(mocks.getBrainAccess).toHaveBeenCalledWith({
       userWorkosId: "user_member",
       brainRef: "goat_brain_1",
     });
@@ -52,8 +52,8 @@ describe("GET /api/brain-activity/source-items", () => {
   });
 
   it("does not return metadata when the brain is not accessible", async () => {
-    mocks.currentGoatUser.mockResolvedValue({ user: { workosUserId: "user_member" } });
-    mocks.getGoatBrainAccess.mockResolvedValue(null);
+    mocks.currentUser.mockResolvedValue({ user: { workosUserId: "user_member" } });
+    mocks.getBrainAccess.mockResolvedValue(null);
     mocks.getDb.mockReturnValue(sourceItemDbMock([sourceItemRow()]));
     const { GET } = await import("./route");
 

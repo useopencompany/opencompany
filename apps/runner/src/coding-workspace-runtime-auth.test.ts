@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  createGoatCodingWorkspacePreviewCapability,
-  createGoatCodingWorkspaceTicket,
-  verifyGoatCodingWorkspacePreviewCapability,
-  verifyGoatCodingWorkspaceTicket,
+  createCodingWorkspacePreviewCapability,
+  createCodingWorkspaceTicket,
+  verifyCodingWorkspacePreviewCapability,
+  verifyCodingWorkspaceTicket,
 } from "./coding-workspace-runtime-auth";
 
 const secret = "test-secret-at-least-long-enough";
@@ -11,14 +11,14 @@ const codingSessionId = "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000";
 
 describe("Goat coding workspace tickets", () => {
   it("round-trips an owner-bound short-lived ticket", () => {
-    const signed = createGoatCodingWorkspaceTicket({
+    const signed = createCodingWorkspaceTicket({
       codingSessionId,
       userWorkosId: "user_123",
       secret,
       now: 1_000,
     });
 
-    expect(verifyGoatCodingWorkspaceTicket({ ticket: signed.ticket, secret, now: 2_000 })).toEqual({
+    expect(verifyCodingWorkspaceTicket({ ticket: signed.ticket, secret, now: 2_000 })).toEqual({
       v: 1,
       codingSessionId,
       userWorkosId: "user_123",
@@ -27,25 +27,23 @@ describe("Goat coding workspace tickets", () => {
   });
 
   it("rejects expiry and tampering", () => {
-    const signed = createGoatCodingWorkspaceTicket({
+    const signed = createCodingWorkspaceTicket({
       codingSessionId,
       userWorkosId: "user_123",
       secret,
       now: 1_000,
     });
 
+    expect(verifyCodingWorkspaceTicket({ ticket: signed.ticket, secret, now: 61_000 })).toBeNull();
     expect(
-      verifyGoatCodingWorkspaceTicket({ ticket: signed.ticket, secret, now: 61_000 }),
-    ).toBeNull();
-    expect(
-      verifyGoatCodingWorkspaceTicket({ ticket: `${signed.ticket}x`, secret, now: 2_000 }),
+      verifyCodingWorkspaceTicket({ ticket: `${signed.ticket}x`, secret, now: 2_000 }),
     ).toBeNull();
   });
 });
 
 describe("Goat coding workspace preview capabilities", () => {
   it("fits in one DNS label and round-trips the session, port, and expiry", () => {
-    const signed = createGoatCodingWorkspacePreviewCapability({
+    const signed = createCodingWorkspacePreviewCapability({
       codingSessionId,
       port: 3_000,
       secret,
@@ -55,7 +53,7 @@ describe("Goat coding workspace preview capabilities", () => {
     expect(signed.capability.length).toBeLessThanOrEqual(63);
     expect(signed.capability).toMatch(/^[a-z2-7]+$/);
     expect(
-      verifyGoatCodingWorkspacePreviewCapability({
+      verifyCodingWorkspacePreviewCapability({
         capability: signed.capability,
         secret,
         now: 2_000,
@@ -64,7 +62,7 @@ describe("Goat coding workspace preview capabilities", () => {
   });
 
   it("rejects tampering, expiry, invalid session ids, and invalid ports", () => {
-    const signed = createGoatCodingWorkspacePreviewCapability({
+    const signed = createCodingWorkspacePreviewCapability({
       codingSessionId,
       port: 3_000,
       secret,
@@ -73,28 +71,28 @@ describe("Goat coding workspace preview capabilities", () => {
     const tampered = `${signed.capability.slice(0, -1)}${signed.capability.endsWith("a") ? "b" : "a"}`;
 
     expect(
-      verifyGoatCodingWorkspacePreviewCapability({
+      verifyCodingWorkspacePreviewCapability({
         capability: tampered,
         secret,
         now: 2_000,
       }),
     ).toBeNull();
     expect(
-      verifyGoatCodingWorkspacePreviewCapability({
+      verifyCodingWorkspacePreviewCapability({
         capability: signed.capability,
         secret,
         now: signed.expiresAt,
       }),
     ).toBeNull();
     expect(() =>
-      createGoatCodingWorkspacePreviewCapability({
+      createCodingWorkspacePreviewCapability({
         codingSessionId: "goat_codex_chat_not-a-uuid",
         port: 3_000,
         secret,
       }),
     ).toThrow(/valid UUID/);
     expect(() =>
-      createGoatCodingWorkspacePreviewCapability({ codingSessionId, port: 0, secret }),
+      createCodingWorkspacePreviewCapability({ codingSessionId, port: 0, secret }),
     ).toThrow(/Preview port/);
   });
 });

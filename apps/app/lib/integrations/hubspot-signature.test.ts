@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { verifyGoatHubspotWebhookSignature } from "./hubspot-signature";
+import { verifyHubspotWebhookSignature } from "./hubspot-signature";
 
 const SECRET = "test-client-secret";
 const URI = "https://goat.example.com/api/webhooks/hubspot/events";
@@ -12,7 +12,7 @@ function sign(input: { method?: string; uri?: string; rawBody: string; timestamp
     .digest("base64");
 }
 
-describe("verifyGoatHubspotWebhookSignature", () => {
+describe("verifyHubspotWebhookSignature", () => {
   beforeEach(() => {
     process.env.HUBSPOT_CLIENT_SECRET = SECRET;
   });
@@ -24,7 +24,7 @@ describe("verifyGoatHubspotWebhookSignature", () => {
     const rawBody = JSON.stringify([{ eventId: 1 }]);
     const timestamp = String(NOW_MS);
     expect(
-      verifyGoatHubspotWebhookSignature({
+      verifyHubspotWebhookSignature({
         method: "POST",
         candidateUris: [URI],
         rawBody,
@@ -39,7 +39,7 @@ describe("verifyGoatHubspotWebhookSignature", () => {
     const rawBody = "[]";
     const timestamp = String(NOW_MS);
     expect(
-      verifyGoatHubspotWebhookSignature({
+      verifyHubspotWebhookSignature({
         method: "POST",
         candidateUris: ["https://internal.host/api/webhooks/hubspot/events", URI],
         rawBody,
@@ -55,7 +55,7 @@ describe("verifyGoatHubspotWebhookSignature", () => {
     const timestamp = String(NOW_MS);
     const valid = sign({ rawBody, timestamp });
     expect(
-      verifyGoatHubspotWebhookSignature({
+      verifyHubspotWebhookSignature({
         method: "POST",
         candidateUris: [URI],
         rawBody: "tampered",
@@ -65,7 +65,7 @@ describe("verifyGoatHubspotWebhookSignature", () => {
       }),
     ).toBe(false);
     expect(
-      verifyGoatHubspotWebhookSignature({
+      verifyHubspotWebhookSignature({
         method: "POST",
         candidateUris: ["https://other.example.com/hook"],
         rawBody,
@@ -80,7 +80,7 @@ describe("verifyGoatHubspotWebhookSignature", () => {
     const rawBody = "[]";
     const staleTimestamp = String(NOW_MS - 6 * 60_000);
     expect(
-      verifyGoatHubspotWebhookSignature({
+      verifyHubspotWebhookSignature({
         method: "POST",
         candidateUris: [URI],
         rawBody,
@@ -90,7 +90,7 @@ describe("verifyGoatHubspotWebhookSignature", () => {
       }),
     ).toBe(false);
     expect(
-      verifyGoatHubspotWebhookSignature({
+      verifyHubspotWebhookSignature({
         method: "POST",
         candidateUris: [URI],
         rawBody,
@@ -102,7 +102,7 @@ describe("verifyGoatHubspotWebhookSignature", () => {
     delete process.env.HUBSPOT_CLIENT_SECRET;
     const timestamp = String(NOW_MS);
     expect(
-      verifyGoatHubspotWebhookSignature({
+      verifyHubspotWebhookSignature({
         method: "POST",
         candidateUris: [URI],
         rawBody,

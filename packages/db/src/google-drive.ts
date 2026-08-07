@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import { and, asc, eq, or, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import {
-  goatBrainSources,
-  goatGoogleDriveFileStates,
-  goatGoogleDriveSyncCursors,
-  goatGoogleDriveWatchChannels,
+  brainSources,
+  googleDriveFileStates,
+  googleDriveSyncCursors,
+  googleDriveWatchChannels,
 } from "./schema";
 
 type DbLike = any;
@@ -15,29 +15,29 @@ export const GOAT_GOOGLE_DRIVE_QUIET_MS = 5 * 60_000;
 export const GOAT_GOOGLE_DRIVE_FORCE_MS = 30 * 60_000;
 export const GOAT_GOOGLE_DRIVE_MAX_FILE_ATTEMPTS = 5;
 
-export type GoatGoogleDriveCorpusKey = "user" | `drive:${string}`;
-export type GoatGoogleDriveResourceKind = "file" | "folder";
-export type GoatGoogleDriveResourceRef = {
+export type GoogleDriveCorpusKey = "user" | `drive:${string}`;
+export type GoogleDriveResourceKind = "file" | "folder";
+export type GoogleDriveResourceRef = {
   id: string;
   name: string;
-  kind: GoatGoogleDriveResourceKind;
+  kind: GoogleDriveResourceKind;
   mimeType: string;
   driveId: string | null;
-  corpusKey: GoatGoogleDriveCorpusKey;
+  corpusKey: GoogleDriveCorpusKey;
   webViewLink: string | null;
   selectedAt: string;
 };
 
-export type GoatGoogleDriveAllFilesRef = {
+export type GoogleDriveAllFilesRef = {
   selectedAt: string;
 };
 
-export type GoatGoogleDriveSourceConfig = {
-  allFiles?: GoatGoogleDriveAllFilesRef;
-  resources: GoatGoogleDriveResourceRef[];
+export type GoogleDriveSourceConfig = {
+  allFiles?: GoogleDriveAllFilesRef;
+  resources: GoogleDriveResourceRef[];
 };
 
-export function readGoatGoogleDriveAllFiles(config: unknown): GoatGoogleDriveAllFilesRef | null {
+export function readGoogleDriveAllFiles(config: unknown): GoogleDriveAllFilesRef | null {
   if (!config || typeof config !== "object" || Array.isArray(config)) return null;
   const allFiles = (config as Record<string, unknown>).allFiles;
   if (!allFiles || typeof allFiles !== "object" || Array.isArray(allFiles)) return null;
@@ -45,12 +45,12 @@ export function readGoatGoogleDriveAllFiles(config: unknown): GoatGoogleDriveAll
   return selectedAt ? { selectedAt } : null;
 }
 
-export function readGoatGoogleDriveResources(config: unknown): GoatGoogleDriveResourceRef[] {
+export function readGoogleDriveResources(config: unknown): GoogleDriveResourceRef[] {
   if (!config || typeof config !== "object" || Array.isArray(config)) return [];
   const resources = (config as Record<string, unknown>).resources;
   if (!Array.isArray(resources)) return [];
   const seen = new Set<string>();
-  const result: GoatGoogleDriveResourceRef[] = [];
+  const result: GoogleDriveResourceRef[] = [];
   for (const value of resources) {
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
     const row = value as Record<string, unknown>;
@@ -76,10 +76,10 @@ export function readGoatGoogleDriveResources(config: unknown): GoatGoogleDriveRe
   return result;
 }
 
-export async function upsertGoatGoogleDriveSyncCursor(input: {
+export async function upsertGoogleDriveSyncCursor(input: {
   integrationId: string;
   userWorkosId: string;
-  corpusKey: GoatGoogleDriveCorpusKey;
+  corpusKey: GoogleDriveCorpusKey;
   driveId: string | null;
   pageToken: string;
   webhookAddress: string;
@@ -89,9 +89,9 @@ export async function upsertGoatGoogleDriveSyncCursor(input: {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
   await db
-    .insert(goatGoogleDriveSyncCursors)
+    .insert(googleDriveSyncCursors)
     .values({
-      id: newGoatGoogleDriveCursorId(),
+      id: newGoogleDriveCursorId(),
       integrationId: input.integrationId,
       userWorkosId: input.userWorkosId,
       corpusKey: input.corpusKey,
@@ -102,7 +102,7 @@ export async function upsertGoatGoogleDriveSyncCursor(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: [goatGoogleDriveSyncCursors.integrationId, goatGoogleDriveSyncCursors.corpusKey],
+      target: [googleDriveSyncCursors.integrationId, googleDriveSyncCursors.corpusKey],
       // Never reset an existing durable cursor when another brain selects the
       // same corpus; only refresh routing metadata and request a prompt drain.
       set: {
@@ -114,11 +114,11 @@ export async function upsertGoatGoogleDriveSyncCursor(input: {
     });
   const [cursor] = await db
     .select()
-    .from(goatGoogleDriveSyncCursors)
+    .from(googleDriveSyncCursors)
     .where(
       and(
-        eq(goatGoogleDriveSyncCursors.integrationId, input.integrationId),
-        eq(goatGoogleDriveSyncCursors.corpusKey, input.corpusKey),
+        eq(googleDriveSyncCursors.integrationId, input.integrationId),
+        eq(googleDriveSyncCursors.corpusKey, input.corpusKey),
       ),
     )
     .limit(1);
@@ -126,11 +126,11 @@ export async function upsertGoatGoogleDriveSyncCursor(input: {
   return cursor;
 }
 
-export async function listGoatGoogleDriveSyncCursors(db: DbLike = getDb()) {
-  return db.select().from(goatGoogleDriveSyncCursors).orderBy(asc(goatGoogleDriveSyncCursors.id));
+export async function listGoogleDriveSyncCursors(db: DbLike = getDb()) {
+  return db.select().from(googleDriveSyncCursors).orderBy(asc(googleDriveSyncCursors.id));
 }
 
-export async function claimNextGoatGoogleDriveSyncCursor(input: {
+export async function claimNextGoogleDriveSyncCursor(input: {
   leaseId: string;
   leaseOwner: string;
   leaseExpiresAt: Date;
@@ -182,7 +182,7 @@ export async function claimNextGoatGoogleDriveSyncCursor(input: {
   return rowsFromExecute<Record<string, unknown>>(result)[0] ?? null;
 }
 
-export async function releaseGoatGoogleDriveSyncCursor(input: {
+export async function releaseGoogleDriveSyncCursor(input: {
   cursorId: string;
   leaseId: string;
   pageToken?: string;
@@ -195,12 +195,12 @@ export async function releaseGoatGoogleDriveSyncCursor(input: {
 }) {
   const db = input.db ?? getDb();
   const [released] = await db
-    .update(goatGoogleDriveSyncCursors)
+    .update(googleDriveSyncCursors)
     .set({
       ...(input.pageToken !== undefined ? { pageToken: input.pageToken } : {}),
       ...(input.clearWakeThrough
         ? {
-            wakeRequestedAt: sql`CASE WHEN ${goatGoogleDriveSyncCursors.wakeRequestedAt} <= ${input.clearWakeThrough} THEN NULL ELSE ${goatGoogleDriveSyncCursors.wakeRequestedAt} END`,
+            wakeRequestedAt: sql`CASE WHEN ${googleDriveSyncCursors.wakeRequestedAt} <= ${input.clearWakeThrough} THEN NULL ELSE ${googleDriveSyncCursors.wakeRequestedAt} END`,
           }
         : {}),
       lastPolledAt: input.lastPolledAt,
@@ -214,15 +214,15 @@ export async function releaseGoatGoogleDriveSyncCursor(input: {
     })
     .where(
       and(
-        eq(goatGoogleDriveSyncCursors.id, input.cursorId),
-        eq(goatGoogleDriveSyncCursors.leaseId, input.leaseId),
+        eq(googleDriveSyncCursors.id, input.cursorId),
+        eq(googleDriveSyncCursors.leaseId, input.leaseId),
       ),
     )
-    .returning({ id: goatGoogleDriveSyncCursors.id });
+    .returning({ id: googleDriveSyncCursors.id });
   return Boolean(released);
 }
 
-export async function advanceGoatGoogleDriveSyncCursor(input: {
+export async function advanceGoogleDriveSyncCursor(input: {
   cursorId: string;
   leaseId: string;
   pageToken: string;
@@ -233,7 +233,7 @@ export async function advanceGoatGoogleDriveSyncCursor(input: {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
   const [advanced] = await db
-    .update(goatGoogleDriveSyncCursors)
+    .update(googleDriveSyncCursors)
     .set({
       pageToken: input.pageToken,
       leaseExpiresAt: input.leaseExpiresAt,
@@ -241,15 +241,15 @@ export async function advanceGoatGoogleDriveSyncCursor(input: {
     })
     .where(
       and(
-        eq(goatGoogleDriveSyncCursors.id, input.cursorId),
-        eq(goatGoogleDriveSyncCursors.leaseId, input.leaseId),
+        eq(googleDriveSyncCursors.id, input.cursorId),
+        eq(googleDriveSyncCursors.leaseId, input.leaseId),
       ),
     )
-    .returning({ id: goatGoogleDriveSyncCursors.id });
+    .returning({ id: googleDriveSyncCursors.id });
   return Boolean(advanced);
 }
 
-export async function updateGoatGoogleDriveSyncCursor(input: {
+export async function updateGoogleDriveSyncCursor(input: {
   cursorId: string;
   pageToken?: string;
   wakeRequestedAt?: Date | null;
@@ -263,7 +263,7 @@ export async function updateGoatGoogleDriveSyncCursor(input: {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
   await db
-    .update(goatGoogleDriveSyncCursors)
+    .update(googleDriveSyncCursors)
     .set({
       ...(input.pageToken !== undefined ? { pageToken: input.pageToken } : {}),
       ...(input.wakeRequestedAt !== undefined ? { wakeRequestedAt: input.wakeRequestedAt } : {}),
@@ -273,37 +273,37 @@ export async function updateGoatGoogleDriveSyncCursor(input: {
       ...(input.lastError !== undefined ? { lastError: input.lastError } : {}),
       updatedAt: now,
     })
-    .where(eq(goatGoogleDriveSyncCursors.id, input.cursorId));
+    .where(eq(googleDriveSyncCursors.id, input.cursorId));
 }
 
-export async function loadGoatGoogleDriveWatchChannel(channelId: string, db: DbLike = getDb()) {
+export async function loadGoogleDriveWatchChannel(channelId: string, db: DbLike = getDb()) {
   const [row] = await db
     .select({
-      id: goatGoogleDriveWatchChannels.id,
-      cursorId: goatGoogleDriveWatchChannels.cursorId,
-      tokenHash: goatGoogleDriveWatchChannels.tokenHash,
-      resourceId: goatGoogleDriveWatchChannels.resourceId,
-      status: goatGoogleDriveWatchChannels.status,
-      expiresAt: goatGoogleDriveWatchChannels.expiresAt,
+      id: googleDriveWatchChannels.id,
+      cursorId: googleDriveWatchChannels.cursorId,
+      tokenHash: googleDriveWatchChannels.tokenHash,
+      resourceId: googleDriveWatchChannels.resourceId,
+      status: googleDriveWatchChannels.status,
+      expiresAt: googleDriveWatchChannels.expiresAt,
     })
-    .from(goatGoogleDriveWatchChannels)
-    .where(eq(goatGoogleDriveWatchChannels.id, channelId))
+    .from(googleDriveWatchChannels)
+    .where(eq(googleDriveWatchChannels.id, channelId))
     .limit(1);
   return row ?? null;
 }
 
-export async function requestGoatGoogleDriveCursorWake(
+export async function requestGoogleDriveCursorWake(
   cursorId: string,
   now = new Date(),
   db: DbLike = getDb(),
 ) {
   await db
-    .update(goatGoogleDriveSyncCursors)
+    .update(googleDriveSyncCursors)
     .set({ wakeRequestedAt: now, updatedAt: now })
-    .where(eq(goatGoogleDriveSyncCursors.id, cursorId));
+    .where(eq(googleDriveSyncCursors.id, cursorId));
 }
 
-export async function createGoatGoogleDriveWatchChannel(input: {
+export async function createGoogleDriveWatchChannel(input: {
   id: string;
   cursorId: string;
   integrationId: string;
@@ -314,7 +314,7 @@ export async function createGoatGoogleDriveWatchChannel(input: {
 }) {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
-  await db.insert(goatGoogleDriveWatchChannels).values({
+  await db.insert(googleDriveWatchChannels).values({
     id: input.id,
     cursorId: input.cursorId,
     integrationId: input.integrationId,
@@ -326,7 +326,7 @@ export async function createGoatGoogleDriveWatchChannel(input: {
   });
 }
 
-export async function activateGoatGoogleDriveWatchChannel(input: {
+export async function activateGoogleDriveWatchChannel(input: {
   id: string;
   resourceId: string;
   expiresAt: Date;
@@ -336,47 +336,44 @@ export async function activateGoatGoogleDriveWatchChannel(input: {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
   await db
-    .update(goatGoogleDriveWatchChannels)
+    .update(googleDriveWatchChannels)
     .set({
       resourceId: input.resourceId,
       expiresAt: input.expiresAt,
       status: "active",
       updatedAt: now,
     })
-    .where(eq(goatGoogleDriveWatchChannels.id, input.id));
+    .where(eq(googleDriveWatchChannels.id, input.id));
 }
 
-export async function stopGoatGoogleDriveWatchChannel(
+export async function stopGoogleDriveWatchChannel(
   id: string,
   now = new Date(),
   db: DbLike = getDb(),
 ) {
   await db
-    .update(goatGoogleDriveWatchChannels)
+    .update(googleDriveWatchChannels)
     .set({ status: "stopped", updatedAt: now })
-    .where(eq(goatGoogleDriveWatchChannels.id, id));
+    .where(eq(googleDriveWatchChannels.id, id));
 }
 
-export async function listActiveGoatGoogleDriveWatchChannels(
-  cursorId: string,
-  db: DbLike = getDb(),
-) {
+export async function listActiveGoogleDriveWatchChannels(cursorId: string, db: DbLike = getDb()) {
   return db
     .select()
-    .from(goatGoogleDriveWatchChannels)
+    .from(googleDriveWatchChannels)
     .where(
       and(
-        eq(goatGoogleDriveWatchChannels.cursorId, cursorId),
+        eq(googleDriveWatchChannels.cursorId, cursorId),
         or(
-          eq(goatGoogleDriveWatchChannels.status, "creating"),
-          eq(goatGoogleDriveWatchChannels.status, "active"),
+          eq(googleDriveWatchChannels.status, "creating"),
+          eq(googleDriveWatchChannels.status, "active"),
         ),
       ),
     )
-    .orderBy(asc(goatGoogleDriveWatchChannels.createdAt));
+    .orderBy(asc(googleDriveWatchChannels.createdAt));
 }
 
-export async function observeGoatGoogleDriveFile(input: {
+export async function observeGoogleDriveFile(input: {
   integrationId: string;
   userWorkosId: string;
   fileId: string;
@@ -391,9 +388,9 @@ export async function observeGoatGoogleDriveFile(input: {
   const nextIngestAt = new Date(now.getTime() + GOAT_GOOGLE_DRIVE_QUIET_MS);
   const forceIngestAt = new Date(now.getTime() + GOAT_GOOGLE_DRIVE_FORCE_MS);
   await db
-    .insert(goatGoogleDriveFileStates)
+    .insert(googleDriveFileStates)
     .values({
-      id: newGoatGoogleDriveFileStateId(),
+      id: newGoogleDriveFileStateId(),
       integrationId: input.integrationId,
       userWorkosId: input.userWorkosId,
       fileId: input.fileId,
@@ -407,7 +404,7 @@ export async function observeGoatGoogleDriveFile(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: [goatGoogleDriveFileStates.integrationId, goatGoogleDriveFileStates.fileId],
+      target: [googleDriveFileStates.integrationId, googleDriveFileStates.fileId],
       set: {
         driveId: input.driveId,
         observedVersion: input.version,
@@ -416,16 +413,16 @@ export async function observeGoatGoogleDriveFile(input: {
         nextIngestAt,
         // Preserve the start of an outstanding burst. Once caught up, start a
         // fresh thirty-minute ceiling for the next revision.
-        firstObservedAt: sql`CASE WHEN ${goatGoogleDriveFileStates.observedVersion} = ${goatGoogleDriveFileStates.ingestedVersion} THEN ${now} ELSE ${goatGoogleDriveFileStates.firstObservedAt} END`,
-        forceIngestAt: sql`CASE WHEN ${goatGoogleDriveFileStates.observedVersion} = ${goatGoogleDriveFileStates.ingestedVersion} THEN ${forceIngestAt} ELSE ${goatGoogleDriveFileStates.forceIngestAt} END`,
-        attempts: sql`CASE WHEN ${goatGoogleDriveFileStates.observedVersion} <> ${input.version} THEN 0 ELSE ${goatGoogleDriveFileStates.attempts} END`,
+        firstObservedAt: sql`CASE WHEN ${googleDriveFileStates.observedVersion} = ${googleDriveFileStates.ingestedVersion} THEN ${now} ELSE ${googleDriveFileStates.firstObservedAt} END`,
+        forceIngestAt: sql`CASE WHEN ${googleDriveFileStates.observedVersion} = ${googleDriveFileStates.ingestedVersion} THEN ${forceIngestAt} ELSE ${googleDriveFileStates.forceIngestAt} END`,
+        attempts: sql`CASE WHEN ${googleDriveFileStates.observedVersion} <> ${input.version} THEN 0 ELSE ${googleDriveFileStates.attempts} END`,
         lastError: null,
         updatedAt: now,
       },
     });
 }
 
-export async function claimNextGoatGoogleDriveFile(input: {
+export async function claimNextGoogleDriveFile(input: {
   leaseId: string;
   leaseOwner: string;
   leaseExpiresAt: Date;
@@ -471,7 +468,7 @@ export async function claimNextGoatGoogleDriveFile(input: {
   return rowsFromExecute<Record<string, unknown>>(result)[0] ?? null;
 }
 
-export async function completeGoatGoogleDriveFile(input: {
+export async function completeGoogleDriveFile(input: {
   id: string;
   leaseId: string;
   claimedVersion: string;
@@ -483,9 +480,9 @@ export async function completeGoatGoogleDriveFile(input: {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
   await db
-    .update(goatGoogleDriveFileStates)
+    .update(googleDriveFileStates)
     .set({
-      observedVersion: sql`CASE WHEN ${goatGoogleDriveFileStates.observedVersion} = ${input.claimedVersion} THEN ${input.fetchedVersion} ELSE ${goatGoogleDriveFileStates.observedVersion} END`,
+      observedVersion: sql`CASE WHEN ${googleDriveFileStates.observedVersion} = ${input.claimedVersion} THEN ${input.fetchedVersion} ELSE ${googleDriveFileStates.observedVersion} END`,
       ingestedVersion: input.fetchedVersion,
       lastSourceItemId: input.sourceItemId,
       leaseId: null,
@@ -496,14 +493,11 @@ export async function completeGoatGoogleDriveFile(input: {
       updatedAt: now,
     })
     .where(
-      and(
-        eq(goatGoogleDriveFileStates.id, input.id),
-        eq(goatGoogleDriveFileStates.leaseId, input.leaseId),
-      ),
+      and(eq(googleDriveFileStates.id, input.id), eq(googleDriveFileStates.leaseId, input.leaseId)),
     );
 }
 
-export async function failGoatGoogleDriveFile(input: {
+export async function failGoogleDriveFile(input: {
   id: string;
   leaseId: string;
   error: string;
@@ -514,7 +508,7 @@ export async function failGoatGoogleDriveFile(input: {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
   await db
-    .update(goatGoogleDriveFileStates)
+    .update(googleDriveFileStates)
     .set({
       leaseId: null,
       leaseOwner: null,
@@ -524,31 +518,25 @@ export async function failGoatGoogleDriveFile(input: {
       updatedAt: now,
     })
     .where(
-      and(
-        eq(goatGoogleDriveFileStates.id, input.id),
-        eq(goatGoogleDriveFileStates.leaseId, input.leaseId),
-      ),
+      and(eq(googleDriveFileStates.id, input.id), eq(googleDriveFileStates.leaseId, input.leaseId)),
     );
 }
 
-export async function listEnabledGoatGoogleDriveSources(
-  integrationId: string,
-  db: DbLike = getDb(),
-) {
+export async function listEnabledGoogleDriveSources(integrationId: string, db: DbLike = getDb()) {
   const rows = await db
-    .select({ brainRef: goatBrainSources.brainId, config: goatBrainSources.config })
-    .from(goatBrainSources)
+    .select({ brainRef: brainSources.brainId, config: brainSources.config })
+    .from(brainSources)
     .where(
       and(
-        eq(goatBrainSources.integrationId, integrationId),
-        eq(goatBrainSources.provider, "google_drive"),
-        eq(goatBrainSources.enabled, true),
+        eq(brainSources.integrationId, integrationId),
+        eq(brainSources.provider, "google_drive"),
+        eq(brainSources.enabled, true),
       ),
     );
   return rows.map((row: { brainRef: string; config: unknown }) => ({
     brainRef: row.brainRef,
-    allFiles: readGoatGoogleDriveAllFiles(row.config),
-    resources: readGoatGoogleDriveResources(row.config),
+    allFiles: readGoogleDriveAllFiles(row.config),
+    resources: readGoogleDriveResources(row.config),
   }));
 }
 
@@ -561,7 +549,7 @@ function readIso(value: unknown) {
   return text && Number.isFinite(new Date(text).getTime()) ? new Date(text).toISOString() : null;
 }
 
-function readCorpusKey(value: unknown): GoatGoogleDriveCorpusKey | null {
+function readCorpusKey(value: unknown): GoogleDriveCorpusKey | null {
   if (value === "user") return value;
   return typeof value === "string" && value.startsWith("drive:") && value.length > 6
     ? (value as `drive:${string}`)
@@ -577,10 +565,10 @@ function rowsFromExecute<T>(result: unknown): T[] {
   return [];
 }
 
-export function newGoatGoogleDriveCursorId() {
+export function newGoogleDriveCursorId() {
   return `ggdc_${randomUUID().replaceAll("-", "")}`;
 }
 
-export function newGoatGoogleDriveFileStateId() {
+export function newGoogleDriveFileStateId() {
   return `ggdf_${randomUUID().replaceAll("-", "")}`;
 }

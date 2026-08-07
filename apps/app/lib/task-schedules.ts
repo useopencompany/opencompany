@@ -7,17 +7,17 @@ import {
   normalizeScheduleTimezone,
 } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
-import type { GoatHarnessSpec, GoatTaskScheduleRunStatus } from "@opencompany/db/schema";
-import { goatTaskScheduleRuns, goatTaskSchedules, goatUsers } from "@opencompany/db/schema";
+import type { HarnessSpec, TaskScheduleRunStatus } from "@opencompany/db/schema";
+import { taskScheduleRuns, taskSchedules, users } from "@opencompany/db/schema";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
-import { planGoatTaskHarness } from "@/lib/task-runner";
-import { createGoatTaskForUser } from "@/lib/tasks";
+import { planTaskHarness } from "@/lib/task-runner";
+import { createTaskForUser } from "@/lib/tasks";
 
 const GOAT_TASK_SCHEDULE_PROMPT_MAX_LENGTH = 10_000;
 
-export type GoatTaskScheduleView = {
+export type TaskScheduleView = {
   id: string;
   name: string;
   sourceDescription: string;
@@ -31,35 +31,31 @@ export type GoatTaskScheduleView = {
   updatedAt: string;
 };
 
-export async function listCurrentUserGoatTaskSchedules(): Promise<GoatTaskScheduleView[]> {
-  const { user } = await currentGoatUser();
-  return listGoatTaskSchedulesForUser(user.workosUserId);
+export async function listCurrentUserTaskSchedules(): Promise<TaskScheduleView[]> {
+  const { user } = await currentUser();
+  return listTaskSchedulesForUser(user.workosUserId);
 }
 
-export async function listGoatTaskSchedulesForUser(
-  userWorkosId: string,
-): Promise<GoatTaskScheduleView[]> {
+export async function listTaskSchedulesForUser(userWorkosId: string): Promise<TaskScheduleView[]> {
   if (!(await taskSpawningEnabledForUser(userWorkosId))) return [];
   const rows = await getDb()
     .select()
-    .from(goatTaskSchedules)
-    .where(
-      and(eq(goatTaskSchedules.userWorkosId, userWorkosId), isNull(goatTaskSchedules.deletedAt)),
-    )
-    .orderBy(desc(goatTaskSchedules.createdAt))
+    .from(taskSchedules)
+    .where(and(eq(taskSchedules.userWorkosId, userWorkosId), isNull(taskSchedules.deletedAt)))
+    .orderBy(desc(taskSchedules.createdAt))
     .limit(50);
 
   return rows.map(taskScheduleToView);
 }
 
-export async function createGoatTaskScheduleForUser(input: {
+export async function createTaskScheduleForUser(input: {
   userWorkosId: string;
   name: string;
   sourceDescription?: string;
   cron: string;
   timezone?: string | null;
   prompt: string;
-  plannedHarnessSpec?: GoatHarnessSpec;
+  plannedHarnessSpec?: HarnessSpec;
   now?: Date;
 }) {
   const parsed = parseTaskScheduleInput(input);
@@ -72,7 +68,7 @@ export async function createGoatTaskScheduleForUser(input: {
   const now = input.now ?? new Date();
   const plannedHarnessSpec =
     input.plannedHarnessSpec ??
-    (await planGoatTaskHarness({
+    (await planTaskHarness({
       userWorkosId: input.userWorkosId,
       prompt: parsed.value.prompt,
     }));
@@ -81,7 +77,7 @@ export async function createGoatTaskScheduleForUser(input: {
     throw new Error("Recurring task schedule could not compute a next run.");
   }
 
-  const scheduleId = newGoatTaskScheduleId();
+  const scheduleId = newTaskScheduleId();
   const result = await getDb().execute(sql`
     WITH enabled_user AS MATERIALIZED (
       SELECT task_user.workos_user_id
@@ -143,20 +139,20 @@ export async function createGoatTaskScheduleForUser(input: {
   };
 }
 
-export async function setGoatTaskScheduleEnabledAction(scheduleId: string, enabled: boolean) {
-  const { user } = await currentGoatUser();
+export async function setTaskScheduleEnabledAction(scheduleId: string, enabled: boolean) {
+  const { user } = await currentUser();
   if (!user.taskSpawningEnabled) {
     return { ok: false, error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } as const;
   }
   const now = new Date();
   const [schedule] = await getDb()
     .select()
-    .from(goatTaskSchedules)
+    .from(taskSchedules)
     .where(
       and(
-        eq(goatTaskSchedules.id, scheduleId),
-        eq(goatTaskSchedules.userWorkosId, user.workosUserId),
-        isNull(goatTaskSchedules.deletedAt),
+        eq(taskSchedules.id, scheduleId),
+        eq(taskSchedules.userWorkosId, user.workosUserId),
+        isNull(taskSchedules.deletedAt),
       ),
     )
     .limit(1);
@@ -167,24 +163,24 @@ export async function setGoatTaskScheduleEnabledAction(scheduleId: string, enabl
     ? (nextCronRunAt(schedule.cron, schedule.timezone, now) ?? schedule.nextRunAt)
     : schedule.nextRunAt;
   const [updated] = await getDb()
-    .update(goatTaskSchedules)
+    .update(taskSchedules)
     .set({ enabled, nextRunAt, updatedAt: now })
     .where(
       and(
-        eq(goatTaskSchedules.id, schedule.id),
-        eq(goatTaskSchedules.userWorkosId, user.workosUserId),
-        isNull(goatTaskSchedules.deletedAt),
+        eq(taskSchedules.id, schedule.id),
+        eq(taskSchedules.userWorkosId, user.workosUserId),
+        isNull(taskSchedules.deletedAt),
         taskSpawningEnabledForUserSql(user.workosUserId),
       ),
     )
-    .returning({ id: goatTaskSchedules.id });
+    .returning({ id: taskSchedules.id });
 
   return updated
     ? ({ ok: true } as const)
     : ({ ok: false, error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } as const);
 }
 
-export async function updateGoatTaskScheduleAction(
+export async function updateTaskScheduleAction(
   scheduleId: string,
   input: {
     name: string;
@@ -194,11 +190,11 @@ export async function updateGoatTaskScheduleAction(
     prompt: string;
   },
 ) {
-  const { user } = await currentGoatUser();
-  return updateGoatTaskScheduleForUser(user.workosUserId, scheduleId, input);
+  const { user } = await currentUser();
+  return updateTaskScheduleForUser(user.workosUserId, scheduleId, input);
 }
 
-export async function updateGoatTaskScheduleForUser(
+export async function updateTaskScheduleForUser(
   userWorkosId: string,
   scheduleId: string,
   input: {
@@ -216,13 +212,13 @@ export async function updateGoatTaskScheduleForUser(
   if (!parsed.ok) return { ok: false, error: parsed.error } as const;
 
   const [schedule] = await getDb()
-    .select({ id: goatTaskSchedules.id })
-    .from(goatTaskSchedules)
+    .select({ id: taskSchedules.id })
+    .from(taskSchedules)
     .where(
       and(
-        eq(goatTaskSchedules.id, scheduleId),
-        eq(goatTaskSchedules.userWorkosId, userWorkosId),
-        isNull(goatTaskSchedules.deletedAt),
+        eq(taskSchedules.id, scheduleId),
+        eq(taskSchedules.userWorkosId, userWorkosId),
+        isNull(taskSchedules.deletedAt),
       ),
     )
     .limit(1);
@@ -234,13 +230,13 @@ export async function updateGoatTaskScheduleForUser(
     return { ok: false, error: "Recurring task schedule could not compute a next run." } as const;
   }
 
-  const plannedHarnessSpec = await planGoatTaskHarness({
+  const plannedHarnessSpec = await planTaskHarness({
     userWorkosId,
     prompt: parsed.value.prompt,
   });
 
   const [updated] = await getDb()
-    .update(goatTaskSchedules)
+    .update(taskSchedules)
     .set({
       name: parsed.value.name,
       sourceDescription: parsed.value.sourceDescription,
@@ -253,71 +249,71 @@ export async function updateGoatTaskScheduleForUser(
     })
     .where(
       and(
-        eq(goatTaskSchedules.id, schedule.id),
-        eq(goatTaskSchedules.userWorkosId, userWorkosId),
-        isNull(goatTaskSchedules.deletedAt),
+        eq(taskSchedules.id, schedule.id),
+        eq(taskSchedules.userWorkosId, userWorkosId),
+        isNull(taskSchedules.deletedAt),
         taskSpawningEnabledForUserSql(userWorkosId),
       ),
     )
     .returning({
-      id: goatTaskSchedules.id,
-      name: goatTaskSchedules.name,
-      cron: goatTaskSchedules.cron,
-      timezone: goatTaskSchedules.timezone,
-      nextRunAt: goatTaskSchedules.nextRunAt,
+      id: taskSchedules.id,
+      name: taskSchedules.name,
+      cron: taskSchedules.cron,
+      timezone: taskSchedules.timezone,
+      nextRunAt: taskSchedules.nextRunAt,
     });
 
   if (!updated) return { ok: false, error: "Recurring task not found." } as const;
   return { ok: true, schedule: updated } as const;
 }
 
-export async function deleteGoatTaskScheduleAction(scheduleId: string) {
-  const { user } = await currentGoatUser();
-  return deleteGoatTaskScheduleForUser(user.workosUserId, scheduleId);
+export async function deleteTaskScheduleAction(scheduleId: string) {
+  const { user } = await currentUser();
+  return deleteTaskScheduleForUser(user.workosUserId, scheduleId);
 }
 
-export async function deleteGoatTaskScheduleForUser(userWorkosId: string, scheduleId: string) {
+export async function deleteTaskScheduleForUser(userWorkosId: string, scheduleId: string) {
   if (!(await taskSpawningEnabledForUser(userWorkosId))) {
     return { ok: false, error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } as const;
   }
   const [updated] = await getDb()
-    .update(goatTaskSchedules)
+    .update(taskSchedules)
     .set({ enabled: false, deletedAt: new Date(), updatedAt: new Date() })
     .where(
       and(
-        eq(goatTaskSchedules.id, scheduleId),
-        eq(goatTaskSchedules.userWorkosId, userWorkosId),
-        isNull(goatTaskSchedules.deletedAt),
+        eq(taskSchedules.id, scheduleId),
+        eq(taskSchedules.userWorkosId, userWorkosId),
+        isNull(taskSchedules.deletedAt),
         taskSpawningEnabledForUserSql(userWorkosId),
       ),
     )
-    .returning({ id: goatTaskSchedules.id });
+    .returning({ id: taskSchedules.id });
 
   return updated
     ? ({ ok: true } as const)
     : ({ ok: false, error: "Recurring task not found." } as const);
 }
 
-export async function runGoatTaskScheduleNowAction(scheduleId: string) {
-  const { user, workspace } = await currentGoatUser();
+export async function runTaskScheduleNowAction(scheduleId: string) {
+  const { user, workspace } = await currentUser();
   if (!user.taskSpawningEnabled) {
     return { ok: false, error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } as const;
   }
   const [schedule] = await getDb()
     .select()
-    .from(goatTaskSchedules)
+    .from(taskSchedules)
     .where(
       and(
-        eq(goatTaskSchedules.id, scheduleId),
-        eq(goatTaskSchedules.userWorkosId, user.workosUserId),
-        isNull(goatTaskSchedules.deletedAt),
+        eq(taskSchedules.id, scheduleId),
+        eq(taskSchedules.userWorkosId, user.workosUserId),
+        isNull(taskSchedules.deletedAt),
       ),
     )
     .limit(1);
   if (!schedule) return { ok: false, error: "Recurring task not found." } as const;
 
   const scheduledFor = new Date();
-  const task = await createGoatTaskForUser({
+  const task = await createTaskForUser({
     userWorkosId: user.workosUserId,
     workspaceId: workspace.id,
     prompt: schedule.prompt,
@@ -341,7 +337,7 @@ export async function runGoatTaskScheduleNowAction(scheduleId: string) {
 function taskSpawningEnabledForUserSql(userWorkosId: string) {
   return sql`EXISTS (
     SELECT 1
-    FROM ${goatUsers} AS task_user
+    FROM ${users} AS task_user
     WHERE task_user.workos_user_id = ${userWorkosId}
       AND task_user.task_spawning_enabled = true
   )`;
@@ -349,9 +345,9 @@ function taskSpawningEnabledForUserSql(userWorkosId: string) {
 
 async function taskSpawningEnabledForUser(userWorkosId: string) {
   const [user] = await getDb()
-    .select({ enabled: goatUsers.taskSpawningEnabled })
-    .from(goatUsers)
-    .where(eq(goatUsers.workosUserId, userWorkosId))
+    .select({ enabled: users.taskSpawningEnabled })
+    .from(users)
+    .where(eq(users.workosUserId, userWorkosId))
     .limit(1);
   return user?.enabled === true;
 }
@@ -401,7 +397,7 @@ function normalizeScheduleName(name: string | undefined, prompt: string) {
   return normalized.length > 80 ? `${normalized.slice(0, 77)}...` : normalized;
 }
 
-function taskScheduleToView(row: typeof goatTaskSchedules.$inferSelect): GoatTaskScheduleView {
+function taskScheduleToView(row: typeof taskSchedules.$inferSelect): TaskScheduleView {
   return {
     id: row.id,
     name: row.name,
@@ -422,14 +418,14 @@ async function insertScheduleRun(input: {
   userWorkosId: string;
   scheduledFor: Date;
   taskId: string | null;
-  status: GoatTaskScheduleRunStatus;
+  status: TaskScheduleRunStatus;
   error?: string | null;
 }) {
   const now = new Date();
   await getDb()
-    .insert(goatTaskScheduleRuns)
+    .insert(taskScheduleRuns)
     .values({
-      id: newGoatTaskScheduleRunId(),
+      id: newTaskScheduleRunId(),
       scheduleId: input.scheduleId,
       userWorkosId: input.userWorkosId,
       scheduledFor: input.scheduledFor,
@@ -439,15 +435,15 @@ async function insertScheduleRun(input: {
       updatedAt: now,
     })
     .onConflictDoNothing({
-      target: [goatTaskScheduleRuns.scheduleId, goatTaskScheduleRuns.scheduledFor],
+      target: [taskScheduleRuns.scheduleId, taskScheduleRuns.scheduledFor],
     });
 }
 
-function newGoatTaskScheduleId() {
+function newTaskScheduleId() {
   return `goat_task_schedule_${randomUUID()}`;
 }
 
-function newGoatTaskScheduleRunId() {
+function newTaskScheduleRunId() {
   return `goat_task_schedule_run_${randomUUID()}`;
 }
 

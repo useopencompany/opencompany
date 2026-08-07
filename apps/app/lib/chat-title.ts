@@ -1,7 +1,7 @@
 import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
-import { goatChatMessages, goatChatSessions } from "@opencompany/db/schema";
-import { createGoatGatewayAttribution, goatGatewayProviderOptions } from "@opencompany/telemetry";
+import { chatMessages, chatSessions } from "@opencompany/db/schema";
+import { createGatewayAttribution, gatewayProviderOptions } from "@opencompany/telemetry";
 import { createGateway, generateText } from "ai";
 import { and, asc, eq, isNull } from "drizzle-orm";
 
@@ -9,7 +9,7 @@ const TITLE_MODEL = "openai/gpt-5.4-mini";
 const MAX_TITLE_LENGTH = 60;
 const MAX_PROMPT_CHARS = 4000;
 
-type GoatTitleGenerationResult =
+type TitleGenerationResult =
   | { ok: true; title: string }
   | {
       ok: false;
@@ -20,23 +20,23 @@ type GoatTitleGenerationResult =
         | "title_generation_failed";
     };
 
-export async function generateGoatChatTitleForMessage(input: {
+export async function generateChatTitleForMessage(input: {
   sessionId: string;
   messageId: string;
   apiKey?: string | null;
-}): Promise<GoatTitleGenerationResult> {
+}): Promise<TitleGenerationResult> {
   const apiKey = input.apiKey?.trim();
   if (!apiKey) return { ok: false, skipped: "missing_api_key" };
 
   const db = getDb();
   const [session] = await db
-    .select({ id: goatChatSessions.id, userWorkosId: goatChatSessions.userWorkosId })
-    .from(goatChatSessions)
-    .where(and(eq(goatChatSessions.id, input.sessionId), isNull(goatChatSessions.closedAt)))
+    .select({ id: chatSessions.id, userWorkosId: chatSessions.userWorkosId })
+    .from(chatSessions)
+    .where(and(eq(chatSessions.id, input.sessionId), isNull(chatSessions.closedAt)))
     .limit(1);
   if (!session) return { ok: false, skipped: "session_not_found" };
 
-  const firstUserMessage = await loadFirstGoatUserMessage(input.sessionId);
+  const firstUserMessage = await loadFirstUserMessage(input.sessionId);
   if (!firstUserMessage || firstUserMessage.id !== input.messageId) {
     return { ok: false, skipped: "message_not_first_user_message" };
   }
@@ -44,7 +44,7 @@ export async function generateGoatChatTitleForMessage(input: {
   const fallbackTitle = titleFromPrompt(firstUserMessage.content);
   let title: string;
   try {
-    title = await generateGoatChatTitle({
+    title = await generateChatTitle({
       content: firstUserMessage.content,
       fallbackTitle,
       apiKey,
@@ -56,16 +56,16 @@ export async function generateGoatChatTitleForMessage(input: {
   }
 
   const [updated] = await db
-    .update(goatChatSessions)
+    .update(chatSessions)
     .set({ title, updatedAt: new Date() })
-    .where(and(eq(goatChatSessions.id, input.sessionId), isNull(goatChatSessions.closedAt)))
-    .returning({ id: goatChatSessions.id });
+    .where(and(eq(chatSessions.id, input.sessionId), isNull(chatSessions.closedAt)))
+    .returning({ id: chatSessions.id });
 
   if (!updated) return { ok: false, skipped: "session_not_found" };
   return { ok: true, title };
 }
 
-export async function generateGoatChatTitle(input: {
+export async function generateChatTitle(input: {
   content: string;
   fallbackTitle: string;
   apiKey: string;
@@ -73,7 +73,7 @@ export async function generateGoatChatTitle(input: {
   chatSessionId?: string | null;
 }) {
   const gateway = createGateway({ apiKey: input.apiKey });
-  const attribution = createGoatGatewayAttribution({
+  const attribution = createGatewayAttribution({
     userWorkosId: input.userWorkosId,
     feature: "chat-title",
     ...(input.chatSessionId ? { chatSessionId: input.chatSessionId } : {}),
@@ -88,13 +88,13 @@ export async function generateGoatChatTitle(input: {
     )}`,
     maxOutputTokens: 20,
     temperature: 0,
-    providerOptions: goatGatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
+    providerOptions: gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
   });
 
-  return sanitizeGoatChatTitle(result.text, input.fallbackTitle);
+  return sanitizeChatTitle(result.text, input.fallbackTitle);
 }
 
-export function sanitizeGoatChatTitle(title: string, fallbackTitle: string) {
+export function sanitizeChatTitle(title: string, fallbackTitle: string) {
   const normalized = title
     .replace(/\s+/g, " ")
     .trim()
@@ -119,15 +119,15 @@ function truncateTitle(title: string) {
   return `${title.slice(0, MAX_TITLE_LENGTH - 3).trimEnd()}...`;
 }
 
-async function loadFirstGoatUserMessage(sessionId: string) {
+async function loadFirstUserMessage(sessionId: string) {
   const [message] = await getDb()
     .select({
-      id: goatChatMessages.id,
-      content: goatChatMessages.content,
+      id: chatMessages.id,
+      content: chatMessages.content,
     })
-    .from(goatChatMessages)
-    .where(and(eq(goatChatMessages.sessionId, sessionId), eq(goatChatMessages.role, "user")))
-    .orderBy(asc(goatChatMessages.createdAt))
+    .from(chatMessages)
+    .where(and(eq(chatMessages.sessionId, sessionId), eq(chatMessages.role, "user")))
+    .orderBy(asc(chatMessages.createdAt))
     .limit(1);
 
   return message ?? null;

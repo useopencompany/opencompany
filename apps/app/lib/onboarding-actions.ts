@@ -3,28 +3,28 @@
 import {
   ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS,
   HARD_DEFAULT_GOAT_BRAIN_FOLDERS,
-  normalizeGoatBrainFolder,
+  normalizeBrainFolder,
 } from "@opencompany/brain/schema";
 import {
-  isGoatWorkspaceSlugAvailable,
-  markGoatUserOnboarded,
-  updateGoatWorkspaceNameAndSlug,
-  upsertGoatOnboarding,
+  isWorkspaceSlugAvailable,
+  markUserOnboarded,
+  updateWorkspaceNameAndSlug,
+  upsertOnboarding,
 } from "@opencompany/db/workspaces";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
-import { createGoatBrainFolderForUser, deleteGoatBrainFolderForUser } from "@/lib/brain";
-import { parseGoatOnboardingProfile } from "@/lib/onboarding-profile";
+import { currentUser } from "@/lib/auth";
+import { createBrainFolderForUser, deleteBrainFolderForUser } from "@/lib/brain";
+import { parseOnboardingProfile } from "@/lib/onboarding-profile";
 import { getWorkOSClient } from "@/lib/workos-client";
 
-export type GoatOnboardingActionResult = { ok: true } | { ok: false; error: string };
+export type OnboardingActionResult = { ok: true } | { ok: false; error: string };
 
 function errorResult(error: unknown, fallback: string): { ok: false; error: string } {
   return { ok: false, error: error instanceof Error ? error.message : fallback };
 }
 
 // Mirrors the client-side slugify so what the user previews is what we store.
-function normalizeGoatWorkspaceSlug(value: string): string {
+function normalizeWorkspaceSlug(value: string): string {
   return value
     .toLowerCase()
     .trim()
@@ -34,24 +34,24 @@ function normalizeGoatWorkspaceSlug(value: string): string {
     .replace(/-+$/g, "");
 }
 
-export async function checkGoatWorkspaceSlugAction(
+export async function checkWorkspaceSlugAction(
   rawSlug: string,
 ): Promise<{ slug: string; available: boolean }> {
-  const context = await currentGoatUser();
-  const slug = normalizeGoatWorkspaceSlug(rawSlug);
+  const context = await currentUser();
+  const slug = normalizeWorkspaceSlug(rawSlug);
   if (!slug) return { slug, available: false };
-  const available = await isGoatWorkspaceSlugAvailable({
+  const available = await isWorkspaceSlugAvailable({
     slug,
     excludeWorkspaceId: context.workspace.id,
   });
   return { slug, available };
 }
 
-export async function saveGoatOnboardingWorkspaceAction(input: {
+export async function saveOnboardingWorkspaceAction(input: {
   name: string;
   slug: string;
-}): Promise<GoatOnboardingActionResult> {
-  const context = await currentGoatUser();
+}): Promise<OnboardingActionResult> {
+  const context = await currentUser();
   if (context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can set this up." };
   }
@@ -60,11 +60,11 @@ export async function saveGoatOnboardingWorkspaceAction(input: {
   if (!name) return { ok: false, error: "Enter a company name." };
   if (name.length > 80) return { ok: false, error: "Name is too long (max 80 chars)." };
 
-  const slug = normalizeGoatWorkspaceSlug(input.slug);
+  const slug = normalizeWorkspaceSlug(input.slug);
   if (!slug) return { ok: false, error: "Enter a valid workspace URL." };
 
   try {
-    const available = await isGoatWorkspaceSlugAvailable({
+    const available = await isWorkspaceSlugAvailable({
       slug,
       excludeWorkspaceId: context.workspace.id,
     });
@@ -76,7 +76,7 @@ export async function saveGoatOnboardingWorkspaceAction(input: {
         name,
       });
     }
-    await updateGoatWorkspaceNameAndSlug({ workspaceId: context.workspace.id, name, slug });
+    await updateWorkspaceNameAndSlug({ workspaceId: context.workspace.id, name, slug });
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
@@ -84,10 +84,10 @@ export async function saveGoatOnboardingWorkspaceAction(input: {
   }
 }
 
-export async function saveGoatOnboardingBrainFoldersAction(input: {
+export async function saveOnboardingBrainFoldersAction(input: {
   folders: string[];
-}): Promise<GoatOnboardingActionResult> {
-  const context = await currentGoatUser();
+}): Promise<OnboardingActionResult> {
+  const context = await currentUser();
   if (context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can set this up." };
   }
@@ -95,7 +95,7 @@ export async function saveGoatOnboardingBrainFoldersAction(input: {
   if (!brain) return { ok: false, error: "No brain to configure." };
 
   const target = new Set(
-    input.folders.map((f) => normalizeGoatBrainFolder(f)).filter((f) => f.length > 0),
+    input.folders.map((f) => normalizeBrainFolder(f)).filter((f) => f.length > 0),
   );
   const hard = new Set<string>(HARD_DEFAULT_GOAT_BRAIN_FOLDERS);
   const adjustable = new Set<string>(ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS);
@@ -105,29 +105,29 @@ export async function saveGoatOnboardingBrainFoldersAction(input: {
   // any custom folders. Mutations are idempotent, so we ignore no-op failures.
   for (const folder of ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS) {
     if (target.has(folder)) {
-      await createGoatBrainFolderForUser({ brainRef: brain.id, userWorkosId, folderPath: folder });
+      await createBrainFolderForUser({ brainRef: brain.id, userWorkosId, folderPath: folder });
     } else {
-      await deleteGoatBrainFolderForUser({ brainRef: brain.id, userWorkosId, folderPath: folder });
+      await deleteBrainFolderForUser({ brainRef: brain.id, userWorkosId, folderPath: folder });
     }
   }
   for (const folder of target) {
     if (hard.has(folder) || adjustable.has(folder)) continue;
-    await createGoatBrainFolderForUser({ brainRef: brain.id, userWorkosId, folderPath: folder });
+    await createBrainFolderForUser({ brainRef: brain.id, userWorkosId, folderPath: folder });
   }
 
   revalidatePath("/", "layout");
   return { ok: true };
 }
 
-export async function saveGoatOnboardingProfileAction(input: {
+export async function saveOnboardingProfileAction(input: {
   role: string | null;
   companyUrl: string;
-}): Promise<GoatOnboardingActionResult> {
-  const context = await currentGoatUser();
-  const profile = parseGoatOnboardingProfile(input);
+}): Promise<OnboardingActionResult> {
+  const context = await currentUser();
+  const profile = parseOnboardingProfile(input);
   if (!profile.ok) return profile;
   try {
-    await upsertGoatOnboarding({
+    await upsertOnboarding({
       userWorkosId: context.user.workosUserId,
       workspaceId: context.workspace.id,
       role: profile.role,
@@ -141,17 +141,17 @@ export async function saveGoatOnboardingProfileAction(input: {
   }
 }
 
-export async function finishGoatOnboardingAction(input: {
+export async function finishOnboardingAction(input: {
   referralSource: string | null;
-}): Promise<GoatOnboardingActionResult> {
-  const context = await currentGoatUser();
+}): Promise<OnboardingActionResult> {
+  const context = await currentUser();
   try {
-    await upsertGoatOnboarding({
+    await upsertOnboarding({
       userWorkosId: context.user.workosUserId,
       workspaceId: context.workspace.id,
       referralSource: input.referralSource?.trim() || null,
     });
-    await markGoatUserOnboarded(context.user.workosUserId);
+    await markUserOnboarded(context.user.workosUserId);
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {

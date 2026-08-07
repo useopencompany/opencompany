@@ -1,59 +1,59 @@
-import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { captureServerEvent } from "@opencompany/analytics/server";
+import { captureServerEvent as captureSharedServerEvent } from "@opencompany/analytics/shared-server";
 import {
-  claimGoatAutoRefill,
+  claimAutoRefill,
   releasePendingForWorkspace,
-  settleGoatAutoRefill,
+  settleAutoRefill,
 } from "@opencompany/db/billing";
-import { recordGoatAutoRefillCredit } from "@opencompany/db/credits";
+import { recordAutoRefillCredit } from "@opencompany/db/credits";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getGoatStripe } from "@/lib/billing/stripe";
-import { runGoatAutoRefill } from "./auto-refill";
-
-vi.mock("@opencompany/analytics/goat/server", () => ({
-  captureGoatServerEvent: vi.fn(async () => undefined),
-}));
+import { getStripe } from "@/lib/billing/stripe";
+import { runAutoRefill } from "./auto-refill";
 
 vi.mock("@opencompany/analytics/server", () => ({
   captureServerEvent: vi.fn(async () => undefined),
 }));
 
+vi.mock("@opencompany/analytics/shared-server", () => ({
+  captureServerEvent: vi.fn(async () => undefined),
+}));
+
 vi.mock("@opencompany/db/billing", () => ({
-  claimGoatAutoRefill: vi.fn(),
+  claimAutoRefill: vi.fn(),
   GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS: 5_000_000,
-  listGoatAutoRefillCandidates: vi.fn(async () => []),
+  listAutoRefillCandidates: vi.fn(async () => []),
   releasePendingForWorkspace: vi.fn(async () => 0),
-  settleGoatAutoRefill: vi.fn(async () => undefined),
+  settleAutoRefill: vi.fn(async () => undefined),
 }));
 
 vi.mock("@opencompany/db/credits", () => ({
-  getGoatCreditBalanceUsdMicros: vi.fn(async () => 0),
-  goatUsdMicrosToCents: (micros: number) => Math.round(micros / 10_000),
-  recordGoatAutoRefillCredit: vi.fn(),
+  getCreditBalanceUsdMicros: vi.fn(async () => 0),
+  usdMicrosToCents: (micros: number) => Math.round(micros / 10_000),
+  recordAutoRefillCredit: vi.fn(),
 }));
 
 vi.mock("@/lib/billing/stripe", () => ({
-  assertGoatCheckoutEnabled: vi.fn(),
-  getGoatStripe: vi.fn(),
+  assertCheckoutEnabled: vi.fn(),
+  getStripe: vi.fn(),
 }));
 
-const captureGoatServerEventMock = vi.mocked(captureGoatServerEvent);
 const captureServerEventMock = vi.mocked(captureServerEvent);
-const claimGoatAutoRefillMock = vi.mocked(claimGoatAutoRefill);
-const recordGoatAutoRefillCreditMock = vi.mocked(recordGoatAutoRefillCredit);
+const captureSharedServerEventMock = vi.mocked(captureSharedServerEvent);
+const claimAutoRefillMock = vi.mocked(claimAutoRefill);
+const recordAutoRefillCreditMock = vi.mocked(recordAutoRefillCredit);
 const releasePendingForWorkspaceMock = vi.mocked(releasePendingForWorkspace);
-const settleGoatAutoRefillMock = vi.mocked(settleGoatAutoRefill);
-const getGoatStripeMock = vi.mocked(getGoatStripe);
+const settleAutoRefillMock = vi.mocked(settleAutoRefill);
+const getStripeMock = vi.mocked(getStripe);
 
-describe("runGoatAutoRefill", () => {
+describe("runAutoRefill", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    claimGoatAutoRefillMock.mockResolvedValue({
+    claimAutoRefillMock.mockResolvedValue({
       amountCents: 2_000,
       stripeCustomerId: "cus_123",
       paymentMethodId: "pm_123",
     });
-    getGoatStripeMock.mockReturnValue({
+    getStripeMock.mockReturnValue({
       paymentIntents: {
         create: vi.fn(async () => ({ id: "pi_123", status: "succeeded" })),
       },
@@ -61,17 +61,17 @@ describe("runGoatAutoRefill", () => {
   });
 
   it("captures a successfully credited auto-refill in the Goat project", async () => {
-    recordGoatAutoRefillCreditMock.mockResolvedValue({
+    recordAutoRefillCreditMock.mockResolvedValue({
       ok: true,
       ledgerId: 42,
       balanceUsdMicros: 21_000_000,
     });
 
-    await expect(runGoatAutoRefill("workspace_123")).resolves.toEqual({
+    await expect(runAutoRefill("workspace_123")).resolves.toEqual({
       charged: true,
     });
 
-    expect(captureGoatServerEventMock).toHaveBeenCalledWith(
+    expect(captureServerEventMock).toHaveBeenCalledWith(
       "billing_topup_completed",
       "workspace_123",
       {
@@ -82,7 +82,7 @@ describe("runGoatAutoRefill", () => {
         balance_cents: 2_100,
       },
     );
-    expect(captureServerEventMock).toHaveBeenCalledWith(
+    expect(captureSharedServerEventMock).toHaveBeenCalledWith(
       "goat_billing_auto_refill_succeeded",
       "workspace_123",
       {
@@ -90,24 +90,24 @@ describe("runGoatAutoRefill", () => {
         amount_cents: 2_000,
       },
     );
-    expect(settleGoatAutoRefillMock).toHaveBeenCalledWith({
+    expect(settleAutoRefillMock).toHaveBeenCalledWith({
       workspaceId: "workspace_123",
     });
     expect(releasePendingForWorkspaceMock).toHaveBeenCalledWith("workspace_123");
   });
 
   it("does not double-capture when the webhook already credited the PaymentIntent", async () => {
-    recordGoatAutoRefillCreditMock.mockResolvedValue({
+    recordAutoRefillCreditMock.mockResolvedValue({
       ok: false,
       reason: "duplicate",
     });
 
-    await expect(runGoatAutoRefill("workspace_123")).resolves.toEqual({
+    await expect(runAutoRefill("workspace_123")).resolves.toEqual({
       charged: true,
     });
 
-    expect(captureGoatServerEventMock).not.toHaveBeenCalled();
-    expect(captureServerEventMock).toHaveBeenCalledWith(
+    expect(captureServerEventMock).not.toHaveBeenCalled();
+    expect(captureSharedServerEventMock).toHaveBeenCalledWith(
       "goat_billing_auto_refill_succeeded",
       "workspace_123",
       expect.any(Object),

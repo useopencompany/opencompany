@@ -14,13 +14,13 @@ export function blend(
       record,
       score:
         GOAT_BRAIN_WEIGHT_RELEVANCE * (relevance / maxRelevance) +
-        GOAT_BRAIN_WEIGHT_FRESHNESS * goatBrainFreshness(record.updatedAt, now),
+        GOAT_BRAIN_WEIGHT_FRESHNESS * brainFreshness(record.updatedAt, now),
     }))
     .sort((a, b) => b.score - a.score || a.record.id.localeCompare(b.record.id));
 }
 
 // Recency decay shared by every retrieval surface (CLI corpus ranking and the DB read plane).
-export function goatBrainFreshness(updatedAt: string | Date, now: number): number {
+export function brainFreshness(updatedAt: string | Date, now: number): number {
   const updated = updatedAt instanceof Date ? updatedAt.getTime() : Date.parse(updatedAt);
   if (Number.isNaN(updated)) return 0;
   const ageDays = Math.max(0, (now - updated) / (1000 * 60 * 60 * 24));

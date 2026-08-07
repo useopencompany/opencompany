@@ -1,8 +1,8 @@
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import { deleteBrowserProfile } from "@/lib/browser-profiles";
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return new Response(null, { status: 401 });
 
   try {

@@ -1,7 +1,4 @@
-import {
-  createGoatRemoteMcpIntegration,
-  type GoatRemoteMcpProviderState,
-} from "./remote-mcp-oauth";
+import { createRemoteMcpIntegration, type RemoteMcpProviderState } from "./remote-mcp-oauth";
 
 const POSTHOG_TOOL_NAMES = [
   "dashboards-get-all",
@@ -33,7 +30,7 @@ export const GOAT_POSTHOG_MCP_ENDPOINT_URL = `https://mcp.posthog.com/mcp?mode=t
   ",",
 )}`;
 
-const posthogMcpIntegration = createGoatRemoteMcpIntegration({
+const posthogMcpIntegration = createRemoteMcpIntegration({
   provider: "posthog",
   displayName: "PostHog",
   endpointUrl: GOAT_POSTHOG_MCP_ENDPOINT_URL,
@@ -42,11 +39,11 @@ const posthogMcpIntegration = createGoatRemoteMcpIntegration({
   authScope: POSTHOG_OAUTH_SCOPES.join(" "),
 });
 
-export type GoatPostHogProviderState = GoatRemoteMcpProviderState<"posthog">;
+export type PostHogProviderState = RemoteMcpProviderState<"posthog">;
 
-export const getGoatPostHogIntegrationState = posthogMcpIntegration.getState;
-export const loadGoatPostHogMcpWorkerConnection = posthogMcpIntegration.loadWorkerConnection;
-export const startGoatPostHogMcpOAuth = posthogMcpIntegration.start;
-export const completeGoatPostHogMcpOAuth = posthogMcpIntegration.complete;
-export const verifyGoatPostHogMcpState = posthogMcpIntegration.verifyState;
-export const appendGoatPostHogMcpStatus = posthogMcpIntegration.appendStatus;
+export const getPostHogIntegrationState = posthogMcpIntegration.getState;
+export const loadPostHogMcpWorkerConnection = posthogMcpIntegration.loadWorkerConnection;
+export const startPostHogMcpOAuth = posthogMcpIntegration.start;
+export const completePostHogMcpOAuth = posthogMcpIntegration.complete;
+export const verifyPostHogMcpState = posthogMcpIntegration.verifyState;
+export const appendPostHogMcpStatus = posthogMcpIntegration.appendStatus;

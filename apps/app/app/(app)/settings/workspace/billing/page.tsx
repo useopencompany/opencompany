@@ -1,4 +1,4 @@
-import { loadGoatBillingOverview } from "@opencompany/db/billing";
+import { loadBillingOverview } from "@opencompany/db/billing";
 import {
   GOAT_AUTO_REFILL_MONTHLY_MAX_USD_CENTS,
   GOAT_DEFAULT_TOP_UP_USD_CENTS,
@@ -9,22 +9,22 @@ import {
   GOAT_MIN_TOP_UP_USD_CENTS,
   GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
   GOAT_TOP_UP_AMOUNTS_USD_CENTS,
-  goatWorkspaceMemberCap,
+  workspaceMemberCap,
 } from "@opencompany/db/billing-constants";
-import { loadGoatCreditOverview } from "@opencompany/db/credits";
-import { GoatBillingPanel } from "@/components/GoatBillingPanel";
-import { currentGoatUser } from "@/lib/auth";
+import { loadCreditOverview } from "@opencompany/db/credits";
+import { BillingPanel } from "@/components/BillingPanel";
+import { currentUser } from "@/lib/auth";
 
 export default async function WorkspaceBillingSettingsPage({
   searchParams,
 }: {
   searchParams: Promise<{ checkout?: string; topup?: string }>;
 }) {
-  const [context, params] = await Promise.all([currentGoatUser(), searchParams]);
-  const overview = await loadGoatBillingOverview(context.workspace.id);
-  const credit = await loadGoatCreditOverview(context.workspace.id);
+  const [context, params] = await Promise.all([currentUser(), searchParams]);
+  const overview = await loadBillingOverview(context.workspace.id);
+  const credit = await loadCreditOverview(context.workspace.id);
   return (
-    <GoatBillingPanel
+    <BillingPanel
       data={{
         creditBalanceUsdMicros: overview.creditBalanceUsdMicros,
         includedBalanceUsdMicros: overview.includedBalanceUsdMicros,
@@ -39,7 +39,7 @@ export default async function WorkspaceBillingSettingsPage({
         proMonthlyPriceCents: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
         hobbyIncludedUsageCents: GOAT_HOBBY_INCLUDED_USAGE_USD_CENTS,
         memberCount: overview.memberCount,
-        memberCap: goatWorkspaceMemberCap(overview.billing.plan),
+        memberCap: workspaceMemberCap(overview.billing.plan),
         spendThisMonthUsdMicros: credit.spendThisMonthUsdMicros,
         spendThisMonthByCategory: credit.spendThisMonthByCategory,
         recentActivity: credit.recentEntries.map((entry) => ({

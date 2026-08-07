@@ -1,22 +1,19 @@
 import { createLogger } from "@opencompany/observability";
 import Fastify from "fastify";
-import { wakeGoatBrainImportWorker } from "./brain-import-worker";
-import { wakeGoatBrainIngestWorker } from "./brain-ingest-worker";
-import { pollGoatCodexDeviceAuthFlow, startGoatCodexDeviceAuthFlow } from "./codex-auth";
-import {
-  GoatCodingWorkspaceAccessError,
-  mintGoatCodingWorkspaceAccess,
-} from "./coding-workspace-runtime";
-import { createGoatCodingWorkspaceTransport } from "./coding-workspace-runtime-transport";
-import { createGoatDictationTicket } from "./dictation-auth";
+import { wakeBrainImportWorker } from "./brain-import-worker";
+import { wakeBrainIngestWorker } from "./brain-ingest-worker";
+import { pollCodexDeviceAuthFlow, startCodexDeviceAuthFlow } from "./codex-auth";
+import { CodingWorkspaceAccessError, mintCodingWorkspaceAccess } from "./coding-workspace-runtime";
+import { createCodingWorkspaceTransport } from "./coding-workspace-runtime-transport";
+import { createDictationTicket } from "./dictation-auth";
 import type { RunnerEnv } from "./env";
-import { wakeGoatGoogleDriveSyncWorker } from "./google-drive-sync-worker";
-import { planGoatHarnessForTask } from "./harness";
-import { getGoatHarnessPlannerContextForRunner } from "./harness-planner";
-import { completeGoatInfisicalAuthFlow, startGoatInfisicalAuthFlow } from "./infisical-auth";
+import { wakeGoogleDriveSyncWorker } from "./google-drive-sync-worker";
+import { planHarnessForTask } from "./harness";
+import { getHarnessPlannerContextForRunner } from "./harness-planner";
+import { completeInfisicalAuthFlow, startInfisicalAuthFlow } from "./infisical-auth";
 import { type LlmBrokerOptions, registerLlmBrokerRoutes } from "./llm-broker";
 import { getSandboxLifecycleStatus, killSandbox } from "./sandbox";
-import { wakeGoatCodexChatWorker } from "./turn-worker";
+import { wakeCodexChatWorker } from "./turn-worker";
 
 const logger = createLogger({
   service: "opencompany-runner",
@@ -29,7 +26,7 @@ export function createServer(
     llmBroker?: Pick<LlmBrokerOptions, "store" | "fetchImpl">;
   } = {},
 ) {
-  const runtimeTransport = createGoatCodingWorkspaceTransport(env);
+  const runtimeTransport = createCodingWorkspaceTransport(env);
   const app = Fastify({
     logger: false,
     serverFactory: runtimeTransport.serverFactory,
@@ -72,11 +69,11 @@ export function createServer(
 
   app.post("/internal/goat/codex-chat/wake", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.goatTaskWorkerEnabled) {
+    if (!env.taskWorkerEnabled) {
       reply.status(503).send({ error: "Goat workers are disabled." });
       return;
     }
-    wakeGoatCodexChatWorker();
+    wakeCodexChatWorker();
     reply.status(202).send({ ok: true });
   });
 
@@ -105,14 +102,14 @@ export function createServer(
       }
 
       try {
-        const access = await mintGoatCodingWorkspaceAccess({
+        const access = await mintCodingWorkspaceAccess({
           codingSessionId,
           userWorkosId,
           env,
         });
         reply.send(access);
       } catch (error) {
-        if (error instanceof GoatCodingWorkspaceAccessError) {
+        if (error instanceof CodingWorkspaceAccessError) {
           reply.status(error.statusCode).send({ error: error.message });
           return;
         }
@@ -130,7 +127,7 @@ export function createServer(
       return;
     }
 
-    reply.send(createGoatDictationTicket({ userWorkosId, secret: env.streamTokenSecret }));
+    reply.send(createDictationTicket({ userWorkosId, secret: env.streamTokenSecret }));
   });
 
   app.delete("/internal/goat/codex-chat/sandboxes/:sandboxId", async (request, reply) => {
@@ -147,37 +144,37 @@ export function createServer(
 
   app.post("/internal/goat/brain-ingest/wake", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.goatTaskWorkerEnabled) {
+    if (!env.taskWorkerEnabled) {
       reply.status(503).send({ error: "Goat workers are disabled." });
       return;
     }
-    wakeGoatBrainIngestWorker();
+    wakeBrainIngestWorker();
     reply.status(202).send({ ok: true });
   });
 
   app.post("/internal/goat/google-drive/sync", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.goatTaskWorkerEnabled) {
+    if (!env.taskWorkerEnabled) {
       reply.status(503).send({ error: "Goat workers are disabled." });
       return;
     }
-    wakeGoatGoogleDriveSyncWorker();
+    wakeGoogleDriveSyncWorker();
     reply.status(202).send({ ok: true });
   });
 
   app.post("/internal/goat/brain-import/wake", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.goatTaskWorkerEnabled) {
+    if (!env.taskWorkerEnabled) {
       reply.status(503).send({ error: "Goat workers are disabled." });
       return;
     }
-    wakeGoatBrainImportWorker();
+    wakeBrainImportWorker();
     reply.status(202).send({ ok: true });
   });
 
   app.post("/internal/goat/task-harness/plan", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.goatTaskWorkerEnabled) {
+    if (!env.taskWorkerEnabled) {
       reply.status(503).send({ error: "Goat task worker is disabled." });
       return;
     }
@@ -190,10 +187,10 @@ export function createServer(
       return;
     }
 
-    const plannerContext = await getGoatHarnessPlannerContextForRunner(userWorkosId, {
-      browserEnabled: env.goatBrowserEnabled,
+    const plannerContext = await getHarnessPlannerContextForRunner(userWorkosId, {
+      browserEnabled: env.browserEnabled,
     });
-    const planned = await planGoatHarnessForTask({
+    const planned = await planHarnessForTask({
       prompt,
       model: "moonshotai/kimi-k2.6",
       availableTools: plannerContext.availableTools,
@@ -217,7 +214,7 @@ export function createServer(
       event: "opencompany.runner_goat_codex_auth_start_route_received",
       user_workos_id: userWorkosId,
     });
-    const flow = await startGoatCodexDeviceAuthFlow({ userWorkosId, env });
+    const flow = await startCodexDeviceAuthFlow({ userWorkosId, env });
     logger.info("Goat Codex device auth start route completed", {
       event: "opencompany.runner_goat_codex_auth_start_route_completed",
       user_workos_id: userWorkosId,
@@ -241,7 +238,7 @@ export function createServer(
       user_workos_id: userWorkosId,
       flow_id: flowId,
     });
-    const flow = await pollGoatCodexDeviceAuthFlow({
+    const flow = await pollCodexDeviceAuthFlow({
       userWorkosId,
       flowId,
       env,
@@ -274,7 +271,7 @@ export function createServer(
       return;
     }
     try {
-      const flow = await startGoatInfisicalAuthFlow({ workspaceId, requestedByWorkosId, env });
+      const flow = await startInfisicalAuthFlow({ workspaceId, requestedByWorkosId, env });
       reply.send({ ok: true, flow });
     } catch (error) {
       const forbidden =
@@ -304,7 +301,7 @@ export function createServer(
       return;
     }
     try {
-      const flow = await completeGoatInfisicalAuthFlow({
+      const flow = await completeInfisicalAuthFlow({
         workspaceId,
         requestedByWorkosId,
         flowId,

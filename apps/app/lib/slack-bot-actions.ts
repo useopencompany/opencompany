@@ -1,57 +1,54 @@
 "use server";
 
 import { getDb } from "@opencompany/db/client";
-import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-} from "@opencompany/db/integrations";
-import { goatBrainSources } from "@opencompany/db/schema";
-import type { GoatSlackConversationRef } from "@opencompany/db/slack";
-import { parseGoatSlackBrainSourceConfig } from "@opencompany/db/slack";
-import { getGoatSlackBotIntegrationForWorkspace } from "@opencompany/db/slack-bot";
-import { getGoatBrainAccess } from "@opencompany/db/workspaces";
+import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
+import { brainSources } from "@opencompany/db/schema";
+import type { SlackConversationRef } from "@opencompany/db/slack";
+import { parseSlackBrainSourceConfig } from "@opencompany/db/slack";
+import { getSlackBotIntegrationForWorkspace } from "@opencompany/db/slack-bot";
+import { getBrainAccess } from "@opencompany/db/workspaces";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
-import { upsertGoatBrainSourceWithAnalytics } from "@/lib/brain-source-analytics";
+import { currentUser } from "@/lib/auth";
+import { upsertBrainSourceWithAnalytics } from "@/lib/brain-source-analytics";
 import { slackApiRequest } from "@/lib/integrations/slack";
-import type { GoatWorkspaceActionResult } from "@/lib/workspace-actions";
+import type { WorkspaceActionResult } from "@/lib/workspace-actions";
 
-export type GoatSlackBotWorkspaceState = {
+export type SlackBotWorkspaceState = {
   installed: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
   teamName: string | null;
   statusReason: string | null;
 };
 
-export type GoatSlackBotChannel = GoatSlackConversationRef & {
+export type SlackBotChannel = SlackConversationRef & {
   isPrivate: boolean;
   isMember: boolean;
 };
 
-export type GoatSlackBotChannelListResult =
-  | { ok: true; channels: GoatSlackBotChannel[]; partial: boolean }
+export type SlackBotChannelListResult =
+  | { ok: true; channels: SlackBotChannel[]; partial: boolean }
   | { ok: false; error: string };
 
-export type GoatSlackBotDestinationView = {
+export type SlackBotDestinationView = {
   installed: boolean;
   botConnected: boolean;
   isAdmin: boolean;
   brainVisibility: "workspace" | "restricted";
-  source: { enabled: boolean; channels: GoatSlackConversationRef[] } | null;
+  source: { enabled: boolean; channels: SlackConversationRef[] } | null;
 };
 
-export async function disconnectGoatSlackBotAction(): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
+export async function disconnectSlackBotAction(): Promise<WorkspaceActionResult> {
+  const context = await currentUser();
   if (context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can manage the Slack bot." };
   }
-  const integration = await getGoatSlackBotIntegrationForWorkspace(context.workspace.id);
+  const integration = await getSlackBotIntegrationForWorkspace(context.workspace.id);
   if (!integration) {
     return { ok: false, error: "The Slack bot is not connected." };
   }
   try {
-    await markGoatIntegrationStatus({
+    await markIntegrationStatus({
       userWorkosId: integration.userWorkosId,
       integrationId: integration.id,
       provider: "slack_bot",
@@ -70,9 +67,9 @@ export async function disconnectGoatSlackBotAction(): Promise<GoatWorkspaceActio
 
 // Channel picker source: pages conversations.list with the workspace bot
 // token (unlike ingestion's per-user users.conversations).
-export async function listGoatSlackBotChannelsAction(
+export async function listSlackBotChannelsAction(
   brainRef: string,
-): Promise<GoatSlackBotChannelListResult> {
+): Promise<SlackBotChannelListResult> {
   const context = await requireAdminBrainAccess(brainRef);
   if (!context) {
     return { ok: false, error: "Only workspace admins can configure the Slack bot." };
@@ -82,7 +79,7 @@ export async function listGoatSlackBotChannelsAction(
     return { ok: false, error: "Connect the Slack bot in workspace settings first." };
   }
 
-  const channels: GoatSlackBotChannel[] = [];
+  const channels: SlackBotChannel[] = [];
   let cursor: string | undefined;
   let partial = false;
   let loadedPages = 0;
@@ -133,33 +130,30 @@ export async function listGoatSlackBotChannelsAction(
   return { ok: true, channels, partial };
 }
 
-export async function getGoatBrainSlackBotDestinationAction(
+export async function getBrainSlackBotDestinationAction(
   brainRef: string,
-): Promise<GoatSlackBotDestinationView | null> {
-  const context = await currentGoatUser();
-  const access = await getGoatBrainAccess({
+): Promise<SlackBotDestinationView | null> {
+  const context = await currentUser();
+  const access = await getBrainAccess({
     userWorkosId: context.user.workosUserId,
     brainRef,
   });
   if (!access || access.brain.workspaceId !== context.workspace.id) return null;
 
-  const integration = await getGoatSlackBotIntegrationForWorkspace(context.workspace.id);
+  const integration = await getSlackBotIntegrationForWorkspace(context.workspace.id);
   const installed = Boolean(integration && integration.status !== "disconnected");
 
-  let source: GoatSlackBotDestinationView["source"] = null;
+  let source: SlackBotDestinationView["source"] = null;
   if (integration) {
     const [row] = await getDb()
-      .select({ enabled: goatBrainSources.enabled, config: goatBrainSources.config })
-      .from(goatBrainSources)
+      .select({ enabled: brainSources.enabled, config: brainSources.config })
+      .from(brainSources)
       .where(
-        and(
-          eq(goatBrainSources.brainId, brainRef),
-          eq(goatBrainSources.integrationId, integration.id),
-        ),
+        and(eq(brainSources.brainId, brainRef), eq(brainSources.integrationId, integration.id)),
       )
       .limit(1);
     if (row) {
-      const config = parseGoatSlackBrainSourceConfig(row.config);
+      const config = parseSlackBrainSourceConfig(row.config);
       source = { enabled: row.enabled, channels: config.channels ?? [] };
     }
   }
@@ -173,22 +167,22 @@ export async function getGoatBrainSlackBotDestinationAction(
   };
 }
 
-export async function setGoatBrainSlackBotDestinationAction(input: {
+export async function setBrainSlackBotDestinationAction(input: {
   brainRef: string;
   enabled: boolean;
-  channels: GoatSlackConversationRef[];
-}): Promise<GoatWorkspaceActionResult> {
+  channels: SlackConversationRef[];
+}): Promise<WorkspaceActionResult> {
   const context = await requireAdminBrainAccess(input.brainRef);
   if (!context) {
     return { ok: false, error: "Only workspace admins can configure the Slack bot." };
   }
-  const integration = await getGoatSlackBotIntegrationForWorkspace(context.workspace.id);
+  const integration = await getSlackBotIntegrationForWorkspace(context.workspace.id);
   if (!integration || integration.status === "disconnected") {
     return { ok: false, error: "Connect the Slack bot in workspace settings first." };
   }
 
   try {
-    await upsertGoatBrainSourceWithAnalytics({
+    await upsertBrainSourceWithAnalytics({
       workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: "slack_bot",
@@ -209,9 +203,9 @@ export async function setGoatBrainSlackBotDestinationAction(input: {
 }
 
 async function requireAdminBrainAccess(brainRef: string) {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   if (context.role !== "admin") return null;
-  const access = await getGoatBrainAccess({
+  const access = await getBrainAccess({
     userWorkosId: context.user.workosUserId,
     brainRef,
   });
@@ -220,9 +214,9 @@ async function requireAdminBrainAccess(brainRef: string) {
 }
 
 async function loadWorkspaceBotToken(workspaceId: string): Promise<string | null> {
-  const integration = await getGoatSlackBotIntegrationForWorkspace(workspaceId);
+  const integration = await getSlackBotIntegrationForWorkspace(workspaceId);
   if (!integration || integration.status === "disconnected") return null;
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId: integration.userWorkosId,
     integrationId: integration.id,
     provider: "slack_bot",
@@ -232,9 +226,9 @@ async function loadWorkspaceBotToken(workspaceId: string): Promise<string | null
   return typeof token === "string" && token ? token : null;
 }
 
-function sanitizeChannelRefs(refs: GoatSlackConversationRef[]): GoatSlackConversationRef[] {
+function sanitizeChannelRefs(refs: SlackConversationRef[]): SlackConversationRef[] {
   const seen = new Set<string>();
-  const sanitized: GoatSlackConversationRef[] = [];
+  const sanitized: SlackConversationRef[] = [];
   for (const ref of refs) {
     const id = typeof ref.id === "string" ? ref.id.trim() : "";
     if (!id || seen.has(id)) continue;

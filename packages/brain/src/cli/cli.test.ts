@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getGoatBrainCliSource } from "../generated/cli-bundle";
+import { getBrainCliSource } from "../generated/cli-bundle";
 import { DEFAULT_GOAT_BRAIN_FOLDERS } from "../schema";
 import { parseArgs } from "./args";
 import { commandHelp, HELP, ingestCommandExitCode, validateCommandArgs } from "./index";
@@ -1258,7 +1258,7 @@ describe("goat-brain cli", () => {
 
   it("runs the generated bundle under node from a temp brain root", async () => {
     const bundlePath = path.join(root, "goat-brain.mjs");
-    await writeFile(bundlePath, getGoatBrainCliSource(), "utf8");
+    await writeFile(bundlePath, getBrainCliSource(), "utf8");
 
     const created = await spawnNode(bundlePath, [
       "create",

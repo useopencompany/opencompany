@@ -1,13 +1,13 @@
 import { generateKeyPairSync } from "node:crypto";
-import { goatIntegrationResources, goatIntegrations } from "@opencompany/db/schema";
+import { integrationResources, integrations } from "@opencompany/db/schema";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  createGoatGitHubIntegrationState,
-  GoatGitHubApiError,
-  listConnectedGoatGitHubInstallations,
-  searchGoatGitHubIssues,
-  syncGoatGitHubIntegrationRepositories,
-  verifyGoatGitHubIntegrationState,
+  createGitHubIntegrationState,
+  GitHubApiError,
+  listConnectedGitHubInstallations,
+  searchGitHubIssues,
+  syncGitHubIntegrationRepositories,
+  verifyGitHubIntegrationState,
 } from "./github";
 
 const TEST_PRIVATE_KEY = generateKeyPairSync("rsa", { modulusLength: 2048 })
@@ -78,13 +78,13 @@ afterEach(() => {
 
 describe("Goat GitHub integration", () => {
   it("round-trips signed state for a Goat user", () => {
-    const state = createGoatGitHubIntegrationState({
+    const state = createGitHubIntegrationState({
       userWorkosId: "user_123",
       workspaceId: "gws_123",
       returnTo: "/settings",
     });
 
-    expect(verifyGoatGitHubIntegrationState(state)).toMatchObject({
+    expect(verifyGitHubIntegrationState(state)).toMatchObject({
       userWorkosId: "user_123",
       workspaceId: "gws_123",
       returnTo: "/settings",
@@ -99,7 +99,7 @@ describe("Goat GitHub integration", () => {
       { installationId: null, accountName: "broken", status: "connected" },
     );
 
-    await expect(listConnectedGoatGitHubInstallations("workspace_1")).resolves.toEqual([
+    await expect(listConnectedGitHubInstallations("workspace_1")).resolves.toEqual([
       { installationId: "connected-1", accountName: "opencompany" },
       { installationId: "connected-2", accountName: "acme" },
     ]);
@@ -118,7 +118,7 @@ describe("Goat GitHub integration", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      searchGoatGitHubIssues({
+      searchGitHubIssues({
         installationId: "12345",
         query: "repo:opencompany/goat state:open",
         limit: 7,
@@ -152,19 +152,19 @@ describe("Goat GitHub integration", () => {
       vi.fn(async () => new Response("sensitive provider payload", { status: 404 })),
     );
 
-    const error = await searchGoatGitHubIssues({
+    const error = await searchGitHubIssues({
       installationId: "missing",
       query: "is:issue",
       limit: 10,
       signal: new AbortController().signal,
     }).catch((caught: unknown) => caught);
-    expect(error).toBeInstanceOf(GoatGitHubApiError);
+    expect(error).toBeInstanceOf(GitHubApiError);
     expect(error).toMatchObject({ status: 404, operation: "installation_token" });
     expect((error as Error).message).not.toContain("sensitive provider payload");
   });
 
   it("syncs repositories into Goat integration resources", async () => {
-    await syncGoatGitHubIntegrationRepositories({
+    await syncGitHubIntegrationRepositories({
       userWorkosId: "user_123",
       workspaceId: "gws_123",
       installationId: "12345",
@@ -180,12 +180,12 @@ describe("Goat GitHub integration", () => {
       ],
     });
 
-    expect(db.insert).toHaveBeenCalledWith(goatIntegrations);
-    expect(db.insert).toHaveBeenCalledWith(goatIntegrationResources);
+    expect(db.insert).toHaveBeenCalledWith(integrations);
+    expect(db.insert).toHaveBeenCalledWith(integrationResources);
     expect(db.insertValues).toEqual(
       expect.arrayContaining([
         {
-          table: goatIntegrations,
+          table: integrations,
           values: expect.objectContaining({
             userWorkosId: "user_123",
             provider: "github",
@@ -196,7 +196,7 @@ describe("Goat GitHub integration", () => {
           }),
         },
         {
-          table: goatIntegrationResources,
+          table: integrationResources,
           values: [
             expect.objectContaining({
               userWorkosId: "user_123",
@@ -218,7 +218,7 @@ describe("Goat GitHub integration", () => {
     expect(db.updateValues).toEqual(
       expect.arrayContaining([
         {
-          table: goatIntegrations,
+          table: integrations,
           values: expect.objectContaining({
             status: "connected",
             statusReason: null,

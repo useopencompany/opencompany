@@ -1,23 +1,23 @@
 import { getAgentModelDefinition } from "@opencompany/agent-runtime";
 import type {
-  GoatHarnessEngine,
-  GoatTaskEvent,
-  GoatTaskEventType,
-  GoatTaskMessage,
-  GoatTaskMessageRole,
-  GoatTaskMessageStatus,
-  GoatTaskModelUsage,
-  GoatTaskModelUsagePhase,
-  GoatTaskReportedOutcome,
-  GoatTaskSandboxUsage,
-  GoatTaskStage,
-  GoatTaskStatus,
-  GoatTaskToolName,
-  GoatTaskToolUsage,
+  HarnessEngine,
+  TaskEvent,
+  TaskEventType,
+  TaskMessage,
+  TaskMessageRole,
+  TaskMessageStatus,
+  TaskModelUsage,
+  TaskModelUsagePhase,
+  TaskReportedOutcome,
+  TaskSandboxUsage,
+  TaskStage,
+  TaskStatus,
+  TaskToolName,
+  TaskToolUsage,
 } from "@opencompany/db/schema";
-import type { GoatChatSessionView } from "@/lib/chat-ui";
+import type { ChatSessionView } from "@/lib/chat-ui";
 
-export type GoatTaskRunTaskInput =
+export type TaskRunTaskInput =
   | {
       id: string;
       displayId: string;
@@ -25,13 +25,13 @@ export type GoatTaskRunTaskInput =
       prompt: string;
       model: string;
       sessionId?: string | null;
-      status: GoatTaskStatus;
-      stage: GoatTaskStage;
+      status: TaskStatus;
+      stage: TaskStage;
       result: string | null;
       error: string | null;
       harnessSpec?: unknown;
       workflowId?: string | null;
-      reportedOutcome?: GoatTaskReportedOutcome | null;
+      reportedOutcome?: TaskReportedOutcome | null;
       outcomeComment?: string | null;
       createdAt: Date | string;
       updatedAt: Date | string;
@@ -43,29 +43,29 @@ export type GoatTaskRunTaskInput =
       prompt: string;
       model: string;
       session_id?: string | null;
-      status: GoatTaskStatus;
-      stage: GoatTaskStage;
+      status: TaskStatus;
+      stage: TaskStage;
       result: string | null;
       error: string | null;
       harness_spec?: unknown;
       workflow_id?: string | null;
-      reported_outcome?: GoatTaskReportedOutcome | null;
+      reported_outcome?: TaskReportedOutcome | null;
       outcome_comment?: string | null;
       created_at: string;
       updated_at: string;
     };
 
-export type GoatTaskRunMessageInput =
-  | GoatTaskMessage
+export type TaskRunMessageInput =
+  | TaskMessage
   | {
       id: string;
       task_id: string;
       user_workos_id: string;
-      role: GoatTaskMessageRole;
-      status: GoatTaskMessageStatus;
+      role: TaskMessageRole;
+      status: TaskMessageStatus;
       content: string;
       model_message: unknown | null;
-      tool_name: GoatTaskToolName | null;
+      tool_name: TaskToolName | null;
       tool_call_id: string | null;
       response_to_message_id: string | null;
       created_at: string;
@@ -73,20 +73,20 @@ export type GoatTaskRunMessageInput =
       completed_at: string | null;
     };
 
-export type GoatTaskRunEventInput =
-  | GoatTaskEvent
+export type TaskRunEventInput =
+  | TaskEvent
   | {
       id: number;
       task_id: string;
       user_workos_id: string;
       message_id: string | null;
-      type: GoatTaskEventType;
+      type: TaskEventType;
       payload: Record<string, unknown>;
       created_at: string;
     };
 
-export type GoatTaskRunModelUsageInput =
-  | GoatTaskModelUsage
+export type TaskRunModelUsageInput =
+  | TaskModelUsage
   | {
       id: number;
       task_id: string;
@@ -118,8 +118,8 @@ export type GoatTaskRunModelUsageInput =
       created_at: string;
     };
 
-export type GoatTaskRunToolUsageInput =
-  | GoatTaskToolUsage
+export type TaskRunToolUsageInput =
+  | TaskToolUsage
   | {
       id: number;
       task_id: string;
@@ -139,8 +139,8 @@ export type GoatTaskRunToolUsageInput =
       created_at: string;
     };
 
-export type GoatTaskRunSandboxUsageInput =
-  | GoatTaskSandboxUsage
+export type TaskRunSandboxUsageInput =
+  | TaskSandboxUsage
   | {
       id: number;
       task_id: string;
@@ -162,7 +162,7 @@ export type GoatTaskRunSandboxUsageInput =
       created_at: string;
     };
 
-export type GoatHarnessRunViewModel = {
+export type HarnessRunViewModel = {
   hasDurableRun: boolean;
   legacyDetailText: string;
   task: {
@@ -172,31 +172,31 @@ export type GoatHarnessRunViewModel = {
     prompt: string;
     model: string;
     sessionId: string | null;
-    engine: GoatHarnessEngine;
-    status: GoatTaskStatus;
-    stage: GoatTaskStage;
+    engine: HarnessEngine;
+    status: TaskStatus;
+    stage: TaskStage;
     result: string;
     error: string;
     workflowId: string | null;
-    reportedOutcome: GoatTaskReportedOutcome | null;
+    reportedOutcome: TaskReportedOutcome | null;
     outcomeComment: string | null;
     createdAt: string;
     updatedAt: string;
   };
-  messages: GoatRunMessage[];
-  userMessage: GoatRunMessage | null;
-  assistantMessages: GoatRunMessage[];
-  toolCalls: GoatHarnessRunToolCall[];
-  artifacts: GoatRunArtifact[];
-  resultArtifact: GoatRunArtifact | null;
-  events: GoatRunEvent[];
-  models: GoatRunModelSummary[];
-  harnessConfig: GoatRunHarnessConfig | null;
-  chat: GoatChatSessionView | null;
-  cost: GoatRunCostSummary;
+  messages: RunMessage[];
+  userMessage: RunMessage | null;
+  assistantMessages: RunMessage[];
+  toolCalls: HarnessRunToolCall[];
+  artifacts: RunArtifact[];
+  resultArtifact: RunArtifact | null;
+  events: RunEvent[];
+  models: RunModelSummary[];
+  harnessConfig: RunHarnessConfig | null;
+  chat: ChatSessionView | null;
+  cost: RunCostSummary;
 };
 
-export type GoatRunArtifact = {
+export type RunArtifact = {
   type: "brain_markdown_report";
   title: string;
   url: string;
@@ -208,36 +208,36 @@ export type GoatRunArtifact = {
   createdAt: string;
 };
 
-export type GoatRunModelSummary = {
+export type RunModelSummary = {
   id: string;
   label: string;
   usageCount: number;
-  phases: GoatTaskModelUsagePhase[];
+  phases: TaskModelUsagePhase[];
 };
 
-export type GoatRunHarnessConfig = {
+export type RunHarnessConfig = {
   model: string;
   modelLabel: string;
-  tools: GoatRunHarnessTool[];
+  tools: RunHarnessTool[];
   skills: string[];
   maxModelSteps: number | null;
   resultMode: string;
-  codexGoalMode: GoatRunCodexGoalMode | null;
+  codexGoalMode: RunCodexGoalMode | null;
   rawSpec: unknown;
 };
 
-export type GoatRunCodexGoalMode = {
+export type RunCodexGoalMode = {
   objective: string;
   tokenBudget: number | null;
 };
 
-export type GoatRunHarnessTool = {
+export type RunHarnessTool = {
   id: string;
   label: string;
-  kind: GoatHarnessRunToolCall["kind"];
+  kind: HarnessRunToolCall["kind"];
 };
 
-export type GoatRunCostSummary = {
+export type RunCostSummary = {
   hasRecordedCosts: boolean;
   totalCostUsdMicros: number;
   modelCostUsdMicros: number;
@@ -245,11 +245,11 @@ export type GoatRunCostSummary = {
   sandboxCostUsdMicros: number;
   providerCostUsdMicros: number;
   platformFeeUsdMicros: number;
-  tokens: GoatRunTokenSummary;
-  toolUsageByProviderOperation: GoatRunToolUsageSummary[];
+  tokens: RunTokenSummary;
+  toolUsageByProviderOperation: RunToolUsageSummary[];
 };
 
-export type GoatRunTokenSummary = {
+export type RunTokenSummary = {
   inputTokens: number;
   inputNoCacheTokens: number;
   inputCacheReadTokens: number;
@@ -260,7 +260,7 @@ export type GoatRunTokenSummary = {
   totalTokens: number;
 };
 
-export type GoatRunToolUsageSummary = {
+export type RunToolUsageSummary = {
   provider: string;
   operation: string;
   costUsdMicros: number;
@@ -271,29 +271,29 @@ export type GoatRunToolUsageSummary = {
 
 type UsageNumberInput = number | string;
 
-export type GoatRunMessage = {
+export type RunMessage = {
   id: string;
-  role: GoatTaskMessageRole;
-  status: GoatTaskMessageStatus;
+  role: TaskMessageRole;
+  status: TaskMessageStatus;
   content: string;
-  toolName: GoatTaskToolName | null;
+  toolName: TaskToolName | null;
   toolCallId: string | null;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
 };
 
-export type GoatRunEvent = {
+export type RunEvent = {
   id: number;
   messageId: string | null;
-  type: GoatTaskEventType;
+  type: TaskEventType;
   payload: Record<string, unknown>;
   createdAt: string;
 };
 
-export type GoatHarnessRunToolCall = {
+export type HarnessRunToolCall = {
   id: string;
-  name: GoatTaskToolName | string;
+  name: TaskToolName | string;
   label: string;
   kind: "search" | "browser" | "gmail" | "calendar" | "linear" | "tool";
   status: "running" | "completed" | "failed";
@@ -306,16 +306,16 @@ export type GoatHarnessRunToolCall = {
 
 const PREVIEW_MAX_LENGTH = 900;
 
-export function buildGoatHarnessRun(input: {
-  task: GoatTaskRunTaskInput;
-  messages: readonly GoatTaskRunMessageInput[];
-  events: readonly GoatTaskRunEventInput[];
-  modelUsage?: readonly GoatTaskRunModelUsageInput[];
-  toolUsage?: readonly GoatTaskRunToolUsageInput[];
-  sandboxUsage?: readonly GoatTaskRunSandboxUsageInput[];
-  cost?: GoatRunCostSummary;
-  chat?: GoatChatSessionView | null;
-}): GoatHarnessRunViewModel {
+export function buildHarnessRun(input: {
+  task: TaskRunTaskInput;
+  messages: readonly TaskRunMessageInput[];
+  events: readonly TaskRunEventInput[];
+  modelUsage?: readonly TaskRunModelUsageInput[];
+  toolUsage?: readonly TaskRunToolUsageInput[];
+  sandboxUsage?: readonly TaskRunSandboxUsageInput[];
+  cost?: RunCostSummary;
+  chat?: ChatSessionView | null;
+}): HarnessRunViewModel {
   const task = normalizeTask(input.task);
   const messages = input.messages.map(normalizeMessage).toSorted(compareCreatedAt);
   const events = input.events.map(normalizeEvent).toSorted((a, b) => a.id - b.id);
@@ -350,7 +350,7 @@ export function buildGoatHarnessRun(input: {
   };
 }
 
-function buildHarnessConfig(value: unknown, fallbackModel: string): GoatRunHarnessConfig | null {
+function buildHarnessConfig(value: unknown, fallbackModel: string): RunHarnessConfig | null {
   const spec = readRecord(value);
   if (!spec || Object.keys(spec).length === 0) return null;
 
@@ -378,11 +378,11 @@ function buildHarnessConfig(value: unknown, fallbackModel: string): GoatRunHarne
 
 function buildModelSummary(
   fallbackModel: string,
-  modelUsage: readonly GoatTaskRunModelUsageInput[],
-): GoatRunModelSummary[] {
+  modelUsage: readonly TaskRunModelUsageInput[],
+): RunModelSummary[] {
   const byModel = new Map<
     string,
-    { id: string; usageCount: number; phases: Set<GoatTaskModelUsagePhase> }
+    { id: string; usageCount: number; phases: Set<TaskModelUsagePhase> }
   >();
 
   for (const usage of modelUsage) {
@@ -411,10 +411,10 @@ function modelLabel(modelId: string) {
 }
 
 function buildCostSummary(input: {
-  modelUsage: readonly GoatTaskRunModelUsageInput[];
-  toolUsage: readonly GoatTaskRunToolUsageInput[];
-  sandboxUsage: readonly GoatTaskRunSandboxUsageInput[];
-}): GoatRunCostSummary {
+  modelUsage: readonly TaskRunModelUsageInput[];
+  toolUsage: readonly TaskRunToolUsageInput[];
+  sandboxUsage: readonly TaskRunSandboxUsageInput[];
+}): RunCostSummary {
   const tokens = emptyTokenSummary();
   let modelCostUsdMicros = 0;
   let modelProviderCostUsdMicros = 0;
@@ -461,7 +461,7 @@ function buildCostSummary(input: {
   let toolCostUsdMicros = 0;
   let toolProviderCostUsdMicros = 0;
   let toolPlatformFeeUsdMicros = 0;
-  const toolGroups = new Map<string, GoatRunToolUsageSummary>();
+  const toolGroups = new Map<string, RunToolUsageSummary>();
   for (const usage of input.toolUsage) {
     const provider = readUsageString(usage, "provider", "provider") || "unknown";
     const operation = readUsageString(usage, "operation", "operation") || "unknown";
@@ -520,7 +520,7 @@ function buildCostSummary(input: {
   };
 }
 
-function emptyTokenSummary(): GoatRunTokenSummary {
+function emptyTokenSummary(): RunTokenSummary {
   return {
     inputTokens: 0,
     inputNoCacheTokens: 0,
@@ -533,7 +533,7 @@ function emptyTokenSummary(): GoatRunTokenSummary {
   };
 }
 
-function makeToolUsageSummary(provider: string, operation: string): GoatRunToolUsageSummary {
+function makeToolUsageSummary(provider: string, operation: string): RunToolUsageSummary {
   return {
     provider,
     operation,
@@ -544,8 +544,8 @@ function makeToolUsageSummary(provider: string, operation: string): GoatRunToolU
   };
 }
 
-function buildToolCalls(events: readonly GoatRunEvent[]) {
-  const byCallId = new Map<string, GoatHarnessRunToolCall>();
+function buildToolCalls(events: readonly RunEvent[]) {
+  const byCallId = new Map<string, HarnessRunToolCall>();
   for (const event of events) {
     if (
       event.type !== "tool.started" &&
@@ -603,9 +603,9 @@ function buildToolCalls(events: readonly GoatRunEvent[]) {
   return Array.from(byCallId.values()).toSorted(compareCreatedAt);
 }
 
-function buildArtifacts(events: readonly GoatRunEvent[]): GoatRunArtifact[] {
+function buildArtifacts(events: readonly RunEvent[]): RunArtifact[] {
   return events
-    .flatMap((event): GoatRunArtifact[] => {
+    .flatMap((event): RunArtifact[] => {
       if (event.type !== "artifact.created") return [];
       const artifact = parseArtifact(event.payload.artifact);
       return artifact ? [{ ...artifact, createdAt: event.createdAt }] : [];
@@ -613,7 +613,7 @@ function buildArtifacts(events: readonly GoatRunEvent[]): GoatRunArtifact[] {
     .toSorted(compareCreatedAt);
 }
 
-function parseArtifact(value: unknown): Omit<GoatRunArtifact, "createdAt"> | null {
+function parseArtifact(value: unknown): Omit<RunArtifact, "createdAt"> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   if (record.type !== "brain_markdown_report") return null;
@@ -646,13 +646,13 @@ function isInternalBrainUrl(url: string) {
 function makeToolCall(input: {
   id: string;
   name: string;
-  status: GoatHarnessRunToolCall["status"];
+  status: HarnessRunToolCall["status"];
   input: unknown;
   output: unknown;
   error: unknown;
   raw: unknown;
   createdAt: string;
-}): GoatHarnessRunToolCall {
+}): HarnessRunToolCall {
   const description = describeTool(input.name);
   return {
     id: input.id,
@@ -668,7 +668,7 @@ function makeToolCall(input: {
   };
 }
 
-function describeTool(name: string): Pick<GoatHarnessRunToolCall, "label" | "kind"> {
+function describeTool(name: string): Pick<HarnessRunToolCall, "label" | "kind"> {
   if (name === "exa_search") return { label: "Web search", kind: "search" };
   if (name.startsWith("browser_")) {
     const labels: Record<string, string> = {
@@ -725,12 +725,12 @@ function describeTool(name: string): Pick<GoatHarnessRunToolCall, "label" | "kin
   return { label: name, kind: "tool" };
 }
 
-function readTaskHarnessSpec(task: GoatTaskRunTaskInput): unknown {
+function readTaskHarnessSpec(task: TaskRunTaskInput): unknown {
   if ("displayId" in task) return task.harnessSpec;
   return task.harness_spec;
 }
 
-function normalizeTask(task: GoatTaskRunTaskInput): GoatHarnessRunViewModel["task"] {
+function normalizeTask(task: TaskRunTaskInput): HarnessRunViewModel["task"] {
   const engine = readHarnessEngine(readTaskHarnessSpec(task));
   if ("displayId" in task) {
     return {
@@ -772,12 +772,12 @@ function normalizeTask(task: GoatTaskRunTaskInput): GoatHarnessRunViewModel["tas
   };
 }
 
-function readHarnessEngine(value: unknown): GoatHarnessEngine {
+function readHarnessEngine(value: unknown): HarnessEngine {
   const spec = readRecord(value);
   return spec?.engine === "codex" || spec?.engine === "claude_code" ? spec.engine : "opencompany";
 }
 
-function normalizeMessage(message: GoatTaskRunMessageInput): GoatRunMessage {
+function normalizeMessage(message: TaskRunMessageInput): RunMessage {
   if ("taskId" in message) {
     return {
       id: message.id,
@@ -804,7 +804,7 @@ function normalizeMessage(message: GoatTaskRunMessageInput): GoatRunMessage {
   };
 }
 
-function normalizeEvent(event: GoatTaskRunEventInput): GoatRunEvent {
+function normalizeEvent(event: TaskRunEventInput): RunEvent {
   if ("taskId" in event) {
     return {
       id: event.id,
@@ -885,7 +885,7 @@ function readPositiveInteger(value: unknown) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-function readCodexGoalMode(value: unknown): GoatRunCodexGoalMode | null {
+function readCodexGoalMode(value: unknown): RunCodexGoalMode | null {
   const codex = readRecord(value);
   const goalMode = readRecord(codex?.goalMode);
   if (!goalMode) return null;
@@ -915,7 +915,7 @@ function readUsageString(value: unknown, camelKey: string, snakeKey: string) {
   return typeof raw === "string" ? raw.trim() : "";
 }
 
-function readModelUsagePhase(value: unknown): GoatTaskModelUsagePhase | null {
+function readModelUsagePhase(value: unknown): TaskModelUsagePhase | null {
   const phase = readUsageString(value, "phase", "phase");
   return phase === "planner" || phase === "execution" ? phase : null;
 }

@@ -9,13 +9,13 @@ import {
   GOAT_OBSERVABILITY_SERVICE_NAME,
   GOAT_OTEL_METRIC_EXPORT_INTERVAL_MS,
   GOAT_OTEL_TRACE_SAMPLE_RATE,
-  isGoatObservabilityEnabled,
+  isObservabilityEnabled,
 } from ".";
 
 let sdk: NodeSDK | null = null;
 
-export function registerGoatNodeObservability(input: { serviceName?: string } = {}) {
-  if (sdk || !isGoatObservabilityEnabled()) return null;
+export function registerNodeObservability(input: { serviceName?: string } = {}) {
+  if (sdk || !isObservabilityEnabled()) return null;
   const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim();
   if (!endpoint) return null;
 
@@ -45,7 +45,7 @@ export function registerGoatNodeObservability(input: { serviceName?: string } = 
   return sdk;
 }
 
-export async function shutdownGoatNodeObservability() {
+export async function shutdownNodeObservability() {
   if (!sdk) return;
   const active = sdk;
   sdk = null;

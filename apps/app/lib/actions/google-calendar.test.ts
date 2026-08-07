@@ -27,13 +27,13 @@ vi.mock("@opencompany/core/integrations/google-access-token", async (importOrigi
 import { GoogleAccessAuthError } from "@opencompany/core/integrations/google-access-token";
 import { resolveGoogleCalendarActions } from "@/lib/actions/google-calendar";
 import {
-  GoatActionAuthError,
-  type GoatActionExecuteContext,
-  GoatActionInvalidParamsError,
-  GoatActionPermissionError,
+  ActionAuthError,
+  type ActionExecuteContext,
+  ActionInvalidParamsError,
+  ActionPermissionError,
 } from "@/lib/actions/types";
 
-const CONTEXT: GoatActionExecuteContext = {
+const CONTEXT: ActionExecuteContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-22T12:00:00.000Z"),
@@ -443,7 +443,7 @@ describe("google_calendar.list_events", () => {
     const action = findListEvents(await resolveGoogleCalendarActions("user_1"));
 
     const execution = action.execute(WINDOW, CONTEXT);
-    await expect(execution).rejects.toBeInstanceOf(GoatActionAuthError);
+    await expect(execution).rejects.toBeInstanceOf(ActionAuthError);
     await expect(execution).rejects.toMatchObject({
       code: "auth_expired",
       provider: "google_calendar",
@@ -467,7 +467,7 @@ describe("google_calendar.list_events", () => {
     const action = findListEvents(await resolveGoogleCalendarActions("user_1"));
 
     await expect(action.execute({ ...WINDOW, limit: 0 }, CONTEXT)).rejects.toBeInstanceOf(
-      GoatActionInvalidParamsError,
+      ActionInvalidParamsError,
     );
   });
 });
@@ -622,7 +622,7 @@ describe("google_calendar.create_event", () => {
 
     mocks.dbRows = [{ ...connectedRow(), capabilityModes: { write: "off" } }];
     const execution = action.execute(TIMED_EVENT, CONTEXT);
-    await expect(execution).rejects.toBeInstanceOf(GoatActionPermissionError);
+    await expect(execution).rejects.toBeInstanceOf(ActionPermissionError);
     await expect(execution).rejects.toMatchObject({
       message: expect.stringContaining("turned off"),
     });

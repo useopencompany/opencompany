@@ -2,10 +2,10 @@ import { GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runti
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
-import type { GoatChatMessageAttachment, GoatHarnessSpec } from "./schema";
-import { createGoatTaskSession, enqueueGoatTaskSessionTurn } from "./task-sessions";
+import type { ChatMessageAttachment, HarnessSpec } from "./schema";
+import { createTaskSession, enqueueTaskSessionTurn } from "./task-sessions";
 
-const harnessSpec: GoatHarnessSpec = {
+const harnessSpec: HarnessSpec = {
   schemaVersion: "goat.harness.v1",
   engine: "opencompany",
   model: "moonshotai/kimi-k2.6",
@@ -22,7 +22,7 @@ describe("Goat task sessions", () => {
     const execute = vi.fn(async (_query: SQL) => [taskRow()]);
 
     await expect(
-      createGoatTaskSession(
+      createTaskSession(
         {
           userWorkosId: "user_1",
           workspaceId: "workspace_1",
@@ -65,7 +65,7 @@ describe("Goat task sessions", () => {
     const execute = vi.fn(async (_query: SQL) => [taskRow()]);
 
     await expect(
-      createGoatTaskSession(
+      createTaskSession(
         {
           userWorkosId: "user_1",
           prompt: "Research the market.",
@@ -87,7 +87,7 @@ describe("Goat task sessions", () => {
     const execute = vi.fn(async (_query: SQL) => [taskRow(claudeCodeHarnessSpec)]);
 
     await expect(
-      createGoatTaskSession(
+      createTaskSession(
         {
           userWorkosId: "user_1",
           workspaceId: "workspace_1",
@@ -116,7 +116,7 @@ describe("Goat task sessions", () => {
     ]);
 
     await expect(
-      enqueueGoatTaskSessionTurn(
+      enqueueTaskSessionTurn(
         {
           taskId: "goat_task_1",
           userWorkosId: "user_1",
@@ -142,13 +142,13 @@ function rendered(query: SQL | undefined) {
   return new PgDialect().sqlToQuery(query!);
 }
 
-const claudeCodeHarnessSpec: GoatHarnessSpec = {
+const claudeCodeHarnessSpec: HarnessSpec = {
   ...harnessSpec,
   engine: "claude_code",
   model: "anthropic/claude-sonnet-5",
 };
 
-const attachment: GoatChatMessageAttachment = {
+const attachment: ChatMessageAttachment = {
   id: "goat_chat_att_1",
   kind: "docx",
   mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -158,7 +158,7 @@ const attachment: GoatChatMessageAttachment = {
   blobUrl: "https://blob.test/goat-chat/user_1/report.docx",
 };
 
-function taskRow(spec: GoatHarnessSpec = harnessSpec) {
+function taskRow(spec: HarnessSpec = harnessSpec) {
   const now = new Date("2026-07-30T09:00:00.000Z");
   return {
     id: "goat_task_1",

@@ -3,7 +3,7 @@ import type { WebSearchToolInput, WebSearchToolOutput } from "./chat-ui";
 
 // Pure Exa call for the chat web_search tool, shared by the streaming chat
 // route (which wraps it in telemetry) and headless surfaces like the Slack bot.
-export async function executeGoatChatExaSearch(input: {
+export async function executeChatExaSearch(input: {
   toolInput: WebSearchToolInput;
   apiKey: string;
   signal: AbortSignal;

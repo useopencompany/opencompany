@@ -1,19 +1,19 @@
 "use server";
 
 import { getDb } from "@opencompany/db/client";
-import { goatBrainSources, goatIntegrations } from "@opencompany/db/schema";
+import { brainSources, integrations } from "@opencompany/db/schema";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import {
-  type GoatCapabilityMode,
-  isGoatCapabilityId,
-  isGoatCapabilityMode,
+  type CapabilityMode,
+  isCapabilityId,
+  isCapabilityMode,
   providerCapability,
 } from "@/lib/actions/capabilities";
-import { resolveGoatActionCatalog } from "@/lib/actions/catalog";
-import { currentGoatUser } from "@/lib/auth";
+import { resolveActionCatalog } from "@/lib/actions/catalog";
+import { currentUser } from "@/lib/auth";
 
-export type GoatIntegrationAccountUsage = {
+export type IntegrationAccountUsage = {
   ok: true;
   // brain_sources rows fed by this account (across all brains).
   affectedBrainSourceCount: number;
@@ -21,17 +21,17 @@ export type GoatIntegrationAccountUsage = {
 
 // Pre-disconnect check so the UI can warn before removing an account that
 // still feeds brains.
-export async function getGoatIntegrationAccountUsageAction(
+export async function getIntegrationAccountUsageAction(
   integrationId: string,
-): Promise<GoatIntegrationAccountUsage | { ok: false; error: string }> {
-  const context = await currentGoatUser();
+): Promise<IntegrationAccountUsage | { ok: false; error: string }> {
+  const context = await currentUser();
   const owned = await loadOwnPersonalIntegration(integrationId, context.user.workosUserId);
   if (!owned) return { ok: false, error: "Only the connection owner can manage this account." };
   try {
     const [row] = await getDb()
       .select({ count: sql<number>`count(*)::integer` })
-      .from(goatBrainSources)
-      .where(eq(goatBrainSources.integrationId, integrationId));
+      .from(brainSources)
+      .where(eq(brainSources.integrationId, integrationId));
     return { ok: true, affectedBrainSourceCount: Number(row?.count ?? 0) };
   } catch (error) {
     return {
@@ -44,10 +44,10 @@ export async function getGoatIntegrationAccountUsageAction(
 // Hard-deletes a personal integration account. Credentials, synced resources,
 // brain sources, and buffered events cascade away; already-ingested brain
 // content stays (pointer/copy rule) and event claims survive via SET NULL.
-export async function disconnectGoatIntegrationAccountAction(
+export async function disconnectIntegrationAccountAction(
   integrationId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   try {
     // Claims are created when work is enqueued, before the ingest job reaches
     // a terminal state. Hard-deleting an integration cascades its source items
@@ -107,21 +107,21 @@ export async function disconnectGoatIntegrationAccountAction(
 // Settings control: one capability mode ("on" | "ask" | "off") for one
 // connection. Modes are stored as sparse overrides; registry defaults cover
 // missing keys.
-export async function setGoatIntegrationCapabilityModeAction(
+export async function setIntegrationCapabilityModeAction(
   integrationId: string,
   capabilityId: string,
   mode: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const context = await currentGoatUser();
-  if (!isGoatCapabilityMode(mode) || !isGoatCapabilityId(capabilityId)) {
+  const context = await currentUser();
+  if (!isCapabilityMode(mode) || !isCapabilityId(capabilityId)) {
     return { ok: false, error: "Unknown permission mode." };
   }
   const owned = await loadOwnPersonalIntegration(integrationId, context.user.workosUserId);
   if (!owned) return { ok: false, error: "Only the connection owner can manage this account." };
   const [row] = await getDb()
-    .select({ provider: goatIntegrations.provider })
-    .from(goatIntegrations)
-    .where(eq(goatIntegrations.id, integrationId))
+    .select({ provider: integrations.provider })
+    .from(integrations)
+    .where(eq(integrations.id, integrationId))
     .limit(1);
   const capability = row ? providerCapability(row.provider, capabilityId) : undefined;
   if (!capability) {
@@ -142,12 +142,12 @@ export async function setGoatIntegrationCapabilityModeAction(
 // Chat "Always allow": flips the asked capability to "on" for every ask-mode
 // connection behind the action, so the next call runs without a confirmation.
 // The catalog is re-resolved server-side — the client only names the action.
-export async function alwaysAllowGoatChatActionAction(
+export async function alwaysAllowChatActionAction(
   actionId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   try {
-    const catalog = await resolveGoatActionCatalog({
+    const catalog = await resolveActionCatalog({
       userWorkosId: context.user.workosUserId,
       workspaceId: context.workspace.id,
     });
@@ -172,28 +172,28 @@ export async function alwaysAllowGoatChatActionAction(
 async function applyCapabilityMode(
   integrationIds: string[],
   capabilityId: string,
-  mode: GoatCapabilityMode,
+  mode: CapabilityMode,
 ) {
   await getDb()
-    .update(goatIntegrations)
+    .update(integrations)
     .set({
-      capabilityModes: sql`${goatIntegrations.capabilityModes} || ${JSON.stringify({
+      capabilityModes: sql`${integrations.capabilityModes} || ${JSON.stringify({
         [capabilityId]: mode,
       })}::jsonb`,
       updatedAt: new Date(),
     })
-    .where(inArray(goatIntegrations.id, integrationIds));
+    .where(inArray(integrations.id, integrationIds));
 }
 
 async function loadOwnPersonalIntegration(integrationId: string, userWorkosId: string) {
   const [row] = await getDb()
-    .select({ id: goatIntegrations.id })
-    .from(goatIntegrations)
+    .select({ id: integrations.id })
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.id, integrationId),
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        isNull(goatIntegrations.workspaceId),
+        eq(integrations.id, integrationId),
+        eq(integrations.userWorkosId, userWorkosId),
+        isNull(integrations.workspaceId),
       ),
     )
     .limit(1);

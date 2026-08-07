@@ -1,4 +1,4 @@
-import type { GoatChatAttachmentKind } from "@opencompany/db/schema";
+import type { ChatAttachmentKind } from "@opencompany/db/schema";
 
 // Isomorphic (client + server) constants for Goat chat attachments. The core
 // set matches what the brain asset pipeline can ingest: pdf, docx, xlsx, SRT,
@@ -7,7 +7,7 @@ import type { GoatChatAttachmentKind } from "@opencompany/db/schema";
 export const GOAT_CHAT_SRT_MIME_TYPE = "application/x-subrip";
 export const GOAT_CHAT_TSV_MIME_TYPE = "text/tab-separated-values";
 
-export const GOAT_CHAT_ATTACHMENT_MIME_KINDS: Record<string, GoatChatAttachmentKind> = {
+export const GOAT_CHAT_ATTACHMENT_MIME_KINDS: Record<string, ChatAttachmentKind> = {
   "application/pdf": "pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
@@ -49,21 +49,21 @@ export const GOAT_CHAT_ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
 export const GOAT_CHAT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 export const GOAT_CHAT_ATTACHMENT_MAX_PER_MESSAGE = 5;
 
-export function goatChatAttachmentKindForMime(mediaType: string): GoatChatAttachmentKind | null {
+export function chatAttachmentKindForMime(mediaType: string): ChatAttachmentKind | null {
   return GOAT_CHAT_ATTACHMENT_MIME_KINDS[normalizedMimeType(mediaType)] ?? null;
 }
 
-export type GoatChatAttachmentValidation =
-  | { ok: true; kind: GoatChatAttachmentKind; mediaType: string }
+export type ChatAttachmentValidation =
+  | { ok: true; kind: ChatAttachmentKind; mediaType: string }
   | { ok: false; reason: "type" | "size"; message: string };
 
-export function validateGoatChatAttachmentCandidate(input: {
+export function validateChatAttachmentCandidate(input: {
   mediaType: string;
   filename?: string;
   sizeBytes: number;
-}): GoatChatAttachmentValidation {
-  const mediaType = normalizedGoatChatAttachmentMediaType(input);
-  const kind = goatChatAttachmentKindForMime(mediaType);
+}): ChatAttachmentValidation {
+  const mediaType = normalizedChatAttachmentMediaType(input);
+  const kind = chatAttachmentKindForMime(mediaType);
   if (!kind) {
     return {
       ok: false,
@@ -95,7 +95,7 @@ export function validateGoatChatAttachmentCandidate(input: {
   return { ok: true, kind, mediaType };
 }
 
-export function normalizedGoatChatAttachmentMediaType(input: {
+export function normalizedChatAttachmentMediaType(input: {
   mediaType: string;
   filename?: string;
 }): string {
@@ -106,7 +106,7 @@ export function normalizedGoatChatAttachmentMediaType(input: {
     (!mediaType ||
       mediaType === "application/octet-stream" ||
       mediaType === "text/plain" ||
-      goatChatAttachmentKindForMime(mediaType) === "srt")
+      chatAttachmentKindForMime(mediaType) === "srt")
   ) {
     return GOAT_CHAT_SRT_MIME_TYPE;
   }

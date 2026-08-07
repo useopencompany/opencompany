@@ -19,11 +19,11 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/workspaces", () => ({
-  getGoatBrainAccess: vi.fn(),
+  getBrainAccess: vi.fn(),
 }));
 
 beforeEach(() => {

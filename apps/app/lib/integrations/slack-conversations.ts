@@ -1,18 +1,18 @@
-import type { GoatSlackConversationRef } from "@opencompany/db/slack";
+import type { SlackConversationRef } from "@opencompany/db/slack";
 import { slackApiRequest } from "@/lib/integrations/slack";
 
-export type GoatSlackChannelOption = GoatSlackConversationRef & {
+export type SlackChannelOption = SlackConversationRef & {
   isPrivate: boolean;
   isSlackConnect: boolean;
 };
 
-export type GoatSlackDmOption = GoatSlackConversationRef & {
+export type SlackDmOption = SlackConversationRef & {
   isSlackConnect: boolean;
 };
 
-export type GoatSlackConversationOptions = {
-  channels: GoatSlackChannelOption[];
-  dms: GoatSlackDmOption[];
+export type SlackConversationOptions = {
+  channels: SlackChannelOption[];
+  dms: SlackDmOption[];
   partial: boolean;
 };
 
@@ -46,15 +46,15 @@ export type SlackApiRequester = <T extends Record<string, unknown>>(
   input: SlackApiRequestInput,
 ) => Promise<T>;
 
-export async function listGoatSlackConversationOptions(input: {
+export async function listSlackConversationOptions(input: {
   token: string;
   teamId: string;
   authedUserId: string;
   request?: SlackApiRequester;
-}): Promise<GoatSlackConversationOptions> {
+}): Promise<SlackConversationOptions> {
   const request = input.request ?? slackApiRequest;
-  const channels: GoatSlackChannelOption[] = [];
-  const dms: GoatSlackDmOption[] = [];
+  const channels: SlackChannelOption[] = [];
+  const dms: SlackDmOption[] = [];
   const ims: SlackConversation[] = [];
   let cursor: string | undefined;
   let partial = false;

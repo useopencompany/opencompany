@@ -1,22 +1,22 @@
 import {
-  type GoatBrainHydratablePointerProvider,
+  type BrainHydratablePointerProvider,
+  type NormalizedBrainPointerSourceItem,
   type NormalizedBrainSourceItem,
   type NormalizedGmailThreadMessage,
-  type NormalizedGoatBrainPointerSourceItem,
   type NormalizedLinearIssueSourceItem,
   type NormalizedSlackConversationSourceItem,
+  normalizeChatCapture,
   normalizeGmailThreadWindow,
-  normalizeGoatChatCapture,
   normalizeLinearIssueWindow,
   normalizeSlackConversationWindow,
-  parseGoatBrainSourceRef,
+  parseBrainSourceRef,
 } from "@opencompany/brain";
-import type { GoatSlackOAuthCredentialPayload } from "@opencompany/db/integrations";
-import { loadGoatIntegrationCredential } from "@opencompany/db/integrations";
+import type { SlackOAuthCredentialPayload } from "@opencompany/db/integrations";
+import { loadIntegrationCredential } from "@opencompany/db/integrations";
 import {
-  type GoatBrainAgentIngestEnv,
+  type BrainAgentIngestEnv,
+  runChatCaptureAgentIngest,
   runGmailThreadAgentIngest,
-  runGoatChatCaptureAgentIngest,
   runLinearIssueAgentIngest,
   runSlackConversationAgentIngest,
 } from "./brain-agent-ingest";
@@ -33,7 +33,7 @@ import {
   slackApiRequest,
 } from "./slack-api";
 
-export type GoatBrainPointerHydrationEnv = GoatBrainAgentIngestEnv & GoogleApiEnv;
+export type BrainPointerHydrationEnv = BrainAgentIngestEnv & GoogleApiEnv;
 
 type HydratedPointerItem =
   | NormalizedSlackConversationSourceItem
@@ -42,32 +42,32 @@ type HydratedPointerItem =
 
 type NormalizedGmailThreadSourceItem = ReturnType<typeof normalizeGmailThreadWindow>;
 
-export type GoatBrainPointerHydrator = {
-  provider: GoatBrainHydratablePointerProvider;
+export type BrainPointerHydrator = {
+  provider: BrainHydratablePointerProvider;
   hydrate(input: {
     ref: string;
     userWorkosId: string;
     integrationId: string;
-    env: GoatBrainPointerHydrationEnv;
+    env: BrainPointerHydrationEnv;
     signal: AbortSignal;
   }): Promise<HydratedPointerItem | null>;
 };
 
-export const GOAT_BRAIN_POINTER_HYDRATORS: readonly GoatBrainPointerHydrator[] = [
+export const GOAT_BRAIN_POINTER_HYDRATORS: readonly BrainPointerHydrator[] = [
   { provider: "slack", hydrate: hydrateSlackPointer },
   { provider: "gmail", hydrate: hydrateGmailPointer },
   { provider: "linear", hydrate: hydrateLinearPointer },
 ];
 
-export async function hydrateGoatBrainPointer(
+export async function hydrateBrainPointer(
   input: {
-    item: NormalizedGoatBrainPointerSourceItem;
+    item: NormalizedBrainPointerSourceItem;
     userWorkosId: string;
     integrationId: string;
-    env: GoatBrainPointerHydrationEnv;
+    env: BrainPointerHydrationEnv;
     signal: AbortSignal;
   },
-  hydrators: readonly GoatBrainPointerHydrator[] = GOAT_BRAIN_POINTER_HYDRATORS,
+  hydrators: readonly BrainPointerHydrator[] = GOAT_BRAIN_POINTER_HYDRATORS,
 ) {
   const hydrator = hydrators.find((entry) => entry.provider === input.item.sourceProvider);
   if (!hydrator)
@@ -81,27 +81,27 @@ export async function hydrateGoatBrainPointer(
   });
 }
 
-export async function runGoatBrainPointerHydrate(
+export async function runBrainPointerHydrate(
   input: {
     jobId: string;
     userWorkosId: string;
     brainRef: string | null;
     integrationId: string | null;
-    item: NormalizedGoatBrainPointerSourceItem;
-    env: GoatBrainPointerHydrationEnv;
+    item: NormalizedBrainPointerSourceItem;
+    env: BrainPointerHydrationEnv;
     signal?: AbortSignal;
   },
   deps: {
-    hydrate?: typeof hydrateGoatBrainPointer;
+    hydrate?: typeof hydrateBrainPointer;
     runSlack?: typeof runSlackConversationAgentIngest;
     runGmail?: typeof runGmailThreadAgentIngest;
     runLinear?: typeof runLinearIssueAgentIngest;
-    runFallback?: typeof runGoatChatCaptureAgentIngest;
+    runFallback?: typeof runChatCaptureAgentIngest;
   } = {},
 ): Promise<Record<string, unknown>> {
   if (!input.integrationId) throw new Error("Pointer hydration requires an integration id.");
   const signal = input.signal ?? new AbortController().signal;
-  const hydrated = await (deps.hydrate ?? hydrateGoatBrainPointer)({
+  const hydrated = await (deps.hydrate ?? hydrateBrainPointer)({
     item: input.item,
     userWorkosId: input.userWorkosId,
     integrationId: input.integrationId,
@@ -119,7 +119,7 @@ export async function runGoatBrainPointerHydrate(
         sourceRef: input.item.sourceRef,
       };
     }
-    const fallbackItem = normalizeGoatChatCapture({
+    const fallbackItem = normalizeChatCapture({
       text: pointer.fallbackText,
       title: input.item.title,
       chatSessionId: pointer.chatSessionId,
@@ -129,7 +129,7 @@ export async function runGoatBrainPointerHydrate(
       capturedAt: input.item.capturedAt,
       sourceRef: input.item.sourceRef,
     });
-    const result = await (deps.runFallback ?? runGoatChatCaptureAgentIngest)({
+    const result = await (deps.runFallback ?? runChatCaptureAgentIngest)({
       ...input,
       integrationId: null,
       item: fallbackItem,
@@ -170,17 +170,17 @@ export async function runGoatBrainPointerHydrate(
   };
 }
 
-async function hydrateSlackPointer(input: Parameters<GoatBrainPointerHydrator["hydrate"]>[0]) {
+async function hydrateSlackPointer(input: Parameters<BrainPointerHydrator["hydrate"]>[0]) {
   const parsed = parseSlackPointer(input.ref);
   if (!parsed) return null;
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId: input.userWorkosId,
     integrationId: input.integrationId,
     provider: "slack",
     kind: "oauth_token",
     db: getDb(),
   });
-  const payload = credential?.payload as GoatSlackOAuthCredentialPayload | undefined;
+  const payload = credential?.payload as SlackOAuthCredentialPayload | undefined;
   if (!payload?.access_token) throw new Error("Reconnect Slack in Settings before hydrating it.");
   if (payload.team_id !== parsed.teamId) return null;
 
@@ -275,7 +275,7 @@ async function fetchSlackAnchorMessages(input: {
   return (history.messages ?? []).filter((message) => message.ts === input.anchorTs);
 }
 
-async function hydrateGmailPointer(input: Parameters<GoatBrainPointerHydrator["hydrate"]>[0]) {
+async function hydrateGmailPointer(input: Parameters<BrainPointerHydrator["hydrate"]>[0]) {
   const threadId = parseGmailPointer(input.ref);
   if (!threadId) return null;
   const account = {
@@ -329,10 +329,10 @@ async function hydrateGmailPointer(input: Parameters<GoatBrainPointerHydrator["h
   });
 }
 
-async function hydrateLinearPointer(input: Parameters<GoatBrainPointerHydrator["hydrate"]>[0]) {
+async function hydrateLinearPointer(input: Parameters<BrainPointerHydrator["hydrate"]>[0]) {
   const identifier = parseLinearPointer(input.ref);
   if (!identifier) return null;
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId: input.userWorkosId,
     integrationId: input.integrationId,
     provider: "linear",
@@ -388,7 +388,7 @@ async function hydrateLinearPointer(input: Parameters<GoatBrainPointerHydrator["
 }
 
 function parseSlackPointer(ref: string) {
-  const parsed = parseGoatBrainSourceRef(ref);
+  const parsed = parseBrainSourceRef(ref);
   const [kind, teamId, channelId, anchorTs, ...extra] = parsed?.id.split(":") ?? [];
   if (
     parsed?.provider !== "slack" ||
@@ -404,13 +404,13 @@ function parseSlackPointer(ref: string) {
 }
 
 function parseGmailPointer(ref: string) {
-  const parsed = parseGoatBrainSourceRef(ref);
+  const parsed = parseBrainSourceRef(ref);
   if (parsed?.provider !== "gmail" || !parsed.id.startsWith("thread:")) return null;
   return parsed.id.slice("thread:".length).trim() || null;
 }
 
 function parseLinearPointer(ref: string) {
-  const parsed = parseGoatBrainSourceRef(ref);
+  const parsed = parseBrainSourceRef(ref);
   if (parsed?.provider !== "linear" || !parsed.id.startsWith("issue:")) return null;
   return parsed.id.slice("issue:".length).trim() || null;
 }

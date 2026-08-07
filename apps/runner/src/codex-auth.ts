@@ -1,6 +1,6 @@
 import { shellQuote } from "@opencompany/agent-runtime";
-import { newGoatCodexDeviceAuthFlowId, saveGoatCodexCredential } from "@opencompany/db/codex-auth";
-import { goatCodexDeviceAuthFlows } from "@opencompany/db/schema";
+import { newCodexDeviceAuthFlowId, saveCodexCredential } from "@opencompany/db/codex-auth";
+import { codexDeviceAuthFlows } from "@opencompany/db/schema";
 import { createLogger } from "@opencompany/observability";
 import { and, eq, inArray } from "drizzle-orm";
 import { Sandbox } from "e2b";
@@ -29,11 +29,11 @@ export type CodexDeviceAuthFlowStatus = {
   expiresAt: string;
 };
 
-export async function startGoatCodexDeviceAuthFlow(input: {
+export async function startCodexDeviceAuthFlow(input: {
   userWorkosId: string;
   env: RunnerEnv;
 }): Promise<CodexDeviceAuthFlowStatus> {
-  await supersedeActiveGoatCodexAuthFlows(input.userWorkosId);
+  await supersedeActiveCodexAuthFlows(input.userWorkosId);
   const sandbox = await createCodexAuthSandbox({
     ownerLogFields: { user_workos_id: input.userWorkosId },
     metadata: {
@@ -46,11 +46,11 @@ export async function startGoatCodexDeviceAuthFlow(input: {
     await prepareCodexAuthHome(sandbox);
     await spawnCodexDeviceLogin(sandbox);
 
-    const id = newGoatCodexDeviceAuthFlowId();
+    const id = newCodexDeviceAuthFlowId();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + CODEX_AUTH_FLOW_TTL_MS);
 
-    await getDb().insert(goatCodexDeviceAuthFlows).values({
+    await getDb().insert(codexDeviceAuthFlows).values({
       id,
       userWorkosId: input.userWorkosId,
       sandboxId: sandbox.sandboxId,
@@ -89,17 +89,17 @@ export async function startGoatCodexDeviceAuthFlow(input: {
   }
 }
 
-async function supersedeActiveGoatCodexAuthFlows(userWorkosId: string) {
+async function supersedeActiveCodexAuthFlows(userWorkosId: string) {
   const activeFlows = await getDb()
     .select({
-      id: goatCodexDeviceAuthFlows.id,
-      sandboxId: goatCodexDeviceAuthFlows.sandboxId,
+      id: codexDeviceAuthFlows.id,
+      sandboxId: codexDeviceAuthFlows.sandboxId,
     })
-    .from(goatCodexDeviceAuthFlows)
+    .from(codexDeviceAuthFlows)
     .where(
       and(
-        eq(goatCodexDeviceAuthFlows.userWorkosId, userWorkosId),
-        inArray(goatCodexDeviceAuthFlows.status, ["pending", "code_ready"]),
+        eq(codexDeviceAuthFlows.userWorkosId, userWorkosId),
+        inArray(codexDeviceAuthFlows.status, ["pending", "code_ready"]),
       ),
     );
 
@@ -107,7 +107,7 @@ async function supersedeActiveGoatCodexAuthFlows(userWorkosId: string) {
 
   const now = new Date();
   for (const flow of activeFlows) {
-    await markGoatFlowTerminal({
+    await markFlowTerminal({
       userWorkosId,
       flowId: flow.id,
       status: "failed",
@@ -123,12 +123,12 @@ async function supersedeActiveGoatCodexAuthFlows(userWorkosId: string) {
   });
 }
 
-export async function pollGoatCodexDeviceAuthFlow(input: {
+export async function pollCodexDeviceAuthFlow(input: {
   userWorkosId: string;
   flowId: string;
   env: RunnerEnv;
 }): Promise<CodexDeviceAuthFlowStatus | null> {
-  const flow = await loadGoatFlow(input.userWorkosId, input.flowId);
+  const flow = await loadFlow(input.userWorkosId, input.flowId);
   if (!flow) {
     logger.warn("Goat Codex auth flow not found during poll", {
       event: "opencompany.runner_goat_codex_auth_poll_not_found",
@@ -139,12 +139,12 @@ export async function pollGoatCodexDeviceAuthFlow(input: {
   }
 
   if (flow.status === "completed" || flow.status === "failed" || flow.status === "expired") {
-    return goatFlowStatus(flow);
+    return flowStatus(flow);
   }
 
   const now = new Date();
   if (flow.expiresAt <= now) {
-    await markGoatFlowTerminal({
+    await markFlowTerminal({
       userWorkosId: input.userWorkosId,
       flowId: input.flowId,
       status: "expired",
@@ -153,7 +153,7 @@ export async function pollGoatCodexDeviceAuthFlow(input: {
     });
     await killSandbox(flow.sandboxId).catch(() => {});
     return {
-      ...goatFlowStatus(flow),
+      ...flowStatus(flow),
       status: "expired",
       statusReason: "Codex device authentication expired. Start a new connection.",
     };
@@ -166,7 +166,7 @@ export async function pollGoatCodexDeviceAuthFlow(input: {
       requestTimeoutMs: 30_000,
     });
   } catch (error) {
-    await markGoatFlowTerminal({
+    await markFlowTerminal({
       userWorkosId: input.userWorkosId,
       flowId: input.flowId,
       status: "failed",
@@ -181,7 +181,7 @@ export async function pollGoatCodexDeviceAuthFlow(input: {
       error,
     });
     return {
-      ...goatFlowStatus(flow),
+      ...flowStatus(flow),
       status: "failed",
       statusReason: "Codex authentication sandbox is no longer available.",
     };
@@ -191,7 +191,7 @@ export async function pollGoatCodexDeviceAuthFlow(input: {
   if (login.browserAuthFallback && !login.userCode) {
     const reason =
       "Codex fell back to browser OAuth instead of device-code login. Enable device code login in ChatGPT security or workspace permissions, then retry.";
-    await markGoatFlowTerminal({
+    await markFlowTerminal({
       userWorkosId: input.userWorkosId,
       flowId: input.flowId,
       status: "failed",
@@ -199,21 +199,21 @@ export async function pollGoatCodexDeviceAuthFlow(input: {
       now,
     });
     await killSandbox(flow.sandboxId).catch(() => {});
-    return { ...goatFlowStatus(flow), status: "failed", statusReason: reason };
+    return { ...flowStatus(flow), status: "failed", statusReason: reason };
   }
 
   const authJson = await readAuthJson(sandbox);
   if (authJson) {
     try {
       await validateCodexAuth(sandbox);
-      await saveGoatCodexCredential({
+      await saveCodexCredential({
         db: getDb(),
         userWorkosId: input.userWorkosId,
         authJson,
         validatedAt: now,
         now,
       });
-      await markGoatFlowTerminal({
+      await markFlowTerminal({
         userWorkosId: input.userWorkosId,
         flowId: input.flowId,
         status: "completed",
@@ -228,14 +228,14 @@ export async function pollGoatCodexDeviceAuthFlow(input: {
         sandbox_id: flow.sandboxId,
       });
       return {
-        ...goatFlowStatus(flow),
+        ...flowStatus(flow),
         status: "completed",
         userCode: login.userCode ?? flow.userCode,
         verificationUri: login.verificationUri ?? flow.verificationUri,
         statusReason: null,
       };
     } catch (error) {
-      await markGoatFlowTerminal({
+      await markFlowTerminal({
         userWorkosId: input.userWorkosId,
         flowId: input.flowId,
         status: "failed",
@@ -250,7 +250,7 @@ export async function pollGoatCodexDeviceAuthFlow(input: {
         error,
       });
       return {
-        ...goatFlowStatus(flow),
+        ...flowStatus(flow),
         status: "failed",
         statusReason: "Codex login completed, but the saved credentials could not be validated.",
       };
@@ -260,7 +260,7 @@ export async function pollGoatCodexDeviceAuthFlow(input: {
   const exitCode = await readLoginExitCode(sandbox);
   if (exitCode && exitCode !== "0") {
     const reason = "Codex device authentication failed before credentials were saved.";
-    await markGoatFlowTerminal({
+    await markFlowTerminal({
       userWorkosId: input.userWorkosId,
       flowId: input.flowId,
       status: "failed",
@@ -268,7 +268,7 @@ export async function pollGoatCodexDeviceAuthFlow(input: {
       now,
     });
     await killSandbox(flow.sandboxId).catch(() => {});
-    return { ...goatFlowStatus(flow), status: "failed", statusReason: reason };
+    return { ...flowStatus(flow), status: "failed", statusReason: reason };
   }
 
   const nextUserCode = login.userCode ?? flow.userCode;
@@ -284,7 +284,7 @@ export async function pollGoatCodexDeviceAuthFlow(input: {
 
   if (shouldUpdateFlow) {
     const [updated] = await getDb()
-      .update(goatCodexDeviceAuthFlows)
+      .update(codexDeviceAuthFlows)
       .set({
         userCode: nextUserCode,
         verificationUri: nextVerificationUri,
@@ -294,15 +294,15 @@ export async function pollGoatCodexDeviceAuthFlow(input: {
       })
       .where(
         and(
-          eq(goatCodexDeviceAuthFlows.userWorkosId, input.userWorkosId),
-          eq(goatCodexDeviceAuthFlows.id, input.flowId),
+          eq(codexDeviceAuthFlows.userWorkosId, input.userWorkosId),
+          eq(codexDeviceAuthFlows.id, input.flowId),
         ),
       )
       .returning();
-    if (updated) return goatFlowStatus(updated);
+    if (updated) return flowStatus(updated);
   }
 
-  return goatFlowStatus(flow);
+  return flowStatus(flow);
 }
 
 async function createCodexAuthSandbox(input: {
@@ -465,21 +465,18 @@ async function readSandboxText(sandbox: SandboxHandle, path: string) {
   }
 }
 
-async function loadGoatFlow(userWorkosId: string, flowId: string) {
+async function loadFlow(userWorkosId: string, flowId: string) {
   const [flow] = await getDb()
     .select()
-    .from(goatCodexDeviceAuthFlows)
+    .from(codexDeviceAuthFlows)
     .where(
-      and(
-        eq(goatCodexDeviceAuthFlows.userWorkosId, userWorkosId),
-        eq(goatCodexDeviceAuthFlows.id, flowId),
-      ),
+      and(eq(codexDeviceAuthFlows.userWorkosId, userWorkosId), eq(codexDeviceAuthFlows.id, flowId)),
     )
     .limit(1);
   return flow ?? null;
 }
 
-async function markGoatFlowTerminal(input: {
+async function markFlowTerminal(input: {
   userWorkosId: string;
   flowId: string;
   status: "completed" | "failed" | "expired";
@@ -487,7 +484,7 @@ async function markGoatFlowTerminal(input: {
   now: Date;
 }) {
   await getDb()
-    .update(goatCodexDeviceAuthFlows)
+    .update(codexDeviceAuthFlows)
     .set({
       status: input.status,
       statusReason: input.statusReason,
@@ -495,15 +492,13 @@ async function markGoatFlowTerminal(input: {
     })
     .where(
       and(
-        eq(goatCodexDeviceAuthFlows.userWorkosId, input.userWorkosId),
-        eq(goatCodexDeviceAuthFlows.id, input.flowId),
+        eq(codexDeviceAuthFlows.userWorkosId, input.userWorkosId),
+        eq(codexDeviceAuthFlows.id, input.flowId),
       ),
     );
 }
 
-function goatFlowStatus(
-  flow: typeof goatCodexDeviceAuthFlows.$inferSelect,
-): CodexDeviceAuthFlowStatus {
+function flowStatus(flow: typeof codexDeviceAuthFlows.$inferSelect): CodexDeviceAuthFlowStatus {
   return {
     id: flow.id,
     status: flow.status,

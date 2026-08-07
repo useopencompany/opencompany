@@ -1,4 +1,4 @@
-import { parseGoatBrainSourceRef } from "@opencompany/brain/schema";
+import { parseBrainSourceRef } from "@opencompany/brain/schema";
 
 const SAFE_EXTERNAL_PROTOCOLS = new Set(["http:", "https:"]);
 const GITHUB_OWNER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
@@ -6,7 +6,7 @@ const GITHUB_REPO_PATTERN = /^[A-Za-z0-9._-]{1,100}$/;
 const GITHUB_NUMBER_PATTERN = /^\d+$/;
 
 export function sourceHrefForRef(ref: string): string | null {
-  const parsed = parseGoatBrainSourceRef(ref);
+  const parsed = parseBrainSourceRef(ref);
   if (!parsed) return null;
 
   const directUrl = safeExternalUrl(parsed.id);
@@ -34,7 +34,7 @@ export type BrainSourceChip = { icon: "github" | "link"; label: string };
  * the chip's tooltip and click target. Everything else keeps its authored label.
  */
 export function sourceChipDisplay(ref: string, fallbackLabel: string): BrainSourceChip {
-  const parsed = parseGoatBrainSourceRef(ref);
+  const parsed = parseBrainSourceRef(ref);
   if (parsed?.provider === "github") {
     const label = githubChipLabel(parsed.id);
     if (label) return { icon: "github", label };

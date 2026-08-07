@@ -1,34 +1,34 @@
 "use server";
 
 import {
+  type AttioApiKeyCredentialPayload,
   GOAT_ATTIO_CREDENTIAL_KIND,
   GOAT_ATTIO_PROVIDER,
-  type GoatAttioApiKeyCredentialPayload,
 } from "@opencompany/db/attio";
-import { loadGoatIntegrationCredential } from "@opencompany/db/integrations";
+import { loadIntegrationCredential } from "@opencompany/db/integrations";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
-import { disconnectGoatIntegrationAccountAction } from "@/lib/integration-account-actions";
-import type { GoatAttioProviderState } from "@/lib/integration-state";
+import { currentUser } from "@/lib/auth";
+import { disconnectIntegrationAccountAction } from "@/lib/integration-account-actions";
+import type { AttioProviderState } from "@/lib/integration-state";
 import {
-  connectGoatAttioIntegration,
-  deleteGoatAttioWebhook,
-  getGoatAttioIntegrationState,
-  hasGoatAttioCommentWriteScopes,
-  hasGoatAttioListConfigurationWriteScope,
-  hasGoatAttioListReadScopes,
-  hasGoatAttioListWriteScopes,
-  hasGoatAttioRecordWriteScopes,
+  connectAttioIntegration,
+  deleteAttioWebhook,
+  getAttioIntegrationState,
+  hasAttioCommentWriteScopes,
+  hasAttioListConfigurationWriteScope,
+  hasAttioListReadScopes,
+  hasAttioListWriteScopes,
+  hasAttioRecordWriteScopes,
   isValidAttioApiKey,
-  validateGoatAttioApiKey,
+  validateAttioApiKey,
 } from "@/lib/integrations/attio";
 
 export type AttioConnectActionResult =
-  | { ok: true; state: GoatAttioProviderState }
+  | { ok: true; state: AttioProviderState }
   | { ok: false; error: string };
 
 export async function saveAttioApiKeyAction(apiKey: string): Promise<AttioConnectActionResult> {
-  const { user } = await currentGoatUser();
+  const { user } = await currentUser();
   const trimmed = apiKey.trim();
   if (!isValidAttioApiKey(trimmed)) {
     return {
@@ -37,14 +37,14 @@ export async function saveAttioApiKeyAction(apiKey: string): Promise<AttioConnec
     };
   }
   try {
-    const validation = await validateGoatAttioApiKey(trimmed);
+    const validation = await validateAttioApiKey(trimmed);
     if (!validation.ok) return { ok: false, error: validation.error };
     if (
-      !hasGoatAttioListReadScopes(validation.identity.scopes) ||
-      !hasGoatAttioListConfigurationWriteScope(validation.identity.scopes) ||
-      !hasGoatAttioRecordWriteScopes(validation.identity.scopes) ||
-      !hasGoatAttioListWriteScopes(validation.identity.scopes) ||
-      !hasGoatAttioCommentWriteScopes(validation.identity.scopes)
+      !hasAttioListReadScopes(validation.identity.scopes) ||
+      !hasAttioListConfigurationWriteScope(validation.identity.scopes) ||
+      !hasAttioRecordWriteScopes(validation.identity.scopes) ||
+      !hasAttioListWriteScopes(validation.identity.scopes) ||
+      !hasAttioCommentWriteScopes(validation.identity.scopes)
     ) {
       return {
         ok: false,
@@ -52,13 +52,13 @@ export async function saveAttioApiKeyAction(apiKey: string): Promise<AttioConnec
           "This Attio API key needs object_configuration:read, record_permission:read-write, list_configuration:read-write, list_entry:read-write, and comment:read-write so Chat can read and operate CRM records, lists, pipeline fields, and comments.",
       };
     }
-    await connectGoatAttioIntegration({
+    await connectAttioIntegration({
       userWorkosId: user.workosUserId,
       apiKey: trimmed,
       identity: validation.identity,
     });
     revalidatePath("/", "layout");
-    return { ok: true, state: await getGoatAttioIntegrationState(user.workosUserId) };
+    return { ok: true, state: await getAttioIntegrationState(user.workosUserId) };
   } catch (error) {
     console.error("[goat-attio] Failed to save Attio API key", error);
     return {
@@ -75,16 +75,16 @@ export async function saveAttioApiKeyAction(apiKey: string): Promise<AttioConnec
 export async function disconnectAttioIntegrationAction(
   integrationId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { user } = await currentGoatUser();
-  const credential = await loadGoatIntegrationCredential({
+  const { user } = await currentUser();
+  const credential = await loadIntegrationCredential({
     userWorkosId: user.workosUserId,
     integrationId,
     provider: GOAT_ATTIO_PROVIDER,
     kind: GOAT_ATTIO_CREDENTIAL_KIND,
   }).catch(() => null);
-  const payload = credential?.payload as GoatAttioApiKeyCredentialPayload | undefined;
+  const payload = credential?.payload as AttioApiKeyCredentialPayload | undefined;
   if (payload?.apiKey && payload.webhookId) {
-    await deleteGoatAttioWebhook({ apiKey: payload.apiKey, webhookId: payload.webhookId });
+    await deleteAttioWebhook({ apiKey: payload.apiKey, webhookId: payload.webhookId });
   }
-  return await disconnectGoatIntegrationAccountAction(integrationId);
+  return await disconnectIntegrationAccountAction(integrationId);
 }

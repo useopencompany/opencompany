@@ -6,11 +6,8 @@ import {
   type OAuthClientProvider,
   type OAuthTokens,
 } from "@ai-sdk/mcp";
-import {
-  loadGoatIntegrationCredential,
-  saveGoatIntegrationCredential,
-} from "@opencompany/db/integrations";
-import { type GoatIntegrationProvider, goatIntegrations } from "@opencompany/db/schema";
+import { loadIntegrationCredential, saveIntegrationCredential } from "@opencompany/db/integrations";
+import { type IntegrationProvider, integrations } from "@opencompany/db/schema";
 import Ajv from "ajv";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "./db";
@@ -39,7 +36,7 @@ type McpToolBody =
     ) => unknown | Promise<unknown>)
   | undefined;
 
-type RemoteMcpConfig<TProvider extends GoatIntegrationProvider> = {
+type RemoteMcpConfig<TProvider extends IntegrationProvider> = {
   provider: TProvider;
   displayName: string;
   endpointUrl: string;
@@ -47,7 +44,7 @@ type RemoteMcpConfig<TProvider extends GoatIntegrationProvider> = {
   authScope?: string;
 };
 
-export function createGoatRemoteMcpTools<const TProvider extends GoatIntegrationProvider>(
+export function createRemoteMcpTools<const TProvider extends IntegrationProvider>(
   config: RemoteMcpConfig<TProvider>,
 ) {
   const searchToolName = `${config.provider}_search_tools`;
@@ -122,15 +119,15 @@ export function createGoatRemoteMcpTools<const TProvider extends GoatIntegration
   ): Promise<{ integrationId: string; payload: RemoteMcpOAuthPayload }> {
     const [integration] = await getDb()
       .select({
-        id: goatIntegrations.id,
-        status: goatIntegrations.status,
+        id: integrations.id,
+        status: integrations.status,
       })
-      .from(goatIntegrations)
+      .from(integrations)
       .where(
         and(
-          eq(goatIntegrations.userWorkosId, userWorkosId),
-          eq(goatIntegrations.provider, config.provider),
-          eq(goatIntegrations.externalId, config.externalId),
+          eq(integrations.userWorkosId, userWorkosId),
+          eq(integrations.provider, config.provider),
+          eq(integrations.externalId, config.externalId),
         ),
       )
       .limit(1);
@@ -141,7 +138,7 @@ export function createGoatRemoteMcpTools<const TProvider extends GoatIntegration
       );
     }
 
-    const credential = await loadGoatIntegrationCredential({
+    const credential = await loadIntegrationCredential({
       userWorkosId,
       integrationId: integration.id,
       provider: config.provider,
@@ -171,7 +168,7 @@ export function createGoatRemoteMcpTools<const TProvider extends GoatIntegration
 
     async function persist(next: RemoteMcpOAuthPayload) {
       payload = next;
-      await saveGoatIntegrationCredential({
+      await saveIntegrationCredential({
         userWorkosId: input.userWorkosId,
         integrationId: input.integrationId,
         provider: config.provider,

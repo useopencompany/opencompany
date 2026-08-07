@@ -3,8 +3,8 @@
 import { Check } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { disconnectGoatIntegrationAccountAction } from "@/lib/integration-account-actions";
-import type { GoatImessageProviderState } from "@/lib/integration-state";
+import { disconnectIntegrationAccountAction } from "@/lib/integration-account-actions";
+import type { ImessageProviderState } from "@/lib/integration-state";
 import {
   confirmImessagePairingAction,
   startImessagePairingAction,
@@ -13,7 +13,7 @@ import {
 export function IMessageIntegrationSetup({
   initialState,
 }: {
-  initialState: GoatImessageProviderState;
+  initialState: ImessageProviderState;
 }) {
   const router = useRouter();
   const [state, setState] = useState(initialState);
@@ -57,7 +57,7 @@ export function IMessageIntegrationSetup({
     if (!state.integrationId) return;
     setError(null);
     startTransition(async () => {
-      const result = await disconnectGoatIntegrationAccountAction(state.integrationId as string);
+      const result = await disconnectIntegrationAccountAction(state.integrationId as string);
       if (!result.ok) {
         setError(result.error);
         return;
@@ -219,7 +219,7 @@ export function IMessageIntegrationSetup({
   );
 }
 
-function setupStatus(state: GoatImessageProviderState) {
+function setupStatus(state: ImessageProviderState) {
   if (state.connected) {
     return {
       label: state.phoneE164 ? `Paired with ${state.phoneE164}` : "iMessage is paired",

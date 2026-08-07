@@ -1,24 +1,24 @@
 import { randomUUID } from "node:crypto";
 import {
-  type GoatCodexChatTurn,
-  type GoatCodexChatTurnSettings,
-  goatCodexChatSessions,
-  goatTasks,
+  type CodexChatTurn,
+  type CodexChatTurnSettings,
+  codexChatSessions,
+  tasks,
 } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
-import { GOAT_METRICS, recordGoatHistogram } from "@opencompany/telemetry";
+import { GOAT_METRICS, recordHistogram } from "@opencompany/telemetry";
 import { and, eq, sql } from "drizzle-orm";
-import { runGoatClaudeCodeChatTurn } from "./claude-code-chat";
-import { runGoatCodexChatTurn } from "./codex-chat";
+import { runClaudeCodeChatTurn } from "./claude-code-chat";
+import { runCodexChatTurn } from "./codex-chat";
 import {
-  GoatCodexChatHandoffError,
-  GoatCodexChatLeaseLostError,
-  GoatCodexChatRetryableInfrastructureError,
+  CodexChatHandoffError,
+  CodexChatLeaseLostError,
+  CodexChatRetryableInfrastructureError,
 } from "./codex-chat-errors";
-import { settledGoatCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
+import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
-import { runGoatOpenCompanyChatTurn } from "./opencompany-chat";
+import { runOpenCompanyChatTurn } from "./opencompany-chat";
 import { armSandboxActiveTimeoutById, armSandboxIdleTimeoutById } from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
 
@@ -29,11 +29,11 @@ const GOAT_CODEX_CHAT_RETRY_MAX_DELAY_MS = 60_000;
 
 let registeredWakeup: (() => void) | null = null;
 
-export function setGoatCodexChatWakeup(wake: (() => void) | null) {
+export function setCodexChatWakeup(wake: (() => void) | null) {
   registeredWakeup = wake;
 }
 
-export function wakeGoatCodexChatWorker() {
+export function wakeCodexChatWorker() {
   registeredWakeup?.();
 }
 
@@ -45,9 +45,9 @@ type ClaimedTurnRow = {
   user_message_id: string;
   assistant_message_id: string;
   codex_turn_id: string | null;
-  status: GoatCodexChatTurn["status"];
+  status: CodexChatTurn["status"];
   prompt: string;
-  settings: GoatCodexChatTurnSettings;
+  settings: CodexChatTurnSettings;
   error: string | null;
   interrupt_requested_at: Date | string | null;
   attempts: number;
@@ -67,10 +67,10 @@ type ClaimedTurnRow = {
 //  - claimable: freshly queued, or a running turn whose lease expired (worker crash);
 //  - one active turn per session: skip while a sibling holds a live running lease;
 //  - per-session FIFO: an earlier queued sibling always goes first.
-export async function claimNextGoatCodexChatTurn(input: {
+export async function claimNextCodexChatTurn(input: {
   leaseOwner: string;
   leaseTtlMs: number;
-}): Promise<GoatCodexChatTurn | null> {
+}): Promise<CodexChatTurn | null> {
   const now = new Date();
   const leaseId = `goat_codex_chat_lease_${randomUUID()}`;
   const leaseExpiresAt = new Date(now.getTime() + input.leaseTtlMs);
@@ -136,7 +136,7 @@ export async function claimNextGoatCodexChatTurn(input: {
   return row ? turnFromRow(row) : null;
 }
 
-export async function heartbeatGoatCodexChatTurn(input: {
+export async function heartbeatCodexChatTurn(input: {
   turnId: string;
   leaseId: string;
   leaseOwner: string;
@@ -171,7 +171,7 @@ export async function heartbeatGoatCodexChatTurn(input: {
 }
 
 export async function runClaimedTurn(
-  turn: GoatCodexChatTurn,
+  turn: CodexChatTurn,
   env: RunnerEnv,
   options: { handoffSignal?: AbortSignal } = {},
 ) {
@@ -181,21 +181,21 @@ export async function runClaimedTurn(
 
   const [claimedSession] = await getDb()
     .select({
-      session: goatCodexChatSessions,
-      task: goatTasks,
+      session: codexChatSessions,
+      task: tasks,
     })
-    .from(goatCodexChatSessions)
+    .from(codexChatSessions)
     .leftJoin(
-      goatTasks,
+      tasks,
       and(
-        eq(goatTasks.sessionId, goatCodexChatSessions.chatSessionId),
-        eq(goatTasks.userWorkosId, turn.userWorkosId),
+        eq(tasks.sessionId, codexChatSessions.chatSessionId),
+        eq(tasks.userWorkosId, turn.userWorkosId),
       ),
     )
     .where(
       and(
-        eq(goatCodexChatSessions.id, turn.codexChatSessionId),
-        eq(goatCodexChatSessions.userWorkosId, turn.userWorkosId),
+        eq(codexChatSessions.id, turn.codexChatSessionId),
+        eq(codexChatSessions.userWorkosId, turn.userWorkosId),
       ),
     )
     .limit(1);
@@ -208,7 +208,7 @@ export async function runClaimedTurn(
   if (turn.attempts === 1) {
     const queueStartedAt =
       turn.runAfter && turn.runAfter > turn.createdAt ? turn.runAfter : turn.createdAt;
-    recordGoatHistogram(
+    recordHistogram(
       GOAT_METRICS.codexChatQueueWaitMs,
       Math.max(0, Date.now() - queueStartedAt.getTime()),
       {
@@ -249,14 +249,14 @@ export async function runClaimedTurn(
     });
   }
 
-  let heartbeatAbort: GoatCodexChatLeaseLostError | null = null;
-  let rejectHeartbeatAbort: ((error: GoatCodexChatLeaseLostError) => void) | null = null;
+  let heartbeatAbort: CodexChatLeaseLostError | null = null;
+  let rejectHeartbeatAbort: ((error: CodexChatLeaseLostError) => void) | null = null;
   const heartbeatAbortPromise = new Promise<never>((_, reject) => {
     rejectHeartbeatAbort = reject;
   });
   const markHeartbeatLost = (error: unknown) => {
     if (heartbeatAbort) return;
-    heartbeatAbort = new GoatCodexChatLeaseLostError();
+    heartbeatAbort = new CodexChatLeaseLostError();
     rejectHeartbeatAbort?.(heartbeatAbort);
     captureException(error, {
       event: "opencompany.goat_codex_chat_heartbeat_failed",
@@ -270,23 +270,23 @@ export async function runClaimedTurn(
   };
   const heartbeat = setInterval(
     () => {
-      void heartbeatGoatCodexChatTurn({
+      void heartbeatCodexChatTurn({
         turnId: turn.id,
         leaseId,
         leaseOwner,
-        leaseTtlMs: goatCodexChatLeaseTtlMs(env),
+        leaseTtlMs: codexChatLeaseTtlMs(env),
       })
         .then((owned) => {
-          if (!owned) markHeartbeatLost(new GoatCodexChatLeaseLostError());
+          if (!owned) markHeartbeatLost(new CodexChatLeaseLostError());
         })
         .catch(markHeartbeatLost);
     },
-    Math.max(5_000, Math.floor(goatCodexChatLeaseTtlMs(env) / 3)),
+    Math.max(5_000, Math.floor(codexChatLeaseTtlMs(env) / 3)),
   );
   let handedOff = false;
-  let retryableError: GoatCodexChatRetryableInfrastructureError | null = null;
+  let retryableError: CodexChatRetryableInfrastructureError | null = null;
   let runPromise: Promise<
-    "settled" | "handed_off" | { retryableError: GoatCodexChatRetryableInfrastructureError } | void
+    "settled" | "handed_off" | { retryableError: CodexChatRetryableInfrastructureError } | void
   > | null = null;
   try {
     runPromise = (async () => {
@@ -297,19 +297,19 @@ export async function runClaimedTurn(
         ...(taskContext ? { taskContext } : {}),
         ...(recoveryRequired ? { recovery: { reason: "lease_reclaimed" as const } } : {}),
         shouldAbort: () =>
-          options.handoffSignal?.aborted ? new GoatCodexChatHandoffError() : heartbeatAbort,
+          options.handoffSignal?.aborted ? new CodexChatHandoffError() : heartbeatAbort,
       };
       const outcome =
         session.engine === "opencompany"
-          ? await runGoatOpenCompanyChatTurn(turnInput)
+          ? await runOpenCompanyChatTurn(turnInput)
           : session.engine === "claude_code"
-            ? await runGoatClaudeCodeChatTurn(turnInput)
-            : await runGoatCodexChatTurn(turnInput);
+            ? await runClaudeCodeChatTurn(turnInput)
+            : await runCodexChatTurn(turnInput);
       return outcome;
     })().catch((error) => {
-      if (error instanceof GoatCodexChatHandoffError) {
+      if (error instanceof CodexChatHandoffError) {
         return "handed_off" as const;
-      } else if (error instanceof GoatCodexChatRetryableInfrastructureError) {
+      } else if (error instanceof CodexChatRetryableInfrastructureError) {
         return { retryableError: error };
       } else {
         throw error;
@@ -326,8 +326,8 @@ export async function runClaimedTurn(
     if (heartbeatAbort) void runPromise?.catch(() => undefined);
   }
   if (retryableError) {
-    const retryAt = goatCodexChatRetryAt(new Date(), turn.attempts);
-    await deferGoatCodexChatTurnForRetry({
+    const retryAt = codexChatRetryAt(new Date(), turn.attempts);
+    await deferCodexChatTurnForRetry({
       turnId: turn.id,
       codexChatSessionId: turn.codexChatSessionId,
       userWorkosId: turn.userWorkosId,
@@ -353,11 +353,11 @@ export async function runClaimedTurn(
     return;
   }
   if (handedOff) {
-    await releaseGoatCodexChatTurnForHandoff({ turnId: turn.id, leaseId, leaseOwner });
+    await releaseCodexChatTurnForHandoff({ turnId: turn.id, leaseId, leaseOwner });
   }
 }
 
-export async function deferGoatCodexChatTurnForRetry(input: {
+export async function deferCodexChatTurnForRetry(input: {
   turnId: string;
   codexChatSessionId: string;
   userWorkosId: string;
@@ -393,11 +393,11 @@ export async function deferGoatCodexChatTurnForRetry(input: {
     RETURNING session.id
   `);
   if (rowsFromExecute(result).length === 0) {
-    throw new GoatCodexChatLeaseLostError();
+    throw new CodexChatLeaseLostError();
   }
 }
 
-export function goatCodexChatRetryAt(now: Date, attempts: number) {
+export function codexChatRetryAt(now: Date, attempts: number) {
   const delayMs = Math.min(
     GOAT_CODEX_CHAT_RETRY_MAX_DELAY_MS,
     GOAT_CODEX_CHAT_RETRY_BASE_DELAY_MS * 2 ** Math.max(0, attempts - 1),
@@ -405,18 +405,18 @@ export function goatCodexChatRetryAt(now: Date, attempts: number) {
   return new Date(now.getTime() + delayMs);
 }
 
-export async function releaseGoatCodexChatTurnForHandoff(input: {
+export async function releaseCodexChatTurnForHandoff(input: {
   turnId: string;
   leaseId: string;
   leaseOwner: string;
 }) {
-  const released = await expireGoatCodexChatTurnLeaseForHandoff(input);
+  const released = await expireCodexChatTurnLeaseForHandoff(input);
   if (!released) {
-    throw new GoatCodexChatLeaseLostError();
+    throw new CodexChatLeaseLostError();
   }
 }
 
-async function expireGoatCodexChatTurnLeaseForHandoff(input: {
+async function expireCodexChatTurnLeaseForHandoff(input: {
   turnId: string;
   leaseId: string;
   leaseOwner: string;
@@ -437,7 +437,7 @@ async function expireGoatCodexChatTurnLeaseForHandoff(input: {
   return rowsFromExecute<{ id: string }>(result).length > 0;
 }
 
-export async function sweepTerminalGoatCodexChatSandboxes(input: {
+export async function sweepTerminalCodexChatSandboxes(input: {
   idleTimeoutMs: number;
   limit?: number;
 }) {
@@ -466,7 +466,7 @@ export async function sweepTerminalGoatCodexChatSandboxes(input: {
     try {
       const armed = await armSandboxIdleTimeoutById(
         row.sandbox_id,
-        settledGoatCodingSandboxIdleTimeoutMs({
+        settledCodingSandboxIdleTimeoutMs({
           configuredIdleTimeoutMs: input.idleTimeoutMs,
           taskSession: row.chat_kind === "task",
         }),
@@ -511,7 +511,7 @@ export async function sweepTerminalGoatCodexChatSandboxes(input: {
   return reconciled;
 }
 
-export function startGoatCodexChatWorker(
+export function startCodexChatWorker(
   env: RunnerEnv,
   options: {
     concurrency?: number;
@@ -520,7 +520,7 @@ export function startGoatCodexChatWorker(
     sandboxSweepIntervalMs?: number;
   } = {},
 ) {
-  const concurrency = resolveGoatCodexChatWorkerConcurrency(env, options.concurrency);
+  const concurrency = resolveCodexChatWorkerConcurrency(env, options.concurrency);
   const pollIntervalMs = Math.max(50, options.pollIntervalMs ?? 1_000);
   const active = new Map<
     Promise<void>,
@@ -583,9 +583,9 @@ export function startGoatCodexChatWorker(
           });
         }
         while (!stopped && active.size < concurrency) {
-          const turn = await claimNextGoatCodexChatTurn({
+          const turn = await claimNextCodexChatTurn({
             leaseOwner: env.instanceId,
-            leaseTtlMs: goatCodexChatLeaseTtlMs(env),
+            leaseTtlMs: codexChatLeaseTtlMs(env),
           });
           if (!turn) break;
           const handoffController = new AbortController();
@@ -593,7 +593,7 @@ export function startGoatCodexChatWorker(
             handoffSignal: handoffController.signal,
           })
             .catch((error) => {
-              if (error instanceof GoatCodexChatLeaseLostError) return;
+              if (error instanceof CodexChatLeaseLostError) return;
               captureException(error, {
                 event: "opencompany.goat_codex_chat_turn_failed",
                 turn_id: turn.id,
@@ -662,7 +662,7 @@ export function startGoatCodexChatWorker(
       const forcedHandoffs = await Promise.allSettled(
         pendingHandoffs.map((run) =>
           run.leaseId && run.leaseOwner
-            ? expireGoatCodexChatTurnLeaseForHandoff({
+            ? expireCodexChatTurnLeaseForHandoff({
                 turnId: run.turnId,
                 leaseId: run.leaseId,
                 leaseOwner: run.leaseOwner,
@@ -692,20 +692,18 @@ export function startGoatCodexChatWorker(
   };
 }
 
-export function resolveGoatCodexChatWorkerConcurrency(
+export function resolveCodexChatWorkerConcurrency(
   env: Pick<RunnerEnv, "workerConcurrency">,
   override?: number,
 ) {
   return Math.max(1, override ?? env.workerConcurrency);
 }
 
-export function goatCodexChatLeaseTtlMs(
-  env: Pick<RunnerEnv, "jobLeaseTtlMs" | "goatCodexChatLeaseTtlMs">,
-) {
-  return env.goatCodexChatLeaseTtlMs ?? env.jobLeaseTtlMs;
+export function codexChatLeaseTtlMs(env: Pick<RunnerEnv, "jobLeaseTtlMs" | "codexChatLeaseTtlMs">) {
+  return env.codexChatLeaseTtlMs ?? env.jobLeaseTtlMs;
 }
 
-function turnFromRow(row: ClaimedTurnRow): GoatCodexChatTurn {
+function turnFromRow(row: ClaimedTurnRow): CodexChatTurn {
   return {
     id: row.id,
     userWorkosId: row.user_workos_id,

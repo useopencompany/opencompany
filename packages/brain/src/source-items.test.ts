@@ -3,25 +3,25 @@ import {
   BrainSourceNormalizationError,
   githubActivityEventType,
   isNormalizedAttioObjectSourceItem,
+  isNormalizedBrainPointerSourceItem,
+  isNormalizedChatCaptureSourceItem,
   isNormalizedGitHubActivitySourceItem,
   isNormalizedGmailThreadSourceItem,
-  isNormalizedGoatBrainPointerSourceItem,
-  isNormalizedGoatChatCaptureSourceItem,
-  isNormalizedGoatImportSourceItem,
   isNormalizedGoogleDriveDocumentSourceItem,
   isNormalizedHubspotObjectSourceItem,
+  isNormalizedImportSourceItem,
   isNormalizedLinearIssueSourceItem,
   isNormalizedSlackConversationSourceItem,
   isNormalizedUploadAssetSourceItem,
   normalizeAttioObjectWindow,
+  normalizeBrainPointerCapture,
+  normalizeChatCapture,
   normalizeGitHubActivityWebhook,
   normalizeGitHubPullRequestWindow,
   normalizeGmailThreadWindow,
-  normalizeGoatBrainPointerCapture,
-  normalizeGoatChatCapture,
-  normalizeGoatImportRun,
   normalizeGoogleDriveDocument,
   normalizeHubspotObjectWindow,
+  normalizeImportRun,
   normalizeJamieMeetingCompletedWebhook,
   normalizeLinearIssueWindow,
   normalizeSlackConversationWindow,
@@ -48,8 +48,8 @@ describe("Goat company import normalization", () => {
   };
 
   it("creates a stable research source item", () => {
-    const first = normalizeGoatImportRun(base);
-    const second = normalizeGoatImportRun({
+    const first = normalizeImportRun(base);
+    const second = normalizeImportRun({
       ...base,
       capturedAt: "2026-07-13T09:05:00.000Z",
     });
@@ -61,11 +61,11 @@ describe("Goat company import normalization", () => {
       sourceRef: "goat-import:gbimp_123:research",
     });
     expect(first.contentHash).toBe(second.contentHash);
-    expect(isNormalizedGoatImportSourceItem(first)).toBe(true);
+    expect(isNormalizedImportSourceItem(first)).toBe(true);
   });
 
   it("hashes finalization separately and rejects unrelated payloads", () => {
-    const finalizer = normalizeGoatImportRun({
+    const finalizer = normalizeImportRun({
       phase: "finalize",
       importRunId: base.importRunId,
       companyUrl: base.companyUrl,
@@ -75,8 +75,8 @@ describe("Goat company import normalization", () => {
     });
 
     expect(finalizer.externalId).toBe("gbimp_123:finalize");
-    expect(finalizer.contentHash).not.toBe(normalizeGoatImportRun(base).contentHash);
-    expect(isNormalizedGoatImportSourceItem({ sourceProvider: "goat-import" })).toBe(false);
+    expect(finalizer.contentHash).not.toBe(normalizeImportRun(base).contentHash);
+    expect(isNormalizedImportSourceItem({ sourceProvider: "goat-import" })).toBe(false);
   });
 });
 
@@ -344,7 +344,7 @@ describe("Goat chat capture normalization", () => {
   }
 
   it("normalizes a chat capture", () => {
-    const item = normalizeGoatChatCapture(captureInput());
+    const item = normalizeChatCapture(captureInput());
 
     expect(item).toMatchObject({
       sourceProvider: "goat-chat",
@@ -363,38 +363,38 @@ describe("Goat chat capture normalization", () => {
       draftBrainId: "pricing-teardown-reference",
       draftFolder: "inbox",
     });
-    expect(isNormalizedGoatChatCaptureSourceItem(item)).toBe(true);
-    expect(isNormalizedGoatChatCaptureSourceItem(JSON.parse(JSON.stringify(item)))).toBe(true);
+    expect(isNormalizedChatCaptureSourceItem(item)).toBe(true);
+    expect(isNormalizedChatCaptureSourceItem(JSON.parse(JSON.stringify(item)))).toBe(true);
   });
 
   it("derives stable content hashes and changes them when the text changes", () => {
-    const first = normalizeGoatChatCapture(captureInput());
-    const second = normalizeGoatChatCapture(captureInput());
-    const changed = normalizeGoatChatCapture(captureInput({ text: "Different idea." }));
+    const first = normalizeChatCapture(captureInput());
+    const second = normalizeChatCapture(captureInput());
+    const changed = normalizeChatCapture(captureInput({ text: "Different idea." }));
 
     expect(second.contentHash).toBe(first.contentHash);
     expect(changed.contentHash).not.toBe(first.contentHash);
   });
 
   it("accepts a stable external id for durable host-tool retries", () => {
-    const item = normalizeGoatChatCapture(
+    const item = normalizeChatCapture(
       captureInput({ externalId: "codex-save:stable-capture-key" }),
     );
 
     expect(item.externalId).toBe("codex-save:stable-capture-key");
-    expect(isNormalizedGoatChatCaptureSourceItem(item)).toBe(true);
+    expect(isNormalizedChatCaptureSourceItem(item)).toBe(true);
   });
 
   it("omits an empty intent", () => {
-    const item = normalizeGoatChatCapture(captureInput({ intent: "  " }));
+    const item = normalizeChatCapture(captureInput({ intent: "  " }));
     expect(item.content.capture.intent).toBeUndefined();
   });
 
   it("preserves an explicit MCP source ref for the shared capture pipeline", () => {
-    const item = normalizeGoatChatCapture(captureInput({ sourceRef: "mcp:capture_123" }));
+    const item = normalizeChatCapture(captureInput({ sourceRef: "mcp:capture_123" }));
 
     expect(item.sourceRef).toBe("mcp:capture_123");
-    expect(isNormalizedGoatChatCaptureSourceItem(item)).toBe(true);
+    expect(isNormalizedChatCaptureSourceItem(item)).toBe(true);
   });
 
   it.each([
@@ -406,16 +406,16 @@ describe("Goat chat capture normalization", () => {
     ["timestamp", { capturedAt: "not-a-date" }],
     ["source ref", { sourceRef: "not a source ref" }],
   ])("rejects an invalid %s", (_field, override) => {
-    expect(() => normalizeGoatChatCapture(captureInput(override))).toThrow(
+    expect(() => normalizeChatCapture(captureInput(override))).toThrow(
       BrainSourceNormalizationError,
     );
   });
 
   it("rejects non-capture payloads in the guard", () => {
-    expect(isNormalizedGoatChatCaptureSourceItem(null)).toBe(false);
-    expect(isNormalizedGoatChatCaptureSourceItem({ sourceProvider: "goat-chat" })).toBe(false);
+    expect(isNormalizedChatCaptureSourceItem(null)).toBe(false);
+    expect(isNormalizedChatCaptureSourceItem({ sourceProvider: "goat-chat" })).toBe(false);
     expect(
-      isNormalizedGoatChatCaptureSourceItem(normalizeJamieMeetingCompletedWebhook(jamiePayload())),
+      isNormalizedChatCaptureSourceItem(normalizeJamieMeetingCompletedWebhook(jamiePayload())),
     ).toBe(false);
   });
 });
@@ -432,7 +432,7 @@ describe("Goat Brain pointer capture normalization", () => {
   };
 
   it("normalizes a hydratable source pointer", () => {
-    const item = normalizeGoatBrainPointerCapture({
+    const item = normalizeBrainPointerCapture({
       ...base,
       fallbackText: "A short fallback summary.",
     });
@@ -452,13 +452,13 @@ describe("Goat Brain pointer capture normalization", () => {
       draftBrainId: "slack-launch-discussion",
       draftFolder: "inbox",
     });
-    expect(isNormalizedGoatBrainPointerSourceItem(item)).toBe(true);
-    expect(isNormalizedGoatBrainPointerSourceItem(JSON.parse(JSON.stringify(item)))).toBe(true);
+    expect(isNormalizedBrainPointerSourceItem(item)).toBe(true);
+    expect(isNormalizedBrainPointerSourceItem(JSON.parse(JSON.stringify(item)))).toBe(true);
   });
 
   it("deduplicates by canonical source ref instead of chat metadata", () => {
-    const first = normalizeGoatBrainPointerCapture(base);
-    const second = normalizeGoatBrainPointerCapture({
+    const first = normalizeBrainPointerCapture(base);
+    const second = normalizeBrainPointerCapture({
       ...base,
       fallbackText: "Different fallback text.",
       chatSessionId: "another_session",
@@ -471,15 +471,15 @@ describe("Goat Brain pointer capture normalization", () => {
 
   it("rejects unsupported pointer providers and unrelated guard payloads", () => {
     expect(() =>
-      normalizeGoatBrainPointerCapture({
+      normalizeBrainPointerCapture({
         ...base,
         sourceRef: "github:issue:opencompany:123",
       }),
     ).toThrow(BrainSourceNormalizationError);
-    expect(isNormalizedGoatBrainPointerSourceItem(null)).toBe(false);
+    expect(isNormalizedBrainPointerSourceItem(null)).toBe(false);
     expect(
-      isNormalizedGoatBrainPointerSourceItem(
-        normalizeGoatChatCapture({
+      isNormalizedBrainPointerSourceItem(
+        normalizeChatCapture({
           text: "A note",
           title: "Note",
           chatSessionId: "session",

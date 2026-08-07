@@ -20,15 +20,15 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("@opencompany/core/integrations/github", () => ({
-  GoatGitHubApiError: mocks.ApiError,
-  listConnectedGoatGitHubInstallations: mocks.connections,
-  searchGoatGitHubIssues: mocks.searchIssues,
+  GitHubApiError: mocks.ApiError,
+  listConnectedGitHubInstallations: mocks.connections,
+  searchGitHubIssues: mocks.searchIssues,
 }));
 
 import { resolveGitHubActions } from "@/lib/actions/github";
-import { GoatActionAuthError, type GoatActionExecuteContext } from "@/lib/actions/types";
+import { ActionAuthError, type ActionExecuteContext } from "@/lib/actions/types";
 
-const CONTEXT: GoatActionExecuteContext = {
+const CONTEXT: ActionExecuteContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-22T00:00:00.000Z"),
@@ -172,16 +172,16 @@ describe("github.search_issues", () => {
     for (const status of [401, 404]) {
       mocks.searchIssues.mockRejectedValueOnce(new mocks.ApiError(status));
       await expect(search.execute({ query: "is:issue" }, CONTEXT)).rejects.toMatchObject({
-        name: "GoatActionAuthError",
+        name: "ActionAuthError",
         code: "auth_expired",
         provider: "github",
         message: expect.stringContaining("Settings → Integrations"),
-      } satisfies Partial<GoatActionAuthError>);
+      } satisfies Partial<ActionAuthError>);
     }
 
     mocks.searchIssues.mockRejectedValueOnce(new mocks.ApiError(403, "installation_token"));
     await expect(search.execute({ query: "is:issue" }, CONTEXT)).rejects.toBeInstanceOf(
-      GoatActionAuthError,
+      ActionAuthError,
     );
   });
 

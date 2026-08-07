@@ -1,8 +1,8 @@
 "use client";
 
 import type {
-  GoatBrainIngestTrace,
-  GoatBrainIngestTraceToolCall,
+  BrainIngestTrace,
+  BrainIngestTraceToolCall,
 } from "@opencompany/db/brain-ingest-trace";
 import {
   Dialog,
@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Markdown } from "@/components/Markdown";
-import { finiteDurationMs, formatGoatChatDuration } from "@/lib/chat-timing";
+import { finiteDurationMs, formatChatDuration } from "@/lib/chat-timing";
 
 export function BrainIngestTraceDialog({
   trace,
@@ -31,7 +31,7 @@ export function BrainIngestTraceDialog({
   open,
   onOpenChange,
 }: {
-  trace: GoatBrainIngestTrace | null;
+  trace: BrainIngestTrace | null;
   traceId: string;
   sourceTitle: string;
   durationMs: number | null;
@@ -64,13 +64,13 @@ function TraceSummaryLine({
   trace,
   durationMs,
 }: {
-  trace: GoatBrainIngestTrace;
+  trace: BrainIngestTrace;
   durationMs: number | null;
 }) {
   const safeDurationMs = finiteDurationMs(durationMs);
   const parts = [
     trace.model,
-    safeDurationMs !== null ? `Run ${formatGoatChatDuration(safeDurationMs)}` : null,
+    safeDurationMs !== null ? `Run ${formatChatDuration(safeDurationMs)}` : null,
     `${trace.steps} ${trace.steps === 1 ? "step" : "steps"}`,
     `${trace.toolCallCount} ${trace.toolCallCount === 1 ? "tool call" : "tool calls"}`,
   ].filter((part): part is string => Boolean(part));
@@ -83,7 +83,7 @@ export function BrainIngestTraceView({
   traceId,
   sourceTitle,
 }: {
-  trace: GoatBrainIngestTrace;
+  trace: BrainIngestTrace;
   traceId: string;
   sourceTitle: string;
 }) {
@@ -148,7 +148,7 @@ function SourceContextBubble({ sourceTitle }: { sourceTitle: string }) {
   );
 }
 
-function TraceToolCallRow({ toolCall }: { toolCall: GoatBrainIngestTraceToolCall }) {
+function TraceToolCallRow({ toolCall }: { toolCall: BrainIngestTraceToolCall }) {
   const [expanded, setExpanded] = useState(false);
   const detail = toolCallDetail(toolCall);
   return (
@@ -207,7 +207,7 @@ function TraceToolCallRow({ toolCall }: { toolCall: GoatBrainIngestTraceToolCall
   );
 }
 
-function TraceStatusText({ status }: { status: GoatBrainIngestTraceToolCall["status"] }) {
+function TraceStatusText({ status }: { status: BrainIngestTraceToolCall["status"] }) {
   if (status === "completed") return null;
   const Icon = status === "blocked" ? CircleSlash : AlertCircle;
   return (
@@ -229,7 +229,7 @@ function TracePreviewBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
-function RawJsonDisclosure({ trace }: { trace: GoatBrainIngestTrace }) {
+function RawJsonDisclosure({ trace }: { trace: BrainIngestTrace }) {
   const [open, setOpen] = useState(false);
   const rawJson = useMemo(() => (open ? JSON.stringify(trace, null, 2) : ""), [open, trace]);
 
@@ -258,13 +258,13 @@ function RawJsonDisclosure({ trace }: { trace: GoatBrainIngestTrace }) {
   );
 }
 
-function toolCallDetail(toolCall: GoatBrainIngestTraceToolCall) {
+function toolCallDetail(toolCall: BrainIngestTraceToolCall) {
   const command = formatCommand(toolCall);
   if (command.length <= 120) return command;
   return `${command.slice(0, 117)}...`;
 }
 
-function formatCommand(toolCall: GoatBrainIngestTraceToolCall) {
+function formatCommand(toolCall: BrainIngestTraceToolCall) {
   return ["goat_brain", toolCall.command, ...toolCall.args.map(formatArg)]
     .filter(Boolean)
     .join(" ");

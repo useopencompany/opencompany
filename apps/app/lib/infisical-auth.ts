@@ -2,20 +2,20 @@
 
 import { getDb } from "@opencompany/db/client";
 import {
-  disconnectGoatInfisicalConnection,
-  loadGoatInfisicalConnectionMetadata,
+  disconnectInfisicalConnection,
+  loadInfisicalConnectionMetadata,
 } from "@opencompany/db/infisical-auth";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 
-export type GoatInfisicalAuthSettings = {
+export type InfisicalAuthSettings = {
   status: "connected" | "needs_reauth" | "disconnected" | null;
   statusReason: string | null;
   accountEmail: string | null;
   lastValidatedAt: string | null;
 };
 
-export type GoatInfisicalAuthFlow = {
+export type InfisicalAuthFlow = {
   id: string;
   status: "pending" | "link_ready" | "completed" | "failed" | "expired";
   loginUrl: string | null;
@@ -23,11 +23,11 @@ export type GoatInfisicalAuthFlow = {
   expiresAt: string;
 };
 
-type RunnerFlowResponse = { ok: boolean; flow: GoatInfisicalAuthFlow };
+type RunnerFlowResponse = { ok: boolean; flow: InfisicalAuthFlow };
 
-export async function loadCurrentGoatInfisicalAuthSettings(): Promise<GoatInfisicalAuthSettings> {
-  const { workspace } = await currentGoatUser();
-  const connection = await loadGoatInfisicalConnectionMetadata({
+export async function loadCurrentInfisicalAuthSettings(): Promise<InfisicalAuthSettings> {
+  const { workspace } = await currentUser();
+  const connection = await loadInfisicalConnectionMetadata({
     db: getDb(),
     workspaceId: workspace.id,
   });
@@ -39,7 +39,7 @@ export async function loadCurrentGoatInfisicalAuthSettings(): Promise<GoatInfisi
   };
 }
 
-export async function startGoatInfisicalAuth() {
+export async function startInfisicalAuth() {
   const gate = await requireWorkspaceAdmin();
   if (!gate.ok) return gate;
   try {
@@ -59,7 +59,7 @@ export async function startGoatInfisicalAuth() {
   }
 }
 
-export async function completeGoatInfisicalAuth(input: { flowId: string; browserToken: string }) {
+export async function completeInfisicalAuth(input: { flowId: string; browserToken: string }) {
   const gate = await requireWorkspaceAdmin();
   if (!gate.ok) return gate;
   const flowId = input.flowId.trim();
@@ -90,10 +90,10 @@ export async function completeGoatInfisicalAuth(input: { flowId: string; browser
   }
 }
 
-export async function disconnectGoatInfisicalAuth() {
+export async function disconnectInfisicalAuth() {
   const gate = await requireWorkspaceAdmin();
   if (!gate.ok) return gate;
-  await disconnectGoatInfisicalConnection({ db: getDb(), workspaceId: gate.workspaceId });
+  await disconnectInfisicalConnection({ db: getDb(), workspaceId: gate.workspaceId });
   revalidatePath("/settings");
   return { ok: true as const };
 }
@@ -101,7 +101,7 @@ export async function disconnectGoatInfisicalAuth() {
 async function requireWorkspaceAdmin(): Promise<
   { ok: false; error: string } | { ok: true; workspaceId: string; userWorkosId: string }
 > {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return { ok: false, error: "You must be signed in." };
   if (context.role !== "admin") {
     return { ok: false, error: "Only workspace admins can manage Infisical." };

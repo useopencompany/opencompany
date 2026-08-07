@@ -3,30 +3,30 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { shellQuote } from "@opencompany/agent-runtime";
 import {
-  formatGoatBrainEvidenceLink,
+  type BrainDocument,
+  brainTimelineEntryFromParts,
+  formatBrainEvidenceLink,
   GOAT_BRAIN_FOLDER_MANIFEST_PATH,
-  type GoatBrainDocument,
-  goatBrainTimelineEntryFromParts,
+  normalizeBrainId,
   normalizeEvidenceId,
-  normalizeGoatBrainId,
-  parseGoatBrainFolderManifest,
-  serializeGoatBrainDocument,
-  serializeGoatBrainFolderManifest,
+  parseBrainFolderManifest,
+  serializeBrainDocument,
+  serializeBrainFolderManifest,
 } from "@opencompany/brain";
-import { getGoatBrainCliSource } from "@opencompany/brain/cli-bundle";
+import { getBrainCliSource } from "@opencompany/brain/cli-bundle";
 import {
-  type MaterializedGoatBrainFile as DbMaterializedGoatBrainFile,
+  type BrainSyncFile,
+  brainFilePathFor,
+  type MaterializedBrainFile as DbMaterializedBrainFile,
   GOAT_BRAIN_FILE_MIME_TYPE,
-  type GoatBrainSyncFile,
-  goatBrainFilePathFor,
-  listGoatBrainFiles,
-  listGoatBrainFolderRows,
-  materializeGoatBrainFilesToRoot,
-  readGoatBrainFilesFromRoot,
-  syncGoatBrainFiles,
-  upsertGoatBrainFile,
+  listBrainFiles,
+  listBrainFolderRows,
+  materializeBrainFilesToRoot,
+  readBrainFilesFromRoot,
+  syncBrainFiles,
+  upsertBrainFile,
 } from "@opencompany/db/brain-files";
-import { getDefaultGoatBrainForUser } from "@opencompany/db/workspaces";
+import { getDefaultBrainForUser } from "@opencompany/db/workspaces";
 import { getDb } from "./db";
 import type { SandboxHandle } from "./sandbox";
 
@@ -36,11 +36,11 @@ export const MAX_GOAT_BRAIN_MARKDOWN_DOCUMENT_BYTES = 256 * 1024;
 export const MAX_GOAT_BRAIN_SANDBOX_FILE_BYTES = MAX_GOAT_BRAIN_MARKDOWN_DOCUMENT_BYTES;
 export const GOAT_BRAIN_REPORT_FOLDER = "research";
 
-export type MaterializedGoatBrainSnapshot = {
-  files: MaterializedGoatBrainFile[];
+export type MaterializedBrainSnapshot = {
+  files: MaterializedBrainFile[];
 };
 
-export type MaterializedGoatBrainFile = {
+export type MaterializedBrainFile = {
   documentId: string;
   brainId: string;
   folderPath: string;
@@ -48,7 +48,7 @@ export type MaterializedGoatBrainFile = {
   contentHash: string;
 };
 
-export type GoatBrainMarkdownReportArtifact = {
+export type BrainMarkdownReportArtifact = {
   type: "brain_markdown_report";
   title: string;
   documentId: string;
@@ -59,13 +59,13 @@ export type GoatBrainMarkdownReportArtifact = {
   mimeType: typeof GOAT_BRAIN_FILE_MIME_TYPE;
 };
 
-export async function createGoatBrainMarkdownReportForTask(input: {
+export async function createBrainMarkdownReportForTask(input: {
   userWorkosId: string;
   taskId: string;
   taskTurnId?: string | undefined;
   title: string;
   markdown: string;
-}): Promise<GoatBrainMarkdownReportArtifact> {
+}): Promise<BrainMarkdownReportArtifact> {
   const body = input.markdown.trim();
   if (!body) throw new Error("Cannot save an empty Goat research report.");
   if (Buffer.byteLength(body, "utf8") > MAX_GOAT_BRAIN_MARKDOWN_DOCUMENT_BYTES) {
@@ -73,8 +73,8 @@ export async function createGoatBrainMarkdownReportForTask(input: {
   }
 
   const title = firstMarkdownHeading(body) || input.title.trim() || "Research report";
-  const brainRef = await resolveGoatBrainRefForUser(input.userWorkosId);
-  const existingFiles = await listGoatBrainFiles(
+  const brainRef = await resolveBrainRefForUser(input.userWorkosId);
+  const existingFiles = await listBrainFiles(
     { brainRef },
     {
       includeInvalid: true,
@@ -92,7 +92,7 @@ export async function createGoatBrainMarkdownReportForTask(input: {
       documentId: existingReport.id,
       brainId: existingReport.brainId,
       folderPath: existingReport.folderPath,
-      brainPath: goatBrainFilePathFor(existingReport.folderPath, existingReport.brainId),
+      brainPath: brainFilePathFor(existingReport.folderPath, existingReport.brainId),
       url: brainDocumentUrl(existingReport.folderPath, existingReport.brainId),
       mimeType: GOAT_BRAIN_FILE_MIME_TYPE,
     };
@@ -102,8 +102,8 @@ export async function createGoatBrainMarkdownReportForTask(input: {
   const folderPath = GOAT_BRAIN_REPORT_FOLDER;
   const now = new Date().toISOString();
   const evidenceId = normalizeEvidenceId(`ev-created-from-${input.taskId}`) ?? "ev-task-created";
-  const citedBody = `${body}\n\nEvidence: ${formatGoatBrainEvidenceLink(evidenceId, `Task ${input.taskId}`)}`;
-  const doc: GoatBrainDocument = {
+  const citedBody = `${body}\n\nEvidence: ${formatBrainEvidenceLink(evidenceId, `Task ${input.taskId}`)}`;
+  const doc: BrainDocument = {
     frontmatter: {
       id: brainId,
       folder: folderPath,
@@ -134,7 +134,7 @@ export async function createGoatBrainMarkdownReportForTask(input: {
     title,
     compiledTruth: citedBody,
     timeline: [
-      goatBrainTimelineEntryFromParts({
+      brainTimelineEntryFromParts({
         evidenceId,
         at: now,
         summary: `Created from Goat task ${input.taskId}.`,
@@ -143,15 +143,15 @@ export async function createGoatBrainMarkdownReportForTask(input: {
       }),
     ],
   };
-  const content = serializeGoatBrainDocument(doc);
+  const content = serializeBrainDocument(doc);
   if (Buffer.byteLength(content, "utf8") > MAX_GOAT_BRAIN_MARKDOWN_DOCUMENT_BYTES) {
     throw new Error("Goat research report is too large to save to the Brain.");
   }
-  const row = await upsertGoatBrainFile(
+  const row = await upsertBrainFile(
     {
       brainRef,
       userWorkosId: input.userWorkosId,
-      path: goatBrainFilePathFor(folderPath, brainId),
+      path: brainFilePathFor(folderPath, brainId),
       content,
       id: `goat_brain_file_${randomUUID()}`,
     },
@@ -164,25 +164,25 @@ export async function createGoatBrainMarkdownReportForTask(input: {
     documentId: row.id,
     brainId,
     folderPath,
-    brainPath: goatBrainFilePathFor(folderPath, brainId),
+    brainPath: brainFilePathFor(folderPath, brainId),
     url: brainDocumentUrl(folderPath, brainId),
     mimeType: GOAT_BRAIN_FILE_MIME_TYPE,
   };
 }
 
-export async function materializeGoatBrainForTask(input: {
+export async function materializeBrainForTask(input: {
   sandbox: SandboxHandle;
   userWorkosId: string;
-}): Promise<MaterializedGoatBrainSnapshot> {
-  const brainRef = await resolveGoatBrainRefForUser(input.userWorkosId);
-  const rows = await listGoatBrainFiles(
+}): Promise<MaterializedBrainSnapshot> {
+  const brainRef = await resolveBrainRefForUser(input.userWorkosId);
+  const rows = await listBrainFiles(
     { brainRef },
     {
       includeInvalid: true,
       db: getDb(),
     },
   );
-  const folderRows = await listGoatBrainFolderRows({ brainRef }, { db: getDb() });
+  const folderRows = await listBrainFolderRows({ brainRef }, { db: getDb() });
   await input.sandbox.commands.run(
     `rm -rf ${shellQuote(GOAT_BRAIN_ROOT)} && mkdir -p ${shellQuote(GOAT_BRAIN_ROOT)}`,
     { timeoutMs: 30_000 },
@@ -192,16 +192,16 @@ export async function materializeGoatBrainForTask(input: {
   });
   await input.sandbox.files.write(
     `${GOAT_BRAIN_ROOT}/${GOAT_BRAIN_FOLDER_MANIFEST_PATH}`,
-    serializeGoatBrainFolderManifest(folderRows),
+    serializeBrainFolderManifest(folderRows),
   );
-  await input.sandbox.files.write(GOAT_BRAIN_CLI_PATH, getGoatBrainCliSource());
+  await input.sandbox.files.write(GOAT_BRAIN_CLI_PATH, getBrainCliSource());
   await input.sandbox.commands.run(`chmod 700 ${shellQuote(GOAT_BRAIN_CLI_PATH)}`, {
     timeoutMs: 30_000,
   });
 
-  const files: MaterializedGoatBrainFile[] = [];
+  const files: MaterializedBrainFile[] = [];
   for (const row of rows) {
-    const relativePath = goatBrainFilePathFor(row.folderPath, row.brainId);
+    const relativePath = brainFilePathFor(row.folderPath, row.brainId);
     await input.sandbox.commands.run(
       `mkdir -p ${shellQuote(`${GOAT_BRAIN_ROOT}/${path.posix.dirname(relativePath)}`)}`,
       { timeoutMs: 30_000 },
@@ -212,15 +212,15 @@ export async function materializeGoatBrainForTask(input: {
   return { files };
 }
 
-export async function materializeGoatBrainToLocalRoot(input: {
+export async function materializeBrainToLocalRoot(input: {
   root: string;
   userWorkosId: string;
-}): Promise<MaterializedGoatBrainSnapshot & { cliPath: string }> {
-  const brainRef = await resolveGoatBrainRefForUser(input.userWorkosId);
-  const files = await materializeGoatBrainFilesToRoot({
+}): Promise<MaterializedBrainSnapshot & { cliPath: string }> {
+  const brainRef = await resolveBrainRefForUser(input.userWorkosId);
+  const files = await materializeBrainFilesToRoot({
     brainRef,
     root: input.root,
-    cliSource: getGoatBrainCliSource(),
+    cliSource: getBrainCliSource(),
     db: getDb(),
   });
   return {
@@ -229,11 +229,11 @@ export async function materializeGoatBrainToLocalRoot(input: {
   };
 }
 
-export async function syncGoatBrainFromSandbox(input: {
+export async function syncBrainFromSandbox(input: {
   sandbox: SandboxHandle;
   userWorkosId: string;
   taskId?: string | null;
-  baseSnapshot: MaterializedGoatBrainSnapshot;
+  baseSnapshot: MaterializedBrainSnapshot;
 }): Promise<void> {
   const listed = await input.sandbox.commands.run(
     `if [ -d ${shellQuote(GOAT_BRAIN_ROOT)} ]; then find ${shellQuote(
@@ -241,7 +241,7 @@ export async function syncGoatBrainFromSandbox(input: {
     )} -type f -name '*.md' -not -path '*/.*/*' | sort; fi`,
     { timeoutMs: 30_000 },
   );
-  const files: GoatBrainSyncFile[] = [];
+  const files: BrainSyncFile[] = [];
   for (const absolutePath of listed.stdout
     .split("\n")
     .map((line) => line.trim())
@@ -264,13 +264,13 @@ export async function syncGoatBrainFromSandbox(input: {
   });
 }
 
-export async function syncGoatBrainFromLocalRoot(input: {
+export async function syncBrainFromLocalRoot(input: {
   root: string;
   userWorkosId: string;
   taskId?: string | null;
-  baseSnapshot: MaterializedGoatBrainSnapshot;
+  baseSnapshot: MaterializedBrainSnapshot;
 }): Promise<void> {
-  const files = await readGoatBrainFilesFromRoot(input.root);
+  const files = await readBrainFilesFromRoot(input.root);
   await syncFiles({
     userWorkosId: input.userWorkosId,
     files,
@@ -281,13 +281,13 @@ export async function syncGoatBrainFromLocalRoot(input: {
 
 async function syncFiles(input: {
   userWorkosId: string;
-  files: GoatBrainSyncFile[];
-  folders?: ReturnType<typeof parseGoatBrainFolderManifest> | null;
-  baseSnapshot: MaterializedGoatBrainSnapshot;
+  files: BrainSyncFile[];
+  folders?: ReturnType<typeof parseBrainFolderManifest> | null;
+  baseSnapshot: MaterializedBrainSnapshot;
   taskId?: string | null;
 }) {
-  const brainRef = await resolveGoatBrainRefForUser(input.userWorkosId);
-  const result = await syncGoatBrainFiles({
+  const brainRef = await resolveBrainRefForUser(input.userWorkosId);
+  const result = await syncBrainFiles({
     brainRef,
     userWorkosId: input.userWorkosId,
     files: input.files,
@@ -310,27 +310,27 @@ async function readSandboxFolderManifest(sandbox: SandboxHandle) {
     const source = String(
       await sandbox.files.read(`${GOAT_BRAIN_ROOT}/${GOAT_BRAIN_FOLDER_MANIFEST_PATH}`),
     );
-    return parseGoatBrainFolderManifest(source);
+    return parseBrainFolderManifest(source);
   } catch {
     return null;
   }
 }
 
-function materializedFileFromDb(input: DbMaterializedGoatBrainFile): MaterializedGoatBrainFile;
+function materializedFileFromDb(input: DbMaterializedBrainFile): MaterializedBrainFile;
 function materializedFileFromDb(input: {
   id: string;
   brainId: string;
   folderPath: string;
   path: string;
   contentHash: string;
-}): MaterializedGoatBrainFile;
+}): MaterializedBrainFile;
 function materializedFileFromDb(input: {
   id: string;
   brainId: string;
   folderPath: string;
   path: string;
   contentHash: string;
-}): MaterializedGoatBrainFile {
+}): MaterializedBrainFile {
   return {
     documentId: input.id,
     brainId: input.brainId,
@@ -340,9 +340,7 @@ function materializedFileFromDb(input: {
   };
 }
 
-function dbMaterializedFileFromRunner(
-  input: MaterializedGoatBrainFile,
-): DbMaterializedGoatBrainFile {
+function dbMaterializedFileFromRunner(input: MaterializedBrainFile): DbMaterializedBrainFile {
   return {
     id: input.documentId,
     brainId: input.brainId,
@@ -354,8 +352,8 @@ function dbMaterializedFileFromRunner(
 
 // Runner work has no interactive session, so it targets the user's default
 // ("General") brain; the chat surface targets the user's active brain instead.
-async function resolveGoatBrainRefForUser(userWorkosId: string): Promise<string> {
-  const brain = await getDefaultGoatBrainForUser(userWorkosId, { db: getDb() });
+async function resolveBrainRefForUser(userWorkosId: string): Promise<string> {
+  const brain = await getDefaultBrainForUser(userWorkosId, { db: getDb() });
   if (!brain) {
     throw new Error(`No accessible Goat brain found for user ${userWorkosId}.`);
   }
@@ -363,10 +361,10 @@ async function resolveGoatBrainRefForUser(userWorkosId: string): Promise<string>
 }
 
 function nextAvailableBrainId(
-  rows: Awaited<ReturnType<typeof listGoatBrainFiles>>,
+  rows: Awaited<ReturnType<typeof listBrainFiles>>,
   title: string,
 ): string {
-  const base = normalizeGoatBrainId(title) || "research-report";
+  const base = normalizeBrainId(title) || "research-report";
   const used = new Set(rows.map((row) => row.brainId));
   if (!used.has(base)) return base;
   for (let index = 2; index < 1000; index++) {

@@ -1,18 +1,18 @@
 import {
-  getGoatCapabilitySessionBudgetUsdMicros,
-  listGoatWorkspaceCapabilities,
+  getCapabilitySessionBudgetUsdMicros,
+  listWorkspaceCapabilities,
 } from "@opencompany/db/capabilities";
-import { GoatCapabilitiesPanel } from "@/components/GoatCapabilitiesPanel";
-import { currentGoatUser } from "@/lib/auth";
+import { CapabilitiesPanel } from "@/components/CapabilitiesPanel";
+import { currentUser } from "@/lib/auth";
 
 export default async function WorkspaceCapabilitiesPage() {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   const [capabilities, sessionBudgetUsdMicros] = await Promise.all([
-    listGoatWorkspaceCapabilities(context.workspace.id),
-    getGoatCapabilitySessionBudgetUsdMicros(context.workspace.id),
+    listWorkspaceCapabilities(context.workspace.id),
+    getCapabilitySessionBudgetUsdMicros(context.workspace.id),
   ]);
   return (
-    <GoatCapabilitiesPanel
+    <CapabilitiesPanel
       capabilities={capabilities}
       sessionBudgetUsdMicros={sessionBudgetUsdMicros}
       isAdmin={context.role === "admin"}

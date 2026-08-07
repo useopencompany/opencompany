@@ -1,30 +1,30 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
+import { captureIngestionQuotaAnalytics } from "@opencompany/analytics/app";
 import { normalizeGoogleDriveDocument } from "@opencompany/brain";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
-  upsertGoatBrainSourceItemAndEnqueue,
+  upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
-  activateGoatGoogleDriveWatchChannel,
-  advanceGoatGoogleDriveSyncCursor,
-  claimNextGoatGoogleDriveFile,
-  claimNextGoatGoogleDriveSyncCursor,
-  completeGoatGoogleDriveFile,
-  createGoatGoogleDriveWatchChannel,
-  failGoatGoogleDriveFile,
-  type GoatGoogleDriveAllFilesRef,
-  type GoatGoogleDriveResourceRef,
-  listActiveGoatGoogleDriveWatchChannels,
-  listEnabledGoatGoogleDriveSources,
-  observeGoatGoogleDriveFile,
-  releaseGoatGoogleDriveSyncCursor,
-  stopGoatGoogleDriveWatchChannel,
+  activateGoogleDriveWatchChannel,
+  advanceGoogleDriveSyncCursor,
+  claimNextGoogleDriveFile,
+  claimNextGoogleDriveSyncCursor,
+  completeGoogleDriveFile,
+  createGoogleDriveWatchChannel,
+  failGoogleDriveFile,
+  type GoogleDriveAllFilesRef,
+  type GoogleDriveResourceRef,
+  listActiveGoogleDriveWatchChannels,
+  listEnabledGoogleDriveSources,
+  observeGoogleDriveFile,
+  releaseGoogleDriveSyncCursor,
+  stopGoogleDriveWatchChannel,
 } from "@opencompany/db/google-drive";
-import { goatIntegrations } from "@opencompany/db/schema";
+import { integrations } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { eq } from "drizzle-orm";
-import { wakeGoatBrainIngestWorker } from "./brain-ingest-worker";
+import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { type GoogleApiAccount, GoogleApiRequestError } from "./google-api-auth";
@@ -81,21 +81,21 @@ type ClaimedFile = {
 
 type DriveRoute = {
   brainRef: string;
-  allFiles: GoatGoogleDriveAllFilesRef | null;
-  resources: GoatGoogleDriveResourceRef[];
+  allFiles: GoogleDriveAllFilesRef | null;
+  resources: GoogleDriveResourceRef[];
 };
 
 let wakeup: (() => void) | null = null;
 
-export function setGoatGoogleDriveSyncWakeup(callback: (() => void) | null) {
+export function setGoogleDriveSyncWakeup(callback: (() => void) | null) {
   wakeup = callback;
 }
 
-export function wakeGoatGoogleDriveSyncWorker() {
+export function wakeGoogleDriveSyncWorker() {
   wakeup?.();
 }
 
-export function startGoatGoogleDriveSyncWorker(
+export function startGoogleDriveSyncWorker(
   env: RunnerEnv,
   options: { pollIntervalMs?: number } = {},
 ) {
@@ -160,7 +160,7 @@ export function startGoatGoogleDriveSyncWorker(
 async function runGoogleDriveTick(env: RunnerEnv) {
   for (let count = 0; count < MAX_CURSOR_CLAIMS_PER_TICK; count += 1) {
     const now = new Date();
-    const row = await claimNextGoatGoogleDriveSyncCursor({
+    const row = await claimNextGoogleDriveSyncCursor({
       leaseId: `ggdc_lease_${randomUUID()}`,
       leaseOwner: env.instanceId,
       leaseExpiresAt: new Date(now.getTime() + CURSOR_LEASE_MS),
@@ -174,7 +174,7 @@ async function runGoogleDriveTick(env: RunnerEnv) {
 
   for (let count = 0; count < MAX_FILE_CLAIMS_PER_TICK; count += 1) {
     const now = new Date();
-    const row = await claimNextGoatGoogleDriveFile({
+    const row = await claimNextGoogleDriveFile({
       leaseId: `ggdf_lease_${randomUUID()}`,
       leaseOwner: env.instanceId,
       leaseExpiresAt: new Date(now.getTime() + FILE_LEASE_MS),
@@ -192,10 +192,7 @@ async function syncClaimedCursor(env: RunnerEnv, cursor: ClaimedCursor) {
   let pageToken = cursor.pageToken;
   let resetAt: Date | undefined;
   try {
-    const routes: DriveRoute[] = await listEnabledGoatGoogleDriveSources(
-      cursor.integrationId,
-      getDb(),
-    );
+    const routes: DriveRoute[] = await listEnabledGoogleDriveSources(cursor.integrationId, getDb());
     while (true) {
       const page = await listGoogleDriveChanges(context, {
         pageToken,
@@ -206,7 +203,7 @@ async function syncClaimedCursor(env: RunnerEnv, cursor: ClaimedCursor) {
       }
       if (page.nextPageToken) {
         pageToken = page.nextPageToken;
-        const advanced = await advanceGoatGoogleDriveSyncCursor({
+        const advanced = await advanceGoogleDriveSyncCursor({
           cursorId: cursor.id,
           leaseId: cursor.leaseId,
           pageToken,
@@ -222,7 +219,7 @@ async function syncClaimedCursor(env: RunnerEnv, cursor: ClaimedCursor) {
     }
 
     await ensureDriveWatchChannel(context, cursor, pageToken, now);
-    await releaseGoatGoogleDriveSyncCursor({
+    await releaseGoogleDriveSyncCursor({
       cursorId: cursor.id,
       leaseId: cursor.leaseId,
       pageToken,
@@ -242,7 +239,7 @@ async function syncClaimedCursor(env: RunnerEnv, cursor: ClaimedCursor) {
         cursor_id: cursor.id,
       });
     }
-    await releaseGoatGoogleDriveSyncCursor({
+    await releaseGoogleDriveSyncCursor({
       cursorId: cursor.id,
       leaseId: cursor.leaseId,
       ...(resetAt ? { pageToken, lastResetAt: resetAt } : {}),
@@ -339,7 +336,7 @@ async function observeDriveFile(
   file: GoogleDriveFileMetadata,
   observedAt: Date,
 ) {
-  await observeGoatGoogleDriveFile({
+  await observeGoogleDriveFile({
     integrationId,
     userWorkosId,
     fileId: file.id,
@@ -360,7 +357,7 @@ async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
       file = await getGoogleDriveFileMetadata(context, state.fileId);
     } catch (error) {
       if (isLostDriveAccess(error)) {
-        const routes: DriveRoute[] = await listEnabledGoatGoogleDriveSources(
+        const routes: DriveRoute[] = await listEnabledGoogleDriveSources(
           state.integrationId,
           getDb(),
         );
@@ -384,7 +381,7 @@ async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
           ...(cached?.lastModifyingUser ? { lastModifyingUser: cached.lastModifyingUser } : {}),
           capturedAt: new Date().toISOString(),
         });
-        const upserted = await upsertGoatBrainSourceItemAndEnqueue({
+        const upserted = await upsertBrainSourceItemAndEnqueue({
           userWorkosId: state.userWorkosId,
           sourceConnectionId: state.integrationId,
           integrationId: state.integrationId,
@@ -398,8 +395,8 @@ async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
           brainRefs: uniqueStrings(eligibleRoutes.map((route) => route.brainRef)),
           skipReason: "Google Drive no longer permits this file to be read.",
         });
-        captureGoatIngestionQuotaAnalytics(upserted.quotaUpdates);
-        await completeGoatGoogleDriveFile({
+        captureIngestionQuotaAnalytics(upserted.quotaUpdates);
+        await completeGoogleDriveFile({
           id: state.id,
           leaseId,
           claimedVersion: state.observedVersion,
@@ -412,15 +409,12 @@ async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
       throw error;
     }
 
-    const routes: DriveRoute[] = await listEnabledGoatGoogleDriveSources(
-      state.integrationId,
-      getDb(),
-    );
+    const routes: DriveRoute[] = await listEnabledGoogleDriveSources(state.integrationId, getDb());
     const matching = file.trashed
       ? []
       : await matchingDriveRoutes(context, routes, file, state.lastObservedAt);
     if (matching.length === 0) {
-      await completeGoatGoogleDriveFile({
+      await completeGoogleDriveFile({
         id: state.id,
         leaseId,
         claimedVersion: state.observedVersion,
@@ -448,7 +442,7 @@ async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
       ...(file.lastModifyingUser ? { lastModifyingUser: file.lastModifyingUser } : {}),
       capturedAt,
     });
-    const upserted = await upsertGoatBrainSourceItemAndEnqueue({
+    const upserted = await upsertBrainSourceItemAndEnqueue({
       userWorkosId: state.userWorkosId,
       sourceConnectionId: state.integrationId,
       integrationId: state.integrationId,
@@ -463,8 +457,8 @@ async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
       brainRefs: uniqueStrings(matching.map((route) => route.brainRef)),
       skipReason: skippedReason,
     });
-    captureGoatIngestionQuotaAnalytics(upserted.quotaUpdates);
-    await completeGoatGoogleDriveFile({
+    captureIngestionQuotaAnalytics(upserted.quotaUpdates);
+    await completeGoogleDriveFile({
       id: state.id,
       leaseId,
       claimedVersion: state.observedVersion,
@@ -472,10 +466,10 @@ async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
       sourceItemId: upserted.sourceItemId,
       db: getDb(),
     });
-    if (upserted.enqueued) wakeGoatBrainIngestWorker();
+    if (upserted.enqueued) wakeBrainIngestWorker();
   } catch (error) {
     const now = new Date();
-    await failGoatGoogleDriveFile({
+    await failGoogleDriveFile({
       id: state.id,
       leaseId,
       error: errorMessage(error),
@@ -547,10 +541,10 @@ async function ensureDriveWatchChannel(
   now: Date,
 ) {
   if (!isPublicHttpsAddress(cursor.webhookAddress)) return;
-  const existing = await listActiveGoatGoogleDriveWatchChannels(cursor.id, getDb());
+  const existing = await listActiveGoogleDriveWatchChannels(cursor.id, getDb());
   for (const channel of existing) {
     if (channel.expiresAt && channel.expiresAt <= now) {
-      await stopGoatGoogleDriveWatchChannel(channel.id, now, getDb());
+      await stopGoogleDriveWatchChannel(channel.id, now, getDb());
     }
   }
   const liveChannels = existing.filter(
@@ -568,7 +562,7 @@ async function ensureDriveWatchChannel(
   const channelId = randomUUID();
   const channelToken = randomBytes(32).toString("base64url");
   const requestedExpiry = new Date(now.getTime() + WATCH_LIFETIME_MS);
-  await createGoatGoogleDriveWatchChannel({
+  await createGoogleDriveWatchChannel({
     id: channelId,
     cursorId: cursor.id,
     integrationId: cursor.integrationId,
@@ -586,7 +580,7 @@ async function ensureDriveWatchChannel(
       address: cursor.webhookAddress,
       expiresAt: requestedExpiry,
     });
-    await activateGoatGoogleDriveWatchChannel({
+    await activateGoogleDriveWatchChannel({
       id: channelId,
       resourceId: watched.resourceId,
       expiresAt: watched.expiresAt,
@@ -596,7 +590,7 @@ async function ensureDriveWatchChannel(
     // deliberate: either channel may race a change notification, and the
     // webhook reduces both to the same idempotent cursor wake.
   } catch (error) {
-    await stopGoatGoogleDriveWatchChannel(channelId, new Date(), getDb());
+    await stopGoogleDriveWatchChannel(channelId, new Date(), getDb());
     logger.warn("Google Drive watch unavailable; reconciliation polling remains active", {
       event: "opencompany.goat_google_drive_watch_create_failed",
       cursor_id: cursor.id,
@@ -611,9 +605,9 @@ async function loadDriveContext(
   userWorkosId: string,
 ): Promise<GoogleDriveApiContext> {
   const [integration] = await getDb()
-    .select({ accountEmail: goatIntegrations.accountEmail })
-    .from(goatIntegrations)
-    .where(eq(goatIntegrations.id, integrationId))
+    .select({ accountEmail: integrations.accountEmail })
+    .from(integrations)
+    .where(eq(integrations.id, integrationId))
     .limit(1);
   const account: GoogleApiAccount = {
     integrationId,
@@ -623,11 +617,11 @@ async function loadDriveContext(
   return { env, userWorkosId, account, signal: new AbortController().signal };
 }
 
-function selectedBefore(resource: GoatGoogleDriveResourceRef, observedAt: Date) {
+function selectedBefore(resource: GoogleDriveResourceRef, observedAt: Date) {
   return new Date(resource.selectedAt).getTime() <= observedAt.getTime();
 }
 
-function isAllFilesSelectedBefore(allFiles: GoatGoogleDriveAllFilesRef | null, observedAt: Date) {
+function isAllFilesSelectedBefore(allFiles: GoogleDriveAllFilesRef | null, observedAt: Date) {
   return Boolean(allFiles && new Date(allFiles.selectedAt).getTime() <= observedAt.getTime());
 }
 

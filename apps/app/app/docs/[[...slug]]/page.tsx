@@ -2,10 +2,10 @@ import type { TOCItemType } from "fumadocs-core/toc";
 import type { MDXContent } from "mdx/types";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import GoatDocsView from "@/components/GoatDocsView";
+import DocsView from "@/components/DocsView";
 import { source } from "@/lib/docs-source";
 
-type GoatDocsPageProps = {
+type DocsPageProps = {
   params: Promise<{
     slug?: string[];
   }>;
@@ -22,7 +22,7 @@ export function generateStaticParams() {
   return source.generateParams();
 }
 
-export async function generateMetadata({ params }: GoatDocsPageProps): Promise<Metadata> {
+export async function generateMetadata({ params }: DocsPageProps): Promise<Metadata> {
   const { slug } = await params;
   const page = source.getPage(slug);
 
@@ -39,7 +39,7 @@ export async function generateMetadata({ params }: GoatDocsPageProps): Promise<M
   };
 }
 
-export default async function GoatDocsPage({ params }: GoatDocsPageProps) {
+export default async function DocsPage({ params }: DocsPageProps) {
   const { slug } = await params;
   const page = source.getPage(slug);
 
@@ -50,7 +50,7 @@ export default async function GoatDocsPage({ params }: GoatDocsPageProps) {
   const data = page.data as RenderableDocsData;
 
   return (
-    <GoatDocsView
+    <DocsView
       title={data.title ?? "Documentation"}
       description={data.description}
       url={page.url}

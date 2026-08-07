@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
+import { captureIngestionQuotaAnalytics } from "@opencompany/analytics/app";
 import {
   BrainSourceNormalizationError,
   githubActivityEventType,
@@ -7,27 +7,27 @@ import {
 } from "@opencompany/brain";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
-  upsertGoatBrainSourceItemAndEnqueue,
+  upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
-  type GoatGitHubPullRequestEventInsert,
-  goatGitHubEnabledEventTypes,
-  goatGitHubSelectedRepoIds,
-  insertGoatGitHubPullRequestEvents,
-  listEnabledGoatGitHubBrainSourceRoutes,
-  listGoatGitHubIntegrationsForInstallation,
+  type GitHubPullRequestEventInsert,
+  gitHubEnabledEventTypes,
+  gitHubSelectedRepoIds,
+  insertGitHubPullRequestEvents,
+  listEnabledGitHubBrainSourceRoutes,
+  listGitHubIntegrationsForInstallation,
 } from "@opencompany/db/github";
-import { markGoatIntegrationStatus } from "@opencompany/db/integrations";
+import { markIntegrationStatus } from "@opencompany/db/integrations";
 import { NextResponse } from "next/server";
-import { verifyGoatGitHubWebhookSignature } from "@/lib/integrations/github-signature";
-import { triggerGoatBrainIngestWake } from "@/lib/task-runner";
+import { verifyGitHubWebhookSignature } from "@/lib/integrations/github-signature";
+import { triggerBrainIngestWake } from "@/lib/task-runner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   const rawBody = await request.text();
-  const verified = verifyGoatGitHubWebhookSignature({
+  const verified = verifyGitHubWebhookSignature({
     rawBody,
     signature: request.headers.get("x-hub-signature-256"),
   });
@@ -81,11 +81,11 @@ async function handleInstallationEvent(payload: Record<string, unknown>) {
   const installationId = readInstallationId(payload);
   if (!installationId) return { ok: true, ignored: true };
 
-  const integrations = await listGoatGitHubIntegrationsForInstallation(installationId);
+  const integrations = await listGitHubIntegrationsForInstallation(installationId);
   let marked = 0;
   for (const integration of integrations) {
     if (integration.status === "disconnected") continue;
-    await markGoatIntegrationStatus({
+    await markIntegrationStatus({
       userWorkosId: integration.userWorkosId,
       integrationId: integration.id,
       provider: "github",
@@ -126,19 +126,19 @@ async function handleActivityEvent(
   const installationId = readInstallationId(payload);
   if (!installationId) return { ok: true, dropped: true };
 
-  const integrations = await listGoatGitHubIntegrationsForInstallation(installationId);
+  const integrations = await listGitHubIntegrationsForInstallation(installationId);
   const connected = integrations.filter((integration) => integration.status === "connected");
   if (connected.length === 0) return { ok: true, dropped: true };
 
-  const routes = await listEnabledGoatGitHubBrainSourceRoutes(
+  const routes = await listEnabledGitHubBrainSourceRoutes(
     connected.map((integration) => integration.id),
   );
   const repoId = item.content.activity.repository.id;
   const eventType = githubActivityEventType(item.content.activity);
   const brainRefsByIntegration = new Map<string, string[]>();
   for (const route of routes) {
-    if (!goatGitHubSelectedRepoIds(route.config).has(repoId)) continue;
-    if (!goatGitHubEnabledEventTypes(route.config).has(eventType)) continue;
+    if (!gitHubSelectedRepoIds(route.config).has(repoId)) continue;
+    if (!gitHubEnabledEventTypes(route.config).has(eventType)) continue;
     const refs = brainRefsByIntegration.get(route.integrationId) ?? [];
     refs.push(route.brainRef);
     brainRefsByIntegration.set(route.integrationId, refs);
@@ -156,7 +156,7 @@ async function handleActivityEvent(
     if (pullRequestNumber === undefined || !pullRequestEventType) {
       return { ok: true, dropped: true };
     }
-    const inserts: GoatGitHubPullRequestEventInsert[] = connected.flatMap((integration) => {
+    const inserts: GitHubPullRequestEventInsert[] = connected.flatMap((integration) => {
       const brainRefs = brainRefsByIntegration.get(integration.id);
       if (!brainRefs || brainRefs.length === 0) return [];
       return [
@@ -173,7 +173,7 @@ async function handleActivityEvent(
         },
       ];
     });
-    const buffered = await insertGoatGitHubPullRequestEvents(inserts);
+    const buffered = await insertGitHubPullRequestEvents(inserts);
     return { ok: true, buffered };
   }
 
@@ -181,7 +181,7 @@ async function handleActivityEvent(
   for (const integration of connected) {
     const brainRefs = brainRefsByIntegration.get(integration.id);
     if (!brainRefs || brainRefs.length === 0) continue;
-    const result = await upsertGoatBrainSourceItemAndEnqueue({
+    const result = await upsertBrainSourceItemAndEnqueue({
       userWorkosId: integration.userWorkosId,
       sourceConnectionId: integration.id,
       integrationId: integration.id,
@@ -190,12 +190,12 @@ async function handleActivityEvent(
       kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
     });
-    captureGoatIngestionQuotaAnalytics(result.quotaUpdates);
+    captureIngestionQuotaAnalytics(result.quotaUpdates);
     enqueued += result.jobIds.length;
   }
 
   if (enqueued > 0) {
-    triggerGoatBrainIngestWake().catch((error) => {
+    triggerBrainIngestWake().catch((error) => {
       console.warn("[goat-github] Failed to wake Goat Brain ingest worker", {
         error: error instanceof Error ? error.message : String(error),
       });

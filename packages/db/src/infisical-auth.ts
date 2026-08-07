@@ -9,40 +9,37 @@ import {
 } from "@opencompany/crypto";
 import { and, eq } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import type * as goatSchema from "./schema";
+import type * as schema from "./schema";
 import {
-  type GoatInfisicalConnectionStatus,
-  type GoatIntegrationCredentialEncryptedPayload,
-  goatInfisicalConnections,
+  type InfisicalConnectionStatus,
+  type IntegrationCredentialEncryptedPayload,
+  infisicalConnections,
 } from "./schema";
 
 const ENCRYPTION_KEY_VERSION = 1;
 export const GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION = 1 as const;
 export const GOAT_INFISICAL_HOST = "https://app.infisical.com";
 
-type DbSchema = typeof goatSchema;
-type GoatInfisicalAuthDb = Pick<
-  PgDatabase<PgQueryResultHKT, DbSchema>,
-  "insert" | "select" | "update"
->;
+type DbSchema = typeof schema;
+type InfisicalAuthDb = Pick<PgDatabase<PgQueryResultHKT, DbSchema>, "insert" | "select" | "update">;
 
-export type GoatInfisicalAuthBundleFile = {
+export type InfisicalAuthBundleFile = {
   path: string;
   contentsBase64: string;
   mode: number;
 };
 
-export type GoatInfisicalAuthBundle = {
+export type InfisicalAuthBundle = {
   formatVersion: typeof GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION;
-  files: GoatInfisicalAuthBundleFile[];
+  files: InfisicalAuthBundleFile[];
   redactionValues: string[];
 };
 
-export type LoadedGoatInfisicalConnection = {
+export type LoadedInfisicalConnection = {
   workspaceId: string;
-  authBundle: GoatInfisicalAuthBundle | null;
+  authBundle: InfisicalAuthBundle | null;
   credentialGeneration: string;
-  status: GoatInfisicalConnectionStatus;
+  status: InfisicalConnectionStatus;
   statusReason: string | null;
   host: string;
   accountEmail: string | null;
@@ -55,16 +52,16 @@ export type LoadedGoatInfisicalConnection = {
   updatedAt: Date;
 };
 
-export type GoatInfisicalConnectionMetadata = Omit<LoadedGoatInfisicalConnection, "authBundle">;
+export type InfisicalConnectionMetadata = Omit<LoadedInfisicalConnection, "authBundle">;
 
-export function newGoatInfisicalAuthFlowId() {
+export function newInfisicalAuthFlowId() {
   return `ginff_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
 }
 
-export async function saveGoatInfisicalConnection(input: {
-  db: GoatInfisicalAuthDb;
+export async function saveInfisicalConnection(input: {
+  db: InfisicalAuthDb;
   workspaceId: string;
-  authBundle: GoatInfisicalAuthBundle;
+  authBundle: InfisicalAuthBundle;
   accountEmail: string;
   cliVersion: string;
   expiresAt?: Date | null;
@@ -80,7 +77,7 @@ export async function saveGoatInfisicalConnection(input: {
   );
 
   const [connection] = await input.db
-    .insert(goatInfisicalConnections)
+    .insert(infisicalConnections)
     .values({
       workspaceId: input.workspaceId,
       encryptedAuthBundle,
@@ -99,7 +96,7 @@ export async function saveGoatInfisicalConnection(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: goatInfisicalConnections.workspaceId,
+      target: infisicalConnections.workspaceId,
       set: {
         encryptedAuthBundle,
         encryptionKeyVersion: ENCRYPTION_KEY_VERSION,
@@ -118,23 +115,23 @@ export async function saveGoatInfisicalConnection(input: {
       },
     })
     .returning({
-      workspaceId: goatInfisicalConnections.workspaceId,
-      credentialGeneration: goatInfisicalConnections.credentialGeneration,
+      workspaceId: infisicalConnections.workspaceId,
+      credentialGeneration: infisicalConnections.credentialGeneration,
     });
 
   if (!connection) throw new Error("Could not persist the Infisical connection.");
   return connection;
 }
 
-export async function disconnectGoatInfisicalConnection(input: {
-  db: GoatInfisicalAuthDb;
+export async function disconnectInfisicalConnection(input: {
+  db: InfisicalAuthDb;
   workspaceId: string;
   now?: Date;
 }) {
   const now = input.now ?? new Date();
   const credentialGeneration = randomUUID();
   await input.db
-    .insert(goatInfisicalConnections)
+    .insert(infisicalConnections)
     .values({
       workspaceId: input.workspaceId,
       encryptedAuthBundle: null,
@@ -153,7 +150,7 @@ export async function disconnectGoatInfisicalConnection(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: goatInfisicalConnections.workspaceId,
+      target: infisicalConnections.workspaceId,
       set: {
         encryptedAuthBundle: null,
         encryptionKeyVersion: null,
@@ -173,15 +170,15 @@ export async function disconnectGoatInfisicalConnection(input: {
   return { credentialGeneration };
 }
 
-export async function markGoatInfisicalConnectionNeedsReauth(input: {
-  db: GoatInfisicalAuthDb;
+export async function markInfisicalConnectionNeedsReauth(input: {
+  db: InfisicalAuthDb;
   workspaceId: string;
   expectedCredentialGeneration: string;
   statusReason: string;
   now?: Date;
 }) {
   const [updated] = await input.db
-    .update(goatInfisicalConnections)
+    .update(infisicalConnections)
     .set({
       status: "needs_reauth",
       statusReason: input.statusReason.slice(0, 240),
@@ -189,40 +186,40 @@ export async function markGoatInfisicalConnectionNeedsReauth(input: {
     })
     .where(
       and(
-        eq(goatInfisicalConnections.workspaceId, input.workspaceId),
-        eq(goatInfisicalConnections.credentialGeneration, input.expectedCredentialGeneration),
-        eq(goatInfisicalConnections.status, "connected"),
+        eq(infisicalConnections.workspaceId, input.workspaceId),
+        eq(infisicalConnections.credentialGeneration, input.expectedCredentialGeneration),
+        eq(infisicalConnections.status, "connected"),
       ),
     )
-    .returning({ workspaceId: goatInfisicalConnections.workspaceId });
+    .returning({ workspaceId: infisicalConnections.workspaceId });
   return Boolean(updated);
 }
 
-export async function markGoatInfisicalConnectionValidated(input: {
-  db: GoatInfisicalAuthDb;
+export async function markInfisicalConnectionValidated(input: {
+  db: InfisicalAuthDb;
   workspaceId: string;
   expectedCredentialGeneration: string;
   now?: Date;
 }) {
   const now = input.now ?? new Date();
   const [updated] = await input.db
-    .update(goatInfisicalConnections)
+    .update(infisicalConnections)
     .set({ status: "connected", statusReason: null, lastValidatedAt: now, updatedAt: now })
     .where(
       and(
-        eq(goatInfisicalConnections.workspaceId, input.workspaceId),
-        eq(goatInfisicalConnections.credentialGeneration, input.expectedCredentialGeneration),
-        eq(goatInfisicalConnections.status, "connected"),
+        eq(infisicalConnections.workspaceId, input.workspaceId),
+        eq(infisicalConnections.credentialGeneration, input.expectedCredentialGeneration),
+        eq(infisicalConnections.status, "connected"),
       ),
     )
-    .returning({ workspaceId: goatInfisicalConnections.workspaceId });
+    .returning({ workspaceId: infisicalConnections.workspaceId });
   return Boolean(updated);
 }
 
-export async function loadGoatInfisicalConnection(input: {
-  db: GoatInfisicalAuthDb;
+export async function loadInfisicalConnection(input: {
+  db: InfisicalAuthDb;
   workspaceId: string;
-}): Promise<LoadedGoatInfisicalConnection | null> {
+}): Promise<LoadedInfisicalConnection | null> {
   const row = await loadConnectionRow(input);
   if (!row) return null;
   if (row.workspaceId !== input.workspaceId) {
@@ -236,43 +233,43 @@ export async function loadGoatInfisicalConnection(input: {
   return metadataFromRow(row, authBundle);
 }
 
-export async function loadGoatInfisicalConnectionMetadata(input: {
-  db: GoatInfisicalAuthDb;
+export async function loadInfisicalConnectionMetadata(input: {
+  db: InfisicalAuthDb;
   workspaceId: string;
-}): Promise<GoatInfisicalConnectionMetadata | null> {
+}): Promise<InfisicalConnectionMetadata | null> {
   const row = await loadConnectionRow(input);
   return row ? metadataFromRow(row, null) : null;
 }
 
-async function loadConnectionRow(input: { db: GoatInfisicalAuthDb; workspaceId: string }) {
+async function loadConnectionRow(input: { db: InfisicalAuthDb; workspaceId: string }) {
   const [row] = await input.db
     .select({
-      workspaceId: goatInfisicalConnections.workspaceId,
-      encryptedAuthBundle: goatInfisicalConnections.encryptedAuthBundle,
-      encryptionKeyVersion: goatInfisicalConnections.encryptionKeyVersion,
-      credentialGeneration: goatInfisicalConnections.credentialGeneration,
-      status: goatInfisicalConnections.status,
-      statusReason: goatInfisicalConnections.statusReason,
-      host: goatInfisicalConnections.host,
-      accountEmail: goatInfisicalConnections.accountEmail,
-      cliVersion: goatInfisicalConnections.cliVersion,
-      bundleFormatVersion: goatInfisicalConnections.bundleFormatVersion,
-      expiresAt: goatInfisicalConnections.expiresAt,
-      connectedByWorkosId: goatInfisicalConnections.connectedByWorkosId,
-      lastValidatedAt: goatInfisicalConnections.lastValidatedAt,
-      lastRotatedAt: goatInfisicalConnections.lastRotatedAt,
-      updatedAt: goatInfisicalConnections.updatedAt,
+      workspaceId: infisicalConnections.workspaceId,
+      encryptedAuthBundle: infisicalConnections.encryptedAuthBundle,
+      encryptionKeyVersion: infisicalConnections.encryptionKeyVersion,
+      credentialGeneration: infisicalConnections.credentialGeneration,
+      status: infisicalConnections.status,
+      statusReason: infisicalConnections.statusReason,
+      host: infisicalConnections.host,
+      accountEmail: infisicalConnections.accountEmail,
+      cliVersion: infisicalConnections.cliVersion,
+      bundleFormatVersion: infisicalConnections.bundleFormatVersion,
+      expiresAt: infisicalConnections.expiresAt,
+      connectedByWorkosId: infisicalConnections.connectedByWorkosId,
+      lastValidatedAt: infisicalConnections.lastValidatedAt,
+      lastRotatedAt: infisicalConnections.lastRotatedAt,
+      updatedAt: infisicalConnections.updatedAt,
     })
-    .from(goatInfisicalConnections)
-    .where(eq(goatInfisicalConnections.workspaceId, input.workspaceId))
+    .from(infisicalConnections)
+    .where(eq(infisicalConnections.workspaceId, input.workspaceId))
     .limit(1);
   return row ?? null;
 }
 
 function metadataFromRow(
   row: NonNullable<Awaited<ReturnType<typeof loadConnectionRow>>>,
-  authBundle: GoatInfisicalAuthBundle | null,
-): LoadedGoatInfisicalConnection {
+  authBundle: InfisicalAuthBundle | null,
+): LoadedInfisicalConnection {
   return {
     workspaceId: row.workspaceId,
     authBundle,
@@ -292,10 +289,10 @@ function metadataFromRow(
 }
 
 function encryptAuthBundle(
-  authBundle: GoatInfisicalAuthBundle,
+  authBundle: InfisicalAuthBundle,
   workspaceId: string,
   keyVersion: number,
-): GoatIntegrationCredentialEncryptedPayload {
+): IntegrationCredentialEncryptedPayload {
   return encryptJson(authBundle, {
     key: loadEncryptionKey(keyVersion),
     aad: authenticatedData(workspaceId, keyVersion),
@@ -303,10 +300,10 @@ function encryptAuthBundle(
 }
 
 function decryptAuthBundle(
-  encryptedAuthBundle: GoatIntegrationCredentialEncryptedPayload,
+  encryptedAuthBundle: IntegrationCredentialEncryptedPayload,
   workspaceId: string,
   keyVersion: number,
-): GoatInfisicalAuthBundle {
+): InfisicalAuthBundle {
   if (encryptedAuthBundle.algorithm !== ENCRYPTION_ALGORITHM) {
     throw new Error(
       `Unsupported Infisical credential encryption algorithm ${encryptedAuthBundle.algorithm}.`,
@@ -338,9 +335,9 @@ function decryptAuthBundle(
   return decrypted;
 }
 
-function isAuthBundle(value: unknown): value is GoatInfisicalAuthBundle {
+function isAuthBundle(value: unknown): value is InfisicalAuthBundle {
   if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<GoatInfisicalAuthBundle>;
+  const candidate = value as Partial<InfisicalAuthBundle>;
   return (
     candidate.formatVersion === GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION &&
     Array.isArray(candidate.files) &&

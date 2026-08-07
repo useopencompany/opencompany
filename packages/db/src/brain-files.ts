@@ -5,60 +5,60 @@ import path from "node:path";
 import { and, desc, eq, like, notInArray, or } from "drizzle-orm";
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import {
-  appendGoatBrainAssetTextBlock,
-  defaultGoatBrainFolderManifestEntries,
-  deriveGoatBrainEdges,
+  appendBrainAssetTextBlock,
+  type BrainDocumentFormat,
+  type BrainEntityType,
+  type BrainFolderManifestEntry,
+  type BrainKind,
+  type BrainRelation,
+  type BrainSource,
+  type BrainStatus,
+  type BrainTimelineEntry,
+  brainEntryFromLegacyMarkdown,
+  brainFolderFromRelativePath,
+  brainFolderSourceForPath,
+  brainIdFromRelativePath,
+  brainKindForFolder,
+  brainRelativePath,
+  brainSidecarRelativePath,
+  defaultBrainFolderManifestEntries,
+  deriveBrainEdges,
   GOAT_BRAIN_FOLDER_MANIFEST_PATH,
-  type GoatBrainDocumentFormat,
-  type GoatBrainEntityType,
-  type GoatBrainFolderManifestEntry,
-  type GoatBrainKind,
-  type GoatBrainRelation,
-  type GoatBrainSource,
-  type GoatBrainStatus,
-  type GoatBrainTimelineEntry,
-  goatBrainEntryFromLegacyMarkdown,
-  goatBrainFolderFromRelativePath,
-  goatBrainFolderSourceForPath,
-  goatBrainIdFromRelativePath,
-  goatBrainKindForFolder,
-  goatBrainRelativePath,
-  goatBrainSidecarRelativePath,
-  isBuiltInGoatBrainEntityType,
-  isHardDefaultGoatBrainFolder,
-  isSafeGoatBrainRelativePath,
-  isValidGoatBrainFolder,
-  isValidGoatBrainId,
-  isValidGoatBrainKind,
-  isValidGoatBrainStatus,
-  normalizeGoatBrainCompiledTruth,
-  normalizeGoatBrainFolder,
-  normalizeGoatBrainFolderEntries,
-  normalizeGoatBrainFolderForV1,
-  type GoatBrainDocument as ParsedGoatBrainDocument,
-  parseGoatBrainDocument,
-  parseGoatBrainFolderManifest,
-  parseGoatBrainSidecar,
-  recoverLegacyGoatBrainEntryFromSidecar,
-  replaceGoatBrainCompiledTruth,
-  serializeGoatBrainDocument,
-  serializeGoatBrainFolderManifest,
-  serializeGoatBrainPayload,
-  serializeGoatBrainSidecar,
-  serializeLegacyGoatBrainEntry,
-  stripGoatBrainAssetTextBlock,
-  validateGoatBrainDocument,
-  validateGoatBrainSidecar,
+  isBuiltInBrainEntityType,
+  isHardDefaultBrainFolder,
+  isSafeBrainRelativePath,
+  isValidBrainFolder,
+  isValidBrainId,
+  isValidBrainKind,
+  isValidBrainStatus,
+  normalizeBrainCompiledTruth,
+  normalizeBrainFolder,
+  normalizeBrainFolderEntries,
+  normalizeBrainFolderForV1,
+  type BrainDocument as ParsedBrainDocument,
+  parseBrainDocument,
+  parseBrainFolderManifest,
+  parseBrainSidecar,
+  recoverLegacyBrainEntryFromSidecar,
+  replaceBrainCompiledTruth,
+  serializeBrainDocument,
+  serializeBrainFolderManifest,
+  serializeBrainPayload,
+  serializeBrainSidecar,
+  serializeLegacyBrainEntry,
+  stripBrainAssetTextBlock,
+  validateBrainDocument,
+  validateBrainSidecar,
 } from "../../brain/src/index";
 import { getDb } from "./client";
 import {
-  type GoatBrainDocument,
-  type GoatBrainFolder,
-  goatBrainDocuments,
-  goatBrainDocumentVersions,
-  goatBrainEdges,
-  goatBrainFolders,
-  goatBrainTimelineEntries,
+  type BrainDocument,
+  type BrainFolder,
+  brainDocuments,
+  brainDocumentVersions,
+  brainEdges,
+  brainFolders,
+  brainTimelineEntries,
 } from "./schema";
 
 export const GOAT_BRAIN_FILE_MIME_TYPE = "text/markdown";
@@ -67,7 +67,7 @@ export const MAX_GOAT_BRAIN_FILE_BYTES = 1_000_000;
 // Cap on stored machine-extracted asset text for file-backed rows.
 export const MAX_GOAT_BRAIN_ASSET_TEXT_BYTES = 200_000;
 
-export type GoatBrainFileProjection = {
+export type BrainFileProjection = {
   path: string;
   brainId: string;
   folderPath: string;
@@ -75,20 +75,20 @@ export type GoatBrainFileProjection = {
   mimeType: typeof GOAT_BRAIN_FILE_MIME_TYPE;
   content: string;
   body: string;
-  timeline: GoatBrainTimelineEntry[];
+  timeline: BrainTimelineEntry[];
   contentHash: string;
   sizeBytes: number;
   title: string;
   description?: string;
-  kind: GoatBrainKind;
-  entityType: GoatBrainEntityType;
-  status: GoatBrainStatus;
-  relations: GoatBrainRelation[];
-  sources: GoatBrainSource[];
+  kind: BrainKind;
+  entityType: BrainEntityType;
+  status: BrainStatus;
+  relations: BrainRelation[];
+  sources: BrainSource[];
   aliases: string[];
 };
 
-export type GoatBrainStoredFrontmatter = {
+export type BrainStoredFrontmatter = {
   id?: string;
   kind?: string;
   type?: string;
@@ -98,13 +98,13 @@ export type GoatBrainStoredFrontmatter = {
   createdAt?: string;
   updatedAt?: string;
   aliases?: string[];
-  related?: GoatBrainRelation[];
-  sources?: GoatBrainSource[];
+  related?: BrainRelation[];
+  sources?: BrainSource[];
   mergedInto?: string;
   folder?: string;
 };
 
-export type MaterializedGoatBrainFile = {
+export type MaterializedBrainFile = {
   id: string;
   brainId: string;
   path: string;
@@ -117,31 +117,31 @@ export type MaterializedGoatBrainFile = {
   materializedHash?: string;
 };
 
-export type GoatBrainSyncFile = {
+export type BrainSyncFile = {
   path: string;
   content: string;
   skip?: boolean;
 };
 
-export type GoatBrainSyncConflict = {
+export type BrainSyncConflict = {
   path: string;
   reason: "changed_since_materialize" | "created_since_materialize";
 };
 
-export type GoatBrainSyncPageAction = "created" | "updated" | "conflict_created";
+export type BrainSyncPageAction = "created" | "updated" | "conflict_created";
 
-export type GoatBrainSyncPage = {
+export type BrainSyncPage = {
   brainId: string;
   folderPath: string;
   title: string;
-  action: GoatBrainSyncPageAction;
+  action: BrainSyncPageAction;
 };
 
-export type GoatBrainSyncResult = {
+export type BrainSyncResult = {
   upserted: number;
   deleted: number;
-  conflicts: GoatBrainSyncConflict[];
-  pages: GoatBrainSyncPage[];
+  conflicts: BrainSyncConflict[];
+  pages: BrainSyncPage[];
 };
 
 type DbClient = any;
@@ -156,33 +156,33 @@ function runAtomically<T>(db: DbClient, fn: (tx: DbLike) => Promise<T>): Promise
   return db.transaction(fn);
 }
 
-export function hashGoatBrainContent(content: string): string {
+export function hashBrainContent(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
-export function createGoatBrainMarkdownContent(input: {
+export function createBrainMarkdownContent(input: {
   id: string;
   folderPath: string;
   title: string;
   description?: string;
-  type: GoatBrainEntityType;
-  status?: GoatBrainStatus;
+  type: BrainEntityType;
+  status?: BrainStatus;
   compiledTruth?: string;
-  related?: GoatBrainRelation[];
-  sources?: GoatBrainSource[];
+  related?: BrainRelation[];
+  sources?: BrainSource[];
   aliases?: string[];
-  timeline?: GoatBrainTimelineEntry[];
+  timeline?: BrainTimelineEntry[];
   createdAt?: string;
   updatedAt?: string;
 }): string {
   const now = new Date().toISOString();
   const folder = input.folderPath;
-  const doc: ParsedGoatBrainDocument = {
+  const doc: ParsedBrainDocument = {
     frontmatter: {
       id: input.id,
       folder,
       // Kind is derived from the folder: the evidence/ zone marks evidence docs.
-      kind: goatBrainKindForFolder(folder),
+      kind: brainKindForFolder(folder),
       type: input.type,
       status: input.status ?? "draft",
       title: input.title,
@@ -197,47 +197,47 @@ export function createGoatBrainMarkdownContent(input: {
     compiledTruth: input.compiledTruth ?? "",
     timeline: input.timeline ?? [],
   };
-  return serializeGoatBrainDocument(doc);
+  return serializeBrainDocument(doc);
 }
 
-export function replaceGoatBrainFileCompiledTruth(input: {
+export function replaceBrainFileCompiledTruth(input: {
   content: string;
   compiledTruth: string;
   updatedAt?: string;
 }): string {
-  return replaceGoatBrainCompiledTruth(input.content, input.compiledTruth, {
+  return replaceBrainCompiledTruth(input.content, input.compiledTruth, {
     ...(input.updatedAt ? { updatedAt: input.updatedAt } : {}),
   });
 }
 
-export function deriveGoatBrainFileProjection(input: {
+export function deriveBrainFileProjection(input: {
   path: string;
   content: string;
-}): GoatBrainFileProjection {
+}): BrainFileProjection {
   const normalizedPath = normalizeBrainFilePath(input.path);
   // The generated extracted-text block on binary-backed projections is never
   // authoritative: strip it before parsing so it can neither leak into the
   // content column nor let edits inside it flow back.
-  const source = stripGoatBrainAssetTextBlock(
+  const source = stripBrainAssetTextBlock(
     sourceFromSidecarOrPayloadSync(normalizedPath, input.content),
   );
 
-  const pathBrainId = goatBrainIdFromRelativePath(normalizedPath);
-  const pathFolder = goatBrainFolderFromRelativePath(normalizedPath);
+  const pathBrainId = brainIdFromRelativePath(normalizedPath);
+  const pathFolder = brainFolderFromRelativePath(normalizedPath);
   if (!pathBrainId || !pathFolder) {
     throw new Error(`Brain file path "${normalizedPath}" must be a safe markdown path.`);
   }
 
-  const parsed = parseGoatBrainDocument(source);
+  const parsed = parseBrainDocument(source);
   const brainId =
-    parsed.frontmatter.id && isValidGoatBrainId(parsed.frontmatter.id)
+    parsed.frontmatter.id && isValidBrainId(parsed.frontmatter.id)
       ? parsed.frontmatter.id
       : pathBrainId;
   const rawFolderPath =
-    parsed.frontmatter.folder && isValidGoatBrainFolder(parsed.frontmatter.folder)
+    parsed.frontmatter.folder && isValidBrainFolder(parsed.frontmatter.folder)
       ? parsed.frontmatter.folder
       : pathFolder;
-  const folderPath = normalizeGoatBrainFolderForV1(rawFolderPath);
+  const folderPath = normalizeBrainFolderForV1(rawFolderPath);
   if (brainId !== pathBrainId) {
     throw new Error(`frontmatter.id "${brainId}" does not match path id "${pathBrainId}".`);
   }
@@ -247,20 +247,20 @@ export function deriveGoatBrainFileProjection(input: {
     );
   }
   const entityType =
-    parsed.frontmatter.type && isBuiltInGoatBrainEntityType(parsed.frontmatter.type)
+    parsed.frontmatter.type && isBuiltInBrainEntityType(parsed.frontmatter.type)
       ? parsed.frontmatter.type
       : null;
-  const kind = isValidGoatBrainKind(parsed.frontmatter.kind) ? parsed.frontmatter.kind : null;
-  const status = isValidGoatBrainStatus(parsed.frontmatter.status)
+  const kind = isValidBrainKind(parsed.frontmatter.kind) ? parsed.frontmatter.kind : null;
+  const status = isValidBrainStatus(parsed.frontmatter.status)
     ? parsed.frontmatter.status
     : "draft";
   const title = parsed.title || parsed.frontmatter.title || titleFromId(brainId);
-  const validation = validateGoatBrainDocument(parsed, brainId, source);
+  const validation = validateBrainDocument(parsed, brainId, source);
   if (!validation.ok) throw new Error(validation.errors.join("\n"));
   if (!entityType) throw new Error("frontmatter.type must be a built-in brain entity type.");
   if (!kind) throw new Error('frontmatter.kind must be "page" or "evidence".');
-  const body = normalizeGoatBrainCompiledTruth(parsed.compiledTruth, title);
-  const content = canonicalGoatBrainContent({
+  const body = normalizeBrainCompiledTruth(parsed.compiledTruth, title);
+  const content = canonicalBrainContent({
     parsed,
     brainId,
     folderPath,
@@ -285,7 +285,7 @@ export function deriveGoatBrainFileProjection(input: {
     content,
     body,
     timeline: parsed.timeline,
-    contentHash: hashGoatBrainContent(content),
+    contentHash: hashBrainContent(content),
     sizeBytes,
     title,
     ...(parsed.frontmatter.description ? { description: parsed.frontmatter.description } : {}),
@@ -298,14 +298,14 @@ export function deriveGoatBrainFileProjection(input: {
   };
 }
 
-function canonicalGoatBrainContent(input: {
-  parsed: ReturnType<typeof parseGoatBrainDocument>;
+function canonicalBrainContent(input: {
+  parsed: ReturnType<typeof parseBrainDocument>;
   brainId: string;
   folderPath: string;
   title: string;
-  kind: GoatBrainKind;
-  entityType: GoatBrainEntityType;
-  status: GoatBrainStatus;
+  kind: BrainKind;
+  entityType: BrainEntityType;
+  status: BrainStatus;
   body: string;
   source: string;
 }): string {
@@ -321,7 +321,7 @@ function canonicalGoatBrainContent(input: {
   ) {
     return input.source;
   }
-  return serializeGoatBrainDocument({
+  return serializeBrainDocument({
     title: input.title,
     compiledTruth: input.body,
     timeline: input.parsed.timeline,
@@ -345,64 +345,64 @@ function canonicalGoatBrainContent(input: {
 
 // Identity contract for all brain file mutations: `brainRef` (the brain the
 // row belongs to) scopes every query; `userWorkosId` only attributes writes.
-// Access control happens upstream (requireGoatBrainAccess) before these run.
-export type GoatBrainScope = {
+// Access control happens upstream (requireBrainAccess) before these run.
+export type BrainScope = {
   brainRef: string;
   userWorkosId: string;
 };
 
-export async function listGoatBrainFiles(
+export async function listBrainFiles(
   input: { brainRef: string },
   options: { db?: DbClient; includeInvalid?: boolean } = {},
-): Promise<GoatBrainDocument[]> {
+): Promise<BrainDocument[]> {
   const db = options.db ?? getDb();
   return db
     .select()
-    .from(goatBrainDocuments)
-    .where(eq(goatBrainDocuments.brainRef, input.brainRef))
-    .orderBy(desc(goatBrainDocuments.updatedAt));
+    .from(brainDocuments)
+    .where(eq(brainDocuments.brainRef, input.brainRef))
+    .orderBy(desc(brainDocuments.updatedAt));
 }
 
-export async function listGoatBrainFolderRows(
+export async function listBrainFolderRows(
   input: { brainRef: string },
   options: { db?: DbClient } = {},
-): Promise<GoatBrainFolder[]> {
+): Promise<BrainFolder[]> {
   const db = options.db ?? getDb();
   const rows = await db
     .select()
-    .from(goatBrainFolders)
-    .where(eq(goatBrainFolders.brainRef, input.brainRef));
+    .from(brainFolders)
+    .where(eq(brainFolders.brainRef, input.brainRef));
   return normalizeStoredFolderRows(Array.isArray(rows) ? rows : []).toSorted((a, b) =>
     a.path.localeCompare(b.path),
   );
 }
 
-export async function seedDefaultGoatBrainFolders(
-  input: GoatBrainScope,
+export async function seedDefaultBrainFolders(
+  input: BrainScope,
   options: { db?: DbClient } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
-  await upsertFolderRows(db, input, defaultGoatBrainFolderManifestEntries());
+  await upsertFolderRows(db, input, defaultBrainFolderManifestEntries());
 }
 
-export async function createGoatBrainFolderRow(
-  input: GoatBrainScope & { path: string },
+export async function createBrainFolderRow(
+  input: BrainScope & { path: string },
   options: { db?: DbClient } = {},
-): Promise<GoatBrainFolder> {
+): Promise<BrainFolder> {
   const db = options.db ?? getDb();
-  const folderPath = normalizeGoatBrainFolderForV1(input.path);
-  if (!isValidGoatBrainFolder(folderPath)) throw new Error("Folder path must be safe.");
-  if (isHardDefaultGoatBrainFolder(folderPath)) {
+  const folderPath = normalizeBrainFolderForV1(input.path);
+  if (!isValidBrainFolder(folderPath)) throw new Error("Folder path must be safe.");
+  if (isHardDefaultBrainFolder(folderPath)) {
     throw new Error(`Folder "${folderPath}" is required and already exists.`);
   }
   const rows = await db
-    .insert(goatBrainFolders)
-    .values(folderRowValues(input, folderPath, goatBrainFolderSourceForPath(folderPath)))
+    .insert(brainFolders)
+    .values(folderRowValues(input, folderPath, brainFolderSourceForPath(folderPath)))
     .onConflictDoUpdate({
-      target: [goatBrainFolders.brainRef, goatBrainFolders.path],
+      target: [brainFolders.brainRef, brainFolders.path],
       set: {
         userWorkosId: input.userWorkosId,
-        source: goatBrainFolderSourceForPath(folderPath),
+        source: brainFolderSourceForPath(folderPath),
         updatedAt: new Date(),
       },
     })
@@ -412,14 +412,14 @@ export async function createGoatBrainFolderRow(
   return row;
 }
 
-export async function deleteGoatBrainFolderRow(
-  input: GoatBrainScope & { path: string },
+export async function deleteBrainFolderRow(
+  input: BrainScope & { path: string },
   options: { db?: DbClient } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
-  const folderPath = normalizeGoatBrainFolderForV1(input.path);
-  if (!isValidGoatBrainFolder(folderPath)) throw new Error("Folder path must be safe.");
-  if (isHardDefaultGoatBrainFolder(folderPath)) {
+  const folderPath = normalizeBrainFolderForV1(input.path);
+  if (!isValidBrainFolder(folderPath)) throw new Error("Folder path must be safe.");
+  if (isHardDefaultBrainFolder(folderPath)) {
     throw new Error(`Folder "${folderPath}" is required and cannot be removed.`);
   }
   const [docs, childFolders] = await Promise.all([
@@ -430,31 +430,29 @@ export async function deleteGoatBrainFolderRow(
     throw new Error(`Folder "${folderPath}" is not empty.`);
   }
   await db
-    .delete(goatBrainFolders)
-    .where(
-      and(eq(goatBrainFolders.brainRef, input.brainRef), eq(goatBrainFolders.path, folderPath)),
-    );
+    .delete(brainFolders)
+    .where(and(eq(brainFolders.brainRef, input.brainRef), eq(brainFolders.path, folderPath)));
 }
 
-export async function renameGoatBrainFolderRow(
-  input: GoatBrainScope & { fromPath: string; toPath: string },
+export async function renameBrainFolderRow(
+  input: BrainScope & { fromPath: string; toPath: string },
   options: { db?: DbClient } = {},
 ): Promise<{ movedDocuments: number; movedFolders: number }> {
   const db = options.db ?? getDb();
   return runAtomically(db, async (tx: DbLike) => {
-    const fromPath = normalizeGoatBrainFolderForV1(input.fromPath);
-    const toPath = normalizeGoatBrainFolderForV1(input.toPath);
-    if (!isValidGoatBrainFolder(fromPath) || !isValidGoatBrainFolder(toPath)) {
+    const fromPath = normalizeBrainFolderForV1(input.fromPath);
+    const toPath = normalizeBrainFolderForV1(input.toPath);
+    if (!isValidBrainFolder(fromPath) || !isValidBrainFolder(toPath)) {
       throw new Error("Folder paths must be safe.");
     }
     if (fromPath === toPath) return { movedDocuments: 0, movedFolders: 0 };
-    if (isHardDefaultGoatBrainFolder(fromPath) || isHardDefaultGoatBrainFolder(toPath)) {
+    if (isHardDefaultBrainFolder(fromPath) || isHardDefaultBrainFolder(toPath)) {
       throw new Error("Required folders cannot be renamed.");
     }
     if (toPath.startsWith(`${fromPath}/`)) {
       throw new Error("Cannot rename a folder into one of its own children.");
     }
-    if (goatBrainKindForFolder(fromPath) !== goatBrainKindForFolder(toPath)) {
+    if (brainKindForFolder(fromPath) !== brainKindForFolder(toPath)) {
       throw new Error("Cannot rename folders across the evidence boundary.");
     }
     const [targetDocs, targetFolders, sourceDocs, sourceFolders] = await Promise.all([
@@ -473,8 +471,8 @@ export async function renameGoatBrainFolderRow(
     let movedDocuments = 0;
     for (const row of sourceDocs) {
       const nextFolder = replaceFolderPrefix(row.folderPath, fromPath, toPath);
-      const parsed = parseGoatBrainDocument(row.content);
-      const content = serializeGoatBrainDocument({
+      const parsed = parseBrainDocument(row.content);
+      const content = serializeBrainDocument({
         title: parsed.title || row.title || row.brainId,
         compiledTruth: parsed.compiledTruth,
         timeline: parsed.timeline,
@@ -496,12 +494,12 @@ export async function renameGoatBrainFolderRow(
           ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
         },
       });
-      await moveGoatBrainFile(
+      await moveBrainFile(
         {
           brainRef: input.brainRef,
           userWorkosId: input.userWorkosId,
           fileId: row.id,
-          path: goatBrainFilePathFor(nextFolder, row.brainId),
+          path: brainFilePathFor(nextFolder, row.brainId),
           content,
         },
         { db: tx },
@@ -512,7 +510,7 @@ export async function renameGoatBrainFolderRow(
     const renamedFolders = sourceFolders.map((folder) => ({
       ...folder,
       path: replaceFolderPrefix(folder.path, fromPath, toPath),
-      source: goatBrainFolderSourceForPath(replaceFolderPrefix(folder.path, fromPath, toPath)),
+      source: brainFolderSourceForPath(replaceFolderPrefix(folder.path, fromPath, toPath)),
     }));
     await upsertFolderRows(tx, input, renamedFolders);
     await deleteFolderRows(
@@ -524,23 +522,21 @@ export async function renameGoatBrainFolderRow(
   });
 }
 
-export async function getGoatBrainFile(
+export async function getBrainFile(
   input: { brainRef: string; fileId: string },
   options: { db?: DbClient } = {},
-): Promise<GoatBrainDocument | null> {
+): Promise<BrainDocument | null> {
   const db = options.db ?? getDb();
   const rows = await db
     .select()
-    .from(goatBrainDocuments)
-    .where(
-      and(eq(goatBrainDocuments.brainRef, input.brainRef), eq(goatBrainDocuments.id, input.fileId)),
-    )
+    .from(brainDocuments)
+    .where(and(eq(brainDocuments.brainRef, input.brainRef), eq(brainDocuments.id, input.fileId)))
     .limit(1);
   return rows[0] ?? null;
 }
 
-export async function upsertGoatBrainFile(
-  input: GoatBrainScope & {
+export async function upsertBrainFile(
+  input: BrainScope & {
     path: string;
     content: string;
     id?: string;
@@ -552,10 +548,10 @@ export async function upsertGoatBrainFile(
     createdByWorkosId?: string | null;
   },
   options: { db?: DbClient } = {},
-): Promise<GoatBrainDocument> {
+): Promise<BrainDocument> {
   const db = options.db ?? getDb();
   return runAtomically(db, async (tx: DbLike) => {
-    const projection = deriveGoatBrainFileProjection({
+    const projection = deriveBrainFileProjection({
       path: input.path,
       content: input.content,
     });
@@ -574,7 +570,7 @@ export async function upsertGoatBrainFile(
     }
 
     const rows = await tx
-      .insert(goatBrainDocuments)
+      .insert(brainDocuments)
       .values({
         id: documentId,
         userWorkosId: input.userWorkosId,
@@ -588,7 +584,7 @@ export async function upsertGoatBrainFile(
         updatedAt: now,
       })
       .onConflictDoUpdate({
-        target: [goatBrainDocuments.brainRef, goatBrainDocuments.brainId],
+        target: [brainDocuments.brainRef, brainDocuments.brainId],
         set: {
           ...documentValues(projection),
           userWorkosId: input.userWorkosId,
@@ -603,20 +599,20 @@ export async function upsertGoatBrainFile(
   });
 }
 
-// Insert-only companion to upsertGoatBrainFile for interactive file creation.
+// Insert-only companion to upsertBrainFile for interactive file creation.
 // A null result means another writer claimed the same brain id first; callers
 // can safely allocate the next display name without overwriting that document.
-export async function createGoatBrainMarkdownDocument(
-  input: GoatBrainScope & {
+export async function createBrainMarkdownDocument(
+  input: BrainScope & {
     path: string;
     content: string;
     id?: string;
   },
   options: { db?: DbClient } = {},
-): Promise<GoatBrainDocument | null> {
+): Promise<BrainDocument | null> {
   const db = options.db ?? getDb();
-  const projection = deriveGoatBrainFileProjection({ path: input.path, content: input.content });
-  const edges = deriveGoatBrainEdges({
+  const projection = deriveBrainFileProjection({ path: input.path, content: input.content });
+  const edges = deriveBrainEdges({
     id: projection.brainId,
     relations: projection.relations,
     body: [projection.body, ...projection.timeline.map((entry) => entry.body)].join("\n\n"),
@@ -633,7 +629,7 @@ export async function createGoatBrainMarkdownDocument(
   await ensureFolderPath(db, input, projection.folderPath);
   const now = new Date();
   const rows = await db
-    .insert(goatBrainDocuments)
+    .insert(brainDocuments)
     .values({
       id: input.id ?? `goat_brain_doc_${randomUUID()}`,
       userWorkosId: input.userWorkosId,
@@ -646,20 +642,20 @@ export async function createGoatBrainMarkdownDocument(
       updatedAt: now,
     })
     .onConflictDoNothing({
-      target: [goatBrainDocuments.brainRef, goatBrainDocuments.brainId],
+      target: [brainDocuments.brainRef, brainDocuments.brainId],
     })
     .returning();
   return rows[0] ?? null;
 }
 
-export async function updateGoatBrainFileContent(
-  input: GoatBrainScope & {
+export async function updateBrainFileContent(
+  input: BrainScope & {
     fileId: string;
     content: string;
     expectedContentHash?: string;
   },
   options: { db?: DbClient } = {},
-): Promise<GoatBrainDocument> {
+): Promise<BrainDocument> {
   const db = options.db ?? getDb();
   return runAtomically(db, async (tx: DbLike) => {
     const existing = await getDocumentById(tx, input.brainRef, input.fileId);
@@ -667,26 +663,21 @@ export async function updateGoatBrainFileContent(
     if (input.expectedContentHash && existing.contentHash !== input.expectedContentHash) {
       throw new Error("Brain document changed since it was loaded. Retry with the latest content.");
     }
-    const projection = deriveGoatBrainFileProjection({
-      path: goatBrainFilePathFor(existing.folderPath, existing.brainId),
+    const projection = deriveBrainFileProjection({
+      path: brainFilePathFor(existing.folderPath, existing.brainId),
       content: input.content,
     });
     if (existing.contentHash !== projection.contentHash) {
       await insertVersion(tx, input.userWorkosId, existing, "overwrite", null, null);
     }
     const rows = await tx
-      .update(goatBrainDocuments)
+      .update(brainDocuments)
       .set({
         ...documentValues(projection),
         userWorkosId: input.userWorkosId,
         updatedAt: new Date(),
       })
-      .where(
-        and(
-          eq(goatBrainDocuments.brainRef, input.brainRef),
-          eq(goatBrainDocuments.id, input.fileId),
-        ),
-      )
+      .where(and(eq(brainDocuments.brainRef, input.brainRef), eq(brainDocuments.id, input.fileId)))
       .returning();
     const row = rows[0];
     if (!row) throw new Error("Failed to update Goat brain document.");
@@ -695,15 +686,15 @@ export async function updateGoatBrainFileContent(
   });
 }
 
-export async function moveGoatBrainFile(
-  input: GoatBrainScope & { fileId: string; path: string; content: string },
+export async function moveBrainFile(
+  input: BrainScope & { fileId: string; path: string; content: string },
   options: { db?: DbClient } = {},
-): Promise<GoatBrainDocument> {
+): Promise<BrainDocument> {
   const db = options.db ?? getDb();
   return runAtomically(db, async (tx: DbLike) => {
     const existing = await getDocumentById(tx, input.brainRef, input.fileId);
     if (!existing) throw new Error("Brain document not found.");
-    const projection = deriveGoatBrainFileProjection({
+    const projection = deriveBrainFileProjection({
       path: input.path,
       content: input.content,
     });
@@ -714,18 +705,13 @@ export async function moveGoatBrainFile(
       await insertVersion(tx, input.userWorkosId, existing, "overwrite", null, null);
     }
     const rows = await tx
-      .update(goatBrainDocuments)
+      .update(brainDocuments)
       .set({
         ...documentValues(projection),
         userWorkosId: input.userWorkosId,
         updatedAt: new Date(),
       })
-      .where(
-        and(
-          eq(goatBrainDocuments.brainRef, input.brainRef),
-          eq(goatBrainDocuments.id, input.fileId),
-        ),
-      )
+      .where(and(eq(brainDocuments.brainRef, input.brainRef), eq(brainDocuments.id, input.fileId)))
       .returning();
     const row = rows[0];
     if (!row) throw new Error("Failed to move Goat brain document.");
@@ -734,8 +720,8 @@ export async function moveGoatBrainFile(
   });
 }
 
-export async function deleteGoatBrainFile(
-  input: GoatBrainScope & {
+export async function deleteBrainFile(
+  input: BrainScope & {
     fileId: string;
     taskId?: string | null;
     importRunId?: string | null;
@@ -755,22 +741,17 @@ export async function deleteGoatBrainFile(
         input.importRunId ?? null,
       );
     await tx
-      .delete(goatBrainDocuments)
-      .where(
-        and(
-          eq(goatBrainDocuments.brainRef, input.brainRef),
-          eq(goatBrainDocuments.id, input.fileId),
-        ),
-      );
-    return existing as GoatBrainDocument | null;
+      .delete(brainDocuments)
+      .where(and(eq(brainDocuments.brainRef, input.brainRef), eq(brainDocuments.id, input.fileId)));
+    return existing as BrainDocument | null;
   });
-  if (deleted?.assetStorageKey) await deleteGoatBrainAssetBlob(deleted.assetStorageKey);
+  if (deleted?.assetStorageKey) await deleteBrainAssetBlob(deleted.assetStorageKey);
 }
 
 // Best-effort blob cleanup after the row is gone. Version rows keep the
 // markdown projection, not the bytes, so a deleted asset's page can be
 // restored but its file cannot.
-async function deleteGoatBrainAssetBlob(storageKey: string): Promise<void> {
+async function deleteBrainAssetBlob(storageKey: string): Promise<void> {
   try {
     const { del } = await import("@vercel/blob");
     await del(storageKey);
@@ -784,14 +765,14 @@ async function deleteGoatBrainAssetBlob(storageKey: string): Promise<void> {
 // timeline); the bytes live in blob storage behind assetStorageKey. The
 // caller is responsible for choosing an unused brainId and for enqueuing the
 // ingestion job that extracts text and curates the page.
-export async function createGoatBrainAssetDocument(
-  input: GoatBrainScope & {
+export async function createBrainAssetDocument(
+  input: BrainScope & {
     id?: string;
     brainId: string;
     folderPath: string;
     title: string;
-    entityType?: GoatBrainEntityType;
-    format: Exclude<GoatBrainDocumentFormat, "markdown">;
+    entityType?: BrainEntityType;
+    format: Exclude<BrainDocumentFormat, "markdown">;
     mimeType: string;
     originalFileName: string;
     assetStorageKey: string;
@@ -800,10 +781,10 @@ export async function createGoatBrainAssetDocument(
     sourceRef: string;
   },
   options: { db?: DbClient } = {},
-): Promise<GoatBrainDocument> {
+): Promise<BrainDocument> {
   const db = options.db ?? getDb();
   const now = new Date();
-  const content = createGoatBrainMarkdownContent({
+  const content = createBrainMarkdownContent({
     id: input.brainId,
     folderPath: input.folderPath,
     title: input.title,
@@ -818,13 +799,13 @@ export async function createGoatBrainAssetDocument(
       },
     ],
   });
-  const projection = deriveGoatBrainFileProjection({
-    path: goatBrainFilePathFor(input.folderPath, input.brainId),
+  const projection = deriveBrainFileProjection({
+    path: brainFilePathFor(input.folderPath, input.brainId),
     content,
   });
   return runAtomically(db, async (tx: DbLike) => {
     const rows = await tx
-      .insert(goatBrainDocuments)
+      .insert(brainDocuments)
       .values({
         id: input.id ?? `goat_brain_doc_${randomUUID()}`,
         userWorkosId: input.userWorkosId,
@@ -851,28 +832,26 @@ export async function createGoatBrainAssetDocument(
 // Records the machine-extracted text of a binary asset (ingestion stage 1).
 // Only asset columns move; the markdown projection is untouched, so no
 // version row is written.
-export async function updateGoatBrainAssetExtraction(
-  input: GoatBrainScope & {
+export async function updateBrainAssetExtraction(
+  input: BrainScope & {
     fileId: string;
     extractedText: string;
     assetContentHash: string;
     assetSizeBytes: number;
   },
   options: { db?: DbClient } = {},
-): Promise<GoatBrainDocument> {
+): Promise<BrainDocument> {
   const db = options.db ?? getDb();
   const extractedText = truncateUtf8(input.extractedText, MAX_GOAT_BRAIN_ASSET_TEXT_BYTES);
   const rows = await db
-    .update(goatBrainDocuments)
+    .update(brainDocuments)
     .set({
       assetExtractedText: extractedText || null,
       assetContentHash: input.assetContentHash,
       assetSizeBytes: input.assetSizeBytes,
       updatedAt: new Date(),
     })
-    .where(
-      and(eq(goatBrainDocuments.brainRef, input.brainRef), eq(goatBrainDocuments.id, input.fileId)),
-    )
+    .where(and(eq(brainDocuments.brainRef, input.brainRef), eq(brainDocuments.id, input.fileId)))
     .returning();
   const row = rows[0];
   if (!row) throw new Error("Brain document not found.");
@@ -882,8 +861,8 @@ export async function updateGoatBrainAssetExtraction(
 // Points an existing asset document at newly uploaded bytes (re-upload). The
 // stale blob is removed best-effort and the extracted text is cleared until
 // the next ingestion pass rebuilds it.
-export async function replaceGoatBrainAssetFile(
-  input: GoatBrainScope & {
+export async function replaceBrainAssetFile(
+  input: BrainScope & {
     fileId: string;
     mimeType: string;
     originalFileName: string;
@@ -892,7 +871,7 @@ export async function replaceGoatBrainAssetFile(
     assetContentHash?: string | null;
   },
   options: { db?: DbClient } = {},
-): Promise<GoatBrainDocument> {
+): Promise<BrainDocument> {
   const db = options.db ?? getDb();
   const existing = await getDocumentById(db, input.brainRef, input.fileId);
   if (!existing) throw new Error("Brain document not found.");
@@ -900,7 +879,7 @@ export async function replaceGoatBrainAssetFile(
     throw new Error("Only binary-backed brain documents can have their file replaced.");
   }
   const rows = await db
-    .update(goatBrainDocuments)
+    .update(brainDocuments)
     .set({
       mimeType: input.mimeType,
       originalFileName: input.originalFileName,
@@ -911,14 +890,12 @@ export async function replaceGoatBrainAssetFile(
       userWorkosId: input.userWorkosId,
       updatedAt: new Date(),
     })
-    .where(
-      and(eq(goatBrainDocuments.brainRef, input.brainRef), eq(goatBrainDocuments.id, input.fileId)),
-    )
+    .where(and(eq(brainDocuments.brainRef, input.brainRef), eq(brainDocuments.id, input.fileId)))
     .returning();
   const row = rows[0];
   if (!row) throw new Error("Failed to replace Goat brain asset file.");
   if (existing.assetStorageKey && existing.assetStorageKey !== input.assetStorageKey) {
-    await deleteGoatBrainAssetBlob(existing.assetStorageKey);
+    await deleteBrainAssetBlob(existing.assetStorageKey);
   }
   return row;
 }
@@ -928,22 +905,22 @@ function truncateUtf8(value: string, maxBytes: number): string {
   return Buffer.from(value, "utf8").subarray(0, maxBytes).toString("utf8").replace(/�+$/, "");
 }
 
-export async function materializeGoatBrainFilesToRoot(input: {
+export async function materializeBrainFilesToRoot(input: {
   brainRef: string;
   root: string;
   db?: DbClient;
   cliSource?: string;
-}): Promise<MaterializedGoatBrainFile[]> {
+}): Promise<MaterializedBrainFile[]> {
   await rm(input.root, { recursive: true, force: true });
   await mkdir(input.root, { recursive: true });
-  const rows = await listGoatBrainFiles(
+  const rows = await listBrainFiles(
     { brainRef: input.brainRef },
     {
       ...(input.db ? { db: input.db } : {}),
       includeInvalid: true,
     },
   );
-  const folderRows = await listGoatBrainFolderRows(
+  const folderRows = await listBrainFolderRows(
     { brainRef: input.brainRef },
     {
       ...(input.db ? { db: input.db } : {}),
@@ -952,40 +929,40 @@ export async function materializeGoatBrainFilesToRoot(input: {
   await writeRootFile(
     input.root,
     GOAT_BRAIN_FOLDER_MANIFEST_PATH,
-    serializeGoatBrainFolderManifest(folderRows),
+    serializeBrainFolderManifest(folderRows),
   );
   const materializedHashByPath = new Map<string, string>();
   for (const row of rows) {
-    const payloadPath = goatBrainFilePathFor(row.folderPath, row.brainId);
+    const payloadPath = brainFilePathFor(row.folderPath, row.brainId);
     if (row.format !== GOAT_BRAIN_FILE_FORMAT) {
       // Binary-backed rows materialize as their markdown projection (the
       // content column) plus a generated, non-authoritative extracted-text
       // block; the bytes themselves stay in blob storage.
-      const projected = appendGoatBrainAssetTextBlock(row.content, row.assetExtractedText ?? "");
+      const projected = appendBrainAssetTextBlock(row.content, row.assetExtractedText ?? "");
       await writeRootFile(input.root, payloadPath, projected);
       if (projected !== row.content) {
-        materializedHashByPath.set(payloadPath, hashGoatBrainContent(projected));
+        materializedHashByPath.set(payloadPath, hashBrainContent(projected));
       }
       continue;
     }
-    let entry: ReturnType<typeof goatBrainEntryFromLegacyMarkdown> | null = null;
+    let entry: ReturnType<typeof brainEntryFromLegacyMarkdown> | null = null;
     try {
-      entry = goatBrainEntryFromLegacyMarkdown(row.content);
+      entry = brainEntryFromLegacyMarkdown(row.content);
     } catch {}
     if (!entry) {
       await writeRootFile(input.root, payloadPath, row.content);
       continue;
     }
 
-    const payload = serializeGoatBrainPayload(entry);
-    const sidecarPath = goatBrainSidecarRelativePath(row.folderPath, row.brainId);
+    const payload = serializeBrainPayload(entry);
+    const sidecarPath = brainSidecarRelativePath(row.folderPath, row.brainId);
     await writeRootFile(input.root, payloadPath, payload);
-    await writeRootFile(input.root, sidecarPath, serializeGoatBrainSidecar(entry));
+    await writeRootFile(input.root, sidecarPath, serializeBrainSidecar(entry));
   }
   if (input.cliSource)
     await writeFile(path.join(input.root, "goat-brain.mjs"), input.cliSource, "utf8");
   return rows.map((row) => {
-    const path = goatBrainFilePathFor(row.folderPath, row.brainId);
+    const path = brainFilePathFor(row.folderPath, row.brainId);
     const materializedHash = materializedHashByPath.get(path);
     return {
       id: row.id,
@@ -998,9 +975,9 @@ export async function materializeGoatBrainFilesToRoot(input: {
   });
 }
 
-export async function readGoatBrainFilesFromRoot(root: string): Promise<GoatBrainSyncFile[]> {
+export async function readBrainFilesFromRoot(root: string): Promise<BrainSyncFile[]> {
   const relativePaths = await walkMarkdown(root, "");
-  const files: GoatBrainSyncFile[] = [];
+  const files: BrainSyncFile[] = [];
   for (const relativePath of relativePaths) {
     const content = await sourceFromRootFile(root, relativePath);
     if (content === null) {
@@ -1012,46 +989,43 @@ export async function readGoatBrainFilesFromRoot(root: string): Promise<GoatBrai
   return files.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-export async function readGoatBrainFolderManifestFromRoot(
+export async function readBrainFolderManifestFromRoot(
   root: string,
-): Promise<GoatBrainFolderManifestEntry[] | null> {
+): Promise<BrainFolderManifestEntry[] | null> {
   try {
     const source = await readFile(path.join(root, GOAT_BRAIN_FOLDER_MANIFEST_PATH), "utf8");
-    return parseGoatBrainFolderManifest(source);
+    return parseBrainFolderManifest(source);
   } catch (error) {
     if (isNotFound(error)) return null;
     throw error;
   }
 }
 
-export async function syncGoatBrainFiles(input: {
+export async function syncBrainFiles(input: {
   brainRef: string;
   userWorkosId: string;
-  files: GoatBrainSyncFile[];
-  baseSnapshot: MaterializedGoatBrainFile[];
+  files: BrainSyncFile[];
+  baseSnapshot: MaterializedBrainFile[];
   db?: DbClient;
   taskId?: string | null;
   importRunId?: string | null;
-  folders?: GoatBrainFolderManifestEntry[] | null;
+  folders?: BrainFolderManifestEntry[] | null;
   // Attribution for documents this sync *creates* (existing rows keep theirs).
   // Defaults to the acting user; pass null when no human originated the
   // content (e.g. Slack-window ingestion).
   createdByWorkosId?: string | null;
-}): Promise<GoatBrainSyncResult> {
+}): Promise<BrainSyncResult> {
   const db = input.db ?? getDb();
-  const currentRows: GoatBrainDocument[] = await db
+  const currentRows: BrainDocument[] = await db
     .select()
-    .from(goatBrainDocuments)
-    .where(eq(goatBrainDocuments.brainRef, input.brainRef));
+    .from(brainDocuments)
+    .where(eq(brainDocuments.brainRef, input.brainRef));
   const currentByPath = new Map(
-    currentRows.map((row: GoatBrainDocument) => [
-      goatBrainFilePathFor(row.folderPath, row.brainId),
-      row,
-    ]),
+    currentRows.map((row: BrainDocument) => [brainFilePathFor(row.folderPath, row.brainId), row]),
   );
-  const currentByBrainId = new Map(currentRows.map((row: GoatBrainDocument) => [row.brainId, row]));
+  const currentByBrainId = new Map(currentRows.map((row: BrainDocument) => [row.brainId, row]));
   const baseByPath = new Map(input.baseSnapshot.map((file) => [file.path, file]));
-  const nextByPath = new Map<string, GoatBrainSyncFile>();
+  const nextByPath = new Map<string, BrainSyncFile>();
   const skippedPaths = new Set<string>();
   for (const file of input.files) {
     const normalizedPath = normalizeBrainFilePath(file.path);
@@ -1060,12 +1034,12 @@ export async function syncGoatBrainFiles(input: {
     const base = baseByPath.get(normalizedPath);
     const unchangedFromBase =
       base !== undefined &&
-      hashGoatBrainContent(file.content) === (base.materializedHash ?? base.contentHash);
+      hashBrainContent(file.content) === (base.materializedHash ?? base.contentHash);
     const skip = Boolean(file.skip || unchangedFromBase);
     if (skip) {
       skippedPaths.add(normalizedPath);
     } else {
-      deriveGoatBrainFileProjection({
+      deriveBrainFileProjection({
         path: normalizedPath,
         content: file.content,
       });
@@ -1077,7 +1051,7 @@ export async function syncGoatBrainFiles(input: {
     });
   }
 
-  const conflicts: GoatBrainSyncConflict[] = [];
+  const conflicts: BrainSyncConflict[] = [];
   const handledConflictPaths = new Set<string>();
   for (const [pathName, next] of nextByPath) {
     // Files the agent left untouched are never written by this sync, so a
@@ -1116,7 +1090,7 @@ export async function syncGoatBrainFiles(input: {
     };
 
   let upserted = 0;
-  const pages: GoatBrainSyncPage[] = [];
+  const pages: BrainSyncPage[] = [];
   for (const pathName of handledConflictPaths) {
     const file = nextByPath.get(pathName);
     const current = currentByPath.get(pathName);
@@ -1139,10 +1113,10 @@ export async function syncGoatBrainFiles(input: {
 
   for (const [pathName, file] of nextByPath) {
     if (file.skip || handledConflictPaths.has(pathName)) continue;
-    const brainId = goatBrainIdFromRelativePath(pathName);
+    const brainId = brainIdFromRelativePath(pathName);
     const existing =
       currentByPath.get(pathName) ?? (brainId ? currentByBrainId.get(brainId) : undefined);
-    const row = await upsertGoatBrainFile(
+    const row = await upsertBrainFile(
       {
         brainRef: input.brainRef,
         userWorkosId: input.userWorkosId,
@@ -1163,7 +1137,7 @@ export async function syncGoatBrainFiles(input: {
 
   const nextBrainIds = new Set(
     [...nextByPath.keys()]
-      .map((pathName) => goatBrainIdFromRelativePath(pathName))
+      .map((pathName) => brainIdFromRelativePath(pathName))
       .filter((brainId): brainId is string => Boolean(brainId)),
   );
   const deleteIds = [...baseByPath.keys()].flatMap((pathName) => {
@@ -1174,7 +1148,7 @@ export async function syncGoatBrainFiles(input: {
     return current ? [current.id] : [];
   });
   for (const id of deleteIds) {
-    await deleteGoatBrainFile(
+    await deleteBrainFile(
       {
         brainRef: input.brainRef,
         userWorkosId: input.userWorkosId,
@@ -1186,7 +1160,7 @@ export async function syncGoatBrainFiles(input: {
     );
   }
   if (input.folders) {
-    await syncGoatBrainFolderRows({
+    await syncBrainFolderRows({
       db,
       scope: { brainRef: input.brainRef, userWorkosId: input.userWorkosId },
       folders: input.folders,
@@ -1195,19 +1169,19 @@ export async function syncGoatBrainFiles(input: {
   return { upserted, deleted: deleteIds.length, conflicts: [], pages };
 }
 
-export async function syncGoatBrainFilesFromRoot(input: {
+export async function syncBrainFilesFromRoot(input: {
   brainRef: string;
   userWorkosId: string;
   root: string;
-  baseSnapshot: MaterializedGoatBrainFile[];
+  baseSnapshot: MaterializedBrainFile[];
   db?: DbClient;
   taskId?: string | null;
   importRunId?: string | null;
   createdByWorkosId?: string | null;
-}): Promise<GoatBrainSyncResult> {
-  const files = await readGoatBrainFilesFromRoot(input.root);
-  const folders = await readGoatBrainFolderManifestFromRoot(input.root);
-  return syncGoatBrainFiles({
+}): Promise<BrainSyncResult> {
+  const files = await readBrainFilesFromRoot(input.root);
+  const folders = await readBrainFolderManifestFromRoot(input.root);
+  return syncBrainFiles({
     brainRef: input.brainRef,
     userWorkosId: input.userWorkosId,
     files,
@@ -1227,26 +1201,26 @@ async function upsertConflictDocument(input: {
   userWorkosId: string;
   path: string;
   content: string;
-  current: GoatBrainDocument;
+  current: BrainDocument;
   taskId: string | null;
   importRunId: string | null;
   createdByWorkosId: string | null;
   db: DbClient;
-}): Promise<GoatBrainDocument> {
-  const parsed = parseGoatBrainDocument(input.content);
-  const originalId = goatBrainIdFromRelativePath(input.path) ?? input.current.brainId;
-  const folderPath = goatBrainFolderFromRelativePath(input.path) ?? input.current.folderPath;
+}): Promise<BrainDocument> {
+  const parsed = parseBrainDocument(input.content);
+  const originalId = brainIdFromRelativePath(input.path) ?? input.current.brainId;
+  const folderPath = brainFolderFromRelativePath(input.path) ?? input.current.folderPath;
   const conflictId = `${originalId}-conflict-${randomUUID().slice(0, 8)}`;
   const title = `${parsed.title || parsed.frontmatter.title || input.current.title || originalId} conflict`;
   const now = new Date().toISOString();
-  const conflictContent = serializeGoatBrainDocument({
+  const conflictContent = serializeBrainDocument({
     ...parsed,
     title,
     frontmatter: {
       ...parsed.frontmatter,
       id: conflictId,
       folder: folderPath,
-      kind: parsed.frontmatter.kind ?? goatBrainKindForFolder(folderPath),
+      kind: parsed.frontmatter.kind ?? brainKindForFolder(folderPath),
       type: parsed.frontmatter.type ?? input.current.entityType,
       title,
       status:
@@ -1259,11 +1233,11 @@ async function upsertConflictDocument(input: {
       updatedAt: now,
     },
   });
-  return upsertGoatBrainFile(
+  return upsertBrainFile(
     {
       brainRef: input.brainRef,
       userWorkosId: input.userWorkosId,
-      path: goatBrainFilePathFor(folderPath, conflictId),
+      path: brainFilePathFor(folderPath, conflictId),
       content: conflictContent,
       taskId: input.taskId,
       importRunId: input.importRunId,
@@ -1273,11 +1247,7 @@ async function upsertConflictDocument(input: {
   );
 }
 
-function addSyncPage(
-  pages: GoatBrainSyncPage[],
-  row: GoatBrainDocument,
-  action: GoatBrainSyncPageAction,
-) {
+function addSyncPage(pages: BrainSyncPage[], row: BrainDocument, action: BrainSyncPageAction) {
   if (row.kind !== "page") return;
   pages.push({
     brainId: row.brainId,
@@ -1287,14 +1257,14 @@ function addSyncPage(
   });
 }
 
-export function goatBrainFilePathFor(folderPath: string, brainId: string): string {
-  return goatBrainRelativePath(folderPath, brainId);
+export function brainFilePathFor(folderPath: string, brainId: string): string {
+  return brainRelativePath(folderPath, brainId);
 }
 
 // Markdown-plane fields only. format/mimeType and the asset columns are
 // deliberately absent so file-plane syncs can never clobber a binary-backed
 // row's asset identity; new rows get their format at insert time.
-function documentValues(projection: GoatBrainFileProjection) {
+function documentValues(projection: BrainFileProjection) {
   return {
     brainId: projection.brainId,
     folderPath: projection.folderPath,
@@ -1310,15 +1280,15 @@ function documentValues(projection: GoatBrainFileProjection) {
     aliases: projection.aliases,
     contentHash: projection.contentHash,
     sizeBytes: projection.sizeBytes,
-    searchText: goatBrainSearchText(projection),
-    nameText: goatBrainNameText(projection),
+    searchText: brainSearchText(projection),
+    nameText: brainNameText(projection),
   };
 }
 
 // Retrieval projections consumed by goat-brain-read.ts: `search_text` feeds the generated FTS
 // tsvector, `name_text` feeds trigram entity lookup. Migration 0102 backfills the same
 // composition in SQL for pre-existing rows.
-function goatBrainSearchText(projection: GoatBrainFileProjection): string {
+function brainSearchText(projection: BrainFileProjection): string {
   return [
     projection.title,
     projection.aliases.join(" "),
@@ -1330,33 +1300,31 @@ function goatBrainSearchText(projection: GoatBrainFileProjection): string {
     .join("\n");
 }
 
-function goatBrainNameText(projection: GoatBrainFileProjection): string {
+function brainNameText(projection: BrainFileProjection): string {
   return [projection.title, ...projection.aliases].filter(Boolean).join(" ").trim();
 }
 
 async function replaceDerivedRows(
   db: DbLike,
   userWorkosId: string,
-  row: GoatBrainDocument,
-  projection: GoatBrainFileProjection,
+  row: BrainDocument,
+  projection: BrainFileProjection,
 ) {
   await ensureFolderPath(db, { brainRef: row.brainRef, userWorkosId }, projection.folderPath);
   const evidenceIds = projection.timeline.map((entry) => entry.evidenceId);
   if (evidenceIds.length > 0) {
     await db
-      .delete(goatBrainTimelineEntries)
+      .delete(brainTimelineEntries)
       .where(
         and(
-          eq(goatBrainTimelineEntries.documentId, row.id),
-          notInArray(goatBrainTimelineEntries.evidenceId, evidenceIds),
+          eq(brainTimelineEntries.documentId, row.id),
+          notInArray(brainTimelineEntries.evidenceId, evidenceIds),
         ),
       );
   } else {
-    await db
-      .delete(goatBrainTimelineEntries)
-      .where(eq(goatBrainTimelineEntries.documentId, row.id));
+    await db.delete(brainTimelineEntries).where(eq(brainTimelineEntries.documentId, row.id));
   }
-  await db.delete(goatBrainEdges).where(eq(goatBrainEdges.documentId, row.id));
+  await db.delete(brainEdges).where(eq(brainEdges.documentId, row.id));
 
   for (const entry of projection.timeline) {
     const parts = timelineParts(entry);
@@ -1373,10 +1341,10 @@ async function replaceDerivedRows(
       detail: parts.detail,
     };
     await db
-      .insert(goatBrainTimelineEntries)
+      .insert(brainTimelineEntries)
       .values(values)
       .onConflictDoUpdate({
-        target: [goatBrainTimelineEntries.documentId, goatBrainTimelineEntries.evidenceId],
+        target: [brainTimelineEntries.documentId, brainTimelineEntries.evidenceId],
         set: {
           userWorkosId,
           brainRef: row.brainRef,
@@ -1390,13 +1358,13 @@ async function replaceDerivedRows(
       });
   }
 
-  for (const edge of deriveGoatBrainEdges({
+  for (const edge of deriveBrainEdges({
     id: row.brainId,
     relations: projection.relations,
     body: [projection.body, ...projection.timeline.map((entry) => entry.body)].join("\n\n"),
   })) {
-    await db.insert(goatBrainEdges).values({
-      id: `goat_brain_edge_${hashGoatBrainContent(
+    await db.insert(brainEdges).values({
+      id: `goat_brain_edge_${hashBrainContent(
         `${row.id}:${edge.sourceKind}:${edge.type}:${edge.from}:${edge.to}`,
       ).slice(0, 32)}`,
       userWorkosId,
@@ -1412,29 +1380,29 @@ async function replaceDerivedRows(
   }
 }
 
-async function ensureFolderPath(db: DbLike, scope: GoatBrainScope, folderPath: string) {
+async function ensureFolderPath(db: DbLike, scope: BrainScope, folderPath: string) {
   const parts = folderPath.split("/").filter(Boolean);
   for (let index = 0; index < parts.length; index++) {
     const pathName = parts.slice(0, index + 1).join("/");
     await db
-      .insert(goatBrainFolders)
-      .values(folderRowValues(scope, pathName, goatBrainFolderSourceForPath(pathName)))
+      .insert(brainFolders)
+      .values(folderRowValues(scope, pathName, brainFolderSourceForPath(pathName)))
       .onConflictDoNothing();
   }
 }
 
 async function upsertFolderRows(
   db: DbLike,
-  scope: GoatBrainScope,
-  folders: Iterable<Partial<GoatBrainFolderManifestEntry> & { path?: unknown; source?: unknown }>,
+  scope: BrainScope,
+  folders: Iterable<Partial<BrainFolderManifestEntry> & { path?: unknown; source?: unknown }>,
 ) {
-  const entries = normalizeGoatBrainFolderEntries(folders);
+  const entries = normalizeBrainFolderEntries(folders);
   for (const entry of entries) {
     await db
-      .insert(goatBrainFolders)
+      .insert(brainFolders)
       .values(folderRowValues(scope, entry.path, entry.source))
       .onConflictDoUpdate({
-        target: [goatBrainFolders.brainRef, goatBrainFolders.path],
+        target: [brainFolders.brainRef, brainFolders.path],
         set: {
           userWorkosId: scope.userWorkosId,
           source: entry.source,
@@ -1444,24 +1412,21 @@ async function upsertFolderRows(
   }
 }
 
-async function syncGoatBrainFolderRows(input: {
+async function syncBrainFolderRows(input: {
   db: DbLike;
-  scope: GoatBrainScope;
-  folders: GoatBrainFolderManifestEntry[];
+  scope: BrainScope;
+  folders: BrainFolderManifestEntry[];
 }) {
-  const desired = normalizeGoatBrainFolderEntries(input.folders);
+  const desired = normalizeBrainFolderEntries(input.folders);
   await upsertFolderRows(input.db, input.scope, desired);
   const desiredPaths = new Set(desired.map((folder) => folder.path));
-  const current = await listGoatBrainFolderRows(
-    { brainRef: input.scope.brainRef },
-    { db: input.db },
-  );
+  const current = await listBrainFolderRows({ brainRef: input.scope.brainRef }, { db: input.db });
   const removable = current
     .filter((folder) => !desiredPaths.has(folder.path) && folder.source !== "system")
     .toSorted((a, b) => b.path.length - a.path.length);
   for (const folder of removable) {
     try {
-      await deleteGoatBrainFolderRow(
+      await deleteBrainFolderRow(
         {
           brainRef: input.scope.brainRef,
           userWorkosId: input.scope.userWorkosId,
@@ -1478,8 +1443,8 @@ async function syncGoatBrainFolderRows(input: {
 async function deleteFolderRows(db: DbLike, brainRef: string, paths: string[]) {
   for (const pathName of paths.toSorted((a, b) => b.length - a.length)) {
     await db
-      .delete(goatBrainFolders)
-      .where(and(eq(goatBrainFolders.brainRef, brainRef), eq(goatBrainFolders.path, pathName)));
+      .delete(brainFolders)
+      .where(and(eq(brainFolders.brainRef, brainRef), eq(brainFolders.path, pathName)));
   }
 }
 
@@ -1487,16 +1452,16 @@ async function documentsUnderFolder(
   db: DbLike,
   brainRef: string,
   folderPath: string,
-): Promise<GoatBrainDocument[]> {
+): Promise<BrainDocument[]> {
   return db
     .select()
-    .from(goatBrainDocuments)
+    .from(brainDocuments)
     .where(
       and(
-        eq(goatBrainDocuments.brainRef, brainRef),
+        eq(brainDocuments.brainRef, brainRef),
         or(
-          eq(goatBrainDocuments.folderPath, folderPath),
-          like(goatBrainDocuments.folderPath, `${folderPath}/%`),
+          eq(brainDocuments.folderPath, folderPath),
+          like(brainDocuments.folderPath, `${folderPath}/%`),
         ),
       ),
     );
@@ -1507,42 +1472,38 @@ async function foldersUnderFolder(
   brainRef: string,
   folderPath: string,
   options: { includeSelf: boolean },
-): Promise<GoatBrainFolder[]> {
+): Promise<BrainFolder[]> {
   const condition = options.includeSelf
-    ? or(eq(goatBrainFolders.path, folderPath), like(goatBrainFolders.path, `${folderPath}/%`))
-    : like(goatBrainFolders.path, `${folderPath}/%`);
+    ? or(eq(brainFolders.path, folderPath), like(brainFolders.path, `${folderPath}/%`))
+    : like(brainFolders.path, `${folderPath}/%`);
   const rows = await db
     .select()
-    .from(goatBrainFolders)
-    .where(and(eq(goatBrainFolders.brainRef, brainRef), condition));
+    .from(brainFolders)
+    .where(and(eq(brainFolders.brainRef, brainRef), condition));
   return normalizeStoredFolderRows(rows);
 }
 
-function normalizeStoredFolderRows(rows: GoatBrainFolder[]): GoatBrainFolder[] {
+function normalizeStoredFolderRows(rows: BrainFolder[]): BrainFolder[] {
   return rows.flatMap((row) => {
     if (typeof row.path !== "string") return [];
-    const folderPath = normalizeGoatBrainFolder(row.path);
-    if (!isValidGoatBrainFolder(folderPath)) return [];
+    const folderPath = normalizeBrainFolder(row.path);
+    if (!isValidBrainFolder(folderPath)) return [];
     return [
       {
         ...row,
         path: folderPath,
         source:
-          row.source === "system" && isHardDefaultGoatBrainFolder(folderPath)
+          row.source === "system" && isHardDefaultBrainFolder(folderPath)
             ? "system"
-            : goatBrainFolderSourceForPath(folderPath),
+            : brainFolderSourceForPath(folderPath),
       },
     ];
   });
 }
 
-function folderRowValues(
-  scope: GoatBrainScope,
-  folderPath: string,
-  source: GoatBrainFolder["source"],
-) {
+function folderRowValues(scope: BrainScope, folderPath: string, source: BrainFolder["source"]) {
   return {
-    id: `goat_brain_folder_${hashGoatBrainContent(`${scope.brainRef}:${folderPath}`).slice(0, 24)}`,
+    id: `goat_brain_folder_${hashBrainContent(`${scope.brainRef}:${folderPath}`).slice(0, 24)}`,
     userWorkosId: scope.userWorkosId,
     brainRef: scope.brainRef,
     path: folderPath,
@@ -1560,12 +1521,12 @@ function replaceFolderPrefix(pathName: string, fromPath: string, toPath: string)
 async function insertVersion(
   db: DbLike,
   userWorkosId: string,
-  row: GoatBrainDocument,
+  row: BrainDocument,
   operation: "overwrite" | "delete",
   taskId: string | null,
   importRunId: string | null,
 ) {
-  await db.insert(goatBrainDocumentVersions).values({
+  await db.insert(brainDocumentVersions).values({
     userWorkosId,
     brainRef: row.brainRef,
     documentId: row.id,
@@ -1581,12 +1542,12 @@ async function insertVersion(
 }
 
 async function findDocumentForUpsert(db: DbLike, brainRef: string, pathName: string) {
-  const brainId = goatBrainIdFromRelativePath(pathName);
+  const brainId = brainIdFromRelativePath(pathName);
   if (!brainId) return null;
   const rows = await db
     .select()
-    .from(goatBrainDocuments)
-    .where(and(eq(goatBrainDocuments.brainRef, brainRef), eq(goatBrainDocuments.brainId, brainId)))
+    .from(brainDocuments)
+    .where(and(eq(brainDocuments.brainRef, brainRef), eq(brainDocuments.brainId, brainId)))
     .limit(1);
   return rows[0] ?? null;
 }
@@ -1594,21 +1555,21 @@ async function findDocumentForUpsert(db: DbLike, brainRef: string, pathName: str
 async function getDocumentById(db: DbLike, brainRef: string, id: string) {
   const rows = await db
     .select()
-    .from(goatBrainDocuments)
-    .where(and(eq(goatBrainDocuments.brainRef, brainRef), eq(goatBrainDocuments.id, id)))
+    .from(brainDocuments)
+    .where(and(eq(brainDocuments.brainRef, brainRef), eq(brainDocuments.id, id)))
     .limit(1);
   return rows[0] ?? null;
 }
 
 function normalizeBrainFilePath(value: string): string {
   const normalized = value.trim().replace(/\\/g, "/").replace(/^\/+/, "");
-  if (!normalized.endsWith(".md") || !isSafeGoatBrainRelativePath(normalized)) {
+  if (!normalized.endsWith(".md") || !isSafeBrainRelativePath(normalized)) {
     throw new Error(`Invalid brain file path "${value}".`);
   }
-  const brainId = goatBrainIdFromRelativePath(normalized);
-  const folder = goatBrainFolderFromRelativePath(normalized);
+  const brainId = brainIdFromRelativePath(normalized);
+  const folder = brainFolderFromRelativePath(normalized);
   if (!brainId || !folder) throw new Error(`Invalid brain file path "${value}".`);
-  return goatBrainFilePathFor(normalizeGoatBrainFolderForV1(folder), brainId);
+  return brainFilePathFor(normalizeBrainFolderForV1(folder), brainId);
 }
 
 async function walkMarkdown(root: string, relDir: string): Promise<string[]> {
@@ -1636,35 +1597,32 @@ async function walkMarkdown(root: string, relDir: string): Promise<string[]> {
 
 async function sourceFromRootFile(root: string, relativePath: string): Promise<string | null> {
   const payload = await readFile(path.join(root, relativePath), "utf8");
-  const id = goatBrainIdFromRelativePath(relativePath);
-  const folder = goatBrainFolderFromRelativePath(relativePath);
+  const id = brainIdFromRelativePath(relativePath);
+  const folder = brainFolderFromRelativePath(relativePath);
   if (!id || !folder) return payload;
   let sidecarSource: string;
   try {
-    sidecarSource = await readFile(
-      path.join(root, goatBrainSidecarRelativePath(folder, id)),
-      "utf8",
-    );
+    sidecarSource = await readFile(path.join(root, brainSidecarRelativePath(folder, id)), "utf8");
   } catch (error) {
     if (isNotFound(error)) return payload;
     throw error;
   }
   try {
-    const sidecar = parseGoatBrainSidecar(sidecarSource);
-    const validation = validateGoatBrainSidecar({
+    const sidecar = parseBrainSidecar(sidecarSource);
+    const validation = validateBrainSidecar({
       sidecar,
       payloadContent: payload,
       payloadRelativePath: relativePath,
     });
-    if (validation.ok) return serializeLegacyGoatBrainEntry(validation.entry);
-    if (isLegacyGoatBrainMarkdown(payload)) return payload;
-    return recoverLegacyGoatBrainEntryFromSidecar({
+    if (validation.ok) return serializeLegacyBrainEntry(validation.entry);
+    if (isLegacyBrainMarkdown(payload)) return payload;
+    return recoverLegacyBrainEntryFromSidecar({
       sidecar,
       payloadContent: payload,
       payloadRelativePath: relativePath,
     });
   } catch {
-    if (isLegacyGoatBrainMarkdown(payload)) return payload;
+    if (isLegacyBrainMarkdown(payload)) return payload;
     return null;
   }
 }
@@ -1673,7 +1631,7 @@ function sourceFromSidecarOrPayloadSync(_relativePath: string, content: string) 
   return content;
 }
 
-function isLegacyGoatBrainMarkdown(value: string) {
+function isLegacyBrainMarkdown(value: string) {
   return (
     value.startsWith("---\n") &&
     value.includes("\n---") &&
@@ -1688,7 +1646,7 @@ async function writeRootFile(root: string, relativePath: string, content: string
   await writeFile(target, content, "utf8");
 }
 
-function timelineParts(entry: GoatBrainTimelineEntry) {
+function timelineParts(entry: BrainTimelineEntry) {
   const chunks = entry.body
     .split(/\n\s*\n/g)
     .map((chunk: string) => chunk.trim())

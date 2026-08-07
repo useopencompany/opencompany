@@ -1,9 +1,9 @@
-import { GOAT_MCP_METADATA_CORS_HEADERS, resolveGoatAuthKitDomain } from "@/lib/mcp-oauth";
+import { GOAT_MCP_METADATA_CORS_HEADERS, resolveAuthKitDomain } from "@/lib/mcp-oauth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const authKitDomain = resolveGoatAuthKitDomain();
+  const authKitDomain = resolveAuthKitDomain();
   if (!authKitDomain.ok) {
     return Response.json({ error: authKitDomain.error }, { status: 503 });
   }

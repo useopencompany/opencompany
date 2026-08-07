@@ -12,13 +12,13 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(async () => ({ user: { workosUserId: "user_owner" } })),
+  currentUser: vi.fn(async () => ({ user: { workosUserId: "user_owner" } })),
 }));
 
-const { disconnectGoatIntegrationAccountAction } = await import("./integration-account-actions");
+const { disconnectIntegrationAccountAction } = await import("./integration-account-actions");
 const pgDialect = new PgDialect();
 
-describe("disconnectGoatIntegrationAccountAction", () => {
+describe("disconnectIntegrationAccountAction", () => {
   beforeEach(() => {
     executeMock.mockReset();
     revalidatePathMock.mockReset();
@@ -27,7 +27,7 @@ describe("disconnectGoatIntegrationAccountAction", () => {
   it("releases claims without a successful brain job before deleting the integration", async () => {
     executeMock.mockResolvedValue([{ id: "integration_123" }]);
 
-    await expect(disconnectGoatIntegrationAccountAction("integration_123")).resolves.toEqual({
+    await expect(disconnectIntegrationAccountAction("integration_123")).resolves.toEqual({
       ok: true,
     });
 
@@ -46,7 +46,7 @@ describe("disconnectGoatIntegrationAccountAction", () => {
   it("rejects deleting an account the current user does not own", async () => {
     executeMock.mockResolvedValue([]);
 
-    await expect(disconnectGoatIntegrationAccountAction("integration_other")).resolves.toEqual({
+    await expect(disconnectIntegrationAccountAction("integration_other")).resolves.toEqual({
       ok: false,
       error: "Only the connection owner can manage this account.",
     });

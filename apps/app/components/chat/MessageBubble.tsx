@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import type { GoatChatUiAttachment, GoatChatUiMessage } from "@/lib/chat-ui";
+import type { ChatUiAttachment, ChatUiMessage } from "@/lib/chat-ui";
 import { AssistantTextBubble } from "./AssistantTextBubble";
 import {
   type AssistantRenderItem,
@@ -32,7 +32,7 @@ export function MessageBubble({
   isTaskSession = false,
   attachmentSrc,
 }: {
-  message: GoatChatUiMessage;
+  message: ChatUiMessage;
   taskLookup: ChatTaskLookup;
   stopped?: boolean;
   durationMs?: number | null | undefined;
@@ -42,7 +42,7 @@ export function MessageBubble({
   allowActionApproval?: boolean;
   readOnly?: boolean;
   isTaskSession?: boolean;
-  attachmentSrc?: (messageId: string, attachment: GoatChatUiAttachment) => string | undefined;
+  attachmentSrc?: (messageId: string, attachment: ChatUiAttachment) => string | undefined;
 }) {
   if (message.role === "user") {
     return <UserMessageBubble message={message} {...(attachmentSrc ? { attachmentSrc } : {})} />;
@@ -75,7 +75,7 @@ function AssistantTurn({
   readOnly,
   isTaskSession,
 }: {
-  message: GoatChatUiMessage;
+  message: ChatUiMessage;
   taskLookup: ChatTaskLookup;
   stopped: boolean;
   durationMs?: number | null | undefined;

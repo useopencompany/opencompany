@@ -4,7 +4,7 @@ import {
   GOAT_CHAT_FRONTIER_MODEL,
   GOAT_CHAT_PDF_MODEL,
   GOAT_CHAT_STANDARD_MODEL,
-  resolveAutoGoatModel,
+  resolveAutoModel,
 } from "@/lib/chat-model-router";
 
 const baseInput = {
@@ -15,11 +15,11 @@ const baseInput = {
   workspaceId: "workspace_1",
 } as const;
 
-describe("resolveAutoGoatModel", () => {
+describe("resolveAutoModel", () => {
   it("routes PDFs directly to the PDF-capable model without a classifier call", async () => {
     const generateObjectImpl = vi.fn();
 
-    const result = await resolveAutoGoatModel(
+    const result = await resolveAutoModel(
       {
         ...baseInput,
         attachments: [{ kind: "pdf" }],
@@ -37,7 +37,7 @@ describe("resolveAutoGoatModel", () => {
   });
 
   it("routes other attachments directly to the frontier model", async () => {
-    const result = await resolveAutoGoatModel({
+    const result = await resolveAutoModel({
       ...baseInput,
       attachments: [{ kind: "image" }],
     });
@@ -56,7 +56,7 @@ describe("resolveAutoGoatModel", () => {
       usage: { inputTokens: 20, outputTokens: 5, totalTokens: 25 },
     }));
 
-    const result = await resolveAutoGoatModel(baseInput, {
+    const result = await resolveAutoModel(baseInput, {
       generateObjectImpl: generateObjectImpl as unknown as typeof generateObject,
     });
 
@@ -90,7 +90,7 @@ describe("resolveAutoGoatModel", () => {
       usage: { inputTokens: 20, outputTokens: 5, totalTokens: 25 },
     }));
 
-    const result = await resolveAutoGoatModel(baseInput, {
+    const result = await resolveAutoModel(baseInput, {
       generateObjectImpl: generateObjectImpl as unknown as typeof generateObject,
     });
 
@@ -107,7 +107,7 @@ describe("resolveAutoGoatModel", () => {
       throw new DOMException("Timed out", "TimeoutError");
     });
 
-    const result = await resolveAutoGoatModel(baseInput, {
+    const result = await resolveAutoModel(baseInput, {
       generateObjectImpl: generateObjectImpl as unknown as typeof generateObject,
     });
 
@@ -142,7 +142,7 @@ describe("resolveAutoGoatModel", () => {
       });
     });
 
-    const result = await resolveAutoGoatModel(baseInput, {
+    const result = await resolveAutoModel(baseInput, {
       generateObjectImpl: generateObjectImpl as unknown as typeof generateObject,
     });
 
@@ -170,7 +170,7 @@ describe("resolveAutoGoatModel", () => {
       });
     });
 
-    const result = await resolveAutoGoatModel(baseInput, {
+    const result = await resolveAutoModel(baseInput, {
       generateObjectImpl: generateObjectImpl as unknown as typeof generateObject,
     });
 
@@ -189,7 +189,7 @@ describe("resolveAutoGoatModel", () => {
       usage: { inputTokens: 20, outputTokens: 5, totalTokens: 25 },
     }));
 
-    const result = await resolveAutoGoatModel(baseInput, {
+    const result = await resolveAutoModel(baseInput, {
       generateObjectImpl: generateObjectImpl as unknown as typeof generateObject,
     });
 

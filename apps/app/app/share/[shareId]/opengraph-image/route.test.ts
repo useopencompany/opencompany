@@ -2,21 +2,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "./route";
 
 const createSharedChatOpenGraphImageMock = vi.hoisted(() => vi.fn());
-const loadPublicGoatChatMetadataMock = vi.hoisted(() => vi.fn());
+const loadPublicChatMetadataMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/components/chat/SharedChatOpenGraphImage", () => ({
   createSharedChatOpenGraphImage: createSharedChatOpenGraphImageMock,
 }));
 
 vi.mock("@/lib/chat-sharing", () => ({
-  loadPublicGoatChatMetadata: loadPublicGoatChatMetadataMock,
+  loadPublicChatMetadata: loadPublicChatMetadataMock,
 }));
 
 const SHARE_ID = "goat_chat_share_123e4567-e89b-42d3-a456-426614174000";
 
 describe("shared chat Open Graph image", () => {
   beforeEach(() => {
-    loadPublicGoatChatMetadataMock.mockResolvedValue({
+    loadPublicChatMetadataMock.mockResolvedValue({
       shareId: SHARE_ID,
       title: "Architecture review",
       kind: "chat",
@@ -34,14 +34,14 @@ describe("shared chat Open Graph image", () => {
       params: Promise.resolve({ shareId: SHARE_ID }),
     });
 
-    expect(loadPublicGoatChatMetadataMock).toHaveBeenCalledWith(SHARE_ID);
+    expect(loadPublicChatMetadataMock).toHaveBeenCalledWith(SHARE_ID);
     expect(createSharedChatOpenGraphImageMock).toHaveBeenCalledWith("Architecture review");
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("image/png");
   });
 
   it("returns a non-cacheable 404 after a share is revoked", async () => {
-    loadPublicGoatChatMetadataMock.mockResolvedValueOnce(null);
+    loadPublicChatMetadataMock.mockResolvedValueOnce(null);
 
     const response = await GET(new Request(`https://goat.example.com/share/${SHARE_ID}`), {
       params: Promise.resolve({ shareId: SHARE_ID }),

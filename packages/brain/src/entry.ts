@@ -1,37 +1,37 @@
 import { createHash } from "node:crypto";
 import {
-  normalizeGoatBrainBody,
-  type ParsedGoatBrainDocument,
-  parseGoatBrainDocument,
-  serializeGoatBrainDocument,
+  normalizeBrainBody,
+  type ParsedBrainDocument,
+  parseBrainDocument,
+  serializeBrainDocument,
 } from "./document";
-import { goatBrainRelativePath } from "./paths";
+import { brainRelativePath } from "./paths";
 import {
-  type GoatBrainDocument,
-  type GoatBrainDocumentFormat,
-  type GoatBrainEntityType,
-  type GoatBrainFrontmatter,
-  type GoatBrainKind,
-  type GoatBrainRelation,
-  type GoatBrainSource,
-  type GoatBrainStatus,
-  type GoatBrainTimelineEntry,
-  isValidGoatBrainEntityType,
-  isValidGoatBrainFolder,
-  isValidGoatBrainId,
-  isValidGoatBrainKind,
-  isValidGoatBrainStatus,
-  normalizeGoatBrainFolder,
+  type BrainDocument,
+  type BrainDocumentFormat,
+  type BrainEntityType,
+  type BrainFrontmatter,
+  type BrainKind,
+  type BrainRelation,
+  type BrainSource,
+  type BrainStatus,
+  type BrainTimelineEntry,
+  isValidBrainEntityType,
+  isValidBrainFolder,
+  isValidBrainId,
+  isValidBrainKind,
+  isValidBrainStatus,
+  normalizeBrainFolder,
 } from "./schema";
 import { isIsoDate } from "./time";
-import { validateGoatBrainFolderKindType, validateGoatBrainRelations } from "./validate";
+import { validateBrainFolderKindType, validateBrainRelations } from "./validate";
 
 export const GOAT_BRAIN_ENTRY_SCHEMA_VERSION = "goat.brain.entry.v2";
 export const GOAT_BRAIN_MARKDOWN_MIME_TYPE = "text/markdown";
 
-export type GoatBrainEntryFormat = GoatBrainDocumentFormat;
+export type BrainEntryFormat = BrainDocumentFormat;
 
-const GOAT_BRAIN_ENTRY_FORMATS = new Set<GoatBrainEntryFormat>([
+const GOAT_BRAIN_ENTRY_FORMATS = new Set<BrainEntryFormat>([
   "markdown",
   "pdf",
   "docx",
@@ -44,93 +44,93 @@ const GOAT_BRAIN_ENTRY_FORMATS = new Set<GoatBrainEntryFormat>([
   "image",
 ]);
 
-export type GoatBrainEntry = {
+export type BrainEntry = {
   id: string;
   folder: string;
   title: string;
   description?: string;
-  format: GoatBrainEntryFormat;
+  format: BrainEntryFormat;
   mimeType: string;
   body: string;
   createdAt: string;
   updatedAt: string;
-  relations: GoatBrainRelation[];
-  sources: GoatBrainSource[];
-  kind: GoatBrainKind;
-  type: GoatBrainEntityType;
-  status: GoatBrainStatus;
+  relations: BrainRelation[];
+  sources: BrainSource[];
+  kind: BrainKind;
+  type: BrainEntityType;
+  status: BrainStatus;
   aliases: string[];
-  timeline: GoatBrainTimelineEntry[];
+  timeline: BrainTimelineEntry[];
   originalFileName?: string;
   assetStorageKey?: string;
 };
 
-export type GoatBrainPayloadDescriptor = {
+export type BrainPayloadDescriptor = {
   path: string;
   sha256: string;
   sizeBytes: number;
   originalFileName?: string;
 };
 
-export type GoatBrainSidecar = {
+export type BrainSidecar = {
   schemaVersion: typeof GOAT_BRAIN_ENTRY_SCHEMA_VERSION;
   id: string;
   folder: string;
   title: string;
   description?: string;
-  format: GoatBrainEntryFormat;
+  format: BrainEntryFormat;
   mimeType: string;
   createdAt: string;
   updatedAt: string;
-  relations: GoatBrainRelation[];
-  sources: GoatBrainSource[];
-  kind: GoatBrainKind;
-  type: GoatBrainEntityType;
-  status?: GoatBrainStatus;
+  relations: BrainRelation[];
+  sources: BrainSource[];
+  kind: BrainKind;
+  type: BrainEntityType;
+  status?: BrainStatus;
   aliases?: string[];
-  timeline?: GoatBrainTimelineEntry[];
+  timeline?: BrainTimelineEntry[];
   assetStorageKey?: string;
-  payload: GoatBrainPayloadDescriptor;
+  payload: BrainPayloadDescriptor;
 };
 
-export type GoatBrainSidecarValidationResult =
-  | { ok: true; entry: GoatBrainEntry }
+export type BrainSidecarValidationResult =
+  | { ok: true; entry: BrainEntry }
   | { ok: false; errors: string[] };
 
-export function goatBrainPayloadRelativePath(
+export function brainPayloadRelativePath(
   folder: string,
   id: string,
-  format: GoatBrainEntryFormat = "markdown",
+  format: BrainEntryFormat = "markdown",
   originalFileName?: string,
 ): string {
-  if (format === "markdown") return goatBrainRelativePath(folder, id);
-  const normalizedFolder = normalizeGoatBrainFolder(folder);
-  if (!isValidGoatBrainFolder(normalizedFolder)) throw new Error("Invalid brain folder.");
-  if (!isValidGoatBrainId(id)) throw new Error("Invalid brain id.");
+  if (format === "markdown") return brainRelativePath(folder, id);
+  const normalizedFolder = normalizeBrainFolder(folder);
+  if (!isValidBrainFolder(normalizedFolder)) throw new Error("Invalid brain folder.");
+  if (!isValidBrainId(id)) throw new Error("Invalid brain id.");
   const extension = extensionForFormat(format, originalFileName);
   return `${normalizedFolder}/${id}.${extension}`;
 }
 
-export function goatBrainSidecarRelativePath(folder: string, id: string): string {
-  const normalizedFolder = normalizeGoatBrainFolder(folder);
-  if (!isValidGoatBrainFolder(normalizedFolder)) throw new Error("Invalid brain folder.");
-  if (!isValidGoatBrainId(id)) throw new Error("Invalid brain id.");
+export function brainSidecarRelativePath(folder: string, id: string): string {
+  const normalizedFolder = normalizeBrainFolder(folder);
+  if (!isValidBrainFolder(normalizedFolder)) throw new Error("Invalid brain folder.");
+  if (!isValidBrainId(id)) throw new Error("Invalid brain id.");
   return `${normalizedFolder}/.brain/${id}.json`;
 }
 
-export function goatBrainPayloadHash(content: string | Uint8Array): string {
+export function brainPayloadHash(content: string | Uint8Array): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
-export function goatBrainPayloadSizeBytes(content: string | Uint8Array): number {
+export function brainPayloadSizeBytes(content: string | Uint8Array): number {
   return typeof content === "string" ? Buffer.byteLength(content, "utf8") : content.byteLength;
 }
 
-export function goatBrainEntryFromLegacyMarkdown(source: string): GoatBrainEntry {
-  return goatBrainEntryFromParsedLegacy(parseGoatBrainDocument(source));
+export function brainEntryFromLegacyMarkdown(source: string): BrainEntry {
+  return brainEntryFromParsedLegacy(parseBrainDocument(source));
 }
 
-export function goatBrainEntryFromLegacyDocument(doc: GoatBrainDocument): GoatBrainEntry {
+export function brainEntryFromLegacyDocument(doc: BrainDocument): BrainEntry {
   return {
     id: doc.frontmatter.id,
     folder: doc.frontmatter.folder,
@@ -151,20 +151,20 @@ export function goatBrainEntryFromLegacyDocument(doc: GoatBrainDocument): GoatBr
   };
 }
 
-export function goatBrainEntryFromParsedLegacy(parsed: ParsedGoatBrainDocument): GoatBrainEntry {
-  const frontmatter = parsed.frontmatter as Partial<GoatBrainFrontmatter>;
+export function brainEntryFromParsedLegacy(parsed: ParsedBrainDocument): BrainEntry {
+  const frontmatter = parsed.frontmatter as Partial<BrainFrontmatter>;
   const id = frontmatter.id ?? "";
   const folder = frontmatter.folder ?? "";
-  if (!isValidGoatBrainId(id)) {
+  if (!isValidBrainId(id)) {
     throw new Error("Brain document is missing a valid frontmatter.id.");
   }
-  if (!isValidGoatBrainFolder(folder)) {
+  if (!isValidBrainFolder(folder)) {
     throw new Error("Brain document is missing a valid frontmatter.folder.");
   }
-  if (!isValidGoatBrainEntityType(frontmatter.type)) {
+  if (!isValidBrainEntityType(frontmatter.type)) {
     throw new Error("Brain document is missing a valid frontmatter.type.");
   }
-  if (!isValidGoatBrainKind(frontmatter.kind)) {
+  if (!isValidBrainKind(frontmatter.kind)) {
     throw new Error("Brain document is missing a valid frontmatter.kind.");
   }
   const title = (frontmatter.title ?? parsed.title ?? id).trim();
@@ -188,7 +188,7 @@ export function goatBrainEntryFromParsedLegacy(parsed: ParsedGoatBrainDocument):
   };
 }
 
-export function legacyGoatBrainDocumentFromEntry(entry: GoatBrainEntry): GoatBrainDocument {
+export function legacyBrainDocumentFromEntry(entry: BrainEntry): BrainDocument {
   return {
     frontmatter: {
       id: entry.id,
@@ -210,23 +210,23 @@ export function legacyGoatBrainDocumentFromEntry(entry: GoatBrainEntry): GoatBra
   };
 }
 
-export function serializeLegacyGoatBrainEntry(entry: GoatBrainEntry): string {
-  return serializeGoatBrainDocument(legacyGoatBrainDocumentFromEntry(entry));
+export function serializeLegacyBrainEntry(entry: BrainEntry): string {
+  return serializeBrainDocument(legacyBrainDocumentFromEntry(entry));
 }
 
-export function serializeGoatBrainPayload(entry: GoatBrainEntry): string {
-  return normalizeGoatBrainBody(entry.body);
+export function serializeBrainPayload(entry: BrainEntry): string {
+  return normalizeBrainBody(entry.body);
 }
 
-export function serializeGoatBrainSidecar(entry: GoatBrainEntry): string {
-  const payload = serializeGoatBrainPayload(entry);
-  const payloadPath = goatBrainPayloadRelativePath(
+export function serializeBrainSidecar(entry: BrainEntry): string {
+  const payload = serializeBrainPayload(entry);
+  const payloadPath = brainPayloadRelativePath(
     entry.folder,
     entry.id,
     entry.format,
     entry.originalFileName,
   );
-  const sidecar: GoatBrainSidecar = {
+  const sidecar: BrainSidecar = {
     schemaVersion: GOAT_BRAIN_ENTRY_SCHEMA_VERSION,
     id: entry.id,
     folder: entry.folder,
@@ -246,62 +246,62 @@ export function serializeGoatBrainSidecar(entry: GoatBrainEntry): string {
     ...(entry.assetStorageKey ? { assetStorageKey: entry.assetStorageKey } : {}),
     payload: {
       path: payloadPath,
-      sha256: goatBrainPayloadHash(payload),
-      sizeBytes: goatBrainPayloadSizeBytes(payload),
+      sha256: brainPayloadHash(payload),
+      sizeBytes: brainPayloadSizeBytes(payload),
       ...(entry.originalFileName ? { originalFileName: entry.originalFileName } : {}),
     },
   };
   return `${JSON.stringify(sidecar, null, 2)}\n`;
 }
 
-export function parseGoatBrainSidecar(source: string): GoatBrainSidecar | null {
+export function parseBrainSidecar(source: string): BrainSidecar | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(source);
   } catch {
     return null;
   }
-  return isRecord(parsed) ? (parsed as GoatBrainSidecar) : null;
+  return isRecord(parsed) ? (parsed as BrainSidecar) : null;
 }
 
-export function validateGoatBrainSidecar(input: {
-  sidecar: GoatBrainSidecar | null;
+export function validateBrainSidecar(input: {
+  sidecar: BrainSidecar | null;
   payloadContent: string;
   payloadRelativePath: string;
-}): GoatBrainSidecarValidationResult {
-  const { sidecar, errors } = validateGoatBrainSidecarMetadata(input);
+}): BrainSidecarValidationResult {
+  const { sidecar, errors } = validateBrainSidecarMetadata(input);
   if (!sidecar) return { ok: false, errors };
-  const actualHash = goatBrainPayloadHash(input.payloadContent);
+  const actualHash = brainPayloadHash(input.payloadContent);
   if (sidecar.payload?.sha256 !== actualHash) errors.push("sidecar.payload.sha256 mismatch.");
-  const actualSize = goatBrainPayloadSizeBytes(input.payloadContent);
+  const actualSize = brainPayloadSizeBytes(input.payloadContent);
   if (sidecar.payload?.sizeBytes !== actualSize) errors.push("sidecar.payload.sizeBytes mismatch.");
   if (errors.length > 0) return { ok: false, errors };
   return { ok: true, entry: entryFromValidSidecar(sidecar, input.payloadContent) };
 }
 
-export function recoverLegacyGoatBrainEntryFromSidecar(input: {
-  sidecar: GoatBrainSidecar | null;
+export function recoverLegacyBrainEntryFromSidecar(input: {
+  sidecar: BrainSidecar | null;
   payloadContent: string;
   payloadRelativePath: string;
 }): string | null {
-  const { sidecar, errors } = validateGoatBrainSidecarMetadata(input);
+  const { sidecar, errors } = validateBrainSidecarMetadata(input);
   if (!sidecar || errors.length > 0 || sidecar.format !== "markdown") return null;
-  return serializeLegacyGoatBrainEntry(entryFromValidSidecar(sidecar, input.payloadContent));
+  return serializeLegacyBrainEntry(entryFromValidSidecar(sidecar, input.payloadContent));
 }
 
-function validateGoatBrainSidecarMetadata(input: {
-  sidecar: GoatBrainSidecar | null;
+function validateBrainSidecarMetadata(input: {
+  sidecar: BrainSidecar | null;
   payloadRelativePath: string;
-}): { sidecar: GoatBrainSidecar | null; errors: string[] } {
+}): { sidecar: BrainSidecar | null; errors: string[] } {
   const errors: string[] = [];
   const sidecar = input.sidecar;
   if (!sidecar) return { sidecar: null, errors: ["Sidecar JSON is invalid."] };
   if (sidecar.schemaVersion !== GOAT_BRAIN_ENTRY_SCHEMA_VERSION) {
     errors.push("sidecar.schemaVersion is invalid.");
   }
-  if (!isValidGoatBrainId(sidecar.id)) errors.push("sidecar.id must be a lowercase slug.");
+  if (!isValidBrainId(sidecar.id)) errors.push("sidecar.id must be a lowercase slug.");
   errors.push(
-    ...validateGoatBrainFolderKindType({
+    ...validateBrainFolderKindType({
       folder: sidecar.folder,
       kind: sidecar.kind,
       type: sidecar.type,
@@ -314,7 +314,7 @@ function validateGoatBrainSidecarMetadata(input: {
   if (sidecar.description !== undefined && !sidecar.description.trim()) {
     errors.push("sidecar.description must not be empty when present.");
   }
-  if (sidecar.status !== undefined && !isValidGoatBrainStatus(sidecar.status)) {
+  if (sidecar.status !== undefined && !isValidBrainStatus(sidecar.status)) {
     errors.push("sidecar.status is invalid.");
   }
   if (sidecar.aliases && !validStringArray(sidecar.aliases)) {
@@ -338,11 +338,11 @@ function validateGoatBrainSidecarMetadata(input: {
   if (sidecar.payload?.path !== input.payloadRelativePath) {
     errors.push("sidecar.payload.path does not match the payload path.");
   }
-  errors.push(...validateGoatBrainRelations(sidecar.relations, { fieldName: "sidecar.relations" }));
+  errors.push(...validateBrainRelations(sidecar.relations, { fieldName: "sidecar.relations" }));
   return { sidecar, errors };
 }
 
-function entryFromValidSidecar(sidecar: GoatBrainSidecar, payloadContent: string): GoatBrainEntry {
+function entryFromValidSidecar(sidecar: BrainSidecar, payloadContent: string): BrainEntry {
   return {
     id: sidecar.id,
     folder: sidecar.folder,
@@ -368,7 +368,7 @@ function entryFromValidSidecar(sidecar: GoatBrainSidecar, payloadContent: string
   };
 }
 
-function extensionForFormat(format: GoatBrainEntryFormat, originalFileName?: string) {
+function extensionForFormat(format: BrainEntryFormat, originalFileName?: string) {
   const extension = originalFileName?.split(".").pop()?.trim().toLowerCase();
   if (extension && /^[a-z0-9]{1,12}$/.test(extension)) return extension;
   if (format === "pdf") return "pdf";

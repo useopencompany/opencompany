@@ -3,7 +3,7 @@ import path from "node:path";
 
 import type { Metadata } from "next";
 
-import GoatChangelogView from "@/components/GoatChangelogView";
+import ChangelogView from "@/components/ChangelogView";
 import { parseChangelog } from "@/lib/changelog";
 
 // The changelog is authored by hand in the repo-root CHANGELOG.md (Keep a
@@ -22,5 +22,5 @@ export default async function ChangelogPage() {
   const source = await fs.readFile(filePath, "utf8");
   const changelog = parseChangelog(source);
 
-  return <GoatChangelogView changelog={changelog} />;
+  return <ChangelogView changelog={changelog} />;
 }

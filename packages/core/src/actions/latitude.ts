@@ -3,19 +3,19 @@ import type { JSONSchema7, ToolExecutionOptions, ToolSet } from "ai";
 import Ajv, { type AnySchema } from "ajv";
 import {
   GOAT_LATITUDE_MCP_ENDPOINT_URL,
-  getGoatLatitudeIntegrationState,
-  loadGoatLatitudeMcpWorkerConnection,
+  getLatitudeIntegrationState,
+  loadLatitudeMcpWorkerConnection,
 } from "../integrations/latitude-mcp";
-import { effectiveCapabilityMode, type GoatCapabilityId, providerCapability } from "./capabilities";
+import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  ActionAuthError,
+  type ActionExecuteContext,
+  ActionInvalidParamsError,
+  ActionPermissionError,
+  type ActionProviderCatalog,
   GOAT_ACTION_EFFECTS_READ,
   GOAT_ACTION_EFFECTS_WRITE,
-  GoatActionAuthError,
-  type GoatActionExecuteContext,
-  GoatActionInvalidParamsError,
-  GoatActionPermissionError,
-  type GoatActionProviderCatalog,
-  type ResolvedGoatAction,
+  type ResolvedAction,
 } from "./types";
 
 type LatitudeToolDefinition = {
@@ -31,8 +31,8 @@ const latitudeSchemaValidator = new Ajv({ allErrors: true, strict: false });
 
 export async function resolveLatitudeActions(
   userWorkosId: string,
-): Promise<GoatActionProviderCatalog | null> {
-  const state = await getGoatLatitudeIntegrationState(userWorkosId);
+): Promise<ActionProviderCatalog | null> {
+  const state = await getLatitudeIntegrationState(userWorkosId);
   const integrationId = state.integrationId;
   if (!state.connected || !integrationId) return null;
 
@@ -41,7 +41,7 @@ export async function resolveLatitudeActions(
     effectiveCapabilityMode("latitude", "write", state.capabilityModes) !== "off";
   if (!readEnabled && !writeEnabled) return null;
 
-  const connection = await loadGoatLatitudeMcpWorkerConnection({
+  const connection = await loadLatitudeMcpWorkerConnection({
     userWorkosId,
     onAuthorizationRequired: () => {
       throw latitudeAuthError();
@@ -60,7 +60,7 @@ export async function resolveLatitudeActions(
     await client.close().catch(() => {});
   }
 
-  const actions: ResolvedGoatAction[] = definitions.flatMap((definition) => {
+  const actions: ResolvedAction[] = definitions.flatMap((definition) => {
     const capability = latitudeToolCapability(definition);
     if ((capability === "read" && !readEnabled) || (capability === "write" && !writeEnabled)) {
       return [];
@@ -102,9 +102,9 @@ export async function resolveLatitudeActions(
 }
 
 function permissionAnnotation(
-  capabilityId: GoatCapabilityId,
+  capabilityId: CapabilityId,
   state: { integrationId: string; capabilityModes: unknown },
-): Pick<ResolvedGoatAction, "permissionMode" | "permission"> {
+): Pick<ResolvedAction, "permissionMode" | "permission"> {
   if (effectiveCapabilityMode("latitude", capabilityId, state.capabilityModes) !== "ask") {
     return { permissionMode: "on" };
   }
@@ -121,15 +121,15 @@ function permissionAnnotation(
 
 async function executeLatitudeAction(input: {
   remoteName: string;
-  expectedCapability: GoatCapabilityId;
+  expectedCapability: CapabilityId;
   expectedIntegrationId: string;
   params: Record<string, unknown>;
-  context: GoatActionExecuteContext;
+  context: ActionExecuteContext;
 }) {
-  const state = await getGoatLatitudeIntegrationState(input.context.userWorkosId);
+  const state = await getLatitudeIntegrationState(input.context.userWorkosId);
   if (!state.connected || !state.integrationId) throw latitudeAuthError();
   if (state.integrationId !== input.expectedIntegrationId) {
-    throw new GoatActionPermissionError(
+    throw new ActionPermissionError(
       "latitude",
       "The Latitude connection changed before this action could run. Retry so Goat can use the current connection and permission.",
     );
@@ -137,13 +137,13 @@ async function executeLatitudeAction(input: {
   if (
     effectiveCapabilityMode("latitude", input.expectedCapability, state.capabilityModes) === "off"
   ) {
-    throw new GoatActionPermissionError(
+    throw new ActionPermissionError(
       "latitude",
       `${input.expectedCapability === "read" ? "Reading from" : "Writing to"} Latitude is turned off. It can be changed under Settings → Integrations.`,
     );
   }
 
-  const connection = await loadGoatLatitudeMcpWorkerConnection({
+  const connection = await loadLatitudeMcpWorkerConnection({
     userWorkosId: input.context.userWorkosId,
     onAuthorizationRequired: () => {
       throw latitudeAuthError();
@@ -151,7 +151,7 @@ async function executeLatitudeAction(input: {
   });
   if (!connection.ok) throw latitudeAuthError();
   if (connection.integrationId !== input.expectedIntegrationId) {
-    throw new GoatActionPermissionError(
+    throw new ActionPermissionError(
       "latitude",
       "The Latitude connection changed before this action could run. Retry so Goat can use the current connection and permission.",
     );
@@ -172,7 +172,7 @@ async function executeLatitudeAction(input: {
       input.expectedCapability === "read" &&
       latitudeToolCapability(currentDefinition) !== "read"
     ) {
-      throw new GoatActionPermissionError(
+      throw new ActionPermissionError(
         "latitude",
         `Latitude changed the "${input.remoteName}" tool from read-only. Retry so Goat can request confirmation with the current permission.`,
       );
@@ -182,7 +182,7 @@ async function executeLatitudeAction(input: {
       latitudeInputSchema(currentDefinition.inputSchema) as AnySchema,
     );
     if (!validate(input.params)) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `The parameters for "${input.remoteName}" do not match Latitude's current schema.`,
       );
     }
@@ -220,7 +220,7 @@ function createLatitudeClient(authProvider: OAuthClientProvider) {
   });
 }
 
-function latitudeToolCapability(definition: LatitudeToolDefinition): GoatCapabilityId {
+function latitudeToolCapability(definition: LatitudeToolDefinition): CapabilityId {
   // MCP annotations are advisory. Unknown tools default to write/Ask so a
   // newly added Latitude mutation can never run without user confirmation.
   return definition.annotations?.readOnlyHint === true ? "read" : "write";
@@ -237,7 +237,7 @@ function latitudeInputSchema(
 }
 
 function latitudeAuthError() {
-  return new GoatActionAuthError(
+  return new ActionAuthError(
     "auth_expired",
     "latitude",
     "The Latitude connection needs reauthorization; reconnect Latitude in Settings → Integrations.",

@@ -6,22 +6,22 @@ import path from "node:path";
 import { type ExaSearchResult, executeExaSearchRequest } from "@opencompany/agent-runtime";
 import { AUX_GATEWAY_MODEL_PRICING, calculateModelUsageCost } from "@opencompany/billing";
 import {
+  type BrainFolderManifestEntry,
+  type BrainUsageEntry,
   GOAT_BRAIN_POINTER_COPY_RULE,
-  type GoatBrainFolderManifestEntry,
-  type GoatBrainUsageEntry,
   type NormalizedAttioObjectContent,
   type NormalizedAttioObjectSourceItem,
   type NormalizedBrainSourceItem,
+  type NormalizedChatCaptureSourceItem,
   type NormalizedFathomMeetingSourceItem,
   type NormalizedGitHubActivitySourceItem,
   type NormalizedGmailThreadContent,
   type NormalizedGmailThreadSourceItem,
-  type NormalizedGoatChatCaptureSourceItem,
-  type NormalizedGoatImportSourceItem,
   type NormalizedGoogleDriveDocumentSourceItem,
   type NormalizedGranolaMeetingSourceItem,
   type NormalizedHubspotObjectContent,
   type NormalizedHubspotObjectSourceItem,
+  type NormalizedImportSourceItem,
   type NormalizedJamieMeetingSourceItem,
   type NormalizedLinearIssueContent,
   type NormalizedLinearIssueSourceItem,
@@ -29,51 +29,51 @@ import {
   type NormalizedSlackConversationMessage,
   type NormalizedSlackConversationSourceItem,
   type NormalizedUploadAssetSourceItem,
-  parseGoatBrainUsageReport,
+  parseBrainUsageReport,
   slackTsToIso,
 } from "@opencompany/brain";
-import { getGoatBrainCliSource } from "@opencompany/brain/cli-bundle";
+import { getBrainCliSource } from "@opencompany/brain/cli-bundle";
 import {
   GOAT_BASIC_INGEST_MODEL,
   GOAT_FRONTIER_INGEST_MODEL,
 } from "@opencompany/db/billing-constants";
 import {
-  type GoatBrainSyncPage,
-  getGoatBrainFile,
-  materializeGoatBrainFilesToRoot,
-  readGoatBrainFolderManifestFromRoot,
-  syncGoatBrainFilesFromRoot,
-  updateGoatBrainAssetExtraction,
+  type BrainSyncPage,
+  getBrainFile,
+  materializeBrainFilesToRoot,
+  readBrainFolderManifestFromRoot,
+  syncBrainFilesFromRoot,
+  updateBrainAssetExtraction,
 } from "@opencompany/db/brain-files";
 import {
+  type BrainIngestBudget,
+  type BrainIngestTrace,
+  type BrainIngestTraceToolCall,
+  type BrainIngestTraceUsage,
+  type BrainIngestTriageTrace,
+  brainIngestTracePreview,
   GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH,
   GOAT_BRAIN_INGEST_TRACE_MAX_TOOL_CALLS,
   GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
   GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
   GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH,
-  type GoatBrainIngestBudget,
-  type GoatBrainIngestTrace,
-  type GoatBrainIngestTraceToolCall,
-  type GoatBrainIngestTraceUsage,
-  type GoatBrainIngestTriageTrace,
-  goatBrainIngestTracePreview,
-  sanitizeGoatBrainIngestTraceArgs,
+  sanitizeBrainIngestTraceArgs,
 } from "@opencompany/db/brain-ingest-trace";
-import { getGoatGmailBrainSourceInstructions } from "@opencompany/db/gmail";
-import type { GoatBrainIntelligence } from "@opencompany/db/schema";
+import { getGmailBrainSourceInstructions } from "@opencompany/db/gmail";
+import type { BrainIntelligence } from "@opencompany/db/schema";
 import {
-  getDefaultGoatBrainForUser,
-  getGoatBrainEnrichmentEnabled,
-  getGoatBrainIntelligence,
-  getGoatUserDisplayName,
+  getBrainEnrichmentEnabled,
+  getBrainIntelligence,
+  getDefaultBrainForUser,
+  getUserDisplayName,
 } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import {
-  createGoatGatewayAttribution,
-  goatGatewayProviderOptions,
-  recordGoatBrainIngestBudgetExhausted,
-  recordGoatBrainIngestSpend,
+  createGatewayAttribution,
+  gatewayProviderOptions,
+  recordBrainIngestBudgetExhausted,
+  recordBrainIngestSpend,
 } from "@opencompany/telemetry";
 import { latitudeTelemetry } from "@opencompany/telemetry/latitude";
 import * as ai from "ai";
@@ -94,12 +94,12 @@ import {
   GRANOLA_MEETING_FOLDER,
 } from "./brain-granola-writes";
 import {
+  type BrainIngestTriageInput,
   buildAttioIngestTriagePrompt,
   buildGitHubCommentIngestTriagePrompt,
   buildGmailIngestTriagePrompt,
   buildSlackIngestTriagePrompt,
-  type GoatBrainIngestTriageInput,
-  runGoatBrainIngestTriage,
+  runBrainIngestTriage,
 } from "./brain-ingest-triage";
 import {
   buildJamieMeetingEvidenceWrite,
@@ -124,7 +124,7 @@ const logger = createLogger({
 export const GOAT_BRAIN_AGENT_INGEST_BASIC_MODEL = GOAT_BASIC_INGEST_MODEL;
 export const GOAT_BRAIN_AGENT_INGEST_FRONTIER_MODEL = GOAT_FRONTIER_INGEST_MODEL;
 
-export function goatBrainIngestModelForIntelligence(intelligence: GoatBrainIntelligence) {
+export function brainIngestModelForIntelligence(intelligence: BrainIntelligence) {
   return intelligence === "frontier"
     ? GOAT_BRAIN_AGENT_INGEST_FRONTIER_MODEL
     : GOAT_BRAIN_AGENT_INGEST_BASIC_MODEL;
@@ -214,7 +214,7 @@ const READ_ONLY_AGENT_CLI_COMMANDS = new Set([
 ]);
 const READ_ONLY_AGENT_FOLDER_SUBCOMMANDS = new Set(["list"]);
 
-export type GoatBrainAgentIngestEnv = Pick<RunnerEnv, "vercelAiGatewayApiKey"> & {
+export type BrainAgentIngestEnv = Pick<RunnerEnv, "vercelAiGatewayApiKey"> & {
   // Needed only by handlers that fetch blob bytes (uploaded assets); optional
   // so text-only profiles and tests need not provide it.
   blobReadWriteToken?: RunnerEnv["blobReadWriteToken"];
@@ -225,7 +225,7 @@ export type GoatBrainAgentIngestEnv = Pick<RunnerEnv, "vercelAiGatewayApiKey"> &
   googleOAuthClientSecret?: RunnerEnv["googleOAuthClientSecret"];
 };
 
-export type GoatBrainAgentCliResult = {
+export type BrainAgentCliResult = {
   ok: boolean;
   exitCode: number | null;
   stdout: string;
@@ -233,7 +233,7 @@ export type GoatBrainAgentCliResult = {
   error?: string;
 };
 
-export type GoatBrainAgentCliRunner = (input: {
+export type BrainAgentCliRunner = (input: {
   cliPath: string;
   root: string;
   argv: string[];
@@ -241,11 +241,11 @@ export type GoatBrainAgentCliRunner = (input: {
   reporting?: { user?: string; tags: string[] };
   stdin?: string;
   signal?: AbortSignal;
-}) => Promise<GoatBrainAgentCliResult>;
+}) => Promise<BrainAgentCliResult>;
 
-export type GoatBrainAgentIngestDeps = {
-  runCli?: GoatBrainAgentCliRunner;
-  runTriage?: (input: GoatBrainIngestTriageInput) => Promise<GoatBrainIngestTriageTrace>;
+export type BrainAgentIngestDeps = {
+  runCli?: BrainAgentCliRunner;
+  runTriage?: (input: BrainIngestTriageInput) => Promise<BrainIngestTriageTrace>;
 };
 
 const GOAT_BRAIN_INGEST_CLI_WRITE_REFERENCE = [
@@ -265,7 +265,7 @@ const GOAT_BRAIN_INGEST_CLI_WRITE_REFERENCE = [
   "Use --at, never --date. For stdin, use the matching --truth-stdin, --body-stdin, or --detail-stdin flag and provide the text in goat_brain.stdin; there is no generic --stdin flag. Body-writing commands always require --body or --body-stdin. Use only one stdin flag per call.",
 ];
 
-function buildGoatBrainIngestSystemPrompt(input: {
+function buildBrainIngestSystemPrompt(input: {
   mission: string;
   skipRule: string;
   sourceDataRule?: string;
@@ -319,46 +319,46 @@ export const GOAT_BRAIN_ENRICHMENT_SYSTEM_ADDENDUM = [
   `- Budget: at most ${GOAT_BRAIN_ENRICHMENT_SEARCH_LIMIT} web searches for this whole ingest. When the budget is exhausted the tool refuses further calls; finish with what you have.`,
 ].join("\n");
 
-export const JAMIE_MEETING_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+export const JAMIE_MEETING_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
   mission: "folds one source item into a single brain of Markdown knowledge documents.",
   skipRule: `If the source content is not brain-worthy (spam, empty, pure noise), make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}.`,
 });
 
-export const GRANOLA_MEETING_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+export const GRANOLA_MEETING_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
   mission: "folds one source item into a single brain of Markdown knowledge documents.",
   skipRule: `If the source content is not brain-worthy (spam, empty, pure noise), make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}.`,
 });
 
-export const FATHOM_MEETING_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+export const FATHOM_MEETING_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
   mission: "folds one source item into a single brain of Markdown knowledge documents.",
   skipRule: `If the source content is not brain-worthy (spam, empty, pure noise), make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}.`,
 });
 
-export const GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+export const GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
   mission:
     "curates one explicit user capture — saved from Goat chat or an authorized MCP client — into a single brain of Markdown knowledge documents. The capture is already stored as a draft page in the inbox; your job is to file it properly.",
   skipRule: `The user explicitly saved this content, so it is almost always brain-worthy. Only if it is literally empty or unusable, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}; the draft then stays in the inbox for the user.`,
 });
 
-export const UPLOAD_ASSET_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+export const UPLOAD_ASSET_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
   mission:
     "curates one file the user uploaded into a single brain of Markdown knowledge documents. The file already exists as a document page in the brain (its bytes live outside the markdown plane); your job is to turn that page into a durable synthesis and wire it into the graph.",
   skipRule: `The user explicitly uploaded this file, so it is almost always brain-worthy. Only if its content is literally empty or unreadable AND the file name carries no meaning, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}; the page then stays as an unenriched draft.`,
 });
 
-export const SLACK_CONVERSATION_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+export const SLACK_CONVERSATION_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
   mission:
     "folds one batch of Slack conversation messages into a single brain of Markdown knowledge documents.",
   skipRule: `Slack is high-noise: most batches are chit-chat, scheduling logistics, or banter that carries no durable knowledge. If nothing in the batch is brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Skipping is the common, correct outcome — only decisions, plans, facts about people/companies/projects, and substantive shared content belong in the brain.`,
 });
 
-export const LINEAR_ISSUE_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+export const LINEAR_ISSUE_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
   mission:
     "folds one window of Linear issue activity into a single brain of Markdown knowledge documents.",
   skipRule: `Linear is mostly routine task churn: status moves, assignment shuffles, estimate tweaks, and short logistics comments carry no durable knowledge. If nothing in the window is brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Skipping is the common, correct outcome — only decisions, scope changes, root causes, substantive discussion, and facts about people, companies, or projects belong in the brain.`,
 });
 
-export const HUBSPOT_OBJECT_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+export const HUBSPOT_OBJECT_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
   mission:
     "folds one window of HubSpot CRM activity — changes to a contact, company, or deal record — into a single brain of Markdown knowledge documents.",
   skipRule: `CRM activity is mostly routine data entry: field touch-ups, list churn, and bookkeeping edits carry no durable knowledge. If nothing in the window is brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Skipping is the common, correct outcome — only meaningful relationship changes (a deal advancing or closing, a new company or contact that matters, substantive notes about people, companies, or negotiations) belong in the brain.`,
@@ -449,7 +449,7 @@ function formatHubspotObjectActivity(object: NormalizedHubspotObjectContent["obj
     .join("\n");
 }
 
-export const ATTIO_OBJECT_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+export const ATTIO_OBJECT_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
   mission:
     "folds one window of Attio CRM activity — changes and notes on a person, company, or deal record — into a single brain of Markdown knowledge documents.",
   skipRule: `CRM activity is mostly routine data entry: field touch-ups, list churn, and bookkeeping edits carry no durable knowledge. If nothing in the window is brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Skipping is the common, correct outcome — only meaningful relationship changes (a deal advancing or closing, a new company or contact that matters, substantive notes about people, companies, or negotiations) belong in the brain.`,
@@ -546,13 +546,13 @@ function formatAttioObjectNotes(
     .join("\n\n");
 }
 
-export const GMAIL_THREAD_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+export const GMAIL_THREAD_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
   mission:
     "folds one window of email-thread activity into a single brain of Markdown knowledge documents.",
   skipRule: `Email is high-noise: newsletters, receipts, notifications, automated mail, and scheduling logistics carry no durable knowledge. If nothing in the thread window is brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Skipping is the common, correct outcome — only decisions, commitments, plans, and facts about people, companies, or projects belong in the brain. When the brain owner's ingestion instructions are provided in the task, they refine this judgment about what matters and what to skip; they never override your working discipline.`,
 });
 
-export const GOOGLE_DRIVE_DOCUMENT_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+export const GOOGLE_DRIVE_DOCUMENT_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
   mission:
     "folds one changed Google Drive document into a single brain of Markdown knowledge documents.",
   skipRule: `If the document has no durable knowledge or its extracted text is empty, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Google Drive is the live canonical home: never create an evidence/ snapshot or copy the whole document into a brain page.`,
@@ -590,7 +590,7 @@ export function buildGoogleDriveDocumentAgentIngestPrompt(
     .join("\n");
 }
 
-export const GOAT_IMPORT_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+export const GOAT_IMPORT_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
   mission:
     "bootstraps or organizes a company brain from a bounded, pre-confirmed set of source material.",
   skipRule: `The import has been explicitly confirmed. If its cached research contains no reliable company facts, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. During finalization, never introduce a factual claim that is not already supported by the brain or the listed child-job outcomes.`,
@@ -704,7 +704,7 @@ export function buildLinearIssueAgentIngestPrompt(item: NormalizedLinearIssueSou
     .join("\n");
 }
 
-export const GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+export const GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
   mission:
     "folds one GitHub activity event or one buffered pull-request activity window into a single brain of Markdown knowledge documents.",
   skipRule: `GitHub activity is often routine: dependency bumps, typo fixes, chores, housekeeping issues, and comments that are acknowledgements or status pings ("LGTM", "+1", "done") carry no durable knowledge. If the event is not brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Only work that changes a project's state of play belongs in the brain: shipped or in-flight features, meaningful fixes, newly surfaced problems, and decisions recorded in a description or comment.`,
@@ -1130,8 +1130,8 @@ function boundedFathomTranscriptMarkdown(item: NormalizedFathomMeetingSourceItem
   return formatFathomTranscriptExcerpt(segments, PROMPT_TRANSCRIPT_BYTES);
 }
 
-export function buildGoatChatCaptureAgentIngestPrompt(
-  item: NormalizedGoatChatCaptureSourceItem,
+export function buildChatCaptureAgentIngestPrompt(
+  item: NormalizedChatCaptureSourceItem,
   context: { capturedByName?: string | null } = {},
 ) {
   const capture = item.content.capture;
@@ -1214,11 +1214,11 @@ type BrainAgentIngestSessionResult = {
   mutations: number;
   upserted: number;
   deleted: number;
-  pages: GoatBrainSyncPage[];
-  usage: GoatBrainIngestTraceUsage;
-  budget: GoatBrainIngestBudget;
+  pages: BrainSyncPage[];
+  usage: BrainIngestTraceUsage;
+  budget: BrainIngestBudget;
   summary: string;
-  trace: GoatBrainIngestTrace;
+  trace: BrainIngestTrace;
 };
 
 type BrainAgentNoMutationOutcome = "fail" | "skip";
@@ -1228,19 +1228,19 @@ type BrainAgentIngestSkipMode = "explicit" | "inferred_no_mutations" | "triage";
 // brain writes and no SKIP, or only failed mutating commands). Re-running the
 // identical content rarely changes that verdict, so the worker retries these
 // on a tighter attempt budget than infrastructure failures.
-export class GoatBrainAgentOutcomeError extends Error {}
+export class BrainAgentOutcomeError extends Error {}
 
-export type GoatBrainIngestBudgetErrorResult = Pick<
+export type BrainIngestBudgetErrorResult = Pick<
   BrainAgentIngestSessionResult,
   "budget" | "trace" | "usage" | "steps" | "toolCalls" | "mutations"
 >;
 
-export class GoatBrainIngestBudgetError extends Error {
-  readonly result: GoatBrainIngestBudgetErrorResult;
+export class BrainIngestBudgetError extends Error {
+  readonly result: BrainIngestBudgetErrorResult;
 
-  constructor(message: string, result: GoatBrainIngestBudgetErrorResult) {
+  constructor(message: string, result: BrainIngestBudgetErrorResult) {
     super(message);
-    this.name = "GoatBrainIngestBudgetError";
+    this.name = "BrainIngestBudgetError";
     this.result = result;
   }
 }
@@ -1254,7 +1254,7 @@ async function runBrainAgentIngestSession(input: {
   userWorkosId: string;
   brainRef: string | null;
   sourceRef: string;
-  env: GoatBrainAgentIngestEnv;
+  env: BrainAgentIngestEnv;
   system: string;
   buildPrompt: () => string;
   // Binary parts attached to the agent's user message (e.g. an image asset so
@@ -1272,31 +1272,30 @@ async function runBrainAgentIngestSession(input: {
   createdByWorkosId?: string | null;
   importRunId?: string | null;
   signal?: AbortSignal;
-  deps?: GoatBrainAgentIngestDeps;
-  triage?: GoatBrainIngestTriageTrace;
+  deps?: BrainAgentIngestDeps;
+  triage?: BrainIngestTriageTrace;
 }): Promise<BrainAgentIngestSessionResult> {
   const db = getDb();
-  const brainRef =
-    input.brainRef ?? (await getDefaultGoatBrainForUser(input.userWorkosId, { db }))?.id;
+  const brainRef = input.brainRef ?? (await getDefaultBrainForUser(input.userWorkosId, { db }))?.id;
   if (!brainRef) {
     throw new Error(`No accessible Goat brain found for user ${input.userWorkosId}.`);
   }
 
   const root = await mkdtemp(path.join(os.tmpdir(), "goat-agent-ingest-"));
   try {
-    const materialized = await materializeGoatBrainFilesToRoot({
+    const materialized = await materializeBrainFilesToRoot({
       brainRef,
       root,
-      cliSource: getGoatBrainCliSource(),
+      cliSource: getBrainCliSource(),
       db,
     });
     await input.prepareRoot?.(root);
-    const folderPrompt = await buildGoatBrainFolderInventoryPrompt(root);
+    const folderPrompt = await buildBrainFolderInventoryPrompt(root);
 
     // Live read (not snapshotted at enqueue) so switching a brain's tier
     // applies to already-queued jobs. The debit prices from the recorded
     // trace model, so a mid-queue toggle can never bill the wrong tier.
-    const intelligence = await getGoatBrainIntelligence(brainRef, db).catch((error) => {
+    const intelligence = await getBrainIntelligence(brainRef, db).catch((error) => {
       logger.warn("Goat Brain intelligence lookup failed", {
         event: "opencompany.goat_brain_intelligence_lookup_failed",
         brain_ref: brainRef,
@@ -1304,14 +1303,14 @@ async function runBrainAgentIngestSession(input: {
       });
       return "basic" as const;
     });
-    const model = goatBrainIngestModelForIntelligence(intelligence);
+    const model = brainIngestModelForIntelligence(intelligence);
 
     // Live read (not snapshotted at enqueue) so an owner toggling enrichment off
     // applies to already-queued jobs. The Exa key gates whether it can run at all.
     const exaApiKey = input.env.exaApiKey?.trim() || null;
     const enrichmentEnabled =
       exaApiKey && !input.importRunId
-        ? await getGoatBrainEnrichmentEnabled(brainRef, db).catch((error) => {
+        ? await getBrainEnrichmentEnabled(brainRef, db).catch((error) => {
             logger.warn("Goat Brain enrichment flag lookup failed", {
               event: "opencompany.goat_brain_enrichment_flag_lookup_failed",
               brain_ref: brainRef,
@@ -1330,8 +1329,8 @@ async function runBrainAgentIngestSession(input: {
       model,
       ingestJobId: input.jobId,
       system: input.system,
-      prompt: appendGoatBrainFolderInventory(
-        appendGoatBrainIngestTriageHandoff(input.buildPrompt(), input.triage),
+      prompt: appendBrainFolderInventory(
+        appendBrainIngestTriageHandoff(input.buildPrompt(), input.triage),
         folderPrompt,
       ),
       ...(input.files?.length ? { files: input.files } : {}),
@@ -1351,14 +1350,14 @@ async function runBrainAgentIngestSession(input: {
     };
 
     if (!loop.budget.accountingComplete) {
-      throw new GoatBrainIngestBudgetError(
+      throw new BrainIngestBudgetError(
         loop.budgetAccountingError ?? "Goat Brain ingestion spend could not be accounted for.",
         budgetErrorResult,
       );
     }
 
     if (loop.budget.exhausted && loop.mutations === 0) {
-      throw new GoatBrainIngestBudgetError(
+      throw new BrainIngestBudgetError(
         `Goat Brain ingestion budget exhausted after ${loop.budget.totalCostUsdMicros} USD micros without producing a brain mutation.`,
         budgetErrorResult,
       );
@@ -1388,14 +1387,14 @@ async function runBrainAgentIngestSession(input: {
       cache_write_input_tokens: loop.usage.cacheWriteInputTokens,
       triage_input_tokens: input.triage?.usage.inputTokens,
       triage_output_tokens: input.triage?.usage.outputTokens,
-      ...goatBrainBudgetLogFields(loop.budget),
+      ...brainBudgetLogFields(loop.budget),
     });
 
     // The source may have been disabled while the model was running. Its job
     // lease is revoked by the source action and propagated through this signal;
     // never sync the temporary Brain after that cancellation point.
     input.signal?.throwIfAborted();
-    const synced = await syncGoatBrainFilesFromRoot({
+    const synced = await syncBrainFilesFromRoot({
       brainRef,
       userWorkosId: input.userWorkosId,
       root,
@@ -1444,7 +1443,7 @@ function brainAgentIngestCompletionOutcome(input: {
 }): { skipped: boolean; reason?: string; skipMode?: BrainAgentIngestSkipMode } {
   if (input.mutations > 0) return { skipped: false };
   if (input.failedMutatingToolCalls > 0) {
-    throw new GoatBrainAgentOutcomeError(
+    throw new BrainAgentOutcomeError(
       `Goat Brain ingestion agent attempted ${input.failedMutatingToolCalls} mutating command${
         input.failedMutatingToolCalls === 1 ? "" : "s"
       } without successfully writing to the brain.`,
@@ -1465,7 +1464,7 @@ function brainAgentIngestCompletionOutcome(input: {
       skipMode: "inferred_no_mutations",
     };
   }
-  throw new GoatBrainAgentOutcomeError(
+  throw new BrainAgentOutcomeError(
     "Goat Brain ingestion agent finished without writing to the brain and did not skip.",
   );
 }
@@ -1494,14 +1493,14 @@ function explicitSkipFromFinalText(finalText: string): { reason?: string } | nul
   return null;
 }
 
-export async function buildGoatBrainFolderInventoryPrompt(root: string): Promise<string | null> {
-  const folders = await readGoatBrainFolderManifestFromRoot(root);
+export async function buildBrainFolderInventoryPrompt(root: string): Promise<string | null> {
+  const folders = await readBrainFolderManifestFromRoot(root);
   if (!folders || folders.length === 0) return null;
-  return formatGoatBrainFolderInventoryPrompt(folders);
+  return formatBrainFolderInventoryPrompt(folders);
 }
 
-export function formatGoatBrainFolderInventoryPrompt(
-  folders: readonly GoatBrainFolderManifestEntry[],
+export function formatBrainFolderInventoryPrompt(
+  folders: readonly BrainFolderManifestEntry[],
 ): string | null {
   if (folders.length === 0) return null;
   const lines = folders.map((folder) => `- ${folder.path}/ (${folder.source})`);
@@ -1512,14 +1511,14 @@ export function formatGoatBrainFolderInventoryPrompt(
   ].join("\n");
 }
 
-function appendGoatBrainFolderInventory(prompt: string, folderPrompt: string | null) {
+function appendBrainFolderInventory(prompt: string, folderPrompt: string | null) {
   if (!folderPrompt) return prompt;
   return `${folderPrompt}\n\n${prompt}`;
 }
 
-function appendGoatBrainIngestTriageHandoff(
+function appendBrainIngestTriageHandoff(
   prompt: string,
-  triage: GoatBrainIngestTriageTrace | undefined,
+  triage: BrainIngestTriageTrace | undefined,
 ) {
   if (!triage || triage.decision !== "ingest") return prompt;
   const reason = triage.reason.replace(/\s+/g, " ").trim();
@@ -1554,16 +1553,16 @@ function appendGoatBrainIngestTriageHandoff(
 // content was authored by other people (channel participants, correspondents,
 // ticket workers), never the integration owner who connected the source — those
 // documents carry no created-by attribution.
-type GoatBrainIngestAuthorship = "acting_user" | "external";
+type BrainIngestAuthorship = "acting_user" | "external";
 
-type GoatBrainIngestProfileInput<TItem extends NormalizedBrainSourceItem> = {
+type BrainIngestProfileInput<TItem extends NormalizedBrainSourceItem> = {
   jobId?: string;
   userWorkosId: string;
   brainRef: string | null;
   integrationId?: string | null;
   importRunId?: string | null;
   item: TItem;
-  env: GoatBrainAgentIngestEnv;
+  env: BrainAgentIngestEnv;
   signal?: AbortSignal;
 };
 
@@ -1571,7 +1570,7 @@ type GoatBrainIngestProfileInput<TItem extends NormalizedBrainSourceItem> = {
 // run (a prompt plus optional pre-writes/attachments/metadata) or an early
 // result that short-circuits the agent entirely — e.g. the uploaded document was
 // deleted before ingestion, which is a clean skip, not a run.
-type GoatBrainIngestPreparedRun = {
+type BrainIngestPreparedRun = {
   buildPrompt: () => string;
   // Source-only tiny-model prompt. Runs before Brain materialization and folder
   // inventory; an obvious-noise verdict short-circuits the full agent.
@@ -1586,18 +1585,16 @@ type GoatBrainIngestPreparedRun = {
   // Merged into the returned result alongside the session fields.
   metadata?: Record<string, unknown>;
 };
-type GoatBrainIngestPrepared =
-  | GoatBrainIngestPreparedRun
-  | { earlyResult: Record<string, unknown> };
+type BrainIngestPrepared = BrainIngestPreparedRun | { earlyResult: Record<string, unknown> };
 
-type GoatBrainIngestPrepareContext<TItem extends NormalizedBrainSourceItem> = {
-  input: GoatBrainIngestProfileInput<TItem>;
+type BrainIngestPrepareContext<TItem extends NormalizedBrainSourceItem> = {
+  input: BrainIngestProfileInput<TItem>;
   brainRef: string;
   db: ReturnType<typeof getDb>;
-  deps: GoatBrainAgentIngestDeps;
+  deps: BrainAgentIngestDeps;
 };
 
-export type GoatBrainIngestProfile<
+export type BrainIngestProfile<
   TItem extends NormalizedBrainSourceItem = NormalizedBrainSourceItem,
 > = {
   system: string;
@@ -1607,24 +1604,23 @@ export type GoatBrainIngestProfile<
   // nothing is lost. "fail": treat the empty run as a failure and retry —
   // reserved for a source that must always produce a mutation.
   noMutationOutcome: BrainAgentNoMutationOutcome;
-  authorship: GoatBrainIngestAuthorship;
+  authorship: BrainIngestAuthorship;
   // Default command surface; omit for the standard read+write set.
   commands?: readonly string[];
-  prepare: (ctx: GoatBrainIngestPrepareContext<TItem>) => Promise<GoatBrainIngestPrepared>;
+  prepare: (ctx: BrainIngestPrepareContext<TItem>) => Promise<BrainIngestPrepared>;
 };
 
 // Applies a source profile to one job: resolve the target brain, run the
 // source's per-item prepare step, then hand the shared session everything it
 // needs. This is the single call site of runBrainAgentIngestSession, so the
 // required outcome/authorship policy can never be forgotten.
-export async function runGoatBrainIngestProfile<TItem extends NormalizedBrainSourceItem>(
-  profile: GoatBrainIngestProfile<TItem>,
-  input: GoatBrainIngestProfileInput<TItem>,
-  deps: GoatBrainAgentIngestDeps = {},
+export async function runBrainIngestProfile<TItem extends NormalizedBrainSourceItem>(
+  profile: BrainIngestProfile<TItem>,
+  input: BrainIngestProfileInput<TItem>,
+  deps: BrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
   const db = getDb();
-  const brainRef =
-    input.brainRef ?? (await getDefaultGoatBrainForUser(input.userWorkosId, { db }))?.id;
+  const brainRef = input.brainRef ?? (await getDefaultBrainForUser(input.userWorkosId, { db }))?.id;
   if (!brainRef) {
     throw new Error(`No accessible Goat brain found for user ${input.userWorkosId}.`);
   }
@@ -1635,7 +1631,7 @@ export async function runGoatBrainIngestProfile<TItem extends NormalizedBrainSou
   }
 
   const triage = prepared.triagePrompt
-    ? await runPreparedGoatBrainIngestTriage({
+    ? await runPreparedBrainIngestTriage({
         input,
         brainRef,
         prompt: prepared.triagePrompt,
@@ -1690,14 +1686,14 @@ export async function runGoatBrainIngestProfile<TItem extends NormalizedBrainSou
   return { ...session, ...(prepared.metadata ?? {}) };
 }
 
-async function runPreparedGoatBrainIngestTriage<TItem extends NormalizedBrainSourceItem>(input: {
-  input: GoatBrainIngestProfileInput<TItem>;
+async function runPreparedBrainIngestTriage<TItem extends NormalizedBrainSourceItem>(input: {
+  input: BrainIngestProfileInput<TItem>;
   brainRef: string;
   prompt: string;
-  deps: GoatBrainAgentIngestDeps;
+  deps: BrainAgentIngestDeps;
 }) {
   try {
-    const runner = input.deps.runTriage ?? runGoatBrainIngestTriage;
+    const runner = input.deps.runTriage ?? runBrainIngestTriage;
     const triage = await runner({
       prompt: input.prompt,
       gatewayApiKey: input.input.env.vercelAiGatewayApiKey,
@@ -1731,7 +1727,7 @@ async function runPreparedGoatBrainIngestTriage<TItem extends NormalizedBrainSou
   }
 }
 
-function triageOnlyBudget(triage: GoatBrainIngestTriageTrace): GoatBrainIngestBudget {
+function triageOnlyBudget(triage: BrainIngestTriageTrace): BrainIngestBudget {
   return {
     limitUsdMicros: GOAT_BRAIN_AGENT_INGEST_BUDGET_LIMIT_USD_MICROS,
     stopThresholdUsdMicros: GOAT_BRAIN_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS,
@@ -1745,9 +1741,9 @@ function triageOnlyBudget(triage: GoatBrainIngestTriageTrace): GoatBrainIngestBu
 }
 
 function triageOnlyTrace(
-  triage: GoatBrainIngestTriageTrace,
-  budget: GoatBrainIngestBudget,
-): GoatBrainIngestTrace {
+  triage: BrainIngestTriageTrace,
+  budget: BrainIngestBudget,
+): BrainIngestTrace {
   return {
     schemaVersion: GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
     model: triage.model,
@@ -1755,10 +1751,7 @@ function triageOnlyTrace(
     toolCallCount: 0,
     mutations: 0,
     usage: triage.usage,
-    finalText: goatBrainIngestTracePreview(
-      triage.reason,
-      GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH,
-    ),
+    finalText: brainIngestTracePreview(triage.reason, GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH),
     toolCalls: [],
     truncatedToolCalls: 0,
     webSearchCount: 0,
@@ -1769,7 +1762,7 @@ function triageOnlyTrace(
   };
 }
 
-const GOAT_IMPORT_INGEST_PROFILE: GoatBrainIngestProfile<NormalizedGoatImportSourceItem> = {
+const GOAT_IMPORT_INGEST_PROFILE: BrainIngestProfile<NormalizedImportSourceItem> = {
   system: GOAT_IMPORT_INGEST_SYSTEM_PROMPT,
   noMutationOutcome: "skip",
   authorship: "acting_user",
@@ -1805,11 +1798,11 @@ const GOAT_IMPORT_INGEST_PROFILE: GoatBrainIngestProfile<NormalizedGoatImportSou
   },
 };
 
-export function runGoatImportAgentIngest(
-  input: GoatBrainIngestProfileInput<NormalizedGoatImportSourceItem>,
-  deps: GoatBrainAgentIngestDeps = {},
+export function runImportAgentIngest(
+  input: BrainIngestProfileInput<NormalizedImportSourceItem>,
+  deps: BrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
-  return runGoatBrainIngestProfile(GOAT_IMPORT_INGEST_PROFILE, input, deps);
+  return runBrainIngestProfile(GOAT_IMPORT_INGEST_PROFILE, input, deps);
 }
 
 // Jamie, Granola, and Fathom share one shape: snapshot the transcript to
@@ -1828,7 +1821,7 @@ function meetingEvidenceProfile<
   system: string;
   buildEvidence: (item: TItem) => TEvidence;
   buildPrompt: (item: TItem, evidence: TEvidence) => string;
-}): GoatBrainIngestProfile<TItem> {
+}): BrainIngestProfile<TItem> {
   return {
     system: config.system,
     noMutationOutcome: "skip",
@@ -1856,10 +1849,10 @@ const JAMIE_MEETING_INGEST_PROFILE = meetingEvidenceProfile({
 });
 
 export function runJamieMeetingAgentIngest(
-  input: GoatBrainIngestProfileInput<NormalizedJamieMeetingSourceItem>,
-  deps: GoatBrainAgentIngestDeps = {},
+  input: BrainIngestProfileInput<NormalizedJamieMeetingSourceItem>,
+  deps: BrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
-  return runGoatBrainIngestProfile(JAMIE_MEETING_INGEST_PROFILE, input, deps);
+  return runBrainIngestProfile(JAMIE_MEETING_INGEST_PROFILE, input, deps);
 }
 
 const GRANOLA_MEETING_INGEST_PROFILE = meetingEvidenceProfile({
@@ -1869,10 +1862,10 @@ const GRANOLA_MEETING_INGEST_PROFILE = meetingEvidenceProfile({
 });
 
 export function runGranolaMeetingAgentIngest(
-  input: GoatBrainIngestProfileInput<NormalizedGranolaMeetingSourceItem>,
-  deps: GoatBrainAgentIngestDeps = {},
+  input: BrainIngestProfileInput<NormalizedGranolaMeetingSourceItem>,
+  deps: BrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
-  return runGoatBrainIngestProfile(GRANOLA_MEETING_INGEST_PROFILE, input, deps);
+  return runBrainIngestProfile(GRANOLA_MEETING_INGEST_PROFILE, input, deps);
 }
 
 const FATHOM_MEETING_INGEST_PROFILE = meetingEvidenceProfile({
@@ -1882,13 +1875,13 @@ const FATHOM_MEETING_INGEST_PROFILE = meetingEvidenceProfile({
 });
 
 export function runFathomMeetingAgentIngest(
-  input: GoatBrainIngestProfileInput<NormalizedFathomMeetingSourceItem>,
-  deps: GoatBrainAgentIngestDeps = {},
+  input: BrainIngestProfileInput<NormalizedFathomMeetingSourceItem>,
+  deps: BrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
-  return runGoatBrainIngestProfile(FATHOM_MEETING_INGEST_PROFILE, input, deps);
+  return runBrainIngestProfile(FATHOM_MEETING_INGEST_PROFILE, input, deps);
 }
 
-export const GOAT_CHAT_CAPTURE_INGEST_PROFILE: GoatBrainIngestProfile<NormalizedGoatChatCaptureSourceItem> =
+export const GOAT_CHAT_CAPTURE_INGEST_PROFILE: BrainIngestProfile<NormalizedChatCaptureSourceItem> =
   {
     system: GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT,
     // The capture is already persisted as a draft in the inbox before this job
@@ -1901,28 +1894,26 @@ export const GOAT_CHAT_CAPTURE_INGEST_PROFILE: GoatBrainIngestProfile<Normalized
     async prepare({ input, db }) {
       // The capture's author is the acting user; their name lets the agent
       // attribute the idea in prose instead of writing "the user".
-      const capturedByName = await getGoatUserDisplayName(input.userWorkosId, { db }).catch(
-        (error) => {
-          logger.warn("Goat chat capture ingest user name lookup failed", {
-            event: "opencompany.goat_chat_capture_user_name_lookup_failed",
-            user_workos_id: input.userWorkosId,
-            error,
-          });
-          return null;
-        },
-      );
+      const capturedByName = await getUserDisplayName(input.userWorkosId, { db }).catch((error) => {
+        logger.warn("Goat chat capture ingest user name lookup failed", {
+          event: "opencompany.goat_chat_capture_user_name_lookup_failed",
+          user_workos_id: input.userWorkosId,
+          error,
+        });
+        return null;
+      });
       return {
-        buildPrompt: () => buildGoatChatCaptureAgentIngestPrompt(input.item, { capturedByName }),
+        buildPrompt: () => buildChatCaptureAgentIngestPrompt(input.item, { capturedByName }),
         metadata: { draftBrainId: input.item.content.capture.draftBrainId },
       };
     },
   };
 
-export function runGoatChatCaptureAgentIngest(
-  input: GoatBrainIngestProfileInput<NormalizedGoatChatCaptureSourceItem>,
-  deps: GoatBrainAgentIngestDeps = {},
+export function runChatCaptureAgentIngest(
+  input: BrainIngestProfileInput<NormalizedChatCaptureSourceItem>,
+  deps: BrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
-  return runGoatBrainIngestProfile(GOAT_CHAT_CAPTURE_INGEST_PROFILE, input, deps);
+  return runBrainIngestProfile(GOAT_CHAT_CAPTURE_INGEST_PROFILE, input, deps);
 }
 
 // Slack, Linear, HubSpot, Attio, GitHub, and Drive share one shape: fold a
@@ -1934,7 +1925,7 @@ function externalActivityProfile<TItem extends NormalizedBrainSourceItem>(config
   buildPrompt: (item: TItem) => string;
   metadata: (item: TItem) => Record<string, unknown>;
   buildTriagePrompt?: (item: TItem) => string | null;
-}): GoatBrainIngestProfile<TItem> {
+}): BrainIngestProfile<TItem> {
   return {
     system: config.system,
     noMutationOutcome: "skip",
@@ -1968,10 +1959,10 @@ const SLACK_CONVERSATION_INGEST_PROFILE =
   });
 
 export function runSlackConversationAgentIngest(
-  input: GoatBrainIngestProfileInput<NormalizedSlackConversationSourceItem>,
-  deps: GoatBrainAgentIngestDeps = {},
+  input: BrainIngestProfileInput<NormalizedSlackConversationSourceItem>,
+  deps: BrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
-  return runGoatBrainIngestProfile(SLACK_CONVERSATION_INGEST_PROFILE, input, deps);
+  return runBrainIngestProfile(SLACK_CONVERSATION_INGEST_PROFILE, input, deps);
 }
 
 const LINEAR_ISSUE_INGEST_PROFILE = externalActivityProfile<NormalizedLinearIssueSourceItem>({
@@ -1990,10 +1981,10 @@ const LINEAR_ISSUE_INGEST_PROFILE = externalActivityProfile<NormalizedLinearIssu
 });
 
 export function runLinearIssueAgentIngest(
-  input: GoatBrainIngestProfileInput<NormalizedLinearIssueSourceItem>,
-  deps: GoatBrainAgentIngestDeps = {},
+  input: BrainIngestProfileInput<NormalizedLinearIssueSourceItem>,
+  deps: BrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
-  return runGoatBrainIngestProfile(LINEAR_ISSUE_INGEST_PROFILE, input, deps);
+  return runBrainIngestProfile(LINEAR_ISSUE_INGEST_PROFILE, input, deps);
 }
 
 const HUBSPOT_OBJECT_INGEST_PROFILE = externalActivityProfile<NormalizedHubspotObjectSourceItem>({
@@ -2012,10 +2003,10 @@ const HUBSPOT_OBJECT_INGEST_PROFILE = externalActivityProfile<NormalizedHubspotO
 });
 
 export function runHubspotObjectAgentIngest(
-  input: GoatBrainIngestProfileInput<NormalizedHubspotObjectSourceItem>,
-  deps: GoatBrainAgentIngestDeps = {},
+  input: BrainIngestProfileInput<NormalizedHubspotObjectSourceItem>,
+  deps: BrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
-  return runGoatBrainIngestProfile(HUBSPOT_OBJECT_INGEST_PROFILE, input, deps);
+  return runBrainIngestProfile(HUBSPOT_OBJECT_INGEST_PROFILE, input, deps);
 }
 
 const ATTIO_OBJECT_INGEST_PROFILE = externalActivityProfile<NormalizedAttioObjectSourceItem>({
@@ -2035,13 +2026,13 @@ const ATTIO_OBJECT_INGEST_PROFILE = externalActivityProfile<NormalizedAttioObjec
 });
 
 export function runAttioObjectAgentIngest(
-  input: GoatBrainIngestProfileInput<NormalizedAttioObjectSourceItem>,
-  deps: GoatBrainAgentIngestDeps = {},
+  input: BrainIngestProfileInput<NormalizedAttioObjectSourceItem>,
+  deps: BrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
-  return runGoatBrainIngestProfile(ATTIO_OBJECT_INGEST_PROFILE, input, deps);
+  return runBrainIngestProfile(ATTIO_OBJECT_INGEST_PROFILE, input, deps);
 }
 
-const GMAIL_THREAD_INGEST_PROFILE: GoatBrainIngestProfile<NormalizedGmailThreadSourceItem> = {
+const GMAIL_THREAD_INGEST_PROFILE: BrainIngestProfile<NormalizedGmailThreadSourceItem> = {
   system: GMAIL_THREAD_INGEST_SYSTEM_PROMPT,
   noMutationOutcome: "skip",
   // Email content is authored by the correspondents, not the integration owner.
@@ -2056,7 +2047,7 @@ const GMAIL_THREAD_INGEST_PROFILE: GoatBrainIngestProfile<NormalizedGmailThreadS
     // brain settings apply to already-queued jobs; the job content hash covers
     // only the normalized item, so this never invalidates the claim.
     const instructions = input.integrationId
-      ? await getGoatGmailBrainSourceInstructions(
+      ? await getGmailBrainSourceInstructions(
           {
             integrationId: input.integrationId,
             brainRef,
@@ -2096,10 +2087,10 @@ const GMAIL_THREAD_INGEST_PROFILE: GoatBrainIngestProfile<NormalizedGmailThreadS
 };
 
 export function runGmailThreadAgentIngest(
-  input: GoatBrainIngestProfileInput<NormalizedGmailThreadSourceItem>,
-  deps: GoatBrainAgentIngestDeps = {},
+  input: BrainIngestProfileInput<NormalizedGmailThreadSourceItem>,
+  deps: BrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
-  return runGoatBrainIngestProfile(GMAIL_THREAD_INGEST_PROFILE, input, deps);
+  return runBrainIngestProfile(GMAIL_THREAD_INGEST_PROFILE, input, deps);
 }
 
 const GOOGLE_DRIVE_DOCUMENT_INGEST_PROFILE =
@@ -2118,10 +2109,10 @@ const GOOGLE_DRIVE_DOCUMENT_INGEST_PROFILE =
   });
 
 export function runGoogleDriveDocumentAgentIngest(
-  input: GoatBrainIngestProfileInput<NormalizedGoogleDriveDocumentSourceItem>,
-  deps: GoatBrainAgentIngestDeps = {},
+  input: BrainIngestProfileInput<NormalizedGoogleDriveDocumentSourceItem>,
+  deps: BrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
-  return runGoatBrainIngestProfile(GOOGLE_DRIVE_DOCUMENT_INGEST_PROFILE, input, deps);
+  return runBrainIngestProfile(GOOGLE_DRIVE_DOCUMENT_INGEST_PROFILE, input, deps);
 }
 
 const GITHUB_ACTIVITY_INGEST_PROFILE = externalActivityProfile<NormalizedGitHubActivitySourceItem>({
@@ -2141,82 +2132,81 @@ const GITHUB_ACTIVITY_INGEST_PROFILE = externalActivityProfile<NormalizedGitHubA
 });
 
 export function runGitHubActivityAgentIngest(
-  input: GoatBrainIngestProfileInput<NormalizedGitHubActivitySourceItem>,
-  deps: GoatBrainAgentIngestDeps = {},
+  input: BrainIngestProfileInput<NormalizedGitHubActivitySourceItem>,
+  deps: BrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
-  return runGoatBrainIngestProfile(GITHUB_ACTIVITY_INGEST_PROFILE, input, deps);
+  return runBrainIngestProfile(GITHUB_ACTIVITY_INGEST_PROFILE, input, deps);
 }
 
-export const UPLOAD_ASSET_INGEST_PROFILE: GoatBrainIngestProfile<NormalizedUploadAssetSourceItem> =
-  {
-    system: UPLOAD_ASSET_INGEST_SYSTEM_PROMPT,
-    // The file already exists as a brain document before this job runs, so a
-    // curation pass that makes no change leaves it as an unenriched draft — a safe
-    // no-op to skip, not a failure to retry.
-    noMutationOutcome: "skip",
-    authorship: "acting_user",
-    async prepare({ input, brainRef, db }) {
-      const asset = input.item.content.asset;
-      const row = await getGoatBrainFile({ brainRef, fileId: asset.documentId }, { db });
-      // The user may delete the document between upload and ingestion; that is a
-      // clean no-op, not a retryable failure.
-      if (!row) {
-        return {
-          earlyResult: { skipped: true, reason: "document_missing", documentId: asset.documentId },
-        };
-      }
-      if (row.format === "markdown" || !row.assetStorageKey) {
-        throw new Error(`Brain document ${asset.documentId} is not a binary asset.`);
-      }
-
-      // Stage 1 (deterministic): fetch the bytes, extract text, record it on the
-      // row so materialization inside the agent session includes the generated
-      // extracted-text block and retrieval can index it. Images have no text to
-      // extract — the bytes go to the (multimodal) agent as an image part instead.
-      const bytes = await downloadGoatBrainAssetBytes(row.assetStorageKey, input.env);
-      const extractedText = await extractAssetText(row.format, bytes);
-      await updateGoatBrainAssetExtraction(
-        {
-          brainRef,
-          userWorkosId: input.userWorkosId,
-          fileId: row.id,
-          extractedText,
-          assetContentHash: createHash("sha256").update(bytes).digest("hex"),
-          assetSizeBytes: bytes.byteLength,
-        },
-        { db },
-      );
-
-      const truncatedText = Buffer.byteLength(extractedText, "utf8") > PROMPT_ASSET_TEXT_BYTES;
+export const UPLOAD_ASSET_INGEST_PROFILE: BrainIngestProfile<NormalizedUploadAssetSourceItem> = {
+  system: UPLOAD_ASSET_INGEST_SYSTEM_PROMPT,
+  // The file already exists as a brain document before this job runs, so a
+  // curation pass that makes no change leaves it as an unenriched draft — a safe
+  // no-op to skip, not a failure to retry.
+  noMutationOutcome: "skip",
+  authorship: "acting_user",
+  async prepare({ input, brainRef, db }) {
+    const asset = input.item.content.asset;
+    const row = await getBrainFile({ brainRef, fileId: asset.documentId }, { db });
+    // The user may delete the document between upload and ingestion; that is a
+    // clean no-op, not a retryable failure.
+    if (!row) {
       return {
-        buildPrompt: () =>
-          buildUploadAssetAgentIngestPrompt(input.item, {
-            extractedText: truncateByBytes(extractedText, PROMPT_ASSET_TEXT_BYTES),
-            truncatedText,
-            format: row.format,
-          }),
-        ...(row.format === "image"
-          ? { files: [{ mediaType: row.mimeType ?? "image/png", data: bytes }] }
-          : {}),
-        metadata: {
-          documentId: row.id,
-          assetBrainId: row.brainId,
-          extractedTextBytes: Buffer.byteLength(extractedText, "utf8"),
-        },
+        earlyResult: { skipped: true, reason: "document_missing", documentId: asset.documentId },
       };
-    },
-  };
+    }
+    if (row.format === "markdown" || !row.assetStorageKey) {
+      throw new Error(`Brain document ${asset.documentId} is not a binary asset.`);
+    }
+
+    // Stage 1 (deterministic): fetch the bytes, extract text, record it on the
+    // row so materialization inside the agent session includes the generated
+    // extracted-text block and retrieval can index it. Images have no text to
+    // extract — the bytes go to the (multimodal) agent as an image part instead.
+    const bytes = await downloadBrainAssetBytes(row.assetStorageKey, input.env);
+    const extractedText = await extractAssetText(row.format, bytes);
+    await updateBrainAssetExtraction(
+      {
+        brainRef,
+        userWorkosId: input.userWorkosId,
+        fileId: row.id,
+        extractedText,
+        assetContentHash: createHash("sha256").update(bytes).digest("hex"),
+        assetSizeBytes: bytes.byteLength,
+      },
+      { db },
+    );
+
+    const truncatedText = Buffer.byteLength(extractedText, "utf8") > PROMPT_ASSET_TEXT_BYTES;
+    return {
+      buildPrompt: () =>
+        buildUploadAssetAgentIngestPrompt(input.item, {
+          extractedText: truncateByBytes(extractedText, PROMPT_ASSET_TEXT_BYTES),
+          truncatedText,
+          format: row.format,
+        }),
+      ...(row.format === "image"
+        ? { files: [{ mediaType: row.mimeType ?? "image/png", data: bytes }] }
+        : {}),
+      metadata: {
+        documentId: row.id,
+        assetBrainId: row.brainId,
+        extractedTextBytes: Buffer.byteLength(extractedText, "utf8"),
+      },
+    };
+  },
+};
 
 export function runUploadAssetAgentIngest(
-  input: GoatBrainIngestProfileInput<NormalizedUploadAssetSourceItem>,
-  deps: GoatBrainAgentIngestDeps = {},
+  input: BrainIngestProfileInput<NormalizedUploadAssetSourceItem>,
+  deps: BrainAgentIngestDeps = {},
 ): Promise<Record<string, unknown>> {
-  return runGoatBrainIngestProfile(UPLOAD_ASSET_INGEST_PROFILE, input, deps);
+  return runBrainIngestProfile(UPLOAD_ASSET_INGEST_PROFILE, input, deps);
 }
 
-async function downloadGoatBrainAssetBytes(
+async function downloadBrainAssetBytes(
   storageKey: string,
-  env: GoatBrainAgentIngestEnv,
+  env: BrainAgentIngestEnv,
 ): Promise<Buffer> {
   // Same pattern as attachment-hydration.ts: the blob lives in the PRIVATE
   // store; the token defaults to BLOB_READ_WRITE_TOKEN, overridden when the
@@ -2341,23 +2331,23 @@ export async function runIngestAgentLoop(input: {
   files?: readonly { mediaType: string; data: Buffer }[];
   commands?: readonly string[];
   signal?: AbortSignal;
-  runCli?: GoatBrainAgentCliRunner;
+  runCli?: BrainAgentCliRunner;
   // When set, the web_search enrichment tool is registered and the enrichment
   // discipline is appended to the system prompt. Absent → source-only ingest.
   exaApiKey?: string;
   // Successful source-only triage spend is part of this attempt's shared
   // budget and trace, but was already recorded when the triage call finished.
-  triage?: GoatBrainIngestTriageTrace;
+  triage?: BrainIngestTriageTrace;
 }) {
   const { generateText } = getBraintrustAISDK(ai);
   const gateway = ai.createGateway({ apiKey: input.gatewayApiKey });
-  const attribution = createGoatGatewayAttribution({
+  const attribution = createGatewayAttribution({
     userWorkosId: input.userWorkosId,
     feature: "brain-ingest",
     brainRef: input.brainRef,
     ingestJobId: input.ingestJobId,
   });
-  const brainQueryAttribution = createGoatGatewayAttribution({
+  const brainQueryAttribution = createGatewayAttribution({
     userWorkosId: input.userWorkosId,
     feature: "brain-query",
     brainRef: input.brainRef,
@@ -2383,13 +2373,13 @@ export async function runIngestAgentLoop(input: {
   let budgetExhausted = false;
   let budgetAccountingError: string | null = null;
   let cliQueue: Promise<void> = Promise.resolve();
-  const traceToolCalls: GoatBrainIngestTraceToolCall[] = [];
-  const successfulWritesByPage = new Map<string, GoatBrainAgentWriteReceipt>();
-  const runCli = input.runCli ?? runGoatBrainAgentCli;
+  const traceToolCalls: BrainIngestTraceToolCall[] = [];
+  const successfulWritesByPage = new Map<string, BrainAgentWriteReceipt>();
+  const runCli = input.runCli ?? runBrainAgentCli;
   const commands = input.commands ?? AGENT_CLI_COMMANDS;
   const totalCostUsdMicros = () =>
     modelCostUsdMicros + brainQueryCostUsdMicros + webSearchCostUsdMicros;
-  const budgetSnapshot = (): GoatBrainIngestBudget => ({
+  const budgetSnapshot = (): BrainIngestBudget => ({
     limitUsdMicros: GOAT_BRAIN_AGENT_INGEST_BUDGET_LIMIT_USD_MICROS,
     stopThresholdUsdMicros: GOAT_BRAIN_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS,
     modelCostUsdMicros,
@@ -2404,14 +2394,14 @@ export async function runIngestAgentLoop(input: {
       budgetAccountingError = `Invalid ${source} provider cost reported for Goat Brain ingestion.`;
       if (!budgetExhausted) {
         budgetExhausted = true;
-        recordGoatBrainIngestBudgetExhausted();
+        recordBrainIngestBudgetExhausted();
       }
       logger.warn("Goat Brain ingestion received invalid provider cost", {
         event: "opencompany.goat_brain_ingest_cost_invalid",
         brain_ref: input.brainRef,
         ingest_job_id: input.ingestJobId,
         cost_source: source,
-        ...goatBrainBudgetLogFields(budgetSnapshot()),
+        ...brainBudgetLogFields(budgetSnapshot()),
       });
       return;
     }
@@ -2420,7 +2410,7 @@ export async function runIngestAgentLoop(input: {
     if (source === "model") modelCostUsdMicros += cost;
     if (source === "brain_query") brainQueryCostUsdMicros += cost;
     if (source === "web_search") webSearchCostUsdMicros += cost;
-    recordGoatBrainIngestSpend({
+    recordBrainIngestSpend({
       costUsdMicros: cost,
       source,
       attributes: {
@@ -2432,12 +2422,12 @@ export async function runIngestAgentLoop(input: {
       totalCostUsdMicros() >= GOAT_BRAIN_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS
     ) {
       budgetExhausted = true;
-      recordGoatBrainIngestBudgetExhausted();
+      recordBrainIngestBudgetExhausted();
       logger.warn("Goat Brain ingestion spend gate reached", {
         event: "opencompany.goat_brain_ingest_budget_exhausted",
         brain_ref: input.brainRef,
         ingest_job_id: input.ingestJobId,
-        ...goatBrainBudgetLogFields(budgetSnapshot()),
+        ...brainBudgetLogFields(budgetSnapshot()),
       });
     }
   };
@@ -2496,17 +2486,17 @@ export async function runIngestAgentLoop(input: {
         toolCalls += 1;
         const traceId = `goat_brain_call_${toolCalls}`;
         let startedAt = new Date().toISOString();
-        const sanitizedArgs = sanitizeGoatBrainIngestTraceArgs(args.args ?? []);
+        const sanitizedArgs = sanitizeBrainIngestTraceArgs(args.args ?? []);
         const stdinPreview =
           typeof args.stdin === "string" && args.stdin
-            ? goatBrainIngestTracePreview(args.stdin, GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH)
+            ? brainIngestTracePreview(args.stdin, GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH)
             : null;
-        const mutating = isMutatingGoatBrainAgentInvocation(args);
+        const mutating = isMutatingBrainAgentInvocation(args);
         const invalid =
           budgetExhausted || budgetAccountingError
             ? (budgetAccountingError ??
               "ingestion spend budget exhausted; finish with the brain changes already made")
-            : validateGoatBrainAgentInvocation(args, commands);
+            : validateBrainAgentInvocation(args, commands);
         if (invalid) {
           if (mutating) failedMutatingToolCalls += 1;
           appendTraceToolCall(traceToolCalls, {
@@ -2520,7 +2510,7 @@ export async function runIngestAgentLoop(input: {
             exitCode: null,
             stdoutPreview: "",
             stderrPreview: "",
-            errorPreview: goatBrainIngestTracePreview(
+            errorPreview: brainIngestTracePreview(
               invalid,
               GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
             ),
@@ -2548,9 +2538,7 @@ export async function runIngestAgentLoop(input: {
             signal: abort.signal,
           });
           const receipt =
-            rawResult.ok && mutating
-              ? buildGoatBrainAgentWriteReceipt(args, rawResult.stdout)
-              : null;
+            rawResult.ok && mutating ? buildBrainAgentWriteReceipt(args, rawResult.stdout) : null;
           if (receipt) {
             mutations += 1;
             for (const pageId of receipt.affectedPageIds) {
@@ -2573,7 +2561,7 @@ export async function runIngestAgentLoop(input: {
             exitCode: null,
             stdoutPreview: "",
             stderrPreview: "",
-            errorPreview: goatBrainIngestTracePreview(
+            errorPreview: brainIngestTracePreview(
               execution.blocked,
               GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
             ),
@@ -2583,14 +2571,14 @@ export async function runIngestAgentLoop(input: {
           return { ok: false, error: execution.blocked };
         }
         const { rawResult, receipt } = execution;
-        const reportedUsage = parseGoatBrainUsageReport(rawResult.stderr);
+        const reportedUsage = parseBrainUsageReport(rawResult.stderr);
         for (const entry of reportedUsage.entries) {
-          const cost = priceGoatBrainUsageEntry(entry);
+          const cost = priceBrainUsageEntry(entry);
           if (cost === null) {
             budgetAccountingError = `Could not price ${entry.operation} usage for model ${entry.model}.`;
             if (!budgetExhausted) {
               budgetExhausted = true;
-              recordGoatBrainIngestBudgetExhausted();
+              recordBrainIngestBudgetExhausted();
             }
             logger.warn("Goat Brain query usage could not be priced", {
               event: "opencompany.goat_brain_ingest_usage_unpriced",
@@ -2613,15 +2601,15 @@ export async function runIngestAgentLoop(input: {
           status: result.ok ? "completed" : "failed",
           mutating,
           exitCode: result.exitCode,
-          stdoutPreview: goatBrainIngestTracePreview(
+          stdoutPreview: brainIngestTracePreview(
             receipt ? JSON.stringify(receipt) : result.stdout,
             GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
           ),
-          stderrPreview: goatBrainIngestTracePreview(
+          stderrPreview: brainIngestTracePreview(
             result.stderr,
             GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
           ),
-          errorPreview: goatBrainIngestTracePreview(
+          errorPreview: brainIngestTracePreview(
             result.error ?? "",
             GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
           ),
@@ -2801,7 +2789,7 @@ export async function runIngestAgentLoop(input: {
         () => budgetExhausted || budgetAccountingError !== null,
       ],
       abortSignal: abort.signal,
-      providerOptions: goatGatewayProviderOptions(attribution),
+      providerOptions: gatewayProviderOptions(attribution),
       prepareStep: ({ messages }) => ({
         messages: placeMovingAnthropicCacheBreakpoint(messages),
       }),
@@ -2819,14 +2807,14 @@ export async function runIngestAgentLoop(input: {
       cacheWriteInputTokens: usage?.inputTokenDetails?.cacheWriteTokens ?? null,
     };
     const budget = budgetSnapshot();
-    const trace: GoatBrainIngestTrace = {
+    const trace: BrainIngestTrace = {
       schemaVersion: GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
       model: input.model,
       steps: result.steps.length,
       toolCallCount: toolCalls,
       mutations,
       usage: normalizedUsage,
-      finalText: goatBrainIngestTracePreview(finalText, GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH),
+      finalText: brainIngestTracePreview(finalText, GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH),
       toolCalls: traceToolCalls,
       truncatedToolCalls: Math.max(0, toolCalls - traceToolCalls.length),
       webSearchCount,
@@ -2864,14 +2852,14 @@ export async function runIngestAgentLoop(input: {
 }
 
 function appendTraceToolCall(
-  toolCalls: GoatBrainIngestTraceToolCall[],
-  toolCall: GoatBrainIngestTraceToolCall,
+  toolCalls: BrainIngestTraceToolCall[],
+  toolCall: BrainIngestTraceToolCall,
 ) {
   if (toolCalls.length >= GOAT_BRAIN_INGEST_TRACE_MAX_TOOL_CALLS) return;
   toolCalls.push(toolCall);
 }
 
-function goatBrainBudgetLogFields(budget: GoatBrainIngestBudget) {
+function brainBudgetLogFields(budget: BrainIngestBudget) {
   return {
     budget_limit_usd_micros: budget.limitUsdMicros,
     budget_stop_threshold_usd_micros: budget.stopThresholdUsdMicros,
@@ -2903,7 +2891,7 @@ function priceModelUsage(usage: ai.LanguageModelUsage, modelName: string): numbe
   }).providerCostUsdMicros;
 }
 
-function priceGoatBrainUsageEntry(entry: GoatBrainUsageEntry): number | null {
+function priceBrainUsageEntry(entry: BrainUsageEntry): number | null {
   if (entry.costUsd !== null && Number.isFinite(entry.costUsd) && entry.costUsd >= 0) {
     return Math.round(entry.costUsd * 1_000_000);
   }
@@ -2931,18 +2919,18 @@ function positiveUsageNumber(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
 }
 
-type GoatBrainAgentWriteReceipt = {
+type BrainAgentWriteReceipt = {
   outcome: "succeeded";
   command: string;
   affectedPageIds: string[];
   result: Record<string, unknown>;
 };
 
-function buildGoatBrainAgentWriteReceipt(
+function buildBrainAgentWriteReceipt(
   args: { command: string; args?: string[] },
   stdout: string,
-): GoatBrainAgentWriteReceipt {
-  const result = parseGoatBrainAgentWriteResult(stdout);
+): BrainAgentWriteReceipt {
+  const result = parseBrainAgentWriteResult(stdout);
   return {
     outcome: "succeeded",
     command: args.command,
@@ -2951,7 +2939,7 @@ function buildGoatBrainAgentWriteReceipt(
   };
 }
 
-function parseGoatBrainAgentWriteResult(stdout: string): Record<string, unknown> {
+function parseBrainAgentWriteResult(stdout: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(stdout) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
@@ -2999,7 +2987,7 @@ function affectedPageIdsForMutation(
   const add = (value: unknown) => {
     if (typeof value === "string" && value.trim()) ids.add(value.trim());
   };
-  const primaryId = result.id ?? goatBrainInvocationPageId(invocation.args ?? []);
+  const primaryId = result.id ?? brainInvocationPageId(invocation.args ?? []);
   switch (invocation.command) {
     case "create":
     case "rewrite":
@@ -3018,7 +3006,7 @@ function affectedPageIdsForMutation(
     case "merge":
       add(result.from ?? flagValue(invocation.args ?? [], "from"));
       add(result.into ?? flagValue(invocation.args ?? [], "into"));
-      for (const positional of goatBrainInvocationPositionals(invocation.args ?? []).slice(0, 2)) {
+      for (const positional of brainInvocationPositionals(invocation.args ?? []).slice(0, 2)) {
         add(positional);
       }
       break;
@@ -3028,18 +3016,18 @@ function affectedPageIdsForMutation(
 
 function redundantPostWriteReadError(
   invocation: { command: string; args?: string[] },
-  successfulWritesByPage: ReadonlyMap<string, GoatBrainAgentWriteReceipt>,
+  successfulWritesByPage: ReadonlyMap<string, BrainAgentWriteReceipt>,
 ): string | null {
   if (invocation.command !== "get" && invocation.command !== "timeline") return null;
-  const pageId = goatBrainInvocationPageId(invocation.args ?? []);
+  const pageId = brainInvocationPageId(invocation.args ?? []);
   if (!pageId) return null;
   const receipt = successfulWritesByPage.get(pageId);
   if (!receipt) return null;
   return `Verification read blocked: "${pageId}" was already changed successfully by ${receipt.command} in this ingest. Its write receipt is authoritative; continue without calling ${invocation.command}. Reads after failed writes and reads of other pages remain available.`;
 }
 
-function goatBrainInvocationPageId(tokens: readonly string[]): string | null {
-  return flagValue(tokens, "id") ?? goatBrainInvocationPositionals(tokens)[0] ?? null;
+function brainInvocationPageId(tokens: readonly string[]): string | null {
+  return flagValue(tokens, "id") ?? brainInvocationPositionals(tokens)[0] ?? null;
 }
 
 function flagValue(tokens: readonly string[], name: string): string | null {
@@ -3071,7 +3059,7 @@ const GOAT_BRAIN_BOOLEAN_FLAGS = new Set([
   "truth-stdin",
 ]);
 
-function goatBrainInvocationPositionals(tokens: readonly string[]): string[] {
+function brainInvocationPositionals(tokens: readonly string[]): string[] {
   const positionals: string[] = [];
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index] ?? "";
@@ -3090,7 +3078,7 @@ function hasJsonFlag(tokens: readonly string[]): boolean {
   return tokens.some((token) => token === "--json" || token.startsWith("--json="));
 }
 
-export function validateGoatBrainAgentInvocation(
+export function validateBrainAgentInvocation(
   args: {
     command: string;
     args?: string[];
@@ -3112,7 +3100,7 @@ export function validateGoatBrainAgentInvocation(
   return null;
 }
 
-function isMutatingGoatBrainAgentInvocation(args: { command: string; args?: string[] }): boolean {
+function isMutatingBrainAgentInvocation(args: { command: string; args?: string[] }): boolean {
   if (args.command === "folder") {
     const subcommand = args.args?.[0] ?? "list";
     return !READ_ONLY_AGENT_FOLDER_SUBCOMMANDS.has(subcommand);
@@ -3120,7 +3108,7 @@ function isMutatingGoatBrainAgentInvocation(args: { command: string; args?: stri
   return !READ_ONLY_AGENT_CLI_COMMANDS.has(args.command);
 }
 
-const runGoatBrainAgentCli: GoatBrainAgentCliRunner = async (input) => {
+const runBrainAgentCli: BrainAgentCliRunner = async (input) => {
   const child = spawn(process.execPath, [input.cliPath, ...input.argv], {
     env: {
       PATH: process.env.PATH ?? "",
@@ -3160,9 +3148,9 @@ const runGoatBrainAgentCli: GoatBrainAgentCliRunner = async (input) => {
     stderr += chunk.toString("utf8");
   });
 
-  return new Promise<GoatBrainAgentCliResult>((resolve) => {
+  return new Promise<BrainAgentCliResult>((resolve) => {
     let settled = false;
-    const settle = (result: GoatBrainAgentCliResult) => {
+    const settle = (result: BrainAgentCliResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);

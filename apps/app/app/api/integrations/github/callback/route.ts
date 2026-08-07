@@ -1,27 +1,27 @@
 import { NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
-import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
+import { currentUser } from "@/lib/auth";
+import { captureIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 import {
-  appendGoatGitHubIntegrationStatus,
-  buildGoatGitHubUserAuthorizationUrl,
-  createGoatGitHubIntegrationState,
-  exchangeGoatGitHubUserCode,
-  getGoatGitHubInstallation,
-  isGoatGitHubIntegrationConfigured,
-  listGoatGitHubInstallationRepositories,
-  syncGoatGitHubIntegrationRepositories,
-  verifyGoatGitHubIntegrationState,
-  verifyGoatGitHubUserInstallation,
+  appendGitHubIntegrationStatus,
+  buildGitHubUserAuthorizationUrl,
+  createGitHubIntegrationState,
+  exchangeGitHubUserCode,
+  getGitHubInstallation,
+  isGitHubIntegrationConfigured,
+  listGitHubInstallationRepositories,
+  syncGitHubIntegrationRepositories,
+  verifyGitHubIntegrationState,
+  verifyGitHubUserInstallation,
 } from "@/lib/integrations/github";
 
 export async function GET(request: Request) {
-  const current = await currentGoatUser();
+  const current = await currentUser();
   const url = new URL(request.url);
   const stateValue = url.searchParams.get("state") ?? "";
 
   let state;
   try {
-    state = verifyGoatGitHubIntegrationState(stateValue);
+    state = verifyGitHubIntegrationState(stateValue);
   } catch {
     return NextResponse.redirect(
       new URL("/settings?integration=github&setup=error&reason=invalid_state", url),
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
 
   if (state.userWorkosId !== current.user.workosUserId) {
     return NextResponse.redirect(
-      new URL(appendGoatGitHubIntegrationStatus(state.returnTo, "error", "session_mismatch"), url),
+      new URL(appendGitHubIntegrationStatus(state.returnTo, "error", "session_mismatch"), url),
     );
   }
 
@@ -39,13 +39,13 @@ export async function GET(request: Request) {
   const membership = current.workspaces.find((entry) => entry.workspace.id === state.workspaceId);
   if (!membership || membership.role !== "admin") {
     return NextResponse.redirect(
-      new URL(appendGoatGitHubIntegrationStatus(state.returnTo, "error", "admin_required"), url),
+      new URL(appendGitHubIntegrationStatus(state.returnTo, "error", "admin_required"), url),
     );
   }
 
-  if (!isGoatGitHubIntegrationConfigured()) {
+  if (!isGitHubIntegrationConfigured()) {
     return NextResponse.redirect(
-      new URL(appendGoatGitHubIntegrationStatus(state.returnTo, "error", "not_configured"), url),
+      new URL(appendGitHubIntegrationStatus(state.returnTo, "error", "not_configured"), url),
     );
   }
 
@@ -54,39 +54,39 @@ export async function GET(request: Request) {
   const oauthError = url.searchParams.get("error");
   if (oauthError) {
     return NextResponse.redirect(
-      new URL(appendGoatGitHubIntegrationStatus(state.returnTo, "error", "github_denied"), url),
+      new URL(appendGitHubIntegrationStatus(state.returnTo, "error", "github_denied"), url),
     );
   }
 
   if (!installationId) {
     return NextResponse.redirect(
       new URL(
-        appendGoatGitHubIntegrationStatus(state.returnTo, "error", "missing_installation_id"),
+        appendGitHubIntegrationStatus(state.returnTo, "error", "missing_installation_id"),
         url,
       ),
     );
   }
 
   if (!code) {
-    const nextState = createGoatGitHubIntegrationState({
+    const nextState = createGitHubIntegrationState({
       userWorkosId: state.userWorkosId,
       workspaceId: state.workspaceId,
       returnTo: state.returnTo,
       installationId,
     });
-    return NextResponse.redirect(buildGoatGitHubUserAuthorizationUrl(nextState));
+    return NextResponse.redirect(buildGitHubUserAuthorizationUrl(nextState));
   }
 
   try {
-    const userToken = await exchangeGoatGitHubUserCode(code);
-    const verifiedInstallation = await verifyGoatGitHubUserInstallation({
+    const userToken = await exchangeGitHubUserCode(code);
+    const verifiedInstallation = await verifyGitHubUserInstallation({
       userToken,
       installationId,
     });
-    const installation = await getGoatGitHubInstallation({ installationId });
-    const repositories = await listGoatGitHubInstallationRepositories({ installationId });
+    const installation = await getGitHubInstallation({ installationId });
+    const repositories = await listGitHubInstallationRepositories({ installationId });
 
-    await syncGoatGitHubIntegrationRepositories({
+    await syncGitHubIntegrationRepositories({
       userWorkosId: current.user.workosUserId,
       workspaceId: state.workspaceId,
       installationId,
@@ -94,19 +94,19 @@ export async function GET(request: Request) {
       accountType: installation.account?.type ?? verifiedInstallation.account?.type ?? null,
       repositories,
     });
-    await captureGoatIntegrationAddedAnalytics({
+    await captureIntegrationAddedAnalytics({
       userWorkosId: current.user.workosUserId,
       workspaceId: state.workspaceId,
       provider: "github",
     });
 
     return NextResponse.redirect(
-      new URL(appendGoatGitHubIntegrationStatus(state.returnTo, "connected"), url),
+      new URL(appendGitHubIntegrationStatus(state.returnTo, "connected"), url),
     );
   } catch {
     return NextResponse.redirect(
       new URL(
-        appendGoatGitHubIntegrationStatus(state.returnTo, "error", "connection_sync_failed"),
+        appendGitHubIntegrationStatus(state.returnTo, "error", "connection_sync_failed"),
         url,
       ),
     );

@@ -1,13 +1,13 @@
-import { getGoatCapabilityApproval } from "@opencompany/db/capabilities";
-import { currentGoatUser } from "@/lib/auth";
+import { getCapabilityApproval } from "@opencompany/db/capabilities";
+import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ runId: string }> }) {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const { runId } = await params;
-  const row = await getGoatCapabilityApproval({
+  const row = await getCapabilityApproval({
     id: runId,
     userWorkosId: context.user.workosUserId,
     workspaceId: context.workspace.id,
@@ -16,7 +16,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ run
   return Response.json(approvalView(row));
 }
 
-function approvalView(row: NonNullable<Awaited<ReturnType<typeof getGoatCapabilityApproval>>>) {
+function approvalView(row: NonNullable<Awaited<ReturnType<typeof getCapabilityApproval>>>) {
   return {
     runId: row.id,
     source: row.source,

@@ -5,7 +5,7 @@ export const REVOLUT_BUSINESS_SANDBOX_API_BASE_URL = "https://sandbox-b2b.revolu
 const REVOLUT_API_TIMEOUT_MS = 15_000;
 const MAX_REVOLUT_ERROR_DETAIL_CHARS = 240;
 
-export type GoatRevolutBusinessConnection = {
+export type RevolutBusinessConnection = {
   workspaceId: string;
   accountLabel: string;
   apiToken: string;
@@ -20,14 +20,14 @@ type RevolutApiErrorPayload = {
   message?: string;
 };
 
-export class GoatRevolutApiError extends Error {
+export class RevolutApiError extends Error {
   readonly status: number;
   readonly code: string | undefined;
   readonly detail: string | undefined;
 
   constructor(status: number, path: string, payload?: RevolutApiErrorPayload | null) {
     super(`Revolut Business API GET ${path} failed (${status}).`);
-    this.name = "GoatRevolutApiError";
+    this.name = "RevolutApiError";
     this.status = status;
     this.code = boundedRevolutErrorString(
       typeof payload?.error === "object" ? payload.error.code : payload?.code,
@@ -40,9 +40,9 @@ export class GoatRevolutApiError extends Error {
   }
 }
 
-export function loadGoatRevolutBusinessConnection(
+export function loadRevolutBusinessConnection(
   workspaceId: string,
-): GoatRevolutBusinessConnection | null {
+): RevolutBusinessConnection | null {
   const allowedWorkspaceId = process.env.REVOLUT_BUSINESS_WORKSPACE_ID?.trim();
   if (!allowedWorkspaceId || allowedWorkspaceId !== workspaceId) return null;
 
@@ -63,8 +63,8 @@ export function loadGoatRevolutBusinessConnection(
   };
 }
 
-export async function requestGoatRevolutBusinessApi<T>(input: {
-  connection: GoatRevolutBusinessConnection;
+export async function requestRevolutBusinessApi<T>(input: {
+  connection: RevolutBusinessConnection;
   path: string;
   params?: Readonly<Record<string, string | number | boolean | undefined>>;
   signal?: AbortSignal;
@@ -95,7 +95,7 @@ export async function requestGoatRevolutBusinessApi<T>(input: {
 
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as RevolutApiErrorPayload | null;
-    throw new GoatRevolutApiError(response.status, input.path, payload);
+    throw new RevolutApiError(response.status, input.path, payload);
   }
 
   if (response.status === 204) return undefined as T;
@@ -123,7 +123,7 @@ function normalizeRevolutApiBaseUrl(value: string | undefined, apiToken: string)
 function inferRevolutEnvironment(
   apiBaseUrl: string,
   apiToken: string,
-): GoatRevolutBusinessConnection["environment"] {
+): RevolutBusinessConnection["environment"] {
   if (apiToken.startsWith("oa_sand_") || apiBaseUrl.includes("sandbox")) return "sandbox";
   if (apiBaseUrl === REVOLUT_BUSINESS_API_BASE_URL && apiToken.startsWith("oa_prod_")) {
     return "production";

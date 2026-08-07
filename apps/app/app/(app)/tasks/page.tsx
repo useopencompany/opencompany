@@ -1,22 +1,19 @@
-import { TasksWorkflowsDisabledRoute } from "@/components/GoatRoutes";
-import { GoatTasksBoardRoute } from "@/components/GoatTasksBoard";
-import { currentGoatUser } from "@/lib/auth";
-import { listGoatWorkflows } from "@/lib/workflows";
+import { TasksWorkflowsDisabledRoute } from "@/components/AppRoutes";
+import { TasksBoardRoute } from "@/components/TasksBoard";
+import { currentUser } from "@/lib/auth";
+import { listWorkflows } from "@/lib/workflows";
 
 export default async function TasksPage() {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   if (!context.user.taskSpawningEnabled) {
     return <TasksWorkflowsDisabledRoute />;
   }
 
-  const workflows = await listGoatWorkflows(context.workspace.id);
+  const workflows = await listWorkflows(context.workspace.id);
   const workflowNames = Object.fromEntries(
     workflows.map((workflow) => [workflow.slug, workflow.name]),
   );
   return (
-    <GoatTasksBoardRoute
-      workflowNames={workflowNames}
-      initialViewMode={context.user.taskViewMode}
-    />
+    <TasksBoardRoute workflowNames={workflowNames} initialViewMode={context.user.taskViewMode} />
   );
 }

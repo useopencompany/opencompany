@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { parseDeviceLoginDetails, startGoatCodexDeviceAuthFlow } from "./codex-auth";
+import { parseDeviceLoginDetails, startCodexDeviceAuthFlow } from "./codex-auth";
 import type { RunnerEnv } from "./env";
 
 const mocks = vi.hoisted(() => ({
@@ -87,7 +87,7 @@ Follow these steps to sign in with ChatGPT using device code authorization:
   });
 });
 
-describe("startGoatCodexDeviceAuthFlow", () => {
+describe("startCodexDeviceAuthFlow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.activeFlows.length = 0;
@@ -108,7 +108,7 @@ describe("startGoatCodexDeviceAuthFlow", () => {
   it("supersedes active Goat Codex auth flows before creating a replacement sandbox", async () => {
     mocks.activeFlows.push({ id: "gcodf_old", sandboxId: "sbx_old" });
 
-    const flow = await startGoatCodexDeviceAuthFlow({
+    const flow = await startCodexDeviceAuthFlow({
       userWorkosId: "user_1",
       env: env(),
     });
@@ -143,7 +143,7 @@ describe("startGoatCodexDeviceAuthFlow", () => {
     });
 
     await expect(
-      startGoatCodexDeviceAuthFlow({
+      startCodexDeviceAuthFlow({
         userWorkosId: "user_1",
         env: env(),
       }),
@@ -210,15 +210,15 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     publicUrl: undefined,
     llmBrokerEnabled: true,
     exaApiKey: "exa",
-    goatBrowserEnabled: false,
+    browserEnabled: false,
     ampE2bTemplate: undefined,
     codexE2bTemplate: undefined,
     e2bSandboxIdleTimeoutMs: 30_000,
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",
-    goatCodexChatIdleTimeoutMs: 1_800_000,
+    codexChatIdleTimeoutMs: 1_800_000,
     jobLeaseTtlMs: 300_000,
-    goatTaskWorkerEnabled: false,
+    taskWorkerEnabled: false,
     workerConcurrency: 2,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],

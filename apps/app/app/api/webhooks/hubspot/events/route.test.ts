@@ -1,34 +1,34 @@
 import {
-  insertGoatHubspotObjectEvents,
-  listEnabledGoatHubspotBrainSourceRoutes,
-  listGoatHubspotIntegrationsForPortal,
+  insertHubspotObjectEvents,
+  listEnabledHubspotBrainSourceRoutes,
+  listHubspotIntegrationsForPortal,
 } from "@opencompany/db/hubspot";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { verifyGoatHubspotWebhookSignature } from "@/lib/integrations/hubspot-signature";
+import { verifyHubspotWebhookSignature } from "@/lib/integrations/hubspot-signature";
 import { POST } from "./route";
 
 vi.mock("@opencompany/db/hubspot", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  insertGoatHubspotObjectEvents: vi.fn(),
-  listEnabledGoatHubspotBrainSourceRoutes: vi.fn(),
-  listGoatHubspotIntegrationsForPortal: vi.fn(),
+  insertHubspotObjectEvents: vi.fn(),
+  listEnabledHubspotBrainSourceRoutes: vi.fn(),
+  listHubspotIntegrationsForPortal: vi.fn(),
 }));
 vi.mock("@/lib/integrations/hubspot-signature", () => ({
-  verifyGoatHubspotWebhookSignature: vi.fn(),
+  verifyHubspotWebhookSignature: vi.fn(),
 }));
 vi.mock("@/lib/workos", () => ({
-  getGoatAppUrl: () => "https://goat.example.com",
+  getAppUrl: () => "https://goat.example.com",
 }));
 
 describe("POST /api/webhooks/hubspot/events", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.mocked(verifyGoatHubspotWebhookSignature).mockReturnValue(true);
-    vi.mocked(listGoatHubspotIntegrationsForPortal).mockResolvedValue([
+    vi.mocked(verifyHubspotWebhookSignature).mockReturnValue(true);
+    vi.mocked(listHubspotIntegrationsForPortal).mockResolvedValue([
       { id: "gint_hubspot_1", userWorkosId: "user_1", status: "connected" },
     ]);
-    vi.mocked(listEnabledGoatHubspotBrainSourceRoutes).mockResolvedValue([
+    vi.mocked(listEnabledHubspotBrainSourceRoutes).mockResolvedValue([
       {
         integrationId: "gint_hubspot_1",
         brainRef: "gbrain_1",
@@ -38,7 +38,7 @@ describe("POST /api/webhooks/hubspot/events", () => {
         },
       },
     ]);
-    vi.mocked(insertGoatHubspotObjectEvents).mockResolvedValue(1);
+    vi.mocked(insertHubspotObjectEvents).mockResolvedValue(1);
   });
 
   afterEach(() => {
@@ -46,9 +46,7 @@ describe("POST /api/webhooks/hubspot/events", () => {
   });
 
   it("returns a retryable response when buffering fails", async () => {
-    vi.mocked(insertGoatHubspotObjectEvents).mockRejectedValueOnce(
-      new Error("database unavailable"),
-    );
+    vi.mocked(insertHubspotObjectEvents).mockRejectedValueOnce(new Error("database unavailable"));
 
     const response = await POST(hubspotRequest());
 

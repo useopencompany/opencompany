@@ -1,43 +1,43 @@
-import { extractGoatBrainCitations, parseGoatBrainDocument } from "./document";
-import { deriveGoatBrainEdges } from "./edges";
-import { parseGoatBrainInlineLinks } from "./inline-links";
-import { goatBrainRelativePath } from "./paths";
-import { isValidGoatBrainFolder, isValidGoatBrainId, isValidGoatBrainSourceRef } from "./schema";
-import { listGoatBrainFiles, type StoredGoatBrainFile } from "./store";
-import { validateGoatBrainDocument } from "./validate";
+import { extractBrainCitations, parseBrainDocument } from "./document";
+import { deriveBrainEdges } from "./edges";
+import { parseBrainInlineLinks } from "./inline-links";
+import { brainRelativePath } from "./paths";
+import { isValidBrainFolder, isValidBrainId, isValidBrainSourceRef } from "./schema";
+import { listBrainFiles, type StoredBrainFile } from "./store";
+import { validateBrainDocument } from "./validate";
 
-export type GoatBrainHealthFinding = {
+export type BrainHealthFinding = {
   severity: "error" | "warn";
   code: string;
   id: string;
   message: string;
 };
 
-export type GoatBrainHealthReport = {
+export type BrainHealthReport = {
   files: number;
   errors: number;
   warnings: number;
-  findings: GoatBrainHealthFinding[];
+  findings: BrainHealthFinding[];
 };
 
-export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealthReport> {
-  const files = await listGoatBrainFiles(root);
-  const findings: GoatBrainHealthFinding[] = [];
+export async function checkBrainHealth(root: string): Promise<BrainHealthReport> {
+  const files = await listBrainFiles(root);
+  const findings: BrainHealthFinding[] = [];
   const idCounts = new Map<string, number>();
   const byId = new Map<
     string,
-    { file: StoredGoatBrainFile; doc: ReturnType<typeof parseGoatBrainDocument> }
+    { file: StoredBrainFile; doc: ReturnType<typeof parseBrainDocument> }
   >();
   const parsedFiles: Array<{
-    file: StoredGoatBrainFile;
-    doc: ReturnType<typeof parseGoatBrainDocument>;
+    file: StoredBrainFile;
+    doc: ReturnType<typeof parseBrainDocument>;
   }> = [];
   const aliasOwners = new Map<string, string>();
 
   for (const file of files) {
     idCounts.set(file.id, (idCounts.get(file.id) ?? 0) + 1);
     try {
-      const doc = parseGoatBrainDocument(file.source);
+      const doc = parseBrainDocument(file.source);
       parsedFiles.push({ file, doc });
       if (!byId.has(file.id)) byId.set(file.id, { file, doc });
     } catch (error) {
@@ -67,7 +67,7 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
   );
 
   for (const { file, doc } of parsedFiles) {
-    const validation = validateGoatBrainDocument(doc, file.id, file.source);
+    const validation = validateBrainDocument(doc, file.id, file.source);
     if (!validation.ok) {
       for (const message of validation.errors) {
         findings.push({ severity: "error", code: "invalid", id: file.id, message });
@@ -77,9 +77,9 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
     const expectedPath =
       doc.frontmatter.folder &&
       doc.frontmatter.id &&
-      isValidGoatBrainFolder(doc.frontmatter.folder) &&
-      isValidGoatBrainId(doc.frontmatter.id)
-        ? goatBrainRelativePath(doc.frontmatter.folder, doc.frontmatter.id)
+      isValidBrainFolder(doc.frontmatter.folder) &&
+      isValidBrainId(doc.frontmatter.id)
+        ? brainRelativePath(doc.frontmatter.folder, doc.frontmatter.id)
         : null;
     if (expectedPath && expectedPath !== file.relativePath) {
       findings.push({
@@ -135,7 +135,7 @@ export async function checkGoatBrainHealth(root: string): Promise<GoatBrainHealt
 
     for (const sourceEntry of doc.frontmatter.sources ?? []) {
       const ref = sourceEntry.ref.trim();
-      if (ref && !isValidGoatBrainSourceRef(ref)) {
+      if (ref && !isValidBrainSourceRef(ref)) {
         findings.push({
           severity: "warn",
           code: "nonstandard_source_ref",
@@ -170,9 +170,9 @@ function checkCitations(input: {
   localEvidenceIds: Set<string>;
   evidenceRecordIds: Set<string>;
   text: string;
-  findings: GoatBrainHealthFinding[];
+  findings: BrainHealthFinding[];
 }) {
-  for (const citation of extractGoatBrainCitations(input.text)) {
+  for (const citation of extractBrainCitations(input.text)) {
     if (input.localEvidenceIds.has(citation) || input.evidenceRecordIds.has(citation)) continue;
     input.findings.push({
       severity: "error",
@@ -184,11 +184,11 @@ function checkCitations(input: {
 }
 
 function graphDegreeById(
-  byId: Map<string, { file: StoredGoatBrainFile; doc: ReturnType<typeof parseGoatBrainDocument> }>,
+  byId: Map<string, { file: StoredBrainFile; doc: ReturnType<typeof parseBrainDocument> }>,
 ) {
   const degreeById = new Map([...byId.keys()].map((id) => [id, 0]));
   for (const [id, { doc }] of byId) {
-    for (const edge of deriveGoatBrainEdges({
+    for (const edge of deriveBrainEdges({
       id,
       relations: doc.frontmatter.relations ?? [],
       body: [doc.compiledTruth, ...doc.timeline.map((entry) => entry.body)].join("\n\n"),
@@ -205,7 +205,7 @@ function checkRelations(input: {
   id: string;
   byId: Map<string, unknown>;
   relations: Array<{ type: string; to: string }>;
-  findings: GoatBrainHealthFinding[];
+  findings: BrainHealthFinding[];
 }) {
   for (const relation of input.relations) {
     if (!input.byId.has(relation.to)) {
@@ -223,9 +223,9 @@ function checkInlineLinks(input: {
   id: string;
   byId: Map<string, unknown>;
   text: string;
-  findings: GoatBrainHealthFinding[];
+  findings: BrainHealthFinding[];
 }) {
-  for (const link of parseGoatBrainInlineLinks(input.text)) {
+  for (const link of parseBrainInlineLinks(input.text)) {
     if (!link.valid) {
       input.findings.push({
         severity: "error",

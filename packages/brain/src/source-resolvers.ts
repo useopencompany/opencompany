@@ -1,4 +1,4 @@
-import type { ParsedGoatBrainSourceRef } from "./schema";
+import type { ParsedBrainSourceRef } from "./schema";
 
 // Source resolvers are the future seam for hydrating [[source:provider:id]]
 // pointers at read time through the integrations layer. The brain stores only
@@ -8,7 +8,7 @@ import type { ParsedGoatBrainSourceRef } from "./schema";
 // implementations live in the integrations layer, registered per provider,
 // and no resolver is invoked anywhere yet.
 
-export type GoatBrainResolvedSource = {
+export type BrainResolvedSource = {
   ref: string;
   provider: string;
   /** Canonical live URL, when the provider has one. */
@@ -20,9 +20,9 @@ export type GoatBrainResolvedSource = {
   fetchedAt: string;
 };
 
-export type GoatBrainSourceResolver = {
+export type BrainSourceResolver = {
   /** Provider segment of the source refs this resolver handles, e.g. "linear". */
   provider: string;
   /** Returns null when the source no longer exists or is not reachable. */
-  resolve(ref: ParsedGoatBrainSourceRef): Promise<GoatBrainResolvedSource | null>;
+  resolve(ref: ParsedBrainSourceRef): Promise<BrainResolvedSource | null>;
 };

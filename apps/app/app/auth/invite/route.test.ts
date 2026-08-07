@@ -4,7 +4,7 @@ import { getWorkOSClient } from "@/lib/workos-client";
 import { GET } from "./route";
 
 vi.mock("@/lib/workos", () => ({
-  getGoatAppUrl: vi.fn(() => "https://my.opencompany.chat"),
+  getAppUrl: vi.fn(() => "https://my.opencompany.chat"),
 }));
 
 vi.mock("@/lib/workos-client", () => ({

@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { executeGoatActionGateway } from "@/lib/codex-actions";
+import { executeActionGateway } from "@/lib/codex-actions";
 import { POST } from "./route";
 
 vi.mock("@/lib/codex-actions", () => ({
-  executeGoatActionGateway: vi.fn(),
+  executeActionGateway: vi.fn(),
 }));
 
 vi.mock("next/server", () => ({
@@ -20,7 +20,7 @@ describe("POST /api/internal/action-gateway", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("RUNNER_INTERNAL_TOKEN", "shared-secret");
-    vi.mocked(executeGoatActionGateway).mockResolvedValue({
+    vi.mocked(executeActionGateway).mockResolvedValue({
       ok: true,
       sources: [],
     });
@@ -30,7 +30,7 @@ describe("POST /api/internal/action-gateway", () => {
     const response = await POST(request({ operation: "list" }));
 
     expect(response.status).toBe(401);
-    expect(executeGoatActionGateway).not.toHaveBeenCalled();
+    expect(executeActionGateway).not.toHaveBeenCalled();
   });
 
   it("accepts only bounded host identity fields", async () => {
@@ -51,7 +51,7 @@ describe("POST /api/internal/action-gateway", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(executeGoatActionGateway).toHaveBeenCalledWith({
+    expect(executeActionGateway).toHaveBeenCalledWith({
       request: {
         operation: "execute",
         sessionId: "session_1",
@@ -84,7 +84,7 @@ describe("POST /api/internal/action-gateway", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(executeGoatActionGateway).toHaveBeenCalledWith({
+    expect(executeActionGateway).toHaveBeenCalledWith({
       request: {
         operation: "execute",
         sessionId: "session_1",

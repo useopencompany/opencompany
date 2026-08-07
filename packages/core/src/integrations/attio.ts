@@ -1,34 +1,34 @@
 import { randomUUID } from "node:crypto";
 import {
+  type AttioApiKeyCredentialPayload,
   GOAT_ATTIO_CREDENTIAL_KIND,
   GOAT_ATTIO_OBJECT_SLUGS,
   GOAT_ATTIO_PROVIDER,
-  type GoatAttioApiKeyCredentialPayload,
 } from "@opencompany/db/attio";
 import { getDb } from "@opencompany/db/client";
 import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-  saveGoatIntegrationCredential,
+  loadIntegrationCredential,
+  markIntegrationStatus,
+  saveIntegrationCredential,
 } from "@opencompany/db/integrations";
-import { type GoatAttioObjectType, goatIntegrations } from "@opencompany/db/schema";
+import { type AttioObjectType, integrations } from "@opencompany/db/schema";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
-import { getGoatAppUrl } from "../app-url";
-import type { GoatAttioProviderState } from "../integration-state";
-import { captureGoatIntegrationAddedAnalytics } from "./analytics";
+import { getAppUrl } from "../app-url";
+import type { AttioProviderState } from "../integration-state";
+import { captureIntegrationAddedAnalytics } from "./analytics";
 
 export const GOAT_ATTIO_API_BASE_URL = "https://api.attio.com/v2";
 
 const ATTIO_API_TIMEOUT_MS = 15_000;
 const MAX_ATTIO_ERROR_DETAIL_CHARS = 200;
 
-export class GoatAttioApiRequestError extends Error {
+export class AttioApiRequestError extends Error {
   readonly status: number;
   readonly detail: string | undefined;
 
   constructor(status: number, method: string, path: string, detail?: string) {
     super(`Attio API ${method} ${path} failed (${status}).`);
-    this.name = "GoatAttioApiRequestError";
+    this.name = "AttioApiRequestError";
     this.status = status;
     this.detail = detail;
   }
@@ -40,7 +40,7 @@ export class GoatAttioApiRequestError extends Error {
 const ATTIO_RECORD_EVENT_TYPES = ["record.created", "record.updated"] as const;
 const ATTIO_NOTE_EVENT_TYPE = "note.created";
 
-export type GoatAttioWorkspaceIdentity = {
+export type AttioWorkspaceIdentity = {
   workspaceId: string;
   workspaceName: string | null;
   workspaceSlug: string | null;
@@ -48,14 +48,14 @@ export type GoatAttioWorkspaceIdentity = {
   scopes: string[];
 };
 
-export function parseGoatAttioScopes(value: unknown): string[] {
+export function parseAttioScopes(value: unknown): string[] {
   const values = (Array.isArray(value) ? value : [value]).flatMap((entry) =>
     typeof entry === "string" ? entry.split(/\s+/) : [],
   );
   return [...new Set(values.map((scope) => scope.trim()).filter(Boolean))].sort();
 }
 
-export function hasGoatAttioListReadScopes(scopes: readonly string[]) {
+export function hasAttioListReadScopes(scopes: readonly string[]) {
   const canReadListConfiguration =
     scopes.includes("list_configuration:read") || scopes.includes("list_configuration:read-write");
   const canReadListEntries =
@@ -63,7 +63,7 @@ export function hasGoatAttioListReadScopes(scopes: readonly string[]) {
   return canReadListConfiguration && canReadListEntries;
 }
 
-export function hasGoatAttioRecordReadScopes(scopes: readonly string[]) {
+export function hasAttioRecordReadScopes(scopes: readonly string[]) {
   const canReadObjectConfiguration =
     scopes.includes("object_configuration:read") ||
     scopes.includes("object_configuration:read-write");
@@ -72,35 +72,35 @@ export function hasGoatAttioRecordReadScopes(scopes: readonly string[]) {
   return canReadObjectConfiguration && canReadRecords;
 }
 
-export function hasGoatAttioRecordWriteScopes(scopes: readonly string[]) {
+export function hasAttioRecordWriteScopes(scopes: readonly string[]) {
   const canReadObjectConfiguration =
     scopes.includes("object_configuration:read") ||
     scopes.includes("object_configuration:read-write");
   return canReadObjectConfiguration && scopes.includes("record_permission:read-write");
 }
 
-export function hasGoatAttioListWriteScopes(scopes: readonly string[]) {
+export function hasAttioListWriteScopes(scopes: readonly string[]) {
   const canReadListConfiguration =
     scopes.includes("list_configuration:read") || scopes.includes("list_configuration:read-write");
   return canReadListConfiguration && scopes.includes("list_entry:read-write");
 }
 
-export function hasGoatAttioListConfigurationWriteScope(scopes: readonly string[]) {
+export function hasAttioListConfigurationWriteScope(scopes: readonly string[]) {
   return scopes.includes("list_configuration:read-write");
 }
 
-export function hasGoatAttioRecordCommentWriteScopes(scopes: readonly string[]) {
-  return scopes.includes("comment:read-write") && hasGoatAttioRecordReadScopes(scopes);
+export function hasAttioRecordCommentWriteScopes(scopes: readonly string[]) {
+  return scopes.includes("comment:read-write") && hasAttioRecordReadScopes(scopes);
 }
 
-export function hasGoatAttioListCommentWriteScopes(scopes: readonly string[]) {
-  return scopes.includes("comment:read-write") && hasGoatAttioListReadScopes(scopes);
+export function hasAttioListCommentWriteScopes(scopes: readonly string[]) {
+  return scopes.includes("comment:read-write") && hasAttioListReadScopes(scopes);
 }
 
-export function hasGoatAttioCommentWriteScopes(scopes: readonly string[]) {
+export function hasAttioCommentWriteScopes(scopes: readonly string[]) {
   return (
     scopes.includes("comment:read-write") &&
-    (hasGoatAttioRecordReadScopes(scopes) || hasGoatAttioListReadScopes(scopes))
+    (hasAttioRecordReadScopes(scopes) || hasAttioListReadScopes(scopes))
   );
 }
 
@@ -110,13 +110,13 @@ export function isValidAttioApiKey(apiKey: string) {
   return /^\S{16,2000}$/.test(apiKey);
 }
 
-export type GoatAttioApiKeyValidation =
-  | { ok: true; identity: GoatAttioWorkspaceIdentity }
+export type AttioApiKeyValidation =
+  | { ok: true; identity: AttioWorkspaceIdentity }
   | { ok: false; error: string };
 
 // GET /v2/self identifies the workspace the key is scoped to and doubles as
 // the liveness check.
-export async function validateGoatAttioApiKey(apiKey: string): Promise<GoatAttioApiKeyValidation> {
+export async function validateAttioApiKey(apiKey: string): Promise<AttioApiKeyValidation> {
   let response: Response;
   try {
     response = await fetch(`${GOAT_ATTIO_API_BASE_URL}/self`, {
@@ -154,7 +154,7 @@ export async function validateGoatAttioApiKey(apiKey: string): Promise<GoatAttio
         body.authorized_by_workspace_member_id
           ? body.authorized_by_workspace_member_id
           : null,
-      scopes: parseGoatAttioScopes(body.scope),
+      scopes: parseAttioScopes(body.scope),
     },
   };
 }
@@ -162,17 +162,18 @@ export async function validateGoatAttioApiKey(apiKey: string): Promise<GoatAttio
 // Resolves the workspace's object UUIDs for our standard object types. Events
 // reference objects by UUID, so the webhook receiver needs this map to route
 // without an API call.
-export async function fetchGoatAttioObjectIds(
+export async function fetchAttioObjectIds(
   apiKey: string,
-): Promise<Partial<Record<GoatAttioObjectType, string>>> {
-  const response = await requestGoatAttioApi({ apiKey, path: "/objects" });
+): Promise<Partial<Record<AttioObjectType, string>>> {
+  const response = await requestAttioApi({ apiKey, path: "/objects" });
   const objects = (response as { data?: Array<Record<string, unknown>> })?.data ?? [];
   const slugToType = new Map(
-    (Object.entries(GOAT_ATTIO_OBJECT_SLUGS) as [GoatAttioObjectType, string][]).map(
-      ([type, slug]) => [slug, type],
-    ),
+    (Object.entries(GOAT_ATTIO_OBJECT_SLUGS) as [AttioObjectType, string][]).map(([type, slug]) => [
+      slug,
+      type,
+    ]),
   );
-  const objectIdBySlug: Partial<Record<GoatAttioObjectType, string>> = {};
+  const objectIdBySlug: Partial<Record<AttioObjectType, string>> = {};
   for (const object of objects) {
     const slug = typeof object.api_slug === "string" ? object.api_slug : null;
     const id = (object.id as { object_id?: string } | undefined)?.object_id;
@@ -186,7 +187,7 @@ export async function fetchGoatAttioObjectIds(
 // standard CRM objects at the Attio side; note events filter on the parent
 // object. The secret is only returned at creation, so it is persisted in the
 // api_key credential payload.
-export async function createGoatAttioWebhook(input: {
+export async function createAttioWebhook(input: {
   apiKey: string;
   targetUrl: string;
   objectIds: readonly string[];
@@ -208,7 +209,7 @@ export async function createGoatAttioWebhook(input: {
       value: objectId,
     })),
   };
-  const response = (await requestGoatAttioApi({
+  const response = (await requestAttioApi({
     apiKey: input.apiKey,
     path: "/webhooks",
     method: "POST",
@@ -237,12 +238,12 @@ export async function createGoatAttioWebhook(input: {
 
 // Best-effort cleanup; a webhook left behind in Attio delivers to a receiver
 // that no longer recognizes its id and gets 401s until Attio disables it.
-export async function deleteGoatAttioWebhook(input: {
+export async function deleteAttioWebhook(input: {
   apiKey: string;
   webhookId: string;
 }): Promise<boolean> {
   try {
-    await requestGoatAttioApi({
+    await requestAttioApi({
       apiKey: input.apiKey,
       path: `/webhooks/${encodeURIComponent(input.webhookId)}`,
       method: "DELETE",
@@ -253,10 +254,10 @@ export async function deleteGoatAttioWebhook(input: {
   }
 }
 
-export async function connectGoatAttioIntegration(input: {
+export async function connectAttioIntegration(input: {
   userWorkosId: string;
   apiKey: string;
-  identity: GoatAttioWorkspaceIdentity;
+  identity: AttioWorkspaceIdentity;
   now?: Date;
 }): Promise<{ integrationId: string }> {
   const db = getDb();
@@ -264,9 +265,9 @@ export async function connectGoatAttioIntegration(input: {
   const connectionLabel = input.identity.workspaceName?.trim() || "Attio";
 
   const [integration] = await db
-    .insert(goatIntegrations)
+    .insert(integrations)
     .values({
-      id: newGoatIntegrationId(),
+      id: newIntegrationId(),
       userWorkosId: input.userWorkosId,
       provider: GOAT_ATTIO_PROVIDER,
       // The Attio workspace id is the routing key for inbound webhooks.
@@ -282,13 +283,9 @@ export async function connectGoatAttioIntegration(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: [
-        goatIntegrations.userWorkosId,
-        goatIntegrations.provider,
-        goatIntegrations.externalId,
-      ],
+      target: [integrations.userWorkosId, integrations.provider, integrations.externalId],
       // The personal-uniqueness index is partial; the arbiter must match it.
-      targetWhere: sql`${goatIntegrations.workspaceId} IS NULL`,
+      targetWhere: sql`${integrations.workspaceId} IS NULL`,
       set: {
         connectionLabel,
         accountName: input.identity.workspaceSlug,
@@ -300,7 +297,7 @@ export async function connectGoatAttioIntegration(input: {
         updatedAt: now,
       },
     })
-    .returning({ id: goatIntegrations.id });
+    .returning({ id: integrations.id });
 
   if (!integration) {
     throw new Error("Could not persist Goat Attio integration.");
@@ -309,27 +306,27 @@ export async function connectGoatAttioIntegration(input: {
   // A reconnect replaces the webhook rather than reusing it: the secret is
   // only readable at creation, so a fresh webhook is the only way to be sure
   // the stored secret matches the live one.
-  const existing = await loadGoatIntegrationCredential({
+  const existing = await loadIntegrationCredential({
     userWorkosId: input.userWorkosId,
     integrationId: integration.id,
     provider: GOAT_ATTIO_PROVIDER,
     kind: GOAT_ATTIO_CREDENTIAL_KIND,
     db,
   }).catch(() => null);
-  const existingPayload = existing?.payload as GoatAttioApiKeyCredentialPayload | undefined;
+  const existingPayload = existing?.payload as AttioApiKeyCredentialPayload | undefined;
   if (existingPayload?.webhookId) {
-    await deleteGoatAttioWebhook({ apiKey: input.apiKey, webhookId: existingPayload.webhookId });
+    await deleteAttioWebhook({ apiKey: input.apiKey, webhookId: existingPayload.webhookId });
   }
 
-  let payload: GoatAttioApiKeyCredentialPayload;
+  let payload: AttioApiKeyCredentialPayload;
   try {
-    const objectIdBySlug = await fetchGoatAttioObjectIds(input.apiKey);
+    const objectIdBySlug = await fetchAttioObjectIds(input.apiKey);
     const objectIds = Object.values(objectIdBySlug).filter(
       (value): value is string => typeof value === "string" && value.length > 0,
     );
-    const webhook = await createGoatAttioWebhook({
+    const webhook = await createAttioWebhook({
       apiKey: input.apiKey,
-      targetUrl: `${getGoatAppUrl()}/api/webhooks/attio/events`,
+      targetUrl: `${getAppUrl()}/api/webhooks/attio/events`,
       objectIds,
     });
     payload = {
@@ -342,7 +339,7 @@ export async function connectGoatAttioIntegration(input: {
       createdAt: now.toISOString(),
     };
   } catch (error) {
-    await markGoatIntegrationStatus({
+    await markIntegrationStatus({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
       provider: GOAT_ATTIO_PROVIDER,
@@ -355,7 +352,7 @@ export async function connectGoatAttioIntegration(input: {
   }
 
   try {
-    await saveGoatIntegrationCredential({
+    await saveIntegrationCredential({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
       provider: GOAT_ATTIO_PROVIDER,
@@ -367,8 +364,8 @@ export async function connectGoatAttioIntegration(input: {
       now,
     });
   } catch (error) {
-    await deleteGoatAttioWebhook({ apiKey: input.apiKey, webhookId: payload.webhookId ?? "" });
-    await markGoatIntegrationStatus({
+    await deleteAttioWebhook({ apiKey: input.apiKey, webhookId: payload.webhookId ?? "" });
+    await markIntegrationStatus({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
       provider: GOAT_ATTIO_PROVIDER,
@@ -380,7 +377,7 @@ export async function connectGoatAttioIntegration(input: {
     throw error;
   }
 
-  await captureGoatIntegrationAddedAnalytics({
+  await captureIntegrationAddedAnalytics({
     userWorkosId: input.userWorkosId,
     provider: "attio",
   });
@@ -388,25 +385,23 @@ export async function connectGoatAttioIntegration(input: {
   return { integrationId: integration.id };
 }
 
-export async function getGoatAttioIntegrationState(
-  userWorkosId: string,
-): Promise<GoatAttioProviderState> {
+export async function getAttioIntegrationState(userWorkosId: string): Promise<AttioProviderState> {
   const [row] = await getDb()
     .select({
-      id: goatIntegrations.id,
-      status: goatIntegrations.status,
-      connectionLabel: goatIntegrations.connectionLabel,
-      statusReason: goatIntegrations.statusReason,
+      id: integrations.id,
+      status: integrations.status,
+      connectionLabel: integrations.connectionLabel,
+      statusReason: integrations.statusReason,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, GOAT_ATTIO_PROVIDER),
-        ne(goatIntegrations.status, "disconnected"),
+        eq(integrations.userWorkosId, userWorkosId),
+        eq(integrations.provider, GOAT_ATTIO_PROVIDER),
+        ne(integrations.status, "disconnected"),
       ),
     )
-    .orderBy(desc(goatIntegrations.updatedAt))
+    .orderBy(desc(integrations.updatedAt))
     .limit(1);
 
   if (!row) {
@@ -430,7 +425,7 @@ export async function getGoatAttioIntegrationState(
   };
 }
 
-export async function requestGoatAttioApi(input: {
+export async function requestAttioApi(input: {
   apiKey: string;
   path: string;
   method?: string;
@@ -452,12 +447,7 @@ export async function requestGoatAttioApi(input: {
   });
   if (!response.ok) {
     const body = await response.text();
-    throw new GoatAttioApiRequestError(
-      response.status,
-      method,
-      input.path,
-      attioApiErrorDetail(body),
-    );
+    throw new AttioApiRequestError(response.status, method, input.path, attioApiErrorDetail(body));
   }
   if (response.status === 204) return null;
   return await response.json().catch(() => null);
@@ -491,6 +481,6 @@ function boundedAttioErrorString(value: unknown): string | undefined {
     : normalized;
 }
 
-function newGoatIntegrationId() {
+function newIntegrationId() {
   return `gint_${randomUUID().replace(/-/g, "")}`;
 }

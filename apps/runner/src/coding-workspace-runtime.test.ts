@@ -1,14 +1,14 @@
 import { execFileSync } from "node:child_process";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  discoverGoatCodingWorkspacePreviewPorts,
+  discoverCodingWorkspacePreviewPorts,
   GOAT_CODING_WORKSPACE_SANDBOX_NETWORK,
   isAllowedPreviewPort,
-  mintGoatCodingWorkspaceAccess,
+  mintCodingWorkspaceAccess,
   parseListeningPorts,
   parseWorkspaceListeningPorts,
 } from "./coding-workspace-runtime";
-import { verifyGoatCodingWorkspaceTicket } from "./coding-workspace-runtime-auth";
+import { verifyCodingWorkspaceTicket } from "./coding-workspace-runtime-auth";
 import type { SandboxHandle } from "./sandbox";
 
 const mocks = vi.hoisted(() => ({
@@ -99,7 +99,7 @@ describe("Goat coding workspace preview port discovery", () => {
     });
     const sandbox = { commands: { run } } as unknown as SandboxHandle;
 
-    const ports = await discoverGoatCodingWorkspacePreviewPorts(sandbox, {
+    const ports = await discoverCodingWorkspacePreviewPorts(sandbox, {
       workDirectory: "/home/user/opencompany-goat/codex-chat",
     });
 
@@ -138,9 +138,9 @@ ${command}
     });
     const sandbox = { commands: { run } } as unknown as SandboxHandle;
 
-    await expect(
-      discoverGoatCodingWorkspacePreviewPorts(sandbox, { workDirectory }),
-    ).resolves.toEqual([{ port: 3_003, isHttp: true, score: 1_000 }]);
+    await expect(discoverCodingWorkspacePreviewPorts(sandbox, { workDirectory })).resolves.toEqual([
+      { port: 3_003, isHttp: true, score: 1_000 },
+    ]);
   });
 });
 
@@ -151,7 +151,7 @@ describe("Goat coding workspace access", () => {
   ] as const)("mints owner-bound access for %s sessions", async (engine) => {
     mocks.rows = [runtimeSession({ engine })];
 
-    const access = await mintGoatCodingWorkspaceAccess({
+    const access = await mintCodingWorkspaceAccess({
       codingSessionId: "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000",
       userWorkosId: "user_1",
       env: { streamTokenSecret: secret },
@@ -159,7 +159,7 @@ describe("Goat coding workspace access", () => {
 
     expect(access.sandboxStatus).toBe("running");
     expect(
-      verifyGoatCodingWorkspaceTicket({
+      verifyCodingWorkspaceTicket({
         ticket: access.ticket,
         secret,
       }),
@@ -178,7 +178,7 @@ describe("Goat coding workspace access", () => {
     mocks.rows = rows;
 
     await expect(
-      mintGoatCodingWorkspaceAccess({
+      mintCodingWorkspaceAccess({
         codingSessionId: "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000",
         userWorkosId: "user_1",
         env: { streamTokenSecret: secret },
@@ -191,7 +191,7 @@ describe("Goat coding workspace access", () => {
     mocks.sandboxStatus.mockResolvedValue("deleted");
 
     await expect(
-      mintGoatCodingWorkspaceAccess({
+      mintCodingWorkspaceAccess({
         codingSessionId: "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000",
         userWorkosId: "user_1",
         env: { streamTokenSecret: secret },

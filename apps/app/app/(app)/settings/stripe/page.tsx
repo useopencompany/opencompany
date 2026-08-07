@@ -1,5 +1,5 @@
-import { GoatStripeSettingsRoute } from "@/components/GoatRoutes";
+import { StripeSettingsRoute } from "@/components/AppRoutes";
 
 export default function StripeSettingsPage() {
-  return <GoatStripeSettingsRoute />;
+  return <StripeSettingsRoute />;
 }

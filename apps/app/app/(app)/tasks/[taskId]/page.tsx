@@ -1,4 +1,4 @@
-import { GoatTaskDetailRoute } from "@/components/GoatRoutes";
+import { TaskDetailRoute } from "@/components/AppRoutes";
 
 type TaskDetailPageProps = {
   params: Promise<{ taskId: string }>;
@@ -6,5 +6,5 @@ type TaskDetailPageProps = {
 
 export default async function TaskDetailPage({ params }: TaskDetailPageProps) {
   const { taskId } = await params;
-  return <GoatTaskDetailRoute taskId={taskId} />;
+  return <TaskDetailRoute taskId={taskId} />;
 }

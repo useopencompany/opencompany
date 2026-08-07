@@ -1,11 +1,7 @@
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
-import { currentGoatUser } from "@/lib/auth";
-import { createDbGoatChatStore } from "@/lib/chat";
-import {
-  getActiveGoatChatStream,
-  getGoatChatStreamContext,
-  isGoatChatResumeEnabled,
-} from "@/lib/chat-streams";
+import { currentUser } from "@/lib/auth";
+import { createDbChatStore } from "@/lib/chat";
+import { getActiveChatStream, getChatStreamContext, isChatResumeEnabled } from "@/lib/chat-streams";
 
 export const maxDuration = 240;
 export const runtime = "nodejs";
@@ -18,20 +14,20 @@ export async function GET(
   { params }: { params: Promise<{ sessionId: string }> },
 ): Promise<Response> {
   const { sessionId } = await params;
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return new Response("Unauthorized", { status: 401 });
-  if (!isGoatChatResumeEnabled()) return noActiveStream();
+  if (!isChatResumeEnabled()) return noActiveStream();
 
-  const session = await createDbGoatChatStore().findOpenSession({
+  const session = await createDbChatStore().findOpenSession({
     userWorkosId: context.user.workosUserId,
     sessionId,
   });
   if (!session) return noActiveStream();
 
-  const streamId = await getActiveGoatChatStream(session.id);
+  const streamId = await getActiveChatStream(session.id);
   if (!streamId) return noActiveStream();
 
-  const stream = await getGoatChatStreamContext()
+  const stream = await getChatStreamContext()
     .resumeExistingStream(streamId)
     .catch(() => null);
   if (!stream) return noActiveStream();

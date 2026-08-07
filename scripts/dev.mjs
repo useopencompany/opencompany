@@ -6,10 +6,10 @@ import "./load-env.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { exit } from "node:process";
-import { resolveGoatDevEnv } from "./lib/app-dev-env.mjs";
-import { isolatedGoatDevEnvironment, selectGoatDevPorts } from "./lib/app-dev-ports.mjs";
-import { startGoatDevProxy } from "./lib/app-dev-proxy.mjs";
-import { goatHttpsDisabled, goatHttpsPort, startGoatLocalHttpsProxy } from "./lib/caddy-dev.mjs";
+import { resolveDevEnv } from "./lib/app-dev-env.mjs";
+import { isolatedDevEnvironment, selectDevPorts } from "./lib/app-dev-ports.mjs";
+import { startDevProxy } from "./lib/app-dev-proxy.mjs";
+import { httpsDisabled, httpsPort, startLocalHttpsProxy } from "./lib/caddy-dev.mjs";
 import {
   envForTunnel,
   ngrokConfigState,
@@ -21,16 +21,13 @@ import {
 import { findPortListeners } from "./lib/port-kill.mjs";
 
 const { turboArgs } = parseArgs(process.argv.slice(2));
-const goatDevPorts = selectGoatDevPorts({ httpsDisabled: goatHttpsDisabled() });
-if (goatDevPorts?.isolated) {
+const devPorts = selectDevPorts({ httpsDisabled: httpsDisabled() });
+if (devPorts?.isolated) {
   console.log(
     `\nConfigured Goat ports are already in use; using this workspace's isolated ports ` +
-      `(${goatDevPorts.app}-${goatDevPorts.electric}).`,
+      `(${devPorts.app}-${devPorts.electric}).`,
   );
-  Object.assign(
-    process.env,
-    isolatedGoatDevEnvironment(goatDevPorts, { httpsDisabled: goatHttpsDisabled() }),
-  );
+  Object.assign(process.env, isolatedDevEnvironment(devPorts, { httpsDisabled: httpsDisabled() }));
 }
 const defaultPort = process.env.APP_PORT ?? "3002";
 const port = valueFor(turboArgs, "--port") ?? defaultPort;
@@ -39,10 +36,10 @@ const tunnelDisabled = process.env.OPENCOMPANY_NGROK_DISABLED === "1" || isCI;
 configureDevLogFile(turboArgs);
 let ngrok;
 let tunnelEnv = {};
-let goatHttpsEnv = {};
-let goatDevProxy = null;
-let goatLocalHttps = null;
-let goatProxyTarget = null;
+let httpsEnv = {};
+let devProxy = null;
+let localHttps = null;
+let proxyTarget = null;
 let dev = null;
 let shuttingDown = false;
 
@@ -52,7 +49,7 @@ process.on("uncaughtExceptionMonitor", (error, origin) => {
 
 process.on("exit", () => {
   if (ngrok && !ngrok.killed) ngrok.kill("SIGTERM");
-  stopGoatLocalHttps();
+  stopLocalHttps();
   if (dev?.exitCode === null && !dev.killed) {
     killProcessTree(dev, "SIGTERM");
   }
@@ -64,8 +61,8 @@ for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
     shuttingDown = true;
     const childSignal = signal === "SIGHUP" ? "SIGTERM" : signal;
     if (ngrok && !ngrok.killed) ngrok.kill(childSignal);
-    stopGoatLocalHttps();
-    stopGoatDevProxy();
+    stopLocalHttps();
+    stopDevProxy();
     if (dev) {
       stopDevProcess(childSignal);
     } else {
@@ -74,14 +71,14 @@ for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
   });
 }
 
-assertGoatDevPortsAvailable();
-goatProxyTarget = await prepareGoatProxyTarget(port);
-goatLocalHttps = await startGoatHttps(goatProxyTarget.port);
+assertDevPortsAvailable();
+proxyTarget = await prepareProxyTarget(port);
+localHttps = await startHttps(proxyTarget.port);
 
 if (!tunnelDisabled) {
-  ngrok = await startDefaultTunnel(goatProxyTarget.port, {
+  ngrok = await startDefaultTunnel(proxyTarget.port, {
     appPort: port,
-    exposesRunnerCallbacks: goatProxyTarget.exposesRunnerCallbacks,
+    exposesRunnerCallbacks: proxyTarget.exposesRunnerCallbacks,
   });
 }
 
@@ -91,22 +88,22 @@ dev = spawn(turboBin, ["dev", ...turboArgs], {
   env: {
     ...process.env,
     ...tunnelEnv,
-    ...goatHttpsEnv,
-    ...resolveGoatDevEnv({ port, processEnv: process.env, tunnelEnv, goatHttpsEnv }),
+    ...httpsEnv,
+    ...resolveDevEnv({ port, processEnv: process.env, tunnelEnv, httpsEnv }),
   },
 });
 
-function stopGoatDevProxy() {
-  if (goatDevProxy) {
-    goatDevProxy.close().catch(() => {});
-    goatDevProxy = null;
+function stopDevProxy() {
+  if (devProxy) {
+    devProxy.close().catch(() => {});
+    devProxy = null;
   }
 }
 
-function stopGoatLocalHttps() {
-  if (goatLocalHttps) {
-    goatLocalHttps.close();
-    goatLocalHttps = null;
+function stopLocalHttps() {
+  if (localHttps) {
+    localHttps.close();
+    localHttps = null;
   }
 }
 
@@ -208,8 +205,8 @@ function descendantPids(rootPid) {
 
 dev.on("exit", (code, signal) => {
   if (ngrok && !ngrok.killed) ngrok.kill("SIGTERM");
-  stopGoatLocalHttps();
-  stopGoatDevProxy();
+  stopLocalHttps();
+  stopDevProxy();
   if (shuttingDown) exit(0);
   if (signal) exit(1);
   exit(code ?? 0);
@@ -217,32 +214,32 @@ dev.on("exit", (code, signal) => {
 
 dev.on("error", (error) => {
   if (ngrok && !ngrok.killed) ngrok.kill("SIGTERM");
-  stopGoatLocalHttps();
-  stopGoatDevProxy();
+  stopLocalHttps();
+  stopDevProxy();
   console.error(`\nFailed to start turbo dev: ${error.message}\n`);
   exit(1);
 });
 
-async function prepareGoatProxyTarget(appPort) {
+async function prepareProxyTarget(appPort) {
   const runnerPort = localRunnerPort();
-  goatDevProxy = await startGoatDevProxy({ appPort, runnerPort });
-  console.log(`\nGoat dev proxy ready: http://127.0.0.1:${goatDevProxy.port}`);
-  console.log(`  app routes    -> ${goatDevProxy.routes.app}`);
+  devProxy = await startDevProxy({ appPort, runnerPort });
+  console.log(`\nGoat dev proxy ready: http://127.0.0.1:${devProxy.port}`);
+  console.log(`  app routes    -> ${devProxy.routes.app}`);
   console.log(
-    `  runner routes -> ${goatDevProxy.routes.runner} (/broker/*, /goat/runtime, /goat/dictation, *.preview.localhost)\n`,
+    `  runner routes -> ${devProxy.routes.runner} (/broker/*, /goat/runtime, /goat/dictation, *.preview.localhost)\n`,
   );
-  return { port: goatDevProxy.port, exposesRunnerCallbacks: true };
+  return { port: devProxy.port, exposesRunnerCallbacks: true };
 }
 
-function assertGoatDevPortsAvailable() {
+function assertDevPortsAvailable() {
   if (isCI) return;
 
   const ports = [
     { label: "Goat app", port },
     { label: "runner", port: localRunnerPort() },
   ];
-  if (!goatHttpsDisabled()) {
-    ports.push({ label: "Goat HTTPS", port: goatHttpsPort() });
+  if (!httpsDisabled()) {
+    ports.push({ label: "Goat HTTPS", port: httpsPort() });
   }
   const busy = [];
   for (const { label, port } of dedupePorts(ports)) {
@@ -275,22 +272,22 @@ function dedupePorts(ports) {
   return unique;
 }
 
-async function startGoatHttps(targetPort) {
-  const proxy = await startGoatLocalHttpsProxy({ targetPort });
+async function startHttps(targetPort) {
+  const proxy = await startLocalHttpsProxy({ targetPort });
   if (!proxy) return null;
 
-  const goatRedirectUri = `${proxy.url}/auth/callback`;
-  goatHttpsEnv = {
+  const redirectUri = `${proxy.url}/auth/callback`;
+  httpsEnv = {
     NEXT_PUBLIC_APP_URL: proxy.url,
-    NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
+    NEXT_PUBLIC_WORKOS_REDIRECT_URI: redirectUri,
     NEXT_PUBLIC_APP_URL: proxy.url,
-    NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
-    WORKOS_REDIRECT_URI: goatRedirectUri,
+    NEXT_PUBLIC_WORKOS_REDIRECT_URI: redirectUri,
+    WORKOS_REDIRECT_URI: redirectUri,
   };
 
   console.log(`\nGoat local HTTPS ready: ${proxy.url}`);
   console.log(`  Caddy config: ${proxy.configPath}`);
-  console.log(`  WorkOS redirect URI: ${goatRedirectUri}`);
+  console.log(`  WorkOS redirect URI: ${redirectUri}`);
   console.log("  Open this URL for local Goat dev so Electric shapes use HTTP/2.\n");
   console.log(
     "  If the browser warns about the certificate, run `caddy trust` while dev is running.\n",
@@ -299,7 +296,7 @@ async function startGoatHttps(targetPort) {
 }
 
 function localRunnerPort() {
-  if (goatDevPorts) return goatDevPorts.runner;
+  if (devPorts) return devPorts.runner;
 
   const configured =
     process.env.RUNNER_INTERNAL_URL?.trim() || process.env.RUNNER_PUBLIC_URL?.trim();

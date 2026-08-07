@@ -1,7 +1,7 @@
-import type { GoatManagedCapabilitySource } from "@opencompany/db/schema";
+import type { ManagedCapabilitySource } from "@opencompany/db/schema";
 import type { JSONSchema7 } from "ai";
 import { MAX_EXPANDED_ACTION_RESULT_CHARS } from "@/lib/actions/execute";
-import { GoatActionInvalidParamsError } from "@/lib/actions/types";
+import { ActionInvalidParamsError } from "@/lib/actions/types";
 import { shapeCompanyEmployeesOutput } from "@/lib/capabilities/lead-company-employees";
 import { shapePdlPersonEmailOutput } from "@/lib/capabilities/pdl-person";
 import { MAX_CAPABILITY_PAYLOAD_STRING_CHARS } from "@/lib/capabilities/sanitize";
@@ -24,7 +24,7 @@ export type ManagedCapabilityMappedInput = {
 
 export type ManagedCapabilityActionSpec = {
   id: string;
-  source: GoatManagedCapabilitySource;
+  source: ManagedCapabilitySource;
   description: string;
   params: JSONSchema7;
   provider: "tikhub" | "apify" | "pdl" | "semrush";
@@ -38,7 +38,7 @@ export type ManagedCapabilityActionSpec = {
 };
 
 export const MANAGED_CAPABILITY_SOURCE_DETAILS: Record<
-  GoatManagedCapabilitySource,
+  ManagedCapabilitySource,
   { label: string; description: string }
 > = {
   x: {
@@ -767,7 +767,7 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
       const params = checkedParams(raw, ["country", "limit"]);
       const country = optionalText(params, "country", 2);
       if (country && !/^[A-Z]{2}$/.test(country)) {
-        throw new GoatActionInvalidParamsError('"country" must be a two-letter uppercase code.');
+        throw new ActionInvalidParamsError('"country" must be a two-letter uppercase code.');
       }
       const limit = limitParam(params, 12, 12);
       return {
@@ -849,11 +849,11 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
       const company = optionalText(params, "company", 200);
       const location = optionalText(params, "location", 200);
       if (name && !/\S+\s+\S+/.test(name)) {
-        throw new GoatActionInvalidParamsError('"name" must include at least first and last name.');
+        throw new ActionInvalidParamsError('"name" must include at least first and last name.');
       }
       const canonicalLinks = profile ? [linkedinUrl(profile, "person")] : [];
       if (!profile && !(name && (company || location))) {
-        throw new GoatActionInvalidParamsError(
+        throw new ActionInvalidParamsError(
           "Provide linkedinUrl, or provide name with company or location.",
         );
       }
@@ -1006,7 +1006,7 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
         maxCompanyEmployees !== undefined &&
         minCompanyEmployees > maxCompanyEmployees
       ) {
-        throw new GoatActionInvalidParamsError(
+        throw new ActionInvalidParamsError(
           '"minCompanyEmployees" cannot exceed "maxCompanyEmployees".',
         );
       }
@@ -1063,7 +1063,7 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
         });
       }
       if (must.length === 0) {
-        throw new GoatActionInvalidParamsError(
+        throw new ActionInvalidParamsError(
           "Provide at least one title, seniority, location, industry, or employee-count filter.",
         );
       }
@@ -1264,7 +1264,7 @@ export const MANAGED_CAPABILITY_ACTIONS_BY_ID = new Map(
   MANAGED_CAPABILITY_ACTIONS.map((action) => [action.id, action]),
 );
 
-export function managedCapabilityActionsForSource(source: GoatManagedCapabilitySource) {
+export function managedCapabilityActionsForSource(source: ManagedCapabilitySource) {
   return MANAGED_CAPABILITY_ACTIONS.filter((action) => action.source === source);
 }
 
@@ -1360,7 +1360,7 @@ export function managedCapabilityContractProbeParams(id: string): Record<string,
 
 function profileAction(input: {
   id: string;
-  source: GoatManagedCapabilitySource;
+  source: ManagedCapabilitySource;
   description: string;
   endpoint: string;
   platform: "x";
@@ -1385,7 +1385,7 @@ function profileAction(input: {
 
 function profileListAction(input: {
   id: string;
-  source: GoatManagedCapabilitySource;
+  source: ManagedCapabilitySource;
   description: string;
   endpoint: string;
   platform: "x";
@@ -1411,7 +1411,7 @@ function profileListAction(input: {
 
 function idAction(input: {
   id: string;
-  source: GoatManagedCapabilitySource;
+  source: ManagedCapabilitySource;
   description: string;
   endpoint: string;
   field: string;
@@ -1437,7 +1437,7 @@ function idAction(input: {
 
 function idListAction(input: {
   id: string;
-  source: GoatManagedCapabilitySource;
+  source: ManagedCapabilitySource;
   description: string;
   endpoint: string;
   field: string;
@@ -1659,7 +1659,7 @@ function youtubeTranscriptSearchInput(raw: Record<string, unknown>) {
   const params = checkedParams(raw, ["video", "query", "language", "contextSeconds", "maxMatches"]);
   const query = requiredText(params, "query", 200);
   if (!/[\p{L}\p{N}]/u.test(query)) {
-    throw new GoatActionInvalidParamsError('"query" must contain at least one letter or number.');
+    throw new ActionInvalidParamsError('"query" must contain at least one letter or number.');
   }
   return {
     video: parseContentIdentity(requiredText(params, "video", 1_000), "youtube_video"),
@@ -1673,9 +1673,7 @@ function youtubeTranscriptSearchInput(raw: Record<string, unknown>) {
 function youtubeTranscriptLanguage(params: Record<string, unknown>) {
   const language = optionalText(params, "language", 2);
   if (language && !/^[a-z]{2}$/.test(language)) {
-    throw new GoatActionInvalidParamsError(
-      '"language" must be a lowercase two-letter ISO 639-1 code.',
-    );
+    throw new ActionInvalidParamsError('"language" must be a lowercase two-letter ISO 639-1 code.');
   }
   return language;
 }
@@ -1868,13 +1866,13 @@ function tiktokSearchAction(
       const cursor = cursorParam(params);
       const offset = cursor === undefined ? 0 : Number(cursor);
       if (!Number.isSafeInteger(offset) || offset < 0 || offset > 10_000) {
-        throw new GoatActionInvalidParamsError(
+        throw new ActionInvalidParamsError(
           '"cursor" must be the numeric offset returned by TikTok.',
         );
       }
       const region = supportsRegion ? (optionalText(params, "region", 2) ?? "US") : undefined;
       if (region !== undefined && !/^[A-Z]{2}$/.test(region)) {
-        throw new GoatActionInvalidParamsError('"region" must be a two-letter uppercase code.');
+        throw new ActionInvalidParamsError('"region" must be a two-letter uppercase code.');
       }
       return {
         providerInput: compact({
@@ -1892,7 +1890,7 @@ function tiktokSearchAction(
 
 function noInputAction(
   id: string,
-  source: GoatManagedCapabilitySource,
+  source: ManagedCapabilitySource,
   description: string,
   endpoint: string,
   defaultLimit: number,
@@ -2005,7 +2003,7 @@ function checkedParams(raw: Record<string, unknown>, allowed: readonly string[])
   const allowedSet = new Set(allowed);
   const unknown = Object.keys(raw).filter((key) => !allowedSet.has(key));
   if (unknown.length > 0) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `Unknown parameter${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}.`,
     );
   }
@@ -2014,7 +2012,7 @@ function checkedParams(raw: Record<string, unknown>, allowed: readonly string[])
 
 function requiredText(params: Record<string, unknown>, key: string, maxLength: number) {
   const value = optionalText(params, key, maxLength);
-  if (!value) throw new GoatActionInvalidParamsError(`"${key}" is required.`);
+  if (!value) throw new ActionInvalidParamsError(`"${key}" is required.`);
   return value;
 }
 
@@ -2022,12 +2020,12 @@ function optionalText(params: Record<string, unknown>, key: string, maxLength: n
   const value = params[key];
   if (value === undefined || value === null || value === "") return undefined;
   if (typeof value !== "string") {
-    throw new GoatActionInvalidParamsError(`"${key}" must be a string.`);
+    throw new ActionInvalidParamsError(`"${key}" must be a string.`);
   }
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   if (trimmed.length > maxLength) {
-    throw new GoatActionInvalidParamsError(`"${key}" must be at most ${maxLength} characters.`);
+    throw new ActionInvalidParamsError(`"${key}" must be at most ${maxLength} characters.`);
   }
   return trimmed;
 }
@@ -2040,7 +2038,7 @@ function limitParam(params: Record<string, unknown>, defaultValue: number, maxVa
   const value = params.limit;
   if (value === undefined || value === null) return defaultValue;
   if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > maxValue) {
-    throw new GoatActionInvalidParamsError(`"limit" must be an integer from 1 to ${maxValue}.`);
+    throw new ActionInvalidParamsError(`"limit" must be an integer from 1 to ${maxValue}.`);
   }
   return value as number;
 }
@@ -2055,7 +2053,7 @@ function integerParam(
   const value = params[key];
   if (value === undefined || value === null) return defaultValue;
   if (!Number.isInteger(value) || (value as number) < min || (value as number) > max) {
-    throw new GoatActionInvalidParamsError(`"${key}" must be an integer from ${min} to ${max}.`);
+    throw new ActionInvalidParamsError(`"${key}" must be an integer from ${min} to ${max}.`);
   }
   return value as number;
 }
@@ -2069,7 +2067,7 @@ function optionalIntegerParam(
   const value = params[key];
   if (value === undefined || value === null) return undefined;
   if (!Number.isInteger(value) || (value as number) < min || (value as number) > max) {
-    throw new GoatActionInvalidParamsError(`"${key}" must be an integer from ${min} to ${max}.`);
+    throw new ActionInvalidParamsError(`"${key}" must be an integer from ${min} to ${max}.`);
   }
   return value as number;
 }
@@ -2078,7 +2076,7 @@ function optionalBooleanParam(params: Record<string, unknown>, key: string) {
   const value = params[key];
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "boolean") {
-    throw new GoatActionInvalidParamsError(`"${key}" must be a boolean.`);
+    throw new ActionInvalidParamsError(`"${key}" must be a boolean.`);
   }
   return value;
 }
@@ -2092,15 +2090,15 @@ function lowercaseTextListParam(
   const value = params[key];
   if (value === undefined || value === null) return [] as string[];
   if (!Array.isArray(value) || value.length < 1 || value.length > maxItems) {
-    throw new GoatActionInvalidParamsError(`"${key}" must contain from 1 to ${maxItems} strings.`);
+    throw new ActionInvalidParamsError(`"${key}" must contain from 1 to ${maxItems} strings.`);
   }
   const normalized = value.map((entry) => {
     if (typeof entry !== "string") {
-      throw new GoatActionInvalidParamsError(`"${key}" must contain only strings.`);
+      throw new ActionInvalidParamsError(`"${key}" must contain only strings.`);
     }
     const text = entry.trim().toLowerCase();
     if (!text || text.length > maxItemLength) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `Each "${key}" value must be from 1 to ${maxItemLength} characters.`,
       );
     }
@@ -2117,7 +2115,7 @@ function enumListParam<T extends string>(
 ) {
   const entries = lowercaseTextListParam(params, key, maxItems, 100);
   if (entries.some((entry) => !values.includes(entry as T))) {
-    throw new GoatActionInvalidParamsError(`"${key}" values must be one of: ${values.join(", ")}.`);
+    throw new ActionInvalidParamsError(`"${key}" values must be one of: ${values.join(", ")}.`);
   }
   return entries as T[];
 }
@@ -2135,7 +2133,7 @@ function pdlLocationFilter(locations: string[], fields: string[]) {
 function seoDatabase(params: Record<string, unknown>) {
   const country = optionalText(params, "country", 2) ?? "US";
   if (!/^[A-Z]{2}$/.test(country)) {
-    throw new GoatActionInvalidParamsError('"country" must be a two-letter uppercase code.');
+    throw new ActionInvalidParamsError('"country" must be a two-letter uppercase code.');
   }
   return country === "GB" ? "uk" : country.toLowerCase();
 }
@@ -2143,7 +2141,7 @@ function seoDatabase(params: Record<string, unknown>) {
 function seoCountry(params: Record<string, unknown>) {
   const country = optionalText(params, "country", 2) ?? "US";
   if (!/^[A-Z]{2}$/.test(country)) {
-    throw new GoatActionInvalidParamsError('"country" must be a two-letter uppercase code.');
+    throw new ActionInvalidParamsError('"country" must be a two-letter uppercase code.');
   }
   return country === "GB" ? "UK" : country;
 }
@@ -2154,7 +2152,7 @@ function seoDomain(params: Record<string, unknown>) {
   try {
     url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
   } catch {
-    throw new GoatActionInvalidParamsError('"domain" must be a valid public domain or HTTPS URL.');
+    throw new ActionInvalidParamsError('"domain" must be a valid public domain or HTTPS URL.');
   }
   if (
     url.protocol !== "https:" ||
@@ -2163,7 +2161,7 @@ function seoDomain(params: Record<string, unknown>) {
     url.port ||
     url.hostname === "localhost"
   ) {
-    throw new GoatActionInvalidParamsError('"domain" must be a valid public domain or HTTPS URL.');
+    throw new ActionInvalidParamsError('"domain" must be a valid public domain or HTTPS URL.');
   }
   const hostname = url.hostname.toLowerCase().replace(/^www\./, "");
   const labels = hostname.split(".");
@@ -2176,7 +2174,7 @@ function seoDomain(params: Record<string, unknown>) {
         label.length < 1 || label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label),
     )
   ) {
-    throw new GoatActionInvalidParamsError('"domain" must be a valid public domain or HTTPS URL.');
+    throw new ActionInvalidParamsError('"domain" must be a valid public domain or HTTPS URL.');
   }
   return hostname;
 }
@@ -2197,7 +2195,7 @@ function enumParam<T extends string>(
     return defaultValue === undefined ? undefined : (map?.[defaultValue] ?? defaultValue);
   }
   if (typeof value !== "string" || !values.includes(value as T)) {
-    throw new GoatActionInvalidParamsError(`"${key}" must be one of: ${values.join(", ")}.`);
+    throw new ActionInvalidParamsError(`"${key}" must be one of: ${values.join(", ")}.`);
   }
   return map?.[value as T] ?? value;
 }
@@ -2220,7 +2218,7 @@ function parseProfileIdentity(value: string, platform: "x" | "instagram" | "tikt
         : (parts[0] ?? "");
   }
   if (!/^[A-Za-z0-9._-]{1,100}$/.test(id)) {
-    throw new GoatActionInvalidParamsError("The profile URL or username is invalid.");
+    throw new ActionInvalidParamsError("The profile URL or username is invalid.");
   }
   const url =
     platform === "x"
@@ -2270,7 +2268,7 @@ function parseContentIdentity(
         ? /^[A-Za-z0-9_-]{5,64}$/
         : /^\d{5,30}$/;
   if (!pattern.test(id)) {
-    throw new GoatActionInvalidParamsError("The content URL or identifier is invalid.");
+    throw new ActionInvalidParamsError("The content URL or identifier is invalid.");
   }
   const url =
     platform === "x_post"
@@ -2293,7 +2291,7 @@ function linkedinUrl(value: string, kind: "person" | "company" | "post") {
         ? /^\/company\/[^/]+\/?$/
         : /^\/(?:posts|feed\/update|pulse)\/.+/;
   if (!allowed.test(url.pathname)) {
-    throw new GoatActionInvalidParamsError(`Expected a LinkedIn ${kind} URL.`);
+    throw new ActionInvalidParamsError(`Expected a LinkedIn ${kind} URL.`);
   }
   url.protocol = "https:";
   url.hostname = "www.linkedin.com";
@@ -2307,7 +2305,7 @@ function linkedInSlug(value: string, segment: "in" | "company") {
   const parts = url.pathname.split("/").filter(Boolean);
   const index = parts.indexOf(segment);
   const slug = index >= 0 ? parts[index + 1] : undefined;
-  if (!slug) throw new GoatActionInvalidParamsError("The LinkedIn URL is missing its slug.");
+  if (!slug) throw new ActionInvalidParamsError("The LinkedIn URL is missing its slug.");
   return slug;
 }
 
@@ -2318,7 +2316,7 @@ function linkedInPostId(value: string) {
     decodedPath.match(/urn:li:(?:activity|ugcPost|share):(\d+)/)?.[1] ??
     decodedPath.match(/-(\d{5,30})(?:\/)?$/)?.[1];
   if (!id) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       "The LinkedIn post URL must contain its numeric activity or post ID.",
     );
   }
@@ -2333,7 +2331,7 @@ function youtubeChannel(value: string) {
   assertHost(url, ["youtube.com"]);
   const match = url.pathname.match(/^\/channel\/(UC[A-Za-z0-9_-]{20,30})\/?$/);
   if (!match?.[1]) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       "Use a YouTube channel ID or a /channel/UC... URL for this action.",
     );
   }
@@ -2346,14 +2344,14 @@ function safeUrl(value: string) {
     if (url.protocol !== "https:") throw new Error("bad protocol");
     return url;
   } catch {
-    throw new GoatActionInvalidParamsError("Expected a valid public HTTPS URL.");
+    throw new ActionInvalidParamsError("Expected a valid public HTTPS URL.");
   }
 }
 
 function assertHost(url: URL, allowedRoots: readonly string[]) {
   const hostname = url.hostname.toLowerCase().replace(/^www\./, "");
   if (!allowedRoots.some((root) => hostname === root || hostname.endsWith(`.${root}`))) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `URL host ${JSON.stringify(url.hostname)} is not allowed for this action.`,
     );
   }

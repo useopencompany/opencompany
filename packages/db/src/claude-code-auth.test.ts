@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  markGoatClaudeCodeCredentialValidated,
-  saveGoatClaudeCodeCredential,
-} from "./claude-code-auth";
+import { markClaudeCodeCredentialValidated, saveClaudeCodeCredential } from "./claude-code-auth";
 
 describe("Goat Claude Code credential validation state", () => {
   afterEach(() => {
@@ -24,7 +21,7 @@ describe("Goat Claude Code credential validation state", () => {
     const values = vi.fn(() => ({ onConflictDoUpdate }));
     const db = { insert: vi.fn(() => ({ values })) };
 
-    await saveGoatClaudeCodeCredential({
+    await saveClaudeCodeCredential({
       db: db as never,
       userWorkosId: "user_123",
       authJson: { token: "sk-ant-oat01-abcdefghijklmnopqrstuvwxyz" },
@@ -55,7 +52,7 @@ describe("Goat Claude Code credential validation state", () => {
     const db = { update: vi.fn(() => ({ set })) };
 
     await expect(
-      markGoatClaudeCodeCredentialValidated({
+      markClaudeCodeCredentialValidated({
         db: db as never,
         userWorkosId: "user_123",
         expectedUpdatedAt: new Date("2026-07-28T10:00:00.000Z"),
@@ -79,7 +76,7 @@ describe("Goat Claude Code credential validation state", () => {
     const db = { update: vi.fn(() => ({ set })) };
 
     await expect(
-      markGoatClaudeCodeCredentialValidated({
+      markClaudeCodeCredentialValidated({
         db: db as never,
         userWorkosId: "user_123",
         expectedUpdatedAt: new Date("2026-07-28T10:00:00.000Z"),

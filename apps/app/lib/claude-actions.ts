@@ -1,20 +1,20 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
+  type ActionGatewayRequest,
+  type ActionGatewayResponse,
   GOAT_ACTION_TOOL_CONTRACT,
-  type GoatActionGatewayRequest,
-  type GoatActionGatewayResponse,
 } from "@opencompany/agent-runtime";
 import * as z from "zod/v4-mini";
-import { executeGoatActionGateway } from "@/lib/codex-actions";
+import { executeActionGateway } from "@/lib/codex-actions";
 
-export type GoatClaudeActionToolContext = {
+export type ClaudeActionToolContext = {
   codexChatSessionId: string;
   codexChatTurnId: string;
   signal?: AbortSignal;
 };
 
-type GoatClaudeActionToolDependencies = {
-  executeAction: typeof executeGoatActionGateway;
+type ClaudeActionToolDependencies = {
+  executeAction: typeof executeActionGateway;
 };
 
 // MCP requires Zod validators, while Codex accepts JSON Schema directly. Build
@@ -23,12 +23,12 @@ type GoatClaudeActionToolDependencies = {
 const listActionsInputSchema = mcpInputSchema(GOAT_ACTION_TOOL_CONTRACT.list.inputSchema);
 const useActionInputSchema = mcpInputSchema(GOAT_ACTION_TOOL_CONTRACT.execute.inputSchema);
 
-export function registerGoatClaudeActionTools(
+export function registerClaudeActionTools(
   server: McpServer,
-  ctx: GoatClaudeActionToolContext,
-  dependencies: Partial<GoatClaudeActionToolDependencies> = {},
+  ctx: ClaudeActionToolContext,
+  dependencies: Partial<ClaudeActionToolDependencies> = {},
 ) {
-  const executeAction = dependencies.executeAction ?? executeGoatActionGateway;
+  const executeAction = dependencies.executeAction ?? executeActionGateway;
 
   server.registerTool(
     GOAT_ACTION_TOOL_CONTRACT.list.name,
@@ -112,9 +112,9 @@ function mcpInvocationId(
 }
 
 async function runGateway(
-  executeAction: typeof executeGoatActionGateway,
-  ctx: GoatClaudeActionToolContext,
-  request: GoatActionGatewayRequest,
+  executeAction: typeof executeActionGateway,
+  ctx: ClaudeActionToolContext,
+  request: ActionGatewayRequest,
 ) {
   const response = await executeAction({
     request,
@@ -123,7 +123,7 @@ async function runGateway(
   return mcpResult(response);
 }
 
-function mcpResult(response: GoatActionGatewayResponse) {
+function mcpResult(response: ActionGatewayResponse) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(response) }],
     structuredContent: response as unknown as Record<string, unknown>,

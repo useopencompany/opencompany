@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { goatWorkflowStepSettings } from "@/lib/workflow-model-options";
+import { workflowStepSettings } from "@/lib/workflow-model-options";
 
-describe("goatWorkflowStepSettings", () => {
+describe("workflowStepSettings", () => {
   it("drops cloud coding settings when the workflow step runtime is not cloud coding", () => {
     expect(
-      goatWorkflowStepSettings({
+      workflowStepSettings({
         model: "kimi-k2.6",
         runtimeModel: "openai/gpt-5.6-luna",
         reasoningEffort: "xhigh",
@@ -14,7 +14,7 @@ describe("goatWorkflowStepSettings", () => {
 
   it("normalizes cloud coding steps to a concrete model and effort", () => {
     expect(
-      goatWorkflowStepSettings({
+      workflowStepSettings({
         model: "codex",
         runtimeModel: "openai/gpt-5.6-luna",
         reasoningEffort: "medium",

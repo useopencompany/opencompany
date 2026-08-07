@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   evidenceLinkTargets,
-  formatGoatBrainEvidenceLink,
-  formatGoatBrainPageLink,
-  formatGoatBrainSourceLink,
+  formatBrainEvidenceLink,
+  formatBrainPageLink,
+  formatBrainSourceLink,
   pageLinkTargets,
-  parseGoatBrainInlineLinks,
+  parseBrainInlineLinks,
   sourceLinkTargets,
 } from "./inline-links";
 
 describe("goat brain inline links", () => {
   it("parses canonical page, evidence, and source links", () => {
     expect(
-      parseGoatBrainInlineLinks(
+      parseBrainInlineLinks(
         "See [[page:acme|Acme]], [[evidence:ev-acme-email|email]], and [[source:gmail:thread_1|thread]].",
       ),
     ).toEqual([
@@ -41,7 +41,7 @@ describe("goat brain inline links", () => {
   });
 
   it("keeps legacy bare page links and evidence citations readable", () => {
-    expect(parseGoatBrainInlineLinks("[[acme|Acme]] cites [^ev:ev-seed].")).toEqual([
+    expect(parseBrainInlineLinks("[[acme|Acme]] cites [^ev:ev-seed].")).toEqual([
       expect.objectContaining({
         kind: "page",
         target: "acme",
@@ -60,12 +60,12 @@ describe("goat brain inline links", () => {
   });
 
   it("reports invalid targets without dropping the link", () => {
-    expect(
-      parseGoatBrainInlineLinks("[[page:Bad Id]] [[evidence:not-ev]] [[source:bad]ref]]"),
-    ).toEqual([
-      expect.objectContaining({ kind: "page", target: "Bad Id", valid: false }),
-      expect.objectContaining({ kind: "evidence", target: "not-ev", valid: false }),
-    ]);
+    expect(parseBrainInlineLinks("[[page:Bad Id]] [[evidence:not-ev]] [[source:bad]ref]]")).toEqual(
+      [
+        expect.objectContaining({ kind: "page", target: "Bad Id", valid: false }),
+        expect.objectContaining({ kind: "evidence", target: "not-ev", valid: false }),
+      ],
+    );
   });
 
   it("ignores escaped links and links inside Markdown code", () => {
@@ -88,14 +88,14 @@ describe("goat brain inline links", () => {
       "[[page:visible|Visible]]",
     ].join("\n");
 
-    expect(parseGoatBrainInlineLinks(text)).toEqual([
+    expect(parseBrainInlineLinks(text)).toEqual([
       expect.objectContaining({ kind: "page", target: "visible", label: "Visible" }),
     ]);
-    expect(parseGoatBrainInlineLinks(String.raw`\\[[page:visible|Visible]]`)).toEqual([
+    expect(parseBrainInlineLinks(String.raw`\\[[page:visible|Visible]]`)).toEqual([
       expect.objectContaining({ kind: "page", target: "visible", label: "Visible" }),
     ]);
     expect(
-      parseGoatBrainInlineLinks(
+      parseBrainInlineLinks(
         "```text\r\n[[page:fenced-code|Fenced code]]\r\n```\r\n[[page:visible|Visible]]",
       ),
     ).toEqual([expect.objectContaining({ kind: "page", target: "visible", label: "Visible" })]);
@@ -113,7 +113,7 @@ describe("goat brain inline links", () => {
       "      [[page:list-code|List code]]",
     ].join("\n");
 
-    expect(parseGoatBrainInlineLinks(text).map((link) => link.target)).toEqual([
+    expect(parseBrainInlineLinks(text).map((link) => link.target)).toEqual([
       "continuation",
       "nested",
       "list-paragraph",
@@ -156,7 +156,7 @@ describe("goat brain inline links", () => {
       "<span>[[page:html-after-list|HTML after list]]</span>",
     ].join("\n");
 
-    expect(parseGoatBrainInlineLinks(text).map((link) => link.target)).toEqual([
+    expect(parseBrainInlineLinks(text).map((link) => link.target)).toEqual([
       "after-quote",
       "outer-quote",
       "after-list",
@@ -171,7 +171,7 @@ describe("goat brain inline links", () => {
 
   it("requires source targets to be provider:id shaped", () => {
     expect(
-      parseGoatBrainInlineLinks(
+      parseBrainInlineLinks(
         "[[source:jamie:meeting:calendar_event_123]] [[source:noid]] [[source:Bad:ref]] [[source:gmail:thread 1]]",
       ),
     ).toEqual([
@@ -196,22 +196,22 @@ describe("goat brain inline links", () => {
   });
 
   it("formats canonical typed links", () => {
-    expect(formatGoatBrainPageLink("acme", "Acme")).toBe("[[page:acme|Acme]]");
-    expect(formatGoatBrainEvidenceLink("ev-seed")).toBe("[[evidence:ev-seed]]");
-    expect(formatGoatBrainSourceLink("gmail:thread_1", "Thread")).toBe(
+    expect(formatBrainPageLink("acme", "Acme")).toBe("[[page:acme|Acme]]");
+    expect(formatBrainEvidenceLink("ev-seed")).toBe("[[evidence:ev-seed]]");
+    expect(formatBrainSourceLink("gmail:thread_1", "Thread")).toBe(
       "[[source:gmail:thread_1|Thread]]",
     );
   });
 
   it("rejects invalid formatted targets and labels", () => {
-    expect(() => formatGoatBrainPageLink("Bad Id")).toThrow("Invalid Goat Brain page link target.");
-    expect(() => formatGoatBrainEvidenceLink("seed")).toThrow(
+    expect(() => formatBrainPageLink("Bad Id")).toThrow("Invalid Goat Brain page link target.");
+    expect(() => formatBrainEvidenceLink("seed")).toThrow(
       "Invalid Goat Brain evidence link target.",
     );
-    expect(() => formatGoatBrainSourceLink("gmail:1", "bad]label")).toThrow(
+    expect(() => formatBrainSourceLink("gmail:1", "bad]label")).toThrow(
       "Invalid Goat Brain link label.",
     );
-    expect(() => formatGoatBrainPageLink("acme", "bad[label")).toThrow(
+    expect(() => formatBrainPageLink("acme", "bad[label")).toThrow(
       "Invalid Goat Brain link label.",
     );
   });

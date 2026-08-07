@@ -1,34 +1,34 @@
 import { NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import {
-  appendGoatSlackBotSetupStatus,
-  buildGoatSlackBotAuthorizationUrl,
-  createGoatSlackBotState,
-  isGoatSlackBotConfigured,
+  appendSlackBotSetupStatus,
+  buildSlackBotAuthorizationUrl,
+  createSlackBotState,
+  isSlackBotConfigured,
 } from "@/lib/integrations/slack-bot";
 
 export async function GET(request: Request) {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings/workspace/slack";
 
   if (context.role !== "admin") {
     return NextResponse.redirect(
-      new URL(appendGoatSlackBotSetupStatus(returnTo, "error", "admin_required"), url),
+      new URL(appendSlackBotSetupStatus(returnTo, "error", "admin_required"), url),
     );
   }
 
-  if (!isGoatSlackBotConfigured()) {
+  if (!isSlackBotConfigured()) {
     return NextResponse.redirect(
-      new URL(appendGoatSlackBotSetupStatus(returnTo, "error", "not_configured"), url),
+      new URL(appendSlackBotSetupStatus(returnTo, "error", "not_configured"), url),
     );
   }
 
-  const state = createGoatSlackBotState({
+  const state = createSlackBotState({
     userWorkosId: context.user.workosUserId,
     workspaceId: context.workspace.id,
     returnTo,
   });
 
-  return NextResponse.redirect(buildGoatSlackBotAuthorizationUrl(state));
+  return NextResponse.redirect(buildSlackBotAuthorizationUrl(state));
 }

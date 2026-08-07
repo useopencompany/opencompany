@@ -1,9 +1,9 @@
-import type { GoatCodexChatTurn } from "@opencompany/db/schema";
+import type { CodexChatTurn } from "@opencompany/db/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  enqueueGoatCodexChatWakeup,
+  enqueueCodexChatWakeup,
   GOAT_CODEX_CHAT_WAKEUP_MAX_CHAIN,
-  persistGoatCodexChatScheduledWakeup,
+  persistCodexChatScheduledWakeup,
   scheduledWakeupFromTurnSettings,
 } from "./codex-chat-wakeup";
 
@@ -15,14 +15,14 @@ vi.mock("./db", () => ({
   getDb: () => ({ execute: mocks.execute }),
 }));
 
-describe("enqueueGoatCodexChatWakeup", () => {
+describe("enqueueCodexChatWakeup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.execute.mockResolvedValue({ rows: [{ id: "goat_codex_chat_turn_wakeup" }] });
   });
 
   it("enqueues both synthetic messages and a delayed turn without activating the session", async () => {
-    const result = await enqueueGoatCodexChatWakeup({
+    const result = await enqueueCodexChatWakeup({
       parentTurn: parentTurn(),
       model: "claude-opus-4-8",
       wakeup: {
@@ -54,7 +54,7 @@ describe("enqueueGoatCodexChatWakeup", () => {
   });
 
   it("does not carry the parent's persisted wakeup request into the child turn", async () => {
-    await enqueueGoatCodexChatWakeup({
+    await enqueueCodexChatWakeup({
       parentTurn: parentTurn({
         settings: {
           reasoningEffort: "high",
@@ -82,7 +82,7 @@ describe("enqueueGoatCodexChatWakeup", () => {
     mocks.execute.mockResolvedValueOnce({ rows: [] });
 
     await expect(
-      enqueueGoatCodexChatWakeup({
+      enqueueCodexChatWakeup({
         parentTurn: parentTurn(),
         model: "claude-opus-4-8",
         wakeup: { delaySeconds: 60, reason: "Wait for CI", prompt: "" },
@@ -96,7 +96,7 @@ describe("enqueueGoatCodexChatWakeup", () => {
 
   it("caps recursive wakeup chains before writing anything", async () => {
     await expect(
-      enqueueGoatCodexChatWakeup({
+      enqueueCodexChatWakeup({
         parentTurn: parentTurn({
           settings: { wakeupChain: GOAT_CODEX_CHAT_WAKEUP_MAX_CHAIN },
         }),
@@ -109,7 +109,7 @@ describe("enqueueGoatCodexChatWakeup", () => {
   });
 
   it("persists a scheduled wakeup only while the worker still owns the running turn", async () => {
-    await persistGoatCodexChatScheduledWakeup({
+    await persistCodexChatScheduledWakeup({
       turnId: "goat_codex_chat_turn_1",
       userWorkosId: "user_1",
       codexChatSessionId: "goat_codex_chat_1",
@@ -135,7 +135,7 @@ describe("enqueueGoatCodexChatWakeup", () => {
     mocks.execute.mockResolvedValueOnce({ rows: [] });
 
     await expect(
-      persistGoatCodexChatScheduledWakeup({
+      persistCodexChatScheduledWakeup({
         turnId: "goat_codex_chat_turn_1",
         userWorkosId: "user_1",
         codexChatSessionId: "goat_codex_chat_1",
@@ -143,7 +143,7 @@ describe("enqueueGoatCodexChatWakeup", () => {
         leaseOwner: "runner_1",
         wakeup: { delaySeconds: 120, reason: "Wait for CI", prompt: "" },
       }),
-    ).rejects.toMatchObject({ name: "GoatCodexChatLeaseLostError" });
+    ).rejects.toMatchObject({ name: "CodexChatLeaseLostError" });
   });
 
   it("restores and validates the last persisted wakeup during recovery", () => {
@@ -168,7 +168,7 @@ describe("enqueueGoatCodexChatWakeup", () => {
   });
 });
 
-function parentTurn(overrides: Partial<GoatCodexChatTurn> = {}) {
+function parentTurn(overrides: Partial<CodexChatTurn> = {}) {
   return {
     id: "goat_codex_chat_turn_parent",
     userWorkosId: "user_1",

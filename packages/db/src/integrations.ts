@@ -9,15 +9,15 @@ import {
 import { and, eq, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { getDb } from "./client";
-import type * as goatSchema from "./schema";
+import type * as schema from "./schema";
 import {
-  type GoatIntegrationCredentialKind,
-  type GoatIntegrationProvider,
-  goatIntegrationCredentials,
-  goatIntegrations,
+  type IntegrationCredentialKind,
+  type IntegrationProvider,
+  integrationCredentials,
+  integrations,
 } from "./schema";
 
-export type GoatGoogleOAuthTokens = {
+export type GoogleOAuthTokens = {
   access_token: string;
   refresh_token?: string;
   scope?: string;
@@ -25,35 +25,29 @@ export type GoatGoogleOAuthTokens = {
   id_token?: string;
 };
 
-type DbSchema = typeof goatSchema;
-type GoatIntegrationDb = Pick<
-  PgDatabase<PgQueryResultHKT, DbSchema>,
-  "insert" | "select" | "update"
->;
-type GoatIntegrationTransactionalDb = GoatIntegrationDb & {
-  transaction<T>(callback: (tx: GoatIntegrationDb) => Promise<T>): Promise<T>;
+type DbSchema = typeof schema;
+type IntegrationDb = Pick<PgDatabase<PgQueryResultHKT, DbSchema>, "insert" | "select" | "update">;
+type IntegrationTransactionalDb = IntegrationDb & {
+  transaction<T>(callback: (tx: IntegrationDb) => Promise<T>): Promise<T>;
 };
-type GoatIntegrationBatchDb = Pick<
-  ReturnType<typeof getDb>,
-  "batch" | "insert" | "select" | "update"
->;
-type GoatIntegrationRefreshDb = GoatIntegrationTransactionalDb | GoatIntegrationBatchDb;
+type IntegrationBatchDb = Pick<ReturnType<typeof getDb>, "batch" | "insert" | "select" | "update">;
+type IntegrationRefreshDb = IntegrationTransactionalDb | IntegrationBatchDb;
 const GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING = {
-  id: goatIntegrationCredentials.id,
-  expiresAt: goatIntegrationCredentials.expiresAt,
-  lastRotatedAt: goatIntegrationCredentials.lastRotatedAt,
-  updatedAt: goatIntegrationCredentials.updatedAt,
-  encryptionKeyVersion: goatIntegrationCredentials.encryptionKeyVersion,
+  id: integrationCredentials.id,
+  expiresAt: integrationCredentials.expiresAt,
+  lastRotatedAt: integrationCredentials.lastRotatedAt,
+  updatedAt: integrationCredentials.updatedAt,
+  encryptionKeyVersion: integrationCredentials.encryptionKeyVersion,
 } as const;
 
-export type GoatIntegrationCredentialContext = {
+export type IntegrationCredentialContext = {
   userWorkosId: string;
   integrationId: string;
-  provider: GoatIntegrationProvider;
-  kind: GoatIntegrationCredentialKind;
+  provider: IntegrationProvider;
+  kind: IntegrationCredentialKind;
 };
 
-export type LoadedGoatIntegrationCredential = {
+export type LoadedIntegrationCredential = {
   payload: Record<string, unknown>;
   expiresAt: Date | null;
   lastRotatedAt: Date | null;
@@ -61,16 +55,16 @@ export type LoadedGoatIntegrationCredential = {
   encryptionKeyVersion: number;
 };
 
-export async function connectGoatGoogleIntegration(input: {
-  provider: GoatIntegrationProvider;
+export async function connectGoogleIntegration(input: {
+  provider: IntegrationProvider;
   userWorkosId: string;
   externalId: string;
   accountEmail: string | null;
   accountName: string | null;
-  tokens: GoatGoogleOAuthTokens;
+  tokens: GoogleOAuthTokens;
   expiresAt: Date | null;
   scopes: string[];
-  db?: GoatIntegrationDb;
+  db?: IntegrationDb;
   now?: Date;
 }) {
   const db = input.db ?? getDb();
@@ -78,9 +72,9 @@ export async function connectGoatGoogleIntegration(input: {
   const connectionLabel = input.accountEmail?.trim() || input.accountName?.trim() || "Google";
 
   const [integration] = await db
-    .insert(goatIntegrations)
+    .insert(integrations)
     .values({
-      id: newGoatIntegrationId(),
+      id: newIntegrationId(),
       userWorkosId: input.userWorkosId,
       provider: input.provider,
       externalId: input.externalId,
@@ -95,13 +89,9 @@ export async function connectGoatGoogleIntegration(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: [
-        goatIntegrations.userWorkosId,
-        goatIntegrations.provider,
-        goatIntegrations.externalId,
-      ],
+      target: [integrations.userWorkosId, integrations.provider, integrations.externalId],
       // The personal-uniqueness index is partial; the arbiter must match it.
-      targetWhere: sql`${goatIntegrations.workspaceId} IS NULL`,
+      targetWhere: sql`${integrations.workspaceId} IS NULL`,
       set: {
         connectionLabel,
         accountName: input.accountName,
@@ -114,14 +104,14 @@ export async function connectGoatGoogleIntegration(input: {
         updatedAt: now,
       },
     })
-    .returning({ id: goatIntegrations.id });
+    .returning({ id: integrations.id });
 
   if (!integration) {
     throw new Error("Could not persist Goat Google integration.");
   }
 
   try {
-    await saveGoatIntegrationCredential({
+    await saveIntegrationCredential({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
       provider: input.provider,
@@ -132,7 +122,7 @@ export async function connectGoatGoogleIntegration(input: {
       now,
     });
   } catch (error) {
-    await markGoatIntegrationStatus({
+    await markIntegrationStatus({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
       provider: input.provider,
@@ -147,7 +137,7 @@ export async function connectGoatGoogleIntegration(input: {
   return { integrationId: integration.id };
 }
 
-export type GoatSlackOAuthCredentialPayload = {
+export type SlackOAuthCredentialPayload = {
   access_token: string;
   authed_user_id: string;
   team_id: string;
@@ -156,7 +146,7 @@ export type GoatSlackOAuthCredentialPayload = {
   scope?: string;
 };
 
-export async function connectGoatSlackIntegration(input: {
+export async function connectSlackIntegration(input: {
   userWorkosId: string;
   teamId: string;
   teamName: string | null;
@@ -166,7 +156,7 @@ export async function connectGoatSlackIntegration(input: {
   accountEmail: string | null;
   accessToken: string;
   scopes: string[];
-  db?: GoatIntegrationDb;
+  db?: IntegrationDb;
   now?: Date;
 }) {
   const db = input.db ?? getDb();
@@ -174,9 +164,9 @@ export async function connectGoatSlackIntegration(input: {
   const connectionLabel = input.teamName?.trim() || "Slack";
 
   const [integration] = await db
-    .insert(goatIntegrations)
+    .insert(integrations)
     .values({
-      id: newGoatIntegrationId(),
+      id: newIntegrationId(),
       userWorkosId: input.userWorkosId,
       provider: "slack",
       // The Slack team id is the routing key for inbound events.
@@ -192,13 +182,9 @@ export async function connectGoatSlackIntegration(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: [
-        goatIntegrations.userWorkosId,
-        goatIntegrations.provider,
-        goatIntegrations.externalId,
-      ],
+      target: [integrations.userWorkosId, integrations.provider, integrations.externalId],
       // The personal-uniqueness index is partial; the arbiter must match it.
-      targetWhere: sql`${goatIntegrations.workspaceId} IS NULL`,
+      targetWhere: sql`${integrations.workspaceId} IS NULL`,
       set: {
         connectionLabel,
         accountName: input.accountName,
@@ -211,13 +197,13 @@ export async function connectGoatSlackIntegration(input: {
         updatedAt: now,
       },
     })
-    .returning({ id: goatIntegrations.id });
+    .returning({ id: integrations.id });
 
   if (!integration) {
     throw new Error("Could not persist Goat Slack integration.");
   }
 
-  const payload: GoatSlackOAuthCredentialPayload = {
+  const payload: SlackOAuthCredentialPayload = {
     access_token: input.accessToken,
     authed_user_id: input.authedUserId,
     team_id: input.teamId,
@@ -227,7 +213,7 @@ export async function connectGoatSlackIntegration(input: {
   };
 
   try {
-    await saveGoatIntegrationCredential({
+    await saveIntegrationCredential({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
       provider: "slack",
@@ -239,7 +225,7 @@ export async function connectGoatSlackIntegration(input: {
       now,
     });
   } catch (error) {
-    await markGoatIntegrationStatus({
+    await markIntegrationStatus({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
       provider: "slack",
@@ -254,7 +240,7 @@ export async function connectGoatSlackIntegration(input: {
   return { integrationId: integration.id };
 }
 
-export type GoatSlackBotOAuthCredentialPayload = {
+export type SlackBotOAuthCredentialPayload = {
   access_token: string;
   bot_user_id: string;
   team_id: string;
@@ -265,7 +251,7 @@ export type GoatSlackBotOAuthCredentialPayload = {
 // The Slack answer-bot install. Workspace-owned (see
 // WORKSPACE_OWNED_GOAT_INTEGRATION_PROVIDERS): the bot token belongs to the
 // Slack workspace install, not to the connecting admin.
-export async function connectGoatSlackBotIntegration(input: {
+export async function connectSlackBotIntegration(input: {
   userWorkosId: string;
   workspaceId: string;
   teamId: string;
@@ -273,7 +259,7 @@ export async function connectGoatSlackBotIntegration(input: {
   botUserId: string;
   accessToken: string;
   scopes: string[];
-  db?: GoatIntegrationBatchDb;
+  db?: IntegrationBatchDb;
   now?: Date;
 }) {
   const db = input.db ?? getDb();
@@ -285,19 +271,16 @@ export async function connectGoatSlackBotIntegration(input: {
   // and original connector first so the integration and encrypted credential
   // can still be committed atomically below.
   const [existing] = await db
-    .select({ id: goatIntegrations.id, userWorkosId: goatIntegrations.userWorkosId })
-    .from(goatIntegrations)
+    .select({ id: integrations.id, userWorkosId: integrations.userWorkosId })
+    .from(integrations)
     .where(
-      and(
-        eq(goatIntegrations.workspaceId, input.workspaceId),
-        eq(goatIntegrations.provider, "slack_bot"),
-      ),
+      and(eq(integrations.workspaceId, input.workspaceId), eq(integrations.provider, "slack_bot")),
     )
     .limit(1);
-  const integrationId = existing?.id ?? newGoatIntegrationId();
+  const integrationId = existing?.id ?? newIntegrationId();
   const integrationUserWorkosId = existing?.userWorkosId ?? input.userWorkosId;
 
-  const payload: GoatSlackBotOAuthCredentialPayload = {
+  const payload: SlackBotOAuthCredentialPayload = {
     access_token: input.accessToken,
     bot_user_id: input.botUserId,
     team_id: input.teamId,
@@ -305,7 +288,7 @@ export async function connectGoatSlackBotIntegration(input: {
     ...(input.scopes.length > 0 ? { scope: input.scopes.join(",") } : {}),
   };
 
-  const credentialWrite = prepareGoatIntegrationCredentialWrite(
+  const credentialWrite = prepareIntegrationCredentialWrite(
     {
       userWorkosId: integrationUserWorkosId,
       integrationId,
@@ -318,9 +301,9 @@ export async function connectGoatSlackBotIntegration(input: {
     now,
   );
 
-  const [integrations, credentials] = await db.batch([
+  const [integrationRows, credentialRows] = await db.batch([
     db
-      .insert(goatIntegrations)
+      .insert(integrations)
       .values({
         id: integrationId,
         userWorkosId: integrationUserWorkosId,
@@ -339,8 +322,8 @@ export async function connectGoatSlackBotIntegration(input: {
         updatedAt: now,
       })
       .onConflictDoUpdate({
-        target: [goatIntegrations.workspaceId, goatIntegrations.provider],
-        targetWhere: sql`${goatIntegrations.workspaceId} IS NOT NULL AND ${goatIntegrations.provider} = 'slack_bot'`,
+        target: [integrations.workspaceId, integrations.provider],
+        targetWhere: sql`${integrations.workspaceId} IS NOT NULL AND ${integrations.provider} = 'slack_bot'`,
         // On reconnect (possibly by a different admin) user_workos_id stays as
         // the original connector: credential AAD and brain_sources FKs use it.
         set: {
@@ -355,26 +338,26 @@ export async function connectGoatSlackBotIntegration(input: {
           updatedAt: now,
         },
       })
-      .returning({ id: goatIntegrations.id }),
+      .returning({ id: integrations.id }),
     db
-      .insert(goatIntegrationCredentials)
+      .insert(integrationCredentials)
       .values(credentialWrite.values)
       .onConflictDoUpdate({
-        target: [goatIntegrationCredentials.integrationId, goatIntegrationCredentials.kind],
+        target: [integrationCredentials.integrationId, integrationCredentials.kind],
         set: credentialWrite.conflictSet,
       })
       .returning(GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING),
   ] as const);
 
-  const integration = integrations[0];
-  if (!integration || !credentials[0]) {
+  const integration = integrationRows[0];
+  if (!integration || !credentialRows[0]) {
     throw new Error("Could not persist Goat Slack bot integration and credential.");
   }
 
   return { integrationId: integration.id };
 }
 
-export type GoatLinearOAuthCredentialPayload = {
+export type LinearOAuthCredentialPayload = {
   access_token: string;
   organization_id: string;
   organization_name?: string;
@@ -388,7 +371,7 @@ export type GoatLinearOAuthCredentialPayload = {
 // which shares provider "linear" but keys external_id on the "linear_mcp"
 // sentinel; ingestion rows key on the Linear organization id so inbound
 // webhooks can route by payload organizationId.
-export async function connectGoatLinearIngestIntegration(input: {
+export async function connectLinearIngestIntegration(input: {
   userWorkosId: string;
   organizationId: string;
   organizationName: string | null;
@@ -398,7 +381,7 @@ export async function connectGoatLinearIngestIntegration(input: {
   viewerEmail: string | null;
   accessToken: string;
   scopes: string[];
-  db?: GoatIntegrationDb;
+  db?: IntegrationDb;
   now?: Date;
 }) {
   const db = input.db ?? getDb();
@@ -406,9 +389,9 @@ export async function connectGoatLinearIngestIntegration(input: {
   const connectionLabel = input.organizationName?.trim() || "Linear";
 
   const [integration] = await db
-    .insert(goatIntegrations)
+    .insert(integrations)
     .values({
-      id: newGoatIntegrationId(),
+      id: newIntegrationId(),
       userWorkosId: input.userWorkosId,
       provider: "linear",
       // The Linear organization id is the routing key for inbound webhooks.
@@ -424,13 +407,9 @@ export async function connectGoatLinearIngestIntegration(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: [
-        goatIntegrations.userWorkosId,
-        goatIntegrations.provider,
-        goatIntegrations.externalId,
-      ],
+      target: [integrations.userWorkosId, integrations.provider, integrations.externalId],
       // The personal-uniqueness index is partial; the arbiter must match it.
-      targetWhere: sql`${goatIntegrations.workspaceId} IS NULL`,
+      targetWhere: sql`${integrations.workspaceId} IS NULL`,
       set: {
         connectionLabel,
         accountName: input.viewerName,
@@ -443,13 +422,13 @@ export async function connectGoatLinearIngestIntegration(input: {
         updatedAt: now,
       },
     })
-    .returning({ id: goatIntegrations.id });
+    .returning({ id: integrations.id });
 
   if (!integration) {
     throw new Error("Could not persist Goat Linear integration.");
   }
 
-  const payload: GoatLinearOAuthCredentialPayload = {
+  const payload: LinearOAuthCredentialPayload = {
     access_token: input.accessToken,
     organization_id: input.organizationId,
     ...(input.organizationName ? { organization_name: input.organizationName } : {}),
@@ -460,7 +439,7 @@ export async function connectGoatLinearIngestIntegration(input: {
   };
 
   try {
-    await saveGoatIntegrationCredential({
+    await saveIntegrationCredential({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
       provider: "linear",
@@ -472,7 +451,7 @@ export async function connectGoatLinearIngestIntegration(input: {
       now,
     });
   } catch (error) {
-    await markGoatIntegrationStatus({
+    await markIntegrationStatus({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
       provider: "linear",
@@ -487,7 +466,7 @@ export async function connectGoatLinearIngestIntegration(input: {
   return { integrationId: integration.id };
 }
 
-export type GoatHubspotOAuthCredentialPayload = {
+export type HubspotOAuthCredentialPayload = {
   access_token: string;
   refresh_token: string;
   portal_id: string;
@@ -500,7 +479,7 @@ export type GoatHubspotOAuthCredentialPayload = {
 // (hub) id so inbound webhooks can route by payload portalId. Unlike Linear,
 // HubSpot access tokens are short-lived; the runner refreshes them from the
 // stored refresh token, so expiresAt is always set.
-export async function connectGoatHubspotIntegration(input: {
+export async function connectHubspotIntegration(input: {
   userWorkosId: string;
   portalId: string;
   hubDomain: string | null;
@@ -509,7 +488,7 @@ export async function connectGoatHubspotIntegration(input: {
   refreshToken: string;
   expiresAt: Date | null;
   scopes: string[];
-  db?: GoatIntegrationDb;
+  db?: IntegrationDb;
   now?: Date;
 }) {
   const db = input.db ?? getDb();
@@ -517,9 +496,9 @@ export async function connectGoatHubspotIntegration(input: {
   const connectionLabel = input.hubDomain?.trim() || "HubSpot";
 
   const [integration] = await db
-    .insert(goatIntegrations)
+    .insert(integrations)
     .values({
-      id: newGoatIntegrationId(),
+      id: newIntegrationId(),
       userWorkosId: input.userWorkosId,
       provider: "hubspot",
       // The HubSpot portal id is the routing key for inbound webhooks.
@@ -535,13 +514,9 @@ export async function connectGoatHubspotIntegration(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: [
-        goatIntegrations.userWorkosId,
-        goatIntegrations.provider,
-        goatIntegrations.externalId,
-      ],
+      target: [integrations.userWorkosId, integrations.provider, integrations.externalId],
       // The personal-uniqueness index is partial; the arbiter must match it.
-      targetWhere: sql`${goatIntegrations.workspaceId} IS NULL`,
+      targetWhere: sql`${integrations.workspaceId} IS NULL`,
       set: {
         connectionLabel,
         accountEmail: input.userEmail,
@@ -553,13 +528,13 @@ export async function connectGoatHubspotIntegration(input: {
         updatedAt: now,
       },
     })
-    .returning({ id: goatIntegrations.id });
+    .returning({ id: integrations.id });
 
   if (!integration) {
     throw new Error("Could not persist Goat HubSpot integration.");
   }
 
-  const payload: GoatHubspotOAuthCredentialPayload = {
+  const payload: HubspotOAuthCredentialPayload = {
     access_token: input.accessToken,
     refresh_token: input.refreshToken,
     portal_id: input.portalId,
@@ -569,7 +544,7 @@ export async function connectGoatHubspotIntegration(input: {
   };
 
   try {
-    await saveGoatIntegrationCredential({
+    await saveIntegrationCredential({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
       provider: "hubspot",
@@ -580,7 +555,7 @@ export async function connectGoatHubspotIntegration(input: {
       now,
     });
   } catch (error) {
-    await markGoatIntegrationStatus({
+    await markIntegrationStatus({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
       provider: "hubspot",
@@ -595,23 +570,23 @@ export async function connectGoatHubspotIntegration(input: {
   return { integrationId: integration.id };
 }
 
-export async function saveGoatIntegrationCredential(
-  input: GoatIntegrationCredentialContext & {
+export async function saveIntegrationCredential(
+  input: IntegrationCredentialContext & {
     payload: Record<string, unknown>;
     expiresAt?: Date | null;
-    db?: GoatIntegrationDb;
+    db?: IntegrationDb;
     now?: Date;
   },
 ) {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
-  const write = prepareGoatIntegrationCredentialWrite(input, now);
+  const write = prepareIntegrationCredentialWrite(input, now);
 
   const [credential] = await db
-    .insert(goatIntegrationCredentials)
+    .insert(integrationCredentials)
     .values(write.values)
     .onConflictDoUpdate({
-      target: [goatIntegrationCredentials.integrationId, goatIntegrationCredentials.kind],
+      target: [integrationCredentials.integrationId, integrationCredentials.kind],
       set: write.conflictSet,
     })
     .returning(GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING);
@@ -623,16 +598,16 @@ export async function saveGoatIntegrationCredential(
   return credential;
 }
 
-export async function refreshGoatIntegrationCredential(
-  input: GoatIntegrationCredentialContext & {
+export async function refreshIntegrationCredential(
+  input: IntegrationCredentialContext & {
     payload: Record<string, unknown>;
     expiresAt?: Date | null;
-    db: GoatIntegrationRefreshDb;
+    db: IntegrationRefreshDb;
     now?: Date;
   },
 ) {
   const now = input.now ?? new Date();
-  const write = prepareGoatIntegrationCredentialWrite(input, now);
+  const write = prepareIntegrationCredentialWrite(input, now);
 
   // neon-http cannot open an interactive transaction, but its batch API sends
   // all queries through Neon's transactional HTTP endpoint. The runner's
@@ -640,21 +615,21 @@ export async function refreshGoatIntegrationCredential(
   if ("batch" in input.db) {
     const [credentials] = await input.db.batch([
       input.db
-        .insert(goatIntegrationCredentials)
+        .insert(integrationCredentials)
         .values(write.values)
         .onConflictDoUpdate({
-          target: [goatIntegrationCredentials.integrationId, goatIntegrationCredentials.kind],
+          target: [integrationCredentials.integrationId, integrationCredentials.kind],
           set: write.conflictSet,
         })
         .returning(GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING),
       input.db
-        .update(goatIntegrations)
+        .update(integrations)
         .set({ status: "connected", statusReason: null, updatedAt: now })
         .where(
           and(
-            eq(goatIntegrations.userWorkosId, input.userWorkosId),
-            eq(goatIntegrations.id, input.integrationId),
-            eq(goatIntegrations.provider, input.provider),
+            eq(integrations.userWorkosId, input.userWorkosId),
+            eq(integrations.id, input.integrationId),
+            eq(integrations.provider, input.provider),
           ),
         ),
     ] as const);
@@ -668,8 +643,8 @@ export async function refreshGoatIntegrationCredential(
   }
 
   return input.db.transaction(async (tx) => {
-    const credential = await saveGoatIntegrationCredential({ ...input, db: tx, now });
-    await markGoatIntegrationStatus({
+    const credential = await saveIntegrationCredential({ ...input, db: tx, now });
+    await markIntegrationStatus({
       userWorkosId: input.userWorkosId,
       integrationId: input.integrationId,
       provider: input.provider,
@@ -682,8 +657,8 @@ export async function refreshGoatIntegrationCredential(
   });
 }
 
-function prepareGoatIntegrationCredentialWrite(
-  input: GoatIntegrationCredentialContext & {
+function prepareIntegrationCredentialWrite(
+  input: IntegrationCredentialContext & {
     payload: Record<string, unknown>;
     expiresAt?: Date | null;
   },
@@ -692,7 +667,7 @@ function prepareGoatIntegrationCredentialWrite(
   const keyVersion = DEFAULT_ENCRYPTION_KEY_VERSION;
   const encryptedPayload = encryptJson(input.payload, {
     key: loadEncryptionKey(keyVersion),
-    aad: goatCredentialAad({
+    aad: credentialAad({
       userWorkosId: input.userWorkosId,
       integrationId: input.integrationId,
       provider: input.provider,
@@ -703,7 +678,7 @@ function prepareGoatIntegrationCredentialWrite(
 
   return {
     values: {
-      id: newGoatIntegrationCredentialId(),
+      id: newIntegrationCredentialId(),
       userWorkosId: input.userWorkosId,
       integrationId: input.integrationId,
       provider: input.provider,
@@ -726,29 +701,29 @@ function prepareGoatIntegrationCredentialWrite(
   };
 }
 
-export async function loadGoatIntegrationCredential(
-  input: GoatIntegrationCredentialContext & { db?: Pick<ReturnType<typeof getDb>, "select"> },
-): Promise<LoadedGoatIntegrationCredential | null> {
+export async function loadIntegrationCredential(
+  input: IntegrationCredentialContext & { db?: Pick<ReturnType<typeof getDb>, "select"> },
+): Promise<LoadedIntegrationCredential | null> {
   const db = input.db ?? getDb();
   const [credential] = await db
     .select({
-      userWorkosId: goatIntegrationCredentials.userWorkosId,
-      integrationId: goatIntegrationCredentials.integrationId,
-      provider: goatIntegrationCredentials.provider,
-      kind: goatIntegrationCredentials.kind,
-      encryptedPayload: goatIntegrationCredentials.encryptedPayload,
-      encryptionKeyVersion: goatIntegrationCredentials.encryptionKeyVersion,
-      expiresAt: goatIntegrationCredentials.expiresAt,
-      lastRotatedAt: goatIntegrationCredentials.lastRotatedAt,
-      updatedAt: goatIntegrationCredentials.updatedAt,
+      userWorkosId: integrationCredentials.userWorkosId,
+      integrationId: integrationCredentials.integrationId,
+      provider: integrationCredentials.provider,
+      kind: integrationCredentials.kind,
+      encryptedPayload: integrationCredentials.encryptedPayload,
+      encryptionKeyVersion: integrationCredentials.encryptionKeyVersion,
+      expiresAt: integrationCredentials.expiresAt,
+      lastRotatedAt: integrationCredentials.lastRotatedAt,
+      updatedAt: integrationCredentials.updatedAt,
     })
-    .from(goatIntegrationCredentials)
+    .from(integrationCredentials)
     .where(
       and(
-        eq(goatIntegrationCredentials.userWorkosId, input.userWorkosId),
-        eq(goatIntegrationCredentials.integrationId, input.integrationId),
-        eq(goatIntegrationCredentials.provider, input.provider),
-        eq(goatIntegrationCredentials.kind, input.kind),
+        eq(integrationCredentials.userWorkosId, input.userWorkosId),
+        eq(integrationCredentials.integrationId, input.integrationId),
+        eq(integrationCredentials.provider, input.provider),
+        eq(integrationCredentials.kind, input.kind),
       ),
     )
     .limit(1);
@@ -758,7 +733,7 @@ export async function loadGoatIntegrationCredential(
   return {
     payload: decryptJson(credential.encryptedPayload, {
       key: loadEncryptionKey(credential.encryptionKeyVersion),
-      aad: goatCredentialAad({
+      aad: credentialAad({
         userWorkosId: input.userWorkosId,
         integrationId: input.integrationId,
         provider: input.provider,
@@ -773,17 +748,17 @@ export async function loadGoatIntegrationCredential(
   };
 }
 
-export async function markGoatIntegrationStatus(input: {
+export async function markIntegrationStatus(input: {
   userWorkosId: string;
   integrationId: string;
-  provider: GoatIntegrationProvider;
+  provider: IntegrationProvider;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected";
   statusReason?: string | null;
-  db?: Pick<GoatIntegrationDb, "update">;
+  db?: Pick<IntegrationDb, "update">;
   now?: Date;
 }) {
   await (input.db ?? getDb())
-    .update(goatIntegrations)
+    .update(integrations)
     .set({
       status: input.status,
       statusReason: input.statusReason ? input.statusReason.slice(0, 240) : null,
@@ -791,16 +766,14 @@ export async function markGoatIntegrationStatus(input: {
     })
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, input.userWorkosId),
-        eq(goatIntegrations.id, input.integrationId),
-        eq(goatIntegrations.provider, input.provider),
+        eq(integrations.userWorkosId, input.userWorkosId),
+        eq(integrations.id, input.integrationId),
+        eq(integrations.provider, input.provider),
       ),
     );
 }
 
-export function goatCredentialAad(
-  input: GoatIntegrationCredentialContext & { keyVersion: number },
-) {
+export function credentialAad(input: IntegrationCredentialContext & { keyVersion: number }) {
   return buildAad({
     userWorkosId: input.userWorkosId,
     integrationId: input.integrationId,
@@ -810,10 +783,10 @@ export function goatCredentialAad(
   });
 }
 
-function newGoatIntegrationId() {
+function newIntegrationId() {
   return `gint_${randomUUID().replace(/-/g, "")}`;
 }
 
-function newGoatIntegrationCredentialId() {
+function newIntegrationCredentialId() {
   return `gcred_${randomUUID().replace(/-/g, "")}`;
 }

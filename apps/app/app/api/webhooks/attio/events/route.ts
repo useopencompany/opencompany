@@ -1,20 +1,20 @@
 import { randomUUID } from "node:crypto";
 import {
+  type AttioApiKeyCredentialPayload,
+  type AttioObjectEventInsert,
+  attioEventTypeFor,
+  attioRouteMatchesEvent,
+  attioSelectedObjectTypes,
   GOAT_ATTIO_CREDENTIAL_KIND,
   GOAT_ATTIO_PROVIDER,
-  type GoatAttioApiKeyCredentialPayload,
-  type GoatAttioObjectEventInsert,
-  goatAttioEventTypeFor,
-  goatAttioRouteMatchesEvent,
-  goatAttioSelectedObjectTypes,
-  insertGoatAttioObjectEvents,
-  listEnabledGoatAttioBrainSourceRoutes,
-  listGoatAttioIntegrationsForWorkspace,
+  insertAttioObjectEvents,
+  listAttioIntegrationsForWorkspace,
+  listEnabledAttioBrainSourceRoutes,
 } from "@opencompany/db/attio";
-import { loadGoatIntegrationCredential } from "@opencompany/db/integrations";
-import type { GoatAttioEventAction, GoatAttioObjectType } from "@opencompany/db/schema";
+import { loadIntegrationCredential } from "@opencompany/db/integrations";
+import type { AttioEventAction, AttioObjectType } from "@opencompany/db/schema";
 import { NextResponse } from "next/server";
-import { verifyGoatAttioWebhookSignature } from "@/lib/integrations/attio-signature";
+import { verifyAttioWebhookSignature } from "@/lib/integrations/attio-signature";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
     if (!match) {
       return NextResponse.json({ error: "Unknown Attio webhook." }, { status: 401 });
     }
-    const verified = verifyGoatAttioWebhookSignature({
+    const verified = verifyAttioWebhookSignature({
       rawBody,
       signature,
       secret: match.payload.webhookSecret,
@@ -93,7 +93,7 @@ type AttioIntegrationMatch = {
   integrationId: string;
   userWorkosId: string;
   connected: boolean;
-  payload: GoatAttioApiKeyCredentialPayload;
+  payload: AttioApiKeyCredentialPayload;
 };
 
 // Each integration of an Attio workspace owns its own webhook; the delivery's
@@ -103,15 +103,15 @@ async function findIntegrationForWebhook(
   workspaceId: string,
   webhookId: string,
 ): Promise<AttioIntegrationMatch | null> {
-  const integrations = await listGoatAttioIntegrationsForWorkspace(workspaceId);
+  const integrations = await listAttioIntegrationsForWorkspace(workspaceId);
   for (const integration of integrations) {
-    const credential = await loadGoatIntegrationCredential({
+    const credential = await loadIntegrationCredential({
       userWorkosId: integration.userWorkosId,
       integrationId: integration.id,
       provider: GOAT_ATTIO_PROVIDER,
       kind: GOAT_ATTIO_CREDENTIAL_KIND,
     }).catch(() => null);
-    const payload = credential?.payload as GoatAttioApiKeyCredentialPayload | undefined;
+    const payload = credential?.payload as AttioApiKeyCredentialPayload | undefined;
     if (payload?.webhookId !== webhookId) continue;
     return {
       integrationId: integration.id,
@@ -132,31 +132,31 @@ async function handleAttioEvents(input: {
   const { events, workspaceId, idempotencyKey, match } = input;
   if (!match.connected) return { ok: true, ignored: true };
 
-  const objectTypeById = new Map<string, GoatAttioObjectType>();
+  const objectTypeById = new Map<string, AttioObjectType>();
   for (const [type, objectId] of Object.entries(match.payload.objectIdBySlug ?? {})) {
     if (typeof objectId === "string" && objectId) {
-      objectTypeById.set(objectId, type as GoatAttioObjectType);
+      objectTypeById.set(objectId, type as AttioObjectType);
     }
   }
 
-  const routes = await listEnabledGoatAttioBrainSourceRoutes([match.integrationId]);
+  const routes = await listEnabledAttioBrainSourceRoutes([match.integrationId]);
   if (routes.length === 0) return { ok: true, ignored: true };
 
-  const inserts: GoatAttioObjectEventInsert[] = [];
+  const inserts: AttioObjectEventInsert[] = [];
   for (const [eventIndex, event] of events.entries()) {
     const parsed = parseAttioEvent(event, objectTypeById, {
       idempotencyKey,
       eventIndex,
     });
     if (!parsed) continue;
-    const eventType = goatAttioEventTypeFor(parsed.action);
+    const eventType = attioEventTypeFor(parsed.action);
     const actorType =
       typeof parsed.payload.actorType === "string" ? parsed.payload.actorType : null;
     const matched = routes.some((route) => {
-      const selected = goatAttioSelectedObjectTypes(route.config);
+      const selected = attioSelectedObjectTypes(route.config);
       if (selected.size === 0) return false;
       if (!selected.has(parsed.objectType)) return false;
-      return goatAttioRouteMatchesEvent(route.config, eventType, { actorType });
+      return attioRouteMatchesEvent(route.config, eventType, { actorType });
     });
     if (!matched) continue;
     inserts.push({
@@ -167,15 +167,15 @@ async function handleAttioEvents(input: {
     });
   }
 
-  const buffered = await insertGoatAttioObjectEvents(inserts);
+  const buffered = await insertAttioObjectEvents(inserts);
   return { ok: true, buffered };
 }
 
 function parseAttioEvent(
   event: AttioWebhookEvent,
-  objectTypeById: ReadonlyMap<string, GoatAttioObjectType>,
+  objectTypeById: ReadonlyMap<string, AttioObjectType>,
   delivery: { idempotencyKey: string | null; eventIndex: number },
-): Omit<GoatAttioObjectEventInsert, "integrationId" | "userWorkosId" | "workspaceId"> | null {
+): Omit<AttioObjectEventInsert, "integrationId" | "userWorkosId" | "workspaceId"> | null {
   const eventType = event.event_type;
   const actorType = typeof event.actor?.type === "string" ? event.actor.type : null;
 
@@ -184,7 +184,7 @@ function parseAttioEvent(
     const recordId = asId(event.id?.record_id);
     const objectType = objectId ? objectTypeById.get(objectId) : undefined;
     if (!objectType || !recordId) return null;
-    const action: GoatAttioEventAction = eventType === "record.created" ? "create" : "update";
+    const action: AttioEventAction = eventType === "record.created" ? "create" : "update";
     const attributeId = action === "update" ? asId(event.id?.attribute_id) : null;
     return {
       objectType,

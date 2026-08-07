@@ -4,7 +4,7 @@ import { Check, Copy, RotateCw } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import type { GoatJamieProviderState } from "@/lib/integration-state";
+import type { JamieProviderState } from "@/lib/integration-state";
 import {
   createOrResetJamieWebhookEndpointAction,
   saveJamieWebhookApiKeyAction,
@@ -25,7 +25,7 @@ export function JamieIntegrationSetup({
   variant = "settings",
   onSaved,
 }: {
-  initialState: GoatJamieProviderState;
+  initialState: JamieProviderState;
   brainSourcesHref?: string | null;
   // Jamie is a workspace-owned integration; members see status only while
   // admins get the webhook + API key setup.
@@ -307,7 +307,7 @@ function SetupValue({
 }
 
 function setupStatus(
-  initialState: GoatJamieProviderState,
+  initialState: JamieProviderState,
   hasEndpoint: boolean,
   apiKeyConfigured: boolean,
 ) {

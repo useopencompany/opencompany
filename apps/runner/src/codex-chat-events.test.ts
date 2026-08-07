@@ -1,12 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GoatCodexChatLeaseLostError } from "./codex-chat-errors";
-import {
-  createGoatCodexChatProjector,
-  type GoatCodexChatProjectorTarget,
-} from "./codex-chat-events";
+import { CodexChatLeaseLostError } from "./codex-chat-errors";
+import { type CodexChatProjectorTarget, createCodexChatProjector } from "./codex-chat-events";
 
 const mocks = vi.hoisted(() => ({
-  captureGoatLlmUsageRecorded: vi.fn(async () => undefined),
+  captureLlmUsageRecorded: vi.fn(async () => undefined),
   captureException: vi.fn(),
   createLogger: vi.fn(() => ({
     debug: vi.fn(),
@@ -17,8 +14,8 @@ const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
 }));
 
-vi.mock("@opencompany/analytics/goat/server", () => ({
-  captureGoatLlmUsageRecorded: mocks.captureGoatLlmUsageRecorded,
+vi.mock("@opencompany/analytics/server", () => ({
+  captureLlmUsageRecorded: mocks.captureLlmUsageRecorded,
 }));
 
 vi.mock("@opencompany/observability", () => ({
@@ -30,7 +27,7 @@ vi.mock("./db", () => ({
   getDb: () => ({ execute: mocks.execute }),
 }));
 
-describe("createGoatCodexChatProjector", () => {
+describe("createCodexChatProjector", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -42,7 +39,7 @@ describe("createGoatCodexChatProjector", () => {
     mocks.execute
       .mockRejectedValueOnce(databaseError)
       .mockResolvedValueOnce({ rows: [{ id: "goat_chat_msg_assistant_1" }] });
-    const projector = createGoatCodexChatProjector({
+    const projector = createCodexChatProjector({
       target: projectorTarget(),
       redact: (value) => value,
     });
@@ -52,7 +49,7 @@ describe("createGoatCodexChatProjector", () => {
     expect(mocks.execute).toHaveBeenCalledTimes(2);
     expect(mocks.captureException).toHaveBeenCalledWith(
       expect.objectContaining({
-        name: "GoatCodexChatEventPersistenceError",
+        name: "CodexChatEventPersistenceError",
         message: "Goat Codex chat audit event persistence failed.",
       }),
       expect.objectContaining({
@@ -67,13 +64,13 @@ describe("createGoatCodexChatProjector", () => {
 
   it("still aborts projection when the event insert proves the turn lease was lost", async () => {
     mocks.execute.mockResolvedValueOnce({ rows: [] });
-    const projector = createGoatCodexChatProjector({
+    const projector = createCodexChatProjector({
       target: projectorTarget(),
       redact: (value) => value,
     });
 
     await expect(projector.push([fileChangeStartedEvent()])).rejects.toBeInstanceOf(
-      GoatCodexChatLeaseLostError,
+      CodexChatLeaseLostError,
     );
 
     expect(mocks.execute).toHaveBeenCalledTimes(2);
@@ -86,7 +83,7 @@ describe("createGoatCodexChatProjector", () => {
     mocks.execute
       .mockRejectedValueOnce(cyclicError)
       .mockResolvedValueOnce({ rows: [{ id: "goat_chat_msg_assistant_1" }] });
-    const projector = createGoatCodexChatProjector({
+    const projector = createCodexChatProjector({
       target: projectorTarget(),
       redact: (value) => value,
     });
@@ -105,7 +102,7 @@ describe("createGoatCodexChatProjector", () => {
       .mockResolvedValueOnce({ rows: [{ id: "message_1" }] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ id: "event_1" }] });
-    const projector = createGoatCodexChatProjector({
+    const projector = createCodexChatProjector({
       target: projectorTarget(),
       redact: (value) => value,
     });
@@ -130,7 +127,7 @@ describe("createGoatCodexChatProjector", () => {
 
   it("keeps the session queued until a queued follow-up turn is claimed", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
-    const projector = createGoatCodexChatProjector({
+    const projector = createCodexChatProjector({
       target: projectorTarget(),
       redact: (value) => value,
     });
@@ -158,7 +155,7 @@ describe("createGoatCodexChatProjector", () => {
 
   it("captures Codex token usage in PostHog analytics when a turn finalizes", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
-    const projector = createGoatCodexChatProjector({
+    const projector = createCodexChatProjector({
       target: projectorTarget({
         workspaceId: "workspace_1",
         engine: "codex",
@@ -181,7 +178,7 @@ describe("createGoatCodexChatProjector", () => {
       goal: null,
     });
 
-    expect(mocks.captureGoatLlmUsageRecorded).toHaveBeenCalledWith({
+    expect(mocks.captureLlmUsageRecorded).toHaveBeenCalledWith({
       distinctId: "user_1",
       workspaceId: "workspace_1",
       surface: "chat",
@@ -211,7 +208,7 @@ describe("createGoatCodexChatProjector", () => {
 
   it("captures Claude Code token usage in PostHog analytics when a turn finalizes", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
-    const projector = createGoatCodexChatProjector({
+    const projector = createCodexChatProjector({
       target: projectorTarget({
         workspaceId: "workspace_1",
         engine: "claude_code",
@@ -232,7 +229,7 @@ describe("createGoatCodexChatProjector", () => {
       goal: null,
     });
 
-    expect(mocks.captureGoatLlmUsageRecorded).toHaveBeenCalledWith(
+    expect(mocks.captureLlmUsageRecorded).toHaveBeenCalledWith(
       expect.objectContaining({
         distinctId: "user_1",
         workspaceId: "workspace_1",
@@ -254,7 +251,7 @@ describe("createGoatCodexChatProjector", () => {
 
   it("durably projects and resolves an app-server user-input request", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
-    const projector = createGoatCodexChatProjector({
+    const projector = createCodexChatProjector({
       target: projectorTarget(),
       redact: (value) => value,
     });
@@ -274,7 +271,7 @@ describe("createGoatCodexChatProjector", () => {
   });
 
   it("rejects malformed user-input requests before persistence", async () => {
-    const projector = createGoatCodexChatProjector({
+    const projector = createCodexChatProjector({
       target: projectorTarget(),
       redact: (value) => value,
     });
@@ -300,7 +297,7 @@ describe("createGoatCodexChatProjector", () => {
           }),
       )
       .mockResolvedValue({ rows: [{ id: "updated_row" }] });
-    const projector = createGoatCodexChatProjector({
+    const projector = createCodexChatProjector({
       target: projectorTarget(),
       redact: (value) => value,
     });
@@ -315,11 +312,11 @@ describe("createGoatCodexChatProjector", () => {
   });
 });
 
-function projectorTarget(overrides: Partial<GoatCodexChatProjectorTarget> = {}) {
+function projectorTarget(overrides: Partial<CodexChatProjectorTarget> = {}) {
   return { ...projectorTargetBase(), ...overrides };
 }
 
-function projectorTargetBase(): GoatCodexChatProjectorTarget {
+function projectorTargetBase(): CodexChatProjectorTarget {
   return {
     userWorkosId: "user_1",
     workspaceId: null,

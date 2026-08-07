@@ -24,8 +24,8 @@ vi.mock("@/components/useHydrated", () => ({
 }));
 
 vi.mock("@/lib/mcp-setup-actions", () => ({
-  savePreferredGoatMcpClientAction: actionsMock.saveClient,
-  checkGoatMcpSetupStatusAction: actionsMock.checkStatus,
+  savePreferredMcpClientAction: actionsMock.saveClient,
+  checkMcpSetupStatusAction: actionsMock.checkStatus,
 }));
 
 vi.mock("@opencompany/ui/components/sonner", () => ({

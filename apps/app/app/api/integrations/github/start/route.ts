@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import {
-  appendGoatGitHubIntegrationStatus,
-  buildGoatGitHubInstallUrl,
-  createGoatGitHubIntegrationState,
-  isGoatGitHubIntegrationConfigured,
+  appendGitHubIntegrationStatus,
+  buildGitHubInstallUrl,
+  createGitHubIntegrationState,
+  isGitHubIntegrationConfigured,
 } from "@/lib/integrations/github";
 
 export async function GET(request: Request) {
-  const { user, workspace, role } = await currentGoatUser();
+  const { user, workspace, role } = await currentUser();
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
 
@@ -16,21 +16,21 @@ export async function GET(request: Request) {
   // connect them.
   if (role !== "admin") {
     return NextResponse.redirect(
-      new URL(appendGoatGitHubIntegrationStatus(returnTo, "error", "admin_required"), url),
+      new URL(appendGitHubIntegrationStatus(returnTo, "error", "admin_required"), url),
     );
   }
 
-  if (!isGoatGitHubIntegrationConfigured()) {
+  if (!isGitHubIntegrationConfigured()) {
     return NextResponse.redirect(
-      new URL(appendGoatGitHubIntegrationStatus(returnTo, "error", "not_configured"), url),
+      new URL(appendGitHubIntegrationStatus(returnTo, "error", "not_configured"), url),
     );
   }
 
-  const state = createGoatGitHubIntegrationState({
+  const state = createGitHubIntegrationState({
     userWorkosId: user.workosUserId,
     workspaceId: workspace.id,
     returnTo,
   });
 
-  return NextResponse.redirect(buildGoatGitHubInstallUrl(state));
+  return NextResponse.redirect(buildGitHubInstallUrl(state));
 }

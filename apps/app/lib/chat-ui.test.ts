@@ -1,27 +1,27 @@
-import type { GoatChatMessageDebugTrace } from "@opencompany/db/schema";
+import type { ChatMessageDebugTrace } from "@opencompany/db/schema";
 import { describe, expect, it } from "vitest";
 import {
   CODEX_COMMAND_TOOL_PART_TYPE,
-  compareGoatChatMessageOrder,
-  deriveGoatChatState,
-  type GoatStoredChatMessage,
-  goatChatSummaryState,
+  chatSummaryState,
+  compareChatMessageOrder,
+  deriveChatState,
   LIST_ACTIONS_TOOL_PART_TYPE,
   LIST_SKILLS_TOOL_PART_TYPE,
   listedActionSourceIdsFromMessages,
   listedSkillIdsFromMessages,
-  nextGoatChatMessageCreatedAt,
+  nextChatMessageCreatedAt,
   START_TASK_TOOL_PART_TYPE,
-  toGoatChatUiMessage,
+  type StoredChatMessage,
+  toChatUiMessage,
   USE_SKILL_TOOL_PART_TYPE,
   usedSkillIdsFromMessages,
 } from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 
-describe("goatChatSummaryState", () => {
+describe("chatSummaryState", () => {
   it("shows active agent runtime as working before unread", () => {
     expect(
-      goatChatSummaryState({
+      chatSummaryState({
         codexRuntime: {
           status: "running",
           error: null,
@@ -36,7 +36,7 @@ describe("goatChatSummaryState", () => {
 
   it("marks completed newer agent work as unseen after runtime stops", () => {
     expect(
-      deriveGoatChatState({
+      deriveChatState({
         codexRuntime: { status: "idle" },
         lastSeenAt: "2026-08-02T20:55:00.000Z",
         updatedAt: "2026-08-02T21:00:00.000Z",
@@ -46,7 +46,7 @@ describe("goatChatSummaryState", () => {
 
   it("shows a runtime with an active turn as working even if status lags", () => {
     expect(
-      goatChatSummaryState({
+      chatSummaryState({
         codexRuntime: {
           status: "idle",
           activeTurnId: "goat_codex_chat_turn_1",
@@ -61,7 +61,7 @@ describe("goatChatSummaryState", () => {
   });
 });
 
-describe("toGoatChatUiMessage", () => {
+describe("toChatUiMessage", () => {
   it("surfaces scheduled wakeup debug metadata on its synthetic user message", () => {
     const message = storedAssistantMessage({
       role: "user",
@@ -74,7 +74,7 @@ describe("toGoatChatUiMessage", () => {
       },
     });
 
-    expect(toGoatChatUiMessage(message).metadata?.scheduledWakeup).toEqual({
+    expect(toChatUiMessage(message).metadata?.scheduledWakeup).toEqual({
       reason: "Wait for CI",
       dueAt: "2026-07-10T09:02:00.000Z",
     });
@@ -109,7 +109,7 @@ describe("toGoatChatUiMessage", () => {
       },
     });
 
-    expect(toGoatChatUiMessage(message).parts.map((part) => part.type)).toEqual([
+    expect(toChatUiMessage(message).parts.map((part) => part.type)).toEqual([
       "text",
       START_TASK_TOOL_PART_TYPE,
       "text",
@@ -141,7 +141,7 @@ describe("toGoatChatUiMessage", () => {
       },
     });
 
-    const parts = toGoatChatUiMessage(message).parts;
+    const parts = toChatUiMessage(message).parts;
 
     expect(parts.map((part) => part.type)).toEqual(["text", START_TASK_TOOL_PART_TYPE, "text"]);
     expect(parts[0]).toEqual({
@@ -174,7 +174,7 @@ describe("toGoatChatUiMessage", () => {
       },
     });
 
-    const parts = toGoatChatUiMessage(message).parts;
+    const parts = toChatUiMessage(message).parts;
     expect(parts.map((part) => part.type)).toEqual([
       "reasoning",
       CODEX_COMMAND_TOOL_PART_TYPE,
@@ -206,7 +206,7 @@ describe("toGoatChatUiMessage", () => {
       },
     });
 
-    expect(toGoatChatUiMessage(message).parts[0]).toMatchObject({
+    expect(toChatUiMessage(message).parts[0]).toMatchObject({
       type: CODEX_COMMAND_TOOL_PART_TYPE,
       state: "input-available",
       input: { command: "bun test" },
@@ -221,7 +221,7 @@ describe("toGoatChatUiMessage", () => {
       taskStatus: "succeeded",
     });
 
-    expect(toGoatChatUiMessage(message).metadata).toMatchObject({
+    expect(toChatUiMessage(message).metadata).toMatchObject({
       sessionId: "goat_chat_1",
       taskId: "task_1",
       task: {
@@ -244,7 +244,7 @@ describe("toGoatChatUiMessage", () => {
       updatedAt: new Date("2026-07-04T12:02:33.400Z"),
     });
 
-    expect(toGoatChatUiMessage(message).metadata?.timing).toEqual({
+    expect(toChatUiMessage(message).metadata?.timing).toEqual({
       createdAt: "2026-07-04T12:00:00.000Z",
       updatedAt: "2026-07-04T12:02:33.400Z",
       durationMs: 153_400,
@@ -264,13 +264,13 @@ describe("toGoatChatUiMessage", () => {
       },
     });
 
-    expect(toGoatChatUiMessage(message).metadata?.contextTokens).toBe(14_200);
+    expect(toChatUiMessage(message).metadata?.contextTokens).toBe(14_200);
   });
 });
 
 describe("listedActionSourceIdsFromMessages", () => {
   it("recovers successful action discovery from earlier persisted turns", () => {
-    const discovered = toGoatChatUiMessage(
+    const discovered = toChatUiMessage(
       storedAssistantMessage({
         debugTrace: {
           schemaVersion: "opencompany.chat.debug.v1",
@@ -328,7 +328,7 @@ describe("listedActionSourceIdsFromMessages", () => {
 
 describe("listedSkillIdsFromMessages", () => {
   it("recovers the exact skills returned by successful discovery", () => {
-    const discovered = toGoatChatUiMessage(
+    const discovered = toChatUiMessage(
       storedAssistantMessage({
         debugTrace: {
           schemaVersion: "opencompany.chat.debug.v1",
@@ -380,7 +380,7 @@ describe("listedSkillIdsFromMessages", () => {
 
 describe("usedSkillIdsFromMessages", () => {
   it("recovers skills whose instructions were loaded successfully", () => {
-    const loaded = toGoatChatUiMessage(
+    const loaded = toChatUiMessage(
       storedAssistantMessage({
         debugTrace: {
           schemaVersion: "opencompany.chat.debug.v1",
@@ -410,7 +410,7 @@ describe("usedSkillIdsFromMessages", () => {
   });
 });
 
-describe("compareGoatChatMessageOrder", () => {
+describe("compareChatMessageOrder", () => {
   it("keeps equal-timestamp Codex turn placeholders in user-then-assistant order", () => {
     const createdAt = "2026-07-10T08:00:00.000Z";
     const messages = [
@@ -418,7 +418,7 @@ describe("compareGoatChatMessageOrder", () => {
       { id: "user_1", role: "user" as const, createdAt },
     ];
 
-    expect(messages.toSorted(compareGoatChatMessageOrder).map((message) => message.id)).toEqual([
+    expect(messages.toSorted(compareChatMessageOrder).map((message) => message.id)).toEqual([
       "user_1",
       "assistant_1",
     ]);
@@ -427,17 +427,15 @@ describe("compareGoatChatMessageOrder", () => {
   it("creates a strictly later timestamp for pre-created assistant placeholders", () => {
     const userCreatedAt = new Date("2026-07-10T08:00:00.000Z");
 
-    expect(nextGoatChatMessageCreatedAt(userCreatedAt).toISOString()).toBe(
-      "2026-07-10T08:00:00.001Z",
-    );
+    expect(nextChatMessageCreatedAt(userCreatedAt).toISOString()).toBe("2026-07-10T08:00:00.001Z");
   });
 });
 
 function storedAssistantMessage(
-  overrides: Partial<GoatStoredChatMessage> & {
-    debugTrace?: GoatChatMessageDebugTrace | null;
+  overrides: Partial<StoredChatMessage> & {
+    debugTrace?: ChatMessageDebugTrace | null;
   } = {},
-): GoatStoredChatMessage {
+): StoredChatMessage {
   const now = new Date("2026-07-04T12:00:00.000Z");
   return {
     id: "goat_chat_msg_1",

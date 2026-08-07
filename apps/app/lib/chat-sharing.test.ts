@@ -1,26 +1,22 @@
-import type {
-  GoatChatMessageAttachment,
-  GoatChatSession,
-  GoatChatShare,
-} from "@opencompany/db/schema";
+import type { ChatMessageAttachment, ChatSession, ChatShare } from "@opencompany/db/schema";
 import { drizzle } from "drizzle-orm/neon-http";
 import { describe, expect, it, vi } from "vitest";
 import {
-  createDbGoatChatShareStore,
-  ensureGoatChatShareForUser,
-  findGoatChatShareForUser,
-  type GoatChatShareStore,
-  isGoatChatShareId,
-  loadPublicGoatChat,
-  loadPublicGoatChatMetadata,
-  newGoatChatShareId,
-  revokeGoatChatShareForUser,
+  type ChatShareStore,
+  createDbChatShareStore,
+  ensureChatShareForUser,
+  findChatShareForUser,
+  isChatShareId,
+  loadPublicChat,
+  loadPublicChatMetadata,
+  newChatShareId,
+  revokeChatShareForUser,
 } from "@/lib/chat-sharing";
-import type { GoatStoredChatMessage } from "@/lib/chat-ui";
+import type { StoredChatMessage } from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
 }));
 
 const SHARE_ID = "goat_chat_share_123e4567-e89b-42d3-a456-426614174000";
@@ -37,7 +33,7 @@ describe("Goat chat sharing", () => {
     const client = Object.assign(query, {
       transaction: vi.fn(async (queries: Promise<unknown>[]) => Promise.all(queries)),
     });
-    const store = createDbGoatChatShareStore(drizzle(client as never) as never);
+    const store = createDbChatShareStore(drizzle(client as never) as never);
 
     await expect(
       store.ensureShare({
@@ -60,7 +56,7 @@ describe("Goat chat sharing", () => {
     const store = createStore();
 
     await expect(
-      ensureGoatChatShareForUser({ userWorkosId: "user_1", chatSessionId: "  chat_1  " }, store),
+      ensureChatShareForUser({ userWorkosId: "user_1", chatSessionId: "  chat_1  " }, store),
     ).resolves.toMatchObject({ chatSessionId: "chat_1" });
 
     expect(store.ensureShare).toHaveBeenCalledWith({
@@ -69,17 +65,17 @@ describe("Goat chat sharing", () => {
       workspaceId: null,
       chatSessionId: "chat_1",
     });
-    expect(isGoatChatShareId(vi.mocked(store.ensureShare).mock.calls[0]![0].id)).toBe(true);
+    expect(isChatShareId(vi.mocked(store.ensureShare).mock.calls[0]![0].id)).toBe(true);
   });
 
   it("finds and revokes a share through owner-scoped storage", async () => {
     const store = createStore();
 
     await expect(
-      findGoatChatShareForUser({ userWorkosId: "user_1", chatSessionId: "  chat_1  " }, store),
+      findChatShareForUser({ userWorkosId: "user_1", chatSessionId: "  chat_1  " }, store),
     ).resolves.toMatchObject({ id: SHARE_ID });
     await expect(
-      revokeGoatChatShareForUser({ userWorkosId: "user_1", chatSessionId: "  chat_1  " }, store),
+      revokeChatShareForUser({ userWorkosId: "user_1", chatSessionId: "  chat_1  " }, store),
     ).resolves.toBe(true);
 
     expect(store.findShareForUser).toHaveBeenCalledWith({
@@ -102,7 +98,7 @@ describe("Goat chat sharing", () => {
     const client = Object.assign(query, {
       transaction: vi.fn(async (queries: Promise<unknown>[]) => Promise.all(queries)),
     });
-    const store = createDbGoatChatShareStore(drizzle(client as never) as never);
+    const store = createDbChatShareStore(drizzle(client as never) as never);
 
     await expect(
       store.findShareForUser({ userWorkosId: "user_1", chatSessionId: "chat_1" }),
@@ -127,7 +123,7 @@ describe("Goat chat sharing", () => {
     const client = Object.assign(query, {
       transaction: vi.fn(async (queries: Promise<unknown>[]) => Promise.all(queries)),
     });
-    const store = createDbGoatChatShareStore(drizzle(client as never) as never);
+    const store = createDbChatShareStore(drizzle(client as never) as never);
 
     await expect(
       store.ensureShare({
@@ -166,7 +162,7 @@ describe("Goat chat sharing", () => {
     const client = Object.assign(query, {
       transaction: vi.fn(async (queries: Promise<unknown>[]) => Promise.all(queries)),
     });
-    const store = createDbGoatChatShareStore(drizzle(client as never) as never);
+    const store = createDbChatShareStore(drizzle(client as never) as never);
 
     await expect(store.findShare(SHARE_ID)).resolves.toMatchObject({
       share: { id: SHARE_ID },
@@ -186,7 +182,7 @@ describe("Goat chat sharing", () => {
     const client = Object.assign(query, {
       transaction: vi.fn(async (queries: Promise<unknown>[]) => Promise.all(queries)),
     });
-    const store = createDbGoatChatShareStore(drizzle(client as never) as never);
+    const store = createDbChatShareStore(drizzle(client as never) as never);
 
     await expect(
       store.revokeShare({ userWorkosId: "user_1", chatSessionId: "chat_1" }),
@@ -203,17 +199,17 @@ describe("Goat chat sharing", () => {
   it("rejects malformed public ids before querying storage", async () => {
     const store = createStore();
 
-    await expect(loadPublicGoatChat("../chat_1", store)).resolves.toBeNull();
-    await expect(loadPublicGoatChatMetadata("../chat_1", store)).resolves.toBeNull();
+    await expect(loadPublicChat("../chat_1", store)).resolves.toBeNull();
+    await expect(loadPublicChatMetadata("../chat_1", store)).resolves.toBeNull();
 
     expect(store.findShare).not.toHaveBeenCalled();
-    expect(isGoatChatShareId(newGoatChatShareId())).toBe(true);
+    expect(isChatShareId(newChatShareId())).toBe(true);
   });
 
   it("loads public share metadata without loading transcript messages", async () => {
     const store = createStore();
 
-    await expect(loadPublicGoatChatMetadata(`  ${SHARE_ID}  `, store)).resolves.toEqual({
+    await expect(loadPublicChatMetadata(`  ${SHARE_ID}  `, store)).resolves.toEqual({
       shareId: SHARE_ID,
       title: "Architecture review",
       kind: "chat",
@@ -225,7 +221,7 @@ describe("Goat chat sharing", () => {
   });
 
   it("loads a shared transcript without leaking its private session id or blob URL", async () => {
-    const attachment: GoatChatMessageAttachment = {
+    const attachment: ChatMessageAttachment = {
       id: "att_1",
       kind: "image",
       mediaType: "image/png",
@@ -250,7 +246,7 @@ describe("Goat chat sharing", () => {
       ],
     });
 
-    const result = await loadPublicGoatChat(SHARE_ID, store);
+    const result = await loadPublicChat(SHARE_ID, store);
 
     expect(result).toMatchObject({
       shareId: SHARE_ID,
@@ -282,14 +278,14 @@ describe("Goat chat sharing", () => {
   });
 });
 
-function createStore({ messages = [] }: { messages?: GoatStoredChatMessage[] } = {}) {
+function createStore({ messages = [] }: { messages?: StoredChatMessage[] } = {}) {
   const createdAt = new Date("2026-07-27T10:00:00.000Z");
-  const share: GoatChatShare = {
+  const share: ChatShare = {
     id: SHARE_ID,
     chatSessionId: "chat_1",
     createdAt,
   };
-  const chatSession: GoatChatSession = {
+  const chatSession: ChatSession = {
     id: "chat_1",
     userWorkosId: "user_1",
     title: "Architecture review",
@@ -316,14 +312,14 @@ function createStore({ messages = [] }: { messages?: GoatStoredChatMessage[] } =
     ),
     findShare: vi.fn(async (shareId) => (shareId === SHARE_ID ? { share, chatSession } : null)),
     listMessages: vi.fn(async () => messages),
-  } satisfies GoatChatShareStore;
+  } satisfies ChatShareStore;
 }
 
 function storedMessage(
-  input: Pick<GoatStoredChatMessage, "id" | "role" | "content"> & {
-    attachments?: GoatChatMessageAttachment[] | null;
+  input: Pick<StoredChatMessage, "id" | "role" | "content"> & {
+    attachments?: ChatMessageAttachment[] | null;
   },
-): GoatStoredChatMessage {
+): StoredChatMessage {
   const createdAt = new Date("2026-07-27T10:00:00.000Z");
   return {
     id: input.id,

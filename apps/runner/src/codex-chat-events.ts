@@ -10,35 +10,35 @@ import {
   parseCodexUiMessageParts,
   resolveCodexUiInteraction,
 } from "@opencompany/agent-runtime";
-import type { GoatAnalyticsEngine } from "@opencompany/analytics/goat/events";
+import type { AnalyticsEngine } from "@opencompany/analytics/events";
 import {
-  captureGoatLlmUsageRecorded,
-  type GoatLlmUsageAnalyticsStage,
-} from "@opencompany/analytics/goat/server";
+  captureLlmUsageRecorded,
+  type LlmUsageAnalyticsStage,
+} from "@opencompany/analytics/server";
 import {
+  type ChatMessageDebugTrace,
+  type CodexChatEventType,
+  type CodexChatSessionStatus,
+  chatMessages,
   GOAT_CODEX_CHAT_EVENT_TYPES,
-  type GoatChatMessageDebugTrace,
-  type GoatCodexChatEventType,
-  type GoatCodexChatSessionStatus,
-  goatChatMessages,
 } from "@opencompany/db/schema";
 import { captureException } from "@opencompany/observability";
 import { and, eq, sql } from "drizzle-orm";
 import type { CodexAppServerRequest, CodexAppServerSummary } from "./codex-app-server";
-import { GoatCodexChatLeaseLostError } from "./codex-chat-errors";
+import { CodexChatLeaseLostError } from "./codex-chat-errors";
 import { getDb } from "./db";
 import { rowsFromExecute } from "./sql-exec";
-import { type GoatTaskTurnCompletion, settleGoatDurableTurn } from "./task-turn";
+import { settleDurableTurn, type TaskTurnCompletion } from "./task-turn";
 
 const CODEX_CHAT_DEBUG_SCHEMA_VERSION = "goat.codex_chat.debug.v1" as const;
 
 // Event types that are persisted to goat.codex_chat_events. Deltas are volume, not chunks:
 // they never land in the audit log or the message row.
-const PERSISTED_EVENT_TYPES = new Set<GoatCodexChatEventType>(
+const PERSISTED_EVENT_TYPES = new Set<CodexChatEventType>(
   GOAT_CODEX_CHAT_EVENT_TYPES.filter((eventType) => eventType !== "unknown"),
 );
 
-export type GoatCodexChatProjectorTarget = {
+export type CodexChatProjectorTarget = {
   userWorkosId: string;
   workspaceId?: string | null;
   codexChatSessionId: string;
@@ -47,7 +47,7 @@ export type GoatCodexChatProjectorTarget = {
   userMessageId: string;
   assistantMessageId: string;
   model: string;
-  engine: GoatAnalyticsEngine;
+  engine: AnalyticsEngine;
   leaseId: string;
   leaseOwner: string;
   planMode: boolean;
@@ -58,8 +58,8 @@ export type GoatCodexChatProjectorTarget = {
 // Electric-synced streaming surface), the codex_chat_events audit log, and turn/session status.
 // One message UPDATE per logical chunk; Electric ships the full row so the client is always
 // consistent, including across reloads.
-export function createGoatCodexChatProjector(input: {
-  target: GoatCodexChatProjectorTarget;
+export function createCodexChatProjector(input: {
+  target: CodexChatProjectorTarget;
   redact: (value: string) => string;
   initialParts?: CodexUiMessagePart[];
   // Engines that don't speak the codex app-server protocol (Claude Code) inject their
@@ -77,7 +77,7 @@ export function createGoatCodexChatProjector(input: {
     options: {
       error?: string | null;
       aborted?: boolean;
-      usage?: GoatChatMessageDebugTrace["usage"];
+      usage?: ChatMessageDebugTrace["usage"];
       durationMs?: number | undefined;
     } = {},
   ) => {
@@ -91,7 +91,7 @@ export function createGoatCodexChatProjector(input: {
         .filter((text) => text.trim())
         .join("\n\n"),
     );
-    const debugTrace: GoatChatMessageDebugTrace = {
+    const debugTrace: ChatMessageDebugTrace = {
       schemaVersion: CODEX_CHAT_DEBUG_SCHEMA_VERSION,
       model: target.model,
       uiMessageParts: redactedParts,
@@ -115,7 +115,7 @@ export function createGoatCodexChatProjector(input: {
   };
 
   const insertEventRow = async (event: CodexAppServerNormalizedEvent) => {
-    if (!PERSISTED_EVENT_TYPES.has(event.type as GoatCodexChatEventType)) return true;
+    if (!PERSISTED_EVENT_TYPES.has(event.type as CodexChatEventType)) return true;
     const eventKey = codexChatEventKey(event);
     try {
       const result = await getDb().execute(sql`
@@ -155,13 +155,13 @@ export function createGoatCodexChatProjector(input: {
         `);
         if (rowsFromExecute(duplicate).length > 0) return false;
       }
-      throw new GoatCodexChatLeaseLostError();
+      throw new CodexChatLeaseLostError();
     } catch (error) {
-      if (error instanceof GoatCodexChatLeaseLostError) throw error;
+      if (error instanceof CodexChatLeaseLostError) throw error;
       if (auditFailureReported) return true;
       auditFailureReported = true;
       const persistenceError = new Error("Goat Codex chat audit event persistence failed.");
-      persistenceError.name = "GoatCodexChatEventPersistenceError";
+      persistenceError.name = "CodexChatEventPersistenceError";
       captureException(persistenceError, {
         event: "opencompany.goat_codex_chat_event_persist_failed",
         turn_id: target.turnId,
@@ -299,13 +299,13 @@ export function createGoatCodexChatProjector(input: {
 
   const settleTurn = async (options: {
     turnStatus: "completed" | "failed" | "interrupted";
-    sessionStatus: GoatCodexChatSessionStatus;
+    sessionStatus: CodexChatSessionStatus;
     error: string | null;
     completedAt?: Date;
-    taskCompletion?: GoatTaskTurnCompletion | null | undefined;
+    taskCompletion?: TaskTurnCompletion | null | undefined;
   }) => {
     const now = options.completedAt ?? new Date();
-    await settleGoatDurableTurn({
+    await settleDurableTurn({
       target,
       turnStatus: options.turnStatus,
       sessionStatus: options.sessionStatus,
@@ -427,7 +427,7 @@ export function createGoatCodexChatProjector(input: {
     finalize(
       summary: CodexAppServerSummary,
       options: {
-        taskCompletion?: GoatTaskTurnCompletion | null;
+        taskCompletion?: TaskTurnCompletion | null;
         replacementContent?: string | null;
       } = {},
     ) {
@@ -495,7 +495,7 @@ export function createGoatCodexChatProjector(input: {
       });
     },
 
-    interrupted(taskCompletion?: GoatTaskTurnCompletion | null) {
+    interrupted(taskCompletion?: TaskTurnCompletion | null) {
       return serializeProjection(async () => {
         const completedAt = new Date();
         await cancelPendingInteractions();
@@ -517,8 +517,8 @@ export function createGoatCodexChatProjector(input: {
     fail(
       error: string,
       options: {
-        sessionStatus?: GoatCodexChatSessionStatus;
-        taskCompletion?: GoatTaskTurnCompletion | null;
+        sessionStatus?: CodexChatSessionStatus;
+        taskCompletion?: TaskTurnCompletion | null;
       } = {},
     ) {
       return serializeProjection(async () => {
@@ -542,9 +542,9 @@ export function createGoatCodexChatProjector(input: {
 }
 
 async function captureExternalHarnessUsage(input: {
-  target: GoatCodexChatProjectorTarget;
+  target: CodexChatProjectorTarget;
   summary: CodexAppServerSummary;
-  taskCompletion?: GoatTaskTurnCompletion | null | undefined;
+  taskCompletion?: TaskTurnCompletion | null | undefined;
 }) {
   const usage = input.summary.usage;
   if (!usage || (input.target.engine !== "codex" && input.target.engine !== "claude_code")) return;
@@ -561,7 +561,7 @@ async function captureExternalHarnessUsage(input: {
   );
   const totalTokens = inputTokens + outputTokens;
 
-  await captureGoatLlmUsageRecorded({
+  await captureLlmUsageRecorded({
     distinctId: input.target.userWorkosId,
     workspaceId: input.target.workspaceId,
     surface: input.taskCompletion ? "task" : "chat",
@@ -589,11 +589,11 @@ async function captureExternalHarnessUsage(input: {
   });
 }
 
-function externalHarnessUsageStage(_engine: GoatAnalyticsEngine): GoatLlmUsageAnalyticsStage {
+function externalHarnessUsageStage(_engine: AnalyticsEngine): LlmUsageAnalyticsStage {
   return "execution";
 }
 
-function externalHarnessModelProvider(engine: GoatAnalyticsEngine) {
+function externalHarnessModelProvider(engine: AnalyticsEngine) {
   if (engine === "claude_code") return "anthropic";
   if (engine === "codex") return "openai";
   return "external";
@@ -605,7 +605,7 @@ function positiveTokenCount(value: number | undefined) {
 
 function assertRowsChanged(result: unknown) {
   if (rowsFromExecute(result).length === 0) {
-    throw new GoatCodexChatLeaseLostError();
+    throw new CodexChatLeaseLostError();
   }
 }
 
@@ -700,9 +700,9 @@ function isValidCodexUserInputRequest(params: Record<string, unknown>) {
 
 export async function loadCodexChatAssistantMessageParts(assistantMessageId: string) {
   const [message] = await getDb()
-    .select({ debugTrace: goatChatMessages.debugTrace })
-    .from(goatChatMessages)
-    .where(and(eq(goatChatMessages.id, assistantMessageId), eq(goatChatMessages.role, "assistant")))
+    .select({ debugTrace: chatMessages.debugTrace })
+    .from(chatMessages)
+    .where(and(eq(chatMessages.id, assistantMessageId), eq(chatMessages.role, "assistant")))
     .limit(1);
   return parseCodexUiMessageParts(message?.debugTrace?.uiMessageParts);
 }

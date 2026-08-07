@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildGoatBrainActivityEvents,
-  buildGoatBrainDraftIngestStates,
-} from "@/lib/brain-activity";
-import type { GoatBrainIngestJobRow, GoatBrainSourceItemRow } from "@/lib/task-collections";
+import { buildBrainActivityEvents, buildBrainDraftIngestStates } from "@/lib/brain-activity";
+import type { BrainIngestJobRow, BrainSourceItemRow } from "@/lib/task-collections";
 
-function job(overrides: Partial<GoatBrainIngestJobRow> = {}): GoatBrainIngestJobRow {
+function job(overrides: Partial<BrainIngestJobRow> = {}): BrainIngestJobRow {
   return {
     id: "gbjob_1",
     source_item_id: "gbsrc_1",
@@ -32,7 +29,7 @@ function job(overrides: Partial<GoatBrainIngestJobRow> = {}): GoatBrainIngestJob
   };
 }
 
-function item(overrides: Partial<GoatBrainSourceItemRow> = {}): GoatBrainSourceItemRow {
+function item(overrides: Partial<BrainSourceItemRow> = {}): BrainSourceItemRow {
   return {
     id: "gbsrc_1",
     user_workos_id: "user_1",
@@ -53,9 +50,9 @@ function item(overrides: Partial<GoatBrainSourceItemRow> = {}): GoatBrainSourceI
   };
 }
 
-describe("buildGoatBrainActivityEvents", () => {
+describe("buildBrainActivityEvents", () => {
   it("emits a capture event for a queued chat capture", () => {
-    const events = buildGoatBrainActivityEvents([job()], [item()]);
+    const events = buildBrainActivityEvents([job()], [item()]);
 
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
@@ -68,7 +65,7 @@ describe("buildGoatBrainActivityEvents", () => {
   });
 
   it("shows queued work held by a quota reservation as paused by plan", () => {
-    const events = buildGoatBrainActivityEvents([job({ plan_paused: true })], [item()]);
+    const events = buildBrainActivityEvents([job({ plan_paused: true })], [item()]);
 
     expect(events.find((event) => event.kind === "paused")).toMatchObject({
       kind: "paused",
@@ -77,7 +74,7 @@ describe("buildGoatBrainActivityEvents", () => {
   });
 
   it("labels meeting sources and adds a filing event while running", () => {
-    const events = buildGoatBrainActivityEvents(
+    const events = buildBrainActivityEvents(
       [job({ status: "running", updated_at: "2026-07-09T10:00:30.000Z" })],
       [item({ source_provider: "jamie", source_type: "meeting", title: "Roadmap review" })],
     );
@@ -88,7 +85,7 @@ describe("buildGoatBrainActivityEvents", () => {
   });
 
   it("summarizes a succeeded job with the result's first line and brain id", () => {
-    const events = buildGoatBrainActivityEvents(
+    const events = buildBrainActivityEvents(
       [
         job({
           status: "succeeded",
@@ -143,7 +140,7 @@ describe("buildGoatBrainActivityEvents", () => {
   });
 
   it("falls back to an empty page list for legacy succeeded jobs", () => {
-    const events = buildGoatBrainActivityEvents(
+    const events = buildBrainActivityEvents(
       [
         job({
           status: "succeeded",
@@ -160,7 +157,7 @@ describe("buildGoatBrainActivityEvents", () => {
   });
 
   it("attaches valid completed traces and ignores malformed legacy traces", () => {
-    const events = buildGoatBrainActivityEvents(
+    const events = buildBrainActivityEvents(
       [
         job({
           id: "gbjob_traced",
@@ -201,7 +198,7 @@ describe("buildGoatBrainActivityEvents", () => {
   });
 
   it("shows first-class skipped jobs as skipped filing events", () => {
-    const events = buildGoatBrainActivityEvents(
+    const events = buildBrainActivityEvents(
       [
         job({
           status: "skipped",
@@ -225,7 +222,7 @@ describe("buildGoatBrainActivityEvents", () => {
   });
 
   it("reports failures and retries with the last error", () => {
-    const failed = buildGoatBrainActivityEvents(
+    const failed = buildBrainActivityEvents(
       [job({ status: "failed", attempts: 5, last_error: "Gateway timed out." })],
       [item()],
     );
@@ -234,7 +231,7 @@ describe("buildGoatBrainActivityEvents", () => {
       detail: "Gateway timed out.",
     });
 
-    const retrying = buildGoatBrainActivityEvents(
+    const retrying = buildBrainActivityEvents(
       [job({ status: "queued", attempts: 2, last_error: "Brain changed while running." })],
       [item()],
     );
@@ -245,7 +242,7 @@ describe("buildGoatBrainActivityEvents", () => {
   });
 
   it("sorts newest first and tolerates a missing source item", () => {
-    const events = buildGoatBrainActivityEvents(
+    const events = buildBrainActivityEvents(
       [
         job({
           id: "gbjob_old",
@@ -293,9 +290,9 @@ function trace() {
   };
 }
 
-describe("buildGoatBrainDraftIngestStates", () => {
+describe("buildBrainDraftIngestStates", () => {
   it("maps pending chat capture jobs to their inbox draft id", () => {
-    const states = buildGoatBrainDraftIngestStates([job()], [item()]);
+    const states = buildBrainDraftIngestStates([job()], [item()]);
 
     expect(states.get("pricing-reference")).toMatchObject({
       kind: "queued",
@@ -306,13 +303,13 @@ describe("buildGoatBrainDraftIngestStates", () => {
   });
 
   it("uses running, retrying, and failed job states", () => {
-    const running = buildGoatBrainDraftIngestStates(
+    const running = buildBrainDraftIngestStates(
       [job({ status: "running", attempts: 1 })],
       [item()],
     );
     expect(running.get("pricing-reference")).toMatchObject({ kind: "running", attempts: 1 });
 
-    const retrying = buildGoatBrainDraftIngestStates(
+    const retrying = buildBrainDraftIngestStates(
       [job({ status: "queued", attempts: 2, last_error: "Brain changed while running." })],
       [item()],
     );
@@ -321,7 +318,7 @@ describe("buildGoatBrainDraftIngestStates", () => {
       detail: "Brain changed while running.",
     });
 
-    const failed = buildGoatBrainDraftIngestStates(
+    const failed = buildBrainDraftIngestStates(
       [job({ status: "failed", attempts: 5, last_error: "Gateway timed out." })],
       [item({ last_ingest_status: "failed" })],
     );
@@ -332,9 +329,9 @@ describe("buildGoatBrainDraftIngestStates", () => {
   });
 
   it("hides succeeded jobs and ignores non-capture source items", () => {
-    expect(buildGoatBrainDraftIngestStates([job({ status: "succeeded" })], [item()]).size).toBe(0);
+    expect(buildBrainDraftIngestStates([job({ status: "succeeded" })], [item()]).size).toBe(0);
     expect(
-      buildGoatBrainDraftIngestStates(
+      buildBrainDraftIngestStates(
         [job({ source_provider: "jamie" })],
         [item({ source_provider: "jamie", source_type: "meeting" })],
       ).size,

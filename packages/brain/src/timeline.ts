@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import type { GoatBrainTimelineEntry } from "./schema";
-import { isValidGoatBrainEvidenceId, normalizeGoatBrainId } from "./schema";
+import type { BrainTimelineEntry } from "./schema";
+import { isValidBrainEvidenceId, normalizeBrainId } from "./schema";
 
-export type GoatBrainTimelineParts = {
+export type BrainTimelineParts = {
   at: string;
   summary: string;
   detail: string;
@@ -12,14 +12,14 @@ export type GoatBrainTimelineParts = {
 
 const SOURCE_PREFIX = "Source:";
 
-export function goatBrainTimelineEntryFromParts(input: {
+export function brainTimelineEntryFromParts(input: {
   evidenceId?: string | null;
   at: string;
   summary: string;
   detail?: string | null;
   sourceRef?: string | null;
   sourceTitle?: string | null;
-}): GoatBrainTimelineEntry {
+}): BrainTimelineEntry {
   const at = normalizeTimelineAt(input.at);
   if (!at) throw new Error(`Invalid timeline "at" value: ${input.at}`);
   const evidenceId =
@@ -32,7 +32,7 @@ export function goatBrainTimelineEntryFromParts(input: {
   return {
     evidenceId,
     at,
-    body: goatBrainTimelineBody({
+    body: brainTimelineBody({
       summary: input.summary,
       detail: input.detail ?? "",
       sourceRef: input.sourceRef ?? "",
@@ -41,7 +41,7 @@ export function goatBrainTimelineEntryFromParts(input: {
   };
 }
 
-export function goatBrainTimelineBody(input: {
+export function brainTimelineBody(input: {
   summary: string;
   detail?: string | null;
   sourceRef?: string | null;
@@ -60,9 +60,7 @@ export function goatBrainTimelineBody(input: {
     .join("\n\n");
 }
 
-export function goatBrainTimelinePartsFromEntry(
-  entry: GoatBrainTimelineEntry,
-): GoatBrainTimelineParts | null {
+export function brainTimelinePartsFromEntry(entry: BrainTimelineEntry): BrainTimelineParts | null {
   const at = normalizeTimelineAt(entry.at);
   if (!at) return null;
 
@@ -102,10 +100,10 @@ export function normalizeTimelineAt(value: string) {
 export function normalizeEvidenceId(value: string | null | undefined): string | null {
   if (!value) return null;
   const trimmed = value.trim();
-  if (isValidGoatBrainEvidenceId(trimmed)) return trimmed;
-  const normalized = normalizeGoatBrainId(String(trimmed).replace(/^ev[-_]?/i, ""));
+  if (isValidBrainEvidenceId(trimmed)) return trimmed;
+  const normalized = normalizeBrainId(String(trimmed).replace(/^ev[-_]?/i, ""));
   const candidate = normalized ? `ev-${normalized}` : "";
-  return isValidGoatBrainEvidenceId(candidate) ? candidate : null;
+  return isValidBrainEvidenceId(candidate) ? candidate : null;
 }
 
 export function deterministicEvidenceId(input: {
@@ -115,7 +113,7 @@ export function deterministicEvidenceId(input: {
 }): string {
   const normalizedAt = normalizeTimelineAt(input.at) ?? input.at;
   const dateSlug = normalizedAt.slice(0, 10).replace(/-/g, "");
-  const label = normalizeGoatBrainId(input.sourceRef || input.summary || "evidence") || "evidence";
+  const label = normalizeBrainId(input.sourceRef || input.summary || "evidence") || "evidence";
   const digest = createHash("sha256")
     .update([normalizedAt, input.sourceRef ?? "", input.summary ?? ""].join("\n"))
     .digest("hex")

@@ -1,13 +1,13 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
+  type BrainFrontmatter,
+  type BrainRelation,
+  type BrainSource,
+  type BrainStatus,
   DEFAULT_GOAT_BRAIN_RELATION_TYPE,
-  type GoatBrainFrontmatter,
-  type GoatBrainRelation,
-  type GoatBrainSource,
-  type GoatBrainStatus,
-  isValidGoatBrainKind,
+  isValidBrainKind,
 } from "./schema";
-import { normalizeBuiltInGoatBrainEntityType } from "./schemas";
+import { normalizeBuiltInBrainEntityType } from "./schemas";
 
 export function splitFrontmatter(source: string): { yaml: string; body: string } {
   const normalized = source.replace(/\r\n/g, "\n");
@@ -20,7 +20,7 @@ export function splitFrontmatter(source: string): { yaml: string; body: string }
   };
 }
 
-export function parseFrontmatter(yaml: string): Partial<GoatBrainFrontmatter> {
+export function parseFrontmatter(yaml: string): Partial<BrainFrontmatter> {
   let raw: unknown;
   try {
     raw = parseYaml(yaml);
@@ -29,7 +29,7 @@ export function parseFrontmatter(yaml: string): Partial<GoatBrainFrontmatter> {
   }
   if (!isRecord(raw)) return {};
 
-  const out: Partial<GoatBrainFrontmatter> = {};
+  const out: Partial<BrainFrontmatter> = {};
   const id = readString(raw.id);
   if (id) out.id = id;
   const folder = readString(raw.folder);
@@ -40,10 +40,10 @@ export function parseFrontmatter(yaml: string): Partial<GoatBrainFrontmatter> {
   if (description) out.description = description;
   const model = readString(raw.model);
   if (model) out.model = model;
-  const type = normalizeBuiltInGoatBrainEntityType(readString(raw.type) ?? undefined);
+  const type = normalizeBuiltInBrainEntityType(readString(raw.type) ?? undefined);
   if (type) out.type = type;
   const kind = readString(raw.kind);
-  if (isValidGoatBrainKind(kind)) out.kind = kind;
+  if (isValidBrainKind(kind)) out.kind = kind;
   const status = readStatus(raw.status);
   if (status) out.status = status;
   const aliases = readStringArray(raw.aliases);
@@ -62,7 +62,7 @@ export function parseFrontmatter(yaml: string): Partial<GoatBrainFrontmatter> {
   return out;
 }
 
-export function serializeFrontmatter(frontmatter: GoatBrainFrontmatter): string {
+export function serializeFrontmatter(frontmatter: BrainFrontmatter): string {
   const record: Record<string, unknown> = {
     id: frontmatter.id,
     folder: frontmatter.folder,
@@ -91,12 +91,12 @@ export function serializeFrontmatter(frontmatter: GoatBrainFrontmatter): string 
   return ["---", stringifyYaml(record, { lineWidth: 0 }).trimEnd(), "---"].join("\n");
 }
 
-function readRelations(value: unknown): GoatBrainRelation[] {
+function readRelations(value: unknown): BrainRelation[] {
   if (!Array.isArray(value)) return [];
-  const out: GoatBrainRelation[] = [];
+  const out: BrainRelation[] = [];
   const seen = new Set<string>();
   for (const item of value) {
-    let relation: GoatBrainRelation | null = null;
+    let relation: BrainRelation | null = null;
     if (typeof item === "string") {
       const target = readString(item);
       if (target) relation = { type: DEFAULT_GOAT_BRAIN_RELATION_TYPE, to: target };
@@ -113,11 +113,11 @@ function readRelations(value: unknown): GoatBrainRelation[] {
   return out;
 }
 
-function relationKey(relation: GoatBrainRelation): string {
+function relationKey(relation: BrainRelation): string {
   return `${relation.type}:${relation.to}`;
 }
 
-function readStatus(value: unknown): GoatBrainStatus | null {
+function readStatus(value: unknown): BrainStatus | null {
   const status = readString(value);
   if (status === "draft" || status === "active" || status === "archived" || status === "merged") {
     return status;
@@ -125,9 +125,9 @@ function readStatus(value: unknown): GoatBrainStatus | null {
   return null;
 }
 
-function readSources(value: unknown): GoatBrainSource[] {
+function readSources(value: unknown): BrainSource[] {
   if (!Array.isArray(value)) return [];
-  const out: GoatBrainSource[] = [];
+  const out: BrainSource[] = [];
   for (const item of value) {
     if (!isRecord(item)) continue;
     const ref = readString(item.ref);

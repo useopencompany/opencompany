@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { readGoatGoogleDriveAllFiles, readGoatGoogleDriveResources } from "./google-drive";
+import { readGoogleDriveAllFiles, readGoogleDriveResources } from "./google-drive";
 
 describe("Google Drive source configuration", () => {
   it("sanitizes resources, timestamps, corpus keys, and duplicate ids", () => {
     expect(
-      readGoatGoogleDriveResources({
+      readGoogleDriveResources({
         resources: [
           {
             id: "file_1",
@@ -51,11 +51,11 @@ describe("Google Drive source configuration", () => {
 
   it("sanitizes all-files source timestamps", () => {
     expect(
-      readGoatGoogleDriveAllFiles({
+      readGoogleDriveAllFiles({
         allFiles: { selectedAt: "2026-07-13T08:00:00Z" },
       }),
     ).toEqual({ selectedAt: "2026-07-13T08:00:00.000Z" });
 
-    expect(readGoatGoogleDriveAllFiles({ allFiles: { selectedAt: "not-a-date" } })).toBeNull();
+    expect(readGoogleDriveAllFiles({ allFiles: { selectedAt: "not-a-date" } })).toBeNull();
   });
 });

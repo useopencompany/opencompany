@@ -1,16 +1,16 @@
-import { GoatBrainRoute } from "@/components/GoatRoutes";
-import { currentGoatUser } from "@/lib/auth";
-import { listGoatBrainForBrain } from "@/lib/brain";
-import { getGoatBrainOverviewStats } from "@/lib/brain-overview";
+import { BrainRoute } from "@/components/AppRoutes";
+import { currentUser } from "@/lib/auth";
+import { listBrainForBrain } from "@/lib/brain";
+import { getBrainOverviewStats } from "@/lib/brain-overview";
 
 type PageProps = {
   params: Promise<{ path?: string[] }>;
 };
 
-export default async function GoatBrainPage({ params }: PageProps) {
+export default async function BrainPage({ params }: PageProps) {
   const { path } = await params;
   const segments = path ?? [];
-  const { brains, activeBrain } = await currentGoatUser();
+  const { brains, activeBrain } = await currentUser();
   const explicitBrain = segments[0] ? brains.find((brain) => brain.id === segments[0]) : null;
   const selectedBrain = explicitBrain ?? activeBrain;
   const routeBrainId = explicitBrain?.id ?? null;
@@ -23,15 +23,15 @@ export default async function GoatBrainPage({ params }: PageProps) {
   // live collection fills the file tree after the route is visible.
   const [brain, overviewStats] = await Promise.all([
     selectedBrain && !isSettingsRoute && !isOverviewRoute
-      ? listGoatBrainForBrain(selectedBrain.id)
+      ? listBrainForBrain(selectedBrain.id)
       : Promise.resolve(null),
     selectedBrain && !isSettingsRoute
-      ? getGoatBrainOverviewStats(selectedBrain.id)
+      ? getBrainOverviewStats(selectedBrain.id)
       : Promise.resolve(null),
   ]);
 
   return (
-    <GoatBrainRoute
+    <BrainRoute
       path={brainPath}
       routeBrainId={routeBrainId}
       selectedBrain={selectedBrain ? brainSummaryView(selectedBrain) : null}

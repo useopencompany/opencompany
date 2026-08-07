@@ -1,7 +1,7 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import type { GoatHarnessSpec } from "@opencompany/db/schema";
+import type { HarnessSpec } from "@opencompany/db/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { planGoatHarnessForTask } from "./harness";
+import { planHarnessForTask } from "./harness";
 import { GOAT_HARNESS_CREATION_SYSTEM_PROMPT } from "./prompts/harness-creation";
 
 const aiMock = vi.hoisted(() => ({
@@ -29,18 +29,18 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-// The production planner entry point is planGoatHarnessForTask; this wrapper keeps the
+// The production planner entry point is planHarnessForTask; this wrapper keeps the
 // planner specs focused on the resulting harness spec.
-async function planGoatHarness(input: {
+async function planHarness(input: {
   prompt: string;
-  model: GoatHarnessSpec["model"];
-  requestedEngine?: GoatHarnessSpec["engine"];
+  model: HarnessSpec["model"];
+  requestedEngine?: HarnessSpec["engine"];
   gatewayApiKey: string;
-  availableTools?: readonly GoatHarnessSpec["tools"][number][];
+  availableTools?: readonly HarnessSpec["tools"][number][];
   githubRepositories?: readonly string[];
-}): Promise<GoatHarnessSpec> {
+}): Promise<HarnessSpec> {
   return (
-    await planGoatHarnessForTask({
+    await planHarnessForTask({
       ...input,
       availableTools: input.availableTools ?? ["exa_search"],
       githubRepositories: input.githubRepositories ?? [],
@@ -48,7 +48,7 @@ async function planGoatHarness(input: {
   ).harnessSpec;
 }
 
-describe("planGoatHarness", () => {
+describe("planHarness", () => {
   it("produces goat.harness.v1 with operation-level tools and a planned execution model", async () => {
     aiMock.generateObject.mockResolvedValueOnce({
       object: {
@@ -65,7 +65,7 @@ describe("planGoatHarness", () => {
     });
 
     await expect(
-      planGoatHarness({
+      planHarness({
         prompt:
           "Summarize the user's latest emails. Since no inbox access is available in chat, ask the user to paste/export them.",
         model,
@@ -156,7 +156,7 @@ describe("planGoatHarness", () => {
       },
     });
 
-    const result = await planGoatHarness({
+    const result = await planHarness({
       prompt: "Research Marseille.",
       model,
       availableTools: ["exa_search"],
@@ -191,7 +191,7 @@ describe("planGoatHarness", () => {
     });
 
     await expect(
-      planGoatHarness({
+      planHarness({
         prompt: "Research Marseille.",
         model,
         availableTools: ["exa_search"],
@@ -215,7 +215,7 @@ describe("planGoatHarness", () => {
     });
 
     await expect(
-      planGoatHarness({
+      planHarness({
         prompt: "Find my Linear issues about onboarding.",
         model,
         availableTools: ["exa_search", "linear_search_tools", "linear_use_tool"],
@@ -242,7 +242,7 @@ describe("planGoatHarness", () => {
     });
 
     await expect(
-      planGoatHarness({
+      planHarness({
         prompt: "Deeply research the category across many sources and produce a report.",
         model,
         availableTools: ["exa_search"],
@@ -275,7 +275,7 @@ describe("planGoatHarness", () => {
     });
 
     await expect(
-      planGoatHarness({
+      planHarness({
         prompt: "Change octo/private-repo and open a PR.",
         model,
         availableTools: [
@@ -322,7 +322,7 @@ describe("planGoatHarness", () => {
     });
 
     await expect(
-      planGoatHarness({
+      planHarness({
         prompt: "Find three wireless mice on Amazon under $50.",
         model,
         availableTools: [
@@ -361,7 +361,7 @@ describe("planGoatHarness", () => {
     });
 
     await expect(
-      planGoatHarness({
+      planHarness({
         prompt: "Deep research the Marseille AI market.",
         model,
         availableTools: ["exa_search"],
@@ -401,7 +401,7 @@ describe("planGoatHarness", () => {
     });
 
     await expect(
-      planGoatHarness({
+      planHarness({
         prompt: "Use Codex to fix the failing tests in octo/repo.",
         model,
         availableTools: ["exa_search", "github_clone_repository", "github_shell"],
@@ -435,7 +435,7 @@ describe("planGoatHarness", () => {
     });
 
     await expect(
-      planGoatHarness({
+      planHarness({
         prompt: "Check out opencompany-experimental and report whether development work can start.",
         model,
         requestedEngine: "codex",
@@ -477,7 +477,7 @@ describe("planGoatHarness", () => {
     });
 
     await expect(
-      planGoatHarness({
+      planHarness({
         prompt: "Use Codex to fix the flaky test suite in octo/repo and verify it.",
         model,
         availableTools: ["exa_search", "github_clone_repository", "github_shell"],
@@ -517,7 +517,7 @@ describe("planGoatHarness", () => {
     });
 
     await expect(
-      planGoatHarness({
+      planHarness({
         prompt: "Use Codex to fix Yellowknife and open a PR.",
         model,
         availableTools: ["exa_search", "github_clone_repository", "github_shell"],
@@ -564,7 +564,7 @@ describe("planGoatHarness", () => {
     });
 
     await expect(
-      planGoatHarness({
+      planHarness({
         prompt: "Use Codex to fix octo/repo but do not open a PR.",
         model,
         availableTools: ["exa_search", "github_clone_repository", "github_shell"],
@@ -594,7 +594,7 @@ describe("planGoatHarness", () => {
       },
     });
 
-    const result = await planGoatHarness({
+    const result = await planHarness({
       prompt: "Run YC-style office hours and reason from first principles.",
       model,
       availableTools: ["exa_search"],

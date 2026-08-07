@@ -6,7 +6,7 @@ function promptBlock(name: string, lines: readonly string[]) {
 // Slack. Overrides the surface-specific parts: Slack mrkdwn differs from
 // Markdown in ways that render badly if ignored (** bold, # headings, tables),
 // only the final message is delivered, and several humans can share a thread.
-export function createGoatSlackSurfacePromptBlock(input: { isDirectMessage?: boolean } = {}) {
+export function createSlackSurfacePromptBlock(input: { isDirectMessage?: boolean } = {}) {
   return promptBlock("slack_surface", [
     input.isDirectMessage
       ? "You are replying inside a direct message with one person in Slack, not the OpenCompany app."

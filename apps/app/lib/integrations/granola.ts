@@ -1,22 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
 import {
-  ensureGoatGranolaSyncState,
+  ensureGranolaSyncState,
   GOAT_GRANOLA_CREDENTIAL_KIND,
   GOAT_GRANOLA_PROVIDER,
 } from "@opencompany/db/granola";
-import {
-  markGoatIntegrationStatus,
-  saveGoatIntegrationCredential,
-} from "@opencompany/db/integrations";
-import { goatIntegrations } from "@opencompany/db/schema";
+import { markIntegrationStatus, saveIntegrationCredential } from "@opencompany/db/integrations";
+import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
-import type { GoatGranolaProviderState } from "@/lib/integration-state";
-import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
+import type { GranolaProviderState } from "@/lib/integration-state";
+import { captureIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 
 export const GOAT_GRANOLA_API_BASE_URL = "https://public-api.granola.ai/v1";
 
-export type GoatGranolaApiKeyCredentialPayload = {
+export type GranolaApiKeyCredentialPayload = {
   apiKey: string;
   createdAt: string;
 };
@@ -24,7 +21,7 @@ export type GoatGranolaApiKeyCredentialPayload = {
 // One Granola connection per user: the key is minted per person in the Granola
 // desktop app, so the personal-uniqueness index keys on this stable sentinel
 // and a key rotation updates the row in place instead of minting a sibling.
-export function goatGranolaExternalIdForUser(userWorkosId: string) {
+export function granolaExternalIdForUser(userWorkosId: string) {
   return `granola:${userWorkosId}`;
 }
 
@@ -32,16 +29,14 @@ export function isValidGranolaApiKey(apiKey: string) {
   return /^grn_[A-Za-z0-9_-]{10,200}$/.test(apiKey);
 }
 
-export type GoatGranolaApiKeyValidation =
+export type GranolaApiKeyValidation =
   | { ok: true; accountEmail: string | null; accountName: string | null }
   | { ok: false; error: string };
 
 // Granola has no identity endpoint; a page_size=1 list call both proves the
 // key works and — when a personal note exists — surfaces the key owner from
 // the note's owner field.
-export async function validateGoatGranolaApiKey(
-  apiKey: string,
-): Promise<GoatGranolaApiKeyValidation> {
+export async function validateGranolaApiKey(apiKey: string): Promise<GranolaApiKeyValidation> {
   let response: Response;
   try {
     response = await fetch(`${GOAT_GRANOLA_API_BASE_URL}/notes?page_size=1`, {
@@ -74,7 +69,7 @@ export async function validateGoatGranolaApiKey(
   };
 }
 
-export async function connectGoatGranolaIntegration(input: {
+export async function connectGranolaIntegration(input: {
   userWorkosId: string;
   apiKey: string;
   accountEmail: string | null;
@@ -86,12 +81,12 @@ export async function connectGoatGranolaIntegration(input: {
   const connectionLabel = input.accountEmail?.trim() || input.accountName?.trim() || "Granola";
 
   const [integration] = await db
-    .insert(goatIntegrations)
+    .insert(integrations)
     .values({
-      id: newGoatIntegrationId(),
+      id: newIntegrationId(),
       userWorkosId: input.userWorkosId,
       provider: GOAT_GRANOLA_PROVIDER,
-      externalId: goatGranolaExternalIdForUser(input.userWorkosId),
+      externalId: granolaExternalIdForUser(input.userWorkosId),
       connectionLabel,
       accountName: input.accountName,
       accountEmail: input.accountEmail,
@@ -103,13 +98,9 @@ export async function connectGoatGranolaIntegration(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: [
-        goatIntegrations.userWorkosId,
-        goatIntegrations.provider,
-        goatIntegrations.externalId,
-      ],
+      target: [integrations.userWorkosId, integrations.provider, integrations.externalId],
       // The personal-uniqueness index is partial; the arbiter must match it.
-      targetWhere: sql`${goatIntegrations.workspaceId} IS NULL`,
+      targetWhere: sql`${integrations.workspaceId} IS NULL`,
       set: {
         connectionLabel,
         accountName: input.accountName,
@@ -121,19 +112,19 @@ export async function connectGoatGranolaIntegration(input: {
         updatedAt: now,
       },
     })
-    .returning({ id: goatIntegrations.id });
+    .returning({ id: integrations.id });
 
   if (!integration) {
     throw new Error("Could not persist Goat Granola integration.");
   }
 
-  const payload: GoatGranolaApiKeyCredentialPayload = {
+  const payload: GranolaApiKeyCredentialPayload = {
     apiKey: input.apiKey,
     createdAt: now.toISOString(),
   };
 
   try {
-    await saveGoatIntegrationCredential({
+    await saveIntegrationCredential({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
       provider: GOAT_GRANOLA_PROVIDER,
@@ -145,7 +136,7 @@ export async function connectGoatGranolaIntegration(input: {
       now,
     });
   } catch (error) {
-    await markGoatIntegrationStatus({
+    await markIntegrationStatus({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
       provider: GOAT_GRANOLA_PROVIDER,
@@ -159,12 +150,12 @@ export async function connectGoatGranolaIntegration(input: {
 
   // Anchor the poll cursor row now so the first runner poll starts from the
   // moment of connection (no backfill) without racing the credential write.
-  await ensureGoatGranolaSyncState(
+  await ensureGranolaSyncState(
     { integrationId: integration.id, userWorkosId: input.userWorkosId },
     db,
   );
 
-  await captureGoatIntegrationAddedAnalytics({
+  await captureIntegrationAddedAnalytics({
     userWorkosId: input.userWorkosId,
     provider: "granola",
   });
@@ -172,26 +163,26 @@ export async function connectGoatGranolaIntegration(input: {
   return { integrationId: integration.id };
 }
 
-export async function getGoatGranolaIntegrationState(
+export async function getGranolaIntegrationState(
   userWorkosId: string,
-): Promise<GoatGranolaProviderState> {
+): Promise<GranolaProviderState> {
   const [row] = await getDb()
     .select({
-      id: goatIntegrations.id,
-      status: goatIntegrations.status,
-      accountEmail: goatIntegrations.accountEmail,
-      accountName: goatIntegrations.accountName,
-      statusReason: goatIntegrations.statusReason,
+      id: integrations.id,
+      status: integrations.status,
+      accountEmail: integrations.accountEmail,
+      accountName: integrations.accountName,
+      statusReason: integrations.statusReason,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, GOAT_GRANOLA_PROVIDER),
-        ne(goatIntegrations.status, "disconnected"),
+        eq(integrations.userWorkosId, userWorkosId),
+        eq(integrations.provider, GOAT_GRANOLA_PROVIDER),
+        ne(integrations.status, "disconnected"),
       ),
     )
-    .orderBy(desc(goatIntegrations.updatedAt))
+    .orderBy(desc(integrations.updatedAt))
     .limit(1);
 
   if (!row) {
@@ -217,6 +208,6 @@ export async function getGoatGranolaIntegrationState(
   };
 }
 
-function newGoatIntegrationId() {
+function newIntegrationId() {
   return `gint_${randomUUID().replace(/-/g, "")}`;
 }

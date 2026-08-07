@@ -2,20 +2,20 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "./client";
 import {
-  type GoatHubspotEventAction,
-  type GoatHubspotObjectType,
-  type GoatIntegrationStatus,
-  goatBrainSources,
-  goatHubspotObjectEvents,
-  goatIntegrations,
+  brainSources,
+  type HubspotEventAction,
+  type HubspotObjectType,
+  hubspotObjectEvents,
+  type IntegrationStatus,
+  integrations,
 } from "./schema";
 
 type DbLike = any;
 
 export const HUBSPOT_OBJECT_TYPES = ["contact", "company", "deal"] as const;
 
-export type GoatHubspotObjectTypeRef = {
-  id: GoatHubspotObjectType;
+export type HubspotObjectTypeRef = {
+  id: HubspotObjectType;
 };
 
 export const HUBSPOT_EVENT_TYPES = [
@@ -24,10 +24,10 @@ export const HUBSPOT_EVENT_TYPES = [
   "object_stage_changed",
 ] as const;
 
-export type GoatHubspotEventType = (typeof HUBSPOT_EVENT_TYPES)[number];
+export type HubspotEventType = (typeof HUBSPOT_EVENT_TYPES)[number];
 
-export type GoatHubspotEventRef = {
-  id: GoatHubspotEventType;
+export type HubspotEventRef = {
+  id: HubspotEventType;
 };
 
 // Deal/ticket-style stage properties: a property change on one of these is a
@@ -38,37 +38,37 @@ const HUBSPOT_STAGE_PROPERTY_NAMES = new Set(["dealstage", "hs_pipeline_stage", 
 // the flush worker: CRM activity is buffered/ingested only when its object
 // type and derived event type appear in the enabled brain-source config for
 // the integration.
-export type GoatHubspotBrainSourceConfig = {
-  objectTypes?: GoatHubspotObjectTypeRef[];
-  events?: GoatHubspotEventRef[];
+export type HubspotBrainSourceConfig = {
+  objectTypes?: HubspotObjectTypeRef[];
+  events?: HubspotEventRef[];
 };
 
-export type GoatHubspotIntegrationForPortal = {
+export type HubspotIntegrationForPortal = {
   id: string;
   userWorkosId: string;
-  status: GoatIntegrationStatus;
+  status: IntegrationStatus;
 };
 
-export type GoatHubspotBrainSourceRoute = {
+export type HubspotBrainSourceRoute = {
   integrationId: string;
   brainRef: string;
-  config: GoatHubspotBrainSourceConfig;
+  config: HubspotBrainSourceConfig;
 };
 
-export type GoatHubspotObjectEventInsert = {
+export type HubspotObjectEventInsert = {
   integrationId: string;
   userWorkosId: string;
   portalId: string;
-  objectType: GoatHubspotObjectType;
+  objectType: HubspotObjectType;
   objectId: string;
   deliveryId: string;
-  action: GoatHubspotEventAction;
+  action: HubspotEventAction;
   propertyName?: string | null;
   payload: Record<string, unknown>;
   eventTime: Date;
 };
 
-export function parseGoatHubspotBrainSourceConfig(value: unknown): GoatHubspotBrainSourceConfig {
+export function parseHubspotBrainSourceConfig(value: unknown): HubspotBrainSourceConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const record = value as Record<string, unknown>;
   const objectTypes = parseObjectTypeRefs(record.objectTypes);
@@ -79,103 +79,103 @@ export function parseGoatHubspotBrainSourceConfig(value: unknown): GoatHubspotBr
   };
 }
 
-export function goatHubspotSelectedObjectTypes(
-  config: GoatHubspotBrainSourceConfig,
-): Set<GoatHubspotObjectType> {
-  const ids = new Set<GoatHubspotObjectType>();
+export function hubspotSelectedObjectTypes(
+  config: HubspotBrainSourceConfig,
+): Set<HubspotObjectType> {
+  const ids = new Set<HubspotObjectType>();
   for (const ref of config.objectTypes ?? []) ids.add(ref.id);
   return ids;
 }
 
-export function goatHubspotSelectedEventTypes(
-  config: GoatHubspotBrainSourceConfig,
-): Set<GoatHubspotEventType> | null {
+export function hubspotSelectedEventTypes(
+  config: HubspotBrainSourceConfig,
+): Set<HubspotEventType> | null {
   if (!config.events) return null;
   return new Set(config.events.map((ref) => ref.id));
 }
 
-export function goatHubspotRouteMatchesEvent(
-  config: GoatHubspotBrainSourceConfig,
-  eventType: GoatHubspotEventType,
+export function hubspotRouteMatchesEvent(
+  config: HubspotBrainSourceConfig,
+  eventType: HubspotEventType,
 ) {
-  const selected = goatHubspotSelectedEventTypes(config);
+  const selected = hubspotSelectedEventTypes(config);
   return selected === null || selected.has(eventType);
 }
 
-export function goatHubspotEventTypeFor(input: {
-  action: GoatHubspotEventAction;
+export function hubspotEventTypeFor(input: {
+  action: HubspotEventAction;
   propertyName?: string | null;
-}): GoatHubspotEventType {
+}): HubspotEventType {
   if (input.action === "create") return "object_created";
   return input.propertyName && HUBSPOT_STAGE_PROPERTY_NAMES.has(input.propertyName)
     ? "object_stage_changed"
     : "object_updated";
 }
 
-export function isGoatHubspotObjectType(value: unknown): value is GoatHubspotObjectType {
+export function isHubspotObjectType(value: unknown): value is HubspotObjectType {
   return typeof value === "string" && (HUBSPOT_OBJECT_TYPES as readonly string[]).includes(value);
 }
 
-export async function listGoatHubspotIntegrationsForPortal(
+export async function listHubspotIntegrationsForPortal(
   portalId: string,
   db: DbLike = getDb(),
-): Promise<GoatHubspotIntegrationForPortal[]> {
+): Promise<HubspotIntegrationForPortal[]> {
   return await db
     .select({
-      id: goatIntegrations.id,
-      userWorkosId: goatIntegrations.userWorkosId,
-      status: goatIntegrations.status,
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      status: integrations.status,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.provider, "hubspot"),
+        eq(integrations.provider, "hubspot"),
         // Integration rows key external_id on the HubSpot portal (hub) id, so
         // inbound webhooks route by payload portalId.
-        eq(goatIntegrations.externalId, portalId),
+        eq(integrations.externalId, portalId),
       ),
     );
 }
 
-export async function listEnabledGoatHubspotBrainSourceRoutes(
+export async function listEnabledHubspotBrainSourceRoutes(
   integrationIds: readonly string[],
   db: DbLike = getDb(),
-): Promise<GoatHubspotBrainSourceRoute[]> {
+): Promise<HubspotBrainSourceRoute[]> {
   if (integrationIds.length === 0) return [];
   const rows = await db
     .select({
-      integrationId: goatBrainSources.integrationId,
-      brainRef: goatBrainSources.brainId,
-      config: goatBrainSources.config,
+      integrationId: brainSources.integrationId,
+      brainRef: brainSources.brainId,
+      config: brainSources.config,
     })
-    .from(goatBrainSources)
+    .from(brainSources)
     .where(
       and(
-        eq(goatBrainSources.provider, "hubspot"),
-        eq(goatBrainSources.enabled, true),
-        inArray(goatBrainSources.integrationId, [...integrationIds]),
+        eq(brainSources.provider, "hubspot"),
+        eq(brainSources.enabled, true),
+        inArray(brainSources.integrationId, [...integrationIds]),
       ),
     );
 
   return rows.map((row: { integrationId: string; brainRef: string; config: unknown }) => ({
     integrationId: row.integrationId,
     brainRef: row.brainRef,
-    config: parseGoatHubspotBrainSourceConfig(row.config),
+    config: parseHubspotBrainSourceConfig(row.config),
   }));
 }
 
-export async function insertGoatHubspotObjectEvents(
-  events: readonly GoatHubspotObjectEventInsert[],
+export async function insertHubspotObjectEvents(
+  events: readonly HubspotObjectEventInsert[],
   db: DbLike = getDb(),
 ): Promise<number> {
   if (events.length === 0) return 0;
   // HubSpot redelivers webhooks on retry; the unique (integration, delivery id)
   // index makes redeliveries no-ops.
   const rows = await db
-    .insert(goatHubspotObjectEvents)
+    .insert(hubspotObjectEvents)
     .values(
       events.map((event) => ({
-        id: newGoatHubspotObjectEventId(),
+        id: newHubspotObjectEventId(),
         integrationId: event.integrationId,
         userWorkosId: event.userWorkosId,
         portalId: event.portalId,
@@ -189,21 +189,21 @@ export async function insertGoatHubspotObjectEvents(
       })),
     )
     .onConflictDoNothing()
-    .returning({ id: goatHubspotObjectEvents.id });
+    .returning({ id: hubspotObjectEvents.id });
   return rows.length;
 }
 
-export function newGoatHubspotObjectEventId() {
+export function newHubspotObjectEventId() {
   return `ghubevt_${randomUUID().replace(/-/g, "")}`;
 }
 
-export function newGoatHubspotObjectWindowId() {
+export function newHubspotObjectWindowId() {
   return `ghubwin_${randomUUID().replace(/-/g, "")}`;
 }
 
-function parseObjectTypeRefs(value: unknown): GoatHubspotObjectTypeRef[] | undefined {
+function parseObjectTypeRefs(value: unknown): HubspotObjectTypeRef[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const seen = new Set<GoatHubspotObjectType>();
+  const seen = new Set<HubspotObjectType>();
   const refs = value.flatMap((entry) => {
     const id =
       typeof entry === "string"
@@ -211,16 +211,16 @@ function parseObjectTypeRefs(value: unknown): GoatHubspotObjectTypeRef[] | undef
         : entry && typeof entry === "object" && !Array.isArray(entry)
           ? (entry as Record<string, unknown>).id
           : null;
-    if (!isGoatHubspotObjectType(id) || seen.has(id)) return [];
+    if (!isHubspotObjectType(id) || seen.has(id)) return [];
     seen.add(id);
     return [{ id }];
   });
   return refs.length > 0 ? refs : undefined;
 }
 
-function parseEventRefs(value: unknown): GoatHubspotEventRef[] | undefined {
+function parseEventRefs(value: unknown): HubspotEventRef[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const seen = new Set<GoatHubspotEventType>();
+  const seen = new Set<HubspotEventType>();
   const refs = value.flatMap((entry) => {
     const id =
       typeof entry === "string"
@@ -228,13 +228,13 @@ function parseEventRefs(value: unknown): GoatHubspotEventRef[] | undefined {
         : entry && typeof entry === "object" && !Array.isArray(entry)
           ? (entry as Record<string, unknown>).id
           : null;
-    if (!isGoatHubspotEventType(id) || seen.has(id)) return [];
+    if (!isHubspotEventType(id) || seen.has(id)) return [];
     seen.add(id);
     return [{ id }];
   });
   return refs;
 }
 
-function isGoatHubspotEventType(value: unknown): value is GoatHubspotEventType {
+function isHubspotEventType(value: unknown): value is HubspotEventType {
   return typeof value === "string" && (HUBSPOT_EVENT_TYPES as readonly string[]).includes(value);
 }

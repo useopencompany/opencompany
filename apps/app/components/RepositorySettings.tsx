@@ -1,14 +1,14 @@
 "use client";
 
-import type { GoatRepoConfigView, GoatWorkspaceRepository } from "@opencompany/db/repo-configs";
+import type { RepoConfigView, WorkspaceRepository } from "@opencompany/db/repo-configs";
 import { Check, KeyRound, Loader2, LockKeyhole, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import {
-  clearGoatRepoEnvAction,
-  deleteGoatRepoConfigAction,
-  saveGoatRepoEnvAction,
-  saveGoatRepoSetupInstructionsAction,
+  clearRepoEnvAction,
+  deleteRepoConfigAction,
+  saveRepoEnvAction,
+  saveRepoSetupInstructionsAction,
 } from "@/lib/repo-config-actions";
 
 export function RepositorySettings({
@@ -16,8 +16,8 @@ export function RepositorySettings({
   initialConfigs,
   canEdit,
 }: {
-  initialRepositories: GoatWorkspaceRepository[];
-  initialConfigs: GoatRepoConfigView[];
+  initialRepositories: WorkspaceRepository[];
+  initialConfigs: RepoConfigView[];
   canEdit: boolean;
 }) {
   const [configs, setConfigs] = useState(initialConfigs);
@@ -63,7 +63,7 @@ export function RepositorySettings({
     setSetupSaved(false);
   };
 
-  const updateConfig = (config: GoatRepoConfigView) => {
+  const updateConfig = (config: RepoConfigView) => {
     setConfigs((current) =>
       [
         ...current.filter(
@@ -79,7 +79,7 @@ export function RepositorySettings({
     setEnvError(null);
     setEnvSaved(false);
     startSavingEnv(async () => {
-      const result = await saveGoatRepoEnvAction({
+      const result = await saveRepoEnvAction({
         repositoryExternalId: selectedRepository,
         envContent,
       });
@@ -98,7 +98,7 @@ export function RepositorySettings({
     setEnvError(null);
     setEnvSaved(false);
     startClearingEnv(async () => {
-      const result = await clearGoatRepoEnvAction({
+      const result = await clearRepoEnvAction({
         repositoryExternalId: selectedRepository,
       });
       if (!result.ok) {
@@ -115,7 +115,7 @@ export function RepositorySettings({
     setSetupError(null);
     setSetupSaved(false);
     startSavingSetup(async () => {
-      const result = await saveGoatRepoSetupInstructionsAction({
+      const result = await saveRepoSetupInstructionsAction({
         repositoryExternalId: selectedRepository,
         setupInstructions,
       });
@@ -132,7 +132,7 @@ export function RepositorySettings({
     if (!selectedConfig) return;
     setRemoveError(null);
     startRemovingConfig(async () => {
-      const result = await deleteGoatRepoConfigAction({
+      const result = await deleteRepoConfigAction({
         repositoryExternalId: selectedConfig.repositoryExternalId,
       });
       if (!result.ok) {
@@ -379,13 +379,10 @@ export function RepositorySettings({
   );
 }
 
-function repositoryOptionsFrom(
-  repositories: GoatWorkspaceRepository[],
-  configs: GoatRepoConfigView[],
-) {
+function repositoryOptionsFrom(repositories: WorkspaceRepository[], configs: RepoConfigView[]) {
   const options = new Map<
     string,
-    GoatWorkspaceRepository & {
+    WorkspaceRepository & {
       available: boolean;
     }
   >();

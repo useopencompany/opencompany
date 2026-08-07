@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  GoatRevolutApiError,
   isPlausibleRevolutBusinessApiToken,
-  loadGoatRevolutBusinessConnection,
+  loadRevolutBusinessConnection,
   REVOLUT_BUSINESS_API_BASE_URL,
   REVOLUT_BUSINESS_SANDBOX_API_BASE_URL,
-  requestGoatRevolutBusinessApi,
+  RevolutApiError,
+  requestRevolutBusinessApi,
 } from "@/lib/integrations/revolut";
 
 afterEach(() => {
@@ -13,14 +13,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("loadGoatRevolutBusinessConnection", () => {
+describe("loadRevolutBusinessConnection", () => {
   it("requires a workspace match and plausible short-lived access token", () => {
     vi.stubEnv("REVOLUT_BUSINESS_WORKSPACE_ID", "workspace_1");
     vi.stubEnv("REVOLUT_BUSINESS_API_TOKEN", "oa_prod_testtokenwithenoughlength");
     vi.stubEnv("REVOLUT_BUSINESS_ACCOUNT_LABEL", "Acme Revolut");
 
-    expect(loadGoatRevolutBusinessConnection("workspace_2")).toBeNull();
-    expect(loadGoatRevolutBusinessConnection("workspace_1")).toEqual({
+    expect(loadRevolutBusinessConnection("workspace_2")).toBeNull();
+    expect(loadRevolutBusinessConnection("workspace_1")).toEqual({
       workspaceId: "workspace_1",
       accountLabel: "Acme Revolut",
       apiToken: "oa_prod_testtokenwithenoughlength",
@@ -32,11 +32,11 @@ describe("loadGoatRevolutBusinessConnection", () => {
   it("rejects refresh tokens and non-https base URLs", () => {
     vi.stubEnv("REVOLUT_BUSINESS_WORKSPACE_ID", "workspace_1");
     vi.stubEnv("REVOLUT_BUSINESS_API_TOKEN", "refresh_token");
-    expect(loadGoatRevolutBusinessConnection("workspace_1")).toBeNull();
+    expect(loadRevolutBusinessConnection("workspace_1")).toBeNull();
 
     vi.stubEnv("REVOLUT_BUSINESS_API_TOKEN", "oa_sand_testtokenwithenoughlength");
     vi.stubEnv("REVOLUT_BUSINESS_API_BASE_URL", "http://localhost:9999/api/1.0");
-    expect(loadGoatRevolutBusinessConnection("workspace_1")).toMatchObject({
+    expect(loadRevolutBusinessConnection("workspace_1")).toMatchObject({
       apiBaseUrl: REVOLUT_BUSINESS_SANDBOX_API_BASE_URL,
       environment: "sandbox",
     });
@@ -52,7 +52,7 @@ describe("isPlausibleRevolutBusinessApiToken", () => {
   });
 });
 
-describe("requestGoatRevolutBusinessApi", () => {
+describe("requestRevolutBusinessApi", () => {
   it("sends a bearer request to the configured Revolut endpoint", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify([{ id: "account_1" }]), {
@@ -63,7 +63,7 @@ describe("requestGoatRevolutBusinessApi", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      requestGoatRevolutBusinessApi({
+      requestRevolutBusinessApi({
         connection: {
           workspaceId: "workspace_1",
           accountLabel: "Acme Revolut",
@@ -100,7 +100,7 @@ describe("requestGoatRevolutBusinessApi", () => {
     );
 
     await expect(
-      requestGoatRevolutBusinessApi({
+      requestRevolutBusinessApi({
         connection: {
           workspaceId: "workspace_1",
           accountLabel: "Acme Revolut",
@@ -111,10 +111,10 @@ describe("requestGoatRevolutBusinessApi", () => {
         path: "/accounts",
       }),
     ).rejects.toMatchObject({
-      name: "GoatRevolutApiError",
+      name: "RevolutApiError",
       status: 401,
       code: "unauthorized",
       detail: "The provided access token is invalid.",
-    } satisfies Partial<GoatRevolutApiError>);
+    } satisfies Partial<RevolutApiError>);
   });
 });

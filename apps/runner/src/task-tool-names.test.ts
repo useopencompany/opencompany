@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { normalizeGoatTaskToolNames } from "./task-tool-names";
+import { normalizeTaskToolNames } from "./task-tool-names";
 
-describe("normalizeGoatTaskToolNames", () => {
+describe("normalizeTaskToolNames", () => {
   it("keeps known names in catalog order without duplicates", () => {
     expect(
-      normalizeGoatTaskToolNames(["github_status", "exa_search", "github_status", "unknown_tool"]),
+      normalizeTaskToolNames(["github_status", "exa_search", "github_status", "unknown_tool"]),
     ).toEqual(["exa_search", "github_status"]);
   });
 
   it("falls back to Exa for missing or legacy-only values", () => {
-    expect(normalizeGoatTaskToolNames(undefined)).toEqual(["exa_search"]);
-    expect(normalizeGoatTaskToolNames(["unknown_tool"])).toEqual(["exa_search"]);
+    expect(normalizeTaskToolNames(undefined)).toEqual(["exa_search"]);
+    expect(normalizeTaskToolNames(["unknown_tool"])).toEqual(["exa_search"]);
   });
 });

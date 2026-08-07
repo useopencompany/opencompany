@@ -8,41 +8,41 @@ import {
 } from "@ai-sdk/mcp";
 import { getDb } from "@opencompany/db/client";
 import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-  saveGoatIntegrationCredential,
+  loadIntegrationCredential,
+  markIntegrationStatus,
+  saveIntegrationCredential,
 } from "@opencompany/db/integrations";
 import {
-  type GoatIntegrationProvider,
-  type GoatIntegrationStatus,
-  goatIntegrations,
+  type IntegrationProvider,
+  type IntegrationStatus,
+  integrations,
 } from "@opencompany/db/schema";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { getGoatAppUrl } from "../app-url";
-import { captureGoatIntegrationAddedAnalytics } from "./analytics";
+import { getAppUrl } from "../app-url";
+import { captureIntegrationAddedAnalytics } from "./analytics";
 
 const STATE_TTL_MS = 10 * 60 * 1000;
 const CREDENTIAL_KIND = "oauth_token" as const;
 
-export type GoatRemoteMcpProviderState<TProvider extends GoatIntegrationProvider> = {
+export type RemoteMcpProviderState<TProvider extends IntegrationProvider> = {
   provider: TProvider;
   connected: boolean;
-  status: GoatIntegrationStatus | "not_connected";
+  status: IntegrationStatus | "not_connected";
   integrationId: string | null;
   accountName: string | null;
   statusReason: string | null;
   capabilityModes: Record<string, unknown>;
 };
 
-type GoatRemoteMcpOAuthPayload = {
+type RemoteMcpOAuthPayload = {
   clientInformation?: OAuthClientInformation;
   tokens?: OAuthTokens;
   codeVerifier?: string;
   state?: string;
 };
 
-type GoatRemoteMcpState = {
-  provider?: GoatIntegrationProvider;
+type RemoteMcpState = {
+  provider?: IntegrationProvider;
   userWorkosId: string;
   integrationId: string;
   returnTo: string;
@@ -50,7 +50,7 @@ type GoatRemoteMcpState = {
   nonce: string;
 };
 
-type GoatRemoteMcpIntegrationConfig<TProvider extends GoatIntegrationProvider> = {
+type RemoteMcpIntegrationConfig<TProvider extends IntegrationProvider> = {
   provider: TProvider;
   displayName: string;
   endpointUrl: string;
@@ -60,30 +60,30 @@ type GoatRemoteMcpIntegrationConfig<TProvider extends GoatIntegrationProvider> =
   acceptLegacyStateWithoutProvider?: boolean;
 };
 
-export function createGoatRemoteMcpIntegration<const TProvider extends GoatIntegrationProvider>(
-  config: GoatRemoteMcpIntegrationConfig<TProvider>,
+export function createRemoteMcpIntegration<const TProvider extends IntegrationProvider>(
+  config: RemoteMcpIntegrationConfig<TProvider>,
 ) {
   const callbackUrl = () =>
-    `${getGoatAppUrl()}/api/integrations/${config.provider.replaceAll("_", "-")}/callback`;
+    `${getAppUrl()}/api/integrations/${config.provider.replaceAll("_", "-")}/callback`;
 
-  async function getState(userWorkosId: string): Promise<GoatRemoteMcpProviderState<TProvider>> {
+  async function getState(userWorkosId: string): Promise<RemoteMcpProviderState<TProvider>> {
     const [row] = await getDb()
       .select({
-        id: goatIntegrations.id,
-        status: goatIntegrations.status,
-        accountName: goatIntegrations.accountName,
-        statusReason: goatIntegrations.statusReason,
-        capabilityModes: goatIntegrations.capabilityModes,
+        id: integrations.id,
+        status: integrations.status,
+        accountName: integrations.accountName,
+        statusReason: integrations.statusReason,
+        capabilityModes: integrations.capabilityModes,
       })
-      .from(goatIntegrations)
+      .from(integrations)
       .where(
         and(
-          eq(goatIntegrations.userWorkosId, userWorkosId),
-          eq(goatIntegrations.provider, config.provider),
-          eq(goatIntegrations.externalId, config.externalId),
+          eq(integrations.userWorkosId, userWorkosId),
+          eq(integrations.provider, config.provider),
+          eq(integrations.externalId, config.externalId),
         ),
       )
-      .orderBy(desc(goatIntegrations.updatedAt))
+      .orderBy(desc(integrations.updatedAt))
       .limit(1);
 
     if (!row || row.status === "disconnected") {
@@ -117,16 +117,16 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
     | { ok: true; integrationId: string; authProvider: OAuthClientProvider }
   > {
     const [row] = await getDb()
-      .select({ id: goatIntegrations.id, status: goatIntegrations.status })
-      .from(goatIntegrations)
+      .select({ id: integrations.id, status: integrations.status })
+      .from(integrations)
       .where(
         and(
-          eq(goatIntegrations.userWorkosId, input.userWorkosId),
-          eq(goatIntegrations.provider, config.provider),
-          eq(goatIntegrations.externalId, config.externalId),
+          eq(integrations.userWorkosId, input.userWorkosId),
+          eq(integrations.provider, config.provider),
+          eq(integrations.externalId, config.externalId),
         ),
       )
-      .orderBy(desc(goatIntegrations.updatedAt))
+      .orderBy(desc(integrations.updatedAt))
       .limit(1);
 
     if (!row || row.status === "disconnected") return { ok: false, reason: "not_connected" };
@@ -219,8 +219,8 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
     await markConnected(input.integrationId, input.userWorkosId);
   }
 
-  function createState(input: Omit<GoatRemoteMcpState, "expiresAt" | "nonce">) {
-    const payload: GoatRemoteMcpState = {
+  function createState(input: Omit<RemoteMcpState, "expiresAt" | "nonce">) {
+    const payload: RemoteMcpState = {
       ...input,
       returnTo: sanitizeReturnTo(input.returnTo),
       expiresAt: Date.now() + STATE_TTL_MS,
@@ -230,14 +230,14 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
     return `${body}.${signStateBody(body)}`;
   }
 
-  function verifyState(state: string): GoatRemoteMcpState {
+  function verifyState(state: string): RemoteMcpState {
     const [body, signature] = state.split(".");
     if (!body || !signature || !safeEqual(signature, signStateBody(body))) {
       throw new Error(`Invalid ${config.displayName} MCP state.`);
     }
 
     const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as unknown;
-    if (!isGoatRemoteMcpState(payload)) {
+    if (!isRemoteMcpState(payload)) {
       throw new Error(`Invalid ${config.displayName} MCP state payload.`);
     }
     if (
@@ -254,7 +254,7 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
   }
 
   function appendStatus(returnTo: string, status: "connected" | "error", reason?: string) {
-    const url = new URL(sanitizeReturnTo(returnTo), getGoatAppUrl());
+    const url = new URL(sanitizeReturnTo(returnTo), getAppUrl());
     url.searchParams.set("integration", config.provider);
     url.searchParams.set("setup", status);
     if (status === "error" && reason) url.searchParams.set("reason", reason);
@@ -263,12 +263,12 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
 
   async function upsertIntegration(input: {
     userWorkosId: string;
-    status: GoatIntegrationStatus;
+    status: IntegrationStatus;
     statusReason: string | null;
   }) {
     const now = new Date();
     const [integration] = await getDb()
-      .insert(goatIntegrations)
+      .insert(integrations)
       .values({
         id: `gint_${randomUUID().replaceAll("-", "").slice(0, 16)}`,
         userWorkosId: input.userWorkosId,
@@ -284,12 +284,8 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
         updatedAt: now,
       })
       .onConflictDoUpdate({
-        target: [
-          goatIntegrations.userWorkosId,
-          goatIntegrations.provider,
-          goatIntegrations.externalId,
-        ],
-        targetWhere: sql`${goatIntegrations.workspaceId} IS NULL`,
+        target: [integrations.userWorkosId, integrations.provider, integrations.externalId],
+        targetWhere: sql`${integrations.workspaceId} IS NULL`,
         set: {
           connectionLabel: config.displayName,
           accountName: config.displayName,
@@ -301,7 +297,7 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
           updatedAt: now,
         },
       })
-      .returning({ id: goatIntegrations.id });
+      .returning({ id: integrations.id });
 
     if (!integration) {
       throw new Error(`Could not persist Goat ${config.displayName} integration.`);
@@ -311,7 +307,7 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
 
   async function markConnected(integrationId: string, userWorkosId: string) {
     await getDb()
-      .update(goatIntegrations)
+      .update(integrations)
       .set({
         status: "connected",
         statusReason: null,
@@ -324,19 +320,19 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
       })
       .where(
         and(
-          eq(goatIntegrations.id, integrationId),
-          eq(goatIntegrations.userWorkosId, userWorkosId),
-          eq(goatIntegrations.provider, config.provider),
+          eq(integrations.id, integrationId),
+          eq(integrations.userWorkosId, userWorkosId),
+          eq(integrations.provider, config.provider),
         ),
       );
-    await captureGoatIntegrationAddedAnalytics({
+    await captureIntegrationAddedAnalytics({
       userWorkosId,
       provider: config.provider,
     });
   }
 
   async function loadPayload(input: { userWorkosId: string; integrationId: string }) {
-    const credential = await loadGoatIntegrationCredential({
+    const credential = await loadIntegrationCredential({
       userWorkosId: input.userWorkosId,
       integrationId: input.integrationId,
       provider: config.provider,
@@ -348,15 +344,15 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
   function createClientProvider(input: {
     userWorkosId: string;
     integrationId: string;
-    payload: GoatRemoteMcpOAuthPayload;
+    payload: RemoteMcpOAuthPayload;
     state?: string;
     onAuthorizationUrl?: (url: URL) => void;
   }): OAuthClientProvider {
     let payload = input.payload;
 
-    async function persist(next: GoatRemoteMcpOAuthPayload) {
+    async function persist(next: RemoteMcpOAuthPayload) {
       payload = next;
-      await saveGoatIntegrationCredential({
+      await saveIntegrationCredential({
         userWorkosId: input.userWorkosId,
         integrationId: input.integrationId,
         provider: config.provider,
@@ -429,7 +425,7 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
     integrationId: string;
     statusReason: string;
   }) {
-    await markGoatIntegrationStatus({
+    await markIntegrationStatus({
       userWorkosId: input.userWorkosId,
       integrationId: input.integrationId,
       provider: config.provider,
@@ -448,8 +444,8 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
   };
 }
 
-function parsePayload(value: Record<string, unknown>): GoatRemoteMcpOAuthPayload {
-  const payload: GoatRemoteMcpOAuthPayload = {};
+function parsePayload(value: Record<string, unknown>): RemoteMcpOAuthPayload {
+  const payload: RemoteMcpOAuthPayload = {};
   if (isOAuthClientInformation(value.clientInformation)) {
     payload.clientInformation = value.clientInformation;
   }
@@ -459,8 +455,8 @@ function parsePayload(value: Record<string, unknown>): GoatRemoteMcpOAuthPayload
   return payload;
 }
 
-function omitPayload<TKey extends keyof GoatRemoteMcpOAuthPayload>(
-  payload: GoatRemoteMcpOAuthPayload,
+function omitPayload<TKey extends keyof RemoteMcpOAuthPayload>(
+  payload: RemoteMcpOAuthPayload,
   keys: TKey[],
 ) {
   const next = { ...payload };
@@ -489,7 +485,7 @@ function requiredStateSecret() {
   return value;
 }
 
-function isGoatRemoteMcpState(value: unknown): value is GoatRemoteMcpState {
+function isRemoteMcpState(value: unknown): value is RemoteMcpState {
   if (!isRecord(value)) return false;
   return (
     (value.provider === undefined || typeof value.provider === "string") &&

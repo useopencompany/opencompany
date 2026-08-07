@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
-  normalizeGoatBrainIngestTrace,
+  normalizeBrainIngestTrace,
 } from "./brain-ingest-trace";
 
 function trace(budget?: Record<string, unknown>) {
@@ -20,14 +20,14 @@ function trace(budget?: Record<string, unknown>) {
   };
 }
 
-describe("normalizeGoatBrainIngestTrace", () => {
+describe("normalizeBrainIngestTrace", () => {
   it("keeps pre-budget traces compatible", () => {
-    expect(normalizeGoatBrainIngestTrace(trace())).not.toHaveProperty("budget");
+    expect(normalizeBrainIngestTrace(trace())).not.toHaveProperty("budget");
   });
 
   it("normalizes the provider-spend budget breakdown", () => {
     expect(
-      normalizeGoatBrainIngestTrace(
+      normalizeBrainIngestTrace(
         trace({
           limitUsdMicros: 500_000,
           stopThresholdUsdMicros: 400_000,
@@ -55,7 +55,7 @@ describe("normalizeGoatBrainIngestTrace", () => {
 
   it("normalizes an optional cheap-triage trace", () => {
     expect(
-      normalizeGoatBrainIngestTrace({
+      normalizeBrainIngestTrace({
         ...trace(),
         triage: {
           model: "openai/gpt-5.4-nano",
@@ -80,7 +80,7 @@ describe("normalizeGoatBrainIngestTrace", () => {
 
   it("drops malformed triage traces without breaking the ingest trace", () => {
     expect(
-      normalizeGoatBrainIngestTrace({
+      normalizeBrainIngestTrace({
         ...trace(),
         triage: { decision: "maybe", entityHints: ["Ada"] },
       }),
@@ -89,10 +89,10 @@ describe("normalizeGoatBrainIngestTrace", () => {
 
   it("sanitizes malformed budget fields without breaking the trace", () => {
     expect(
-      normalizeGoatBrainIngestTrace(trace([] as unknown as Record<string, unknown>)),
+      normalizeBrainIngestTrace(trace([] as unknown as Record<string, unknown>)),
     ).not.toHaveProperty("budget");
     expect(
-      normalizeGoatBrainIngestTrace(
+      normalizeBrainIngestTrace(
         trace({
           limitUsdMicros: -1,
           stopThresholdUsdMicros: 1.5,

@@ -6,17 +6,17 @@ import {
   type NormalizedSlackConversationSourceItem,
 } from "@opencompany/brain";
 import {
+  type BrainIngestTraceUsage,
+  type BrainIngestTriageTrace,
   GOAT_BRAIN_INGEST_TRIAGE_ENTITY_HINT_LENGTH,
   GOAT_BRAIN_INGEST_TRIAGE_MAX_ENTITY_HINTS,
   GOAT_BRAIN_INGEST_TRIAGE_REASON_LENGTH,
-  type GoatBrainIngestTraceUsage,
-  type GoatBrainIngestTriageTrace,
 } from "@opencompany/db/brain-ingest-trace";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import {
-  createGoatGatewayAttribution,
-  goatGatewayProviderOptions,
-  recordGoatBrainIngestSpend,
+  createGatewayAttribution,
+  gatewayProviderOptions,
+  recordBrainIngestSpend,
 } from "@opencompany/telemetry";
 import { latitudeTelemetry } from "@opencompany/telemetry/latitude";
 import * as ai from "ai";
@@ -63,7 +63,7 @@ const GOAT_BRAIN_INGEST_TRIAGE_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-export type GoatBrainIngestTriageInput = {
+export type BrainIngestTriageInput = {
   prompt: string;
   gatewayApiKey: string;
   userWorkosId: string;
@@ -72,12 +72,12 @@ export type GoatBrainIngestTriageInput = {
   signal?: AbortSignal;
 };
 
-export async function runGoatBrainIngestTriage(
-  input: GoatBrainIngestTriageInput,
-): Promise<GoatBrainIngestTriageTrace> {
+export async function runBrainIngestTriage(
+  input: BrainIngestTriageInput,
+): Promise<BrainIngestTriageTrace> {
   const gateway = ai.createGateway({ apiKey: input.gatewayApiKey });
   const { generateObject } = getBraintrustAISDK(ai);
-  const attribution = createGoatGatewayAttribution({
+  const attribution = createGatewayAttribution({
     userWorkosId: input.userWorkosId,
     feature: "brain-ingest",
     brainRef: input.brainRef,
@@ -101,7 +101,7 @@ export async function runGoatBrainIngestTriage(
       sessionId: input.ingestJobId,
       metadata: { model: GOAT_BRAIN_INGEST_TRIAGE_MODEL, brainRef: input.brainRef },
     }),
-    providerOptions: goatGatewayProviderOptions(attribution, {
+    providerOptions: gatewayProviderOptions(attribution, {
       openai: {
         reasoningEffort: "low",
         reasoningSummary: "concise",
@@ -115,7 +115,7 @@ export async function runGoatBrainIngestTriage(
   };
   const usage = normalizeTriageUsage(result.usage);
   const modelCostUsdMicros = priceTriageUsage(usage);
-  recordGoatBrainIngestSpend({
+  recordBrainIngestSpend({
     costUsdMicros: modelCostUsdMicros,
     source: "model",
     attributes: {
@@ -271,7 +271,7 @@ function normalizeEntityHints(values: readonly string[]) {
   return hints;
 }
 
-function normalizeTriageUsage(usage: ai.LanguageModelUsage): GoatBrainIngestTraceUsage {
+function normalizeTriageUsage(usage: ai.LanguageModelUsage): BrainIngestTraceUsage {
   return {
     inputTokens: usage.inputTokens ?? null,
     outputTokens: usage.outputTokens ?? null,
@@ -281,7 +281,7 @@ function normalizeTriageUsage(usage: ai.LanguageModelUsage): GoatBrainIngestTrac
   };
 }
 
-function priceTriageUsage(usage: GoatBrainIngestTraceUsage) {
+function priceTriageUsage(usage: BrainIngestTraceUsage) {
   const inputTokens = usage.inputTokens ?? 0;
   const inputCacheReadTokens = usage.cacheReadInputTokens ?? 0;
   const inputCacheWriteTokens = usage.cacheWriteInputTokens ?? 0;

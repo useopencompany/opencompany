@@ -1,19 +1,19 @@
-import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
-import type { GoatChatEngine } from "@opencompany/db/schema";
+import { captureServerEvent } from "@opencompany/analytics/server";
+import type { ChatEngine } from "@opencompany/db/schema";
 
-type GoatChatAnalyticsUser = {
+type ChatAnalyticsUser = {
   workosUserId: string;
   email: string | null;
   firstName: string | null;
   lastName: string | null;
 };
 
-export function captureGoatChatMessageSent(input: {
-  user: GoatChatAnalyticsUser;
+export function captureChatMessageSent(input: {
+  user: ChatAnalyticsUser;
   workspaceId: string;
   sessionId: string;
   isFirstMessage: boolean;
-  engine: GoatChatEngine;
+  engine: ChatEngine;
   model: string;
   messageLength: number;
   selectionMode?: "manual" | "auto";
@@ -26,7 +26,7 @@ export function captureGoatChatMessageSent(input: {
   routingProviderStatusCode?: number;
   routingProviderRetryable?: boolean;
 }) {
-  return captureGoatServerEvent(
+  return captureServerEvent(
     "chat_message_sent",
     input.user.workosUserId,
     {
@@ -34,7 +34,7 @@ export function captureGoatChatMessageSent(input: {
       session_id: input.sessionId,
       is_first_message: input.isFirstMessage,
       engine: input.engine,
-      usage_source: goatAnalyticsUsageSourceForEngine(input.engine),
+      usage_source: analyticsUsageSourceForEngine(input.engine),
       model: input.model,
       message_length: input.messageLength,
       ...(input.selectionMode ? { selection_mode: input.selectionMode } : {}),
@@ -62,6 +62,6 @@ export function captureGoatChatMessageSent(input: {
   );
 }
 
-function goatAnalyticsUsageSourceForEngine(engine: GoatChatEngine) {
+function analyticsUsageSourceForEngine(engine: ChatEngine) {
   return engine === "opencompany" ? "owned_platform" : "external_harness";
 }

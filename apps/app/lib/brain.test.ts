@@ -1,48 +1,48 @@
-import { parseGoatBrainDocument } from "@opencompany/brain";
+import { parseBrainDocument } from "@opencompany/brain";
 import {
-  type createGoatBrainMarkdownDocument as CreateGoatBrainMarkdownDocument,
-  deriveGoatBrainFileProjection,
+  type createBrainMarkdownDocument as CreateBrainMarkdownDocument,
+  deriveBrainFileProjection,
 } from "@opencompany/db/brain-files";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  createGoatBrainDocumentForUser,
-  createGoatBrainSkillForUser,
-  moveGoatBrainDocumentForUser,
-  renameGoatBrainDocumentForUser,
-  updateGoatBrainSkillForUser,
+  createBrainDocumentForUser,
+  createBrainSkillForUser,
+  moveBrainDocumentForUser,
+  renameBrainDocumentForUser,
+  updateBrainSkillForUser,
 } from "@/lib/brain";
 
 const dbMocks = vi.hoisted(() => ({
-  createGoatBrainMarkdownDocument: vi.fn(),
-  getGoatBrainFile: vi.fn(),
-  listGoatBrainFiles: vi.fn(),
-  moveGoatBrainFile: vi.fn(),
-  updateGoatBrainFileContent: vi.fn(),
+  createBrainMarkdownDocument: vi.fn(),
+  getBrainFile: vi.fn(),
+  listBrainFiles: vi.fn(),
+  moveBrainFile: vi.fn(),
+  updateBrainFileContent: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/brain-files", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opencompany/db/brain-files")>();
   return {
     ...actual,
-    createGoatBrainMarkdownDocument: dbMocks.createGoatBrainMarkdownDocument,
-    getGoatBrainFile: dbMocks.getGoatBrainFile,
-    listGoatBrainFiles: dbMocks.listGoatBrainFiles,
-    moveGoatBrainFile: dbMocks.moveGoatBrainFile,
-    updateGoatBrainFileContent: dbMocks.updateGoatBrainFileContent,
+    createBrainMarkdownDocument: dbMocks.createBrainMarkdownDocument,
+    getBrainFile: dbMocks.getBrainFile,
+    listBrainFiles: dbMocks.listBrainFiles,
+    moveBrainFile: dbMocks.moveBrainFile,
+    updateBrainFileContent: dbMocks.updateBrainFileContent,
   };
 });
 
 describe("manual Goat brain documents", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    dbMocks.listGoatBrainFiles.mockResolvedValue([]);
-    dbMocks.createGoatBrainMarkdownDocument.mockImplementation(
-      async (input: Parameters<typeof CreateGoatBrainMarkdownDocument>[0]) => {
-        const projection = deriveGoatBrainFileProjection({
+    dbMocks.listBrainFiles.mockResolvedValue([]);
+    dbMocks.createBrainMarkdownDocument.mockImplementation(
+      async (input: Parameters<typeof CreateBrainMarkdownDocument>[0]) => {
+        const projection = deriveBrainFileProjection({
           path: input.path,
           content: input.content,
         });
@@ -67,7 +67,7 @@ describe("manual Goat brain documents", () => {
   });
 
   it("creates an empty draft note from a Markdown file name", async () => {
-    const result = await createGoatBrainDocumentForUser({
+    const result = await createBrainDocumentForUser({
       brainRef: "goat_brain_1",
       userWorkosId: "user_1",
       folderPath: "projects",
@@ -86,13 +86,13 @@ describe("manual Goat brain documents", () => {
         body: "_No compiled truth yet._",
       },
     });
-    const input = dbMocks.createGoatBrainMarkdownDocument.mock.calls[0]?.[0];
+    const input = dbMocks.createBrainMarkdownDocument.mock.calls[0]?.[0];
     expect(input).toMatchObject({
       brainRef: "goat_brain_1",
       userWorkosId: "user_1",
       path: "projects/quarterly-roadmap.md",
     });
-    expect(parseGoatBrainDocument(input.content)).toMatchObject({
+    expect(parseBrainDocument(input.content)).toMatchObject({
       frontmatter: {
         id: "quarterly-roadmap",
         folder: "projects",
@@ -106,7 +106,7 @@ describe("manual Goat brain documents", () => {
   });
 
   it("creates a stable skill id with provided description frontmatter", async () => {
-    const result = await createGoatBrainSkillForUser({
+    const result = await createBrainSkillForUser({
       brainRef: "goat_brain_1",
       userWorkosId: "user_1",
       folderPath: "skills/engineering",
@@ -123,8 +123,8 @@ describe("manual Goat brain documents", () => {
         description: "How coding work should happen.",
       },
     });
-    const input = dbMocks.createGoatBrainMarkdownDocument.mock.calls[0]?.[0];
-    expect(parseGoatBrainDocument(input.content).frontmatter).toMatchObject({
+    const input = dbMocks.createBrainMarkdownDocument.mock.calls[0]?.[0];
+    expect(parseBrainDocument(input.content).frontmatter).toMatchObject({
       id: "coding-work",
       folder: "skills/engineering",
       title: "Coding work",
@@ -133,7 +133,7 @@ describe("manual Goat brain documents", () => {
   });
 
   it("creates a skill with only a name", async () => {
-    const result = await createGoatBrainSkillForUser({
+    const result = await createBrainSkillForUser({
       brainRef: "goat_brain_1",
       userWorkosId: "user_1",
       folderPath: "skills",
@@ -148,28 +148,28 @@ describe("manual Goat brain documents", () => {
         title: "Coding work",
       },
     });
-    const input = dbMocks.createGoatBrainMarkdownDocument.mock.calls[0]?.[0];
-    expect(parseGoatBrainDocument(input.content).frontmatter).not.toHaveProperty("description");
+    const input = dbMocks.createBrainMarkdownDocument.mock.calls[0]?.[0];
+    expect(parseBrainDocument(input.content).frontmatter).not.toHaveProperty("description");
   });
 
   it("removes an optional description when updating a skill", async () => {
-    await createGoatBrainSkillForUser({
+    await createBrainSkillForUser({
       brainRef: "goat_brain_1",
       userWorkosId: "user_1",
       folderPath: "skills",
       name: "Coding work",
       description: "How coding work should happen.",
     });
-    const existing = await dbMocks.createGoatBrainMarkdownDocument.mock.results[0]?.value;
-    dbMocks.getGoatBrainFile.mockResolvedValue(existing);
-    dbMocks.updateGoatBrainFileContent.mockImplementation(async (input) => ({
+    const existing = await dbMocks.createBrainMarkdownDocument.mock.results[0]?.value;
+    dbMocks.getBrainFile.mockResolvedValue(existing);
+    dbMocks.updateBrainFileContent.mockImplementation(async (input) => ({
       ...existing,
-      ...deriveGoatBrainFileProjection({ path: "skills/coding-work.md", content: input.content }),
+      ...deriveBrainFileProjection({ path: "skills/coding-work.md", content: input.content }),
       updatedAt: new Date("2026-07-13T12:05:00.000Z"),
     }));
 
     await expect(
-      updateGoatBrainSkillForUser({
+      updateBrainSkillForUser({
         brainRef: "goat_brain_1",
         userWorkosId: "user_1",
         documentId: existing.id,
@@ -178,13 +178,13 @@ describe("manual Goat brain documents", () => {
         instructions: "Inspect, implement, and verify.",
       }),
     ).resolves.toMatchObject({ ok: true, document: { title: "Coding work" } });
-    const input = dbMocks.updateGoatBrainFileContent.mock.calls[0]?.[0];
-    expect(parseGoatBrainDocument(input.content).frontmatter).not.toHaveProperty("description");
+    const input = dbMocks.updateBrainFileContent.mock.calls[0]?.[0];
+    expect(parseBrainDocument(input.content).frontmatter).not.toHaveProperty("description");
   });
 
   it("rejects invalid descriptions and skill creation outside skills", async () => {
     await expect(
-      createGoatBrainSkillForUser({
+      createBrainSkillForUser({
         brainRef: "goat_brain_1",
         userWorkosId: "user_1",
         folderPath: "projects",
@@ -193,7 +193,7 @@ describe("manual Goat brain documents", () => {
       }),
     ).resolves.toEqual({ ok: false, message: 'Skills must live in the "skills" folder.' });
     await expect(
-      createGoatBrainSkillForUser({
+      createBrainSkillForUser({
         brainRef: "goat_brain_1",
         userWorkosId: "user_1",
         folderPath: "skills",
@@ -204,14 +204,14 @@ describe("manual Goat brain documents", () => {
       ok: false,
       message: 'Skill descriptions cannot contain "<" or ">".',
     });
-    expect(dbMocks.createGoatBrainMarkdownDocument).not.toHaveBeenCalled();
+    expect(dbMocks.createBrainMarkdownDocument).not.toHaveBeenCalled();
   });
 
   it("keeps allocated skill ids within the native 64-character limit", async () => {
     const fullId = `s${"x".repeat(63)}`;
-    dbMocks.listGoatBrainFiles.mockResolvedValueOnce([{ brainId: fullId }]);
+    dbMocks.listBrainFiles.mockResolvedValueOnce([{ brainId: fullId }]);
 
-    const result = await createGoatBrainSkillForUser({
+    const result = await createBrainSkillForUser({
       brainRef: "goat_brain_1",
       userWorkosId: "user_1",
       folderPath: "skills",
@@ -220,35 +220,35 @@ describe("manual Goat brain documents", () => {
     });
 
     expect(result).toMatchObject({ ok: true });
-    const input = dbMocks.createGoatBrainMarkdownDocument.mock.calls[0]?.[0];
-    const id = parseGoatBrainDocument(input.content).frontmatter.id;
+    const input = dbMocks.createBrainMarkdownDocument.mock.calls[0]?.[0];
+    const id = parseBrainDocument(input.content).frontmatter.id;
     expect(id).toHaveLength(64);
     expect(id?.endsWith("-2")).toBe(true);
   });
 
   it("preserves a skill description across rename and move rewrites", async () => {
-    await createGoatBrainSkillForUser({
+    await createBrainSkillForUser({
       brainRef: "goat_brain_1",
       userWorkosId: "user_1",
       folderPath: "skills",
       name: "Coding work",
       description: "How coding work should happen.",
     });
-    const existing = await dbMocks.createGoatBrainMarkdownDocument.mock.results[0]?.value;
-    dbMocks.getGoatBrainFile.mockResolvedValue(existing);
-    dbMocks.updateGoatBrainFileContent.mockImplementation(async (input) => ({
+    const existing = await dbMocks.createBrainMarkdownDocument.mock.results[0]?.value;
+    dbMocks.getBrainFile.mockResolvedValue(existing);
+    dbMocks.updateBrainFileContent.mockImplementation(async (input) => ({
       ...existing,
-      ...deriveGoatBrainFileProjection({ path: "skills/coding-work.md", content: input.content }),
+      ...deriveBrainFileProjection({ path: "skills/coding-work.md", content: input.content }),
       updatedAt: new Date("2026-07-13T12:05:00.000Z"),
     }));
-    dbMocks.moveGoatBrainFile.mockImplementation(async (input) => ({
+    dbMocks.moveBrainFile.mockImplementation(async (input) => ({
       ...existing,
-      ...deriveGoatBrainFileProjection({ path: input.path, content: input.content }),
+      ...deriveBrainFileProjection({ path: input.path, content: input.content }),
       updatedAt: new Date("2026-07-13T12:10:00.000Z"),
     }));
 
     await expect(
-      renameGoatBrainDocumentForUser({
+      renameBrainDocumentForUser({
         brainRef: "goat_brain_1",
         userWorkosId: "user_1",
         documentId: existing.id,
@@ -258,13 +258,13 @@ describe("manual Goat brain documents", () => {
       ok: true,
       document: { description: "How coding work should happen." },
     });
-    const renamedContent = dbMocks.updateGoatBrainFileContent.mock.calls[0]?.[0].content;
-    expect(parseGoatBrainDocument(renamedContent).frontmatter.description).toBe(
+    const renamedContent = dbMocks.updateBrainFileContent.mock.calls[0]?.[0].content;
+    expect(parseBrainDocument(renamedContent).frontmatter.description).toBe(
       "How coding work should happen.",
     );
 
     await expect(
-      moveGoatBrainDocumentForUser({
+      moveBrainDocumentForUser({
         brainRef: "goat_brain_1",
         userWorkosId: "user_1",
         documentId: existing.id,
@@ -274,16 +274,16 @@ describe("manual Goat brain documents", () => {
       ok: true,
       document: { description: "How coding work should happen." },
     });
-    const movedContent = dbMocks.moveGoatBrainFile.mock.calls[0]?.[0].content;
-    expect(parseGoatBrainDocument(movedContent).frontmatter.description).toBe(
+    const movedContent = dbMocks.moveBrainFile.mock.calls[0]?.[0].content;
+    expect(parseBrainDocument(movedContent).frontmatter.description).toBe(
       "How coding work should happen.",
     );
   });
 
   it("allocates a non-conflicting Markdown id", async () => {
-    dbMocks.listGoatBrainFiles.mockResolvedValueOnce([{ brainId: "roadmap" }]);
+    dbMocks.listBrainFiles.mockResolvedValueOnce([{ brainId: "roadmap" }]);
 
-    const result = await createGoatBrainDocumentForUser({
+    const result = await createBrainDocumentForUser({
       brainRef: "goat_brain_1",
       userWorkosId: "user_1",
       folderPath: "projects",
@@ -291,15 +291,15 @@ describe("manual Goat brain documents", () => {
     });
 
     expect(result).toMatchObject({ ok: true, path: "projects/roadmap-2.md" });
-    expect(dbMocks.createGoatBrainMarkdownDocument).toHaveBeenCalledWith(
+    expect(dbMocks.createBrainMarkdownDocument).toHaveBeenCalledWith(
       expect.objectContaining({ path: "projects/roadmap-2.md" }),
     );
   });
 
   it("retries the next id when a concurrent create claims the first one", async () => {
-    dbMocks.createGoatBrainMarkdownDocument.mockResolvedValueOnce(null);
+    dbMocks.createBrainMarkdownDocument.mockResolvedValueOnce(null);
 
-    const result = await createGoatBrainDocumentForUser({
+    const result = await createBrainDocumentForUser({
       brainRef: "goat_brain_1",
       userWorkosId: "user_1",
       folderPath: "projects",
@@ -307,13 +307,14 @@ describe("manual Goat brain documents", () => {
     });
 
     expect(result).toMatchObject({ ok: true, path: "projects/roadmap-2.md" });
-    expect(dbMocks.createGoatBrainMarkdownDocument.mock.calls.map(([input]) => input.path)).toEqual(
-      ["projects/roadmap.md", "projects/roadmap-2.md"],
-    );
+    expect(dbMocks.createBrainMarkdownDocument.mock.calls.map(([input]) => input.path)).toEqual([
+      "projects/roadmap.md",
+      "projects/roadmap-2.md",
+    ]);
   });
 
   it("rejects file names that try to choose another folder", async () => {
-    const result = await createGoatBrainDocumentForUser({
+    const result = await createBrainDocumentForUser({
       brainRef: "goat_brain_1",
       userWorkosId: "user_1",
       folderPath: "projects",
@@ -321,7 +322,7 @@ describe("manual Goat brain documents", () => {
     });
 
     expect(result).toEqual({ ok: false, message: "File names cannot include a folder path." });
-    expect(dbMocks.createGoatBrainMarkdownDocument).not.toHaveBeenCalled();
+    expect(dbMocks.createBrainMarkdownDocument).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -346,22 +347,20 @@ describe("manual Goat brain documents", () => {
       "Folder paths must be lowercase slugs separated by /.",
     ],
   ])("rejects a %s", async (_label, invalid, message) => {
-    const result = await createGoatBrainDocumentForUser({
+    const result = await createBrainDocumentForUser({
       brainRef: "goat_brain_1",
       userWorkosId: "user_1",
       ...invalid,
     });
 
     expect(result).toEqual({ ok: false, message });
-    expect(dbMocks.createGoatBrainMarkdownDocument).not.toHaveBeenCalled();
+    expect(dbMocks.createBrainMarkdownDocument).not.toHaveBeenCalled();
   });
 
   it("returns a failed mutation when persistence fails", async () => {
-    dbMocks.createGoatBrainMarkdownDocument.mockRejectedValueOnce(
-      new Error("Database unavailable"),
-    );
+    dbMocks.createBrainMarkdownDocument.mockRejectedValueOnce(new Error("Database unavailable"));
 
-    const result = await createGoatBrainDocumentForUser({
+    const result = await createBrainDocumentForUser({
       brainRef: "goat_brain_1",
       userWorkosId: "user_1",
       folderPath: "projects",

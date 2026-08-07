@@ -1,17 +1,17 @@
 import { getDb } from "@opencompany/db/client";
-import { goatIntegrations } from "@opencompany/db/schema";
+import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { GoogleAccessAuthError, googleApiCall } from "../integrations/google-access-token";
-import { effectiveCapabilityMode, type GoatCapabilityId, providerCapability } from "./capabilities";
+import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  ActionAuthError,
+  type ActionExecuteContext,
+  ActionInvalidParamsError,
+  ActionPermissionError,
+  type ActionProviderCatalog,
   GOAT_ACTION_EFFECTS_READ,
   GOAT_ACTION_EFFECTS_WRITE,
-  GoatActionAuthError,
-  type GoatActionExecuteContext,
-  GoatActionInvalidParamsError,
-  GoatActionPermissionError,
-  type GoatActionProviderCatalog,
-  type ResolvedGoatAction,
+  type ResolvedAction,
   requiredStringParam,
   truncateText,
 } from "./types";
@@ -36,7 +36,7 @@ type GoogleCalendarConnection = {
 
 export async function resolveGoogleCalendarActions(
   userWorkosId: string,
-): Promise<GoatActionProviderCatalog | null> {
+): Promise<ActionProviderCatalog | null> {
   const allConnections = await loadGoogleCalendarConnections(userWorkosId);
   if (allConnections.length === 0) return null;
 
@@ -47,7 +47,7 @@ export async function resolveGoogleCalendarActions(
   const writeConnections = eligibleConnections(allConnections, "write");
   if (readConnections.length === 0 && writeConnections.length === 0) return null;
 
-  const actions: ResolvedGoatAction[] = [];
+  const actions: ResolvedAction[] = [];
   if (readConnections.length > 0) actions.push(listEventsAction(readConnections));
   if (writeConnections.length > 0) actions.push(createEventAction(writeConnections));
 
@@ -68,7 +68,7 @@ export async function resolveGoogleCalendarActions(
 
 function eligibleConnections(
   connections: readonly GoogleCalendarConnection[],
-  capabilityId: GoatCapabilityId,
+  capabilityId: CapabilityId,
 ): GoogleCalendarConnection[] {
   return connections.filter(
     (connection) =>
@@ -81,9 +81,9 @@ function eligibleConnections(
 // "ask" as soon as any connection wants confirmation (exact for the common
 // single-account case), carrying the connection ids an "always allow" flips.
 function permissionAnnotation(
-  capabilityId: GoatCapabilityId,
+  capabilityId: CapabilityId,
   connections: readonly GoogleCalendarConnection[],
-): Pick<ResolvedGoatAction, "permissionMode" | "permission"> {
+): Pick<ResolvedAction, "permissionMode" | "permission"> {
   const askIntegrationIds = connections
     .filter(
       (connection) =>
@@ -118,7 +118,7 @@ function accountParamSchema(connections: readonly GoogleCalendarConnection[]) {
     : {};
 }
 
-function listEventsAction(connections: readonly GoogleCalendarConnection[]): ResolvedGoatAction {
+function listEventsAction(connections: readonly GoogleCalendarConnection[]): ResolvedAction {
   const accountParam = accountParamSchema(connections);
   const required = ["time_min", "time_max"];
   if (connections.length > 1) required.push("account");
@@ -214,7 +214,7 @@ function listEventsAction(connections: readonly GoogleCalendarConnection[]): Res
   };
 }
 
-function createEventAction(connections: readonly GoogleCalendarConnection[]): ResolvedGoatAction {
+function createEventAction(connections: readonly GoogleCalendarConnection[]): ResolvedAction {
   const accountParam = accountParamSchema(connections);
   const required = ["summary", "start", "end"];
   if (connections.length > 1) required.push("account");
@@ -344,13 +344,13 @@ const CREATE_EVENT_PARAM_KEYS = [
 
 async function assertWriteStillEnabled(connection: GoogleCalendarConnection) {
   const rows = await getDb()
-    .select({ capabilityModes: goatIntegrations.capabilityModes })
-    .from(goatIntegrations)
-    .where(eq(goatIntegrations.id, connection.integrationId))
+    .select({ capabilityModes: integrations.capabilityModes })
+    .from(integrations)
+    .where(eq(integrations.id, connection.integrationId))
     .limit(1);
   const mode = effectiveCapabilityMode("google_calendar", "write", rows[0]?.capabilityModes);
   if (mode === "off") {
-    throw new GoatActionPermissionError(
+    throw new ActionPermissionError(
       "google_calendar",
       `Adding events is turned off for ${connectionLabel(connection)}. It can be changed under Settings → Integrations.`,
     );
@@ -369,14 +369,14 @@ function validateEventTimes(params: Record<string, unknown>, userTimezone: strin
 
   if (startDate && endDate) {
     if (timeZoneParam) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         '"time_zone" only applies to timed events; omit it for all-day events.',
       );
     }
     const startMs = Date.UTC(startDate.year, startDate.month - 1, startDate.day);
     const endMs = Date.UTC(endDate.year, endDate.month - 1, endDate.day);
     if (endMs < startMs) {
-      throw new GoatActionInvalidParamsError('"end" must not be before "start".');
+      throw new ActionInvalidParamsError('"end" must not be before "start".');
     }
     const exclusiveEnd = endMs === startMs ? addUtcDays(endDate, 1) : endDate;
     return {
@@ -385,7 +385,7 @@ function validateEventTimes(params: Record<string, unknown>, userTimezone: strin
     };
   }
   if (startDate || endDate) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       '"start" and "end" must use the same form: both RFC 3339 date-times or both plain dates.',
     );
   }
@@ -393,7 +393,7 @@ function validateEventTimes(params: Record<string, unknown>, userTimezone: strin
   const start = validateRfc3339Timestamp(startRaw, "start");
   const end = validateRfc3339Timestamp(endRaw, "end");
   if (Date.parse(end) <= Date.parse(start)) {
-    throw new GoatActionInvalidParamsError('"end" must be after "start".');
+    throw new ActionInvalidParamsError('"end" must be after "start".');
   }
   const timeZone = timeZoneParam
     ? validateExplicitTimezone(timeZoneParam)
@@ -409,7 +409,7 @@ function validateExplicitTimezone(value: string) {
     new Intl.DateTimeFormat("en-US", { timeZone: value }).format(0);
     return value;
   } catch {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"time_zone" must be a valid IANA timezone, got ${JSON.stringify(value)}.`,
     );
   }
@@ -418,10 +418,10 @@ function validateExplicitTimezone(value: string) {
 function validateAttendees(value: unknown) {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) {
-    throw new GoatActionInvalidParamsError('"attendees" must be an array of email addresses.');
+    throw new ActionInvalidParamsError('"attendees" must be an array of email addresses.');
   }
   if (value.length > MAX_EVENT_ATTENDEES) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"attendees" allows at most ${MAX_EVENT_ATTENDEES} entries.`,
     );
   }
@@ -429,7 +429,7 @@ function validateAttendees(value: unknown) {
   const attendees: Array<{ email: string }> = [];
   for (const entry of value) {
     if (typeof entry !== "string") {
-      throw new GoatActionInvalidParamsError('"attendees" must be an array of email addresses.');
+      throw new ActionInvalidParamsError('"attendees" must be an array of email addresses.');
     }
     const email = entry.trim();
     if (
@@ -437,7 +437,7 @@ function validateAttendees(value: unknown) {
       email.length > MAX_ATTENDEE_EMAIL_CHARS ||
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
     ) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `${JSON.stringify(entry)} is not a valid attendee email address.`,
       );
     }
@@ -452,7 +452,7 @@ function validateAttendees(value: unknown) {
 function requiredBoundedString(params: Record<string, unknown>, key: string, maxChars: number) {
   const value = requiredStringParam(params, key);
   if (value.length > maxChars) {
-    throw new GoatActionInvalidParamsError(`"${key}" exceeds ${maxChars} characters.`);
+    throw new ActionInvalidParamsError(`"${key}" exceeds ${maxChars} characters.`);
   }
   return value;
 }
@@ -462,21 +462,21 @@ async function loadGoogleCalendarConnections(
 ): Promise<GoogleCalendarConnection[]> {
   const rows = await getDb()
     .select({
-      integrationId: goatIntegrations.id,
-      accountEmail: goatIntegrations.accountEmail,
-      accountName: goatIntegrations.accountName,
-      status: goatIntegrations.status,
-      capabilityModes: goatIntegrations.capabilityModes,
+      integrationId: integrations.id,
+      accountEmail: integrations.accountEmail,
+      accountName: integrations.accountName,
+      status: integrations.status,
+      capabilityModes: integrations.capabilityModes,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, "google_calendar"),
-        ne(goatIntegrations.status, "disconnected"),
+        eq(integrations.userWorkosId, userWorkosId),
+        eq(integrations.provider, "google_calendar"),
+        ne(integrations.status, "disconnected"),
       ),
     )
-    .orderBy(desc(goatIntegrations.updatedAt));
+    .orderBy(desc(integrations.updatedAt));
 
   return rows
     .filter((row) => row.status === "connected")
@@ -498,14 +498,14 @@ function resolveConnection(
       (connection) => normalizeAccountSelector(accountSelector(connection, connections)) === wanted,
     );
     if (match) return match;
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `No connected Google Calendar account matches ${JSON.stringify(account)}. Connected accounts: ${connections
         .map((connection) => JSON.stringify(accountSelector(connection, connections)))
         .join(", ")}.`,
     );
   }
   if (connections.length === 1) return connections[0]!;
-  throw new GoatActionInvalidParamsError(
+  throw new ActionInvalidParamsError(
     `Multiple Google Calendar accounts are connected; pass account as one of: ${connections
       .map((connection) => JSON.stringify(accountSelector(connection, connections)))
       .join(", ")}.`,
@@ -513,7 +513,7 @@ function resolveConnection(
 }
 
 async function calendarApiCall(
-  context: GoatActionExecuteContext,
+  context: ActionExecuteContext,
   connection: GoogleCalendarConnection,
   url: URL,
   init?: { method?: "GET" | "POST"; body?: unknown },
@@ -534,7 +534,7 @@ async function calendarApiCall(
     );
   } catch (error) {
     if (error instanceof GoogleAccessAuthError) {
-      throw new GoatActionAuthError(
+      throw new ActionAuthError(
         "auth_expired",
         "google_calendar",
         `Reconnect Google Calendar for ${connectionLabel(connection)} in Settings → Integrations using “Reconnect or add”, select the same Google account, then retry.`,
@@ -549,7 +549,7 @@ function validateTimeWindow(timeMin: string, timeMax: string, userTimezone: stri
   const normalizedMin = validateRfc3339(timeMin, "time_min", timezone, false);
   const normalizedMax = validateRfc3339(timeMax, "time_max", timezone, true);
   if (Date.parse(normalizedMax) <= Date.parse(normalizedMin)) {
-    throw new GoatActionInvalidParamsError('"time_max" must be after "time_min".');
+    throw new ActionInvalidParamsError('"time_max" must be after "time_min".');
   }
   return { timeMin: normalizedMin, timeMax: normalizedMax };
 }
@@ -579,7 +579,7 @@ function validateRfc3339Timestamp(value: string, field: string) {
     date.toISOString().slice(0, 10) !== trimmed.slice(0, 10) ||
     Number.isNaN(Date.parse(trimmed))
   ) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"${field}" must be an RFC 3339 date-time with Z or a numeric UTC offset, or a valid YYYY-MM-DD date.`,
     );
   }
@@ -661,7 +661,7 @@ function formatUtcOffset(offsetMinutes: number) {
 function validateLimit(value: unknown) {
   if (value === undefined) return 10;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > MAX_EVENTS) {
-    throw new GoatActionInvalidParamsError(`"limit" must be an integer from 1 to ${MAX_EVENTS}.`);
+    throw new ActionInvalidParamsError(`"limit" must be an integer from 1 to ${MAX_EVENTS}.`);
   }
   return value;
 }
@@ -675,7 +675,7 @@ function assertOnlyKnownParams(
     (key) => !allowedKeys.includes(key) && !(allowAccount && key === "account"),
   );
   if (unknown.length > 0) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `Unknown parameter${unknown.length === 1 ? "" : "s"}: ${unknown
         .map((key) => JSON.stringify(key))
         .join(", ")}.`,
@@ -687,11 +687,11 @@ function boundedOptionalString(params: Record<string, unknown>, key: string, max
   const value = params[key];
   if (value === undefined) return undefined;
   if (typeof value !== "string" || !value.trim()) {
-    throw new GoatActionInvalidParamsError(`"${key}" must be a non-empty string.`);
+    throw new ActionInvalidParamsError(`"${key}" must be a non-empty string.`);
   }
   const trimmed = value.trim();
   if (trimmed.length > maxChars) {
-    throw new GoatActionInvalidParamsError(`"${key}" exceeds ${maxChars} characters.`);
+    throw new ActionInvalidParamsError(`"${key}" exceeds ${maxChars} characters.`);
   }
   return trimmed;
 }

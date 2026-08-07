@@ -1,4 +1,4 @@
-import { GoatActionExecutionError } from "@/lib/actions/types";
+import { ActionExecutionError } from "@/lib/actions/types";
 import { MAX_CAPABILITY_PAYLOAD_STRING_CHARS } from "@/lib/capabilities/sanitize";
 
 const MAX_PROVIDER_SEGMENTS = 20_000;
@@ -46,7 +46,7 @@ export function shapeYoutubeTranscriptOutput(output: unknown, videoUrl: string) 
     transcript,
   };
   if (JSON.stringify(result).length > MAX_CAPABILITY_PAYLOAD_STRING_CHARS) {
-    throw new GoatActionExecutionError(
+    throw new ActionExecutionError(
       "provider_error",
       "This video's complete transcript is too large to return safely in one action result.",
     );
@@ -294,7 +294,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function transcriptProviderError() {
-  return new GoatActionExecutionError(
+  return new ActionExecutionError(
     "provider_error",
     "The transcript provider did not return a usable timestamped transcript.",
   );

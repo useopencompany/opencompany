@@ -1,16 +1,16 @@
 import { createHash } from "node:crypto";
 import {
-  type GoatLinearIssueEventInsert,
-  goatLinearEventTypeFor,
-  goatLinearRouteMatchesEvent,
-  goatLinearSelectedTeamIds,
-  insertGoatLinearIssueEvents,
-  listEnabledGoatLinearBrainSourceRoutes,
-  listGoatLinearIntegrationsForOrganization,
+  insertLinearIssueEvents,
+  type LinearIssueEventInsert,
+  linearEventTypeFor,
+  linearRouteMatchesEvent,
+  linearSelectedTeamIds,
+  listEnabledLinearBrainSourceRoutes,
+  listLinearIntegrationsForOrganization,
 } from "@opencompany/db/linear";
-import type { GoatLinearEventAction, GoatLinearEventEntityType } from "@opencompany/db/schema";
+import type { LinearEventAction, LinearEventEntityType } from "@opencompany/db/schema";
 import { NextResponse } from "next/server";
-import { verifyGoatLinearWebhookSignature } from "@/lib/integrations/linear-signature";
+import { verifyLinearWebhookSignature } from "@/lib/integrations/linear-signature";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  const verified = verifyGoatLinearWebhookSignature({
+  const verified = verifyLinearWebhookSignature({
     rawBody,
     signature: request.headers.get("linear-signature"),
     webhookTimestampMs:
@@ -92,7 +92,7 @@ async function handleLinearEvent(
   if (entityType === "issue" && action === "update" && isNoiseIssueUpdate(envelope.updatedFrom)) {
     return { ok: true, dropped: true };
   }
-  const eventType = goatLinearEventTypeFor({
+  const eventType = linearEventTypeFor({
     entityType,
     action,
     updatedFrom: envelope.updatedFrom ?? null,
@@ -112,11 +112,11 @@ async function handleLinearEvent(
   const issueTitle =
     entityType === "issue" ? asString(data.title) : asString(asRecord(data.issue)?.title);
 
-  const integrations = await listGoatLinearIntegrationsForOrganization(organizationId);
+  const integrations = await listLinearIntegrationsForOrganization(organizationId);
   const connected = integrations.filter((integration) => integration.status === "connected");
   if (connected.length === 0) return { ok: true, dropped: true };
 
-  const routes = await listEnabledGoatLinearBrainSourceRoutes(
+  const routes = await listEnabledLinearBrainSourceRoutes(
     connected.map((integration) => integration.id),
   );
   // With a known team the selection is exact; comment events may not carry the
@@ -125,9 +125,9 @@ async function handleLinearEvent(
   const matchedIntegrationIds = new Set(
     routes
       .filter((route) => {
-        const selected = goatLinearSelectedTeamIds(route.config);
+        const selected = linearSelectedTeamIds(route.config);
         if (selected.size === 0) return false;
-        if (!goatLinearRouteMatchesEvent(route.config, eventType)) return false;
+        if (!linearRouteMatchesEvent(route.config, eventType)) return false;
         return teamId ? selected.has(teamId) : true;
       })
       .map((route) => route.integrationId),
@@ -141,7 +141,7 @@ async function handleLinearEvent(
       : createHash("sha256").update(rawBody).digest("hex"));
   const eventTime = envelope.createdAt ? new Date(envelope.createdAt) : new Date();
 
-  const inserts: GoatLinearIssueEventInsert[] = connected
+  const inserts: LinearIssueEventInsert[] = connected
     .filter((integration) => matchedIntegrationIds.has(integration.id))
     .map((integration) => ({
       integrationId: integration.id,
@@ -166,17 +166,17 @@ async function handleLinearEvent(
       eventTime: Number.isNaN(eventTime.getTime()) ? new Date() : eventTime,
     }));
 
-  const buffered = await insertGoatLinearIssueEvents(inserts);
+  const buffered = await insertLinearIssueEvents(inserts);
   return { ok: true, buffered };
 }
 
-function linearEntityType(type: string | undefined): GoatLinearEventEntityType | null {
+function linearEntityType(type: string | undefined): LinearEventEntityType | null {
   if (type === "Issue") return "issue";
   if (type === "Comment") return "comment";
   return null;
 }
 
-function linearEventAction(action: string | undefined): GoatLinearEventAction | null {
+function linearEventAction(action: string | undefined): LinearEventAction | null {
   if (action === "create" || action === "update" || action === "remove") return action;
   return null;
 }

@@ -2,19 +2,19 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
-  appendGoatBrainAssetTextBlock,
+  appendBrainAssetTextBlock,
   GOAT_BRAIN_FOLDER_MANIFEST_PATH,
-  parseGoatBrainDocument,
-  parseGoatBrainFolderManifest,
+  parseBrainDocument,
+  parseBrainFolderManifest,
 } from "@opencompany/brain";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  createGoatBrainMarkdownContent,
-  deriveGoatBrainFileProjection,
-  hashGoatBrainContent,
-  materializeGoatBrainFilesToRoot,
-  readGoatBrainFilesFromRoot,
-  syncGoatBrainFiles,
+  createBrainMarkdownContent,
+  deriveBrainFileProjection,
+  hashBrainContent,
+  materializeBrainFilesToRoot,
+  readBrainFilesFromRoot,
+  syncBrainFiles,
 } from "./brain-files";
 
 let root: string;
@@ -29,7 +29,7 @@ afterEach(async () => {
 
 describe("goat brain file sync", () => {
   it("projects evidence kind from the evidence zone folder", () => {
-    const content = createGoatBrainMarkdownContent({
+    const content = createBrainMarkdownContent({
       id: "ev-acme-email",
       folderPath: "evidence/email",
       title: "Acme email",
@@ -39,7 +39,7 @@ describe("goat brain file sync", () => {
     });
 
     expect(
-      deriveGoatBrainFileProjection({
+      deriveBrainFileProjection({
         path: "evidence/email/ev-acme-email.md",
         content,
       }),
@@ -52,7 +52,7 @@ describe("goat brain file sync", () => {
   });
 
   it("projects pages outside the evidence zone with kind page", () => {
-    const content = createGoatBrainMarkdownContent({
+    const content = createBrainMarkdownContent({
       id: "ada",
       folderPath: "team/gtm",
       title: "Ada",
@@ -61,7 +61,7 @@ describe("goat brain file sync", () => {
       compiledTruth: "Ada leads GTM.",
     });
 
-    expect(deriveGoatBrainFileProjection({ path: "team/gtm/ada.md", content })).toMatchObject({
+    expect(deriveBrainFileProjection({ path: "team/gtm/ada.md", content })).toMatchObject({
       brainId: "ada",
       folderPath: "team/gtm",
       kind: "page",
@@ -70,7 +70,7 @@ describe("goat brain file sync", () => {
   });
 
   it("preserves skill descriptions in the database projection", () => {
-    const content = createGoatBrainMarkdownContent({
+    const content = createBrainMarkdownContent({
       id: "coding-work",
       folderPath: "skills",
       title: "Coding work",
@@ -80,7 +80,7 @@ describe("goat brain file sync", () => {
       compiledTruth: "Inspect, implement, and verify.",
     });
 
-    const projection = deriveGoatBrainFileProjection({
+    const projection = deriveBrainFileProjection({
       path: "skills/coding-work.md",
       content,
     });
@@ -89,13 +89,13 @@ describe("goat brain file sync", () => {
       folderPath: "skills",
       description: "How coding work should happen.",
     });
-    expect(parseGoatBrainDocument(projection.content).frontmatter.description).toBe(
+    expect(parseBrainDocument(projection.content).frontmatter.description).toBe(
       "How coding work should happen.",
     );
   });
 
   it("preserves skill descriptions through materialization", async () => {
-    const content = createGoatBrainMarkdownContent({
+    const content = createBrainMarkdownContent({
       id: "coding-work",
       folderPath: "skills",
       title: "Coding work",
@@ -112,22 +112,22 @@ describe("goat brain file sync", () => {
         brainId: "coding-work",
         folderPath: "skills",
         content,
-        contentHash: hashGoatBrainContent(content),
+        contentHash: hashBrainContent(content),
         format: "markdown",
       },
     ]);
 
-    await materializeGoatBrainFilesToRoot({ brainRef: "goat_brain_user_1", root, db });
-    const files = await readGoatBrainFilesFromRoot(root);
+    await materializeBrainFilesToRoot({ brainRef: "goat_brain_user_1", root, db });
+    const files = await readBrainFilesFromRoot(root);
 
     expect(files).toEqual([{ path: "skills/coding-work.md", content }]);
-    expect(parseGoatBrainDocument(files[0]!.content).frontmatter.description).toBe(
+    expect(parseBrainDocument(files[0]!.content).frontmatter.description).toBe(
       "How coding work should happen.",
     );
   });
 
   it("projects nested legacy markdown compiled truth as body-only text", () => {
-    const nested = createGoatBrainMarkdownContent({
+    const nested = createBrainMarkdownContent({
       id: "nested-note",
       folderPath: "inbox",
       title: "Nested note",
@@ -159,7 +159,7 @@ describe("goat brain file sync", () => {
       "",
     ].join("\n");
 
-    const projection = deriveGoatBrainFileProjection({
+    const projection = deriveBrainFileProjection({
       path: "product/concepts/brain-native-background-workers.md",
       content,
     });
@@ -167,12 +167,12 @@ describe("goat brain file sync", () => {
     expect(projection).toMatchObject({
       body: "Only this truth should be stored as the body.",
     });
-    expect(parseGoatBrainDocument(projection.content).compiledTruth).toBe(projection.body);
+    expect(parseBrainDocument(projection.content).compiledTruth).toBe(projection.body);
     expect(projection.content).not.toContain("id: nested-note");
   });
 
   it("projects compiled truth without a duplicate leading title heading", () => {
-    const content = createGoatBrainMarkdownContent({
+    const content = createBrainMarkdownContent({
       id: "acme",
       folderPath: "companies",
       title: "Acme",
@@ -181,13 +181,13 @@ describe("goat brain file sync", () => {
       compiledTruth: "# Acme\n\nAcme evaluates Goat Brain.",
     });
 
-    const projection = deriveGoatBrainFileProjection({
+    const projection = deriveBrainFileProjection({
       path: "companies/acme.md",
       content,
     });
 
     expect(projection.body).toBe("Acme evaluates Goat Brain.");
-    expect(parseGoatBrainDocument(projection.content).compiledTruth).toBe(projection.body);
+    expect(parseBrainDocument(projection.content).compiledTruth).toBe(projection.body);
   });
 
   it("recovers sidecar-backed markdown when only the payload hash is stale", async () => {
@@ -217,7 +217,7 @@ describe("goat brain file sync", () => {
       },
     });
 
-    const files = await readGoatBrainFilesFromRoot(root);
+    const files = await readBrainFilesFromRoot(root);
 
     expect(files).toHaveLength(1);
     expect(files[0]).toMatchObject({ path: "companies/acme.md" });
@@ -254,14 +254,14 @@ describe("goat brain file sync", () => {
       },
     });
 
-    await expect(readGoatBrainFilesFromRoot(root)).resolves.toEqual([
+    await expect(readBrainFilesFromRoot(root)).resolves.toEqual([
       { path: "competitors/rivalco-competitor.md", content: "", skip: true },
     ]);
   });
 
   it("does not validate unchanged invalid files during sync", async () => {
     const content = "---\n---\n";
-    const contentHash = hashGoatBrainContent(content);
+    const contentHash = hashBrainContent(content);
     const db = syncSelectOnlyDb([
       {
         id: "doc_1",
@@ -274,7 +274,7 @@ describe("goat brain file sync", () => {
     ]);
 
     await expect(
-      syncGoatBrainFiles({
+      syncBrainFiles({
         brainRef: "goat_brain_user_1",
         userWorkosId: "user_1",
         files: [{ path: "competitors/rivalco-competitor.md", content }],
@@ -293,7 +293,7 @@ describe("goat brain file sync", () => {
   });
 
   it("reports newly created page descriptors from sync", async () => {
-    const content = createGoatBrainMarkdownContent({
+    const content = createBrainMarkdownContent({
       id: "acme",
       folderPath: "companies",
       title: "Acme",
@@ -303,7 +303,7 @@ describe("goat brain file sync", () => {
     });
     const db = syncMutableDb([]);
 
-    const result = await syncGoatBrainFiles({
+    const result = await syncBrainFiles({
       brainRef: "goat_brain_user_1",
       userWorkosId: "user_1",
       files: [{ path: "companies/acme.md", content }],
@@ -327,7 +327,7 @@ describe("goat brain file sync", () => {
   });
 
   it("keeps a moved brain file by matching on stable brain id", async () => {
-    const oldContent = createGoatBrainMarkdownContent({
+    const oldContent = createBrainMarkdownContent({
       id: "acme",
       folderPath: "companies",
       title: "Acme",
@@ -335,7 +335,7 @@ describe("goat brain file sync", () => {
       status: "draft",
       compiledTruth: "Acme is an existing account.",
     });
-    const newContent = createGoatBrainMarkdownContent({
+    const newContent = createBrainMarkdownContent({
       id: "acme",
       folderPath: "companies/customers",
       title: "Acme",
@@ -350,7 +350,7 @@ describe("goat brain file sync", () => {
       brainId: "acme",
       folderPath: "companies",
       content: oldContent,
-      contentHash: hashGoatBrainContent(oldContent),
+      contentHash: hashBrainContent(oldContent),
       sizeBytes: Buffer.byteLength(oldContent, "utf8"),
       title: "Acme",
       entityType: "company",
@@ -358,7 +358,7 @@ describe("goat brain file sync", () => {
     };
     const db = syncMutableDb([current]);
 
-    const result = await syncGoatBrainFiles({
+    const result = await syncBrainFiles({
       brainRef: "goat_brain_user_1",
       userWorkosId: "user_1",
       files: [{ path: "companies/customers/acme.md", content: newContent }],
@@ -368,7 +368,7 @@ describe("goat brain file sync", () => {
           brainId: "acme",
           folderPath: "companies",
           path: "companies/acme.md",
-          contentHash: hashGoatBrainContent(oldContent),
+          contentHash: hashBrainContent(oldContent),
         },
       ],
       db,
@@ -392,7 +392,7 @@ describe("goat brain file sync", () => {
   });
 
   it("reports conflict-created page descriptors from handled sync conflicts", async () => {
-    const baseContent = createGoatBrainMarkdownContent({
+    const baseContent = createBrainMarkdownContent({
       id: "acme",
       folderPath: "companies",
       title: "Acme",
@@ -400,7 +400,7 @@ describe("goat brain file sync", () => {
       status: "draft",
       compiledTruth: "Base.",
     });
-    const currentContent = createGoatBrainMarkdownContent({
+    const currentContent = createBrainMarkdownContent({
       id: "acme",
       folderPath: "companies",
       title: "Acme",
@@ -408,7 +408,7 @@ describe("goat brain file sync", () => {
       status: "draft",
       compiledTruth: "Current changed independently.",
     });
-    const nextContent = createGoatBrainMarkdownContent({
+    const nextContent = createBrainMarkdownContent({
       id: "acme",
       folderPath: "companies",
       title: "Acme",
@@ -424,7 +424,7 @@ describe("goat brain file sync", () => {
         brainId: "acme",
         folderPath: "companies",
         content: currentContent,
-        contentHash: hashGoatBrainContent(currentContent),
+        contentHash: hashBrainContent(currentContent),
         sizeBytes: Buffer.byteLength(currentContent, "utf8"),
         title: "Acme",
         kind: "page",
@@ -433,7 +433,7 @@ describe("goat brain file sync", () => {
       },
     ]);
 
-    const result = await syncGoatBrainFiles({
+    const result = await syncBrainFiles({
       brainRef: "goat_brain_user_1",
       userWorkosId: "user_1",
       files: [{ path: "companies/acme.md", content: nextContent }],
@@ -443,7 +443,7 @@ describe("goat brain file sync", () => {
           brainId: "acme",
           folderPath: "companies",
           path: "companies/acme.md",
-          contentHash: hashGoatBrainContent(baseContent),
+          contentHash: hashBrainContent(baseContent),
         },
       ],
       db,
@@ -462,7 +462,7 @@ describe("goat brain file sync", () => {
   });
 
   it("does not conflict on concurrently changed files the sync leaves untouched", async () => {
-    const baseContent = createGoatBrainMarkdownContent({
+    const baseContent = createBrainMarkdownContent({
       id: "acme",
       folderPath: "companies",
       title: "Acme",
@@ -470,7 +470,7 @@ describe("goat brain file sync", () => {
       status: "draft",
       compiledTruth: "Base.",
     });
-    const currentContent = createGoatBrainMarkdownContent({
+    const currentContent = createBrainMarkdownContent({
       id: "acme",
       folderPath: "companies",
       title: "Acme",
@@ -478,7 +478,7 @@ describe("goat brain file sync", () => {
       status: "draft",
       compiledTruth: "Current changed independently.",
     });
-    const otherContent = createGoatBrainMarkdownContent({
+    const otherContent = createBrainMarkdownContent({
       id: "ada",
       folderPath: "people",
       title: "Ada",
@@ -494,7 +494,7 @@ describe("goat brain file sync", () => {
         brainId: "acme",
         folderPath: "companies",
         content: currentContent,
-        contentHash: hashGoatBrainContent(currentContent),
+        contentHash: hashBrainContent(currentContent),
         sizeBytes: Buffer.byteLength(currentContent, "utf8"),
         title: "Acme",
         kind: "page",
@@ -505,7 +505,7 @@ describe("goat brain file sync", () => {
 
     // The agent never touched companies/acme.md (its root copy still matches the
     // base snapshot), so the concurrent stored change must not abort the sync.
-    const result = await syncGoatBrainFiles({
+    const result = await syncBrainFiles({
       brainRef: "goat_brain_user_1",
       userWorkosId: "user_1",
       files: [
@@ -518,7 +518,7 @@ describe("goat brain file sync", () => {
           brainId: "acme",
           folderPath: "companies",
           path: "companies/acme.md",
-          contentHash: hashGoatBrainContent(baseContent),
+          contentHash: hashBrainContent(baseContent),
         },
       ],
       db,
@@ -532,7 +532,7 @@ describe("goat brain file sync", () => {
   });
 
   it("still aborts when a concurrently changed file was deleted by the sync", async () => {
-    const baseContent = createGoatBrainMarkdownContent({
+    const baseContent = createBrainMarkdownContent({
       id: "acme",
       folderPath: "companies",
       title: "Acme",
@@ -540,7 +540,7 @@ describe("goat brain file sync", () => {
       status: "draft",
       compiledTruth: "Base.",
     });
-    const currentContent = createGoatBrainMarkdownContent({
+    const currentContent = createBrainMarkdownContent({
       id: "acme",
       folderPath: "companies",
       title: "Acme",
@@ -556,7 +556,7 @@ describe("goat brain file sync", () => {
         brainId: "acme",
         folderPath: "companies",
         content: currentContent,
-        contentHash: hashGoatBrainContent(currentContent),
+        contentHash: hashBrainContent(currentContent),
         sizeBytes: Buffer.byteLength(currentContent, "utf8"),
         title: "Acme",
         kind: "page",
@@ -565,7 +565,7 @@ describe("goat brain file sync", () => {
       },
     ]);
 
-    const result = await syncGoatBrainFiles({
+    const result = await syncBrainFiles({
       brainRef: "goat_brain_user_1",
       userWorkosId: "user_1",
       files: [],
@@ -575,7 +575,7 @@ describe("goat brain file sync", () => {
           brainId: "acme",
           folderPath: "companies",
           path: "companies/acme.md",
-          contentHash: hashGoatBrainContent(baseContent),
+          contentHash: hashBrainContent(baseContent),
         },
       ],
       db,
@@ -598,22 +598,22 @@ describe("goat brain file sync", () => {
         brainId: "rivalco-competitor",
         folderPath: "competitors",
         content,
-        contentHash: hashGoatBrainContent(content),
+        contentHash: hashBrainContent(content),
       },
     ]);
 
     await expect(
-      materializeGoatBrainFilesToRoot({ brainRef: "goat_brain_user_1", root, db }),
+      materializeBrainFilesToRoot({ brainRef: "goat_brain_user_1", root, db }),
     ).resolves.toEqual([
       {
         id: "doc_1",
         brainId: "rivalco-competitor",
         path: "competitors/rivalco-competitor.md",
         folderPath: "competitors",
-        contentHash: hashGoatBrainContent(content),
+        contentHash: hashBrainContent(content),
       },
     ]);
-    await expect(readGoatBrainFilesFromRoot(root)).resolves.toEqual([
+    await expect(readBrainFilesFromRoot(root)).resolves.toEqual([
       { path: "competitors/rivalco-competitor.md", content },
     ]);
   });
@@ -627,9 +627,9 @@ describe("goat brain file sync", () => {
       ],
     ]);
 
-    await materializeGoatBrainFilesToRoot({ brainRef: "goat_brain_user_1", root, db });
+    await materializeBrainFilesToRoot({ brainRef: "goat_brain_user_1", root, db });
 
-    const folders = parseGoatBrainFolderManifest(
+    const folders = parseBrainFolderManifest(
       await readFile(path.join(root, GOAT_BRAIN_FOLDER_MANIFEST_PATH), "utf8"),
     );
     expect(folders).toEqual(
@@ -647,7 +647,7 @@ describe("goat brain file sync", () => {
   it("syncs folder manifest rows and normalizes adjustable sources", async () => {
     const db = folderSyncDb();
 
-    await syncGoatBrainFiles({
+    await syncBrainFiles({
       brainRef: "goat_brain_user_1",
       userWorkosId: "user_1",
       files: [],
@@ -813,39 +813,39 @@ function folderRow(input: { path: string; source: "system" | "custom" }) {
 
 describe("goat brain asset projections", () => {
   it("strips the generated extracted-text block before persisting", () => {
-    const content = createGoatBrainMarkdownContent({
+    const content = createBrainMarkdownContent({
       id: "q3-board-deck",
       folderPath: "sources",
       title: "Q3 Board Deck",
       type: "source",
       compiledTruth: "Uploaded file `deck.pdf`. Ingestion pending.",
     });
-    const projected = appendGoatBrainAssetTextBlock(content, "Revenue grew 40% QoQ.");
+    const projected = appendBrainAssetTextBlock(content, "Revenue grew 40% QoQ.");
 
-    const projection = deriveGoatBrainFileProjection({
+    const projection = deriveBrainFileProjection({
       path: "sources/q3-board-deck.md",
       content: projected,
     });
 
     expect(projection.content).toBe(content);
-    expect(projection.contentHash).toBe(hashGoatBrainContent(content));
+    expect(projection.contentHash).toBe(hashBrainContent(content));
     expect(projection.body).not.toContain("Revenue grew 40%");
   });
 
   it("discards edits made inside the generated block", () => {
-    const content = createGoatBrainMarkdownContent({
+    const content = createBrainMarkdownContent({
       id: "q3-board-deck",
       folderPath: "sources",
       title: "Q3 Board Deck",
       type: "source",
       compiledTruth: "Synthesis.",
     });
-    const tampered = appendGoatBrainAssetTextBlock(content, "original text").replace(
+    const tampered = appendBrainAssetTextBlock(content, "original text").replace(
       "original text",
       "tampered text",
     );
 
-    const projection = deriveGoatBrainFileProjection({
+    const projection = deriveBrainFileProjection({
       path: "sources/q3-board-deck.md",
       content: tampered,
     });

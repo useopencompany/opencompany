@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  hashGoatJamieWebhookApiKey,
+  hashJamieWebhookApiKey,
   isValidJamieProviderApiKey,
-  verifyGoatJamieWebhookApiKey,
+  verifyJamieWebhookApiKey,
 } from "./jamie";
 
 describe("Goat Jamie webhook API keys", () => {
@@ -15,7 +15,7 @@ describe("Goat Jamie webhook API keys", () => {
   it("rejects delivery API keys before a key is saved", () => {
     expect(isValidJamieProviderApiKey("jwhsec_legacy")).toBe(false);
     expect(
-      verifyGoatJamieWebhookApiKey({
+      verifyJamieWebhookApiKey({
         candidate: jamieApiKey,
         apiKeyHash: null,
       }),
@@ -23,18 +23,18 @@ describe("Goat Jamie webhook API keys", () => {
   });
 
   it("verifies bound Jamie API keys without storing plaintext in the hash", () => {
-    const apiKeyHash = hashGoatJamieWebhookApiKey(jamieApiKey);
+    const apiKeyHash = hashJamieWebhookApiKey(jamieApiKey);
 
     expect(apiKeyHash).toMatch(/^[a-f0-9]{64}$/);
     expect(apiKeyHash).not.toContain(jamieApiKey);
     expect(
-      verifyGoatJamieWebhookApiKey({
+      verifyJamieWebhookApiKey({
         candidate: jamieApiKey,
         apiKeyHash,
       }),
     ).toEqual({ valid: true, apiKey: jamieApiKey });
     expect(
-      verifyGoatJamieWebhookApiKey({
+      verifyJamieWebhookApiKey({
         candidate: `${jamieApiKey}0`,
         apiKeyHash,
       }),

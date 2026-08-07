@@ -1,26 +1,26 @@
 import { createHash, randomUUID } from "node:crypto";
 import { and, asc, eq, or, sql } from "drizzle-orm";
-import { defaultGoatBrainFolderManifestEntries, normalizeGoatBrainId } from "../../brain/src/index";
-import { GOAT_PRO_STRIPE_PRODUCT_KEY, goatCalendarMonthWindow } from "./billing-constants";
-import { hashGoatBrainContent, seedDefaultGoatBrainFolders } from "./brain-files";
+import { defaultBrainFolderManifestEntries, normalizeBrainId } from "../../brain/src/index";
+import { calendarMonthWindow, GOAT_PRO_STRIPE_PRODUCT_KEY } from "./billing-constants";
+import { hashBrainContent, seedDefaultBrainFolders } from "./brain-files";
 import { getDb } from "./client";
-import { grantGoatMonthlyIncludedUsage } from "./credits";
+import { grantMonthlyIncludedUsage } from "./credits";
 import {
-  type GoatBrain,
-  type GoatBrainIntelligence,
-  type GoatBrainVisibility,
-  type GoatOnboarding,
-  type GoatUser,
-  type GoatWorkspace,
-  type GoatWorkspaceRole,
-  goatBrainFolders,
-  goatBrainMembers,
-  goatBrains,
-  goatOnboarding,
-  goatUsers,
-  goatWorkspaceBilling,
-  goatWorkspaceMembers,
-  goatWorkspaces,
+  type Brain,
+  type BrainIntelligence,
+  type BrainVisibility,
+  brainFolders,
+  brainMembers,
+  brains,
+  type Onboarding,
+  onboarding,
+  type User,
+  users,
+  type Workspace,
+  type WorkspaceRole,
+  workspaceBilling,
+  workspaceMembers,
+  workspaces,
 } from "./schema";
 
 type DbClient = any;
@@ -30,39 +30,39 @@ export const DEFAULT_GOAT_BRAIN_SLUG = "general";
 const GOAT_BRAIN_ID_SUFFIX_LENGTH = 12;
 const GOAT_BRAIN_ID_MAX_LENGTH = 80;
 
-export type GoatWorkspaceWithRole = {
-  workspace: GoatWorkspace;
-  role: GoatWorkspaceRole;
+export type WorkspaceWithRole = {
+  workspace: Workspace;
+  role: WorkspaceRole;
 };
 
-export type GoatBrainAccess = {
-  brain: GoatBrain;
-  workspaceRole: GoatWorkspaceRole;
+export type BrainAccess = {
+  brain: Brain;
+  workspaceRole: WorkspaceRole;
 };
 
-export type GoatWorkspaceMemberWithUser = {
-  member: { id: string; role: GoatWorkspaceRole; createdAt: Date };
-  user: GoatUser;
+export type WorkspaceMemberWithUser = {
+  member: { id: string; role: WorkspaceRole; createdAt: Date };
+  user: User;
 };
 
-export function newGoatWorkspaceId() {
+export function newWorkspaceId() {
   return `goat_ws_${randomUUID()}`;
 }
 
-export function newGoatBrainId(name = "brain") {
-  return readableGoatBrainId(name, randomUUID());
+export function newBrainId(name = "brain") {
+  return readableBrainId(name, randomUUID());
 }
 
-export function defaultGoatBrainIdForUser(userWorkosId: string) {
-  return readableGoatBrainId(DEFAULT_GOAT_BRAIN_SLUG, userWorkosId);
+export function defaultBrainIdForUser(userWorkosId: string) {
+  return readableBrainId(DEFAULT_GOAT_BRAIN_SLUG, userWorkosId);
 }
 
-function readableGoatBrainId(name: string, entropy: string) {
+function readableBrainId(name: string, entropy: string) {
   const suffix = createHash("sha256")
     .update(entropy)
     .digest("hex")
     .slice(0, GOAT_BRAIN_ID_SUFFIX_LENGTH);
-  const base = normalizeGoatBrainId(name) || "brain";
+  const base = normalizeBrainId(name) || "brain";
   const baseMaxLength = GOAT_BRAIN_ID_MAX_LENGTH - suffix.length - 1;
   return `${base.slice(0, baseMaxLength).replace(/-+$/g, "")}-${suffix}`;
 }
@@ -77,7 +77,7 @@ function brainAccessCondition(userWorkosId: string) {
       FROM "goat"."workspaces" access_workspace
       LEFT JOIN "goat"."workspace_billing" access_billing
         ON access_billing."workspace_id" = access_workspace."id"
-      WHERE access_workspace."id" = ${goatBrains.workspaceId}
+      WHERE access_workspace."id" = ${brains.workspaceId}
         AND (
           access_workspace."created_by_workos_id" = ${userWorkosId}
           OR (
@@ -87,174 +87,172 @@ function brainAccessCondition(userWorkosId: string) {
         )
     )
     AND (
-      (${goatBrains.visibility} = 'workspace' AND EXISTS (
+      (${brains.visibility} = 'workspace' AND EXISTS (
       SELECT 1 FROM "goat"."workspace_members" wm
-      WHERE wm."workspace_id" = ${goatBrains.workspaceId}
+      WHERE wm."workspace_id" = ${brains.workspaceId}
         AND wm."user_workos_id" = ${userWorkosId}
     ))
     OR
-    (${goatBrains.visibility} = 'restricted' AND EXISTS (
+    (${brains.visibility} = 'restricted' AND EXISTS (
       SELECT 1 FROM "goat"."brain_members" bm
-      WHERE bm."brain_id" = ${goatBrains.id}
+      WHERE bm."brain_id" = ${brains.id}
         AND bm."user_workos_id" = ${userWorkosId}
     ))
     )
   )`;
 }
 
-export async function listGoatWorkspacesForUser(
+export async function listWorkspacesForUser(
   userWorkosId: string,
   options: { db?: DbClient } = {},
-): Promise<GoatWorkspaceWithRole[]> {
+): Promise<WorkspaceWithRole[]> {
   const db = options.db ?? getDb();
   const rows = await db
-    .select({ workspace: goatWorkspaces, role: goatWorkspaceMembers.role })
-    .from(goatWorkspaceMembers)
-    .innerJoin(goatWorkspaces, eq(goatWorkspaces.id, goatWorkspaceMembers.workspaceId))
-    .leftJoin(goatWorkspaceBilling, eq(goatWorkspaceBilling.workspaceId, goatWorkspaces.id))
+    .select({ workspace: workspaces, role: workspaceMembers.role })
+    .from(workspaceMembers)
+    .innerJoin(workspaces, eq(workspaces.id, workspaceMembers.workspaceId))
+    .leftJoin(workspaceBilling, eq(workspaceBilling.workspaceId, workspaces.id))
     .where(
       and(
-        eq(goatWorkspaceMembers.userWorkosId, userWorkosId),
+        eq(workspaceMembers.userWorkosId, userWorkosId),
         or(
-          eq(goatWorkspaces.createdByWorkosId, userWorkosId),
+          eq(workspaces.createdByWorkosId, userWorkosId),
           and(
-            eq(goatWorkspaceBilling.plan, "pro"),
-            eq(goatWorkspaceBilling.stripeProductKey, GOAT_PRO_STRIPE_PRODUCT_KEY),
+            eq(workspaceBilling.plan, "pro"),
+            eq(workspaceBilling.stripeProductKey, GOAT_PRO_STRIPE_PRODUCT_KEY),
           ),
         ),
       ),
     )
-    .orderBy(asc(goatWorkspaces.createdAt));
+    .orderBy(asc(workspaces.createdAt));
   return rows;
 }
 
-export async function hasOwnedGoatHobbyWorkspace(
+export async function hasOwnedHobbyWorkspace(
   userWorkosId: string,
   options: { db?: DbClient } = {},
 ) {
   const db = options.db ?? getDb();
   const rows = await db
-    .select({ id: goatWorkspaces.id })
-    .from(goatWorkspaces)
-    .leftJoin(goatWorkspaceBilling, eq(goatWorkspaceBilling.workspaceId, goatWorkspaces.id))
+    .select({ id: workspaces.id })
+    .from(workspaces)
+    .leftJoin(workspaceBilling, eq(workspaceBilling.workspaceId, workspaces.id))
     .where(
       and(
-        eq(goatWorkspaces.createdByWorkosId, userWorkosId),
-        sql`NOT COALESCE(${goatWorkspaceBilling.plan} = 'pro' AND ${goatWorkspaceBilling.stripeProductKey} = ${GOAT_PRO_STRIPE_PRODUCT_KEY}, false)`,
+        eq(workspaces.createdByWorkosId, userWorkosId),
+        sql`NOT COALESCE(${workspaceBilling.plan} = 'pro' AND ${workspaceBilling.stripeProductKey} = ${GOAT_PRO_STRIPE_PRODUCT_KEY}, false)`,
       ),
     )
     .limit(1);
   return rows.length > 0;
 }
 
-export async function listAccessibleGoatBrains(
+export async function listAccessibleBrains(
   input: { userWorkosId: string; workspaceId: string },
   options: { db?: DbClient } = {},
-): Promise<GoatBrain[]> {
+): Promise<Brain[]> {
   const db = options.db ?? getDb();
   return db
     .select()
-    .from(goatBrains)
-    .where(
-      and(eq(goatBrains.workspaceId, input.workspaceId), brainAccessCondition(input.userWorkosId)),
-    )
-    .orderBy(asc(goatBrains.createdAt));
+    .from(brains)
+    .where(and(eq(brains.workspaceId, input.workspaceId), brainAccessCondition(input.userWorkosId)))
+    .orderBy(asc(brains.createdAt));
 }
 
-export type GoatBrainWithWorkspace = {
-  brain: GoatBrain;
+export type BrainWithWorkspace = {
+  brain: Brain;
   workspace: { id: string; name: string; workosOrganizationId: string | null };
-  workspaceRole: GoatWorkspaceRole;
+  workspaceRole: WorkspaceRole;
 };
 
 // Every brain the user can read, across all their workspaces. Used by the
 // user-level MCP connector to enumerate and resolve brains for one token.
-export async function listAccessibleGoatBrainsForUser(
+export async function listAccessibleBrainsForUser(
   userWorkosId: string,
   options: { db?: DbClient } = {},
-): Promise<GoatBrainWithWorkspace[]> {
+): Promise<BrainWithWorkspace[]> {
   const db = options.db ?? getDb();
   const rows: Array<{
-    brain: GoatBrain;
-    workspace: GoatBrainWithWorkspace["workspace"];
-    workspaceRole: GoatWorkspaceRole | null;
+    brain: Brain;
+    workspace: BrainWithWorkspace["workspace"];
+    workspaceRole: WorkspaceRole | null;
   }> = await db
     .select({
-      brain: goatBrains,
+      brain: brains,
       workspace: {
-        id: goatWorkspaces.id,
-        name: goatWorkspaces.name,
-        workosOrganizationId: goatWorkspaces.workosOrganizationId,
+        id: workspaces.id,
+        name: workspaces.name,
+        workosOrganizationId: workspaces.workosOrganizationId,
       },
-      workspaceRole: goatWorkspaceMembers.role,
+      workspaceRole: workspaceMembers.role,
     })
-    .from(goatBrains)
-    .innerJoin(goatWorkspaces, eq(goatWorkspaces.id, goatBrains.workspaceId))
+    .from(brains)
+    .innerJoin(workspaces, eq(workspaces.id, brains.workspaceId))
     .leftJoin(
-      goatWorkspaceMembers,
+      workspaceMembers,
       and(
-        eq(goatWorkspaceMembers.workspaceId, goatBrains.workspaceId),
-        eq(goatWorkspaceMembers.userWorkosId, userWorkosId),
+        eq(workspaceMembers.workspaceId, brains.workspaceId),
+        eq(workspaceMembers.userWorkosId, userWorkosId),
       ),
     )
     .where(brainAccessCondition(userWorkosId))
-    .orderBy(asc(goatWorkspaces.createdAt), asc(goatBrains.createdAt));
+    .orderBy(asc(workspaces.createdAt), asc(brains.createdAt));
   return rows.map((row) => ({
     ...row,
     workspaceRole: row.workspaceRole ?? "member",
   }));
 }
 
-export async function getGoatBrainAccess(
+export async function getBrainAccess(
   input: { userWorkosId: string; brainRef: string },
   options: { db?: DbClient } = {},
-): Promise<GoatBrainAccess | null> {
+): Promise<BrainAccess | null> {
   const db = options.db ?? getDb();
   const rows = await db
-    .select({ brain: goatBrains, role: goatWorkspaceMembers.role })
-    .from(goatBrains)
+    .select({ brain: brains, role: workspaceMembers.role })
+    .from(brains)
     .leftJoin(
-      goatWorkspaceMembers,
+      workspaceMembers,
       and(
-        eq(goatWorkspaceMembers.workspaceId, goatBrains.workspaceId),
-        eq(goatWorkspaceMembers.userWorkosId, input.userWorkosId),
+        eq(workspaceMembers.workspaceId, brains.workspaceId),
+        eq(workspaceMembers.userWorkosId, input.userWorkosId),
       ),
     )
-    .where(and(eq(goatBrains.id, input.brainRef), brainAccessCondition(input.userWorkosId)))
+    .where(and(eq(brains.id, input.brainRef), brainAccessCondition(input.userWorkosId)))
     .limit(1);
   const row = rows[0];
   if (!row) return null;
   return { brain: row.brain, workspaceRole: row.role ?? "member" };
 }
 
-export async function requireGoatBrainAccess(
+export async function requireBrainAccess(
   input: { userWorkosId: string; brainRef: string },
   options: { db?: DbClient } = {},
-): Promise<GoatBrainAccess> {
-  const access = await getGoatBrainAccess(input, options);
+): Promise<BrainAccess> {
+  const access = await getBrainAccess(input, options);
   if (!access) throw new Error("You do not have access to this brain.");
   return access;
 }
 
-export async function getGoatWorkspaceRole(
+export async function getWorkspaceRole(
   input: { userWorkosId: string; workspaceId: string },
   options: { db?: DbClient } = {},
-): Promise<GoatWorkspaceRole | null> {
+): Promise<WorkspaceRole | null> {
   const db = options.db ?? getDb();
   const rows = await db
-    .select({ role: goatWorkspaceMembers.role })
-    .from(goatWorkspaceMembers)
-    .innerJoin(goatWorkspaces, eq(goatWorkspaces.id, goatWorkspaceMembers.workspaceId))
-    .leftJoin(goatWorkspaceBilling, eq(goatWorkspaceBilling.workspaceId, goatWorkspaces.id))
+    .select({ role: workspaceMembers.role })
+    .from(workspaceMembers)
+    .innerJoin(workspaces, eq(workspaces.id, workspaceMembers.workspaceId))
+    .leftJoin(workspaceBilling, eq(workspaceBilling.workspaceId, workspaces.id))
     .where(
       and(
-        eq(goatWorkspaceMembers.workspaceId, input.workspaceId),
-        eq(goatWorkspaceMembers.userWorkosId, input.userWorkosId),
+        eq(workspaceMembers.workspaceId, input.workspaceId),
+        eq(workspaceMembers.userWorkosId, input.userWorkosId),
         or(
-          eq(goatWorkspaces.createdByWorkosId, input.userWorkosId),
+          eq(workspaces.createdByWorkosId, input.userWorkosId),
           and(
-            eq(goatWorkspaceBilling.plan, "pro"),
-            eq(goatWorkspaceBilling.stripeProductKey, GOAT_PRO_STRIPE_PRODUCT_KEY),
+            eq(workspaceBilling.plan, "pro"),
+            eq(workspaceBilling.stripeProductKey, GOAT_PRO_STRIPE_PRODUCT_KEY),
           ),
         ),
       ),
@@ -263,26 +261,26 @@ export async function getGoatWorkspaceRole(
   return rows[0]?.role ?? null;
 }
 
-export async function requireGoatWorkspaceAdmin(
+export async function requireWorkspaceAdmin(
   input: { userWorkosId: string; workspaceId: string },
   options: { db?: DbClient } = {},
 ): Promise<void> {
-  const role = await getGoatWorkspaceRole(input, options);
+  const role = await getWorkspaceRole(input, options);
   if (role !== "admin") throw new Error("Only workspace admins can do this.");
 }
 
 // Human-readable name for attributing a user's own captures/uploads in
 // ingestion prompts. Never falls back to the email: an address is not how the
 // user should be named in prose.
-export async function getGoatUserDisplayName(
+export async function getUserDisplayName(
   userWorkosId: string,
   options: { db?: DbClient } = {},
 ): Promise<string | null> {
   const db = options.db ?? getDb();
   const rows = await db
-    .select({ firstName: goatUsers.firstName, lastName: goatUsers.lastName })
-    .from(goatUsers)
-    .where(eq(goatUsers.workosUserId, userWorkosId))
+    .select({ firstName: users.firstName, lastName: users.lastName })
+    .from(users)
+    .where(eq(users.workosUserId, userWorkosId))
     .limit(1);
   const user = rows[0];
   if (!user) return null;
@@ -290,15 +288,15 @@ export async function getGoatUserDisplayName(
   return name || null;
 }
 
-export async function getDefaultGoatBrainForUser(
+export async function getDefaultBrainForUser(
   userWorkosId: string,
   options: { db?: DbClient } = {},
-): Promise<GoatBrain | null> {
+): Promise<Brain | null> {
   const db = options.db ?? getDb();
-  const workspaces = await listGoatWorkspacesForUser(userWorkosId, { db });
+  const workspaces = await listWorkspacesForUser(userWorkosId, { db });
   const first = workspaces[0];
   if (!first) return null;
-  const brains = await listAccessibleGoatBrains(
+  const brains = await listAccessibleBrains(
     { userWorkosId, workspaceId: first.workspace.id },
     { db },
   );
@@ -308,14 +306,14 @@ export async function getDefaultGoatBrainForUser(
 // Bootstraps the personal workspace + "General" brain for a user that has no
 // workspace membership yet. Deterministic ids (matching migration 0096's
 // backfill) make concurrent sign-in requests converge on the same rows.
-export async function createDefaultGoatWorkspaceForUser(
+export async function createDefaultWorkspaceForUser(
   input: { userWorkosId: string; name: string },
   options: { db?: DbClient } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
-  const brainId = defaultGoatBrainIdForUser(input.userWorkosId);
+  const brainId = defaultBrainIdForUser(input.userWorkosId);
   await db
-    .insert(goatWorkspaces)
+    .insert(workspaces)
     .values({
       id: `goat_ws_${input.userWorkosId}`,
       name: input.name,
@@ -323,7 +321,7 @@ export async function createDefaultGoatWorkspaceForUser(
     })
     .onConflictDoNothing();
   await db
-    .insert(goatWorkspaceMembers)
+    .insert(workspaceMembers)
     .values({
       id: `goat_wsm_${input.userWorkosId}`,
       workspaceId: `goat_ws_${input.userWorkosId}`,
@@ -332,7 +330,7 @@ export async function createDefaultGoatWorkspaceForUser(
     })
     .onConflictDoNothing();
   await db
-    .insert(goatBrains)
+    .insert(brains)
     .values({
       id: brainId,
       workspaceId: `goat_ws_${input.userWorkosId}`,
@@ -342,7 +340,7 @@ export async function createDefaultGoatWorkspaceForUser(
       createdByWorkosId: input.userWorkosId,
     })
     .onConflictDoNothing();
-  await seedDefaultGoatBrainFolders(
+  await seedDefaultBrainFolders(
     {
       brainRef: brainId,
       userWorkosId: input.userWorkosId,
@@ -352,8 +350,8 @@ export async function createDefaultGoatWorkspaceForUser(
   // Seed the current Hobby allowance immediately; the hourly billing sweep
   // repairs a transient failure without blocking sign-in.
   try {
-    const { start, resetAt } = goatCalendarMonthWindow(new Date());
-    await grantGoatMonthlyIncludedUsage({
+    const { start, resetAt } = calendarMonthWindow(new Date());
+    await grantMonthlyIncludedUsage({
       workspaceId: `goat_ws_${input.userWorkosId}`,
       plan: "hobby",
       seatQuantity: 1,
@@ -372,7 +370,7 @@ export async function createDefaultGoatWorkspaceForUser(
 // Creates the local resources for a user-created WorkOS organization. The
 // workspace, admin membership, default brain, and required folder rows are one
 // Neon batch so a failed provision never leaves a partially usable workspace.
-export async function createGoatWorkspaceForUser(
+export async function createWorkspaceForUser(
   input: {
     workspaceId: string;
     workosOrganizationId: string;
@@ -380,14 +378,14 @@ export async function createGoatWorkspaceForUser(
     name: string;
   },
   options: { db?: DbClient } = {},
-): Promise<{ workspace: GoatWorkspace; brain: GoatBrain }> {
+): Promise<{ workspace: Workspace; brain: Brain }> {
   const db = options.db ?? getDb();
   const name = input.name.trim();
   if (!name) throw new Error("Workspace name cannot be empty.");
 
-  const brainId = newGoatBrainId(DEFAULT_GOAT_BRAIN_SLUG);
+  const brainId = newBrainId(DEFAULT_GOAT_BRAIN_SLUG);
   const workspaceInsert = db
-    .insert(goatWorkspaces)
+    .insert(workspaces)
     .values({
       id: input.workspaceId,
       workosOrganizationId: input.workosOrganizationId,
@@ -395,14 +393,14 @@ export async function createGoatWorkspaceForUser(
       createdByWorkosId: input.userWorkosId,
     })
     .returning();
-  const membershipInsert = db.insert(goatWorkspaceMembers).values({
+  const membershipInsert = db.insert(workspaceMembers).values({
     id: `goat_wsm_${randomUUID()}`,
     workspaceId: input.workspaceId,
     userWorkosId: input.userWorkosId,
     role: "admin",
   });
   const brainInsert = db
-    .insert(goatBrains)
+    .insert(brains)
     .values({
       id: brainId,
       workspaceId: input.workspaceId,
@@ -412,9 +410,9 @@ export async function createGoatWorkspaceForUser(
       createdByWorkosId: input.userWorkosId,
     })
     .returning();
-  const folderInserts = defaultGoatBrainFolderManifestEntries().map((folder) =>
-    db.insert(goatBrainFolders).values({
-      id: `goat_brain_folder_${hashGoatBrainContent(`${brainId}:${folder.path}`).slice(0, 24)}`,
+  const folderInserts = defaultBrainFolderManifestEntries().map((folder) =>
+    db.insert(brainFolders).values({
+      id: `goat_brain_folder_${hashBrainContent(`${brainId}:${folder.path}`).slice(0, 24)}`,
       userWorkosId: input.userWorkosId,
       brainRef: brainId,
       path: folder.path,
@@ -436,8 +434,8 @@ export async function createGoatWorkspaceForUser(
   // billing outage must not turn a successfully created organization into a
   // partially cleaned-up workspace. The hourly sweep repairs the grant.
   try {
-    const { start, resetAt } = goatCalendarMonthWindow(new Date());
-    await grantGoatMonthlyIncludedUsage({
+    const { start, resetAt } = calendarMonthWindow(new Date());
+    await grantMonthlyIncludedUsage({
       workspaceId: workspace.id,
       plan: "hobby",
       seatQuantity: 1,
@@ -459,10 +457,10 @@ export async function createGoatWorkspaceForUser(
 // to (the invite-acceptance landing path). Organizations without a matching
 // goat workspace row (e.g. web-app organizations in the shared WorkOS
 // environment) are skipped.
-export async function adoptGoatWorkspaceMembershipsFromOrgs(
+export async function adoptWorkspaceMembershipsFromOrgs(
   input: {
     userWorkosId: string;
-    memberships: Array<{ organizationId: string; role: GoatWorkspaceRole }>;
+    memberships: Array<{ organizationId: string; role: WorkspaceRole }>;
   },
   options: { db?: DbClient } = {},
 ): Promise<number> {
@@ -472,14 +470,14 @@ export async function adoptGoatWorkspaceMembershipsFromOrgs(
   for (const membership of input.memberships) {
     const rows = await db
       .select({
-        id: goatWorkspaces.id,
-        createdByWorkosId: goatWorkspaces.createdByWorkosId,
-        plan: goatWorkspaceBilling.plan,
-        stripeProductKey: goatWorkspaceBilling.stripeProductKey,
+        id: workspaces.id,
+        createdByWorkosId: workspaces.createdByWorkosId,
+        plan: workspaceBilling.plan,
+        stripeProductKey: workspaceBilling.stripeProductKey,
       })
-      .from(goatWorkspaces)
-      .leftJoin(goatWorkspaceBilling, eq(goatWorkspaceBilling.workspaceId, goatWorkspaces.id))
-      .where(eq(goatWorkspaces.workosOrganizationId, membership.organizationId))
+      .from(workspaces)
+      .leftJoin(workspaceBilling, eq(workspaceBilling.workspaceId, workspaces.id))
+      .where(eq(workspaces.workosOrganizationId, membership.organizationId))
       .limit(1);
     const workspace = rows[0];
     if (!workspace) continue;
@@ -487,7 +485,7 @@ export async function adoptGoatWorkspaceMembershipsFromOrgs(
       workspace.plan === "pro" && workspace.stripeProductKey === GOAT_PRO_STRIPE_PRODUCT_KEY;
     if (!isPro && workspace.createdByWorkosId !== input.userWorkosId) continue;
     await db
-      .insert(goatWorkspaceMembers)
+      .insert(workspaceMembers)
       .values({
         id: `goat_wsm_${randomUUID()}`,
         workspaceId: workspace.id,
@@ -500,24 +498,24 @@ export async function adoptGoatWorkspaceMembershipsFromOrgs(
   return adopted;
 }
 
-export async function createGoatBrain(
+export async function createBrain(
   input: {
     workspaceId: string;
     name: string;
     description?: string | null;
-    visibility: GoatBrainVisibility;
+    visibility: BrainVisibility;
     createdByWorkosId: string;
   },
   options: { db?: DbClient } = {},
-): Promise<GoatBrain> {
+): Promise<Brain> {
   const db = options.db ?? getDb();
   const name = input.name.trim();
   if (!name) throw new Error("Brain name cannot be empty.");
-  const baseSlug = normalizeGoatBrainId(name) || "brain";
+  const baseSlug = normalizeBrainId(name) || "brain";
   const existing = await db
-    .select({ slug: goatBrains.slug })
-    .from(goatBrains)
-    .where(eq(goatBrains.workspaceId, input.workspaceId));
+    .select({ slug: brains.slug })
+    .from(brains)
+    .where(eq(brains.workspaceId, input.workspaceId));
   const used = new Set(existing.map((row: { slug: string }) => row.slug));
   let slug = baseSlug;
   for (let i = 2; used.has(slug); i++) {
@@ -526,9 +524,9 @@ export async function createGoatBrain(
   }
 
   const rows = await db
-    .insert(goatBrains)
+    .insert(brains)
     .values({
-      id: newGoatBrainId(slug),
+      id: newBrainId(slug),
       workspaceId: input.workspaceId,
       name,
       slug,
@@ -539,13 +537,13 @@ export async function createGoatBrain(
     .returning();
   const brain = rows[0];
   if (!brain) throw new Error("Failed to create brain.");
-  await seedDefaultGoatBrainFolders(
+  await seedDefaultBrainFolders(
     { brainRef: brain.id, userWorkosId: input.createdByWorkosId },
     { db },
   );
   if (input.visibility === "restricted") {
     await db
-      .insert(goatBrainMembers)
+      .insert(brainMembers)
       .values({
         id: `goat_brm_${randomUUID()}`,
         brainId: brain.id,
@@ -557,19 +555,19 @@ export async function createGoatBrain(
   return brain;
 }
 
-export async function updateGoatBrainVisibility(
-  input: { brainRef: string; visibility: GoatBrainVisibility; actingUserWorkosId: string },
+export async function updateBrainVisibility(
+  input: { brainRef: string; visibility: BrainVisibility; actingUserWorkosId: string },
   options: { db?: DbClient } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
   await db
-    .update(goatBrains)
+    .update(brains)
     .set({ visibility: input.visibility, updatedAt: new Date() })
-    .where(eq(goatBrains.id, input.brainRef));
+    .where(eq(brains.id, input.brainRef));
   if (input.visibility === "restricted") {
     // The acting admin keeps access so the brain never becomes orphaned.
     await db
-      .insert(goatBrainMembers)
+      .insert(brainMembers)
       .values({
         id: `goat_brm_${randomUUID()}`,
         brainId: input.brainRef,
@@ -582,59 +580,59 @@ export async function updateGoatBrainVisibility(
 
 // Read live at ingest time so an owner toggling enrichment off applies to
 // already-queued jobs. Missing rows fail closed.
-export async function getGoatBrainEnrichmentEnabled(
+export async function getBrainEnrichmentEnabled(
   brainRef: string,
   db: DbClient = getDb(),
 ): Promise<boolean> {
   const rows = await db
-    .select({ enrichmentEnabled: goatBrains.enrichmentEnabled })
-    .from(goatBrains)
-    .where(eq(goatBrains.id, brainRef))
+    .select({ enrichmentEnabled: brains.enrichmentEnabled })
+    .from(brains)
+    .where(eq(brains.id, brainRef))
     .limit(1);
   return rows[0]?.enrichmentEnabled ?? false;
 }
 
-export async function updateGoatBrainEnrichmentEnabled(
+export async function updateBrainEnrichmentEnabled(
   input: { brainRef: string; enabled: boolean },
   options: { db?: DbClient } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
   const rows = await db
-    .update(goatBrains)
+    .update(brains)
     .set({ enrichmentEnabled: input.enabled, updatedAt: new Date() })
-    .where(eq(goatBrains.id, input.brainRef))
-    .returning({ id: goatBrains.id });
+    .where(eq(brains.id, input.brainRef))
+    .returning({ id: brains.id });
   if (rows.length === 0) throw new Error("Brain not found.");
 }
 
 // Read live at ingest time (like enrichment) so switching a brain's tier
 // applies to already-queued jobs. Missing rows fail to the included tier.
-export async function getGoatBrainIntelligence(
+export async function getBrainIntelligence(
   brainRef: string,
   db: DbClient = getDb(),
-): Promise<GoatBrainIntelligence> {
+): Promise<BrainIntelligence> {
   const rows = await db
-    .select({ intelligence: goatBrains.intelligence })
-    .from(goatBrains)
-    .where(eq(goatBrains.id, brainRef))
+    .select({ intelligence: brains.intelligence })
+    .from(brains)
+    .where(eq(brains.id, brainRef))
     .limit(1);
   return rows[0]?.intelligence ?? "basic";
 }
 
-export async function updateGoatBrainIntelligence(
-  input: { brainRef: string; intelligence: GoatBrainIntelligence },
+export async function updateBrainIntelligence(
+  input: { brainRef: string; intelligence: BrainIntelligence },
   options: { db?: DbClient } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
   const rows = await db
-    .update(goatBrains)
+    .update(brains)
     .set({ intelligence: input.intelligence, updatedAt: new Date() })
-    .where(eq(goatBrains.id, input.brainRef))
-    .returning({ id: goatBrains.id });
+    .where(eq(brains.id, input.brainRef))
+    .returning({ id: brains.id });
   if (rows.length === 0) throw new Error("Brain not found.");
 }
 
-export async function replaceGoatBrainMembers(
+export async function replaceBrainMembers(
   input: { brainRef: string; userWorkosIds: string[]; addedByWorkosId: string },
   options: { db?: DbClient } = {},
 ): Promise<void> {
@@ -686,69 +684,66 @@ export async function replaceGoatBrainMembers(
   `);
 }
 
-export async function listGoatBrainMemberIds(
+export async function listBrainMemberIds(
   brainRef: string,
   options: { db?: DbClient } = {},
 ): Promise<string[]> {
   const db = options.db ?? getDb();
   const rows = await db
-    .select({ userWorkosId: goatBrainMembers.userWorkosId })
-    .from(goatBrainMembers)
-    .where(eq(goatBrainMembers.brainId, brainRef));
+    .select({ userWorkosId: brainMembers.userWorkosId })
+    .from(brainMembers)
+    .where(eq(brainMembers.brainId, brainRef));
   return rows.map((row: { userWorkosId: string }) => row.userWorkosId);
 }
 
-export async function listGoatWorkspaceMembers(
+export async function listWorkspaceMembers(
   workspaceId: string,
   options: { db?: DbClient } = {},
-): Promise<GoatWorkspaceMemberWithUser[]> {
+): Promise<WorkspaceMemberWithUser[]> {
   const db = options.db ?? getDb();
   const rows = await db
     .select({
       member: {
-        id: goatWorkspaceMembers.id,
-        role: goatWorkspaceMembers.role,
-        createdAt: goatWorkspaceMembers.createdAt,
+        id: workspaceMembers.id,
+        role: workspaceMembers.role,
+        createdAt: workspaceMembers.createdAt,
       },
-      user: goatUsers,
+      user: users,
     })
-    .from(goatWorkspaceMembers)
-    .innerJoin(goatUsers, eq(goatUsers.workosUserId, goatWorkspaceMembers.userWorkosId))
-    .where(eq(goatWorkspaceMembers.workspaceId, workspaceId))
-    .orderBy(asc(goatWorkspaceMembers.createdAt));
+    .from(workspaceMembers)
+    .innerJoin(users, eq(users.workosUserId, workspaceMembers.userWorkosId))
+    .where(eq(workspaceMembers.workspaceId, workspaceId))
+    .orderBy(asc(workspaceMembers.createdAt));
   return rows;
 }
 
-export async function countGoatWorkspaceMembers(
+export async function countWorkspaceMembers(
   workspaceId: string,
   options: { db?: DbClient } = {},
 ): Promise<number> {
   const db = options.db ?? getDb();
   const rows = await db
     .select({ total: sql<number>`count(*)::integer` })
-    .from(goatWorkspaceMembers)
-    .where(eq(goatWorkspaceMembers.workspaceId, workspaceId));
+    .from(workspaceMembers)
+    .where(eq(workspaceMembers.workspaceId, workspaceId));
   return Number(rows[0]?.total ?? 0);
 }
 
-export async function removeGoatWorkspaceMember(
+export async function removeWorkspaceMember(
   input: { workspaceId: string; userWorkosId: string },
   options: { db?: DbClient } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
   // Drop the member's restricted-brain access in this workspace first.
-  const brains = await db
-    .select({ id: goatBrains.id })
-    .from(goatBrains)
-    .where(eq(goatBrains.workspaceId, input.workspaceId));
-  for (const brain of brains) {
+  const workspaceBrains = await db
+    .select({ id: brains.id })
+    .from(brains)
+    .where(eq(brains.workspaceId, input.workspaceId));
+  for (const brain of workspaceBrains) {
     await db
-      .delete(goatBrainMembers)
+      .delete(brainMembers)
       .where(
-        and(
-          eq(goatBrainMembers.brainId, brain.id),
-          eq(goatBrainMembers.userWorkosId, input.userWorkosId),
-        ),
+        and(eq(brainMembers.brainId, brain.id), eq(brainMembers.userWorkosId, input.userWorkosId)),
       );
   }
   // Detach the member's personal-integration brain sources in this workspace:
@@ -766,89 +761,89 @@ export async function removeGoatWorkspaceMember(
       AND i.workspace_id IS NULL
   `);
   await db
-    .delete(goatWorkspaceMembers)
+    .delete(workspaceMembers)
     .where(
       and(
-        eq(goatWorkspaceMembers.workspaceId, input.workspaceId),
-        eq(goatWorkspaceMembers.userWorkosId, input.userWorkosId),
+        eq(workspaceMembers.workspaceId, input.workspaceId),
+        eq(workspaceMembers.userWorkosId, input.userWorkosId),
       ),
     );
 }
 
-export async function setGoatWorkspaceOrganizationId(
+export async function setWorkspaceOrganizationId(
   input: { workspaceId: string; workosOrganizationId: string },
   options: { db?: DbClient } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
   await db
-    .update(goatWorkspaces)
+    .update(workspaces)
     .set({ workosOrganizationId: input.workosOrganizationId, updatedAt: new Date() })
-    .where(eq(goatWorkspaces.id, input.workspaceId));
+    .where(eq(workspaces.id, input.workspaceId));
 }
 
-export async function updateGoatWorkspaceName(
+export async function updateWorkspaceName(
   input: { workspaceId: string; name: string },
   options: { db?: DbClient } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
   await db
-    .update(goatWorkspaces)
+    .update(workspaces)
     .set({ name: input.name, updatedAt: new Date() })
-    .where(eq(goatWorkspaces.id, input.workspaceId));
+    .where(eq(workspaces.id, input.workspaceId));
 }
 
-export async function updateGoatWorkspaceNameAndSlug(
+export async function updateWorkspaceNameAndSlug(
   input: { workspaceId: string; name: string; slug: string | null },
   options: { db?: DbClient } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
   await db
-    .update(goatWorkspaces)
+    .update(workspaces)
     .set({ name: input.name, slug: input.slug, updatedAt: new Date() })
-    .where(eq(goatWorkspaces.id, input.workspaceId));
+    .where(eq(workspaces.id, input.workspaceId));
 }
 
 // A slug is free when no other workspace holds it. The excludeWorkspaceId keeps a
 // workspace's own slug from reading as "taken" while it edits.
-export async function isGoatWorkspaceSlugAvailable(
+export async function isWorkspaceSlugAvailable(
   input: { slug: string; excludeWorkspaceId?: string },
   options: { db?: DbClient } = {},
 ): Promise<boolean> {
   const db = options.db ?? getDb();
   const rows = await db
-    .select({ id: goatWorkspaces.id })
-    .from(goatWorkspaces)
-    .where(eq(goatWorkspaces.slug, input.slug))
+    .select({ id: workspaces.id })
+    .from(workspaces)
+    .where(eq(workspaces.slug, input.slug))
     .limit(2);
   return rows.every((row: { id: string }) => row.id === input.excludeWorkspaceId);
 }
 
-export async function markGoatUserOnboarded(
+export async function markUserOnboarded(
   userWorkosId: string,
   options: { db?: DbClient } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
   const now = new Date();
   await db
-    .update(goatUsers)
+    .update(users)
     .set({ onboardedAt: now, updatedAt: now })
-    .where(eq(goatUsers.workosUserId, userWorkosId));
+    .where(eq(users.workosUserId, userWorkosId));
 }
 
-export async function getGoatOnboarding(
+export async function getOnboarding(
   userWorkosId: string,
   options: { db?: DbClient } = {},
-): Promise<GoatOnboarding | null> {
+): Promise<Onboarding | null> {
   const db = options.db ?? getDb();
   const [row] = await db
     .select()
-    .from(goatOnboarding)
-    .where(eq(goatOnboarding.userWorkosId, userWorkosId))
+    .from(onboarding)
+    .where(eq(onboarding.userWorkosId, userWorkosId))
     .limit(1);
   return row ?? null;
 }
 
-export async function upsertGoatOnboarding(
+export async function upsertOnboarding(
   input: {
     userWorkosId: string;
     workspaceId?: string | null;
@@ -873,7 +868,7 @@ export async function upsertGoatOnboarding(
   if (input.contextUrls !== undefined) set.contextUrls = input.contextUrls;
 
   await db
-    .insert(goatOnboarding)
+    .insert(onboarding)
     .values({
       userWorkosId: input.userWorkosId,
       workspaceId: input.workspaceId ?? null,
@@ -885,5 +880,5 @@ export async function upsertGoatOnboarding(
       createdAt: now,
       updatedAt: now,
     })
-    .onConflictDoUpdate({ target: goatOnboarding.userWorkosId, set });
+    .onConflictDoUpdate({ target: onboarding.userWorkosId, set });
 }

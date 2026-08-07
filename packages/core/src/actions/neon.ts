@@ -3,18 +3,18 @@ import type { JSONSchema7, ToolExecutionOptions, ToolSet } from "ai";
 import Ajv, { type AnySchema } from "ajv";
 import {
   GOAT_NEON_MCP_ENDPOINT_URL,
-  getGoatNeonIntegrationState,
-  loadGoatNeonMcpWorkerConnection,
+  getNeonIntegrationState,
+  loadNeonMcpWorkerConnection,
 } from "../integrations/neon-mcp";
-import { effectiveCapabilityMode, type GoatCapabilityId, providerCapability } from "./capabilities";
+import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  ActionAuthError,
+  type ActionExecuteContext,
+  ActionInvalidParamsError,
+  ActionPermissionError,
+  type ActionProviderCatalog,
   GOAT_ACTION_EFFECTS_READ,
-  GoatActionAuthError,
-  type GoatActionExecuteContext,
-  GoatActionInvalidParamsError,
-  GoatActionPermissionError,
-  type GoatActionProviderCatalog,
-  type ResolvedGoatAction,
+  type ResolvedAction,
 } from "./types";
 
 type NeonToolDefinition = {
@@ -38,7 +38,7 @@ const NEON_ACTION_CAPABILITIES = {
   get_database_tables: "read",
   describe_table_schema: "read",
   run_sql: "query",
-} as const satisfies Record<string, GoatCapabilityId>;
+} as const satisfies Record<string, CapabilityId>;
 
 type NeonActionToolName = keyof typeof NEON_ACTION_CAPABILITIES;
 
@@ -54,8 +54,8 @@ const neonSchemaValidator = new Ajv({ allErrors: true, strict: false });
 
 export async function resolveNeonActions(
   userWorkosId: string,
-): Promise<GoatActionProviderCatalog | null> {
-  const state = await getGoatNeonIntegrationState(userWorkosId);
+): Promise<ActionProviderCatalog | null> {
+  const state = await getNeonIntegrationState(userWorkosId);
   const integrationId = state.integrationId;
   if (!state.connected || !integrationId) return null;
 
@@ -63,7 +63,7 @@ export async function resolveNeonActions(
   const queryEnabled = effectiveCapabilityMode("neon", "query", state.capabilityModes) !== "off";
   if (!readEnabled && !queryEnabled) return null;
 
-  const connection = await loadGoatNeonMcpWorkerConnection({
+  const connection = await loadNeonMcpWorkerConnection({
     userWorkosId,
     onAuthorizationRequired: () => {
       throw neonAuthError();
@@ -82,7 +82,7 @@ export async function resolveNeonActions(
     await client.close().catch(() => {});
   }
 
-  const actions: ResolvedGoatAction[] = definitions.flatMap((definition) => {
+  const actions: ResolvedAction[] = definitions.flatMap((definition) => {
     if (!isNeonActionToolName(definition.name)) return [];
     const remoteName = definition.name;
     const capability = NEON_ACTION_CAPABILITIES[remoteName];
@@ -127,9 +127,9 @@ export async function resolveNeonActions(
 }
 
 function permissionAnnotation(
-  capabilityId: GoatCapabilityId,
+  capabilityId: CapabilityId,
   state: { integrationId: string; capabilityModes: unknown },
-): Pick<ResolvedGoatAction, "permissionMode" | "permission"> {
+): Pick<ResolvedAction, "permissionMode" | "permission"> {
   if (effectiveCapabilityMode("neon", capabilityId, state.capabilityModes) !== "ask") {
     return { permissionMode: "on" };
   }
@@ -146,27 +146,27 @@ function permissionAnnotation(
 
 async function executeNeonAction(input: {
   remoteName: NeonActionToolName;
-  expectedCapability: GoatCapabilityId;
+  expectedCapability: CapabilityId;
   expectedIntegrationId: string;
   params: Record<string, unknown>;
-  context: GoatActionExecuteContext;
+  context: ActionExecuteContext;
 }) {
-  const state = await getGoatNeonIntegrationState(input.context.userWorkosId);
+  const state = await getNeonIntegrationState(input.context.userWorkosId);
   if (!state.connected || !state.integrationId) throw neonAuthError();
   if (state.integrationId !== input.expectedIntegrationId) {
-    throw new GoatActionPermissionError(
+    throw new ActionPermissionError(
       "neon",
       "The Neon connection changed before this action could run. Retry so Goat can use the current connection and permission.",
     );
   }
   if (effectiveCapabilityMode("neon", input.expectedCapability, state.capabilityModes) === "off") {
-    throw new GoatActionPermissionError(
+    throw new ActionPermissionError(
       "neon",
       `${input.expectedCapability === "query" ? "Querying Neon databases" : "Inspecting Neon structure"} is turned off. It can be changed under Settings → Integrations.`,
     );
   }
 
-  const connection = await loadGoatNeonMcpWorkerConnection({
+  const connection = await loadNeonMcpWorkerConnection({
     userWorkosId: input.context.userWorkosId,
     onAuthorizationRequired: () => {
       throw neonAuthError();
@@ -174,7 +174,7 @@ async function executeNeonAction(input: {
   });
   if (!connection.ok) throw neonAuthError();
   if (connection.integrationId !== input.expectedIntegrationId) {
-    throw new GoatActionPermissionError(
+    throw new ActionPermissionError(
       "neon",
       "The Neon connection changed before this action could run. Retry so Goat can use the current connection and permission.",
     );
@@ -195,7 +195,7 @@ async function executeNeonAction(input: {
       !hasSupportedNeonSafetyContract(currentDefinition) ||
       NEON_ACTION_CAPABILITIES[currentDefinition.name] !== input.expectedCapability
     ) {
-      throw new GoatActionPermissionError(
+      throw new ActionPermissionError(
         "neon",
         `Neon changed the safety contract for "${input.remoteName}", so Goat will not run it.`,
       );
@@ -205,7 +205,7 @@ async function executeNeonAction(input: {
       neonInputSchema(currentDefinition.inputSchema) as AnySchema,
     );
     if (!validate(input.params)) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `The parameters for "${input.remoteName}" do not match Neon's current schema.`,
       );
     }
@@ -249,21 +249,21 @@ function createNeonClient(authProvider: OAuthClientProvider) {
 
 function validateNeonReadOnlySql(value: unknown) {
   if (typeof value !== "string" || !value.trim()) {
-    throw new GoatActionInvalidParamsError('"sql" is required and must be a non-empty string.');
+    throw new ActionInvalidParamsError('"sql" is required and must be a non-empty string.');
   }
   if (value.length > MAX_NEON_SQL_CHARS) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"sql" must be ${MAX_NEON_SQL_CHARS.toLocaleString("en-US")} characters or fewer.`,
     );
   }
   const firstKeyword = firstSqlKeyword(value);
   if (firstKeyword !== "select" && firstKeyword !== "with" && firstKeyword !== "show") {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       '"sql" must begin with SELECT, WITH, or SHOW. Neon also enforces a read-only transaction.',
     );
   }
   if (NEON_UNSAFE_SQL_FUNCTION_PATTERN.test(value)) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       '"sql" calls an administrative or side-effecting Postgres function that Goat does not permit.',
     );
   }
@@ -325,7 +325,7 @@ function neonInputSchema(value: Record<string, unknown>): JSONSchema7 & Record<s
 }
 
 function neonAuthError() {
-  return new GoatActionAuthError(
+  return new ActionAuthError(
     "auth_expired",
     "neon",
     "The Neon connection needs reauthorization; reconnect Neon in Settings → Integrations.",

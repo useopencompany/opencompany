@@ -2,7 +2,7 @@ const GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh/v1";
 
 export type FetchLike = typeof fetch;
 
-export type GoatBrainUsageEntry = {
+export type BrainUsageEntry = {
   model: string;
   operation: "embeddings" | "chat";
   inputTokens: number;
@@ -18,7 +18,7 @@ export type GatewayConfig = {
   chatModel?: string;
   timeoutMs?: number;
   fetch?: FetchLike;
-  onUsage?: (entry: GoatBrainUsageEntry) => void;
+  onUsage?: (entry: BrainUsageEntry) => void;
   reporting?: {
     user?: string;
     tags?: readonly string[];
@@ -42,7 +42,7 @@ export function createGateway(config: GatewayConfig): Gateway {
     ...reportingHeaders(config.reporting),
   };
 
-  const report = (model: string, operation: GoatBrainUsageEntry["operation"], body: unknown) => {
+  const report = (model: string, operation: BrainUsageEntry["operation"], body: unknown) => {
     if (!config.onUsage) return;
     try {
       config.onUsage(parseUsage(model, operation, body));
@@ -107,7 +107,7 @@ async function fetchWithTimeout(
   url: string,
   init: RequestInit,
   timeoutMs: number,
-  operation: GoatBrainUsageEntry["operation"],
+  operation: BrainUsageEntry["operation"],
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -147,9 +147,9 @@ function reportingHeaders(reporting: GatewayConfig["reporting"]): Record<string,
 
 function parseUsage(
   model: string,
-  operation: GoatBrainUsageEntry["operation"],
+  operation: BrainUsageEntry["operation"],
   body: unknown,
-): GoatBrainUsageEntry {
+): BrainUsageEntry {
   const record = isRecord(body) ? body : {};
   const usage = isRecord(record.usage) ? record.usage : {};
   const inputTokens = numberOr(usage.prompt_tokens ?? usage.input_tokens, 0);

@@ -9,7 +9,7 @@ import { join } from "node:path";
 export const DEFAULT_APP_HTTPS_PORT = "3443";
 export const GOAT_HTTPS_DISABLED_VALUES = new Set(["1", "true", "yes", "on"]);
 
-export function goatHttpsDisabled(env = process.env) {
+export function httpsDisabled(env = process.env) {
   return GOAT_HTTPS_DISABLED_VALUES.has(
     String(env.APP_HTTPS_DISABLED ?? "")
       .trim()
@@ -17,11 +17,11 @@ export function goatHttpsDisabled(env = process.env) {
   );
 }
 
-export function goatHttpsPort(env = process.env) {
+export function httpsPort(env = process.env) {
   return String(env.APP_HTTPS_PORT?.trim() || DEFAULT_APP_HTTPS_PORT);
 }
 
-export function goatHttpsOrigin(env = process.env) {
+export function httpsOrigin(env = process.env) {
   const configured = env.NEXT_PUBLIC_APP_URL?.trim();
   if (configured?.startsWith("https://localhost")) {
     try {
@@ -30,7 +30,7 @@ export function goatHttpsOrigin(env = process.env) {
       // Fall through to the default port.
     }
   }
-  return `https://localhost:${goatHttpsPort(env)}`;
+  return `https://localhost:${httpsPort(env)}`;
 }
 
 export function caddyState() {
@@ -73,17 +73,17 @@ export function trustCaddyLocalCA({ stdio = "inherit" } = {}) {
   });
 }
 
-export async function startGoatLocalHttpsProxy({
+export async function startLocalHttpsProxy({
   targetPort,
   env = process.env,
   onWarning = console.warn,
 } = {}) {
-  if (goatHttpsDisabled(env)) {
+  if (httpsDisabled(env)) {
     onWarning("\nGoat local HTTPS is disabled by APP_HTTPS_DISABLED=1.\n");
     return null;
   }
   if (!targetPort) {
-    throw new Error("startGoatLocalHttpsProxy requires targetPort.");
+    throw new Error("startLocalHttpsProxy requires targetPort.");
   }
 
   const state = caddyState();
@@ -95,14 +95,14 @@ export async function startGoatLocalHttpsProxy({
     return null;
   }
 
-  const origin = goatHttpsOrigin(env);
+  const origin = httpsOrigin(env);
   const url = new URL(origin);
   const host = url.hostname || "localhost";
   const port = url.port || "443";
   const configDir = join(".context", "caddy");
   const configPath = join(configDir, "goat.Caddyfile");
   mkdirSync(configDir, { recursive: true });
-  writeFileSync(configPath, goatCaddyfile({ host, port, targetPort }));
+  writeFileSync(configPath, caddyfile({ host, port, targetPort }));
 
   const child = spawn("caddy", ["run", "--config", configPath], {
     stdio: ["ignore", "ignore", "pipe"],
@@ -130,7 +130,7 @@ export async function startGoatLocalHttpsProxy({
   };
 }
 
-function goatCaddyfile({ host, port, targetPort }) {
+function caddyfile({ host, port, targetPort }) {
   return `{
 \tskip_install_trust
 }

@@ -5,9 +5,9 @@ const mocks = vi.hoisted(() => ({
   getApproval: vi.fn(),
 }));
 
-vi.mock("@/lib/auth", () => ({ currentGoatUser: mocks.currentUser }));
+vi.mock("@/lib/auth", () => ({ currentUser: mocks.currentUser }));
 vi.mock("@opencompany/db/capabilities", () => ({
-  getGoatCapabilityApproval: mocks.getApproval,
+  getCapabilityApproval: mocks.getApproval,
 }));
 
 import { GET } from "./route";

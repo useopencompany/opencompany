@@ -1,55 +1,55 @@
 import { describe, expect, it } from "vitest";
 import {
   GOAT_GMAIL_INSTRUCTIONS_MAX_LENGTH,
-  goatGmailEventTypeForDirection,
-  goatGmailRouteMatchesEvent,
-  goatGmailSelectedEventTypes,
-  parseGoatGmailBrainSourceConfig,
-  sanitizeGoatGmailInstructions,
+  gmailEventTypeForDirection,
+  gmailRouteMatchesEvent,
+  gmailSelectedEventTypes,
+  parseGmailBrainSourceConfig,
+  sanitizeGmailInstructions,
 } from "./gmail";
 
 describe("Goat Gmail brain source config", () => {
   it("keeps missing events as all events for backwards compatibility", () => {
-    const config = parseGoatGmailBrainSourceConfig({});
+    const config = parseGmailBrainSourceConfig({});
 
-    expect(goatGmailSelectedEventTypes(config)).toBeNull();
-    expect(goatGmailRouteMatchesEvent(config, "email_received")).toBe(true);
-    expect(goatGmailRouteMatchesEvent(config, "email_sent")).toBe(true);
+    expect(gmailSelectedEventTypes(config)).toBeNull();
+    expect(gmailRouteMatchesEvent(config, "email_received")).toBe(true);
+    expect(gmailRouteMatchesEvent(config, "email_sent")).toBe(true);
   });
 
   it("preserves an explicit empty event selection", () => {
-    const config = parseGoatGmailBrainSourceConfig({ events: [] });
+    const config = parseGmailBrainSourceConfig({ events: [] });
 
-    expect(goatGmailSelectedEventTypes(config)).toEqual(new Set());
-    expect(goatGmailRouteMatchesEvent(config, "email_received")).toBe(false);
+    expect(gmailSelectedEventTypes(config)).toEqual(new Set());
+    expect(gmailRouteMatchesEvent(config, "email_received")).toBe(false);
   });
 
   it("parses selected event ids and drops unknown events", () => {
-    const config = parseGoatGmailBrainSourceConfig({
+    const config = parseGmailBrainSourceConfig({
       events: [{ id: "email_received" }, "email_sent", { id: "unknown" }],
     });
 
-    expect(goatGmailSelectedEventTypes(config)).toEqual(new Set(["email_received", "email_sent"]));
+    expect(gmailSelectedEventTypes(config)).toEqual(new Set(["email_received", "email_sent"]));
   });
 
   it("trims and caps the ingestion instructions", () => {
-    expect(sanitizeGoatGmailInstructions("  only investor emails  ")).toBe("only investor emails");
-    expect(sanitizeGoatGmailInstructions("   ")).toBeUndefined();
-    expect(sanitizeGoatGmailInstructions(42)).toBeUndefined();
-    expect(sanitizeGoatGmailInstructions("x".repeat(5000))).toHaveLength(
+    expect(sanitizeGmailInstructions("  only investor emails  ")).toBe("only investor emails");
+    expect(sanitizeGmailInstructions("   ")).toBeUndefined();
+    expect(sanitizeGmailInstructions(42)).toBeUndefined();
+    expect(sanitizeGmailInstructions("x".repeat(5000))).toHaveLength(
       GOAT_GMAIL_INSTRUCTIONS_MAX_LENGTH,
     );
   });
 
   it("drops empty instructions when parsing config", () => {
-    expect(parseGoatGmailBrainSourceConfig({ instructions: "  " })).toEqual({});
-    expect(parseGoatGmailBrainSourceConfig({ instructions: "keep customer emails" })).toEqual({
+    expect(parseGmailBrainSourceConfig({ instructions: "  " })).toEqual({});
+    expect(parseGmailBrainSourceConfig({ instructions: "keep customer emails" })).toEqual({
       instructions: "keep customer emails",
     });
   });
 
   it("maps message directions to event types", () => {
-    expect(goatGmailEventTypeForDirection("sent")).toBe("email_sent");
-    expect(goatGmailEventTypeForDirection("received")).toBe("email_received");
+    expect(gmailEventTypeForDirection("sent")).toBe("email_sent");
+    expect(gmailEventTypeForDirection("received")).toBe("email_received");
   });
 });

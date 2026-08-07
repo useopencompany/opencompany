@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  createGoatWorkflow,
-  goatWorkflowStepsWithLegacyFallback,
-  validateGoatWorkflowFields,
+  createWorkflow,
+  validateWorkflowFields,
+  workflowStepsWithLegacyFallback,
 } from "@/lib/workflows";
 
 const dbMocks = vi.hoisted(() => ({
@@ -36,10 +36,10 @@ beforeEach(() => {
   dbMocks.select.mockImplementation(() => createSelectBuilder(dbMocks.existingWorkflowRows));
 });
 
-describe("createGoatWorkflow", () => {
+describe("createWorkflow", () => {
   it("creates new workflows as active by default", async () => {
     await expect(
-      createGoatWorkflow({
+      createWorkflow({
         workspaceId: "workspace_1",
         createdByWorkosId: "user_1",
         name: "Weekly update",
@@ -75,17 +75,17 @@ describe("createGoatWorkflow", () => {
   });
 });
 
-describe("validateGoatWorkflowFields", () => {
+describe("validateWorkflowFields", () => {
   it("requires between one and twenty steps", () => {
     expect(
-      validateGoatWorkflowFields({
+      validateWorkflowFields({
         name: "Workflow",
         description: "",
         steps: [],
       }),
     ).toMatch(/at least one/i);
     expect(
-      validateGoatWorkflowFields({
+      validateWorkflowFields({
         name: "Workflow",
         description: "",
         steps: Array.from({ length: 21 }, (_, index) => ({
@@ -98,35 +98,35 @@ describe("validateGoatWorkflowFields", () => {
 
   it("validates step titles, instructions, models, and IDs", () => {
     expect(
-      validateGoatWorkflowFields({
+      validateWorkflowFields({
         name: "Workflow",
         description: "",
         steps: [{ ...validStep, title: "x".repeat(121) }],
       }),
     ).toMatch(/titles/);
     expect(
-      validateGoatWorkflowFields({
+      validateWorkflowFields({
         name: "Workflow",
         description: "",
         steps: [{ ...validStep, instructions: "x".repeat(20_001) }],
       }),
     ).toMatch(/20,000/);
     expect(
-      validateGoatWorkflowFields({
+      validateWorkflowFields({
         name: "Workflow",
         description: "",
         steps: [{ ...validStep, model: "future-model" }],
       }),
     ).toMatch(/model/);
     expect(
-      validateGoatWorkflowFields({
+      validateWorkflowFields({
         name: "Workflow",
         description: "",
         steps: [{ ...validStep, model: "codex", runtimeModel: "anthropic/claude-sonnet-5" }],
       }),
     ).toMatch(/coding model/);
     expect(
-      validateGoatWorkflowFields({
+      validateWorkflowFields({
         name: "Workflow",
         description: "",
         steps: [
@@ -140,7 +140,7 @@ describe("validateGoatWorkflowFields", () => {
       }),
     ).toMatch(/effort/);
     expect(
-      validateGoatWorkflowFields({
+      validateWorkflowFields({
         name: "Workflow",
         description: "",
         steps: [validStep, { ...validStep }],
@@ -150,7 +150,7 @@ describe("validateGoatWorkflowFields", () => {
 
   it("allows active workflows to be edited before every step has instructions", () => {
     expect(
-      validateGoatWorkflowFields({
+      validateWorkflowFields({
         name: "Workflow",
         description: "",
         steps: [{ ...validStep, instructions: " " }],
@@ -158,7 +158,7 @@ describe("validateGoatWorkflowFields", () => {
       }),
     ).toBeNull();
     expect(
-      validateGoatWorkflowFields({
+      validateWorkflowFields({
         name: "Workflow",
         description: "",
         steps: [
@@ -169,7 +169,7 @@ describe("validateGoatWorkflowFields", () => {
       }),
     ).toBeNull();
     expect(
-      validateGoatWorkflowFields({
+      validateWorkflowFields({
         name: "Workflow",
         description: "",
         steps: [validStep, { ...validStep, id: "step-2" }],
@@ -180,7 +180,7 @@ describe("validateGoatWorkflowFields", () => {
 
   it("validates schedule triggers", () => {
     expect(
-      validateGoatWorkflowFields({
+      validateWorkflowFields({
         name: "Workflow",
         description: "",
         steps: [validStep],
@@ -193,7 +193,7 @@ describe("validateGoatWorkflowFields", () => {
       }),
     ).toBeNull();
     expect(
-      validateGoatWorkflowFields({
+      validateWorkflowFields({
         name: "Workflow",
         description: "",
         steps: [validStep],
@@ -208,10 +208,10 @@ describe("validateGoatWorkflowFields", () => {
   });
 });
 
-describe("goatWorkflowStepsWithLegacyFallback", () => {
+describe("workflowStepsWithLegacyFallback", () => {
   it("synthesizes one step for a legacy instructions row", () => {
     expect(
-      goatWorkflowStepsWithLegacyFallback({
+      workflowStepsWithLegacyFallback({
         slug: "weekly-update",
         steps: [],
         model: "sonnet-5",
@@ -229,7 +229,7 @@ describe("goatWorkflowStepsWithLegacyFallback", () => {
 
   it("does not invent a step for an empty legacy draft", () => {
     expect(
-      goatWorkflowStepsWithLegacyFallback({
+      workflowStepsWithLegacyFallback({
         slug: "empty",
         steps: [],
         model: "",
@@ -240,7 +240,7 @@ describe("goatWorkflowStepsWithLegacyFallback", () => {
 
   it("prefers native steps when legacy columns disagree", () => {
     expect(
-      goatWorkflowStepsWithLegacyFallback({
+      workflowStepsWithLegacyFallback({
         slug: "weekly-update",
         steps: [validStep],
         model: "sonnet-5",
@@ -251,7 +251,7 @@ describe("goatWorkflowStepsWithLegacyFallback", () => {
 
   it("preserves a model-only legacy draft", () => {
     expect(
-      goatWorkflowStepsWithLegacyFallback({
+      workflowStepsWithLegacyFallback({
         slug: "weekly-update",
         steps: [],
         model: "sonnet-5",
@@ -269,7 +269,7 @@ describe("goatWorkflowStepsWithLegacyFallback", () => {
 
   it("keeps native steps when legacy columns contain their old mirror", () => {
     expect(
-      goatWorkflowStepsWithLegacyFallback({
+      workflowStepsWithLegacyFallback({
         slug: "weekly-update",
         steps: [validStep],
         model: validStep.model,

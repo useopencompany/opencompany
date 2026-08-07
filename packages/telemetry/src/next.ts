@@ -7,14 +7,14 @@ import { OTLPHttpJsonTraceExporter, registerOTel } from "@vercel/otel";
 import {
   GOAT_OBSERVABILITY_SERVICE_NAME,
   GOAT_OTEL_METRIC_EXPORT_INTERVAL_MS,
-  isGoatObservabilityEnabled,
+  isObservabilityEnabled,
 } from ".";
 import { parseOtlpHeaders } from "./node";
 
 let registered = false;
 
-export function registerGoatNextObservability(input: { serviceName?: string } = {}) {
-  if (registered || !isGoatObservabilityEnabled()) return;
+export function registerNextObservability(input: { serviceName?: string } = {}) {
+  if (registered || !isObservabilityEnabled()) return;
   const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim();
   if (!endpoint) return;
   registered = true;

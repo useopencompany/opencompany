@@ -1,7 +1,4 @@
-import {
-  createGoatRemoteMcpIntegration,
-  type GoatRemoteMcpProviderState,
-} from "./remote-mcp-oauth";
+import { createRemoteMcpIntegration, type RemoteMcpProviderState } from "./remote-mcp-oauth";
 
 // OAuth scope and URL configuration both force Neon's hosted MCP into read-only
 // mode. Categories narrow provider discovery before Goat applies its own strict
@@ -9,7 +6,7 @@ import {
 export const GOAT_NEON_MCP_ENDPOINT_URL =
   "https://mcp.neon.tech/mcp?readonly=true&category=projects&category=branches&category=schema&category=querying";
 
-const neonMcpIntegration = createGoatRemoteMcpIntegration({
+const neonMcpIntegration = createRemoteMcpIntegration({
   provider: "neon",
   displayName: "Neon",
   endpointUrl: GOAT_NEON_MCP_ENDPOINT_URL,
@@ -18,11 +15,11 @@ const neonMcpIntegration = createGoatRemoteMcpIntegration({
   authScope: "read",
 });
 
-export type GoatNeonProviderState = GoatRemoteMcpProviderState<"neon">;
+export type NeonProviderState = RemoteMcpProviderState<"neon">;
 
-export const getGoatNeonIntegrationState = neonMcpIntegration.getState;
-export const loadGoatNeonMcpWorkerConnection = neonMcpIntegration.loadWorkerConnection;
-export const startGoatNeonMcpOAuth = neonMcpIntegration.start;
-export const completeGoatNeonMcpOAuth = neonMcpIntegration.complete;
-export const verifyGoatNeonMcpState = neonMcpIntegration.verifyState;
-export const appendGoatNeonMcpStatus = neonMcpIntegration.appendStatus;
+export const getNeonIntegrationState = neonMcpIntegration.getState;
+export const loadNeonMcpWorkerConnection = neonMcpIntegration.loadWorkerConnection;
+export const startNeonMcpOAuth = neonMcpIntegration.start;
+export const completeNeonMcpOAuth = neonMcpIntegration.complete;
+export const verifyNeonMcpState = neonMcpIntegration.verifyState;
+export const appendNeonMcpStatus = neonMcpIntegration.appendStatus;

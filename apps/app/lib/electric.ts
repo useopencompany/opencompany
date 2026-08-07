@@ -259,7 +259,7 @@ const SHAPE_SCOPES = {
   },
 } as const;
 
-export function goatElectricBaseUrl() {
+export function electricBaseUrl() {
   return process.env.ELECTRIC_URL?.replace(/\/+$/, "") ?? null;
 }
 
@@ -270,7 +270,7 @@ export function hasInvalidElectricCloudSecretPair(input: {
   return Boolean(input.sourceId) !== Boolean(input.sourceSecret);
 }
 
-export function buildGoatElectricOriginUrl(input: {
+export function buildElectricOriginUrl(input: {
   electricUrl: string;
   requestUrl: URL;
   userWorkosId: string;
@@ -367,7 +367,7 @@ function scopedTaskChildWhere(
   };
 }
 
-export function goatElectricChatMessagesSessionId(requestUrl: URL) {
+export function electricChatMessagesSessionId(requestUrl: URL) {
   const table = requestUrl.searchParams.get("table");
   if (table !== "chat_messages" && table !== "goat.chat_messages") return null;
 
@@ -380,7 +380,7 @@ function scopedChatMessageWhere(
   requestUrl: URL,
   context: ShapeWhereContext,
 ): ShapeWhere | null {
-  const sessionId = goatElectricChatMessagesSessionId(requestUrl);
+  const sessionId = electricChatMessagesSessionId(requestUrl);
   if (!sessionId || context.authorizedChatSessionId !== sessionId) return null;
 
   return {
@@ -389,7 +389,7 @@ function scopedChatMessageWhere(
   };
 }
 
-export function goatElectricCodexChatSessionId(requestUrl: URL) {
+export function electricCodexChatSessionId(requestUrl: URL) {
   const table = requestUrl.searchParams.get("table");
   if (table !== "codex_chat_sessions" && table !== "goat.codex_chat_sessions") return null;
 
@@ -402,7 +402,7 @@ function scopedCodexChatSessionWhere(
   requestUrl: URL,
   context: ShapeWhereContext,
 ): ShapeWhere | null {
-  const sessionId = goatElectricCodexChatSessionId(requestUrl);
+  const sessionId = electricCodexChatSessionId(requestUrl);
   if (!sessionId) return scopedUserWhere(userWorkosId);
   if (context.authorizedChatSessionId !== sessionId) return null;
 
@@ -412,7 +412,7 @@ function scopedCodexChatSessionWhere(
   };
 }
 
-export function goatElectricBrainRef(requestUrl: URL) {
+export function electricBrainRef(requestUrl: URL) {
   const table = requestUrl.searchParams.get("table");
   if (!table || !BRAIN_SHAPE_TABLES.has(table)) return null;
 
@@ -427,7 +427,7 @@ function scopedBrainWhere(
   requestUrl: URL,
   context: ShapeWhereContext,
 ): ShapeWhere | null {
-  const brainRef = goatElectricBrainRef(requestUrl);
+  const brainRef = electricBrainRef(requestUrl);
   if (!brainRef || context.authorizedBrainRef !== brainRef) return null;
 
   return {

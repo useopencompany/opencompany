@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildGoatElectricOriginUrl, hasInvalidElectricCloudSecretPair } from "@/lib/electric";
+import { buildElectricOriginUrl, hasInvalidElectricCloudSecretPair } from "@/lib/electric";
 
-describe("buildGoatElectricOriginUrl", () => {
+describe("buildElectricOriginUrl", () => {
   it("scopes goat.tasks to the active workspace plus legacy private tasks", () => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com/",
       requestUrl: new URL(
         "https://goat.example.com/api/electric/v1/shape?table=goat.tasks&live=true&where=1=1",
@@ -26,7 +26,7 @@ describe("buildGoatElectricOriginUrl", () => {
   });
 
   it("rejects unknown tables", () => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL("https://goat.example.com/api/electric/v1/shape?table=users"),
       userWorkosId: "user_123",
@@ -36,7 +36,7 @@ describe("buildGoatElectricOriginUrl", () => {
   });
 
   it("scopes goat.task_messages to workspace-visible tasks and trusted task id", () => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
         "https://goat.example.com/api/electric/v1/shape?table=goat.task_messages&task_id=goat_task_1&where=1=1",
@@ -56,7 +56,7 @@ describe("buildGoatElectricOriginUrl", () => {
   });
 
   it("scopes goat.task_events to workspace-visible tasks when no task id is requested", () => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL("https://goat.example.com/api/electric/v1/shape?table=goat.task_events"),
       userWorkosId: "user_123",
@@ -73,7 +73,7 @@ describe("buildGoatElectricOriginUrl", () => {
   });
 
   it("scopes goat.chat_messages to an open chat owned by the user and trusted session id", () => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
         "https://goat.example.com/api/electric/v1/shape?table=goat.chat_messages&session_id=goat_chat_1&where=1=1",
@@ -89,7 +89,7 @@ describe("buildGoatElectricOriginUrl", () => {
   });
 
   it("rejects goat.chat_messages without a route-authorized session id", () => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
         "https://goat.example.com/api/electric/v1/shape?table=goat.chat_messages&session_id=goat_chat_1",
@@ -101,7 +101,7 @@ describe("buildGoatElectricOriginUrl", () => {
   });
 
   it("scopes goat.chat_sessions to open sessions for the authenticated WorkOS user", () => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
         "https://goat.example.com/api/electric/v1/shape?table=goat.chat_sessions&where=1=1",
@@ -117,7 +117,7 @@ describe("buildGoatElectricOriginUrl", () => {
   });
 
   it("scopes the global Codex session feed to the authenticated WorkOS user", () => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
         "https://goat.example.com/api/electric/v1/shape?table=goat.codex_chat_sessions",
@@ -133,7 +133,7 @@ describe("buildGoatElectricOriginUrl", () => {
   });
 
   it("keeps detail-scoped Codex session feeds bound to an authorized chat", () => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
         "https://goat.example.com/api/electric/v1/shape?table=goat.codex_chat_sessions&chat_session_id=goat_chat_1",
@@ -147,7 +147,7 @@ describe("buildGoatElectricOriginUrl", () => {
   });
 
   it("rejects a detail-scoped Codex session feed for a different chat", () => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
         "https://goat.example.com/api/electric/v1/shape?table=goat.codex_chat_sessions&chat_session_id=goat_chat_1",
@@ -164,7 +164,7 @@ describe("buildGoatElectricOriginUrl", () => {
     "goat.task_tool_usage",
     "goat.task_sandbox_usage",
   ])("scopes %s to workspace-visible tasks and trusted task id", (table) => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
         `https://goat.example.com/api/electric/v1/shape?table=${table}&task_id=goat_task_1&where=1=1`,
@@ -184,7 +184,7 @@ describe("buildGoatElectricOriginUrl", () => {
   });
 
   it("scopes goat.integrations to the user's personal rows plus the active workspace", () => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL("https://goat.example.com/api/electric/v1/shape?table=goat.integrations"),
       userWorkosId: "user_123",
@@ -200,7 +200,7 @@ describe("buildGoatElectricOriginUrl", () => {
   });
 
   it("scopes goat.integrations to personal rows only without a workspace context", () => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL("https://goat.example.com/api/electric/v1/shape?table=goat.integrations"),
       userWorkosId: "user_123",
@@ -218,7 +218,7 @@ describe("buildGoatElectricOriginUrl", () => {
     "goat.brain_edges",
     "goat.brain_ingest_jobs",
   ])("scopes %s to the route-authorized brain ref", (table) => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
         `https://goat.example.com/api/electric/v1/shape?table=${table}&brain_ref=goat_brain_1&where=1=1`,
@@ -237,7 +237,7 @@ describe("buildGoatElectricOriginUrl", () => {
     "goat.brain_documents without a route-authorized brain ref",
     "goat.brain_documents with a mismatched authorized brain ref",
   ])("rejects %s", (label) => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
         "https://goat.example.com/api/electric/v1/shape?table=goat.brain_documents&brain_ref=goat_brain_1",
@@ -250,7 +250,7 @@ describe("buildGoatElectricOriginUrl", () => {
   });
 
   it("scopes goat.brain_source_items to the user and strips the payload columns", () => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
         "https://goat.example.com/api/electric/v1/shape?table=goat.brain_source_items",
@@ -269,7 +269,7 @@ describe("buildGoatElectricOriginUrl", () => {
   });
 
   it("allows safe goat.brain_source_items filters", () => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
         "https://goat.example.com/api/electric/v1/shape?table=goat.brain_source_items&source_provider=goat-chat&source_type=capture&last_ingest_status=pending,skipped,failed",
@@ -289,7 +289,7 @@ describe("buildGoatElectricOriginUrl", () => {
   });
 
   it("rejects unsafe goat.brain_source_items filters", () => {
-    const url = buildGoatElectricOriginUrl({
+    const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
         "https://goat.example.com/api/electric/v1/shape?table=goat.brain_source_items&source_provider=other",

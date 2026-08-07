@@ -1,4 +1,4 @@
-import type { GoatImessageProvider, GoatImessageSendResult } from "./provider";
+import type { ImessageProvider, ImessageSendResult } from "./provider";
 
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com";
 
@@ -8,7 +8,7 @@ export function createLinqImessageProvider(config: {
   token: string;
   fromNumber: string;
   baseUrl?: string | null;
-}): GoatImessageProvider {
+}): ImessageProvider {
   const baseUrl = (config.baseUrl || DEFAULT_LINQ_API_BASE_URL).replace(/\/$/, "");
   return {
     name: "linq",
@@ -54,4 +54,4 @@ async function parseProviderMessageId(response: Response): Promise<string | null
   return null;
 }
 
-export type { GoatImessageSendResult };
+export type { ImessageSendResult };

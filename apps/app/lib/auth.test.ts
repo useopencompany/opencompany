@@ -1,33 +1,33 @@
 import { getDb } from "@opencompany/db/client";
-import { goatUsers } from "@opencompany/db/schema";
+import { users } from "@opencompany/db/schema";
 import {
-  adoptGoatWorkspaceMembershipsFromOrgs,
-  listAccessibleGoatBrains,
-  listGoatWorkspacesForUser,
+  adoptWorkspaceMembershipsFromOrgs,
+  listAccessibleBrains,
+  listWorkspacesForUser,
 } from "@opencompany/db/workspaces";
-import { recordGoatSignup } from "@opencompany/telemetry";
+import { recordSignup } from "@opencompany/telemetry";
 import { saveSession, withAuth } from "@workos-inc/authkit-nextjs";
 import { cookies } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  activateGoatWorkspaceForOrganization,
+  activateWorkspaceForOrganization,
   adoptWorkOSOrganizationMemberships,
-  completeGoatAuthentication,
-  currentGoatUser,
+  completeAuthentication,
+  currentUser,
   GOAT_ACTIVE_BRAIN_COOKIE,
   GOAT_ACTIVE_WORKSPACE_COOKIE,
-  syncGoatUser,
+  syncUser,
 } from "@/lib/auth";
-import { recordLastGoatAuthMethod } from "@/lib/auth-methods";
+import { recordLastAuthMethod } from "@/lib/auth-methods";
 import { getWorkOSClient } from "@/lib/workos-client";
-import { ensureGoatWorkspaceOrganizationsForEntries } from "@/lib/workos-organizations";
+import { ensureWorkspaceOrganizationsForEntries } from "@/lib/workos-organizations";
 
 const analyticsMocks = vi.hoisted(() => ({
-  captureGoatServerEvent: vi.fn(async () => {}),
+  captureServerEvent: vi.fn(async () => {}),
 }));
 
-vi.mock("@opencompany/analytics/goat/server", () => ({
-  captureGoatServerEvent: analyticsMocks.captureGoatServerEvent,
+vi.mock("@opencompany/analytics/server", () => ({
+  captureServerEvent: analyticsMocks.captureServerEvent,
 }));
 
 vi.mock("@opencompany/db/client", () => ({
@@ -35,16 +35,16 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@opencompany/db/workspaces", () => ({
-  adoptGoatWorkspaceMembershipsFromOrgs: vi.fn(),
-  createDefaultGoatWorkspaceForUser: vi.fn(),
+  adoptWorkspaceMembershipsFromOrgs: vi.fn(),
+  createDefaultWorkspaceForUser: vi.fn(),
   DEFAULT_GOAT_BRAIN_SLUG: "default",
-  getGoatBrainAccess: vi.fn(),
-  listAccessibleGoatBrains: vi.fn(),
-  listGoatWorkspacesForUser: vi.fn(),
+  getBrainAccess: vi.fn(),
+  listAccessibleBrains: vi.fn(),
+  listWorkspacesForUser: vi.fn(),
 }));
 
 vi.mock("@opencompany/telemetry", () => ({
-  recordGoatSignup: vi.fn(),
+  recordSignup: vi.fn(),
 }));
 
 vi.mock("@workos-inc/authkit-nextjs", () => ({
@@ -53,7 +53,7 @@ vi.mock("@workos-inc/authkit-nextjs", () => ({
 }));
 
 vi.mock("@/lib/auth-methods", () => ({
-  recordLastGoatAuthMethod: vi.fn(),
+  recordLastAuthMethod: vi.fn(),
 }));
 
 vi.mock("next/headers", () => ({
@@ -73,26 +73,26 @@ vi.mock("@/lib/workos-client", () => ({
 }));
 
 vi.mock("@/lib/billing/seats", () => ({
-  syncGoatStripeSeatQuantityForWorkspace: vi.fn().mockResolvedValue({ ok: true, changed: false }),
+  syncStripeSeatQuantityForWorkspace: vi.fn().mockResolvedValue({ ok: true, changed: false }),
 }));
 
 vi.mock("@/lib/workos-organizations", () => ({
-  ensureGoatWorkspaceOrganizationsForEntries: vi.fn((entries) => entries),
+  ensureWorkspaceOrganizationsForEntries: vi.fn((entries) => entries),
 }));
 
 const getDbMock = vi.mocked(getDb);
-const adoptGoatWorkspaceMembershipsFromOrgsMock = vi.mocked(adoptGoatWorkspaceMembershipsFromOrgs);
+const adoptWorkspaceMembershipsFromOrgsMock = vi.mocked(adoptWorkspaceMembershipsFromOrgs);
 const cookiesMock = vi.mocked(cookies);
-const ensureGoatWorkspaceOrganizationsForEntriesMock = vi.mocked(
-  ensureGoatWorkspaceOrganizationsForEntries,
+const ensureWorkspaceOrganizationsForEntriesMock = vi.mocked(
+  ensureWorkspaceOrganizationsForEntries,
 );
 const getWorkOSClientMock = vi.mocked(getWorkOSClient);
-const listAccessibleGoatBrainsMock = vi.mocked(listAccessibleGoatBrains);
-const listGoatWorkspacesForUserMock = vi.mocked(listGoatWorkspacesForUser);
-const recordGoatSignupMock = vi.mocked(recordGoatSignup);
+const listAccessibleBrainsMock = vi.mocked(listAccessibleBrains);
+const listWorkspacesForUserMock = vi.mocked(listWorkspacesForUser);
+const recordSignupMock = vi.mocked(recordSignup);
 const withAuthMock = vi.mocked(withAuth);
 const saveSessionMock = vi.mocked(saveSession);
-const recordLastGoatAuthMethodMock = vi.mocked(recordLastGoatAuthMethod);
+const recordLastAuthMethodMock = vi.mocked(recordLastAuthMethod);
 
 const now = new Date("2026-01-01T00:00:00.000Z");
 const authUser = {
@@ -103,7 +103,7 @@ const authUser = {
   profilePictureUrl: null,
 };
 
-const goatUser = {
+const user = {
   workosUserId: authUser.id,
   email: authUser.email,
   firstName: authUser.firstName,
@@ -139,7 +139,7 @@ function createDbMock(input: { insertReturning: unknown[]; updateReturning?: unk
   };
 }
 
-describe("syncGoatUser", () => {
+describe("syncUser", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(now);
@@ -151,13 +151,13 @@ describe("syncGoatUser", () => {
   });
 
   it("records a Goat signup when user sync creates the user row", async () => {
-    const dbMock = createDbMock({ insertReturning: [goatUser] });
+    const dbMock = createDbMock({ insertReturning: [user] });
     getDbMock.mockReturnValue(dbMock.db as never);
 
-    const result = await syncGoatUser(authUser as never);
+    const result = await syncUser(authUser as never);
 
-    expect(result).toBe(goatUser);
-    expect(dbMock.insert).toHaveBeenCalledWith(goatUsers);
+    expect(result).toBe(user);
+    expect(dbMock.insert).toHaveBeenCalledWith(users);
     expect(dbMock.values).toHaveBeenCalledWith({
       workosUserId: authUser.id,
       email: authUser.email,
@@ -166,11 +166,11 @@ describe("syncGoatUser", () => {
       avatarUrl: authUser.profilePictureUrl,
       updatedAt: now,
     });
-    expect(dbMock.onConflictDoNothing).toHaveBeenCalledWith({ target: goatUsers.workosUserId });
+    expect(dbMock.onConflictDoNothing).toHaveBeenCalledWith({ target: users.workosUserId });
     expect(dbMock.update).not.toHaveBeenCalled();
-    expect(recordGoatSignupMock).toHaveBeenCalledOnce();
-    expect(recordGoatSignupMock).toHaveBeenCalledWith({ source: "user_sync" });
-    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
+    expect(recordSignupMock).toHaveBeenCalledOnce();
+    expect(recordSignupMock).toHaveBeenCalledWith({ source: "user_sync" });
+    expect(analyticsMocks.captureServerEvent).toHaveBeenCalledWith(
       "signup_completed",
       authUser.id,
       { source: "user_sync" },
@@ -183,14 +183,14 @@ describe("syncGoatUser", () => {
   });
 
   it("updates an existing Goat user without recording another signup", async () => {
-    const updatedUser = { ...goatUser, firstName: "Augusta" };
+    const updatedUser = { ...user, firstName: "Augusta" };
     const dbMock = createDbMock({ insertReturning: [], updateReturning: [updatedUser] });
     getDbMock.mockReturnValue(dbMock.db as never);
 
-    const result = await syncGoatUser({ ...authUser, firstName: "Augusta" } as never);
+    const result = await syncUser({ ...authUser, firstName: "Augusta" } as never);
 
     expect(result).toBe(updatedUser);
-    expect(dbMock.update).toHaveBeenCalledWith(goatUsers);
+    expect(dbMock.update).toHaveBeenCalledWith(users);
     expect(dbMock.set).toHaveBeenCalledWith({
       email: authUser.email,
       firstName: "Augusta",
@@ -198,16 +198,16 @@ describe("syncGoatUser", () => {
       avatarUrl: authUser.profilePictureUrl,
       updatedAt: now,
     });
-    expect(recordGoatSignupMock).not.toHaveBeenCalled();
-    expect(analyticsMocks.captureGoatServerEvent).not.toHaveBeenCalled();
+    expect(recordSignupMock).not.toHaveBeenCalled();
+    expect(analyticsMocks.captureServerEvent).not.toHaveBeenCalled();
   });
 
   it("throws when neither insert nor update returns a user", async () => {
     const dbMock = createDbMock({ insertReturning: [], updateReturning: [] });
     getDbMock.mockReturnValue(dbMock.db as never);
 
-    await expect(syncGoatUser(authUser as never)).rejects.toThrow("Unable to sync the Goat user.");
-    expect(recordGoatSignupMock).not.toHaveBeenCalled();
+    await expect(syncUser(authUser as never)).rejects.toThrow("Unable to sync the Goat user.");
+    expect(recordSignupMock).not.toHaveBeenCalled();
   });
 });
 
@@ -237,7 +237,7 @@ describe("adoptWorkOSOrganizationMemberships", () => {
       userId: authUser.id,
       statuses: ["active"],
     });
-    expect(adoptGoatWorkspaceMembershipsFromOrgsMock).toHaveBeenCalledWith({
+    expect(adoptWorkspaceMembershipsFromOrgsMock).toHaveBeenCalledWith({
       userWorkosId: authUser.id,
       memberships: [
         { organizationId: "org_personal", role: "admin" },
@@ -259,7 +259,7 @@ describe("adoptWorkOSOrganizationMemberships", () => {
 
     await expect(adoptWorkOSOrganizationMemberships(authUser as never)).resolves.toBeUndefined();
 
-    expect(adoptGoatWorkspaceMembershipsFromOrgsMock).not.toHaveBeenCalled();
+    expect(adoptWorkspaceMembershipsFromOrgsMock).not.toHaveBeenCalled();
     expect(consoleError).toHaveBeenCalledWith(
       "[goat] Failed to adopt WorkOS organization memberships",
       error,
@@ -267,13 +267,13 @@ describe("adoptWorkOSOrganizationMemberships", () => {
   });
 });
 
-describe("activateGoatWorkspaceForOrganization", () => {
+describe("activateWorkspaceForOrganization", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("activates the Goat workspace and default brain mapped to the authenticated organization", async () => {
-    listGoatWorkspacesForUserMock.mockResolvedValue([
+    listWorkspacesForUserMock.mockResolvedValue([
       {
         workspace: {
           id: "goat_ws_personal",
@@ -289,7 +289,7 @@ describe("activateGoatWorkspaceForOrganization", () => {
         role: "member",
       },
     ] as never);
-    listAccessibleGoatBrainsMock.mockResolvedValue([
+    listAccessibleBrainsMock.mockResolvedValue([
       { id: "brain_other", slug: "other" },
       { id: "brain_default", slug: "default" },
     ] as never);
@@ -300,13 +300,13 @@ describe("activateGoatWorkspaceForOrganization", () => {
     cookiesMock.mockResolvedValue(cookieStore as never);
 
     await expect(
-      activateGoatWorkspaceForOrganization({
+      activateWorkspaceForOrganization({
         userWorkosId: authUser.id,
         organizationId: "org_invited",
       }),
     ).resolves.toBe(true);
 
-    expect(listAccessibleGoatBrainsMock).toHaveBeenCalledWith({
+    expect(listAccessibleBrainsMock).toHaveBeenCalledWith({
       userWorkosId: authUser.id,
       workspaceId: "goat_ws_invited",
     });
@@ -329,7 +329,7 @@ describe("activateGoatWorkspaceForOrganization", () => {
   });
 
   it("does not change cookies when the organization has no accessible Goat workspace", async () => {
-    listGoatWorkspacesForUserMock.mockResolvedValue([
+    listWorkspacesForUserMock.mockResolvedValue([
       {
         workspace: {
           id: "goat_ws_personal",
@@ -340,18 +340,18 @@ describe("activateGoatWorkspaceForOrganization", () => {
     ] as never);
 
     await expect(
-      activateGoatWorkspaceForOrganization({
+      activateWorkspaceForOrganization({
         userWorkosId: authUser.id,
         organizationId: "org_legacy_web",
       }),
     ).resolves.toBe(false);
 
-    expect(listAccessibleGoatBrainsMock).not.toHaveBeenCalled();
+    expect(listAccessibleBrainsMock).not.toHaveBeenCalled();
     expect(cookiesMock).not.toHaveBeenCalled();
   });
 
   it("clears a stale active brain when the invited workspace has no accessible brain", async () => {
-    listGoatWorkspacesForUserMock.mockResolvedValue([
+    listWorkspacesForUserMock.mockResolvedValue([
       {
         workspace: {
           id: "goat_ws_invited",
@@ -360,14 +360,14 @@ describe("activateGoatWorkspaceForOrganization", () => {
         role: "member",
       },
     ] as never);
-    listAccessibleGoatBrainsMock.mockResolvedValue([]);
+    listAccessibleBrainsMock.mockResolvedValue([]);
     const cookieStore = {
       set: vi.fn(),
       delete: vi.fn(),
     };
     cookiesMock.mockResolvedValue(cookieStore as never);
 
-    await activateGoatWorkspaceForOrganization({
+    await activateWorkspaceForOrganization({
       userWorkosId: authUser.id,
       organizationId: "org_invited",
     });
@@ -381,13 +381,13 @@ describe("activateGoatWorkspaceForOrganization", () => {
   });
 });
 
-describe("completeGoatAuthentication", () => {
+describe("completeAuthentication", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   function mockSyncAndAdopt() {
-    const dbMock = createDbMock({ insertReturning: [goatUser] });
+    const dbMock = createDbMock({ insertReturning: [user] });
     getDbMock.mockReturnValue(dbMock.db as never);
     getWorkOSClientMock.mockReturnValue({
       userManagement: {
@@ -399,15 +399,13 @@ describe("completeGoatAuthentication", () => {
 
   it("seals the session, records the auth method, and activates the invited workspace", async () => {
     mockSyncAndAdopt();
-    listGoatWorkspacesForUserMock.mockResolvedValue([
+    listWorkspacesForUserMock.mockResolvedValue([
       {
         workspace: { id: "goat_ws_invited", workosOrganizationId: "org_invited" },
         role: "member",
       },
     ] as never);
-    listAccessibleGoatBrainsMock.mockResolvedValue([
-      { id: "brain_default", slug: "default" },
-    ] as never);
+    listAccessibleBrainsMock.mockResolvedValue([{ id: "brain_default", slug: "default" }] as never);
     const cookieStore = { set: vi.fn(), delete: vi.fn() };
     cookiesMock.mockResolvedValue(cookieStore as never);
 
@@ -419,10 +417,10 @@ describe("completeGoatAuthentication", () => {
       authenticationMethod: "MagicAuth",
     };
 
-    await completeGoatAuthentication(authResponse as never, "https://my.opencompany.chat");
+    await completeAuthentication(authResponse as never, "https://my.opencompany.chat");
 
     expect(saveSessionMock).toHaveBeenCalledWith(authResponse, "https://my.opencompany.chat");
-    expect(recordLastGoatAuthMethodMock).toHaveBeenCalledWith("MagicAuth");
+    expect(recordLastAuthMethodMock).toHaveBeenCalledWith("MagicAuth");
     expect(cookieStore.set).toHaveBeenCalledWith(
       "goat-active-workspace",
       "goat_ws_invited",
@@ -440,14 +438,14 @@ describe("completeGoatAuthentication", () => {
       authenticationMethod: "GoogleOAuth",
     };
 
-    await completeGoatAuthentication(authResponse as never, "https://my.opencompany.chat");
+    await completeAuthentication(authResponse as never, "https://my.opencompany.chat");
 
-    expect(listGoatWorkspacesForUserMock).not.toHaveBeenCalled();
+    expect(listWorkspacesForUserMock).not.toHaveBeenCalled();
   });
 
   it("does not block authentication when workspace activation fails", async () => {
     mockSyncAndAdopt();
-    listGoatWorkspacesForUserMock.mockRejectedValue(new Error("Database unavailable"));
+    listWorkspacesForUserMock.mockRejectedValue(new Error("Database unavailable"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const authResponse = {
@@ -459,7 +457,7 @@ describe("completeGoatAuthentication", () => {
     };
 
     await expect(
-      completeGoatAuthentication(authResponse as never, "https://my.opencompany.chat"),
+      completeAuthentication(authResponse as never, "https://my.opencompany.chat"),
     ).resolves.toBeUndefined();
 
     expect(consoleError).toHaveBeenCalledWith(
@@ -469,7 +467,7 @@ describe("completeGoatAuthentication", () => {
   });
 });
 
-describe("currentGoatUser", () => {
+describe("currentUser", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -494,7 +492,7 @@ describe("currentGoatUser", () => {
       },
     ];
     const selectedBrain = { id: "brain_company", slug: "general" };
-    const limit = vi.fn(async () => [goatUser]);
+    const limit = vi.fn(async () => [user]);
     const where = vi.fn(() => ({ limit }));
     const from = vi.fn(() => ({ where }));
     const select = vi.fn(() => ({ from }));
@@ -504,19 +502,19 @@ describe("currentGoatUser", () => {
       user: authUser,
       organizationId: "org_company",
     } as never);
-    listGoatWorkspacesForUserMock.mockResolvedValue(workspaces as never);
-    ensureGoatWorkspaceOrganizationsForEntriesMock.mockResolvedValue(workspaces as never);
-    listAccessibleGoatBrainsMock.mockResolvedValue([selectedBrain] as never);
+    listWorkspacesForUserMock.mockResolvedValue(workspaces as never);
+    ensureWorkspaceOrganizationsForEntriesMock.mockResolvedValue(workspaces as never);
+    listAccessibleBrainsMock.mockResolvedValue([selectedBrain] as never);
     cookiesMock.mockResolvedValue({
       get: vi.fn(() => ({ value: "goat_ws_personal" })),
     } as never);
 
-    const result = await currentGoatUser();
+    const result = await currentUser();
 
     expect(result.workspace.id).toBe("goat_ws_company");
     expect(result.role).toBe("member");
     expect(result.activeBrain).toBe(selectedBrain);
-    expect(listAccessibleGoatBrainsMock).toHaveBeenCalledWith({
+    expect(listAccessibleBrainsMock).toHaveBeenCalledWith({
       userWorkosId: authUser.id,
       workspaceId: "goat_ws_company",
     });

@@ -2,34 +2,34 @@ import { randomUUID } from "node:crypto";
 import { executeExaSearchRequest } from "@opencompany/agent-runtime";
 import {
   BrainSourceNormalizationError,
-  type GoatImportResearchResult,
+  type ImportResearchResult,
   type NormalizedBrainSourceItem,
   normalizeFathomMeeting,
-  normalizeGoatImportRun,
   normalizeGranolaMeetingNote,
+  normalizeImportRun,
 } from "@opencompany/brain";
 import {
-  addGoatBrainImportCandidate,
-  completeGoatBrainImportDiscovery,
-  discoverStoredGoatBrainImportCandidates,
-  type GoatBrainImportRun,
-  getGoatBrainImportJobProgress,
+  addBrainImportCandidate,
+  type BrainImportRun,
+  completeBrainImportDiscovery,
+  discoverStoredBrainImportCandidates,
+  getBrainImportJobProgress,
 } from "@opencompany/db/brain-import";
-import { upsertGoatBrainSourceItemAndEnqueue } from "@opencompany/db/brain-ingest";
+import { upsertBrainSourceItemAndEnqueue } from "@opencompany/db/brain-ingest";
 import { GOAT_FATHOM_CREDENTIAL_KIND, GOAT_FATHOM_PROVIDER } from "@opencompany/db/fathom";
 import { GOAT_GRANOLA_CREDENTIAL_KIND, GOAT_GRANOLA_PROVIDER } from "@opencompany/db/granola";
-import { loadGoatIntegrationCredential } from "@opencompany/db/integrations";
+import { loadIntegrationCredential } from "@opencompany/db/integrations";
 import {
-  type GoatBrainImportDiscoverySummary,
-  type GoatBrainImportProvider,
-  goatBrainImportCandidates,
-  goatBrainImportRuns,
-  goatBrainIngestJobs,
-  goatBrainSourceItems,
+  type BrainImportDiscoverySummary,
+  type BrainImportProvider,
+  brainImportCandidates,
+  brainImportRuns,
+  brainIngestJobs,
+  brainSourceItems,
 } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { and, asc, eq, inArray, isNull, lt, lte, or } from "drizzle-orm";
-import { wakeGoatBrainIngestWorker } from "./brain-ingest-worker";
+import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { type FathomMeetingSummary, listFathomMeetings } from "./fathom-api";
@@ -52,7 +52,7 @@ const GRANOLA_IMPORT_MAX_LIST_PAGES = 5;
 const GRANOLA_IMPORT_MAX_NOTES = 20;
 const FATHOM_IMPORT_MAX_LIST_PAGES = 5;
 const FATHOM_IMPORT_MAX_MEETINGS = 20;
-const PROVIDERS: GoatBrainImportProvider[] = [
+const PROVIDERS: BrainImportProvider[] = [
   "public_web",
   "github",
   "jamie",
@@ -65,34 +65,34 @@ const PROVIDERS: GoatBrainImportProvider[] = [
 
 let registeredWakeup: (() => void) | null = null;
 
-export function setGoatBrainImportWakeup(wake: (() => void) | null) {
+export function setBrainImportWakeup(wake: (() => void) | null) {
   registeredWakeup = wake;
 }
 
-export function wakeGoatBrainImportWorker() {
+export function wakeBrainImportWorker() {
   registeredWakeup?.();
 }
 
-export async function processNextGoatBrainImportRun(env: RunnerEnv): Promise<boolean> {
+export async function processNextBrainImportRun(env: RunnerEnv): Promise<boolean> {
   const db = getDb();
   const now = new Date();
   const [run] = await db
     .select()
-    .from(goatBrainImportRuns)
+    .from(brainImportRuns)
     .where(
       and(
-        inArray(goatBrainImportRuns.status, ACTIVE_WORKER_STATUSES),
-        lte(goatBrainImportRuns.nextRunAt, now),
-        or(isNull(goatBrainImportRuns.leaseId), lt(goatBrainImportRuns.leaseExpiresAt, now)),
+        inArray(brainImportRuns.status, ACTIVE_WORKER_STATUSES),
+        lte(brainImportRuns.nextRunAt, now),
+        or(isNull(brainImportRuns.leaseId), lt(brainImportRuns.leaseExpiresAt, now)),
       ),
     )
-    .orderBy(goatBrainImportRuns.nextRunAt)
+    .orderBy(brainImportRuns.nextRunAt)
     .limit(1);
   if (!run) return false;
 
   const leaseId = randomUUID();
   const [claimed] = await db
-    .update(goatBrainImportRuns)
+    .update(brainImportRuns)
     .set({
       leaseId,
       leaseOwner: env.instanceId,
@@ -101,10 +101,10 @@ export async function processNextGoatBrainImportRun(env: RunnerEnv): Promise<boo
     })
     .where(
       and(
-        eq(goatBrainImportRuns.id, run.id),
-        inArray(goatBrainImportRuns.status, ACTIVE_WORKER_STATUSES),
-        lte(goatBrainImportRuns.nextRunAt, now),
-        or(isNull(goatBrainImportRuns.leaseId), lt(goatBrainImportRuns.leaseExpiresAt, now)),
+        eq(brainImportRuns.id, run.id),
+        inArray(brainImportRuns.status, ACTIVE_WORKER_STATUSES),
+        lte(brainImportRuns.nextRunAt, now),
+        or(isNull(brainImportRuns.leaseId), lt(brainImportRuns.leaseExpiresAt, now)),
       ),
     )
     .returning();
@@ -120,7 +120,7 @@ export async function processNextGoatBrainImportRun(env: RunnerEnv): Promise<boo
       import_run_id: run.id,
     });
     await db
-      .update(goatBrainImportRuns)
+      .update(brainImportRuns)
       .set({
         status: "failed",
         lastError: error instanceof Error ? error.message : String(error),
@@ -130,15 +130,15 @@ export async function processNextGoatBrainImportRun(env: RunnerEnv): Promise<boo
         leaseExpiresAt: null,
         updatedAt: new Date(),
       })
-      .where(and(eq(goatBrainImportRuns.id, run.id), eq(goatBrainImportRuns.leaseId, leaseId)));
+      .where(and(eq(brainImportRuns.id, run.id), eq(brainImportRuns.leaseId, leaseId)));
   }
   return true;
 }
 
-async function discoverImport(run: GoatBrainImportRun, env: RunnerEnv) {
+async function discoverImport(run: BrainImportRun, env: RunnerEnv) {
   if (!run.leaseId) throw new Error("Import discovery lease is missing.");
   const db = getDb();
-  const summary: GoatBrainImportDiscoverySummary = {};
+  const summary: BrainImportDiscoverySummary = {};
   for (const provider of PROVIDERS) {
     if (!(await renewImportLease(run, "discovering"))) return;
     const selection = run.sourceSelection[provider];
@@ -152,7 +152,7 @@ async function discoverImport(run: GoatBrainImportRun, env: RunnerEnv) {
       } else {
         if (provider === "granola") await hydrateGranolaImportSourceItems(run);
         if (provider === "fathom") await hydrateFathomImportSourceItems(run);
-        const counts = await discoverStoredGoatBrainImportCandidates({
+        const counts = await discoverStoredBrainImportCandidates({
           run,
           provider,
           db,
@@ -173,7 +173,7 @@ async function discoverImport(run: GoatBrainImportRun, env: RunnerEnv) {
       };
     }
   }
-  await completeGoatBrainImportDiscovery({
+  await completeBrainImportDiscovery({
     importRunId: run.id,
     leaseId: run.leaseId,
     discoverySummary: summary,
@@ -181,10 +181,10 @@ async function discoverImport(run: GoatBrainImportRun, env: RunnerEnv) {
   });
 }
 
-async function hydrateGranolaImportSourceItems(run: GoatBrainImportRun) {
+async function hydrateGranolaImportSourceItems(run: BrainImportRun) {
   const selection = run.sourceSelection.granola;
   if (!selection?.enabled || !selection.integrationId) return;
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId: run.userWorkosId,
     integrationId: selection.integrationId,
     provider: GOAT_GRANOLA_PROVIDER,
@@ -233,7 +233,7 @@ async function hydrateGranolaImportSourceItems(run: GoatBrainImportRun) {
     try {
       const payload = await fetchGranolaNote({ apiKey, noteId: note.id });
       const item = normalizeGranolaMeetingNote(payload, { capturedAt: new Date().toISOString() });
-      await upsertGoatBrainSourceItemAndEnqueue({
+      await upsertBrainSourceItemAndEnqueue({
         userWorkosId: run.userWorkosId,
         sourceConnectionId: selection.integrationId,
         integrationId: selection.integrationId,
@@ -260,10 +260,10 @@ async function hydrateGranolaImportSourceItems(run: GoatBrainImportRun) {
   }
 }
 
-async function hydrateFathomImportSourceItems(run: GoatBrainImportRun) {
+async function hydrateFathomImportSourceItems(run: BrainImportRun) {
   const selection = run.sourceSelection.fathom;
   if (!selection?.enabled || !selection.integrationId) return;
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId: run.userWorkosId,
     integrationId: selection.integrationId,
     provider: GOAT_FATHOM_PROVIDER,
@@ -315,7 +315,7 @@ async function hydrateFathomImportSourceItems(run: GoatBrainImportRun) {
       const item = normalizeFathomMeeting(meeting.raw, {
         capturedAt: new Date().toISOString(),
       });
-      await upsertGoatBrainSourceItemAndEnqueue({
+      await upsertBrainSourceItemAndEnqueue({
         userWorkosId: run.userWorkosId,
         sourceConnectionId: selection.integrationId,
         integrationId: selection.integrationId,
@@ -373,7 +373,7 @@ function timestamp(value: string | null) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-async function discoverPublicResearch(run: GoatBrainImportRun, env: RunnerEnv) {
+async function discoverPublicResearch(run: BrainImportRun, env: RunnerEnv) {
   if (!env.exaApiKey)
     throw new Error("Public research is unavailable because Exa is not configured.");
   const queries: Array<{
@@ -392,7 +392,7 @@ async function discoverPublicResearch(run: GoatBrainImportRun, env: RunnerEnv) {
     { query: `site:${run.companyDomain} blog news`, category: "general" },
     { query: `${run.companyDomain} founders leadership`, category: "people" },
   ];
-  const results = new Map<string, GoatImportResearchResult>();
+  const results = new Map<string, ImportResearchResult>();
   for (const search of queries) {
     if (!(await renewImportLease(run, "discovering"))) {
       throw new Error("Import discovery lease was lost.");
@@ -431,7 +431,7 @@ async function discoverPublicResearch(run: GoatBrainImportRun, env: RunnerEnv) {
   if (!(await renewImportLease(run, "discovering"))) {
     throw new Error("Import discovery lease was lost.");
   }
-  const item = normalizeGoatImportRun({
+  const item = normalizeImportRun({
     phase: "research",
     importRunId: run.id,
     companyUrl: run.companyUrl,
@@ -441,7 +441,7 @@ async function discoverPublicResearch(run: GoatBrainImportRun, env: RunnerEnv) {
     searches: queries,
     results: Array.from(results.values()),
   });
-  const persisted = await upsertGoatBrainSourceItemAndEnqueue({
+  const persisted = await upsertBrainSourceItemAndEnqueue({
     userWorkosId: run.userWorkosId,
     sourceConnectionId: run.id,
     item,
@@ -449,7 +449,7 @@ async function discoverPublicResearch(run: GoatBrainImportRun, env: RunnerEnv) {
     kind: "brain_agent_ingest",
     brainRefs: [],
   });
-  await addGoatBrainImportCandidate({
+  await addBrainImportCandidate({
     importRunId: run.id,
     provider: "public_web",
     sourceItemId: persisted.sourceItemId,
@@ -469,10 +469,10 @@ async function discoverPublicResearch(run: GoatBrainImportRun, env: RunnerEnv) {
   };
 }
 
-async function monitorChildren(run: GoatBrainImportRun) {
+async function monitorChildren(run: BrainImportRun) {
   const db = getDb();
   await enqueuePendingCandidates(run);
-  const progress = await getGoatBrainImportJobProgress(run.id, db);
+  const progress = await getBrainImportJobProgress(run.id, db);
   if (!progress.terminal) {
     await releaseForPoll(run, "ingesting");
     return;
@@ -485,7 +485,7 @@ async function monitorChildren(run: GoatBrainImportRun) {
       ...(summary ? { summary } : {}),
     };
   });
-  const item = normalizeGoatImportRun({
+  const item = normalizeImportRun({
     phase: "finalize",
     importRunId: run.id,
     companyUrl: run.companyUrl,
@@ -498,19 +498,19 @@ async function monitorChildren(run: GoatBrainImportRun) {
   const leaseId = run.leaseId;
   const enqueued = await db.transaction(async (tx) => {
     const [transitioned] = await tx
-      .update(goatBrainImportRuns)
+      .update(brainImportRuns)
       .set({ status: "finalizing", updatedAt: new Date() })
       .where(
         and(
-          eq(goatBrainImportRuns.id, run.id),
-          eq(goatBrainImportRuns.status, "ingesting"),
-          eq(goatBrainImportRuns.leaseId, leaseId),
+          eq(brainImportRuns.id, run.id),
+          eq(brainImportRuns.status, "ingesting"),
+          eq(brainImportRuns.leaseId, leaseId),
         ),
       )
-      .returning({ id: goatBrainImportRuns.id });
+      .returning({ id: brainImportRuns.id });
     if (!transitioned) return false;
 
-    await upsertGoatBrainSourceItemAndEnqueue({
+    await upsertBrainSourceItemAndEnqueue({
       userWorkosId: run.userWorkosId,
       sourceConnectionId: run.id,
       item,
@@ -521,7 +521,7 @@ async function monitorChildren(run: GoatBrainImportRun) {
       db: tx,
     });
     await tx
-      .update(goatBrainImportRuns)
+      .update(brainImportRuns)
       .set({
         result: { childSummary },
         nextRunAt: new Date(Date.now() + POLL_INTERVAL_MS),
@@ -532,65 +532,62 @@ async function monitorChildren(run: GoatBrainImportRun) {
       })
       .where(
         and(
-          eq(goatBrainImportRuns.id, run.id),
-          eq(goatBrainImportRuns.status, "finalizing"),
-          eq(goatBrainImportRuns.leaseId, leaseId),
+          eq(brainImportRuns.id, run.id),
+          eq(brainImportRuns.status, "finalizing"),
+          eq(brainImportRuns.leaseId, leaseId),
         ),
       );
     return true;
   });
-  if (enqueued) wakeGoatBrainIngestWorker();
+  if (enqueued) wakeBrainIngestWorker();
 }
 
-async function enqueuePendingCandidates(run: GoatBrainImportRun) {
+async function enqueuePendingCandidates(run: BrainImportRun) {
   if (!run.leaseId) throw new Error("Import ingestion lease is missing.");
   const leaseId = run.leaseId;
   const db = getDb();
   const candidates = await db
     .select({
-      id: goatBrainImportCandidates.id,
-      sourceItemId: goatBrainSourceItems.id,
-      userWorkosId: goatBrainSourceItems.userWorkosId,
-      sourceConnectionId: goatBrainSourceItems.sourceConnectionId,
-      integrationId: goatBrainSourceItems.integrationId,
-      contentHash: goatBrainSourceItems.contentHash,
-      rawPayload: goatBrainSourceItems.rawPayload,
-      normalizedPayload: goatBrainSourceItems.normalizedPayload,
-      rawEventCount: goatBrainSourceItems.rawEventCount,
+      id: brainImportCandidates.id,
+      sourceItemId: brainSourceItems.id,
+      userWorkosId: brainSourceItems.userWorkosId,
+      sourceConnectionId: brainSourceItems.sourceConnectionId,
+      integrationId: brainSourceItems.integrationId,
+      contentHash: brainSourceItems.contentHash,
+      rawPayload: brainSourceItems.rawPayload,
+      normalizedPayload: brainSourceItems.normalizedPayload,
+      rawEventCount: brainSourceItems.rawEventCount,
     })
-    .from(goatBrainImportCandidates)
-    .innerJoin(
-      goatBrainSourceItems,
-      eq(goatBrainSourceItems.id, goatBrainImportCandidates.sourceItemId),
-    )
+    .from(brainImportCandidates)
+    .innerJoin(brainSourceItems, eq(brainSourceItems.id, brainImportCandidates.sourceItemId))
     .where(
       and(
-        eq(goatBrainImportCandidates.importRunId, run.id),
-        eq(goatBrainImportCandidates.selected, true),
-        isNull(goatBrainImportCandidates.ingestJobId),
+        eq(brainImportCandidates.importRunId, run.id),
+        eq(brainImportCandidates.selected, true),
+        isNull(brainImportCandidates.ingestJobId),
       ),
     )
-    .orderBy(asc(goatBrainImportCandidates.rank), asc(goatBrainImportCandidates.createdAt));
+    .orderBy(asc(brainImportCandidates.rank), asc(brainImportCandidates.createdAt));
 
   for (const candidate of candidates) {
     const enqueued = await db.transaction(async (tx) => {
       const [activeRun] = await tx
-        .update(goatBrainImportRuns)
+        .update(brainImportRuns)
         .set({
           leaseExpiresAt: new Date(Date.now() + LEASE_TTL_MS),
           updatedAt: new Date(),
         })
         .where(
           and(
-            eq(goatBrainImportRuns.id, run.id),
-            eq(goatBrainImportRuns.status, "ingesting"),
-            eq(goatBrainImportRuns.leaseId, leaseId),
+            eq(brainImportRuns.id, run.id),
+            eq(brainImportRuns.status, "ingesting"),
+            eq(brainImportRuns.leaseId, leaseId),
           ),
         )
-        .returning({ id: goatBrainImportRuns.id });
+        .returning({ id: brainImportRuns.id });
       if (!activeRun) return false;
 
-      const result = await upsertGoatBrainSourceItemAndEnqueue({
+      const result = await upsertBrainSourceItemAndEnqueue({
         userWorkosId: candidate.userWorkosId,
         sourceConnectionId: candidate.sourceConnectionId,
         integrationId: candidate.integrationId,
@@ -605,14 +602,14 @@ async function enqueuePendingCandidates(run: GoatBrainImportRun) {
       let jobId = result.jobId;
       if (!jobId) {
         const [existingJob] = await tx
-          .select({ id: goatBrainIngestJobs.id })
-          .from(goatBrainIngestJobs)
+          .select({ id: brainIngestJobs.id })
+          .from(brainIngestJobs)
           .where(
             and(
-              eq(goatBrainIngestJobs.sourceItemId, candidate.sourceItemId),
-              eq(goatBrainIngestJobs.contentHash, candidate.contentHash),
-              eq(goatBrainIngestJobs.kind, "brain_agent_ingest"),
-              eq(goatBrainIngestJobs.brainRef, run.brainRef),
+              eq(brainIngestJobs.sourceItemId, candidate.sourceItemId),
+              eq(brainIngestJobs.contentHash, candidate.contentHash),
+              eq(brainIngestJobs.kind, "brain_agent_ingest"),
+              eq(brainIngestJobs.brainRef, run.brainRef),
             ),
           )
           .limit(1);
@@ -620,28 +617,28 @@ async function enqueuePendingCandidates(run: GoatBrainImportRun) {
       }
       if (!jobId) throw new Error(`Could not enqueue import candidate ${candidate.id}.`);
       await tx
-        .update(goatBrainIngestJobs)
+        .update(brainIngestJobs)
         .set({ importRunId: run.id, updatedAt: new Date() })
-        .where(eq(goatBrainIngestJobs.id, jobId));
+        .where(eq(brainIngestJobs.id, jobId));
       await tx
-        .update(goatBrainImportCandidates)
+        .update(brainImportCandidates)
         .set({ ingestJobId: jobId, updatedAt: new Date() })
         .where(
           and(
-            eq(goatBrainImportCandidates.id, candidate.id),
-            isNull(goatBrainImportCandidates.ingestJobId),
+            eq(brainImportCandidates.id, candidate.id),
+            isNull(brainImportCandidates.ingestJobId),
           ),
         );
       return true;
     });
     if (!enqueued) throw new Error("Import ingestion lease was lost while enqueueing candidates.");
   }
-  if (candidates.length > 0) wakeGoatBrainIngestWorker();
+  if (candidates.length > 0) wakeBrainIngestWorker();
 }
 
-async function finishImport(run: GoatBrainImportRun) {
+async function finishImport(run: BrainImportRun) {
   const db = getDb();
-  const progress = await getGoatBrainImportJobProgress(run.id, db);
+  const progress = await getBrainImportJobProgress(run.id, db);
   const finalizer = progress.rows.find(isFinalizerJob);
   if (!finalizer || !["succeeded", "failed", "skipped"].includes(finalizer.status)) {
     await releaseForPoll(run, "finalizing");
@@ -661,7 +658,7 @@ async function finishImport(run: GoatBrainImportRun) {
   if (!run.leaseId) return;
   const leaseId = run.leaseId;
   await db
-    .update(goatBrainImportRuns)
+    .update(brainImportRuns)
     .set({
       status,
       result: { ...run.result, jobs },
@@ -673,9 +670,9 @@ async function finishImport(run: GoatBrainImportRun) {
     })
     .where(
       and(
-        eq(goatBrainImportRuns.id, run.id),
-        eq(goatBrainImportRuns.status, "finalizing"),
-        eq(goatBrainImportRuns.leaseId, leaseId),
+        eq(brainImportRuns.id, run.id),
+        eq(brainImportRuns.status, "finalizing"),
+        eq(brainImportRuns.leaseId, leaseId),
       ),
     );
 }
@@ -694,11 +691,11 @@ function jobSummary(row: { result: Record<string, unknown>; lastError: string | 
     : row.lastError?.slice(0, 1_000);
 }
 
-async function releaseForPoll(run: GoatBrainImportRun, status: "ingesting" | "finalizing") {
+async function releaseForPoll(run: BrainImportRun, status: "ingesting" | "finalizing") {
   if (!run.leaseId) return;
   const leaseId = run.leaseId;
   await getDb()
-    .update(goatBrainImportRuns)
+    .update(brainImportRuns)
     .set({
       status,
       nextRunAt: new Date(Date.now() + POLL_INTERVAL_MS),
@@ -709,32 +706,32 @@ async function releaseForPoll(run: GoatBrainImportRun, status: "ingesting" | "fi
     })
     .where(
       and(
-        eq(goatBrainImportRuns.id, run.id),
-        eq(goatBrainImportRuns.status, status),
-        eq(goatBrainImportRuns.leaseId, leaseId),
+        eq(brainImportRuns.id, run.id),
+        eq(brainImportRuns.status, status),
+        eq(brainImportRuns.leaseId, leaseId),
       ),
     );
 }
 
 async function renewImportLease(
-  run: GoatBrainImportRun,
+  run: BrainImportRun,
   status: "discovering" | "ingesting" | "finalizing",
 ) {
   if (!run.leaseId) return false;
   const [renewed] = await getDb()
-    .update(goatBrainImportRuns)
+    .update(brainImportRuns)
     .set({
       leaseExpiresAt: new Date(Date.now() + LEASE_TTL_MS),
       updatedAt: new Date(),
     })
     .where(
       and(
-        eq(goatBrainImportRuns.id, run.id),
-        eq(goatBrainImportRuns.status, status),
-        eq(goatBrainImportRuns.leaseId, run.leaseId),
+        eq(brainImportRuns.id, run.id),
+        eq(brainImportRuns.status, status),
+        eq(brainImportRuns.leaseId, run.leaseId),
       ),
     )
-    .returning({ id: goatBrainImportRuns.id });
+    .returning({ id: brainImportRuns.id });
   return Boolean(renewed);
 }
 
@@ -770,7 +767,7 @@ function redactPersonalContactData(value: string) {
     .replace(/(?:\+?\d[\d\s().-]{7,}\d)/g, "[phone removed]");
 }
 
-export function startGoatBrainImportWorker(env: RunnerEnv) {
+export function startBrainImportWorker(env: RunnerEnv) {
   let stopped = false;
   let active = 0;
   let wake: (() => void) | null = null;
@@ -784,7 +781,7 @@ export function startGoatBrainImportWorker(env: RunnerEnv) {
       let processed = false;
       try {
         active += 1;
-        processed = await processNextGoatBrainImportRun(env);
+        processed = await processNextBrainImportRun(env);
       } catch (error) {
         logger.error("Goat Brain import worker failed", { error });
       } finally {

@@ -1,27 +1,27 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "./client";
 import {
-  type GoatChatModelRoutingErrorCategory,
-  type GoatChatModelRoutingOutcome,
-  type GoatChatModelRoutingReason,
-  type GoatChatModelRoutingTier,
-  goatChatModelRoutingAttempts,
+  type ChatModelRoutingErrorCategory,
+  type ChatModelRoutingOutcome,
+  type ChatModelRoutingReason,
+  type ChatModelRoutingTier,
+  chatModelRoutingAttempts,
 } from "./schema";
 
 type DbLike = any;
 
-export type RecordGoatChatModelRoutingAttemptInput = {
+export type RecordChatModelRoutingAttemptInput = {
   workspaceId: string;
   userWorkosId: string;
   chatSessionId: string;
   userMessageId: string;
   classifierModel: string;
   selectedModel: AgentModelId;
-  tier: GoatChatModelRoutingTier;
-  reason: GoatChatModelRoutingReason;
-  outcome: GoatChatModelRoutingOutcome;
+  tier: ChatModelRoutingTier;
+  reason: ChatModelRoutingReason;
+  outcome: ChatModelRoutingOutcome;
   durationMs: number;
-  errorCategory?: GoatChatModelRoutingErrorCategory | undefined;
+  errorCategory?: ChatModelRoutingErrorCategory | undefined;
   finishReason?: string | undefined;
   providerStatusCode?: number | undefined;
   providerRetryable?: boolean | undefined;
@@ -33,11 +33,11 @@ export type RecordGoatChatModelRoutingAttemptInput = {
   db?: DbLike;
 };
 
-export async function recordGoatChatModelRoutingAttempt(
-  input: RecordGoatChatModelRoutingAttemptInput,
+export async function recordChatModelRoutingAttempt(
+  input: RecordChatModelRoutingAttemptInput,
 ): Promise<void> {
   const db = input.db ?? getDb();
-  await db.insert(goatChatModelRoutingAttempts).values({
+  await db.insert(chatModelRoutingAttempts).values({
     workspaceId: input.workspaceId,
     userWorkosId: input.userWorkosId,
     chatSessionId: input.chatSessionId,

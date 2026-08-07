@@ -1,6 +1,6 @@
 import { isCodexReasoningEffort } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
-import type { GoatCodexChatTurnSettings } from "@opencompany/db/schema";
+import type { CodexChatTurnSettings } from "@opencompany/db/schema";
 
 export const DEFAULT_CODEX_CHAT_REASONING_EFFORT: CodexReasoningEffort = "xhigh";
 export const DEFAULT_CODEX_PLAN_MODE_REASONING_EFFORT: CodexReasoningEffort = "high";
@@ -14,16 +14,16 @@ export type CodexChatSettingsInput = {
 };
 
 export type CodexChatSettingsResult =
-  | { ok: true; settings: GoatCodexChatTurnSettings }
+  | { ok: true; settings: CodexChatTurnSettings }
   | { ok: false; error: string };
-type CodexGoalMode = NonNullable<GoatCodexChatTurnSettings["goalMode"]>;
+type CodexGoalMode = NonNullable<CodexChatTurnSettings["goalMode"]>;
 type NormalizedCodexChatSettings = {
   reasoningEffort: CodexReasoningEffort;
   planModeReasoningEffort: CodexReasoningEffort | null;
   goalMode: CodexGoalMode | null;
 };
 
-export type GoatCodexComposerSettingsView = {
+export type CodexComposerSettingsView = {
   reasoningEffort: CodexReasoningEffort;
   planModeEnabled: boolean;
   goalMode: CodexGoalMode | null;
@@ -41,7 +41,7 @@ export function parseCodexChatSettings(
   const reasoningEffort = readReasoningEffort(value.reasoningEffort);
   if (!reasoningEffort) return { ok: false, error: "Invalid Codex reasoning effort." };
 
-  const settings: GoatCodexChatTurnSettings = { reasoningEffort };
+  const settings: CodexChatTurnSettings = { reasoningEffort };
   if (value.planModeEnabled === true) {
     settings.planModeReasoningEffort = DEFAULT_CODEX_PLAN_MODE_REASONING_EFFORT;
   }
@@ -56,7 +56,7 @@ export function parseCodexChatSettings(
 }
 
 export function normalizeCodexChatSettings(
-  value: GoatCodexChatTurnSettings | null | undefined,
+  value: CodexChatTurnSettings | null | undefined,
   defaultReasoningEffort = DEFAULT_CODEX_CHAT_REASONING_EFFORT,
 ): NormalizedCodexChatSettings {
   return {
@@ -67,9 +67,9 @@ export function normalizeCodexChatSettings(
 }
 
 export function codexComposerSettingsFromTurnSettings(
-  value: GoatCodexChatTurnSettings | null | undefined,
+  value: CodexChatTurnSettings | null | undefined,
   defaultReasoningEffort = DEFAULT_CODEX_CHAT_REASONING_EFFORT,
-): GoatCodexComposerSettingsView {
+): CodexComposerSettingsView {
   const settings = normalizeCodexChatSettings(value, defaultReasoningEffort);
   return {
     reasoningEffort: settings.reasoningEffort,

@@ -1,4 +1,4 @@
-import type { GoatActionProviderId } from "./types";
+import type { ActionProviderId } from "./types";
 
 // Human-readable permission "capabilities" for chat actions. Keep these
 // provider-level groups legible to non-technical users while separating
@@ -10,20 +10,20 @@ import type { GoatActionProviderId } from "./types";
 // This module must stay pure and client-safe — it is imported by both the
 // server-side action catalog and the settings panel.
 
-export type GoatCapabilityMode = "on" | "off" | "ask";
-export type GoatCapabilityId = "read" | "query" | "draft" | "write";
+export type CapabilityMode = "on" | "off" | "ask";
+export type CapabilityId = "read" | "query" | "draft" | "write";
 
-export type GoatProviderCapability = {
-  id: GoatCapabilityId;
+export type ProviderCapability = {
+  id: CapabilityId;
   label: string;
   description: string;
-  defaultMode: GoatCapabilityMode;
+  defaultMode: CapabilityMode;
 };
 
-export const GOAT_CAPABILITY_MODES: readonly GoatCapabilityMode[] = ["on", "ask", "off"];
+export const GOAT_CAPABILITY_MODES: readonly CapabilityMode[] = ["on", "ask", "off"];
 
 export const GOAT_PROVIDER_CAPABILITIES: Partial<
-  Record<GoatActionProviderId, readonly GoatProviderCapability[]>
+  Record<ActionProviderId, readonly ProviderCapability[]>
 > = {
   gmail: [
     {
@@ -155,25 +155,25 @@ export const GOAT_PROVIDER_CAPABILITIES: Partial<
   ],
 };
 
-export function isGoatCapabilityMode(value: unknown): value is GoatCapabilityMode {
+export function isCapabilityMode(value: unknown): value is CapabilityMode {
   return value === "on" || value === "off" || value === "ask";
 }
 
-export function isGoatCapabilityId(value: unknown): value is GoatCapabilityId {
+export function isCapabilityId(value: unknown): value is CapabilityId {
   return value === "read" || value === "query" || value === "draft" || value === "write";
 }
 
 // The lookups accept any provider string (integration rows carry providers
 // with no chat actions, e.g. jamie or hubspot); unknown providers simply have
 // no capabilities.
-export function providerCapabilities(provider: string): readonly GoatProviderCapability[] {
-  return GOAT_PROVIDER_CAPABILITIES[provider as GoatActionProviderId] ?? [];
+export function providerCapabilities(provider: string): readonly ProviderCapability[] {
+  return GOAT_PROVIDER_CAPABILITIES[provider as ActionProviderId] ?? [];
 }
 
 export function providerCapability(
   provider: string,
-  capabilityId: GoatCapabilityId,
-): GoatProviderCapability | undefined {
+  capabilityId: CapabilityId,
+): ProviderCapability | undefined {
   return providerCapabilities(provider).find((capability) => capability.id === capabilityId);
 }
 
@@ -182,12 +182,12 @@ export function providerCapability(
 // and unknown capabilities fall back to the registry default, then "on".
 export function effectiveCapabilityMode(
   provider: string,
-  capabilityId: GoatCapabilityId,
+  capabilityId: CapabilityId,
   stored: unknown,
-): GoatCapabilityMode {
+): CapabilityMode {
   if (stored && typeof stored === "object" && !Array.isArray(stored)) {
     const value = (stored as Record<string, unknown>)[capabilityId];
-    if (isGoatCapabilityMode(value)) return value;
+    if (isCapabilityMode(value)) return value;
   }
   return providerCapability(provider, capabilityId)?.defaultMode ?? "on";
 }

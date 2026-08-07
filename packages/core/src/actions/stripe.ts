@@ -1,15 +1,15 @@
 import {
-  GoatStripeApiError,
-  type GoatStripeConnection,
-  loadGoatStripeConnection,
-  markGoatStripeConnectionNeedsReauth,
-  requestGoatStripeApi,
+  loadStripeConnection,
+  markStripeConnectionNeedsReauth,
+  requestStripeApi,
+  StripeApiError,
+  type StripeConnection,
 } from "../integrations/stripe";
 import {
+  ActionAuthError,
+  ActionInvalidParamsError,
+  type ActionProviderCatalog,
   GOAT_ACTION_EFFECTS_READ,
-  GoatActionAuthError,
-  GoatActionInvalidParamsError,
-  type GoatActionProviderCatalog,
   optionalStringParam,
 } from "./types";
 
@@ -118,8 +118,8 @@ type StripeCurrencyActivity = {
 
 export async function resolveStripeActions(
   workspaceId: string,
-): Promise<GoatActionProviderCatalog | null> {
-  const connection = await loadGoatStripeConnection(workspaceId);
+): Promise<ActionProviderCatalog | null> {
+  const connection = await loadStripeConnection(workspaceId);
   if (!connection) return null;
 
   const accountLabel = boundedLabel(connection.accountName);
@@ -201,7 +201,7 @@ export async function resolveStripeActions(
         execute: async (params, context) => {
           validateAllowedParams(params, new Set());
           const balance = await withStripeAuth(connection, () =>
-            requestGoatStripeApi<{
+            requestStripeApi<{
               available?: StripeBalanceAmount[];
               pending?: StripeBalanceAmount[];
               connect_reserved?: StripeBalanceAmount[];
@@ -292,13 +292,13 @@ export async function resolveStripeActions(
   };
 }
 
-async function withStripeAuth<T>(connection: GoatStripeConnection, run: () => Promise<T>) {
+async function withStripeAuth<T>(connection: StripeConnection, run: () => Promise<T>) {
   try {
     return await run();
   } catch (error) {
-    if (error instanceof GoatStripeApiError && (error.status === 401 || error.status === 403)) {
-      await markGoatStripeConnectionNeedsReauth(connection).catch(() => undefined);
-      throw new GoatActionAuthError(
+    if (error instanceof StripeApiError && (error.status === 401 || error.status === 403)) {
+      await markStripeConnectionNeedsReauth(connection).catch(() => undefined);
+      throw new ActionAuthError(
         "auth_expired",
         "stripe",
         "Stripe rejected the saved restricted key or a required read permission. Reconnect Stripe in Settings → Integrations, then retry.",
@@ -309,7 +309,7 @@ async function withStripeAuth<T>(connection: GoatStripeConnection, run: () => Pr
 }
 
 async function listStripePages<T extends { id?: string }>(input: {
-  connection: GoatStripeConnection;
+  connection: StripeConnection;
   path: string;
   params?: Record<string, string | number | boolean | undefined>;
   maxPages: number;
@@ -319,7 +319,7 @@ async function listStripePages<T extends { id?: string }>(input: {
   let startingAfter: string | undefined;
   let hasMore = false;
   for (let page = 0; page < input.maxPages; page += 1) {
-    const response = await requestGoatStripeApi<StripeList<T>>({
+    const response = await requestStripeApi<StripeList<T>>({
       apiKey: input.connection.apiKey,
       path: input.path,
       params: {
@@ -349,23 +349,23 @@ function resolveRevenuePeriod(params: Record<string, unknown>, currentDate: Date
     : new Date(end.getTime() - DEFAULT_REVENUE_PERIOD_MS);
   const duration = end.getTime() - start.getTime();
   if (duration <= 0) {
-    throw new GoatActionInvalidParamsError('"start" must be earlier than the exclusive "end".');
+    throw new ActionInvalidParamsError('"start" must be earlier than the exclusive "end".');
   }
   if (duration > MAX_REVENUE_PERIOD_MS) {
-    throw new GoatActionInvalidParamsError("The revenue period must be 366 days or less.");
+    throw new ActionInvalidParamsError("The revenue period must be 366 days or less.");
   }
   return { start, end };
 }
 
 function parseIsoInstant(value: string, key: string) {
   if (!/(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"${key}" must be an ISO 8601 instant ending in Z or a numeric UTC offset.`,
     );
   }
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime())) {
-    throw new GoatActionInvalidParamsError(`"${key}" is not a valid ISO 8601 instant.`);
+    throw new ActionInvalidParamsError(`"${key}" is not a valid ISO 8601 instant.`);
   }
   return parsed;
 }
@@ -430,7 +430,7 @@ function summarizeBalanceActivity(
 }
 
 function summarizeSubscriptions(
-  connection: GoatStripeConnection,
+  connection: StripeConnection,
   accountLabel: string,
   listings: Array<{
     status: (typeof STRIPE_SUBSCRIPTION_STATUSES)[number];
@@ -531,7 +531,7 @@ function isStripeRecurringInterval(
 }
 
 function summarizeReceivables(
-  connection: GoatStripeConnection,
+  connection: StripeConnection,
   accountLabel: string,
   invoices: readonly StripeInvoice[],
   partial: boolean,
@@ -644,7 +644,7 @@ function compactSourceTypes(value: Record<string, number>) {
 function validateAllowedParams(params: Record<string, unknown>, allowed: ReadonlySet<string>) {
   const unexpected = Object.keys(params).find((key) => !allowed.has(key));
   if (unexpected) {
-    throw new GoatActionInvalidParamsError(`Unexpected parameter ${JSON.stringify(unexpected)}.`);
+    throw new ActionInvalidParamsError(`Unexpected parameter ${JSON.stringify(unexpected)}.`);
   }
 }
 

@@ -1,11 +1,11 @@
 import { type CloudCodingEngine, isCloudCodingEngine } from "@opencompany/agent-runtime";
 import {
-  type GoatCodexChatSessionStatus,
-  goatChatSessions,
-  goatCodexChatSessions,
+  type CodexChatSessionStatus,
+  chatSessions,
+  codexChatSessions,
 } from "@opencompany/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
-import { createGoatCodingWorkspaceTicket } from "./coding-workspace-runtime-auth";
+import { createCodingWorkspaceTicket } from "./coding-workspace-runtime-auth";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { getSandboxLifecycleStatus, type SandboxHandle } from "./sandbox";
@@ -18,34 +18,34 @@ export const GOAT_CODING_WORKSPACE_SANDBOX_NETWORK = {
   maskRequestHost: "localhost:${PORT}",
 } as const;
 
-export type GoatCodingWorkspaceSession = {
+export type CodingWorkspaceSession = {
   id: string;
   chatSessionId: string;
   userWorkosId: string;
   sandboxId: string;
-  status: GoatCodexChatSessionStatus;
+  status: CodexChatSessionStatus;
   engine: CloudCodingEngine;
 };
 
-type StoredCodingWorkspaceSession = Omit<GoatCodingWorkspaceSession, "engine" | "sandboxId"> & {
+type StoredCodingWorkspaceSession = Omit<CodingWorkspaceSession, "engine" | "sandboxId"> & {
   engine: unknown;
   sandboxId: string | null;
 };
 
-export class GoatCodingWorkspaceAccessError extends Error {
+export class CodingWorkspaceAccessError extends Error {
   constructor(
     message: string,
     readonly statusCode: 404 | 409 | 503,
   ) {
     super(message);
-    this.name = "GoatCodingWorkspaceAccessError";
+    this.name = "CodingWorkspaceAccessError";
   }
 }
 
-export async function loadGoatCodingWorkspaceSession(input: {
+export async function loadCodingWorkspaceSession(input: {
   codingSessionId: string;
   userWorkosId?: string;
-}): Promise<GoatCodingWorkspaceSession | null> {
+}): Promise<CodingWorkspaceSession | null> {
   const row = await loadStoredCodingWorkspaceSession(input);
   if (!row || !row.sandboxId || row.status === "closed" || !isCloudCodingEngine(row.engine)) {
     return null;
@@ -58,47 +58,42 @@ async function loadStoredCodingWorkspaceSession(input: {
   userWorkosId?: string;
 }): Promise<StoredCodingWorkspaceSession | null> {
   const ownership = input.userWorkosId
-    ? eq(goatCodexChatSessions.userWorkosId, input.userWorkosId)
+    ? eq(codexChatSessions.userWorkosId, input.userWorkosId)
     : undefined;
   const [row] = await getDb()
     .select({
-      id: goatCodexChatSessions.id,
-      chatSessionId: goatCodexChatSessions.chatSessionId,
-      userWorkosId: goatCodexChatSessions.userWorkosId,
-      sandboxId: goatCodexChatSessions.sandboxId,
-      status: goatCodexChatSessions.status,
-      engine: goatCodexChatSessions.engine,
+      id: codexChatSessions.id,
+      chatSessionId: codexChatSessions.chatSessionId,
+      userWorkosId: codexChatSessions.userWorkosId,
+      sandboxId: codexChatSessions.sandboxId,
+      status: codexChatSessions.status,
+      engine: codexChatSessions.engine,
     })
-    .from(goatCodexChatSessions)
+    .from(codexChatSessions)
     .innerJoin(
-      goatChatSessions,
-      and(
-        eq(goatChatSessions.id, goatCodexChatSessions.chatSessionId),
-        isNull(goatChatSessions.closedAt),
-      ),
+      chatSessions,
+      and(eq(chatSessions.id, codexChatSessions.chatSessionId), isNull(chatSessions.closedAt)),
     )
-    .where(
-      and(eq(goatCodexChatSessions.id, input.codingSessionId), ...(ownership ? [ownership] : [])),
-    )
+    .where(and(eq(codexChatSessions.id, input.codingSessionId), ...(ownership ? [ownership] : [])))
     .limit(1);
 
   return row ?? null;
 }
 
-export async function mintGoatCodingWorkspaceAccess(input: {
+export async function mintCodingWorkspaceAccess(input: {
   codingSessionId: string;
   userWorkosId: string;
   env: Pick<RunnerEnv, "streamTokenSecret">;
 }) {
   const session = await loadStoredCodingWorkspaceSession(input);
   if (!session || session.status === "closed" || !isCloudCodingEngine(session.engine)) {
-    throw new GoatCodingWorkspaceAccessError(
+    throw new CodingWorkspaceAccessError(
       "This coding workspace is not available or no longer exists.",
       404,
     );
   }
   if (!session.sandboxId) {
-    throw new GoatCodingWorkspaceAccessError(
+    throw new CodingWorkspaceAccessError(
       "This coding workspace is not ready yet. Send a message first.",
       409,
     );
@@ -106,13 +101,13 @@ export async function mintGoatCodingWorkspaceAccess(input: {
 
   const sandboxStatus = await getSandboxLifecycleStatus(session.sandboxId);
   if (sandboxStatus === "deleted") {
-    throw new GoatCodingWorkspaceAccessError(
+    throw new CodingWorkspaceAccessError(
       "This coding workspace has been deleted. Send another message to create a new workspace.",
       409,
     );
   }
 
-  const signed = createGoatCodingWorkspaceTicket({
+  const signed = createCodingWorkspaceTicket({
     codingSessionId: session.id,
     userWorkosId: session.userWorkosId,
     secret: input.env.streamTokenSecret,
@@ -120,16 +115,16 @@ export async function mintGoatCodingWorkspaceAccess(input: {
   return { ...signed, sandboxStatus };
 }
 
-export type GoatCodingWorkspacePreviewPort = {
+export type CodingWorkspacePreviewPort = {
   port: number;
   isHttp: boolean;
   score: number;
 };
 
-export async function discoverGoatCodingWorkspacePreviewPorts(
+export async function discoverCodingWorkspacePreviewPorts(
   sandbox: SandboxHandle,
   input: { workDirectory: string },
-): Promise<GoatCodingWorkspacePreviewPort[]> {
+): Promise<CodingWorkspacePreviewPort[]> {
   const result = await sandbox.commands.run(LISTENING_PORT_PROCESS_COMMAND, {
     user: "user",
     timeoutMs: 10_000,

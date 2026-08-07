@@ -1,24 +1,24 @@
 import { AuthenticationException, type AuthenticationResponse } from "@workos-inc/node";
 import { cookies } from "next/headers";
 
-export type GoatAuthMethod = "google" | "magic_link";
+export type AuthMethod = "google" | "magic_link";
 
 const LAST_AUTH_METHOD_COOKIE = "goat-last-auth-method";
 const OAUTH_STATE_COOKIE = "goat-oauth-state";
 const ORGANIZATION_SELECTION_COOKIE = "goat-organization-selection";
 
-export type GoatOrganizationOption = {
+export type OrganizationOption = {
   id: string;
   name: string;
 };
 
-type GoatOrganizationSelection = {
+type OrganizationSelection = {
   pendingAuthenticationToken: string;
-  organizations: GoatOrganizationOption[];
+  organizations: OrganizationOption[];
   returnPathname: string;
 };
 
-export type GoatOAuthStateCookiePayload = {
+export type OAuthStateCookiePayload = {
   state: string;
   invitationToken?: string;
   returnPathname?: string;
@@ -26,7 +26,7 @@ export type GoatOAuthStateCookiePayload = {
 
 // Normalize a return target from an unauthenticated cookie to a same-origin
 // path, rejecting absolute and protocol-relative URLs before redirecting.
-export function safeGoatReturnPathname(value: unknown): string {
+export function safeReturnPathname(value: unknown): string {
   if (typeof value !== "string" || !value.startsWith("/")) return "/";
 
   const baseUrl = new URL("https://goat.invalid");
@@ -41,7 +41,7 @@ export function safeGoatReturnPathname(value: unknown): string {
 
 export function organizationSelectionFromError(
   error: unknown,
-): Omit<GoatOrganizationSelection, "returnPathname"> | null {
+): Omit<OrganizationSelection, "returnPathname"> | null {
   if (
     !(error instanceof AuthenticationException) ||
     error.code !== "organization_selection_required" ||
@@ -63,9 +63,7 @@ export function organizationSelectionFromError(
   };
 }
 
-function toGoatAuthMethod(
-  method: AuthenticationResponse["authenticationMethod"],
-): GoatAuthMethod | null {
+function toAuthMethod(method: AuthenticationResponse["authenticationMethod"]): AuthMethod | null {
   if (method === "GoogleOAuth") return "google";
   if (method === "MagicAuth") return "magic_link";
   return null;
@@ -73,20 +71,20 @@ function toGoatAuthMethod(
 
 // WorkOS's hosted AuthKit shows a "last used" badge on sign-in; there is no API for
 // it, so we replicate it ourselves with a first-party, browser-scoped cookie.
-export async function recordLastGoatAuthMethod(
-  method: AuthenticationResponse["authenticationMethod"],
+export async function recordLastAuthMethod(
+  authenticationMethod: AuthenticationResponse["authenticationMethod"],
 ) {
-  const goatMethod = toGoatAuthMethod(method);
-  if (!goatMethod) return;
+  const method = toAuthMethod(authenticationMethod);
+  if (!method) return;
   const cookieStore = await cookies();
-  cookieStore.set(LAST_AUTH_METHOD_COOKIE, goatMethod, {
+  cookieStore.set(LAST_AUTH_METHOD_COOKIE, method, {
     path: "/",
     sameSite: "lax",
     maxAge: 60 * 60 * 24 * 365,
   });
 }
 
-export async function readLastGoatAuthMethod(): Promise<GoatAuthMethod | null> {
+export async function readLastAuthMethod(): Promise<AuthMethod | null> {
   const cookieStore = await cookies();
   const value = cookieStore.get(LAST_AUTH_METHOD_COOKIE)?.value;
   return value === "google" || value === "magic_link" ? value : null;
@@ -95,7 +93,7 @@ export async function readLastGoatAuthMethod(): Promise<GoatAuthMethod | null> {
 // Short-lived CSRF cookie for the Google OAuth leg: we generate `state`
 // ourselves (rather than going through authkit-nextjs's hosted-only helpers)
 // so we can target the GoogleOAuth provider directly instead of WorkOS's picker.
-export async function setGoatOAuthStateCookie(payload: GoatOAuthStateCookiePayload) {
+export async function setOAuthStateCookie(payload: OAuthStateCookiePayload) {
   const cookieStore = await cookies();
   cookieStore.set(OAUTH_STATE_COOKIE, JSON.stringify(payload), {
     path: "/",
@@ -106,31 +104,31 @@ export async function setGoatOAuthStateCookie(payload: GoatOAuthStateCookiePaylo
   });
 }
 
-export async function consumeGoatOAuthStateCookie(): Promise<GoatOAuthStateCookiePayload | null> {
+export async function consumeOAuthStateCookie(): Promise<OAuthStateCookiePayload | null> {
   const cookieStore = await cookies();
   const raw = cookieStore.get(OAUTH_STATE_COOKIE)?.value;
-  // Must match the path the cookie was set with (see setGoatOAuthStateCookie)
+  // Must match the path the cookie was set with (see setOAuthStateCookie)
   // or the browser treats this as a no-op deletion of a different cookie,
   // leaving the original — still consumable — state cookie in place.
   cookieStore.delete({ name: OAUTH_STATE_COOKIE, path: "/" });
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    return typeof parsed?.state === "string" ? (parsed as GoatOAuthStateCookiePayload) : null;
+    return typeof parsed?.state === "string" ? (parsed as OAuthStateCookiePayload) : null;
   } catch {
     return null;
   }
 }
 
-export async function setGoatOrganizationSelection(
-  selection: Omit<GoatOrganizationSelection, "returnPathname"> & { returnPathname?: string },
+export async function setOrganizationSelection(
+  selection: Omit<OrganizationSelection, "returnPathname"> & { returnPathname?: string },
 ) {
   const cookieStore = await cookies();
   const value = Buffer.from(
     JSON.stringify({
       ...selection,
-      returnPathname: safeGoatReturnPathname(selection.returnPathname),
-    } satisfies GoatOrganizationSelection),
+      returnPathname: safeReturnPathname(selection.returnPathname),
+    } satisfies OrganizationSelection),
   ).toString("base64url");
   cookieStore.set(ORGANIZATION_SELECTION_COOKIE, value, {
     path: "/",
@@ -141,7 +139,7 @@ export async function setGoatOrganizationSelection(
   });
 }
 
-async function readGoatOrganizationSelection(): Promise<GoatOrganizationSelection | null> {
+async function readOrganizationSelection(): Promise<OrganizationSelection | null> {
   const cookieStore = await cookies();
   const raw = cookieStore.get(ORGANIZATION_SELECTION_COOKIE)?.value;
   if (!raw) return null;
@@ -149,7 +147,7 @@ async function readGoatOrganizationSelection(): Promise<GoatOrganizationSelectio
   try {
     const parsed = JSON.parse(
       Buffer.from(raw, "base64url").toString("utf8"),
-    ) as Partial<GoatOrganizationSelection>;
+    ) as Partial<OrganizationSelection>;
     if (
       typeof parsed.pendingAuthenticationToken !== "string" ||
       !Array.isArray(parsed.organizations)
@@ -166,23 +164,23 @@ async function readGoatOrganizationSelection(): Promise<GoatOrganizationSelectio
     return {
       pendingAuthenticationToken: parsed.pendingAuthenticationToken,
       organizations,
-      returnPathname: safeGoatReturnPathname(parsed.returnPathname),
+      returnPathname: safeReturnPathname(parsed.returnPathname),
     };
   } catch {
     return null;
   }
 }
 
-export async function readGoatOrganizationOptions(): Promise<GoatOrganizationOption[] | null> {
-  const selection = await readGoatOrganizationSelection();
+export async function readOrganizationOptions(): Promise<OrganizationOption[] | null> {
+  const selection = await readOrganizationSelection();
   return selection?.organizations ?? null;
 }
 
-export async function readPendingGoatOrganizationSelection() {
-  return readGoatOrganizationSelection();
+export async function readPendingOrganizationSelection() {
+  return readOrganizationSelection();
 }
 
-export async function clearGoatOrganizationSelection() {
+export async function clearOrganizationSelection() {
   const cookieStore = await cookies();
   cookieStore.delete(ORGANIZATION_SELECTION_COOKIE);
 }

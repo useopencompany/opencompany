@@ -2,19 +2,19 @@ import { randomUUID } from "node:crypto";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
 import {
-  type GoatChatMessage,
-  type GoatChatMessageAttachment,
-  type GoatChatMessageDebugTrace,
-  type GoatChatRole,
-  type GoatChatSession,
-  type GoatChatSessionKind,
-  type GoatCodexChatTurnSettings,
-  goatChatMessages,
-  goatChatSessions,
-  goatCodexChatSessions,
-  goatCodexChatTurns,
-  goatTasks,
-  goatUsers,
+  type ChatMessage,
+  type ChatMessageAttachment,
+  type ChatMessageDebugTrace,
+  type ChatRole,
+  type ChatSession,
+  type ChatSessionKind,
+  type CodexChatTurnSettings,
+  chatMessages,
+  chatSessions,
+  codexChatSessions,
+  codexChatTurns,
+  tasks,
+  users,
 } from "@opencompany/db/schema";
 import {
   and,
@@ -31,79 +31,79 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import {
   applyApprovalResponsesToStoredParts,
-  compareGoatChatMessageOrder,
-  deriveGoatChatState,
+  type ChatSessionView,
+  type ChatSummaryView,
+  type ChatUiMessage,
+  type CodexRuntimeView,
+  compareChatMessageOrder,
+  deriveChatState,
   dismissPendingApprovalsInStoredParts,
   GOAT_PINNED_CHAT_LIMIT,
-  type GoatChatSessionView,
-  type GoatChatSummaryView,
-  type GoatChatUiMessage,
-  type GoatCodexRuntimeView,
-  type GoatStoredChatMessage,
+  type StoredChatMessage,
   settleIncompleteToolCallsInStoredParts,
-  toGoatChatUiMessage,
+  toChatUiMessage,
 } from "@/lib/chat-ui";
 import { DEFAULT_CLAUDE_CHAT_REASONING_EFFORT } from "@/lib/claude-chat-settings";
 import { codexComposerSettingsFromTurnSettings } from "@/lib/codex-chat-settings";
-import { goatHomeActivityCutoff } from "@/lib/home-activity";
-import { toGoatTaskTitle } from "@/lib/task-display";
+import { homeActivityCutoff } from "@/lib/home-activity";
+import { toTaskTitle } from "@/lib/task-display";
 
 const GOAT_RECENT_CHAT_LIMIT = 8;
 const GOAT_CHAT_PREVIEW_MAX_LENGTH = 96;
 
 export type {
-  GoatChatMessageMetadata,
-  GoatChatSessionView,
-  GoatChatSummaryView,
-  GoatChatUiMessage,
-  GoatStoredChatMessage,
+  ChatMessageMetadata,
+  ChatSessionView,
+  ChatSummaryView,
+  ChatUiMessage,
   StartTaskToolOutput,
+  StoredChatMessage,
 } from "@/lib/chat-ui";
 export {
-  textFromGoatChatUiMessage,
-  toGoatChatMessageMetadata,
-  toGoatChatUiMessage,
+  textFromChatUiMessage,
+  toChatMessageMetadata,
+  toChatUiMessage,
 } from "@/lib/chat-ui";
 
-export type GoatChatStore = {
+export type ChatStore = {
   findOpenSession(input: {
     userWorkosId: string;
     sessionId?: string | null;
-    kind?: GoatChatSessionKind;
-  }): Promise<GoatChatSession | null>;
+    kind?: ChatSessionKind;
+  }): Promise<ChatSession | null>;
   listOpenSessions(input: {
     userWorkosId: string;
     limit: number;
     updatedAfter?: Date;
-  }): Promise<GoatChatSession[]>;
+  }): Promise<ChatSession[]>;
   createSession(input: {
     id?: string;
     userWorkosId: string;
     model: AgentModelId;
     title: string;
-  }): Promise<GoatChatSession>;
+  }): Promise<ChatSession>;
   loadLatestCodexTurnSettings?(input: {
     userWorkosId: string;
     sessionId: string;
-  }): Promise<GoatCodexChatTurnSettings | null>;
+  }): Promise<CodexChatTurnSettings | null>;
   loadCodexRuntime?(input: {
     userWorkosId: string;
     sessionId: string;
-  }): Promise<GoatCodexRuntimeView | null>;
-  listMessages(sessionId: string): Promise<GoatStoredChatMessage[]>;
+  }): Promise<CodexRuntimeView | null>;
+  listMessages(sessionId: string): Promise<StoredChatMessage[]>;
   insertMessage(input: {
     id?: string;
     sessionId: string;
-    role: GoatChatRole;
+    role: ChatRole;
     content: string;
     taskId?: string | null;
-    debugTrace?: GoatChatMessageDebugTrace | null;
-    attachments?: GoatChatMessageAttachment[] | null;
+    debugTrace?: ChatMessageDebugTrace | null;
+    attachments?: ChatMessageAttachment[] | null;
     attachmentTexts?: Record<string, string> | null;
-  }): Promise<GoatChatMessage>;
+  }): Promise<ChatMessage>;
   touchSession(input: { sessionId: string; now: Date }): Promise<void>;
   markSessionSeen(input: {
     userWorkosId: string;
@@ -120,9 +120,9 @@ export type GoatChatStore = {
   }): Promise<boolean>;
 };
 
-export async function loadCurrentGoatChatSession(): Promise<GoatChatSessionView | null> {
-  const { user } = await currentGoatUser();
-  const store = createDbGoatChatStore();
+export async function loadCurrentChatSession(): Promise<ChatSessionView | null> {
+  const { user } = await currentUser();
+  const store = createDbChatStore();
   const session = await store.findOpenSession({ userWorkosId: user.workosUserId });
   if (!session) return null;
 
@@ -142,23 +142,23 @@ export async function loadCurrentGoatChatSession(): Promise<GoatChatSessionView 
   return toChatSessionView(session, messages, codexComposerSettings, codexRuntime);
 }
 
-export async function loadCurrentGoatChatSessionById(
+export async function loadCurrentChatSessionById(
   sessionId: string | null | undefined,
-): Promise<GoatChatSessionView | null> {
+): Promise<ChatSessionView | null> {
   const trimmed = sessionId?.trim();
   if (!trimmed) return null;
 
-  const { user } = await currentGoatUser();
-  return loadGoatChatSessionByIdForUser({
+  const { user } = await currentUser();
+  return loadChatSessionByIdForUser({
     userWorkosId: user.workosUserId,
     sessionId: trimmed,
   });
 }
 
-export async function loadGoatChatSessionByIdForUser(
-  input: { userWorkosId: string; sessionId: string; kind?: GoatChatSessionKind },
-  store: GoatChatStore = createDbGoatChatStore(),
-): Promise<GoatChatSessionView | null> {
+export async function loadChatSessionByIdForUser(
+  input: { userWorkosId: string; sessionId: string; kind?: ChatSessionKind },
+  store: ChatStore = createDbChatStore(),
+): Promise<ChatSessionView | null> {
   const session = await store.findOpenSession({
     userWorkosId: input.userWorkosId,
     sessionId: input.sessionId,
@@ -182,26 +182,26 @@ export async function loadGoatChatSessionByIdForUser(
   return toChatSessionView(session, messages, codexComposerSettings, codexRuntime);
 }
 
-export async function loadGoatTaskChatSessionByIdForWorkspace(
+export async function loadTaskChatSessionByIdForWorkspace(
   input: { workspaceId: string; sessionId: string },
-  store: GoatChatStore = createDbGoatChatStore(),
-): Promise<GoatChatSessionView | null> {
+  store: ChatStore = createDbChatStore(),
+): Promise<ChatSessionView | null> {
   const [row] = await getDb()
-    .select({ session: goatChatSessions })
-    .from(goatChatSessions)
+    .select({ session: chatSessions })
+    .from(chatSessions)
     .innerJoin(
-      goatCodexChatSessions,
+      codexChatSessions,
       and(
-        eq(goatCodexChatSessions.chatSessionId, goatChatSessions.id),
-        eq(goatCodexChatSessions.userWorkosId, goatChatSessions.userWorkosId),
+        eq(codexChatSessions.chatSessionId, chatSessions.id),
+        eq(codexChatSessions.userWorkosId, chatSessions.userWorkosId),
       ),
     )
     .where(
       and(
-        eq(goatChatSessions.id, input.sessionId),
-        eq(goatChatSessions.kind, "task"),
-        isNull(goatChatSessions.closedAt),
-        eq(goatCodexChatSessions.workspaceId, input.workspaceId),
+        eq(chatSessions.id, input.sessionId),
+        eq(chatSessions.kind, "task"),
+        isNull(chatSessions.closedAt),
+        eq(codexChatSessions.workspaceId, input.workspaceId),
       ),
     )
     .limit(1);
@@ -224,18 +224,18 @@ export async function loadGoatTaskChatSessionByIdForWorkspace(
   return toChatSessionView(session, messages, codexComposerSettings, codexRuntime);
 }
 
-export async function listCurrentUserRecentGoatChats(
+export async function listCurrentUserRecentChats(
   limit = GOAT_RECENT_CHAT_LIMIT,
-): Promise<GoatChatSummaryView[]> {
-  const { user } = await currentGoatUser();
-  const store = createDbGoatChatStore();
-  return listRecentGoatChatsForUser({ userWorkosId: user.workosUserId, limit }, store);
+): Promise<ChatSummaryView[]> {
+  const { user } = await currentUser();
+  const store = createDbChatStore();
+  return listRecentChatsForUser({ userWorkosId: user.workosUserId, limit }, store);
 }
 
-export async function listRecentGoatChatsForUser(
+export async function listRecentChatsForUser(
   input: { userWorkosId: string; limit?: number },
-  store: GoatChatStore = createDbGoatChatStore(),
-): Promise<GoatChatSummaryView[]> {
+  store: ChatStore = createDbChatStore(),
+): Promise<ChatSummaryView[]> {
   const limit = Math.max(
     1,
     Math.min(input.limit ?? GOAT_RECENT_CHAT_LIMIT, GOAT_RECENT_CHAT_LIMIT),
@@ -243,7 +243,7 @@ export async function listRecentGoatChatsForUser(
   const sessions = await store.listOpenSessions({
     userWorkosId: input.userWorkosId,
     limit,
-    updatedAfter: goatHomeActivityCutoff(),
+    updatedAfter: homeActivityCutoff(),
   });
   const summaries = await Promise.all(
     sessions.map(async (session) => {
@@ -266,7 +266,7 @@ export async function listRecentGoatChatsForUser(
   return summaries;
 }
 
-export async function createGoatChatUserTurn(
+export async function createChatUserTurn(
   input: {
     userWorkosId: string;
     prompt: string;
@@ -274,10 +274,10 @@ export async function createGoatChatUserTurn(
     sessionId?: string | null;
     newSessionId?: string | null;
     messageId?: string | null;
-    attachments?: GoatChatMessageAttachment[] | null;
+    attachments?: ChatMessageAttachment[] | null;
     attachmentTexts?: Record<string, string> | null;
   },
-  store: GoatChatStore = createDbGoatChatStore(),
+  store: ChatStore = createDbChatStore(),
 ) {
   const { session, created: sessionCreated } = await findOrCreateOpenSession({
     store,
@@ -306,7 +306,7 @@ export async function createGoatChatUserTurn(
     sessionCreated,
     userMessage,
     storedMessages,
-    messages: storedMessages.map((message) => toGoatChatUiMessage(message)),
+    messages: storedMessages.map((message) => toChatUiMessage(message)),
   };
 }
 
@@ -315,16 +315,16 @@ export async function createGoatChatUserTurn(
 // assistant message carrying approval decisions, which are merged into the
 // stored copy (never trusting client-supplied inputs/outputs) and persisted so
 // the decided state survives a crash before the continuation stream lands.
-export async function createGoatChatApprovalContinuationTurn(
-  input: { userWorkosId: string; sessionId: string; message: GoatChatUiMessage },
-  store: GoatChatStore = createDbGoatChatStore(),
+export async function createChatApprovalContinuationTurn(
+  input: { userWorkosId: string; sessionId: string; message: ChatUiMessage },
+  store: ChatStore = createDbChatStore(),
 ): Promise<
   | {
       ok: true;
-      session: GoatChatSession;
-      lastUserMessage: GoatStoredChatMessage | null;
-      storedMessages: GoatStoredChatMessage[];
-      messages: GoatChatUiMessage[];
+      session: ChatSession;
+      lastUserMessage: StoredChatMessage | null;
+      storedMessages: StoredChatMessage[];
+      messages: ChatUiMessage[];
       respondedApprovals: Array<{
         approvalId: string;
         toolCallId: string;
@@ -363,7 +363,7 @@ export async function createGoatChatApprovalContinuationTurn(
   }
 
   const mergedTrace = { ...lastStored.debugTrace, uiMessageParts: parts };
-  await persistGoatChatAssistantMessage(
+  await persistChatAssistantMessage(
     {
       sessionId: session.id,
       messageId: lastStored.id,
@@ -384,7 +384,7 @@ export async function createGoatChatApprovalContinuationTurn(
     session,
     lastUserMessage,
     storedMessages,
-    messages: storedMessages.map((message) => toGoatChatUiMessage(message)),
+    messages: storedMessages.map((message) => toChatUiMessage(message)),
     respondedApprovals,
   };
 }
@@ -394,10 +394,10 @@ export async function createGoatChatApprovalContinuationTurn(
 // stopped or failed stream are settled. Both otherwise create tool calls with
 // no result, which model conversion rejects. Persist the repair so the UI and
 // every later turn share the same terminal state.
-export async function settleStaleGoatChatToolCalls(
-  turn: { storedMessages: GoatStoredChatMessage[] },
-  store: GoatChatStore = createDbGoatChatStore(),
-): Promise<{ changed: boolean; messages: GoatChatUiMessage[]; toolCallIds: string[] }> {
+export async function settleStaleChatToolCalls(
+  turn: { storedMessages: StoredChatMessage[] },
+  store: ChatStore = createDbChatStore(),
+): Promise<{ changed: boolean; messages: ChatUiMessage[]; toolCallIds: string[] }> {
   let changedAny = false;
   const toolCallIds = new Set<string>();
   const storedMessages = await Promise.all(
@@ -411,7 +411,7 @@ export async function settleStaleGoatChatToolCalls(
         toolCallIds.add(toolCallId);
       }
       const debugTrace = { ...message.debugTrace, uiMessageParts: settled.parts };
-      await persistGoatChatAssistantMessage(
+      await persistChatAssistantMessage(
         {
           sessionId: message.sessionId,
           messageId: message.id,
@@ -426,20 +426,20 @@ export async function settleStaleGoatChatToolCalls(
   );
   return {
     changed: changedAny,
-    messages: storedMessages.map((message) => toGoatChatUiMessage(message)),
+    messages: storedMessages.map((message) => toChatUiMessage(message)),
     toolCallIds: [...toolCallIds],
   };
 }
 
-export async function persistGoatChatAssistantMessage(
+export async function persistChatAssistantMessage(
   input: {
     sessionId: string;
     messageId?: string | null;
     content: string;
     taskId?: string | null;
-    debugTrace?: GoatChatMessageDebugTrace | null;
+    debugTrace?: ChatMessageDebugTrace | null;
   },
-  store: GoatChatStore = createDbGoatChatStore(),
+  store: ChatStore = createDbChatStore(),
 ) {
   const assistantMessage = await store.insertMessage({
     ...(input.messageId ? { id: input.messageId } : {}),
@@ -453,9 +453,9 @@ export async function persistGoatChatAssistantMessage(
   return assistantMessage;
 }
 
-export async function closeGoatChatSessionForUser(
+export async function closeChatSessionForUser(
   input: { userWorkosId: string; sessionId: string },
-  store: GoatChatStore = createDbGoatChatStore(),
+  store: ChatStore = createDbChatStore(),
 ) {
   return store.closeSession({
     userWorkosId: input.userWorkosId,
@@ -464,9 +464,9 @@ export async function closeGoatChatSessionForUser(
   });
 }
 
-export async function reopenGoatChatSessionForUser(
+export async function reopenChatSessionForUser(
   input: { userWorkosId: string; sessionId: string },
-  store: GoatChatStore = createDbGoatChatStore(),
+  store: ChatStore = createDbChatStore(),
 ) {
   return store.reopenSession({
     userWorkosId: input.userWorkosId,
@@ -475,9 +475,9 @@ export async function reopenGoatChatSessionForUser(
   });
 }
 
-export async function setGoatChatSessionPinnedForUser(
+export async function setChatSessionPinnedForUser(
   input: { userWorkosId: string; sessionId: string; pinned: boolean },
-  store: GoatChatStore = createDbGoatChatStore(),
+  store: ChatStore = createDbChatStore(),
 ) {
   return store.setSessionPinned({
     userWorkosId: input.userWorkosId,
@@ -487,9 +487,9 @@ export async function setGoatChatSessionPinnedForUser(
   });
 }
 
-export async function markGoatChatSessionSeenForUser(
+export async function markChatSessionSeenForUser(
   input: { userWorkosId: string; sessionId: string },
-  store: GoatChatStore = createDbGoatChatStore(),
+  store: ChatStore = createDbChatStore(),
 ) {
   return store.markSessionSeen({
     userWorkosId: input.userWorkosId,
@@ -498,29 +498,29 @@ export async function markGoatChatSessionSeenForUser(
   });
 }
 
-type GoatChatDb = ReturnType<typeof getDb>;
+type ChatDb = ReturnType<typeof getDb>;
 
-export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
+export function createDbChatStore(db: ChatDb = getDb()): ChatStore {
   return {
     async findOpenSession(input) {
       const where = input.sessionId?.trim()
         ? and(
-            eq(goatChatSessions.id, input.sessionId.trim()),
-            eq(goatChatSessions.userWorkosId, input.userWorkosId),
-            isNull(goatChatSessions.closedAt),
-            eq(goatChatSessions.kind, input.kind ?? "chat"),
+            eq(chatSessions.id, input.sessionId.trim()),
+            eq(chatSessions.userWorkosId, input.userWorkosId),
+            isNull(chatSessions.closedAt),
+            eq(chatSessions.kind, input.kind ?? "chat"),
           )
         : and(
-            eq(goatChatSessions.userWorkosId, input.userWorkosId),
-            isNull(goatChatSessions.closedAt),
-            eq(goatChatSessions.kind, input.kind ?? "chat"),
+            eq(chatSessions.userWorkosId, input.userWorkosId),
+            isNull(chatSessions.closedAt),
+            eq(chatSessions.kind, input.kind ?? "chat"),
           );
 
       const [session] = await db
         .select()
-        .from(goatChatSessions)
+        .from(chatSessions)
         .where(where)
-        .orderBy(desc(goatChatSessions.updatedAt))
+        .orderBy(desc(chatSessions.updatedAt))
         .limit(1);
 
       return session ?? null;
@@ -532,43 +532,39 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
       const [pinned, activeCodex, recent] = await Promise.all([
         db
           .select()
-          .from(goatChatSessions)
+          .from(chatSessions)
           .where(
             and(
-              eq(goatChatSessions.userWorkosId, input.userWorkosId),
-              isNull(goatChatSessions.closedAt),
-              eq(goatChatSessions.kind, "chat"),
-              isNotNull(goatChatSessions.pinnedAt),
+              eq(chatSessions.userWorkosId, input.userWorkosId),
+              isNull(chatSessions.closedAt),
+              eq(chatSessions.kind, "chat"),
+              isNotNull(chatSessions.pinnedAt),
             ),
           )
-          .orderBy(desc(goatChatSessions.pinnedAt))
+          .orderBy(desc(chatSessions.pinnedAt))
           .limit(GOAT_PINNED_CHAT_LIMIT),
         db
           .select()
-          .from(goatChatSessions)
+          .from(chatSessions)
           .where(
             and(
-              eq(goatChatSessions.userWorkosId, input.userWorkosId),
-              isNull(goatChatSessions.closedAt),
-              eq(goatChatSessions.kind, "chat"),
-              isNull(goatChatSessions.pinnedAt),
+              eq(chatSessions.userWorkosId, input.userWorkosId),
+              isNull(chatSessions.closedAt),
+              eq(chatSessions.kind, "chat"),
+              isNull(chatSessions.pinnedAt),
               exists(
                 db
-                  .select({ id: goatCodexChatSessions.id })
-                  .from(goatCodexChatSessions)
+                  .select({ id: codexChatSessions.id })
+                  .from(codexChatSessions)
                   .where(
                     and(
-                      eq(goatCodexChatSessions.chatSessionId, goatChatSessions.id),
-                      eq(goatCodexChatSessions.userWorkosId, input.userWorkosId),
+                      eq(codexChatSessions.chatSessionId, chatSessions.id),
+                      eq(codexChatSessions.userWorkosId, input.userWorkosId),
                       or(
-                        inArray(goatCodexChatSessions.status, ["queued", "starting", "running"]),
+                        inArray(codexChatSessions.status, ["queued", "starting", "running"]),
                         and(
-                          isNotNull(goatCodexChatSessions.activeTurnId),
-                          notInArray(goatCodexChatSessions.status, [
-                            "failed",
-                            "interrupted",
-                            "closed",
-                          ]),
+                          isNotNull(codexChatSessions.activeTurnId),
+                          notInArray(codexChatSessions.status, ["failed", "interrupted", "closed"]),
                         ),
                       ),
                     ),
@@ -576,20 +572,20 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
               ),
             ),
           )
-          .orderBy(desc(goatChatSessions.updatedAt)),
+          .orderBy(desc(chatSessions.updatedAt)),
         db
           .select()
-          .from(goatChatSessions)
+          .from(chatSessions)
           .where(
             and(
-              eq(goatChatSessions.userWorkosId, input.userWorkosId),
-              isNull(goatChatSessions.closedAt),
-              eq(goatChatSessions.kind, "chat"),
-              isNull(goatChatSessions.pinnedAt),
-              ...(input.updatedAfter ? [gte(goatChatSessions.updatedAt, input.updatedAfter)] : []),
+              eq(chatSessions.userWorkosId, input.userWorkosId),
+              isNull(chatSessions.closedAt),
+              eq(chatSessions.kind, "chat"),
+              isNull(chatSessions.pinnedAt),
+              ...(input.updatedAfter ? [gte(chatSessions.updatedAt, input.updatedAfter)] : []),
             ),
           )
-          .orderBy(desc(goatChatSessions.updatedAt))
+          .orderBy(desc(chatSessions.updatedAt))
           .limit(input.limit),
       ]);
       const seen = new Set<string>();
@@ -603,9 +599,9 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
     async createSession(input) {
       const now = new Date();
       const [session] = await db
-        .insert(goatChatSessions)
+        .insert(chatSessions)
         .values({
-          id: input.id ?? newGoatChatSessionId(),
+          id: input.id ?? newChatSessionId(),
           userWorkosId: input.userWorkosId,
           title: input.title,
           model: input.model,
@@ -620,15 +616,15 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
 
     async loadLatestCodexTurnSettings(input) {
       const [turn] = await db
-        .select({ settings: goatCodexChatTurns.settings })
-        .from(goatCodexChatTurns)
+        .select({ settings: codexChatTurns.settings })
+        .from(codexChatTurns)
         .where(
           and(
-            eq(goatCodexChatTurns.userWorkosId, input.userWorkosId),
-            eq(goatCodexChatTurns.chatSessionId, input.sessionId),
+            eq(codexChatTurns.userWorkosId, input.userWorkosId),
+            eq(codexChatTurns.chatSessionId, input.sessionId),
           ),
         )
-        .orderBy(desc(goatCodexChatTurns.createdAt))
+        .orderBy(desc(codexChatTurns.createdAt))
         .limit(1);
       return turn?.settings ?? null;
     },
@@ -636,16 +632,16 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
     async loadCodexRuntime(input) {
       const [runtime] = await db
         .select({
-          status: goatCodexChatSessions.status,
-          activeTurnId: goatCodexChatSessions.activeTurnId,
-          error: goatCodexChatSessions.error,
-          updatedAt: goatCodexChatSessions.updatedAt,
+          status: codexChatSessions.status,
+          activeTurnId: codexChatSessions.activeTurnId,
+          error: codexChatSessions.error,
+          updatedAt: codexChatSessions.updatedAt,
         })
-        .from(goatCodexChatSessions)
+        .from(codexChatSessions)
         .where(
           and(
-            eq(goatCodexChatSessions.userWorkosId, input.userWorkosId),
-            eq(goatCodexChatSessions.chatSessionId, input.sessionId),
+            eq(codexChatSessions.userWorkosId, input.userWorkosId),
+            eq(codexChatSessions.chatSessionId, input.sessionId),
           ),
         )
         .limit(1);
@@ -662,32 +658,32 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
     async listMessages(sessionId) {
       const messages = await db
         .select({
-          id: goatChatMessages.id,
-          sessionId: goatChatMessages.sessionId,
-          role: goatChatMessages.role,
-          content: goatChatMessages.content,
-          taskId: goatChatMessages.taskId,
-          debugTrace: goatChatMessages.debugTrace,
-          attachments: goatChatMessages.attachments,
-          attachmentTexts: goatChatMessages.attachmentTexts,
-          createdAt: goatChatMessages.createdAt,
-          updatedAt: goatChatMessages.updatedAt,
-          taskDisplayId: goatTasks.displayId,
-          taskName: goatTasks.name,
-          taskPrompt: goatTasks.prompt,
-          taskStatus: goatTasks.status,
+          id: chatMessages.id,
+          sessionId: chatMessages.sessionId,
+          role: chatMessages.role,
+          content: chatMessages.content,
+          taskId: chatMessages.taskId,
+          debugTrace: chatMessages.debugTrace,
+          attachments: chatMessages.attachments,
+          attachmentTexts: chatMessages.attachmentTexts,
+          createdAt: chatMessages.createdAt,
+          updatedAt: chatMessages.updatedAt,
+          taskDisplayId: tasks.displayId,
+          taskName: tasks.name,
+          taskPrompt: tasks.prompt,
+          taskStatus: tasks.status,
         })
-        .from(goatChatMessages)
-        .leftJoin(goatTasks, eq(goatChatMessages.taskId, goatTasks.id))
-        .where(eq(goatChatMessages.sessionId, sessionId))
-        .orderBy(asc(goatChatMessages.createdAt));
-      return messages.toSorted(compareGoatChatMessageOrder);
+        .from(chatMessages)
+        .leftJoin(tasks, eq(chatMessages.taskId, tasks.id))
+        .where(eq(chatMessages.sessionId, sessionId))
+        .orderBy(asc(chatMessages.createdAt));
+      return messages.toSorted(compareChatMessageOrder);
     },
 
     async insertMessage(input) {
       const now = new Date();
-      const insert = db.insert(goatChatMessages).values({
-        id: input.id ?? newGoatChatMessageId(),
+      const insert = db.insert(chatMessages).values({
+        id: input.id ?? newChatMessageId(),
         sessionId: input.sessionId,
         role: input.role,
         content: input.content,
@@ -705,14 +701,14 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
       // surfaces the conflict like the plain insert used to.
       const [message] = await (input.role === "assistant"
         ? insert.onConflictDoUpdate({
-            target: goatChatMessages.id,
+            target: chatMessages.id,
             set: {
               content: input.content,
               taskId: input.taskId ?? null,
               debugTrace: input.debugTrace ?? null,
               updatedAt: now,
             },
-            setWhere: sql`${goatChatMessages.sessionId} = ${input.sessionId} and ${goatChatMessages.role} = 'assistant'`,
+            setWhere: sql`${chatMessages.sessionId} = ${input.sessionId} and ${chatMessages.role} = 'assistant'`,
           })
         : insert
       ).returning();
@@ -722,72 +718,72 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
 
     async touchSession(input) {
       await db
-        .update(goatChatSessions)
+        .update(chatSessions)
         .set({ updatedAt: input.now })
-        .where(eq(goatChatSessions.id, input.sessionId));
+        .where(eq(chatSessions.id, input.sessionId));
     },
 
     async markSessionSeen(input) {
       const [session] = await db
-        .update(goatChatSessions)
+        .update(chatSessions)
         .set({
-          lastSeenAt: sql`GREATEST(COALESCE(${goatChatSessions.lastSeenAt}, '-infinity'::timestamptz), ${input.seenAt})`,
+          lastSeenAt: sql`GREATEST(COALESCE(${chatSessions.lastSeenAt}, '-infinity'::timestamptz), ${input.seenAt})`,
         })
         .where(
           and(
-            eq(goatChatSessions.id, input.sessionId),
-            eq(goatChatSessions.userWorkosId, input.userWorkosId),
-            eq(goatChatSessions.kind, "chat"),
-            isNull(goatChatSessions.closedAt),
+            eq(chatSessions.id, input.sessionId),
+            eq(chatSessions.userWorkosId, input.userWorkosId),
+            eq(chatSessions.kind, "chat"),
+            isNull(chatSessions.closedAt),
           ),
         )
-        .returning({ id: goatChatSessions.id });
+        .returning({ id: chatSessions.id });
       return Boolean(session);
     },
 
     async closeSession(input) {
       const [session] = await db
-        .update(goatChatSessions)
+        .update(chatSessions)
         .set({ closedAt: input.now, updatedAt: input.now })
         .where(
           and(
-            eq(goatChatSessions.id, input.sessionId),
-            eq(goatChatSessions.userWorkosId, input.userWorkosId),
-            eq(goatChatSessions.kind, "chat"),
-            isNull(goatChatSessions.closedAt),
+            eq(chatSessions.id, input.sessionId),
+            eq(chatSessions.userWorkosId, input.userWorkosId),
+            eq(chatSessions.kind, "chat"),
+            isNull(chatSessions.closedAt),
           ),
         )
-        .returning({ id: goatChatSessions.id });
+        .returning({ id: chatSessions.id });
       return Boolean(session);
     },
 
     async reopenSession(input) {
       const [session] = await db
-        .update(goatChatSessions)
+        .update(chatSessions)
         .set({ closedAt: null, updatedAt: input.now })
         .where(
           and(
-            eq(goatChatSessions.id, input.sessionId),
-            eq(goatChatSessions.userWorkosId, input.userWorkosId),
-            eq(goatChatSessions.kind, "chat"),
-            isNotNull(goatChatSessions.closedAt),
+            eq(chatSessions.id, input.sessionId),
+            eq(chatSessions.userWorkosId, input.userWorkosId),
+            eq(chatSessions.kind, "chat"),
+            isNotNull(chatSessions.closedAt),
           ),
         )
-        .returning({ id: goatChatSessions.id });
+        .returning({ id: chatSessions.id });
       return Boolean(session);
     },
 
     async setSessionPinned(input) {
       const pinCount = db
         .select({ count: sql<number>`count(*)::integer` })
-        .from(goatChatSessions)
+        .from(chatSessions)
         .where(
           and(
-            eq(goatChatSessions.userWorkosId, input.userWorkosId),
-            eq(goatChatSessions.kind, "chat"),
-            ne(goatChatSessions.id, input.sessionId),
-            isNull(goatChatSessions.closedAt),
-            isNotNull(goatChatSessions.pinnedAt),
+            eq(chatSessions.userWorkosId, input.userWorkosId),
+            eq(chatSessions.kind, "chat"),
+            ne(chatSessions.id, input.sessionId),
+            isNull(chatSessions.closedAt),
+            isNotNull(chatSessions.pinnedAt),
           ),
         );
       const pinCapacity = sql`(${pinCount}) < ${GOAT_PINNED_CHAT_LIMIT}`;
@@ -797,24 +793,24 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
       // one transaction. Locking the owner serializes concurrent cap checks.
       const [owners, sessions] = await db.batch([
         db
-          .select({ workosUserId: goatUsers.workosUserId })
-          .from(goatUsers)
-          .where(eq(goatUsers.workosUserId, input.userWorkosId))
+          .select({ workosUserId: users.workosUserId })
+          .from(users)
+          .where(eq(users.workosUserId, input.userWorkosId))
           .limit(1)
           .for("update"),
         db
-          .update(goatChatSessions)
+          .update(chatSessions)
           .set({ pinnedAt: input.pinned ? input.now : null })
           .where(
             and(
-              eq(goatChatSessions.id, input.sessionId),
-              eq(goatChatSessions.userWorkosId, input.userWorkosId),
-              eq(goatChatSessions.kind, "chat"),
-              isNull(goatChatSessions.closedAt),
+              eq(chatSessions.id, input.sessionId),
+              eq(chatSessions.userWorkosId, input.userWorkosId),
+              eq(chatSessions.kind, "chat"),
+              isNull(chatSessions.closedAt),
               ...(input.pinned ? [pinCapacity] : []),
             ),
           )
-          .returning({ id: goatChatSessions.id }),
+          .returning({ id: chatSessions.id }),
       ] as const);
 
       return Boolean(owners[0] && sessions[0]);
@@ -822,16 +818,16 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
   };
 }
 
-export function newGoatChatMessageId() {
+export function newChatMessageId() {
   return `goat_chat_msg_${randomUUID()}`;
 }
 
 function toChatSessionView(
-  session: GoatChatSession,
-  messages: readonly GoatStoredChatMessage[],
+  session: ChatSession,
+  messages: readonly StoredChatMessage[],
   codexComposerSettings: ReturnType<typeof codexComposerSettingsFromTurnSettings> | null = null,
-  codexRuntime: GoatCodexRuntimeView | null = null,
-): GoatChatSessionView {
+  codexRuntime: CodexRuntimeView | null = null,
+): ChatSessionView {
   return {
     id: session.id,
     title: session.title,
@@ -839,16 +835,16 @@ function toChatSessionView(
     engine: session.engine,
     codexComposerSettings,
     codexRuntime,
-    messages: messages.map(toGoatChatUiMessage),
+    messages: messages.map(toChatUiMessage),
   };
 }
 
 function toChatSummaryView(
-  session: GoatChatSession,
-  messages: readonly GoatStoredChatMessage[],
+  session: ChatSession,
+  messages: readonly StoredChatMessage[],
   codexComposerSettings: ReturnType<typeof codexComposerSettingsFromTurnSettings> | null = null,
-  codexRuntime: GoatCodexRuntimeView | null = null,
-): GoatChatSummaryView {
+  codexRuntime: CodexRuntimeView | null = null,
+): ChatSummaryView {
   return {
     id: session.id,
     title: session.title,
@@ -859,7 +855,7 @@ function toChatSummaryView(
     preview: previewFromMessages(messages),
     updatedAt: session.updatedAt.toISOString(),
     lastSeenAt: session.lastSeenAt?.toISOString() ?? null,
-    state: deriveGoatChatState({
+    state: deriveChatState({
       updatedAt: session.updatedAt.toISOString(),
       lastSeenAt: session.lastSeenAt?.toISOString() ?? null,
       codexRuntime,
@@ -869,9 +865,9 @@ function toChatSummaryView(
 }
 
 async function loadCodexComposerSettingsForChatSession(input: {
-  store: GoatChatStore;
+  store: ChatStore;
   userWorkosId: string;
-  session: GoatChatSession;
+  session: ChatSession;
 }) {
   if (input.session.engine !== "codex" && input.session.engine !== "claude_code") return null;
   const settings = await input.store.loadLatestCodexTurnSettings?.({
@@ -887,9 +883,9 @@ async function loadCodexComposerSettingsForChatSession(input: {
 }
 
 async function loadCodexRuntimeForChatSession(input: {
-  store: GoatChatStore;
+  store: ChatStore;
   userWorkosId: string;
-  session: GoatChatSession;
+  session: ChatSession;
 }) {
   return (
     (await input.store.loadCodexRuntime?.({
@@ -899,7 +895,7 @@ async function loadCodexRuntimeForChatSession(input: {
   );
 }
 
-function previewFromMessages(messages: readonly Pick<GoatStoredChatMessage, "content">[]) {
+function previewFromMessages(messages: readonly Pick<StoredChatMessage, "content">[]) {
   const content =
     messages
       .toReversed()
@@ -911,7 +907,7 @@ function previewFromMessages(messages: readonly Pick<GoatStoredChatMessage, "con
 }
 
 async function findOrCreateOpenSession(input: {
-  store: GoatChatStore;
+  store: ChatStore;
   userWorkosId: string;
   sessionId?: string | null;
   newSessionId?: string | null;
@@ -949,10 +945,10 @@ function titleFromPrompt(prompt: string, firstAttachmentName: string | null = nu
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find(Boolean);
-  return toGoatTaskTitle(title ?? firstAttachmentName ?? "New chat");
+  return toTaskTitle(title ?? firstAttachmentName ?? "New chat");
 }
 
-function toStoredChatMessage(message: GoatChatMessage): GoatStoredChatMessage {
+function toStoredChatMessage(message: ChatMessage): StoredChatMessage {
   return {
     id: message.id,
     sessionId: message.sessionId,
@@ -971,6 +967,6 @@ function toStoredChatMessage(message: GoatChatMessage): GoatStoredChatMessage {
   };
 }
 
-function newGoatChatSessionId() {
+function newChatSessionId() {
   return `goat_chat_${randomUUID()}`;
 }

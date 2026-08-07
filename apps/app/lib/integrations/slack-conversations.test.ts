@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  listGoatSlackConversationOptions,
+  listSlackConversationOptions,
   type SlackApiRequester,
 } from "@/lib/integrations/slack-conversations";
 
-describe("listGoatSlackConversationOptions", () => {
+describe("listSlackConversationOptions", () => {
   it("keeps Slack Connect channels and one-to-one DMs visible", async () => {
     const request = vi.fn(async ({ method, form }: Parameters<SlackApiRequester>[0]) => {
       if (method === "users.conversations") {
@@ -52,7 +52,7 @@ describe("listGoatSlackConversationOptions", () => {
       throw new Error(`Unexpected Slack method: ${method}`);
     }) as unknown as SlackApiRequester;
 
-    const result = await listGoatSlackConversationOptions({
+    const result = await listSlackConversationOptions({
       token: "xoxp-test",
       teamId: "T_HOME",
       authedUserId: "U_SELF",
@@ -105,7 +105,7 @@ describe("listGoatSlackConversationOptions", () => {
       throw new Error("Slack profile lookup failed");
     }) as unknown as SlackApiRequester;
 
-    const result = await listGoatSlackConversationOptions({
+    const result = await listSlackConversationOptions({
       token: "xoxp-test",
       teamId: "T_HOME",
       authedUserId: "U_SELF",

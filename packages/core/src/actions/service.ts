@@ -1,13 +1,13 @@
 import {
+  type ActionGatewayRequest,
+  type ActionGatewayResponse,
   GOAT_ACTION_MAX_CALLS_PER_TURN,
   GOAT_ACTION_MAX_PROVIDER_FAILURES_PER_TURN,
-  type GoatActionGatewayRequest,
-  type GoatActionGatewayResponse,
 } from "@opencompany/agent-runtime";
-import type { GoatActionSourceDescriptor } from "./types";
+import type { ActionSourceDescriptor } from "./types";
 
-export type GoatActionServiceCatalog = {
-  sources: readonly GoatActionSourceDescriptor[];
+export type ActionServiceCatalog = {
+  sources: readonly ActionSourceDescriptor[];
   actions: readonly {
     id: string;
     source: string;
@@ -17,34 +17,34 @@ export type GoatActionServiceCatalog = {
   }[];
 };
 
-export type GoatActionInvocationClaim =
+export type ActionInvocationClaim =
   | { ok: true; callCount: number; duplicate: boolean }
   | { ok: false; reason: "list_required" | "call_budget" };
 
-export type GoatActionTurnGovernance = {
+export type ActionTurnGovernance = {
   recordSourceDiscovery: (sourceId: string) => Promise<void>;
   claimInvocation: (input: {
     sourceId: string;
     invocationId: string;
     maxCalls: number;
-  }) => Promise<GoatActionInvocationClaim>;
+  }) => Promise<ActionInvocationClaim>;
   hasDiscoveredSource?: (sourceId: string) => boolean;
   acquireProviderAttempt?: (action: string, signal?: AbortSignal) => Promise<boolean>;
   completeProviderAttempt?: (action: string, outcome: "success" | "failure" | "neutral") => void;
 };
 
-export async function serveGoatActionRequest(input: {
-  request: GoatActionGatewayRequest;
-  catalog: GoatActionServiceCatalog;
-  governance: GoatActionTurnGovernance;
+export async function serveActionRequest(input: {
+  request: ActionGatewayRequest;
+  catalog: ActionServiceCatalog;
+  governance: ActionTurnGovernance;
   execute: (input: {
     action: string;
     params: Record<string, unknown>;
     invocationId: string;
-  }) => Promise<GoatActionGatewayResponse>;
+  }) => Promise<ActionGatewayResponse>;
   maxCalls?: number;
   signal?: AbortSignal;
-}): Promise<GoatActionGatewayResponse> {
+}): Promise<ActionGatewayResponse> {
   const request = input.request;
   if (request.operation === "list") {
     const sourceId = request.source;
@@ -178,9 +178,9 @@ export async function serveGoatActionRequest(input: {
   }
 }
 
-export function createInMemoryGoatActionTurnGovernance(
+export function createInMemoryActionTurnGovernance(
   input: { prelistedSourceIds?: readonly string[]; maxProviderFailures?: number } = {},
-): GoatActionTurnGovernance {
+): ActionTurnGovernance {
   const discoveredSourceIds = new Set(input.prelistedSourceIds ?? []);
   const invocationIds = new Set<string>();
   let callCount = 0;

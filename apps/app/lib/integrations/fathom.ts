@@ -1,22 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
 import {
-  ensureGoatFathomSyncState,
+  ensureFathomSyncState,
   GOAT_FATHOM_CREDENTIAL_KIND,
   GOAT_FATHOM_PROVIDER,
 } from "@opencompany/db/fathom";
-import {
-  markGoatIntegrationStatus,
-  saveGoatIntegrationCredential,
-} from "@opencompany/db/integrations";
-import { goatIntegrations } from "@opencompany/db/schema";
+import { markIntegrationStatus, saveIntegrationCredential } from "@opencompany/db/integrations";
+import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
-import type { GoatFathomProviderState } from "@/lib/integration-state";
-import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
+import type { FathomProviderState } from "@/lib/integration-state";
+import { captureIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 
 export const GOAT_FATHOM_API_BASE_URL = "https://api.fathom.ai/external/v1";
 
-export type GoatFathomApiKeyCredentialPayload = {
+export type FathomApiKeyCredentialPayload = {
   apiKey: string;
   createdAt: string;
 };
@@ -24,7 +21,7 @@ export type GoatFathomApiKeyCredentialPayload = {
 // One Fathom connection per user: the key is minted per person in Fathom's
 // user settings, so the personal-uniqueness index keys on this stable sentinel
 // and a key rotation updates the row in place instead of minting a sibling.
-export function goatFathomExternalIdForUser(userWorkosId: string) {
+export function fathomExternalIdForUser(userWorkosId: string) {
   return `fathom:${userWorkosId}`;
 }
 
@@ -34,13 +31,11 @@ export function isValidFathomApiKey(apiKey: string) {
   return /^\S{16,500}$/.test(apiKey);
 }
 
-export type GoatFathomApiKeyValidation = { ok: true } | { ok: false; error: string };
+export type FathomApiKeyValidation = { ok: true } | { ok: false; error: string };
 
 // Fathom has no identity endpoint; a bare meetings list call (no transcript or
 // summary payloads) proves the key works without pulling meeting content.
-export async function validateGoatFathomApiKey(
-  apiKey: string,
-): Promise<GoatFathomApiKeyValidation> {
+export async function validateFathomApiKey(apiKey: string): Promise<FathomApiKeyValidation> {
   let response: Response;
   try {
     response = await fetch(`${GOAT_FATHOM_API_BASE_URL}/meetings`, {
@@ -59,7 +54,7 @@ export async function validateGoatFathomApiKey(
   return { ok: true };
 }
 
-export async function connectGoatFathomIntegration(input: {
+export async function connectFathomIntegration(input: {
   userWorkosId: string;
   apiKey: string;
   now?: Date;
@@ -68,12 +63,12 @@ export async function connectGoatFathomIntegration(input: {
   const now = input.now ?? new Date();
 
   const [integration] = await db
-    .insert(goatIntegrations)
+    .insert(integrations)
     .values({
-      id: newGoatIntegrationId(),
+      id: newIntegrationId(),
       userWorkosId: input.userWorkosId,
       provider: GOAT_FATHOM_PROVIDER,
-      externalId: goatFathomExternalIdForUser(input.userWorkosId),
+      externalId: fathomExternalIdForUser(input.userWorkosId),
       connectionLabel: "Fathom",
       accountName: null,
       accountEmail: null,
@@ -85,13 +80,9 @@ export async function connectGoatFathomIntegration(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: [
-        goatIntegrations.userWorkosId,
-        goatIntegrations.provider,
-        goatIntegrations.externalId,
-      ],
+      target: [integrations.userWorkosId, integrations.provider, integrations.externalId],
       // The personal-uniqueness index is partial; the arbiter must match it.
-      targetWhere: sql`${goatIntegrations.workspaceId} IS NULL`,
+      targetWhere: sql`${integrations.workspaceId} IS NULL`,
       set: {
         connectionLabel: "Fathom",
         accountType: "fathom_api_key",
@@ -101,19 +92,19 @@ export async function connectGoatFathomIntegration(input: {
         updatedAt: now,
       },
     })
-    .returning({ id: goatIntegrations.id });
+    .returning({ id: integrations.id });
 
   if (!integration) {
     throw new Error("Could not persist Goat Fathom integration.");
   }
 
-  const payload: GoatFathomApiKeyCredentialPayload = {
+  const payload: FathomApiKeyCredentialPayload = {
     apiKey: input.apiKey,
     createdAt: now.toISOString(),
   };
 
   try {
-    await saveGoatIntegrationCredential({
+    await saveIntegrationCredential({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
       provider: GOAT_FATHOM_PROVIDER,
@@ -125,7 +116,7 @@ export async function connectGoatFathomIntegration(input: {
       now,
     });
   } catch (error) {
-    await markGoatIntegrationStatus({
+    await markIntegrationStatus({
       userWorkosId: input.userWorkosId,
       integrationId: integration.id,
       provider: GOAT_FATHOM_PROVIDER,
@@ -139,7 +130,7 @@ export async function connectGoatFathomIntegration(input: {
 
   // Anchor the poll cursor row now so the first runner poll starts from the
   // moment of connection (no backfill) without racing the credential write.
-  await ensureGoatFathomSyncState(
+  await ensureFathomSyncState(
     {
       integrationId: integration.id,
       userWorkosId: input.userWorkosId,
@@ -148,7 +139,7 @@ export async function connectGoatFathomIntegration(input: {
     db,
   );
 
-  await captureGoatIntegrationAddedAnalytics({
+  await captureIntegrationAddedAnalytics({
     userWorkosId: input.userWorkosId,
     provider: "fathom",
   });
@@ -156,26 +147,26 @@ export async function connectGoatFathomIntegration(input: {
   return { integrationId: integration.id };
 }
 
-export async function getGoatFathomIntegrationState(
+export async function getFathomIntegrationState(
   userWorkosId: string,
-): Promise<GoatFathomProviderState> {
+): Promise<FathomProviderState> {
   const [row] = await getDb()
     .select({
-      id: goatIntegrations.id,
-      status: goatIntegrations.status,
-      accountEmail: goatIntegrations.accountEmail,
-      accountName: goatIntegrations.accountName,
-      statusReason: goatIntegrations.statusReason,
+      id: integrations.id,
+      status: integrations.status,
+      accountEmail: integrations.accountEmail,
+      accountName: integrations.accountName,
+      statusReason: integrations.statusReason,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, GOAT_FATHOM_PROVIDER),
-        ne(goatIntegrations.status, "disconnected"),
+        eq(integrations.userWorkosId, userWorkosId),
+        eq(integrations.provider, GOAT_FATHOM_PROVIDER),
+        ne(integrations.status, "disconnected"),
       ),
     )
-    .orderBy(desc(goatIntegrations.updatedAt))
+    .orderBy(desc(integrations.updatedAt))
     .limit(1);
 
   if (!row) {
@@ -201,6 +192,6 @@ export async function getGoatFathomIntegrationState(
   };
 }
 
-function newGoatIntegrationId() {
+function newIntegrationId() {
   return `gint_${randomUUID().replace(/-/g, "")}`;
 }

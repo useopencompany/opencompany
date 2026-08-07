@@ -3,11 +3,11 @@ import { EventEmitter } from "node:events";
 import { type AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
-import type { GoatCodingWorkspaceSession } from "./coding-workspace-runtime";
+import type { CodingWorkspaceSession } from "./coding-workspace-runtime";
 import {
   attachRuntimeConnection,
   forwardPreviewWebSocketMessages,
-  isGoatCodingWorkspaceOriginAllowed,
+  isCodingWorkspaceOriginAllowed,
   RUNTIME_TOOLS_INSTALL_COMMAND,
   rewritePreviewResponseHeaders,
 } from "./coding-workspace-runtime-transport";
@@ -29,9 +29,9 @@ afterEach(async () => {
 describe("Goat coding workspace origin validation", () => {
   it("requires an exact configured browser origin", () => {
     const allowed = ["https://goat.example.com"];
-    expect(isGoatCodingWorkspaceOriginAllowed("https://goat.example.com", allowed)).toBe(true);
-    expect(isGoatCodingWorkspaceOriginAllowed("https://evil.example.com", allowed)).toBe(false);
-    expect(isGoatCodingWorkspaceOriginAllowed(undefined, allowed)).toBe(false);
+    expect(isCodingWorkspaceOriginAllowed("https://goat.example.com", allowed)).toBe(true);
+    expect(isCodingWorkspaceOriginAllowed("https://evil.example.com", allowed)).toBe(false);
+    expect(isCodingWorkspaceOriginAllowed(undefined, allowed)).toBe(false);
   });
 });
 
@@ -157,8 +157,8 @@ describe("Goat coding workspace terminal transport", () => {
           sandboxId: "sandbox_1",
           status: "idle",
           engine,
-        } satisfies GoatCodingWorkspaceSession,
-        { goatCodexChatIdleTimeoutMs: 300_000 } as RunnerEnv,
+        } satisfies CodingWorkspaceSession,
+        { codexChatIdleTimeoutMs: 300_000 } as RunnerEnv,
         restoreTimeout,
       );
     });
@@ -245,8 +245,8 @@ describe("Goat coding workspace terminal input latency", () => {
         sandboxId: "sandbox_1",
         status: "idle",
         engine: "codex",
-      } satisfies GoatCodingWorkspaceSession,
-      { goatCodexChatIdleTimeoutMs: 300_000 } as RunnerEnv,
+      } satisfies CodingWorkspaceSession,
+      { codexChatIdleTimeoutMs: 300_000 } as RunnerEnv,
       vi.fn(async () => undefined),
     );
 
@@ -298,8 +298,8 @@ describe("Goat coding workspace terminal input latency", () => {
         sandboxId: "sandbox_1",
         status: "idle",
         engine: "codex",
-      } satisfies GoatCodingWorkspaceSession,
-      { goatCodexChatIdleTimeoutMs: 300_000 } as RunnerEnv,
+      } satisfies CodingWorkspaceSession,
+      { codexChatIdleTimeoutMs: 300_000 } as RunnerEnv,
       vi.fn(async () => undefined),
     );
 
@@ -374,8 +374,8 @@ describe("Goat coding workspace terminal input latency", () => {
           sandboxId: "sandbox_1",
           status: "idle",
           engine: "codex",
-        } satisfies GoatCodingWorkspaceSession,
-        { goatCodexChatIdleTimeoutMs: 300_000 } as RunnerEnv,
+        } satisfies CodingWorkspaceSession,
+        { codexChatIdleTimeoutMs: 300_000 } as RunnerEnv,
         vi.fn(async () => undefined),
       );
     });

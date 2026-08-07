@@ -1,5 +1,5 @@
-import { handleGoatGoogleOAuthStart } from "@/lib/integrations/google-routes";
+import { handleGoogleOAuthStart } from "@/lib/integrations/google-routes";
 
 export async function GET(request: Request) {
-  return handleGoatGoogleOAuthStart("google_calendar", request);
+  return handleGoogleOAuthStart("google_calendar", request);
 }

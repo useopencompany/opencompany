@@ -1,18 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  categorizeGoatFailure,
-  createGoatGatewayAttribution,
-  goatGatewayProviderOptions,
-  goatGatewayReportingHeaders,
-  hashGoatUserId,
-  isGoatObservabilityEnabled,
-  recordGoatCounter,
-  recordGoatModelCost,
-  recordGoatRunOutcome,
-  recordGoatSignup,
-  sanitizeGoatAttributes,
-  sanitizeGoatMetricAttributes,
-  startGoatSpan,
+  categorizeFailure,
+  createGatewayAttribution,
+  gatewayProviderOptions,
+  gatewayReportingHeaders,
+  hashUserId,
+  isObservabilityEnabled,
+  recordCounter,
+  recordModelCost,
+  recordRunOutcome,
+  recordSignup,
+  sanitizeAttributes,
+  sanitizeMetricAttributes,
+  startSpan,
 } from ".";
 
 describe("@opencompany/telemetry", () => {
@@ -22,7 +22,7 @@ describe("@opencompany/telemetry", () => {
 
   it("sanitizes attributes and drops text-like fields", () => {
     expect(
-      sanitizeGoatAttributes({
+      sanitizeAttributes({
         "goat.task_id": "goat_task_1",
         "goat.prompt": "secret prompt",
         "goat.tool_input": "secret args",
@@ -42,7 +42,7 @@ describe("@opencompany/telemetry", () => {
 
   it("keeps metric labels low-cardinality", () => {
     expect(
-      sanitizeGoatMetricAttributes({
+      sanitizeMetricAttributes({
         "goat.surface": "task",
         "goat.model": "openai/gpt-5.5",
         "goat.outcome": "failure",
@@ -72,15 +72,15 @@ describe("@opencompany/telemetry", () => {
   });
 
   it("hashes user ids without exposing the source value", () => {
-    const first = hashGoatUserId("user_123");
-    const second = hashGoatUserId("user_123");
+    const first = hashUserId("user_123");
+    const second = hashUserId("user_123");
     expect(first).toBe(second);
     expect(first).toMatch(/^[0-9a-f]{16}$/);
     expect(first).not.toContain("user_123");
   });
 
   it("builds non-PII Gateway reporting user and bounded tags", () => {
-    const attribution = createGoatGatewayAttribution({
+    const attribution = createGatewayAttribution({
       userWorkosId: "user_123",
       feature: "chat",
       env: "preview",
@@ -118,7 +118,7 @@ describe("@opencompany/telemetry", () => {
   });
 
   it("formats Gateway provider options and HTTP reporting headers", () => {
-    const attribution = createGoatGatewayAttribution({
+    const attribution = createGatewayAttribution({
       userWorkosId: "user_123",
       feature: "brain-query",
       env: "production",
@@ -126,7 +126,7 @@ describe("@opencompany/telemetry", () => {
     });
 
     expect(
-      goatGatewayProviderOptions(attribution, {
+      gatewayProviderOptions(attribution, {
         gateway: { caching: "auto" },
         anthropic: { thinking: { type: "enabled" } },
       }),
@@ -138,44 +138,42 @@ describe("@opencompany/telemetry", () => {
       },
       anthropic: { thinking: { type: "enabled" } },
     });
-    expect(goatGatewayReportingHeaders(attribution)).toEqual({
+    expect(gatewayReportingHeaders(attribution)).toEqual({
       "ai-reporting-user": attribution.user,
       "ai-reporting-tags": "app:goat,env:production,feature:brain-query,bad-tag-with-spaces",
     });
   });
 
   it("categorizes common failures", () => {
-    expect(categorizeGoatFailure(new Error("Goat task lease lost while trying to complete."))).toBe(
+    expect(categorizeFailure(new Error("Goat task lease lost while trying to complete."))).toBe(
       "lease_lost",
     );
-    expect(categorizeGoatFailure(new Error("VERCEL_AI_GATEWAY_API_KEY is required."))).toBe("auth");
-    expect(categorizeGoatFailure(new Error("Gmail integration needs reauth."))).toBe("integration");
-    expect(categorizeGoatFailure(new Error("Goat Brain ingestion budget exhausted."))).toBe(
-      "budget",
-    );
-    expect(categorizeGoatFailure(new TypeError("Cannot read properties of undefined"))).toBe("bug");
+    expect(categorizeFailure(new Error("VERCEL_AI_GATEWAY_API_KEY is required."))).toBe("auth");
+    expect(categorizeFailure(new Error("Gmail integration needs reauth."))).toBe("integration");
+    expect(categorizeFailure(new Error("Goat Brain ingestion budget exhausted."))).toBe("budget");
+    expect(categorizeFailure(new TypeError("Cannot read properties of undefined"))).toBe("bug");
   });
 
   it("no-ops safely when disabled", () => {
     vi.stubEnv("TELEMETRY_ENABLED", "false");
-    expect(isGoatObservabilityEnabled()).toBe(false);
-    expect(() => recordGoatCounter("goat.test", 1, { "goat.task_id": "task" })).not.toThrow();
+    expect(isObservabilityEnabled()).toBe(false);
+    expect(() => recordCounter("goat.test", 1, { "goat.task_id": "task" })).not.toThrow();
     expect(() =>
-      recordGoatModelCost({
+      recordModelCost({
         costUsdMicros: 42,
         attributes: { "goat.model": "openai/gpt-5.5", "goat.surface": "task" },
       }),
     ).not.toThrow();
-    expect(() => recordGoatSignup({ source: "user_sync" })).not.toThrow();
+    expect(() => recordSignup({ source: "user_sync" })).not.toThrow();
     expect(() =>
-      recordGoatRunOutcome({
+      recordRunOutcome({
         surface: "brain_ingest",
         durationMs: 1,
         outcome: "success",
         attributes: { "goat.brain_ingest_job_id": "job" },
       }),
     ).not.toThrow();
-    const span = startGoatSpan("goat.test", { "goat.task_id": "task" });
+    const span = startSpan("goat.test", { "goat.task_id": "task" });
     expect(() => {
       span.setAttributes({ "goat.status": "running" });
       span.fail(new Error("boom"));

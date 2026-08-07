@@ -1,35 +1,33 @@
 import { getDb } from "@opencompany/db/client";
-import { goatIntegrations } from "@opencompany/db/schema";
+import { integrations } from "@opencompany/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import {
-  type GoatIntegrationAccountView,
-  type GoatPersonalAccountProvider,
-  goatPersonalAccountsFromRows,
+  type IntegrationAccountView,
+  type PersonalAccountProvider,
+  personalAccountsFromRows,
 } from "@/lib/integration-state";
 
 // Server-side mirror of the Electric-fed client state: all of the user's
 // personal (workspace_id IS NULL) integration rows, grouped per provider.
-export async function getGoatPersonalAccounts(
+export async function getPersonalAccounts(
   userWorkosId: string,
-): Promise<Record<GoatPersonalAccountProvider, GoatIntegrationAccountView[]>> {
+): Promise<Record<PersonalAccountProvider, IntegrationAccountView[]>> {
   const rows = await getDb()
     .select({
-      id: goatIntegrations.id,
-      provider: goatIntegrations.provider,
-      workspaceId: goatIntegrations.workspaceId,
-      externalId: goatIntegrations.externalId,
-      accountEmail: goatIntegrations.accountEmail,
-      accountName: goatIntegrations.accountName,
-      connectionLabel: goatIntegrations.connectionLabel,
-      statusReason: goatIntegrations.statusReason,
-      status: goatIntegrations.status,
-      scopes: goatIntegrations.scopes,
-      capabilityModes: goatIntegrations.capabilityModes,
+      id: integrations.id,
+      provider: integrations.provider,
+      workspaceId: integrations.workspaceId,
+      externalId: integrations.externalId,
+      accountEmail: integrations.accountEmail,
+      accountName: integrations.accountName,
+      connectionLabel: integrations.connectionLabel,
+      statusReason: integrations.statusReason,
+      status: integrations.status,
+      scopes: integrations.scopes,
+      capabilityModes: integrations.capabilityModes,
     })
-    .from(goatIntegrations)
-    .where(
-      and(eq(goatIntegrations.userWorkosId, userWorkosId), isNull(goatIntegrations.workspaceId)),
-    )
-    .orderBy(goatIntegrations.createdAt);
-  return goatPersonalAccountsFromRows(rows);
+    .from(integrations)
+    .where(and(eq(integrations.userWorkosId, userWorkosId), isNull(integrations.workspaceId)))
+    .orderBy(integrations.createdAt);
+  return personalAccountsFromRows(rows);
 }

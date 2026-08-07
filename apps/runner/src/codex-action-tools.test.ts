@@ -1,28 +1,25 @@
+import { type ActionGatewayRequest, GOAT_ACTION_TOOL_CONTRACT } from "@opencompany/agent-runtime";
 import {
-  GOAT_ACTION_TOOL_CONTRACT,
-  type GoatActionGatewayRequest,
-} from "@opencompany/agent-runtime";
-import {
-  createInMemoryGoatActionTurnGovernance,
-  serveGoatActionRequest,
+  createInMemoryActionTurnGovernance,
+  serveActionRequest,
 } from "@opencompany/core/actions/service";
 import { describe, expect, it, vi } from "vitest";
-import { createGoatCodexActionDynamicTools } from "./codex-action-tools";
+import { createCodexActionDynamicTools } from "./codex-action-tools";
 import type { CodexAppServerDynamicToolCall } from "./codex-app-server";
 
 const context = {
   codexChatSessionId: "codex_session_1",
   codexChatTurnId: "codex_turn_1",
   env: {
-    goatAppUrl: "https://goat.example.com",
+    appUrl: "https://goat.example.com",
     internalToken: "internal-secret",
   },
   checkAbort: vi.fn(async () => undefined),
 };
 
-describe("createGoatCodexActionDynamicTools", () => {
+describe("createCodexActionDynamicTools", () => {
   it("registers generic discovery and execution tools", () => {
-    const tools = createGoatCodexActionDynamicTools(context);
+    const tools = createCodexActionDynamicTools(context);
     expect(tools.map((tool) => tool.spec.name)).toEqual([
       GOAT_ACTION_TOOL_CONTRACT.list.name,
       GOAT_ACTION_TOOL_CONTRACT.execute.name,
@@ -40,7 +37,7 @@ describe("createGoatCodexActionDynamicTools", () => {
         sources: [{ id: "gmail", label: "Gmail", description: "Email" }],
       }),
     );
-    const [listTool] = createGoatCodexActionDynamicTools(context, {
+    const [listTool] = createCodexActionDynamicTools(context, {
       fetch: fetchMock,
     });
 
@@ -68,7 +65,7 @@ describe("createGoatCodexActionDynamicTools", () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
       Response.json({ ok: true, action: "gmail.search", result: [] }),
     );
-    const [, useTool] = createGoatCodexActionDynamicTools(context, {
+    const [, useTool] = createCodexActionDynamicTools(context, {
       fetch: fetchMock,
     });
 
@@ -99,7 +96,7 @@ describe("createGoatCodexActionDynamicTools", () => {
 
   it("returns a structured error without calling the network when unconfigured", async () => {
     const fetchMock = vi.fn<typeof fetch>();
-    const [listTool] = createGoatCodexActionDynamicTools(
+    const [listTool] = createCodexActionDynamicTools(
       { ...context, env: { internalToken: "internal-secret" } },
       { fetch: fetchMock },
     );
@@ -116,10 +113,10 @@ describe("createGoatCodexActionDynamicTools", () => {
   });
 
   it("surfaces call_budget on call 17 from the shared service", async () => {
-    const governance = createInMemoryGoatActionTurnGovernance();
+    const governance = createInMemoryActionTurnGovernance();
     const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
-      const request = JSON.parse(String(init?.body)) as GoatActionGatewayRequest;
-      const result = await serveGoatActionRequest({
+      const request = JSON.parse(String(init?.body)) as ActionGatewayRequest;
+      const result = await serveActionRequest({
         request,
         catalog: {
           sources: [{ id: "gmail", label: "Gmail", description: "Email" }],
@@ -137,7 +134,7 @@ describe("createGoatCodexActionDynamicTools", () => {
       });
       return Response.json(result);
     });
-    const [listTool, useTool] = createGoatCodexActionDynamicTools(context, {
+    const [listTool, useTool] = createCodexActionDynamicTools(context, {
       fetch: fetchMock,
     });
 

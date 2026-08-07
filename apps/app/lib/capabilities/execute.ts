@@ -1,29 +1,29 @@
 import "server-only";
 
 import { calculatePlatformFeeUsdMicros, USD_MICROS_PER_DOLLAR } from "@opencompany/billing";
-import { ensureGoatMonthlyIncludedUsage } from "@opencompany/db/billing";
+import { ensureMonthlyIncludedUsage } from "@opencompany/db/billing";
 import {
-  consumeGoatCapabilityApprovalByToolCall,
-  createGoatCapabilityRun,
-  getGoatCapabilitySessionBudgetUsdMicros,
-  isGoatWorkspaceCapabilityEnabled,
-  markGoatCapabilityRunSettlementFailure,
-  markGoatCapabilityRunStarted,
-  markGoatCapabilityRunStopping,
-  settleGoatCapabilityRun,
-  sumGoatCapabilitySessionSpendUsdMicros,
+  consumeCapabilityApprovalByToolCall,
+  createCapabilityRun,
+  getCapabilitySessionBudgetUsdMicros,
+  isWorkspaceCapabilityEnabled,
+  markCapabilityRunSettlementFailure,
+  markCapabilityRunStarted,
+  markCapabilityRunStopping,
+  settleCapabilityRun,
+  sumCapabilitySessionSpendUsdMicros,
 } from "@opencompany/db/capabilities";
-import { getGoatCreditBalanceUsdMicros, recordGoatCreditDebit } from "@opencompany/db/credits";
-import type { GoatCapabilityRun } from "@opencompany/db/schema";
-import { GOAT_METRICS, recordGoatCounter, recordGoatHistogram } from "@opencompany/telemetry";
+import { getCreditBalanceUsdMicros, recordCreditDebit } from "@opencompany/db/credits";
+import type { CapabilityRun } from "@opencompany/db/schema";
+import { GOAT_METRICS, recordCounter, recordHistogram } from "@opencompany/telemetry";
 import {
-  type GoatActionExecuteContext,
-  GoatActionExecutionError,
-  GoatActionInvalidParamsError,
-  type GoatCapabilityQuote,
-  type GoatCapabilityTurnState,
+  type ActionExecuteContext,
+  ActionExecutionError,
+  ActionInvalidParamsError,
+  type CapabilityQuote,
+  type CapabilityTurnState,
 } from "@/lib/actions/types";
-import { maybeTriggerGoatAutoRefill } from "@/lib/billing/auto-refill";
+import { maybeTriggerAutoRefill } from "@/lib/billing/auto-refill";
 import type { ManagedCapabilityActionSpec } from "@/lib/capabilities/catalog";
 import { assertManagedCapabilityInspection } from "@/lib/capabilities/contract";
 import { hashCapabilityInput } from "@/lib/capabilities/hash";
@@ -45,11 +45,11 @@ export const assertInspectionMatches = assertManagedCapabilityInspection;
 const DEFAULT_POLL_INTERVAL_MS = 1_500;
 const GOAT_ACTION_QUOTE_TIMEOUT_MS = 20_000;
 
-export function isGoatManagedCapabilitiesKilled() {
+export function isManagedCapabilitiesKilled() {
   return process.env.MANAGED_CAPABILITIES_KILL_SWITCH === "true";
 }
 
-export function isGoatManagedCapabilityActionKilled(actionId: string) {
+export function isManagedCapabilityActionKilled(actionId: string) {
   return new Set(
     (process.env.DISABLED_MANAGED_CAPABILITY_ACTIONS ?? "")
       .split(",")
@@ -65,18 +65,18 @@ export async function evaluateManagedCapabilityApproval(input: {
   workspaceId: string;
   userWorkosId: string;
   chatSessionId: string;
-  turnState: GoatCapabilityTurnState;
+  turnState: CapabilityTurnState;
   client?: MonidClient;
   signal?: AbortSignal;
   now?: () => Date;
 }): Promise<boolean> {
   try {
-    if (isGoatManagedCapabilitiesKilled() || isGoatManagedCapabilityActionKilled(input.spec.id)) {
+    if (isManagedCapabilitiesKilled() || isManagedCapabilityActionKilled(input.spec.id)) {
       return false;
     }
     const client = managedCapabilityClient(input.client);
     if (
-      !(await isGoatWorkspaceCapabilityEnabled({
+      !(await isWorkspaceCapabilityEnabled({
         workspaceId: input.workspaceId,
         source: input.spec.source,
       }))
@@ -103,8 +103,8 @@ export async function evaluateManagedCapabilityApproval(input: {
     assertInspectionMatches(input.spec, mapped, inspection);
     const quote = capabilityQuote(inputHash, inspection, mapped.resultLimit);
     const [budgetUsdMicros, spentUsdMicros] = await Promise.all([
-      getGoatCapabilitySessionBudgetUsdMicros(input.workspaceId),
-      sumGoatCapabilitySessionSpendUsdMicros({
+      getCapabilitySessionBudgetUsdMicros(input.workspaceId),
+      sumCapabilitySessionSpendUsdMicros({
         workspaceId: input.workspaceId,
         chatSessionId: input.chatSessionId,
         excludeToolCallIds: turnSnapshot.admittedToolCallIds,
@@ -127,7 +127,7 @@ export async function evaluateManagedCapabilityApproval(input: {
     }
 
     const createdAt = input.now?.() ?? new Date();
-    const run = await createGoatCapabilityRun({
+    const run = await createCapabilityRun({
       workspaceId: input.workspaceId,
       userWorkosId: input.userWorkosId,
       chatSessionId: input.chatSessionId,
@@ -165,19 +165,16 @@ export async function evaluateManagedCapabilityApproval(input: {
 export async function executeManagedCapability(input: {
   spec: ManagedCapabilityActionSpec;
   params: Record<string, unknown>;
-  context: GoatActionExecuteContext;
+  context: ActionExecuteContext;
   client?: MonidClient;
   now?: () => Date;
   pollIntervalMs?: number;
 }) {
-  if (isGoatManagedCapabilitiesKilled()) {
-    throw new GoatActionExecutionError(
-      "disabled",
-      "Paid capabilities are temporarily unavailable.",
-    );
+  if (isManagedCapabilitiesKilled()) {
+    throw new ActionExecutionError("disabled", "Paid capabilities are temporarily unavailable.");
   }
-  if (isGoatManagedCapabilityActionKilled(input.spec.id)) {
-    throw new GoatActionExecutionError(
+  if (isManagedCapabilityActionKilled(input.spec.id)) {
+    throw new ActionExecutionError(
       "disabled",
       "This paid capability action is temporarily unavailable.",
     );
@@ -188,18 +185,18 @@ export async function executeManagedCapability(input: {
   const chatSessionId = input.context.chatSessionId;
   const turnState = input.context.capabilityTurnState;
   if (!workspaceId || !chatSessionId || !turnState) {
-    throw new GoatActionExecutionError(
+    throw new ActionExecutionError(
       "provider_error",
       "The paid capability execution context is incomplete.",
     );
   }
   if (
-    !(await isGoatWorkspaceCapabilityEnabled({
+    !(await isWorkspaceCapabilityEnabled({
       workspaceId,
       source: input.spec.source,
     }))
   ) {
-    throw new GoatActionExecutionError(
+    throw new ActionExecutionError(
       "disabled",
       "This paid capability is disabled for the workspace.",
     );
@@ -213,7 +210,7 @@ export async function executeManagedCapability(input: {
   const turnSnapshot = await capabilityTurnSnapshot(turnState);
   const cachedQuote = toolCallId ? turnSnapshot.quotesByToolCallId.get(toolCallId) : undefined;
   if (cachedQuote && cachedQuote.inputHash !== inputHash) {
-    throw new GoatActionExecutionError(
+    throw new ActionExecutionError(
       "provider_error",
       "The paid capability input changed after it was quoted.",
     );
@@ -229,10 +226,10 @@ export async function executeManagedCapability(input: {
           signal: input.context.signal,
         });
 
-  await ensureGoatMonthlyIncludedUsage(workspaceId);
-  const balanceUsdMicros = await getGoatCreditBalanceUsdMicros(workspaceId);
+  await ensureMonthlyIncludedUsage(workspaceId);
+  const balanceUsdMicros = await getCreditBalanceUsdMicros(workspaceId);
   if (balanceUsdMicros < quote.quoteTotalCostUsdMicros) {
-    throw new GoatActionExecutionError(
+    throw new ActionExecutionError(
       "insufficient_credits",
       "This workspace does not have enough credits for the maximum quoted cost.",
     );
@@ -247,9 +244,9 @@ export async function executeManagedCapability(input: {
     throw error;
   }
 
-  let auditRun: GoatCapabilityRun;
+  let auditRun: CapabilityRun;
   if (cachedQuote?.inputHash === inputHash && cachedQuote.decision === "auto") {
-    auditRun = await createGoatCapabilityRun({
+    auditRun = await createCapabilityRun({
       workspaceId,
       userWorkosId: input.context.userWorkosId,
       chatSessionId,
@@ -267,7 +264,7 @@ export async function executeManagedCapability(input: {
     });
   } else {
     const approved = toolCallId
-      ? await consumeGoatCapabilityApprovalByToolCall({
+      ? await consumeCapabilityApprovalByToolCall({
           toolCallId,
           userWorkosId: input.context.userWorkosId,
           workspaceId,
@@ -282,8 +279,8 @@ export async function executeManagedCapability(input: {
       auditRun = approved;
     } else {
       const [budgetUsdMicros, spentUsdMicros] = await Promise.all([
-        getGoatCapabilitySessionBudgetUsdMicros(workspaceId),
-        sumGoatCapabilitySessionSpendUsdMicros({
+        getCapabilitySessionBudgetUsdMicros(workspaceId),
+        sumCapabilitySessionSpendUsdMicros({
           workspaceId,
           chatSessionId,
           excludeToolCallIds: turnSnapshot.admittedToolCallIds,
@@ -294,7 +291,7 @@ export async function executeManagedCapability(input: {
         budgetUsdMicros
       ) {
         await releaseAsyncCapabilityRun(input.spec, turnState, toolCallId);
-        throw new GoatActionExecutionError(
+        throw new ActionExecutionError(
           "approval_required",
           "This paid lookup still exceeds the session budget. Ask again only if the user wants a fresh approval card.",
         );
@@ -309,7 +306,7 @@ export async function executeManagedCapability(input: {
         );
         if (!admitted) {
           await releaseAsyncCapabilityRun(input.spec, turnState, toolCallId);
-          throw new GoatActionExecutionError(
+          throw new ActionExecutionError(
             "approval_required",
             "Concurrent paid lookups consumed the remaining session budget. Ask again only if the user wants a fresh approval card.",
           );
@@ -317,7 +314,7 @@ export async function executeManagedCapability(input: {
       } else {
         turnState.quotedTotalUsdMicros += quote.quoteTotalCostUsdMicros;
       }
-      auditRun = await createGoatCapabilityRun({
+      auditRun = await createCapabilityRun({
         workspaceId,
         userWorkosId: input.context.userWorkosId,
         chatSessionId,
@@ -349,7 +346,7 @@ export async function executeManagedCapability(input: {
       input.context.signal,
     );
     currentRun = started.run;
-    await markGoatCapabilityRunStarted({
+    await markCapabilityRunStarted({
       id: auditRun.id,
       monidRunId: currentRun.runId,
       async: started.async,
@@ -384,13 +381,13 @@ export async function executeManagedCapability(input: {
       }).catch(() => undefined);
     }
     if (currentRun && (input.context.signal.aborted || isCapabilityPollTimeout(error))) {
-      await markGoatCapabilityRunStopping({
+      await markCapabilityRunStopping({
         id: auditRun.id,
         now: now(),
       }).catch(() => undefined);
       await stopRunBestEffort(client, currentRun.runId);
       if (isCapabilityPollTimeout(error)) {
-        throw new GoatActionExecutionError(
+        throw new ActionExecutionError(
           "timeout",
           "The capability is still settling after 120 seconds. Its final cost and status will be reconciled automatically.",
         );
@@ -398,14 +395,14 @@ export async function executeManagedCapability(input: {
     }
     if (!currentRun && error instanceof MonidApiError) {
       if (error.runId) {
-        await markGoatCapabilityRunStarted({
+        await markCapabilityRunStarted({
           id: auditRun.id,
           monidRunId: error.runId,
           async: error.async ?? true,
           now: now(),
         });
       } else {
-        await settleGoatCapabilityRun({
+        await settleCapabilityRun({
           id: auditRun.id,
           status: "failed",
           providerCostUsdMicros: 0,
@@ -425,7 +422,7 @@ export async function executeManagedCapability(input: {
     try {
       payload = input.spec.mapOutput(currentRun.output, input.params);
     } catch (error) {
-      if (error instanceof GoatActionInvalidParamsError) {
+      if (error instanceof ActionInvalidParamsError) {
         await settleManagedCapabilityRun({
           auditRun,
           providerRun: currentRun,
@@ -440,8 +437,8 @@ export async function executeManagedCapability(input: {
           message: "The capability returned data that could not be safely used.",
         },
       });
-      if (error instanceof GoatActionExecutionError) throw error;
-      throw new GoatActionExecutionError(
+      if (error instanceof ActionExecutionError) throw error;
+      throw new ActionExecutionError(
         "provider_error",
         "The capability returned data that could not be safely used.",
       );
@@ -452,7 +449,7 @@ export async function executeManagedCapability(input: {
     providerRun: currentRun,
   });
   if (!settlement.success) {
-    throw new GoatActionExecutionError("provider_error", settlement.message);
+    throw new ActionExecutionError("provider_error", settlement.message);
   }
   return sanitizeCapabilityResult({
     source: input.spec.source,
@@ -476,7 +473,7 @@ export async function executeManagedCapability(input: {
 
 export async function settleManagedCapabilityRun(input: {
   auditRun: Pick<
-    GoatCapabilityRun,
+    CapabilityRun,
     "id" | "workspaceId" | "userWorkosId" | "chatSessionId" | "source" | "action" | "createdAt"
   >;
   providerRun: MonidRun;
@@ -494,7 +491,7 @@ export async function settleManagedCapabilityRun(input: {
 
   if (providerCostUsdMicros === null) {
     if (input.forceFailure) {
-      await markGoatCapabilityRunSettlementFailure({
+      await markCapabilityRunSettlementFailure({
         id: input.auditRun.id,
         errorCode: input.forceFailure.code,
         errorMessage: input.forceFailure.message,
@@ -513,7 +510,7 @@ export async function settleManagedCapabilityRun(input: {
   const platformFeeUsdMicros = calculatePlatformFeeUsdMicros(settledProviderCostUsdMicros);
   const totalCostUsdMicros = settledProviderCostUsdMicros + platformFeeUsdMicros;
   if (totalCostUsdMicros > 0) {
-    await recordGoatCreditDebit({
+    await recordCreditDebit({
       workspaceId: input.auditRun.workspaceId,
       userWorkosId: input.auditRun.userWorkosId,
       source: "capability_usage",
@@ -542,7 +539,7 @@ export async function settleManagedCapabilityRun(input: {
       : input.providerRun.status === "TIMED_OUT"
         ? "timed_out"
         : "failed";
-  const settledRow = await settleGoatCapabilityRun({
+  const settledRow = await settleCapabilityRun({
     id: input.auditRun.id,
     status,
     providerHttpStatus,
@@ -564,15 +561,15 @@ export async function settleManagedCapabilityRun(input: {
       "goat.capability_action": input.auditRun.action,
       "goat.outcome": status,
     };
-    recordGoatCounter(GOAT_METRICS.capabilityRunsTotal, 1, metricAttributes);
-    recordGoatCounter(
+    recordCounter(GOAT_METRICS.capabilityRunsTotal, 1, metricAttributes);
+    recordCounter(
       GOAT_METRICS.capabilityProviderCostUsdMicros,
       settledProviderCostUsdMicros,
       metricAttributes,
     );
     const createdAt = input.auditRun.createdAt;
     if (createdAt instanceof Date && Number.isFinite(createdAt.getTime())) {
-      recordGoatHistogram(
+      recordHistogram(
         GOAT_METRICS.capabilitySettlementLagMs,
         Math.max(0, Date.now() - createdAt.getTime()),
         metricAttributes,
@@ -580,7 +577,7 @@ export async function settleManagedCapabilityRun(input: {
     }
   }
   if (totalCostUsdMicros > 0) {
-    void maybeTriggerGoatAutoRefill(input.auditRun.workspaceId);
+    void maybeTriggerAutoRefill(input.auditRun.workspaceId);
   }
   return {
     success,
@@ -597,7 +594,7 @@ export function calculateMaximumProviderQuoteUsdMicros(
   resultLimit: number,
 ) {
   if (!inspection.price) {
-    throw new GoatActionExecutionError(
+    throw new ActionExecutionError(
       "provider_error",
       "The capability did not return a price quote.",
     );
@@ -610,7 +607,7 @@ function managedCapabilityClient(client?: MonidClient) {
   if (client) return client;
   const apiKey = process.env.MONID_API_KEY?.trim();
   if (!apiKey) {
-    throw new GoatActionExecutionError("disabled", "Paid capabilities are not configured.");
+    throw new ActionExecutionError("disabled", "Paid capabilities are not configured.");
   }
   return new MonidClient({ apiKey });
 }
@@ -619,7 +616,7 @@ function capabilityQuote(
   inputHash: string,
   inspection: MonidInspection,
   resultLimit: number,
-): Omit<GoatCapabilityQuote, "decision" | "runId"> {
+): Omit<CapabilityQuote, "decision" | "runId"> {
   const quoteProviderCostUsdMicros = calculateMaximumProviderQuoteUsdMicros(
     inspection,
     resultLimit,
@@ -651,14 +648,14 @@ async function inspectCapabilityQuote(input: {
   };
 }
 
-async function capabilityTurnSnapshot(turnState: GoatCapabilityTurnState) {
+async function capabilityTurnSnapshot(turnState: CapabilityTurnState) {
   return turnState.governance?.load() ?? turnState;
 }
 
 async function storeCapabilityQuote(
-  turnState: GoatCapabilityTurnState,
+  turnState: CapabilityTurnState,
   toolCallId: string,
-  quote: GoatCapabilityQuote,
+  quote: CapabilityQuote,
   admitted: boolean,
   maxQuotedTotalUsdMicros?: number,
 ) {
@@ -686,15 +683,15 @@ async function storeCapabilityQuote(
 }
 
 async function admitCapabilityQuote(
-  turnState: GoatCapabilityTurnState,
+  turnState: CapabilityTurnState,
   toolCallId: string,
-  quote: GoatCapabilityQuote,
+  quote: CapabilityQuote,
   maxQuotedTotalUsdMicros?: number,
 ) {
   return storeCapabilityQuote(turnState, toolCallId, quote, true, maxQuotedTotalUsdMicros);
 }
 
-async function releaseCapabilityQuote(turnState: GoatCapabilityTurnState, toolCallId: string) {
+async function releaseCapabilityQuote(turnState: CapabilityTurnState, toolCallId: string) {
   const quote = (await capabilityTurnSnapshot(turnState)).quotesByToolCallId.get(toolCallId);
   if (!quote) return;
   if (turnState.governance) {
@@ -714,7 +711,7 @@ async function releaseCapabilityQuote(turnState: GoatCapabilityTurnState, toolCa
 
 async function claimAsyncCapabilityRun(
   spec: ManagedCapabilityActionSpec,
-  turnState: GoatCapabilityTurnState,
+  turnState: CapabilityTurnState,
   toolCallId: string,
 ) {
   if (spec.executionMode !== "async") return;
@@ -724,7 +721,7 @@ async function claimAsyncCapabilityRun(
       maxRuns: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
     });
     if (!claimed) {
-      throw new GoatActionExecutionError(
+      throw new ActionExecutionError(
         "call_budget",
         `Only ${GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN} long-running paid capabilities can be started in a turn.`,
       );
@@ -732,7 +729,7 @@ async function claimAsyncCapabilityRun(
     return;
   }
   if (turnState.asyncRunsStarted >= GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN) {
-    throw new GoatActionExecutionError(
+    throw new ActionExecutionError(
       "call_budget",
       `Only ${GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN} long-running paid capabilities can be started in a turn.`,
     );
@@ -743,7 +740,7 @@ async function claimAsyncCapabilityRun(
 
 async function releaseAsyncCapabilityRun(
   spec: ManagedCapabilityActionSpec,
-  turnState: GoatCapabilityTurnState,
+  turnState: CapabilityTurnState,
   toolCallId: string,
 ) {
   if (spec.executionMode !== "async") return;
@@ -781,7 +778,7 @@ function providerRunMatches(spec: ManagedCapabilityActionSpec, run: MonidRun) {
 
 function assertProviderRunMatches(spec: ManagedCapabilityActionSpec, run: MonidRun) {
   if (!providerRunMatches(spec, run)) {
-    throw new GoatActionExecutionError(
+    throw new ActionExecutionError(
       "provider_error",
       "The paid capability returned a run for a different reviewed endpoint.",
     );
@@ -815,10 +812,7 @@ async function stopRunBestEffort(client: MonidClient, runId: string) {
 
 function usdToMicros(value: number) {
   if (!Number.isFinite(value) || value < 0) {
-    throw new GoatActionExecutionError(
-      "provider_error",
-      "The capability returned an invalid price.",
-    );
+    throw new ActionExecutionError("provider_error", "The capability returned an invalid price.");
   }
   return Math.round(value * USD_MICROS_PER_DOLLAR);
 }

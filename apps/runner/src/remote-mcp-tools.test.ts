@@ -1,10 +1,7 @@
 import { createMCPClient } from "@ai-sdk/mcp";
-import {
-  loadGoatIntegrationCredential,
-  saveGoatIntegrationCredential,
-} from "@opencompany/db/integrations";
+import { loadIntegrationCredential, saveIntegrationCredential } from "@opencompany/db/integrations";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createGoatRemoteMcpTools } from "./remote-mcp-tools";
+import { createRemoteMcpTools } from "./remote-mcp-tools";
 
 const mocks = vi.hoisted(() => ({
   limit: vi.fn(),
@@ -27,8 +24,8 @@ vi.mock("./db", () => ({
 }));
 
 vi.mock("@opencompany/db/integrations", () => ({
-  loadGoatIntegrationCredential: vi.fn(),
-  saveGoatIntegrationCredential: vi.fn(async () => undefined),
+  loadIntegrationCredential: vi.fn(),
+  saveIntegrationCredential: vi.fn(async () => undefined),
 }));
 
 vi.mock("@ai-sdk/mcp", () => ({
@@ -39,7 +36,7 @@ vi.mock("@ai-sdk/mcp", () => ({
   })),
 }));
 
-const latitudeTools = createGoatRemoteMcpTools({
+const latitudeTools = createRemoteMcpTools({
   provider: "latitude",
   displayName: "Latitude",
   endpointUrl: "https://api.latitude.so/v1/mcp",
@@ -75,7 +72,7 @@ describe("Goat runner remote MCP tools", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.limit.mockResolvedValue([{ id: "gint_latitude", status: "connected" }]);
-    vi.mocked(loadGoatIntegrationCredential).mockResolvedValue({
+    vi.mocked(loadIntegrationCredential).mockResolvedValue({
       payload: {
         clientInformation: { client_id: "client_1" },
         tokens: { access_token: "access_1", token_type: "Bearer" },
@@ -115,7 +112,7 @@ describe("Goat runner remote MCP tools", () => {
         }),
       }),
     );
-    expect(loadGoatIntegrationCredential).toHaveBeenCalledWith({
+    expect(loadIntegrationCredential).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       integrationId: "gint_latitude",
       provider: "latitude",
@@ -156,6 +153,6 @@ describe("Goat runner remote MCP tools", () => {
         abortSignal: signal,
       }),
     );
-    expect(saveGoatIntegrationCredential).not.toHaveBeenCalled();
+    expect(saveIntegrationCredential).not.toHaveBeenCalled();
   });
 });

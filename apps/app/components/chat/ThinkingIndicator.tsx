@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { formatGoatChatDuration } from "@/lib/chat-timing";
+import { formatChatDuration } from "@/lib/chat-timing";
 
 const TIMER_TICK_MS = 100;
 
@@ -23,7 +23,7 @@ export function ThinkingIndicator({
         className="-ml-1 inline-flex items-center gap-2 rounded-md px-1 py-0.5 text-[12px] font-medium leading-5 text-ink-muted"
       >
         <ActivityGlyph />
-        <span>{formatGoatChatDuration(durationMs)}</span>
+        <span>{formatChatDuration(durationMs)}</span>
       </div>
     </div>
   );
@@ -49,10 +49,10 @@ export function TurnDuration({ durationMs }: { durationMs: number }) {
   return (
     <div className="flex justify-start">
       <div
-        aria-label={`Turn completed in ${formatGoatChatDuration(durationMs)}`}
+        aria-label={`Turn completed in ${formatChatDuration(durationMs)}`}
         className="-ml-1 inline-flex items-center rounded-md px-1 py-0.5 text-[12px] font-medium leading-5 text-ink-muted"
       >
-        <span>{formatGoatChatDuration(durationMs)}</span>
+        <span>{formatChatDuration(durationMs)}</span>
       </div>
     </div>
   );

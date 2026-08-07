@@ -10,31 +10,31 @@ const mocks = vi.hoisted(() => ({
   wake: vi.fn(),
 }));
 
-vi.mock("@opencompany/analytics/goat", () => ({
-  captureGoatIngestionQuotaAnalytics: mocks.captureAnalytics,
+vi.mock("@opencompany/analytics/app", () => ({
+  captureIngestionQuotaAnalytics: mocks.captureAnalytics,
 }));
 vi.mock("@opencompany/db/brain-files", () => ({
-  createGoatBrainMarkdownContent: vi.fn((input: unknown) => JSON.stringify(input)),
-  goatBrainFilePathFor: vi.fn((folder: string, id: string) => `${folder}/${id}.md`),
-  upsertGoatBrainFile: mocks.upsertFile,
+  createBrainMarkdownContent: vi.fn((input: unknown) => JSON.stringify(input)),
+  brainFilePathFor: vi.fn((folder: string, id: string) => `${folder}/${id}.md`),
+  upsertBrainFile: mocks.upsertFile,
 }));
 vi.mock("@opencompany/db/brain-ingest", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opencompany/db/brain-ingest")>();
   return {
     ...actual,
-    findExistingGoatBrainChatCaptureIngest: mocks.findExistingCapture,
-    findExistingGoatBrainPointerIngest: mocks.findExistingPointer,
-    upsertGoatBrainSourceItemAndEnqueue: mocks.enqueue,
+    findExistingBrainChatCaptureIngest: mocks.findExistingCapture,
+    findExistingBrainPointerIngest: mocks.findExistingPointer,
+    upsertBrainSourceItemAndEnqueue: mocks.enqueue,
   };
 });
 vi.mock("@/lib/brain", () => ({
-  nextAvailableGoatBrainId: mocks.nextBrainId,
+  nextAvailableBrainId: mocks.nextBrainId,
 }));
 vi.mock("@/lib/task-runner", () => ({
-  triggerGoatBrainIngestWake: mocks.wake,
+  triggerBrainIngestWake: mocks.wake,
 }));
 
-import { captureToGoatBrainInbox } from "@/lib/brain-capture";
+import { captureToBrainInbox } from "@/lib/brain-capture";
 
 const BASE_INPUT = {
   brainRef: "goat_brain_1",
@@ -47,7 +47,7 @@ const BASE_INPUT = {
   },
 };
 
-describe("captureToGoatBrainInbox", () => {
+describe("captureToBrainInbox", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.nextBrainId.mockResolvedValue("launch-decision");
@@ -63,7 +63,7 @@ describe("captureToGoatBrainInbox", () => {
   });
 
   it("preserves source provenance for copied integration content", async () => {
-    const result = await captureToGoatBrainInbox({
+    const result = await captureToBrainInbox({
       ...BASE_INPUT,
       text: "The team approved the launch plan.",
       sourceRef: "linear:issue:ENG-1",
@@ -88,7 +88,7 @@ describe("captureToGoatBrainInbox", () => {
   });
 
   it("enqueues a bare integration source for pointer hydration", async () => {
-    const result = await captureToGoatBrainInbox({
+    const result = await captureToBrainInbox({
       ...BASE_INPUT,
       sourceRef: "slack:conversation:T123:C456:1234.5678",
       integrationId: "gint_slack_1",
@@ -117,7 +117,7 @@ describe("captureToGoatBrainInbox", () => {
   });
 
   it("rejects pointers without a provider integration id", async () => {
-    const result = await captureToGoatBrainInbox({
+    const result = await captureToBrainInbox({
       ...BASE_INPUT,
       sourceRef: "gmail:thread:thread_1",
     });
@@ -140,7 +140,7 @@ describe("captureToGoatBrainInbox", () => {
       title: "Existing launch decision",
     });
 
-    const result = await captureToGoatBrainInbox({
+    const result = await captureToBrainInbox({
       ...BASE_INPUT,
       sourceRef: "linear:issue:ENG-1",
       integrationId: "gint_linear_1",
@@ -171,7 +171,7 @@ describe("captureToGoatBrainInbox", () => {
       title: "Existing launch decision",
     });
 
-    const result = await captureToGoatBrainInbox({
+    const result = await captureToBrainInbox({
       ...BASE_INPUT,
       text: "The team approved the launch plan.",
       source: {
@@ -197,7 +197,7 @@ describe("captureToGoatBrainInbox", () => {
   });
 
   it("persists a new durable chat capture with its idempotency key", async () => {
-    await captureToGoatBrainInbox({
+    await captureToBrainInbox({
       ...BASE_INPUT,
       text: "The team approved the launch plan.",
       source: {
@@ -216,7 +216,7 @@ describe("captureToGoatBrainInbox", () => {
   });
 
   it("requires content when a source provider cannot be hydrated", async () => {
-    const result = await captureToGoatBrainInbox({
+    const result = await captureToBrainInbox({
       ...BASE_INPUT,
       sourceRef: "https://example.com/company",
     });

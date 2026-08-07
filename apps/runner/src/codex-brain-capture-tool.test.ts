@@ -1,21 +1,21 @@
 import { GOAT_CODEX_SAVE_TO_BRAIN_TOOL_NAME } from "@opencompany/agent-runtime";
 import { describe, expect, it, vi } from "vitest";
 import type { CodexAppServerDynamicToolCall } from "./codex-app-server";
-import { createGoatCodexBrainCaptureDynamicTool } from "./codex-brain-capture-tool";
+import { createCodexBrainCaptureDynamicTool } from "./codex-brain-capture-tool";
 
 const context = {
   codexChatSessionId: "codex_session_1",
   codexChatTurnId: "codex_turn_1",
   env: {
-    goatAppUrl: "https://goat.example.com",
+    appUrl: "https://goat.example.com",
     internalToken: "internal-secret",
   },
   checkAbort: vi.fn(async () => undefined),
 };
 
-describe("createGoatCodexBrainCaptureDynamicTool", () => {
+describe("createCodexBrainCaptureDynamicTool", () => {
   it("registers a capture-only save_to_brain tool", () => {
-    const tool = createGoatCodexBrainCaptureDynamicTool(context);
+    const tool = createCodexBrainCaptureDynamicTool(context);
 
     expect(tool.spec).toMatchObject({
       type: "function",
@@ -35,7 +35,7 @@ describe("createGoatCodexBrainCaptureDynamicTool", () => {
         title: "Launch decision",
       }),
     );
-    const tool = createGoatCodexBrainCaptureDynamicTool(context, { fetch: fetchMock });
+    const tool = createCodexBrainCaptureDynamicTool(context, { fetch: fetchMock });
 
     const output = await tool.execute(
       call({
@@ -67,7 +67,7 @@ describe("createGoatCodexBrainCaptureDynamicTool", () => {
 
   it("rejects an empty capture locally", async () => {
     const fetchMock = vi.fn<typeof fetch>();
-    const tool = createGoatCodexBrainCaptureDynamicTool(context, { fetch: fetchMock });
+    const tool = createCodexBrainCaptureDynamicTool(context, { fetch: fetchMock });
 
     const output = await tool.execute(call({ title: "Nothing" }));
 
@@ -77,7 +77,7 @@ describe("createGoatCodexBrainCaptureDynamicTool", () => {
 
   it("rejects oversized content instead of silently falling back to a source pointer", async () => {
     const fetchMock = vi.fn<typeof fetch>();
-    const tool = createGoatCodexBrainCaptureDynamicTool(context, { fetch: fetchMock });
+    const tool = createCodexBrainCaptureDynamicTool(context, { fetch: fetchMock });
 
     const output = await tool.execute(
       call({
@@ -92,7 +92,7 @@ describe("createGoatCodexBrainCaptureDynamicTool", () => {
 
   it("rejects malformed success responses from the private gateway", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => Response.json({ ok: true }));
-    const tool = createGoatCodexBrainCaptureDynamicTool(context, { fetch: fetchMock });
+    const tool = createCodexBrainCaptureDynamicTool(context, { fetch: fetchMock });
 
     const output = await tool.execute(call({ content: "Remember this." }));
 
@@ -106,7 +106,7 @@ describe("createGoatCodexBrainCaptureDynamicTool", () => {
 
   it("returns a structured error without calling the network when unconfigured", async () => {
     const fetchMock = vi.fn<typeof fetch>();
-    const tool = createGoatCodexBrainCaptureDynamicTool(
+    const tool = createCodexBrainCaptureDynamicTool(
       { ...context, env: { internalToken: "internal-secret" } },
       { fetch: fetchMock },
     );

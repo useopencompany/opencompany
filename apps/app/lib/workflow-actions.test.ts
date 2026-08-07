@@ -1,18 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  archiveGoatWorkflowAction,
-  createGoatWorkflowAction,
-  updateGoatWorkflowAction,
+  archiveWorkflowAction,
+  createWorkflowAction,
+  updateWorkflowAction,
 } from "@/lib/workflow-actions";
 
 const authMock = vi.hoisted(() => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
 }));
 
 const workflowMocks = vi.hoisted(() => ({
-  createGoatWorkflow: vi.fn(),
-  updateGoatWorkflow: vi.fn(),
-  archiveGoatWorkflow: vi.fn(),
+  createWorkflow: vi.fn(),
+  updateWorkflow: vi.fn(),
+  archiveWorkflow: vi.fn(),
 }));
 
 const cacheMocks = vi.hoisted(() => ({
@@ -20,16 +20,16 @@ const cacheMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: authMock.currentGoatUser,
+  currentUser: authMock.currentUser,
 }));
 
 vi.mock("@/lib/workflows", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/workflows")>();
   return {
     ...actual,
-    createGoatWorkflow: workflowMocks.createGoatWorkflow,
-    updateGoatWorkflow: workflowMocks.updateGoatWorkflow,
-    archiveGoatWorkflow: workflowMocks.archiveGoatWorkflow,
+    createWorkflow: workflowMocks.createWorkflow,
+    updateWorkflow: workflowMocks.updateWorkflow,
+    archiveWorkflow: workflowMocks.archiveWorkflow,
   };
 });
 
@@ -39,26 +39,26 @@ vi.mock("next/cache", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  authMock.currentGoatUser.mockResolvedValue({
+  authMock.currentUser.mockResolvedValue({
     user: { workosUserId: "user_member" },
     workspace: { id: "workspace_1" },
     role: "member",
   });
-  workflowMocks.createGoatWorkflow.mockResolvedValue({ ok: true, slug: "weekly-update" });
-  workflowMocks.updateGoatWorkflow.mockResolvedValue({ ok: true, slug: "weekly-update" });
-  workflowMocks.archiveGoatWorkflow.mockResolvedValue({ ok: true, slug: "weekly-update" });
+  workflowMocks.createWorkflow.mockResolvedValue({ ok: true, slug: "weekly-update" });
+  workflowMocks.updateWorkflow.mockResolvedValue({ ok: true, slug: "weekly-update" });
+  workflowMocks.archiveWorkflow.mockResolvedValue({ ok: true, slug: "weekly-update" });
 });
 
 describe("workflow actions", () => {
   it("lets workspace members create shared workflows", async () => {
     await expect(
-      createGoatWorkflowAction({
+      createWorkflowAction({
         name: "Weekly update",
         description: "Summarize the week.",
       }),
     ).resolves.toEqual({ ok: true, slug: "weekly-update" });
 
-    expect(workflowMocks.createGoatWorkflow).toHaveBeenCalledWith({
+    expect(workflowMocks.createWorkflow).toHaveBeenCalledWith({
       workspaceId: "workspace_1",
       createdByWorkosId: "user_member",
       name: "Weekly update",
@@ -76,7 +76,7 @@ describe("workflow actions", () => {
     };
 
     await expect(
-      updateGoatWorkflowAction({
+      updateWorkflowAction({
         slug: "weekly-update",
         name: "Weekly update",
         description: "",
@@ -85,7 +85,7 @@ describe("workflow actions", () => {
       }),
     ).resolves.toEqual({ ok: true, slug: "weekly-update" });
 
-    expect(workflowMocks.updateGoatWorkflow).toHaveBeenCalledWith({
+    expect(workflowMocks.updateWorkflow).toHaveBeenCalledWith({
       workspaceId: "workspace_1",
       slug: "weekly-update",
       name: "Weekly update",
@@ -99,12 +99,12 @@ describe("workflow actions", () => {
   });
 
   it("lets workspace members archive shared workflows", async () => {
-    await expect(archiveGoatWorkflowAction({ slug: "weekly-update" })).resolves.toEqual({
+    await expect(archiveWorkflowAction({ slug: "weekly-update" })).resolves.toEqual({
       ok: true,
       slug: "weekly-update",
     });
 
-    expect(workflowMocks.archiveGoatWorkflow).toHaveBeenCalledWith({
+    expect(workflowMocks.archiveWorkflow).toHaveBeenCalledWith({
       workspaceId: "workspace_1",
       slug: "weekly-update",
     });

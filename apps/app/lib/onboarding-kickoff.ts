@@ -1,6 +1,6 @@
 const GOAT_ONBOARDING_KICKOFF_STORAGE_KEY = "goat-onboarding-kickoff-v1";
 
-export function buildGoatOnboardingKickoffPrompt(companyUrl: string) {
+export function buildOnboardingKickoffPrompt(companyUrl: string) {
   return `You're helping me seed our company Brain for the first time. Keep this workflow in main chat and work transparently with me.
 
 1. Survey breadth before depth. First identify the most relevant Slack channels, Gmail threads, Linear projects/issues, and other useful surfaces. Then go deeper only where there is durable company knowledge: decisions, product direction, customers, team, and process. Skip bots, notifications, routine status churn, and chit-chat.
@@ -13,7 +13,7 @@ export function buildGoatOnboardingKickoffPrompt(companyUrl: string) {
 Company: ${companyUrl}`;
 }
 
-export function queueGoatOnboardingKickoff(companyUrl: string): boolean {
+export function queueOnboardingKickoff(companyUrl: string): boolean {
   try {
     window.sessionStorage.setItem(GOAT_ONBOARDING_KICKOFF_STORAGE_KEY, companyUrl);
     return true;
@@ -22,11 +22,11 @@ export function queueGoatOnboardingKickoff(companyUrl: string): boolean {
   }
 }
 
-export function consumeGoatOnboardingKickoffPrompt(): string | null {
+export function consumeOnboardingKickoffPrompt(): string | null {
   try {
     const companyUrl = window.sessionStorage.getItem(GOAT_ONBOARDING_KICKOFF_STORAGE_KEY);
     window.sessionStorage.removeItem(GOAT_ONBOARDING_KICKOFF_STORAGE_KEY);
-    return companyUrl ? buildGoatOnboardingKickoffPrompt(companyUrl) : null;
+    return companyUrl ? buildOnboardingKickoffPrompt(companyUrl) : null;
   } catch {
     return null;
   }

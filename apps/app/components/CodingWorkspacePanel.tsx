@@ -24,7 +24,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { GoatCodexSandboxStatus } from "@/lib/task-runner";
+import type { CodexSandboxStatus } from "@/lib/task-runner";
 
 const CodingWorkspaceTerminal = dynamic(() => import("./CodingWorkspaceTerminal"), {
   ssr: false,
@@ -55,7 +55,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
     onRequestFocusReturn,
   }: {
     chatSessionId: string;
-    sandboxStatus: GoatCodexSandboxStatus | null;
+    sandboxStatus: CodexSandboxStatus | null;
     engineLabel: string;
     onExpandedChange?: (expanded: boolean) => void;
     onRequestFocusReturn?: () => void;
@@ -672,7 +672,7 @@ function tabClass(active: boolean) {
   );
 }
 
-function workspaceStateTitle(status: GoatCodexSandboxStatus | null) {
+function workspaceStateTitle(status: CodexSandboxStatus | null) {
   if (status === "sleeping") return "Workspace is sleeping";
   if (status === "running") return "Workspace is ready";
   if (status === "deleted") return "Workspace was deleted";

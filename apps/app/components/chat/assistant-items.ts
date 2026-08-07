@@ -1,7 +1,9 @@
 import { isBrowserToolName } from "@opencompany/browser-tools";
-import type { GoatTaskStatus } from "@opencompany/db/schema";
-import type { GoatTaskView } from "@/components/GoatSurface";
+import type { TaskStatus } from "@opencompany/db/schema";
+import type { TaskView } from "@/components/ChatSurface";
 import {
+  type BrainToolOutput,
+  type ChatUiMessage,
   CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_NAME,
   CODEX_FILE_CHANGE_TOOL_NAME,
@@ -14,15 +16,13 @@ import {
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
   GOAT_BRAIN_TOOL_NAME,
-  type GoatBrainToolOutput,
-  type GoatChatUiMessage,
-  type GoatTaskCardMetadata,
   SCHEDULE_TASK_TOOL_NAME,
   START_TASK_TOOL_NAME,
   START_TASK_TOOL_PART_TYPE,
   START_WORKFLOW_TOOL_NAME,
   START_WORKFLOW_TOOL_PART_TYPE,
   type StartTaskToolOutput,
+  type TaskCardMetadata,
   USE_ACTION_TOOL_NAME,
   USE_SKILL_TOOL_NAME,
   type UseActionToolOutput,
@@ -61,7 +61,7 @@ export type ChatTaskCardView = {
   id: string;
   displayId: string | null;
   title: string | null;
-  status: GoatTaskStatus | null;
+  status: TaskStatus | null;
 };
 
 export type ChatTaskLookup = ReadonlyMap<string, ChatTaskCardView>;
@@ -88,7 +88,7 @@ type AssistantRenderOptions = {
 };
 
 export function getOrderedAssistantItems(
-  message: GoatChatUiMessage,
+  message: ChatUiMessage,
   taskLookup: ChatTaskLookup,
   options: AssistantRenderOptions = {},
 ) {
@@ -204,9 +204,7 @@ function deduplicateTaskItems(items: AssistantRenderItem[]) {
   });
 }
 
-export function metadataTaskCard(
-  metadata: GoatChatUiMessage["metadata"],
-): GoatTaskCardMetadata | null {
+export function metadataTaskCard(metadata: ChatUiMessage["metadata"]): TaskCardMetadata | null {
   if (metadata?.task) return metadata.task;
   if (metadata?.taskId) return { id: metadata.taskId };
   return null;
@@ -220,9 +218,9 @@ export function toolCallViewFromPart(
   if (!name) return null;
   const state = typeof part.state === "string" ? part.state : "";
   const output = part.output;
-  const failedGoatBrain =
-    name === GOAT_BRAIN_TOOL_NAME && state === "output-available" && isGoatBrainToolOutput(output)
-      ? !goatBrainToolOutputSucceeded(output)
+  const failedBrain =
+    name === GOAT_BRAIN_TOOL_NAME && state === "output-available" && isBrainToolOutput(output)
+      ? !brainToolOutputSucceeded(output)
       : false;
   // use_action reports failures inside its structured output, not via the
   // part state: completed-with-ok=false renders as failed.
@@ -256,7 +254,7 @@ export function toolCallViewFromPart(
     isCodexItemToolName(name) && state === "output-available" && isRecord(output)
       ? readString(output.status)
       : null;
-  const status = failedGoatBrain
+  const status = failedBrain
     ? "failed"
     : failedAction
       ? "failed"
@@ -410,7 +408,7 @@ export function toolDetail(
   }
 
   if (name === GOAT_BRAIN_TOOL_NAME) {
-    return goatBrainToolDetail(part, status);
+    return brainToolDetail(part, status);
   }
 
   if (name === START_TASK_TOOL_NAME || name === START_WORKFLOW_TOOL_NAME) {
@@ -591,12 +589,12 @@ export function isUseSkillToolOutput(value: unknown): value is UseSkillToolOutpu
   );
 }
 
-function goatBrainToolDetail(
+function brainToolDetail(
   part: Record<string, unknown> & { type: string },
   status: ToolCallView["status"],
 ) {
-  if (part.state === "output-available" && isGoatBrainToolOutput(part.output)) {
-    if (!goatBrainToolOutputSucceeded(part.output)) {
+  if (part.state === "output-available" && isBrainToolOutput(part.output)) {
+    if (!brainToolOutputSucceeded(part.output)) {
       return truncateToolPreview(
         firstNonEmptyLine(part.output.error, part.output.stderr, part.output.stdout) ??
           formatToolInput(part.input),
@@ -604,7 +602,7 @@ function goatBrainToolDetail(
     }
     return truncateToolPreview(
       firstNonEmptyLine(
-        goatBrainCliSuccessSummary(part.output.stdout),
+        brainCliSuccessSummary(part.output.stdout),
         part.output.stdout,
         part.output.stderr,
       ) ?? formatToolInput(part.input),
@@ -725,7 +723,7 @@ function formatToolInput(value: unknown) {
   if (!isRecord(value)) return null;
   if (typeof value.args === "string") return truncateToolPreview(`goat_brain ${value.args}`);
   if (typeof value.command === "string") {
-    return truncateToolPreview(`goat_brain ${formatGoatBrainCommandInput(value)}`);
+    return truncateToolPreview(`goat_brain ${formatBrainCommandInput(value)}`);
   }
   if (typeof value.action === "string") {
     const detail =
@@ -745,7 +743,7 @@ function formatToolInput(value: unknown) {
   }
 }
 
-function formatGoatBrainCommandInput(input: Record<string, unknown>) {
+function formatBrainCommandInput(input: Record<string, unknown>) {
   const command = input.command;
   const flags = isRecord(input.flags) ? input.flags : {};
   const parts = [String(command)];
@@ -777,7 +775,7 @@ function formatToolArg(value: string) {
   return `"${value.replace(/["\\]/g, "\\$&")}"`;
 }
 
-export function isGoatBrainToolOutput(value: unknown): value is GoatBrainToolOutput {
+export function isBrainToolOutput(value: unknown): value is BrainToolOutput {
   if (!isRecord(value)) return false;
   return (
     typeof value.ok === "boolean" &&
@@ -791,7 +789,7 @@ export function isGoatBrainToolOutput(value: unknown): value is GoatBrainToolOut
 const MAX_BRAIN_CITATIONS_PER_TEXT = 6;
 
 export function brainCitationsFromToolOutput(output: unknown): BrainCitation[] {
-  if (!isGoatBrainToolOutput(output) || !output.ok) return [];
+  if (!isBrainToolOutput(output) || !output.ok) return [];
   const parsed = isRecord(output.parsed) ? output.parsed : null;
   if (!parsed) return [];
 
@@ -877,13 +875,13 @@ function brainPathHref(segments: string[]) {
   return `/brain${segments.length ? `/${segments.map((segment) => encodeURIComponent(segment)).join("/")}` : ""}`;
 }
 
-function goatBrainToolOutputSucceeded(output: GoatBrainToolOutput) {
+function brainToolOutputSucceeded(output: BrainToolOutput) {
   if (output.ok) return true;
-  return parseGoatBrainCliJson(output.stdout)?.ok === true;
+  return parseBrainCliJson(output.stdout)?.ok === true;
 }
 
-function goatBrainCliSuccessSummary(stdout: string | undefined) {
-  const parsed = parseGoatBrainCliJson(stdout);
+function brainCliSuccessSummary(stdout: string | undefined) {
+  const parsed = parseBrainCliJson(stdout);
   if (!parsed || parsed.ok !== true) return null;
   const appliedCount = Array.isArray(parsed.applied) ? parsed.applied.length : null;
   if (typeof appliedCount === "number" && appliedCount > 0) {
@@ -896,7 +894,7 @@ function goatBrainCliSuccessSummary(stdout: string | undefined) {
   return null;
 }
 
-function parseGoatBrainCliJson(stdout: string | undefined): Record<string, unknown> | null {
+function parseBrainCliJson(stdout: string | undefined): Record<string, unknown> | null {
   if (!stdout?.trim()) return null;
   try {
     const parsed = JSON.parse(stdout.trim());
@@ -921,9 +919,9 @@ export function truncateToolPreview(value: string | null | undefined) {
 }
 
 export function buildChatTaskLookup(input: {
-  messages: readonly GoatChatUiMessage[];
-  tasks: readonly GoatTaskView[];
-  liveTasks: readonly GoatTaskView[] | null;
+  messages: readonly ChatUiMessage[];
+  tasks: readonly TaskView[];
+  liveTasks: readonly TaskView[] | null;
 }): ChatTaskLookup {
   const lookup = new Map<string, ChatTaskCardView>();
 
@@ -943,7 +941,7 @@ export function buildChatTaskLookup(input: {
   return lookup;
 }
 
-function setChatTaskLookupValue(lookup: Map<string, ChatTaskCardView>, task: GoatTaskCardMetadata) {
+function setChatTaskLookupValue(lookup: Map<string, ChatTaskCardView>, task: TaskCardMetadata) {
   const existing = lookup.get(task.id);
   lookup.set(task.id, {
     id: task.id,
@@ -953,7 +951,7 @@ function setChatTaskLookupValue(lookup: Map<string, ChatTaskCardView>, task: Goa
   });
 }
 
-function taskCardFromTask(task: GoatTaskView): ChatTaskCardView {
+function taskCardFromTask(task: TaskView): ChatTaskCardView {
   return {
     id: task.id,
     displayId: task.displayId,
@@ -963,7 +961,7 @@ function taskCardFromTask(task: GoatTaskView): ChatTaskCardView {
 }
 
 export function resolveChatTaskCard(
-  fallback: GoatTaskCardMetadata,
+  fallback: TaskCardMetadata,
   lookup: ChatTaskLookup,
 ): ChatTaskCardView {
   const resolved = lookup.get(fallback.id);
@@ -975,7 +973,7 @@ export function resolveChatTaskCard(
   };
 }
 
-export function taskFromOutput(output: StartTaskToolOutput): GoatTaskCardMetadata {
+export function taskFromOutput(output: StartTaskToolOutput): TaskCardMetadata {
   return {
     id: output.taskId,
     displayId: output.taskDisplayId,
@@ -1002,7 +1000,7 @@ function readString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-export function shouldShowThinkingBubble(messages: readonly GoatChatUiMessage[]) {
+export function shouldShowThinkingBubble(messages: readonly ChatUiMessage[]) {
   const lastMessage = messages.at(-1);
   if (!lastMessage || lastMessage.role === "user") return true;
   return getOrderedAssistantItems(lastMessage, new Map<string, ChatTaskCardView>()).length === 0;

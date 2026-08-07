@@ -1,27 +1,22 @@
-import type {
-  GoatCodexChatSession,
-  GoatCodexChatTurn,
-  GoatHarnessSpec,
-  GoatTask,
-} from "@opencompany/db/schema";
+import type { CodexChatSession, CodexChatTurn, HarnessSpec, Task } from "@opencompany/db/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { extractClaudeScheduleWakeup, runGoatClaudeCodeChatTurn } from "./claude-code-chat";
+import { extractClaudeScheduleWakeup, runClaudeCodeChatTurn } from "./claude-code-chat";
 import type { RunnerEnv } from "./env";
 
 const authMocks = vi.hoisted(() => ({
-  loadGoatClaudeCodeCredential: vi.fn(),
-  markGoatClaudeCodeCredentialNeedsReauth: vi.fn(),
-  markGoatClaudeCodeCredentialValidated: vi.fn(),
+  loadClaudeCodeCredential: vi.fn(),
+  markClaudeCodeCredentialNeedsReauth: vi.fn(),
+  markClaudeCodeCredentialValidated: vi.fn(),
 }));
 
 const chatMocks = vi.hoisted(() => ({
   claimCodexChatRecovery: vi.fn(),
   codexChatTurnLeaseIsHeld: vi.fn(),
-  loadGoatCodexChatAttachments: vi.fn(),
-  loadGoatCodexChatSessionSkills: vi.fn(),
-  loadGoatGitHubAuthForUser: vi.fn(),
+  loadCodexChatAttachments: vi.fn(),
+  loadCodexChatSessionSkills: vi.fn(),
+  loadGitHubAuthForUser: vi.fn(),
   markCodexChatSandboxTimeoutArmed: vi.fn(),
-  materializeGoatCodexChatAttachments: vi.fn(),
+  materializeCodexChatAttachments: vi.fn(),
   summarizeCodexChatRecoveryProgress: vi.fn(),
   updateCodexChatSessionIfLeaseHeld: vi.fn(),
 }));
@@ -33,13 +28,13 @@ const cliMocks = vi.hoisted(() => ({
 }));
 
 const eventMocks = vi.hoisted(() => ({
-  createGoatCodexChatProjector: vi.fn(),
+  createCodexChatProjector: vi.fn(),
   loadCodexChatAssistantMessageParts: vi.fn(),
 }));
 
 const repoMocks = vi.hoisted(() => ({
-  loadGoatRepositoryBootstrap: vi.fn(),
-  stageGoatRepositoryBootstrap: vi.fn(),
+  loadRepositoryBootstrap: vi.fn(),
+  stageRepositoryBootstrap: vi.fn(),
 }));
 
 const sandboxMocks = vi.hoisted(() => ({
@@ -53,26 +48,26 @@ const skillMocks = vi.hoisted(() => ({
 }));
 
 const taskMocks = vi.hoisted(() => ({
-  buildGoatTaskTerminalProjection: vi.fn(),
-  buildGoatTaskTurnCompletion: vi.fn(),
-  closeGoatTaskTurn: vi.fn(),
-  finalizeGoatTaskResult: vi.fn(),
-  markGoatTaskTurnRunning: vi.fn(),
+  buildTaskTerminalProjection: vi.fn(),
+  buildTaskTurnCompletion: vi.fn(),
+  closeTaskTurn: vi.fn(),
+  finalizeTaskResult: vi.fn(),
+  markTaskTurnRunning: vi.fn(),
 }));
 
 const wakeupMocks = vi.hoisted(() => ({
-  enqueueGoatCodexChatWakeup: vi.fn(),
-  persistGoatCodexChatScheduledWakeup: vi.fn(),
+  enqueueCodexChatWakeup: vi.fn(),
+  persistCodexChatScheduledWakeup: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/claude-code-auth", () => ({
-  loadGoatClaudeCodeCredential: authMocks.loadGoatClaudeCodeCredential,
-  markGoatClaudeCodeCredentialNeedsReauth: authMocks.markGoatClaudeCodeCredentialNeedsReauth,
-  markGoatClaudeCodeCredentialValidated: authMocks.markGoatClaudeCodeCredentialValidated,
+  loadClaudeCodeCredential: authMocks.loadClaudeCodeCredential,
+  markClaudeCodeCredentialNeedsReauth: authMocks.markClaudeCodeCredentialNeedsReauth,
+  markClaudeCodeCredentialValidated: authMocks.markClaudeCodeCredentialValidated,
 }));
 
 vi.mock("@opencompany/db/harness", () => ({
-  getGoatWorkflowHarnessSkillSnapshots: () => [],
+  getWorkflowHarnessSkillSnapshots: () => [],
 }));
 
 vi.mock("./claude-code-cli", () => ({
@@ -100,40 +95,40 @@ vi.mock("./codex-chat", () => ({
     const error = input.shouldAbort?.();
     if (error) throw error;
   },
-  GoatCodexChatInterruptedError: class GoatCodexChatInterruptedError extends Error {},
-  loadGoatCodexChatAttachments: chatMocks.loadGoatCodexChatAttachments,
-  loadGoatCodexChatSessionSkills: chatMocks.loadGoatCodexChatSessionSkills,
-  loadGoatGitHubAuthForUser: chatMocks.loadGoatGitHubAuthForUser,
+  CodexChatInterruptedError: class CodexChatInterruptedError extends Error {},
+  loadCodexChatAttachments: chatMocks.loadCodexChatAttachments,
+  loadCodexChatSessionSkills: chatMocks.loadCodexChatSessionSkills,
+  loadGitHubAuthForUser: chatMocks.loadGitHubAuthForUser,
   markCodexChatSandboxTimeoutArmed: chatMocks.markCodexChatSandboxTimeoutArmed,
-  materializeGoatCodexChatAttachments: chatMocks.materializeGoatCodexChatAttachments,
+  materializeCodexChatAttachments: chatMocks.materializeCodexChatAttachments,
   summarizeCodexChatRecoveryProgress: chatMocks.summarizeCodexChatRecoveryProgress,
   updateCodexChatSessionIfLeaseHeld: chatMocks.updateCodexChatSessionIfLeaseHeld,
 }));
 
 vi.mock("./codex-chat-events", () => ({
-  createGoatCodexChatProjector: eventMocks.createGoatCodexChatProjector,
+  createCodexChatProjector: eventMocks.createCodexChatProjector,
   loadCodexChatAssistantMessageParts: eventMocks.loadCodexChatAssistantMessageParts,
 }));
 
 vi.mock("./codex-chat-wakeup", () => ({
-  enqueueGoatCodexChatWakeup: wakeupMocks.enqueueGoatCodexChatWakeup,
+  enqueueCodexChatWakeup: wakeupMocks.enqueueCodexChatWakeup,
   GOAT_CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS: 3_600,
   GOAT_CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS: 60,
-  persistGoatCodexChatScheduledWakeup: wakeupMocks.persistGoatCodexChatScheduledWakeup,
+  persistCodexChatScheduledWakeup: wakeupMocks.persistCodexChatScheduledWakeup,
   scheduledWakeupFromTurnSettings: () => null,
 }));
 
 vi.mock("./task-turn", () => ({
-  buildGoatTaskTerminalProjection: taskMocks.buildGoatTaskTerminalProjection,
-  buildGoatTaskTurnCompletion: taskMocks.buildGoatTaskTurnCompletion,
-  closeGoatTaskTurn: taskMocks.closeGoatTaskTurn,
-  finalizeGoatTaskResult: taskMocks.finalizeGoatTaskResult,
-  markGoatTaskTurnRunning: taskMocks.markGoatTaskTurnRunning,
+  buildTaskTerminalProjection: taskMocks.buildTaskTerminalProjection,
+  buildTaskTurnCompletion: taskMocks.buildTaskTurnCompletion,
+  closeTaskTurn: taskMocks.closeTaskTurn,
+  finalizeTaskResult: taskMocks.finalizeTaskResult,
+  markTaskTurnRunning: taskMocks.markTaskTurnRunning,
 }));
 
 vi.mock("./repo-bootstrap", () => ({
-  loadGoatRepositoryBootstrap: repoMocks.loadGoatRepositoryBootstrap,
-  stageGoatRepositoryBootstrap: repoMocks.stageGoatRepositoryBootstrap,
+  loadRepositoryBootstrap: repoMocks.loadRepositoryBootstrap,
+  stageRepositoryBootstrap: repoMocks.stageRepositoryBootstrap,
 }));
 
 vi.mock("./sandbox", () => ({
@@ -210,10 +205,10 @@ describe("extractClaudeScheduleWakeup", () => {
   });
 });
 
-describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
+describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    authMocks.loadGoatClaudeCodeCredential.mockResolvedValue({
+    authMocks.loadClaudeCodeCredential.mockResolvedValue({
       status: "connected",
       authJson: {
         token: "claude_token",
@@ -223,11 +218,11 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
       updatedAt: new Date("2026-07-10T12:00:00.000Z"),
     });
     chatMocks.codexChatTurnLeaseIsHeld.mockResolvedValue(true);
-    chatMocks.loadGoatCodexChatAttachments.mockResolvedValue([]);
-    chatMocks.loadGoatCodexChatSessionSkills.mockResolvedValue([]);
-    chatMocks.loadGoatGitHubAuthForUser.mockResolvedValue(null);
+    chatMocks.loadCodexChatAttachments.mockResolvedValue([]);
+    chatMocks.loadCodexChatSessionSkills.mockResolvedValue([]);
+    chatMocks.loadGitHubAuthForUser.mockResolvedValue(null);
     chatMocks.markCodexChatSandboxTimeoutArmed.mockResolvedValue(undefined);
-    chatMocks.materializeGoatCodexChatAttachments.mockResolvedValue({
+    chatMocks.materializeCodexChatAttachments.mockResolvedValue({
       paths: [],
       localImages: [],
     });
@@ -242,24 +237,24 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
       stderrTail: "",
     });
     eventMocks.loadCodexChatAssistantMessageParts.mockResolvedValue([]);
-    eventMocks.createGoatCodexChatProjector.mockReturnValue({
+    eventMocks.createCodexChatProjector.mockReturnValue({
       push: vi.fn(async () => undefined),
       finalize: vi.fn(async () => undefined),
       fail: vi.fn(async () => undefined),
       interrupted: vi.fn(async () => undefined),
     });
-    repoMocks.loadGoatRepositoryBootstrap.mockResolvedValue({
+    repoMocks.loadRepositoryBootstrap.mockResolvedValue({
       configs: [],
       promptFragment: "",
       secretValues: [],
     });
-    repoMocks.stageGoatRepositoryBootstrap.mockResolvedValue(undefined);
+    repoMocks.stageRepositoryBootstrap.mockResolvedValue(undefined);
     sandboxMocks.armSandboxActiveTimeoutById.mockResolvedValue(true);
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
     skillMocks.materializeCodexSkillSnapshotsForSession.mockResolvedValue(undefined);
-    taskMocks.buildGoatTaskTerminalProjection.mockReturnValue({ taskId: "goat_task_1" });
-    taskMocks.markGoatTaskTurnRunning.mockResolvedValue(undefined);
+    taskMocks.buildTaskTerminalProjection.mockReturnValue({ taskId: "goat_task_1" });
+    taskMocks.markTaskTurnRunning.mockResolvedValue(undefined);
   });
 
   it("caps finished durable task sandbox parking at 5 minutes", async () => {
@@ -268,14 +263,14 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
     const harnessSpec = harnessSpecForClaudeTask();
 
     await expect(
-      runGoatClaudeCodeChatTurn({
+      runClaudeCodeChatTurn({
         turn: claudeTurn(),
         session: claudeSession(),
         taskContext: {
           task: taskForHarness(harnessSpec),
           harnessSpec,
         },
-        env: env({ goatCodexChatIdleTimeoutMs: 30 * 60 * 1000 }),
+        env: env({ codexChatIdleTimeoutMs: 30 * 60 * 1000 }),
       }),
     ).resolves.toBe("settled");
 
@@ -290,13 +285,13 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
     const harnessSpec = harnessSpecForClaudeTask();
     const turn = claudeTurn({ settings: { reasoningEffort: "high" } });
     const completion = { taskId: "goat_task_1", nextTurn: { id: "next_turn" } };
-    taskMocks.closeGoatTaskTurn.mockResolvedValueOnce({
+    taskMocks.closeTaskTurn.mockResolvedValueOnce({
       reportedOutcome: "needs_attention",
       outcomeComment: "Waiting for CI.",
     });
-    taskMocks.finalizeGoatTaskResult.mockResolvedValueOnce("PR opened; CI is running.");
-    taskMocks.buildGoatTaskTurnCompletion.mockReturnValueOnce(completion);
-    eventMocks.createGoatCodexChatProjector.mockImplementationOnce(
+    taskMocks.finalizeTaskResult.mockResolvedValueOnce("PR opened; CI is running.");
+    taskMocks.buildTaskTurnCompletion.mockReturnValueOnce(completion);
+    eventMocks.createCodexChatProjector.mockImplementationOnce(
       (input: { normalizeEvent?: (event: unknown) => unknown }) => ({
         push: vi.fn(async (events: unknown[]) => {
           for (const event of events) input.normalizeEvent?.(event);
@@ -334,7 +329,7 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
     );
 
     await expect(
-      runGoatClaudeCodeChatTurn({
+      runClaudeCodeChatTurn({
         turn,
         session: claudeSession(),
         taskContext: {
@@ -345,7 +340,7 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
       }),
     ).resolves.toBe("settled");
 
-    expect(taskMocks.buildGoatTaskTurnCompletion).toHaveBeenCalledWith(
+    expect(taskMocks.buildTaskTurnCompletion).toHaveBeenCalledWith(
       expect.objectContaining({
         scheduledWakeup: {
           wakeup: {
@@ -357,8 +352,8 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
         },
       }),
     );
-    expect(wakeupMocks.persistGoatCodexChatScheduledWakeup).toHaveBeenCalledOnce();
-    expect(wakeupMocks.enqueueGoatCodexChatWakeup).not.toHaveBeenCalled();
+    expect(wakeupMocks.persistCodexChatScheduledWakeup).toHaveBeenCalledOnce();
+    expect(wakeupMocks.enqueueCodexChatWakeup).not.toHaveBeenCalled();
   });
 });
 
@@ -381,7 +376,7 @@ function fakeSandbox(sandboxId: string) {
   };
 }
 
-function claudeSession(overrides: Partial<GoatCodexChatSession> = {}): GoatCodexChatSession {
+function claudeSession(overrides: Partial<CodexChatSession> = {}): CodexChatSession {
   const now = new Date("2026-07-10T12:00:00.000Z");
   return {
     id: "goat_codex_chat_1",
@@ -404,7 +399,7 @@ function claudeSession(overrides: Partial<GoatCodexChatSession> = {}): GoatCodex
   };
 }
 
-function claudeTurn(overrides: Partial<GoatCodexChatTurn> = {}): GoatCodexChatTurn {
+function claudeTurn(overrides: Partial<CodexChatTurn> = {}): CodexChatTurn {
   const now = new Date("2026-07-10T12:00:00.000Z");
   return {
     id: "goat_codex_turn_1",
@@ -434,7 +429,7 @@ function claudeTurn(overrides: Partial<GoatCodexChatTurn> = {}): GoatCodexChatTu
   };
 }
 
-function harnessSpecForClaudeTask(): GoatHarnessSpec {
+function harnessSpecForClaudeTask(): HarnessSpec {
   return {
     schemaVersion: "goat.harness.v1",
     engine: "claude_code",
@@ -449,7 +444,7 @@ function harnessSpecForClaudeTask(): GoatHarnessSpec {
   };
 }
 
-function taskForHarness(harnessSpec: GoatHarnessSpec): GoatTask {
+function taskForHarness(harnessSpec: HarnessSpec): Task {
   const now = new Date("2026-07-10T12:00:00.000Z");
   return {
     id: "goat_task_1",
@@ -495,15 +490,15 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     publicUrl: undefined,
     llmBrokerEnabled: true,
     exaApiKey: "exa",
-    goatBrowserEnabled: false,
+    browserEnabled: false,
     ampE2bTemplate: undefined,
     codexE2bTemplate: undefined,
     e2bSandboxIdleTimeoutMs: 30_000,
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",
-    goatCodexChatIdleTimeoutMs: 300_000,
+    codexChatIdleTimeoutMs: 300_000,
     jobLeaseTtlMs: 300_000,
-    goatTaskWorkerEnabled: false,
+    taskWorkerEnabled: false,
     workerConcurrency: 2,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],

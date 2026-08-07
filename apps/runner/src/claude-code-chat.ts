@@ -2,21 +2,21 @@ import {
   CLOUD_CODING_ENGINE_CONFIG,
   type ClaudeCodeTurnSummary,
   claudeCodeModelSupportsReasoningEffort,
+  createClaudeActionGatewayTicket,
   createClaudeCodeEventNormalizer,
-  createGoatClaudeActionGatewayTicket,
+  isActionHostToolContractVersion,
   isCodexReasoningEffort,
-  isGoatActionHostToolContractVersion,
   shellQuote,
 } from "@opencompany/agent-runtime";
-import { type GoatBrainSkill, serializeGoatBrainSkillMarkdown } from "@opencompany/brain";
+import { type BrainSkill, serializeBrainSkillMarkdown } from "@opencompany/brain";
 import { TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK } from "@opencompany/core/chat-agent";
 import {
-  loadGoatClaudeCodeCredential,
-  markGoatClaudeCodeCredentialNeedsReauth,
-  markGoatClaudeCodeCredentialValidated,
+  loadClaudeCodeCredential,
+  markClaudeCodeCredentialNeedsReauth,
+  markClaudeCodeCredentialValidated,
 } from "@opencompany/db/claude-code-auth";
-import { getGoatWorkflowHarnessSkillSnapshots } from "@opencompany/db/harness";
-import type { GoatCodexChatSession, GoatCodexChatTurn } from "@opencompany/db/schema";
+import { getWorkflowHarnessSkillSnapshots } from "@opencompany/db/harness";
+import type { CodexChatSession, CodexChatTurn } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import {
@@ -29,47 +29,44 @@ import {
 } from "./claude-code-cli";
 import type { CodexAppServerSummary } from "./codex-app-server";
 import {
+  CodexChatInterruptedError,
   claimCodexChatRecovery,
   codexChatAttachmentPromptLines,
   codexChatTurnLeaseIsHeld,
   createTurnAbortCheck,
-  GoatCodexChatInterruptedError,
-  loadGoatCodexChatAttachments,
-  loadGoatCodexChatSessionSkills,
-  loadGoatGitHubAuthForUser,
+  loadCodexChatAttachments,
+  loadCodexChatSessionSkills,
+  loadGitHubAuthForUser,
   markCodexChatSandboxTimeoutArmed,
-  materializeGoatCodexChatAttachments,
+  materializeCodexChatAttachments,
   summarizeCodexChatRecoveryProgress,
   updateCodexChatSessionIfLeaseHeld,
 } from "./codex-chat";
 import {
-  GoatCodexChatHandoffError,
-  GoatCodexChatLeaseLostError,
-  GoatTaskTurnTerminalError,
+  CodexChatHandoffError,
+  CodexChatLeaseLostError,
+  TaskTurnTerminalError,
 } from "./codex-chat-errors";
+import { createCodexChatProjector, loadCodexChatAssistantMessageParts } from "./codex-chat-events";
 import {
-  createGoatCodexChatProjector,
-  loadCodexChatAssistantMessageParts,
-} from "./codex-chat-events";
-import {
-  enqueueGoatCodexChatWakeup,
+  type CodexChatScheduledWakeup,
+  enqueueCodexChatWakeup,
   GOAT_CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS,
   GOAT_CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS,
-  type GoatCodexChatScheduledWakeup,
-  persistGoatCodexChatScheduledWakeup,
+  persistCodexChatScheduledWakeup,
   scheduledWakeupFromTurnSettings,
 } from "./codex-chat-wakeup";
 import { materializeCodexSkillSnapshotsForSession } from "./codex-managed-skills";
 import { buildGitHubCommandEnv, createKnownSecretRedactor } from "./coding-agent-shared";
-import { settledGoatCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
+import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
 import { GOAT_CODING_WORKSPACE_SANDBOX_NETWORK } from "./coding-workspace-runtime";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import {
   combineSandboxPromptFragments,
-  reconcileGoatInfisicalSandboxAuth,
+  reconcileInfisicalSandboxAuth,
 } from "./infisical-sandbox-auth";
-import { loadGoatRepositoryBootstrap, stageGoatRepositoryBootstrap } from "./repo-bootstrap";
+import { loadRepositoryBootstrap, stageRepositoryBootstrap } from "./repo-bootstrap";
 import {
   armSandboxActiveTimeoutById,
   armSandboxIdleTimeout,
@@ -77,12 +74,12 @@ import {
   type SandboxHandle,
 } from "./sandbox";
 import {
-  buildGoatTaskTerminalProjection,
-  buildGoatTaskTurnCompletion,
-  closeGoatTaskTurn,
-  finalizeGoatTaskResult,
-  type GoatTaskTurnContext,
-  markGoatTaskTurnRunning,
+  buildTaskTerminalProjection,
+  buildTaskTurnCompletion,
+  closeTaskTurn,
+  finalizeTaskResult,
+  markTaskTurnRunning,
+  type TaskTurnContext,
 } from "./task-turn";
 
 const CLAUDE_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.claude_code.workDirectory;
@@ -118,14 +115,14 @@ export const GOAT_CLAUDE_CODE_CHAT_REAUTH_MESSAGE =
 const AUTH_FAILURE_PATTERN =
   /oauth|authenticat|unauthorized|401|login expired|invalid api key|credit balance|usage credits/i;
 
-export async function loadGoatClaudeCodeAuth(
+export async function loadClaudeCodeAuth(
   userWorkosId: string,
 ): Promise<(ClaudeCodeCliAuth & { credentialUpdatedAt: Date }) | null> {
-  let credential: Awaited<ReturnType<typeof loadGoatClaudeCodeCredential>>;
+  let credential: Awaited<ReturnType<typeof loadClaudeCodeCredential>>;
   try {
-    credential = await loadGoatClaudeCodeCredential({ db: getDb(), userWorkosId });
+    credential = await loadClaudeCodeCredential({ db: getDb(), userWorkosId });
   } catch {
-    await markGoatClaudeCodeCredentialNeedsReauth({
+    await markClaudeCodeCredentialNeedsReauth({
       db: getDb(),
       userWorkosId,
       statusReason:
@@ -151,11 +148,11 @@ export async function loadGoatClaudeCodeAuth(
   };
 }
 
-export async function runGoatClaudeCodeChatTurn(input: {
-  turn: GoatCodexChatTurn;
-  session: GoatCodexChatSession;
+export async function runClaudeCodeChatTurn(input: {
+  turn: CodexChatTurn;
+  session: CodexChatSession;
   env: RunnerEnv;
-  taskContext?: GoatTaskTurnContext | undefined;
+  taskContext?: TaskTurnContext | undefined;
   recovery?: { reason: "lease_reclaimed" };
   shouldAbort?: () => Error | null;
 }): Promise<"settled" | "handed_off"> {
@@ -183,7 +180,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
     turnCreatedAt: turn.runAfter && turn.runAfter > turn.createdAt ? turn.runAfter : turn.createdAt,
   };
   const bareProjector = () =>
-    createGoatCodexChatProjector({
+    createCodexChatProjector({
       target: projectorTarget,
       redact: (value) => value,
       initialParts,
@@ -191,7 +188,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
 
   if (turn.interruptRequestedAt) {
     await bareProjector().interrupted(
-      input.taskContext ? buildGoatTaskTerminalProjection(input.taskContext) : undefined,
+      input.taskContext ? buildTaskTerminalProjection(input.taskContext) : undefined,
     );
     return "settled";
   }
@@ -213,24 +210,24 @@ export async function runGoatClaudeCodeChatTurn(input: {
     taskAbortTimer.unref?.();
     try {
       await checkTaskAbort();
-      await markGoatTaskTurnRunning({ context: taskContext, turn });
+      await markTaskTurnRunning({ context: taskContext, turn });
       await checkTaskAbort();
     } catch (error) {
       const effectiveError = taskController.signal.aborted ? taskController.signal.reason : error;
       if (
-        effectiveError instanceof GoatCodexChatHandoffError ||
-        effectiveError instanceof GoatCodexChatLeaseLostError
+        effectiveError instanceof CodexChatHandoffError ||
+        effectiveError instanceof CodexChatLeaseLostError
       ) {
         throw effectiveError;
       }
       if (
-        effectiveError instanceof GoatCodexChatInterruptedError ||
-        effectiveError instanceof GoatTaskTurnTerminalError
+        effectiveError instanceof CodexChatInterruptedError ||
+        effectiveError instanceof TaskTurnTerminalError
       ) {
-        await bareProjector().interrupted(buildGoatTaskTerminalProjection(taskContext));
+        await bareProjector().interrupted(buildTaskTerminalProjection(taskContext));
       } else {
         await bareProjector().fail(errorMessage(effectiveError), {
-          taskCompletion: buildGoatTaskTerminalProjection(taskContext),
+          taskCompletion: buildTaskTerminalProjection(taskContext),
         });
       }
       return "settled";
@@ -239,16 +236,16 @@ export async function runGoatClaudeCodeChatTurn(input: {
     }
   }
 
-  const auth = await loadGoatClaudeCodeAuth(turn.userWorkosId);
+  const auth = await loadClaudeCodeAuth(turn.userWorkosId);
   if (!auth) {
     await bareProjector().fail(GOAT_CLAUDE_CODE_CHAT_REAUTH_MESSAGE, {
       sessionStatus: "failed",
-      ...(taskContext ? { taskCompletion: buildGoatTaskTerminalProjection(taskContext) } : {}),
+      ...(taskContext ? { taskCompletion: buildTaskTerminalProjection(taskContext) } : {}),
     });
     return "settled";
   }
 
-  const repositoryBootstrapPromise = loadGoatRepositoryBootstrap(
+  const repositoryBootstrapPromise = loadRepositoryBootstrap(
     session.workspaceId,
     turn.userWorkosId,
   );
@@ -264,13 +261,13 @@ export async function runGoatClaudeCodeChatTurn(input: {
         user_id: turn.userWorkosId,
       },
       network: GOAT_CODING_WORKSPACE_SANDBOX_NETWORK,
-      idleTimeoutMs: env.goatCodexChatIdleTimeoutMs,
+      idleTimeoutMs: env.codexChatIdleTimeoutMs,
     });
   } catch (error) {
     await bareProjector().fail(
       `Claude Code sandbox could not be started: ${errorMessage(error)}. Send your message again to retry.`,
       {
-        ...(taskContext ? { taskCompletion: buildGoatTaskTerminalProjection(taskContext) } : {}),
+        ...(taskContext ? { taskCompletion: buildTaskTerminalProjection(taskContext) } : {}),
       },
     );
     return "settled";
@@ -289,20 +286,20 @@ export async function runGoatClaudeCodeChatTurn(input: {
   }
 
   const repositoryBootstrap = await repositoryBootstrapPromise;
-  const infisicalAuth = await reconcileGoatInfisicalSandboxAuth({
+  const infisicalAuth = await reconcileInfisicalSandboxAuth({
     sandbox,
     workspaceId: session.workspaceId,
     userWorkosId: turn.userWorkosId,
   });
-  const github = await loadGoatGitHubAuthForUser(turn.userWorkosId);
+  const github = await loadGitHubAuthForUser(turn.userWorkosId);
   const actionToolsEnabled =
-    isGoatActionHostToolContractVersion(session.hostToolContractVersion) &&
+    isActionHostToolContractVersion(session.hostToolContractVersion) &&
     Boolean(session.workspaceId) &&
-    Boolean(env.goatAppUrl);
+    Boolean(env.appUrl);
   // Minted before the redactor so a leaked ticket (e.g. the agent cats its own MCP
   // config) is scrubbed from logs the same way the other sandbox credentials are.
   const actionGatewayTicket = actionToolsEnabled
-    ? createGoatClaudeActionGatewayTicket({
+    ? createClaudeActionGatewayTicket({
         codexChatSessionId: session.id,
         codexChatTurnId: turn.id,
         secret: env.internalToken,
@@ -321,7 +318,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
     ...infisicalAuth.redactionValues,
   ]);
   const normalizer = createClaudeCodeEventNormalizer();
-  const projector = createGoatCodexChatProjector({
+  const projector = createCodexChatProjector({
     target: projectorTarget,
     redact,
     initialParts,
@@ -360,7 +357,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
         exhaustedMessage: CLAUDE_CHAT_RECOVERY_EXHAUSTED_MESSAGE,
       });
     }
-    const attachments = await loadGoatCodexChatAttachments(turn);
+    const attachments = await loadCodexChatAttachments(turn);
     await checkAbort();
     executionStage = "prepare_directories";
     await sandbox.commands.run(
@@ -369,14 +366,14 @@ export async function runGoatClaudeCodeChatTurn(input: {
     );
     await checkAbort();
     executionStage = "stage_repository_configs";
-    await stageGoatRepositoryBootstrap({ sandbox, bootstrap: repositoryBootstrap });
+    await stageRepositoryBootstrap({ sandbox, bootstrap: repositoryBootstrap });
     await checkAbort();
     executionStage = "ensure_claude";
     await ensureClaudeInstalled(sandbox);
     await checkAbort();
     executionStage = "load_skills";
-    const sessionSkills = await loadGoatCodexChatSessionSkills(turn);
-    const turnSkills = resolveGoatClaudeTurnSkills({
+    const sessionSkills = await loadCodexChatSessionSkills(turn);
+    const turnSkills = resolveClaudeTurnSkills({
       sessionSkills,
       userMessageId: turn.userMessageId,
       ...(taskContext ? { taskContext } : {}),
@@ -391,7 +388,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
         files: [
           {
             path: "SKILL.md",
-            content: serializeGoatBrainSkillMarkdown(skill),
+            content: serializeBrainSkillMarkdown(skill),
           },
         ],
       })),
@@ -401,7 +398,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
       (skillId) => `${CLAUDE_CHAT_WORKDIR}/.agents/skills/${skillId}/SKILL.md`,
     );
     executionStage = "materialize_attachments";
-    const materializedAttachments = await materializeGoatCodexChatAttachments({
+    const materializedAttachments = await materializeCodexChatAttachments({
       sandbox,
       turnId: turn.id,
       attachments,
@@ -442,10 +439,10 @@ export async function runGoatClaudeCodeChatTurn(input: {
 
     executionStage = "write_mcp_config";
     const mcpConfigPath = actionGatewayTicket
-      ? await writeGoatClaudeActionsMcpConfig({
+      ? await writeClaudeActionsMcpConfig({
           sandbox,
           turnId: turn.id,
-          goatAppUrl: env.goatAppUrl,
+          appUrl: env.appUrl,
           ticket: actionGatewayTicket,
         })
       : null;
@@ -501,7 +498,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
         onEvent: async (event) => {
           const nextScheduledWakeup = extractClaudeScheduleWakeup(event);
           if (nextScheduledWakeup) {
-            await persistGoatCodexChatScheduledWakeup({
+            await persistCodexChatScheduledWakeup({
               turnId: turn.id,
               userWorkosId: turn.userWorkosId,
               codexChatSessionId: turn.codexChatSessionId,
@@ -554,7 +551,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
     if (summary.status === "failure") {
       const failureText = `${summary.error ?? ""}\n${runResult.stderrTail}`;
       if (AUTH_FAILURE_PATTERN.test(failureText)) {
-        await markGoatClaudeCodeCredentialNeedsReauth({
+        await markClaudeCodeCredentialNeedsReauth({
           db: getDb(),
           userWorkosId: turn.userWorkosId,
           statusReason: "Claude Code rejected the stored token. Reconnect in Goat settings.",
@@ -565,7 +562,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
     if (summary.status === "success") {
       executionStage = "validate_credential";
       try {
-        const validated = await markGoatClaudeCodeCredentialValidated({
+        const validated = await markClaudeCodeCredentialValidated({
           db: getDb(),
           userWorkosId: turn.userWorkosId,
           expectedUpdatedAt: auth.credentialUpdatedAt,
@@ -608,7 +605,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
       let reported;
       try {
         await checkAbort();
-        reported = await closeGoatTaskTurn({
+        reported = await closeTaskTurn({
           context: taskContext,
           finalContent: rawResult,
           env,
@@ -622,7 +619,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
         clearInterval(closerAbortTimer);
       }
 
-      const finalResult = await finalizeGoatTaskResult({
+      const finalResult = await finalizeTaskResult({
         context: taskContext,
         assistantContent: rawResult,
         turnId: turn.id,
@@ -631,7 +628,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
         { ...appServerSummary, result: finalResult },
         {
           replacementContent: finalResult,
-          taskCompletion: buildGoatTaskTurnCompletion({
+          taskCompletion: buildTaskTurnCompletion({
             context: taskContext,
             result: finalResult,
             reportedOutcome: reported?.reportedOutcome,
@@ -649,14 +646,14 @@ export async function runGoatClaudeCodeChatTurn(input: {
       );
     } else if (taskContext) {
       await projector.finalize(appServerSummary, {
-        taskCompletion: buildGoatTaskTerminalProjection(taskContext),
+        taskCompletion: buildTaskTerminalProjection(taskContext),
       });
     } else {
       await projector.finalize(appServerSummary);
     }
     if (summary.status === "success" && outcome === "settled" && scheduledWakeup && !taskContext) {
       try {
-        await enqueueGoatCodexChatWakeup({
+        await enqueueCodexChatWakeup({
           parentTurn: turn,
           model: session.model,
           wakeup: scheduledWakeup,
@@ -677,20 +674,20 @@ export async function runGoatClaudeCodeChatTurn(input: {
     }
   } catch (error) {
     const effectiveError =
-      error instanceof GoatCodexChatHandoffError ||
-      error instanceof GoatCodexChatInterruptedError ||
-      error instanceof GoatCodexChatLeaseLostError
+      error instanceof CodexChatHandoffError ||
+      error instanceof CodexChatInterruptedError ||
+      error instanceof CodexChatLeaseLostError
         ? error
         : (shouldAbort?.() ?? error);
-    if (effectiveError instanceof GoatCodexChatHandoffError) {
+    if (effectiveError instanceof CodexChatHandoffError) {
       // One-shot CLI turns cannot be reattached; the replacement runner reclaims the
       // turn and reruns it with the recovery prompt against the persisted sandbox.
       outcome = "handed_off";
-    } else if (effectiveError instanceof GoatCodexChatInterruptedError) {
+    } else if (effectiveError instanceof CodexChatInterruptedError) {
       await projector.interrupted(
-        taskContext ? buildGoatTaskTerminalProjection(taskContext) : undefined,
+        taskContext ? buildTaskTerminalProjection(taskContext) : undefined,
       );
-    } else if (effectiveError instanceof GoatCodexChatLeaseLostError) {
+    } else if (effectiveError instanceof CodexChatLeaseLostError) {
       leaseLost = true;
       throw effectiveError;
     } else {
@@ -706,7 +703,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
         error: message,
       });
       await projector.fail(message, {
-        ...(taskContext ? { taskCompletion: buildGoatTaskTerminalProjection(taskContext) } : {}),
+        ...(taskContext ? { taskCompletion: buildTaskTerminalProjection(taskContext) } : {}),
       });
     }
   } finally {
@@ -715,8 +712,8 @@ export async function runGoatClaudeCodeChatTurn(input: {
     const idleTimeoutMs =
       outcome === "handed_off"
         ? Math.max(CLAUDE_CHAT_HANDOFF_TIMEOUT_MS, env.jobLeaseTtlMs * 2)
-        : settledGoatCodingSandboxIdleTimeoutMs({
-            configuredIdleTimeoutMs: env.goatCodexChatIdleTimeoutMs,
+        : settledCodingSandboxIdleTimeoutMs({
+            configuredIdleTimeoutMs: env.codexChatIdleTimeoutMs,
             taskSession: Boolean(taskContext),
           });
     try {
@@ -783,12 +780,12 @@ function isUnresumableSessionFailure(
 
 export function extractClaudeScheduleWakeup(
   event: Record<string, unknown>,
-): GoatCodexChatScheduledWakeup | null {
+): CodexChatScheduledWakeup | null {
   if (event.type !== "assistant") return null;
   const message = recordFromUnknown(event.message);
   if (!message || !Array.isArray(message.content)) return null;
 
-  let wakeup: GoatCodexChatScheduledWakeup | null = null;
+  let wakeup: CodexChatScheduledWakeup | null = null;
   for (const block of message.content) {
     const toolUse = recordFromUnknown(block);
     if (toolUse?.type !== "tool_use" || toolUse.name !== "ScheduleWakeup") continue;
@@ -811,14 +808,14 @@ export function extractClaudeScheduleWakeup(
   return wakeup;
 }
 
-async function writeGoatClaudeActionsMcpConfig(input: {
+async function writeClaudeActionsMcpConfig(input: {
   sandbox: SandboxHandle;
   turnId: string;
-  goatAppUrl: string | undefined;
+  appUrl: string | undefined;
   ticket: string;
 }) {
-  const appUrl = input.goatAppUrl;
-  if (!appUrl) throw new Error("goatAppUrl is required to enable Claude Code action tools.");
+  const appUrl = input.appUrl;
+  if (!appUrl) throw new Error("appUrl is required to enable Claude Code action tools.");
 
   const config = {
     mcpServers: {
@@ -841,7 +838,7 @@ function buildClaudeChatTask(input: {
   repositoryBootstrapPrompt: string;
   attachmentPaths: string[];
   skillPaths: string[];
-  taskContext?: GoatTaskTurnContext | undefined;
+  taskContext?: TaskTurnContext | undefined;
 }) {
   return [
     "You are Claude Code running in a persistent cloud sandbox for an ongoing chat with a user.",
@@ -873,7 +870,7 @@ function buildClaudeChatRecoveryTask(input: {
   previousProgress: string;
   attachmentPaths: string[];
   skillPaths: string[];
-  taskContext?: GoatTaskTurnContext | undefined;
+  taskContext?: TaskTurnContext | undefined;
 }) {
   return [
     "You are Claude Code running in a persistent cloud sandbox for an ongoing chat with a user.",
@@ -902,14 +899,14 @@ function buildClaudeChatRecoveryTask(input: {
     .join("\n");
 }
 
-type GoatCodexChatSessionSkill = Awaited<ReturnType<typeof loadGoatCodexChatSessionSkills>>[number];
+type CodexChatSessionSkill = Awaited<ReturnType<typeof loadCodexChatSessionSkills>>[number];
 
-function resolveGoatClaudeTurnSkills(input: {
-  sessionSkills: readonly GoatCodexChatSessionSkill[];
+function resolveClaudeTurnSkills(input: {
+  sessionSkills: readonly CodexChatSessionSkill[];
   userMessageId: string;
-  taskContext?: GoatTaskTurnContext | undefined;
-}): { snapshots: GoatBrainSkill[]; invokedSkillIds: string[] } {
-  const snapshots = new Map<string, GoatBrainSkill>();
+  taskContext?: TaskTurnContext | undefined;
+}): { snapshots: BrainSkill[]; invokedSkillIds: string[] } {
+  const snapshots = new Map<string, BrainSkill>();
   const invokedSkillIds = new Set<string>();
   for (const skill of input.sessionSkills) {
     snapshots.set(skill.skillId, {
@@ -924,7 +921,7 @@ function resolveGoatClaudeTurnSkills(input: {
   }
 
   const workflowSkills = input.taskContext
-    ? (getGoatWorkflowHarnessSkillSnapshots(input.taskContext.harnessSpec) ?? [])
+    ? (getWorkflowHarnessSkillSnapshots(input.taskContext.harnessSpec) ?? [])
     : [];
   for (const skill of workflowSkills) {
     snapshots.set(skill.id, skill);
@@ -933,7 +930,7 @@ function resolveGoatClaudeTurnSkills(input: {
   return { snapshots: [...snapshots.values()], invokedSkillIds: [...invokedSkillIds] };
 }
 
-function claudeBackgroundTaskPromptLines(context: GoatTaskTurnContext | undefined) {
+function claudeBackgroundTaskPromptLines(context: TaskTurnContext | undefined) {
   if (!context) return [];
   const codex = context.harnessSpec.codex;
   return [

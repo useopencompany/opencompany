@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 // GitHub signs the raw delivery body with the App webhook secret and sends it
 // as `x-hub-signature-256: sha256=<hex hmac>`. Kept free of db/auth imports so
 // the webhook route and its tests stay light.
-export function verifyGoatGitHubWebhookSignature(input: {
+export function verifyGitHubWebhookSignature(input: {
   rawBody: string;
   signature: string | null;
 }): boolean {

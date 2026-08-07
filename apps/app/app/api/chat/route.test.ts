@@ -1,22 +1,22 @@
 import { CODEX_DEFAULT_MODEL_ID } from "@opencompany/agent-runtime";
 import { BROWSER_TOOL_NAMES } from "@opencompany/browser-tools";
 import { GOAT_ACTION_EFFECTS_READ } from "@opencompany/core/actions/types";
-import { recordGoatChatModelRoutingAttempt } from "@opencompany/db/chat-model-routing";
+import { recordChatModelRoutingAttempt } from "@opencompany/db/chat-model-routing";
 import { convertToModelMessages, streamText } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
-import { executeGoatAction } from "@/lib/actions/execute";
-import { captureToGoatBrainInbox } from "@/lib/brain-capture";
-import { runGoatBrainToolForUser } from "@/lib/brain-cli";
+import { isChatActionsKilled, resolveActionCatalog } from "@/lib/actions/catalog";
+import { executeAction } from "@/lib/actions/execute";
+import { captureToBrainInbox } from "@/lib/brain-capture";
+import { runBrainToolForUser } from "@/lib/brain-cli";
 import {
-  createGoatChatApprovalContinuationTurn,
-  createGoatChatUserTurn,
-  persistGoatChatAssistantMessage,
+  createChatApprovalContinuationTurn,
+  createChatUserTurn,
+  persistChatAssistantMessage,
 } from "@/lib/chat";
 import { OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX } from "@/lib/chat-agent";
-import { resolveAutoGoatModel } from "@/lib/chat-model-router";
-import { resolveGoatChatRequestContext } from "@/lib/chat-request-auth";
-import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
+import { resolveAutoModel } from "@/lib/chat-model-router";
+import { resolveChatRequestContext } from "@/lib/chat-request-auth";
+import { generateChatTitleForMessage } from "@/lib/chat-title";
 import {
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
@@ -34,22 +34,22 @@ import {
   USE_SKILL_TOOL_NAME,
 } from "@/lib/chat-ui";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
-import { isGoatClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
-import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
+import { isClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
+import { isCodexConnectedForUser } from "@/lib/codex-auth";
 import {
-  activateAndListGoatChatSessionSkills,
-  GoatSkillMentionError,
-  listGoatSkillCatalog,
-  resolveGoatSkillMentions,
+  activateAndListChatSessionSkills,
+  listSkillCatalog,
+  resolveSkillMentions,
+  SkillMentionError,
 } from "@/lib/skills";
 import {
-  deleteGoatTaskScheduleForUser,
-  listGoatTaskSchedulesForUser,
-  updateGoatTaskScheduleForUser,
+  deleteTaskScheduleForUser,
+  listTaskSchedulesForUser,
+  updateTaskScheduleForUser,
 } from "@/lib/task-schedules";
-import { createGoatTaskForUser } from "@/lib/tasks";
-import { createGoatTaskFromWorkflow, generateGoatWorkflowTaskTitle } from "@/lib/workflow-tasks";
-import { listGoatWorkflowCatalog } from "@/lib/workflows";
+import { createTaskForUser } from "@/lib/tasks";
+import { createTaskFromWorkflow, generateWorkflowTaskTitle } from "@/lib/workflow-tasks";
+import { listWorkflowCatalog } from "@/lib/workflows";
 import { POST } from "./route";
 
 const browserMocks = vi.hoisted(() => ({
@@ -61,9 +61,9 @@ const browserMocks = vi.hoisted(() => ({
 }));
 
 const analyticsMocks = vi.hoisted(() => ({
-  captureGoatModelSpendRecorded: vi.fn(async () => {}),
-  captureGoatLlmUsageRecorded: vi.fn(async () => {}),
-  captureGoatServerEvent: vi.fn(async () => {}),
+  captureModelSpendRecorded: vi.fn(async () => {}),
+  captureLlmUsageRecorded: vi.fn(async () => {}),
+  captureServerEvent: vi.fn(async () => {}),
 }));
 
 const capabilityMocks = vi.hoisted(() => ({
@@ -74,22 +74,22 @@ const capabilityMocks = vi.hoisted(() => ({
 
 vi.mock("@opencompany/db/billing", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@opencompany/db/billing")>()),
-  ensureGoatMonthlyIncludedUsage: vi.fn().mockResolvedValue({ ok: false, reason: "current" }),
+  ensureMonthlyIncludedUsage: vi.fn().mockResolvedValue({ ok: false, reason: "current" }),
 }));
 
-vi.mock("@opencompany/analytics/goat/server", () => ({
-  captureGoatModelSpendRecorded: analyticsMocks.captureGoatModelSpendRecorded,
-  captureGoatLlmUsageRecorded: analyticsMocks.captureGoatLlmUsageRecorded,
-  captureGoatServerEvent: analyticsMocks.captureGoatServerEvent,
+vi.mock("@opencompany/analytics/server", () => ({
+  captureModelSpendRecorded: analyticsMocks.captureModelSpendRecorded,
+  captureLlmUsageRecorded: analyticsMocks.captureLlmUsageRecorded,
+  captureServerEvent: analyticsMocks.captureServerEvent,
 }));
 
 vi.mock("@opencompany/db/capabilities", () => ({
-  approveGoatCapabilityRunByToolCall: capabilityMocks.approveByToolCall,
-  cancelGoatCapabilityRunByToolCall: capabilityMocks.cancelByToolCall,
+  approveCapabilityRunByToolCall: capabilityMocks.approveByToolCall,
+  cancelCapabilityRunByToolCall: capabilityMocks.cancelByToolCall,
 }));
 
 vi.mock("@opencompany/db/chat-model-routing", () => ({
-  recordGoatChatModelRoutingAttempt: vi.fn(async () => undefined),
+  recordChatModelRoutingAttempt: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/lib/capabilities/execute", () => ({
@@ -122,50 +122,50 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@/lib/chat-request-auth", () => ({
-  resolveGoatChatRequestContext: vi.fn(),
+  resolveChatRequestContext: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
 }));
 
 vi.mock("@/lib/brain-cli", () => ({
-  runGoatBrainToolForUser: vi.fn(),
+  runBrainToolForUser: vi.fn(),
 }));
 
 vi.mock("@/lib/brain-capture", () => ({
-  captureToGoatBrainInbox: vi.fn(),
+  captureToBrainInbox: vi.fn(),
 }));
 
 vi.mock("@/lib/skills", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/skills")>();
   return {
     ...actual,
-    activateAndListGoatChatSessionSkills: vi.fn(),
-    listGoatSkillCatalog: vi.fn(),
-    resolveGoatSkillMentions: vi.fn(),
+    activateAndListChatSessionSkills: vi.fn(),
+    listSkillCatalog: vi.fn(),
+    resolveSkillMentions: vi.fn(),
   };
 });
 
 vi.mock("@/lib/chat", () => ({
-  createDbGoatChatStore: vi.fn(() => ({})),
-  createGoatChatApprovalContinuationTurn: vi.fn(),
-  createGoatChatUserTurn: vi.fn(),
-  settleStaleGoatChatToolCalls: vi.fn(async () => ({
+  createDbChatStore: vi.fn(() => ({})),
+  createChatApprovalContinuationTurn: vi.fn(),
+  createChatUserTurn: vi.fn(),
+  settleStaleChatToolCalls: vi.fn(async () => ({
     changed: false,
     messages: [],
     toolCallIds: [],
   })),
-  newGoatChatMessageId: vi.fn(() => "assistant_1"),
-  persistGoatChatAssistantMessage: vi.fn(),
+  newChatMessageId: vi.fn(() => "assistant_1"),
+  persistChatAssistantMessage: vi.fn(),
 }));
 
 vi.mock("@/lib/chat-title", () => ({
-  generateGoatChatTitleForMessage: vi.fn(async () => ({ ok: true, title: "Generated title" })),
+  generateChatTitleForMessage: vi.fn(async () => ({ ok: true, title: "Generated title" })),
 }));
 
 vi.mock("@/lib/chat-model-router", () => ({
-  resolveAutoGoatModel: vi.fn(),
+  resolveAutoModel: vi.fn(),
 }));
 
 vi.mock("next/server", () => ({
@@ -173,44 +173,44 @@ vi.mock("next/server", () => ({
 }));
 
 vi.mock("@/lib/codex-auth", () => ({
-  isGoatCodexConnectedForUser: vi.fn(),
+  isCodexConnectedForUser: vi.fn(),
 }));
 
 vi.mock("@/lib/claude-code-auth", () => ({
-  isGoatClaudeCodeConnectedForUser: vi.fn(),
+  isClaudeCodeConnectedForUser: vi.fn(),
 }));
 
 vi.mock("@/lib/tasks", () => ({
-  createGoatTaskForUser: vi.fn(),
+  createTaskForUser: vi.fn(),
 }));
 
 vi.mock("@/lib/workflow-tasks", () => ({
-  createGoatTaskFromWorkflow: vi.fn(),
-  generateGoatWorkflowTaskTitle: vi.fn(),
+  createTaskFromWorkflow: vi.fn(),
+  generateWorkflowTaskTitle: vi.fn(),
 }));
 
 vi.mock("@/lib/workflows", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/workflows")>();
   return {
     ...actual,
-    listGoatWorkflowCatalog: vi.fn(),
+    listWorkflowCatalog: vi.fn(),
   };
 });
 
 vi.mock("@/lib/task-schedules", () => ({
-  createGoatTaskScheduleForUser: vi.fn(),
-  deleteGoatTaskScheduleForUser: vi.fn(),
-  listGoatTaskSchedulesForUser: vi.fn(),
-  updateGoatTaskScheduleForUser: vi.fn(),
+  createTaskScheduleForUser: vi.fn(),
+  deleteTaskScheduleForUser: vi.fn(),
+  listTaskSchedulesForUser: vi.fn(),
+  updateTaskScheduleForUser: vi.fn(),
 }));
 
 vi.mock("@/lib/actions/catalog", () => ({
-  isGoatChatActionsKilled: vi.fn(),
-  resolveGoatActionCatalog: vi.fn(),
+  isChatActionsKilled: vi.fn(),
+  resolveActionCatalog: vi.fn(),
 }));
 
 vi.mock("@/lib/actions/execute", () => ({
-  executeGoatAction: vi.fn(),
+  executeAction: vi.fn(),
 }));
 
 vi.mock("@/lib/sandbox/browser-tools", () => ({
@@ -240,17 +240,17 @@ describe("POST /api/chat", () => {
     browserMocks.dbInsert.mockReturnValue({ values: browserMocks.dbValues });
     browserMocks.dbValues.mockResolvedValue(undefined);
     browserMocks.getUsage.mockReturnValue(null);
-    mockListGoatTaskSchedulesForUser().mockResolvedValue([]);
-    mockIsGoatCodexConnectedForUser().mockResolvedValue(false);
-    mockIsGoatClaudeCodeConnectedForUser().mockResolvedValue(false);
-    mockIsGoatChatActionsKilled().mockReturnValue(false);
-    mockResolveGoatActionCatalog().mockResolvedValue({ providers: [], actions: [] });
-    vi.mocked(listGoatSkillCatalog).mockResolvedValue([]);
-    vi.mocked(listGoatWorkflowCatalog).mockResolvedValue([]);
-    vi.mocked(resolveGoatSkillMentions).mockResolvedValue([]);
-    vi.mocked(activateAndListGoatChatSessionSkills).mockResolvedValue([]);
-    vi.mocked(generateGoatWorkflowTaskTitle).mockResolvedValue(undefined);
-    vi.mocked(resolveAutoGoatModel).mockResolvedValue({
+    mockListTaskSchedulesForUser().mockResolvedValue([]);
+    mockIsCodexConnectedForUser().mockResolvedValue(false);
+    mockIsClaudeCodeConnectedForUser().mockResolvedValue(false);
+    mockIsChatActionsKilled().mockReturnValue(false);
+    mockResolveActionCatalog().mockResolvedValue({ providers: [], actions: [] });
+    vi.mocked(listSkillCatalog).mockResolvedValue([]);
+    vi.mocked(listWorkflowCatalog).mockResolvedValue([]);
+    vi.mocked(resolveSkillMentions).mockResolvedValue([]);
+    vi.mocked(activateAndListChatSessionSkills).mockResolvedValue([]);
+    vi.mocked(generateWorkflowTaskTitle).mockResolvedValue(undefined);
+    vi.mocked(resolveAutoModel).mockResolvedValue({
       model: "moonshotai/kimi-k3",
       tier: "frontier",
       reason: "router_fallback",
@@ -263,7 +263,7 @@ describe("POST /api/chat", () => {
   });
 
   it("rejects unauthenticated requests", async () => {
-    mockResolveGoatChatRequestContext().mockResolvedValue({
+    mockResolveChatRequestContext().mockResolvedValue({
       ok: false,
       response: new Response("Unauthorized", { status: 401 }),
     });
@@ -303,7 +303,7 @@ describe("POST /api/chat", () => {
   it("resolves Auto to one concrete model before creating the session", async () => {
     mockAuth({ autoModelRoutingEnabled: true });
     mockCreateTurn();
-    vi.mocked(resolveAutoGoatModel).mockResolvedValue({
+    vi.mocked(resolveAutoModel).mockResolvedValue({
       model: "moonshotai/kimi-k2.6",
       tier: "standard",
       reason: "simple_answer",
@@ -329,18 +329,18 @@ describe("POST /api/chat", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(resolveAutoGoatModel).toHaveBeenCalledWith({
+    expect(resolveAutoModel).toHaveBeenCalledWith({
       prompt: "What is the capital of France?",
       attachments: [],
       gatewayApiKey: "test-key",
       userWorkosId: "user_1",
       workspaceId: "goat_ws_user_1",
     });
-    expect(createGoatChatUserTurn).toHaveBeenCalledWith(
+    expect(createChatUserTurn).toHaveBeenCalledWith(
       expect.objectContaining({ model: "moonshotai/kimi-k2.6" }),
       expect.anything(),
     );
-    expect(recordGoatChatModelRoutingAttempt).toHaveBeenCalledWith({
+    expect(recordChatModelRoutingAttempt).toHaveBeenCalledWith({
       workspaceId: "goat_ws_user_1",
       userWorkosId: "user_1",
       chatSessionId: "session_1",
@@ -357,7 +357,7 @@ describe("POST /api/chat", () => {
       outputTokens: 0,
       totalTokens: 0,
     });
-    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
+    expect(analyticsMocks.captureServerEvent).toHaveBeenCalledWith(
       "chat_message_sent",
       "user_1",
       expect.objectContaining({
@@ -385,8 +385,8 @@ describe("POST /api/chat", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(resolveAutoGoatModel).not.toHaveBeenCalled();
-    expect(createGoatChatUserTurn).not.toHaveBeenCalled();
+    expect(resolveAutoModel).not.toHaveBeenCalled();
+    expect(createChatUserTurn).not.toHaveBeenCalled();
   });
 
   it("rejects Auto on an existing session", async () => {
@@ -406,7 +406,7 @@ describe("POST /api/chat", () => {
 
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toContain("only available when starting a new chat");
-    expect(resolveAutoGoatModel).not.toHaveBeenCalled();
+    expect(resolveAutoModel).not.toHaveBeenCalled();
   });
 
   it("rejects workflow mentions before creating a normal chat turn", async () => {
@@ -436,14 +436,14 @@ describe("POST /api/chat", () => {
     await expect(response.text()).resolves.toBe(
       "Start workflow tasks through the workflows endpoint.",
     );
-    expect(createGoatChatUserTurn).not.toHaveBeenCalled();
+    expect(createChatUserTurn).not.toHaveBeenCalled();
     expect(streamText).not.toHaveBeenCalled();
   });
 
   it("resolves the action catalog for every non-engine request without a beta flag", async () => {
     mockAuth();
     mockCreateTurn();
-    mockResolveGoatActionCatalog().mockResolvedValue(sampleActionCatalog());
+    mockResolveActionCatalog().mockResolvedValue(sampleActionCatalog());
     mockStreamText().mockImplementation((options: unknown) => {
       const streamOptions = options as {
         tools?: Record<string, unknown>;
@@ -460,12 +460,12 @@ describe("POST /api/chat", () => {
 
     const response = await POST(validChatRequest("What's new in #general?"));
     expect(response.status).toBe(200);
-    expect(resolveGoatActionCatalog).toHaveBeenCalledWith({
+    expect(resolveActionCatalog).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       workspaceId: "goat_ws_user_1",
     });
-    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledOnce();
-    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
+    expect(analyticsMocks.captureServerEvent).toHaveBeenCalledOnce();
+    expect(analyticsMocks.captureServerEvent).toHaveBeenCalledWith(
       "chat_message_sent",
       "user_1",
       expect.objectContaining({
@@ -488,14 +488,14 @@ describe("POST /api/chat", () => {
   it("lets main chat discover and load active workspace skills", async () => {
     mockAuth();
     mockCreateTurn();
-    vi.mocked(listGoatSkillCatalog).mockResolvedValue([
+    vi.mocked(listSkillCatalog).mockResolvedValue([
       {
         id: "product-feature",
         name: "Product feature",
         description: "Build and verify product changes.",
       },
     ]);
-    vi.mocked(resolveGoatSkillMentions)
+    vi.mocked(resolveSkillMentions)
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
@@ -533,8 +533,8 @@ describe("POST /api/chat", () => {
     const response = await POST(validChatRequest("Help me implement this product change."));
 
     expect(response.status).toBe(200);
-    expect(listGoatSkillCatalog).toHaveBeenCalledWith("goat_ws_user_1");
-    expect(resolveGoatSkillMentions).toHaveBeenLastCalledWith({
+    expect(listSkillCatalog).toHaveBeenCalledWith("goat_ws_user_1");
+    expect(resolveSkillMentions).toHaveBeenLastCalledWith({
       workspaceId: "goat_ws_user_1",
       mentions: [{ id: "product-feature" }],
     });
@@ -552,14 +552,14 @@ describe("POST /api/chat", () => {
   it("starts an active workflow for an opted-in member without ad-hoc task tools", async () => {
     mockAuth({ role: "member", taskSpawningEnabled: true });
     mockCreateTurn();
-    vi.mocked(listGoatWorkflowCatalog).mockResolvedValue([
+    vi.mocked(listWorkflowCatalog).mockResolvedValue([
       {
         id: "customer-interview-synthesis",
         name: "Customer interview synthesis",
         description: "Synthesize confirmed interview findings.",
       },
     ]);
-    vi.mocked(createGoatTaskFromWorkflow).mockResolvedValue({
+    vi.mocked(createTaskFromWorkflow).mockResolvedValue({
       id: "goat_task_workflow_1",
       displayId: "TASK-42",
       name: "Customer interview synthesis",
@@ -595,14 +595,14 @@ describe("POST /api/chat", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(listGoatWorkflowCatalog).toHaveBeenCalledWith("goat_ws_user_1");
-    expect(createGoatTaskFromWorkflow).toHaveBeenCalledWith({
+    expect(listWorkflowCatalog).toHaveBeenCalledWith("goat_ws_user_1");
+    expect(createTaskFromWorkflow).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       workspaceId: "goat_ws_user_1",
       mention: { id: "customer-interview-synthesis" },
       description: "Synthesize the Acme interview using the confirmed pricing concern.",
     });
-    expect(generateGoatWorkflowTaskTitle).toHaveBeenCalledWith({
+    expect(generateWorkflowTaskTitle).toHaveBeenCalledWith({
       taskId: "goat_task_workflow_1",
       userWorkosId: "user_1",
       workflowName: "Customer interview synthesis",
@@ -621,14 +621,14 @@ describe("POST /api/chat", () => {
   it("does not reload skill instructions that are already active in the chat", async () => {
     mockAuth();
     mockCreateTurn();
-    vi.mocked(listGoatSkillCatalog).mockResolvedValue([
+    vi.mocked(listSkillCatalog).mockResolvedValue([
       {
         id: "product-feature",
         name: "Product feature",
         description: "Build and verify product changes.",
       },
     ]);
-    vi.mocked(resolveGoatSkillMentions)
+    vi.mocked(resolveSkillMentions)
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
@@ -638,7 +638,7 @@ describe("POST /api/chat", () => {
           instructions: "Inspect, implement, and verify.",
         },
       ]);
-    vi.mocked(activateAndListGoatChatSessionSkills).mockResolvedValue([
+    vi.mocked(activateAndListChatSessionSkills).mockResolvedValue([
       {
         chatSessionId: "session_1",
         skillId: "product-feature",
@@ -688,7 +688,7 @@ describe("POST /api/chat", () => {
   it("exposes Stripe actions without automatically surveying live finance data for Brain fill", async () => {
     mockAuth();
     mockCreateTurn();
-    mockResolveGoatActionCatalog().mockResolvedValue({
+    mockResolveActionCatalog().mockResolvedValue({
       providers: [
         {
           id: "stripe",
@@ -725,7 +725,7 @@ describe("POST /api/chat", () => {
 
   it("honors the actions kill switch", async () => {
     mockAuth();
-    mockIsGoatChatActionsKilled().mockReturnValue(true);
+    mockIsChatActionsKilled().mockReturnValue(true);
     mockCreateTurn();
     mockStreamText().mockImplementation((options: unknown) => {
       const tools = (options as { tools?: Record<string, unknown> }).tools ?? {};
@@ -738,7 +738,7 @@ describe("POST /api/chat", () => {
 
     const response = await POST(validChatRequest("What's new in #general?"));
     expect(response.status).toBe(200);
-    expect(resolveGoatActionCatalog).not.toHaveBeenCalled();
+    expect(resolveActionCatalog).not.toHaveBeenCalled();
   });
 
   it("streams context usage metadata as each model step finishes", async () => {
@@ -793,10 +793,10 @@ describe("POST /api/chat", () => {
   it("forwards use_action calls to the executor and returns its result", async () => {
     mockAuth({ timezone: "" });
     mockCreateTurn();
-    mockPersistGoatChatAssistantMessage().mockResolvedValue({} as never);
+    mockPersistChatAssistantMessage().mockResolvedValue({} as never);
     const catalog = sampleActionCatalog();
-    mockResolveGoatActionCatalog().mockResolvedValue(catalog);
-    mockExecuteGoatAction().mockResolvedValue({
+    mockResolveActionCatalog().mockResolvedValue(catalog);
+    mockExecuteAction().mockResolvedValue({
       ok: true,
       action: "slack.fetch_history",
       result: { messages: [{ ts: "1.0", text: "hello" }] },
@@ -853,7 +853,7 @@ describe("POST /api/chat", () => {
 
     const response = await POST(validChatRequest("What's new in #general?"));
     expect(response.status).toBe(200);
-    expect(executeGoatAction).toHaveBeenCalledWith(
+    expect(executeAction).toHaveBeenCalledWith(
       expect.objectContaining({
         catalog,
         actionId: "slack.fetch_history",
@@ -865,7 +865,7 @@ describe("POST /api/chat", () => {
     expect(actionOutput).toEqual(
       expect.objectContaining({ ok: true, action: "slack.fetch_history" }),
     );
-    expect(persistGoatChatAssistantMessage).toHaveBeenCalledWith(
+    expect(persistChatAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         content: "The latest message is hello.",
       }),
@@ -875,7 +875,7 @@ describe("POST /api/chat", () => {
 
   it("reuses successful action discovery from an earlier turn", async () => {
     mockAuth();
-    mockCreateGoatChatUserTurn().mockResolvedValue({
+    mockCreateChatUserTurn().mockResolvedValue({
       session: {
         id: "session_1",
         model: "openai/gpt-5.5",
@@ -910,8 +910,8 @@ describe("POST /api/chat", () => {
       ],
     });
     const catalog = sampleActionCatalog();
-    mockResolveGoatActionCatalog().mockResolvedValue(catalog);
-    mockExecuteGoatAction().mockResolvedValue({
+    mockResolveActionCatalog().mockResolvedValue(catalog);
+    mockExecuteAction().mockResolvedValue({
       ok: true,
       action: "slack.fetch_history",
       result: { messages: [] },
@@ -943,7 +943,7 @@ describe("POST /api/chat", () => {
       ok: true,
       action: "slack.fetch_history",
     });
-    expect(executeGoatAction).toHaveBeenCalledTimes(1);
+    expect(executeAction).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -951,7 +951,7 @@ describe("POST /api/chat", () => {
     ["a declined", false],
   ])("keeps %s integration approval continuation answer-only", async (_label, approved) => {
     mockAuth();
-    mockCreateGoatChatApprovalContinuationTurn().mockResolvedValue({
+    mockCreateChatApprovalContinuationTurn().mockResolvedValue({
       ok: true,
       session: {
         id: "session_1",
@@ -1016,7 +1016,7 @@ describe("POST /api/chat", () => {
     ["declined", false],
   ])("keeps a %s capability continuation tool-enabled", async (_label, approved) => {
     mockAuth();
-    mockCreateGoatChatApprovalContinuationTurn().mockResolvedValue({
+    mockCreateChatApprovalContinuationTurn().mockResolvedValue({
       ok: true,
       session: {
         id: "session_1",
@@ -1107,7 +1107,7 @@ describe("POST /api/chat", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mockCreateGoatChatUserTurn()).toHaveBeenCalledWith(
+    expect(mockCreateChatUserTurn()).toHaveBeenCalledWith(
       expect.objectContaining({ newSessionId }),
       expect.anything(),
     );
@@ -1130,12 +1130,12 @@ describe("POST /api/chat", () => {
 
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toBe("Invalid new chat session id.");
-    expect(mockCreateGoatChatUserTurn()).not.toHaveBeenCalled();
+    expect(mockCreateChatUserTurn()).not.toHaveBeenCalled();
   });
 
   it("activates a selected skill on its message while preserving stored content", async () => {
     mockAuth();
-    vi.mocked(resolveGoatSkillMentions).mockResolvedValue([
+    vi.mocked(resolveSkillMentions).mockResolvedValue([
       {
         id: "coding-work",
         name: "Coding work",
@@ -1143,7 +1143,7 @@ describe("POST /api/chat", () => {
         instructions: "Inspect, implement, and verify.",
       },
     ]);
-    mockCreateGoatChatUserTurn().mockResolvedValue({
+    mockCreateChatUserTurn().mockResolvedValue({
       session: { id: "session_1", model: "openai/gpt-5.5" },
       userMessage: { id: "user_message_2" },
       storedMessages: [],
@@ -1157,7 +1157,7 @@ describe("POST /api/chat", () => {
         },
       ],
     } as never);
-    vi.mocked(activateAndListGoatChatSessionSkills).mockResolvedValue([
+    vi.mocked(activateAndListChatSessionSkills).mockResolvedValue([
       {
         chatSessionId: "session_1",
         skillId: "coding-work",
@@ -1188,11 +1188,11 @@ describe("POST /api/chat", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mockCreateGoatChatUserTurn()).toHaveBeenCalledWith(
+    expect(mockCreateChatUserTurn()).toHaveBeenCalledWith(
       expect.objectContaining({ prompt: "Implement this" }),
       expect.anything(),
     );
-    expect(activateAndListGoatChatSessionSkills).toHaveBeenCalledWith({
+    expect(activateAndListChatSessionSkills).toHaveBeenCalledWith({
       chatSessionId: "session_1",
       activatedMessageId: "user_message_2",
       workspaceRef: "goat_ws_user_1",
@@ -1211,7 +1211,7 @@ describe("POST /api/chat", () => {
 
   it("replays an activated skill from its original message on later turns", async () => {
     mockAuth();
-    mockCreateGoatChatUserTurn().mockResolvedValue({
+    mockCreateChatUserTurn().mockResolvedValue({
       session: { id: "session_1", model: "openai/gpt-5.5" },
       userMessage: { id: "user_message_2" },
       storedMessages: [],
@@ -1229,7 +1229,7 @@ describe("POST /api/chat", () => {
         },
       ],
     } as never);
-    vi.mocked(activateAndListGoatChatSessionSkills).mockResolvedValue([
+    vi.mocked(activateAndListChatSessionSkills).mockResolvedValue([
       {
         chatSessionId: "session_1",
         skillId: "coding-work",
@@ -1268,8 +1268,8 @@ describe("POST /api/chat", () => {
 
   it("rejects stale structured skill references before storing the turn", async () => {
     mockAuth();
-    vi.mocked(resolveGoatSkillMentions).mockRejectedValue(
-      new GoatSkillMentionError("Skill is unavailable."),
+    vi.mocked(resolveSkillMentions).mockRejectedValue(
+      new SkillMentionError("Skill is unavailable."),
     );
 
     const response = await POST(
@@ -1288,13 +1288,13 @@ describe("POST /api/chat", () => {
 
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toBe("Skill is unavailable.");
-    expect(mockCreateGoatChatUserTurn()).not.toHaveBeenCalled();
+    expect(mockCreateChatUserTurn()).not.toHaveBeenCalled();
   });
 
   it("wires the personal brain CLI tool into the model stream", async () => {
     mockAuth();
     mockCreateTurn();
-    mockRunGoatBrainToolForUser().mockResolvedValue({
+    mockRunBrainToolForUser().mockResolvedValue({
       ok: true,
       exitCode: 0,
       stdout: "1. [inbox] Hiring note (hiring-note, score 1, updated 2026-01-01T00:00:00.000Z)",
@@ -1335,7 +1335,7 @@ describe("POST /api/chat", () => {
     await brainToolPromise;
 
     expect(response.status).toBe(200);
-    expect(mockGenerateGoatChatTitleForMessage()).toHaveBeenCalledWith({
+    expect(mockGenerateChatTitleForMessage()).toHaveBeenCalledWith({
       sessionId: "session_1",
       messageId: "user_message_1",
       apiKey: "test-key",
@@ -1357,7 +1357,7 @@ describe("POST /api/chat", () => {
         },
       }),
     );
-    expect(runGoatBrainToolForUser).toHaveBeenCalledWith({
+    expect(runBrainToolForUser).toHaveBeenCalledWith({
       brainRef: "goat_brain_user_1",
       userWorkosId: "user_1",
       toolInput: {
@@ -1415,7 +1415,7 @@ describe("POST /api/chat", () => {
   it("wires save_to_brain captures into the model stream", async () => {
     mockAuth();
     mockCreateTurn();
-    mockCaptureToGoatBrainInbox().mockResolvedValue({
+    mockCaptureToBrainInbox().mockResolvedValue({
       ok: true,
       draftBrainId: "acme",
       path: "inbox/acme.md",
@@ -1461,7 +1461,7 @@ describe("POST /api/chat", () => {
       title: "Acme",
       status: "captured",
     });
-    expect(captureToGoatBrainInbox).toHaveBeenCalledWith({
+    expect(captureToBrainInbox).toHaveBeenCalledWith({
       brainRef: "goat_brain_user_1",
       userWorkosId: "user_1",
       text: "Acme is a company building billing tools.",
@@ -1474,7 +1474,7 @@ describe("POST /api/chat", () => {
         itemId: "user_message_1",
       },
     });
-    expect(runGoatBrainToolForUser).not.toHaveBeenCalled();
+    expect(runBrainToolForUser).not.toHaveBeenCalled();
   });
 
   it("rejects direct brain create from the chat tool before the CLI runner", async () => {
@@ -1520,13 +1520,13 @@ describe("POST /api/chat", () => {
     await expect(brainToolPromise).rejects.toThrow("goat_brain command is invalid");
 
     expect(response.status).toBe(200);
-    expect(runGoatBrainToolForUser).not.toHaveBeenCalled();
+    expect(runBrainToolForUser).not.toHaveBeenCalled();
   });
 
   it("lets members capture through save_to_brain while keeping direct writes and tasks disabled", async () => {
     mockAuth({ role: "member" });
     mockCreateTurn();
-    mockCaptureToGoatBrainInbox().mockResolvedValue({
+    mockCaptureToBrainInbox().mockResolvedValue({
       ok: true,
       draftBrainId: "member-note",
       path: "inbox/member-note.md",
@@ -1602,8 +1602,8 @@ describe("POST /api/chat", () => {
       title: "Member note",
       status: "captured",
     });
-    expect(runGoatBrainToolForUser).not.toHaveBeenCalled();
-    expect(captureToGoatBrainInbox).toHaveBeenCalledWith({
+    expect(runBrainToolForUser).not.toHaveBeenCalled();
+    expect(captureToBrainInbox).toHaveBeenCalledWith({
       brainRef: "goat_brain_user_1",
       userWorkosId: "user_1",
       sourceRef: "gmail:thread:thread_1",
@@ -1616,8 +1616,8 @@ describe("POST /api/chat", () => {
         itemId: "user_message_1",
       },
     });
-    expect(createGoatTaskForUser).not.toHaveBeenCalled();
-    expect(listGoatTaskSchedulesForUser).not.toHaveBeenCalled();
+    expect(createTaskForUser).not.toHaveBeenCalled();
+    expect(listTaskSchedulesForUser).not.toHaveBeenCalled();
   });
 
   it("keeps background task and schedule behavior out of chat when the user has not opted in", async () => {
@@ -1654,9 +1654,9 @@ describe("POST /api/chat", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(listGoatWorkflowCatalog).not.toHaveBeenCalled();
-    expect(listGoatTaskSchedulesForUser).not.toHaveBeenCalled();
-    expect(createGoatTaskForUser).not.toHaveBeenCalled();
+    expect(listWorkflowCatalog).not.toHaveBeenCalled();
+    expect(listTaskSchedulesForUser).not.toHaveBeenCalled();
+    expect(createTaskForUser).not.toHaveBeenCalled();
   });
 
   it("wires Exa-backed web_search into the model stream when configured", async () => {
@@ -1962,7 +1962,7 @@ describe("POST /api/chat", () => {
       activeMs: 2500,
       rawMetrics: { commandCount: 2 },
     });
-    mockPersistGoatChatAssistantMessage().mockResolvedValue({} as never);
+    mockPersistChatAssistantMessage().mockResolvedValue({} as never);
     mockStreamText().mockImplementation(
       () =>
         ({
@@ -2019,8 +2019,8 @@ describe("POST /api/chat", () => {
   it("uses structured Codex mention metadata when starting a task", async () => {
     mockAuth();
     mockCreateTurn();
-    mockIsGoatCodexConnectedForUser().mockResolvedValue(true);
-    mockCreateGoatTaskForUser().mockResolvedValue({
+    mockIsCodexConnectedForUser().mockResolvedValue(true);
+    mockCreateTaskForUser().mockResolvedValue({
       id: "task_1",
       displayId: "TASK-1",
       name: "Test repo access",
@@ -2057,8 +2057,8 @@ describe("POST /api/chat", () => {
     await startTaskToolPromise;
 
     expect(response.status).toBe(200);
-    expect(isGoatCodexConnectedForUser).toHaveBeenCalledWith("user_1");
-    expect(createGoatTaskForUser).toHaveBeenCalledWith({
+    expect(isCodexConnectedForUser).toHaveBeenCalledWith("user_1");
+    expect(createTaskForUser).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       workspaceId: "goat_ws_user_1",
       brainRef: "goat_brain_user_1",
@@ -2072,8 +2072,8 @@ describe("POST /api/chat", () => {
   it("normalizes a Codex task started from a non-Codex main-chat model", async () => {
     mockAuth();
     mockCreateTurn();
-    mockIsGoatCodexConnectedForUser().mockResolvedValue(true);
-    mockCreateGoatTaskForUser().mockResolvedValue({
+    mockIsCodexConnectedForUser().mockResolvedValue(true);
+    mockCreateTaskForUser().mockResolvedValue({
       id: "task_1",
       displayId: "TASK-1",
       name: "Test repo access",
@@ -2110,7 +2110,7 @@ describe("POST /api/chat", () => {
     await startTaskToolPromise;
 
     expect(response.status).toBe(200);
-    expect(createGoatTaskForUser).toHaveBeenCalledWith({
+    expect(createTaskForUser).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       workspaceId: "goat_ws_user_1",
       brainRef: "goat_brain_user_1",
@@ -2124,8 +2124,8 @@ describe("POST /api/chat", () => {
   it("uses structured Claude Code mention metadata when starting a task", async () => {
     mockAuth();
     mockCreateTurn();
-    mockIsGoatClaudeCodeConnectedForUser().mockResolvedValue(true);
-    mockCreateGoatTaskForUser().mockResolvedValue({
+    mockIsClaudeCodeConnectedForUser().mockResolvedValue(true);
+    mockCreateTaskForUser().mockResolvedValue({
       id: "task_1",
       displayId: "TASK-1",
       name: "Test repo access",
@@ -2162,9 +2162,9 @@ describe("POST /api/chat", () => {
     await startTaskToolPromise;
 
     expect(response.status).toBe(200);
-    expect(isGoatClaudeCodeConnectedForUser).toHaveBeenCalledWith("user_1");
-    expect(isGoatCodexConnectedForUser).not.toHaveBeenCalled();
-    expect(createGoatTaskForUser).toHaveBeenCalledWith({
+    expect(isClaudeCodeConnectedForUser).toHaveBeenCalledWith("user_1");
+    expect(isCodexConnectedForUser).not.toHaveBeenCalled();
+    expect(createTaskForUser).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       workspaceId: "goat_ws_user_1",
       brainRef: "goat_brain_user_1",
@@ -2178,7 +2178,7 @@ describe("POST /api/chat", () => {
   it("ignores malformed mention metadata when starting a task", async () => {
     mockAuth();
     mockCreateTurn();
-    mockCreateGoatTaskForUser().mockResolvedValue({
+    mockCreateTaskForUser().mockResolvedValue({
       id: "task_1",
       displayId: "TASK-1",
       name: "Test repo access",
@@ -2218,16 +2218,16 @@ describe("POST /api/chat", () => {
     await startTaskToolPromise;
 
     expect(response.status).toBe(200);
-    expect(isGoatCodexConnectedForUser).not.toHaveBeenCalled();
-    const taskInput = mockCreateGoatTaskForUser().mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(isCodexConnectedForUser).not.toHaveBeenCalled();
+    const taskInput = mockCreateTaskForUser().mock.calls[0]?.[0] as Record<string, unknown>;
     expect(taskInput).not.toHaveProperty("engine");
   });
 
   it("ignores structured Codex mention metadata when Codex is not connected", async () => {
     mockAuth();
     mockCreateTurn();
-    mockIsGoatCodexConnectedForUser().mockResolvedValue(false);
-    mockCreateGoatTaskForUser().mockResolvedValue({
+    mockIsCodexConnectedForUser().mockResolvedValue(false);
+    mockCreateTaskForUser().mockResolvedValue({
       id: "task_1",
       displayId: "TASK-1",
       name: "Test repo access",
@@ -2264,16 +2264,16 @@ describe("POST /api/chat", () => {
     await startTaskToolPromise;
 
     expect(response.status).toBe(200);
-    expect(isGoatCodexConnectedForUser).toHaveBeenCalledWith("user_1");
-    const taskInput = mockCreateGoatTaskForUser().mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(isCodexConnectedForUser).toHaveBeenCalledWith("user_1");
+    const taskInput = mockCreateTaskForUser().mock.calls[0]?.[0] as Record<string, unknown>;
     expect(taskInput).not.toHaveProperty("engine");
   });
 
   it("ignores structured Claude Code mention metadata when Claude Code is not connected", async () => {
     mockAuth();
     mockCreateTurn();
-    mockIsGoatClaudeCodeConnectedForUser().mockResolvedValue(false);
-    mockCreateGoatTaskForUser().mockResolvedValue({
+    mockIsClaudeCodeConnectedForUser().mockResolvedValue(false);
+    mockCreateTaskForUser().mockResolvedValue({
       id: "task_1",
       displayId: "TASK-1",
       name: "Test repo access",
@@ -2310,15 +2310,15 @@ describe("POST /api/chat", () => {
     await startTaskToolPromise;
 
     expect(response.status).toBe(200);
-    expect(isGoatClaudeCodeConnectedForUser).toHaveBeenCalledWith("user_1");
-    const taskInput = mockCreateGoatTaskForUser().mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(isClaudeCodeConnectedForUser).toHaveBeenCalledWith("user_1");
+    const taskInput = mockCreateTaskForUser().mock.calls[0]?.[0] as Record<string, unknown>;
     expect(taskInput).not.toHaveProperty("engine");
   });
 
   it("wires recurring schedule edits into the model stream", async () => {
     mockAuth();
     mockCreateTurn();
-    mockListGoatTaskSchedulesForUser().mockResolvedValue([
+    mockListTaskSchedulesForUser().mockResolvedValue([
       {
         id: "goat_task_schedule_1",
         name: "Daily briefing",
@@ -2333,7 +2333,7 @@ describe("POST /api/chat", () => {
         updatedAt: "2026-07-01T00:00:00.000Z",
       },
     ]);
-    mockUpdateGoatTaskScheduleForUser().mockResolvedValue({
+    mockUpdateTaskScheduleForUser().mockResolvedValue({
       ok: true,
       schedule: {
         id: "goat_task_schedule_1",
@@ -2376,7 +2376,7 @@ describe("POST /api/chat", () => {
     const output = await editToolPromise;
 
     expect(response.status).toBe(200);
-    expect(updateGoatTaskScheduleForUser).toHaveBeenCalledWith("user_1", "goat_task_schedule_1", {
+    expect(updateTaskScheduleForUser).toHaveBeenCalledWith("user_1", "goat_task_schedule_1", {
       name: "Daily briefing",
       sourceDescription: "0 10 * * * - UTC",
       cron: "0 10 * * *",
@@ -2397,7 +2397,7 @@ describe("POST /api/chat", () => {
   it("wires recurring schedule deletion into the model stream", async () => {
     mockAuth();
     mockCreateTurn();
-    mockListGoatTaskSchedulesForUser().mockResolvedValue([
+    mockListTaskSchedulesForUser().mockResolvedValue([
       {
         id: "goat_task_schedule_1",
         name: "Daily briefing",
@@ -2412,7 +2412,7 @@ describe("POST /api/chat", () => {
         updatedAt: "2026-07-01T00:00:00.000Z",
       },
     ]);
-    mockDeleteGoatTaskScheduleForUser().mockResolvedValue({ ok: true });
+    mockDeleteTaskScheduleForUser().mockResolvedValue({ ok: true });
     let deleteToolPromise: Promise<unknown> | null = null;
     mockStreamText().mockImplementation((options: unknown) => {
       const tool = (options as { tools?: { delete_task_schedule?: { execute?: unknown } } }).tools
@@ -2439,7 +2439,7 @@ describe("POST /api/chat", () => {
     const output = await deleteToolPromise;
 
     expect(response.status).toBe(200);
-    expect(deleteGoatTaskScheduleForUser).toHaveBeenCalledWith("user_1", "goat_task_schedule_1");
+    expect(deleteTaskScheduleForUser).toHaveBeenCalledWith("user_1", "goat_task_schedule_1");
     expect(output).toEqual({
       ok: true,
       scheduleId: "goat_task_schedule_1",
@@ -2499,7 +2499,7 @@ describe("POST /api/chat", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(persistGoatChatAssistantMessage).toHaveBeenCalledWith(
+    expect(persistChatAssistantMessage).toHaveBeenCalledWith(
       {
         sessionId: "session_1",
         messageId: "assistant_1",
@@ -2524,13 +2524,13 @@ describe("POST /api/chat", () => {
   it("persists a fallback assistant message when the stream errors after tool activity", async () => {
     mockAuth();
     mockCreateTurn();
-    mockRunGoatBrainToolForUser().mockResolvedValue({
+    mockRunBrainToolForUser().mockResolvedValue({
       ok: true,
       exitCode: 0,
       stdout: "[]",
       stderr: "",
     });
-    mockPersistGoatChatAssistantMessage().mockResolvedValue({} as never);
+    mockPersistChatAssistantMessage().mockResolvedValue({} as never);
     let brainToolPromise: Promise<unknown> | null = null;
     mockStreamText().mockImplementation((options: unknown) => {
       const tool = (options as { tools?: { goat_brain?: { execute?: unknown } } }).tools
@@ -2566,7 +2566,7 @@ describe("POST /api/chat", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(persistGoatChatAssistantMessage).toHaveBeenCalledWith(
+    expect(persistChatAssistantMessage).toHaveBeenCalledWith(
       {
         sessionId: "session_1",
         content: "Goat stopped before it could finish.",
@@ -2583,7 +2583,7 @@ describe("POST /api/chat", () => {
   it("retries final assistant persistence with a server id when the streamed id write fails", async () => {
     mockAuth();
     mockCreateTurn();
-    mockPersistGoatChatAssistantMessage()
+    mockPersistChatAssistantMessage()
       .mockRejectedValueOnce(new Error("duplicate key value violates unique constraint"))
       .mockResolvedValueOnce({} as never);
     mockStreamText().mockImplementation(
@@ -2628,7 +2628,7 @@ describe("POST /api/chat", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(persistGoatChatAssistantMessage).toHaveBeenNthCalledWith(
+    expect(persistChatAssistantMessage).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
         sessionId: "session_1",
@@ -2637,7 +2637,7 @@ describe("POST /api/chat", () => {
       }),
       expect.anything(),
     );
-    expect(persistGoatChatAssistantMessage).toHaveBeenNthCalledWith(
+    expect(persistChatAssistantMessage).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
         sessionId: "session_1",
@@ -2674,7 +2674,7 @@ function mockAuth(
     timezone: overrides.timezone ?? "UTC",
   };
 
-  mockResolveGoatChatRequestContext().mockResolvedValue({
+  mockResolveChatRequestContext().mockResolvedValue({
     ok: true,
     context: {
       user: {
@@ -2732,7 +2732,7 @@ const ACTIVE_BRAIN = {
 };
 
 function mockCreateTurn() {
-  mockCreateGoatChatUserTurn().mockImplementation(async (...args: unknown[]) => {
+  mockCreateChatUserTurn().mockImplementation(async (...args: unknown[]) => {
     const input = args[0] as { model?: string } | undefined;
     return {
       session: {
@@ -2750,72 +2750,72 @@ function mockCreateTurn() {
   });
 }
 
-function mockResolveGoatChatRequestContext() {
-  return vi.mocked(resolveGoatChatRequestContext as unknown as () => Promise<unknown>);
+function mockResolveChatRequestContext() {
+  return vi.mocked(resolveChatRequestContext as unknown as () => Promise<unknown>);
 }
 
-function mockCreateGoatChatUserTurn() {
-  return vi.mocked(createGoatChatUserTurn as unknown as () => Promise<unknown>);
+function mockCreateChatUserTurn() {
+  return vi.mocked(createChatUserTurn as unknown as () => Promise<unknown>);
 }
 
-function mockCreateGoatChatApprovalContinuationTurn() {
-  return vi.mocked(createGoatChatApprovalContinuationTurn as unknown as () => Promise<unknown>);
+function mockCreateChatApprovalContinuationTurn() {
+  return vi.mocked(createChatApprovalContinuationTurn as unknown as () => Promise<unknown>);
 }
 
-function mockPersistGoatChatAssistantMessage() {
-  return vi.mocked(persistGoatChatAssistantMessage as unknown as () => Promise<unknown>);
+function mockPersistChatAssistantMessage() {
+  return vi.mocked(persistChatAssistantMessage as unknown as () => Promise<unknown>);
 }
 
-function mockGenerateGoatChatTitleForMessage() {
-  return vi.mocked(generateGoatChatTitleForMessage);
+function mockGenerateChatTitleForMessage() {
+  return vi.mocked(generateChatTitleForMessage);
 }
 
-function mockRunGoatBrainToolForUser() {
-  return vi.mocked(runGoatBrainToolForUser);
+function mockRunBrainToolForUser() {
+  return vi.mocked(runBrainToolForUser);
 }
 
-function mockCaptureToGoatBrainInbox() {
-  return vi.mocked(captureToGoatBrainInbox);
+function mockCaptureToBrainInbox() {
+  return vi.mocked(captureToBrainInbox);
 }
 
-function mockIsGoatCodexConnectedForUser() {
-  return vi.mocked(isGoatCodexConnectedForUser);
+function mockIsCodexConnectedForUser() {
+  return vi.mocked(isCodexConnectedForUser);
 }
 
-function mockIsGoatClaudeCodeConnectedForUser() {
-  return vi.mocked(isGoatClaudeCodeConnectedForUser);
+function mockIsClaudeCodeConnectedForUser() {
+  return vi.mocked(isClaudeCodeConnectedForUser);
 }
 
-function mockCreateGoatTaskForUser() {
-  return vi.mocked(createGoatTaskForUser);
+function mockCreateTaskForUser() {
+  return vi.mocked(createTaskForUser);
 }
 
-function mockListGoatTaskSchedulesForUser() {
-  return vi.mocked(listGoatTaskSchedulesForUser);
+function mockListTaskSchedulesForUser() {
+  return vi.mocked(listTaskSchedulesForUser);
 }
 
-function mockUpdateGoatTaskScheduleForUser() {
-  return vi.mocked(updateGoatTaskScheduleForUser);
+function mockUpdateTaskScheduleForUser() {
+  return vi.mocked(updateTaskScheduleForUser);
 }
 
-function mockDeleteGoatTaskScheduleForUser() {
-  return vi.mocked(deleteGoatTaskScheduleForUser);
+function mockDeleteTaskScheduleForUser() {
+  return vi.mocked(deleteTaskScheduleForUser);
 }
 
 function mockStreamText() {
   return vi.mocked(streamText);
 }
 
-function mockResolveGoatActionCatalog() {
-  return vi.mocked(resolveGoatActionCatalog);
+function mockResolveActionCatalog() {
+  return vi.mocked(resolveActionCatalog);
 }
 
-function mockIsGoatChatActionsKilled() {
-  return vi.mocked(isGoatChatActionsKilled);
+function mockIsChatActionsKilled() {
+  return vi.mocked(isChatActionsKilled);
 }
 
-function mockExecuteGoatAction() {
-  return vi.mocked(executeGoatAction);
+function mockExecuteAction() {
+  return vi.mocked(executeAction);
 }
 
 function sampleActionCatalog() {

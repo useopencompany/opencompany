@@ -19,18 +19,18 @@ vi.mock("@opencompany/db/client", () => ({
   }),
 }));
 vi.mock("@opencompany/db/integrations", () => ({
-  loadGoatIntegrationCredential: mocks.loadCredential,
-  markGoatIntegrationStatus: mocks.markStatus,
+  loadIntegrationCredential: mocks.loadCredential,
+  markIntegrationStatus: mocks.markStatus,
 }));
 
 import { resolveAttioActions } from "@/lib/actions/attio";
 import {
-  GoatActionAuthError,
-  type GoatActionExecuteContext,
-  GoatActionInvalidParamsError,
+  ActionAuthError,
+  type ActionExecuteContext,
+  ActionInvalidParamsError,
 } from "@/lib/actions/types";
 
-const CONTEXT: GoatActionExecuteContext = {
+const CONTEXT: ActionExecuteContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-22T00:00:00.000Z"),
@@ -404,7 +404,7 @@ describe("attio.search_records", () => {
     );
     await expect(
       action.execute({ query: "Ada", objects: ["contacts"] }, CONTEXT),
-    ).rejects.toBeInstanceOf(GoatActionInvalidParamsError);
+    ).rejects.toBeInstanceOf(ActionInvalidParamsError);
     await expect(
       action.execute({ query: "Ada", objects: ["people", "people"] }, CONTEXT),
     ).rejects.toThrow('"objects" must not contain duplicates');
@@ -422,7 +422,7 @@ describe("attio.search_records", () => {
     await expect(
       findSearchAction().then((action) => action.execute({ query: "Ada" }, CONTEXT)),
     ).rejects.toMatchObject({
-      name: "GoatActionAuthError",
+      name: "ActionAuthError",
       code: "auth_expired",
       provider: "attio",
       message: expect.stringContaining("reconnect Attio in Settings → Integrations"),
@@ -435,7 +435,7 @@ describe("attio.search_records", () => {
     );
     await expect(
       findSearchAction().then((action) => action.execute({ query: "Ada" }, CONTEXT)),
-    ).rejects.toBeInstanceOf(GoatActionAuthError);
+    ).rejects.toBeInstanceOf(ActionAuthError);
     expect(mocks.markStatus).toHaveBeenCalledWith(
       expect.objectContaining({
         integrationId: "gint_attio_1",
@@ -1617,7 +1617,7 @@ describe("Attio updates", () => {
 
     await expect(
       action.execute({ list: LIST_ID, title: "Stage", api_slug: "stage", type: "status" }, CONTEXT),
-    ).rejects.toMatchObject({ name: "GoatActionPermissionError", provider: "attio" });
+    ).rejects.toMatchObject({ name: "ActionPermissionError", provider: "attio" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -1639,7 +1639,7 @@ describe("Attio updates", () => {
         { object: "companies", record_id: "company_1", values: { lead_status: "Qualified" } },
         CONTEXT,
       ),
-    ).rejects.toMatchObject({ name: "GoatActionPermissionError", provider: "attio" });
+    ).rejects.toMatchObject({ name: "ActionPermissionError", provider: "attio" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

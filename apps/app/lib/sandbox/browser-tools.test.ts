@@ -23,7 +23,7 @@ import {
   GOAT_CHAT_SANDBOX_NETWORK_POLICY,
   GOAT_CHAT_SANDBOX_ROOT,
   GOAT_CHAT_SANDBOX_SCREENSHOT_DIR,
-  getGoatChatSandbox,
+  getChatSandbox,
 } from "./chat-sandbox";
 
 const runCommand = vi.fn(async (input: { args: string[] }) => {
@@ -66,7 +66,7 @@ describe("Goat chat browser sandbox", () => {
 
   it("configures a named persistent sandbox and provisions the stock runtime once", async () => {
     const signal = new AbortController().signal;
-    await getGoatChatSandbox({ chatSessionId: "chat/1", signal });
+    await getChatSandbox({ chatSessionId: "chat/1", signal });
 
     expect(mocks.getOrCreate).toHaveBeenCalledOnce();
     const params = mocks.getOrCreate.mock.calls[0]?.[0] as {

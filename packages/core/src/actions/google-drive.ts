@@ -1,25 +1,25 @@
-import { isValidGoatBrainSourceRef } from "@opencompany/brain";
+import { isValidBrainSourceRef } from "@opencompany/brain";
 import { getDb } from "@opencompany/db/client";
-import { goatIntegrations } from "@opencompany/db/schema";
+import { integrations } from "@opencompany/db/schema";
 import type { JSONSchema7 } from "ai";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { GoogleAccessAuthError, googleApiCall } from "../integrations/google-access-token";
 import {
-  hasGoatGoogleDocsWriteScope,
-  hasGoatGoogleSheetsWriteScope,
+  hasGoogleDocsWriteScope,
+  hasGoogleSheetsWriteScope,
 } from "../integrations/google-drive-scopes";
-import { effectiveCapabilityMode, type GoatCapabilityId, providerCapability } from "./capabilities";
+import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  ActionAuthError,
+  type ActionExecuteContext,
+  ActionInvalidParamsError,
+  ActionPermissionError,
+  type ActionProviderCatalog,
   GOAT_ACTION_EFFECTS_READ,
   GOAT_ACTION_EFFECTS_WRITE,
-  GoatActionAuthError,
-  type GoatActionExecuteContext,
-  GoatActionInvalidParamsError,
-  GoatActionPermissionError,
-  type GoatActionProviderCatalog,
   optionalNumberParam,
   optionalStringParam,
-  type ResolvedGoatAction,
+  type ResolvedAction,
   requiredStringParam,
   truncateText,
 } from "./types";
@@ -59,17 +59,17 @@ type GoogleDriveConnection = {
 
 export async function resolveGoogleDriveActions(
   userWorkosId: string,
-): Promise<GoatActionProviderCatalog | null> {
+): Promise<ActionProviderCatalog | null> {
   const allConnections = await loadGoogleDriveConnections(userWorkosId);
   if (allConnections.length === 0) return null;
 
   const readConnections = eligibleConnections(allConnections, "read");
   const writeEligibleConnections = eligibleConnections(allConnections, "write");
   const docsWriteConnections = writeEligibleConnections.filter((connection) =>
-    hasGoatGoogleDocsWriteScope(connection.scopes),
+    hasGoogleDocsWriteScope(connection.scopes),
   );
   const sheetsWriteConnections = writeEligibleConnections.filter((connection) =>
-    hasGoatGoogleSheetsWriteScope(connection.scopes),
+    hasGoogleSheetsWriteScope(connection.scopes),
   );
   if (
     readConnections.length === 0 &&
@@ -79,7 +79,7 @@ export async function resolveGoogleDriveActions(
     return null;
   }
 
-  const actions: ResolvedGoatAction[] = [];
+  const actions: ResolvedAction[] = [];
   if (readConnections.length > 0) {
     actions.push(
       searchFilesAction(readConnections),
@@ -125,7 +125,7 @@ export async function resolveGoogleDriveActions(
 
 function eligibleConnections(
   connections: readonly GoogleDriveConnection[],
-  capabilityId: GoatCapabilityId,
+  capabilityId: CapabilityId,
 ) {
   return connections.filter(
     (connection) =>
@@ -134,9 +134,9 @@ function eligibleConnections(
 }
 
 function permissionAnnotation(
-  capabilityId: GoatCapabilityId,
+  capabilityId: CapabilityId,
   connections: readonly GoogleDriveConnection[],
-): Pick<ResolvedGoatAction, "permissionMode" | "permission"> {
+): Pick<ResolvedAction, "permissionMode" | "permission"> {
   const askIntegrationIds = connections
     .filter(
       (connection) =>
@@ -155,7 +155,7 @@ function permissionAnnotation(
   };
 }
 
-function searchFilesAction(connections: readonly GoogleDriveConnection[]): ResolvedGoatAction {
+function searchFilesAction(connections: readonly GoogleDriveConnection[]): ResolvedAction {
   const accountParam = accountParamSchema(connections);
   const required = ["query"];
   if (connections.length > 1) required.push("account");
@@ -203,7 +203,7 @@ function searchFilesAction(connections: readonly GoogleDriveConnection[]): Resol
           requestedLimit < 1 ||
           requestedLimit > MAX_SEARCH_RESULTS)
       ) {
-        throw new GoatActionInvalidParamsError(
+        throw new ActionInvalidParamsError(
           `"limit" must be an integer from 1 to ${MAX_SEARCH_RESULTS}.`,
         );
       }
@@ -240,7 +240,7 @@ function searchFilesAction(connections: readonly GoogleDriveConnection[]): Resol
   };
 }
 
-function getDocumentAction(connections: readonly GoogleDriveConnection[]): ResolvedGoatAction {
+function getDocumentAction(connections: readonly GoogleDriveConnection[]): ResolvedAction {
   const accountParam = accountParamSchema(connections);
   const required = ["file_id"];
   if (connections.length > 1) required.push("account");
@@ -307,9 +307,7 @@ function getDocumentAction(connections: readonly GoogleDriveConnection[]): Resol
   };
 }
 
-function getSpreadsheetValuesAction(
-  connections: readonly GoogleDriveConnection[],
-): ResolvedGoatAction {
+function getSpreadsheetValuesAction(connections: readonly GoogleDriveConnection[]): ResolvedAction {
   const accountParam = accountParamSchema(connections);
   const required = ["file_id"];
   if (connections.length > 1) required.push("account");
@@ -416,7 +414,7 @@ function getSpreadsheetValuesAction(
   };
 }
 
-function createDocumentAction(connections: readonly GoogleDriveConnection[]): ResolvedGoatAction {
+function createDocumentAction(connections: readonly GoogleDriveConnection[]): ResolvedAction {
   const accountParam = accountParamSchema(connections);
   const required = ["title"];
   if (connections.length > 1) required.push("account");
@@ -527,9 +525,7 @@ function createDocumentAction(connections: readonly GoogleDriveConnection[]): Re
   };
 }
 
-function replaceDocumentTextAction(
-  connections: readonly GoogleDriveConnection[],
-): ResolvedGoatAction {
+function replaceDocumentTextAction(connections: readonly GoogleDriveConnection[]): ResolvedAction {
   const accountParam = accountParamSchema(connections);
   const required = ["file_id", "find", "replace"];
   if (connections.length > 1) required.push("account");
@@ -641,7 +637,7 @@ function replaceDocumentTextAction(
 
 function updateSpreadsheetValuesAction(
   connections: readonly GoogleDriveConnection[],
-): ResolvedGoatAction {
+): ResolvedAction {
   const accountParam = accountParamSchema(connections);
   const required = ["file_id", "range", "values"];
   if (connections.length > 1) required.push("account");
@@ -740,7 +736,7 @@ function updateSpreadsheetValuesAction(
 
 function appendSpreadsheetValuesAction(
   connections: readonly GoogleDriveConnection[],
-): ResolvedGoatAction {
+): ResolvedAction {
   const accountParam = accountParamSchema(connections);
   const required = ["file_id", "range", "values"];
   if (connections.length > 1) required.push("account");
@@ -881,34 +877,34 @@ async function assertWriteStillEnabled(
 ) {
   const rows = await getDb()
     .select({
-      status: goatIntegrations.status,
-      scopes: goatIntegrations.scopes,
-      capabilityModes: goatIntegrations.capabilityModes,
+      status: integrations.status,
+      scopes: integrations.scopes,
+      capabilityModes: integrations.capabilityModes,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.id, connection.integrationId),
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, "google_drive"),
+        eq(integrations.id, connection.integrationId),
+        eq(integrations.userWorkosId, userWorkosId),
+        eq(integrations.provider, "google_drive"),
       ),
     )
     .limit(1);
   const row = rows[0];
   const hasRequiredScope =
     target === "docs"
-      ? hasGoatGoogleDocsWriteScope(row?.scopes ?? [])
-      : hasGoatGoogleSheetsWriteScope(row?.scopes ?? []);
+      ? hasGoogleDocsWriteScope(row?.scopes ?? [])
+      : hasGoogleSheetsWriteScope(row?.scopes ?? []);
   if (!row || row.status !== "connected" || !hasRequiredScope) {
     const targetLabel = target === "docs" ? "Google Docs" : "Google Sheets";
-    throw new GoatActionAuthError(
+    throw new ActionAuthError(
       "auth_expired",
       "google_drive",
       `Reconnect Google Drive for ${connectionLabel(connection)} in Settings → Integrations to enable editing ${targetLabel}, then retry.`,
     );
   }
   if (effectiveCapabilityMode("google_drive", "write", row.capabilityModes) === "off") {
-    throw new GoatActionPermissionError(
+    throw new ActionPermissionError(
       "google_drive",
       `Editing Google Drive files is turned off for ${connectionLabel(connection)}. It can be changed under Settings → Integrations.`,
     );
@@ -918,22 +914,22 @@ async function assertWriteStillEnabled(
 async function loadGoogleDriveConnections(userWorkosId: string): Promise<GoogleDriveConnection[]> {
   const rows = await getDb()
     .select({
-      integrationId: goatIntegrations.id,
-      accountEmail: goatIntegrations.accountEmail,
-      accountName: goatIntegrations.accountName,
-      status: goatIntegrations.status,
-      scopes: goatIntegrations.scopes,
-      capabilityModes: goatIntegrations.capabilityModes,
+      integrationId: integrations.id,
+      accountEmail: integrations.accountEmail,
+      accountName: integrations.accountName,
+      status: integrations.status,
+      scopes: integrations.scopes,
+      capabilityModes: integrations.capabilityModes,
     })
-    .from(goatIntegrations)
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        eq(goatIntegrations.provider, "google_drive"),
-        ne(goatIntegrations.status, "disconnected"),
+        eq(integrations.userWorkosId, userWorkosId),
+        eq(integrations.provider, "google_drive"),
+        ne(integrations.status, "disconnected"),
       ),
     )
-    .orderBy(desc(goatIntegrations.updatedAt));
+    .orderBy(desc(integrations.updatedAt));
 
   return rows
     .filter((row) => row.status === "connected")
@@ -956,14 +952,14 @@ function resolveConnection(
       (connection) => normalizeAccountSelector(accountSelector(connection, connections)) === wanted,
     );
     if (match) return match;
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `No connected Google Drive account matches ${JSON.stringify(account)}. Connected accounts: ${connections
         .map((connection) => JSON.stringify(accountSelector(connection, connections)))
         .join(", ")}.`,
     );
   }
   if (connections.length === 1) return connections[0]!;
-  throw new GoatActionInvalidParamsError(
+  throw new ActionInvalidParamsError(
     `Multiple Google Drive accounts are connected; pass account as one of: ${connections
       .map((connection) => JSON.stringify(accountSelector(connection, connections)))
       .join(", ")}.`,
@@ -993,7 +989,7 @@ function normalizeAccountSelector(value: string) {
 }
 
 async function googleDriveApiCall(
-  context: GoatActionExecuteContext,
+  context: ActionExecuteContext,
   connection: GoogleDriveConnection,
   method: "GET" | "POST" | "PUT",
   url: URL,
@@ -1012,7 +1008,7 @@ async function googleDriveApiCall(
     );
   } catch (error) {
     if (error instanceof GoogleAccessAuthError) {
-      throw new GoatActionAuthError(
+      throw new ActionAuthError(
         "auth_expired",
         "google_drive",
         `Reconnect Google Drive for ${connectionLabel(connection)} in Settings → Integrations, then retry.`,
@@ -1031,7 +1027,7 @@ function assertOnlyKnownParams(
     (key) => !allowedKeys.includes(key) && !(allowAccount && key === "account"),
   );
   if (unknown.length > 0) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `Unknown parameter${unknown.length === 1 ? "" : "s"}: ${unknown
         .map((key) => JSON.stringify(key))
         .join(", ")}.`,
@@ -1042,7 +1038,7 @@ function assertOnlyKnownParams(
 function requiredBoundedString(params: Record<string, unknown>, key: string, maxChars: number) {
   const value = requiredStringParam(params, key);
   if (value.length > maxChars) {
-    throw new GoatActionInvalidParamsError(`"${key}" must be at most ${maxChars} characters.`);
+    throw new ActionInvalidParamsError(`"${key}" must be at most ${maxChars} characters.`);
   }
   return value;
 }
@@ -1050,7 +1046,7 @@ function requiredBoundedString(params: Record<string, unknown>, key: string, max
 function boundedOptionalString(params: Record<string, unknown>, key: string, maxChars: number) {
   const value = optionalStringParam(params, key);
   if (value && value.length > maxChars) {
-    throw new GoatActionInvalidParamsError(`"${key}" must be at most ${maxChars} characters.`);
+    throw new ActionInvalidParamsError(`"${key}" must be at most ${maxChars} characters.`);
   }
   return value;
 }
@@ -1058,10 +1054,10 @@ function boundedOptionalString(params: Record<string, unknown>, key: string, max
 function requiredExactText(params: Record<string, unknown>, key: string, maxChars: number) {
   const value = params[key];
   if (typeof value !== "string" || value.length === 0) {
-    throw new GoatActionInvalidParamsError(`"${key}" is required and must be a non-empty string.`);
+    throw new ActionInvalidParamsError(`"${key}" is required and must be a non-empty string.`);
   }
   if (value.length > maxChars) {
-    throw new GoatActionInvalidParamsError(`"${key}" must be at most ${maxChars} characters.`);
+    throw new ActionInvalidParamsError(`"${key}" must be at most ${maxChars} characters.`);
   }
   return value;
 }
@@ -1070,10 +1066,10 @@ function boundedOptionalExactText(params: Record<string, unknown>, key: string, 
   const value = params[key];
   if (value === undefined || value === null || value === "") return undefined;
   if (typeof value !== "string") {
-    throw new GoatActionInvalidParamsError(`"${key}" must be a string.`);
+    throw new ActionInvalidParamsError(`"${key}" must be a string.`);
   }
   if (value.length > maxChars) {
-    throw new GoatActionInvalidParamsError(`"${key}" must be at most ${maxChars} characters.`);
+    throw new ActionInvalidParamsError(`"${key}" must be at most ${maxChars} characters.`);
   }
   return value;
 }
@@ -1081,10 +1077,10 @@ function boundedOptionalExactText(params: Record<string, unknown>, key: string, 
 function replacementText(params: Record<string, unknown>, maxChars: number) {
   const value = params.replace;
   if (typeof value !== "string") {
-    throw new GoatActionInvalidParamsError('"replace" is required and must be a string.');
+    throw new ActionInvalidParamsError('"replace" is required and must be a string.');
   }
   if (value.length > maxChars) {
-    throw new GoatActionInvalidParamsError(`"replace" must be at most ${maxChars} characters.`);
+    throw new ActionInvalidParamsError(`"replace" must be at most ${maxChars} characters.`);
   }
   return value;
 }
@@ -1093,7 +1089,7 @@ function optionalBooleanParam(params: Record<string, unknown>, key: string) {
   const value = params[key];
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "boolean") {
-    throw new GoatActionInvalidParamsError(`"${key}" must be a boolean.`);
+    throw new ActionInvalidParamsError(`"${key}" must be a boolean.`);
   }
   return value;
 }
@@ -1106,7 +1102,7 @@ function enumStringParam<const T extends readonly string[]>(
   const value = optionalStringParam(params, key);
   if (value === undefined) return undefined;
   if ((allowed as readonly string[]).includes(value)) return value as T[number];
-  throw new GoatActionInvalidParamsError(
+  throw new ActionInvalidParamsError(
     `"${key}" must be one of: ${allowed.map((entry) => JSON.stringify(entry)).join(", ")}.`,
   );
 }
@@ -1135,12 +1131,10 @@ function spreadsheetValuesParamSchema(description: string): JSONSchema7 {
 
 function requiredSpreadsheetValues(value: unknown): GoogleSheetCellValue[][] {
   if (!Array.isArray(value) || value.length === 0) {
-    throw new GoatActionInvalidParamsError(
-      '"values" is required and must be a non-empty 2D array.',
-    );
+    throw new ActionInvalidParamsError('"values" is required and must be a non-empty 2D array.');
   }
   if (value.length > MAX_SPREADSHEET_WRITE_ROWS) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       `"values" may include at most ${MAX_SPREADSHEET_WRITE_ROWS} rows or columns.`,
     );
   }
@@ -1148,18 +1142,18 @@ function requiredSpreadsheetValues(value: unknown): GoogleSheetCellValue[][] {
   let cellCount = 0;
   return value.map((rawRow, rowIndex) => {
     if (!Array.isArray(rawRow) || rawRow.length === 0) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `"values"[${rowIndex}] must be a non-empty array of cells.`,
       );
     }
     if (rawRow.length > MAX_SPREADSHEET_COLUMNS) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `"values"[${rowIndex}] may include at most ${MAX_SPREADSHEET_COLUMNS} cells.`,
       );
     }
     cellCount += rawRow.length;
     if (cellCount > MAX_SPREADSHEET_CELLS) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `"values" may include at most ${MAX_SPREADSHEET_CELLS} cells.`,
       );
     }
@@ -1175,7 +1169,7 @@ function spreadsheetCellValue(
   if (value === null) return null;
   if (typeof value === "string") {
     if (value.length > MAX_SPREADSHEET_CELL_CHARS) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `"values"[${rowIndex}][${columnIndex}] must be at most ${MAX_SPREADSHEET_CELL_CHARS} characters.`,
       );
     }
@@ -1183,14 +1177,14 @@ function spreadsheetCellValue(
   }
   if (typeof value === "number") {
     if (!Number.isFinite(value)) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `"values"[${rowIndex}][${columnIndex}] must be a finite number.`,
       );
     }
     return value;
   }
   if (typeof value === "boolean") return value;
-  throw new GoatActionInvalidParamsError(
+  throw new ActionInvalidParamsError(
     `"values"[${rowIndex}][${columnIndex}] must be a string, number, boolean, or null.`,
   );
 }
@@ -1304,7 +1298,7 @@ function collectTextRuns(value: unknown, depth = 0): string {
 
 function driveFileSourceRef(fileId: string) {
   const sourceRef = `google-drive:file:${fileId}`;
-  if (!isValidGoatBrainSourceRef(sourceRef)) {
+  if (!isValidBrainSourceRef(sourceRef)) {
     throw new Error("Google Drive returned a file id that cannot form a Brain source reference.");
   }
   return sourceRef;

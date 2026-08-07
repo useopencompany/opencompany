@@ -1,14 +1,14 @@
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { currentGoatUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
-import type { GoatWorkspaceSkill } from "@/lib/skills";
+import type { WorkspaceSkill } from "@/lib/skills";
 import {
-  cancelGoatTaskAction,
-  continueGoatTaskAction,
-  createGoatTaskForUser,
-  getCurrentUserGoatTaskSummary,
+  cancelTaskAction,
+  continueTaskAction,
+  createTaskForUser,
+  getCurrentUserTaskSummary,
 } from "@/lib/tasks";
 
 const mocks = vi.hoisted(() => {
@@ -16,16 +16,16 @@ const mocks = vi.hoisted(() => {
     after: vi.fn((work: Promise<unknown> | (() => unknown)) =>
       typeof work === "function" ? work() : work,
     ),
-    captureGoatTaskSpawned: vi.fn(async () => undefined),
+    captureTaskSpawned: vi.fn(async () => undefined),
     execute: vi.fn(),
-    resolveGoatSkillMentions: vi.fn(async (): Promise<GoatWorkspaceSkill[]> => []),
+    resolveSkillMentions: vi.fn(async (): Promise<WorkspaceSkill[]> => []),
     select: vi.fn(),
-    triggerGoatCodexChatWake: vi.fn(),
+    triggerCodexChatWake: vi.fn(),
   };
 });
 
-vi.mock("@opencompany/analytics/goat/server", () => ({
-  captureGoatTaskSpawned: mocks.captureGoatTaskSpawned,
+vi.mock("@opencompany/analytics/server", () => ({
+  captureTaskSpawned: mocks.captureTaskSpawned,
 }));
 
 vi.mock("@opencompany/db/client", () => ({
@@ -36,22 +36,22 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@/lib/task-runner", () => ({
-  triggerGoatCodexChatWake: mocks.triggerGoatCodexChatWake,
+  triggerCodexChatWake: mocks.triggerCodexChatWake,
 }));
 
 vi.mock("@/lib/integrations/google-data", () => ({
-  getGoatAvailableHarnessTools: vi.fn(async () => ["exa_search", "gmail_search"]),
+  getAvailableHarnessTools: vi.fn(async () => ["exa_search", "gmail_search"]),
 }));
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
 }));
 
 vi.mock("@/lib/skills", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/skills")>();
   return {
     ...actual,
-    resolveGoatSkillMentions: mocks.resolveGoatSkillMentions,
+    resolveSkillMentions: mocks.resolveSkillMentions,
   };
 });
 
@@ -64,14 +64,14 @@ vi.mock("next/cache", () => ({
 }));
 
 beforeEach(() => {
-  mocks.resolveGoatSkillMentions.mockResolvedValue([]);
-  vi.mocked(currentGoatUser).mockResolvedValue({
+  mocks.resolveSkillMentions.mockResolvedValue([]);
+  vi.mocked(currentUser).mockResolvedValue({
     user: { workosUserId: "user_1" },
     workspace: { id: "workspace_1" },
   } as never);
 });
 
-describe("createGoatTaskForUser", () => {
+describe("createTaskForUser", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -127,9 +127,9 @@ describe("createGoatTaskForUser", () => {
   });
 
   it("leaves the task queued when runner dispatch fails", async () => {
-    mocks.triggerGoatCodexChatWake.mockRejectedValue(new Error("runner unavailable"));
+    mocks.triggerCodexChatWake.mockRejectedValue(new Error("runner unavailable"));
 
-    const task = await createGoatTaskForUser({
+    const task = await createTaskForUser({
       userWorkosId: "user_1",
       prompt: "Research x",
       model: DEFAULT_GOAT_MODEL,
@@ -137,7 +137,7 @@ describe("createGoatTaskForUser", () => {
 
     expect(task).toMatchObject({ id: "task_1", status: "queued", stage: "queued" });
     expect(mocks.execute).toHaveBeenCalledTimes(1);
-    expect(mocks.captureGoatTaskSpawned).toHaveBeenCalledWith(
+    expect(mocks.captureTaskSpawned).toHaveBeenCalledWith(
       expect.objectContaining({
         userWorkosId: "user_1",
         workspaceId: null,
@@ -150,7 +150,7 @@ describe("createGoatTaskForUser", () => {
         trigger: "manual",
       }),
     );
-    expect(mocks.triggerGoatCodexChatWake).toHaveBeenCalledOnce();
+    expect(mocks.triggerCodexChatWake).toHaveBeenCalledOnce();
     expect(warnSpy).toHaveBeenCalledWith(
       "Goat durable task wake failed; the turn remains queued for polling.",
       expect.objectContaining({
@@ -170,7 +170,7 @@ describe("createGoatTaskForUser", () => {
     });
 
     await expect(
-      createGoatTaskForUser({
+      createTaskForUser({
         userWorkosId: "user_1",
         prompt: "Research x",
         model: DEFAULT_GOAT_MODEL,
@@ -178,7 +178,7 @@ describe("createGoatTaskForUser", () => {
     ).rejects.toThrow("Tasks & Workflows is disabled");
 
     expect(mocks.execute).not.toHaveBeenCalled();
-    expect(mocks.captureGoatTaskSpawned).not.toHaveBeenCalled();
+    expect(mocks.captureTaskSpawned).not.toHaveBeenCalled();
   });
 
   it("reports a concurrent disable when the atomic insert is rejected", async () => {
@@ -196,13 +196,13 @@ describe("createGoatTaskForUser", () => {
     mocks.execute.mockResolvedValueOnce([]);
 
     await expect(
-      createGoatTaskForUser({
+      createTaskForUser({
         userWorkosId: "user_1",
         prompt: "Research x",
         model: DEFAULT_GOAT_MODEL,
       }),
     ).rejects.toThrow("Tasks & Workflows is disabled");
-    expect(mocks.captureGoatTaskSpawned).not.toHaveBeenCalled();
+    expect(mocks.captureTaskSpawned).not.toHaveBeenCalled();
   });
 
   it("reports an unknown user separately from a disabled preference", async () => {
@@ -213,18 +213,18 @@ describe("createGoatTaskForUser", () => {
     });
 
     await expect(
-      createGoatTaskForUser({
+      createTaskForUser({
         userWorkosId: "missing_user",
         prompt: "Research x",
         model: DEFAULT_GOAT_MODEL,
       }),
     ).rejects.toThrow("unknown user");
     expect(mocks.execute).not.toHaveBeenCalled();
-    expect(mocks.captureGoatTaskSpawned).not.toHaveBeenCalled();
+    expect(mocks.captureTaskSpawned).not.toHaveBeenCalled();
   });
 });
 
-describe("getCurrentUserGoatTaskSummary", () => {
+describe("getCurrentUserTaskSummary", () => {
   it("returns aggregate cost and active run duration without loading the full transcript", async () => {
     vi.clearAllMocks();
     mocks.select.mockReturnValue({
@@ -250,7 +250,7 @@ describe("getCurrentUserGoatTaskSummary", () => {
       },
     ]);
 
-    await expect(getCurrentUserGoatTaskSummary("TASK-1")).resolves.toEqual({
+    await expect(getCurrentUserTaskSummary("TASK-1")).resolves.toEqual({
       cost: {
         hasRecordedCosts: true,
         totalCostUsdMicros: 123_400,
@@ -289,7 +289,7 @@ describe("getCurrentUserGoatTaskSummary", () => {
       },
     ]);
 
-    await expect(getCurrentUserGoatTaskSummary("TASK-1")).resolves.toEqual({
+    await expect(getCurrentUserTaskSummary("TASK-1")).resolves.toEqual({
       cost: {
         hasRecordedCosts: true,
         totalCostUsdMicros: 81_400,
@@ -306,7 +306,7 @@ describe("getCurrentUserGoatTaskSummary", () => {
   });
 });
 
-describe("cancelGoatTaskAction", () => {
+describe("cancelTaskAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.select.mockReturnValue({
@@ -316,7 +316,7 @@ describe("cancelGoatTaskAction", () => {
         })),
       })),
     });
-    vi.mocked(currentGoatUser).mockResolvedValue({
+    vi.mocked(currentUser).mockResolvedValue({
       authUser: {
         id: "user_1",
         email: "ada@example.com",
@@ -373,7 +373,7 @@ describe("cancelGoatTaskAction", () => {
   it("cancels an active task for the current user", async () => {
     mocks.execute.mockResolvedValueOnce([{ id: "goat_task_1" }]);
 
-    await expect(cancelGoatTaskAction("goat_task_1")).resolves.toEqual({
+    await expect(cancelTaskAction("goat_task_1")).resolves.toEqual({
       ok: true,
       error: null,
     });
@@ -389,14 +389,14 @@ describe("cancelGoatTaskAction", () => {
   it("rejects terminal or inaccessible tasks", async () => {
     mocks.execute.mockResolvedValueOnce([]);
 
-    await expect(cancelGoatTaskAction("goat_task_done")).resolves.toEqual({
+    await expect(cancelTaskAction("goat_task_done")).resolves.toEqual({
       ok: false,
       error: "Could not stop task.",
     });
   });
 });
 
-describe("continueGoatTaskAction", () => {
+describe("continueTaskAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.select.mockReturnValue({
@@ -413,7 +413,7 @@ describe("continueGoatTaskAction", () => {
     mocks.execute.mockResolvedValueOnce([{ id: messageId, task_id: "goat_task_1" }]);
 
     await expect(
-      continueGoatTaskAction("goat_task_1", "Check the afternoon too.", messageId),
+      continueTaskAction("goat_task_1", "Check the afternoon too.", messageId),
     ).resolves.toEqual({
       ok: true,
       error: null,
@@ -426,12 +426,12 @@ describe("continueGoatTaskAction", () => {
     expect(sqlTextFromExecuteCall(0)).toContain("INSERT INTO goat.chat_messages");
     expect(sqlTextFromExecuteCall(0)).toContain("INSERT INTO goat.codex_chat_turns");
     expect(sqlTextFromExecuteCall(0)).not.toContain("goat.task_messages");
-    expect(mocks.triggerGoatCodexChatWake).toHaveBeenCalledOnce();
+    expect(mocks.triggerCodexChatWake).toHaveBeenCalledOnce();
   });
 
   it("activates selected skills when continuing a session-backed task", async () => {
     const messageId = "goat_chat_msg_11111111-1111-4111-8111-111111111111";
-    mocks.resolveGoatSkillMentions.mockResolvedValueOnce([
+    mocks.resolveSkillMentions.mockResolvedValueOnce([
       {
         id: "product-work",
         name: "Product work",
@@ -442,7 +442,7 @@ describe("continueGoatTaskAction", () => {
     mocks.execute.mockResolvedValueOnce([{ id: messageId, task_id: "goat_task_1" }]);
 
     await expect(
-      continueGoatTaskAction("goat_task_1", "@skill/product-work Check the session.", messageId, [
+      continueTaskAction("goat_task_1", "@skill/product-work Check the session.", messageId, [
         { kind: "skill", id: "product-work" },
       ]),
     ).resolves.toEqual({
@@ -451,7 +451,7 @@ describe("continueGoatTaskAction", () => {
       messageId,
     });
 
-    expect(mocks.resolveGoatSkillMentions).toHaveBeenCalledWith({
+    expect(mocks.resolveSkillMentions).toHaveBeenCalledWith({
       workspaceId: "workspace_1",
       mentions: [{ id: "product-work" }],
     });
@@ -467,11 +467,11 @@ describe("continueGoatTaskAction", () => {
         },
       ]),
     );
-    expect(mocks.triggerGoatCodexChatWake).toHaveBeenCalledOnce();
+    expect(mocks.triggerCodexChatWake).toHaveBeenCalledOnce();
   });
 
   it("continues a session-backed task owned by another workspace member", async () => {
-    vi.mocked(currentGoatUser).mockResolvedValue({
+    vi.mocked(currentUser).mockResolvedValue({
       user: { workosUserId: "member_2" },
       workspace: { id: "workspace_1" },
     } as never);
@@ -484,9 +484,7 @@ describe("continueGoatTaskAction", () => {
     });
     mocks.execute.mockResolvedValueOnce([{ id: "goat_chat_msg_1", task_id: "goat_task_1" }]);
 
-    await expect(
-      continueGoatTaskAction("goat_task_1", "Check the afternoon too."),
-    ).resolves.toEqual({
+    await expect(continueTaskAction("goat_task_1", "Check the afternoon too.")).resolves.toEqual({
       ok: true,
       error: null,
       messageId: "goat_chat_msg_1",
@@ -500,14 +498,14 @@ describe("continueGoatTaskAction", () => {
   it("does not append another turn while the task is active or inaccessible", async () => {
     mocks.execute.mockResolvedValueOnce([]);
 
-    await expect(continueGoatTaskAction("goat_task_1", "Check again.")).resolves.toMatchObject({
+    await expect(continueTaskAction("goat_task_1", "Check again.")).resolves.toMatchObject({
       ok: false,
       messageId: null,
     });
   });
 
   it("rejects an empty reply before touching the database", async () => {
-    await expect(continueGoatTaskAction("goat_task_1", "   ")).resolves.toMatchObject({
+    await expect(continueTaskAction("goat_task_1", "   ")).resolves.toMatchObject({
       ok: false,
       messageId: null,
     });

@@ -1,8 +1,8 @@
 import { getDb } from "@opencompany/db/client";
-import { goatChatMessages, goatChatSessions } from "@opencompany/db/schema";
+import { chatMessages, chatSessions } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
-import { currentGoatUser } from "@/lib/auth";
-import { goatChatAttachmentResponse } from "@/lib/chat-attachment-response";
+import { currentUser } from "@/lib/auth";
+import { chatAttachmentResponse } from "@/lib/chat-attachment-response";
 
 // Serves a chat attachment's bytes from the PRIVATE Vercel Blob store.
 // Mirrors /api/brain-assets/[documentId]: auth-scoped raw byte endpoint; the
@@ -12,19 +12,19 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ messageId: string; attachmentId: string }> },
 ) {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return new Response(null, { status: 401 });
 
   const { messageId, attachmentId } = await params;
   const db = getDb();
   const [row] = await db
     .select({
-      attachments: goatChatMessages.attachments,
-      ownerWorkosId: goatChatSessions.userWorkosId,
+      attachments: chatMessages.attachments,
+      ownerWorkosId: chatSessions.userWorkosId,
     })
-    .from(goatChatMessages)
-    .innerJoin(goatChatSessions, eq(goatChatMessages.sessionId, goatChatSessions.id))
-    .where(eq(goatChatMessages.id, messageId))
+    .from(chatMessages)
+    .innerJoin(chatSessions, eq(chatMessages.sessionId, chatSessions.id))
+    .where(eq(chatMessages.id, messageId))
     .limit(1);
 
   // 404 (not 403) on cross-user ids so the endpoint never reveals that a
@@ -35,5 +35,5 @@ export async function GET(
       : undefined;
   if (!attachment) return new Response(null, { status: 404 });
 
-  return goatChatAttachmentResponse(attachment);
+  return chatAttachmentResponse(attachment);
 }

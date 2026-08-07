@@ -1,72 +1,67 @@
 import {
+  type ActionGatewayRequest,
+  type ActionGatewayResponse,
   GOAT_ACTION_HOST_TOOL_CONTRACT_VERSIONS,
-  type GoatActionGatewayRequest,
-  type GoatActionGatewayResponse,
 } from "@opencompany/agent-runtime";
 import { projectActionCatalog } from "@opencompany/core/actions/policy";
-import { serveGoatActionRequest } from "@opencompany/core/actions/service";
+import { serveActionRequest } from "@opencompany/core/actions/service";
 import {
-  claimGoatActionAsyncRun,
-  claimGoatActionInvocation,
-  getGoatActionCapabilityTurnState,
-  recordGoatActionSourceDiscovery,
-  releaseGoatActionAsyncRun,
-  releaseGoatActionCapabilityQuote,
-  storeGoatActionCapabilityQuote,
+  claimActionAsyncRun,
+  claimActionInvocation,
+  getActionCapabilityTurnState,
+  recordActionSourceDiscovery,
+  releaseActionAsyncRun,
+  releaseActionCapabilityQuote,
+  storeActionCapabilityQuote,
 } from "@opencompany/db/action-governance";
 import { getDb } from "@opencompany/db/client";
-import {
-  goatCodexChatSessions,
-  goatCodexChatTurns,
-  goatUsers,
-  goatWorkspaceMembers,
-} from "@opencompany/db/schema";
+import { codexChatSessions, codexChatTurns, users, workspaceMembers } from "@opencompany/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
-import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
-import { executeGoatAction } from "@/lib/actions/execute";
+import { isChatActionsKilled, resolveActionCatalog } from "@/lib/actions/catalog";
+import { executeAction } from "@/lib/actions/execute";
 import type {
-  GoatCapabilityQuote,
-  GoatCapabilityTurnState,
-  GoatResolvedActionCatalog,
+  CapabilityQuote,
+  CapabilityTurnState,
+  ResolvedActionCatalog,
 } from "@/lib/actions/types";
 
-type GoatActionPrincipal = {
+type ActionPrincipal = {
   userWorkosId: string;
   workspaceId: string;
   chatSessionId: string;
   userTimezone: string;
 };
 
-type GoatActionGatewayDependencies = {
-  loadContext: (request: GoatActionGatewayRequest) => Promise<GoatActionPrincipal | null>;
-  resolveCatalog: typeof resolveGoatActionCatalog;
-  executeAction: typeof executeGoatAction;
+type ActionGatewayDependencies = {
+  loadContext: (request: ActionGatewayRequest) => Promise<ActionPrincipal | null>;
+  resolveCatalog: typeof resolveActionCatalog;
+  executeAction: typeof executeAction;
   getCapabilityTurnState: (
-    request: GoatActionGatewayRequest,
-    context: GoatActionPrincipal,
-  ) => GoatCapabilityTurnState;
-  recordSourceDiscovery: typeof recordGoatActionSourceDiscovery;
-  claimInvocation: typeof claimGoatActionInvocation;
+    request: ActionGatewayRequest,
+    context: ActionPrincipal,
+  ) => CapabilityTurnState;
+  recordSourceDiscovery: typeof recordActionSourceDiscovery;
+  claimInvocation: typeof claimActionInvocation;
   now: () => Date;
 };
 
-const defaultDependencies: GoatActionGatewayDependencies = {
-  loadContext: loadGoatCodexActionContext,
-  resolveCatalog: resolveGoatActionCatalog,
-  executeAction: executeGoatAction,
-  getCapabilityTurnState: getGoatCodexActionCapabilityTurnState,
-  recordSourceDiscovery: recordGoatActionSourceDiscovery,
-  claimInvocation: claimGoatActionInvocation,
+const defaultDependencies: ActionGatewayDependencies = {
+  loadContext: loadCodexActionContext,
+  resolveCatalog: resolveActionCatalog,
+  executeAction: executeAction,
+  getCapabilityTurnState: getCodexActionCapabilityTurnState,
+  recordSourceDiscovery: recordActionSourceDiscovery,
+  claimInvocation: claimActionInvocation,
   now: () => new Date(),
 };
 
-export async function executeGoatActionGateway(input: {
-  request: GoatActionGatewayRequest;
+export async function executeActionGateway(input: {
+  request: ActionGatewayRequest;
   signal: AbortSignal;
-  dependencies?: Partial<GoatActionGatewayDependencies>;
-}): Promise<GoatActionGatewayResponse> {
+  dependencies?: Partial<ActionGatewayDependencies>;
+}): Promise<ActionGatewayResponse> {
   const dependencies = { ...defaultDependencies, ...input.dependencies };
-  if (isGoatChatActionsKilled()) {
+  if (isChatActionsKilled()) {
     return gatewayError("disabled", "Actions are temporarily disabled.");
   }
 
@@ -75,7 +70,7 @@ export async function executeGoatActionGateway(input: {
     return gatewayError("not_permitted", "This turn can no longer access actions.");
   }
 
-  let catalog: GoatResolvedActionCatalog;
+  let catalog: ResolvedActionCatalog;
   try {
     catalog = projectActionCatalog(
       await dependencies.resolveCatalog({
@@ -90,7 +85,7 @@ export async function executeGoatActionGateway(input: {
 
   const turn = actionTurnRef(input.request, context);
   try {
-    return await serveGoatActionRequest({
+    return await serveActionRequest({
       request: input.request,
       catalog: {
         sources: catalog.providers,
@@ -132,10 +127,10 @@ export async function executeGoatActionGateway(input: {
   }
 }
 
-function getGoatCodexActionCapabilityTurnState(
-  request: GoatActionGatewayRequest,
-  context: GoatActionPrincipal,
-): GoatCapabilityTurnState {
+function getCodexActionCapabilityTurnState(
+  request: ActionGatewayRequest,
+  context: ActionPrincipal,
+): CapabilityTurnState {
   const turn = actionTurnRef(request, context);
   return {
     quotedTotalUsdMicros: 0,
@@ -144,18 +139,18 @@ function getGoatCodexActionCapabilityTurnState(
     asyncRunsStarted: 0,
     governance: {
       load: async () => {
-        const state = await getGoatActionCapabilityTurnState({ turn });
+        const state = await getActionCapabilityTurnState({ turn });
         return {
           quotedTotalUsdMicros: state.quotedTotalUsdMicros,
           admittedToolCallIds: state.admittedInvocationIds,
           quotesByToolCallId: new Map(
-            Object.entries(state.capabilityQuotes) as [string, GoatCapabilityQuote][],
+            Object.entries(state.capabilityQuotes) as [string, CapabilityQuote][],
           ),
           asyncRunsStarted: state.asyncRunsStarted,
         };
       },
       storeQuote: ({ toolCallId, quote, admitted, maxQuotedTotalUsdMicros }) =>
-        storeGoatActionCapabilityQuote({
+        storeActionCapabilityQuote({
           turn,
           invocationId: toolCallId,
           quote,
@@ -163,57 +158,57 @@ function getGoatCodexActionCapabilityTurnState(
           ...(maxQuotedTotalUsdMicros === undefined ? {} : { maxQuotedTotalUsdMicros }),
         }),
       releaseQuote: ({ toolCallId, quoteTotalCostUsdMicros }) =>
-        releaseGoatActionCapabilityQuote({
+        releaseActionCapabilityQuote({
           turn,
           invocationId: toolCallId,
           quoteTotalCostUsdMicros,
         }),
       claimAsyncRun: ({ toolCallId, maxRuns }) =>
-        claimGoatActionAsyncRun({
+        claimActionAsyncRun({
           turn,
           invocationId: toolCallId,
           maxRuns,
         }),
       releaseAsyncRun: ({ toolCallId }) =>
-        releaseGoatActionAsyncRun({ turn, invocationId: toolCallId }),
+        releaseActionAsyncRun({ turn, invocationId: toolCallId }),
     },
   };
 }
 
-async function loadGoatCodexActionContext(
-  request: GoatActionGatewayRequest,
-): Promise<GoatActionPrincipal | null> {
+async function loadCodexActionContext(
+  request: ActionGatewayRequest,
+): Promise<ActionPrincipal | null> {
   const [row] = await getDb()
     .select({
-      userWorkosId: goatCodexChatSessions.userWorkosId,
-      workspaceId: goatCodexChatSessions.workspaceId,
-      chatSessionId: goatCodexChatSessions.chatSessionId,
-      userTimezone: goatUsers.timezone,
+      userWorkosId: codexChatSessions.userWorkosId,
+      workspaceId: codexChatSessions.workspaceId,
+      chatSessionId: codexChatSessions.chatSessionId,
+      userTimezone: users.timezone,
     })
-    .from(goatCodexChatSessions)
+    .from(codexChatSessions)
     .innerJoin(
-      goatCodexChatTurns,
+      codexChatTurns,
       and(
-        eq(goatCodexChatTurns.id, request.turnId),
-        eq(goatCodexChatTurns.codexChatSessionId, goatCodexChatSessions.id),
-        eq(goatCodexChatTurns.userWorkosId, goatCodexChatSessions.userWorkosId),
+        eq(codexChatTurns.id, request.turnId),
+        eq(codexChatTurns.codexChatSessionId, codexChatSessions.id),
+        eq(codexChatTurns.userWorkosId, codexChatSessions.userWorkosId),
       ),
     )
-    .innerJoin(goatUsers, eq(goatUsers.workosUserId, goatCodexChatSessions.userWorkosId))
+    .innerJoin(users, eq(users.workosUserId, codexChatSessions.userWorkosId))
     .innerJoin(
-      goatWorkspaceMembers,
+      workspaceMembers,
       and(
-        eq(goatWorkspaceMembers.workspaceId, goatCodexChatSessions.workspaceId),
-        eq(goatWorkspaceMembers.userWorkosId, goatCodexChatSessions.userWorkosId),
+        eq(workspaceMembers.workspaceId, codexChatSessions.workspaceId),
+        eq(workspaceMembers.userWorkosId, codexChatSessions.userWorkosId),
       ),
     )
     .where(
       and(
-        eq(goatCodexChatSessions.id, request.sessionId),
-        inArray(goatCodexChatSessions.hostToolContractVersion, [
+        eq(codexChatSessions.id, request.sessionId),
+        inArray(codexChatSessions.hostToolContractVersion, [
           ...GOAT_ACTION_HOST_TOOL_CONTRACT_VERSIONS,
         ]),
-        eq(goatCodexChatTurns.status, "running"),
+        eq(codexChatTurns.status, "running"),
       ),
     )
     .limit(1);
@@ -227,11 +222,11 @@ async function loadGoatCodexActionContext(
   };
 }
 
-function gatewayError(code: string, message: string): GoatActionGatewayResponse {
+function gatewayError(code: string, message: string): ActionGatewayResponse {
   return { ok: false, error: { code, message } };
 }
 
-function actionTurnRef(request: GoatActionGatewayRequest, context: GoatActionPrincipal) {
+function actionTurnRef(request: ActionGatewayRequest, context: ActionPrincipal) {
   return {
     sessionId: request.sessionId,
     turnId: request.turnId,

@@ -1,18 +1,18 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
-import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
+import { currentUser } from "@/lib/auth";
+import { captureIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 import {
-  createOrResetGoatJamieWebhookEndpoint,
-  type GoatJamieWebhookSetup,
-  saveGoatJamieWebhookApiKey,
+  createOrResetJamieWebhookEndpoint,
+  type JamieWebhookSetup,
+  saveJamieWebhookApiKey,
 } from "@/lib/integrations/jamie";
 
 export type JamieWebhookEndpointActionResult =
   | {
       ok: true;
-      setup: GoatJamieWebhookSetup;
+      setup: JamieWebhookSetup;
     }
   | {
       ok: false;
@@ -20,13 +20,13 @@ export type JamieWebhookEndpointActionResult =
     };
 
 export async function createOrResetJamieWebhookEndpointAction(): Promise<JamieWebhookEndpointActionResult> {
-  const { user, workspace, role } = await currentGoatUser();
+  const { user, workspace, role } = await currentUser();
   // Jamie webhooks are workspace-owned plumbing; only admins manage them.
   if (role !== "admin") {
     return { ok: false, error: "Only workspace admins can manage the Jamie integration." };
   }
   try {
-    const setup = await createOrResetGoatJamieWebhookEndpoint({
+    const setup = await createOrResetJamieWebhookEndpoint({
       userWorkosId: user.workosUserId,
       workspaceId: workspace.id,
     });
@@ -47,16 +47,16 @@ export async function createOrResetJamieWebhookEndpointAction(): Promise<JamieWe
 export async function saveJamieWebhookApiKeyAction(
   apiKey: string,
 ): Promise<JamieWebhookEndpointActionResult> {
-  const { user, workspace, role } = await currentGoatUser();
+  const { user, workspace, role } = await currentUser();
   if (role !== "admin") {
     return { ok: false, error: "Only workspace admins can manage the Jamie integration." };
   }
   try {
-    const setup = await saveGoatJamieWebhookApiKey({
+    const setup = await saveJamieWebhookApiKey({
       workspaceId: workspace.id,
       apiKey,
     });
-    await captureGoatIntegrationAddedAnalytics({
+    await captureIntegrationAddedAnalytics({
       userWorkosId: user.workosUserId,
       workspaceId: workspace.id,
       provider: "jamie",

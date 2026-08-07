@@ -2,12 +2,12 @@ import { shellQuote } from "@opencompany/agent-runtime";
 import {
   GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
   GOAT_INFISICAL_HOST,
-  type GoatInfisicalAuthBundle,
-  newGoatInfisicalAuthFlowId,
-  saveGoatInfisicalConnection,
+  type InfisicalAuthBundle,
+  newInfisicalAuthFlowId,
+  saveInfisicalConnection,
 } from "@opencompany/db/infisical-auth";
-import { goatInfisicalAuthFlows } from "@opencompany/db/schema";
-import { requireGoatWorkspaceAdmin } from "@opencompany/db/workspaces";
+import { infisicalAuthFlows } from "@opencompany/db/schema";
+import { requireWorkspaceAdmin } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
 import { and, eq, inArray } from "drizzle-orm";
 import { Sandbox } from "e2b";
@@ -41,12 +41,12 @@ export type InfisicalAuthFlowStatus = {
   expiresAt: string;
 };
 
-export async function startGoatInfisicalAuthFlow(input: {
+export async function startInfisicalAuthFlow(input: {
   workspaceId: string;
   requestedByWorkosId: string;
   env: RunnerEnv;
 }): Promise<InfisicalAuthFlowStatus> {
-  await requireWorkspaceAdmin(input.workspaceId, input.requestedByWorkosId);
+  await ensureWorkspaceAdmin(input.workspaceId, input.requestedByWorkosId);
   await supersedeActiveFlows(input.workspaceId);
 
   const sandbox = await Sandbox.create(input.env.codexE2bTemplate ?? "codex", {
@@ -69,10 +69,10 @@ export async function startGoatInfisicalAuthFlow(input: {
       throw new Error("Infisical did not provide a browser login link.");
     }
 
-    const id = newGoatInfisicalAuthFlowId();
+    const id = newInfisicalAuthFlowId();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + INFISICAL_AUTH_FLOW_TTL_MS);
-    await getDb().insert(goatInfisicalAuthFlows).values({
+    await getDb().insert(infisicalAuthFlows).values({
       id,
       workspaceId: input.workspaceId,
       requestedByWorkosId: input.requestedByWorkosId,
@@ -108,13 +108,13 @@ export async function startGoatInfisicalAuthFlow(input: {
   }
 }
 
-export async function completeGoatInfisicalAuthFlow(input: {
+export async function completeInfisicalAuthFlow(input: {
   workspaceId: string;
   requestedByWorkosId: string;
   flowId: string;
   browserToken: string;
 }): Promise<InfisicalAuthFlowStatus | null> {
-  await requireWorkspaceAdmin(input.workspaceId, input.requestedByWorkosId);
+  await ensureWorkspaceAdmin(input.workspaceId, input.requestedByWorkosId);
   const flow = await loadFlow(input.workspaceId, input.requestedByWorkosId, input.flowId);
   if (!flow) return null;
   if (isTerminalStatus(flow.status)) return flowStatus(flow);
@@ -179,7 +179,7 @@ export async function completeGoatInfisicalAuthFlow(input: {
       browserCredentials.refreshToken,
       browserCredentials.privateKey,
     ]);
-    await saveGoatInfisicalConnection({
+    await saveInfisicalConnection({
       db: getDb(),
       workspaceId: input.workspaceId,
       authBundle,
@@ -271,21 +271,18 @@ export function decodeInfisicalBrowserToken(browserToken: string) {
   return { email, jwt, refreshToken, privateKey };
 }
 
-async function requireWorkspaceAdmin(workspaceId: string, requestedByWorkosId: string) {
-  await requireGoatWorkspaceAdmin(
-    { workspaceId, userWorkosId: requestedByWorkosId },
-    { db: getDb() },
-  );
+async function ensureWorkspaceAdmin(workspaceId: string, requestedByWorkosId: string) {
+  await requireWorkspaceAdmin({ workspaceId, userWorkosId: requestedByWorkosId }, { db: getDb() });
 }
 
 async function supersedeActiveFlows(workspaceId: string) {
   const activeFlows = await getDb()
-    .select({ id: goatInfisicalAuthFlows.id, sandboxId: goatInfisicalAuthFlows.sandboxId })
-    .from(goatInfisicalAuthFlows)
+    .select({ id: infisicalAuthFlows.id, sandboxId: infisicalAuthFlows.sandboxId })
+    .from(infisicalAuthFlows)
     .where(
       and(
-        eq(goatInfisicalAuthFlows.workspaceId, workspaceId),
-        inArray(goatInfisicalAuthFlows.status, ["pending", "link_ready"]),
+        eq(infisicalAuthFlows.workspaceId, workspaceId),
+        inArray(infisicalAuthFlows.status, ["pending", "link_ready"]),
       ),
     );
   const now = new Date();
@@ -461,7 +458,7 @@ async function validateInfisicalLogin(sandbox: SandboxHandle) {
 async function captureInfisicalAuthBundle(
   sandbox: SandboxHandle,
   initialRedactionValues: string[],
-): Promise<GoatInfisicalAuthBundle> {
+): Promise<InfisicalAuthBundle> {
   const configContents = sandboxFileText(await sandbox.files.read(INFISICAL_CONFIG_PATH));
   const listing = await sandbox.commands.run(
     `find ${shellQuote(INFISICAL_KEYRING_ROOT)} -mindepth 1 -maxdepth 1 -type f -printf '%f\\n'`,
@@ -512,12 +509,12 @@ async function captureInfisicalAuthBundle(
 async function loadFlow(workspaceId: string, requestedByWorkosId: string, flowId: string) {
   const [flow] = await getDb()
     .select()
-    .from(goatInfisicalAuthFlows)
+    .from(infisicalAuthFlows)
     .where(
       and(
-        eq(goatInfisicalAuthFlows.workspaceId, workspaceId),
-        eq(goatInfisicalAuthFlows.requestedByWorkosId, requestedByWorkosId),
-        eq(goatInfisicalAuthFlows.id, flowId),
+        eq(infisicalAuthFlows.workspaceId, workspaceId),
+        eq(infisicalAuthFlows.requestedByWorkosId, requestedByWorkosId),
+        eq(infisicalAuthFlows.id, flowId),
       ),
     )
     .limit(1);
@@ -532,17 +529,17 @@ async function markFlowTerminal(input: {
   now: Date;
 }) {
   await getDb()
-    .update(goatInfisicalAuthFlows)
+    .update(infisicalAuthFlows)
     .set({ status: input.status, statusReason: input.statusReason, updatedAt: input.now })
     .where(
       and(
-        eq(goatInfisicalAuthFlows.workspaceId, input.workspaceId),
-        eq(goatInfisicalAuthFlows.id, input.flowId),
+        eq(infisicalAuthFlows.workspaceId, input.workspaceId),
+        eq(infisicalAuthFlows.id, input.flowId),
       ),
     );
 }
 
-function flowStatus(flow: typeof goatInfisicalAuthFlows.$inferSelect): InfisicalAuthFlowStatus {
+function flowStatus(flow: typeof infisicalAuthFlows.$inferSelect): InfisicalAuthFlowStatus {
   return {
     id: flow.id,
     status: flow.status,

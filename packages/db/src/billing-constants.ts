@@ -33,17 +33,17 @@ export const GOAT_INGEST_ITEM_FEE_USD_MICROS = 0;
 export const GOAT_LOW_BALANCE_WARN_USD_MICROS = 2_000_000;
 export const GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS = 5_000_000;
 
-export function goatWorkspaceMemberCap(plan: "hobby" | "pro") {
+export function workspaceMemberCap(plan: "hobby" | "pro") {
   return plan === "pro" ? GOAT_PRO_MAX_MEMBERS : GOAT_HOBBY_MAX_MEMBERS;
 }
 
-export function goatIncludedUsageAllowanceCents(plan: "hobby" | "pro", seatQuantity: number) {
+export function includedUsageAllowanceCents(plan: "hobby" | "pro", seatQuantity: number) {
   return plan === "pro"
     ? Math.max(1, Math.floor(seatQuantity)) * GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS
     : GOAT_HOBBY_INCLUDED_USAGE_USD_CENTS;
 }
 
-export function goatCalendarMonthWindow(now: Date) {
+export function calendarMonthWindow(now: Date) {
   const start = new Date(now);
   start.setUTCDate(1);
   start.setUTCHours(0, 0, 0, 0);
@@ -63,6 +63,6 @@ export function goatCalendarMonthWindow(now: Date) {
 export const GOAT_BASIC_INGEST_MODEL = "anthropic/claude-haiku-4.5";
 export const GOAT_FRONTIER_INGEST_MODEL = "anthropic/claude-sonnet-5";
 
-export function goatIngestItemFeeUsdMicros(rawEventCount: number) {
+export function ingestItemFeeUsdMicros(rawEventCount: number) {
   return Math.max(0, rawEventCount) * GOAT_INGEST_ITEM_FEE_USD_MICROS;
 }

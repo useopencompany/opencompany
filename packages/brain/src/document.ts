@@ -1,6 +1,6 @@
 import { parseFrontmatter, serializeFrontmatter, splitFrontmatter } from "./frontmatter";
-import { parseGoatBrainInlineLinks } from "./inline-links";
-import type { GoatBrainDocument, GoatBrainFrontmatter, GoatBrainTimelineEntry } from "./schema";
+import { parseBrainInlineLinks } from "./inline-links";
+import type { BrainDocument, BrainFrontmatter, BrainTimelineEntry } from "./schema";
 import { deterministicEvidenceId, normalizeEvidenceId, normalizeTimelineAt } from "./timeline";
 
 export const GOAT_BRAIN_TRUTH_HEADING = "## Compiled truth";
@@ -18,7 +18,7 @@ export const GOAT_BRAIN_ASSET_TEXT_BEGIN =
 export const GOAT_BRAIN_ASSET_TEXT_END = "<!-- ASSET-TEXT:END -->";
 export const GOAT_BRAIN_ASSET_TEXT_HEADING = "## Extracted text";
 
-export function stripGoatBrainAssetTextBlock(source: string): string {
+export function stripBrainAssetTextBlock(source: string): string {
   let result = source;
   while (true) {
     const begin = result.indexOf(GOAT_BRAIN_ASSET_TEXT_BEGIN);
@@ -31,7 +31,7 @@ export function stripGoatBrainAssetTextBlock(source: string): string {
   return result;
 }
 
-export function extractGoatBrainAssetText(source: string): string {
+export function extractBrainAssetText(source: string): string {
   const begin = source.indexOf(GOAT_BRAIN_ASSET_TEXT_BEGIN);
   if (begin === -1) return "";
   const contentStart = begin + GOAT_BRAIN_ASSET_TEXT_BEGIN.length;
@@ -40,11 +40,11 @@ export function extractGoatBrainAssetText(source: string): string {
   return raw.replace(GOAT_BRAIN_ASSET_TEXT_HEADING, "").trim();
 }
 
-export function appendGoatBrainAssetTextBlock(content: string, assetText: string): string {
+export function appendBrainAssetTextBlock(content: string, assetText: string): string {
   const text = assetText.trim();
   if (!text) return content;
   const separator = content.endsWith("\n") ? "" : "\n";
-  // Purely additive so stripGoatBrainAssetTextBlock restores the input
+  // Purely additive so stripBrainAssetTextBlock restores the input
   // byte-for-byte — sync relies on that to keep content hashes stable.
   return `${content}${separator}${[
     GOAT_BRAIN_ASSET_TEXT_BEGIN,
@@ -58,30 +58,30 @@ export function appendGoatBrainAssetTextBlock(content: string, assetText: string
   ].join("\n")}`;
 }
 
-export type ParsedGoatBrainDocument = {
-  frontmatter: Partial<GoatBrainFrontmatter>;
+export type ParsedBrainDocument = {
+  frontmatter: Partial<BrainFrontmatter>;
   title: string;
   compiledTruth: string;
-  timeline: GoatBrainTimelineEntry[];
+  timeline: BrainTimelineEntry[];
 };
 
-export function parseGoatBrainDocument(source: string): ParsedGoatBrainDocument {
-  const { yaml, body } = splitFrontmatter(stripGoatBrainAssetTextBlock(source));
+export function parseBrainDocument(source: string): ParsedBrainDocument {
+  const { yaml, body } = splitFrontmatter(stripBrainAssetTextBlock(source));
   const frontmatter = parseFrontmatter(yaml);
-  const parsedBody = parseGoatBrainBody(body);
+  const parsedBody = parseBrainBody(body);
   return { frontmatter, ...parsedBody };
 }
 
-export function normalizeGoatBrainBody(value: string): string {
+export function normalizeBrainBody(value: string): string {
   const normalized = value.replace(/\r\n/g, "\n").trim();
-  if (!looksLikeLegacyGoatBrainDocument(normalized)) return value;
-  const parsed = parseGoatBrainDocument(normalized);
-  if (!isNestedLegacyGoatBrainDocument(parsed)) return value;
+  if (!looksLikeLegacyBrainDocument(normalized)) return value;
+  const parsed = parseBrainDocument(normalized);
+  if (!isNestedLegacyBrainDocument(parsed)) return value;
   return parsed.compiledTruth;
 }
 
-export function normalizeGoatBrainCompiledTruth(value: string, title?: string): string {
-  const body = normalizeGoatBrainBody(value);
+export function normalizeBrainCompiledTruth(value: string, title?: string): string {
+  const body = normalizeBrainBody(value);
   const trimmed = body.replace(/\r\n/g, "\n").trim();
   const normalizedTitle = comparableTitle(title ?? "");
   if (!normalizedTitle) return trimmed;
@@ -93,10 +93,10 @@ export function normalizeGoatBrainCompiledTruth(value: string, title?: string): 
   return trimmed.slice(firstHeading[0].length).replace(/^\n+/, "");
 }
 
-export function parseGoatBrainBody(body: string): {
+export function parseBrainBody(body: string): {
   title: string;
   compiledTruth: string;
-  timeline: GoatBrainTimelineEntry[];
+  timeline: BrainTimelineEntry[];
 } {
   const normalized = body.replace(/\r\n/g, "\n");
   const title = readTitle(normalized);
@@ -127,9 +127,9 @@ export function parseGoatBrainBody(body: string): {
   return { title, compiledTruth, timeline };
 }
 
-export function serializeGoatBrainDocument(doc: GoatBrainDocument): string {
+export function serializeBrainDocument(doc: BrainDocument): string {
   const title = doc.title.trim() || doc.frontmatter.title?.trim() || doc.frontmatter.id;
-  const compiledTruth = normalizeGoatBrainCompiledTruth(doc.compiledTruth, title);
+  const compiledTruth = normalizeBrainCompiledTruth(doc.compiledTruth, title);
   const timeline = [...doc.timeline].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
   const timelineBody = timeline
     .map((entry) => {
@@ -158,7 +158,7 @@ export function serializeGoatBrainDocument(doc: GoatBrainDocument): string {
   ].join("\n");
 }
 
-export function replaceGoatBrainCompiledTruth(
+export function replaceBrainCompiledTruth(
   source: string,
   compiledTruth: string,
   options: { updatedAt?: string } = {},
@@ -166,7 +166,7 @@ export function replaceGoatBrainCompiledTruth(
   const { yaml, body } = splitFrontmatter(source);
   const frontmatter = parseFrontmatter(yaml);
   const title = frontmatter.title ?? readTitle(body) ?? "Untitled";
-  const normalizedCompiledTruth = normalizeGoatBrainCompiledTruth(compiledTruth, title);
+  const normalizedCompiledTruth = normalizeBrainCompiledTruth(compiledTruth, title);
   const header =
     frontmatter.id &&
     frontmatter.folder &&
@@ -196,7 +196,7 @@ export function replaceGoatBrainCompiledTruth(
   return `${header}${replaceCompiledTruthInBody(body, normalizedCompiledTruth)}`;
 }
 
-function looksLikeLegacyGoatBrainDocument(value: string): boolean {
+function looksLikeLegacyBrainDocument(value: string): boolean {
   return (
     value.startsWith("---\n") &&
     value.includes("\n---") &&
@@ -205,7 +205,7 @@ function looksLikeLegacyGoatBrainDocument(value: string): boolean {
   );
 }
 
-function isNestedLegacyGoatBrainDocument(parsed: ParsedGoatBrainDocument): boolean {
+function isNestedLegacyBrainDocument(parsed: ParsedBrainDocument): boolean {
   return Boolean(
     parsed.frontmatter.id &&
       parsed.frontmatter.folder &&
@@ -289,8 +289,8 @@ function comparableTitle(value: string): string {
     .toLowerCase();
 }
 
-function parseTimeline(text: string): GoatBrainTimelineEntry[] {
-  const entries: GoatBrainTimelineEntry[] = [];
+function parseTimeline(text: string): BrainTimelineEntry[] {
+  const entries: BrainTimelineEntry[] = [];
   const re = /^###\s+(.+?)\s*$/gm;
   const matches = [...text.matchAll(re)];
   for (let i = 0; i < matches.length; i++) {
@@ -309,7 +309,7 @@ function parseTimeline(text: string): GoatBrainTimelineEntry[] {
 
 const TIMELINE_EVIDENCE_HEADING = /^(ev-[a-z0-9][a-z0-9-]{0,76})\s+-\s+(.+)$/;
 
-function parseTimelineHeading(heading: string, body: string): GoatBrainTimelineEntry | null {
+function parseTimelineHeading(heading: string, body: string): BrainTimelineEntry | null {
   const evidenceHeading = TIMELINE_EVIDENCE_HEADING.exec(heading);
   if (evidenceHeading?.[1] && evidenceHeading[2]) {
     const at = normalizeTimelineAt(evidenceHeading[2]);
@@ -325,9 +325,9 @@ function parseTimelineHeading(heading: string, body: string): GoatBrainTimelineE
   };
 }
 
-export function extractGoatBrainCitations(text: string): string[] {
+export function extractBrainCitations(text: string): string[] {
   const ids = new Set<string>();
-  for (const link of parseGoatBrainInlineLinks(text)) {
+  for (const link of parseBrainInlineLinks(text)) {
     if (link.kind !== "evidence") continue;
     const id = normalizeEvidenceId(link.target);
     if (id && link.valid) ids.add(id);
@@ -335,7 +335,7 @@ export function extractGoatBrainCitations(text: string): string[] {
   return [...ids];
 }
 
-export const extractCitations = extractGoatBrainCitations;
+export const extractCitations = extractBrainCitations;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

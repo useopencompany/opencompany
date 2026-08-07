@@ -4,7 +4,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 // sends the hex digest in the `linear-signature` header; the payload's
 // webhookTimestamp (epoch ms) guards against replays of captured requests.
 // Kept free of db/auth imports so the webhook route and its tests stay light.
-export function verifyGoatLinearWebhookSignature(input: {
+export function verifyLinearWebhookSignature(input: {
   rawBody: string;
   signature: string | null;
   webhookTimestampMs: number | null;

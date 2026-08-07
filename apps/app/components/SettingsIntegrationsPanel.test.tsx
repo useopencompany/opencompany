@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
+import { type IntegrationState, integrationStateFromRows } from "@/lib/integration-state";
 import { SettingsIntegrationsPanel } from "./SettingsIntegrationsPanel";
 
 const {
@@ -34,31 +34,31 @@ vi.mock("@/components/useHydrated", () => ({
 }));
 
 vi.mock("@/lib/codex-auth", () => ({
-  disconnectGoatCodexAuth: vi.fn(),
-  pollGoatCodexDeviceAuth: vi.fn(),
-  startGoatCodexDeviceAuth: vi.fn(),
+  disconnectCodexAuth: vi.fn(),
+  pollCodexDeviceAuth: vi.fn(),
+  startCodexDeviceAuth: vi.fn(),
 }));
 
 vi.mock("@/lib/infisical-auth", () => ({
-  completeGoatInfisicalAuth: completeInfisicalAuth,
-  disconnectGoatInfisicalAuth: disconnectInfisicalAuth,
-  startGoatInfisicalAuth: startInfisicalAuth,
+  completeInfisicalAuth: completeInfisicalAuth,
+  disconnectInfisicalAuth: disconnectInfisicalAuth,
+  startInfisicalAuth: startInfisicalAuth,
 }));
 
 // Pulls in @/lib/auth (authkit), which vitest cannot resolve.
 vi.mock("@/lib/claude-code-auth", () => ({
-  disconnectGoatClaudeCodeAuth: vi.fn(async () => ({ ok: true })),
-  saveGoatClaudeCodeToken: vi.fn(async () => ({ ok: true })),
+  disconnectClaudeCodeAuth: vi.fn(async () => ({ ok: true })),
+  saveClaudeCodeToken: vi.fn(async () => ({ ok: true })),
 }));
 
 // Pulls in @/lib/auth (authkit), which vitest cannot resolve.
 vi.mock("@/lib/integration-account-actions", () => ({
-  disconnectGoatIntegrationAccountAction: vi.fn(async () => ({ ok: true })),
-  getGoatIntegrationAccountUsageAction: vi.fn(async () => ({
+  disconnectIntegrationAccountAction: vi.fn(async () => ({ ok: true })),
+  getIntegrationAccountUsageAction: vi.fn(async () => ({
     ok: true,
     affectedBrainSourceCount: 0,
   })),
-  setGoatIntegrationCapabilityModeAction: vi.fn(async () => ({ ok: true })),
+  setIntegrationCapabilityModeAction: vi.fn(async () => ({ ok: true })),
 }));
 
 describe("SettingsIntegrationsPanel", () => {
@@ -80,7 +80,7 @@ describe("SettingsIntegrationsPanel", () => {
 
     render(
       <SettingsIntegrationsPanel
-        initialIntegrations={goatIntegrationStateFromRows([]) as GoatIntegrationState}
+        initialIntegrations={integrationStateFromRows([]) as IntegrationState}
         isWorkspaceAdmin
       />,
     );
@@ -103,7 +103,7 @@ describe("SettingsIntegrationsPanel", () => {
 
     render(
       <SettingsIntegrationsPanel
-        initialIntegrations={goatIntegrationStateFromRows([]) as GoatIntegrationState}
+        initialIntegrations={integrationStateFromRows([]) as IntegrationState}
         isWorkspaceAdmin
       />,
     );
@@ -117,7 +117,7 @@ describe("SettingsIntegrationsPanel", () => {
   it("does not surface Goat MCP as an integration (it lives in its own tab)", () => {
     render(
       <SettingsIntegrationsPanel
-        initialIntegrations={goatIntegrationStateFromRows([]) as GoatIntegrationState}
+        initialIntegrations={integrationStateFromRows([]) as IntegrationState}
         isWorkspaceAdmin={false}
       />,
     );
@@ -127,7 +127,7 @@ describe("SettingsIntegrationsPanel", () => {
   });
 
   it("shows a saved Claude Code token as pending until a successful turn validates it", () => {
-    const integrations = goatIntegrationStateFromRows([]) as GoatIntegrationState;
+    const integrations = integrationStateFromRows([]) as IntegrationState;
     integrations.claude_code = {
       provider: "claude_code",
       connected: true,
@@ -145,7 +145,7 @@ describe("SettingsIntegrationsPanel", () => {
   it("switches between the workspace and personal scopes", () => {
     render(
       <SettingsIntegrationsPanel
-        initialIntegrations={goatIntegrationStateFromRows([]) as GoatIntegrationState}
+        initialIntegrations={integrationStateFromRows([]) as IntegrationState}
         isWorkspaceAdmin
       />,
     );
@@ -190,7 +190,7 @@ describe("SettingsIntegrationsPanel", () => {
 
     render(
       <SettingsIntegrationsPanel
-        initialIntegrations={goatIntegrationStateFromRows([])}
+        initialIntegrations={integrationStateFromRows([])}
         isWorkspaceAdmin
       />,
     );
@@ -221,7 +221,7 @@ describe("SettingsIntegrationsPanel", () => {
   it("keeps workspace Infisical read-only for non-admin members", () => {
     render(
       <SettingsIntegrationsPanel
-        initialIntegrations={goatIntegrationStateFromRows([])}
+        initialIntegrations={integrationStateFromRows([])}
         isWorkspaceAdmin={false}
       />,
     );
@@ -234,7 +234,7 @@ describe("SettingsIntegrationsPanel", () => {
   });
 
   it("links a connected GitHub workspace to repository configuration", () => {
-    const integrations = goatIntegrationStateFromRows([]) as GoatIntegrationState;
+    const integrations = integrationStateFromRows([]) as IntegrationState;
     integrations.github = {
       provider: "github",
       connected: true,
@@ -252,7 +252,7 @@ describe("SettingsIntegrationsPanel", () => {
   });
 
   it("renders the Linear MCP connection instead of the separate brain-source accounts", () => {
-    const integrations = goatIntegrationStateFromRows([
+    const integrations = integrationStateFromRows([
       {
         id: "gint_linear_mcp",
         provider: "linear",
@@ -268,7 +268,7 @@ describe("SettingsIntegrationsPanel", () => {
         accountName: "Source workspace",
         status: "connected",
       },
-    ]) as GoatIntegrationState;
+    ]) as IntegrationState;
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
@@ -299,7 +299,7 @@ describe("SettingsIntegrationsPanel", () => {
   });
 
   it("flags a Linear MCP auth error and lets the user reconnect from integrations settings", () => {
-    const integrations = goatIntegrationStateFromRows([
+    const integrations = integrationStateFromRows([
       {
         id: "gint_linear_mcp",
         provider: "linear",
@@ -309,7 +309,7 @@ describe("SettingsIntegrationsPanel", () => {
         statusReason: "Linear authorization expired. Reconnect Linear in Settings.",
         capabilityModes: {},
       },
-    ]) as GoatIntegrationState;
+    ]) as IntegrationState;
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
@@ -335,7 +335,7 @@ describe("SettingsIntegrationsPanel", () => {
   });
 
   it("shows PostHog with read-on and create-insights-ask permissions", () => {
-    const integrations = goatIntegrationStateFromRows([
+    const integrations = integrationStateFromRows([
       {
         id: "gint_posthog_mcp",
         provider: "posthog",
@@ -344,7 +344,7 @@ describe("SettingsIntegrationsPanel", () => {
         status: "connected",
         capabilityModes: {},
       },
-    ]) as GoatIntegrationState;
+    ]) as IntegrationState;
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
@@ -370,7 +370,7 @@ describe("SettingsIntegrationsPanel", () => {
   });
 
   it("shows separate Gmail read, draft, and send controls with one scope-upgrade prompt", () => {
-    const integrations = goatIntegrationStateFromRows([
+    const integrations = integrationStateFromRows([
       {
         id: "gint_gmail",
         provider: "gmail",
@@ -380,7 +380,7 @@ describe("SettingsIntegrationsPanel", () => {
         scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
         capabilityModes: {},
       },
-    ]) as GoatIntegrationState;
+    ]) as IntegrationState;
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
@@ -416,7 +416,7 @@ describe("SettingsIntegrationsPanel", () => {
   });
 
   it("flags personal accounts with persisted auth errors without showing capability controls", () => {
-    const integrations = goatIntegrationStateFromRows([
+    const integrations = integrationStateFromRows([
       {
         id: "gint_gmail",
         provider: "gmail",
@@ -427,7 +427,7 @@ describe("SettingsIntegrationsPanel", () => {
         scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
         capabilityModes: {},
       },
-    ]) as GoatIntegrationState;
+    ]) as IntegrationState;
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
@@ -451,7 +451,7 @@ describe("SettingsIntegrationsPanel", () => {
   });
 
   it("prompts send-enabled Gmail accounts only for draft access", () => {
-    const integrations = goatIntegrationStateFromRows([
+    const integrations = integrationStateFromRows([
       {
         id: "gint_gmail",
         provider: "gmail",
@@ -464,7 +464,7 @@ describe("SettingsIntegrationsPanel", () => {
         ],
         capabilityModes: {},
       },
-    ]) as GoatIntegrationState;
+    ]) as IntegrationState;
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
@@ -482,7 +482,7 @@ describe("SettingsIntegrationsPanel", () => {
   });
 
   it("shows Attio read and write permission controls on the connected workspace", () => {
-    const integrations = goatIntegrationStateFromRows([
+    const integrations = integrationStateFromRows([
       {
         id: "gint_attio",
         provider: "attio",
@@ -491,7 +491,7 @@ describe("SettingsIntegrationsPanel", () => {
         status: "connected",
         capabilityModes: {},
       },
-    ]) as GoatIntegrationState;
+    ]) as IntegrationState;
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
@@ -516,7 +516,7 @@ describe("SettingsIntegrationsPanel", () => {
   });
 
   it("shows Drive read and write controls plus an OAuth upgrade when writes are unavailable", () => {
-    const integrations = goatIntegrationStateFromRows([
+    const integrations = integrationStateFromRows([
       {
         id: "gint_drive",
         provider: "google_drive",
@@ -526,7 +526,7 @@ describe("SettingsIntegrationsPanel", () => {
         scopes: ["https://www.googleapis.com/auth/drive.readonly"],
         capabilityModes: {},
       },
-    ]) as GoatIntegrationState;
+    ]) as IntegrationState;
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
@@ -560,7 +560,7 @@ describe("SettingsIntegrationsPanel", () => {
   });
 
   it("shows one broad Slack read permission for each connected workspace", () => {
-    const integrations = goatIntegrationStateFromRows([
+    const integrations = integrationStateFromRows([
       {
         id: "gint_slack",
         provider: "slack",
@@ -570,7 +570,7 @@ describe("SettingsIntegrationsPanel", () => {
         status: "connected",
         capabilityModes: {},
       },
-    ]) as GoatIntegrationState;
+    ]) as IntegrationState;
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
@@ -594,7 +594,7 @@ describe("SettingsIntegrationsPanel", () => {
   });
 
   it("connects Latitude as a personal OAuth integration with guarded writes", () => {
-    const integrations = goatIntegrationStateFromRows([
+    const integrations = integrationStateFromRows([
       {
         id: "gint_latitude",
         provider: "latitude",
@@ -603,7 +603,7 @@ describe("SettingsIntegrationsPanel", () => {
         status: "connected",
         capabilityModes: {},
       },
-    ]) as GoatIntegrationState;
+    ]) as IntegrationState;
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
@@ -629,7 +629,7 @@ describe("SettingsIntegrationsPanel", () => {
   });
 
   it("connects Neon personally with structure On and database queries Ask", () => {
-    const integrations = goatIntegrationStateFromRows([
+    const integrations = integrationStateFromRows([
       {
         id: "gint_neon",
         provider: "neon",
@@ -639,7 +639,7 @@ describe("SettingsIntegrationsPanel", () => {
         scopes: ["read"],
         capabilityModes: {},
       },
-    ]) as GoatIntegrationState;
+    ]) as IntegrationState;
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
@@ -669,7 +669,7 @@ describe("SettingsIntegrationsPanel", () => {
   });
 
   it("shows a workspace-owned Stripe connection and test-mode label", () => {
-    const integrations = goatIntegrationStateFromRows([
+    const integrations = integrationStateFromRows([
       {
         id: "gint_stripe",
         workspaceId: "workspace_1",
@@ -679,7 +679,7 @@ describe("SettingsIntegrationsPanel", () => {
         accountType: "stripe_test_restricted_key",
         status: "connected",
       },
-    ]) as GoatIntegrationState;
+    ]) as IntegrationState;
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 

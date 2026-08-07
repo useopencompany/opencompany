@@ -1,21 +1,21 @@
 import { createMCPClient } from "@ai-sdk/mcp";
-import { isValidGoatBrainSourceRef } from "@opencompany/brain";
+import { isValidBrainSourceRef } from "@opencompany/brain";
 import type { JSONSchema7, ToolExecutionOptions, ToolSet } from "ai";
 import {
   GOAT_LINEAR_MCP_ENDPOINT_URL,
-  getGoatLinearIntegrationState,
-  loadGoatLinearMcpWorkerConnection,
+  getLinearIntegrationState,
+  loadLinearMcpWorkerConnection,
 } from "../integrations/linear-mcp";
-import { effectiveCapabilityMode, type GoatCapabilityId, providerCapability } from "./capabilities";
+import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  ActionAuthError,
+  type ActionExecuteContext,
+  ActionInvalidParamsError,
+  ActionPermissionError,
+  type ActionProviderCatalog,
   GOAT_ACTION_EFFECTS_READ,
   GOAT_ACTION_EFFECTS_WRITE,
-  GoatActionAuthError,
-  type GoatActionExecuteContext,
-  GoatActionInvalidParamsError,
-  GoatActionPermissionError,
-  type GoatActionProviderCatalog,
-  type ResolvedGoatAction,
+  type ResolvedAction,
   requiredStringParam,
 } from "./types";
 
@@ -267,7 +267,7 @@ const LINEAR_CREATE_COMMENT_PARAMS: JSONSchema7 = {
 type LinearActionSpec = {
   id: string;
   remoteName: string;
-  capability: GoatCapabilityId;
+  capability: CapabilityId;
   description: string;
   params: JSONSchema7;
   normalize?: (params: Record<string, unknown>) => Record<string, unknown>;
@@ -412,8 +412,8 @@ const LINEAR_ACTION_SPECS: readonly LinearActionSpec[] = [
 
 export async function resolveLinearActions(
   userWorkosId: string,
-): Promise<GoatActionProviderCatalog | null> {
-  const state = await getGoatLinearIntegrationState(userWorkosId);
+): Promise<ActionProviderCatalog | null> {
+  const state = await getLinearIntegrationState(userWorkosId);
   const integrationId = state.integrationId;
   if (!state.connected || !integrationId) return null;
 
@@ -426,7 +426,7 @@ export async function resolveLinearActions(
       (spec.capability === "read" && readEnabled) || (spec.capability === "write" && writeEnabled),
   );
 
-  const actions: ResolvedGoatAction[] = specs.map((spec) => ({
+  const actions: ResolvedAction[] = specs.map((spec) => ({
     id: spec.id,
     provider: "linear",
     capability: spec.capability,
@@ -460,9 +460,9 @@ export async function resolveLinearActions(
 }
 
 function permissionAnnotation(
-  capabilityId: GoatCapabilityId,
+  capabilityId: CapabilityId,
   state: { integrationId: string; capabilityModes: unknown },
-): Pick<ResolvedGoatAction, "permissionMode" | "permission"> {
+): Pick<ResolvedAction, "permissionMode" | "permission"> {
   if (effectiveCapabilityMode("linear", capabilityId, state.capabilityModes) !== "ask") {
     return { permissionMode: "on" };
   }
@@ -480,17 +480,17 @@ function permissionAnnotation(
 async function executeLinearAction(
   spec: LinearActionSpec,
   params: Record<string, unknown>,
-  context: GoatActionExecuteContext,
+  context: ActionExecuteContext,
   expectedIntegrationId: string,
 ): Promise<unknown> {
   if (spec.capability === "write") {
     await assertLinearWriteStillEnabled(context.userWorkosId, expectedIntegrationId);
   }
 
-  const connection = await loadGoatLinearMcpWorkerConnection({
+  const connection = await loadLinearMcpWorkerConnection({
     userWorkosId: context.userWorkosId,
     onAuthorizationRequired: () => {
-      throw new GoatActionAuthError(
+      throw new ActionAuthError(
         "auth_expired",
         "linear",
         "The Linear connection needs reauthorization; reconnect Linear in Settings → Integrations.",
@@ -498,14 +498,14 @@ async function executeLinearAction(
     },
   });
   if (!connection.ok) {
-    throw new GoatActionAuthError(
+    throw new ActionAuthError(
       connection.reason === "not_connected" ? "not_connected" : "auth_expired",
       "linear",
       "Linear is not usable for this account; reconnect Linear in Settings → Integrations.",
     );
   }
   if (spec.capability === "write" && connection.integrationId !== expectedIntegrationId) {
-    throw new GoatActionPermissionError(
+    throw new ActionPermissionError(
       "linear",
       "The Linear connection changed before this change could be made. Retry so Goat can use the current connection and permission.",
     );
@@ -545,19 +545,19 @@ async function executeLinearAction(
 }
 
 async function assertLinearWriteStillEnabled(userWorkosId: string, expectedIntegrationId: string) {
-  const state = await getGoatLinearIntegrationState(userWorkosId);
+  const state = await getLinearIntegrationState(userWorkosId);
   // Let the normal connection loader return the structured reconnect error for
   // disconnected accounts. A different connected row is a permission boundary:
   // the approval/catalog belonged to the previous connection.
   if (!state.connected) return;
   if (state.integrationId !== expectedIntegrationId) {
-    throw new GoatActionPermissionError(
+    throw new ActionPermissionError(
       "linear",
       "The Linear connection changed before this change could be made. Retry so Goat can use the current connection and permission.",
     );
   }
   if (effectiveCapabilityMode("linear", "write", state.capabilityModes) === "off") {
-    throw new GoatActionPermissionError(
+    throw new ActionPermissionError(
       "linear",
       "Writing to Linear is turned off. It can be changed under Settings → Integrations.",
     );
@@ -593,7 +593,7 @@ function addLinearIssueSource(value: unknown, integrationId: string): unknown {
   const identifier = typeof value.identifier === "string" ? value.identifier.trim() : "";
   if (!identifier) return { ...value, integrationId };
   const sourceRef = `linear:issue:${identifier}`;
-  if (!isValidGoatBrainSourceRef(sourceRef)) {
+  if (!isValidBrainSourceRef(sourceRef)) {
     throw new Error("Linear returned an identifier that cannot form a Brain source reference.");
   }
   return { ...value, sourceRef, integrationId };
@@ -621,7 +621,7 @@ export function normalizeLinearListIssuesInput(input: unknown): Record<string, u
   const priority = input.priority;
   const unprioritized = input.unprioritized === true;
   if (unprioritized && priority !== undefined && priority !== null && priority !== 0) {
-    throw new GoatActionInvalidParamsError(
+    throw new ActionInvalidParamsError(
       "Choose either a priority or unprioritized issues, not both.",
     );
   }
@@ -634,9 +634,7 @@ export function normalizeLinearListIssuesInput(input: unknown): Record<string, u
   const assignee = normalized.assignee;
   const unassigned = input.unassigned === true;
   if (unassigned && assignee !== undefined) {
-    throw new GoatActionInvalidParamsError(
-      "Choose either an assignee or unassigned issues, not both.",
-    );
+    throw new ActionInvalidParamsError("Choose either an assignee or unassigned issues, not both.");
   }
   if (unassigned) normalized.assignee = null;
 
@@ -645,7 +643,7 @@ export function normalizeLinearListIssuesInput(input: unknown): Record<string, u
 
 export function normalizeLinearCreateIssueInput(input: unknown): Record<string, unknown> {
   if (!isRecord(input)) {
-    throw new GoatActionInvalidParamsError("Linear issue parameters must be an object.");
+    throw new ActionInvalidParamsError("Linear issue parameters must be an object.");
   }
   assertOnlyKnownParams(input, LINEAR_CREATE_ISSUE_PARAM_KEYS);
 
@@ -674,7 +672,7 @@ export function normalizeLinearCreateIssueInput(input: unknown): Record<string, 
 
 export function normalizeLinearUpdateIssueInput(input: unknown): Record<string, unknown> {
   if (!isRecord(input)) {
-    throw new GoatActionInvalidParamsError("Linear issue parameters must be an object.");
+    throw new ActionInvalidParamsError("Linear issue parameters must be an object.");
   }
   assertOnlyKnownParams(input, LINEAR_UPDATE_ISSUE_PARAM_KEYS);
 
@@ -717,14 +715,14 @@ export function normalizeLinearUpdateIssueInput(input: unknown): Record<string, 
   if (labels !== undefined) normalized.labels = labels;
 
   if (Object.keys(normalized).length === 1) {
-    throw new GoatActionInvalidParamsError("Provide at least one issue field to update.");
+    throw new ActionInvalidParamsError("Provide at least one issue field to update.");
   }
   return normalized;
 }
 
 export function normalizeLinearCreateCommentInput(input: unknown): Record<string, unknown> {
   if (!isRecord(input)) {
-    throw new GoatActionInvalidParamsError("Linear comment parameters must be an object.");
+    throw new ActionInvalidParamsError("Linear comment parameters must be an object.");
   }
   assertOnlyKnownParams(input, LINEAR_CREATE_COMMENT_PARAM_KEYS);
   return {
@@ -764,14 +762,14 @@ function assertOnlyKnownParams(params: Record<string, unknown>, allowed: readonl
   const allowedSet = new Set(allowed);
   const unknown = Object.keys(params).find((key) => !allowedSet.has(key));
   if (unknown) {
-    throw new GoatActionInvalidParamsError(`Unknown parameter ${JSON.stringify(unknown)}.`);
+    throw new ActionInvalidParamsError(`Unknown parameter ${JSON.stringify(unknown)}.`);
   }
 }
 
 function requiredBoundedString(params: Record<string, unknown>, key: string, maxChars: number) {
   const value = requiredStringParam(params, key);
   if (value.length > maxChars) {
-    throw new GoatActionInvalidParamsError(`"${key}" exceeds ${maxChars} characters.`);
+    throw new ActionInvalidParamsError(`"${key}" exceeds ${maxChars} characters.`);
   }
   return value;
 }
@@ -780,22 +778,22 @@ function optionalBoundedString(params: Record<string, unknown>, key: string, max
   const value = params[key];
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "string" || !value.trim()) {
-    throw new GoatActionInvalidParamsError(`"${key}" must be a non-empty string.`);
+    throw new ActionInvalidParamsError(`"${key}" must be a non-empty string.`);
   }
   const trimmed = value.trim();
   if (trimmed.length > maxChars) {
-    throw new GoatActionInvalidParamsError(`"${key}" exceeds ${maxChars} characters.`);
+    throw new ActionInvalidParamsError(`"${key}" exceeds ${maxChars} characters.`);
   }
   return trimmed;
 }
 
 function boundedStringAllowingEmpty(value: unknown, key: string, maxChars: number) {
   if (typeof value !== "string") {
-    throw new GoatActionInvalidParamsError(`"${key}" must be a string.`);
+    throw new ActionInvalidParamsError(`"${key}" must be a string.`);
   }
   const trimmed = value.trim();
   if (trimmed.length > maxChars) {
-    throw new GoatActionInvalidParamsError(`"${key}" exceeds ${maxChars} characters.`);
+    throw new ActionInvalidParamsError(`"${key}" exceeds ${maxChars} characters.`);
   }
   return trimmed;
 }
@@ -803,9 +801,7 @@ function boundedStringAllowingEmpty(value: unknown, key: string, maxChars: numbe
 function normalizeLinearPriority(value: unknown): number | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 4) {
-    throw new GoatActionInvalidParamsError(
-      '"priority" must be an integer from 0 (none) to 4 (low).',
-    );
+    throw new ActionInvalidParamsError('"priority" must be an integer from 0 (none) to 4 (low).');
   }
   return value;
 }
@@ -813,22 +809,22 @@ function normalizeLinearPriority(value: unknown): number | undefined {
 function normalizeLinearLabels(value: unknown): string[] | undefined {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) {
-    throw new GoatActionInvalidParamsError('"labels" must be an array of label names or IDs.');
+    throw new ActionInvalidParamsError('"labels" must be an array of label names or IDs.');
   }
   if (value.length > MAX_LINEAR_LABELS) {
-    throw new GoatActionInvalidParamsError(`"labels" allows at most ${MAX_LINEAR_LABELS} entries.`);
+    throw new ActionInvalidParamsError(`"labels" allows at most ${MAX_LINEAR_LABELS} entries.`);
   }
   const seen = new Set<string>();
   const labels: string[] = [];
   for (const entry of value) {
     if (typeof entry !== "string" || !entry.trim()) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         '"labels" must contain only non-empty label names or IDs.',
       );
     }
     const label = entry.trim();
     if (label.length > MAX_LINEAR_LABEL_CHARS) {
-      throw new GoatActionInvalidParamsError(
+      throw new ActionInvalidParamsError(
         `Linear labels may not exceed ${MAX_LINEAR_LABEL_CHARS} characters.`,
       );
     }

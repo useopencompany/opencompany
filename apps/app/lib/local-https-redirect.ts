@@ -17,7 +17,7 @@ export function isInitialDocumentRequest(request: RedirectRequest) {
   return isDocumentRequest && !isRscRequest && !isPrefetch;
 }
 
-export function localGoatHttpsRedirectUrl(request: RedirectRequest) {
+export function localHttpsRedirectUrl(request: RedirectRequest) {
   if (!isInitialDocumentRequest(request)) return null;
 
   const configured = (process.env.NEXT_PUBLIC_APP_URL?.trim() || "").replace(/\/+$/, "");

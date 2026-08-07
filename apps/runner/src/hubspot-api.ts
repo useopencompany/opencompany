@@ -1,9 +1,9 @@
 import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-  refreshGoatIntegrationCredential,
+  loadIntegrationCredential,
+  markIntegrationStatus,
+  refreshIntegrationCredential,
 } from "@opencompany/db/integrations";
-import type { GoatHubspotObjectType } from "@opencompany/db/schema";
+import type { HubspotObjectType } from "@opencompany/db/schema";
 import { createLogger } from "@opencompany/observability";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
@@ -24,20 +24,20 @@ const REFRESH_SKEW_MS = 60_000;
 const SNAPSHOT_ASSOCIATION_LIMIT = 5;
 const SNAPSHOT_PROPERTY_VALUE_MAX_CHARS = 2_000;
 
-const OBJECT_TYPE_PLURAL: Record<GoatHubspotObjectType, string> = {
+const OBJECT_TYPE_PLURAL: Record<HubspotObjectType, string> = {
   contact: "contacts",
   company: "companies",
   deal: "deals",
 };
 
 // HubSpot record-page object type ids (contact 0-1, company 0-2, deal 0-3).
-const OBJECT_TYPE_URL_ID: Record<GoatHubspotObjectType, string> = {
+const OBJECT_TYPE_URL_ID: Record<HubspotObjectType, string> = {
   contact: "0-1",
   company: "0-2",
   deal: "0-3",
 };
 
-const SNAPSHOT_PROPERTIES: Record<GoatHubspotObjectType, readonly string[]> = {
+const SNAPSHOT_PROPERTIES: Record<HubspotObjectType, readonly string[]> = {
   contact: [
     "firstname",
     "lastname",
@@ -105,7 +105,7 @@ export async function getHubspotAccessToken(input: {
   integrationId: string;
   forceRefresh?: boolean;
 }): Promise<string | null> {
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId: input.userWorkosId,
     integrationId: input.integrationId,
     provider: "hubspot",
@@ -179,7 +179,7 @@ async function refreshHubspotAccessToken(
   };
   if (!result.access_token) return null;
 
-  await refreshGoatIntegrationCredential({
+  await refreshIntegrationCredential({
     userWorkosId: input.userWorkosId,
     integrationId: input.integrationId,
     provider: "hubspot",
@@ -202,7 +202,7 @@ async function markHubspotNeedsReauth(
   input: { userWorkosId: string; integrationId: string },
   reason: string,
 ) {
-  await markGoatIntegrationStatus({
+  await markIntegrationStatus({
     userWorkosId: input.userWorkosId,
     integrationId: input.integrationId,
     provider: "hubspot",
@@ -223,7 +223,7 @@ async function markHubspotNeedsReauth(
 export async function fetchHubspotObjectSnapshot(input: {
   token: string;
   portalId: string;
-  objectType: GoatHubspotObjectType;
+  objectType: HubspotObjectType;
   objectId: string;
 }): Promise<HubspotObjectSnapshot | null> {
   try {
@@ -308,7 +308,7 @@ function associationIds(
 
 async function resolveAssociationNames(input: {
   token: string;
-  objectType: GoatHubspotObjectType;
+  objectType: HubspotObjectType;
   ids: string[];
 }): Promise<string[] | undefined> {
   if (input.ids.length === 0) return undefined;
@@ -341,7 +341,7 @@ async function resolveAssociationNames(input: {
 }
 
 function snapshotName(
-  objectType: GoatHubspotObjectType,
+  objectType: HubspotObjectType,
   properties: Record<string, string>,
 ): string | null {
   if (objectType === "contact") {

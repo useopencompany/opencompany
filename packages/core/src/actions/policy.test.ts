@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { projectActionCatalog } from "./policy";
-import type { GoatResolvedActionCatalog, ResolvedGoatAction } from "./types";
+import type { ResolvedAction, ResolvedActionCatalog } from "./types";
 import {
   GOAT_ACTION_EFFECTS_METERED_READ,
   GOAT_ACTION_EFFECTS_READ,
@@ -9,10 +9,10 @@ import {
 
 const action = (
   id: string,
-  provider: ResolvedGoatAction["provider"],
-  effects: ResolvedGoatAction["effects"],
-  permissionMode: ResolvedGoatAction["permissionMode"] = "on",
-): ResolvedGoatAction => ({
+  provider: ResolvedAction["provider"],
+  effects: ResolvedAction["effects"],
+  permissionMode: ResolvedAction["permissionMode"] = "on",
+): ResolvedAction => ({
   id,
   provider,
   capability: id === "neon.run_sql" ? "query" : effects.mutatesExternalSystem ? "write" : "read",
@@ -23,7 +23,7 @@ const action = (
   execute: vi.fn(),
 });
 
-const catalog: GoatResolvedActionCatalog = {
+const catalog: ResolvedActionCatalog = {
   providers: [
     { id: "gmail", label: "Gmail", description: "Mail" },
     { id: "neon", kind: "integration", label: "Neon", description: "Database" },

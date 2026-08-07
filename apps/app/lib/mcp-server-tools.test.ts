@@ -1,23 +1,23 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { GoatBrainWithWorkspace } from "@opencompany/db/workspaces";
+import type { BrainWithWorkspace } from "@opencompany/db/workspaces";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const workspacesMock = vi.hoisted(() => ({
-  listAccessibleGoatBrainsForUser: vi.fn(),
-  getGoatBrainAccess: vi.fn(),
+  listAccessibleBrainsForUser: vi.fn(),
+  getBrainAccess: vi.fn(),
 }));
 const brainCliMock = vi.hoisted(() => ({
-  runGoatBrainToolForUser: vi.fn(),
+  runBrainToolForUser: vi.fn(),
 }));
 const captureMock = vi.hoisted(() => ({
-  captureToGoatBrainInbox: vi.fn(),
+  captureToBrainInbox: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/workspaces", () => workspacesMock);
 vi.mock("@/lib/brain-cli", () => brainCliMock);
 vi.mock("@/lib/brain-capture", () => captureMock);
 
-import { registerGoatBrainTools } from "./mcp-server";
+import { registerBrainTools } from "./mcp-server";
 
 type RegisteredTool = {
   config: Record<string, unknown>;
@@ -41,7 +41,7 @@ const general = {
     workosOrganizationId: null,
   },
   workspaceRole: "admin",
-} as GoatBrainWithWorkspace;
+} as BrainWithWorkspace;
 
 function registerTools() {
   const tools = new Map<string, RegisteredTool>();
@@ -52,7 +52,7 @@ function registerTools() {
       },
     ),
   } as unknown as McpServer;
-  registerGoatBrainTools(server, {
+  registerBrainTools(server, {
     userWorkosId: "user_123",
     gatewayApiKey: "gateway_test",
   });
@@ -67,19 +67,19 @@ function getTool(tools: Map<string, RegisteredTool>, name: string): RegisteredTo
 
 /** The toolInput passed to the shared read engine on the most recent read call. */
 function lastToolInput() {
-  const calls = brainCliMock.runGoatBrainToolForUser.mock.calls;
+  const calls = brainCliMock.runBrainToolForUser.mock.calls;
   return calls.at(-1)?.[0]?.toolInput;
 }
 
 describe("Goat MCP tools", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    workspacesMock.listAccessibleGoatBrainsForUser.mockResolvedValue([general]);
-    workspacesMock.getGoatBrainAccess.mockResolvedValue({
+    workspacesMock.listAccessibleBrainsForUser.mockResolvedValue([general]);
+    workspacesMock.getBrainAccess.mockResolvedValue({
       brain: general.brain,
       workspaceRole: "admin",
     });
-    brainCliMock.runGoatBrainToolForUser.mockResolvedValue({
+    brainCliMock.runBrainToolForUser.mockResolvedValue({
       ok: true,
       brainRef: general.brain.id,
       exitCode: 0,
@@ -87,7 +87,7 @@ describe("Goat MCP tools", () => {
       stderr: "",
       parsed: { hits: [] },
     });
-    captureMock.captureToGoatBrainInbox.mockResolvedValue({
+    captureMock.captureToBrainInbox.mockResolvedValue({
       ok: true,
       draftBrainId: "pricing-idea",
       path: "inbox/pricing-idea.md",
@@ -149,8 +149,8 @@ describe("Goat MCP tools", () => {
     const tools = registerTools();
     const result = await getTool(tools, "search_brain").callback({ query: "workos sponsorship" });
 
-    expect(brainCliMock.runGoatBrainToolForUser).toHaveBeenCalledTimes(1);
-    expect(brainCliMock.runGoatBrainToolForUser).toHaveBeenCalledWith(
+    expect(brainCliMock.runBrainToolForUser).toHaveBeenCalledTimes(1);
+    expect(brainCliMock.runBrainToolForUser).toHaveBeenCalledWith(
       expect.objectContaining({
         brainRef: general.brain.id,
         userWorkosId: "user_123",
@@ -191,7 +191,7 @@ describe("Goat MCP tools", () => {
   });
 
   it("search_brain exposes continuation metadata in MCP output", async () => {
-    brainCliMock.runGoatBrainToolForUser.mockResolvedValue({
+    brainCliMock.runBrainToolForUser.mockResolvedValue({
       ok: true,
       brainRef: general.brain.id,
       exitCode: 0,
@@ -249,7 +249,7 @@ describe("Goat MCP tools", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain("needs at least one id");
-    expect(brainCliMock.runGoatBrainToolForUser).not.toHaveBeenCalled();
+    expect(brainCliMock.runBrainToolForUser).not.toHaveBeenCalled();
   });
 
   it("list_documents and get_timeline map to their commands", async () => {
@@ -280,8 +280,8 @@ describe("Goat MCP tools", () => {
       brain: { id: "research-cccccccccccc", slug: "research", name: "Research", description: null },
       workspace: general.workspace,
       workspaceRole: "admin",
-    } as GoatBrainWithWorkspace;
-    workspacesMock.listAccessibleGoatBrainsForUser.mockResolvedValue([general, research]);
+    } as BrainWithWorkspace;
+    workspacesMock.listAccessibleBrainsForUser.mockResolvedValue([general, research]);
 
     const tools = registerTools();
     await getTool(tools, "search_brain").callback({
@@ -289,7 +289,7 @@ describe("Goat MCP tools", () => {
       brain_id: "research-cccccccccccc",
     });
 
-    expect(brainCliMock.runGoatBrainToolForUser).toHaveBeenCalledWith(
+    expect(brainCliMock.runBrainToolForUser).toHaveBeenCalledWith(
       expect.objectContaining({ brainRef: "research-cccccccccccc" }),
     );
   });
@@ -299,8 +299,8 @@ describe("Goat MCP tools", () => {
       brain: { id: "research-cccccccccccc", slug: "research", name: "Research", description: null },
       workspace: general.workspace,
       workspaceRole: "admin",
-    } as GoatBrainWithWorkspace;
-    workspacesMock.listAccessibleGoatBrainsForUser.mockResolvedValue([general, research]);
+    } as BrainWithWorkspace;
+    workspacesMock.listAccessibleBrainsForUser.mockResolvedValue([general, research]);
 
     const tools = registerTools();
     const result = await getTool(tools, "search_brain").callback({ query: "roadmap" });
@@ -308,7 +308,7 @@ describe("Goat MCP tools", () => {
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain(general.brain.id);
     expect(result.content[0]?.text).toContain("research-cccccccccccc");
-    expect(brainCliMock.runGoatBrainToolForUser).not.toHaveBeenCalled();
+    expect(brainCliMock.runBrainToolForUser).not.toHaveBeenCalled();
   });
 
   it("captures explicit content into the selected brain and returns structured status", async () => {
@@ -320,7 +320,7 @@ describe("Goat MCP tools", () => {
       intent: "Product principle",
     });
 
-    expect(captureMock.captureToGoatBrainInbox).toHaveBeenCalledWith({
+    expect(captureMock.captureToBrainInbox).toHaveBeenCalledWith({
       brainRef: general.brain.id,
       userWorkosId: "user_123",
       text: "Keep usage-based pricing simple for small teams.",
@@ -352,13 +352,13 @@ describe("Goat MCP tools", () => {
       content: "Remember this.",
     });
 
-    expect(captureMock.captureToGoatBrainInbox).toHaveBeenCalledWith(
+    expect(captureMock.captureToBrainInbox).toHaveBeenCalledWith(
       expect.objectContaining({ brainRef: general.brain.id }),
     );
   });
 
   it("keeps the existing workspace-admin write boundary", async () => {
-    workspacesMock.getGoatBrainAccess.mockResolvedValue({
+    workspacesMock.getBrainAccess.mockResolvedValue({
       brain: general.brain,
       workspaceRole: "member",
     });
@@ -367,7 +367,7 @@ describe("Goat MCP tools", () => {
 
     expect(result).toMatchObject({ isError: true });
     expect(result.content[0]?.text).toContain("Only workspace admins");
-    expect(captureMock.captureToGoatBrainInbox).not.toHaveBeenCalled();
+    expect(captureMock.captureToBrainInbox).not.toHaveBeenCalled();
   });
 
   it("reports save capability when listing brains", async () => {

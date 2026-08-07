@@ -1,26 +1,26 @@
-import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
+import { captureIngestionQuotaAnalytics } from "@opencompany/analytics/app";
 import {
   type NormalizedSlackConversationMessage,
   normalizeSlackConversationWindow,
 } from "@opencompany/brain";
 import {
-  attributeGoatBrainSourceEventClaims,
-  claimGoatBrainSourceEvents,
+  attributeBrainSourceEventClaims,
+  claimBrainSourceEvents,
 } from "@opencompany/db/brain-event-claims";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
-  upsertGoatBrainSourceItemAndEnqueue,
+  upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
-import { loadGoatIntegrationCredential } from "@opencompany/db/integrations";
-import type { GoatIntegrationStatus, GoatSlackChannelType } from "@opencompany/db/schema";
+import { loadIntegrationCredential } from "@opencompany/db/integrations";
+import type { IntegrationStatus, SlackChannelType } from "@opencompany/db/schema";
 import {
-  goatSlackSelectedConversationIds,
-  listEnabledGoatSlackBrainSourceRoutes,
-  newGoatSlackConversationWindowId,
+  listEnabledSlackBrainSourceRoutes,
+  newSlackConversationWindowId,
+  slackSelectedConversationIds,
 } from "@opencompany/db/slack";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
-import { wakeGoatBrainIngestWorker } from "./brain-ingest-worker";
+import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { getDb } from "./db";
 import {
   fetchSlackConversationContext,
@@ -39,12 +39,12 @@ export const SLACK_MAX_WAIT_MS = 60 * 60_000;
 export const SLACK_MAX_WINDOW_MESSAGES = 200;
 const SLACK_FLUSH_POLL_INTERVAL_MS = 60_000;
 
-export type GoatSlackDueWindow = {
+export type SlackDueWindow = {
   integrationId: string;
   userWorkosId: string;
   teamId: string;
   channelId: string;
-  channelType: GoatSlackChannelType;
+  channelType: SlackChannelType;
 };
 
 type BufferedSlackMessageRow = {
@@ -57,11 +57,11 @@ type BufferedSlackMessageRow = {
   payload: Record<string, unknown>;
 };
 
-export async function listDueGoatSlackConversationWindows(input: {
+export async function listDueSlackConversationWindows(input: {
   now?: Date;
   quietPeriodMs?: number;
   maxWaitMs?: number;
-}): Promise<GoatSlackDueWindow[]> {
+}): Promise<SlackDueWindow[]> {
   const now = input.now ?? new Date();
   const quietCutoff = new Date(now.getTime() - (input.quietPeriodMs ?? SLACK_QUIET_PERIOD_MS));
   const maxWaitCutoff = new Date(now.getTime() - (input.maxWaitMs ?? SLACK_MAX_WAIT_MS));
@@ -77,10 +77,10 @@ export async function listDueGoatSlackConversationWindows(input: {
     GROUP BY 1, 2, 3, 4, 5
     HAVING max(received_at) < ${quietCutoff} OR min(received_at) < ${maxWaitCutoff}
   `);
-  return rowsFromExecute<GoatSlackDueWindow>(result);
+  return rowsFromExecute<SlackDueWindow>(result);
 }
 
-export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindow): Promise<{
+export async function flushSlackConversationWindow(window: SlackDueWindow): Promise<{
   sourceItemId: string;
   messageCount: number;
   enqueued: boolean;
@@ -135,7 +135,7 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
     if (claimed.length !== preview.length) return null;
 
     const item = normalizeSlackConversationWindow({
-      windowId: newGoatSlackConversationWindowId(),
+      windowId: newSlackConversationWindowId(),
       teamId: window.teamId,
       ...(integration.teamDomain ? { teamDomain: integration.teamDomain } : {}),
       channelId: window.channelId,
@@ -152,10 +152,10 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
     // so the buffer never wedges on a dead token.
     const routes =
       integration.status === "connected"
-        ? await listEnabledGoatSlackBrainSourceRoutes([window.integrationId], tx)
+        ? await listEnabledSlackBrainSourceRoutes([window.integrationId], tx)
         : [];
     const candidateBrainRefs = routes
-      .filter((route) => goatSlackSelectedConversationIds(route.config).has(window.channelId))
+      .filter((route) => slackSelectedConversationIds(route.config).has(window.channelId))
       .map((route) => route.brainRef);
 
     // Cross-member dedup: several members' integrations can watch the same
@@ -167,7 +167,7 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
     const claimedEventKeysByBrainRef = new Map<string, string[]>();
     const newlyClaimedEventKeys = new Set<string>();
     for (const brainRef of new Set(candidateBrainRefs)) {
-      const { claimedEventKeys } = await claimGoatBrainSourceEvents({
+      const { claimedEventKeys } = await claimBrainSourceEvents({
         brainRef,
         sourceProvider: "slack",
         eventKeys,
@@ -179,7 +179,7 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
       for (const eventKey of claimedEventKeys) newlyClaimedEventKeys.add(eventKey);
     }
 
-    const upserted = await upsertGoatBrainSourceItemAndEnqueue({
+    const upserted = await upsertBrainSourceItemAndEnqueue({
       userWorkosId: window.userWorkosId,
       sourceConnectionId: window.integrationId,
       integrationId: window.integrationId,
@@ -202,7 +202,7 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
       )})
     `);
     for (const brainRef of brainRefs) {
-      await attributeGoatBrainSourceEventClaims({
+      await attributeBrainSourceEventClaims({
         brainRef,
         sourceProvider: "slack",
         eventKeys: claimedEventKeysByBrainRef.get(brainRef) ?? [],
@@ -219,12 +219,12 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
     };
   });
 
-  captureGoatIngestionQuotaAnalytics(result?.quotaUpdates);
-  if (result?.enqueued) wakeGoatBrainIngestWorker();
+  captureIngestionQuotaAnalytics(result?.quotaUpdates);
+  if (result?.enqueued) wakeBrainIngestWorker();
   return result;
 }
 
-async function previewBufferedSlackMessages(window: GoatSlackDueWindow) {
+async function previewBufferedSlackMessages(window: SlackDueWindow) {
   return rowsFromExecute<BufferedSlackMessageRow>(
     await getDb().execute(sql`
       SELECT
@@ -245,7 +245,7 @@ async function previewBufferedSlackMessages(window: GoatSlackDueWindow) {
   );
 }
 
-export function startGoatSlackFlushWorker(options: { pollIntervalMs?: number } = {}) {
+export function startSlackFlushWorker(options: { pollIntervalMs?: number } = {}) {
   const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? SLACK_FLUSH_POLL_INTERVAL_MS);
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -268,10 +268,10 @@ export function startGoatSlackFlushWorker(options: { pollIntervalMs?: number } =
   const loop = (async () => {
     while (!stopped) {
       try {
-        const due = await listDueGoatSlackConversationWindows({});
+        const due = await listDueSlackConversationWindows({});
         for (const window of due) {
           if (stopped) break;
-          const flushed = await flushGoatSlackConversationWindow(window).catch((error) => {
+          const flushed = await flushSlackConversationWindow(window).catch((error) => {
             captureException(error, {
               event: "opencompany.goat_slack_flush_failed",
               integration_id: window.integrationId,
@@ -318,12 +318,12 @@ export function startGoatSlackFlushWorker(options: { pollIntervalMs?: number } =
   };
 }
 
-async function loadSlackIntegrationContext(window: GoatSlackDueWindow): Promise<{
-  status: GoatIntegrationStatus | "unknown";
+async function loadSlackIntegrationContext(window: SlackDueWindow): Promise<{
+  status: IntegrationStatus | "unknown";
   accessToken: string | null;
   teamDomain: string | null;
 }> {
-  const statusRows = rowsFromExecute<{ status: GoatIntegrationStatus }>(
+  const statusRows = rowsFromExecute<{ status: IntegrationStatus }>(
     await getDb().execute(sql`
       SELECT status FROM goat.integrations WHERE id = ${window.integrationId}
     `),
@@ -332,7 +332,7 @@ async function loadSlackIntegrationContext(window: GoatSlackDueWindow): Promise<
 
   const credential =
     status === "connected"
-      ? await loadGoatIntegrationCredential({
+      ? await loadIntegrationCredential({
           userWorkosId: window.userWorkosId,
           integrationId: window.integrationId,
           provider: "slack",
@@ -357,7 +357,7 @@ async function loadSlackIntegrationContext(window: GoatSlackDueWindow): Promise<
 }
 
 async function enrichSlackWindow(
-  window: GoatSlackDueWindow,
+  window: SlackDueWindow,
   messages: readonly BufferedSlackMessageRow[],
   accessToken: string,
 ) {

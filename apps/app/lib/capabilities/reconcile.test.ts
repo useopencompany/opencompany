@@ -9,12 +9,12 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@opencompany/db/capabilities", () => ({
-  expirePendingGoatCapabilityApprovals: mocks.expireApprovals,
-  listUnsettledGoatCapabilityRuns: mocks.listUnsettledRuns,
+  expirePendingCapabilityApprovals: mocks.expireApprovals,
+  listUnsettledCapabilityRuns: mocks.listUnsettledRuns,
 }));
 vi.mock("@opencompany/telemetry", () => ({
   GOAT_METRICS: { capabilityWalletBalanceUsdMicros: "goat.capability.wallet_balance" },
-  recordGoatHistogram: vi.fn(),
+  recordHistogram: vi.fn(),
 }));
 vi.mock("@/lib/capabilities/execute", () => ({
   settleManagedCapabilityRun: mocks.settleRun,
@@ -28,9 +28,9 @@ vi.mock("@/lib/capabilities/monid", () => ({
   },
 }));
 
-import { reconcileGoatCapabilities } from "@/lib/capabilities/reconcile";
+import { reconcileCapabilities } from "@/lib/capabilities/reconcile";
 
-describe("reconcileGoatCapabilities", () => {
+describe("reconcileCapabilities", () => {
   beforeEach(() => {
     vi.stubEnv("MONID_API_KEY", "monid_test");
     mocks.expireApprovals.mockResolvedValue(0);
@@ -51,7 +51,7 @@ describe("reconcileGoatCapabilities", () => {
     mocks.listUnsettledRuns.mockResolvedValue([auditRun]);
     mocks.getRun.mockResolvedValue(providerRun);
 
-    await expect(reconcileGoatCapabilities()).resolves.toMatchObject({
+    await expect(reconcileCapabilities()).resolves.toMatchObject({
       candidates: 1,
       settled: 1,
       pending: 0,
@@ -76,7 +76,7 @@ describe("reconcileGoatCapabilities", () => {
     mocks.listUnsettledRuns.mockResolvedValue([auditRun]);
     mocks.getRun.mockResolvedValue(providerRun);
 
-    await reconcileGoatCapabilities();
+    await reconcileCapabilities();
 
     expect(mocks.settleRun).toHaveBeenCalledWith({
       auditRun,

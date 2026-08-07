@@ -1,4 +1,4 @@
-import type { GoatChatMessageAttachment } from "@opencompany/db/schema";
+import type { ChatMessageAttachment } from "@opencompany/db/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -11,13 +11,13 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@/lib/chat-attachment-response", () => ({
-  goatChatAttachmentResponse: mocks.attachmentResponse,
+  chatAttachmentResponse: mocks.attachmentResponse,
 }));
 
 import { GET } from "./route";
 
 const SHARE_ID = "goat_chat_share_123e4567-e89b-42d3-a456-426614174000";
-const attachment: GoatChatMessageAttachment = {
+const attachment: ChatMessageAttachment = {
   id: "attachment_1",
   kind: "image",
   mediaType: "image/png",
@@ -75,7 +75,7 @@ describe("public shared chat attachments", () => {
   });
 });
 
-function queryDb(rows: Array<{ attachments: GoatChatMessageAttachment[] | null }>) {
+function queryDb(rows: Array<{ attachments: ChatMessageAttachment[] | null }>) {
   const limit = vi.fn(async () => rows);
   const where = vi.fn(() => ({ limit }));
   const innerJoin = vi.fn(() => ({ where }));

@@ -2,21 +2,15 @@
 
 import { GITHUB_ACTIVITY_EVENT_TYPES } from "@opencompany/brain";
 import {
-  cancelGoatBrainImport,
-  confirmGoatBrainImport,
-  createGoatBrainImportRun,
-  retryGoatBrainImportDiscovery,
+  cancelBrainImport,
+  confirmBrainImport,
+  createBrainImportRun,
+  retryBrainImportDiscovery,
 } from "@opencompany/db/brain-import";
-import type {
-  GoatBrainImportProvider,
-  GoatBrainImportSourceSelection,
-} from "@opencompany/db/schema";
-import { currentGoatBrainByRef } from "@/lib/auth";
-import {
-  getGoatBrainSourcesAction,
-  listGoatGitHubRepositoriesAction,
-} from "./brain-source-actions";
-import { triggerGoatBrainImportWake, triggerGoatBrainIngestWake } from "./task-runner";
+import type { BrainImportProvider, BrainImportSourceSelection } from "@opencompany/db/schema";
+import { currentBrainByRef } from "@/lib/auth";
+import { getBrainSourcesAction, listGitHubRepositoriesAction } from "./brain-source-actions";
+import { triggerBrainImportWake, triggerBrainIngestWake } from "./task-runner";
 
 const IMPORT_INTEGRATION_PROVIDERS = [
   "github",
@@ -29,78 +23,78 @@ const IMPORT_INTEGRATION_PROVIDERS = [
 ] as const;
 const IMPORT_PROVIDERS = ["public_web", ...IMPORT_INTEGRATION_PROVIDERS] as const;
 
-export type GoatBrainImportActionResult =
+export type BrainImportActionResult =
   | { ok: true; importRunId: string }
   | { ok: false; message: string };
 
-export async function startGoatBrainImportDiscoveryAction(input: {
+export async function startBrainImportDiscoveryAction(input: {
   brainRef: string;
   companyUrl: string;
   focus?: string;
-  sourceSelection: GoatBrainImportSourceSelection;
-}): Promise<GoatBrainImportActionResult> {
+  sourceSelection: BrainImportSourceSelection;
+}): Promise<BrainImportActionResult> {
   try {
     const context = await requireAdminBrain(input.brainRef);
     const sourceSelection = await validateImportSourceSelection(
       input.brainRef,
       input.sourceSelection,
     );
-    const run = await createGoatBrainImportRun({
+    const run = await createBrainImportRun({
       brainRef: input.brainRef,
       userWorkosId: context.user.workosUserId,
       companyUrl: input.companyUrl,
       ...(input.focus?.trim() ? { focus: input.focus } : {}),
       sourceSelection,
     });
-    await wakeImportWorkers([triggerGoatBrainImportWake()]);
+    await wakeImportWorkers([triggerBrainImportWake()]);
     return { ok: true, importRunId: run.id };
   } catch (error) {
     return failure(error);
   }
 }
 
-export async function confirmGoatBrainImportAction(input: {
+export async function confirmBrainImportAction(input: {
   brainRef: string;
   importRunId: string;
-  enabledProviders: GoatBrainImportProvider[];
-}): Promise<GoatBrainImportActionResult> {
+  enabledProviders: BrainImportProvider[];
+}): Promise<BrainImportActionResult> {
   try {
     const context = await requireAdminBrain(input.brainRef);
-    await confirmGoatBrainImport({
+    await confirmBrainImport({
       importRunId: input.importRunId,
       brainRef: input.brainRef,
       enabledProviders: sanitizeEnabledProviders(input.enabledProviders),
       actingUserWorkosId: context.user.workosUserId,
     });
-    await wakeImportWorkers([triggerGoatBrainIngestWake(), triggerGoatBrainImportWake()]);
+    await wakeImportWorkers([triggerBrainIngestWake(), triggerBrainImportWake()]);
     return { ok: true, importRunId: input.importRunId };
   } catch (error) {
     return failure(error);
   }
 }
 
-export async function cancelGoatBrainImportAction(input: {
+export async function cancelBrainImportAction(input: {
   brainRef: string;
   importRunId: string;
-}): Promise<GoatBrainImportActionResult> {
+}): Promise<BrainImportActionResult> {
   try {
     await requireAdminBrain(input.brainRef);
-    await cancelGoatBrainImport(input);
-    await wakeImportWorkers([triggerGoatBrainImportWake()]);
+    await cancelBrainImport(input);
+    await wakeImportWorkers([triggerBrainImportWake()]);
     return { ok: true, importRunId: input.importRunId };
   } catch (error) {
     return failure(error);
   }
 }
 
-export async function retryGoatBrainImportDiscoveryAction(input: {
+export async function retryBrainImportDiscoveryAction(input: {
   brainRef: string;
   importRunId: string;
-}): Promise<GoatBrainImportActionResult> {
+}): Promise<BrainImportActionResult> {
   try {
     await requireAdminBrain(input.brainRef);
-    await retryGoatBrainImportDiscovery(input);
-    await wakeImportWorkers([triggerGoatBrainImportWake()]);
+    await retryBrainImportDiscovery(input);
+    await wakeImportWorkers([triggerBrainImportWake()]);
     return { ok: true, importRunId: input.importRunId };
   } catch (error) {
     return failure(error);
@@ -108,14 +102,14 @@ export async function retryGoatBrainImportDiscoveryAction(input: {
 }
 
 async function requireAdminBrain(brainRef: string) {
-  const resolved = await currentGoatBrainByRef(brainRef);
+  const resolved = await currentBrainByRef(brainRef);
   if (resolved.context.role !== "admin") {
     throw new Error("Only workspace admins can import company context.");
   }
   return resolved.context;
 }
 
-function failure(error: unknown): GoatBrainImportActionResult {
+function failure(error: unknown): BrainImportActionResult {
   return {
     ok: false,
     message: error instanceof Error ? error.message : "The company-context import failed.",
@@ -135,12 +129,12 @@ async function wakeImportWorkers(wakes: Promise<unknown>[]) {
 
 async function validateImportSourceSelection(
   brainRef: string,
-  selection: GoatBrainImportSourceSelection,
-): Promise<GoatBrainImportSourceSelection> {
-  const details = await getGoatBrainSourcesAction(brainRef);
+  selection: BrainImportSourceSelection,
+): Promise<BrainImportSourceSelection> {
+  const details = await getBrainSourcesAction(brainRef);
   if (!details) throw new Error("Only workspace admins can import company context.");
 
-  const next: GoatBrainImportSourceSelection = {
+  const next: BrainImportSourceSelection = {
     public_web: { enabled: selection.public_web?.enabled !== false },
   };
   for (const provider of IMPORT_INTEGRATION_PROVIDERS) {
@@ -166,7 +160,7 @@ async function validateImportSourceSelection(
 
     let config = manageableSource?.config ?? {};
     if (provider === "github" && !manageableSource) {
-      const repositories = await listGoatGitHubRepositoriesAction(requested.integrationId);
+      const repositories = await listGitHubRepositoriesAction(requested.integrationId);
       if (!repositories.ok) throw new Error(repositories.error);
       const requestedRepos = Array.isArray(requested.config?.repos) ? requested.config.repos : [];
       const requestedKeys = new Set(
@@ -216,7 +210,7 @@ async function validateImportSourceSelection(
 }
 
 function integrationIdFor(
-  details: NonNullable<Awaited<ReturnType<typeof getGoatBrainSourcesAction>>>,
+  details: NonNullable<Awaited<ReturnType<typeof getBrainSourcesAction>>>,
   provider: (typeof IMPORT_INTEGRATION_PROVIDERS)[number],
 ) {
   return details[provider].integration.integrationId ?? null;
@@ -230,13 +224,13 @@ function hasConfiguredEntries(value: unknown) {
   return Array.isArray(value) && value.length > 0;
 }
 
-function sanitizeEnabledProviders(value: unknown): GoatBrainImportProvider[] {
+function sanitizeEnabledProviders(value: unknown): BrainImportProvider[] {
   if (!Array.isArray(value)) throw new Error("Choose the sources to import.");
   const allowed = new Set<string>(IMPORT_PROVIDERS);
   return Array.from(
     new Set(
       value.filter(
-        (provider): provider is GoatBrainImportProvider =>
+        (provider): provider is BrainImportProvider =>
           typeof provider === "string" && allowed.has(provider),
       ),
     ),

@@ -1,8 +1,8 @@
-export function goatChatScreenshotFilename() {
+export function chatScreenshotFilename() {
   return `${Date.now()}-${crypto.randomUUID()}.png`;
 }
 
-export function goatChatScreenshotBlobPath(input: {
+export function chatScreenshotBlobPath(input: {
   userWorkosId: string;
   chatSessionId: string;
   filename: string;
@@ -16,7 +16,7 @@ export function goatChatScreenshotBlobPath(input: {
   ].join("/");
 }
 
-export function goatChatScreenshotUrl(input: { chatSessionId: string; filename: string }) {
+export function chatScreenshotUrl(input: { chatSessionId: string; filename: string }) {
   return `/api/chat-screenshots/${encodeURIComponent(input.chatSessionId)}/${encodeURIComponent(
     safeScreenshotFilename(input.filename),
   )}`;

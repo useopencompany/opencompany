@@ -1,18 +1,18 @@
 import { randomUUID } from "node:crypto";
 import {
+  type BrainSkill,
   GOAT_BRAIN_SKILL_DESCRIPTION_MAX_LENGTH,
   GOAT_BRAIN_SKILL_NAME_MAX_LENGTH,
-  type GoatBrainSkill,
-  isValidGoatBrainId,
-  normalizeGoatBrainId,
-  serializeGoatBrainSkillMarkdown,
+  isValidBrainId,
+  normalizeBrainId,
+  serializeBrainSkillMarkdown,
 } from "@opencompany/brain";
 import { getDb } from "@opencompany/db/client";
 import {
-  type GoatChatSessionSkill,
-  type GoatSkillStatus,
-  goatChatSessionSkills,
-  goatSkills,
+  type ChatSessionSkill,
+  chatSessionSkills,
+  type SkillStatus,
+  skills,
 } from "@opencompany/db/schema";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 
@@ -21,7 +21,7 @@ import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 // own `goat.skills` table so "what the agent can do" is a first-class primitive
 // rather than Brain (knowledge) content. The `@skill/<slug>` composer mention
 // attaches a skill to a chat message, which snapshots its content immutably into
-// `goatChatSessionSkills`.
+// `chatSessionSkills`.
 
 export const MAX_GOAT_CHAT_SKILLS = 16;
 export const MAX_GOAT_CHAT_SKILL_BYTES = 256 * 1024;
@@ -31,27 +31,27 @@ type Db = ReturnType<typeof getDb>;
 // The content shape carried through mentions, session snapshots, and prompt
 // injection. `id` holds the workspace-unique slug (the `@skill/<id>` handle) —
 // kept named `id` so snapshot/prompt consumers stay drop-in with the former
-// Brain-doc shape (`GoatBrainSkill`).
-export type GoatWorkspaceSkill = GoatBrainSkill;
+// Brain-doc shape (`BrainSkill`).
+export type WorkspaceSkill = BrainSkill;
 
-export type GoatSkillListItem = {
+export type SkillListItem = {
   slug: string;
   name: string;
   description: string;
-  status: GoatSkillStatus;
+  status: SkillStatus;
   updatedAt: Date;
 };
 
-export type GoatSkillCatalogItem = Pick<GoatWorkspaceSkill, "id" | "name" | "description">;
+export type SkillCatalogItem = Pick<WorkspaceSkill, "id" | "name" | "description">;
 
-export type GoatSkillDetail = GoatWorkspaceSkill & { status: GoatSkillStatus };
+export type SkillDetail = WorkspaceSkill & { status: SkillStatus };
 
-export type GoatSkillMentionRef = { id: string };
+export type SkillMentionRef = { id: string };
 
-export type GoatSkillMutationResult = { ok: true; slug: string } | { ok: false; message: string };
+export type SkillMutationResult = { ok: true; slug: string } | { ok: false; message: string };
 
-export type GoatChatSessionSkillSnapshot = Pick<
-  GoatChatSessionSkill,
+export type ChatSessionSkillSnapshot = Pick<
+  ChatSessionSkill,
   | "chatSessionId"
   | "skillId"
   | "brainRef"
@@ -62,25 +62,25 @@ export type GoatChatSessionSkillSnapshot = Pick<
   | "createdAt"
 >;
 
-export class GoatSkillMentionError extends Error {
+export class SkillMentionError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "GoatSkillMentionError";
+    this.name = "SkillMentionError";
   }
 }
 
-export function readGoatSkillMentionRefs(
+export function readSkillMentionRefs(
   value: unknown,
-): { ok: true; mentions: GoatSkillMentionRef[] } | { ok: false; error: string } {
+): { ok: true; mentions: SkillMentionRef[] } | { ok: false; error: string } {
   if (value === undefined || value === null) return { ok: true, mentions: [] };
   if (!Array.isArray(value)) return { ok: false, error: "Invalid skill mentions." };
 
-  const mentions: GoatSkillMentionRef[] = [];
+  const mentions: SkillMentionRef[] = [];
   for (const mention of value) {
     if (!mention || typeof mention !== "object" || Array.isArray(mention)) continue;
     const candidate = mention as Record<string, unknown>;
     if (candidate.kind !== "skill") continue;
-    if (typeof candidate.id !== "string" || !isValidGoatBrainId(candidate.id)) {
+    if (typeof candidate.id !== "string" || !isValidBrainId(candidate.id)) {
       return { ok: false, error: "Invalid skill mention." };
     }
     mentions.push({ id: candidate.id });
@@ -88,67 +88,60 @@ export function readGoatSkillMentionRefs(
   return { ok: true, mentions };
 }
 
-export async function listGoatSkillCatalog(
+export async function listSkillCatalog(
   workspaceId: string,
   db: Db = getDb(),
-): Promise<GoatSkillCatalogItem[]> {
+): Promise<SkillCatalogItem[]> {
   const rows = await db
     .select({
-      slug: goatSkills.slug,
-      name: goatSkills.name,
-      description: goatSkills.description,
+      slug: skills.slug,
+      name: skills.name,
+      description: skills.description,
     })
-    .from(goatSkills)
+    .from(skills)
     .where(
       and(
-        eq(goatSkills.workspaceId, workspaceId),
-        eq(goatSkills.status, "active"),
-        isNull(goatSkills.archivedAt),
+        eq(skills.workspaceId, workspaceId),
+        eq(skills.status, "active"),
+        isNull(skills.archivedAt),
       ),
     )
-    .orderBy(asc(goatSkills.name));
+    .orderBy(asc(skills.name));
 
   return rows.map((row) => ({ id: row.slug, name: row.name, description: row.description }));
 }
 
-export async function listGoatSkills(
-  workspaceId: string,
-  db: Db = getDb(),
-): Promise<GoatSkillListItem[]> {
+export async function listSkills(workspaceId: string, db: Db = getDb()): Promise<SkillListItem[]> {
   const rows = await db
     .select({
-      slug: goatSkills.slug,
-      name: goatSkills.name,
-      description: goatSkills.description,
-      status: goatSkills.status,
-      updatedAt: goatSkills.updatedAt,
+      slug: skills.slug,
+      name: skills.name,
+      description: skills.description,
+      status: skills.status,
+      updatedAt: skills.updatedAt,
     })
-    .from(goatSkills)
-    .where(and(eq(goatSkills.workspaceId, workspaceId), isNull(goatSkills.archivedAt)))
-    .orderBy(desc(goatSkills.updatedAt));
+    .from(skills)
+    .where(and(eq(skills.workspaceId, workspaceId), isNull(skills.archivedAt)))
+    .orderBy(desc(skills.updatedAt));
   return rows;
 }
 
-export async function getGoatSkill(
+export async function getSkill(
   workspaceId: string,
   slug: string,
   db: Db = getDb(),
-): Promise<GoatSkillDetail | null> {
+): Promise<SkillDetail | null> {
   const [row] = await db
     .select({
-      slug: goatSkills.slug,
-      name: goatSkills.name,
-      description: goatSkills.description,
-      instructions: goatSkills.instructions,
-      status: goatSkills.status,
+      slug: skills.slug,
+      name: skills.name,
+      description: skills.description,
+      instructions: skills.instructions,
+      status: skills.status,
     })
-    .from(goatSkills)
+    .from(skills)
     .where(
-      and(
-        eq(goatSkills.workspaceId, workspaceId),
-        eq(goatSkills.slug, slug),
-        isNull(goatSkills.archivedAt),
-      ),
+      and(eq(skills.workspaceId, workspaceId), eq(skills.slug, slug), isNull(skills.archivedAt)),
     )
     .limit(1);
   if (!row) return null;
@@ -161,40 +154,38 @@ export async function getGoatSkill(
   };
 }
 
-export async function resolveGoatSkillMentions(input: {
+export async function resolveSkillMentions(input: {
   workspaceId: string | null;
-  mentions: GoatSkillMentionRef[];
+  mentions: SkillMentionRef[];
   db?: Db;
-}): Promise<GoatWorkspaceSkill[]> {
+}): Promise<WorkspaceSkill[]> {
   if (input.mentions.length === 0) return [];
   if (!input.workspaceId) {
-    throw new GoatSkillMentionError("No active workspace is available for skill mentions.");
+    throw new SkillMentionError("No active workspace is available for skill mentions.");
   }
 
   const unique = [...new Map(input.mentions.map((m) => [m.id, m])).values()];
   if (unique.length > MAX_GOAT_CHAT_SKILLS) {
-    throw new GoatSkillMentionError(
-      `Attach at most ${MAX_GOAT_CHAT_SKILLS} skills to one message.`,
-    );
+    throw new SkillMentionError(`Attach at most ${MAX_GOAT_CHAT_SKILLS} skills to one message.`);
   }
 
   const rows = await (input.db ?? getDb())
     .select({
-      slug: goatSkills.slug,
-      name: goatSkills.name,
-      description: goatSkills.description,
-      instructions: goatSkills.instructions,
+      slug: skills.slug,
+      name: skills.name,
+      description: skills.description,
+      instructions: skills.instructions,
     })
-    .from(goatSkills)
+    .from(skills)
     .where(
       and(
-        eq(goatSkills.workspaceId, input.workspaceId),
-        eq(goatSkills.status, "active"),
+        eq(skills.workspaceId, input.workspaceId),
+        eq(skills.status, "active"),
         inArray(
-          goatSkills.slug,
+          skills.slug,
           unique.map((mention) => mention.id),
         ),
-        isNull(goatSkills.archivedAt),
+        isNull(skills.archivedAt),
       ),
     );
   const byId = new Map(
@@ -205,45 +196,45 @@ export async function resolveGoatSkillMentions(input: {
         name: row.name,
         description: row.description,
         instructions: row.instructions,
-      } satisfies GoatWorkspaceSkill,
+      } satisfies WorkspaceSkill,
     ]),
   );
-  const skills = unique.map((mention) => {
+  const resolvedSkills = unique.map((mention) => {
     const skill = byId.get(mention.id);
     if (!skill || !skill.instructions.trim()) {
-      throw new GoatSkillMentionError(`Skill "@skill/${mention.id}" is unavailable or incomplete.`);
+      throw new SkillMentionError(`Skill "@skill/${mention.id}" is unavailable or incomplete.`);
     }
     return skill;
   });
 
-  const totalBytes = goatSkillsByteLength(skills);
+  const totalBytes = skillsByteLength(resolvedSkills);
   if (totalBytes > MAX_GOAT_CHAT_SKILL_BYTES) {
-    throw new GoatSkillMentionError("The selected skills are too large to attach together.");
+    throw new SkillMentionError("The selected skills are too large to attach together.");
   }
-  return skills;
+  return resolvedSkills;
 }
 
-export function goatSkillsByteLength(skills: readonly GoatWorkspaceSkill[]): number {
+export function skillsByteLength(skills: readonly WorkspaceSkill[]): number {
   return skills.reduce(
-    (total, skill) => total + Buffer.byteLength(serializeGoatBrainSkillMarkdown(skill), "utf8"),
+    (total, skill) => total + Buffer.byteLength(serializeBrainSkillMarkdown(skill), "utf8"),
     0,
   );
 }
 
-export async function activateAndListGoatChatSessionSkills(input: {
+export async function activateAndListChatSessionSkills(input: {
   chatSessionId: string;
   activatedMessageId: string;
   // Provenance for the immutable snapshot (stored in the `brain_ref` column,
   // which predates the Brain extraction). Skills are now workspace-scoped, so
   // this is the workspace id.
   workspaceRef: string;
-  skills: GoatWorkspaceSkill[];
+  skills: WorkspaceSkill[];
   db?: Db;
-}): Promise<GoatChatSessionSkillSnapshot[]> {
+}): Promise<ChatSessionSkillSnapshot[]> {
   const db = input.db ?? getDb();
   if (input.skills.length > 0) {
     await db
-      .insert(goatChatSessionSkills)
+      .insert(chatSessionSkills)
       .values(
         input.skills.map((skill) => ({
           chatSessionId: input.chatSessionId,
@@ -258,27 +249,27 @@ export async function activateAndListGoatChatSessionSkills(input: {
       // A skill is an immutable session snapshot. Re-mentioning it keeps the version and original
       // activation point already in this chat; start a new chat to pick up a newer revision.
       .onConflictDoNothing({
-        target: [goatChatSessionSkills.chatSessionId, goatChatSessionSkills.skillId],
+        target: [chatSessionSkills.chatSessionId, chatSessionSkills.skillId],
       });
   }
 
   return db
     .select({
-      chatSessionId: goatChatSessionSkills.chatSessionId,
-      skillId: goatChatSessionSkills.skillId,
-      brainRef: goatChatSessionSkills.brainRef,
-      activatedMessageId: goatChatSessionSkills.activatedMessageId,
-      name: goatChatSessionSkills.name,
-      description: goatChatSessionSkills.description,
-      instructions: goatChatSessionSkills.instructions,
-      createdAt: goatChatSessionSkills.createdAt,
+      chatSessionId: chatSessionSkills.chatSessionId,
+      skillId: chatSessionSkills.skillId,
+      brainRef: chatSessionSkills.brainRef,
+      activatedMessageId: chatSessionSkills.activatedMessageId,
+      name: chatSessionSkills.name,
+      description: chatSessionSkills.description,
+      instructions: chatSessionSkills.instructions,
+      createdAt: chatSessionSkills.createdAt,
     })
-    .from(goatChatSessionSkills)
-    .where(eq(goatChatSessionSkills.chatSessionId, input.chatSessionId))
-    .orderBy(asc(goatChatSessionSkills.createdAt), asc(goatChatSessionSkills.skillId));
+    .from(chatSessionSkills)
+    .where(eq(chatSessionSkills.chatSessionId, input.chatSessionId))
+    .orderBy(asc(chatSessionSkills.createdAt), asc(chatSessionSkills.skillId));
 }
 
-export function attachGoatSkillsToPrompt(prompt: string, skills: GoatWorkspaceSkill[]): string {
+export function attachSkillsToPrompt(prompt: string, skills: WorkspaceSkill[]): string {
   if (skills.length === 0) return prompt;
   const payload = escapePromptJson(
     JSON.stringify({
@@ -297,11 +288,11 @@ export function attachGoatSkillsToPrompt(prompt: string, skills: GoatWorkspaceSk
 
 // --- Authoring (mutations) ---------------------------------------------------
 
-export function validateGoatSkillFields(input: {
+export function validateSkillFields(input: {
   name: string;
   description: string;
   instructions?: string;
-  status?: GoatSkillStatus;
+  status?: SkillStatus;
 }): string | null {
   const name = input.name.trim();
   const description = input.description.trim();
@@ -321,20 +312,20 @@ export function validateGoatSkillFields(input: {
   return null;
 }
 
-export async function createGoatSkill(input: {
+export async function createSkill(input: {
   workspaceId: string;
   createdByWorkosId: string;
   name: string;
   description?: string;
-}): Promise<GoatSkillMutationResult> {
-  const invalid = validateGoatSkillFields({
+}): Promise<SkillMutationResult> {
+  const invalid = validateSkillFields({
     name: input.name,
     description: input.description ?? "",
   });
   if (invalid) return { ok: false, message: invalid };
   const db = getDb();
-  const slug = await uniqueGoatSkillSlug(db, input.workspaceId, input.name);
-  await db.insert(goatSkills).values({
+  const slug = await uniqueSkillSlug(db, input.workspaceId, input.name);
+  await db.insert(skills).values({
     id: `goat_skill_${randomUUID()}`,
     workspaceId: input.workspaceId,
     slug,
@@ -347,19 +338,19 @@ export async function createGoatSkill(input: {
   return { ok: true, slug };
 }
 
-export async function updateGoatSkill(input: {
+export async function updateSkill(input: {
   workspaceId: string;
   slug: string;
   name: string;
   description: string;
   instructions: string;
-  status: GoatSkillStatus;
-}): Promise<GoatSkillMutationResult> {
-  const invalid = validateGoatSkillFields(input);
+  status: SkillStatus;
+}): Promise<SkillMutationResult> {
+  const invalid = validateSkillFields(input);
   if (invalid) return { ok: false, message: invalid };
   const db = getDb();
   const result = await db
-    .update(goatSkills)
+    .update(skills)
     .set({
       name: input.name.trim(),
       description: input.description.trim(),
@@ -369,42 +360,42 @@ export async function updateGoatSkill(input: {
     })
     .where(
       and(
-        eq(goatSkills.workspaceId, input.workspaceId),
-        eq(goatSkills.slug, input.slug),
-        isNull(goatSkills.archivedAt),
+        eq(skills.workspaceId, input.workspaceId),
+        eq(skills.slug, input.slug),
+        isNull(skills.archivedAt),
       ),
     )
-    .returning({ slug: goatSkills.slug });
+    .returning({ slug: skills.slug });
   if (result.length === 0) return { ok: false, message: "Skill not found." };
   return { ok: true, slug: input.slug };
 }
 
-export async function archiveGoatSkill(input: {
+export async function archiveSkill(input: {
   workspaceId: string;
   slug: string;
-}): Promise<GoatSkillMutationResult> {
+}): Promise<SkillMutationResult> {
   const db = getDb();
   const result = await db
-    .update(goatSkills)
+    .update(skills)
     .set({ archivedAt: new Date(), updatedAt: new Date() })
     .where(
       and(
-        eq(goatSkills.workspaceId, input.workspaceId),
-        eq(goatSkills.slug, input.slug),
-        isNull(goatSkills.archivedAt),
+        eq(skills.workspaceId, input.workspaceId),
+        eq(skills.slug, input.slug),
+        isNull(skills.archivedAt),
       ),
     )
-    .returning({ slug: goatSkills.slug });
+    .returning({ slug: skills.slug });
   if (result.length === 0) return { ok: false, message: "Skill not found." };
   return { ok: true, slug: input.slug };
 }
 
-async function uniqueGoatSkillSlug(db: Db, workspaceId: string, name: string): Promise<string> {
-  const base = normalizeGoatBrainId(name).slice(0, 64).replace(/-+$/g, "") || "skill";
+async function uniqueSkillSlug(db: Db, workspaceId: string, name: string): Promise<string> {
+  const base = normalizeBrainId(name).slice(0, 64).replace(/-+$/g, "") || "skill";
   const rows = await db
-    .select({ slug: goatSkills.slug })
-    .from(goatSkills)
-    .where(and(eq(goatSkills.workspaceId, workspaceId), isNull(goatSkills.archivedAt)));
+    .select({ slug: skills.slug })
+    .from(skills)
+    .where(and(eq(skills.workspaceId, workspaceId), isNull(skills.archivedAt)));
   const taken = new Set(rows.map((row) => row.slug));
   if (!taken.has(base)) return base;
   for (let n = 2; n < 1000; n++) {

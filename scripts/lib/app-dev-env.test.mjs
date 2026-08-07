@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { resolveGoatDevEnv } from "./app-dev-env.mjs";
+import { resolveDevEnv } from "./app-dev-env.mjs";
 
 test("Goat local HTTPS WorkOS redirect wins over the ngrok tunnel", () => {
-  const env = resolveGoatDevEnv({
+  const env = resolveDevEnv({
     port: "3002",
     processEnv: {
       RUNNER_ALLOWED_ORIGINS: "https://existing.example",
@@ -13,7 +13,7 @@ test("Goat local HTTPS WorkOS redirect wins over the ngrok tunnel", () => {
       NEXT_PUBLIC_APP_URL: "https://public.ngrok-free.app",
       NEXT_PUBLIC_WORKOS_REDIRECT_URI: "https://public.ngrok-free.app/auth/callback",
     },
-    goatHttpsEnv: {
+    httpsEnv: {
       NEXT_PUBLIC_APP_URL: "https://localhost:3443",
       NEXT_PUBLIC_WORKOS_REDIRECT_URI: "https://localhost:3443/auth/callback",
     },
@@ -30,7 +30,7 @@ test("Goat local HTTPS WorkOS redirect wins over the ngrok tunnel", () => {
 });
 
 test("Goat redirect falls back to localhost when Caddy is unavailable", () => {
-  const env = resolveGoatDevEnv({
+  const env = resolveDevEnv({
     port: "3002",
     processEnv: {
       NEXT_PUBLIC_APP_URL: "https://localhost:3443",

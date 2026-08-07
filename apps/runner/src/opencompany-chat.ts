@@ -1,9 +1,9 @@
 import { AGENT_MODEL_CATALOG, modelSupportsAttachments } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import { resolveGoatActionCatalog } from "@opencompany/core/actions/catalog";
-import { executeGoatAction } from "@opencompany/core/actions/execute";
+import { resolveActionCatalog } from "@opencompany/core/actions/catalog";
+import { executeAction } from "@opencompany/core/actions/execute";
 import { projectActionCatalog } from "@opencompany/core/actions/policy";
-import type { GoatResolvedActionCatalog } from "@opencompany/core/actions/types";
+import type { ResolvedActionCatalog } from "@opencompany/core/actions/types";
 import {
   createOpenCompanyChatToolContext,
   OPENCOMPANY_CHAT_MAX_STEPS,
@@ -12,36 +12,36 @@ import {
   TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
 } from "@opencompany/core/chat-agent";
 import type {
-  GoatChatActionCatalog,
-  GoatChatUiMessage,
-  GoatStoredChatMessage,
+  ChatActionCatalog,
+  ChatUiMessage,
+  StoredChatMessage,
   WebFetchToolOutput,
   WebSearchToolOutput,
 } from "@opencompany/core/chat-ui";
-import { toGoatChatUiMessage } from "@opencompany/core/chat-ui";
-import { executeGoatChatExaFetch } from "@opencompany/core/chat-web-fetch";
-import { executeGoatChatExaSearch } from "@opencompany/core/chat-web-search";
-import { resolveGoatImessageProvider } from "@opencompany/core/imessage/provider";
-import { createGoatSendUserMessageRunner } from "@opencompany/core/imessage/send-user-message";
+import { toChatUiMessage } from "@opencompany/core/chat-ui";
+import { executeChatExaFetch } from "@opencompany/core/chat-web-fetch";
+import { executeChatExaSearch } from "@opencompany/core/chat-web-search";
+import { resolveImessageProvider } from "@opencompany/core/imessage/provider";
+import { createSendUserMessageRunner } from "@opencompany/core/imessage/send-user-message";
 import { createOpenCompanyChatSystemPrompt } from "@opencompany/core/prompts";
-import { ensureGoatMonthlyIncludedUsage } from "@opencompany/db/billing";
-import { hasPositiveGoatCreditBalance } from "@opencompany/db/credits";
-import { resolveGoatImessageDelivery } from "@opencompany/db/imessage";
+import { ensureMonthlyIncludedUsage } from "@opencompany/db/billing";
+import { hasPositiveCreditBalance } from "@opencompany/db/credits";
+import { resolveImessageDelivery } from "@opencompany/db/imessage";
 import {
-  type GoatChatMessageAttachment,
-  type GoatCodexChatSession,
-  type GoatCodexChatTurn,
-  goatChatMessages,
+  type ChatMessageAttachment,
+  type CodexChatSession,
+  type CodexChatTurn,
+  chatMessages,
 } from "@opencompany/db/schema";
 import {
   DEFAULT_GOAT_BRAIN_SLUG,
-  getGoatBrainAccess,
-  getGoatWorkspaceRole,
-  listAccessibleGoatBrains,
+  getBrainAccess,
+  getWorkspaceRole,
+  listAccessibleBrains,
 } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
-import { createGoatGatewayAttribution, goatGatewayProviderOptions } from "@opencompany/telemetry";
+import { createGatewayAttribution, gatewayProviderOptions } from "@opencompany/telemetry";
 import { flushLatitude } from "@opencompany/telemetry/latitude";
 import * as ai from "ai";
 import {
@@ -53,27 +53,27 @@ import {
 } from "ai";
 import { asc, eq } from "drizzle-orm";
 import { downloadBlobBytes } from "./attachment-hydration";
-import { runGoatTaskBrainRead } from "./codex-brain-tool";
+import { runTaskBrainRead } from "./codex-brain-tool";
 import {
-  GoatCodexChatHandoffError,
-  GoatCodexChatLeaseLostError,
-  GoatTaskTurnTerminalError,
+  CodexChatHandoffError,
+  CodexChatLeaseLostError,
+  TaskTurnTerminalError,
 } from "./codex-chat-errors";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import {
-  createGoatOpenCompanyChatProjector,
-  GoatOpenCompanyChatInterruptedError,
-  type GoatOpenCompanyChatProjection,
-  type GoatOpenCompanyChatProjector,
-  type GoatOpenCompanyChatUiPart,
+  createOpenCompanyChatProjector,
+  OpenCompanyChatInterruptedError,
+  type OpenCompanyChatProjection,
+  type OpenCompanyChatProjector,
+  type OpenCompanyChatUiPart,
 } from "./opencompany-chat-projector";
 import {
-  buildGoatTaskTerminalProjection,
-  buildGoatTaskTurnCompletion,
-  closeGoatTaskTurn,
-  type GoatTaskTurnContext,
-  markGoatTaskTurnRunning,
+  buildTaskTerminalProjection,
+  buildTaskTurnCompletion,
+  closeTaskTurn,
+  markTaskTurnRunning,
+  type TaskTurnContext,
 } from "./task-turn";
 
 const ASSISTANT_PARTS_FLUSH_INTERVAL_MS = 500;
@@ -84,7 +84,7 @@ const logger = createLogger({
   runtime: "goat-opencompany-chat",
 });
 
-function isTextExtractableAttachment(attachment: Pick<GoatChatMessageAttachment, "kind">) {
+function isTextExtractableAttachment(attachment: Pick<ChatMessageAttachment, "kind">) {
   return (
     attachment.kind === "docx" ||
     attachment.kind === "xlsx" ||
@@ -96,11 +96,11 @@ function isTextExtractableAttachment(attachment: Pick<GoatChatMessageAttachment,
   );
 }
 
-export async function runGoatOpenCompanyChatTurn(input: {
-  turn: GoatCodexChatTurn;
-  session: GoatCodexChatSession;
+export async function runOpenCompanyChatTurn(input: {
+  turn: CodexChatTurn;
+  session: CodexChatSession;
   env: RunnerEnv;
-  taskContext?: GoatTaskTurnContext | undefined;
+  taskContext?: TaskTurnContext | undefined;
   shouldAbort?: () => Error | null;
 }): Promise<"settled" | "handed_off"> {
   const { turn, session, env } = input;
@@ -113,7 +113,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
     throw new Error(`Session ${session.id} is not an OpenCompany-engine session.`);
   }
 
-  const projector = createGoatOpenCompanyChatProjector({
+  const projector = createOpenCompanyChatProjector({
     target: {
       userWorkosId: turn.userWorkosId,
       codexChatSessionId: session.id,
@@ -130,25 +130,25 @@ export async function runGoatOpenCompanyChatTurn(input: {
         turn.runAfter && turn.runAfter > turn.createdAt ? turn.runAfter : turn.createdAt,
     },
   });
-  let projection: GoatOpenCompanyChatProjection = { parts: [] };
+  let projection: OpenCompanyChatProjection = { parts: [] };
 
   if (turn.interruptRequestedAt) {
     await projector.interrupted(
       projection,
-      input.taskContext ? buildGoatTaskTerminalProjection(input.taskContext) : null,
+      input.taskContext ? buildTaskTerminalProjection(input.taskContext) : null,
     );
     return "settled";
   }
 
   if (session.workspaceId) {
-    if (!(await hasGoatHostedTurnCredits(session.workspaceId))) {
+    if (!(await hasHostedTurnCredits(session.workspaceId))) {
       const message =
         "This workspace is out of credits. Hobby usage refreshes on the first of the month; Pro admins can add credits in Settings → Billing.";
       projection = { parts: [{ type: "text", text: message }] };
       await projector.failed(
         message,
         projection,
-        input.taskContext ? buildGoatTaskTerminalProjection(input.taskContext) : null,
+        input.taskContext ? buildTaskTerminalProjection(input.taskContext) : null,
       );
       return "settled";
     }
@@ -164,7 +164,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
   try {
     await abortWatcher.checkNow();
     if (input.taskContext) {
-      await markGoatTaskTurnRunning({ context: input.taskContext, turn });
+      await markTaskTurnRunning({ context: input.taskContext, turn });
     }
     const runtime = await resolveOpenCompanyChatRuntime({
       turn,
@@ -174,7 +174,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
       taskContext: input.taskContext,
     });
     throwIfAborted(generationController.signal);
-    const messages = await loadGoatOpenCompanyChatModelMessages({
+    const messages = await loadOpenCompanyChatModelMessages({
       chatSessionId: session.chatSessionId,
       currentUserMessageId: turn.userMessageId,
       modelId: runtime.model,
@@ -185,7 +185,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
 
     const gateway = createGateway({ apiKey: env.vercelAiGatewayApiKey });
     const { streamText } = getBraintrustAISDK(ai);
-    const attribution = createGoatGatewayAttribution({
+    const attribution = createGatewayAttribution({
       userWorkosId: turn.userWorkosId,
       feature: input.taskContext ? "task" : "chat",
       chatSessionId: session.chatSessionId,
@@ -207,10 +207,10 @@ export async function runGoatOpenCompanyChatTurn(input: {
         ? { experimental_repairToolCall: runtime.toolContext.repairToolCall }
         : {}),
       abortSignal: generationController.signal,
-      providerOptions: goatGatewayProviderOptions(attribution),
+      providerOptions: gatewayProviderOptions(attribution),
     });
 
-    projection = await consumeGoatOpenCompanyChatStream({
+    projection = await consumeOpenCompanyChatStream({
       fullStream: stream.fullStream,
       signal: generationController.signal,
       sink: {
@@ -225,7 +225,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
     projection = withCompletedResponseFallback(projection);
     const taskResult = projectionText(projection);
     const taskOutcome = input.taskContext
-      ? await closeGoatTaskTurn({
+      ? await closeTaskTurn({
           context: input.taskContext,
           finalContent: taskResult,
           env,
@@ -239,7 +239,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
     await projector.completed(
       projection,
       input.taskContext
-        ? buildGoatTaskTurnCompletion({
+        ? buildTaskTurnCompletion({
             context: input.taskContext,
             result: taskResult,
             reportedOutcome: taskOutcome?.reportedOutcome,
@@ -258,20 +258,20 @@ export async function runGoatOpenCompanyChatTurn(input: {
       ...projection,
       parts: finalizeStreamingParts(projection.parts),
     };
-    if (effectiveError instanceof GoatCodexChatHandoffError) {
+    if (effectiveError instanceof CodexChatHandoffError) {
       return "handed_off";
     }
     if (
-      effectiveError instanceof GoatOpenCompanyChatInterruptedError ||
-      effectiveError instanceof GoatTaskTurnTerminalError
+      effectiveError instanceof OpenCompanyChatInterruptedError ||
+      effectiveError instanceof TaskTurnTerminalError
     ) {
       await projector.interrupted(
         projection,
-        input.taskContext ? buildGoatTaskTerminalProjection(input.taskContext) : null,
+        input.taskContext ? buildTaskTerminalProjection(input.taskContext) : null,
       );
       return "settled";
     }
-    if (effectiveError instanceof GoatCodexChatLeaseLostError) {
+    if (effectiveError instanceof CodexChatLeaseLostError) {
       throw effectiveError;
     }
 
@@ -287,7 +287,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
     await projector.failed(
       message,
       projection,
-      input.taskContext ? buildGoatTaskTerminalProjection(input.taskContext) : null,
+      input.taskContext ? buildTaskTerminalProjection(input.taskContext) : null,
     );
     return "settled";
   } finally {
@@ -296,19 +296,19 @@ export async function runGoatOpenCompanyChatTurn(input: {
   }
 }
 
-export async function hasGoatHostedTurnCredits(workspaceId: string, db = getDb()) {
-  await ensureGoatMonthlyIncludedUsage(workspaceId, { db });
-  return hasPositiveGoatCreditBalance(workspaceId, db);
+export async function hasHostedTurnCredits(workspaceId: string, db = getDb()) {
+  await ensureMonthlyIncludedUsage(workspaceId, { db });
+  return hasPositiveCreditBalance(workspaceId, db);
 }
 
-export async function consumeGoatOpenCompanyChatStream(input: {
+export async function consumeOpenCompanyChatStream(input: {
   fullStream: AsyncIterable<unknown>;
   signal: AbortSignal;
-  sink: Pick<GoatOpenCompanyChatProjector, "project" | "recordStepUsage">;
+  sink: Pick<OpenCompanyChatProjector, "project" | "recordStepUsage">;
   flushIntervalMs?: number;
   now?: () => number;
-}): Promise<GoatOpenCompanyChatProjection> {
-  const parts: GoatOpenCompanyChatUiPart[] = [];
+}): Promise<OpenCompanyChatProjection> {
+  const parts: OpenCompanyChatUiPart[] = [];
   const textPartIndexes = new Map<string, number>();
   const reasoningPartIndexes = new Map<string, number>();
   const toolPartIndexes = new Map<string, number>();
@@ -321,7 +321,7 @@ export async function consumeGoatOpenCompanyChatStream(input: {
   let finishReason: string | undefined;
   let stepIndex = 0;
 
-  const projection = (): GoatOpenCompanyChatProjection => ({
+  const projection = (): OpenCompanyChatProjection => ({
     parts: cloneParts(parts),
     ...(latestUsage ? { usage: latestUsage } : {}),
     ...(finishReason ? { finishReason } : {}),
@@ -334,12 +334,12 @@ export async function consumeGoatOpenCompanyChatStream(input: {
     dirty = false;
     await input.sink.project(projection());
   };
-  const appendPart = (part: GoatOpenCompanyChatUiPart) => {
+  const appendPart = (part: OpenCompanyChatUiPart) => {
     parts.push(part);
     dirty = true;
     return parts.length - 1;
   };
-  const replacePart = (index: number, part: GoatOpenCompanyChatUiPart) => {
+  const replacePart = (index: number, part: OpenCompanyChatUiPart) => {
     parts[index] = part;
     dirty = true;
   };
@@ -560,7 +560,7 @@ export async function consumeGoatOpenCompanyChatStream(input: {
         : null;
     // Preserve the most recent throttled text/reasoning before interruption or a model failure.
     // Once the lease is lost, the database projector must not write another byte.
-    if (!(abort instanceof GoatCodexChatLeaseLostError)) {
+    if (!(abort instanceof CodexChatLeaseLostError)) {
       const finalizedParts = finalizeStreamingParts(parts);
       parts.splice(0, parts.length, ...finalizedParts);
       dirty = true;
@@ -577,8 +577,8 @@ export async function consumeGoatOpenCompanyChatStream(input: {
   return projection();
 }
 
-export async function goatOpenCompanyModelMessagesFromStored(
-  storedMessages: readonly GoatStoredChatMessage[],
+export async function openCompanyModelMessagesFromStored(
+  storedMessages: readonly StoredChatMessage[],
   currentUserMessageId: string,
   options?: { modelId?: string | undefined; blobToken?: string | undefined },
 ) {
@@ -589,9 +589,9 @@ export async function goatOpenCompanyModelMessagesFromStored(
     throw new Error(`OpenCompany chat user message ${currentUserMessageId} was not found.`);
   }
   const replayMessages = storedMessages.slice(0, currentIndex + 1);
-  const uiMessages = replayMessages.map((message) => toGoatChatUiMessage(message));
+  const uiMessages = replayMessages.map((message) => toChatUiMessage(message));
   return convertToModelMessages(
-    await hydrateGoatOpenCompanyAttachmentParts({
+    await hydrateOpenCompanyAttachmentParts({
       uiMessages,
       storedMessages: replayMessages,
       modelId: options?.modelId,
@@ -600,7 +600,7 @@ export async function goatOpenCompanyModelMessagesFromStored(
   );
 }
 
-async function loadGoatOpenCompanyChatModelMessages(input: {
+async function loadOpenCompanyChatModelMessages(input: {
   chatSessionId: string;
   currentUserMessageId: string;
   modelId: string;
@@ -608,46 +608,46 @@ async function loadGoatOpenCompanyChatModelMessages(input: {
 }) {
   const rows = await getDb()
     .select({
-      id: goatChatMessages.id,
-      sessionId: goatChatMessages.sessionId,
-      role: goatChatMessages.role,
-      content: goatChatMessages.content,
-      taskId: goatChatMessages.taskId,
-      debugTrace: goatChatMessages.debugTrace,
-      attachments: goatChatMessages.attachments,
-      attachmentTexts: goatChatMessages.attachmentTexts,
-      createdAt: goatChatMessages.createdAt,
-      updatedAt: goatChatMessages.updatedAt,
+      id: chatMessages.id,
+      sessionId: chatMessages.sessionId,
+      role: chatMessages.role,
+      content: chatMessages.content,
+      taskId: chatMessages.taskId,
+      debugTrace: chatMessages.debugTrace,
+      attachments: chatMessages.attachments,
+      attachmentTexts: chatMessages.attachmentTexts,
+      createdAt: chatMessages.createdAt,
+      updatedAt: chatMessages.updatedAt,
     })
-    .from(goatChatMessages)
-    .where(eq(goatChatMessages.sessionId, input.chatSessionId))
-    .orderBy(asc(goatChatMessages.createdAt), asc(goatChatMessages.id));
-  const storedMessages: GoatStoredChatMessage[] = rows.map((row) => ({
+    .from(chatMessages)
+    .where(eq(chatMessages.sessionId, input.chatSessionId))
+    .orderBy(asc(chatMessages.createdAt), asc(chatMessages.id));
+  const storedMessages: StoredChatMessage[] = rows.map((row) => ({
     ...row,
     taskDisplayId: null,
     taskName: null,
     taskPrompt: null,
     taskStatus: null,
   }));
-  return goatOpenCompanyModelMessagesFromStored(storedMessages, input.currentUserMessageId, {
+  return openCompanyModelMessagesFromStored(storedMessages, input.currentUserMessageId, {
     modelId: input.modelId,
     blobToken: input.blobToken,
   });
 }
 
-async function hydrateGoatOpenCompanyAttachmentParts(input: {
-  uiMessages: GoatChatUiMessage[];
+async function hydrateOpenCompanyAttachmentParts(input: {
+  uiMessages: ChatUiMessage[];
   storedMessages: readonly Pick<
-    GoatStoredChatMessage,
+    StoredChatMessage,
     "id" | "role" | "attachments" | "attachmentTexts"
   >[];
   modelId: string | undefined;
   blobToken: string | undefined;
-}): Promise<GoatChatUiMessage[]> {
+}): Promise<ChatUiMessage[]> {
   const attachmentsByMessageId = new Map<
     string,
     {
-      attachments: GoatChatMessageAttachment[];
+      attachments: ChatMessageAttachment[];
       attachmentTexts: Record<string, string> | null;
     }
   >();
@@ -676,7 +676,7 @@ async function hydrateGoatOpenCompanyAttachmentParts(input: {
       const stored = message.role === "user" ? attachmentsByMessageId.get(message.id) : undefined;
       if (!stored?.attachments?.length) return message;
 
-      const parts: GoatChatUiMessage["parts"] = [...message.parts];
+      const parts: ChatUiMessage["parts"] = [...message.parts];
       for (const attachment of stored.attachments) {
         parts.push(
           ...(await openCompanyAttachmentToParts({
@@ -693,11 +693,11 @@ async function hydrateGoatOpenCompanyAttachmentParts(input: {
 }
 
 async function openCompanyAttachmentToParts(input: {
-  attachment: GoatChatMessageAttachment;
+  attachment: ChatMessageAttachment;
   attachmentTexts: Record<string, string> | null;
   capabilities: { images: boolean; pdf: boolean };
   blobToken: string | undefined;
-}): Promise<GoatChatUiMessage["parts"]> {
+}): Promise<ChatUiMessage["parts"]> {
   const { attachment } = input;
   const label = `[Attached file "${attachment.filename}" (${attachment.kind}) - attachment id: ${attachment.id}]`;
 
@@ -741,11 +741,11 @@ async function openCompanyAttachmentToParts(input: {
 }
 
 async function resolveOpenCompanyChatRuntime(input: {
-  turn: GoatCodexChatTurn;
-  session: GoatCodexChatSession;
+  turn: CodexChatTurn;
+  session: CodexChatSession;
   env: RunnerEnv;
   signal: AbortSignal;
-  taskContext?: GoatTaskTurnContext | undefined;
+  taskContext?: TaskTurnContext | undefined;
 }) {
   const { turn, session, env, signal, taskContext } = input;
   const model = session.model as AgentModelId;
@@ -756,7 +756,7 @@ async function resolveOpenCompanyChatRuntime(input: {
     throw new Error("Durable OpenCompany chat session is missing its workspace.");
   }
   const workspaceId = session.workspaceId;
-  const workspaceRole = await getGoatWorkspaceRole(
+  const workspaceRole = await getWorkspaceRole(
     { userWorkosId: turn.userWorkosId, workspaceId },
     { db: getDb() },
   );
@@ -766,7 +766,7 @@ async function resolveOpenCompanyChatRuntime(input: {
 
   let brain = null;
   if (session.brainRef) {
-    const access = await getGoatBrainAccess(
+    const access = await getBrainAccess(
       { userWorkosId: turn.userWorkosId, brainRef: session.brainRef },
       { db: getDb() },
     );
@@ -775,7 +775,7 @@ async function resolveOpenCompanyChatRuntime(input: {
     }
     brain = access.brain;
   } else {
-    const brains = await listAccessibleGoatBrains(
+    const brains = await listAccessibleBrains(
       { userWorkosId: turn.userWorkosId, workspaceId },
       { db: getDb() },
     );
@@ -783,12 +783,12 @@ async function resolveOpenCompanyChatRuntime(input: {
       brains.find((candidate) => candidate.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
   }
 
-  const resolved = await resolveGoatActionCatalog({
+  const resolved = await resolveActionCatalog({
     userWorkosId: turn.userWorkosId,
     workspaceId,
-  }).catch(() => ({ providers: [], actions: [] }) as GoatResolvedActionCatalog);
+  }).catch(() => ({ providers: [], actions: [] }) as ResolvedActionCatalog);
   const onCatalog = projectActionCatalog(resolved, "headless");
-  const dispatcherCatalog: GoatChatActionCatalog = {
+  const dispatcherCatalog: ChatActionCatalog = {
     sources: onCatalog.providers.map((source) => ({
       ...source,
       kind: source.kind ?? "integration",
@@ -805,15 +805,15 @@ async function resolveOpenCompanyChatRuntime(input: {
   const currentDate = new Date();
   const exaApiKey = env.exaApiKey?.trim();
   const imessageDelivery =
-    resolveGoatImessageProvider() !== null
-      ? await resolveGoatImessageDelivery(turn.userWorkosId, getDb()).catch(() => null)
+    resolveImessageProvider() !== null
+      ? await resolveImessageDelivery(turn.userWorkosId, getDb()).catch(() => null)
       : null;
   const toolContext = createOpenCompanyChatToolContext({
     model,
     latestUserMessage: turn.prompt,
     ...(imessageDelivery
       ? {
-          sendUserMessage: createGoatSendUserMessageRunner({
+          sendUserMessage: createSendUserMessageRunner({
             userWorkosId: turn.userWorkosId,
             phoneE164: imessageDelivery.phoneE164,
             source: "task",
@@ -826,7 +826,7 @@ async function resolveOpenCompanyChatRuntime(input: {
     ...(brain
       ? {
           runBrainCli: (toolInput) =>
-            runGoatTaskBrainRead({
+            runTaskBrainRead({
               brainRef: brain.id,
               userWorkosId: turn.userWorkosId,
               chatSessionId: session.chatSessionId,
@@ -840,7 +840,7 @@ async function resolveOpenCompanyChatRuntime(input: {
       ? {
           webSearch: async (toolInput): Promise<WebSearchToolOutput> => {
             try {
-              return await executeGoatChatExaSearch({
+              return await executeChatExaSearch({
                 toolInput,
                 apiKey: exaApiKey,
                 signal,
@@ -855,7 +855,7 @@ async function resolveOpenCompanyChatRuntime(input: {
           },
           webFetch: async (toolInput): Promise<WebFetchToolOutput> => {
             try {
-              return await executeGoatChatExaFetch({
+              return await executeChatExaFetch({
                 toolInput,
                 apiKey: exaApiKey,
                 signal,
@@ -874,7 +874,7 @@ async function resolveOpenCompanyChatRuntime(input: {
           actions: {
             catalog: dispatcherCatalog,
             execute: (call) =>
-              executeGoatAction({
+              executeAction({
                 catalog: onCatalog,
                 actionId: call.action,
                 params: call.params,
@@ -944,7 +944,7 @@ async function resolveOpenCompanyChatRuntime(input: {
 
 function createOpenCompanyAbortWatcher(input: {
   signalController: AbortController;
-  projector: Pick<GoatOpenCompanyChatProjector, "checkAbort">;
+  projector: Pick<OpenCompanyChatProjector, "checkAbort">;
   shouldAbort?: () => Error | null;
 }) {
   let stopped = false;
@@ -998,7 +998,7 @@ function openCompanyToolPart(input: {
   input?: unknown;
   output?: unknown;
   errorText?: string;
-}): GoatOpenCompanyChatUiPart {
+}): OpenCompanyChatUiPart {
   const dynamic = input.part.dynamic === true;
   const providerMetadata = input.part.providerMetadata;
   const isOutput = input.state === "output-available" || input.state === "output-error";
@@ -1023,7 +1023,7 @@ function providerMetadataFrom(part: Record<string, unknown>) {
   return part.providerMetadata ? { providerMetadata: part.providerMetadata } : {};
 }
 
-function finalizeStreamingParts(parts: readonly GoatOpenCompanyChatUiPart[]) {
+function finalizeStreamingParts(parts: readonly OpenCompanyChatUiPart[]) {
   return parts.map((part) =>
     (part.type === "text" || part.type === "reasoning") && part.state === "streaming"
       ? { ...part, state: "done" }
@@ -1032,8 +1032,8 @@ function finalizeStreamingParts(parts: readonly GoatOpenCompanyChatUiPart[]) {
 }
 
 function withCompletedResponseFallback(
-  projection: GoatOpenCompanyChatProjection,
-): GoatOpenCompanyChatProjection {
+  projection: OpenCompanyChatProjection,
+): OpenCompanyChatProjection {
   if (
     projection.parts.some(
       (part) => part.type === "text" && typeof part.text === "string" && part.text.trim(),
@@ -1054,11 +1054,11 @@ function withCompletedResponseFallback(
   };
 }
 
-function cloneParts(parts: readonly GoatOpenCompanyChatUiPart[]) {
-  return structuredClone(parts) as GoatOpenCompanyChatUiPart[];
+function cloneParts(parts: readonly OpenCompanyChatUiPart[]) {
+  return structuredClone(parts) as OpenCompanyChatUiPart[];
 }
 
-function partAt(parts: readonly GoatOpenCompanyChatUiPart[], index: number) {
+function partAt(parts: readonly OpenCompanyChatUiPart[], index: number) {
   const part = parts[index];
   if (!part) throw new Error(`OpenCompany chat projection part ${index} was not found.`);
   return part;
@@ -1066,10 +1066,10 @@ function partAt(parts: readonly GoatOpenCompanyChatUiPart[], index: number) {
 
 function recognizedAbortError(value: unknown): value is Error {
   return (
-    value instanceof GoatCodexChatHandoffError ||
-    value instanceof GoatOpenCompanyChatInterruptedError ||
-    value instanceof GoatTaskTurnTerminalError ||
-    value instanceof GoatCodexChatLeaseLostError
+    value instanceof CodexChatHandoffError ||
+    value instanceof OpenCompanyChatInterruptedError ||
+    value instanceof TaskTurnTerminalError ||
+    value instanceof CodexChatLeaseLostError
   );
 }
 
@@ -1097,7 +1097,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function projectionText(projection: GoatOpenCompanyChatProjection) {
+function projectionText(projection: OpenCompanyChatProjection) {
   return projection.parts
     .flatMap((part) => (part.type === "text" && typeof part.text === "string" ? [part.text] : []))
     .join("")

@@ -10,11 +10,11 @@ import {
   BROWSER_TOOL_NAMES,
   type BrowserToolName,
 } from "@opencompany/browser-tools";
-import type { GoatHarnessEngine } from "@opencompany/db/schema";
+import type { HarnessEngine } from "@opencompany/db/schema";
 import {
-  createGoatGatewayAttribution,
-  type GoatGatewayFeature,
-  goatGatewayProviderOptions,
+  createGatewayAttribution,
+  type GatewayFeature,
+  gatewayProviderOptions,
 } from "@opencompany/telemetry";
 import { flushLatitude, latitudeTelemetry } from "@opencompany/telemetry/latitude";
 import {
@@ -29,12 +29,12 @@ import {
   tool,
 } from "ai";
 import { MAX_ACTION_CALLS_PER_TURN } from "./actions/limits";
-import { createInMemoryGoatActionTurnGovernance, serveGoatActionRequest } from "./actions/service";
+import { createInMemoryActionTurnGovernance, serveActionRequest } from "./actions/service";
 import {
-  buildGoatBrainMultiBrainToolSchema,
+  type BrainMultiBrainTarget,
+  buildBrainMultiBrainToolSchema,
   GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
-  type GoatBrainMultiBrainTarget,
-  normalizeGoatBrainReadToolInput,
+  normalizeBrainReadToolInput,
 } from "./brain-surface";
 import {
   MAX_BROWSER_CALLS_PER_TURN,
@@ -44,11 +44,16 @@ import {
 } from "./chat-limits";
 import {
   BROWSER_USE_PROFILE_TOOL_NAME,
+  type BrainToolInput,
+  type BrainToolOutput,
   type BrowserProfileCatalogItem,
   type BrowserToolInput,
   type BrowserToolOutput,
   type BrowserUseProfileToolInput,
   type BrowserUseProfileToolOutput,
+  type ChatActionCatalog,
+  type ChatSkillCatalogItem,
+  type ChatWorkflowCatalogItem,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
   type DeleteTaskScheduleToolOutput,
@@ -56,11 +61,6 @@ import {
   type EditTaskScheduleToolInput,
   type EditTaskScheduleToolOutput,
   GOAT_BRAIN_TOOL_NAME,
-  type GoatBrainToolInput,
-  type GoatBrainToolOutput,
-  type GoatChatActionCatalog,
-  type GoatChatSkillCatalogItem,
-  type GoatChatWorkflowCatalogItem,
   LIST_ACTIONS_TOOL_NAME,
   LIST_SKILLS_TOOL_NAME,
   type ListActionsToolInput,
@@ -161,14 +161,14 @@ export const MAX_LIST_SKILL_RESULTS = 20;
 // `updateTaskStatus` runner. Normal background task execution does not expose
 // it; task closers use the same schema to write the user-facing outcome.
 export const UPDATE_TASK_STATUS_TOOL_NAME = "update_task_status";
-export type GoatTaskReportedStatus = "done" | "needs_attention";
+export type TaskReportedStatus = "done" | "needs_attention";
 export type UpdateTaskStatusToolInput = {
-  status: GoatTaskReportedStatus;
+  status: TaskReportedStatus;
   comment: string;
 };
 export type UpdateTaskStatusToolOutput = {
   ok: true;
-  status: GoatTaskReportedStatus;
+  status: TaskReportedStatus;
   comment: string;
 };
 export type UpdateTaskStatusRunner = (input: UpdateTaskStatusToolInput) => Promise<void>;
@@ -218,10 +218,10 @@ export type StartedTask = {
 };
 
 type GenerateTextLike = typeof generateText;
-type GoatBrainCliRunner = (
-  input: GoatBrainToolInput,
+type BrainCliRunner = (
+  input: BrainToolInput,
   executionContext?: unknown,
-) => Promise<GoatBrainToolOutput>;
+) => Promise<BrainToolOutput>;
 type SaveToBrainRunner = (input: SaveToBrainToolInput) => Promise<SaveToBrainToolOutput>;
 type WebFetchRunner = (input: WebFetchToolInput) => Promise<WebFetchToolOutput>;
 type WebSearchRunner = (input: WebSearchToolInput) => Promise<WebSearchToolOutput>;
@@ -240,7 +240,7 @@ export type ActionDispatcher = {
   // The action catalog resolved server-side from real connection state; ids
   // become the dispatch enum, so a disconnected provider's actions cannot be
   // invoked by guessing.
-  catalog: GoatChatActionCatalog;
+  catalog: ChatActionCatalog;
   prelistedSourceIds?: readonly string[];
   execute: (input: {
     action: string;
@@ -255,13 +255,13 @@ export type ActionDispatcher = {
 };
 
 export type SkillDispatcher = {
-  catalog: readonly GoatChatSkillCatalogItem[];
+  catalog: readonly ChatSkillCatalogItem[];
   prelistedSkillIds?: readonly string[];
   execute: (input: { skill: string }) => Promise<UseSkillToolOutput>;
 };
 
 export type WorkflowDispatcher = {
-  catalog: readonly GoatChatWorkflowCatalogItem[];
+  catalog: readonly ChatWorkflowCatalogItem[];
   execute: (input: StartWorkflowToolInput) => Promise<StartedTask>;
 };
 
@@ -308,7 +308,7 @@ type StartTaskRequest = {
   prompt: string;
   name?: string;
   model: AgentModelId;
-  engine?: GoatHarnessEngine;
+  engine?: HarnessEngine;
 };
 
 export async function runOpenCompanyChatAgent(input: {
@@ -316,11 +316,11 @@ export async function runOpenCompanyChatAgent(input: {
   model: AgentModelId;
   gatewayApiKey: string;
   startTask?: (task: StartTaskRequest) => Promise<StartedTask>;
-  requestedEngine?: GoatHarnessEngine;
+  requestedEngine?: HarnessEngine;
   scheduleTask?: ScheduleTaskRunner;
   editTaskSchedule?: EditTaskScheduleRunner;
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
-  runBrainCli?: GoatBrainCliRunner;
+  runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   sendUserMessage?: SendUserMessageRunner;
   webFetch?: WebFetchRunner;
@@ -333,7 +333,7 @@ export async function runOpenCompanyChatAgent(input: {
   actions?: ActionDispatcher;
   skills?: SkillDispatcher;
   workflows?: WorkflowDispatcher;
-  goatBrainMultiBrain?: { targets: readonly GoatBrainMultiBrainTarget[] };
+  brainMultiBrain?: { targets: readonly BrainMultiBrainTarget[] };
   currentDate?: Date | string;
   userContext?: OpenCompanyChatSystemPromptInput["userContext"];
   recurringSchedules?: OpenCompanyChatSystemPromptInput["recurringSchedules"];
@@ -345,7 +345,7 @@ export async function runOpenCompanyChatAgent(input: {
   // (e.g. Slack mrkdwn formatting rules).
   extraSystemBlocks?: readonly string[];
   // Gateway cost attribution surface; defaults to the main chat.
-  feature?: GoatGatewayFeature;
+  feature?: GatewayFeature;
   userWorkosId?: string | null;
   chatSessionId?: string | null;
   // Latitude session grouping for surfaces without a chat session (e.g. a
@@ -363,7 +363,7 @@ export async function runOpenCompanyChatAgent(input: {
 
   const generate = input.generateTextImpl ?? generateText;
   const gateway = createGateway({ apiKey: gatewayApiKey });
-  const attribution = createGoatGatewayAttribution({
+  const attribution = createGatewayAttribution({
     userWorkosId: input.userWorkosId,
     feature: input.feature ?? "chat",
     ...(input.chatSessionId ? { chatSessionId: input.chatSessionId } : {}),
@@ -387,7 +387,7 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.actions ? { actions: input.actions } : {}),
     ...(input.skills ? { skills: input.skills } : {}),
     ...(input.workflows ? { workflows: input.workflows } : {}),
-    ...(input.goatBrainMultiBrain ? { goatBrainMultiBrain: input.goatBrainMultiBrain } : {}),
+    ...(input.brainMultiBrain ? { brainMultiBrain: input.brainMultiBrain } : {}),
   });
 
   const systemPromptInput = {
@@ -430,7 +430,7 @@ export async function runOpenCompanyChatAgent(input: {
       ...(toolContext.repairToolCall
         ? { experimental_repairToolCall: toolContext.repairToolCall }
         : {}),
-      providerOptions: goatGatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
+      providerOptions: gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
       ...latitudeTelemetry({
         name: feature === "slack-bot" ? "slack-answer" : "chat-agent",
         feature,
@@ -468,12 +468,12 @@ export async function runOpenCompanyChatAgent(input: {
 export function createOpenCompanyChatToolContext(input: {
   model: AgentModelId;
   startTask?: (task: StartTaskRequest) => Promise<StartedTask>;
-  requestedEngine?: GoatHarnessEngine;
+  requestedEngine?: HarnessEngine;
   latestUserMessage?: string;
   scheduleTask?: ScheduleTaskRunner;
   editTaskSchedule?: EditTaskScheduleRunner;
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
-  runBrainCli?: GoatBrainCliRunner;
+  runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   sendUserMessage?: SendUserMessageRunner;
   webFetch?: WebFetchRunner;
@@ -500,7 +500,7 @@ export function createOpenCompanyChatToolContext(input: {
   // When several brains are in scope (e.g. a Slack channel routed to more than
   // one brain), the goat_brain schema grows a required `brain` enum and raw
   // args flow to runBrainCli so the runner can pick the target and normalize.
-  goatBrainMultiBrain?: { targets: readonly GoatBrainMultiBrainTarget[] };
+  brainMultiBrain?: { targets: readonly BrainMultiBrainTarget[] };
 }) {
   const webSearchCap = input.limits?.webSearchCallsPerTurn ?? MAX_WEB_SEARCH_CALLS_PER_TURN;
   const webFetchCap = input.limits?.webFetchCallsPerTurn ?? MAX_WEB_FETCH_CALLS_PER_TURN;
@@ -514,7 +514,7 @@ export function createOpenCompanyChatToolContext(input: {
   let webSearchCallCount = 0;
   let browserCallCount = 0;
   let internalActionInvocationSequence = 0;
-  const actionTurnGovernance = createInMemoryGoatActionTurnGovernance({
+  const actionTurnGovernance = createInMemoryActionTurnGovernance({
     ...(input.actions?.prelistedSourceIds
       ? { prelistedSourceIds: input.actions.prelistedSourceIds }
       : {}),
@@ -522,18 +522,18 @@ export function createOpenCompanyChatToolContext(input: {
   const listedSkillIds = new Set(input.skills?.prelistedSkillIds ?? []);
   let repairToolCall: ToolCallRepairFunction<ToolSet> | undefined;
 
-  const multiBrainTargets = input.goatBrainMultiBrain?.targets ?? [];
+  const multiBrainTargets = input.brainMultiBrain?.targets ?? [];
   const multiBrain = multiBrainTargets.length > 1;
-  const goatBrainSchema = multiBrain
-    ? (buildGoatBrainMultiBrainToolSchema(multiBrainTargets) as unknown as Parameters<
+  const brainSchema = multiBrain
+    ? (buildBrainMultiBrainToolSchema(multiBrainTargets) as unknown as Parameters<
         typeof jsonSchema
       >[0])
     : GOAT_BRAIN_READ_TOOL_AI_SCHEMA;
 
   const tools: ToolSet = {
-    [GOAT_BRAIN_TOOL_NAME]: tool<GoatBrainToolInput, GoatBrainToolOutput>({
+    [GOAT_BRAIN_TOOL_NAME]: tool<BrainToolInput, BrainToolOutput>({
       description: GOAT_BRAIN_TOOL_DESCRIPTION,
-      inputSchema: jsonSchema<GoatBrainToolInput>(goatBrainSchema),
+      inputSchema: jsonSchema<BrainToolInput>(brainSchema),
       execute: async (args, executionContext?: unknown) => {
         if (!input.runBrainCli) {
           throw new Error("goat_brain is not configured for this chat.");
@@ -541,7 +541,7 @@ export function createOpenCompanyChatToolContext(input: {
         visibleToolActivity = true;
         // Multi-brain runners receive the raw args (including `brain`) and own
         // normalization after extracting the target.
-        const toolArgs = multiBrain ? args : normalizeGoatBrainToolInput(args);
+        const toolArgs = multiBrain ? args : normalizeBrainToolInput(args);
         return executionContext === undefined
           ? input.runBrainCli(toolArgs)
           : input.runBrainCli(toolArgs, executionContext);
@@ -1183,7 +1183,7 @@ export function createOpenCompanyChatToolContext(input: {
         visibleToolActivity = true;
         const requestedSource =
           typeof args.source === "string" ? args.source.trim().toLowerCase() : "";
-        return serveGoatActionRequest({
+        return serveActionRequest({
           request: {
             operation: "list",
             sessionId: "foreground",
@@ -1262,7 +1262,7 @@ export function createOpenCompanyChatToolContext(input: {
           typeof executionContext.toolCallId === "string"
             ? executionContext.toolCallId
             : `ai-sdk:${++internalActionInvocationSequence}`;
-        return serveGoatActionRequest({
+        return serveActionRequest({
           request: {
             operation: "execute",
             sessionId: "foreground",
@@ -1297,7 +1297,7 @@ export function createOpenCompanyChatToolContext(input: {
       inputSchema: jsonSchema<UpdateTaskStatusToolInput>(UPDATE_TASK_STATUS_TOOL_INPUT_JSON_SCHEMA),
       execute: async (args) => {
         visibleToolActivity = true;
-        const status: GoatTaskReportedStatus =
+        const status: TaskReportedStatus =
           args.status === "needs_attention" ? "needs_attention" : "done";
         const comment = typeof args.comment === "string" ? args.comment.trim() : "";
         await updateTaskStatus({ status, comment });
@@ -1400,21 +1400,21 @@ function parseToolCallParams(input: string): Record<string, unknown> | null {
   }
 }
 
-function normalizeStartTaskEngine(value: unknown): GoatHarnessEngine | undefined {
+function normalizeStartTaskEngine(value: unknown): HarnessEngine | undefined {
   return value === "opencompany" || value === "codex" || value === "claude_code"
     ? value
     : undefined;
 }
 
 function modelForStartTaskEngine(
-  engine: GoatHarnessEngine | undefined,
+  engine: HarnessEngine | undefined,
   model: AgentModelId,
 ): AgentModelId {
   if (engine !== "codex") return model;
   return isCodexModelId(model) ? model : CODEX_DEFAULT_MODEL_ID;
 }
 
-function inferStartTaskEngine(value: string | undefined): GoatHarnessEngine | undefined {
+function inferStartTaskEngine(value: string | undefined): HarnessEngine | undefined {
   if (!value) return undefined;
   const normalized = value.toLowerCase();
   const steeringText = normalized.replace(/@codex\b/g, "");
@@ -1425,8 +1425,8 @@ function inferStartTaskEngine(value: string | undefined): GoatHarnessEngine | un
   return "codex";
 }
 
-export function normalizeGoatBrainToolInput(input: unknown): GoatBrainToolInput {
-  return normalizeGoatBrainReadToolInput(input);
+export function normalizeBrainToolInput(input: unknown): BrainToolInput {
+  return normalizeBrainReadToolInput(input);
 }
 
 function toStartTaskToolOutput(

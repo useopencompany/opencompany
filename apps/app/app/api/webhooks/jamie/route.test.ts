@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { loadGoatJamieWebhookContextForApiKey } from "@/lib/integrations/jamie";
-import { handleGoatJamieWebhookDelivery } from "@/lib/integrations/jamie-webhook";
+import { loadJamieWebhookContextForApiKey } from "@/lib/integrations/jamie";
+import { handleJamieWebhookDelivery } from "@/lib/integrations/jamie-webhook";
 import { POST } from "./route";
 
 vi.mock("@/lib/integrations/jamie", () => ({
-  loadGoatJamieWebhookContextForApiKey: vi.fn(),
+  loadJamieWebhookContextForApiKey: vi.fn(),
 }));
 
 vi.mock("@/lib/integrations/jamie-webhook", () => ({
-  handleGoatJamieWebhookDelivery: vi.fn(async () => Response.json({ ok: true })),
+  handleJamieWebhookDelivery: vi.fn(async () => Response.json({ ok: true })),
 }));
 
 describe("POST /api/webhooks/jamie", () => {
@@ -23,14 +23,14 @@ describe("POST /api/webhooks/jamie", () => {
       apiKeyHash: "hash",
       legacySecretHash: null,
     };
-    vi.mocked(loadGoatJamieWebhookContextForApiKey).mockResolvedValue(context);
+    vi.mocked(loadJamieWebhookContextForApiKey).mockResolvedValue(context);
 
     const request = jamieRequest();
     const response = await POST(request);
 
     expect(response.status).toBe(200);
-    expect(loadGoatJamieWebhookContextForApiKey).toHaveBeenCalledWith(jamieApiKey());
-    expect(handleGoatJamieWebhookDelivery).toHaveBeenCalledWith({
+    expect(loadJamieWebhookContextForApiKey).toHaveBeenCalledWith(jamieApiKey());
+    expect(handleJamieWebhookDelivery).toHaveBeenCalledWith({
       request,
       webhookContext: context,
       missingContextStatus: 401,
@@ -38,11 +38,11 @@ describe("POST /api/webhooks/jamie", () => {
   });
 
   it("passes a null context through as an authentication failure", async () => {
-    vi.mocked(loadGoatJamieWebhookContextForApiKey).mockResolvedValue(null);
+    vi.mocked(loadJamieWebhookContextForApiKey).mockResolvedValue(null);
 
     await POST(jamieRequest());
 
-    expect(handleGoatJamieWebhookDelivery).toHaveBeenCalledWith(
+    expect(handleJamieWebhookDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
         webhookContext: null,
         missingContextStatus: 401,

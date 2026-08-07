@@ -1,29 +1,29 @@
 import { NextResponse } from "next/server";
-import { getGoatAppUrl } from "@/lib/app-url";
-import { currentGoatUser } from "@/lib/auth";
+import { getAppUrl } from "@/lib/app-url";
+import { currentUser } from "@/lib/auth";
 import {
-  appendGoatLinearIngestStatus,
-  buildGoatLinearAuthorizationUrl,
-  createGoatLinearIngestState,
-  isGoatLinearIngestConfigured,
+  appendLinearIngestStatus,
+  buildLinearAuthorizationUrl,
+  createLinearIngestState,
+  isLinearIngestConfigured,
 } from "@/lib/integrations/linear-ingest";
 
 export async function GET(request: Request) {
-  const { user } = await currentGoatUser();
+  const { user } = await currentUser();
   const url = new URL(request.url);
-  const appUrl = getGoatAppUrl();
+  const appUrl = getAppUrl();
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
 
-  if (!isGoatLinearIngestConfigured()) {
+  if (!isLinearIngestConfigured()) {
     return NextResponse.redirect(
-      new URL(appendGoatLinearIngestStatus(returnTo, "error", "not_configured"), appUrl),
+      new URL(appendLinearIngestStatus(returnTo, "error", "not_configured"), appUrl),
     );
   }
 
-  const state = createGoatLinearIngestState({
+  const state = createLinearIngestState({
     userWorkosId: user.workosUserId,
     returnTo,
   });
 
-  return NextResponse.redirect(buildGoatLinearAuthorizationUrl(state));
+  return NextResponse.redirect(buildLinearAuthorizationUrl(state));
 }

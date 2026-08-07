@@ -1,6 +1,6 @@
-import { pageLinkTargets, parseGoatBrainInlineLinks } from "./inline-links";
+import { pageLinkTargets, parseBrainInlineLinks } from "./inline-links";
 
-export type GoatBrainWikiLink = {
+export type BrainWikiLink = {
   raw: string;
   target: string;
   label: string;
@@ -8,8 +8,8 @@ export type GoatBrainWikiLink = {
   valid: boolean;
 };
 
-export function parseGoatBrainWikiLinks(text: string): GoatBrainWikiLink[] {
-  return parseGoatBrainInlineLinks(text)
+export function parseBrainWikiLinks(text: string): BrainWikiLink[] {
+  return parseBrainInlineLinks(text)
     .filter((link) => link.kind === "page")
     .map((link) => ({
       raw: link.raw,

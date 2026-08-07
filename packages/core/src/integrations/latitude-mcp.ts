@@ -1,12 +1,9 @@
-import {
-  createGoatRemoteMcpIntegration,
-  type GoatRemoteMcpProviderState,
-} from "./remote-mcp-oauth";
+import { createRemoteMcpIntegration, type RemoteMcpProviderState } from "./remote-mcp-oauth";
 
 export const GOAT_LATITUDE_MCP_ENDPOINT_URL = "https://api.latitude.so/v1/mcp";
 const GOAT_LATITUDE_PROVIDER = "latitude" as const;
 
-const latitudeMcpIntegration = createGoatRemoteMcpIntegration({
+const latitudeMcpIntegration = createRemoteMcpIntegration({
   provider: GOAT_LATITUDE_PROVIDER,
   displayName: "Latitude",
   endpointUrl: GOAT_LATITUDE_MCP_ENDPOINT_URL,
@@ -16,11 +13,11 @@ const latitudeMcpIntegration = createGoatRemoteMcpIntegration({
   storedScopes: [],
 });
 
-export type GoatLatitudeProviderState = GoatRemoteMcpProviderState<"latitude">;
+export type LatitudeProviderState = RemoteMcpProviderState<"latitude">;
 
-export const getGoatLatitudeIntegrationState = latitudeMcpIntegration.getState;
-export const loadGoatLatitudeMcpWorkerConnection = latitudeMcpIntegration.loadWorkerConnection;
-export const startGoatLatitudeMcpOAuth = latitudeMcpIntegration.start;
-export const completeGoatLatitudeMcpOAuth = latitudeMcpIntegration.complete;
-export const verifyGoatLatitudeMcpState = latitudeMcpIntegration.verifyState;
-export const appendGoatLatitudeMcpStatus = latitudeMcpIntegration.appendStatus;
+export const getLatitudeIntegrationState = latitudeMcpIntegration.getState;
+export const loadLatitudeMcpWorkerConnection = latitudeMcpIntegration.loadWorkerConnection;
+export const startLatitudeMcpOAuth = latitudeMcpIntegration.start;
+export const completeLatitudeMcpOAuth = latitudeMcpIntegration.complete;
+export const verifyLatitudeMcpState = latitudeMcpIntegration.verifyState;
+export const appendLatitudeMcpStatus = latitudeMcpIntegration.appendStatus;
