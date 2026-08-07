@@ -6,7 +6,11 @@ import type {
 } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
-import { extractClaudeScheduleWakeup, runGoatClaudeCodeChatTurn } from "./goat-claude-code-chat";
+import {
+  extractClaudeScheduleWakeup,
+  isClaudeCodeAuthenticationFailure,
+  runGoatClaudeCodeChatTurn,
+} from "./goat-claude-code-chat";
 import { GoatCodexChatRetryableInfrastructureError } from "./goat-codex-chat-errors";
 
 const authMocks = vi.hoisted(() => ({
@@ -153,6 +157,25 @@ vi.mock("./sandbox", () => ({
 vi.mock("./skills", () => ({
   materializeCodexSkillSnapshotsForSession: skillMocks.materializeCodexSkillSnapshotsForSession,
 }));
+
+describe("isClaudeCodeAuthenticationFailure", () => {
+  it.each([
+    "Failed to authenticate. API Error: 401",
+    "OAuth token has expired",
+    "Unauthorized: login expired",
+    "Invalid API key",
+  ])("recognizes rejected credentials: %s", (message) => {
+    expect(isClaudeCodeAuthenticationFailure(message)).toBe(true);
+  });
+
+  it.each([
+    "You're out of usage credits · resets 10am (UTC)",
+    "Credit balance is too low",
+    "5-hour limit reached - resets 10am (UTC)",
+  ])("keeps credentials connected for usage limits: %s", (message) => {
+    expect(isClaudeCodeAuthenticationFailure(message)).toBe(false);
+  });
+});
 
 describe("extractClaudeScheduleWakeup", () => {
   it("uses the last valid ScheduleWakeup call and clamps its delay", () => {

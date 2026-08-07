@@ -123,9 +123,13 @@ export const GOAT_CLAUDE_CODE_CHAT_REAUTH_MESSAGE =
   "Claude Code is disconnected. Reconnect Claude Code in Goat settings, then send your message again.";
 
 // "authenticat" covers both "Failed to authenticate" (real 401 result text, observed
-// against claude 2.1.220) and "authentication".
-const AUTH_FAILURE_PATTERN =
-  /oauth|authenticat|unauthorized|401|login expired|invalid api key|credit balance|usage credits/i;
+// against claude 2.1.220) and "authentication". Usage-credit and credit-balance failures are
+// temporary quota states: the same OAuth credential becomes usable again after a reset or top-up.
+const AUTH_FAILURE_PATTERN = /oauth|authenticat|unauthorized|401|login expired|invalid api key/i;
+
+export function isClaudeCodeAuthenticationFailure(value: string) {
+  return AUTH_FAILURE_PATTERN.test(value);
+}
 
 export async function loadGoatClaudeCodeAuth(
   userWorkosId: string,
@@ -588,7 +592,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
     }
     if (summary.status === "failure") {
       const failureText = `${summary.error ?? ""}\n${runResult.stderrTail}`;
-      if (AUTH_FAILURE_PATTERN.test(failureText)) {
+      if (isClaudeCodeAuthenticationFailure(failureText)) {
         await markGoatClaudeCodeCredentialNeedsReauth({
           db: getDb(),
           userWorkosId: turn.userWorkosId,
