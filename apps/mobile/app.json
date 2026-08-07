@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "opencompany",
+    "slug": "mobile-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "opencompany",
+    "userInterfaceStyle": "automatic",
+    "platforms": ["ios"],
+    "ios": {
+      "icon": "./assets/ios.icon",
+      "supportsTablet": false,
+      "bundleIdentifier": "cloud.opencompany.mobile"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#F7F7F5",
+          "image": "./assets/images/splash-icon.png",
+          "dark": {
+            "image": "./assets/images/splash-icon-dark.png",
+            "backgroundColor": "#111111"
+          },
+          "imageWidth": 76
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
