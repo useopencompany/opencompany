@@ -235,10 +235,12 @@ function CapabilityApprovalCard({
       </p>
       {summary.lines.length > 0 ? (
         <dl className="mt-2 space-y-1">
-          {summary.lines.map((line) => (
-            <div key={line.label} className="flex gap-2 text-[12px] leading-5">
+          {summary.lines.map((line, index) => (
+            <div key={`${line.label}-${index}`} className="flex gap-2 text-[12px] leading-5">
               <dt className="w-20 shrink-0 text-ink-subtle">{line.label}</dt>
-              <dd className="min-w-0 break-words text-ink-muted">{line.value}</dd>
+              <dd className="min-w-0 whitespace-pre-wrap break-words text-ink-muted">
+                {line.value}
+              </dd>
             </div>
           ))}
         </dl>
@@ -322,10 +324,12 @@ function ActionApprovalCard({
       <div className="text-[12px] font-semibold text-ink">{summary.heading}</div>
       {summary.lines.length > 0 ? (
         <dl className="mt-2 space-y-1">
-          {summary.lines.map((line) => (
-            <div key={line.label} className="flex gap-2 text-[12px] leading-5">
+          {summary.lines.map((line, index) => (
+            <div key={`${line.label}-${index}`} className="flex gap-2 text-[12px] leading-5">
               <dt className="w-20 shrink-0 text-ink-subtle">{line.label}</dt>
-              <dd className="min-w-0 break-words text-ink-muted">{line.value}</dd>
+              <dd className="min-w-0 whitespace-pre-wrap break-words text-ink-muted">
+                {line.value}
+              </dd>
             </div>
           ))}
         </dl>
@@ -488,17 +492,38 @@ function actionApprovalSummary(input: unknown): {
     return { heading: "Add this event to your Google Calendar?", lines };
   }
 
+  if (action === "x_account.post_tweet") {
+    const posts = Array.isArray(params.posts)
+      ? params.posts.flatMap((post) => {
+          if (!isRecord(post) || typeof post.text !== "string") return [];
+          const account = typeof post.account === "string" ? `${post.account} — ` : "";
+          return [{ label: "Post", value: `${account}${post.text}` }];
+        })
+      : [];
+    if (typeof params.text === "string") {
+      posts.push({ label: "Post", value: params.text });
+    }
+    if (posts.length > 0) return { heading: "Post to X?", lines: posts };
+  }
+
   return {
     heading: action
       ? `Run ${action.split(".").join(" · ").split("_").join(" ")}?`
       : "Run this action?",
     lines: Object.entries(params).flatMap(([key, value]) => {
       if (value === undefined || value === null) return [];
-      const rendered =
-        typeof value === "string" ? value : Array.isArray(value) ? value.join(", ") : String(value);
+      const rendered = formatApprovalValue(value);
       return rendered ? [{ label: key.split("_").join(" "), value: rendered }] : [];
     }),
   };
+}
+
+function formatApprovalValue(value: unknown) {
+  if (!Array.isArray(value)) return formatDebugValue(value);
+  if (value.every((entry) => ["string", "number", "boolean"].includes(typeof entry))) {
+    return value.join(", ");
+  }
+  return formatDebugValue(value);
 }
 
 function formatEventWindow(start: unknown, end: unknown, timeZone: unknown) {
