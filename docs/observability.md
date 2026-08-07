@@ -60,7 +60,7 @@ from the model plus those token metrics. The spans nest under the per-turn root 
 tool-result pair on that trace; we no longer open manual `tool.*` spans. Tool failures are still
 reported to Better Stack via `captureException`.
 
-Latitude LLM tracing (goat surfaces) is disabled unless keyed:
+Latitude LLM tracing is disabled unless keyed:
 
 ```sh
 LATITUDE_API_KEY=...
@@ -71,7 +71,7 @@ LATITUDE_TELEMETRY_DISABLED=1            # kill switch even when keyed
 ```
 
 When enabled, `@opencompany/telemetry/latitude` sends full-content AI SDK spans
-(prompts, completions, tool calls, token usage) to Latitude for three goat surfaces: main chat
+(prompts, completions, tool calls, token usage) to Latitude for three surfaces: main chat
 turns (`chat-turn`, session = chat session id), Slack bot answers (`slack-answer`, session =
 `slack:{team}:{channel}:{thread}`), and brain ingestion runs (`brain-ingest` +
 `brain-ingest-triage`, session = ingest job id). Spans flow through a dedicated tracer provider
@@ -182,7 +182,7 @@ through `@opencompany/telemetry` when `TELEMETRY_ENABLED=true` and
 `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 
 For the SigNoz dashboard, saved trace views, MCP prompts, and event inventory, see
-[signoz-goat-observability.md](./signoz-goat-observability.md).
+[signoz-observability.md](./signoz-observability.md).
 
 Use SigNoz for the aggregate view. The current production dashboard starts with trace-backed
 aggregates because those are live and drill down to investigation IDs. Add metric-native panels for

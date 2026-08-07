@@ -1,211 +1,111 @@
 # Architecture
 
-This is the short map for coming back to the project after time away. Source files are still the source of truth; this page is meant to orient an agent or teammate quickly.
+The orientation map for the opencompany platform. Source files are the source of truth; this page
+exists so an agent or teammate can rebuild context quickly.
 
-## Runtime Shape
+## The shape
 
-- `apps/web` is the Next.js app. Server Components read from Postgres through Drizzle, and server actions mutate app state.
-- WorkOS AuthKit handles identity. `currentWorkspace()` resolves the signed-in user and workspace before app data is read or written.
-- Neon Postgres is the canonical interactive app state. Once a save transaction succeeds, the app
-  treats that state as saved. The shared DB client lives in `packages/db/src/client.ts`; the schema
-  lives in `packages/db/src/schema.ts`.
-- GitHub stores asynchronously materialized workspace files in an OpenCompany-managed private repo
-  per workspace. This backing repo is separate from GitHub work integrations that agents use for
-  coding workflows.
-- Inngest runs background jobs. The app exposes `/api/inngest`, and local development runs the Inngest dev server through the `@opencompany/inngest-dev` workspace.
-- `apps/runner` is the long-lived agent-session data plane. It provisions E2B sandboxes, runs the model/tool loop through Vercel AI Gateway and AI SDK Core, writes durable runtime boundaries to Postgres, and streams live-only deltas to active clients.
+opencompany is a headless product core with thin surfaces:
 
-## Agent Editing Flow
+- **`packages/core`** — the product engine: the chat agent (system prompts, step preparation, tool
+  context in `chat-agent.ts`), the action service (`actions/` — discovery, invocation, policy
+  projections, and governance for connected integrations and managed capabilities), integration
+  clients, the shared chat UI message contract (`chat-ui.ts`), and iMessage delivery. Core does not
+  import Next.js, Fastify, or React; surfaces inject identity, persistence handles, and
+  side-effect adapters.
+- **`packages/brain`** — the knowledge domain: document model and schema, append-only evidence
+  timelines, inline links, retrieval (BM25 + embeddings with graph-hop expansion), source-item
+  normalization for every connected provider, and the CLI bundle that app and runner materialize
+  inside sandboxes. A leaf package: its only external deps are `minisearch` and `yaml`.
+- **`packages/db`** — the Drizzle schema (`schema.ts`) and one query module per domain, plus the
+  serverless (`client.ts`) and pooled (`pool.ts`, for the runner) clients.
+  `legacy-billing-schema.ts` and `llm-broker-schema.ts` hold the few public-schema tables that
+  still run (see “What was removed” below).
+- **`packages/agent-runtime`** — shared contracts: the model catalog, action-gateway wire types,
+  per-turn HMAC ticket auth for sandboxed Claude Code, Codex app-server and Claude Code event
+  normalization, cloud-coding engine descriptors, and schedule helpers.
+- **`apps/app`** — the Next.js surface at my.opencompany.chat: WorkOS AuthKit auth, routes and
+  server actions, the Electric live-sync proxy, billing (including the Stripe webhook at
+  `/api/stripe/webhook`), and the internal gateways the runner calls. Routes stay thin; domain
+  logic belongs in `lib/` services and, increasingly, `packages/core`.
+- **`apps/runner`** — the long-lived execution surface (Fastify on Render): the durable turn
+  worker, Brain ingestion and provider poll/flush workers, the schedule sweeper, the LLM broker
+  for sandboxed CLIs, and the sandbox/coding-workspace/dictation transports.
+- **`apps/macos`** (opencompany Quick) and the MCP connector (`apps/app/app/mcp`) are additional
+  thin surfaces over the same core — evidence that the seam holds.
+- Support: `packages/ui` (design system), `telemetry` (OTel traces/metrics), `observability`
+  (structured logs + error capture), `analytics` (PostHog; `shared-*` is the residual
+  billing/marketing catalog pending consolidation), `billing` (model pricing), `browser-tools`,
+  `crypto`, `file-extract`.
 
-Agent pages read the `agents` table for the current workspace. The editor is a rich text client
-component with `@` mention suggestions for supported models, tools, and agent work integrations.
+## Execution model: durable turns
 
-When an agent is created or edited:
+Interactive chat streams straight from `apps/app` (`app/api/chat/route.ts`); durability begins at
+the turn queue. Everything backgroundable — cloud coding chats, tasks, workflows, scheduled runs —
+is rows:
 
-1. `createAgent()` or `updateAgent()` in `apps/web/lib/agents/actions.ts` serializes the agent into the `.agent` file format.
-2. The app stores the latest title, body, parsed config, content hash, and version in Postgres.
-3. The same `db.batch([...])` enqueues a row into the unified `workspace_sync_jobs` outbox (via `enqueueWorkspaceSync`) with the desired hash, repo path, and a `nextRunAt` about 10 seconds out.
-4. After the response, the action calls `scheduleWorkspaceSyncDispatch()`, which fire-and-forgets a `workspace.sync_requested` Inngest event.
-5. The UI treats the DB write as saved immediately and separately shows GitHub sync status.
+`chat_sessions` (kind: chat | task) → a runtime session row → a per-session FIFO of leased turns.
 
-The editor debounces saves by about 600ms in `AgentDetail.tsx`. Failed GitHub syncs should not make the editor look unsaved; they set `githubSyncStatus = failed` and keep the error on the agent row.
+The runner’s `turn-worker.ts` claims turns with `FOR UPDATE SKIP LOCKED`, heartbeats the lease,
+survives deploys via handoff and guarded recovery, and settles turn + session + task projection +
+origin-chat notification in one fenced statement (`task-turn.ts`). Three engines share the queue
+and are dispatched per turn:
 
-Agents are one instance of the broader [synced workspace resource](#synced-workspace-resources) pattern.
+- `opencompany` — in-process AI SDK loop (`opencompany-chat.ts`), no sandbox; parts are projected
+  into chat messages by `opencompany-chat-projector.ts`.
+- `codex` — persistent E2B sandbox driving the Codex app-server (`codex-chat.ts`,
+  `codex-app-server.ts`), with dynamic host tools for actions and the Brain.
+- `claude_code` — persistent E2B sandbox driving the Claude CLI (`claude-code-chat.ts`), reaching
+  the same action catalog through a per-turn HMAC-ticketed MCP endpoint.
 
-## Agent File Format
+Tasks and workflows are projections over chat sessions, not a separate execution stack: workflow
+steps are ordinary turns chained by settlement; schedules (`scheduler.ts`) create task sessions on
+cron. Harness planning for Codex tasks lives in `harness.ts`.
 
-Workspace backing repos store agents as `agents/<slug>/<slug>.agent` files. The format is a Markdown body
-with a YAML frontmatter header. In version `2`, saved frontmatter is the runtime contract, while
-the web editor derives tool and integration frontmatter deterministically from rich mention nodes.
+## Boundaries
 
-For the full spec — fields, validation rules, supported models and tools, examples, and the compiled `AgentConfig` shape — see [agent-file.md](./agent-file.md).
+- **app → runner**: `/internal/*` routes (bearer `RUNNER_INTERNAL_TOKEN`) for wake nudges, sandbox
+  status, coding-workspace/dictation ticket minting, and harness planning. The database is the
+  queue; HTTP is only a nudge.
+- **runner → app**: the action gateway (`/api/internal/action-gateway`), the Claude Code MCP bridge
+  (`/api/internal/claude-actions`, ticket-authenticated because it is reachable from inside the
+  sandbox), and Brain capture (`/api/internal/codex-brain-capture`) — so provider credentials and
+  the internal bearer never enter E2B.
+- **browser ↔ data**: Electric shapes through the authenticated proxy
+  (`app/api/electric/v1/shape`); Postgres is the source of truth, the stream is the transport.
 
-The parser and serializer live in `packages/agent-runtime/src/agent-file.ts`; the catalog of
-supported models and tools lives in `packages/agent-runtime/src/models.ts` and
-`packages/agent-runtime/src/tools.ts`.
+## Storage contracts (deliberately frozen names)
 
-## GitHub Workspace State
+These predate the goat → opencompany rename and are kept stable on purpose. They are baked into
+production rows, live user sandboxes, and external dashboards — renaming any of them is a
+data/ops migration, not a refactor:
 
-GitHub logic lives in `apps/web/lib/workspace-state/github.ts`.
+- the physical Postgres schema `goat` (`pgSchema("goat")` in `packages/db/src/schema.ts`) and
+  everything under `drizzle/`;
+- Electric wire table names (`goat.tasks`, `goat.chat_messages`, …);
+- E2B sandbox working directories (`/home/user/opencompany-goat/*`, `/home/user/.opencompany-goat/*`);
+- row-id prefixes (`goat_chat_`, `goat_task_`, `goat_codex_chat_*`, `goat_brain_*`, …);
+- stored engine ids (`opencompany` | `codex` | `claude_code`) and event schema versions
+  (`goat.harness.v1`, `goat.chat.debug.v1`, `goat.codex_chat.debug.v1`);
+- telemetry service names (`opencompany-goat`, `opencompany-runner-goat`) and the `goat.*`
+  span/metric/attribute names;
+- browser storage keys (`opencompany-goat-theme`, `goat-active-workspace`, `goat-active-brain`)
+  and the `goat-coding-workspace-v1` WebSocket protocol;
+- the Infisical `/goat` folder and live third-party app identifiers (HubSpot project, Slack apps,
+  WorkOS environments).
 
-- Each workspace gets one managed private repo named from the workspace and id suffix.
-- The repo record is cached in `workspace_repositories`.
-- GitHub App credentials provide installation tokens; the token is cached in memory until close to expiry.
-- Writes use the Contents API. The app reuses the last `githubBlobSha` when available, then refetches on content conflicts.
-- `listWorkspaceAgentFiles()` and `readWorkspaceFile()` support manual GitHub-to-DB reconciliation
-  through `syncAgentsFromWorkspaceRepository()`.
+## What was removed (2026-08 foundation refactor)
 
-Current limitation: there is no GitHub webhook ingestion path. External GitHub edits are not part
-of the normal authority path; they are only reflected after an explicit sync-from-repository action.
+The legacy first-generation product — `apps/web` and the `.agent`-file platform, its runner
+engine, Inngest, WhatsApp messaging, the legacy memory system, and the PR-preview pipeline — was
+deleted. Legacy public-schema tables remain in the database untouched but have no code; dropping
+them (and retiring the legacy branches of the Stripe webhook) is a deliberate follow-up migration.
 
-## Synced Workspace Resources
+## Next extractions (known seams)
 
-A synced workspace resource is workspace-scoped state whose latest editable version is stored in
-Postgres and whose file copy is materialized to the managed GitHub repo. Postgres is authoritative.
-Every resource type (agents, brain files, agent bundle files) shares **one** outbox table,
-`workspace_sync_jobs`, and **one** projector. A write updates the canonical resource row and
-enqueues an outbox row in the same `db.batch([...])`; an Inngest event then drains the outbox and
-projects all due jobs for the workspace to GitHub as a single commit. Content hashes make repeated
-jobs idempotent, and each outbox row stores the desired state plus retry metadata.
-
-Producers (all enqueue via `enqueueWorkspaceSync` from `@opencompany/db/sync-outbox`, which the web
-and runner share):
-
-- Agents — `apps/web/lib/agents/actions.ts` and `apps/web/lib/agents/create.ts`. Outbox rows use
-  `sourceKind: "agent"` and carry `sourceRef = agentId` (the projector resolves the agent by id, so
-  the row survives title-driven renames).
-- Brain files — `apps/web/lib/brain/actions.ts`. Outbox rows use `sourceKind: "brain"`.
-- Agent bundle files — also enqueued from the agents actions with `sourceKind: "agent_file"`.
-
-The shared pipeline:
-
-- **Outbox** — `workspace_sync_jobs` carries `workspaceId`, `repoPath`, `sourceKind`, `sourceRef`,
-  `operation` (`"upsert" | "delete"`), `desiredHash`, `previousPath`/`previousBlobSha` (for
-  renames/deletes), `status`, `attempts`, `nextRunAt`, and `lastError`. Coalescing is keyed on the
-  unique index `(workspaceId, repoPath)`, so rapid edits to the same path collapse into one pending
-  row. The enqueue helper lives in `packages/db/src/sync-outbox.ts`.
-- **Projector** — `projectWorkspaceToGitHub()` in `apps/web/lib/workspace-state/project.ts` is the
-  only place that writes workspace file state to GitHub. It leases due jobs, resolves canonical
-  content, and commits adds/deletes as a single commit through the Git Data API
-  (`commitWorkspaceChanges()` in `git-data-api.ts`). It marks source rows synced/failed and updates
-  `workspace_repositories.latestHeadSha`/`updatedAt`. It is idempotent under partial failure via
-  hash/status guards and caps a batch at 200 jobs per commit.
-- **Dispatch** — `scheduleWorkspaceSyncDispatch()` (`sync-dispatch.ts`) fire-and-forgets a
-  `workspace.sync_requested` event after the response.
-
-When adding a new synced resource type, give it a `contentHash` column, enqueue through
-`enqueueWorkspaceSync` with a new `sourceKind`, and teach the projector's `resolveDesiredContent`
-how to serialize it. No new tables or Inngest functions are required.
-
-## GitHub Work Integrations
-
-Agent work integrations are separate from workspace backing storage. GitHub work integration state
-is cached as a provider row in `workspace_integrations` plus repository resource rows in
-`workspace_integration_resources`.
-
-Agents reference work integration repositories through `.agent` frontmatter under
-`integrations.github.repositories`. AMP sessions clone the configured work repository into the
-runner sandbox with an installation token minted from the workspace work integration installation,
-not the managed workspace-state installation.
-
-AMP itself is modeled as an agent tool, not a workspace integration. Workspace-scoped provider
-credentials are not required for AMP; the runner uses the platform `AMP_API_KEY` when the AMP tool
-runs. For GitHub-backed AMP runs, the runner also passes a short-lived, repository-scoped GitHub App
-installation token into that AMP process so `gh` and HTTPS Git operations use the same work
-integration identity as the clone.
-
-## Agent Sessions
-
-Agent sessions turn a saved `.agent` configuration into a live cloud run. The web app stays the
-authenticated control plane, while `apps/runner` owns the long-lived data plane.
-
-The important files are:
-
-- `apps/web/lib/agent-sessions/actions.ts`: creates sessions, inserts user messages, appends
-  web-authored transcript events, and dispatches Inngest events.
-- `apps/web/lib/agent-sessions/runner.ts`: server-to-server calls from web/Inngest to the runner.
-- `apps/web/components/SessionView.tsx`: renders persisted messages plus the Durable Stream
-  transcript overlay.
-- `apps/runner/src/server.ts`: Fastify routes for health and internal mutations.
-- `apps/runner/src/agent-loop.ts`: orchestrates a single message run — lease acquisition, assistant streaming, and step bookkeeping. Sandbox provisioning lives in `session-lifecycle.ts`, the model stream loop in `model-stream-runner.ts`, tool dispatch in `tool-dispatcher.ts`, AMP integration in `amp-tool.ts`, and event/usage writes in `lease-writes.ts` and `usage-recorder.ts`.
-- `packages/agent-runtime`: shared config resolution, tool catalog, runtime event types, ids,
-  and path helpers.
-
-The session flow is:
-
-1. Web action creates `agent_sessions` after WorkOS workspace auth.
-2. Web emits `agent.session_started`; Inngest calls the runner start endpoint.
-3. Runner creates or reconnects an E2B sandbox and prepares `/home/user/workspace`.
-4. Browser opens the same-origin Durable Streams read proxy for the session transcript.
-5. Web action inserts a user message, appends that event to the session stream, and emits
-   `agent.message_submitted`.
-6. Inngest calls the runner message endpoint.
-7. Runner resolves the `.agent` config, streams the model through Vercel AI Gateway using AI SDK
-   Core, runs allowed tools in E2B, and appends typed runtime events to Postgres. Assistant text
-   chunks are accumulated in memory and saved when the assistant message completes. Runner also
-   appends durable and transient runtime events to the session Durable Stream.
-8. Browser receives lifecycle, tool, command, file, completion, and error events through the
-   Durable Stream proxy. On refresh or reconnect, the stream can replay from an offset; high-frequency
-   text/reasoning/command deltas are live-streamed and are not replayed from Postgres.
-
-The runner endpoints are documented in [runner.md](./runner.md).
-
-## Inngest Sync
-
-Inngest setup is in:
-
-- `apps/web/lib/inngest/client.ts`
-- `apps/web/lib/inngest/functions.ts`
-- `apps/web/app/api/inngest/route.ts`
-- `scripts/inngest-dev.mjs`
-
-`sync-workspace-to-github` listens for `workspace.sync_requested`, sleeps ~10 seconds to coalesce rapid edits, then calls `projectWorkspaceToGitHub()` in a short drain loop (up to 5 iterations, continuing while the status is `"synced"`) so a backlog larger than one commit's 200-job cap flushes in the same run. `sweep-workspace-sync-outbox` (`apps/web/lib/sync-outbox/sweeper.ts`) runs every minute, scans due `workspace_sync_jobs` rows (pending, retryable failed, or stale-leased `syncing`), groups them by workspace, and re-dispatches `workspace.sync_requested` per workspace, so a missed post-response dispatch recovers without another edit.
-
-`projectWorkspaceToGitHub()`:
-
-- loads due outbox jobs for the workspace and leases them (`status = "syncing"`);
-- resolves canonical content per job and plans tree adds/deletes (a rename emits an add at the new path plus a delete of the old);
-- skips no-op jobs whose `githubSyncedHash` already matches the current hash;
-- commits all changes as one commit via the Git Data API, then marks the source rows synced, advances `workspace_repositories.latestHeadSha`/`updatedAt`, and clears the leased jobs;
-- on failure, marks the jobs `failed` with backoff and the source rows `failed`, then rethrows so Inngest retries.
-
-Inngest concurrency is limited to one active projection per workspace. The projector is the only path that materializes workspace files to GitHub.
-
-## Database Model
-
-The high-level table groups are:
-
-- Identity and tenancy: `users`, `workspaces`, `workspace_memberships`, with WorkOS Organizations mapped through `workspaces.workos_organization_id`.
-- Agent editing: `agents` stores the latest DB version and parsed config.
-- GitHub sync: `workspace_sync_jobs` is the unified outbox of desired materialization state for all synced resources; `workspace_repositories` maps workspaces to managed GitHub backing repos and tracks the latest projected head SHA.
-- Agent work integrations: `workspace_integrations` stores connected provider accounts, and
-  `workspace_integration_resources` stores provider resources such as GitHub repositories.
-- Agent sessions: `agent_sessions`, `agent_session_messages`, and `agent_session_events` store
-  durable session ownership, transcript, and boundary/runtime facts.
-- Onboarding: `onboarding_responses`.
-
-All app-owned data should stay scoped by `workspaceId` so tenancy remains enforceable.
-
-## Operational Notes
-
-- `bun run dev` starts ngrok when authenticated, then starts the web app, local Inngest dev helper,
-  Stripe webhook listener, and runner. ngrok is the expected local path for callback/webhook
-  integrations such as GitHub; WorkOS sign-in still redirects to localhost in local development.
-- `bun run dev:web` runs only the web app.
-- `bun run dev:runner` runs only the runner.
-- `bun run db:generate` creates migrations from `packages/db/src/schema.ts`.
-- `bun run db:migrate` applies migrations to `DATABASE_URL`.
-- Production releases run migrations from the `Release Production` GitHub Actions workflow before
-  deploying Vercel web and Render runner.
-- GitHub workspace-state env vars are `OPENCOMPANY_GITHUB_ORG`, `GITHUB_APP_ID`,
-  `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`. GitHub work integrations use the
-  separate `GITHUB_INTEGRATION_APP_*` env vars.
-- Inngest uses `INNGEST_DEV` for local development; hosted environments should also set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY`.
-- Runner env vars are `RUNNER_PUBLIC_URL`, optional `RUNNER_INTERNAL_URL`,
-  `RUNNER_INTERNAL_TOKEN`, `RUNNER_STREAM_TOKEN_SECRET`, `RUNNER_ALLOWED_ORIGINS`,
-  `DURABLE_STREAMS_URL`, `DURABLE_STREAMS_TOKEN`, `E2B_API_KEY`,
-  `VERCEL_AI_GATEWAY_API_KEY`, optional `OPENCOMPANY_E2B_TEMPLATE`,
-  `AMP_API_KEY`, optional `OPENCOMPANY_AMP_E2B_TEMPLATE`, optional
-  `OPENCOMPANY_CODEX_E2B_TEMPLATE`, optional `GITHUB_INTEGRATION_APP_ID`
-  / `GITHUB_INTEGRATION_APP_PRIVATE_KEY` for AMP work-repository cloning and PRs, and optional
-  `RUNNER_E2B_IDLE_TIMEOUT_MS` / `RUNNER_INSTANCE_ID`.
+- Move the inline chat turn out of `app/api/chat/route.ts` into `packages/core`.
+- Lift the durable-turn write side (`lib/codex-chat.ts`) and the task/workflow/schedule services
+  out of the app into core.
+- Extract the runner’s claim/lease/settle turn-runtime into a package so worker loops stop being
+  re-implemented per worker.
+- Merge `analytics/shared-*` into the product catalog.

@@ -14,7 +14,7 @@ view.
 | Vercel Development | Optional Vercel dev/preview runtime target | Infisical `dev` + `/web` sync |
 | Vercel Preview | Per-PR preview web base env | Infisical `dev` + `/web` sync; per-PR dynamic values injected at deploy time by `pr-preview.yml` |
 | Vercel Production | Production web app and Inngest endpoint | Infisical `prod` + `/web` sync |
-| Vercel opencompany | Experimental `apps/goat` project/domain | Infisical `prod` + `/goat` sync, with a separate WorkOS Application and opencompany-specific app URL |
+| Vercel app | The `apps/app` project/domain | Infisical `prod` + `/goat` sync, with a separate WorkOS Application and opencompany-specific app URL |
 | Vercel Marketing | Production marketing site | No runtime secrets currently; release uses `MARKETING_VERCEL_PROJECT_ID` from Infisical `prod` + `/release` |
 | Render Production | Production runner service | Infisical `prod` + `/runner` sync |
 | Render Preview (per-PR) | Ephemeral per-PR runner / Electric / Durable Streams | Created by `scripts/preview-provision.mjs`; env minted by the orchestrator (not a static sync) |
@@ -108,8 +108,8 @@ Set these in Vercel Production.
 | `REVOLUT_BUSINESS_ACCOUNT_LABEL` | No | Optional friendly label for the experimental Revolut action source, e.g. `Acme Revolut`. |
 | `REVOLUT_BUSINESS_API_BASE_URL` | No | Optional HTTPS Revolut Business API base URL. Defaults to `https://b2b.revolut.com/api/1.0` for `oa_prod_` tokens and `https://sandbox-b2b.revolut.com/api/1.0` for `oa_sand_` tokens. |
 | `CRON_SECRET` | opencompany hosted only | Bearer secret protecting the hourly opencompany cron routes: billing reconciliation (`/api/billing/reconcile`, charges due auto-refills then releases paused ingestion backlogs) and the onboarding email sweep (`/api/cron/onboarding-emails`). Store it in Infisical `prod` + `/goat`; sync it to the opencompany Vercel project, which sends it as the cron Authorization bearer token. |
-| `APP_PORT` | Local opencompany only | Internal Next.js port for `bun run dev:goat`; defaults to `3002`. |
-| `APP_HTTPS_PORT` | Local opencompany only | Browser-facing Caddy HTTPS port for `bun run dev:goat`; defaults to `3443`. |
+| `APP_PORT` | Local opencompany only | Internal Next.js port for `bun run dev`; defaults to `3002`. |
+| `APP_HTTPS_PORT` | Local opencompany only | Browser-facing Caddy HTTPS port for `bun run dev`; defaults to `3443`. |
 | `OPENCOMPANY_GITHUB_ORG` | Yes | GitHub org where workspace repos are created. |
 | `GITHUB_APP_ID` | Yes | GitHub App id. |
 | `GITHUB_APP_INSTALLATION_ID` | Yes | Managed workspace-state GitHub App installation id. Do not use this as the user-facing work integration installation. |
@@ -153,7 +153,7 @@ Set these in Vercel Production.
 | `FEEDBACK_LINEAR_TEAM_ID` | opencompany only | Target Linear team UUID for the sidebar feedback widget. Reuses the shared `LINEAR_API_KEY`; only the team differs. Enable Triage on this team so reports land in the Triage inbox. |
 | `FEEDBACK_LINEAR_PROJECT_ID` | No | Optional project routing for opencompany feedback. |
 | `FEEDBACK_LINEAR_LABELS` | No | Optional comma-separated labels added to opencompany feedback issues. |
-| `RESEND_API_KEY` | No | Enables transactional/lifecycle email through Resend. Missing values disable email sends. Used by the web signup welcome email and the opencompany founder onboarding drip — for opencompany, store it in Infisical `prod` + `/goat` (the `/web` copy does not reach opencompany). |
+| `RESEND_API_KEY` | No | Enables transactional/lifecycle email through Resend. Missing values disable email sends. Used by the founder onboarding drip. Store it in Infisical `prod` + `/goat`. |
 | `RESEND_WELCOME_FROM` | No | Sender identity for the signup welcome email and the opencompany onboarding drip. Defaults to `Louis from opencompany <louis@updates.opencompany.cloud>`. |
 | `RESEND_REPLY_TO` | No | Reply-to address for transactional/lifecycle emails. Defaults to `louis@opencompany.cloud`. |
 | `RESEND_REGISTERED_USERS_SEGMENT_ID` | Required with `RESEND_API_KEY` | Resend Segment ID for the `Registered Users` Segment. Create the Segment in Resend and store its ID in Infisical/Vercel before enabling Resend. |
@@ -184,7 +184,7 @@ Set these in Vercel Production.
 
 ## Vercel opencompany
 
-`apps/goat` is an isolated experimental Next.js app. It uses a separate WorkOS AuthKit Application
+`apps/app` is the product Next.js app. It uses its own WorkOS AuthKit Application
 in the same WorkOS environment as the core app, so users and Organizations remain shared while
 redirects and API-created invitations stay on the opencompany domain. It reuses the Neon database,
 Electric service, and runner, but stores product state in the `goat` Postgres schema.
@@ -193,7 +193,7 @@ Set these in the separate Vercel project for opencompany:
 
 | Var | Required | Purpose |
 |---|---:|---|
-| `DATABASE_URL` | Hosted only | Same hosted Neon database as web/runner. opencompany tables live under the `goat` schema. |
+| `DATABASE_URL` | Hosted only | Same hosted Neon database as the runner. Product tables live under the `goat` Postgres schema (a frozen physical name). |
 | `WORKOS_CLIENT_ID` | Yes | opencompany WorkOS Application client id. Must differ from the core app. |
 | `WORKOS_API_KEY` | Yes | opencompany WorkOS Application API key. Must differ from the core app so API-created invitations preserve application context. |
 | `WORKOS_COOKIE_PASSWORD` | Yes | AuthKit cookie encryption secret, 32+ characters. Use the same value only when the cookie domain setup intentionally allows it. |
@@ -221,7 +221,7 @@ Set these in the separate Vercel project for opencompany:
 | `ELECTRIC_SECRET` / `ELECTRIC_TOKEN` | Self-hosted Electric only | Optional self-hosted Electric auth. |
 | `REDIS_URL` (or `KV_URL`) | No | Enables resumable chat streams (`resumable-stream`): refreshes reattach to in-flight turns, disconnects no longer cancel generation, and the stop button cancels via `/api/chat/[sessionId]/stop`. Without it, chat still works; a mid-stream disconnect persists the partial response instead. |
 | `CHAT_ACTIONS_KILL_SWITCH` | No | Set to `true` to globally disable chat actions (the `list_actions`/`use_action` tools over Attio, Slack, Gmail, Google Calendar, Google Drive, Linear, PostHog, and other supported connections) for everyone, without a deploy rollback. Chat actions are otherwise on by default for connected integrations. |
-| `CHAT_SANDBOX_IMAGE` | Recommended with browser sandbox | Complete Vercel Container Registry image reference built from `apps/goat/sandbox-image`. Without it, the first browser use provisions `agent-browser` and Chromium in a stock Node 24 sandbox. See `docs/goat-chat-sandbox.md`. |
+| `CHAT_SANDBOX_IMAGE` | Recommended with browser sandbox | Complete Vercel Container Registry image reference built from `apps/app/sandbox-image`. Without it, the first browser use provisions `agent-browser` and Chromium in a stock Node 24 sandbox. See `docs/chat-sandbox.md`. |
 | `LINQ_API_TOKEN` / `LINQ_FROM_NUMBER` | iMessage only | Linq Partner API credentials used to send pairing codes and one-way iMessage notifications. Store both in Infisical `prod` + `/goat` and `/runner`; the tool stays unavailable when either value is missing. |
 | `LINQ_API_BASE_URL` | No | Optional Linq API origin override. Leave unset for the production Linq endpoint. |
 | `IMESSAGE_PROVIDER` | Local development only | Set to `log` to exercise pairing and notifications without contacting Linq. Pairing codes are written to server logs; do not enable this provider in hosted environments. |
@@ -603,7 +603,7 @@ Useful local-only vars:
 | `NGROK_AUTHTOKEN` | Optional ngrok auth token for local dev. Prefer the local ngrok config unless sharing through Infisical. |
 | `OPENCOMPANY_NGROK_REQUIRED` | Set to `1` to fail `bun run dev` when ngrok cannot start. Fixed ngrok URLs are treated as required. |
 | `OPENCOMPANY_NGROK_DISABLED` | Set to `1` to skip automatic ngrok startup in `bun run dev`. |
-| `APP_HTTPS_DISABLED` | Set to `1` to skip automatic Caddy HTTPS for `bun run dev:goat`; opencompany falls back to HTTP on `APP_PORT`. |
+| `APP_HTTPS_DISABLED` | Set to `1` to skip automatic Caddy HTTPS for `bun run dev`; opencompany falls back to HTTP on `APP_PORT`. |
 | `PLAYWRIGHT_PORT` | Optional Playwright web server port. |
 
 For local integration testing, `bun run dev` starts ngrok automatically when the local ngrok CLI is
