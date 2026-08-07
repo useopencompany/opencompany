@@ -76,7 +76,7 @@ turns (`chat-turn`, session = chat session id), Slack bot answers (`slack-answer
 `slack:{team}:{channel}:{thread}`), and brain ingestion runs (`brain-ingest` +
 `brain-ingest-triage`, session = ingest job id). Spans flow through a dedicated tracer provider
 passed to each call via `experimental_telemetry`, so this content never enters the sanitized
-`GOAT_OTEL_*` OTLP pipeline. Each call gets an isolated Latitude capture root so session names and
+`OTEL_*` OTLP pipeline. Each call gets an isolated Latitude capture root so session names and
 active durations come from a root span Latitude actually receives. Vercel AI Gateway spans are
 identified as the `vercel` provider used by Latitude's models.dev catalog, allowing Latitude to
 estimate cost from the AI SDK's model and token attributes. Like Braintrust, keep it disabled in

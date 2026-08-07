@@ -107,7 +107,7 @@ Set `OPENCOMPANY_NGROK_DISABLED=1` to skip ngrok for a dev session.
 
 `bun run setup` and `bun run env:pull` reuse the main app's existing
 `GITHUB_INTEGRATION_APP_*` and `GITHUB_INTEGRATION_STATE_SECRET` values from Infisical. Setup also
-mirrors those values into `apps/goat/.env.local` so direct app commands use the same GitHub App
+mirrors those values into `apps/app/.env.local` so direct app commands use the same GitHub App
 credentials as the main app.
 
 Run opencompany with the local runner and ngrok proxy:

@@ -315,7 +315,7 @@ Required controls:
 - require explicit user intent before saving finance artifacts to Brain or Drive;
 - no browser automation against logged-in Revolut pages.
 
-The no-browser-automation rule matters because `apps/goat/lib/browser-profiles`
+The no-browser-automation rule matters because `apps/app/lib/browser-profiles`
 already blocks banking domains, and direct browser access to a bank account is a
 bad trust boundary for agents. Use APIs or user-provided files.
 
@@ -326,16 +326,16 @@ Prefer implementing this as a first-party action provider in the goat app and
 
 Suggested code shape:
 
-1. Add `revolut` to `GoatActionProviderId`.
+1. Add `revolut` to `ActionProviderId`.
 2. Add encrypted connection storage for a workspace-owned Revolut connection.
-3. Add `apps/goat/lib/integrations/revolut.ts` for connect, validate, refresh,
+3. Add `apps/app/lib/integrations/revolut.ts` for connect, validate, refresh,
    and API request helpers, with server-only credential handling.
-4. Add `packages/goat-agent/src/actions/revolut.ts` with bounded read-only
+4. Add `packages/core/src/actions/revolut.ts` with bounded read-only
    actions.
-5. Add the resolver to `packages/goat-agent/src/actions/catalog.ts`.
+5. Add the resolver to `packages/core/src/actions/catalog.ts`.
 6. Add Settings -> Integrations -> Revolut Business, copying the admin-managed
    mental model from Stripe rather than personal OAuth integrations.
-7. Add docs under `apps/goat/content/docs/integrations/revolut.mdx`.
+7. Add docs under `apps/app/content/docs/integrations/revolut.mdx`.
 8. Add tests for:
    - absent catalog when disconnected;
    - rejected unsupported scopes;

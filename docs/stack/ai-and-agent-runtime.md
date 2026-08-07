@@ -108,7 +108,7 @@ HTML/text pages.
 
 - `packages/agent-runtime/src/tools.ts`.
 - `apps/runner/src/hosted-tools.ts`.
-- `apps/goat/app/api/chat/route.ts`.
+- `apps/app/app/api/chat/route.ts`.
 - `apps/web/components/agent-editor/tools.ts`.
 - `EXA_API_KEY` in `.env.example`.
 

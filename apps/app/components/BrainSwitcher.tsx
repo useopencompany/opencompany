@@ -234,7 +234,7 @@ function DialogFrame({
       aria-modal="true"
       aria-label={title}
     >
-      <div className="flex w-full max-w-[380px] flex-col gap-3 rounded-lg bg-canvas p-4 shadow-xl">
+      <div className="flex w-full max-w-[380px] flex-col gap-3 shadow-ring-xl rounded-lg bg-canvas p-4">
         <div className="text-[14px] font-semibold text-ink">{title}</div>
         {children}
       </div>

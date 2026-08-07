@@ -320,7 +320,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
       ref={panelRef}
       className={cn(
         "relative flex h-full shrink-0 flex-col overflow-hidden border-l border-border bg-surface shadow-[-8px_0_24px_rgba(15,15,15,0.03)]",
-        "max-lg:fixed max-lg:inset-0 max-lg:z-50 max-lg:h-auto max-lg:w-auto max-lg:border-0 max-lg:shadow-xl",
+        "max-lg:fixed max-lg:inset-0 max-lg:z-50 max-lg:h-auto max-lg:w-auto max-lg:border-0 max-lg:shadow-ring-xl",
         fullscreen &&
           "fixed inset-0 z-50 h-dvh w-screen border-0 max-lg:inset-0 max-lg:rounded-none",
       )}

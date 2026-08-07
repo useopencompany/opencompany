@@ -1511,7 +1511,7 @@ function SkillDialog({
       aria-modal="true"
       aria-label={isWorkflow ? "New workflow" : "New skill"}
     >
-      <div className="flex w-full max-w-[420px] flex-col gap-3 rounded-lg bg-canvas p-4 shadow-xl">
+      <div className="flex w-full max-w-[420px] flex-col gap-3 shadow-ring-xl rounded-lg bg-canvas p-4">
         <div className="text-[14px] font-semibold text-ink">
           {isWorkflow ? "New workflow" : "New skill"}
         </div>
@@ -1615,7 +1615,7 @@ function FileDialog({
       aria-modal="true"
       aria-label="New Markdown file"
     >
-      <div className="flex w-full max-w-[360px] flex-col gap-3 rounded-lg bg-canvas p-4 shadow-xl">
+      <div className="flex w-full max-w-[360px] flex-col gap-3 shadow-ring-xl rounded-lg bg-canvas p-4">
         <div className="text-[14px] font-semibold text-ink">New Markdown file</div>
         <label className="flex flex-col gap-1 text-[12px] text-ink-subtle">
           File name
@@ -1681,7 +1681,7 @@ function FolderDialog({
       aria-modal="true"
       aria-label={title}
     >
-      <div className="flex w-full max-w-[360px] flex-col gap-3 rounded-lg bg-canvas p-4 shadow-xl">
+      <div className="flex w-full max-w-[360px] flex-col gap-3 shadow-ring-xl rounded-lg bg-canvas p-4">
         <div className="text-[14px] font-semibold text-ink">{title}</div>
         <label className="flex flex-col gap-1 text-[12px] text-ink-subtle">
           Path

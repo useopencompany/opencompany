@@ -2482,7 +2482,7 @@ export function ChatSurface({
         </DialogHeader>
         <DialogContent
           showCloseButton={false}
-          className="top-[18%] max-w-xl translate-y-0 gap-0 overflow-hidden border-border bg-surface p-0 text-ink shadow-[0_18px_60px_rgba(15,15,15,0.18)]"
+          className="top-[18%] max-w-xl translate-y-0 gap-0 overflow-hidden bg-surface p-0 text-ink"
         >
           {commandPaletteView === "compose" ? (
             <>
@@ -2828,7 +2828,7 @@ export function ChatSurface({
                 <div
                   role="listbox"
                   aria-label="Mention menu"
-                  className="absolute bottom-full left-3 z-20 mb-2 max-h-72 w-80 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-[0_8px_24px_rgba(15,15,15,0.12)]"
+                  className="absolute bottom-full left-3 z-20 mb-2 max-h-72 w-80 overflow-y-auto shadow-ring-md rounded-lg bg-surface p-1"
                 >
                   {mentionOptions.map((option, index) => (
                     <button
@@ -3786,7 +3786,7 @@ function QuickChatComposer({
         <div
           role="listbox"
           aria-label="Mention menu"
-          className="max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-[0_8px_24px_rgba(15,15,15,0.12)]"
+          className="max-h-72 w-full overflow-y-auto shadow-ring-md rounded-lg bg-surface p-1"
         >
           {mentionOptions.map((option, index) => (
             <button
@@ -5203,7 +5203,7 @@ function CodingEngineModelPicker({
       <PopoverContent
         align="start"
         sideOffset={10}
-        className="w-[300px] max-w-[calc(100vw-1.5rem)] border-border bg-surface p-0 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
+        className="w-[300px] max-w-[calc(100vw-1.5rem)] bg-surface p-0 text-ink"
       >
         <Command className="bg-surface text-ink">
           <CommandList>
@@ -5363,7 +5363,7 @@ function EngineComposerControls({
           <PopoverContent
             align="end"
             sideOffset={10}
-            className="w-[320px] max-w-[calc(100vw-1.5rem)] border-border bg-surface p-3 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
+            className="w-[320px] max-w-[calc(100vw-1.5rem)] bg-surface p-3 text-ink"
           >
             <div className="flex flex-col gap-3">
               <label className="flex items-center justify-between gap-3">
@@ -6301,7 +6301,7 @@ function ModelPicker({
       <PopoverContent
         align="end"
         sideOffset={10}
-        className="w-[360px] max-w-[calc(100vw-1.5rem)] border-border bg-surface p-0 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
+        className="w-[360px] max-w-[calc(100vw-1.5rem)] bg-surface p-0 text-ink"
       >
         <Command className="bg-surface text-ink">
           <CommandInput placeholder="Search models..." />
