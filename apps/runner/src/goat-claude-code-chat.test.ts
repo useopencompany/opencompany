@@ -55,6 +55,10 @@ const skillMocks = vi.hoisted(() => ({
   materializeCodexSkillSnapshotsForSession: vi.fn(),
 }));
 
+const harnessMocks = vi.hoisted(() => ({
+  getGoatWorkflowHarnessSkillSnapshots: vi.fn(),
+}));
+
 const taskMocks = vi.hoisted(() => ({
   buildGoatTaskTerminalProjection: vi.fn(),
   buildGoatTaskTurnCompletion: vi.fn(),
@@ -75,7 +79,7 @@ vi.mock("@opencompany/db/goat-claude-code-auth", () => ({
 }));
 
 vi.mock("@opencompany/db/goat-harness", () => ({
-  getGoatWorkflowHarnessSkillSnapshots: () => [],
+  getGoatWorkflowHarnessSkillSnapshots: harnessMocks.getGoatWorkflowHarnessSkillSnapshots,
 }));
 
 vi.mock("./claude-code-cli", () => ({
@@ -263,6 +267,7 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
     sandboxMocks.isRetryableCommandStreamError.mockReturnValue(false);
+    harnessMocks.getGoatWorkflowHarnessSkillSnapshots.mockReturnValue([]);
     skillMocks.materializeCodexSkillSnapshotsForSession.mockResolvedValue(undefined);
     taskMocks.buildGoatTaskTerminalProjection.mockReturnValue({ taskId: "goat_task_1" });
     taskMocks.markGoatTaskTurnRunning.mockResolvedValue(undefined);
@@ -290,6 +295,52 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
     );
     expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 300_000);
     expect(sandboxMocks.armSandboxActiveTimeoutById).not.toHaveBeenCalled();
+  });
+
+  it("materializes and invokes workflow skill snapshots for durable tasks", async () => {
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+    harnessMocks.getGoatWorkflowHarnessSkillSnapshots.mockReturnValueOnce([
+      {
+        id: "smooth-shadow-ring",
+        name: "Smooth shadow ring",
+        description: "Polish elevation styles.",
+        instructions: "Use layered shadows and a crisp ring.",
+      },
+    ]);
+    const harnessSpec = harnessSpecForClaudeTask();
+
+    await runGoatClaudeCodeChatTurn({
+      turn: claudeTurn(),
+      session: claudeSession(),
+      taskContext: {
+        task: taskForHarness(harnessSpec),
+        harnessSpec,
+      },
+      env: env(),
+    });
+
+    expect(skillMocks.materializeCodexSkillSnapshotsForSession).toHaveBeenCalledWith({
+      sandbox,
+      codexWorkRoot: "/home/user/opencompany-goat/claude-chat",
+      skills: [
+        {
+          id: "smooth-shadow-ring",
+          files: [
+            {
+              path: "SKILL.md",
+              content: expect.stringContaining('name: "smooth-shadow-ring"'),
+            },
+          ],
+        },
+      ],
+    });
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      "/home/user/.opencompany-goat/claude-chat-prompts/prompt-goat_codex_turn_1.txt",
+      expect.stringContaining(
+        "/home/user/opencompany-goat/claude-chat/.agents/skills/smooth-shadow-ring/SKILL.md",
+      ),
+    );
   });
 
   it("defers an E2B command stream timeout instead of failing its durable task", async () => {

@@ -112,14 +112,24 @@ export function compileGoatWorkflowHarnessSpec(input: {
   workflow: GoatWorkspaceWorkflow;
   workspaceId: string;
   skills: GoatWorkspaceSkill[];
+  invokedSkillIds?: readonly string[];
   tools: GoatTaskToolName[];
   description: string;
 }): GoatWorkflowHarnessSpec {
   const skillById = new Map(input.skills.map((skill) => [skill.id, skill]));
+  const invokedSkillIds = new Set(input.invokedSkillIds ?? []);
   const steps = input.workflow.steps.map((step, index) => {
     const selection = resolveGoatWorkflowStepSelection(step);
-    const stepSkills = extractGoatWorkflowSkillMentionRefs(step.instructions)
-      .map((mention) => skillById.get(mention.id))
+    const stepSkillIds = new Set(
+      extractGoatWorkflowSkillMentionRefs(step.instructions).map((mention) => mention.id),
+    );
+    // Composer-invoked skills belong to the workflow's first user turn. Later steps run in
+    // isolated sessions and keep only the skills authored into those steps.
+    if (index === 0) {
+      for (const skillId of invokedSkillIds) stepSkillIds.add(skillId);
+    }
+    const stepSkills = [...stepSkillIds]
+      .map((skillId) => skillById.get(skillId))
       .filter((skill): skill is GoatWorkspaceSkill => Boolean(skill));
     const skillBlocks =
       selection.engine === "opencompany"
@@ -205,6 +215,7 @@ export async function createGoatTaskFromWorkflow(input: {
   userWorkosId: string;
   workspaceId: string | null;
   mention: GoatWorkflowMentionRef;
+  skillMentions?: GoatSkillMentionRef[];
   description: string;
   attachments?: GoatChatMessageAttachment[];
   attachmentTexts?: Record<string, string> | null;
@@ -220,6 +231,7 @@ export async function createGoatTaskFromWorkflow(input: {
     workspaceId,
     workflow,
     description: input.description,
+    ...(input.skillMentions ? { skillMentions: input.skillMentions } : {}),
   });
 
   return createGoatTaskForUser({
@@ -240,6 +252,7 @@ export async function prepareGoatWorkflowRunForUser(input: {
   userWorkosId: string;
   workspaceId: string;
   workflow: GoatWorkspaceWorkflow;
+  skillMentions?: GoatSkillMentionRef[];
   description: string;
 }): Promise<{
   description: string;
@@ -261,11 +274,17 @@ export async function prepareGoatWorkflowRunForUser(input: {
     );
   }
 
-  const skillRefs = [
+  const workflowSkillRefs = [
     ...new Map(
       workflow.steps
         .flatMap((step) => extractGoatWorkflowSkillMentionRefs(step.instructions))
         .map((mention) => [mention.id, mention]),
+    ).values(),
+  ];
+  const invokedSkillRefs = input.skillMentions ?? [];
+  const skillRefs = [
+    ...new Map(
+      [...workflowSkillRefs, ...invokedSkillRefs].map((mention) => [mention.id, mention]),
     ).values(),
   ];
   const skills = await resolveGoatSkillMentions({
@@ -279,6 +298,7 @@ export async function prepareGoatWorkflowRunForUser(input: {
     workflow,
     workspaceId: input.workspaceId,
     skills,
+    invokedSkillIds: invokedSkillRefs.map((mention) => mention.id),
     tools,
     description,
   });

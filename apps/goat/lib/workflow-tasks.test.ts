@@ -277,6 +277,55 @@ describe("compileGoatWorkflowHarnessSpec", () => {
       },
     ]);
   });
+
+  it("applies explicitly invoked skills to the first workflow step", () => {
+    const spec = compileGoatWorkflowHarnessSpec({
+      workflow: {
+        id: "ship-feature",
+        name: "Ship feature",
+        description: "",
+        steps: [
+          {
+            id: "step-1",
+            title: "Implement",
+            model: "claude-code",
+            instructions: "Use @skill/product-work.",
+          },
+          {
+            id: "step-2",
+            title: "Review",
+            model: "claude-code",
+            instructions: "Review the implementation.",
+          },
+        ],
+      },
+      workspaceId: "ws_1",
+      skills: [
+        {
+          id: "product-work",
+          name: "Product work",
+          description: "Ship product changes",
+          instructions: "Implement and verify the feature.",
+        },
+        {
+          id: "smooth-shadow-ring",
+          name: "Smooth shadow ring",
+          description: "Polish elevation styles",
+          instructions: "Use layered shadows and a crisp ring.",
+        },
+      ],
+      invokedSkillIds: ["smooth-shadow-ring"],
+      tools: [],
+      description: "Improve the shadows.",
+    });
+
+    expect(spec.workflow?.steps?.[0]?.skillIds).toEqual(["product-work", "smooth-shadow-ring"]);
+    expect(spec.workflow?.steps?.[1]?.skillIds).toEqual([]);
+    expect(spec.workflow?.skillSnapshots).toEqual([
+      expect.objectContaining({ id: "product-work" }),
+      expect.objectContaining({ id: "smooth-shadow-ring" }),
+    ]);
+  });
 });
 
 describe("createGoatTaskFromWorkflow", () => {
@@ -350,7 +399,7 @@ describe("createGoatTaskFromWorkflow", () => {
     expect(mocks.createGoatTaskForUser).not.toHaveBeenCalled();
   });
 
-  it("resolves the union of step skills once and queues step zero's model", async () => {
+  it("resolves workflow and invocation skills once and queues step zero's model", async () => {
     mocks.resolveGoatWorkflowMention.mockResolvedValue({
       id: "mixed-workflow",
       name: "Mixed workflow",
@@ -373,6 +422,12 @@ describe("createGoatTaskFromWorkflow", () => {
     mocks.resolveGoatSkillMentions.mockResolvedValue([
       { id: "research", name: "Research", description: "", instructions: "Research well." },
       { id: "writing", name: "Writing", description: "", instructions: "Write clearly." },
+      {
+        id: "smooth-shadow-ring",
+        name: "Smooth shadow ring",
+        description: "",
+        instructions: "Polish elevation styles.",
+      },
     ]);
     mocks.createGoatTaskForUser.mockResolvedValue({ id: "task_1" });
 
@@ -380,6 +435,7 @@ describe("createGoatTaskFromWorkflow", () => {
       userWorkosId: "user_1",
       workspaceId: "ws_1",
       mention: { id: "mixed-workflow" },
+      skillMentions: [{ id: "smooth-shadow-ring" }],
       description: "Run it",
       attachments: [attachment],
       attachmentTexts: { [attachment.id]: "Extracted report text." },
@@ -387,12 +443,21 @@ describe("createGoatTaskFromWorkflow", () => {
 
     expect(mocks.resolveGoatSkillMentions).toHaveBeenCalledWith({
       workspaceId: "ws_1",
-      mentions: [{ id: "research" }, { id: "writing" }],
+      mentions: [{ id: "research" }, { id: "writing" }, { id: "smooth-shadow-ring" }],
     });
     expect(mocks.createGoatTaskForUser).toHaveBeenCalledWith(
       expect.objectContaining({
         model: "moonshotai/kimi-k2.6",
         workflowId: "mixed-workflow",
+        harnessSpec: expect.objectContaining({
+          workflow: expect.objectContaining({
+            skillIds: ["research", "writing", "smooth-shadow-ring"],
+            steps: [
+              expect.objectContaining({ skillIds: ["research", "smooth-shadow-ring"] }),
+              expect.objectContaining({ skillIds: ["writing", "research"] }),
+            ],
+          }),
+        }),
         attachments: [attachment],
         attachmentTexts: { [attachment.id]: "Extracted report text." },
       }),

@@ -1671,6 +1671,7 @@ export function GoatSurface({
 
       const workflowMention = mentions.find(isWorkflowMention);
       if (workflowMention) {
+        const skillMentions = backgroundMentions.filter(isSkillMention);
         clearError();
         setInput("");
         setMentionToken(null);
@@ -1680,6 +1681,7 @@ export function GoatSurface({
         void startGoatWorkflowTask({
           workflow: workflowMention,
           description: messagePrompt,
+          ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
           ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
         })
           .then(({ task }) => {
@@ -1861,6 +1863,7 @@ export function GoatSurface({
 
     const workflowMention = mentions.find(isWorkflowMention);
     if (workflowMention) {
+      const skillMentions = mentions.filter(isSkillMention);
       clearComposerDraft(chatSessionId);
       clearError();
       setInput("");
@@ -1871,6 +1874,7 @@ export function GoatSurface({
       void startGoatWorkflowTask({
         workflow: workflowMention,
         description: prompt,
+        ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
         ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
       })
         .then(({ task }) => {
@@ -3654,6 +3658,7 @@ function QuickChatComposer({
 
     const workflowMention = mentions.find(isWorkflowMention);
     if (workflowMention) {
+      const skillMentions = mentions.filter(isSkillMention);
       setIsSubmitting(true);
       setInput("");
       setMentionToken(null);
@@ -3663,6 +3668,7 @@ function QuickChatComposer({
       void startGoatWorkflowTask({
         workflow: workflowMention,
         description: prompt,
+        ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
         ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
       })
         .then(({ task }) => {
@@ -5098,6 +5104,7 @@ async function startGoatAdHocTask(input: { description: string; model: string; e
 async function startGoatWorkflowTask(input: {
   workflow: Extract<GoatChatMention, { kind: "workflow" }>;
   description: string;
+  mentions?: Extract<GoatChatMention, { kind: "skill" }>[];
   attachments?: GoatChatUiAttachment[];
 }) {
   const response = await fetch("/api/workflows", {
