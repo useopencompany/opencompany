@@ -33,6 +33,16 @@ const INFISICAL_BROWSER_TOKEN_MAX_LENGTH = 64 * 1024;
 const INFISICAL_BUNDLE_MAX_BYTES = 512 * 1024;
 const INFISICAL_KEYRING_MAX_FILES = 5;
 
+type InfisicalAuthStartStage =
+  | "supersede_active_flows"
+  | "create_sandbox"
+  | "set_sandbox_timeout"
+  | "install_infisical_cli"
+  | "install_tmux"
+  | "prepare_login"
+  | "wait_for_login_url"
+  | "persist_flow";
+
 export type InfisicalAuthFlowStatus = {
   id: string;
   status: "pending" | "link_ready" | "completed" | "failed" | "expired";
@@ -47,24 +57,38 @@ export async function startGoatInfisicalAuthFlow(input: {
   env: RunnerEnv;
 }): Promise<InfisicalAuthFlowStatus> {
   await requireWorkspaceAdmin(input.workspaceId, input.requestedByWorkosId);
-  await supersedeActiveFlows(input.workspaceId);
-
-  const sandbox = await Sandbox.create(input.env.codexE2bTemplate ?? "codex", {
-    envs: {},
-    metadata: {
-      user_id: input.requestedByWorkosId,
-      workspace_id: input.workspaceId,
-      purpose: "infisical-auth",
-    },
-    timeoutMs: INFISICAL_AUTH_SANDBOX_TIMEOUT_MS,
-    lifecycle: { onTimeout: "kill" },
-  });
-  await sandbox.setTimeout(INFISICAL_AUTH_SANDBOX_TIMEOUT_MS);
-
+  let failureStage: InfisicalAuthStartStage = "supersede_active_flows";
+  let sandbox: SandboxHandle | null = null;
   try {
-    await ensureInfisicalInstalled(sandbox);
-    await prepareInfisicalAuthSandbox(sandbox);
-    const loginUrl = await waitForLoginUrl(sandbox);
+    await supersedeActiveFlows(input.workspaceId);
+
+    failureStage = "create_sandbox";
+    const createdSandbox = await Sandbox.create(input.env.codexE2bTemplate ?? "codex", {
+      envs: {},
+      metadata: {
+        user_id: input.requestedByWorkosId,
+        workspace_id: input.workspaceId,
+        purpose: "infisical-auth",
+      },
+      timeoutMs: INFISICAL_AUTH_SANDBOX_TIMEOUT_MS,
+      lifecycle: { onTimeout: "kill" },
+    });
+    sandbox = createdSandbox;
+
+    failureStage = "set_sandbox_timeout";
+    await createdSandbox.setTimeout(INFISICAL_AUTH_SANDBOX_TIMEOUT_MS);
+
+    failureStage = "install_infisical_cli";
+    await ensureInfisicalInstalled(createdSandbox);
+
+    failureStage = "install_tmux";
+    await ensureInfisicalTmuxInstalled(createdSandbox);
+
+    failureStage = "prepare_login";
+    await prepareInfisicalAuthSandbox(createdSandbox);
+
+    failureStage = "wait_for_login_url";
+    const loginUrl = await waitForLoginUrl(createdSandbox);
     if (!loginUrl) {
       throw new Error("Infisical did not provide a browser login link.");
     }
@@ -72,11 +96,12 @@ export async function startGoatInfisicalAuthFlow(input: {
     const id = newGoatInfisicalAuthFlowId();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + INFISICAL_AUTH_FLOW_TTL_MS);
+    failureStage = "persist_flow";
     await getDb().insert(goatInfisicalAuthFlows).values({
       id,
       workspaceId: input.workspaceId,
       requestedByWorkosId: input.requestedByWorkosId,
-      sandboxId: sandbox.sandboxId,
+      sandboxId: createdSandbox.sandboxId,
       loginUrl,
       status: "link_ready",
       statusReason: null,
@@ -87,7 +112,7 @@ export async function startGoatInfisicalAuthFlow(input: {
       event: "opencompany.runner_infisical_auth_link_ready",
       workspace_id: input.workspaceId,
       flow_id: id,
-      sandbox_id: sandbox.sandboxId,
+      sandbox_id: createdSandbox.sandboxId,
     });
     return {
       id,
@@ -97,11 +122,12 @@ export async function startGoatInfisicalAuthFlow(input: {
       expiresAt: expiresAt.toISOString(),
     };
   } catch (error) {
-    await killSandbox(sandbox.sandboxId).catch(() => undefined);
+    if (sandbox) await killSandbox(sandbox.sandboxId).catch(() => undefined);
     logger.warn("Infisical auth flow could not start", {
       event: "opencompany.runner_infisical_auth_start_failed",
       workspace_id: input.workspaceId,
-      sandbox_id: sandbox.sandboxId,
+      sandbox_id: sandbox?.sandboxId,
+      failure_stage: failureStage,
       error_name: errorName(error),
     });
     throw error;
@@ -230,7 +256,8 @@ export async function completeGoatInfisicalAuthFlow(input: {
 }
 
 export function parseInfisicalLoginUrl(output: string) {
-  const match = output.match(/https:\/\/app\.infisical\.com\/login\?callback_port=\d+/);
+  const unwrappedOutput = output.replace(/\r?\n/g, "");
+  const match = unwrappedOutput.match(/https:\/\/app\.infisical\.com\/login\?callback_port=\d+/);
   if (!match) return null;
   try {
     const url = new URL(match[0]);
@@ -323,6 +350,19 @@ async function ensureInfisicalInstalled(sandbox: SandboxHandle) {
   );
 }
 
+export async function ensureInfisicalTmuxInstalled(sandbox: SandboxHandle) {
+  await sandbox.commands.run(
+    [
+      "if ! command -v tmux >/dev/null 2>&1; then",
+      "export DEBIAN_FRONTEND=noninteractive;",
+      "apt-get update -qq && apt-get install -y -qq --no-install-recommends tmux;",
+      "fi;",
+      "command -v tmux >/dev/null",
+    ].join(" "),
+    { user: "root", timeoutMs: 120_000 },
+  );
+}
+
 async function prepareInfisicalAuthSandbox(sandbox: SandboxHandle) {
   await sandbox.commands.run(
     [
@@ -378,7 +418,7 @@ async function waitForBrowserTokenPrompt(sandbox: SandboxHandle) {
 
 async function captureLoginPane(sandbox: SandboxHandle) {
   const result = await sandbox.commands.run(
-    `tmux capture-pane -p -S -200 -t ${shellQuote(INFISICAL_TMUX_SESSION)} 2>/dev/null || true`,
+    `tmux capture-pane -p -J -S -200 -t ${shellQuote(INFISICAL_TMUX_SESSION)} 2>/dev/null || true`,
     { user: "user", timeoutMs: 10_000 },
   );
   return result.stdout;
