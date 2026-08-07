@@ -688,7 +688,7 @@ export const onboarding = oc.table("onboarding", {
   // Self-reported profile captured on the first onboarding step. `role` is one
   // of the ROLE_PROFILES ids in the wizard and seeds the tailored brain folders.
   role: text("role"),
-  // Legacy free-text field retained for existing rows. New Goat onboarding
+  // Legacy free-text field retained for existing rows. New onboarding
   // stores the normalized hostname in companyDomain and the homepage URL in
   // contextUrls.
   building: text("building"),
@@ -2388,7 +2388,7 @@ export const granolaSyncState = oc.table("granola_sync_state", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// Per-integration Fathom poll cursor. Goat uses bounded created_after /
+// Per-integration Fathom poll cursor. The app uses bounded created_after /
 // created_before windows for personal API-key connections. The initial cursor
 // is written when the connection is created, so live ingestion never backfills
 // implicitly. pending_created_before_cursor pins the upper bound while an

@@ -43,7 +43,7 @@ import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-fathom-poll" });
 
-// Goat discovers meetings by polling GET /external/v1/meetings per personal
+// The app discovers meetings by polling GET /external/v1/meetings per personal
 // API-key integration. A meeting may be listed before generated content is
 // ready, so the time lag avoids most early reads and a durable pending queue
 // retries the recording endpoints before any cross-brain claim is created.
@@ -276,7 +276,7 @@ export async function listFathomMeetingsWindow(input: {
     seenCursors.add(result.nextCursor);
     cursor = result.nextCursor;
   }
-  logger.info("Goat Fathom poll hit the page cap; saved continuation for next poll", {
+  logger.info("Fathom poll hit the page cap; saved continuation for next poll", {
     event: "opencompany.goat_fathom_poll_page_cap",
     meeting_count: meetings.length,
   });
@@ -389,7 +389,7 @@ async function retryPendingFathomMeetings(input: {
         integration_id: meeting.integrationId,
         recording_id: meeting.recordingId,
       });
-      logger.warn("Goat Fathom pending meeting retry failed", {
+      logger.warn("Fathom pending meeting retry failed", {
         event: "opencompany.goat_fathom_pending_retry_failed",
         integration_id: meeting.integrationId,
         recording_id: meeting.recordingId,
@@ -443,7 +443,7 @@ function meetingTitle(rawPayload: Record<string, unknown>): string | null {
 }
 
 async function markFathomNeedsReauth(candidate: FathomPollCandidate, reason: string) {
-  logger.warn("Goat Fathom integration needs a new API key", {
+  logger.warn("Fathom integration needs a new API key", {
     event: "opencompany.goat_fathom_needs_reauth",
     integration_id: candidate.integrationId,
   });
@@ -492,7 +492,7 @@ export function startFathomPollWorker(options: { pollIntervalMs?: number } = {})
               event: "opencompany.goat_fathom_poll_failed",
               integration_id: candidate.integrationId,
             });
-            logger.error("Goat Fathom integration poll failed", {
+            logger.error("Fathom integration poll failed", {
               event: "opencompany.goat_fathom_poll_failed",
               integration_id: candidate.integrationId,
               error,
@@ -500,7 +500,7 @@ export function startFathomPollWorker(options: { pollIntervalMs?: number } = {})
             return null;
           });
           if (polled && polled.enqueued > 0) {
-            logger.info("Goat Fathom meetings enqueued", {
+            logger.info("Fathom meetings enqueued", {
               event: "opencompany.goat_fathom_meetings_enqueued",
               integration_id: candidate.integrationId,
               enqueued_count: polled.enqueued,
@@ -510,7 +510,7 @@ export function startFathomPollWorker(options: { pollIntervalMs?: number } = {})
         }
       } catch (error) {
         captureException(error, { event: "opencompany.goat_fathom_poll_worker_failed" });
-        logger.error("Goat Fathom poll worker failed", {
+        logger.error("Fathom poll worker failed", {
           event: "opencompany.goat_fathom_poll_worker_failed",
           error,
         });

@@ -163,7 +163,7 @@ async function answerForIntegration(
   const botUserId =
     typeof credential?.payload.bot_user_id === "string" ? credential.payload.bot_user_id : null;
   if (!botToken) {
-    console.error("[goat-slack-bot] Missing bot credential", { integrationId: integration.id });
+    console.error("[slack-bot] Missing bot credential", { integrationId: integration.id });
     return "handled";
   }
 
@@ -300,7 +300,7 @@ async function answerForIntegration(
       idempotencyKey: `slack_bot:${integration.id}:${input.teamId}:${input.channelId}:${input.messageTs}`,
     });
   } catch (error) {
-    console.error("[goat-slack-bot] Answer generation or delivery failed", {
+    console.error("[slack-bot] Answer generation or delivery failed", {
       integrationId: integration.id,
       channelId: input.channelId,
       mode,
@@ -366,7 +366,7 @@ async function resolveBrainTargets(
         degradedToFallback: false,
       };
     }
-    console.warn("[goat-slack-bot] Mapped member lacks access to routed brains; using fallback", {
+    console.warn("[slack-bot] Mapped member lacks access to routed brains; using fallback", {
       integrationId: integration.id,
       channelId,
     });
@@ -697,7 +697,7 @@ async function recordSlackBotUsage(input: {
       });
     }
   } catch (error) {
-    console.error("[goat-slack-bot] Credit debit failed", {
+    console.error("[slack-bot] Credit debit failed", {
       workspaceId: input.workspaceId,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -720,7 +720,7 @@ function logAnswerFailure(
   input: SlackBotEventInput,
   error: unknown,
 ) {
-  console.error("[goat-slack-bot] Failed to answer", {
+  console.error("[slack-bot] Failed to answer", {
     mode,
     teamId: input.teamId,
     channelId: input.channelId,

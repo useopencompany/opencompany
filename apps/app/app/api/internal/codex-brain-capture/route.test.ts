@@ -82,7 +82,7 @@ describe("POST /api/internal/codex-brain-capture", () => {
 });
 
 function request(bearer?: string, overrides: Record<string, unknown> = {}) {
-  return new Request("https://goat.example.com/api/internal/codex-brain-capture", {
+  return new Request("https://app.example.com/api/internal/codex-brain-capture", {
     method: "POST",
     headers: {
       "content-type": "application/json",

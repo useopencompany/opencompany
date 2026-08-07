@@ -85,7 +85,7 @@ export async function syncUser(authUser: WorkOSUser) {
     .returning();
 
   if (!updatedUser) {
-    throw new Error("Unable to sync the Goat user.");
+    throw new Error("Unable to sync the user.");
   }
 
   return updatedUser;
@@ -121,7 +121,7 @@ export async function adoptWorkOSOrganizationMemberships(authUser: WorkOSUser) {
         workspaces.map((entry) =>
           syncStripeSeatQuantityForWorkspace(entry.workspace.id).catch((error) => {
             console.error(
-              "[goat] Failed to sync Stripe seat quantity after invite adoption",
+              "[app] Failed to sync Stripe seat quantity after invite adoption",
               error,
             );
           }),
@@ -129,7 +129,7 @@ export async function adoptWorkOSOrganizationMemberships(authUser: WorkOSUser) {
       );
     }
   } catch (error) {
-    console.error("[goat] Failed to adopt WorkOS organization memberships", error);
+    console.error("[app] Failed to adopt WorkOS organization memberships", error);
   }
 }
 
@@ -188,7 +188,7 @@ export async function completeAuthentication(
         organizationId: authResponse.organizationId,
       });
     } catch (error) {
-      console.error("[goat] Failed to activate the authenticated workspace", error);
+      console.error("[app] Failed to activate the authenticated workspace", error);
     }
   }
 }
@@ -213,7 +213,7 @@ async function ensureWorkspaces(
   // in the founder onboarding email drip and fire the welcome immediately.
   // Best-effort: email/DB hiccups must never block sign-in.
   await enrollOwnerInOnboardingEmails({ workosUserId: user.workosUserId }).catch((error) => {
-    console.error("[goat] Failed to enroll owner in onboarding emails", error);
+    console.error("[app] Failed to enroll owner in onboarding emails", error);
   });
   workspaces = await listWorkspacesForUser(user.workosUserId);
   return ensureWorkspaceOrganizationsForEntries(workspaces);

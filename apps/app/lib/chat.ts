@@ -607,7 +607,7 @@ export function createDbChatStore(db: ChatDb = getDb()): ChatStore {
           updatedAt: now,
         })
         .returning();
-      if (!session) throw new Error("Unable to create Goat chat session.");
+      if (!session) throw new Error("Unable to create chat session.");
       return session;
     },
 
@@ -709,7 +709,7 @@ export function createDbChatStore(db: ChatDb = getDb()): ChatStore {
           })
         : insert
       ).returning();
-      if (!message) throw new Error("Unable to create Goat chat message.");
+      if (!message) throw new Error("Unable to create chat message.");
       return message;
     },
 

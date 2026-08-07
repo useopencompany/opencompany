@@ -1025,7 +1025,7 @@ describe("POST /api/chat", () => {
       },
       lastUserMessage: {
         id: "user_message_1",
-        content: "Research Goat.",
+        content: "Research opencompany.",
       },
       storedMessages: [],
       messages: [],
@@ -2569,7 +2569,7 @@ describe("POST /api/chat", () => {
     expect(persistChatAssistantMessage).toHaveBeenCalledWith(
       {
         sessionId: "session_1",
-        content: "Goat stopped before it could finish.",
+        content: "opencompany stopped before it could finish.",
         taskId: null,
         debugTrace: expect.objectContaining({
           error: "stream closed",
@@ -2650,7 +2650,7 @@ describe("POST /api/chat", () => {
 });
 
 function jsonRequest(body: unknown) {
-  return new Request("https://goat.test/api/chat", {
+  return new Request("https://app.test/api/chat", {
     method: "POST",
     body: JSON.stringify(body),
   });

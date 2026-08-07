@@ -151,7 +151,7 @@ export function createChatBrowserToolSession(input: {
       activeProfileEndPromise = input
         .endBrowserProfileAgentSession(session)
         .catch((error) => {
-          logger.warn("Goat browser profile session cleanup failed", {
+          logger.warn("Browser profile session cleanup failed", {
             event: "goat.browser_profile_session_cleanup_failed",
             chat_session_id: input.chatSessionId,
             profile_id: session.profile.id,
@@ -249,7 +249,7 @@ export function createChatBrowserToolSession(input: {
         };
       } catch (error) {
         if (input.signal.aborted) throw error;
-        logger.warn("Goat chat browser screenshot storage failed", {
+        logger.warn("Chat browser screenshot storage failed", {
           event: "goat.chat_browser_screenshot_storage_failed",
           chat_session_id: input.chatSessionId,
           error,

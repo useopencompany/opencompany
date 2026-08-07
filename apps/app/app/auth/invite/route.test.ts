@@ -13,7 +13,7 @@ vi.mock("@/lib/workos-client", () => ({
 
 const getWorkOSClientMock = vi.mocked(getWorkOSClient);
 
-describe("Goat invitation auth route", () => {
+describe("Invitation auth route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -59,7 +59,7 @@ describe("Goat invitation auth route", () => {
     expect(location.searchParams.get("invitation_token")).toBe("invalid-token");
     expect(location.searchParams.has("email")).toBe(false);
     expect(consoleWarn).toHaveBeenCalledWith(
-      "[goat] Could not resolve the workspace invitation before sign-up",
+      "[app] Could not resolve the workspace invitation before sign-up",
     );
   });
 

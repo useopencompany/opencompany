@@ -33,7 +33,7 @@ export async function saveFathomApiKeyAction(apiKey: string): Promise<FathomConn
     revalidatePath("/", "layout");
     return { ok: true, state: await getFathomIntegrationState(user.workosUserId) };
   } catch (error) {
-    console.error("[goat-fathom] Failed to save Fathom API key", error);
+    console.error("[fathom] Failed to save Fathom API key", error);
     return {
       ok: false,
       error: "Could not save the Fathom API key.",

@@ -82,7 +82,7 @@ async function ensureBillingRow(workspaceId: string, db: DbLike) {
     .from(workspaceBilling)
     .where(eq(workspaceBilling.workspaceId, workspaceId))
     .limit(1);
-  if (!billing) throw new Error(`Billing state is missing for Goat workspace ${workspaceId}.`);
+  if (!billing) throw new Error(`Billing state is missing for workspace ${workspaceId}.`);
   return billing;
 }
 
@@ -147,7 +147,7 @@ export async function refreshMonthlyIncludedUsage(
     } catch (error) {
       failed += 1;
       console.error(
-        `Failed to refresh monthly usage for Goat workspace ${row.workspaceId}.`,
+        `Failed to refresh monthly usage for workspace ${row.workspaceId}.`,
         error,
       );
     }
@@ -303,7 +303,7 @@ export async function reserveWorkspaceIngestion(input: {
     input.rawEventCount < 1 ||
     input.rawEventCount > 200
   ) {
-    throw new Error("Goat ingestion raw event count must be between 1 and 200.");
+    throw new Error("Ingestion raw event count must be between 1 and 200.");
   }
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
@@ -370,7 +370,7 @@ export async function reserveWorkspaceIngestion(input: {
         ),
       )
       .limit(1);
-    if (!existing) throw new Error("Could not load the Goat ingestion reservation.");
+    if (!existing) throw new Error("Could not load the ingestion reservation.");
     return {
       reservation: existing,
       pendingUnits: pendingBefore,
@@ -463,7 +463,7 @@ export async function releasePendingIngestionReservations(
     } catch (error) {
       failed += 1;
       console.error(
-        `Failed to release the paused Goat ingestion backlog for workspace ${row.workspaceId}.`,
+        `Failed to release the paused ingestion backlog for workspace ${row.workspaceId}.`,
         error,
       );
     }

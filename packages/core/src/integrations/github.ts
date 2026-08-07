@@ -353,7 +353,7 @@ export async function syncGitHubIntegrationRepositories(input: {
     .returning({ id: integrations.id, userWorkosId: integrations.userWorkosId });
 
   if (!integration) {
-    throw new Error("Could not persist Goat GitHub integration.");
+    throw new Error("Could not persist GitHub integration.");
   }
 
   const resourceValues = input.repositories.map((repository) => ({
@@ -576,7 +576,7 @@ function createAppJwt() {
 
 function requiredEnv(name: string) {
   const value = process.env[name]?.trim();
-  if (!value) throw new Error(`${name} is required for Goat GitHub integration.`);
+  if (!value) throw new Error(`${name} is required for the GitHub integration.`);
   return value;
 }
 

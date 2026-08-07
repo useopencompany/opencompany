@@ -190,6 +190,6 @@ function safeEqual(left: string, right: string) {
 
 function requiredEnv(name: string) {
   const value = process.env[name]?.trim();
-  if (!value) throw new Error(`${name} is required for the Goat Slack bot integration.`);
+  if (!value) throw new Error(`${name} is required for the Slack bot integration.`);
   return value;
 }

@@ -1,9 +1,10 @@
-# OpenCompany Goat Brain — HubSpot app
+# opencompany Brain — HubSpot app
 
-Declarative definition of the HubSpot app behind the Goat Brain HubSpot source
+Declarative definition of the HubSpot app behind the Brain HubSpot source
 (HubSpot developer-projects framework, platform 2026.03). Deployed to the
 `louis [standard]` HubSpot account (148909358) as project
-`goat-brain-hubspot-public`, App ID 45903920.
+`goat-brain-hubspot-public` (the live HubSpot project identifier, frozen),
+App ID 45903920.
 
 Distribution is `marketplace`, which makes the app a public OAuth app: any
 HubSpot portal can install it through the OAuth authorize URL our
@@ -26,5 +27,5 @@ hs project upload
 
 The OAuth client id/secret live in the app's Auth tab (not exported here);
 they map to `HUBSPOT_CLIENT_ID` / `HUBSPOT_CLIENT_SECRET` in both the
-web and runner environments. `HUBSPOT_STATE_SECRET` is generated, not from
+app and runner environments. `HUBSPOT_STATE_SECRET` is generated, not from
 HubSpot.

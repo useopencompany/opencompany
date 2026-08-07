@@ -59,7 +59,7 @@ export async function planTaskHarness(input: {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
-    throw new Error("Goat runner is not configured.");
+    throw new Error("The runner is not configured.");
   }
 
   const response = await fetch(`${baseUrl}/internal/goat/task-harness/plan`, {
@@ -72,12 +72,12 @@ export async function planTaskHarness(input: {
   });
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`Goat harness planning failed with ${response.status}: ${details}`);
+    throw new Error(`Harness planning failed with ${response.status}: ${details}`);
   }
 
   const body = (await response.json()) as { harnessSpec?: unknown };
   if (!isHarnessSpec(body.harnessSpec)) {
-    throw new Error("Goat harness planning returned an invalid harness.");
+    throw new Error("Harness planning returned an invalid harness.");
   }
   return body.harnessSpec;
 }
@@ -86,7 +86,7 @@ export async function triggerCodexChatWake() {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
-    console.warn("Goat codex chat wake skipped because the runner is not configured.", {
+    console.warn("Codex chat wake skipped because the runner is not configured.", {
       event: "goat.codex_chat_wake_unconfigured",
     });
     return;
@@ -109,7 +109,7 @@ export async function triggerCodexChatWake() {
 
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`Goat codex chat wake failed with ${response.status}: ${details}`);
+    throw new Error(`Codex chat wake failed with ${response.status}: ${details}`);
   }
 }
 
@@ -117,7 +117,7 @@ export async function getCodexSandboxStatus(sandboxId: string): Promise<CodexSan
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
-    throw new Error("Goat runner is not configured.");
+    throw new Error("The runner is not configured.");
   }
 
   const controller = new AbortController();
@@ -140,12 +140,12 @@ export async function getCodexSandboxStatus(sandboxId: string): Promise<CodexSan
 
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`Goat codex sandbox status failed with ${response.status}: ${details}`);
+    throw new Error(`Codex sandbox status failed with ${response.status}: ${details}`);
   }
 
   const body = (await response.json()) as { status?: unknown };
   if (body.status !== "running" && body.status !== "sleeping" && body.status !== "deleted") {
-    throw new Error("Goat codex sandbox status returned an invalid status.");
+    throw new Error("Codex sandbox status returned an invalid status.");
   }
   return body.status;
 }
@@ -267,7 +267,7 @@ export async function killCodexSandbox(sandboxId: string): Promise<boolean> {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
-    throw new Error("Goat runner is not configured.");
+    throw new Error("The runner is not configured.");
   }
 
   const controller = new AbortController();
@@ -290,7 +290,7 @@ export async function killCodexSandbox(sandboxId: string): Promise<boolean> {
 
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`Goat codex sandbox kill failed with ${response.status}: ${details}`);
+    throw new Error(`Codex sandbox kill failed with ${response.status}: ${details}`);
   }
 
   const body = (await response.json()) as { killed?: unknown };
@@ -301,7 +301,7 @@ export async function triggerBrainIngestWake() {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
-    console.warn("Goat Brain ingest wake skipped because the runner is not configured.", {
+    console.warn("Brain ingest wake skipped because the runner is not configured.", {
       event: "goat.brain_ingest_wake_unconfigured",
     });
     return;
@@ -316,7 +316,7 @@ export async function triggerBrainIngestWake() {
 
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`Goat Brain ingest wake failed with ${response.status}: ${details}`);
+    throw new Error(`Brain ingest wake failed with ${response.status}: ${details}`);
   }
 }
 
@@ -324,7 +324,7 @@ export async function triggerGoogleDriveSyncWake() {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
-    console.warn("Goat Google Drive sync wake skipped because the runner is not configured.", {
+    console.warn("Google Drive sync wake skipped because the runner is not configured.", {
       event: "goat.google_drive_sync_wake_unconfigured",
     });
     return;
@@ -336,7 +336,7 @@ export async function triggerGoogleDriveSyncWake() {
   });
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`Goat Google Drive sync wake failed with ${response.status}: ${details}`);
+    throw new Error(`Google Drive sync wake failed with ${response.status}: ${details}`);
   }
 }
 
@@ -344,7 +344,7 @@ export async function triggerBrainImportWake() {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
-    console.warn("Goat Brain import wake skipped because the runner is not configured.", {
+    console.warn("Brain import wake skipped because the runner is not configured.", {
       event: "goat.brain_import_wake_unconfigured",
     });
     return;
@@ -355,7 +355,7 @@ export async function triggerBrainImportWake() {
   });
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`Goat Brain import wake failed with ${response.status}: ${details}`);
+    throw new Error(`Brain import wake failed with ${response.status}: ${details}`);
   }
 }
 

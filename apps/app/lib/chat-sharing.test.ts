@@ -21,7 +21,7 @@ vi.mock("@/lib/auth", () => ({
 
 const SHARE_ID = "goat_chat_share_123e4567-e89b-42d3-a456-426614174000";
 
-describe("Goat chat sharing", () => {
+describe("Chat sharing", () => {
   it("scopes share creation to the session owner and reuses the unique session token", async () => {
     const query = vi.fn(async (...[statement]: [string, unknown[], object]) => {
       if (statement.startsWith("insert")) return { rows: [] };

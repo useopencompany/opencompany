@@ -783,7 +783,7 @@ export function startBrainImportWorker(env: RunnerEnv) {
         active += 1;
         processed = await processNextBrainImportRun(env);
       } catch (error) {
-        logger.error("Goat Brain import worker failed", { error });
+        logger.error("Brain import worker failed", { error });
       } finally {
         active -= 1;
       }

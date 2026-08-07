@@ -218,7 +218,7 @@ export async function listGranolaNotesSince(input: {
     seenCursors.add(result.cursor);
     cursor = result.cursor;
   }
-  logger.info("Goat Granola poll hit the page cap; saved continuation for next poll", {
+  logger.info("Granola poll hit the page cap; saved continuation for next poll", {
     event: "opencompany.goat_granola_poll_page_cap",
     note_count: notes.length,
   });
@@ -307,7 +307,7 @@ async function ingestGranolaNote(input: {
 }
 
 async function markGranolaNeedsReauth(candidate: GranolaPollCandidate, reason: string) {
-  logger.warn("Goat Granola integration needs a new API key", {
+  logger.warn("Granola integration needs a new API key", {
     event: "opencompany.goat_granola_needs_reauth",
     integration_id: candidate.integrationId,
   });
@@ -356,7 +356,7 @@ export function startGranolaPollWorker(options: { pollIntervalMs?: number } = {}
               event: "opencompany.goat_granola_poll_failed",
               integration_id: candidate.integrationId,
             });
-            logger.error("Goat Granola integration poll failed", {
+            logger.error("Granola integration poll failed", {
               event: "opencompany.goat_granola_poll_failed",
               integration_id: candidate.integrationId,
               error,
@@ -364,7 +364,7 @@ export function startGranolaPollWorker(options: { pollIntervalMs?: number } = {}
             return null;
           });
           if (polled && polled.enqueued > 0) {
-            logger.info("Goat Granola notes enqueued", {
+            logger.info("Granola notes enqueued", {
               event: "opencompany.goat_granola_notes_enqueued",
               integration_id: candidate.integrationId,
               enqueued_count: polled.enqueued,
@@ -374,7 +374,7 @@ export function startGranolaPollWorker(options: { pollIntervalMs?: number } = {}
         }
       } catch (error) {
         captureException(error, { event: "opencompany.goat_granola_poll_worker_failed" });
-        logger.error("Goat Granola poll worker failed", {
+        logger.error("Granola poll worker failed", {
           event: "opencompany.goat_granola_poll_worker_failed",
           error,
         });

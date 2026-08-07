@@ -4,5 +4,5 @@ GOAT_OAUTH_ISSUER = https:/$()/your-environment.authkit.app
 // The public WorkOS OAuth application's client ID. This is not a client secret.
 GOAT_OAUTH_CLIENT_ID = client_...
 
-// Uncomment for a non-local Goat deployment.
-// GOAT_API_BASE_URL = https:/$()/goat.example.com
+// Uncomment for a non-local opencompany deployment.
+// GOAT_API_BASE_URL = https:/$()/my.opencompany.chat

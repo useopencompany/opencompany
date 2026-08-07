@@ -89,7 +89,7 @@ export async function startImessagePairingAction(
     }
     return { ok: true };
   } catch (error) {
-    console.error("[goat-imessage] Failed to start pairing", error);
+    console.error("[imessage] Failed to start pairing", error);
     return { ok: false, error: "Could not send the verification code." };
   }
 }
@@ -141,7 +141,7 @@ export async function confirmImessagePairingAction(
     revalidatePath("/", "layout");
     return { ok: true, state: await getImessageIntegrationState(user.workosUserId) };
   } catch (error) {
-    console.error("[goat-imessage] Failed to confirm pairing", error);
+    console.error("[imessage] Failed to confirm pairing", error);
     return { ok: false, error: "Could not verify the code." };
   }
 }

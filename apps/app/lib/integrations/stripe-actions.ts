@@ -50,7 +50,7 @@ export async function saveStripeRestrictedApiKeyAction(
       state: await getStripeIntegrationState(context.workspace.id),
     };
   } catch (error) {
-    console.error("[goat-stripe] Failed to save Stripe restricted key", {
+    console.error("[stripe] Failed to save Stripe restricted key", {
       error: error instanceof Error ? error.message : String(error),
     });
     return {

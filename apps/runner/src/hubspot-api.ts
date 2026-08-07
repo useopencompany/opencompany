@@ -112,7 +112,7 @@ export async function getHubspotAccessToken(input: {
     kind: "oauth_token",
     db: getDb(),
   }).catch((error) => {
-    logger.warn("Goat HubSpot credential load failed", {
+    logger.warn("HubSpot credential load failed", {
       event: "opencompany.goat_hubspot_credential_load_failed",
       integration_id: input.integrationId,
       error,
@@ -210,7 +210,7 @@ async function markHubspotNeedsReauth(
     statusReason: reason,
     db: getDb(),
   }).catch((error) => {
-    logger.warn("Goat HubSpot needs_reauth marking failed", {
+    logger.warn("HubSpot needs_reauth marking failed", {
       event: "opencompany.goat_hubspot_needs_reauth_mark_failed",
       integration_id: input.integrationId,
       error,

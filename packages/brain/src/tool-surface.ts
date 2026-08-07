@@ -29,7 +29,7 @@ export const BRAIN_READ_TOOL_INPUT_JSON_SCHEMA = {
       type: "string",
       enum: [...BRAIN_READ_COMMANDS],
       description:
-        "Read-only Goat Brain command. Use query for recall/search, list for inventory, get for known ids, timeline for dated evidence, doctor for validation, and help for usage.",
+        "Read-only Brain command. Use query for recall/search, list for inventory, get for known ids, timeline for dated evidence, doctor for validation, and help for usage.",
     },
     flags: {
       type: "object",
@@ -113,7 +113,7 @@ export const BRAIN_READ_TOOL_INPUT_JSON_SCHEMA = {
     },
     stdin: {
       type: "string",
-      description: "Optional stdin; read-only Goat Brain commands do not normally need it.",
+      description: "Optional stdin; read-only Brain commands do not normally need it.",
     },
   },
   required: ["command"],
@@ -127,13 +127,13 @@ export const BRAIN_RETRIEVAL_TOOL_INPUT_JSON_SCHEMA = {
       ...BRAIN_READ_TOOL_INPUT_JSON_SCHEMA.properties.command,
       enum: [...BRAIN_RETRIEVAL_COMMANDS],
       description:
-        "Read-only Goat Brain command. Use query for recall/search, list for inventory, get for known ids, and timeline for dated evidence.",
+        "Read-only Brain command. Use query for recall/search, list for inventory, get for known ids, and timeline for dated evidence.",
     },
   },
 };
 
 export const BRAIN_READ_TOOL_DESCRIPTION =
-  "Read-only access to the user's durable Goat Brain. Use it to recall and inspect existing knowledge, never to write. Arguments are { command, flags }: use query with flags.text for recall/search, list with optional flags.folder/type for inventory, get with flags.id for known Brain ids, and timeline with flags.id for a record's history. Query returns curated pages by default; pass kind: \"evidence\" only when raw source material is explicitly needed. Use query with since windows like 6h, 2d, 1w, or an ISO timestamp to search or browse recent Brain pages; omit text when the user only wants recent entries. Query output includes pagination. When pagination.hasMore is true, repeat the same query with all filters unchanged and offset set to pagination.nextOffset. Use includeMerged only when inspecting duplicate/merged history and includeArchived only for retired records. Do not treat Brain as a chat scratchpad.";
+  "Read-only access to the user's durable Brain. Use it to recall and inspect existing knowledge, never to write. Arguments are { command, flags }: use query with flags.text for recall/search, list with optional flags.folder/type for inventory, get with flags.id for known Brain ids, and timeline with flags.id for a record's history. Query returns curated pages by default; pass kind: \"evidence\" only when raw source material is explicitly needed. Use query with since windows like 6h, 2d, 1w, or an ISO timestamp to search or browse recent Brain pages; omit text when the user only wants recent entries. Query output includes pagination. When pagination.hasMore is true, repeat the same query with all filters unchanged and offset set to pagination.nextOffset. Use includeMerged only when inspecting duplicate/merged history and includeArchived only for retired records. Do not treat Brain as a chat scratchpad.";
 
 export const CODEX_BRAIN_TOOL_CONTRACT_VERSION = "goat-codex-brain.v1";
 

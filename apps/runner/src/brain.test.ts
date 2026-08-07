@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const dbMocks = vi.hoisted(() => ({
   getDb: vi.fn(),
   getWebDb: vi.fn(() => {
-    throw new Error("runner Goat brain code must not use the web DB client");
+    throw new Error("runner brain code must not use the web DB client");
   }),
 }));
 
@@ -146,7 +146,7 @@ describe("createBrainMarkdownReportForTask", () => {
           documentId: expect.any(String),
           userWorkosId: "user_1",
           brainId: "market-report",
-          summary: "Created from Goat task goat_task_1.",
+          summary: "Created from task goat_task_1.",
           evidenceId: "ev-created-from-goat-task-1",
           sourceRef: "goat-task:goat_task_1",
         }),

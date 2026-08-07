@@ -48,10 +48,10 @@ const CODEX_CHAT_DEBUG_SCHEMA_VERSION = "goat.codex_chat.debug.v1";
 const OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION = "opencompany.chat.debug.v1";
 
 export const CODEX_CHAT_DISCONNECTED_MESSAGE =
-  "Connect Codex in Goat settings before chatting with the Codex engine.";
+  "Connect Codex in Settings before chatting with the Codex engine.";
 
 export const CLAUDE_CHAT_DISCONNECTED_MESSAGE =
-  "Connect Claude Code in Goat settings before chatting with the Claude engine.";
+  "Connect Claude Code in Settings before chatting with the Claude engine.";
 
 export type CodexChatMessageResult =
   | {
@@ -138,7 +138,7 @@ export async function createCodexChatMessage(input: {
       status: 400,
       error:
         engine === "opencompany"
-          ? "Select a supported Goat model."
+          ? "Select a supported model."
           : engine === "claude_code"
             ? "Select a supported Claude model."
             : "Select a supported Codex model.",
@@ -183,7 +183,7 @@ export async function createCodexChatMessage(input: {
   if (result.ok) {
     // Best-effort nudge; the runner worker's poll loop picks the turn up regardless.
     await triggerCodexChatWake().catch((error) => {
-      console.warn("Goat codex chat wake failed.", {
+      console.warn("Codex chat wake failed.", {
         event: "goat.codex_chat_wake_failed",
         error,
       });
@@ -348,7 +348,7 @@ export async function closeCodexChatSessionForChat(input: {
   // Best-effort: a paused sandbox that outlives the kill only costs storage until e2b's
   // retention window deletes it.
   await killCodexSandbox(session.sandboxId).catch((error) => {
-    console.warn("Goat codex sandbox kill on chat close failed.", {
+    console.warn("Codex sandbox kill on chat close failed.", {
       event: "goat.codex_chat_close_sandbox_kill_failed",
       chat_session_id: input.chatSessionId,
       error,

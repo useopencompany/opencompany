@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     if (envelope.type === "event_callback" && envelope.event && envelope.team_id) {
       const retryNum = request.headers.get("x-slack-retry-num");
       if (retryNum) {
-        console.warn("[goat-slack] Slack retried event delivery", {
+        console.warn("[slack] Slack retried event delivery", {
           retryNum,
           retryReason: request.headers.get("x-slack-retry-reason"),
           eventType: envelope.event.type,
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
       return NextResponse.json(await handleEventCallback(envelope.team_id, envelope.event));
     }
   } catch (error) {
-    console.error("[goat-slack] Failed to process Slack event", {
+    console.error("[slack] Failed to process Slack event", {
       eventType: envelope.event?.type,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -128,7 +128,7 @@ async function handleMessage(teamId: string, event: Record<string, unknown>) {
 
   if (!INGESTED_MESSAGE_SUBTYPES.has(subtype)) {
     if (subtype && !KNOWN_DROPPED_SUBTYPES.has(subtype)) {
-      console.warn("[goat-slack] Dropping message with unknown subtype", { subtype });
+      console.warn("[slack] Dropping message with unknown subtype", { subtype });
     }
     return { ok: true, dropped: true };
   }

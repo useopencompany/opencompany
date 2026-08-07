@@ -8,7 +8,7 @@ vi.mock("@/components/chat/SharedChatView", () => ({
 }));
 
 vi.mock("@/lib/app-url", () => ({
-  getAppUrl: vi.fn(() => "https://goat.example.com"),
+  getAppUrl: vi.fn(() => "https://app.example.com"),
 }));
 
 vi.mock("@/lib/chat-sharing", () => ({
@@ -48,10 +48,10 @@ describe("shared chat metadata", () => {
         siteName: "opencompany",
         title: "Architecture review",
         description: "Architecture review — a read-only chat shared from opencompany.",
-        url: new URL(`https://goat.example.com/share/${SHARE_ID}`),
+        url: new URL(`https://app.example.com/share/${SHARE_ID}`),
         images: [
           {
-            url: new URL(`https://goat.example.com/share/${SHARE_ID}/opengraph-image`),
+            url: new URL(`https://app.example.com/share/${SHARE_ID}/opengraph-image`),
             width: 1200,
             height: 630,
             type: "image/png",
@@ -65,7 +65,7 @@ describe("shared chat metadata", () => {
         description: "Architecture review — a read-only chat shared from opencompany.",
         images: [
           {
-            url: new URL(`https://goat.example.com/share/${SHARE_ID}/opengraph-image`),
+            url: new URL(`https://app.example.com/share/${SHARE_ID}/opengraph-image`),
             width: 1200,
             height: 630,
             type: "image/png",

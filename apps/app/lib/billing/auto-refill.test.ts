@@ -60,7 +60,7 @@ describe("runAutoRefill", () => {
     } as never);
   });
 
-  it("captures a successfully credited auto-refill in the Goat project", async () => {
+  it("captures a successfully credited auto-refill in the app PostHog project", async () => {
     recordAutoRefillCreditMock.mockResolvedValue({
       ok: true,
       ledgerId: 42,

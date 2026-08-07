@@ -31,7 +31,7 @@ struct ComposerView: View {
     VStack(alignment: .leading, spacing: 8) {
       ZStack(alignment: .topLeading) {
         if model.draft.isEmpty {
-          Text("Ask Goat anything…")
+          Text("Ask opencompany anything…")
             .foregroundStyle(.secondary)
             .padding(.horizontal, 6)
             .padding(.vertical, 8)
@@ -64,7 +64,7 @@ struct ComposerView: View {
         .buttonStyle(.borderedProminent)
         .buttonBorderShape(.circle)
         .disabled(!model.canSubmit)
-        .help("Send to Goat")
+        .help("Send to opencompany")
       }
     }
   }
@@ -78,7 +78,7 @@ struct ComposerView: View {
         Text(errorMessage)
           .lineLimit(2)
         if model.openSessionURL != nil {
-          Button("Open in Goat", action: model.openSession)
+          Button("Open in opencompany", action: model.openSession)
             .buttonStyle(.link)
         }
       }
@@ -96,7 +96,7 @@ struct ComposerView: View {
         .font(.system(size: 30))
         .foregroundStyle(.secondary)
       VStack(alignment: .leading, spacing: 4) {
-        Text("Sign in to Goat")
+        Text("Sign in to opencompany")
           .font(.headline)
         Text(
           model.errorMessage

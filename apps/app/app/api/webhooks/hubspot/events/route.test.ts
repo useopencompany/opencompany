@@ -17,7 +17,7 @@ vi.mock("@/lib/integrations/hubspot-signature", () => ({
   verifyHubspotWebhookSignature: vi.fn(),
 }));
 vi.mock("@/lib/workos", () => ({
-  getAppUrl: () => "https://goat.example.com",
+  getAppUrl: () => "https://app.example.com",
 }));
 
 describe("POST /api/webhooks/hubspot/events", () => {
@@ -53,7 +53,7 @@ describe("POST /api/webhooks/hubspot/events", () => {
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({ error: "Unable to buffer HubSpot events." });
     expect(console.error).toHaveBeenCalledWith(
-      "[goat-hubspot] Failed to process HubSpot events",
+      "[hubspot] Failed to process HubSpot events",
       expect.objectContaining({ eventCount: 1, error: "database unavailable" }),
     );
   });
@@ -67,7 +67,7 @@ describe("POST /api/webhooks/hubspot/events", () => {
 });
 
 function hubspotRequest() {
-  return new Request("https://goat.example.com/api/webhooks/hubspot/events", {
+  return new Request("https://app.example.com/api/webhooks/hubspot/events", {
     method: "POST",
     headers: {
       "content-type": "application/json",

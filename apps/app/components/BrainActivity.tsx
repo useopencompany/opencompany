@@ -155,7 +155,7 @@ function BrainActivityFeed({
       })
       .catch((error) => {
         if (controller.signal.aborted) return;
-        console.warn("[goat-brain-activity] failed to load source metadata", {
+        console.warn("[brain-activity] failed to load source metadata", {
           error: error instanceof Error ? error.message : String(error),
         });
       });

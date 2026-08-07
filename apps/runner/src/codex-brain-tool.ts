@@ -468,7 +468,7 @@ function entityTypeFlag(value: BrainToolFlagValue | undefined) {
   if (!type) return undefined;
   if (!isBuiltInBrainEntityType(type)) {
     throw new Error(
-      `Unsupported Goat Brain entity type "${type}". Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`,
+      `Unsupported Brain entity type "${type}". Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`,
     );
   }
   return type;

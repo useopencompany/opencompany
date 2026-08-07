@@ -54,7 +54,7 @@ function getIsMobileServerSnapshot() {
   return false;
 }
 
-// The persistent Goat chrome: the sidebar plus the rounded main-panel wrapper. Lives in the
+// The persistent app chrome: the sidebar plus the rounded main-panel wrapper. Lives in the
 // (app) layout so it stays mounted across navigations (the route page renders into {children}).
 export function Shell({ children }: { children: ReactNode }) {
   const collapsed = useSyncExternalStore(

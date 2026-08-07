@@ -150,7 +150,7 @@ describe("syncUser", () => {
     vi.useRealTimers();
   });
 
-  it("records a Goat signup when user sync creates the user row", async () => {
+  it("records a signup when user sync creates the user row", async () => {
     const dbMock = createDbMock({ insertReturning: [user] });
     getDbMock.mockReturnValue(dbMock.db as never);
 
@@ -182,7 +182,7 @@ describe("syncUser", () => {
     );
   });
 
-  it("updates an existing Goat user without recording another signup", async () => {
+  it("updates an existing user without recording another signup", async () => {
     const updatedUser = { ...user, firstName: "Augusta" };
     const dbMock = createDbMock({ insertReturning: [], updateReturning: [updatedUser] });
     getDbMock.mockReturnValue(dbMock.db as never);
@@ -206,7 +206,7 @@ describe("syncUser", () => {
     const dbMock = createDbMock({ insertReturning: [], updateReturning: [] });
     getDbMock.mockReturnValue(dbMock.db as never);
 
-    await expect(syncUser(authUser as never)).rejects.toThrow("Unable to sync the Goat user.");
+    await expect(syncUser(authUser as never)).rejects.toThrow("Unable to sync the user.");
     expect(recordSignupMock).not.toHaveBeenCalled();
   });
 });
@@ -261,7 +261,7 @@ describe("adoptWorkOSOrganizationMemberships", () => {
 
     expect(adoptWorkspaceMembershipsFromOrgsMock).not.toHaveBeenCalled();
     expect(consoleError).toHaveBeenCalledWith(
-      "[goat] Failed to adopt WorkOS organization memberships",
+      "[app] Failed to adopt WorkOS organization memberships",
       error,
     );
   });
@@ -272,7 +272,7 @@ describe("activateWorkspaceForOrganization", () => {
     vi.clearAllMocks();
   });
 
-  it("activates the Goat workspace and default brain mapped to the authenticated organization", async () => {
+  it("activates the workspace and default brain mapped to the authenticated organization", async () => {
     listWorkspacesForUserMock.mockResolvedValue([
       {
         workspace: {
@@ -323,7 +323,7 @@ describe("activateWorkspaceForOrganization", () => {
     expect(cookieStore.delete).not.toHaveBeenCalled();
   });
 
-  it("does not change cookies when the organization has no accessible Goat workspace", async () => {
+  it("does not change cookies when the organization has no accessible workspace", async () => {
     listWorkspacesForUserMock.mockResolvedValue([
       {
         workspace: {
@@ -456,7 +456,7 @@ describe("completeAuthentication", () => {
     ).resolves.toBeUndefined();
 
     expect(consoleError).toHaveBeenCalledWith(
-      "[goat] Failed to activate the authenticated workspace",
+      "[app] Failed to activate the authenticated workspace",
       expect.any(Error),
     );
   });

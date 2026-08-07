@@ -109,7 +109,7 @@ export async function flushGmailThreadWindow(
             }),
           window.threadId,
         ).catch((error) => {
-          logger.warn("Goat Gmail thread snapshot fetch failed", {
+          logger.warn("Gmail thread snapshot fetch failed", {
             event: "opencompany.goat_gmail_snapshot_failed",
             integration_id: window.integrationId,
             thread_id: window.threadId,
@@ -337,7 +337,7 @@ export function startGmailFlushWorker(env: RunnerEnv, options: { pollIntervalMs?
               integration_id: window.integrationId,
               thread_id: window.threadId,
             });
-            logger.error("Goat Gmail window flush failed", {
+            logger.error("Gmail window flush failed", {
               event: "opencompany.goat_gmail_flush_failed",
               integration_id: window.integrationId,
               thread_id: window.threadId,
@@ -346,7 +346,7 @@ export function startGmailFlushWorker(env: RunnerEnv, options: { pollIntervalMs?
             return null;
           });
           if (flushed) {
-            logger.info("Goat Gmail window flushed", {
+            logger.info("Gmail window flushed", {
               event: "opencompany.goat_gmail_window_flushed",
               integration_id: window.integrationId,
               thread_id: window.threadId,
@@ -358,7 +358,7 @@ export function startGmailFlushWorker(env: RunnerEnv, options: { pollIntervalMs?
         }
       } catch (error) {
         captureException(error, { event: "opencompany.goat_gmail_flush_worker_failed" });
-        logger.error("Goat Gmail flush worker failed", {
+        logger.error("Gmail flush worker failed", {
           event: "opencompany.goat_gmail_flush_worker_failed",
           error,
         });

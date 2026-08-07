@@ -128,7 +128,7 @@ export async function pollGmailIntegration(input: {
       },
       db,
     );
-    logger.warn("Goat Gmail history cursor expired; reset from profile", {
+    logger.warn("Gmail history cursor expired; reset from profile", {
       event: "opencompany.goat_gmail_history_reset",
       integration_id: candidate.integrationId,
     });
@@ -197,7 +197,7 @@ export function startGmailPollWorker(env: RunnerEnv, options: { pollIntervalMs?:
 
   const loop = (async () => {
     if (!env.googleOAuthClientId || !env.googleOAuthClientSecret) {
-      logger.info("Goat Gmail poll worker disabled (Google OAuth not configured)", {
+      logger.info("Gmail poll worker disabled (Google OAuth not configured)", {
         event: "opencompany.goat_gmail_poll_disabled",
       });
       return;
@@ -216,7 +216,7 @@ export function startGmailPollWorker(env: RunnerEnv, options: { pollIntervalMs?:
               event: "opencompany.goat_gmail_poll_failed",
               integration_id: candidate.integrationId,
             });
-            logger.error("Goat Gmail integration poll failed", {
+            logger.error("Gmail integration poll failed", {
               event: "opencompany.goat_gmail_poll_failed",
               integration_id: candidate.integrationId,
               error,
@@ -224,7 +224,7 @@ export function startGmailPollWorker(env: RunnerEnv, options: { pollIntervalMs?:
             return null;
           });
           if (polled && polled.buffered > 0) {
-            logger.info("Goat Gmail messages buffered", {
+            logger.info("Gmail messages buffered", {
               event: "opencompany.goat_gmail_messages_buffered",
               integration_id: candidate.integrationId,
               buffered_count: polled.buffered,
@@ -233,7 +233,7 @@ export function startGmailPollWorker(env: RunnerEnv, options: { pollIntervalMs?:
         }
       } catch (error) {
         captureException(error, { event: "opencompany.goat_gmail_poll_worker_failed" });
-        logger.error("Goat Gmail poll worker failed", {
+        logger.error("Gmail poll worker failed", {
           event: "opencompany.goat_gmail_poll_worker_failed",
           error,
         });

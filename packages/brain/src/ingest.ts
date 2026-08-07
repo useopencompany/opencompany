@@ -164,7 +164,7 @@ function buildIngestPrompt(input: {
     )
     .join("\n");
   return [
-    "You are the controlled ingestion loop for Goat Brain, a durable graph of user-owned knowledge.",
+    "You are the controlled ingestion loop for the Brain, a durable graph of user-owned knowledge.",
     "Return only JSON. Do not include markdown fences.",
     "Use existing ids when information belongs to an existing entity. Create a new entry only when no existing entry is the primary home.",
     "Use only these types: person, company, project, meeting, concept, source, analysis, note. External artifacts (articles, videos, email threads, repos) are `source`; synthesized prose is `analysis`.",
@@ -196,7 +196,7 @@ function buildRepairPrompt(input: {
   errors: string[];
 }) {
   return [
-    "Repair the prior Goat Brain ingest response. Return only valid JSON matching the requested shape.",
+    "Repair the prior Brain ingest response. Return only valid JSON matching the requested shape.",
     `Errors:\n${input.errors.map((error) => `- ${error}`).join("\n")}`,
     "",
     `Original prompt:\n${input.originalPrompt}`,

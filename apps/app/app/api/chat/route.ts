@@ -299,7 +299,7 @@ export async function POST(request: Request): Promise<Response> {
   }
   const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
   if (!gatewayApiKey) {
-    return new Response("Goat chat is not configured.", { status: 503 });
+    return new Response("Chat is not configured.", { status: 503 });
   }
   // Chat is usage-based on both plans: each turn debits the workspace's USD
   // credits, and a turn cannot start on an empty balance. Codex-engine turns
@@ -307,7 +307,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!requestedEngine && isCreditsEnforcementEnabled()) {
     await ensureMonthlyIncludedUsage(context.workspace.id);
     const hasCredits = await hasPositiveCreditBalance(context.workspace.id).catch((error) => {
-      logger.warn("Goat chat credit balance check failed", {
+      logger.warn("Chat credit balance check failed", {
         event: "goat.chat_credit_balance_check_failed",
         workspace_id: context.workspace.id,
         error,
@@ -337,7 +337,7 @@ export async function POST(request: Request): Promise<Response> {
             userWorkosId: context.user.workosUserId,
             workspaceId: context.workspace.id,
           }).catch((error) => {
-            logger.warn("Goat chat action catalog resolution failed", {
+            logger.warn("Chat action catalog resolution failed", {
               event: "goat.chat_action_catalog_resolution_failed",
               error,
             });
@@ -346,7 +346,7 @@ export async function POST(request: Request): Promise<Response> {
         : Promise.resolve(emptyCatalog),
       !requestedEngine
         ? listSkillCatalog(context.workspace.id).catch((error) => {
-            logger.warn("Goat chat skill catalog resolution failed", {
+            logger.warn("Chat skill catalog resolution failed", {
               event: "goat.chat_skill_catalog_resolution_failed",
               error,
             });
@@ -355,7 +355,7 @@ export async function POST(request: Request): Promise<Response> {
         : Promise.resolve([]),
       !requestedEngine && context.user.taskSpawningEnabled
         ? listWorkflowCatalog(context.workspace.id).catch((error) => {
-            logger.warn("Goat chat workflow catalog resolution failed", {
+            logger.warn("Chat workflow catalog resolution failed", {
               event: "goat.chat_workflow_catalog_resolution_failed",
               error,
             });
@@ -373,7 +373,7 @@ export async function POST(request: Request): Promise<Response> {
         : Promise.resolve<ChatModelRoutingResult | null>(null),
       !requestedEngine && resolveImessageProvider() !== null
         ? resolveImessageDelivery(context.user.workosUserId).catch((error) => {
-            logger.warn("Goat chat iMessage delivery resolution failed", {
+            logger.warn("Chat iMessage delivery resolution failed", {
               event: "goat.chat_imessage_delivery_resolution_failed",
               error,
             });
@@ -473,9 +473,9 @@ export async function POST(request: Request): Promise<Response> {
       duration_ms: durationMs,
     };
     if (outcome === "success") {
-      logger.info("Goat chat turn finished", logFields);
+      logger.info("Chat turn finished", logFields);
     } else {
-      logger.warn("Goat chat turn finished", logFields);
+      logger.warn("Chat turn finished", logFields);
     }
   };
 
@@ -637,7 +637,7 @@ export async function POST(request: Request): Promise<Response> {
           totalTokens: routingUsage?.totalTokens ?? 0,
         });
       } catch (error) {
-        logger.warn("Goat chat model routing attempt persistence failed", {
+        logger.warn("Chat model routing attempt persistence failed", {
           event: "goat.chat_model_routing_attempt_persistence_failed",
           workspace_id: context.workspace.id,
           chat_session_id: turn.session.id,
@@ -823,7 +823,7 @@ export async function POST(request: Request): Promise<Response> {
           },
         });
     })().catch((error) => {
-      logger.warn("Goat chat sandbox usage recording failed", {
+      logger.warn("Chat sandbox usage recording failed", {
         event: "goat.chat_sandbox_usage_recording_failed",
         chat_session_id: turn.session.id,
         error,
@@ -1316,7 +1316,7 @@ export async function POST(request: Request): Promise<Response> {
       ...debugTrace,
       durationMs: elapsedChatDurationMs(),
       ...(generationSignal.aborted ? { aborted: true } : {}),
-      error: error instanceof Error ? error.message : "Goat chat stream ended before completion.",
+      error: error instanceof Error ? error.message : "Chat stream ended before completion.",
       finishReason,
     };
     finishChatTelemetry(
@@ -1336,7 +1336,7 @@ export async function POST(request: Request): Promise<Response> {
           sessionId: turn.session.id,
           content: startedTask
             ? normalizeAgentText("", startedTask)
-            : "Goat stopped before it could finish.",
+            : "opencompany stopped before it could finish.",
           taskId: startedTask?.id ?? null,
           debugTrace: fallbackTrace,
         },
@@ -1347,7 +1347,7 @@ export async function POST(request: Request): Promise<Response> {
         assistantPersisted = true;
       })
       .catch((persistError) => {
-        console.warn("Goat chat fallback persistence failed.", {
+        console.warn("Chat fallback persistence failed.", {
           event: "goat.chat_fallback_persist_failed",
           session_id: turn.session.id,
           error: persistError,
@@ -1493,7 +1493,7 @@ export async function POST(request: Request): Promise<Response> {
       );
       debugTrace = createOpenCompanyChatDebugTrace({
         model: turn.session.model,
-        error: event.error instanceof Error ? event.error.message : "Goat chat failed.",
+        error: event.error instanceof Error ? event.error.message : "Chat failed.",
       });
       after(recordBrowserSandboxUsage());
       void persistFallbackAssistantMessage(event.error, "error");
@@ -1532,7 +1532,7 @@ export async function POST(request: Request): Promise<Response> {
             stopWatcherCleanup = watchChatStop(streamId, () => stopController.abort());
             await streamContext.createNewResumableStream(streamId, () => stream);
           } catch (error) {
-            console.warn("Goat chat resumable stream setup failed.", {
+            console.warn("Chat resumable stream setup failed.", {
               event: "goat.chat_resumable_stream_failed",
               session_id: turn.session.id,
               error,
@@ -1545,14 +1545,14 @@ export async function POST(request: Request): Promise<Response> {
       );
     },
     onError(error) {
-      console.warn("Goat chat stream failed.", {
+      console.warn("Chat stream failed.", {
         event: "goat.chat_stream_failed",
         session_id: turn.session.id,
         error,
       });
       after(recordBrowserSandboxUsage());
       void persistFallbackAssistantMessage(error, "error");
-      return "Goat could not answer that right now.";
+      return "opencompany could not answer that right now.";
     },
     onFinish: async ({ responseMessage, finishReason, isAborted }) => {
       releaseStreamCoordination();
@@ -1601,7 +1601,7 @@ export async function POST(request: Request): Promise<Response> {
         await persistChatAssistantMessage(assistantMessageInput, store);
       } catch (error) {
         if (!responseMessageId) throw error;
-        console.warn("Goat chat assistant persistence failed; retrying with a server id.", {
+        console.warn("Chat assistant persistence failed; retrying with a server id.", {
           event: "goat.chat_assistant_persist_retry",
           session_id: turn.session.id,
           error,
@@ -1811,7 +1811,7 @@ async function executeChatActionCall(input: {
       ...metricAttributes,
       "goat.outcome": "error",
     });
-    logger.warn("Goat chat action call failed", {
+    logger.warn("Chat action call failed", {
       event: "goat.chat_action_call_failed",
       action: input.action,
       chat_session_id: input.chatSessionId,
@@ -1918,7 +1918,7 @@ async function recordChatModelCost(input: {
     // the auto-refill threshold. The cron sweep covers runner-side debits.
     void maybeTriggerAutoRefill(input.workspaceId);
   } catch (error) {
-    logger.warn("Goat chat credit debit failed", {
+    logger.warn("Chat credit debit failed", {
       event: "goat.chat_credit_debit_failed",
       workspace_id: input.workspaceId,
       chat_session_id: input.chatSessionId,

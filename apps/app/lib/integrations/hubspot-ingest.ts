@@ -254,6 +254,6 @@ function safeEqual(left: string, right: string) {
 
 function requiredEnv(name: string) {
   const value = process.env[name]?.trim();
-  if (!value) throw new Error(`${name} is required for Goat HubSpot integration.`);
+  if (!value) throw new Error(`${name} is required for the HubSpot integration.`);
   return value;
 }

@@ -71,7 +71,7 @@ export async function requestMagicCode(input: {
     });
     return { ok: true };
   } catch (error) {
-    console.error("[goat] Failed to send a magic sign-in code", error);
+    console.error("[app] Failed to send a magic sign-in code", error);
     return { ok: false, error: "We couldn't send that code. Try again in a moment." };
   }
 }
@@ -101,7 +101,7 @@ export async function verifyMagicCode(input: {
       await setOrganizationSelection(selection);
       return redirect("/signin");
     }
-    console.error("[goat] Failed to verify a magic sign-in code", error);
+    console.error("[app] Failed to verify a magic sign-in code", error);
     return { ok: false, error: "That code is invalid or expired. Request a new one." };
   }
 
@@ -132,7 +132,7 @@ export async function selectOrganization(input: {
       ...signals,
     });
   } catch (error) {
-    console.error("[goat] Failed to complete organization selection", error);
+    console.error("[app] Failed to complete organization selection", error);
     return { ok: false, error: "We couldn't open that workspace. Try signing in again." };
   }
 

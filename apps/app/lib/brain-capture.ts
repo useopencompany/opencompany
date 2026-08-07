@@ -47,7 +47,7 @@ export type BrainCaptureSource =
   | { kind: "chat"; connectionId: string; itemId: string; idempotencyKey?: string }
   | { kind: "mcp"; connectionId: string; itemId: string };
 
-// Explicit saves from Goat chat or MCP are capture-first: persist a draft page
+// Explicit saves from chat or MCP are capture-first: persist a draft page
 // in inbox/ immediately so nothing is lost, then enqueue the durable ingestion
 // agent to curate it (type, title, folder, links, promotion) in the background.
 export async function captureToBrainInbox(input: {
@@ -213,7 +213,7 @@ export async function captureToBrainInbox(input: {
 
   if (result.enqueued) {
     triggerBrainIngestWake().catch((error) => {
-      console.warn("Goat Brain capture failed to wake the ingest worker.", {
+      console.warn("Brain capture failed to wake the ingest worker.", {
         event: "goat.brain_capture_wake_failed",
         error: error instanceof Error ? error.message : String(error),
       });

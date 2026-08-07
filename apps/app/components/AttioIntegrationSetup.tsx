@@ -190,7 +190,7 @@ function setupStatus(state: AttioProviderState) {
   if (state.connected) {
     return {
       label: state.workspaceName ? `Connected to ${state.workspaceName}` : "Attio is connected",
-      detail: "CRM activity is picked up by the Goat Brain ingestion queue.",
+      detail: "CRM activity is picked up by the Brain ingestion queue.",
       badge: "Connected",
     };
   }

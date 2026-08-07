@@ -130,7 +130,7 @@ let redisClientPromise: Promise<RedisClient> | null = null;
 function getRedis(): Promise<RedisClient> {
   redisClientPromise ??= (async () => {
     const url = redisUrl();
-    if (!url) throw new Error("Goat chat resume requires REDIS_URL (or KV_URL).");
+    if (!url) throw new Error("Chat resume requires REDIS_URL (or KV_URL).");
     const client = createClient({ url });
     client.on("error", (error) => warnOnce("goat.chat_stream_redis_error", error));
     await client.connect();
@@ -148,5 +148,5 @@ const warnedEvents = new Set<string>();
 function warnOnce(event: string, error: unknown) {
   if (warnedEvents.has(event)) return;
   warnedEvents.add(event);
-  console.warn("Goat chat stream coordination degraded.", { event, error });
+  console.warn("Chat stream coordination degraded.", { event, error });
 }

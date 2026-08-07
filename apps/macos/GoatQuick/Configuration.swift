@@ -39,7 +39,7 @@ enum ConfigurationError: LocalizedError {
   var errorDescription: String? {
     switch self {
     case .missing(let key):
-      "Set \(key) in Config/Local.xcconfig before running Goat Quick."
+      "Set \(key) in Config/Local.xcconfig before running opencompany Quick."
     }
   }
 }

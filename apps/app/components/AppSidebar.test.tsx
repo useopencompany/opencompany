@@ -146,7 +146,7 @@ describe("AppSidebar", () => {
     expect(screen.queryByText("admin")).not.toBeInTheDocument();
     expect(container.querySelector('svg[viewBox="0 0 100 100"]')).toBeInTheDocument();
 
-    const nav = screen.getByRole("navigation", { name: "Goat primary" });
+    const nav = screen.getByRole("navigation", { name: "Primary" });
     const home = within(nav).getByRole("link", { name: "Home" });
     expect(home).toHaveAttribute("href", "/");
     expect(home).toHaveAttribute("aria-current", "page");
@@ -267,7 +267,7 @@ describe("AppSidebar", () => {
     pathnameMock.value = "/brain/people/ada-lovelace";
     render(<AppSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    const nav = screen.getByRole("navigation", { name: "Goat primary" });
+    const nav = screen.getByRole("navigation", { name: "Primary" });
     expect(within(nav).getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-current");
     expect(screen.getByRole("link", { name: "General" })).toHaveAttribute("aria-current", "page");
   });
@@ -298,7 +298,7 @@ describe("AppSidebar", () => {
     pathnameMock.value = "/chat/goat_chat_123";
     render(<AppSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    const nav = screen.getByRole("navigation", { name: "Goat primary" });
+    const nav = screen.getByRole("navigation", { name: "Primary" });
     expect(within(nav).getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-current");
   });
 
@@ -306,7 +306,7 @@ describe("AppSidebar", () => {
     featureFlagsMock.taskSpawning = true;
     render(<AppSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    const nav = screen.getByRole("navigation", { name: "Goat primary" });
+    const nav = screen.getByRole("navigation", { name: "Primary" });
     expect(within(nav).getByRole("link", { name: "Tasks" })).toHaveAttribute("href", "/tasks");
     expect(within(nav).getByRole("link", { name: "Workflows" })).toHaveAttribute(
       "href",
@@ -352,7 +352,7 @@ describe("AppSidebar", () => {
 
     render(<AppSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    const primaryNav = screen.getByRole("navigation", { name: "Goat primary" });
+    const primaryNav = screen.getByRole("navigation", { name: "Primary" });
     const home = within(primaryNav).getByRole("link", { name: "Home" });
     const tasks = within(primaryNav).getByRole("link", { name: "Tasks" });
     const workflows = within(primaryNav).getByRole("link", { name: "Workflows" });

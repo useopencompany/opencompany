@@ -7,7 +7,7 @@ afterEach(() => {
 });
 
 describe("localHttpsRedirectUrl", () => {
-  it("redirects local HTTP document requests to the configured Goat HTTPS origin", () => {
+  it("redirects local HTTP document requests to the configured app HTTPS origin", () => {
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://localhost:3443");
 
     const redirect = localHttpsRedirectUrl(
@@ -65,7 +65,7 @@ describe("localHttpsRedirectUrl", () => {
   });
 
   it("does not redirect non-local configured app origins", () => {
-    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://goat.example.com");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
 
     const redirect = localHttpsRedirectUrl(
       request("http://localhost:3002/tasks/TASK-1", {
@@ -78,7 +78,7 @@ describe("localHttpsRedirectUrl", () => {
   });
 });
 
-describe("Goat public routes", () => {
+describe("Public routes", () => {
   it("allows invitation links to start authentication", () => {
     expect(isUnauthenticatedPath("/auth/invite")).toBe(true);
   });

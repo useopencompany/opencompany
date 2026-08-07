@@ -114,7 +114,7 @@ describe("SettingsIntegrationsPanel", () => {
     expect(window.location.search).toBe("");
   });
 
-  it("does not surface Goat MCP as an integration (it lives in its own tab)", () => {
+  it("does not surface MCP as an integration (it lives in its own tab)", () => {
     render(
       <SettingsIntegrationsPanel
         initialIntegrations={integrationStateFromRows([]) as IntegrationState}
@@ -122,7 +122,7 @@ describe("SettingsIntegrationsPanel", () => {
       />,
     );
 
-    expect(screen.queryByText("Goat MCP")).not.toBeInTheDocument();
+    expect(screen.queryByText("MCP")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "/settings/mcp" })).not.toBeInTheDocument();
   });
 
@@ -153,16 +153,16 @@ describe("SettingsIntegrationsPanel", () => {
     // Workspace scope is shown first: GitHub is a workspace-owned connection and
     // Gmail (personal) is hidden.
     expect(
-      screen.getByText("Bring pull requests and issues from your repositories into Goat."),
+      screen.getByText("Bring pull requests and issues from your repositories into opencompany."),
     ).toBeInTheDocument();
-    expect(screen.queryByText("Let Goat read and act on your email.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Let opencompany read and act on your email.")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
     // Personal scope reveals the personal connections and hides the workspace ones.
-    expect(screen.getByText("Let Goat read and act on your email.")).toBeInTheDocument();
+    expect(screen.getByText("Let opencompany read and act on your email.")).toBeInTheDocument();
     expect(
-      screen.queryByText("Bring pull requests and issues from your repositories into Goat."),
+      screen.queryByText("Bring pull requests and issues from your repositories into opencompany."),
     ).not.toBeInTheDocument();
   });
 
@@ -349,7 +349,7 @@ describe("SettingsIntegrationsPanel", () => {
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
     const posthogCard = screen
-      .getByText("Explore product analytics and create focused insights from Goat.")
+      .getByText("Explore product analytics and create focused insights from opencompany.")
       .closest("div.rounded-2xl");
     expect(posthogCard).not.toBeNull();
     expect(within(posthogCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
@@ -386,7 +386,7 @@ describe("SettingsIntegrationsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
     const gmailCard = screen
-      .getByText("Let Goat read and act on your email.")
+      .getByText("Let opencompany read and act on your email.")
       .closest("div.rounded-2xl");
     expect(gmailCard).not.toBeNull();
     const readPermission = within(gmailCard as HTMLElement).getByRole("group", {
@@ -433,7 +433,7 @@ describe("SettingsIntegrationsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
     const gmailCard = screen
-      .getByText("Let Goat read and act on your email.")
+      .getByText("Let opencompany read and act on your email.")
       .closest("div.rounded-2xl");
     expect(gmailCard).not.toBeNull();
     expect(within(gmailCard as HTMLElement).getByText("Needs reconnect")).toBeInTheDocument();
@@ -470,7 +470,7 @@ describe("SettingsIntegrationsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
     const gmailCard = screen
-      .getByText("Let Goat read and act on your email.")
+      .getByText("Let opencompany read and act on your email.")
       .closest("div.rounded-2xl");
     expect(gmailCard).not.toBeNull();
     expect(
@@ -532,7 +532,7 @@ describe("SettingsIntegrationsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
     const driveCard = screen
-      .getByText("Sync files and folders you choose into Goat.")
+      .getByText("Sync files and folders you choose into opencompany.")
       .closest("div.rounded-2xl");
     expect(driveCard).not.toBeNull();
     const readPermission = within(driveCard as HTMLElement).getByRole("group", {
@@ -576,7 +576,7 @@ describe("SettingsIntegrationsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
     const slackCard = screen
-      .getByText("Let Goat search and read your Slack conversations.")
+      .getByText("Let opencompany search and read your Slack conversations.")
       .closest("div.rounded-2xl");
     expect(slackCard).not.toBeNull();
     const readPermission = within(slackCard as HTMLElement).getByRole("group", {
@@ -609,7 +609,7 @@ describe("SettingsIntegrationsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
     const latitudeCard = screen
-      .getByText("Observe, understand, and improve your AI agents from Goat.")
+      .getByText("Observe, understand, and improve your AI agents from opencompany.")
       .closest("div.rounded-2xl");
     expect(latitudeCard).not.toBeNull();
     expect(within(latitudeCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
@@ -684,7 +684,7 @@ describe("SettingsIntegrationsPanel", () => {
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
     const stripeCard = screen
-      .getByText("Give Goat read-only access to payment activity, subscriptions, and receivables.")
+      .getByText("Give opencompany read-only access to payment activity, subscriptions, and receivables.")
       .closest("div.rounded-2xl");
     expect(stripeCard).not.toBeNull();
     expect(within(stripeCard as HTMLElement).getByText("Connected")).toBeInTheDocument();

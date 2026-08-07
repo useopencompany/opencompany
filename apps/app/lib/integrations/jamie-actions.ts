@@ -36,7 +36,7 @@ export async function createOrResetJamieWebhookEndpointAction(): Promise<JamieWe
       setup,
     };
   } catch (error) {
-    console.error("[goat-jamie] Failed to create Jamie webhook endpoint", error);
+    console.error("[jamie] Failed to create Jamie webhook endpoint", error);
     return {
       ok: false,
       error: "Could not create a Jamie webhook endpoint.",
@@ -67,7 +67,7 @@ export async function saveJamieWebhookApiKeyAction(
       setup,
     };
   } catch (error) {
-    console.error("[goat-jamie] Failed to save Jamie webhook API key", error);
+    console.error("[jamie] Failed to save Jamie webhook API key", error);
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Could not save the Jamie API key.",

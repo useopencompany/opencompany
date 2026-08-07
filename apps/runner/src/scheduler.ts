@@ -57,7 +57,7 @@ export async function sweepDueTaskSchedules(
       created += 1;
       input.onTaskCreated?.();
       await captureTaskSpawned(result.analytics).catch((error) => {
-        console.warn("Goat scheduled task spawned analytics failed.", {
+        console.warn("Scheduled task spawned analytics failed.", {
           event: "goat.scheduled_task_spawned_analytics_failed",
           task_id: result.taskId,
           error,
@@ -106,7 +106,7 @@ export function startTaskScheduleWorker(input: { onTaskCreated?: () => void } = 
         ...(input.onTaskCreated ? { onTaskCreated: input.onTaskCreated } : {}),
       }).catch((error) => {
         captureException(error, { event: "opencompany.goat_task_schedule_sweep_failed" });
-        console.error("Goat task schedule sweep failed.", {
+        console.error("Task schedule sweep failed.", {
           event: "opencompany.goat_task_schedule_sweep_failed",
           error,
         });

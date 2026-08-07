@@ -776,7 +776,7 @@ export function ChatSurface({
         });
         return;
       }
-      toast.error(error.message || "Goat could not answer that right now.");
+      toast.error(error.message || "opencompany could not answer that right now.");
     },
   });
   const isGenerating = status === "submitted" || status === "streaming";
@@ -2035,7 +2035,7 @@ export function ChatSurface({
         setSelectedMentions(mentions);
         composerAttachments.setAttachments(pendingAttachments);
       }
-      toast.error(error instanceof Error ? error.message : "Goat could not answer that right now.");
+      toast.error(error instanceof Error ? error.message : "opencompany could not answer that right now.");
     });
   };
 
@@ -2746,7 +2746,7 @@ export function ChatSurface({
                           ? codexRuntime?.status === "queued"
                             ? `${ENGINE_CHAT_CONFIG[activeEngine].label} is queued`
                             : `${ENGINE_CHAT_CONFIG[activeEngine].label} is working`
-                          : "Goat is working"
+                          : "opencompany is working"
                       }
                     />
                   ) : null}
@@ -2815,7 +2815,7 @@ export function ChatSurface({
                   className="rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-[12px] leading-4 text-danger shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
                   role="alert"
                 >
-                  {chatError.message || "Goat could not answer that right now."}
+                  {chatError.message || "opencompany could not answer that right now."}
                 </p>
               ) : null}
               {mentionToken && mentionOptions.length > 0 ? (
@@ -2947,7 +2947,7 @@ export function ChatSurface({
                           ? "Reply..."
                           : taskSpawningEnabled
                             ? "Ask a question or describe a task..."
-                            : "Ask Goat anything..."
+                            : "Ask opencompany anything..."
                       }
                       onChange={onInputChange}
                       onBlur={() => setMentionToken(null)}
@@ -3883,7 +3883,7 @@ function QuickChatComposer({
                 id="quick-chat-prompt"
                 name="prompt"
                 value={input}
-                placeholder="Ask Goat anything, or describe a task..."
+                placeholder="Ask opencompany anything, or describe a task..."
                 onChange={onInputChange}
                 onBlur={() => setMentionToken(null)}
                 onClick={(event) =>
@@ -4789,7 +4789,7 @@ function renderComposerInputOverlay({
       <span
         key={`mention-${range.start}-${range.end}-${index}`}
         {...(range.kind === "mention"
-          ? { "data-goat-chat-mention": range.mention.kind }
+          ? { "data-chat-mention": range.mention.kind }
           : { "data-goat-chat-directive": "background" })}
         className={COMPOSER_MENTION_CHIP_CLASS}
       >

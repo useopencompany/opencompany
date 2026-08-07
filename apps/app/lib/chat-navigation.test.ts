@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseOptimisticChatSessionId } from "@/lib/chat-navigation";
 
 describe("parseOptimisticChatSessionId", () => {
-  it("accepts browser-reserved Goat chat UUIDs", () => {
+  it("accepts browser-reserved chat UUIDs", () => {
     expect(parseOptimisticChatSessionId("goat_chat_123e4567-e89b-42d3-a456-426614174000")).toEqual({
       ok: true,
       sessionId: "goat_chat_123e4567-e89b-42d3-a456-426614174000",

@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
       });
       return NextResponse.redirect(new URL("/signin", getAppUrl()));
     }
-    console.error("[goat] Failed to complete Google sign-in", error);
+    console.error("[app] Failed to complete Google sign-in", error);
     return signInErrorRedirect("oauth_failed");
   }
 }

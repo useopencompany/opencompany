@@ -12,7 +12,7 @@ import {
   workspaceMemberCap,
 } from "./billing";
 
-describe("Goat billing v7", () => {
+describe("Billing v7", () => {
   it("reports UTC calendar-month boundaries for usage stats", () => {
     expect(calendarMonthWindow(new Date("2026-12-13T08:30:00.000Z"))).toEqual({
       start: new Date("2026-12-01T00:00:00.000Z"),

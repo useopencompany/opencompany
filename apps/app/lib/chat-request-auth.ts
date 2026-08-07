@@ -55,7 +55,7 @@ export async function verifyMacAccessToken(
   if (!audience) {
     return {
       ok: false,
-      response: new Response("Goat Quick authentication is not configured.", { status: 503 }),
+      response: new Response("opencompany Quick authentication is not configured.", { status: 503 }),
     };
   }
 
@@ -106,13 +106,13 @@ export async function resolveMacChatContext(
   if (!user) {
     return {
       ok: false,
-      response: new Response("Open Goat in your browser before using Goat Quick.", { status: 403 }),
+      response: new Response("Open opencompany in your browser before using opencompany Quick.", { status: 403 }),
     };
   }
   if (!user.onboardedAt) {
     return {
       ok: false,
-      response: new Response("Finish Goat onboarding in your browser first.", { status: 403 }),
+      response: new Response("Finish onboarding in your browser first.", { status: 403 }),
     };
   }
 
@@ -120,7 +120,7 @@ export async function resolveMacChatContext(
   if (!membership) {
     return {
       ok: false,
-      response: new Response("The selected Goat workspace is unavailable.", { status: 403 }),
+      response: new Response("The selected workspace is unavailable.", { status: 403 }),
     };
   }
 

@@ -111,7 +111,7 @@ final class GoatChatClient {
     let (bytes, response) = try await session.bytes(for: request)
     guard let httpResponse = response as? HTTPURLResponse else {
       throw GoatChatSendError(
-        message: "Goat returned an invalid response.",
+        message: "opencompany returned an invalid response.",
         sessionID: submission.sessionID,
         acceptedByServer: false
       )
@@ -122,7 +122,7 @@ final class GoatChatClient {
       return ChatHTTPResponse(statusCode: httpResponse.statusCode, body: body)
     } catch {
       throw GoatChatSendError(
-        message: "The Goat session started, but the response stream disconnected.",
+        message: "The opencompany session started, but the response stream disconnected.",
         sessionID: submission.sessionID,
         acceptedByServer: (200..<300).contains(httpResponse.statusCode)
       )
@@ -146,7 +146,7 @@ final class GoatChatClient {
         String(data: response.body, encoding: .utf8)?
         .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
       throw GoatChatSendError(
-        message: details.isEmpty ? "Goat returned HTTP \(response.statusCode)." : details,
+        message: details.isEmpty ? "opencompany returned HTTP \(response.statusCode)." : details,
         sessionID: submission.sessionID,
         acceptedByServer: false
       )

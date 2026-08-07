@@ -91,7 +91,7 @@ export async function saveClaudeCodeCredential(input: {
       updatedAt: claudeCodeCredentials.updatedAt,
     });
 
-  if (!credential) throw new Error("Could not persist Goat Claude Code credential.");
+  if (!credential) throw new Error("Could not persist Claude Code credential.");
   return credential;
 }
 
@@ -157,7 +157,7 @@ export async function loadClaudeCodeCredential(input: {
 
   if (!credential) return null;
   if (credential.userWorkosId !== input.userWorkosId) {
-    throw new Error("Goat Claude Code credential row did not match the requested user.");
+    throw new Error("Claude Code credential row did not match the requested user.");
   }
 
   return {
@@ -202,7 +202,7 @@ function decryptAuthJson(
 ): ClaudeCodeAuthJson {
   if (encryptedAuthJson.algorithm !== ENCRYPTION_ALGORITHM) {
     throw new Error(
-      `Unsupported Goat Claude Code credential encryption algorithm ${encryptedAuthJson.algorithm}.`,
+      `Unsupported Claude Code credential encryption algorithm ${encryptedAuthJson.algorithm}.`,
     );
   }
 
@@ -212,7 +212,7 @@ function decryptAuthJson(
   } catch (error) {
     if (error instanceof UnsupportedKeyVersionError) {
       throw new Error(
-        `Unsupported Goat Claude Code credential encryption key version ${keyVersion}.`,
+        `Unsupported Claude Code credential encryption key version ${keyVersion}.`,
       );
     }
     throw error;
@@ -225,10 +225,10 @@ function decryptAuthJson(
       aad: authenticatedData(context, keyVersion),
     });
   } catch {
-    throw new Error("Goat Claude Code credential could not be decrypted.");
+    throw new Error("Claude Code credential could not be decrypted.");
   }
   if (typeof decrypted.token !== "string" || !decrypted.token) {
-    throw new Error("Goat Claude Code credential payload is missing its token.");
+    throw new Error("Claude Code credential payload is missing its token.");
   }
   return decrypted as ClaudeCodeAuthJson;
 }

@@ -38,7 +38,7 @@ function callbackRequest(search: string) {
   });
 }
 
-describe("Goat Google OAuth callback", () => {
+describe("Google OAuth callback", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

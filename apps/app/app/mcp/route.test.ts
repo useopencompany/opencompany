@@ -12,18 +12,18 @@ describe("GET /mcp", () => {
   it("challenges missing bearer tokens with MCP resource metadata", async () => {
     vi.stubEnv("AUTHKIT_DOMAIN", "https://example.authkit.app");
 
-    const response = await GET(new Request("https://goat.example.com/mcp"));
+    const response = await GET(new Request("https://app.example.com/mcp"));
 
     expect(response.status).toBe(401);
     expect(response.headers.get("WWW-Authenticate")).toContain(
-      'resource_metadata="https://goat.example.com/.well-known/oauth-protected-resource/mcp"',
+      'resource_metadata="https://app.example.com/.well-known/oauth-protected-resource/mcp"',
     );
   });
 
   it("reports missing AuthKit configuration before authentication", async () => {
     vi.stubEnv("AUTHKIT_DOMAIN", "");
 
-    const response = await GET(new Request("https://goat.example.com/mcp"));
+    const response = await GET(new Request("https://app.example.com/mcp"));
 
     expect(response.status).toBe(503);
   });

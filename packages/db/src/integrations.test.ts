@@ -97,7 +97,7 @@ describe("connectSlackBotIntegration", () => {
     vi.unstubAllEnvs();
   });
 
-  it("upserts one bot integration per Goat workspace and updates its Slack team", async () => {
+  it("upserts one bot integration per workspace and updates its Slack team", async () => {
     const encryptionKey = Buffer.alloc(32, 7);
     vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", encryptionKey.toString("base64"));
     const now = new Date("2026-07-16T10:00:00.000Z");

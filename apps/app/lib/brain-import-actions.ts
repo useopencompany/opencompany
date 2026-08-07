@@ -120,7 +120,7 @@ async function wakeImportWorkers(wakes: Promise<unknown>[]) {
   const results = await Promise.allSettled(wakes);
   for (const result of results) {
     if (result.status === "rejected") {
-      console.warn("A Goat Brain import worker wake-up failed; polling will recover it.", {
+      console.warn("A Brain import worker wake-up failed; polling will recover it.", {
         error: result.reason instanceof Error ? result.reason.message : String(result.reason),
       });
     }

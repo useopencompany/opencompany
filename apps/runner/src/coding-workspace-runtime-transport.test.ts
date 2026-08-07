@@ -26,16 +26,16 @@ afterEach(async () => {
   );
 });
 
-describe("Goat coding workspace origin validation", () => {
+describe("Coding workspace origin validation", () => {
   it("requires an exact configured browser origin", () => {
-    const allowed = ["https://goat.example.com"];
-    expect(isCodingWorkspaceOriginAllowed("https://goat.example.com", allowed)).toBe(true);
+    const allowed = ["https://app.example.com"];
+    expect(isCodingWorkspaceOriginAllowed("https://app.example.com", allowed)).toBe(true);
     expect(isCodingWorkspaceOriginAllowed("https://evil.example.com", allowed)).toBe(false);
     expect(isCodingWorkspaceOriginAllowed(undefined, allowed)).toBe(false);
   });
 });
 
-describe("Goat coding workspace preview response headers", () => {
+describe("Coding workspace preview response headers", () => {
   it("rewrites upstream authority, cookie domains, and framing policy", () => {
     const headers = rewritePreviewResponseHeaders(
       {
@@ -45,17 +45,17 @@ describe("Goat coding workspace preview response headers", () => {
         "content-security-policy": "default-src 'self'; frame-ancestors 'none'",
       },
       "3000-sandbox.e2b.app",
-      "signed.preview.goat.example.com",
-      ["https://goat.example.com"],
+      "signed.preview.app.example.com",
+      ["https://app.example.com"],
       "https",
       3_000,
     );
 
-    expect(headers.location).toBe("https://signed.preview.goat.example.com/dashboard");
+    expect(headers.location).toBe("https://signed.preview.app.example.com/dashboard");
     expect(headers["set-cookie"]).toEqual(["session=abc; Path=/; HttpOnly"]);
     expect(headers["x-frame-options"]).toBeUndefined();
     expect(headers["content-security-policy"]).toBe(
-      "default-src 'self'; frame-ancestors https://goat.example.com",
+      "default-src 'self'; frame-ancestors https://app.example.com",
     );
     expect(headers["referrer-policy"]).toBe("no-referrer");
   });
@@ -64,26 +64,26 @@ describe("Goat coding workspace preview response headers", () => {
     const loopback = rewritePreviewResponseHeaders(
       { location: "http://localhost:3000/login" },
       "3000-sandbox.e2b.app",
-      "signed.preview.goat.example.com",
-      ["https://goat.example.com"],
+      "signed.preview.app.example.com",
+      ["https://app.example.com"],
       "https",
       3_000,
     );
     const external = rewritePreviewResponseHeaders(
       { location: "https://accounts.example.com/login" },
       "3000-sandbox.e2b.app",
-      "signed.preview.goat.example.com",
-      ["https://goat.example.com"],
+      "signed.preview.app.example.com",
+      ["https://app.example.com"],
       "https",
       3_000,
     );
 
-    expect(loopback.location).toBe("https://signed.preview.goat.example.com/login");
+    expect(loopback.location).toBe("https://signed.preview.app.example.com/login");
     expect(external.location).toBe("https://accounts.example.com/login");
   });
 });
 
-describe("Goat coding workspace preview WebSocket transport", () => {
+describe("Coding workspace preview WebSocket transport", () => {
   it("buffers downstream messages until the upstream connection opens", () => {
     const downstream = new EventEmitter() as unknown as WebSocket & EventEmitter;
     const upstream = new EventEmitter() as unknown as WebSocket & EventEmitter;
@@ -122,7 +122,7 @@ describe("Goat coding workspace preview WebSocket transport", () => {
   });
 });
 
-describe("Goat coding workspace terminal transport", () => {
+describe("Coding workspace terminal transport", () => {
   it.each([
     ["codex", "/home/user/opencompany-goat/codex-chat"],
     ["claude_code", "/home/user/opencompany-goat/claude-chat"],
@@ -213,7 +213,7 @@ describe("Goat coding workspace terminal transport", () => {
   });
 });
 
-describe("Goat coding workspace terminal input latency", () => {
+describe("Coding workspace terminal input latency", () => {
   it("batches keystrokes that arrive before the first PTY input flush", async () => {
     const kill = vi.fn(async () => true);
     const keystrokes: string[] = [];
@@ -417,7 +417,7 @@ describe("Goat coding workspace terminal input latency", () => {
   });
 });
 
-describe("Goat coding workspace runtime tools install command", () => {
+describe("Coding workspace runtime tools install command", () => {
   // Regression: a missing `;` after `fi` made this command a bash syntax error, so every
   // runtime connection failed before the install could run (issue behind the prod
   // "Workspace unavailable" panel).

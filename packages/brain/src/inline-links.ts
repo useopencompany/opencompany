@@ -105,11 +105,11 @@ function formatBracketLink(
 ): string {
   const normalizedTarget = target.trim();
   if (!isValidInlineLinkTarget(kind, normalizedTarget)) {
-    throw new Error(`Invalid Goat Brain ${kind} link target.`);
+    throw new Error(`Invalid Brain ${kind} link target.`);
   }
   const normalizedLabel = label?.trim();
   if (normalizedLabel && !isValidInlineLinkLabel(normalizedLabel)) {
-    throw new Error("Invalid Goat Brain link label.");
+    throw new Error("Invalid Brain link label.");
   }
   return normalizedLabel
     ? `[[${kind}:${normalizedTarget}|${normalizedLabel}]]`

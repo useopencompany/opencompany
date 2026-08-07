@@ -88,7 +88,7 @@ export async function saveCodexCredential(input: {
       updatedAt: codexCredentials.updatedAt,
     });
 
-  if (!credential) throw new Error("Could not persist Goat Codex credential.");
+  if (!credential) throw new Error("Could not persist Codex credential.");
   return credential;
 }
 
@@ -158,7 +158,7 @@ export async function loadCodexCredential(input: {
 
   if (!credential) return null;
   if (credential.userWorkosId !== input.userWorkosId) {
-    throw new Error("Goat Codex credential row did not match the requested user.");
+    throw new Error("Codex credential row did not match the requested user.");
   }
 
   return {
@@ -200,7 +200,7 @@ function decryptAuthJson(
 ): CodexAuthJson {
   if (encryptedAuthJson.algorithm !== ENCRYPTION_ALGORITHM) {
     throw new Error(
-      `Unsupported Goat Codex credential encryption algorithm ${encryptedAuthJson.algorithm}.`,
+      `Unsupported Codex credential encryption algorithm ${encryptedAuthJson.algorithm}.`,
     );
   }
 
@@ -209,7 +209,7 @@ function decryptAuthJson(
     key = loadEncryptionKey(keyVersion);
   } catch (error) {
     if (error instanceof UnsupportedKeyVersionError) {
-      throw new Error(`Unsupported Goat Codex credential encryption key version ${keyVersion}.`);
+      throw new Error(`Unsupported Codex credential encryption key version ${keyVersion}.`);
     }
     throw error;
   }
@@ -220,7 +220,7 @@ function decryptAuthJson(
       aad: authenticatedData(context, keyVersion),
     });
   } catch {
-    throw new Error("Goat Codex credential could not be decrypted.");
+    throw new Error("Codex credential could not be decrypted.");
   }
 }
 

@@ -106,7 +106,7 @@ export async function verifyMcpBearerToken(
     // token expiry apart from an audience/issuer mismatch (unstable public
     // host) or a JWKS-fetch/key-rotation blip.
     const details = error as { code?: unknown; claim?: unknown } | undefined;
-    console.warn("[goat-mcp] bearer token rejected", {
+    console.warn("[mcp] bearer token rejected", {
       code: typeof details?.code === "string" ? details.code : undefined,
       claim: typeof details?.claim === "string" ? details.claim : undefined,
       expectedAudience: mcpResourceIndicatorUrlFromRequest(_request),

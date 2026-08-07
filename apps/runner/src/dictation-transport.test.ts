@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { wavFromPcm16 } from "./dictation-transport";
 
-describe("Goat dictation WAV encoding", () => {
+describe("Dictation WAV encoding", () => {
   it("wraps 24kHz mono pcm16 bytes in a valid WAV header", () => {
     const pcm = Buffer.from([0x00, 0x00, 0xff, 0x7f]);
     const wav = wavFromPcm16(pcm);

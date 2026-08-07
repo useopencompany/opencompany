@@ -201,7 +201,7 @@ function reportMutationFailure(
   repositoryExternalId: string,
   error: unknown,
 ) {
-  console.error(`[goat] Failed to ${operation} for repository configuration`, {
+  console.error(`[app] Failed to ${operation} for repository configuration`, {
     workspaceId: context.workspaceId,
     repositoryExternalId,
     errorName: error instanceof Error ? error.name : "UnknownError",

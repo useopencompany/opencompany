@@ -145,12 +145,12 @@ describe("@opencompany/telemetry", () => {
   });
 
   it("categorizes common failures", () => {
-    expect(categorizeFailure(new Error("Goat task lease lost while trying to complete."))).toBe(
+    expect(categorizeFailure(new Error("Task lease lost while trying to complete."))).toBe(
       "lease_lost",
     );
     expect(categorizeFailure(new Error("VERCEL_AI_GATEWAY_API_KEY is required."))).toBe("auth");
     expect(categorizeFailure(new Error("Gmail integration needs reauth."))).toBe("integration");
-    expect(categorizeFailure(new Error("Goat Brain ingestion budget exhausted."))).toBe("budget");
+    expect(categorizeFailure(new Error("Brain ingestion budget exhausted."))).toBe("budget");
     expect(categorizeFailure(new TypeError("Cannot read properties of undefined"))).toBe("bug");
   });
 

@@ -7,7 +7,7 @@ import {
   parseBrainFolderManifest,
 } from "./folders";
 
-describe("Goat Brain folder taxonomy", () => {
+describe("Brain folder taxonomy", () => {
   it("orders the hard and adjustable defaults in the designed root order", () => {
     expect(defaultBrainFolderManifestEntries().map((entry) => entry.path)).toEqual([
       "inbox",

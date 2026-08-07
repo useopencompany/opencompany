@@ -36,7 +36,7 @@ vi.mock("@opencompany/db/brain-files", async (importOriginal) => {
   };
 });
 
-describe("manual Goat brain documents", () => {
+describe("manual brain documents", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dbMocks.listBrainFiles.mockResolvedValue([]);

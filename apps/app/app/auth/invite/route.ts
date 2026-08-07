@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
   } catch {
     // Our sign-up flow surfaces the real error when the token is exchanged;
     // don't log it here because it can contain the invitation token.
-    console.warn("[goat] Could not resolve the workspace invitation before sign-up");
+    console.warn("[app] Could not resolve the workspace invitation before sign-up");
   }
 
   return privateRedirect(url);

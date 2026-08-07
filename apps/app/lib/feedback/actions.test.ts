@@ -93,7 +93,7 @@ describe("submitFeedback", () => {
     expect(input.teamId).toBe("team_1");
     expect(input.title).toBe("[Bug] Search returns stale results");
     expect(input.stateId).toBe("st_triage");
-    expect(input.description).toContain("Submitted from: Goat app");
+    expect(input.description).toContain("Submitted from: opencompany app");
     expect(input.description).toContain("Ana Ng <ana@acme.com>");
     expect(input.description).toContain("Workspace: Acme (gws_1)");
   });

@@ -1229,7 +1229,7 @@ export async function setBrainGoogleDriveSourceAction(input: {
       config: { ...(allFiles ? { allFiles } : {}), resources },
     });
     triggerGoogleDriveSyncWake().catch((error) => {
-      console.warn("Could not wake Goat Google Drive sync worker.", {
+      console.warn("Could not wake Google Drive sync worker.", {
         event: "goat.google_drive_source_wake_failed",
         error: error instanceof Error ? error.message : String(error),
       });

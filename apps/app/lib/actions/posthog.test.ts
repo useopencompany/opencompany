@@ -54,7 +54,7 @@ const definitions = {
     },
     {
       name: "agent-feedback",
-      description: "Always exposed by PostHog but outside Goat's focused catalog.",
+      description: "Always exposed by PostHog but outside the app's focused catalog.",
       inputSchema: { type: "object", properties: {} },
       annotations: { readOnlyHint: false, destructiveHint: false },
     },

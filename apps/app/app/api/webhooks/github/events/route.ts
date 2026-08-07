@@ -62,7 +62,7 @@ export async function POST(request: Request) {
       createHash("sha256").update(rawBody).digest("hex");
     return NextResponse.json(await handleActivityEvent(eventName, payload, deliveryId));
   } catch (error) {
-    console.error("[goat-github] Failed to process GitHub event", {
+    console.error("[github] Failed to process GitHub event", {
       eventName,
       action: payload.action,
       error: error instanceof Error ? error.message : String(error),
@@ -112,7 +112,7 @@ async function handleActivityEvent(
     });
   } catch (error) {
     if (error instanceof BrainSourceNormalizationError) {
-      console.warn("[goat-github] Dropping malformed GitHub event", {
+      console.warn("[github] Dropping malformed GitHub event", {
         eventName,
         code: error.code,
         error: error.message,
@@ -196,7 +196,7 @@ async function handleActivityEvent(
 
   if (enqueued > 0) {
     triggerBrainIngestWake().catch((error) => {
-      console.warn("[goat-github] Failed to wake Goat Brain ingest worker", {
+      console.warn("[github] Failed to wake the Brain ingest worker", {
         error: error instanceof Error ? error.message : String(error),
       });
     });

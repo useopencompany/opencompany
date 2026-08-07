@@ -325,7 +325,7 @@ describe("createCodexChatMessage", () => {
     expect(result).toMatchObject({
       ok: false,
       status: 400,
-      error: "Select a supported Goat model.",
+      error: "Select a supported model.",
     });
     expect(mocks.execute).not.toHaveBeenCalled();
   });

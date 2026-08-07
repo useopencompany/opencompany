@@ -6,7 +6,7 @@ describe("buildElectricOriginUrl", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com/",
       requestUrl: new URL(
-        "https://goat.example.com/api/electric/v1/shape?table=goat.tasks&live=true&where=1=1",
+        "https://app.example.com/api/electric/v1/shape?table=goat.tasks&live=true&where=1=1",
       ),
       userWorkosId: "user_123",
       workspaceId: "workspace_123",
@@ -28,7 +28,7 @@ describe("buildElectricOriginUrl", () => {
   it("rejects unknown tables", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
-      requestUrl: new URL("https://goat.example.com/api/electric/v1/shape?table=users"),
+      requestUrl: new URL("https://app.example.com/api/electric/v1/shape?table=users"),
       userWorkosId: "user_123",
     });
 
@@ -39,7 +39,7 @@ describe("buildElectricOriginUrl", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
-        "https://goat.example.com/api/electric/v1/shape?table=goat.task_messages&task_id=goat_task_1&where=1=1",
+        "https://app.example.com/api/electric/v1/shape?table=goat.task_messages&task_id=goat_task_1&where=1=1",
       ),
       userWorkosId: "user_123",
       workspaceId: "workspace_123",
@@ -58,7 +58,7 @@ describe("buildElectricOriginUrl", () => {
   it("scopes goat.task_events to workspace-visible tasks when no task id is requested", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
-      requestUrl: new URL("https://goat.example.com/api/electric/v1/shape?table=goat.task_events"),
+      requestUrl: new URL("https://app.example.com/api/electric/v1/shape?table=goat.task_events"),
       userWorkosId: "user_123",
       workspaceId: "workspace_123",
     });
@@ -76,7 +76,7 @@ describe("buildElectricOriginUrl", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
-        "https://goat.example.com/api/electric/v1/shape?table=goat.chat_messages&session_id=goat_chat_1&where=1=1",
+        "https://app.example.com/api/electric/v1/shape?table=goat.chat_messages&session_id=goat_chat_1&where=1=1",
       ),
       userWorkosId: "user_123",
       authorizedChatSessionId: "goat_chat_1",
@@ -92,7 +92,7 @@ describe("buildElectricOriginUrl", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
-        "https://goat.example.com/api/electric/v1/shape?table=goat.chat_messages&session_id=goat_chat_1",
+        "https://app.example.com/api/electric/v1/shape?table=goat.chat_messages&session_id=goat_chat_1",
       ),
       userWorkosId: "user_123",
     });
@@ -104,7 +104,7 @@ describe("buildElectricOriginUrl", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
-        "https://goat.example.com/api/electric/v1/shape?table=goat.chat_sessions&where=1=1",
+        "https://app.example.com/api/electric/v1/shape?table=goat.chat_sessions&where=1=1",
       ),
       userWorkosId: "user_123",
     });
@@ -120,7 +120,7 @@ describe("buildElectricOriginUrl", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
-        "https://goat.example.com/api/electric/v1/shape?table=goat.codex_chat_sessions",
+        "https://app.example.com/api/electric/v1/shape?table=goat.codex_chat_sessions",
       ),
       userWorkosId: "user_123",
     });
@@ -136,7 +136,7 @@ describe("buildElectricOriginUrl", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
-        "https://goat.example.com/api/electric/v1/shape?table=goat.codex_chat_sessions&chat_session_id=goat_chat_1",
+        "https://app.example.com/api/electric/v1/shape?table=goat.codex_chat_sessions&chat_session_id=goat_chat_1",
       ),
       userWorkosId: "user_123",
       authorizedChatSessionId: "goat_chat_1",
@@ -150,7 +150,7 @@ describe("buildElectricOriginUrl", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
-        "https://goat.example.com/api/electric/v1/shape?table=goat.codex_chat_sessions&chat_session_id=goat_chat_1",
+        "https://app.example.com/api/electric/v1/shape?table=goat.codex_chat_sessions&chat_session_id=goat_chat_1",
       ),
       userWorkosId: "user_123",
       authorizedChatSessionId: "goat_chat_2",
@@ -167,7 +167,7 @@ describe("buildElectricOriginUrl", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
-        `https://goat.example.com/api/electric/v1/shape?table=${table}&task_id=goat_task_1&where=1=1`,
+        `https://app.example.com/api/electric/v1/shape?table=${table}&task_id=goat_task_1&where=1=1`,
       ),
       userWorkosId: "user_123",
       workspaceId: "workspace_123",
@@ -186,7 +186,7 @@ describe("buildElectricOriginUrl", () => {
   it("scopes goat.integrations to the user's personal rows plus the active workspace", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
-      requestUrl: new URL("https://goat.example.com/api/electric/v1/shape?table=goat.integrations"),
+      requestUrl: new URL("https://app.example.com/api/electric/v1/shape?table=goat.integrations"),
       userWorkosId: "user_123",
       workspaceId: "gws_123",
     });
@@ -202,7 +202,7 @@ describe("buildElectricOriginUrl", () => {
   it("scopes goat.integrations to personal rows only without a workspace context", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
-      requestUrl: new URL("https://goat.example.com/api/electric/v1/shape?table=goat.integrations"),
+      requestUrl: new URL("https://app.example.com/api/electric/v1/shape?table=goat.integrations"),
       userWorkosId: "user_123",
     });
 
@@ -221,7 +221,7 @@ describe("buildElectricOriginUrl", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
-        `https://goat.example.com/api/electric/v1/shape?table=${table}&brain_ref=goat_brain_1&where=1=1`,
+        `https://app.example.com/api/electric/v1/shape?table=${table}&brain_ref=goat_brain_1&where=1=1`,
       ),
       userWorkosId: "user_123",
       authorizedBrainRef: "goat_brain_1",
@@ -240,7 +240,7 @@ describe("buildElectricOriginUrl", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
-        "https://goat.example.com/api/electric/v1/shape?table=goat.brain_documents&brain_ref=goat_brain_1",
+        "https://app.example.com/api/electric/v1/shape?table=goat.brain_documents&brain_ref=goat_brain_1",
       ),
       userWorkosId: "user_123",
       ...(label.includes("mismatched") ? { authorizedBrainRef: "goat_brain_other" } : {}),
@@ -253,7 +253,7 @@ describe("buildElectricOriginUrl", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
-        "https://goat.example.com/api/electric/v1/shape?table=goat.brain_source_items",
+        "https://app.example.com/api/electric/v1/shape?table=goat.brain_source_items",
       ),
       userWorkosId: "user_123",
     });
@@ -272,7 +272,7 @@ describe("buildElectricOriginUrl", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
-        "https://goat.example.com/api/electric/v1/shape?table=goat.brain_source_items&source_provider=goat-chat&source_type=capture&last_ingest_status=pending,skipped,failed",
+        "https://app.example.com/api/electric/v1/shape?table=goat.brain_source_items&source_provider=goat-chat&source_type=capture&last_ingest_status=pending,skipped,failed",
       ),
       userWorkosId: "user_123",
     });
@@ -292,7 +292,7 @@ describe("buildElectricOriginUrl", () => {
     const url = buildElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
-        "https://goat.example.com/api/electric/v1/shape?table=goat.brain_source_items&source_provider=other",
+        "https://app.example.com/api/electric/v1/shape?table=goat.brain_source_items&source_provider=other",
       ),
       userWorkosId: "user_123",
     });

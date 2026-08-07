@@ -91,7 +91,7 @@ export async function POST(request: Request) {
   try {
     return NextResponse.json(await handleHubspotEvents(events));
   } catch (error) {
-    console.error("[goat-hubspot] Failed to process HubSpot events", {
+    console.error("[hubspot] Failed to process HubSpot events", {
       eventCount: events.length,
       error: error instanceof Error ? error.message : String(error),
     });

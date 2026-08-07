@@ -55,7 +55,7 @@ export async function loadAttioApiKey(input: {
     kind: ATTIO_CREDENTIAL_KIND,
     db: getDb(),
   }).catch((error) => {
-    logger.warn("Goat Attio credential load failed", {
+    logger.warn("Attio credential load failed", {
       event: "opencompany.goat_attio_credential_load_failed",
       integration_id: input.integrationId,
       error,
@@ -79,7 +79,7 @@ export async function markAttioNeedsReauth(
     statusReason: reason,
     db: getDb(),
   }).catch((error) => {
-    logger.warn("Goat Attio needs_reauth marking failed", {
+    logger.warn("Attio needs_reauth marking failed", {
       event: "opencompany.goat_attio_needs_reauth_mark_failed",
       integration_id: input.integrationId,
       error,

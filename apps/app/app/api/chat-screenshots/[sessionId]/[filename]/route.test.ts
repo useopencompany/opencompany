@@ -80,7 +80,7 @@ describe("GET /api/chat-screenshots/[sessionId]/[filename]", () => {
 });
 
 function requestScreenshot(filename = "1234-aabb.png") {
-  return GET(new Request("https://goat.test"), {
+  return GET(new Request("https://app.test"), {
     params: Promise.resolve({
       sessionId: "session_1",
       filename,

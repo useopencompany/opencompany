@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { verifyHubspotWebhookSignature } from "./hubspot-signature";
 
 const SECRET = "test-client-secret";
-const URI = "https://goat.example.com/api/webhooks/hubspot/events";
+const URI = "https://app.example.com/api/webhooks/hubspot/events";
 const NOW_MS = 1_784_192_000_000;
 
 function sign(input: { method?: string; uri?: string; rawBody: string; timestamp: string }) {

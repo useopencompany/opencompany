@@ -123,7 +123,7 @@ describe("requestCodingWorkspaceRuntimeAccess", () => {
   it("uses the hosted runner URL in production-style environments", async () => {
     vi.stubEnv("RUNNER_INTERNAL_URL", "https://runner-internal.example.com");
     vi.stubEnv("RUNNER_PUBLIC_URL", "https://runner.example.com");
-    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://goat.example.com");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
     vi.stubEnv("RUNNER_INTERNAL_TOKEN", "token");
     vi.stubGlobal(
       "fetch",
@@ -172,7 +172,7 @@ describe("requestDictationAccess", () => {
   it("uses the hosted runner URL in production-style environments", async () => {
     vi.stubEnv("RUNNER_INTERNAL_URL", "https://runner-internal.example.com");
     vi.stubEnv("RUNNER_PUBLIC_URL", "https://runner.example.com");
-    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://goat.example.com");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
     vi.stubEnv("RUNNER_INTERNAL_TOKEN", "token");
     vi.stubGlobal(
       "fetch",

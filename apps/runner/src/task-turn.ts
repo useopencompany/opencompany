@@ -305,7 +305,7 @@ export async function closeTaskTurn(input: {
     if (input.signal.aborted) {
       throw input.signal.reason instanceof Error ? input.signal.reason : error;
     }
-    console.warn("Goat task closer failed; the task completes without a reported outcome.", {
+    console.warn("Task closer failed; the task completes without a reported outcome.", {
       event: "goat.task_closer_failed",
       task_id: input.context.task.id,
       error,
@@ -1102,7 +1102,7 @@ async function recordTaskGatewayUsage(input: {
       });
     }
   } catch (error) {
-    console.warn("Goat Codex task Gateway credit debit failed.", {
+    console.warn("Codex task Gateway credit debit failed.", {
       event: "goat.codex_task_gateway_credit_debit_failed",
       task_id: input.context.task.id,
       turn_id: input.turn.id,

@@ -6,13 +6,13 @@ import {
   onboardingConnectionError,
 } from "./onboarding-integrations";
 
-describe("Goat onboarding integrations", () => {
+describe("Onboarding integrations", () => {
   it("replaces an integration's settings return path with the popup completion route", () => {
     const href = onboardingConnectHref(
       "/api/integrations/github/start?returnTo=/settings/integrations",
     );
 
-    expect(new URL(href, "https://goat.test").searchParams.get("returnTo")).toBe(
+    expect(new URL(href, "https://app.test").searchParams.get("returnTo")).toBe(
       ONBOARDING_CONNECTION_RETURN_TO,
     );
   });

@@ -154,7 +154,7 @@ async function executePostHogAction(input: {
   if (state.integrationId !== input.expectedIntegrationId) {
     throw new ActionPermissionError(
       "posthog",
-      "The PostHog connection changed before this action could run. Retry so Goat can use the current connection and permission.",
+      "The PostHog connection changed before this action could run. Retry to use the current connection and permission.",
     );
   }
   if (
@@ -176,7 +176,7 @@ async function executePostHogAction(input: {
   if (connection.integrationId !== input.expectedIntegrationId) {
     throw new ActionPermissionError(
       "posthog",
-      "The PostHog connection changed before this action could run. Retry so Goat can use the current connection and permission.",
+      "The PostHog connection changed before this action could run. Retry to use the current connection and permission.",
     );
   }
 
@@ -197,13 +197,13 @@ async function executePostHogAction(input: {
     ) {
       throw new ActionPermissionError(
         "posthog",
-        `PostHog changed the "${input.remoteName}" tool from read-only. Retry so Goat can request confirmation with the current permission.`,
+        `PostHog changed the "${input.remoteName}" tool from read-only. Retry to request confirmation with the current permission.`,
       );
     }
     if (currentDefinition.annotations?.destructiveHint === true) {
       throw new ActionPermissionError(
         "posthog",
-        `PostHog marked the "${input.remoteName}" tool as destructive, so Goat will not run it.`,
+        `PostHog marked the "${input.remoteName}" tool as destructive, so opencompany will not run it.`,
       );
     }
 

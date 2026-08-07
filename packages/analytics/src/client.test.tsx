@@ -20,7 +20,7 @@ vi.mock("@opencompany/observability", () => ({
 
 describe("AnalyticsProvider", () => {
   it("captures one explicit app event with all automatic collection disabled", async () => {
-    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_test_token");
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://eu.i.posthog.com");
 
     const { rerender } = render(
@@ -40,7 +40,7 @@ describe("AnalyticsProvider", () => {
     await waitFor(() => expect(posthog.capture).toHaveBeenCalledOnce());
 
     expect(posthog.init).toHaveBeenCalledWith(
-      "phc_goat_test",
+      "phc_test_token",
       expect.objectContaining({
         api_host: "https://eu.i.posthog.com",
         advanced_disable_flags: true,

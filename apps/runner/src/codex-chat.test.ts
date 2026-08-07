@@ -956,7 +956,7 @@ describe("runCodexChatTurn", () => {
         workspaceId: "workspace_1",
         hostToolContractVersion: "goat-codex-host-tools.v2",
       },
-      env: env({ appUrl: "https://goat.example.com" }),
+      env: env({ appUrl: "https://app.example.com" }),
     });
 
     expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
@@ -979,7 +979,7 @@ describe("runCodexChatTurn", () => {
         workspaceId: "workspace_1",
         hostToolContractVersion: "goat-codex-host-tools.v3",
       },
-      env: env({ appUrl: "https://goat.example.com" }),
+      env: env({ appUrl: "https://app.example.com" }),
     });
 
     expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(

@@ -75,7 +75,7 @@ export function buildFathomMeetingEvidenceWrite(
       })
     : fullEvidenceContent;
   if (Buffer.byteLength(evidenceContent, "utf8") > MAX_BRAIN_FILE_BYTES) {
-    throw new Error("Fathom evidence document exceeds the Goat Brain file size limit.");
+    throw new Error("Fathom evidence document exceeds the Brain file size limit.");
   }
 
   return {

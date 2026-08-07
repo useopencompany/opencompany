@@ -51,7 +51,7 @@ export async function reconcileStripeSeatQuantities(limit = 100) {
       if (result.ok && result.changed) changed += 1;
     } catch (error) {
       failed += 1;
-      console.error(`[goat] Failed to reconcile Stripe seats for workspace ${workspaceId}.`, error);
+      console.error(`[app] Failed to reconcile Stripe seats for workspace ${workspaceId}.`, error);
     }
   }
   return { candidates: candidates.length, reconciled, changed, failed };

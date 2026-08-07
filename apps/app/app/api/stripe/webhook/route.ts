@@ -77,7 +77,7 @@ export async function POST(request: Request) {
             console.error(`Failed to release paused ingestion for ${workspaceId}.`, error);
           });
           await captureTopUpPaymentMethod(session).catch((error) => {
-            console.error(`Failed to capture the Goat top-up payment method.`, error);
+            console.error(`Failed to capture the top-up payment method.`, error);
           });
           await captureServerEvent(
             "billing_topup_completed",
@@ -101,7 +101,7 @@ export async function POST(request: Request) {
       }
       return NextResponse.json({ received: true });
     }
-    // Async Checkout outcomes are only enabled for Goat top-ups here. Legacy
+    // Async Checkout outcomes are only enabled for opencompany top-ups here. Legacy
     // credit fulfillment retains its existing completed-event contract.
     if (event.type !== "checkout.session.completed") {
       return NextResponse.json({ received: true });

@@ -56,7 +56,7 @@ const sandbox = {
   currentSession: () => ({ sessionId: "sbx_session_1" }),
 };
 
-describe("Goat chat browser sandbox", () => {
+describe("Chat browser sandbox", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();

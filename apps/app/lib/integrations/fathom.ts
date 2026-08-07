@@ -95,7 +95,7 @@ export async function connectFathomIntegration(input: {
     .returning({ id: integrations.id });
 
   if (!integration) {
-    throw new Error("Could not persist Goat Fathom integration.");
+    throw new Error("Could not persist Fathom integration.");
   }
 
   const payload: FathomApiKeyCredentialPayload = {

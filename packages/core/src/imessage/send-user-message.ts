@@ -70,7 +70,7 @@ export function createSendUserMessageRunner(input: {
       }
       return { ok: true, delivered: true };
     } catch (error) {
-      console.error("[goat-imessage] send_user_message failed", error);
+      console.error("[imessage] send_user_message failed", error);
       return { ok: false, error: "Sending failed unexpectedly." };
     }
   };

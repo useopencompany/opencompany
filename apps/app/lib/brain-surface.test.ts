@@ -6,7 +6,7 @@ import {
   normalizeBrainReadToolInput,
 } from "@/lib/brain-surface";
 
-describe("Goat Brain read surface", () => {
+describe("Brain read surface", () => {
   it("keeps the shared tool schema aligned with the read command list", () => {
     expect(BRAIN_READ_TOOL_INPUT_JSON_SCHEMA.properties.command.enum).toEqual([
       ...BRAIN_READ_COMMANDS,

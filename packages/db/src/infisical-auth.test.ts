@@ -6,7 +6,7 @@ import {
   saveInfisicalConnection,
 } from "./infisical-auth";
 
-describe("Goat Infisical credentials", () => {
+describe("Infisical credentials", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });

@@ -10,13 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.8.0] - 2026-08-05
 
 ### Added
-- Goat can now create Attio records — people, companies, and deals — directly from chat, alongside the existing search, update, and comment support (#1068) — @opencompany-bot.
+- opencompany can now create Attio records — people, companies, and deals — directly from chat, alongside the existing search, update, and comment support (#1068) — @opencompany-bot.
 - @claude now starts a Claude Code session from the composer, the same way @codex already does (#1071, #1091) — @opencompany-bot.
 - Composer drafts now save per chat — switch away mid-sentence and your unsent text is still there when you come back (#1069) — @opencompany-bot.
 
 ### Changed
 - Background chats started with `&` can now be launched from any chat, including while another chat or Codex session is still running, and the directive is highlighted as you type it (#1064, #1070, #1081, #1088) — @opencompany-bot.
-- Goat usage is now billed at cost with no platform markup, and included monthly usage is tracked separately from top-up funds (#1083) — @opencompany-bot.
+- opencompany usage is now billed at cost with no platform markup, and included monthly usage is tracked separately from top-up funds (#1083) — @opencompany-bot.
 - Typing in the coding workspace terminal now feels instant instead of waiting on the remote echo (#1062, #1076) — @opencompany-bot.
 
 ### Fixed
@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenCompany Pro: a $20/month plan for a single workspace with room for up to 10 members, managed through Stripe billing (#1052) — @opencompany-bot.
 - Voice dictation in the composer — tap the mic, watch your words appear live, and edit before sending (#1054) — @opencompany-bot.
 - Connect Neon as a read-only integration to ask about your database's projects, branches, schemas, and data (#1056, #1059) — @opencompany-bot.
-- Goat can now post comments on Attio records, list entries, and threads (#1055) — @opencompany-bot.
+- opencompany can now post comments on Attio records, list entries, and threads (#1055) — @opencompany-bot.
 - Start a background chat straight from the composer by beginning your message with `&` (#1060) — @opencompany-bot.
 
 ### Changed
@@ -68,8 +68,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.5.0] - 2026-08-01
 
 ### Added
-- Get notified over iMessage when Goat needs your input or finishes a task, with a secure device-pairing flow (#1025) — @louis.
-- Connect an authenticated browser profile so Goat can research pages that need you to be logged in; sensitive sites like banking are blocked by default (#1028) — @opencompany-bot.
+- Get notified over iMessage when opencompany needs your input or finishes a task, with a secure device-pairing flow (#1025) — @louis.
+- Connect an authenticated browser profile so opencompany can research pages that need you to be logged in; sensitive sites like banking are blocked by default (#1028) — @opencompany-bot.
 - Workflows can now run on a schedule, set with a plain-language frequency builder — every N minutes or hours, daily, weekdays, or weekly — instead of raw cron (#1009, #1020) — @opencompany-bot.
 - Start a one-off background task straight from the composer with `#task`, no need to save it as a workflow first (#987) — @opencompany-bot.
 - Pick the coding model for each step in a workflow, and use Claude Code as a workflow step engine (#1005, #1022) — @opencompany-bot.
@@ -104,11 +104,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Codex and Claude Code chats get a persistent Preview and Terminal workspace, tucked behind a single toggle in the chat header until you need it (#962, #972, #976) — @louis and @opencompany-bot.
 - Configure per-repository environment and setup for Codex and Claude Code sandboxes, stored encrypted (#956) — @louis.
 - Codex sessions can now save findings to the Brain, same as main chat (#965) — @opencompany-bot.
-- Ask Goat to create a Google Doc, optionally pre-filled with text (#950) — @opencompany-bot.
+- Ask opencompany to create a Google Doc, optionally pre-filled with text (#950) — @opencompany-bot.
 - Connect PostHog to ask about dashboards, saved insights, and analytics queries from chat (#969) — @opencompany-bot.
 - Claude Fable 5 and DeepSeek V4 Pro are now available as chat models (#975, #946) — @opencompany-bot.
 - Shared chat links now show the chat's title and a branded preview card when unfurled elsewhere (#961) — @opencompany-bot.
-- Automatic model routing (beta): turn it on under Preferences > Beta features to have Goat pick the model for your first message (#966, #968, #970) — @opencompany-bot.
+- Automatic model routing (beta): turn it on under Preferences > Beta features to have opencompany pick the model for your first message (#966, #968, #970) — @opencompany-bot.
 
 ### Changed
 - Cmd+K now opens the full composer — attachments, @mentions, and the model picker included — instead of a bare text box, and always starts a new chat in the background (#949) — @opencompany-bot.
@@ -125,11 +125,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.3.0] - 2026-07-28
 
 ### Added
-- Claude Code is now a persistent sandbox chat engine in Goat, with subscription authentication, model and effort controls, attachments, resumable sessions, and expandable subagent traces (#928, #930, #935) — @louis and @opencompany-bot.
+- Claude Code is now a persistent sandbox chat engine in opencompany, with subscription authentication, model and effort controls, attachments, resumable sessions, and expandable subagent traces (#928, #930, #935) — @louis and @opencompany-bot.
 - Build durable workspace workflows and reusable skills, edit their instructions with rich Markdown, and mention skills from workflow instructions with autocomplete (#927, #934, #937) — @louis and @opencompany-bot.
 - Main chat can discover and use relevant workspace skills without requiring an explicit `@skill` mention (#909) — @opencompany-bot.
 - Cloud Codex tasks can safely read from connected tools that are enabled for read-only access, without exposing provider credentials to the sandbox (#914) — @opencompany-bot.
-- Goat can create Gmail drafts without sending them, controlled by a separate per-account permission (#922) — @opencompany-bot.
+- opencompany can create Gmail drafts without sending them, controlled by a separate per-account permission (#922) — @opencompany-bot.
 - Latitude is now available as a personal integration for chat and background tasks, with per-capability read and write controls (#925) — @opencompany-bot.
 - Switch between workspaces or create a new one directly from the workspace picker (#901) — @opencompany-bot.
 - Search within timestamped YouTube transcripts or bring a complete transcript into chat (#920, #933) — @louis and @opencompany-bot.
@@ -140,7 +140,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Paid research turns can now run up to six long-running capability calls instead of one (#940) — @louis.
 - Opening a Brain overview is now instant, even for Brains with many large documents (#919) — @opencompany-bot.
 - Claude Sonnet chats now reuse prompt context more efficiently through automatic prompt caching (#899) — @louis.
-- Goat analytics now use a minimal PostHog setup with four allowlisted events and no autocapture, session recording, heatmaps, or message content (#923, #931) — @opencompany-bot and @louis.
+- opencompany analytics now use a minimal PostHog setup with four allowlisted events and no autocapture, session recording, heatmaps, or message content (#923, #931) — @opencompany-bot and @louis.
 - Chat headers use tighter spacing so the conversation has more room (#936) — @opencompany-bot.
 
 ### Fixed
@@ -153,9 +153,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.2.0] - 2026-07-27
 
 ### Added
-- Share any Goat chat as a live, read-only link, then stop sharing whenever you want; sharing it again creates a fresh URL so old viewers stay locked out (#892, #896) — @opencompany-bot.
-- Goat Quick brings chat to the macOS menu bar with an Option-Command-Space shortcut (#876, #877) — @louis.
-- Goat can browse full websites in a persistent sandbox and read up to four specific URLs per turn alongside multi-search web research (#866, #868, #881, #906) — @louis and @opencompany-bot.
+- Share any opencompany chat as a live, read-only link, then stop sharing whenever you want; sharing it again creates a fresh URL so old viewers stay locked out (#892, #896) — @opencompany-bot.
+- opencompany Quick brings chat to the macOS menu bar with an Option-Command-Space shortcut (#876, #877) — @louis.
+- opencompany can browse full websites in a persistent sandbox and read up to four specific URLs per turn alongside multi-search web research (#866, #868, #881, #906) — @louis and @opencompany-bot.
 - Connected tools can now take guarded actions from chat with per-connection On, Ask, and Off controls: create Calendar events; create, update, and comment on Linear issues; send Gmail; read and edit Google Docs; read Slack; and read, update, or configure Attio lists (#842, #843, #851, #859, #870, #873, #891, #894, #895, #897, #905) — @louis and @opencompany-bot.
 - New managed research capabilities cover X, LinkedIn, YouTube, Instagram, TikTok, Semrush SEO, and structured prospect search, with a price quote and approval before paid calls (#869, #874, #887, #888) — @louis and @opencompany-bot.
 - Connect a workspace Stripe account to ask read-only questions about payments, balances, subscriptions and estimated MRR, or open invoices (#890) — @opencompany-bot.
@@ -166,8 +166,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A new shareable [use-cases page](https://www.opencompany.cloud/use-cases) shows what OpenCompany can do (#885) — @louis.
 
 ### Changed
-- The Slack answer bot now runs through the full Goat agent, understands follow-up threads, can work across multiple Brains, and shows live status while it works (#854) — @louis.
-- You can keep drafting your next message while Goat responds, tool rows are less cluttered, and the context-window meter updates throughout multi-step turns (#857, #871, #872, #904) — @opencompany-bot.
+- The Slack answer bot now runs through the full opencompany agent, understands follow-up threads, can work across multiple Brains, and shows live status while it works (#854) — @louis.
+- You can keep drafting your next message while opencompany responds, tool rows are less cluttered, and the context-window meter updates throughout multi-step turns (#857, #871, #872, #904) — @opencompany-bot.
 - Onboarding now guides connected sources all the way to actively feeding the Brain, and valid company URLs are no longer blocked by temporary reachability checks (#852, #883) — @louis and @opencompany-bot.
 - Brain queries now default to curated pages, paginate consistently across chat, MCP, and the CLI, and keep raw evidence available when you explicitly need it (#880) — @louis.
 - Basic Brain ingestion is more efficient, groups each GitHub pull request lifecycle into one filing pass, and preserves valid source citations (#846, #847, #848, #849, #850, #853) — @louis and @opencompany-bot.
@@ -182,13 +182,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Four new brain sources file in automatically: Attio, HubSpot, Fathom, and Granola — so your CRM records, meeting notes, and calls land in the brain without you lifting a finger (#776, #757, #767, #758) — @louis.
-- Ask Goat right from Slack — mention @opencompany in a channel and it answers from your brain (beta) (#759) — @louis.
-- Goat chat can now search across your connected tools — Slack, Gmail, GitHub, Linear, Attio, Google Drive, and Google Calendar — and pull the results straight into the conversation (#830, #828, #832, #831, #807) — @louis.
+- Ask opencompany right from Slack — mention @opencompany in a channel and it answers from your brain (beta) (#759) — @louis.
+- opencompany chat can now search across your connected tools — Slack, Gmail, GitHub, Linear, Attio, Google Drive, and Google Calendar — and pull the results straight into the conversation (#830, #828, #832, #831, #807) — @louis.
 - Chat answers now cite the brain sources they came from, so you can see where an answer is grounded (#775) — @louis.
 - Codex coding sessions run in the cloud and show up as Tasks, with model selection and file attachments (#784, #766, #771) — @louis.
 - The changelog now lives in the sidebar, so you can see what's new without leaving the app (#833) — @louis.
 - Browse and restore your archived chats from the ⌘K palette (#796) — @louis.
-- Goat remembers the model you picked for main chat between sessions (#829) — @louis.
+- opencompany remembers the model you picked for main chat between sessions (#829) — @louis.
 - Kimi K3 is now in the model picker (#777) — @louis.
 - A sidebar feedback widget sends your bugs and ideas straight to our team (#764) — @louis.
 - Save anything to your brain over MCP from any agent (#748) — @louis.
@@ -209,23 +209,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.0] - 2026-07-15
 
-Goat is a company brain — it turns your team's tools and conversations into a
+opencompany is a company brain — it turns your team's tools and conversations into a
 shared, structured knowledge base and brings it to any agent over MCP. This is
 its first release at [my.opencompany.chat](https://my.opencompany.chat).
 
 ### Added
-- Goat is here: a company brain that files what matters from your team's tools and conversations, links it to what you already know, and serves it to any agent over MCP (#554) — @louis.
-- Goat Brain is a typed, folder-organized knowledge base with an evidence taxonomy, wiki-style links rendered as chips, and first-class binary documents including PDFs (#558, #607, #611, #615, #620, #613) — @louis.
+- opencompany is here: a company brain that files what matters from your team's tools and conversations, links it to what you already know, and serves it to any agent over MCP (#554) — @louis.
+- opencompany Brain is a typed, folder-organized knowledge base with an evidence taxonomy, wiki-style links rendered as chips, and first-class binary documents including PDFs (#558, #607, #611, #615, #620, #613) — @louis.
 - Brains ingest from your sources automatically — Jamie meeting notes, GitHub (PRs, issues, comments), Gmail, Linear, Google Drive, X, and chat captures — filing and linking what matters (#575, #652, #659, #641, #715, #573, #631) — @louis.
 - Ingestion can enrich entries with web search, respects per-brain spend budgets, and imports company context during onboarding (#691, #725, #724, #728) — @louis.
-- Goat chat streams live with disconnect-safe, resumable sessions, file attachments that flow end-to-end into the brain, chat pinning, background chats, and Cmd+K to start a new one (#633, #700, #731, #577, #627) — @louis.
-- Codex-backed sessions run in Goat across cloud and local sandboxes, with in-chat controls, sandbox status, and per-task engine selection (#555, #649, #624, #662, #661) — @louis.
+- opencompany chat streams live with disconnect-safe, resumable sessions, file attachments that flow end-to-end into the brain, chat pinning, background chats, and Cmd+K to start a new one (#633, #700, #731, #577, #627) — @louis.
+- Codex-backed sessions run in opencompany across cloud and local sandboxes, with in-chat controls, sandbox status, and per-task engine selection (#555, #649, #624, #662, #661) — @louis.
 - Tasks can run on a schedule, notify their originating chat on completion, expose their harness config, and sit behind a background-task preference (#560, #557, #559, #717) — @louis.
 - A single user-level MCP endpoint at `/mcp` exposes every brain you can access, with a personal MCP settings tab and member onboarding (#739, #600, #714) — @louis.
 - Workspaces gate brain access with member-level permissions, member-contributed sources, multi-account connections, and cross-member deduplication (#596, #656, #740) — @louis.
 - Workspace billing ships with pooled monthly allowances, per-seat pricing, USD credits, per-brain intelligence tiers, credit top-up promotion codes, and a spend overview with charts (#718, #732, #742, #745, #648, #651) — @louis.
 - A brain overview dashboard, activity feed, and settings overview give each brain a home, alongside a model picker, Fumadocs-powered docs, browser research tools, an onboarding flow, and new app icons (#741, #625, #669, #594, #572, #576, #710, #727) — @louis.
-- Codex chats get auto-generated titles, and Goat gained an appearance theme toggle and a quicker new-brain action in the sidebar (#668, #703, #702) — @opencompany-bot.
+- Codex chats get auto-generated titles, and opencompany gained an appearance theme toggle and a quicker new-brain action in the sidebar (#668, #703, #702) — @opencompany-bot.
 
 ### Changed
 - Brain retrieval was rebuilt on a Postgres-native read plane and unified into a single surface; chat and MCP now read the brain read-only, with all writes flowing through ingestion (#621, #695, #690) — @louis.
@@ -236,7 +236,7 @@ its first release at [my.opencompany.chat](https://my.opencompany.chat).
 ### Fixed
 - Brain ingestion no longer suffers retry storms or conflict-page pollution, and retrieval tracking is accurate (#707, #743) — @louis.
 - Fixed an infinite render loop that froze brain navigation and a composer freeze when input scrolled past its max height (#736, #730) — @louis.
-- Goat chat session continuity and post-completion navigation are reliable, and chat pin transactions are consistent (#590, #706, #737) — @louis.
+- opencompany chat session continuity and post-completion navigation are reliable, and chat pin transactions are consistent (#590, #706, #737) — @louis.
 - Jamie webhook API-key handling and setup were corrected (#580, #654) — @louis.
 
 ## [0.18.0] - 2026-06-25

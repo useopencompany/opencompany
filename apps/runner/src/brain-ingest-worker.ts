@@ -669,7 +669,7 @@ export async function runClaimedBrainIngestJob(input: {
   const loseLease = () => {
     if (!leaseActive) return;
     leaseActive = false;
-    runAbort.abort(new Error("Goat Brain ingestion lease was revoked."));
+    runAbort.abort(new Error("Brain ingestion lease was revoked."));
   };
 
   const finishTelemetry = (
@@ -719,9 +719,9 @@ export async function runClaimedBrainIngestJob(input: {
       budget_exhausted: finalAttributes["goat.budget_exhausted"],
     };
     if (outcome === "success" || outcome === "skipped") {
-      logger.info("Goat Brain ingest job finished", logFields);
+      logger.info("Brain ingest job finished", logFields);
     } else {
-      logger.warn("Goat Brain ingest job finished", logFields);
+      logger.warn("Brain ingest job finished", logFields);
     }
   };
 
@@ -743,7 +743,7 @@ export async function runClaimedBrainIngestJob(input: {
         event: "opencompany.goat_brain_ingest_heartbeat_failed",
         job_id: input.job.id,
       });
-      logger.warn("Goat Brain ingest heartbeat failed", {
+      logger.warn("Brain ingest heartbeat failed", {
         event: "opencompany.goat_brain_ingest_heartbeat_failed",
         job_id: input.job.id,
         error,
@@ -767,17 +767,17 @@ export async function runClaimedBrainIngestJob(input: {
     const handler = findBrainIngestHandler(handlers, input.job);
     if (!handler) {
       throw new Error(
-        `Unsupported Goat Brain ingest source: ${input.job.kind}/${input.job.sourceProvider}/${input.job.sourceType}`,
+        `Unsupported Brain ingest source: ${input.job.kind}/${input.job.sourceProvider}/${input.job.sourceType}`,
       );
     }
     const normalizedPayload = input.job.normalizedPayload;
     if (!handler.isPayload(normalizedPayload)) {
       throw new Error(
-        `Goat Brain ingest job has an invalid ${input.job.sourceProvider}/${input.job.sourceType} normalized payload.`,
+        `Brain ingest job has an invalid ${input.job.sourceProvider}/${input.job.sourceType} normalized payload.`,
       );
     }
     if (normalizedPayload.contentHash !== input.job.contentHash) {
-      throw new Error("Goat Brain ingest job content hash does not match its source payload.");
+      throw new Error("Brain ingest job content hash does not match its source payload.");
     }
 
     // Open one Braintrust root span per job run so every model + tool span the
@@ -1049,7 +1049,7 @@ async function debitIngestModelCost(
     }
   } catch (error) {
     // A debit failure must never fail (or retry) the ingest job itself.
-    logger.warn("Goat Brain ingest model debit failed", {
+    logger.warn("Brain ingest model debit failed", {
       event: "opencompany.goat_brain_ingest_debit_failed",
       job_id: job.id,
       workspace_id: job.workspaceId,
@@ -1168,7 +1168,7 @@ export function startBrainIngestWorker(
                 event: "opencompany.goat_brain_ingest_job_failed",
                 job_id: job.id,
               });
-              logger.error("Goat Brain ingest job failed", {
+              logger.error("Brain ingest job failed", {
                 event: "opencompany.goat_brain_ingest_job_failed",
                 job_id: job.id,
                 error,
@@ -1181,7 +1181,7 @@ export function startBrainIngestWorker(
         captureException(error, {
           event: "opencompany.goat_brain_ingest_worker_failed",
         });
-        logger.error("Goat Brain ingest worker failed", {
+        logger.error("Brain ingest worker failed", {
           event: "opencompany.goat_brain_ingest_worker_failed",
           error,
         });
@@ -1216,7 +1216,7 @@ export async function writeJamieMeetingToBrain(input: {
   // ("General") brain.
   const brainRef = input.brainRef ?? (await getDefaultBrainForUser(input.userWorkosId, { db }))?.id;
   if (!brainRef) {
-    throw new Error(`No accessible Goat brain found for user ${input.userWorkosId}.`);
+    throw new Error(`No accessible brain found for user ${input.userWorkosId}.`);
   }
   const existingRows = await listBrainFiles({ brainRef }, { db });
   const meetingAlreadyExists = existingRows.some((row) => row.brainId === writes.meetingBrainId);
@@ -1261,7 +1261,7 @@ export async function writeJamieMeetingToBrain(input: {
 
 function requireJobLease(job: BrainIngestJobWithSource, field: "leaseId" | "leaseOwner") {
   const value = job[field];
-  if (!value) throw new Error(`Claimed Goat Brain ingest job ${job.id} is missing ${field}.`);
+  if (!value) throw new Error(`Claimed Brain ingest job ${job.id} is missing ${field}.`);
   return value;
 }
 
@@ -1275,7 +1275,7 @@ function newBrainIngestLeaseId() {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown Goat Brain ingest error.";
+  return error instanceof Error ? error.message : "Unknown Brain ingest error.";
 }
 
 function brainIngestBudgetAttributes(result: Record<string, unknown>): Attributes {

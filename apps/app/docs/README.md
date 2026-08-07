@@ -1,21 +1,21 @@
-# Goat LLM System
+# opencompany LLM System
 
-This is the current-state map of how Goat answers chat messages and runs durable LLM tasks. It is
-intended as a baseline before changing the system.
+This is the current-state map of how opencompany answers chat messages and runs durable LLM tasks.
+It is intended as a baseline before changing the system.
 
-For the Brain (Goat's knowledge store — data model, ingestion, tools, contracts), see the
+For the Brain (opencompany's knowledge store — data model, ingestion, tools, contracts), see the
 [brain section](./brain/README.md).
 
 ## Current Shape
 
-Goat has three LLM paths:
+opencompany has three LLM paths:
 
-1. **Foreground chat:** a short-lived AI SDK stream from the browser to `apps/goat/app/api/chat`.
+1. **Foreground chat:** a short-lived AI SDK stream from the browser to `apps/app/app/api/chat`.
    This agent answers directly, reads connected integrations, calls `goat_brain`, captures with
    `save_to_brain`, calls `start_task`, or explicitly starts an active workspace workflow.
 2. **Background task:** a durable row in `goat.tasks` claimed by `apps/runner`, planned into a
    `goat.harness.v1` config, then executed by an AI SDK model loop in the runner process.
-3. **Persistent cloud coding chat:** Goat chat engine modes for Codex and Claude Code backed by a
+3. **Persistent cloud coding chat:** chat engine modes for Codex and Claude Code backed by a
    persistent E2B sandbox. Uploaded images, PDFs, Word files, Excel files, and SRT subtitles are
    materialized into that sandbox. Each engine keeps its own resumable thread/session state and
    trusted working directory. Codex additionally receives images as native local-image inputs; new
@@ -24,55 +24,51 @@ Goat has three LLM paths:
    read-only action catalog (`list_actions`/`use_action`) from the policy-driven action gateway —
    including metered managed reads when enabled. Codex uses app-server dynamic tools, while Claude
    Code uses a turn-scoped internal MCP server
-   (`apps/goat/app/api/internal/claude-actions`) since that is Claude Code's only custom-tool
+   (`apps/app/app/api/internal/claude-actions`) since that is Claude Code's only custom-tool
    mechanism. Brain tools remain Codex-only for now.
 
-The Goat task path is not currently a full OpenCompany `.agent` session. It reuses runner
-infrastructure, Vercel AI Gateway, leases, observability, and server-side tools, but it
-does not yet use `agent_sessions`, `.agent` files, Brain mounts, skills, approvals, or
-`delegate_to_agent`. It does expose selected user-scoped MCP integrations through the Goat
-task harness, including Linear and Latitude.
-
-The wider OpenCompany runner does have a full multi-agent session loop. Goat can either keep its
-lighter task harness and grow it, or move durable Goat work onto that full session substrate.
+The task path is a focused harness, not a general multi-agent runtime. It reuses runner
+infrastructure, Vercel AI Gateway, leases, observability, and server-side tools, and it exposes
+selected user-scoped MCP integrations through the task harness, including Linear and Latitude. The
+legacy first-generation multi-agent session runtime (`agent_sessions`, `.agent` files,
+`delegate_to_agent`) was deleted in the foundation refactor; the durable turn worker described
+below is the only runner execution substrate.
 
 ## High-Level Flow
 
 ```text
 Browser
-  GoatSurface useChat()
+  ChatSurface useChat()
     POST /api/chat
       persist user chat message
-      streamText(default Goat chat agent)
+      streamText(default opencompany chat agent)
         answer directly
         OR call goat_brain
         OR survey connected integrations with list_actions/use_action
            and capture focused findings with save_to_brain
         OR, when Tasks & Workflows is enabled in Preferences, call start_task
-          insert goat.tasks row
-          POST /internal/goat/tasks/:taskId/run
+          create the task chat session, goat.tasks projection, and first durable turn
+          POST /internal/goat/codex-chat/wake
         OR, when the user explicitly asks to run an active workflow, call start_workflow
-          compile the workflow and insert its goat.tasks row
-          POST /internal/goat/tasks/:taskId/run
-  GoatSurface #task / #workflow submit
+          compile the workflow, create its task session and first durable turn
+          POST /internal/goat/codex-chat/wake
+  ChatSurface #task / #workflow submit
     POST /api/tasks or /api/workflows
-      insert goat.tasks row without creating a chat session or chat messages
-  GoatSurface cloud coding modes
+      create the task chat session, its native messages, and first durable turn
+  ChatSurface cloud coding modes
     POST /api/codex-chat/messages or /api/claude-chat/messages
       persist the message and attachment metadata
       enqueue a turn for the shared cloud coding chat worker
 
 Runner
-  Goat task worker wakes/polls
-    claim queued task with lease
-    plan harness spec with Gateway planner model
-    create durable assistant task message
-    streamText with Gateway, Exa, Gmail, Calendar, Linear MCP, and Latitude MCP tools
-      append durable message and tool events
-    use final assistant message as the task result
-    mark task succeeded, failed, or canceled
+  durable turn worker wakes/polls
+    claim the queued turn with a lease
+    plan the harness spec with the Gateway planner model when needed
+    execute the turn through its opencompany or codex engine adapter
+      stream text and tool events into the assistant goat.chat_messages row
+    settle the turn and task projection as succeeded, failed, or canceled
 
-Goat UI
+App UI
   subscribes to Electric task, chat, and cloud coding shapes
 ```
 

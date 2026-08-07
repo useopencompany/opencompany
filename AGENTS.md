@@ -12,23 +12,26 @@ Use judgment. The goal is not to follow rules mechanically; the goal is to ship 
 
 - Package manager: `bun@1.3.2`
 - Runtime: Node `>=20.20.0`
-- Stack: Turborepo, Bun, Next.js App Router, Drizzle, Neon Postgres, WorkOS AuthKit, Inngest, Vercel AI Gateway, GitHub App integration.
-- Legacy app: `apps/web`
-- New Goat app: `apps/goat`
-- Shared runner service: `apps/runner`
-- Database package: `packages/db`
-- Agent file contract: `docs/agent-file.md`
+- Stack: Turborepo, Bun, Next.js App Router, Drizzle, Neon Postgres, ElectricSQL, WorkOS AuthKit, Vercel AI Gateway, E2B sandboxes, Stripe.
+- Product app: `apps/app` (`@opencompany/app`), served at my.opencompany.chat
+- Execution service: `apps/runner` (`@opencompany/runner`, Fastify on Render)
+- Product engine: `packages/core`; knowledge domain: `packages/brain`
+- Shared contracts: `packages/agent-runtime`; database: `packages/db`
+- Telemetry (OTel): `packages/telemetry`; logs/error capture: `packages/observability`
+- Other surfaces: `apps/macos` (opencompany Quick), `apps/marketing`, `apps/design-system`
+- System map: `docs/architecture.md` (repo-wide) and `apps/app/docs/README.md` (app + runner flow)
 
 Useful commands:
 
 - Install dependencies: `bun install`
 - Local setup: `bun run setup`
+- Dev stack (app + runner): `bun run dev` (`bun run dev:tui` for Turbo's interactive TUI)
 - Format check: `bun run format:check`
 - Lint: `bun run lint`
 - Typecheck: `bun run typecheck`
 - Build: `bun run build`
 - Unit tests: `bun run test`
-- Web E2E tests when UI behavior needs browser verification: `bun run --filter @opencompany/web test:e2e`
+- Managed-capabilities contract check: `bun run capabilities:contract`
 - Secret scan when available: `bun run secrets:check`
 
 The user usually keeps a dev server running. Do not start another one unless asked or unless you have confirmed it is needed.
@@ -37,34 +40,19 @@ The user usually keeps a dev server running. Do not start another one unless ask
 
 When the system prompt gives you a staged environment file for this repository:
 
-1. Never inspect or print it. If `.env.local` is missing, copy the staged file there and set mode `600`.
+1. Never inspect or print it. If `.env.local` is missing, copy the staged file there and set mode `600`. Setup mirrors app-local values into `apps/app/.env.local`; let `bun run setup` own that file.
 2. Run `bun install --frozen-lockfile`, then `bun run setup`, before starting any development process.
-3. For Goat work, start `bun run dev:goat` only after setup succeeds. Do not use `setup:dev`, which starts the legacy web stack.
+3. Start `bun run dev` only after setup succeeds.
 
 Cloud setup refreshes the schema-only `cloud-base` Neon branch and creates a sandbox-unique child branch from it. Do not override that parent or start the dev server against an unset `DATABASE_URL`.
 
-Local dev logs: `bun run dev` and `bun run dev:stream` write Turbo task output to `.context/logs/dev-turbo.json`. Use `bun run dev:logs -- --source runner --tail 100`, `bun run dev:logs -- --source web --tail 100`, `bun run dev:logs -- --errors`, or `bun run dev:logs -- --grep <text>` when debugging. The log file is gitignored and may contain sensitive terminal output, so summarize relevant lines instead of pasting large raw excerpts.
-
-## App Boundaries
-
-This monorepo contains two product generations. `apps/web` is the older OpenCompany app. `apps/goat` is the new Goat app and should be treated as a separate product surface, even when a similarly named feature also exists in `apps/web`.
-
-When the user says "Goat" or the task is clearly about Goat:
-
-- Start in `apps/goat`; do not edit `apps/web` unless the task explicitly crosses both apps or a shared dependency requires it.
-- "Goat runner" means the Goat-specific execution paths inside the shared `apps/runner` package. Look first at `goat-*` modules, `/internal/goat/*` routes, and the `RUNNER_WORKERS_ENABLED` gate. There is currently no separate `apps/goat-runner` package.
-- Follow Goat-specific shared code into `packages/db/src/goat-*`, `packages/goat-brain`, and `packages/goat-observability` as needed. Only modify generic or legacy paths when tracing confirms they are shared by the Goat flow.
-- Use `apps/goat/docs/README.md` for the current Goat app/runner flow and `bun run dev:goat` for the Goat development stack.
-
-If a request could reasonably refer to either app, inspect the relevant entry points and establish the target surface before editing. Do not default to `apps/web` merely because it is older or more complete.
+Local dev logs: `bun run dev` writes Turbo task output to `.context/logs/dev-turbo.json`. Use `bun run dev:logs -- --source runner --tail 100`, `bun run dev:logs -- --source app --tail 100`, `bun run dev:logs -- --errors`, or `bun run dev:logs -- --grep <text>` when debugging. The log file is gitignored and may contain sensitive terminal output, so summarize relevant lines instead of pasting large raw excerpts.
 
 ## Product Context
 
-OpenCompany is a platform for running company-owned AI agents.
+opencompany is the platform for running a company with AI: chat backed by the workspace Brain, background tasks and workflows, and persistent cloud coding agents. The product contract is the chat/Brain/task/workflow platform described in `docs/architecture.md` — routes and server actions in `apps/app` stay thin and call into `packages/core`; all background execution flows through the durable turn queue that `apps/runner` drains for the three engines (`opencompany`, `codex`, `claude_code`).
 
-Agents are plain-text `.agent` files backed by GitHub, Postgres, and the runtime. The `.agent` file is the product contract. Anything that edits, syncs, parses, stores, or runs an agent must preserve that contract. Read `docs/agent-file.md` before changing agent format behavior.
-
-GitHub is the source of truth for managed workspace repos, while the app stores the latest editable state in Postgres and syncs GitHub asynchronously. Preserve that product model unless the task is explicitly about changing it.
+A set of storage-level names is deliberately frozen from before the product rename — the Postgres schema `goat`, Electric wire names `goat.*`, E2B sandbox paths `/home/user/opencompany-goat/*`, stored event schema versions, row-id prefixes, and the `opencompany-goat*` telemetry service names. They are contracts baked into production data, live sandboxes, and external dashboards. Never rename them in passing; the full list and rationale live in `docs/architecture.md` under "Storage contracts".
 
 ## Work Loop
 
@@ -96,10 +84,10 @@ GitHub is the source of truth for managed workspace repos, while the app stores 
 
 ## Data And Env Changes
 
-- Any change to `packages/db/src/schema.ts` needs a Drizzle migration.
+- Any change to the schema files in `packages/db/src` needs a Drizzle migration. Never edit or rename existing files under `drizzle/`.
 - Migration or data-destructive work gets extra scrutiny. Explain rollback implications before running one-way operations.
-- New env vars require `.env.example` and the relevant docs update.
-- Production env vars must be added to the runtime-specific Infisical path and verified in the hosted service before release: Goat uses `prod` + `/goat`, legacy web uses `prod` + `/web`, and the runner uses `prod` + `/runner`. Do not assume a value in `/web` reaches Goat. Add required variables to the matching release preflight so a missing sync fails the release instead of silently disabling behavior.
+- New env vars require `.env.example` and the relevant docs update (`docs/env-vars.md`).
+- Production env vars must be added to the runtime-specific Infisical path and verified in the hosted service before release: the app uses `prod` + `/goat` (the folder name is a frozen external contract), the runner uses `prod` + `/runner`, and release automation uses `prod` + `/release`. Add required variables to `scripts/release-preflight.mjs` so a missing sync fails the release instead of silently disabling behavior.
 - Local setup should use branch-isolated Neon DBs through `bun run setup`. Avoid shared database mode unless explicitly needed.
 - Do not run production migrations or production-affecting scripts unless the user explicitly asks.
 
@@ -130,11 +118,13 @@ Useful docs:
 
 - `README.md` - project overview
 - `CONTRIBUTING.md` - local checks and PR conventions
-- `docs/future-concepts/README.md` - speculative product and architecture ideas that may inform future work
+- `docs/architecture.md` - system map and the frozen storage contracts
+- `apps/app/docs/README.md` - the detailed app + runner flow map
 - `docs/getting-started.md` - local setup
 - `docs/database.md` - Neon, Drizzle, and migrations
 - `docs/deployment.md` - release flow
 - `docs/env-vars.md` - environment variables
+- `docs/future-concepts/README.md` - speculative product and architecture ideas that may inform future work
 
 ## Communication
 

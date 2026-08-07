@@ -549,7 +549,7 @@ export async function consumeOpenCompanyChatStream(input: {
       } else if (part.type === "error") {
         throw part.error instanceof Error
           ? part.error
-          : new Error(readString(part.error) ?? "Goat model stream failed.");
+          : new Error(readString(part.error) ?? "Model stream failed.");
       }
     }
   } catch (error) {

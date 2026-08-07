@@ -159,7 +159,7 @@ describe("POST /api/webhooks/attio/events", () => {
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({ error: "Unable to buffer Attio events." });
     expect(console.error).toHaveBeenCalledWith(
-      "[goat-attio] Failed to process Attio events",
+      "[attio] Failed to process Attio events",
       expect.objectContaining({ eventCount: 1, error: "database unavailable" }),
     );
   });
@@ -179,7 +179,7 @@ function recordUpdatedEvent(objectId: string, actorType = "workspace-member") {
 }
 
 function attioRequest(event: Record<string, unknown>, idempotencyKey = "delivery_1") {
-  return new Request("https://goat.example.com/api/webhooks/attio/events", {
+  return new Request("https://app.example.com/api/webhooks/attio/events", {
     method: "POST",
     headers: {
       "content-type": "application/json",

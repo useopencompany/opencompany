@@ -211,7 +211,7 @@ export async function upsertBrainSourceItemAndEnqueue(input: {
   const skipReason = input.skipReason?.trim() || null;
   const rawEventCount = input.rawEventCount ?? 1;
   if (!Number.isInteger(rawEventCount) || rawEventCount < 1 || rawEventCount > 200) {
-    throw new Error("Goat ingestion raw event count must be between 1 and 200.");
+    throw new Error("Ingestion raw event count must be between 1 and 200.");
   }
   const brainRefs = uniqueBrainRefs(input.brainRefs ?? [input.brainRef ?? null]);
 
@@ -261,7 +261,7 @@ export async function upsertBrainSourceItemAndEnqueue(input: {
       id: brainSourceItems.id,
     });
 
-  if (!sourceItem) throw new Error("Could not persist Goat Brain source item.");
+  if (!sourceItem) throw new Error("Could not persist Brain source item.");
 
   const explicitBrainRefs = brainRefs.filter((brainRef): brainRef is string => brainRef !== null);
   const brainRows: Array<{ id: string; workspaceId: string }> =
@@ -274,7 +274,7 @@ export async function upsertBrainSourceItemAndEnqueue(input: {
   const workspaceByBrain = new Map(brainRows.map((row) => [row.id, row.workspaceId]));
   for (const brainRef of explicitBrainRefs) {
     if (!workspaceByBrain.has(brainRef)) {
-      throw new Error(`Cannot enqueue Goat ingestion for missing brain ${brainRef}.`);
+      throw new Error(`Cannot enqueue ingestion for missing brain ${brainRef}.`);
     }
   }
 
@@ -476,7 +476,7 @@ function brainIngestJobTargetWhere(input: {
       brainRef === null ? isNull(brainIngestJobs.brainRef) : eq(brainIngestJobs.brainRef, brainRef),
     ),
   );
-  if (!brainRefWhere) throw new Error("Cannot build Goat Brain ingest job target without brains.");
+  if (!brainRefWhere) throw new Error("Cannot build Brain ingest job target without brains.");
 
   const targetWhere = and(
     eq(brainIngestJobs.sourceItemId, input.sourceItemId),
@@ -484,7 +484,7 @@ function brainIngestJobTargetWhere(input: {
     eq(brainIngestJobs.kind, input.kind),
     brainRefWhere,
   );
-  if (!targetWhere) throw new Error("Cannot build Goat Brain ingest job target.");
+  if (!targetWhere) throw new Error("Cannot build Brain ingest job target.");
   return targetWhere;
 }
 
@@ -510,7 +510,7 @@ function rawEventCountForWorkspace(input: {
     if (brain.workspaceId !== input.workspaceId) continue;
     const brainKeys = input.rawEventKeysByBrainRef.get(brain.id);
     if (!brainKeys) {
-      throw new Error(`Missing claimed event keys for Goat Brain ${brain.id}.`);
+      throw new Error(`Missing claimed event keys for brain ${brain.id}.`);
     }
     for (const key of brainKeys) {
       const normalized = key.trim();
@@ -518,7 +518,7 @@ function rawEventCountForWorkspace(input: {
     }
   }
   if (keys.size < 1 || keys.size > 200) {
-    throw new Error("Goat ingestion workspace event count must be between 1 and 200.");
+    throw new Error("Ingestion workspace event count must be between 1 and 200.");
   }
   return keys.size;
 }

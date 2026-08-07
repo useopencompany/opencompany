@@ -1,5 +1,5 @@
 // Legacy-product credit fulfillment used only by the shared Stripe webhook.
-// The Goat and legacy web products bill through the same Stripe account, so the
+// The opencompany and legacy web products bill through the same Stripe account, so the
 // webhook that now lives in this app still receives legacy checkout and
 // auto-refill events. Ported verbatim from apps/web/lib/billing/service.ts;
 // these write to the legacy (public-schema) billing tables, not goat.*.

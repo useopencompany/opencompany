@@ -135,7 +135,7 @@ export function startGoogleDriveSyncWorker(
         await runGoogleDriveTick(env);
       } catch (error) {
         captureException(error, { event: "opencompany.goat_google_drive_sync_worker_failed" });
-        logger.error("Goat Google Drive sync worker failed", {
+        logger.error("Google Drive sync worker failed", {
           event: "opencompany.goat_google_drive_sync_worker_failed",
           error,
         });

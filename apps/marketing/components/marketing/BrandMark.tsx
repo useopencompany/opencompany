@@ -1,4 +1,4 @@
-// The OpenCompany / Goat mark. Uses currentColor so it inherits the
+// The opencompany brand mark. Uses currentColor so it inherits the
 // surrounding text color (tint with `text-*`, size with `size-*`).
 export function BrandMark({ className }: { className?: string }) {
   return (

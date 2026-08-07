@@ -114,7 +114,7 @@ function buildDescription({
     message,
     "",
     "---",
-    "Submitted from: Goat app",
+    "Submitted from: opencompany app",
     `Submitted by: ${submittedBy}`,
     `User email: ${user.email}`,
     `Workspace: ${workspace.name} (${workspace.id})`,
@@ -124,7 +124,7 @@ function buildDescription({
 
 async function linearGraphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
   // Reuses the shared Linear API key (same one the web app's feedback intake uses).
-  // Only the target team differs — FEEDBACK_LINEAR_TEAM_ID points at the Goat team.
+  // Only the target team differs — FEEDBACK_LINEAR_TEAM_ID points at the product team.
   const apiKey = process.env.LINEAR_API_KEY;
   if (!apiKey) {
     throw new Error("Missing LINEAR_API_KEY.");

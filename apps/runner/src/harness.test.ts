@@ -197,7 +197,7 @@ describe("planHarness", () => {
         availableTools: ["exa_search"],
         gatewayApiKey: "gateway",
       }),
-    ).rejects.toThrow("Goat harness planner must return a non-empty systemPrompt.");
+    ).rejects.toThrow("Harness planner must return a non-empty systemPrompt.");
   });
 
   it("keeps Linear MCP meta-tools when they are available", async () => {

@@ -107,7 +107,7 @@ export async function connectGoogleIntegration(input: {
     .returning({ id: integrations.id });
 
   if (!integration) {
-    throw new Error("Could not persist Goat Google integration.");
+    throw new Error("Could not persist Google integration.");
   }
 
   try {
@@ -200,7 +200,7 @@ export async function connectSlackIntegration(input: {
     .returning({ id: integrations.id });
 
   if (!integration) {
-    throw new Error("Could not persist Goat Slack integration.");
+    throw new Error("Could not persist Slack integration.");
   }
 
   const payload: SlackOAuthCredentialPayload = {
@@ -351,7 +351,7 @@ export async function connectSlackBotIntegration(input: {
 
   const integration = integrationRows[0];
   if (!integration || !credentialRows[0]) {
-    throw new Error("Could not persist Goat Slack bot integration and credential.");
+    throw new Error("Could not persist Slack bot integration and credential.");
   }
 
   return { integrationId: integration.id };
@@ -425,7 +425,7 @@ export async function connectLinearIngestIntegration(input: {
     .returning({ id: integrations.id });
 
   if (!integration) {
-    throw new Error("Could not persist Goat Linear integration.");
+    throw new Error("Could not persist Linear integration.");
   }
 
   const payload: LinearOAuthCredentialPayload = {
@@ -531,7 +531,7 @@ export async function connectHubspotIntegration(input: {
     .returning({ id: integrations.id });
 
   if (!integration) {
-    throw new Error("Could not persist Goat HubSpot integration.");
+    throw new Error("Could not persist HubSpot integration.");
   }
 
   const payload: HubspotOAuthCredentialPayload = {

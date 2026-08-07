@@ -27,7 +27,7 @@ vi.mock("@opencompany/db/credits", () => ({
 vi.mock("@/lib/auth", () => ({ currentUser: vi.fn() }));
 vi.mock("@/lib/billing/stripe", () => ({
   assertCheckoutEnabled: vi.fn(),
-  getAppUrl: vi.fn(() => "https://goat.test"),
+  getAppUrl: vi.fn(() => "https://app.test"),
   getStripe: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({
@@ -36,7 +36,7 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
-describe("Goat billing actions", () => {
+describe("Billing actions", () => {
   const checkoutCreate = vi.fn();
   const subscriptionList = vi.fn();
 
@@ -49,7 +49,7 @@ describe("Goat billing actions", () => {
       authUser: { email: "admin@example.com" },
     } as Awaited<ReturnType<typeof currentUser>>);
     vi.mocked(loadBillingOverview).mockResolvedValue({
-      billing: { plan: "pro", stripeCustomerId: "cus_goat_1" },
+      billing: { plan: "pro", stripeCustomerId: "cus_test_1" },
     } as unknown as Awaited<ReturnType<typeof loadBillingOverview>>);
     checkoutCreate.mockResolvedValue({
       id: "cs_test_1",
@@ -115,7 +115,7 @@ describe("Goat billing actions", () => {
 
   it("rejects top-ups on Hobby", async () => {
     vi.mocked(loadBillingOverview).mockResolvedValue({
-      billing: { plan: "hobby", stripeCustomerId: "cus_goat_1" },
+      billing: { plan: "hobby", stripeCustomerId: "cus_test_1" },
     } as unknown as Awaited<ReturnType<typeof loadBillingOverview>>);
 
     await expect(createCreditTopUpAction(1_000)).resolves.toEqual({
@@ -141,7 +141,7 @@ describe("Goat billing actions", () => {
     vi.mocked(loadBillingOverview).mockResolvedValue({
       billing: {
         plan: "hobby",
-        stripeCustomerId: "cus_goat_1",
+        stripeCustomerId: "cus_test_1",
         stripeSubscriptionId: null,
         subscriptionStatus: null,
       },
@@ -203,7 +203,7 @@ describe("Goat billing actions", () => {
     vi.mocked(loadBillingOverview).mockResolvedValue({
       billing: {
         plan: "hobby",
-        stripeCustomerId: "cus_goat_1",
+        stripeCustomerId: "cus_test_1",
         stripeSubscriptionId: null,
         subscriptionStatus: null,
       },

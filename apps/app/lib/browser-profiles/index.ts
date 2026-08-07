@@ -234,7 +234,7 @@ export async function createAgentSession(input: {
   assertBrowserProfilesAvailable();
   const profile = await loadOwnedProfile(input.userWorkosId, input.profileId);
   if (profile.status !== "connected") {
-    throw new Error("This browser profile needs to be connected before Goat can use it.");
+    throw new Error("This browser profile needs to be connected before opencompany can use it.");
   }
   const contextId = decryptBrowserbaseContextId(profile);
   const locked = await claimProfileSession(input.userWorkosId, input.profileId);

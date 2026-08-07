@@ -266,7 +266,7 @@ describe("runBrainToolForUser", () => {
       stdout: "",
       stderr: "",
       error: expect.stringContaining(
-        'Unsupported Goat Brain entity type "candidate". Use one of: person, company, project, meeting, concept, source, analysis, note.',
+        'Unsupported Brain entity type "candidate". Use one of: person, company, project, meeting, concept, source, analysis, note.',
       ),
     });
     expect(output.error).toContain('Relevant help command: { command: "help"');

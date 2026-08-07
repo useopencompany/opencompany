@@ -1,4 +1,4 @@
-// Legacy-product auto-refill webhook handlers. The Goat and legacy web
+// Legacy-product auto-refill webhook handlers. The opencompany and legacy web
 // products bill through the same Stripe account, so the shared webhook that
 // now lives in this app still receives legacy setup-mode checkouts and
 // auto-refill PaymentIntent events. Ported verbatim from the webhook section

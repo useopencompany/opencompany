@@ -1,7 +1,7 @@
 import { createRemoteMcpIntegration, type RemoteMcpProviderState } from "./remote-mcp-oauth";
 
 // OAuth scope and URL configuration both force Neon's hosted MCP into read-only
-// mode. Categories narrow provider discovery before Goat applies its own strict
+// mode. Categories narrow provider discovery before the app applies its own strict
 // tool allowlist in actions/neon.ts.
 export const NEON_MCP_ENDPOINT_URL =
   "https://mcp.neon.tech/mcp?readonly=true&category=projects&category=branches&category=schema&category=querying";

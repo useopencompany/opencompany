@@ -1,4 +1,4 @@
-// Goat's product analytics are deliberately small. A new chat is derived from
+// the app's product analytics are deliberately small. A new chat is derived from
 // chat_message_sent.is_first_message instead of emitting a second event for the same action.
 export type TaskSpawnKind = "adhoc" | "workflow" | "scheduled_task" | "scheduled_workflow";
 export type TaskSpawnOrigin = "adhoc" | "workflow";
@@ -126,17 +126,17 @@ type AnalyticsEventDefinition<EventName extends AnalyticsEventName> = {
 export const analyticsEvents = {
   app_opened: {
     name: "app_opened",
-    description: "A signed-in user opened Goat.",
+    description: "A signed-in user opened the app.",
     safeProperties: ["workspace_id"],
   },
   signup_completed: {
     name: "signup_completed",
-    description: "A WorkOS user was synced into Goat for the first time.",
+    description: "A WorkOS user was synced into opencompany for the first time.",
     safeProperties: ["source"],
   },
   chat_message_sent: {
     name: "chat_message_sent",
-    description: "A user sent a message in Goat main chat.",
+    description: "A user sent a message in main chat.",
     safeProperties: [
       "workspace_id",
       "session_id",
@@ -154,7 +154,7 @@ export const analyticsEvents = {
   },
   llm_usage_recorded: {
     name: "llm_usage_recorded",
-    description: "A Goat LLM call reported token and cost usage.",
+    description: "An LLM call reported token and cost usage.",
     safeProperties: [
       "workspace_id",
       "surface",
@@ -186,7 +186,7 @@ export const analyticsEvents = {
   },
   task_spawned: {
     name: "task_spawned",
-    description: "A durable Goat task was created and queued.",
+    description: "A durable task was created and queued.",
     safeProperties: [
       "workspace_id",
       "task_id",
@@ -219,12 +219,12 @@ export const analyticsEvents = {
   },
   billing_topup_completed: {
     name: "billing_topup_completed",
-    description: "A manual or automatic billing top-up credited a Goat workspace.",
+    description: "A manual or automatic billing top-up credited a workspace.",
     safeProperties: ["workspace_id", "topup_type", "amount_cents", "amount_usd", "balance_cents"],
   },
   model_spend_recorded: {
     name: "model_spend_recorded",
-    description: "A billable Goat model-cost usage row was recorded.",
+    description: "A billable model-cost usage row was recorded.",
     safeProperties: [
       "user_id",
       "workspace_id",

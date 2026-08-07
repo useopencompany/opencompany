@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createDictationTicket, verifyDictationTicket } from "./dictation-auth";
 
-describe("Goat dictation tickets", () => {
+describe("Dictation tickets", () => {
   it("mints short-lived user-bound tickets", () => {
     const access = createDictationTicket({
       userWorkosId: "user_1",

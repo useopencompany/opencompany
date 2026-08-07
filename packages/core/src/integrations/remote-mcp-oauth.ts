@@ -140,7 +140,7 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
       await markNeedsReauth({
         userWorkosId: input.userWorkosId,
         integrationId: row.id,
-        statusReason: `${config.displayName} needs to be reconnected before Goat can use it.`,
+        statusReason: `${config.displayName} needs to be reconnected before opencompany can use it.`,
       });
       return { ok: false, reason: "needs_reauth" };
     }
@@ -367,7 +367,7 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
       },
       get clientMetadata(): OAuthClientMetadata {
         return {
-          client_name: "OpenCompany Goat",
+          client_name: "opencompany",
           redirect_uris: [callbackUrl()],
           grant_types: ["authorization_code", "refresh_token"],
           response_types: ["code"],

@@ -522,7 +522,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
                     !portsLoaded
                       ? `Checking listening ports in the ${engineLabel} workspace.`
                       : !ports.some((port) => port.isHttp)
-                        ? `Start a server from ${engineLabel} or Terminal, then refresh ports. Goat never runs package scripts automatically.`
+                        ? `Start a server from ${engineLabel} or Terminal, then refresh ports. opencompany never runs package scripts automatically.`
                         : "Connecting through the secure preview gateway."
                   }
                   busy={!portsLoaded}

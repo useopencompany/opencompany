@@ -37,7 +37,7 @@ describe("public shared chat attachments", () => {
   it("serves only an attachment resolved through the shared session query", async () => {
     mocks.getDb.mockReturnValue(queryDb([{ attachments: [attachment] }]));
 
-    const response = await GET(new Request("https://goat.test"), {
+    const response = await GET(new Request("https://app.test"), {
       params: Promise.resolve({
         shareId: SHARE_ID,
         messageId: "message_1",
@@ -52,7 +52,7 @@ describe("public shared chat attachments", () => {
   it("returns 404 for unknown attachments and malformed share tokens", async () => {
     mocks.getDb.mockReturnValue(queryDb([]));
 
-    const missing = await GET(new Request("https://goat.test"), {
+    const missing = await GET(new Request("https://app.test"), {
       params: Promise.resolve({
         shareId: SHARE_ID,
         messageId: "message_1",
@@ -63,7 +63,7 @@ describe("public shared chat attachments", () => {
     expect(mocks.attachmentResponse).not.toHaveBeenCalled();
 
     mocks.getDb.mockClear();
-    const malformed = await GET(new Request("https://goat.test"), {
+    const malformed = await GET(new Request("https://app.test"), {
       params: Promise.resolve({
         shareId: "../private",
         messageId: "message_1",

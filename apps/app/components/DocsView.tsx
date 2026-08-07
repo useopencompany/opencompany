@@ -71,14 +71,14 @@ function DocsSidebar({ tree, activeUrl }: { tree: Root; activeUrl: string }) {
           <Link
             href="/"
             prefetch={false}
-            aria-label="Back to Goat"
-            title="Back to Goat"
+            aria-label="Back to opencompany"
+            title="Back to opencompany"
             className="rounded-md p-1.5 text-ink/60 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
             <PanelLeft size={15} strokeWidth={1.75} />
           </Link>
           <div className="min-w-0">
-            <div className="truncate text-[13.5px] font-medium text-ink">Goat docs</div>
+            <div className="truncate text-[13.5px] font-medium text-ink">opencompany docs</div>
             <div className="text-[11.5px] text-ink-subtle">Living product notes</div>
           </div>
         </div>

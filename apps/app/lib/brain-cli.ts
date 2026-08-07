@@ -659,7 +659,7 @@ function readEntityTypeFlag(value: BrainToolFlagValue | undefined): string | und
   if (!type) return undefined;
   if (!isBuiltInBrainEntityType(type)) {
     throw new Error(
-      `Unsupported Goat Brain entity type "${type}". Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`,
+      `Unsupported Brain entity type "${type}". Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`,
     );
   }
   return type;
@@ -911,7 +911,7 @@ function validateCreateFlags(flags: Record<string, BrainToolFlagValue>, stdin: s
   }
   if (!isBuiltInBrainEntityType(type)) {
     throw brainToolInputError(
-      `Unsupported Goat Brain entity type "${type}". Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`,
+      `Unsupported Brain entity type "${type}". Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`,
       "create",
     );
   }
@@ -1228,7 +1228,7 @@ async function recordBrainToolRun(input: {
     ] as const);
   } catch (error) {
     if (process.env.NODE_ENV !== "test") {
-      console.error("[goat] Failed to persist Brain tool run", {
+      console.error("[app] Failed to persist Brain tool run", {
         traceId: input.traceId,
         action: input.command,
         error: error instanceof Error ? error.message : String(error),

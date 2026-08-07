@@ -8,7 +8,7 @@ import {
   sanitizeGmailInstructions,
 } from "./gmail";
 
-describe("Goat Gmail brain source config", () => {
+describe("Gmail brain source config", () => {
   it("keeps missing events as all events for backwards compatibility", () => {
     const config = parseGmailBrainSourceConfig({});
 

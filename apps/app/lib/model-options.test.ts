@@ -6,7 +6,7 @@ import {
   normalizeModel,
 } from "@/lib/model-options";
 
-describe("Goat model options", () => {
+describe("Model options", () => {
   it("defaults new chats to Kimi K3", () => {
     expect(DEFAULT_MODEL).toBe("moonshotai/kimi-k3");
     expect(normalizeModel(undefined)).toBe("moonshotai/kimi-k3");

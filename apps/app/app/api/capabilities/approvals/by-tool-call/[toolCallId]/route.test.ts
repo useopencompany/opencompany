@@ -33,7 +33,7 @@ describe("capability approval by tool call API", () => {
   });
 
   it("loads the durable quote and session budget for the owned tool call", async () => {
-    const response = await GET(new Request("https://goat.test"), {
+    const response = await GET(new Request("https://app.test"), {
       params: Promise.resolve({ toolCallId: "tool_1" }),
     });
     expect(response.status).toBe(200);

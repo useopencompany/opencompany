@@ -17,7 +17,7 @@ export async function loadCodexCliAuth(userWorkosId: string): Promise<CodexCliAu
     await markCodexCredentialNeedsReauth({
       db: getDb(),
       userWorkosId,
-      statusReason: "Codex credentials could not be decrypted. Reconnect Codex in Goat settings.",
+      statusReason: "Codex credentials could not be decrypted. Reconnect Codex in Settings.",
     });
     return null;
   }

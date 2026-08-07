@@ -151,7 +151,7 @@ describe("createWorkspaceAction", () => {
     expect(getWorkOSClientMock).not.toHaveBeenCalled();
   });
 
-  it("creates a WorkOS organization and membership, persists Goat resources, and activates it", async () => {
+  it("creates a WorkOS organization and membership, persists workspace resources, and activates it", async () => {
     const result = await createWorkspaceAction("  Analytical Co  ");
 
     expect(result).toEqual({ ok: true, workspaceId: "goat_ws_new" });
@@ -250,7 +250,7 @@ describe("switchWorkspaceAction", () => {
     listAccessibleBrainsMock.mockResolvedValue([{ id: "general-next", slug: "general" }] as never);
   });
 
-  it("switches the WorkOS session before updating Goat's active cookies", async () => {
+  it("switches the WorkOS session before updating the app's active cookies", async () => {
     await expect(switchWorkspaceAction("goat_ws_next")).resolves.toEqual({ ok: true });
 
     expect(switchToOrganizationMock).toHaveBeenCalledWith("org_next", {

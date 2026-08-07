@@ -70,7 +70,7 @@ export function createServer(
   app.post("/internal/goat/codex-chat/wake", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
     if (!env.taskWorkerEnabled) {
-      reply.status(503).send({ error: "Goat workers are disabled." });
+      reply.status(503).send({ error: "Runner workers are disabled." });
       return;
     }
     wakeCodexChatWorker();
@@ -145,7 +145,7 @@ export function createServer(
   app.post("/internal/goat/brain-ingest/wake", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
     if (!env.taskWorkerEnabled) {
-      reply.status(503).send({ error: "Goat workers are disabled." });
+      reply.status(503).send({ error: "Runner workers are disabled." });
       return;
     }
     wakeBrainIngestWorker();
@@ -155,7 +155,7 @@ export function createServer(
   app.post("/internal/goat/google-drive/sync", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
     if (!env.taskWorkerEnabled) {
-      reply.status(503).send({ error: "Goat workers are disabled." });
+      reply.status(503).send({ error: "Runner workers are disabled." });
       return;
     }
     wakeGoogleDriveSyncWorker();
@@ -165,7 +165,7 @@ export function createServer(
   app.post("/internal/goat/brain-import/wake", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
     if (!env.taskWorkerEnabled) {
-      reply.status(503).send({ error: "Goat workers are disabled." });
+      reply.status(503).send({ error: "Runner workers are disabled." });
       return;
     }
     wakeBrainImportWorker();
@@ -175,7 +175,7 @@ export function createServer(
   app.post("/internal/goat/task-harness/plan", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
     if (!env.taskWorkerEnabled) {
-      reply.status(503).send({ error: "Goat task worker is disabled." });
+      reply.status(503).send({ error: "Task worker is disabled." });
       return;
     }
 
@@ -210,12 +210,12 @@ export function createServer(
       reply.status(400).send({ error: "userWorkosId is required." });
       return;
     }
-    logger.info("Goat Codex device auth start route received", {
+    logger.info("Codex device auth start route received", {
       event: "opencompany.runner_goat_codex_auth_start_route_received",
       user_workos_id: userWorkosId,
     });
     const flow = await startCodexDeviceAuthFlow({ userWorkosId, env });
-    logger.info("Goat Codex device auth start route completed", {
+    logger.info("Codex device auth start route completed", {
       event: "opencompany.runner_goat_codex_auth_start_route_completed",
       user_workos_id: userWorkosId,
       flow_id: flow.id,
@@ -233,7 +233,7 @@ export function createServer(
       reply.status(400).send({ error: "userWorkosId is required." });
       return;
     }
-    logger.debug("Goat Codex device auth poll route received", {
+    logger.debug("Codex device auth poll route received", {
       event: "opencompany.runner_goat_codex_auth_poll_route_received",
       user_workos_id: userWorkosId,
       flow_id: flowId,
@@ -244,10 +244,10 @@ export function createServer(
       env,
     });
     if (!flow) {
-      reply.status(404).send({ error: "Goat Codex device auth flow was not found." });
+      reply.status(404).send({ error: "Codex device auth flow was not found." });
       return;
     }
-    logger.debug("Goat Codex device auth poll route completed", {
+    logger.debug("Codex device auth poll route completed", {
       event: "opencompany.runner_goat_codex_auth_poll_route_completed",
       user_workos_id: userWorkosId,
       flow_id: flow.id,

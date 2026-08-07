@@ -174,7 +174,7 @@ export function BrainImport({
           </div>
           <div>
             <h2 className="text-[16px] font-semibold text-ink">
-              {compact ? "Import company context" : "Give Goat a head start"}
+              {compact ? "Import company context" : "Give opencompany a head start"}
             </h2>
             <p className="mt-1 text-[12.5px] leading-5 text-ink-subtle">
               Scan first, review the exact workload, then decide whether to run ingestion.
@@ -192,7 +192,7 @@ export function BrainImport({
             />
           </label>
           <label className="grid gap-1 text-[12px] font-medium text-ink-muted">
-            What should Goat focus on? <span className="font-normal text-ink-subtle">Optional</span>
+            What should opencompany focus on? <span className="font-normal text-ink-subtle">Optional</span>
             <textarea
               value={focus}
               onChange={(event) => setFocus(event.target.value)}
@@ -256,7 +256,7 @@ export function BrainImport({
     return (
       <StatusCard
         title="Scanning sources"
-        detail="No ingestion models are running. Goat is counting and ranking candidate entries."
+        detail="No ingestion models are running. opencompany is counting and ranking candidate entries."
         icon={<Loader2 className="animate-spin" size={18} />}
         action="Cancel"
         onAction={cancel}
@@ -383,7 +383,7 @@ export function BrainImport({
       title={run.status === "finalizing" ? "Organizing your brain" : "Building your brain"}
       detail={
         run.status === "finalizing"
-          ? "Source jobs are complete. Goat is deduplicating and repairing links without adding new facts."
+          ? "Source jobs are complete. opencompany is deduplicating and repairing links without adding new facts."
           : "Documents will appear here as each selected source finishes."
       }
       icon={<Loader2 className="animate-spin" size={18} />}

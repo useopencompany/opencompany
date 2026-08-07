@@ -179,7 +179,7 @@ function routeContext() {
 }
 
 function jamieRequest(payload: unknown, options: { event?: string; secret?: string } = {}) {
-  return new Request("https://goat.test/api/webhooks/jamie/gint_123", {
+  return new Request("https://app.test/api/webhooks/jamie/gint_123", {
     method: "POST",
     headers: {
       "content-type": "application/json",

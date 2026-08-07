@@ -42,7 +42,7 @@ const definitions = {
       name: "run_sql",
       description: "Run SQL.",
       // Neon's live definition marks the generic tool destructive because it
-      // can write outside readonly mode. Goat pins the MCP endpoint to
+      // can write outside readonly mode. The app pins the MCP endpoint to
       // readonly=true and applies its own SQL validation before execution.
       annotations: { destructiveHint: true },
       inputSchema: {

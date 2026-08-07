@@ -310,7 +310,7 @@ export async function createTaskSession(
   )[0];
 
   if (!task) {
-    throw new Error("Unable to create Goat task session.");
+    throw new Error("Unable to create task session.");
   }
   return taskFromRow(task);
 }

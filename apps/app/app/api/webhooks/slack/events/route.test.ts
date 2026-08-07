@@ -34,7 +34,7 @@ function signedRequest(
   const signature =
     overrides.signature ??
     `v0=${createHmac("sha256", SIGNING_SECRET).update(`v0:${timestamp}:${rawBody}`).digest("hex")}`;
-  return new Request("https://goat.example.com/api/webhooks/slack/events", {
+  return new Request("https://app.example.com/api/webhooks/slack/events", {
     method: "POST",
     headers: {
       "content-type": "application/json",

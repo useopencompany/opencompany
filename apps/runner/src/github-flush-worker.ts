@@ -266,7 +266,7 @@ export function startGitHubFlushWorker(options: { pollIntervalMs?: number } = {}
               repository_id: window.repositoryId,
               pull_request_number: window.pullRequestNumber,
             });
-            logger.error("Goat GitHub pull-request window flush failed", {
+            logger.error("GitHub pull-request window flush failed", {
               event: "opencompany.goat_github_flush_failed",
               integration_id: window.integrationId,
               repository_id: window.repositoryId,
@@ -276,7 +276,7 @@ export function startGitHubFlushWorker(options: { pollIntervalMs?: number } = {}
             return null;
           });
           if (flushed) {
-            logger.info("Goat GitHub pull-request window flushed", {
+            logger.info("GitHub pull-request window flushed", {
               event: "opencompany.goat_github_window_flushed",
               integration_id: window.integrationId,
               repository_id: window.repositoryId,
@@ -289,7 +289,7 @@ export function startGitHubFlushWorker(options: { pollIntervalMs?: number } = {}
         }
       } catch (error) {
         captureException(error, { event: "opencompany.goat_github_flush_worker_failed" });
-        logger.error("Goat GitHub flush worker failed", {
+        logger.error("GitHub flush worker failed", {
           event: "opencompany.goat_github_flush_worker_failed",
           error,
         });

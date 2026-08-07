@@ -13,8 +13,8 @@ import { parseChangelog } from "@/lib/changelog";
 export const dynamic = "force-static";
 
 export const metadata: Metadata = {
-  title: "Changelog - Goat",
-  description: "Notable changes to Goat, in Keep a Changelog format.",
+  title: "Changelog - opencompany",
+  description: "Notable changes to opencompany, in Keep a Changelog format.",
 };
 
 export default async function ChangelogPage() {

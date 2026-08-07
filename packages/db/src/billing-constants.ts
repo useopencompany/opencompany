@@ -1,4 +1,4 @@
-// Pure Goat billing configuration, kept free of server-only imports (db
+// Pure billing configuration, kept free of server-only imports (db
 // client, node:crypto) so client components can share the exact numbers and
 // math the server enforces instead of mirroring them. Re-exported by
 // ./billing.

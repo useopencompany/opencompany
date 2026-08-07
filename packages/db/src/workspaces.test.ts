@@ -14,7 +14,7 @@ import {
 
 const pgDialect = new PgDialect();
 
-describe("Goat brain ids", () => {
+describe("brain ids", () => {
   it("generates readable default brain ids without embedding the WorkOS user id", () => {
     const id = defaultBrainIdForUser("user_01JXYZ123456789");
 
@@ -37,7 +37,7 @@ describe("Goat brain ids", () => {
   });
 });
 
-describe("Goat workspace creation", () => {
+describe("Workspace creation", () => {
   it("batches the workspace, membership, default brain, and folder rows together", async () => {
     const insert = vi.fn((table: unknown) => ({
       values: vi.fn((values: Record<string, unknown>) => {
@@ -95,7 +95,7 @@ describe("Goat workspace creation", () => {
   });
 });
 
-describe("Goat brain enrichment flag", () => {
+describe("brain enrichment flag", () => {
   it("returns the stored enrichment setting when the brain exists", async () => {
     const db = selectRowsDb([{ enrichmentEnabled: false }]);
 
@@ -117,7 +117,7 @@ describe("Goat brain enrichment flag", () => {
   });
 });
 
-describe("Goat brain access membership", () => {
+describe("brain access membership", () => {
   it("removes personal sources for users excluded from the desired member set", async () => {
     let executedQuery: unknown;
     const execute = vi.fn(async (query: unknown) => {

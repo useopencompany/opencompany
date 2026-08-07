@@ -650,13 +650,13 @@ describe("formatBrainFolderInventoryPrompt", () => {
     const prompt = formatBrainFolderInventoryPrompt([
       { path: "inbox", source: "system" },
       { path: "product", source: "custom" },
-      { path: "product/goat", source: "custom" },
+      { path: "product/roadmap", source: "custom" },
     ]);
 
     expect(prompt).toContain("## Current brain folders");
     expect(prompt).toContain("Custom folders are deliberate user-created structure");
     expect(prompt).toContain("- product/ (custom)");
-    expect(prompt).toContain("- product/goat/ (custom)");
+    expect(prompt).toContain("- product/roadmap/ (custom)");
     expect(prompt).toContain("create a focused subfolder");
   });
 });

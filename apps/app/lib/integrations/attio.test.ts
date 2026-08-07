@@ -31,7 +31,7 @@ vi.mock("@opencompany/db/integrations", () => ({
   markIntegrationStatus: mocks.markStatus,
 }));
 vi.mock("@opencompany/core/app-url", () => ({
-  getAppUrl: () => "https://goat.example",
+  getAppUrl: () => "https://app.example",
 }));
 
 import {

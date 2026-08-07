@@ -35,7 +35,7 @@ not set expiration on the configured parent branch or on branches Neon reports a
 | `bun run db:branch:create` | Creates a Neon branch matching the current Git branch, writes `DATABASE_URL` to `.env.local`. Idempotent. |
 | `bun run db:branch:delete` | Deletes the Neon branch matching the current Git branch. |
 | `bun run db:cloud-base:refresh` | Creates or migrates the protected, schema-only base used by E2B sessions. Idempotent. |
-| `bun run db:generate` | Generates a SQL migration from `packages/db/src/schema.ts` changes into `drizzle/`. |
+| `bun run db:generate` | Generates a SQL migration from schema changes in `packages/db/src` into `drizzle/`. |
 | `bun run db:migrate` | Applies pending migrations to whatever `DATABASE_URL` points at. |
 | `bun run db:migrations:check` | Verifies every migration SQL file is registered in Drizzle's journal. |
 | `bun run db:seed` | Inserts a dev user + workspace (idempotent). |
@@ -75,13 +75,15 @@ bun run setup
 
 ## Schema changes
 
-1. Edit `packages/db/src/schema.ts`.
+1. Edit the schema in `packages/db/src` (see [Schema layout](#schema-layout)).
 2. `bun run db:generate` — produces a new SQL file in `drizzle/`.
 3. Review the generated SQL.
 4. `bun run db:migrate` — applies it to your branch DB.
-5. Commit both `packages/db/src/schema.ts` and the generated SQL.
+5. Commit both the schema change and the generated SQL.
 
 When teammates pull your branch, their `db:migrate` will catch them up on their own Neon branch.
+Everything under `drizzle/` is append-only history: never edit or rename an existing migration
+file or journal entry.
 
 ### Rebasing across an already-deployed migration
 
@@ -90,11 +92,11 @@ when its `when` timestamp in `drizzle/meta/_journal.json` is **newer than the la
 `__drizzle_migrations` — a single timestamp comparison, no per-migration hash check.
 
 This bites when a rebase re-sequences your migrations in front of one that already shipped: e.g.
-main's `0044_x` is deployed to prod (and thus baked into the preview seed), and your branch renames
-it to `0053_x` and inserts your own `0044`–`0049` before it. Your inserted migrations keep their
-original generation timestamps, which are *older* than `0044_x`'s — so on any DB that already
-applied `0044_x` (prod, preview seed forks), `db:migrate` exits 0 but **silently skips them**. The
-first symptom is a runtime `relation "..." does not exist`, not a migration failure.
+main's `0044_x` is deployed to prod, and your branch renames it to `0053_x` and inserts your own
+`0044`–`0049` before it. Your inserted migrations keep their original generation timestamps, which
+are *older* than `0044_x`'s — so on any DB that already applied `0044_x`, `db:migrate` exits 0 but
+**silently skips them**. The first symptom is a runtime `relation "..." does not exist`, not a
+migration failure.
 
 When you re-sequence migrations across a deployed one:
 
@@ -104,23 +106,17 @@ When you re-sequence migrations across a deployed one:
    guards) — its new `when` is newer than what prod recorded, so prod will re-execute it on the
    next release and it must no-op.
 
-Already-broken preview branches self-heal on the next push: the PR-preview workflow re-forks the
-Neon branch from the seed on `synchronize` and re-runs the full migrate.
-
 ## Production
 
-Production migrations run from the `Release Production` GitHub Actions workflow before the web app
-and runner are deployed. Vercel builds do not run migrations. Set the following in Vercel project
-env:
+Production migrations run from the `Release Production` GitHub Actions workflow before the app and
+runner are deployed. Vercel builds do not run migrations.
 
-- `DATABASE_URL` — pooled connection string for your prod Neon branch (usually `production` or `main`).
-- `NEON_API_KEY` — only needed if you also want to run branch scripts from CI.
-- `NEON_PROJECT_ID` — shared project config. Also set this in Infisical `dev` + `/web` for local worktree setup.
-
-Set the same production database URL as `PRODUCTION_DATABASE_URL` in the protected GitHub Actions
-`production` environment so the release workflow can apply migrations.
-
-Vercel preview deployments can be wired to spin up their own Neon branch via the [Neon Vercel integration](https://neon.tech/docs/guides/vercel-overview) — out of scope for this doc.
+- The app reads `DATABASE_URL` — the pooled connection string for the prod Neon branch — synced
+  from Infisical `prod` + `/goat` into the app's Vercel project, and from `prod` + `/runner` into
+  Render.
+- The release workflow reads `PRODUCTION_DATABASE_URL` from Infisical `prod` + `/release` and maps
+  it to `DATABASE_URL` for the migration step.
+- `NEON_PROJECT_ID` also lives in Infisical `dev` + `/web` for local worktree setup.
 
 ## Optional env vars
 
@@ -134,45 +130,53 @@ These let you override defaults in headless environments:
 - `NEON_API_KEY` — headless Neon CLI auth, only needed outside local browser OAuth.
 - `OPENCOMPANY_SHARED_DATABASE=1` — use the shared `DATABASE_URL` escape hatch during setup.
 
-## Schema overview
+## Schema layout
 
-Current tables (see `packages/db/src/schema.ts` for the source of truth):
+`packages/db/src` holds three schema files plus per-domain query modules (`brain-*.ts`,
+`task-sessions.ts`, `integrations.ts`, `billing.ts`, and so on):
 
-- `users` — one row per WorkOS user, keyed by `usr_<workos_id>`.
-- `workspaces` — internal tenant boundary; each new workspace maps to a WorkOS Organization through `workos_organization_id`.
-- `workspace_memberships` — local mirror of user↔workspace membership with a `role`; WorkOS is the source of truth.
-- `agents` — latest editable agent state: path, title/body, parsed config, content hash, version, and GitHub sync status.
-- `workspace_skills` — company-authored Markdown skills, serialized as `skills/<id>/SKILL.md`, mentionable from agent bodies as `@skill/<id>`.
-- `workspace_sync_jobs` — unified GitHub materialization outbox for all synced resources (agents, brain files, agent bundle files, company skills). Each row records desired state (`repoPath`, `sourceKind`, `sourceRef`, `operation`, `desiredHash`, rename/delete metadata) plus retry bookkeeping. Repeated edits to the same path coalesce on the unique `(workspaceId, repoPath)` index. Drained by `projectWorkspaceToGitHub()`.
-- `workspace_repositories` — one managed private GitHub repo per workspace, including repo id, full name, default branch, and latest head SHA.
-- `onboarding_responses` — user's onboarding answers for a workspace.
+- `schema.ts` — the product schema. All product tables live in the Postgres schema named `goat`
+  (`pgSchema("goat")`, exported as `oc`): workspaces, chat sessions and messages, tasks and
+  workflows, Brain documents and ingestion state, integrations, billing, and the durable turn
+  queue.
+- `legacy-billing-schema.ts` — storage contract for the legacy-product billing tables in the
+  `public` schema that the Stripe webhook still writes. Retirement-tracked; do not evolve them.
+- `llm-broker-schema.ts` — storage contract for the runner's LLM broker tables in the `public`
+  schema.
 
-All app data should hang off `workspaces` so multi-tenant isolation is enforceable from day one.
+> **The physical schema name `goat` is a frozen storage contract.** It predates the product's
+> rename to opencompany and is baked into production data, migrations, Electric shape names, and
+> raw SQL. Renaming it is a data migration, not a refactor — see
+> [architecture.md](./architecture.md#storage-contracts-frozen-names). Code-level symbol names may
+> be product-named; the string passed to `pgSchema` and SQL literals like `goat.tasks` may not.
+
+Legacy public-schema tables from the deleted first-generation product remain in the database
+untouched but have no code; dropping them is a deliberate follow-up migration.
 
 ## Shared package
 
-Database code lives in `@opencompany/db` so the web app and future workers/scripts can share the same schema without importing from `apps/web`.
+Database code lives in `@opencompany/db` so the app, runner, and scripts share the same schema.
 
 - `@opencompany/db/schema` exports Drizzle tables, relations, and inferred row types.
 - `@opencompany/db/client` exports `getDb()` for the default singleton client and `createDb(databaseUrl?)` for callers that need an explicit connection string.
 - `@opencompany/db/pool` exports `createPooledDb(databaseUrl?, options?)` for long-lived services that need a connection pool and interactive transactions.
 
-### Two drivers: `neon-http` (web) vs pooled `node-postgres` (runner)
+### Two drivers: `neon-http` (app) vs pooled `node-postgres` (runner)
 
 The two clients exist for two very different workloads:
 
 | | `@opencompany/db/client` (`neon-http`) | `@opencompany/db/pool` (`node-postgres`) |
 |---|---|---|
-| Used by | Web app (Vercel, serverless) | Runner (`apps/runner`, long-lived) |
+| Used by | The app (Vercel, serverless) | Runner (`apps/runner`, long-lived) |
 | Transport | One HTTPS request per query | Bounded pool of persistent TCP sockets |
 | Transactions | None (only `db.batch()` non-interactive batches) | Real `db.transaction(...)` |
 | Neon endpoint | Pooled (`-pooler`) | **Direct (non-pooled)** |
 
-A serverless web request touches the database once or twice and then disappears, so a
+A serverless app request touches the database once or twice and then disappears, so a
 per-request HTTP driver against Neon's PgBouncer pooler is the right fit. The runner is
 the opposite: a persistent process that streams for minutes and issues many queries per
 turn. It keeps its own small pool of real Postgres connections, which gives it
-statement pipelining and interactive transactions (used by the session-execution lease
+statement pipelining and interactive transactions (used by the atomic turn-lease
 writes), and it connects to Neon's **direct** endpoint because PgBouncer transaction
 pooling cannot do interactive transactions or `LISTEN`/`NOTIFY`.
 
@@ -182,16 +186,14 @@ The runner resolves its connection string as `RUNNER_DATABASE_URL`, falling back
 ### Runner pool sizing
 
 `RUNNER_DB_POOL_MAX` (default `10`) bounds the runner's pool. Size it as worker
-concurrency (`RUNNER_WORKER_CONCURRENCY`) plus headroom for HTTP routes, the job poller,
+concurrency (`RUNNER_WORKER_CONCURRENCY`) plus headroom for HTTP routes, the turn poller,
 and lease heartbeats. Connections are held only transiently (heartbeats are sub-second
-writes every 5s; tool/message persistence is short-lived), so the pool needs to cover a
-*burst* — roughly one connection per concurrent session at a step boundary — not one
+writes; message persistence is short-lived), so the pool needs to cover a *burst* —
+roughly one connection per concurrent session at a step boundary — not one
 permanently-held connection per session.
 
 The hard ceiling is Neon's `max_connections`, which on the current compute is **~901**
-(7 reserved), shared with the web app (`neon-http`, transient) and Inngest. Keep
+(7 reserved), shared with the app (`neon-http`, transient). Keep
 `instances × RUNNER_DB_POOL_MAX` comfortably under it. In practice the pool is nowhere
-near the binding constraint: at the current prod sizing (`RUNNER_WORKER_CONCURRENCY=40`,
-`RUNNER_DB_POOL_MAX=60`, 1 instance) the runner uses <7% of Neon's connections, leaving
-the rest for the web app. The session ceiling is set by the single event loop, the E2B
-concurrent-sandbox quota, and model-gateway rate limits long before Neon is.
+near the binding constraint: the session ceiling is set by the single event loop, the
+E2B concurrent-sandbox quota, and model-gateway rate limits long before Neon is.

@@ -52,7 +52,7 @@ describe("POST /api/webhooks/jamie", () => {
 });
 
 function jamieRequest() {
-  return new Request("https://goat.test/api/webhooks/jamie", {
+  return new Request("https://app.test/api/webhooks/jamie", {
     method: "POST",
     headers: {
       "content-type": "application/json",

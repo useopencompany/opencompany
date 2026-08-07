@@ -61,7 +61,7 @@ export async function POST(request: Request) {
       );
     }
   } catch (error) {
-    console.error("[goat-slack-bot] Failed to process Slack event", {
+    console.error("[slack-bot] Failed to process Slack event", {
       eventType: envelope.event?.type,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -121,7 +121,7 @@ async function handleEventCallback(
     }
 
     if (!eventId) {
-      console.warn("[goat-slack-bot] Dropping Slack event without event_id", {
+      console.warn("[slack-bot] Dropping Slack event without event_id", {
         teamId,
         channelId,
         kind,
@@ -163,12 +163,12 @@ async function processClaimedEvent(
     }
   } catch (error) {
     await releaseSlackBotEvent(claim).catch((releaseError) => {
-      console.error("[goat-slack-bot] Failed to release Slack event claim", {
+      console.error("[slack-bot] Failed to release Slack event claim", {
         eventId: claim.eventId,
         error: releaseError instanceof Error ? releaseError.message : String(releaseError),
       });
     });
-    console.error("[goat-slack-bot] Event processing failed", {
+    console.error("[slack-bot] Event processing failed", {
       kind,
       teamId: input.teamId,
       channelId: input.channelId,
@@ -180,7 +180,7 @@ async function processClaimedEvent(
   await completeSlackBotEvent(claim).catch((error) => {
     // Keep the live lease if completion persistence fails. Releasing it after
     // an answer was posted would let a Slack retry double-post immediately.
-    console.error("[goat-slack-bot] Failed to complete Slack event claim", {
+    console.error("[slack-bot] Failed to complete Slack event claim", {
       eventId: claim.eventId,
       error: error instanceof Error ? error.message : String(error),
     });

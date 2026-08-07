@@ -14,7 +14,7 @@ import {
   sumCapabilitySessionSpendUsdMicros,
 } from "./capabilities";
 
-describe("Goat workspace capabilities", () => {
+describe("Workspace capabilities", () => {
   it("defaults every managed source to enabled when no override row exists", async () => {
     await expect(listWorkspaceCapabilities("workspace_1", selectDb([]))).resolves.toEqual(
       MANAGED_CAPABILITY_SOURCES.map((source) => ({ source, enabled: true })),
@@ -73,7 +73,7 @@ describe("Goat workspace capabilities", () => {
   });
 });
 
-describe("Goat capability session budgets", () => {
+describe("Capability session budgets", () => {
   it("uses the default budget only when the workspace override is null or missing", async () => {
     await expect(
       getCapabilitySessionBudgetUsdMicros("workspace_1", fluentDb({ selects: [] })),
@@ -123,7 +123,7 @@ describe("Goat capability session budgets", () => {
   });
 });
 
-describe("Goat capability approvals by tool call", () => {
+describe("Capability approvals by tool call", () => {
   const approval = {
     id: "gcr_1",
     toolCallId: "tool_1",

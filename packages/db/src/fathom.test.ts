@@ -7,7 +7,7 @@ import {
   upsertFathomPendingMeeting,
 } from "./fathom";
 
-describe("Goat Fathom persistence", () => {
+describe("Fathom persistence", () => {
   it("stores the connection-time cursor when the sync row is first created", async () => {
     const onConflictDoNothing = vi.fn(async () => undefined);
     const values = vi.fn(() => ({ onConflictDoNothing }));

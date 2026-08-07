@@ -58,7 +58,7 @@ export async function handleGoogleOAuthCallback(
   try {
     state = verifyGoogleIntegrationState(url.searchParams.get("state") ?? "");
   } catch (error) {
-    console.warn("Goat Google integration callback failed with invalid state.", {
+    console.warn("Google integration callback failed with invalid state.", {
       event: "goat.google_integration_callback_failed",
       reason: "invalid_state",
       provider,
@@ -68,7 +68,7 @@ export async function handleGoogleOAuthCallback(
   }
 
   if (state.provider !== provider || state.userWorkosId !== current.user.workosUserId) {
-    console.warn("Goat Google integration callback state did not match current session.", {
+    console.warn("Google integration callback state did not match current session.", {
       event: "goat.google_integration_callback_failed",
       reason: "state_session_mismatch",
       provider,
@@ -82,7 +82,7 @@ export async function handleGoogleOAuthCallback(
 
   const oauthError = url.searchParams.get("error");
   if (oauthError) {
-    console.warn("Goat Google integration OAuth returned an error.", {
+    console.warn("Google integration OAuth returned an error.", {
       event: "goat.google_integration_callback_failed",
       reason: "oauth_error",
       provider,
@@ -119,7 +119,7 @@ export async function handleGoogleOAuthCallback(
       new URL(appendGoogleIntegrationStatus(state.returnTo, provider, "connected"), url),
     );
   } catch (error) {
-    console.warn("Goat Google integration callback failed while connecting account.", {
+    console.warn("Google integration callback failed while connecting account.", {
       event: "goat.google_integration_callback_failed",
       reason: "connection_sync_failed",
       provider,

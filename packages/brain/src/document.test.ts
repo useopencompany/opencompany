@@ -167,12 +167,12 @@ Original timeline body.
   it("removes a leading duplicate title heading from compiled truth", () => {
     expect(
       normalizeBrainCompiledTruth(
-        "# Acme\n\nAcme evaluates Goat Brain.\n\n## Notes\nKeep this section.",
+        "# Acme\n\nAcme evaluates the Brain.\n\n## Notes\nKeep this section.",
         "Acme",
       ),
-    ).toBe("Acme evaluates Goat Brain.\n\n## Notes\nKeep this section.");
-    expect(normalizeBrainCompiledTruth("## **Acme**\n\nAcme evaluates Goat Brain.", "Acme")).toBe(
-      "Acme evaluates Goat Brain.",
+    ).toBe("Acme evaluates the Brain.\n\n## Notes\nKeep this section.");
+    expect(normalizeBrainCompiledTruth("## **Acme**\n\nAcme evaluates the Brain.", "Acme")).toBe(
+      "Acme evaluates the Brain.",
     );
     expect(normalizeBrainCompiledTruth("# Acme overview\n\nBody.", "Acme")).toBe(
       "# Acme overview\n\nBody.",
@@ -184,7 +184,7 @@ Original timeline body.
 title: Example
 ---
 
-This is a user-authored Markdown note, not a full Goat Brain document.`;
+This is a user-authored Markdown note, not a full Brain document.`;
 
     expect(normalizeBrainBody(markdown)).toBe(markdown);
   });

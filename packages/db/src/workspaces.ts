@@ -361,7 +361,7 @@ export async function createDefaultWorkspaceForUser(
     });
   } catch (error) {
     console.warn(
-      `Failed to grant the monthly Hobby allowance for Goat workspace goat_ws_${input.userWorkosId}.`,
+      `Failed to grant the monthly Hobby allowance for workspace goat_ws_${input.userWorkosId}.`,
       error,
     );
   }
@@ -428,7 +428,7 @@ export async function createWorkspaceForUser(
   ]);
   const workspace = workspaceRows[0];
   const brain = brainRows[0];
-  if (!workspace || !brain) throw new Error("Could not persist the Goat workspace.");
+  if (!workspace || !brain) throw new Error("Could not persist the workspace.");
 
   // Monthly-allowance writes are idempotent and deliberately non-blocking: a
   // billing outage must not turn a successfully created organization into a
@@ -445,7 +445,7 @@ export async function createWorkspaceForUser(
     });
   } catch (error) {
     console.warn(
-      `Failed to grant the monthly Hobby allowance for Goat workspace ${workspace.id}.`,
+      `Failed to grant the monthly Hobby allowance for workspace ${workspace.id}.`,
       error,
     );
   }

@@ -266,6 +266,6 @@ function safeEqual(left: string, right: string) {
 
 function requiredEnv(name: string) {
   const value = process.env[name]?.trim();
-  if (!value) throw new Error(`${name} is required for Goat Linear integration.`);
+  if (!value) throw new Error(`${name} is required for the Linear integration.`);
   return value;
 }

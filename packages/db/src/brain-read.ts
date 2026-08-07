@@ -21,7 +21,7 @@ import {
   brainTimelineEntries,
 } from "./schema";
 
-// Goat Brain read plane. Every DB-backed consumer (chat tool, MCP connector, HTTP surfaces)
+// Brain read plane. Every DB-backed consumer (chat tool, MCP connector, HTTP surfaces)
 // reads the brain through this module: indexed SQL over the projections that the write path
 // already maintains (search_tsv, name_text, brain_edges, brain_timeline_entries,
 // brain_document_embeddings) — no brain materialization, no CLI spawn, no LLM calls in the

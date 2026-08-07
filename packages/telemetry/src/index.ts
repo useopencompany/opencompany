@@ -7,6 +7,9 @@ import {
   trace,
 } from "@opentelemetry/api";
 
+// Telemetry contract: the service name, span/metric names, and "goat." attribute
+// keys below predate the goat→opencompany rename. SigNoz dashboards and alerts
+// key on these exact strings — never rename them.
 export const OBSERVABILITY_SERVICE_NAME = "opencompany-goat";
 export const OTEL_METRIC_EXPORT_INTERVAL_MS = 60_000;
 export const OTEL_TRACE_SAMPLE_RATE = 1;

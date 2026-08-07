@@ -76,7 +76,7 @@ export async function saveChatAttachmentsToBrain(input: {
   }
 
   triggerBrainIngestWake().catch((error) => {
-    console.warn("Goat chat attachment capture failed to wake the ingest worker.", {
+    console.warn("Chat attachment capture failed to wake the ingest worker.", {
       event: "goat.chat_attachment_capture_wake_failed",
       error: error instanceof Error ? error.message : String(error),
     });

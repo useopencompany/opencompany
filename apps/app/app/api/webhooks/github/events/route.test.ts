@@ -131,7 +131,7 @@ describe("POST /api/webhooks/github/events", () => {
       error: "Unable to process GitHub event.",
     });
     expect(console.error).toHaveBeenCalledWith(
-      "[goat-github] Failed to process GitHub event",
+      "[github] Failed to process GitHub event",
       expect.objectContaining({
         eventName: "pull_request",
         action: "opened",
@@ -142,7 +142,7 @@ describe("POST /api/webhooks/github/events", () => {
 });
 
 function githubRequest(eventName: string, payload: Record<string, unknown>) {
-  return new Request("https://goat.example.com/api/webhooks/github/events", {
+  return new Request("https://app.example.com/api/webhooks/github/events", {
     method: "POST",
     headers: {
       "content-type": "application/json",

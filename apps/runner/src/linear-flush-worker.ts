@@ -319,7 +319,7 @@ export function startLinearFlushWorker(options: { pollIntervalMs?: number } = {}
               integration_id: window.integrationId,
               issue_id: window.issueId,
             });
-            logger.error("Goat Linear window flush failed", {
+            logger.error("Linear window flush failed", {
               event: "opencompany.goat_linear_flush_failed",
               integration_id: window.integrationId,
               issue_id: window.issueId,
@@ -328,7 +328,7 @@ export function startLinearFlushWorker(options: { pollIntervalMs?: number } = {}
             return null;
           });
           if (flushed) {
-            logger.info("Goat Linear window flushed", {
+            logger.info("Linear window flushed", {
               event: "opencompany.goat_linear_window_flushed",
               integration_id: window.integrationId,
               issue_id: window.issueId,
@@ -341,7 +341,7 @@ export function startLinearFlushWorker(options: { pollIntervalMs?: number } = {}
         }
       } catch (error) {
         captureException(error, { event: "opencompany.goat_linear_flush_worker_failed" });
-        logger.error("Goat Linear flush worker failed", {
+        logger.error("Linear flush worker failed", {
           event: "opencompany.goat_linear_flush_worker_failed",
           error,
         });
@@ -403,7 +403,7 @@ async function loadLinearIntegrationContext(window: LinearDueWindow): Promise<{
           provider: "linear",
           kind: "oauth_token",
         }).catch((error) => {
-          logger.warn("Goat Linear credential load failed", {
+          logger.warn("Linear credential load failed", {
             event: "opencompany.goat_linear_credential_load_failed",
             integration_id: window.integrationId,
             error,

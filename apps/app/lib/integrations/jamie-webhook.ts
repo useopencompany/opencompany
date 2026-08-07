@@ -111,7 +111,7 @@ export async function handleJamieWebhookDelivery(input: {
 
   if (result.enqueued) {
     triggerBrainIngestWake().catch((error) => {
-      console.warn("[goat-jamie] Failed to wake Goat Brain ingest worker", {
+      console.warn("[jamie] Failed to wake the Brain ingest worker", {
         error: error instanceof Error ? error.message : String(error),
       });
     });

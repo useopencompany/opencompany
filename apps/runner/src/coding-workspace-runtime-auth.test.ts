@@ -9,7 +9,7 @@ import {
 const secret = "test-secret-at-least-long-enough";
 const codingSessionId = "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000";
 
-describe("Goat coding workspace tickets", () => {
+describe("Coding workspace tickets", () => {
   it("round-trips an owner-bound short-lived ticket", () => {
     const signed = createCodingWorkspaceTicket({
       codingSessionId,
@@ -41,7 +41,7 @@ describe("Goat coding workspace tickets", () => {
   });
 });
 
-describe("Goat coding workspace preview capabilities", () => {
+describe("Coding workspace preview capabilities", () => {
   it("fits in one DNS label and round-trips the session, port, and expiry", () => {
     const signed = createCodingWorkspacePreviewCapability({
       codingSessionId,

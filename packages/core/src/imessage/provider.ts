@@ -18,7 +18,7 @@ export function isImessageKilled(): boolean {
 const logProvider: ImessageProvider = {
   name: "log",
   send: async ({ to, text }) => {
-    console.log(`[goat-imessage] log provider: would send to ${to}: ${text}`);
+    console.log(`[imessage] log provider: would send to ${to}: ${text}`);
     return { ok: true, providerMessageId: null };
   },
 };

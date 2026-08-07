@@ -68,7 +68,7 @@ function params(sessionId: string) {
 }
 
 function stopRequest() {
-  return new Request("https://goat.test/api/chat/session_1/stop", { method: "POST" });
+  return new Request("https://app.test/api/chat/session_1/stop", { method: "POST" });
 }
 
 function mockFindOpenSession(session: { id: string } | null) {

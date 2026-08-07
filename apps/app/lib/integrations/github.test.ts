@@ -68,7 +68,7 @@ beforeEach(() => {
   vi.stubEnv("GITHUB_INTEGRATION_STATE_SECRET", "test-state-secret");
   vi.stubEnv("GITHUB_INTEGRATION_APP_ID", "12345");
   vi.stubEnv("GITHUB_INTEGRATION_APP_PRIVATE_KEY", TEST_PRIVATE_KEY);
-  vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://goat.example.com");
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
 });
 
 afterEach(() => {
@@ -76,8 +76,8 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("Goat GitHub integration", () => {
-  it("round-trips signed state for a Goat user", () => {
+describe("GitHub integration", () => {
+  it("round-trips signed state for a user", () => {
     const state = createGitHubIntegrationState({
       userWorkosId: "user_123",
       workspaceId: "gws_123",
@@ -163,7 +163,7 @@ describe("Goat GitHub integration", () => {
     expect((error as Error).message).not.toContain("sensitive provider payload");
   });
 
-  it("syncs repositories into Goat integration resources", async () => {
+  it("syncs repositories into integration resources", async () => {
     await syncGitHubIntegrationRepositories({
       userWorkosId: "user_123",
       workspaceId: "gws_123",

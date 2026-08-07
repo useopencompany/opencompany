@@ -359,7 +359,7 @@ export async function runOpenCompanyChatAgent(input: {
 }): Promise<OpenCompanyChatAgentResult> {
   const gatewayApiKey = input.gatewayApiKey.trim();
   if (!gatewayApiKey) {
-    throw new Error("VERCEL_AI_GATEWAY_API_KEY is required for Goat chat.");
+    throw new Error("VERCEL_AI_GATEWAY_API_KEY is required for chat.");
   }
 
   const generate = input.generateTextImpl ?? generateText;

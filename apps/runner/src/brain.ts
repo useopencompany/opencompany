@@ -67,9 +67,9 @@ export async function createBrainMarkdownReportForTask(input: {
   markdown: string;
 }): Promise<BrainMarkdownReportArtifact> {
   const body = input.markdown.trim();
-  if (!body) throw new Error("Cannot save an empty Goat research report.");
+  if (!body) throw new Error("Cannot save an empty research report.");
   if (Buffer.byteLength(body, "utf8") > MAX_BRAIN_MARKDOWN_DOCUMENT_BYTES) {
-    throw new Error("Goat research report is too large to save to the Brain.");
+    throw new Error("Research report is too large to save to the Brain.");
   }
 
   const title = firstMarkdownHeading(body) || input.title.trim() || "Research report";
@@ -137,7 +137,7 @@ export async function createBrainMarkdownReportForTask(input: {
       brainTimelineEntryFromParts({
         evidenceId,
         at: now,
-        summary: `Created from Goat task ${input.taskId}.`,
+        summary: `Created from task ${input.taskId}.`,
         sourceRef: `goat-task:${input.taskId}`,
         sourceTitle: `Task ${input.taskId}`,
       }),
@@ -145,7 +145,7 @@ export async function createBrainMarkdownReportForTask(input: {
   };
   const content = serializeBrainDocument(doc);
   if (Buffer.byteLength(content, "utf8") > MAX_BRAIN_MARKDOWN_DOCUMENT_BYTES) {
-    throw new Error("Goat research report is too large to save to the Brain.");
+    throw new Error("Research report is too large to save to the Brain.");
   }
   const row = await upsertBrainFile(
     {
@@ -353,7 +353,7 @@ function dbMaterializedFileFromRunner(input: MaterializedBrainFile): DbMateriali
 async function resolveBrainRefForUser(userWorkosId: string): Promise<string> {
   const brain = await getDefaultBrainForUser(userWorkosId, { db: getDb() });
   if (!brain) {
-    throw new Error(`No accessible Goat brain found for user ${userWorkosId}.`);
+    throw new Error(`No accessible brain found for user ${userWorkosId}.`);
   }
   return brain.id;
 }

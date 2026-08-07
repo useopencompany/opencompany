@@ -40,10 +40,10 @@ import {
 } from "@/lib/brain-tools";
 import type { BrainToolInput } from "@/lib/chat-ui";
 
-// Tool registration for the user-level Goat MCP connector: one surface spanning
+// Tool registration for the user-level MCP connector: one surface spanning
 // every brain the token's user can access, addressed via an optional `brain`
 // argument plus a `list_brains` tool. Reads are available to every brain member;
-// captures preserve the same workspace-admin boundary as Goat chat writes.
+// captures preserve the same workspace-admin boundary as chat writes.
 //
 // The everyday surface is a small set of flat, intent-named tools (search_brain,
 // get_document, list_documents, get_timeline) whose parameters match what an agent

@@ -31,7 +31,7 @@ describe("GET /api/brain-activity/source-items", () => {
 
     const response = await GET(
       new Request(
-        "https://goat.test/api/brain-activity/source-items?brain_ref=goat_brain_1&source_item_ids=gbsrc_1,gbsrc_1",
+        "https://app.test/api/brain-activity/source-items?brain_ref=goat_brain_1&source_item_ids=gbsrc_1,gbsrc_1",
       ),
     );
 
@@ -59,7 +59,7 @@ describe("GET /api/brain-activity/source-items", () => {
 
     const response = await GET(
       new Request(
-        "https://goat.test/api/brain-activity/source-items?brain_ref=goat_brain_1&source_item_ids=gbsrc_1",
+        "https://app.test/api/brain-activity/source-items?brain_ref=goat_brain_1&source_item_ids=gbsrc_1",
       ),
     );
 

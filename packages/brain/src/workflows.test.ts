@@ -39,7 +39,7 @@ function workflowDocument(
   );
 }
 
-describe("Goat Brain workflows", () => {
+describe("Brain workflows", () => {
   it("recognizes the workflows folder and its subfolders", () => {
     expect(isBrainWorkflowFolder("workflows")).toBe(true);
     expect(isBrainWorkflowFolder("workflows/reporting")).toBe(true);

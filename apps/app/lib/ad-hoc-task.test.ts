@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { descriptionFromAdHocTaskPrompt, hasAdHocTaskToken } from "@/lib/ad-hoc-task";
 
-describe("Goat ad-hoc task mention", () => {
+describe("Ad-hoc task mention", () => {
   it("recognizes the reserved token at a word boundary", () => {
     expect(hasAdHocTaskToken("#task research the market")).toBe(true);
     expect(hasAdHocTaskToken("Please #TASK research the market")).toBe(true);

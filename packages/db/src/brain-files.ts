@@ -408,7 +408,7 @@ export async function createBrainFolderRow(
     })
     .returning();
   const row = rows[0];
-  if (!row) throw new Error("Failed to create Goat Brain folder.");
+  if (!row) throw new Error("Failed to create Brain folder.");
   return row;
 }
 
@@ -593,7 +593,7 @@ export async function upsertBrainFile(
       })
       .returning();
     const row = rows[0];
-    if (!row) throw new Error("Failed to upsert Goat brain document.");
+    if (!row) throw new Error("Failed to upsert brain document.");
     await replaceDerivedRows(tx, input.userWorkosId, row, projection);
     return row;
   });
@@ -680,7 +680,7 @@ export async function updateBrainFileContent(
       .where(and(eq(brainDocuments.brainRef, input.brainRef), eq(brainDocuments.id, input.fileId)))
       .returning();
     const row = rows[0];
-    if (!row) throw new Error("Failed to update Goat brain document.");
+    if (!row) throw new Error("Failed to update brain document.");
     await replaceDerivedRows(tx, input.userWorkosId, row, projection);
     return row;
   });
@@ -714,7 +714,7 @@ export async function moveBrainFile(
       .where(and(eq(brainDocuments.brainRef, input.brainRef), eq(brainDocuments.id, input.fileId)))
       .returning();
     const row = rows[0];
-    if (!row) throw new Error("Failed to move Goat brain document.");
+    if (!row) throw new Error("Failed to move brain document.");
     await replaceDerivedRows(tx, input.userWorkosId, row, projection);
     return row;
   });
@@ -756,7 +756,7 @@ async function deleteBrainAssetBlob(storageKey: string): Promise<void> {
     const { del } = await import("@vercel/blob");
     await del(storageKey);
   } catch (error) {
-    console.warn(`Failed to delete Goat brain asset blob "${storageKey}":`, error);
+    console.warn(`Failed to delete brain asset blob "${storageKey}":`, error);
   }
 }
 
@@ -823,7 +823,7 @@ export async function createBrainAssetDocument(
       })
       .returning();
     const row = rows[0];
-    if (!row) throw new Error("Failed to create Goat brain asset document.");
+    if (!row) throw new Error("Failed to create brain asset document.");
     await replaceDerivedRows(tx, input.userWorkosId, row, projection);
     return row;
   });
@@ -893,7 +893,7 @@ export async function replaceBrainAssetFile(
     .where(and(eq(brainDocuments.brainRef, input.brainRef), eq(brainDocuments.id, input.fileId)))
     .returning();
   const row = rows[0];
-  if (!row) throw new Error("Failed to replace Goat brain asset file.");
+  if (!row) throw new Error("Failed to replace brain asset file.");
   if (existing.assetStorageKey && existing.assetStorageKey !== input.assetStorageKey) {
     await deleteBrainAssetBlob(existing.assetStorageKey);
   }

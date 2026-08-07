@@ -58,7 +58,7 @@ vi.mock("@opencompany/core/integrations/analytics", () => ({
 }));
 
 vi.mock("@opencompany/core/app-url", () => ({
-  getAppUrl: () => "https://goat.example",
+  getAppUrl: () => "https://app.example",
 }));
 
 vi.mock("@ai-sdk/mcp", () => ({
@@ -74,7 +74,7 @@ vi.mock("@ai-sdk/mcp", () => ({
   }),
 }));
 
-describe("Goat remote MCP OAuth", () => {
+describe("Remote MCP OAuth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("MCP_OAUTH_STATE_SECRET", "test-state-secret");
@@ -102,10 +102,10 @@ describe("Goat remote MCP OAuth", () => {
       }),
     );
     expect(vi.mocked(auth).mock.calls[0]?.[1]).not.toHaveProperty("scope");
-    expect(observed.callbackUrl).toBe("https://goat.example/api/integrations/latitude/callback");
+    expect(observed.callbackUrl).toBe("https://app.example/api/integrations/latitude/callback");
     expect(observed.clientMetadata).toMatchObject({
-      client_name: "OpenCompany Goat",
-      redirect_uris: ["https://goat.example/api/integrations/latitude/callback"],
+      client_name: "opencompany",
+      redirect_uris: ["https://app.example/api/integrations/latitude/callback"],
       grant_types: ["authorization_code", "refresh_token"],
     });
     expect(saveIntegrationCredential).toHaveBeenCalledWith(
@@ -145,7 +145,7 @@ describe("Goat remote MCP OAuth", () => {
     expect(observed.clientMetadata).toMatchObject({ scope: "read write" });
   });
 
-  it("connects PostHog with only the analytics scopes and tools Goat exposes", async () => {
+  it("connects PostHog with only the analytics scopes and tools opencompany exposes", async () => {
     await startPostHogMcpOAuth({
       userWorkosId: "user_1",
       returnTo: "/settings/integrations",
@@ -161,7 +161,7 @@ describe("Goat remote MCP OAuth", () => {
     expect(serverUrl).toContain("dashboards-get-all");
     expect(serverUrl).toContain("insight-create");
     expect(serverUrl).not.toContain("feature-flag");
-    expect(observed.callbackUrl).toBe("https://goat.example/api/integrations/posthog/callback");
+    expect(observed.callbackUrl).toBe("https://app.example/api/integrations/posthog/callback");
     expect(observed.clientMetadata).toMatchObject({
       scope:
         "dashboard:read insight:read query:read event_definition:read property_definition:read insight:write",
@@ -186,7 +186,7 @@ describe("Goat remote MCP OAuth", () => {
           "https://mcp.neon.tech/mcp?readonly=true&category=projects&category=branches&category=schema&category=querying",
       }),
     );
-    expect(observed.callbackUrl).toBe("https://goat.example/api/integrations/neon/callback");
+    expect(observed.callbackUrl).toBe("https://app.example/api/integrations/neon/callback");
     expect(observed.clientMetadata).toMatchObject({ scope: "read" });
     expect(verifyNeonMcpState(observed.state)).toMatchObject({
       provider: "neon",
@@ -244,7 +244,7 @@ describe("Goat remote MCP OAuth", () => {
         integrationId: "gint_linear",
         provider: "linear",
         status: "needs_reauth",
-        statusReason: "Linear needs to be reconnected before Goat can use it.",
+        statusReason: "Linear needs to be reconnected before opencompany can use it.",
       }),
     );
   });

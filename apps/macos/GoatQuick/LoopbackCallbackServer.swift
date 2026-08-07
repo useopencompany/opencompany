@@ -126,7 +126,7 @@ final class LoopbackCallbackServer: @unchecked Sendable {
       sendResponse(
         on: connection,
         status: "200 OK",
-        message: "You are signed in to Goat Quick. You can close this tab."
+        message: "You are signed in to opencompany Quick. You can close this tab."
       )
       finish(.success(callback))
     }
@@ -139,9 +139,9 @@ final class LoopbackCallbackServer: @unchecked Sendable {
       .replacingOccurrences(of: "<", with: "&lt;")
       .replacingOccurrences(of: ">", with: "&gt;")
     let body = """
-      <!doctype html><html><head><meta charset="utf-8"><title>Goat Quick</title></head>
+      <!doctype html><html><head><meta charset="utf-8"><title>opencompany Quick</title></head>
       <body style="font:16px -apple-system;padding:48px;background:#f7f7f5;color:#171915">
-      <h1 style="font-size:22px">Goat Quick</h1><p>\(escapedMessage)</p></body></html>
+      <h1 style="font-size:22px">opencompany Quick</h1><p>\(escapedMessage)</p></body></html>
       """
     let response = """
       HTTP/1.1 \(status)\r

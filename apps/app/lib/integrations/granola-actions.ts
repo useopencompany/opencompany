@@ -32,7 +32,7 @@ export async function saveGranolaApiKeyAction(apiKey: string): Promise<GranolaCo
     revalidatePath("/", "layout");
     return { ok: true, state: await getGranolaIntegrationState(user.workosUserId) };
   } catch (error) {
-    console.error("[goat-granola] Failed to save Granola API key", error);
+    console.error("[granola] Failed to save Granola API key", error);
     return {
       ok: false,
       error: "Could not save the Granola API key.",

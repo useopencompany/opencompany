@@ -7,7 +7,7 @@ const TIMER_TICK_MS = 100;
 
 export function ThinkingIndicator({
   startedAtMs,
-  label = "Goat is working",
+  label = "opencompany is working",
 }: {
   startedAtMs: number;
   label?: string;

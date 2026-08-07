@@ -32,7 +32,7 @@ describe("GET /api/billing/reconcile", () => {
   });
 
   it("rejects requests without the cron bearer secret", async () => {
-    const response = await GET(new Request("https://goat.test/api/billing/reconcile"));
+    const response = await GET(new Request("https://app.test/api/billing/reconcile"));
     expect(response.status).toBe(401);
     expect(releasePendingIngestionReservations).not.toHaveBeenCalled();
     expect(refreshMonthlyIncludedUsage).not.toHaveBeenCalled();
@@ -68,7 +68,7 @@ describe("GET /api/billing/reconcile", () => {
       wallet: null,
     });
     const response = await GET(
-      new Request("https://goat.test/api/billing/reconcile", {
+      new Request("https://app.test/api/billing/reconcile", {
         headers: { authorization: "Bearer cron-secret" },
       }),
     );

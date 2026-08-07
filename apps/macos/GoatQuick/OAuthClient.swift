@@ -306,15 +306,15 @@ enum OAuthError: LocalizedError {
     case .couldNotOpenBrowser:
       "Could not open the browser for sign-in."
     case .discoveryFailed:
-      "Could not load the Goat authentication configuration."
+      "Could not load the opencompany authentication configuration."
     case .invalidResponse:
       "The authentication server returned an invalid response."
     case .missingCode:
       "The authentication callback did not include a code."
     case .missingRefreshToken:
-      "Goat did not return a refresh token."
+      "opencompany did not return a refresh token."
     case .reauthenticationRequired, .signInRequired:
-      "Sign in to Goat Quick again."
+      "Sign in to opencompany Quick again."
     case .stateMismatch:
       "The authentication callback could not be verified."
     case .tokenRequestFailed(let message):

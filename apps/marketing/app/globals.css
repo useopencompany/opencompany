@@ -21,7 +21,7 @@
  * The flip lives in the last ~16% of the cycle so it reads as an occasional
  * flourish rather than constant motion.
  */
-@keyframes goat-mark-spin {
+@keyframes brand-mark-spin {
   0%,
   84% {
     transform: perspective(200px) rotateY(0);
@@ -31,13 +31,13 @@
   }
 }
 
-.animate-goat-mark-spin {
+.animate-brand-mark-spin {
   transform-origin: 50% 50%;
-  animation: goat-mark-spin 5s ease-in-out infinite;
+  animation: brand-mark-spin 5s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-goat-mark-spin {
+  .animate-brand-mark-spin {
     animation: none;
   }
 }

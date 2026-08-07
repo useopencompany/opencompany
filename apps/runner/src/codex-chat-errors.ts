@@ -10,7 +10,7 @@ export class CodexChatLeaseLostError extends Error {
 // it immediately instead of leaving it running until lease expiry.
 export class TaskTurnTerminalError extends Error {
   constructor() {
-    super("Goat task is already terminal.");
+    super("Task is already terminal.");
     this.name = "TaskTurnTerminalError";
   }
 }

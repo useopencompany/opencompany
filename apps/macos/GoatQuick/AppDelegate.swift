@@ -25,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       }
     } catch {
       let alert = NSAlert()
-      alert.messageText = "Goat Quick shortcut unavailable"
+      alert.messageText = "opencompany Quick shortcut unavailable"
       alert.informativeText = error.localizedDescription
       alert.runModal()
     }
@@ -35,16 +35,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     statusItem.button?.image = NSImage(
       systemSymbolName: "bolt.circle.fill",
-      accessibilityDescription: "Goat Quick"
+      accessibilityDescription: "opencompany Quick"
     )
     let menu = NSMenu()
-    menu.addItem(withTitle: "Open Goat Quick", action: #selector(openPanel), keyEquivalent: "")
+    menu.addItem(withTitle: "Open opencompany Quick", action: #selector(openPanel), keyEquivalent: "")
     menu.addItem(.separator())
     let signInItem = NSMenuItem(
       title: "Sign in", action: #selector(toggleSignIn), keyEquivalent: "")
     menu.addItem(signInItem)
     menu.addItem(.separator())
-    menu.addItem(withTitle: "Quit Goat Quick", action: #selector(quit), keyEquivalent: "q")
+    menu.addItem(withTitle: "Quit opencompany Quick", action: #selector(quit), keyEquivalent: "q")
     for item in menu.items { item.target = self }
     statusItem.menu = menu
     self.statusItem = statusItem

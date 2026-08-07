@@ -7,7 +7,7 @@ const context = {
   codexChatSessionId: "codex_session_1",
   codexChatTurnId: "codex_turn_1",
   env: {
-    appUrl: "https://goat.example.com",
+    appUrl: "https://app.example.com",
     internalToken: "internal-secret",
   },
   checkAbort: vi.fn(async () => undefined),
@@ -47,7 +47,7 @@ describe("createCodexBrainCaptureDynamicTool", () => {
 
     expect(output.success).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
-      new URL("https://goat.example.com/api/internal/codex-brain-capture"),
+      new URL("https://app.example.com/api/internal/codex-brain-capture"),
       expect.objectContaining({
         method: "POST",
         headers: {

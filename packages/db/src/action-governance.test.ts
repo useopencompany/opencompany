@@ -13,7 +13,7 @@ const turn = {
   policy: "cloudReadOnly" as const,
 };
 
-describe("Goat action turn governance", () => {
+describe("Action turn governance", () => {
   it("classifies a repeated invocation without incrementing or redispatching it", async () => {
     const db = governanceDb({
       updates: [[]],

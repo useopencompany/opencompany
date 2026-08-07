@@ -228,7 +228,7 @@ export async function flushLatitude(): Promise<void> {
   try {
     await client.flush();
   } catch (error) {
-    console.warn("[goat-observability] Latitude telemetry flush failed.", error);
+    console.warn("[telemetry] Latitude telemetry flush failed.", error);
   }
 }
 
@@ -259,7 +259,7 @@ function getLatitudeClient(): Latitude | null {
     };
   } catch (error) {
     console.warn(
-      "[goat-observability] Latitude telemetry init failed; continuing without it.",
+      "[telemetry] Latitude telemetry init failed; continuing without it.",
       error,
     );
     cached = { client: null };

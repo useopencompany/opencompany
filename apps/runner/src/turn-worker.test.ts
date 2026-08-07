@@ -188,7 +188,7 @@ describe("codexChatLeaseTtlMs", () => {
   });
 });
 
-describe("Goat Codex chat worker shutdown", () => {
+describe("Codex chat worker shutdown", () => {
   it("reclaims an interrupted silent turn and then runs the queued successor", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-10T09:00:00.000Z"));
@@ -388,7 +388,7 @@ describe("Goat Codex chat worker shutdown", () => {
   });
 });
 
-describe("terminal Goat Codex sandbox reconciliation", () => {
+describe("terminal Codex sandbox reconciliation", () => {
   it("parks a terminal sandbox left active by a hard runner stop", async () => {
     vi.clearAllMocks();
     dbMock.execute

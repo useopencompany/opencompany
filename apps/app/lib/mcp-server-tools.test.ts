@@ -71,7 +71,7 @@ function lastToolInput() {
   return calls.at(-1)?.[0]?.toolInput;
 }
 
-describe("Goat MCP tools", () => {
+describe("MCP tools", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     workspacesMock.listAccessibleBrainsForUser.mockResolvedValue([general]);

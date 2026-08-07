@@ -8,7 +8,7 @@ import {
   parseAttioBrainSourceConfig,
 } from "./attio";
 
-describe("Goat Attio brain source config", () => {
+describe("Attio brain source config", () => {
   it("uses creation and notes as the safe default event selection", () => {
     const config = parseAttioBrainSourceConfig({
       objectTypes: [{ id: "deal" }],

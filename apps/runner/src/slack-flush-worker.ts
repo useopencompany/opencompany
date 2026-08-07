@@ -277,7 +277,7 @@ export function startSlackFlushWorker(options: { pollIntervalMs?: number } = {})
               integration_id: window.integrationId,
               channel_id: window.channelId,
             });
-            logger.error("Goat Slack window flush failed", {
+            logger.error("Slack window flush failed", {
               event: "opencompany.goat_slack_flush_failed",
               integration_id: window.integrationId,
               channel_id: window.channelId,
@@ -286,7 +286,7 @@ export function startSlackFlushWorker(options: { pollIntervalMs?: number } = {})
             return null;
           });
           if (flushed) {
-            logger.info("Goat Slack window flushed", {
+            logger.info("Slack window flushed", {
               event: "opencompany.goat_slack_window_flushed",
               integration_id: window.integrationId,
               channel_id: window.channelId,
@@ -298,7 +298,7 @@ export function startSlackFlushWorker(options: { pollIntervalMs?: number } = {})
         }
       } catch (error) {
         captureException(error, { event: "opencompany.goat_slack_flush_worker_failed" });
-        logger.error("Goat Slack flush worker failed", {
+        logger.error("Slack flush worker failed", {
           event: "opencompany.goat_slack_flush_worker_failed",
           error,
         });
@@ -338,7 +338,7 @@ async function loadSlackIntegrationContext(window: SlackDueWindow): Promise<{
           provider: "slack",
           kind: "oauth_token",
         }).catch((error) => {
-          logger.warn("Goat Slack credential load failed", {
+          logger.warn("Slack credential load failed", {
             event: "opencompany.goat_slack_credential_load_failed",
             integration_id: window.integrationId,
             error,

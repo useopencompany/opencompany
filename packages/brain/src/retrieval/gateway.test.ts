@@ -7,7 +7,7 @@ describe("goat brain retrieval gateway", () => {
     const gateway = createGateway({
       apiKey: "test",
       reporting: {
-        user: "goat-user",
+        user: "user-1",
         tags: ["app:goat", "feature:brain-query"],
       },
       fetch: async (url, init) => {
@@ -25,7 +25,7 @@ describe("goat brain retrieval gateway", () => {
 
     expect(requests).toHaveLength(2);
     for (const request of requests) {
-      expect(request.headers.get("ai-reporting-user")).toBe("goat-user");
+      expect(request.headers.get("ai-reporting-user")).toBe("user-1");
       expect(request.headers.get("ai-reporting-tags")).toBe("app:goat,feature:brain-query");
     }
   });

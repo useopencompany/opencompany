@@ -351,13 +351,13 @@ describe("ChatSurface chat streaming UI", () => {
       <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
-    await user.type(textarea, "Hello Goat");
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    await user.type(textarea, "Hello opencompany");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Hello Goat" });
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Hello opencompany" });
     expect(textarea).toHaveValue("");
-    expect(await screen.findAllByText("Hello Goat")).toHaveLength(2);
+    expect(await screen.findAllByText("Hello opencompany")).toHaveLength(2);
   });
 
   it("starts a background chat from the main composer when the message starts with ampersand", async () => {
@@ -395,7 +395,7 @@ describe("ChatSurface chat streaming UI", () => {
       </>,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     await user.type(textarea, "& Research Q3");
     expect(screen.getByTestId("background-chat-hint")).toHaveTextContent(
       "Sending starts this as a new chat in the background.",
@@ -687,7 +687,7 @@ describe("ChatSurface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     await user.type(textarea, "Draft before mic");
     await user.click(screen.getByRole("button", { name: "Start voice dictation" }));
 
@@ -717,7 +717,7 @@ describe("ChatSurface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     await user.type(textarea, "Please");
     await user.click(screen.getByRole("button", { name: "Start voice dictation" }));
 
@@ -1132,7 +1132,7 @@ describe("ChatSurface chat streaming UI", () => {
     const user = userEvent.setup();
     render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start now");
+    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start now");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     const optimisticHref = historyMock.replaceState.mock.calls[0]?.[2];
@@ -1154,7 +1154,7 @@ describe("ChatSurface chat streaming UI", () => {
     const user = userEvent.setup();
     render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     await user.type(textarea, "Start now");
     await user.keyboard("{Shift>}{Enter}{/Shift}");
 
@@ -1170,7 +1170,7 @@ describe("ChatSurface chat streaming UI", () => {
     chatMock.sendError = new Error("network failed");
     render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Try again");
+    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Try again");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Try again"));
@@ -1211,7 +1211,7 @@ describe("ChatSurface chat streaming UI", () => {
     await user.type(screen.getByPlaceholderText("Reply..."), "Unsent draft");
     act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
 
-    const composer = screen.getByPlaceholderText("Ask Goat anything...");
+    const composer = screen.getByPlaceholderText("Ask opencompany anything...");
     expect(composer).toHaveValue("");
     expect(composer).toHaveFocus();
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
@@ -1318,12 +1318,12 @@ describe("ChatSurface chat streaming UI", () => {
     const user = userEvent.setup();
     render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start");
+    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start");
     await user.click(screen.getByRole("button", { name: "Send message" }));
     act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
     act(() => chatMock.finishWithSessionId?.("goat_chat_returned_late"));
 
-    expect(screen.getByPlaceholderText("Ask Goat anything...")).toHaveFocus();
+    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveFocus();
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
     expect(historyMock.replaceState).toHaveBeenCalledTimes(1);
     expect(routerMock.replace).not.toHaveBeenCalled();
@@ -1371,7 +1371,7 @@ describe("ChatSurface chat streaming UI", () => {
     const user = userEvent.setup();
     render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     await user.type(textarea, "@codex inspect this long prompt");
     expect(textarea).toHaveClass("text-ink");
     expect(textarea).not.toHaveClass("text-transparent");
@@ -1397,7 +1397,7 @@ describe("ChatSurface chat streaming UI", () => {
     expect(screen.queryByText("Local Codex")).not.toBeInTheDocument();
 
     await user.click(screen.getByText("Claude Opus 4.8"));
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Compare");
+    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Compare");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
@@ -1425,7 +1425,7 @@ describe("ChatSurface chat streaming UI", () => {
     await user.click(screen.getByText("Picks once from your first message"));
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Auto");
 
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "What is 2 + 2?");
+    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "What is 2 + 2?");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({ model: "auto" });
@@ -1450,7 +1450,7 @@ describe("ChatSurface chat streaming UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Claude Sonnet 5"));
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Use Sonnet");
+    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Use Sonnet");
     await user.click(screen.getByRole("button", { name: "Send message" }));
     act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
 
@@ -1475,7 +1475,7 @@ describe("ChatSurface chat streaming UI", () => {
       />,
     );
 
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start with Kimi");
+    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start with Kimi");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     const modelPicker = screen.getByRole("button", { name: "Model" });
@@ -1595,7 +1595,7 @@ describe("ChatSurface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Cloud Codex sandbox"));
     expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Sol" })).toBeInTheDocument();
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Clone my repo");
+    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Clone my repo");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
@@ -1670,7 +1670,7 @@ describe("ChatSurface chat streaming UI", () => {
     await user.click(
       screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
     );
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Inspect this repository");
+    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Inspect this repository");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
@@ -1729,7 +1729,7 @@ describe("ChatSurface chat streaming UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Cloud Codex sandbox"));
-    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     await user.type(textarea, "@skill/coding");
     await user.click(await screen.findByRole("option", { name: /coding work/i }));
     await user.type(textarea, "implement this");
@@ -1874,7 +1874,7 @@ describe("ChatSurface chat streaming UI", () => {
     await user.click(screen.getByRole("checkbox", { name: "Goal mode" }));
     await user.type(screen.getByPlaceholderText("Objective"), "Fix the flaky tests");
     await user.type(screen.getByPlaceholderText("Token budget"), "200000");
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Run the failing suite");
+    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Run the failing suite");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
@@ -2242,7 +2242,7 @@ describe("ChatSurface chat streaming UI", () => {
       <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     await user.type(textarea, "First message");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -2296,7 +2296,7 @@ describe("ChatSurface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
     await user.type(textarea, "@");
 
@@ -2307,7 +2307,7 @@ describe("ChatSurface chat streaming UI", () => {
     const overlay = textarea.parentElement?.querySelector(
       '[data-testid="composer-mention-overlay"]',
     );
-    expect(overlay?.querySelectorAll('[data-goat-chat-mention="engine"]')).toHaveLength(1);
+    expect(overlay?.querySelectorAll('[data-chat-mention="engine"]')).toHaveLength(1);
     expect(overlay).toHaveTextContent("@codex");
     expect(textarea).toHaveClass("text-transparent");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
@@ -2369,7 +2369,7 @@ describe("ChatSurface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
     await user.type(textarea, "@");
 
@@ -2380,7 +2380,7 @@ describe("ChatSurface chat streaming UI", () => {
     const overlay = textarea.parentElement?.querySelector(
       '[data-testid="composer-mention-overlay"]',
     );
-    expect(overlay?.querySelectorAll('[data-goat-chat-mention="engine"]')).toHaveLength(1);
+    expect(overlay?.querySelectorAll('[data-chat-mention="engine"]')).toHaveLength(1);
     expect(overlay).toHaveTextContent("@claude");
     expect(textarea).toHaveClass("text-transparent");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Claude Code");
@@ -2472,7 +2472,7 @@ describe("ChatSurface chat streaming UI", () => {
     const overlay = textarea.parentElement?.querySelector(
       '[data-testid="composer-mention-overlay"]',
     );
-    expect(overlay?.querySelectorAll('[data-goat-chat-mention="workflow"]')).toHaveLength(1);
+    expect(overlay?.querySelectorAll('[data-chat-mention="workflow"]')).toHaveLength(1);
     expect(overlay).toHaveTextContent("#morning-test");
     expect(textarea).toHaveClass("text-transparent");
     await user.type(textarea, "run today's checks");
@@ -2778,7 +2778,7 @@ describe("ChatSurface chat streaming UI", () => {
       />,
     );
 
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "#morning");
+    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "#morning");
     await waitFor(() =>
       expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/skills")).toBe(true),
     );
@@ -2793,7 +2793,7 @@ describe("ChatSurface chat streaming UI", () => {
 
     render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     await user.type(textarea, "@");
 
     expect(screen.queryByRole("listbox", { name: "Mention menu" })).not.toBeInTheDocument();
@@ -2806,7 +2806,7 @@ describe("ChatSurface chat streaming UI", () => {
       <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     await user.type(textarea, "@codex check repo access");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -2822,7 +2822,7 @@ describe("ChatSurface chat streaming UI", () => {
       <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     await user.type(textarea, "@");
     await user.click(screen.getByRole("option", { name: /@codex/i }));
     await user.clear(textarea);
@@ -2867,7 +2867,7 @@ describe("ChatSurface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     await user.type(textarea, "@verification");
     const codingOption = await screen.findByRole("option", { name: /coding work/i });
     await user.click(codingOption);
@@ -2878,7 +2878,7 @@ describe("ChatSurface chat streaming UI", () => {
     const overlay = textarea.parentElement?.querySelector(
       '[data-testid="composer-mention-overlay"]',
     );
-    expect(overlay?.querySelectorAll('[data-goat-chat-mention="skill"]')).toHaveLength(2);
+    expect(overlay?.querySelectorAll('[data-chat-mention="skill"]')).toHaveLength(2);
     expect(overlay).toHaveTextContent("@skill/coding-work then @skill/writing-work");
     expect(textarea).toHaveClass("text-transparent");
 
@@ -2887,7 +2887,7 @@ describe("ChatSurface chat streaming UI", () => {
     const reconciledOverlay = textarea.parentElement?.querySelector(
       '[data-testid="composer-mention-overlay"]',
     );
-    expect(reconciledOverlay?.querySelectorAll('[data-goat-chat-mention="skill"]')).toHaveLength(1);
+    expect(reconciledOverlay?.querySelectorAll('[data-chat-mention="skill"]')).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({
@@ -2931,7 +2931,7 @@ describe("ChatSurface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     const pastedText =
       "@skill/product-feature use @skill/add-integration-to-main-chat to add attio";
     fireEvent.paste(textarea, {
@@ -2991,7 +2991,7 @@ describe("ChatSurface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     await user.type(textarea, "@coding");
     await waitFor(() => expect(catalogCalls).toBe(1));
     expect(screen.queryByRole("option", { name: /coding work/i })).not.toBeInTheDocument();
@@ -3007,10 +3007,10 @@ describe("ChatSurface chat streaming UI", () => {
 
     render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Hello Goat");
+    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Hello opencompany");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(await screen.findAllByText("Hello Goat")).toHaveLength(2);
+    expect(await screen.findAllByText("Hello opencompany")).toHaveLength(2);
     expect(screen.queryByText("No results yet.")).not.toBeInTheDocument();
   });
 
@@ -3457,7 +3457,7 @@ describe("ChatSurface chat streaming UI", () => {
     );
     await user.click(within(dialog).getByRole("option", { name: 'Start new chat: "Research Q3"' }));
     const quickComposerInput = screen.getByPlaceholderText(
-      "Ask Goat anything, or describe a task...",
+      "Ask opencompany anything, or describe a task...",
     );
     expect(quickComposerInput).toHaveValue("Research Q3");
     // Same controls as the main composer: model picker, attach button, submit button.
@@ -3490,7 +3490,7 @@ describe("ChatSurface chat streaming UI", () => {
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
     expect(routerMock.push).not.toHaveBeenCalled();
     expect(
-      screen.queryByPlaceholderText("Ask Goat anything, or describe a task..."),
+      screen.queryByPlaceholderText("Ask opencompany anything, or describe a task..."),
     ).not.toBeInTheDocument();
     // Never navigates away from the home screen it was opened on.
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
@@ -3535,7 +3535,7 @@ describe("ChatSurface chat streaming UI", () => {
     const dialog = screen.getByRole("dialog");
     await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     const quickComposerInput = screen.getByPlaceholderText(
-      "Ask Goat anything, or describe a task...",
+      "Ask opencompany anything, or describe a task...",
     );
     await user.type(quickComposerInput, "& Research Q3");
 
@@ -3623,7 +3623,7 @@ describe("ChatSurface chat streaming UI", () => {
     // The model picker's popover content portals outside the dialog's DOM subtree.
     await user.click(screen.getByText("Cloud Codex sandbox"));
     await user.type(
-      within(dialog).getByPlaceholderText("Ask Goat anything, or describe a task..."),
+      within(dialog).getByPlaceholderText("Ask opencompany anything, or describe a task..."),
       "Clone my repo",
     );
     await user.click(within(dialog).getByRole("button", { name: "Send message" }));
@@ -3700,7 +3700,7 @@ describe("ChatSurface chat streaming UI", () => {
     await user.click(screen.getByText("Cloud Codex sandbox"));
 
     const quickComposerInput = within(dialog).getByPlaceholderText(
-      "Ask Goat anything, or describe a task...",
+      "Ask opencompany anything, or describe a task...",
     );
     await user.type(quickComposerInput, "#");
     const workflowOption = await within(dialog).findByRole("option", { name: /Morning Test/i });
@@ -3753,7 +3753,7 @@ describe("ChatSurface chat streaming UI", () => {
     await user.type(screen.getByPlaceholderText("Objective"), "Fix the flaky tests");
     await user.type(screen.getByPlaceholderText("Token budget"), "abc");
     const quickComposerInput = within(dialog).getByPlaceholderText(
-      "Ask Goat anything, or describe a task...",
+      "Ask opencompany anything, or describe a task...",
     );
     await user.type(quickComposerInput, "Run the failing suite");
     await user.click(within(dialog).getByRole("button", { name: "Send message" }));
@@ -3837,7 +3837,7 @@ describe("ChatSurface chat streaming UI", () => {
     await user.keyboard("{Enter}");
 
     const quickComposerInput = within(dialog).getByPlaceholderText(
-      "Ask Goat anything, or describe a task...",
+      "Ask opencompany anything, or describe a task...",
     );
     expect(quickComposerInput).toHaveValue("Research Q3");
   });
@@ -3866,7 +3866,7 @@ describe("ChatSurface chat streaming UI", () => {
     const dialog = screen.getByRole("dialog");
     await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     expect(
-      within(dialog).getByPlaceholderText("Ask Goat anything, or describe a task..."),
+      within(dialog).getByPlaceholderText("Ask opencompany anything, or describe a task..."),
     ).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
@@ -3884,7 +3884,7 @@ describe("ChatSurface chat streaming UI", () => {
 
     render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start");
+    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
@@ -3902,7 +3902,7 @@ describe("ChatSurface chat streaming UI", () => {
       <ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />,
     );
 
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start");
+    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     pathnameMock.value = "/brain";
@@ -4018,7 +4018,7 @@ describe("ChatSurface chat streaming UI", () => {
 
     render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
     expect(textarea).toBeEnabled();
 
     await user.type(textarea, "My next message");
@@ -4048,14 +4048,14 @@ describe("ChatSurface chat streaming UI", () => {
               id: "user_1",
               role: "user",
               metadata: { sessionId: "chat_1" },
-              parts: [{ type: "text", text: "Hello Goat" }],
+              parts: [{ type: "text", text: "Hello opencompany" }],
             },
           ],
         }}
       />,
     );
 
-    expect(screen.getByRole("status", { name: "Goat is working" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "opencompany is working" })).toBeInTheDocument();
     expect(screen.getByText(/^\d+\.\ds$/)).toBeInTheDocument();
   });
 
@@ -4075,7 +4075,7 @@ describe("ChatSurface chat streaming UI", () => {
               id: "user_1",
               role: "user",
               metadata: { sessionId: "chat_1" },
-              parts: [{ type: "text", text: "Hello Goat" }],
+              parts: [{ type: "text", text: "Hello opencompany" }],
             },
             {
               id: "assistant_1",
@@ -4089,7 +4089,7 @@ describe("ChatSurface chat streaming UI", () => {
     );
 
     expect(screen.getByText("Streaming answer")).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Goat is working" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "opencompany is working" })).toBeInTheDocument();
     expect(screen.getByText(/^\d+\.\ds$/)).toBeInTheDocument();
   });
 

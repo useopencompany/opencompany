@@ -29,7 +29,7 @@ import {
   slackTsToIso,
 } from "./source-items";
 
-describe("Goat company import normalization", () => {
+describe("Company import normalization", () => {
   const base = {
     phase: "research" as const,
     importRunId: "gbimp_123",
@@ -328,7 +328,7 @@ describe("Jamie brain source normalization", () => {
   });
 });
 
-describe("Goat chat capture normalization", () => {
+describe("Chat capture normalization", () => {
   function captureInput(overrides: Record<string, unknown> = {}) {
     return {
       text: "Check out https://example.com/pricing-teardown for the pricing rework.",
@@ -420,7 +420,7 @@ describe("Goat chat capture normalization", () => {
   });
 });
 
-describe("Goat Brain pointer capture normalization", () => {
+describe("Brain pointer capture normalization", () => {
   const base = {
     sourceRef: "slack:conversation:T123:C456:1234.5678",
     title: "Slack launch discussion",

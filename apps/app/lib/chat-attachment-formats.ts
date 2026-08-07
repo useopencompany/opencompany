@@ -1,6 +1,6 @@
 import type { ChatAttachmentKind } from "@opencompany/db/schema";
 
-// Isomorphic (client + server) constants for Goat chat attachments. The core
+// Isomorphic (client + server) constants for chat attachments. The core
 // set matches what the brain asset pipeline can ingest: pdf, docx, xlsx, SRT,
 // still images, and text-like founder artifacts such as CSV exports, Markdown,
 // plain text, and JSON. No legacy .doc/.xls or gif (animated frames collapse).

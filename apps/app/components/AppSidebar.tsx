@@ -143,7 +143,7 @@ export function AppSidebar({
         </div>
 
         {/* Primary nav */}
-        <nav aria-label="Goat primary" className="flex flex-col gap-px px-2 pt-2">
+        <nav aria-label="Primary" className="flex flex-col gap-px px-2 pt-2">
           <SidebarNavRow
             href="/"
             icon={House}

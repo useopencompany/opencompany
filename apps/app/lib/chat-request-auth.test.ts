@@ -30,7 +30,7 @@ describe("resolveChatRequestContext", () => {
     vi.mocked(currentUser).mockResolvedValue(context as never);
 
     const result = await resolveChatRequestContext(
-      new Request("https://goat.example/api/chat", { method: "POST" }),
+      new Request("https://app.example/api/chat", { method: "POST" }),
     );
 
     expect(result).toEqual({ ok: true, context });
@@ -39,7 +39,7 @@ describe("resolveChatRequestContext", () => {
 
   it("never falls back to cookies for a malformed authorization header", async () => {
     const result = await resolveChatRequestContext(
-      new Request("https://goat.example/api/chat", {
+      new Request("https://app.example/api/chat", {
         method: "POST",
         headers: { Authorization: "Basic credentials" },
       }),
@@ -52,7 +52,7 @@ describe("resolveChatRequestContext", () => {
 });
 
 describe("verifyMacAccessToken", () => {
-  it("accepts a token issued for the configured Goat resource", async () => {
+  it("accepts a token issued for the configured resource", async () => {
     const verifyJwt = vi.fn(async () => ({
       payload: {
         sub: "user_1",
@@ -149,7 +149,7 @@ describe("resolveMacChatContext", () => {
     if (!result.ok) expect(result.response.status).toBe(401);
   });
 
-  it("requires an existing onboarded Goat user", async () => {
+  it("requires an existing onboarded user", async () => {
     const missing = await resolveMacChatContext(validPayload(), mockDb({ user: null }));
     expect(missing.ok).toBe(false);
     if (!missing.ok) expect(missing.response.status).toBe(403);

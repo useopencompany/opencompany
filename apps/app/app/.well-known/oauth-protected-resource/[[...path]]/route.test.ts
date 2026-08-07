@@ -10,13 +10,13 @@ describe("GET /.well-known/oauth-protected-resource", () => {
     vi.stubEnv("AUTHKIT_DOMAIN", "https://example.authkit.app");
 
     const response = GET(
-      new Request("https://goat.example.com/.well-known/oauth-protected-resource/mcp"),
+      new Request("https://app.example.com/.well-known/oauth-protected-resource/mcp"),
     );
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
     await expect(response.json()).resolves.toEqual({
-      resource: "https://goat.example.com/mcp",
+      resource: "https://app.example.com/mcp",
       authorization_servers: ["https://example.authkit.app"],
       bearer_methods_supported: ["header"],
     });

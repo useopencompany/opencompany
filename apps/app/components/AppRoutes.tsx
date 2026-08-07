@@ -169,7 +169,7 @@ export function IntegrationsSettingsRoute({
   return (
     <SettingsContent
       title="Integrations"
-      description="Connect the tools Goat can read from and act on."
+      description="Connect the tools opencompany can read from and act on."
     >
       <IntegrationRows
         integrations={integrations}
@@ -228,14 +228,14 @@ export function PreferencesSettingsRoute() {
         <BetaFeatureSwitch
           icon={Sparkles}
           label="Automatic model routing"
-          description="Let Goat choose a model from your first message and keep it for the chat."
+          description="Let opencompany choose a model from your first message and keep it for the chat."
           checked={featureFlags.autoModelRouting}
           update={updateAutoModelRoutingAction}
         />
         <BetaFeatureSwitch
           icon={MessageCircle}
           label="iMessage notifications"
-          description="Pair your phone so Goat can text you important updates over iMessage."
+          description="Pair your phone so opencompany can text you important updates over iMessage."
           checked={featureFlags.imessage}
           update={updateImessageEnabledAction}
         />
@@ -345,7 +345,7 @@ export function JamieSettingsRoute() {
   return (
     <SettingsContent
       title="Jamie"
-      description="Meeting notes for Goat Brain"
+      description="Meeting notes for the Brain"
       backLink={{ href: "/settings/integrations", label: "Integrations" }}
     >
       <JamieIntegrationSetup
@@ -366,7 +366,7 @@ export function GranolaSettingsRoute() {
   return (
     <SettingsContent
       title="Granola"
-      description="Meeting notes for Goat Brain"
+      description="Meeting notes for the Brain"
       backLink={{ href: "/settings/integrations", label: "Integrations" }}
     >
       <GranolaIntegrationSetup
@@ -383,7 +383,7 @@ export function IMessageSettingsRoute() {
   return (
     <SettingsContent
       title="iMessage"
-      description="Get important updates from Goat as texts on your phone."
+      description="Get important updates from opencompany as texts on your phone."
       backLink={{ href: "/settings/integrations", label: "Integrations" }}
     >
       {featureFlags.imessage ? (
@@ -410,7 +410,7 @@ export function FathomSettingsRoute() {
   return (
     <SettingsContent
       title="Fathom"
-      description="Meeting recordings for Goat Brain"
+      description="Meeting recordings for the Brain"
       backLink={{ href: "/settings/integrations", label: "Integrations" }}
     >
       <FathomIntegrationSetup
@@ -430,7 +430,7 @@ export function AttioSettingsRoute() {
   return (
     <SettingsContent
       title="Attio"
-      description="CRM activity for Goat Brain"
+      description="CRM activity for the Brain"
       backLink={{ href: "/settings/integrations", label: "Integrations" }}
     >
       <AttioIntegrationSetup

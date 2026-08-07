@@ -30,7 +30,7 @@ describe("shared chat Open Graph image", () => {
   });
 
   it("renders the image from only the public session metadata", async () => {
-    const response = await GET(new Request(`https://goat.example.com/share/${SHARE_ID}`), {
+    const response = await GET(new Request(`https://app.example.com/share/${SHARE_ID}`), {
       params: Promise.resolve({ shareId: SHARE_ID }),
     });
 
@@ -43,7 +43,7 @@ describe("shared chat Open Graph image", () => {
   it("returns a non-cacheable 404 after a share is revoked", async () => {
     loadPublicChatMetadataMock.mockResolvedValueOnce(null);
 
-    const response = await GET(new Request(`https://goat.example.com/share/${SHARE_ID}`), {
+    const response = await GET(new Request(`https://app.example.com/share/${SHARE_ID}`), {
       params: Promise.resolve({ shareId: SHARE_ID }),
     });
 

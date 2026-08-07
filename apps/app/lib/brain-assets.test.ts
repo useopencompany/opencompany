@@ -21,7 +21,7 @@ vi.mock("@/lib/brain", () => ({
   nextAvailableBrainId: vi.fn(),
 }));
 
-describe("Goat Brain asset uploads", () => {
+describe("Brain asset uploads", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

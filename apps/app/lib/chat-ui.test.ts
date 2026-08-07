@@ -121,11 +121,11 @@ describe("toChatUiMessage", () => {
     "Results",
   ])("places legacy task cards before the Added to %s continuation", (destination) => {
     const message = storedAssistantMessage({
-      content: `This needs live Linear access, so I'm spinning up a task to pull the Goat team's current issues and give you a prioritized "what's next" recommendation.Added to ${destination} as TASK-26. It'll pull the Goat team's Linear board.`,
+      content: `This needs live Linear access, so I'm spinning up a task to pull your team's current issues and give you a prioritized "what's next" recommendation.Added to ${destination} as TASK-26. It'll pull your team's Linear board.`,
       taskId: "task_26",
       taskDisplayId: "TASK-26",
-      taskName: "Linear Goat team status + next steps",
-      taskPrompt: "Pull the Goat team's Linear board and recommend what to work on next.",
+      taskName: "Linear Acme team status + next steps",
+      taskPrompt: "Pull your team's Linear board and recommend what to work on next.",
       debugTrace: {
         schemaVersion: "opencompany.chat.debug.v1",
         model: DEFAULT_MODEL,
@@ -133,9 +133,9 @@ describe("toChatUiMessage", () => {
           {
             taskId: "task_26",
             taskDisplayId: "TASK-26",
-            taskName: "Linear Goat team status + next steps",
+            taskName: "Linear Acme team status + next steps",
             status: "queued",
-            prompt: "Pull the Goat team's Linear board and recommend what to work on next.",
+            prompt: "Pull your team's Linear board and recommend what to work on next.",
           },
         ],
       },
@@ -146,11 +146,11 @@ describe("toChatUiMessage", () => {
     expect(parts.map((part) => part.type)).toEqual(["text", START_TASK_TOOL_PART_TYPE, "text"]);
     expect(parts[0]).toEqual({
       type: "text",
-      text: "This needs live Linear access, so I'm spinning up a task to pull the Goat team's current issues and give you a prioritized \"what's next\" recommendation.",
+      text: "This needs live Linear access, so I'm spinning up a task to pull your team's current issues and give you a prioritized \"what's next\" recommendation.",
     });
     expect(parts[2]).toEqual({
       type: "text",
-      text: `Added to ${destination} as TASK-26. It'll pull the Goat team's Linear board.`,
+      text: `Added to ${destination} as TASK-26. It'll pull your team's Linear board.`,
     });
   });
 

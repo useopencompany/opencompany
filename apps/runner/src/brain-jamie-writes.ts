@@ -76,7 +76,7 @@ export function buildJamieMeetingEvidenceWrite(
       })
     : fullEvidenceContent;
   if (Buffer.byteLength(evidenceContent, "utf8") > MAX_BRAIN_FILE_BYTES) {
-    throw new Error("Jamie evidence document exceeds the Goat Brain file size limit.");
+    throw new Error("Jamie evidence document exceeds the Brain file size limit.");
   }
 
   return {
@@ -128,7 +128,7 @@ export function buildJamieMeetingBrainWrites(item: NormalizedJamieMeetingSourceI
   });
 
   if (Buffer.byteLength(meetingContent, "utf8") > MAX_BRAIN_FILE_BYTES) {
-    throw new Error("Jamie meeting document exceeds the Goat Brain file size limit.");
+    throw new Error("Jamie meeting document exceeds the Brain file size limit.");
   }
 
   return {
@@ -256,7 +256,7 @@ export function truncateByBytes(value: string, maxBytes: number) {
     if (Buffer.byteLength(next, "utf8") > maxBytes) break;
     output = next;
   }
-  return `${output}\n\n[Truncated to fit the Goat Brain file size limit.]`;
+  return `${output}\n\n[Truncated to fit the Brain file size limit.]`;
 }
 
 function shortHash(value: string, length = 10) {

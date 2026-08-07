@@ -75,7 +75,7 @@ describe("goat brain ingest", () => {
             title: "Acme",
             type: "company",
             aliases: ["Acme Inc."],
-            body: "Acme is evaluating Goat Brain.",
+            body: "Acme is evaluating the Brain.",
             timelineBody: "User mentioned Acme.",
             relations: [],
           },
@@ -86,7 +86,7 @@ describe("goat brain ingest", () => {
 
     const result = await ingestBrain(
       root,
-      { text: "Remember Acme is evaluating Goat Brain.", sourceRef: "goat-chat:1", dryRun: true },
+      { text: "Remember Acme is evaluating the Brain.", sourceRef: "goat-chat:1", dryRun: true },
       gateway,
     );
 
@@ -112,7 +112,7 @@ describe("goat brain ingest", () => {
                 type: "person",
                 aliases: ["Jane"],
                 body: "Jane Doe is a founder.",
-                timelineBody: "User asked Goat to remember Jane.",
+                timelineBody: "User asked opencompany to remember Jane.",
                 relations: [],
               },
             ],
@@ -151,7 +151,7 @@ describe("goat brain ingest", () => {
             title: "Acme",
             type: "company",
             aliases: [],
-            body: "Acme is evaluating Goat Brain.",
+            body: "Acme is evaluating the Brain.",
             timelineBody: "User mentioned Acme.",
             relations: [],
           },
@@ -161,7 +161,7 @@ describe("goat brain ingest", () => {
 
     const result = await ingestBrain(
       root,
-      { text: "Remember Acme is evaluating Goat Brain.", sourceRef: "goat-chat:3", dryRun: true },
+      { text: "Remember Acme is evaluating the Brain.", sourceRef: "goat-chat:3", dryRun: true },
       gateway,
     );
 
@@ -177,14 +177,14 @@ describe("goat brain ingest", () => {
           title: "Acme",
           type: "company",
           aliases: [],
-          body: "Acme is evaluating Goat Brain.",
+          body: "Acme is evaluating the Brain.",
           timelineBody: "User mentioned Acme.",
           relations: [],
         },
       ],
     });
     const options = {
-      text: "Remember Acme is evaluating Goat Brain.",
+      text: "Remember Acme is evaluating the Brain.",
       sourceRef: "goat-chat:4",
       at: "2026-07-06T12:00:00.000Z",
     };
@@ -208,7 +208,7 @@ describe("goat brain ingest", () => {
             title: "Acme",
             type: "company",
             aliases: [],
-            body: "Acme is evaluating Goat Brain.",
+            body: "Acme is evaluating the Brain.",
             timelineBody: "User mentioned Acme.",
             relations: [],
           },

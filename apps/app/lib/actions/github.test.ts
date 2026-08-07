@@ -107,7 +107,7 @@ describe("github.search_issues", () => {
           labels: [{ name: "bug" }],
           updated_at: "2026-07-21T12:00:00Z",
           body: "The active account can become stale.",
-          html_url: "https://github.com/opencompany/goat/pull/42",
+          html_url: "https://github.com/opencompany/app/pull/42",
           ignored_secret_field: "do not return",
         },
         { number: "invalid", title: "Skipped invalid record" },
@@ -141,7 +141,7 @@ describe("github.search_issues", () => {
           labels: ["bug"],
           updatedAt: "2026-07-21T12:00:00Z",
           bodyPreview: "The active account can become stale.",
-          url: "https://github.com/opencompany/goat/pull/42",
+          url: "https://github.com/opencompany/app/pull/42",
         },
       ],
     });

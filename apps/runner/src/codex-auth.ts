@@ -61,7 +61,7 @@ export async function startCodexDeviceAuthFlow(input: {
       expiresAt,
       updatedAt: now,
     });
-    logger.info("Stored pending Goat Codex auth flow", {
+    logger.info("Stored pending Codex auth flow", {
       event: "opencompany.runner_goat_codex_auth_flow_stored",
       user_workos_id: input.userWorkosId,
       flow_id: id,
@@ -78,7 +78,7 @@ export async function startCodexDeviceAuthFlow(input: {
       expiresAt: expiresAt.toISOString(),
     };
   } catch (error) {
-    logger.warn("Goat Codex auth flow start failed", {
+    logger.warn("Codex auth flow start failed", {
       event: "opencompany.runner_goat_codex_auth_start_failed",
       user_workos_id: input.userWorkosId,
       sandbox_id: sandbox.sandboxId,
@@ -116,7 +116,7 @@ async function supersedeActiveCodexAuthFlows(userWorkosId: string) {
     });
     await killSandbox(flow.sandboxId).catch(() => {});
   }
-  logger.info("Superseded active Goat Codex auth flows", {
+  logger.info("Superseded active Codex auth flows", {
     event: "opencompany.runner_goat_codex_auth_flows_superseded",
     user_workos_id: userWorkosId,
     flow_count: activeFlows.length,
@@ -130,7 +130,7 @@ export async function pollCodexDeviceAuthFlow(input: {
 }): Promise<CodexDeviceAuthFlowStatus | null> {
   const flow = await loadFlow(input.userWorkosId, input.flowId);
   if (!flow) {
-    logger.warn("Goat Codex auth flow not found during poll", {
+    logger.warn("Codex auth flow not found during poll", {
       event: "opencompany.runner_goat_codex_auth_poll_not_found",
       user_workos_id: input.userWorkosId,
       flow_id: input.flowId,
@@ -173,7 +173,7 @@ export async function pollCodexDeviceAuthFlow(input: {
       statusReason: "Codex authentication sandbox is no longer available.",
       now,
     });
-    logger.warn("Goat Codex auth sandbox connect failed", {
+    logger.warn("Codex auth sandbox connect failed", {
       event: "opencompany.runner_goat_codex_auth_sandbox_connect_failed",
       user_workos_id: input.userWorkosId,
       flow_id: input.flowId,
@@ -221,7 +221,7 @@ export async function pollCodexDeviceAuthFlow(input: {
         now,
       });
       await killSandbox(flow.sandboxId).catch(() => {});
-      logger.info("Goat Codex auth flow completed", {
+      logger.info("Codex auth flow completed", {
         event: "opencompany.runner_goat_codex_auth_flow_completed",
         user_workos_id: input.userWorkosId,
         flow_id: input.flowId,
@@ -243,7 +243,7 @@ export async function pollCodexDeviceAuthFlow(input: {
         now,
       });
       await killSandbox(flow.sandboxId).catch(() => {});
-      logger.warn("Goat Codex auth validation failed", {
+      logger.warn("Codex auth validation failed", {
         event: "opencompany.runner_goat_codex_auth_validation_failed",
         user_workos_id: input.userWorkosId,
         flow_id: input.flowId,

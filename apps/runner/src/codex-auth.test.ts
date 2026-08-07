@@ -105,7 +105,7 @@ describe("startCodexDeviceAuthFlow", () => {
     });
   });
 
-  it("supersedes active Goat Codex auth flows before creating a replacement sandbox", async () => {
+  it("supersedes active Codex auth flows before creating a replacement sandbox", async () => {
     mocks.activeFlows.push({ id: "gcodf_old", sandboxId: "sbx_old" });
 
     const flow = await startCodexDeviceAuthFlow({

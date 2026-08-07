@@ -94,7 +94,7 @@ export async function closeChatSessionAction(sessionId: string | null): Promise<
     userWorkosId: user.workosUserId,
     chatSessionId: trimmed,
   }).catch((error) => {
-    console.warn("Goat codex chat close cleanup failed.", {
+    console.warn("Codex chat close cleanup failed.", {
       event: "goat.codex_chat_close_cleanup_failed",
       chat_session_id: trimmed,
       error,

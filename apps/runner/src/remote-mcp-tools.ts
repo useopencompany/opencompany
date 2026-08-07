@@ -183,7 +183,7 @@ export function createRemoteMcpTools<const TProvider extends IntegrationProvider
       },
       get clientMetadata(): OAuthClientMetadata {
         return {
-          client_name: "OpenCompany Goat Runner",
+          client_name: "opencompany Runner",
           redirect_uris: [callbackUrl()],
           grant_types: ["authorization_code", "refresh_token"],
           response_types: ["code"],

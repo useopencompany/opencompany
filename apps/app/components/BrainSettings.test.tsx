@@ -726,7 +726,7 @@ function jamieState(overrides: Partial<JamieProviderState> = {}): JamieProviderS
     accountName: "Jamie",
     statusReason: null,
     integrationId: "gint_jamie_1",
-    webhookUrl: "https://goat.test/api/webhooks/jamie",
+    webhookUrl: "https://app.test/api/webhooks/jamie",
     apiKeyConfigured: false,
     ...overrides,
   };

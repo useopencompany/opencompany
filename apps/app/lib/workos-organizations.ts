@@ -53,7 +53,7 @@ export async function ensureWorkspaceOrganization(workspace: Workspace): Promise
       try {
         await workos.organizations.deleteOrganization(organizationId);
       } catch (cleanupError) {
-        console.error("[goat] Failed to clean up WorkOS organization", cleanupError);
+        console.error("[app] Failed to clean up WorkOS organization", cleanupError);
       }
     }
     throw error;
@@ -72,7 +72,7 @@ export async function ensureWorkspaceOrganizationsForEntries<T extends { workspa
         workspace: { ...entry.workspace, workosOrganizationId },
       });
     } catch (error) {
-      console.error("[goat] Failed to ensure WorkOS organization for workspace", {
+      console.error("[app] Failed to ensure WorkOS organization for workspace", {
         workspaceId: entry.workspace.id,
         error,
       });

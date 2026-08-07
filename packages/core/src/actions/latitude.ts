@@ -131,7 +131,7 @@ async function executeLatitudeAction(input: {
   if (state.integrationId !== input.expectedIntegrationId) {
     throw new ActionPermissionError(
       "latitude",
-      "The Latitude connection changed before this action could run. Retry so Goat can use the current connection and permission.",
+      "The Latitude connection changed before this action could run. Retry to use the current connection and permission.",
     );
   }
   if (
@@ -153,7 +153,7 @@ async function executeLatitudeAction(input: {
   if (connection.integrationId !== input.expectedIntegrationId) {
     throw new ActionPermissionError(
       "latitude",
-      "The Latitude connection changed before this action could run. Retry so Goat can use the current connection and permission.",
+      "The Latitude connection changed before this action could run. Retry to use the current connection and permission.",
     );
   }
 
@@ -174,7 +174,7 @@ async function executeLatitudeAction(input: {
     ) {
       throw new ActionPermissionError(
         "latitude",
-        `Latitude changed the "${input.remoteName}" tool from read-only. Retry so Goat can request confirmation with the current permission.`,
+        `Latitude changed the "${input.remoteName}" tool from read-only. Retry to request confirmation with the current permission.`,
       );
     }
 

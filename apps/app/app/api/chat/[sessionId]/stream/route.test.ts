@@ -82,7 +82,7 @@ function params(sessionId: string) {
 }
 
 function streamRequest() {
-  return new Request("https://goat.test/api/chat/session_1/stream");
+  return new Request("https://app.test/api/chat/session_1/stream");
 }
 
 function mockFindOpenSession(session: { id: string } | null) {

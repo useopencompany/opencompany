@@ -7,7 +7,7 @@ import {
   parseHubspotBrainSourceConfig,
 } from "./hubspot";
 
-describe("Goat HubSpot brain source config", () => {
+describe("HubSpot brain source config", () => {
   it("keeps missing events as all events for backwards compatibility", () => {
     const config = parseHubspotBrainSourceConfig({
       objectTypes: [{ id: "deal" }],

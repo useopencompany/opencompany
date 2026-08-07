@@ -70,7 +70,7 @@ describe("POST /api/webhooks/google-drive", () => {
 });
 
 function driveNotification(state = "change") {
-  return new Request("https://goat.test/api/webhooks/google-drive", {
+  return new Request("https://app.test/api/webhooks/google-drive", {
     method: "POST",
     headers: {
       "x-goog-channel-id": "channel_1",

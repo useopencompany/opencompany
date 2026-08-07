@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { recordChatModelRoutingAttempt } from "./chat-model-routing";
 import { chatModelRoutingAttempts } from "./schema";
 
-describe("Goat chat model routing attempts", () => {
+describe("Chat model routing attempts", () => {
   it("persists prompt-free classifier diagnostics and usage", async () => {
     const values = vi.fn(async (_value: unknown) => undefined);
     const insert = vi.fn(() => ({ values }));

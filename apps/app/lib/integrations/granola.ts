@@ -115,7 +115,7 @@ export async function connectGranolaIntegration(input: {
     .returning({ id: integrations.id });
 
   if (!integration) {
-    throw new Error("Could not persist Goat Granola integration.");
+    throw new Error("Could not persist Granola integration.");
   }
 
   const payload: GranolaApiKeyCredentialPayload = {

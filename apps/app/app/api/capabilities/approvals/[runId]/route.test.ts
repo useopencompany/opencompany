@@ -22,7 +22,7 @@ describe("capability approval API", () => {
   });
 
   it("loads historical state scoped to the requesting user and workspace", async () => {
-    const response = await GET(new Request("https://goat.test"), {
+    const response = await GET(new Request("https://app.test"), {
       params: Promise.resolve({ runId: "gcr_1" }),
     });
     expect(response.status).toBe(200);
@@ -40,7 +40,7 @@ describe("capability approval API", () => {
 
   it("rejects unauthenticated requests", async () => {
     mocks.currentUser.mockResolvedValueOnce(null);
-    const unauthorized = await GET(new Request("https://goat.test"), {
+    const unauthorized = await GET(new Request("https://app.test"), {
       params: Promise.resolve({ runId: "gcr_1" }),
     });
     expect(unauthorized.status).toBe(401);

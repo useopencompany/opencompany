@@ -60,7 +60,7 @@ export async function saveAttioApiKeyAction(apiKey: string): Promise<AttioConnec
     revalidatePath("/", "layout");
     return { ok: true, state: await getAttioIntegrationState(user.workosUserId) };
   } catch (error) {
-    console.error("[goat-attio] Failed to save Attio API key", error);
+    console.error("[attio] Failed to save Attio API key", error);
     return {
       ok: false,
       error:

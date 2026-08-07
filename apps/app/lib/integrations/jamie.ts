@@ -371,7 +371,7 @@ export async function loadJamieWebhookContextForApiKey(
         ),
       );
   } catch (error) {
-    console.warn("[goat-jamie] Failed to backfill Jamie API key lookup hash", {
+    console.warn("[jamie] Failed to backfill Jamie API key lookup hash", {
       error: error instanceof Error ? error.message : String(error),
     });
   }

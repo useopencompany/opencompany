@@ -8,18 +8,18 @@ import {
   verifyGoogleIntegrationState,
 } from "./google-oauth";
 
-describe("Goat Google OAuth", () => {
+describe("Google OAuth", () => {
   beforeEach(() => {
     vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "client-id");
     vi.stubEnv("GOOGLE_INTEGRATION_STATE_SECRET", "state-secret");
-    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://goat.example.com");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com");
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it("round-trips signed state for the Goat user", () => {
+  it("round-trips signed state for the user", () => {
     const state = createGoogleIntegrationState({
       provider: "gmail",
       userWorkosId: "user_123",
@@ -66,7 +66,7 @@ describe("Goat Google OAuth", () => {
     expect(driveUrl.searchParams.get("scope")).not.toContain("calendar.readonly");
   });
 
-  it("uses direct Goat callbacks in production even when the preview broker is configured", () => {
+  it("uses direct app callbacks in production even when the preview broker is configured", () => {
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://opencompany.chat");
     vi.stubEnv("GOOGLE_OAUTH_CALLBACK_URL", "https://oauth.opencompany.cloud/api/google/callback");
 

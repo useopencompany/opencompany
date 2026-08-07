@@ -6,7 +6,7 @@ import {
   parseLinearBrainSourceConfig,
 } from "./linear";
 
-describe("Goat Linear brain source config", () => {
+describe("Linear brain source config", () => {
   it("keeps missing events as all events for backwards compatibility", () => {
     const config = parseLinearBrainSourceConfig({
       teams: [{ id: "team_1", key: "ENG", name: "Engineering" }],

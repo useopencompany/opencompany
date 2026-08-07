@@ -156,7 +156,7 @@ async function executeNeonAction(input: {
   if (state.integrationId !== input.expectedIntegrationId) {
     throw new ActionPermissionError(
       "neon",
-      "The Neon connection changed before this action could run. Retry so Goat can use the current connection and permission.",
+      "The Neon connection changed before this action could run. Retry to use the current connection and permission.",
     );
   }
   if (effectiveCapabilityMode("neon", input.expectedCapability, state.capabilityModes) === "off") {
@@ -176,7 +176,7 @@ async function executeNeonAction(input: {
   if (connection.integrationId !== input.expectedIntegrationId) {
     throw new ActionPermissionError(
       "neon",
-      "The Neon connection changed before this action could run. Retry so Goat can use the current connection and permission.",
+      "The Neon connection changed before this action could run. Retry to use the current connection and permission.",
     );
   }
 
@@ -197,7 +197,7 @@ async function executeNeonAction(input: {
     ) {
       throw new ActionPermissionError(
         "neon",
-        `Neon changed the safety contract for "${input.remoteName}", so Goat will not run it.`,
+        `Neon changed the safety contract for "${input.remoteName}", so opencompany will not run it.`,
       );
     }
 
@@ -264,7 +264,7 @@ function validateNeonReadOnlySql(value: unknown) {
   }
   if (NEON_UNSAFE_SQL_FUNCTION_PATTERN.test(value)) {
     throw new ActionInvalidParamsError(
-      '"sql" calls an administrative or side-effecting Postgres function that Goat does not permit.',
+      '"sql" calls an administrative or side-effecting Postgres function that opencompany does not permit.',
     );
   }
 }
@@ -291,7 +291,7 @@ function firstSqlKeyword(sql: string): string | null {
 
 function actionDescription(name: NeonActionToolName, remoteDescription?: string) {
   if (name === "run_sql") {
-    return "Run one read-only SQL query against a selected Neon project, branch, and database. Use a narrow SELECT, WITH, or SHOW statement and add LIMIT when returning rows. The provider executes it in a read-only transaction; Goat blocks administrative functions, never exposes connection strings, and truncates oversized results.";
+    return "Run one read-only SQL query against a selected Neon project, branch, and database. Use a narrow SELECT, WITH, or SHOW statement and add LIMIT when returning rows. The provider executes it in a read-only transaction; opencompany blocks administrative functions, never exposes connection strings, and truncates oversized results.";
   }
   return (
     remoteDescription?.trim() ||

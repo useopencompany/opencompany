@@ -65,7 +65,7 @@ export async function POST(request: Request) {
   try {
     return NextResponse.json(await handleLinearEvent(envelope, request, rawBody));
   } catch (error) {
-    console.error("[goat-linear] Failed to process Linear event", {
+    console.error("[linear] Failed to process Linear event", {
       eventType: envelope.type,
       action: envelope.action,
       error: error instanceof Error ? error.message : String(error),

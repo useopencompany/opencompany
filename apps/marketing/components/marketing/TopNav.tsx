@@ -9,7 +9,7 @@ export function TopNav() {
     <header className="sticky top-0 z-50 bg-background">
       <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-6">
         <Link href="/" className="flex items-center gap-2 text-ink" aria-label="opencompany home">
-          <BrandMark className="size-5 animate-goat-mark-spin" />
+          <BrandMark className="size-5 animate-brand-mark-spin" />
           <span className="font-medium font-mono text-[15px] tracking-tight">opencompany</span>
         </Link>
         <nav aria-label="Primary navigation" className="hidden items-center gap-6 sm:flex">

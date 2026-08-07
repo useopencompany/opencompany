@@ -39,7 +39,7 @@ describe("ensureWorkspaceOrganization", () => {
     mocks.workos.userManagement.updateOrganizationMembership.mockResolvedValue({});
   });
 
-  it("creates a WorkOS organization with the Goat workspace id as externalId", async () => {
+  it("creates a WorkOS organization with the workspace id as externalId", async () => {
     mocks.workos.organizations.getOrganizationByExternalId.mockRejectedValueOnce({ status: 404 });
     mocks.workos.organizations.createOrganization.mockResolvedValueOnce({ id: "org_new" });
 

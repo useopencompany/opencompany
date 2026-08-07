@@ -28,7 +28,7 @@ export const GOOGLE_PROVIDER_CONFIG: Record<GoogleIntegrationProvider, GooglePro
     routeSegment: "gmail",
     displayName: "Gmail",
     // gmail.compose is the narrowest Gmail API scope that can create drafts.
-    // It also authorizes sending, which Goat gates separately in its own
+    // It also authorizes sending, which the app gates separately in its own
     // per-account permission model.
     scopes: [GMAIL_READ_SCOPE, GMAIL_COMPOSE_SCOPE, ...OPENID_SCOPES],
   },
@@ -349,7 +349,7 @@ function safeEqual(left: string, right: string) {
 function requiredEnv(name: string) {
   const value = process.env[name]?.trim();
   if (!value) {
-    throw new Error(`${name} is required for Goat Google integrations.`);
+    throw new Error(`${name} is required for the Google integrations.`);
   }
   return value;
 }

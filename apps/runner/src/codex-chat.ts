@@ -83,7 +83,7 @@ const INTERACTION_POLL_INTERVAL_MS = 500;
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-codex-chat" });
 
 export const CODEX_CHAT_REAUTH_MESSAGE =
-  "Codex is disconnected. Reconnect Codex in Goat settings, then send your message again.";
+  "Codex is disconnected. Reconnect Codex in Settings, then send your message again.";
 
 export class CodexChatInterruptedError extends Error {
   constructor() {
@@ -540,7 +540,7 @@ export async function runCodexChatTurn(input: {
         event: "opencompany.goat_codex_chat_auth_persist_failed",
         turn_id: turn.id,
       });
-      logger.warn("Failed to persist refreshed Goat Codex auth", {
+      logger.warn("Failed to persist refreshed Codex auth", {
         event: "opencompany.goat_codex_chat_auth_persist_failed",
         turn_id: turn.id,
         error,
@@ -549,7 +549,7 @@ export async function runCodexChatTurn(input: {
     if (taskContext && summary.status === "success") {
       const rawResult = summary.result?.trim() ?? "";
       if (!rawResult) {
-        throw new Error("Goat task completed without a final assistant message.");
+        throw new Error("Task completed without a final assistant message.");
       }
       const closerController = new AbortController();
       const closerAbortTimer = setInterval(() => {
@@ -640,7 +640,7 @@ export async function runCodexChatTurn(input: {
       throw effectiveError;
     } else {
       const message = redact(errorMessage(effectiveError));
-      logger.warn("Goat Codex chat turn execution failed", {
+      logger.warn("Codex chat turn execution failed", {
         event: "opencompany.goat_codex_chat_turn_execution_failed",
         turn_id: turn.id,
         codex_chat_session_id: session.id,
@@ -690,7 +690,7 @@ export async function runCodexChatTurn(input: {
         turn_id: turn.id,
         codex_chat_session_id: session.id,
       });
-      logger.warn("Failed to park Goat Codex chat sandbox", {
+      logger.warn("Failed to park Codex chat sandbox", {
         event: "opencompany.goat_codex_chat_sandbox_parking_failed",
         turn_id: turn.id,
         codex_chat_session_id: session.id,
@@ -919,7 +919,7 @@ function resolveCodexTurnSkills(input: {
   };
 }
 
-// GitHub auth is injected whenever the user has a connected Goat GitHub integration; the token
+// GitHub auth is injected whenever the user has a connected GitHub integration; the token
 // covers every repository of the installation (no repo scoping) so Codex can clone what the user
 // asks for in chat. Missing integration is not an error - the sandbox simply has no GitHub auth.
 export async function loadGitHubAuthForUser(userWorkosId: string) {

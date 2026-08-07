@@ -102,31 +102,31 @@ type IntegrationMeta = {
 const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
   github: {
     label: "GitHub",
-    description: "Bring pull requests and issues from your repositories into Goat.",
+    description: "Bring pull requests and issues from your repositories into opencompany.",
     Icon: GitHubIcon,
     tileClass: "bg-[#181717] text-white",
   },
   jamie: {
     label: "Jamie",
-    description: "Meeting notes land in Goat after every completed meeting.",
+    description: "Meeting notes land in opencompany after every completed meeting.",
     monogram: "J",
     tileClass: "bg-[#5B5BD6] text-white",
   },
   gmail: {
     label: "Gmail",
-    description: "Let Goat read and act on your email.",
+    description: "Let opencompany read and act on your email.",
     Icon: GmailIcon,
     tileClass: "bg-[#EA4335] text-white",
   },
   google_calendar: {
     label: "Google Calendar",
-    description: "Let Goat view and update your schedule and events.",
+    description: "Let opencompany view and update your schedule and events.",
     Icon: GoogleCalendarIcon,
     tileClass: "bg-[#1A73E8] text-white",
   },
   google_drive: {
     label: "Google Drive",
-    description: "Sync files and folders you choose into Goat.",
+    description: "Sync files and folders you choose into opencompany.",
     Icon: GoogleDriveIcon,
     tileClass: "bg-[#1FA463] text-white",
   },
@@ -138,13 +138,13 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
   },
   posthog: {
     label: "PostHog",
-    description: "Explore product analytics and create focused insights from Goat.",
+    description: "Explore product analytics and create focused insights from opencompany.",
     Icon: PostHogIcon,
     tileClass: "bg-[#F54E00] text-white",
   },
   latitude: {
     label: "Latitude",
-    description: "Observe, understand, and improve your AI agents from Goat.",
+    description: "Observe, understand, and improve your AI agents from opencompany.",
     monogram: "L",
     tileClass: "bg-[#171717] text-white",
   },
@@ -156,7 +156,7 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
   },
   slack: {
     label: "Slack",
-    description: "Let Goat search and read your Slack conversations.",
+    description: "Let opencompany search and read your Slack conversations.",
     Icon: SlackIcon,
     tileClass: "bg-[#4A154B] text-white",
   },
@@ -174,7 +174,7 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
   },
   stripe: {
     label: "Stripe",
-    description: "Give Goat read-only access to payment activity, subscriptions, and receivables.",
+    description: "Give opencompany read-only access to payment activity, subscriptions, and receivables.",
     Icon: StripeIcon,
     tileClass: "bg-[#635BFF] text-white",
   },
@@ -198,19 +198,19 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
   },
   codex: {
     label: "Codex",
-    description: "Connect your Codex subscription so Goat can run coding tasks.",
+    description: "Connect your Codex subscription so opencompany can run coding tasks.",
     Icon: OpenAIIcon,
     tileClass: "bg-black text-white",
   },
   claude_code: {
     label: "Claude Code",
-    description: "Connect your Claude subscription so Goat can run coding tasks.",
+    description: "Connect your Claude subscription so opencompany can run coding tasks.",
     Icon: AnthropicIcon,
     tileClass: "bg-[#CC785C] text-white",
   },
   imessage: {
     label: "iMessage",
-    description: "Get important updates from Goat as texts on your phone.",
+    description: "Get important updates from opencompany as texts on your phone.",
     monogram: "iM",
     tileClass: "bg-[#34C759] text-white",
   },

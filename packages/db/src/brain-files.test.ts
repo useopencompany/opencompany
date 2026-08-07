@@ -178,7 +178,7 @@ describe("goat brain file sync", () => {
       title: "Acme",
       type: "company",
       status: "draft",
-      compiledTruth: "# Acme\n\nAcme evaluates Goat Brain.",
+      compiledTruth: "# Acme\n\nAcme evaluates the Brain.",
     });
 
     const projection = deriveBrainFileProjection({
@@ -186,14 +186,14 @@ describe("goat brain file sync", () => {
       content,
     });
 
-    expect(projection.body).toBe("Acme evaluates Goat Brain.");
+    expect(projection.body).toBe("Acme evaluates the Brain.");
     expect(parseBrainDocument(projection.content).compiledTruth).toBe(projection.body);
   });
 
   it("recovers sidecar-backed markdown when only the payload hash is stale", async () => {
     await writeSidecarBackedPayload({
       relativePath: "companies/acme.md",
-      payload: "Acme now evaluates Goat Brain.",
+      payload: "Acme now evaluates the Brain.",
       sidecar: {
         schemaVersion: "goat.brain.entry.v2",
         id: "acme",
@@ -224,7 +224,7 @@ describe("goat brain file sync", () => {
     expect(files[0]?.skip).toBeUndefined();
     expect(files[0]?.content).toContain("id: acme");
     expect(files[0]?.content).toContain("# Acme");
-    expect(files[0]?.content).toContain("Acme now evaluates Goat Brain.");
+    expect(files[0]?.content).toContain("Acme now evaluates the Brain.");
   });
 
   it("skips unrecoverable sidecar-backed markdown instead of throwing", async () => {
@@ -299,7 +299,7 @@ describe("goat brain file sync", () => {
       title: "Acme",
       type: "company",
       status: "draft",
-      compiledTruth: "Acme is evaluating Goat Brain.",
+      compiledTruth: "Acme is evaluating the Brain.",
     });
     const db = syncMutableDb([]);
 

@@ -12,7 +12,7 @@ import {
 
 type DbLike = any;
 
-// The Goat web app uses neon-http, which cannot open interactive transactions.
+// The web app uses neon-http, which cannot open interactive transactions.
 // Run multi-statement mutations sequentially there; pooled runner callers still
 // get a real transaction.
 function runAtomically<T>(db: DbLike, fn: (tx: DbLike) => Promise<T>): Promise<T> {
@@ -171,7 +171,7 @@ export async function upsertBrainSource(input: {
         )
         .returning({ id: brainSources.id });
 
-  if (!row) throw new Error("Could not persist Goat Brain source.");
+  if (!row) throw new Error("Could not persist Brain source.");
   if (!input.enabled) {
     await cancelActiveBrainIngestJobsForSource({
       brainRef: input.brainRef,

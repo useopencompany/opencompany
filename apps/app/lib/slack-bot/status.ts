@@ -35,7 +35,7 @@ export function createSlackBotStatusReporter(input: {
 
   const call = (method: string, form: Record<string, string>) =>
     slackApiRequest({ method, token: input.botToken, form }).catch((error) => {
-      console.error("[goat-slack-bot] Status call failed", {
+      console.error("[slack-bot] Status call failed", {
         method,
         channelId: input.channelId,
         error: error instanceof Error ? error.message : String(error),

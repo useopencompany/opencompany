@@ -8,7 +8,7 @@ import {
 } from "./index";
 
 const base = {
-  sessionId: "goat-task-1",
+  sessionId: "task-1",
   actionPolicyPath: "/tmp/policy.json",
 };
 
@@ -22,7 +22,7 @@ describe("browser command translation", () => {
       }),
     ).toEqual([
       "--session",
-      "goat-task-1",
+      "task-1",
       "--content-boundaries",
       "--max-output",
       "20000",
@@ -52,7 +52,7 @@ describe("browser command translation", () => {
       }),
     ).toEqual([
       "--session",
-      "goat-task-1",
+      "task-1",
       "--content-boundaries",
       "--max-output",
       "20000",

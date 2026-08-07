@@ -44,7 +44,7 @@ export function buildGmailThreadEvidenceWrite(
     ? createGmailEvidenceContent({ item, evidenceBrainId, truncatedBodies: true })
     : fullContent;
   if (Buffer.byteLength(evidenceContent, "utf8") > MAX_BRAIN_FILE_BYTES) {
-    throw new Error("Gmail evidence document exceeds the Goat Brain file size limit.");
+    throw new Error("Gmail evidence document exceeds the Brain file size limit.");
   }
 
   return {

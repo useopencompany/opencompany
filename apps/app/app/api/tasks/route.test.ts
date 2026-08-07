@@ -162,7 +162,7 @@ describe("POST /api/tasks", () => {
     expect(createTaskForUser).not.toHaveBeenCalled();
   });
 
-  it("requires an authenticated Goat user", async () => {
+  it("requires an authenticated user", async () => {
     vi.mocked(currentUser).mockResolvedValueOnce(null as never);
 
     const response = await POST(

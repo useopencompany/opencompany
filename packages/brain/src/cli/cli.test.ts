@@ -185,7 +185,7 @@ describe("goat-brain cli", () => {
       ]),
     ).resolves.toMatchObject({
       exitCode: 1,
-      stderr: expect.stringContaining('Unsupported Goat Brain entity type "slack"'),
+      stderr: expect.stringContaining('Unsupported Brain entity type "slack"'),
     });
     await expect(
       run([
@@ -412,14 +412,14 @@ describe("goat-brain cli", () => {
         "--title",
         "Acme",
         "--truth",
-        "# Acme\n\nAcme evaluates Goat Brain.",
+        "# Acme\n\nAcme evaluates the Brain.",
       ]),
     ).resolves.toMatchObject({ exitCode: 0 });
 
     await expect(run(["get", "--root", root, "acme", "--section", "truth"])).resolves.toMatchObject(
       {
         exitCode: 0,
-        stdout: "Acme evaluates Goat Brain.\n",
+        stdout: "Acme evaluates the Brain.\n",
       },
     );
 
@@ -693,7 +693,7 @@ describe("goat-brain cli", () => {
       run(["set", "--root", root, "quick-note", "--type", "wat"]),
     ).resolves.toMatchObject({
       exitCode: 1,
-      stderr: expect.stringContaining("Unsupported Goat Brain entity type"),
+      stderr: expect.stringContaining("Unsupported Brain entity type"),
     });
     await expect(
       run(["set", "--root", root, "quick-note", "--status", "merged"]),
@@ -778,9 +778,9 @@ describe("goat-brain cli", () => {
         "--id",
         "goat-brain",
         "--title",
-        "Goat Brain",
+        "Brain",
         "--truth",
-        "Goat Brain ingestion now preserves live tracker provenance. [[source:github:useopencompany/opencompany-experimental:pull:123|PR #123]]",
+        "Brain ingestion now preserves live tracker provenance. [[source:github:useopencompany/opencompany-experimental:pull:123|PR #123]]",
       ]),
     ).resolves.toMatchObject({ exitCode: 0 });
 

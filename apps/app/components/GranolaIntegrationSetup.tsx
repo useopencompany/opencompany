@@ -184,7 +184,7 @@ function setupStatus(state: GranolaProviderState) {
   if (state.connected) {
     return {
       label: state.accountEmail ? `Connected as ${state.accountEmail}` : "Granola is connected",
-      detail: "New meeting notes are picked up by the Goat Brain ingestion queue.",
+      detail: "New meeting notes are picked up by the Brain ingestion queue.",
       badge: "Connected",
     };
   }

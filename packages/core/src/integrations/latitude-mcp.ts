@@ -9,7 +9,7 @@ const latitudeMcpIntegration = createRemoteMcpIntegration({
   endpointUrl: LATITUDE_MCP_ENDPOINT_URL,
   externalId: "latitude_mcp",
   // Latitude's protected-resource metadata does not advertise MCP scopes.
-  // Read/write controls are Goat capability modes, not claimed OAuth grants.
+  // Read/write controls are app capability modes, not claimed OAuth grants.
   storedScopes: [],
 });
 

@@ -152,7 +152,7 @@ describe("createTaskForUser", () => {
     );
     expect(mocks.triggerCodexChatWake).toHaveBeenCalledOnce();
     expect(warnSpy).toHaveBeenCalledWith(
-      "Goat durable task wake failed; the turn remains queued for polling.",
+      "Durable task wake failed; the turn remains queued for polling.",
       expect.objectContaining({
         event: "goat.durable_task_created_wake_failed",
       }),

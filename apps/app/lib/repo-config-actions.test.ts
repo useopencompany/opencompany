@@ -133,7 +133,7 @@ describe("repository config actions", () => {
     });
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain(instructions);
     expect(consoleError).toHaveBeenCalledWith(
-      "[goat] Failed to save setup instructions for repository configuration",
+      "[app] Failed to save setup instructions for repository configuration",
       {
         workspaceId: "goat_ws_1",
         repositoryExternalId: "123",

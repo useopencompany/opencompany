@@ -17,7 +17,7 @@ const harnessSpec: HarnessSpec = {
   resultMode: "assistant_final",
 };
 
-describe("Goat task sessions", () => {
+describe("Task sessions", () => {
   it("creates the task projection, native messages, runtime, and first turn in one statement", async () => {
     const execute = vi.fn(async (_query: SQL) => [taskRow()]);
 

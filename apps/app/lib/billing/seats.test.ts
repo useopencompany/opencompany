@@ -17,7 +17,7 @@ vi.mock("@/lib/billing/stripe", () => ({
   getStripe: vi.fn(),
 }));
 
-describe("Goat Stripe seat reconciliation", () => {
+describe("Stripe seat reconciliation", () => {
   const retrieve = vi.fn();
   const update = vi.fn();
 

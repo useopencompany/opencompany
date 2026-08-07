@@ -5,7 +5,7 @@ import { CODEX_PICKER_VALUE } from "@/lib/codex-chat-constants";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 
 describe("normalizeStoredChatSelection", () => {
-  it("restores supported Goat models", () => {
+  it("restores supported models", () => {
     expect(
       normalizeStoredChatSelection("moonshotai/kimi-k3", {
         codexConnected: false,

@@ -189,7 +189,7 @@ export async function getCurrentUserTaskSummary(taskId: string) {
   );
 
   if (!aggregate) {
-    throw new Error("Could not load Goat task summary.");
+    throw new Error("Could not load the task summary.");
   }
 
   const terminal =
@@ -481,7 +481,7 @@ export async function continueTaskAction(
       };
     }
     await triggerCodexChatWake().catch((error) => {
-      console.warn("Goat durable task wake failed; the turn remains queued for polling.", {
+      console.warn("Durable task wake failed; the turn remains queued for polling.", {
         event: "goat.durable_task_continued_wake_failed",
         task_id: normalizedTaskId,
         error,
@@ -518,7 +518,7 @@ export async function createTaskForUser(input: {
 }) {
   const initialTaskSpawningState = await loadTaskSpawningState(input.userWorkosId);
   if (initialTaskSpawningState === null) {
-    throw new Error("Unable to create a Goat task for an unknown user.");
+    throw new Error("Unable to create a task for an unknown user.");
   }
   if (!initialTaskSpawningState) {
     throw new Error(TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE);
@@ -557,12 +557,12 @@ export async function createTaskForUser(input: {
       now,
     });
   } catch (error) {
-    if (!(error instanceof Error) || error.message !== "Unable to create Goat task session.") {
+    if (!(error instanceof Error) || error.message !== "Unable to create task session.") {
       throw error;
     }
     const currentTaskSpawningState = await loadTaskSpawningState(input.userWorkosId);
     if (currentTaskSpawningState === null) {
-      throw new Error("Unable to create a Goat task for an unknown user.");
+      throw new Error("Unable to create a task for an unknown user.");
     }
     if (!currentTaskSpawningState) {
       throw new Error(TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE);
@@ -571,7 +571,7 @@ export async function createTaskForUser(input: {
   }
   captureTaskSpawnedAfterResponse(task, input.workspaceId ?? null);
   await triggerCodexChatWake().catch((error) => {
-    console.warn("Goat durable task wake failed; the turn remains queued for polling.", {
+    console.warn("Durable task wake failed; the turn remains queued for polling.", {
       event: "goat.durable_task_created_wake_failed",
       task_id: task.id,
       error,
@@ -593,7 +593,7 @@ function captureTaskSpawnedAfterResponse(task: Task, workspaceId: string | null 
       scheduleId: task.scheduleId,
       trigger: "manual",
     }).catch((error) => {
-      console.warn("Goat task spawn analytics failed.", {
+      console.warn("Task spawn analytics failed.", {
         event: "goat.task_spawned_analytics_failed",
         task_id: task.id,
         error,

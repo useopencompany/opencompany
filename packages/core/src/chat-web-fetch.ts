@@ -6,7 +6,7 @@ const WEB_FETCH_MAX_AGE_HOURS = 24;
 
 // A known-URL fetch is intentionally separate from web search. Exa Contents
 // gives chat reliable extraction for dynamic pages, PDFs, and complex layouts
-// without exposing the Goat server to arbitrary outbound URLs.
+// without exposing the app server to arbitrary outbound URLs.
 export async function executeChatExaFetch(input: {
   toolInput: WebFetchToolInput;
   apiKey: string;

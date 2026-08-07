@@ -5,7 +5,7 @@ import {
   verifyJamieWebhookApiKey,
 } from "./jamie";
 
-describe("Goat Jamie webhook API keys", () => {
+describe("Jamie webhook API keys", () => {
   const jamieApiKey = "sk_0000000000000000000000000000000000000000000000000000000000000000";
 
   it("recognizes Jamie-issued API key shape", () => {

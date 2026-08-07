@@ -8,7 +8,7 @@ const secret = "test-secret-at-least-long-enough";
 const codexChatSessionId = "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000";
 const codexChatTurnId = "goat_codex_chat_turn_223e4567-e89b-12d3-a456-426614174000";
 
-describe("Goat claude action gateway tickets", () => {
+describe("Claude action gateway tickets", () => {
   it("round-trips a turn-bound short-lived ticket", () => {
     const signed = createClaudeActionGatewayTicket({
       codexChatSessionId,

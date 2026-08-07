@@ -39,7 +39,7 @@ vi.mock("@/lib/integrations/linear-ingest", () => ({
   }),
 }));
 
-describe("Goat Linear ingestion callback", () => {
+describe("Linear ingestion callback", () => {
   beforeEach(() => {
     mocks.connectIntegration.mockReset();
     mocks.exchangeCode.mockReset();
@@ -59,7 +59,7 @@ describe("Goat Linear ingestion callback", () => {
     });
   });
 
-  it("returns to the canonical Goat HTTPS origin after a proxied local callback", async () => {
+  it("returns to the canonical app HTTPS origin after a proxied local callback", async () => {
     const response = await GET(
       new Request(
         "https://localhost:3002/api/integrations/linear-ingest/callback?state=valid&code=code",

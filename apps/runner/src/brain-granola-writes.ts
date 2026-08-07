@@ -77,7 +77,7 @@ export function buildGranolaMeetingEvidenceWrite(
       })
     : fullEvidenceContent;
   if (Buffer.byteLength(evidenceContent, "utf8") > MAX_BRAIN_FILE_BYTES) {
-    throw new Error("Granola evidence document exceeds the Goat Brain file size limit.");
+    throw new Error("Granola evidence document exceeds the Brain file size limit.");
   }
 
   return {

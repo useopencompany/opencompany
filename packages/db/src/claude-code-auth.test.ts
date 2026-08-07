@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { markClaudeCodeCredentialValidated, saveClaudeCodeCredential } from "./claude-code-auth";
 
-describe("Goat Claude Code credential validation state", () => {
+describe("Claude Code credential validation state", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });

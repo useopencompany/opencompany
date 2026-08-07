@@ -50,7 +50,7 @@ describe("createCodexChatProjector", () => {
     expect(mocks.captureException).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "CodexChatEventPersistenceError",
-        message: "Goat Codex chat audit event persistence failed.",
+        message: "Codex chat audit event persistence failed.",
       }),
       expect.objectContaining({
         event: "opencompany.goat_codex_chat_event_persist_failed",

@@ -39,7 +39,7 @@ const logger = createLogger({
   runtime: "index",
 });
 // Render sends SIGTERM on deploy and SIGKILLs after `maxShutdownDelaySeconds` (300s,
-// render.yaml). Workers stop claiming immediately, then active runner jobs and durable Goat Codex
+// render.yaml). Workers stop claiming immediately, then active runner jobs and durable Codex
 // turns get most of that window to finish in place. The remaining minute covers interruption or
 // handoff, stream/telemetry flushes, and closing the DB pool before Render's hard kill.
 const RENDER_SHUTDOWN_DRAIN_MS = 240_000;
@@ -104,7 +104,7 @@ const taskScheduleWorker = codexChatWorker
     })
   : null;
 if (!codexChatWorker) {
-  logger.info("Goat task worker disabled", {
+  logger.info("Task worker disabled", {
     event: "opencompany.goat_task_worker_disabled",
   });
 }
@@ -141,7 +141,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
         handoffAfterMs: RENDER_SHUTDOWN_DRAIN_MS,
         postHandoffWaitMs: RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS,
         onHandoff: (activeCount) => {
-          logger.info("Runner shutdown handing off Goat Codex chat turns", {
+          logger.info("Runner shutdown handing off Codex chat turns", {
             event: "opencompany.runner_shutdown_handing_off_goat_codex_chat",
             active_goat_codex_chat_count: activeCount,
           });

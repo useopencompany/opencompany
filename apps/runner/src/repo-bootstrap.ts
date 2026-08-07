@@ -31,7 +31,7 @@ export async function loadRepositoryBootstrap(
   const db = getDb();
   const role = await getWorkspaceRole({ userWorkosId, workspaceId }, { db });
   if (role === null) {
-    console.error("[goat] Repository bootstrap denied for non-member", {
+    console.error("[app] Repository bootstrap denied for non-member", {
       workspaceId,
       userWorkosId,
     });

@@ -160,7 +160,7 @@ export function createCodexChatProjector(input: {
       if (error instanceof CodexChatLeaseLostError) throw error;
       if (auditFailureReported) return true;
       auditFailureReported = true;
-      const persistenceError = new Error("Goat Codex chat audit event persistence failed.");
+      const persistenceError = new Error("Codex chat audit event persistence failed.");
       persistenceError.name = "CodexChatEventPersistenceError";
       captureException(persistenceError, {
         event: "opencompany.goat_codex_chat_event_persist_failed",

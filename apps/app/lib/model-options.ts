@@ -42,7 +42,7 @@ export function modelContextWindowTokens(modelId: string): number {
 function requireAgentModelDefinition(modelId: AgentModelId) {
   const model = getAgentModelDefinition(modelId);
   if (!model) {
-    throw new Error(`Goat model "${modelId}" is missing from the agent model catalog.`);
+    throw new Error(`Model "${modelId}" is missing from the agent model catalog.`);
   }
   return model;
 }

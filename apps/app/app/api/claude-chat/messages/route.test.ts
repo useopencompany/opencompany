@@ -177,7 +177,7 @@ describe("POST /api/claude-chat/messages", () => {
 });
 
 function jsonRequest(body: unknown) {
-  return new Request("https://goat.test/api/claude-chat/messages", {
+  return new Request("https://app.test/api/claude-chat/messages", {
     method: "POST",
     body: JSON.stringify(body),
     headers: { "Content-Type": "application/json" },

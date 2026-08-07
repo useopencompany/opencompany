@@ -476,7 +476,7 @@ export function startAttioFlushWorker(options: { pollIntervalMs?: number } = {})
               object_type: window.objectType,
               record_id: window.recordId,
             });
-            logger.error("Goat Attio window flush failed", {
+            logger.error("Attio window flush failed", {
               event: "opencompany.goat_attio_flush_failed",
               integration_id: window.integrationId,
               object_type: window.objectType,
@@ -486,7 +486,7 @@ export function startAttioFlushWorker(options: { pollIntervalMs?: number } = {})
             return null;
           });
           if (flushed) {
-            logger.info("Goat Attio window flushed", {
+            logger.info("Attio window flushed", {
               event: "opencompany.goat_attio_window_flushed",
               integration_id: window.integrationId,
               object_type: window.objectType,
@@ -500,7 +500,7 @@ export function startAttioFlushWorker(options: { pollIntervalMs?: number } = {})
         }
       } catch (error) {
         captureException(error, { event: "opencompany.goat_attio_flush_worker_failed" });
-        logger.error("Goat Attio flush worker failed", {
+        logger.error("Attio flush worker failed", {
           event: "opencompany.goat_attio_flush_worker_failed",
           error,
         });

@@ -300,7 +300,7 @@ export async function connectAttioIntegration(input: {
     .returning({ id: integrations.id });
 
   if (!integration) {
-    throw new Error("Could not persist Goat Attio integration.");
+    throw new Error("Could not persist Attio integration.");
   }
 
   // A reconnect replaces the webhook rather than reusing it: the secret is

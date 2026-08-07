@@ -7,7 +7,7 @@ import {
 } from "@opencompany/brain";
 import type { BrainToolInput } from "./chat-ui";
 
-// Shared read-only Goat Brain tool surface for main chat and the per-brain MCP connector.
+// Shared read-only Brain tool surface for main chat and the per-brain MCP connector.
 // Keep command and input normalization here so both consumers expose the same retrieval contract.
 // Commands served by the DB read plane (@opencompany/db/brain-read): indexed SQL, no brain
 // materialization, no CLI spawn. `help` and `doctor` stay on the CLI.

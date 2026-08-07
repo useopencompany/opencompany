@@ -256,7 +256,7 @@ const BRAIN_INGEST_CLI_WRITE_REFERENCE = [
   "- timeline-add usage: timeline-add <id> [--at <iso-date>] (--body <text> [--detail <text> | --detail-stdin] | --body-stdin [--detail <text>]) [--source-ref <ref>] [--source-title <title>] [--evidence-id <id>] [--json]",
   '  Example: {"command":"timeline-add","args":["opencompany","--at","2026-07-06","--body-stdin","--source-ref","chat:message_123"],"stdin":"Ada approved the launch plan."}',
   "- append-timeline usage: append-timeline <id> [--at <iso-date>] (--body <text> [--detail <text> | --detail-stdin] | --body-stdin [--detail <text>]) [--source-ref <ref>] [--source-title <title>] [--evidence-id <id>] [--json]",
-  '  Example: {"command":"append-timeline","args":["opencompany","--body","The launch plan changed.","--source-ref","linear:issue:GOAT-123"]}',
+  '  Example: {"command":"append-timeline","args":["opencompany","--body","The launch plan changed.","--source-ref","linear:issue:ACME-123"]}',
   "- append-evidence usage: append-evidence <subject-id> --source-ref <ref> [--at <iso-date>] (--body <text> [--detail <text> | --detail-stdin] | --body-stdin [--detail <text>]) [--type <type>] [--folder <evidence-path>] [--title <title>] [--source-title <title>] [--evidence-id <ev-id>] [--relation <type>] [--json]",
   '  Example: {"command":"append-evidence","args":["opencompany","--source-ref","gmail:thread_123","--body-stdin","--folder","evidence/email","--title","Customer pricing request"],"stdin":"Acme asked for pricing."}',
   "Use --at, never --date. For stdin, use the matching --truth-stdin, --body-stdin, or --detail-stdin flag and provide the text in goat_brain.stdin; there is no generic --stdin flag. Body-writing commands always require --body or --body-stdin. Use only one stdin flag per call.",
@@ -268,7 +268,7 @@ function buildBrainIngestSystemPrompt(input: {
   sourceDataRule?: string;
 }) {
   return [
-    `You are the Goat Brain ingestion agent: a durable background worker that ${input.mission}`,
+    `You are the Brain ingestion agent: a durable background worker that ${input.mission}`,
     "You operate the brain exclusively through the goat_brain tool, which runs the deterministic goat-brain CLI against this brain. Call the tool and read its real output; never assume or narrate imagined results.",
     "",
     "How the brain works:",
@@ -333,7 +333,7 @@ export const FATHOM_MEETING_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt(
 
 export const CHAT_CAPTURE_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
   mission:
-    "curates one explicit user capture — saved from Goat chat or an authorized MCP client — into a single brain of Markdown knowledge documents. The capture is already stored as a draft page in the inbox; your job is to file it properly.",
+    "curates one explicit user capture — saved from chat or an authorized MCP client — into a single brain of Markdown knowledge documents. The capture is already stored as a draft page in the inbox; your job is to file it properly.",
   skipRule: `The user explicitly saved this content, so it is almost always brain-worthy. Only if it is literally empty or unusable, make no writes and reply with exactly ${BRAIN_AGENT_SKIP_SENTINEL}; the draft then stays in the inbox for the user.`,
 });
 
@@ -1275,10 +1275,10 @@ async function runBrainAgentIngestSession(input: {
   const db = getDb();
   const brainRef = input.brainRef ?? (await getDefaultBrainForUser(input.userWorkosId, { db }))?.id;
   if (!brainRef) {
-    throw new Error(`No accessible Goat brain found for user ${input.userWorkosId}.`);
+    throw new Error(`No accessible brain found for user ${input.userWorkosId}.`);
   }
 
-  const root = await mkdtemp(path.join(os.tmpdir(), "goat-agent-ingest-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "brain-agent-ingest-"));
   try {
     const materialized = await materializeBrainFilesToRoot({
       brainRef,
@@ -1293,7 +1293,7 @@ async function runBrainAgentIngestSession(input: {
     // applies to already-queued jobs. The debit prices from the recorded
     // trace model, so a mid-queue toggle can never bill the wrong tier.
     const intelligence = await getBrainIntelligence(brainRef, db).catch((error) => {
-      logger.warn("Goat Brain intelligence lookup failed", {
+      logger.warn("Brain intelligence lookup failed", {
         event: "opencompany.goat_brain_intelligence_lookup_failed",
         brain_ref: brainRef,
         error,
@@ -1308,7 +1308,7 @@ async function runBrainAgentIngestSession(input: {
     const enrichmentEnabled =
       exaApiKey && !input.importRunId
         ? await getBrainEnrichmentEnabled(brainRef, db).catch((error) => {
-            logger.warn("Goat Brain enrichment flag lookup failed", {
+            logger.warn("Brain enrichment flag lookup failed", {
               event: "opencompany.goat_brain_enrichment_flag_lookup_failed",
               brain_ref: brainRef,
               error,
@@ -1348,14 +1348,14 @@ async function runBrainAgentIngestSession(input: {
 
     if (!loop.budget.accountingComplete) {
       throw new BrainIngestBudgetError(
-        loop.budgetAccountingError ?? "Goat Brain ingestion spend could not be accounted for.",
+        loop.budgetAccountingError ?? "Brain ingestion spend could not be accounted for.",
         budgetErrorResult,
       );
     }
 
     if (loop.budget.exhausted && loop.mutations === 0) {
       throw new BrainIngestBudgetError(
-        `Goat Brain ingestion budget exhausted after ${loop.budget.totalCostUsdMicros} USD micros without producing a brain mutation.`,
+        `Brain ingestion budget exhausted after ${loop.budget.totalCostUsdMicros} USD micros without producing a brain mutation.`,
         budgetErrorResult,
       );
     }
@@ -1366,7 +1366,7 @@ async function runBrainAgentIngestSession(input: {
       failedMutatingToolCalls: loop.failedMutatingToolCalls,
       noMutationOutcome: input.noMutationOutcome,
     });
-    logger.info("Goat Brain ingestion agent finished", {
+    logger.info("Brain ingestion agent finished", {
       event: "opencompany.goat_brain_agent_ingest_finished",
       brain_ref: brainRef,
       source_ref: input.sourceRef,
@@ -1441,7 +1441,7 @@ function brainAgentIngestCompletionOutcome(input: {
   if (input.mutations > 0) return { skipped: false };
   if (input.failedMutatingToolCalls > 0) {
     throw new BrainAgentOutcomeError(
-      `Goat Brain ingestion agent attempted ${input.failedMutatingToolCalls} mutating command${
+      `Brain ingestion agent attempted ${input.failedMutatingToolCalls} mutating command${
         input.failedMutatingToolCalls === 1 ? "" : "s"
       } without successfully writing to the brain.`,
     );
@@ -1462,7 +1462,7 @@ function brainAgentIngestCompletionOutcome(input: {
     };
   }
   throw new BrainAgentOutcomeError(
-    "Goat Brain ingestion agent finished without writing to the brain and did not skip.",
+    "Brain ingestion agent finished without writing to the brain and did not skip.",
   );
 }
 
@@ -1619,7 +1619,7 @@ export async function runBrainIngestProfile<TItem extends NormalizedBrainSourceI
   const db = getDb();
   const brainRef = input.brainRef ?? (await getDefaultBrainForUser(input.userWorkosId, { db }))?.id;
   if (!brainRef) {
-    throw new Error(`No accessible Goat brain found for user ${input.userWorkosId}.`);
+    throw new Error(`No accessible brain found for user ${input.userWorkosId}.`);
   }
 
   const prepared = await profile.prepare({ input, brainRef, db, deps });
@@ -1699,7 +1699,7 @@ async function runPreparedBrainIngestTriage<TItem extends NormalizedBrainSourceI
       ingestJobId: input.input.jobId ?? input.input.item.sourceRef,
       ...(input.input.signal ? { signal: input.input.signal } : {}),
     });
-    logger.info("Goat Brain cheap triage finished", {
+    logger.info("Brain cheap triage finished", {
       event: "opencompany.goat_brain_ingest_triage_finished",
       brain_ref: input.brainRef,
       source_provider: input.input.item.sourceProvider,
@@ -1714,7 +1714,7 @@ async function runPreparedBrainIngestTriage<TItem extends NormalizedBrainSourceI
     input.input.signal?.throwIfAborted();
     // Triage is an optimization, never an availability or data-loss boundary.
     // A provider/schema/timeout failure falls through to the full ingest agent.
-    logger.warn("Goat Brain cheap triage failed; falling back to full ingest", {
+    logger.warn("Brain cheap triage failed; falling back to full ingest", {
       event: "opencompany.goat_brain_ingest_triage_failed",
       brain_ref: input.brainRef,
       source_ref: input.input.item.sourceRef,
@@ -1891,7 +1891,7 @@ export const CHAT_CAPTURE_INGEST_PROFILE: BrainIngestProfile<NormalizedChatCaptu
     // The capture's author is the acting user; their name lets the agent
     // attribute the idea in prose instead of writing "the user".
     const capturedByName = await getUserDisplayName(input.userWorkosId, { db }).catch((error) => {
-      logger.warn("Goat chat capture ingest user name lookup failed", {
+      logger.warn("Chat capture ingest user name lookup failed", {
         event: "opencompany.goat_chat_capture_user_name_lookup_failed",
         user_workos_id: input.userWorkosId,
         error,
@@ -2050,7 +2050,7 @@ const GMAIL_THREAD_INGEST_PROFILE: BrainIngestProfile<NormalizedGmailThreadSourc
           },
           db,
         ).catch((error) => {
-          logger.warn("Goat Gmail ingest instructions lookup failed", {
+          logger.warn("Gmail ingest instructions lookup failed", {
             event: "opencompany.goat_gmail_instructions_lookup_failed",
             brain_ref: brainRef,
             integration_id: input.integrationId,
@@ -2214,7 +2214,7 @@ async function downloadBrainAssetBytes(
     ...(env.blobReadWriteToken ? { token: env.blobReadWriteToken } : {}),
   });
   if (!result || result.statusCode !== 200 || !result.stream) {
-    throw new Error(`Could not download Goat brain asset blob (status ${result?.statusCode}).`);
+    throw new Error(`Could not download brain asset blob (status ${result?.statusCode}).`);
   }
   const chunks: Uint8Array[] = [];
   const reader = result.stream.getReader();
@@ -2252,7 +2252,7 @@ async function extractAssetText(format: string, bytes: Buffer): Promise<string> 
         return "";
     }
   } catch (error) {
-    logger.warn("Goat Brain asset text extraction failed", {
+    logger.warn("Brain asset text extraction failed", {
       event: "opencompany.goat_brain_asset_extraction_failed",
       format,
       error,
@@ -2354,7 +2354,7 @@ export async function runIngestAgentLoop(input: {
   if (input.signal?.aborted) onParentAbort();
   input.signal?.addEventListener("abort", onParentAbort, { once: true });
   const timeout = setTimeout(
-    () => abort.abort(new Error("Goat Brain ingestion agent timed out.")),
+    () => abort.abort(new Error("Brain ingestion agent timed out.")),
     BRAIN_AGENT_INGEST_TIMEOUT_MS,
   );
   timeout.unref?.();
@@ -2387,12 +2387,12 @@ export async function runIngestAgentLoop(input: {
   });
   const recordSpend = (source: "model" | "brain_query" | "web_search", costUsdMicros: number) => {
     if (!Number.isFinite(costUsdMicros) || costUsdMicros < 0) {
-      budgetAccountingError = `Invalid ${source} provider cost reported for Goat Brain ingestion.`;
+      budgetAccountingError = `Invalid ${source} provider cost reported for Brain ingestion.`;
       if (!budgetExhausted) {
         budgetExhausted = true;
         recordBrainIngestBudgetExhausted();
       }
-      logger.warn("Goat Brain ingestion received invalid provider cost", {
+      logger.warn("Brain ingestion received invalid provider cost", {
         event: "opencompany.goat_brain_ingest_cost_invalid",
         brain_ref: input.brainRef,
         ingest_job_id: input.ingestJobId,
@@ -2419,7 +2419,7 @@ export async function runIngestAgentLoop(input: {
     ) {
       budgetExhausted = true;
       recordBrainIngestBudgetExhausted();
-      logger.warn("Goat Brain ingestion spend gate reached", {
+      logger.warn("Brain ingestion spend gate reached", {
         event: "opencompany.goat_brain_ingest_budget_exhausted",
         brain_ref: input.brainRef,
         ingest_job_id: input.ingestJobId,
@@ -2576,7 +2576,7 @@ export async function runIngestAgentLoop(input: {
               budgetExhausted = true;
               recordBrainIngestBudgetExhausted();
             }
-            logger.warn("Goat Brain query usage could not be priced", {
+            logger.warn("Brain query usage could not be priced", {
               event: "opencompany.goat_brain_ingest_usage_unpriced",
               brain_ref: input.brainRef,
               ingest_job_id: input.ingestJobId,
@@ -2820,7 +2820,7 @@ export async function runIngestAgentLoop(input: {
       createdAt: new Date().toISOString(),
     };
     if (webSearchCount > 0) {
-      logger.info("Goat Brain ingestion enrichment used", {
+      logger.info("Brain ingestion enrichment used", {
         event: "opencompany.goat_brain_ingest_enrichment_used",
         brain_ref: input.brainRef,
         ingest_job_id: input.ingestJobId,

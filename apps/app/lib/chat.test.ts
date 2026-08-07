@@ -598,7 +598,7 @@ describe("settleStaleChatToolCalls", () => {
   });
 });
 
-describe("Goat chat history helpers", () => {
+describe("Chat history helpers", () => {
   it("lists recent open chats for one user and excludes closed sessions", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T12:30:00.000Z"));

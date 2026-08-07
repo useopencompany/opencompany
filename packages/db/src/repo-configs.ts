@@ -144,7 +144,7 @@ export async function listDecryptedRepoConfigs(input: {
       });
     } catch (error) {
       if (error instanceof EncryptionKeyConfigError) throw error;
-      console.error("[goat] Skipping invalid repository bootstrap configuration", {
+      console.error("[app] Skipping invalid repository bootstrap configuration", {
         workspaceId: input.workspaceId,
         repositoryExternalId: row.repositoryExternalId,
         errorName: error instanceof Error ? error.name : "UnknownError",

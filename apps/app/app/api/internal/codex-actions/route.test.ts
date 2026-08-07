@@ -66,7 +66,7 @@ describe("POST /api/internal/action-gateway", () => {
 
   it("translates the previous Codex-named transport fields during deploy overlap", async () => {
     const response = await POST(
-      new Request("https://goat.example.com/api/internal/codex-actions", {
+      new Request("https://app.example.com/api/internal/codex-actions", {
         method: "POST",
         headers: {
           authorization: "Bearer shared-secret",
@@ -99,7 +99,7 @@ describe("POST /api/internal/action-gateway", () => {
 });
 
 function request(body: Record<string, unknown>, bearer?: string) {
-  return new Request("https://goat.example.com/api/internal/action-gateway", {
+  return new Request("https://app.example.com/api/internal/action-gateway", {
     method: "POST",
     headers: {
       "content-type": "application/json",

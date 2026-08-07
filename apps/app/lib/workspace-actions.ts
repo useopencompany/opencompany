@@ -88,7 +88,7 @@ async function activateWorkspace(input: {
   brainId: string | null;
 }) {
   // WorkOS owns the authenticated organization context, including any
-  // organization-specific SSO/MFA requirements. Goat's cookies only remember
+  // organization-specific SSO/MFA requirements. the app's cookies only remember
   // which local workspace and brain to render after AuthKit has switched.
   await switchToOrganization(input.workosOrganizationId, {
     revalidationStrategy: "none",
@@ -153,7 +153,7 @@ export async function switchWorkspaceAction(workspaceId: string): Promise<Worksp
     // that framework control flow while translating ordinary refresh failures
     // into the server action's inline-error contract.
     unstable_rethrow(error);
-    console.error("[goat] Failed to activate workspace organization", {
+    console.error("[app] Failed to activate workspace organization", {
       workspaceId: target.workspace.id,
       workosOrganizationId: target.workspace.workosOrganizationId,
       error,
@@ -179,7 +179,7 @@ export async function createWorkspaceAction(name: unknown): Promise<WorkspaceCre
       };
     }
   } catch (error) {
-    console.error("[goat] Failed to verify Hobby workspace ownership", error);
+    console.error("[app] Failed to verify Hobby workspace ownership", error);
     return { ok: false, error: CREATE_WORKSPACE_ERROR_MESSAGE };
   }
   const workspaceId = newWorkspaceId();
@@ -215,7 +215,7 @@ export async function createWorkspaceAction(name: unknown): Promise<WorkspaceCre
     });
     localWorkspacePersisted = true;
   } catch (error) {
-    console.error("[goat] Failed to create workspace organization", {
+    console.error("[app] Failed to create workspace organization", {
       workspaceId,
       workosOrganizationId,
       localWorkspacePersisted,
@@ -225,7 +225,7 @@ export async function createWorkspaceAction(name: unknown): Promise<WorkspaceCre
       try {
         await workos.organizations.deleteOrganization(workosOrganizationId);
       } catch (cleanupError) {
-        console.error("[goat] Failed to clean up workspace organization", {
+        console.error("[app] Failed to clean up workspace organization", {
           workspaceId,
           workosOrganizationId,
           error: cleanupError,
@@ -243,7 +243,7 @@ export async function createWorkspaceAction(name: unknown): Promise<WorkspaceCre
     });
   } catch (error) {
     unstable_rethrow(error);
-    console.error("[goat] Failed to activate newly created workspace organization", {
+    console.error("[app] Failed to activate newly created workspace organization", {
       workspaceId: created.workspace.id,
       workosOrganizationId: created.workspace.workosOrganizationId ?? workosOrganizationId,
       error,
@@ -489,7 +489,7 @@ export async function inviteToWorkspaceAction(email: string): Promise<WorkspaceA
     revalidatePath("/settings/workspace");
     return { ok: true };
   } catch (error) {
-    console.error("[goat] Failed to send workspace invitation", error);
+    console.error("[app] Failed to send workspace invitation", error);
     return errorResult(error, "Could not send the invitation.");
   }
 }
@@ -511,7 +511,7 @@ export async function listWorkspaceInvitationsAction(): Promise<WorkspaceInvitat
         expiresAt: invitation.expiresAt ?? null,
       }));
   } catch (error) {
-    console.error("[goat] Failed to list workspace invitations", error);
+    console.error("[app] Failed to list workspace invitations", error);
     return [];
   }
 }
@@ -559,7 +559,7 @@ export async function removeWorkspaceMemberAction(
       userWorkosId,
     });
     await syncStripeSeatQuantityForWorkspace(context.workspace.id).catch((error) => {
-      console.error("[goat] Failed to sync Stripe seat quantity after member removal", error);
+      console.error("[app] Failed to sync Stripe seat quantity after member removal", error);
     });
     revalidatePath("/", "layout");
     return { ok: true };

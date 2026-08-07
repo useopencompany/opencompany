@@ -1793,7 +1793,7 @@ async function assertAttioWriteStillEnabled(
   if (!row || row.status !== "connected") {
     throw new ActionPermissionError(
       "attio",
-      `The Attio connection for ${connection.selector} changed before the update. Retry so Goat can use the current connection and permission.`,
+      `The Attio connection for ${connection.selector} changed before the update. Retry to use the current connection and permission.`,
     );
   }
   if (effectiveCapabilityMode("attio", "write", row.capabilityModes) === "off") {

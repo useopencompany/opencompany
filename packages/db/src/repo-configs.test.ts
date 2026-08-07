@@ -10,7 +10,7 @@ import {
   upsertRepoConfig,
 } from "./repo-configs";
 
-describe("Goat repository configs", () => {
+describe("Repository configs", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
@@ -169,7 +169,7 @@ describe("Goat repository configs", () => {
       }),
     ]);
     expect(consoleError).toHaveBeenCalledWith(
-      "[goat] Skipping invalid repository bootstrap configuration",
+      "[app] Skipping invalid repository bootstrap configuration",
       {
         workspaceId: "goat_ws_1",
         repositoryExternalId: "456",

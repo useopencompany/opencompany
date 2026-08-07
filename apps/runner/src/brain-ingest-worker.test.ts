@@ -98,7 +98,7 @@ function jamieItem(segmentCount = 2) {
   );
 }
 
-describe("Goat Brain ingest worker", () => {
+describe("Brain ingest worker", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -728,7 +728,7 @@ describe("Goat Brain ingest worker", () => {
     };
     const run = vi.fn(async () => {
       throw new BrainAgentOutcomeError(
-        "Goat Brain ingestion agent finished without writing to the brain and did not skip.",
+        "Brain ingestion agent finished without writing to the brain and did not skip.",
       );
     });
     const fail = vi.fn(async () => true);
@@ -842,7 +842,7 @@ describe("Goat Brain ingest worker", () => {
       mutations: 0,
     };
     const run = vi.fn(async () => {
-      throw new BrainIngestBudgetError("Goat Brain ingestion budget exhausted.", failureResult);
+      throw new BrainIngestBudgetError("Brain ingestion budget exhausted.", failureResult);
     });
     const fail = vi.fn(async () => true);
     const store: BrainIngestStore = {

@@ -1,7 +1,7 @@
 import * as z from "zod/v4-mini";
 import type { BrainToolInput } from "@/lib/chat-ui";
 
-// Single source of truth for the flat, intent-named Goat Brain tool surface.
+// Single source of truth for the flat, intent-named Brain tool surface.
 //
 // The read engine (brain-cli.ts + the @opencompany/db/brain-read plane) speaks a
 // CLI-shaped `{ command, flags }` contract. That shape is great for a guided in-app agent

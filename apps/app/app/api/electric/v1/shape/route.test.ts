@@ -43,7 +43,7 @@ describe("authorizeChatSessionShape", () => {
     await expect(
       authorizeChatSessionShape({
         requestUrl: new URL(
-          "https://goat.example.com/api/electric/v1/shape?table=goat.chat_messages&session_id=goat_chat_1",
+          "https://app.example.com/api/electric/v1/shape?table=goat.chat_messages&session_id=goat_chat_1",
         ),
         userWorkosId: "user_123",
         workspaceId: "workspace_123",
@@ -63,7 +63,7 @@ describe("authorizeChatSessionShape", () => {
   it("ignores shapes that are not chat-session scoped", async () => {
     await expect(
       authorizeChatSessionShape({
-        requestUrl: new URL("https://goat.example.com/api/electric/v1/shape?table=goat.tasks"),
+        requestUrl: new URL("https://app.example.com/api/electric/v1/shape?table=goat.tasks"),
         userWorkosId: "user_123",
         workspaceId: "workspace_123",
       }),

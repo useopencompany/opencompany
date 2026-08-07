@@ -94,7 +94,7 @@ export async function extractChatAttachmentTexts(
             : extractUtf8Text(bytes, { maxBytes: CHAT_ATTACHMENT_TEXT_MAX_BYTES });
       if (text) texts[attachment.id] = text;
     } catch (error) {
-      console.warn("Goat chat attachment text extraction failed.", {
+      console.warn("Chat attachment text extraction failed.", {
         event: "goat.chat_attachment_extraction_failed",
         kind: attachment.kind,
         error: error instanceof Error ? error.message : String(error),
@@ -191,7 +191,7 @@ async function attachmentToParts(
       },
     ];
   } catch (error) {
-    console.warn("Goat chat attachment hydration failed.", {
+    console.warn("Chat attachment hydration failed.", {
       event: "goat.chat_attachment_hydration_failed",
       kind: attachment.kind,
       error: error instanceof Error ? error.message : String(error),

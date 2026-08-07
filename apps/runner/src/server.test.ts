@@ -91,7 +91,7 @@ describe("runner server CORS", () => {
   });
 });
 
-describe("Goat coding workspace access", () => {
+describe("Coding workspace access", () => {
   it("rejects missing owner claims", async () => {
     const server = createServer(env);
     servers.push(server);
@@ -137,7 +137,7 @@ describe("Goat coding workspace access", () => {
   });
 });
 
-describe("Goat dictation access", () => {
+describe("Dictation access", () => {
   it("requires internal auth and returns an owner-bound ticket", async () => {
     const server = createServer(env);
     servers.push(server);
@@ -175,7 +175,7 @@ describe("Goat dictation access", () => {
   });
 });
 
-describe("internal Goat Codex sandbox status endpoint", () => {
+describe("internal Codex sandbox status endpoint", () => {
   it("returns the E2B sandbox lifecycle status", async () => {
     vi.mocked(getSandboxLifecycleStatus).mockResolvedValue("sleeping");
     const server = createServer(workerEnv);
@@ -193,7 +193,7 @@ describe("internal Goat Codex sandbox status endpoint", () => {
   });
 });
 
-describe("internal Goat Codex sandbox kill endpoint", () => {
+describe("internal Codex sandbox kill endpoint", () => {
   it("kills the E2B sandbox", async () => {
     const server = createServer(workerEnv);
     servers.push(server);

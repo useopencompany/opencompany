@@ -45,7 +45,7 @@ function getConfig() {
 
 function debugLog(message: string, payload?: unknown) {
   if (!isDebugEnabled()) return;
-  logger.info(`Goat analytics ${message}`, {
+  logger.info(`Analytics ${message}`, {
     event: "opencompany.analytics_debug",
     project: "goat",
     payload,
@@ -57,7 +57,7 @@ export function initClientAnalytics() {
 
   const { token, host } = getConfig();
   if (!token || !host) {
-    debugLog("client disabled: missing Goat PostHog token or host");
+    debugLog("client disabled: missing PostHog token or host");
     return;
   }
 

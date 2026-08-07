@@ -27,7 +27,7 @@ describe("resolveAuthKitDomain", () => {
   });
 });
 
-describe("Goat MCP metadata URLs", () => {
+describe("MCP metadata URLs", () => {
   it("builds the MCP protected-resource metadata path", () => {
     expect(buildUserMcpResourceMetadataPath()).toBe("/.well-known/oauth-protected-resource/mcp");
   });
@@ -35,32 +35,32 @@ describe("Goat MCP metadata URLs", () => {
   it("derives the MCP resource URL from path-suffixed metadata requests", () => {
     const request = new Request("http://internal.local/.well-known/oauth-protected-resource/mcp", {
       headers: {
-        "x-forwarded-host": "goat.example.com",
+        "x-forwarded-host": "app.example.com",
         "x-forwarded-proto": "https",
       },
     });
 
-    expect(mcpResourceUrlFromMetadataRequest(request)).toBe("https://goat.example.com/mcp");
+    expect(mcpResourceUrlFromMetadataRequest(request)).toBe("https://app.example.com/mcp");
   });
 
   it("derives the stable MCP resource indicator URL from endpoint requests", () => {
     const request = new Request("http://internal.local/mcp?cursor=1", {
       headers: {
-        "x-forwarded-host": "goat.example.com",
+        "x-forwarded-host": "app.example.com",
         "x-forwarded-proto": "https",
       },
     });
 
-    expect(mcpResourceIndicatorUrlFromRequest(request)).toBe("https://goat.example.com/mcp");
+    expect(mcpResourceIndicatorUrlFromRequest(request)).toBe("https://app.example.com/mcp");
   });
 
   it("uses the stable MCP resource indicator in protected-resource metadata", () => {
     const request = new Request(
-      "https://goat.example.com/.well-known/oauth-protected-resource/mcp",
+      "https://app.example.com/.well-known/oauth-protected-resource/mcp",
     );
 
     expect(mcpProtectedResourceMetadata(request, "https://authkit.example.com")).toMatchObject({
-      resource: "https://goat.example.com/mcp",
+      resource: "https://app.example.com/mcp",
       authorization_servers: ["https://authkit.example.com"],
       bearer_methods_supported: ["header"],
     });

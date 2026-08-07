@@ -30,7 +30,7 @@ export async function maybeTriggerAutoRefill(workspaceId: string) {
     if (balance >= AUTO_REFILL_THRESHOLD_USD_MICROS) return;
     await runAutoRefill(workspaceId);
   } catch (error) {
-    console.error(`Goat auto-refill trigger failed for workspace ${workspaceId}.`, error);
+    console.error(`Auto-refill trigger failed for workspace ${workspaceId}.`, error);
   }
 }
 
@@ -116,7 +116,7 @@ export async function sweepAutoRefills(limit = 25) {
       const result = await runAutoRefill(workspaceId);
       if (result.charged) charged += 1;
     } catch (error) {
-      console.error(`Goat auto-refill sweep failed for workspace ${workspaceId}.`, error);
+      console.error(`Auto-refill sweep failed for workspace ${workspaceId}.`, error);
     }
   }
   return { candidates: candidates.length, charged };

@@ -30,7 +30,7 @@ function skillDocument(
   );
 }
 
-describe("Goat Brain skills", () => {
+describe("Brain skills", () => {
   it("materializes a complete draft or active page as a standard SKILL.md", () => {
     const skill = brainSkillFromDocument(skillDocument());
     expect(skill).toEqual({

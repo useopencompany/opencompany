@@ -507,7 +507,7 @@ async function executeLinearAction(
   if (spec.capability === "write" && connection.integrationId !== expectedIntegrationId) {
     throw new ActionPermissionError(
       "linear",
-      "The Linear connection changed before this change could be made. Retry so Goat can use the current connection and permission.",
+      "The Linear connection changed before this change could be made. Retry to use the current connection and permission.",
     );
   }
 
@@ -553,7 +553,7 @@ async function assertLinearWriteStillEnabled(userWorkosId: string, expectedInteg
   if (state.integrationId !== expectedIntegrationId) {
     throw new ActionPermissionError(
       "linear",
-      "The Linear connection changed before this change could be made. Retry so Goat can use the current connection and permission.",
+      "The Linear connection changed before this change could be made. Retry to use the current connection and permission.",
     );
   }
   if (effectiveCapabilityMode("linear", "write", state.capabilityModes) === "off") {

@@ -35,8 +35,8 @@ describe("PostHog server analytics", () => {
     vi.unstubAllEnvs();
   });
 
-  it("routes typed events to the dedicated Goat PostHog project", async () => {
-    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_goat_test");
+  it("routes typed events to the dedicated app PostHog project", async () => {
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_test_token");
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://eu.i.posthog.com");
     vi.stubEnv("NEXT_PUBLIC_ANALYTICS_DEBUG", "true");
 
@@ -61,7 +61,7 @@ describe("PostHog server analytics", () => {
     );
 
     expect(posthog.constructor).toHaveBeenCalledWith(
-      "phc_goat_test",
+      "phc_test_token",
       expect.objectContaining({
         host: "https://eu.i.posthog.com",
         flushAt: 1,
@@ -124,7 +124,7 @@ describe("PostHog server analytics", () => {
   });
 
   it("captures task spawn events with dashboard-safe attributes", async () => {
-    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_test_token");
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://eu.i.posthog.com");
 
     await captureTaskSpawned({
@@ -161,7 +161,7 @@ describe("PostHog server analytics", () => {
   });
 
   it("captures LLM usage with dashboard-friendly model and token properties", async () => {
-    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_test_token");
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://eu.i.posthog.com");
 
     await captureLlmUsageRecorded({
@@ -228,7 +228,7 @@ describe("PostHog server analytics", () => {
   });
 
   it("captures model spend with sum-ready micros properties", async () => {
-    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_test_token");
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://eu.i.posthog.com");
 
     await captureModelSpendRecorded({
@@ -269,7 +269,7 @@ describe("PostHog server analytics", () => {
   });
 
   it("does not capture model spend when the model cost is zero", async () => {
-    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_test_token");
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://eu.i.posthog.com");
 
     await captureModelSpendRecorded({

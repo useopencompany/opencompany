@@ -140,7 +140,7 @@ describe("deriveTaskSteps", () => {
       task({
         status: "failed",
         stage: "failed",
-        error: "Goat harness failed.",
+        error: "Harness failed.",
         debugTrace: traceWithTools([
           {
             name: "exa_search",

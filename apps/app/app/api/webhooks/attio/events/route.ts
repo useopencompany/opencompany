@@ -81,7 +81,7 @@ export async function POST(request: Request) {
       await handleAttioEvents({ events, workspaceId, idempotencyKey, match }),
     );
   } catch (error) {
-    console.error("[goat-attio] Failed to process Attio events", {
+    console.error("[attio] Failed to process Attio events", {
       eventCount: events.length,
       error: error instanceof Error ? error.message : String(error),
     });

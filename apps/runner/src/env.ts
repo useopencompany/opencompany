@@ -13,23 +13,23 @@ export type RunnerEnv = {
   // (llm-broker.ts) as the upstream credential for the "openai" provider. Never enters
   // the sandbox.
   openaiCodexApiKey: string | undefined;
-  // Platform OpenAI key used only by the runner-hosted Goat voice dictation relay.
-  // It is never sent to the browser; the Goat app mints short-lived runner tickets instead.
+  // Platform OpenAI key used only by the runner-hosted voice dictation relay.
+  // It is never sent to the browser; the app mints short-lived runner tickets instead.
   openaiApiKey?: string | undefined;
   dictationRealtimeModel?: string | undefined;
   dictationFinalModel?: string | undefined;
   // Public base URL of this runner (Render's RENDER_EXTERNAL_URL, or
   // RUNNER_LLM_BROKER_PUBLIC_URL to override). E2B cloud sandboxes use it to call back
-  // into runner-hosted routes: the LLM broker and Goat's Google tool bridge. Unset
+  // into runner-hosted routes: the LLM broker and the app's Google tool bridge. Unset
   // local dev disables those callback-only features. Deliberately NOT the web-side
   // RUNNER_PUBLIC_URL: the runner loads the repo-root .env, where that var points at
   // localhost in local dev and would wrongly activate sandbox callbacks.
   publicUrl: string | undefined;
-  // Wildcard preview hostname routed to this runner, for example preview.goat.example.com.
+  // Wildcard preview hostname routed to this runner, for example preview.app.example.com.
   // Capability labels are prepended to this domain. A port may be included for local development.
   previewBaseDomain?: string | undefined;
   previewProtocol?: "http" | "https" | undefined;
-  // Public Goat origin used only by the runner host to call private, bearer-protected
+  // Public app origin used only by the runner host to call private, bearer-protected
   // endpoints. Integration credentials and this bearer token never enter Codex sandboxes.
   appUrl?: string | undefined;
   // Kill switch for the LLM broker: set RUNNER_LLM_BROKER_ENABLED=false to revert to
@@ -54,7 +54,7 @@ export type RunnerEnv = {
   // never publish a pull request.
   codexTimeoutMs: number;
   codexModel: string;
-  // Idle timeout for persistent Goat codex-chat sandboxes. Unlike per-task sandboxes (killed after
+  // Idle timeout for persistent codex-chat sandboxes. Unlike per-task sandboxes (killed after
   // each run), a chat sandbox stays alive across turns so files and the app-server daemon survive;
   // on idle timeout E2B pauses it and Sandbox.connect auto-resumes on the next message.
   codexChatIdleTimeoutMs: number;
@@ -63,11 +63,11 @@ export type RunnerEnv = {
   // shorter than such gaps during a long blocking tool call, letting another instance re-claim the
   // job and replay the whole turn (double model + opencode billing). Sized to absorb a normal deploy.
   jobLeaseTtlMs: number;
-  // Durable Goat chat turn lease TTL. Kept shorter than the generic job delivery lease so a dead
+  // Durable chat turn lease TTL. Kept shorter than the generic job delivery lease so a dead
   // worker's chat turn can be reclaimed quickly without changing the older job queue's deploy buffer.
   codexChatLeaseTtlMs?: number | undefined;
-  // Explicit opt-in for the experimental Goat task worker. Defaults off so normal runner
-  // deployments keep serving existing agent work without polling Goat tables or exposing Goat tools.
+  // Explicit opt-in for the experimental task worker. Defaults off so normal runner
+  // deployments keep serving existing agent work without polling app tables or exposing app tools.
   taskWorkerEnabled: boolean;
   workerConcurrency: number;
   port: number;

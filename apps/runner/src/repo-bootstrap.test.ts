@@ -27,7 +27,7 @@ vi.mock("./db", () => ({
   getDb: () => ({ name: "db" }),
 }));
 
-describe("Goat repository bootstrap", () => {
+describe("Repository bootstrap", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dbMocks.getWorkspaceRole.mockResolvedValue("member");
@@ -45,7 +45,7 @@ describe("Goat repository bootstrap", () => {
     });
 
     expect(dbMocks.listDecryptedRepoConfigs).not.toHaveBeenCalled();
-    expect(consoleError).toHaveBeenCalledWith("[goat] Repository bootstrap denied for non-member", {
+    expect(consoleError).toHaveBeenCalledWith("[app] Repository bootstrap denied for non-member", {
       workspaceId: "goat_ws_1",
       userWorkosId: "user_removed",
     });

@@ -225,7 +225,7 @@ export async function runClaimedTurn(
     turn.attempts > 1 &&
     (turn.engineRecoveryRequired || turn.codexTurnId !== null);
   if (recoveryRequired) {
-    logger.info("Reattaching reclaimed Goat Codex chat turn", {
+    logger.info("Reattaching reclaimed Codex chat turn", {
       event: "opencompany.goat_codex_chat_turn_reattach_started",
       turn_id: turn.id,
       codex_chat_session_id: session.id,
@@ -237,7 +237,7 @@ export async function runClaimedTurn(
     });
   }
   if (turn.attempts > 1) {
-    logger.warn("Reclaimed durable Goat chat turn", {
+    logger.warn("Reclaimed durable chat turn", {
       event: "opencompany.goat_codex_chat_turn_reclaimed",
       turn_id: turn.id,
       codex_chat_session_id: session.id,
@@ -262,7 +262,7 @@ export async function runClaimedTurn(
       event: "opencompany.goat_codex_chat_heartbeat_failed",
       turn_id: turn.id,
     });
-    logger.warn("Goat codex chat heartbeat failed", {
+    logger.warn("Codex chat heartbeat failed", {
       event: "opencompany.goat_codex_chat_heartbeat_failed",
       turn_id: turn.id,
       error,
@@ -335,7 +335,7 @@ export async function runClaimedTurn(
       leaseOwner,
       retryAt,
     });
-    logger.warn("Deferred Goat Codex chat turn after transient infrastructure failure", {
+    logger.warn("Deferred Codex chat turn after transient infrastructure failure", {
       event: "opencompany.goat_codex_chat_turn_retry_deferred",
       turn_id: turn.id,
       codex_chat_session_id: session.id,
@@ -501,7 +501,7 @@ export async function sweepTerminalCodexChatSandboxes(input: {
         event: "opencompany.goat_codex_chat_sandbox_sweep_item_failed",
         codex_chat_session_id: row.id,
       });
-      logger.warn("Failed to reconcile terminal Goat Codex chat sandbox", {
+      logger.warn("Failed to reconcile terminal Codex chat sandbox", {
         event: "opencompany.goat_codex_chat_sandbox_sweep_item_failed",
         codex_chat_session_id: row.id,
         error,
@@ -576,7 +576,7 @@ export function startCodexChatWorker(
             captureException(error, {
               event: "opencompany.goat_codex_chat_sandbox_sweep_failed",
             });
-            logger.warn("Goat Codex chat sandbox sweep failed", {
+            logger.warn("Codex chat sandbox sweep failed", {
               event: "opencompany.goat_codex_chat_sandbox_sweep_failed",
               error,
             });
@@ -598,7 +598,7 @@ export function startCodexChatWorker(
                 event: "opencompany.goat_codex_chat_turn_failed",
                 turn_id: turn.id,
               });
-              logger.error("Goat codex chat turn failed", {
+              logger.error("Codex chat turn failed", {
                 event: "opencompany.goat_codex_chat_turn_failed",
                 turn_id: turn.id,
                 error,
@@ -614,7 +614,7 @@ export function startCodexChatWorker(
         }
       } catch (error) {
         captureException(error, { event: "opencompany.goat_codex_chat_worker_failed" });
-        logger.error("Goat codex chat worker failed", {
+        logger.error("Codex chat worker failed", {
           event: "opencompany.goat_codex_chat_worker_failed",
           error,
         });
@@ -682,7 +682,7 @@ export function startCodexChatWorker(
       ).length;
       const failedCount = forcedHandoffs.filter((result) => result.status === "rejected").length;
       if (releasedCount > 0 || failedCount > 0) {
-        logger.warn("Runner shutdown forced Goat Codex chat lease handoff", {
+        logger.warn("Runner shutdown forced Codex chat lease handoff", {
           event: "opencompany.goat_codex_chat_shutdown_forced_handoff",
           released_count: releasedCount,
           failed_count: failedCount,

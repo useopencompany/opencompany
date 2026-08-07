@@ -210,14 +210,14 @@ describe("MessageBubble assistant errors", () => {
           type: USE_ACTION_TOOL_PART_TYPE,
           toolCallId: "tool_action_1",
           state: "output-available",
-          input: { action: "linear.list_issues", params: { team: "Goat" } },
+          input: { action: "linear.list_issues", params: { team: "Acme" } },
           output: {
             ok: true,
             action: "linear.list_issues",
             result: { issues: [] },
           },
         },
-        { type: "text", text: "No open issues for the Goat team." },
+        { type: "text", text: "No open issues for the Acme team." },
       ],
     };
 
@@ -234,9 +234,9 @@ describe("MessageBubble assistant errors", () => {
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
     expect(within(toolCall).getByText("Input")).toBeInTheDocument();
     expect(within(toolCall).getByText("Output")).toBeInTheDocument();
-    expect(within(toolCall).getByText(/"team": "Goat"/)).toBeInTheDocument();
+    expect(within(toolCall).getByText(/"team": "Acme"/)).toBeInTheDocument();
     expect(within(toolCall).getByText(/"issues": \[\]/)).toBeInTheDocument();
-    expect(screen.getByText("No open issues for the Goat team.")).toBeInTheDocument();
+    expect(screen.getByText("No open issues for the Acme team.")).toBeInTheDocument();
   });
 
   it("renders browser screenshots from the authenticated transcript route", () => {
@@ -264,7 +264,7 @@ describe("MessageBubble assistant errors", () => {
     expect(screen.getByText("Screenshot")).toBeInTheDocument();
     expect(screen.getByText("Full page")).toBeInTheDocument();
     expect(
-      screen.getByRole("img", { name: "Screenshot captured by Goat's browser" }),
+      screen.getByRole("img", { name: "Screenshot captured by the app's browser" }),
     ).toHaveAttribute("src", "/api/chat-screenshots/goat_chat_1/1234-aabb.png");
   });
 

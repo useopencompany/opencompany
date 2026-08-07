@@ -71,7 +71,7 @@ describe("normalizeLinearListIssuesInput", () => {
         cursor: "",
         orderBy: "updatedAt",
         query: "",
-        team: "Goat",
+        team: "Acme",
         state: "Todo",
         cycle: "",
         label: "",
@@ -88,7 +88,7 @@ describe("normalizeLinearListIssuesInput", () => {
     ).toEqual({
       limit: 100,
       orderBy: "updatedAt",
-      team: "Goat",
+      team: "Acme",
       state: "Todo",
       project: "company brain",
       includeArchived: false,
@@ -98,11 +98,11 @@ describe("normalizeLinearListIssuesInput", () => {
   it("maps explicit unassigned and no-priority filters to Linear sentinels", () => {
     expect(
       normalizeLinearListIssuesInput({
-        team: "Goat",
+        team: "Acme",
         unassigned: true,
         unprioritized: true,
       }),
-    ).toEqual({ team: "Goat", assignee: null, priority: 0 });
+    ).toEqual({ team: "Acme", assignee: null, priority: 0 });
   });
 
   it("rejects contradictory explicit filters", () => {
@@ -120,7 +120,7 @@ describe("normalizeLinearCreateIssueInput", () => {
     expect(
       normalizeLinearCreateIssueInput({
         title: "  Add export flow  ",
-        team: " GOAT ",
+        team: " ACME ",
         description: " Ship the first cut. ",
         assignee: " me ",
         state: " Todo ",
@@ -131,7 +131,7 @@ describe("normalizeLinearCreateIssueInput", () => {
       }),
     ).toEqual({
       title: "Add export flow",
-      team: "GOAT",
+      team: "ACME",
       description: "Ship the first cut.",
       assignee: "me",
       state: "Todo",
@@ -143,27 +143,27 @@ describe("normalizeLinearCreateIssueInput", () => {
   });
 
   it("requires a title and team and rejects unsafe or unknown fields", () => {
-    expect(() => normalizeLinearCreateIssueInput({ team: "GOAT" })).toThrow('"title" is required');
+    expect(() => normalizeLinearCreateIssueInput({ team: "ACME" })).toThrow('"title" is required');
     expect(() =>
-      normalizeLinearCreateIssueInput({ title: "Ship", team: "GOAT", priority: 5 }),
+      normalizeLinearCreateIssueInput({ title: "Ship", team: "ACME", priority: 5 }),
     ).toThrow('"priority" must be an integer');
     expect(() =>
-      normalizeLinearCreateIssueInput({ title: "Ship", team: "GOAT", deleteAll: true }),
+      normalizeLinearCreateIssueInput({ title: "Ship", team: "ACME", deleteAll: true }),
     ).toThrow("Unknown parameter");
   });
 
   it("allows issue descriptions up to Linear's documented message body cap", () => {
     const description = "x".repeat(LINEAR_MAX_MARKDOWN_BODY_CHARS);
-    expect(normalizeLinearCreateIssueInput({ title: "Ship", team: "GOAT", description })).toEqual({
+    expect(normalizeLinearCreateIssueInput({ title: "Ship", team: "ACME", description })).toEqual({
       title: "Ship",
-      team: "GOAT",
+      team: "ACME",
       description,
     });
 
     expect(() =>
       normalizeLinearCreateIssueInput({
         title: "Ship",
-        team: "GOAT",
+        team: "ACME",
         description: `${description}x`,
       }),
     ).toThrow('"description" exceeds 249999 characters');
@@ -174,7 +174,7 @@ describe("normalizeLinearUpdateIssueInput", () => {
   it("normalizes requested changes, supports cancellation, and preserves explicit clears", () => {
     expect(
       normalizeLinearUpdateIssueInput({
-        id: " GOAT-123 ",
+        id: " ACME-123 ",
         title: " Ship Linear updates ",
         description: "  ",
         assignee: null,
@@ -184,7 +184,7 @@ describe("normalizeLinearUpdateIssueInput", () => {
         labels: [],
       }),
     ).toEqual({
-      id: "GOAT-123",
+      id: "ACME-123",
       title: "Ship Linear updates",
       description: "",
       assignee: null,
@@ -197,26 +197,26 @@ describe("normalizeLinearUpdateIssueInput", () => {
 
   it("requires an identifier and at least one known field to update", () => {
     expect(() => normalizeLinearUpdateIssueInput({ state: "Done" })).toThrow('"id" is required');
-    expect(() => normalizeLinearUpdateIssueInput({ id: "GOAT-123" })).toThrow(
+    expect(() => normalizeLinearUpdateIssueInput({ id: "ACME-123" })).toThrow(
       "at least one issue field",
     );
-    expect(() => normalizeLinearUpdateIssueInput({ id: "GOAT-123", delete: true })).toThrow(
+    expect(() => normalizeLinearUpdateIssueInput({ id: "ACME-123", delete: true })).toThrow(
       "Unknown parameter",
     );
-    expect(() => normalizeLinearUpdateIssueInput({ id: "GOAT-123", project: "" })).toThrow(
+    expect(() => normalizeLinearUpdateIssueInput({ id: "ACME-123", project: "" })).toThrow(
       '"project" must be a non-empty string',
     );
   });
 
   it("allows replacement descriptions up to Linear's documented message body cap", () => {
     const description = "x".repeat(LINEAR_MAX_MARKDOWN_BODY_CHARS);
-    expect(normalizeLinearUpdateIssueInput({ id: "GOAT-123", description })).toEqual({
-      id: "GOAT-123",
+    expect(normalizeLinearUpdateIssueInput({ id: "ACME-123", description })).toEqual({
+      id: "ACME-123",
       description,
     });
 
     expect(() =>
-      normalizeLinearUpdateIssueInput({ id: "GOAT-123", description: `${description}x` }),
+      normalizeLinearUpdateIssueInput({ id: "ACME-123", description: `${description}x` }),
     ).toThrow('"description" exceeds 249999 characters');
   });
 });
@@ -225,22 +225,22 @@ describe("normalizeLinearCreateCommentInput", () => {
   it("normalizes the issue identifier and Markdown body", () => {
     expect(
       normalizeLinearCreateCommentInput({
-        issueId: " GOAT-123 ",
+        issueId: " ACME-123 ",
         body: "  Shipped in #456.  ",
       }),
     ).toEqual({
-      issueId: "GOAT-123",
+      issueId: "ACME-123",
       body: "Shipped in #456.",
     });
   });
 
   it("requires both fields and rejects unknown parameters", () => {
-    expect(() => normalizeLinearCreateCommentInput({ issueId: "GOAT-123" })).toThrow(
+    expect(() => normalizeLinearCreateCommentInput({ issueId: "ACME-123" })).toThrow(
       '"body" is required',
     );
     expect(() =>
       normalizeLinearCreateCommentInput({
-        issueId: "GOAT-123",
+        issueId: "ACME-123",
         body: "Done",
         notifyAll: true,
       }),
@@ -249,13 +249,13 @@ describe("normalizeLinearCreateCommentInput", () => {
 
   it("allows comments up to Linear's documented message body cap", () => {
     const body = "x".repeat(LINEAR_MAX_MARKDOWN_BODY_CHARS);
-    expect(normalizeLinearCreateCommentInput({ issueId: "GOAT-123", body })).toEqual({
-      issueId: "GOAT-123",
+    expect(normalizeLinearCreateCommentInput({ issueId: "ACME-123", body })).toEqual({
+      issueId: "ACME-123",
       body,
     });
 
     expect(() =>
-      normalizeLinearCreateCommentInput({ issueId: "GOAT-123", body: `${body}x` }),
+      normalizeLinearCreateCommentInput({ issueId: "ACME-123", body: `${body}x` }),
     ).toThrow('"body" exceeds 249999 characters');
   });
 });
@@ -374,11 +374,11 @@ describe("linear action execution", () => {
     const catalog = await resolveLinearActions("user_1");
     const listIssues = catalog?.actions.find((action) => action.id === "linear.list_issues");
     const result = await listIssues?.execute(
-      { team: "Goat", assignee: null, priority: 0 },
+      { team: "Acme", assignee: null, priority: 0 },
       CONTEXT,
     );
 
-    expect(remoteExecute).toHaveBeenCalledWith({ team: "Goat" }, expect.anything());
+    expect(remoteExecute).toHaveBeenCalledWith({ team: "Acme" }, expect.anything());
     expect(result).toEqual({
       integrationId: "gint_linear_1",
       issues: [
@@ -435,7 +435,7 @@ describe("linear action execution", () => {
       content: [
         {
           type: "text",
-          text: '{"id":"issue_1","identifier":"GOAT-123","url":"https://linear.app/acme/issue/GOAT-123"}',
+          text: '{"id":"issue_1","identifier":"ACME-123","url":"https://linear.app/acme/issue/ACME-123"}',
         },
       ],
     }));
@@ -446,7 +446,7 @@ describe("linear action execution", () => {
     const result = await createIssue?.execute(
       {
         title: " Add ticket creation ",
-        team: " GOAT ",
+        team: " ACME ",
         assignee: "me",
         priority: 2,
         labels: ["Feature"],
@@ -457,7 +457,7 @@ describe("linear action execution", () => {
     expect(remoteExecute).toHaveBeenCalledWith(
       {
         title: "Add ticket creation",
-        team: "GOAT",
+        team: "ACME",
         assignee: "me",
         priority: 2,
         labels: ["Feature"],
@@ -466,9 +466,9 @@ describe("linear action execution", () => {
     );
     expect(result).toEqual({
       id: "issue_1",
-      identifier: "GOAT-123",
-      url: "https://linear.app/acme/issue/GOAT-123",
-      sourceRef: "linear:issue:GOAT-123",
+      identifier: "ACME-123",
+      url: "https://linear.app/acme/issue/ACME-123",
+      sourceRef: "linear:issue:ACME-123",
       integrationId: "gint_linear_1",
     });
     expect(close).toHaveBeenCalled();
@@ -484,7 +484,7 @@ describe("linear action execution", () => {
       content: [
         {
           type: "text",
-          text: '{"id":"issue_1","identifier":"GOAT-123","state":{"name":"Canceled"}}',
+          text: '{"id":"issue_1","identifier":"ACME-123","state":{"name":"Canceled"}}',
         },
       ],
     }));
@@ -494,7 +494,7 @@ describe("linear action execution", () => {
     const updateIssue = catalog?.actions.find((action) => action.id === "linear.update_issue");
     const result = await updateIssue?.execute(
       {
-        id: " GOAT-123 ",
+        id: " ACME-123 ",
         state: " Canceled ",
         description: " No longer planned. ",
       },
@@ -503,7 +503,7 @@ describe("linear action execution", () => {
 
     expect(remoteExecute).toHaveBeenCalledWith(
       {
-        id: "GOAT-123",
+        id: "ACME-123",
         state: "Canceled",
         description: "No longer planned.",
       },
@@ -511,9 +511,9 @@ describe("linear action execution", () => {
     );
     expect(result).toEqual({
       id: "issue_1",
-      identifier: "GOAT-123",
+      identifier: "ACME-123",
       state: { name: "Canceled" },
-      sourceRef: "linear:issue:GOAT-123",
+      sourceRef: "linear:issue:ACME-123",
       integrationId: "gint_linear_1",
     });
     expect(close).toHaveBeenCalled();
@@ -529,7 +529,7 @@ describe("linear action execution", () => {
       content: [
         {
           type: "text",
-          text: '{"id":"issue_1","identifier":"GOAT-123","project":null}',
+          text: '{"id":"issue_1","identifier":"ACME-123","project":null}',
         },
       ],
     }));
@@ -537,20 +537,20 @@ describe("linear action execution", () => {
 
     const catalog = await resolveLinearActions("user_1");
     const updateIssue = catalog?.actions.find((action) => action.id === "linear.update_issue");
-    const result = await updateIssue?.execute({ id: " GOAT-123 ", project: null }, CONTEXT);
+    const result = await updateIssue?.execute({ id: " ACME-123 ", project: null }, CONTEXT);
 
     expect(remoteExecute).toHaveBeenCalledWith(
       {
-        id: "GOAT-123",
+        id: "ACME-123",
         project: null,
       },
       expect.anything(),
     );
     expect(result).toEqual({
       id: "issue_1",
-      identifier: "GOAT-123",
+      identifier: "ACME-123",
       project: null,
-      sourceRef: "linear:issue:GOAT-123",
+      sourceRef: "linear:issue:ACME-123",
       integrationId: "gint_linear_1",
     });
     expect(close).toHaveBeenCalled();
@@ -570,12 +570,12 @@ describe("linear action execution", () => {
     const catalog = await resolveLinearActions("user_1");
     const createComment = catalog?.actions.find((action) => action.id === "linear.create_comment");
     const result = await createComment?.execute(
-      { issueId: " GOAT-123 ", body: " Shipped. " },
+      { issueId: " ACME-123 ", body: " Shipped. " },
       CONTEXT,
     );
 
     expect(remoteExecute).toHaveBeenCalledWith(
-      { issueId: "GOAT-123", body: "Shipped." },
+      { issueId: "ACME-123", body: "Shipped." },
       expect.anything(),
     );
     expect(result).toEqual({ id: "comment_1", body: "Shipped." });
@@ -588,7 +588,7 @@ describe("linear action execution", () => {
     const createIssue = catalog?.actions.find((action) => action.id === "linear.create_issue");
 
     await expect(
-      createIssue?.execute({ title: "Should not happen", team: "GOAT" }, CONTEXT),
+      createIssue?.execute({ title: "Should not happen", team: "ACME" }, CONTEXT),
     ).rejects.toBeInstanceOf(ActionPermissionError);
     expect(mocks.createMCPClient).not.toHaveBeenCalled();
   });

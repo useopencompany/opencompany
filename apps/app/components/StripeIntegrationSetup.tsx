@@ -164,7 +164,7 @@ export function StripeIntegrationSetup({
         </ol>
         <p className="px-2 text-[13px] leading-5 text-ink-subtle">
           Main chat can then answer questions about recent payment activity, cash available in
-          Stripe, subscription health and estimated MRR, and open receivables. Goat rejects
+          Stripe, subscription health and estimated MRR, and open receivables. opencompany rejects
           unrestricted <code>sk_</code> keys and never exposes the saved key to the model.
         </p>
       </section>

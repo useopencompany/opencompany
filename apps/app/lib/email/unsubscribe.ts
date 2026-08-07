@@ -7,7 +7,7 @@ import { trimmed } from "@/lib/email/client";
 // The token is an HMAC over {email, type} using RESEND_API_KEY as the signing
 // secret (same convention as web — it never leaves the server). Unsubscribing
 // stops the remaining onboarding sequence for that address; there is no Resend
-// contact to flip because Goat does not sync contacts/segments.
+// contact to flip because the app does not sync contacts/segments.
 
 const UNSUBSCRIBE_TOKEN_VERSION = 1;
 const SIGNATURE_ALGORITHM = "sha256";

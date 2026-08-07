@@ -325,7 +325,7 @@ export function startHubspotFlushWorker(env: RunnerEnv, options: { pollIntervalM
               object_type: window.objectType,
               object_id: window.objectId,
             });
-            logger.error("Goat HubSpot window flush failed", {
+            logger.error("HubSpot window flush failed", {
               event: "opencompany.goat_hubspot_flush_failed",
               integration_id: window.integrationId,
               object_type: window.objectType,
@@ -335,7 +335,7 @@ export function startHubspotFlushWorker(env: RunnerEnv, options: { pollIntervalM
             return null;
           });
           if (flushed) {
-            logger.info("Goat HubSpot window flushed", {
+            logger.info("HubSpot window flushed", {
               event: "opencompany.goat_hubspot_window_flushed",
               integration_id: window.integrationId,
               object_type: window.objectType,
@@ -349,7 +349,7 @@ export function startHubspotFlushWorker(env: RunnerEnv, options: { pollIntervalM
         }
       } catch (error) {
         captureException(error, { event: "opencompany.goat_hubspot_flush_worker_failed" });
-        logger.error("Goat HubSpot flush worker failed", {
+        logger.error("HubSpot flush worker failed", {
           event: "opencompany.goat_hubspot_flush_worker_failed",
           error,
         });

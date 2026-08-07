@@ -221,11 +221,11 @@ function normalizeHarnessSpec(
   const engine = fallback.requestedEngine ?? readHarnessEngine(record.engine, availableEngines);
   const model = readHarnessModel(record.model, availableModels, engine);
   if (!model) {
-    throw new Error("Goat harness planner must choose a supported execution model.");
+    throw new Error("Harness planner must choose a supported execution model.");
   }
   const systemPrompt = readNonEmptyString(record.systemPrompt);
   if (!systemPrompt) {
-    throw new Error("Goat harness planner must return a non-empty systemPrompt.");
+    throw new Error("Harness planner must return a non-empty systemPrompt.");
   }
   const initialUserMessage = readNonEmptyString(record.initialUserMessage) ?? fallback.prompt;
   const selectedTools = normalizeTaskToolNames(record.tools).filter((toolName) =>

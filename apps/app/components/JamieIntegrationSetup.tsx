@@ -314,7 +314,7 @@ function setupStatus(
   if (initialState.connected) {
     return {
       label: "Jamie is connected",
-      detail: "New completed meeting notes are accepted by the Goat Brain ingestion queue.",
+      detail: "New completed meeting notes are accepted by the Brain ingestion queue.",
       badge: "Connected",
     };
   }

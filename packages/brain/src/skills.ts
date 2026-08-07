@@ -46,7 +46,7 @@ export function serializeBrainSkillMarkdown(skill: BrainSkill): string {
   return [
     "---",
     // Native skill runtimes use the frontmatter name as the invocation id. Keep the human title
-    // in Goat's catalog, but materialize the stable, cross-runtime-safe Brain id here.
+    // in the app's catalog, but materialize the stable, cross-runtime-safe Brain id here.
     `name: ${JSON.stringify(skill.id)}`,
     ...(skill.description ? [`description: ${JSON.stringify(skill.description)}`] : []),
     "---",

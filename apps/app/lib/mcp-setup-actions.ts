@@ -25,7 +25,7 @@ export async function savePreferredMcpClientAction(
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
-    console.error("[goat] Could not save MCP client preference", {
+    console.error("[app] Could not save MCP client preference", {
       userWorkosId: user.workosUserId,
       error: error instanceof Error ? error.message : String(error),
     });

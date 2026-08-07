@@ -34,7 +34,7 @@ export async function generateMetadata({ params }: DocsPageProps): Promise<Metad
   const title = data.title ?? "Documentation";
 
   return {
-    title: `${title} - Goat docs`,
+    title: `${title} - opencompany docs`,
     description: data.description,
   };
 }

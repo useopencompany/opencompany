@@ -108,7 +108,7 @@ const CLAUDE_CHAT_ACTIONS_GATEWAY_PATH = "/api/internal/claude-actions";
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-claude-code-chat" });
 
 export const CLAUDE_CODE_CHAT_REAUTH_MESSAGE =
-  "Claude Code is disconnected. Reconnect Claude Code in Goat settings, then send your message again.";
+  "Claude Code is disconnected. Reconnect Claude Code in Settings, then send your message again.";
 
 // "authenticat" covers both "Failed to authenticate" (real 401 result text, observed
 // against claude 2.1.220) and "authentication".
@@ -126,7 +126,7 @@ export async function loadClaudeCodeAuth(
       db: getDb(),
       userWorkosId,
       statusReason:
-        "Claude Code credentials could not be decrypted. Reconnect Claude Code in Goat settings.",
+        "Claude Code credentials could not be decrypted. Reconnect Claude Code in Settings.",
     });
     return null;
   }
@@ -554,7 +554,7 @@ export async function runClaudeCodeChatTurn(input: {
         await markClaudeCodeCredentialNeedsReauth({
           db: getDb(),
           userWorkosId: turn.userWorkosId,
-          statusReason: "Claude Code rejected the stored token. Reconnect in Goat settings.",
+          statusReason: "Claude Code rejected the stored token. Reconnect in Settings.",
         });
         summary = { ...summary, error: CLAUDE_CODE_CHAT_REAUTH_MESSAGE };
       }
@@ -593,7 +593,7 @@ export async function runClaudeCodeChatTurn(input: {
     if (taskContext && summary.status === "success") {
       const rawResult = summary.result?.trim() ?? "";
       if (!rawResult) {
-        throw new Error("Goat task completed without a final assistant message.");
+        throw new Error("Task completed without a final assistant message.");
       }
       const closerController = new AbortController();
       const closerAbortTimer = setInterval(() => {
@@ -692,7 +692,7 @@ export async function runClaudeCodeChatTurn(input: {
       throw effectiveError;
     } else {
       const message = redact(errorMessage(effectiveError));
-      logger.warn("Goat Claude Code chat turn execution failed", {
+      logger.warn("Claude Code chat turn execution failed", {
         event: "opencompany.goat_claude_chat_turn_execution_failed",
         turn_id: turn.id,
         codex_chat_session_id: session.id,
@@ -744,7 +744,7 @@ export async function runClaudeCodeChatTurn(input: {
         turn_id: turn.id,
         codex_chat_session_id: session.id,
       });
-      logger.warn("Failed to park Goat Claude Code chat sandbox", {
+      logger.warn("Failed to park Claude Code chat sandbox", {
         event: "opencompany.goat_claude_chat_sandbox_parking_failed",
         turn_id: turn.id,
         codex_chat_session_id: session.id,

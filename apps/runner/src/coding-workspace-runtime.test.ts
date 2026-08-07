@@ -41,7 +41,7 @@ beforeEach(() => {
   mocks.sandboxStatus.mockResolvedValue("running");
 });
 
-describe("Goat coding workspace preview port discovery", () => {
+describe("Coding workspace preview port discovery", () => {
   it("keeps raw sandbox traffic private for every coding engine", () => {
     expect(CODING_WORKSPACE_SANDBOX_NETWORK).toEqual({
       allowPublicTraffic: false,
@@ -144,7 +144,7 @@ ${command}
   });
 });
 
-describe("Goat coding workspace access", () => {
+describe("Coding workspace access", () => {
   it.each([
     "codex",
     "claude_code",

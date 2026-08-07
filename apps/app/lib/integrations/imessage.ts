@@ -61,7 +61,7 @@ export async function connectImessageIntegration(input: {
     .returning({ id: integrations.id });
 
   if (!integration) {
-    throw new Error("Could not persist Goat iMessage integration.");
+    throw new Error("Could not persist iMessage integration.");
   }
 
   await captureIntegrationAddedAnalytics({

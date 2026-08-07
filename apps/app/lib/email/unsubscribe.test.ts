@@ -10,7 +10,7 @@ vi.mock("@opencompany/db/onboarding-emails", () => ({
 }));
 
 vi.mock("@/lib/app-url", () => ({
-  getAppUrl: () => "https://goat.example.com",
+  getAppUrl: () => "https://app.example.com",
 }));
 
 describe("goat onboarding unsubscribe tokens", () => {
@@ -43,7 +43,7 @@ describe("goat onboarding unsubscribe tokens", () => {
 
   it("builds an unsubscribe url on the goat origin", () => {
     const url = new URL(createEmailUnsubscribeUrl({ email: "ada@example.com" }));
-    expect(url.origin).toBe("https://goat.example.com");
+    expect(url.origin).toBe("https://app.example.com");
     expect(url.pathname).toBe("/api/email/unsubscribe");
     expect(verifyEmailUnsubscribeToken(url.searchParams.get("token") ?? "").email).toBe(
       "ada@example.com",

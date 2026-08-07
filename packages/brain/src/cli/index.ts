@@ -451,7 +451,7 @@ async function create(ctx: CommandContext): Promise<CommandResult> {
   }
   if (!isBuiltInBrainEntityType(typeInput)) {
     return fail(
-      `Unsupported Goat Brain entity type "${typeInput}". Use one of: ${BRAIN_ENTITY_TYPES.join(
+      `Unsupported Brain entity type "${typeInput}". Use one of: ${BRAIN_ENTITY_TYPES.join(
         ", ",
       )}.`,
     );
@@ -871,7 +871,7 @@ async function set(ctx: CommandContext): Promise<CommandResult> {
   const type = typeInput ? normalizeBuiltInBrainEntityType(typeInput) : undefined;
   if (typeInput && !type) {
     return fail(
-      `Unsupported Goat Brain entity type "${typeInput}". Use one of: ${BRAIN_ENTITY_TYPES.join(
+      `Unsupported Brain entity type "${typeInput}". Use one of: ${BRAIN_ENTITY_TYPES.join(
         ", ",
       )}.`,
     );
@@ -975,7 +975,7 @@ async function appendEvidence(ctx: CommandContext): Promise<CommandResult> {
   const typeInput = ctx.args.get("type")?.trim() || "source";
   if (!isBuiltInBrainEntityType(typeInput)) {
     return fail(
-      `Unsupported Goat Brain entity type "${typeInput}". Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`,
+      `Unsupported Brain entity type "${typeInput}". Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`,
     );
   }
   const folder = normalizeBrainFolderForV1(ctx.args.get("folder")?.trim() || BRAIN_EVIDENCE_ZONE);

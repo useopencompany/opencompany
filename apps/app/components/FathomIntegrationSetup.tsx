@@ -175,7 +175,7 @@ export function FathomIntegrationSetup({
         </ol>
         <p className="px-2 text-[13px] leading-5 text-ink-subtle">
           New meetings are usually picked up within about 20 minutes of ending. If Fathom is still
-          generating a summary or transcript, Goat keeps retrying until content is ready. Live
+          generating a summary or transcript, the app keeps retrying until content is ready. Live
           polling does not automatically import older meetings; use Import company context when you
           want to scan recent history.
         </p>
@@ -188,7 +188,7 @@ function setupStatus(state: FathomProviderState) {
   if (state.connected) {
     return {
       label: state.accountEmail ? `Connected as ${state.accountEmail}` : "Fathom is connected",
-      detail: "New meetings are picked up by the Goat Brain ingestion queue.",
+      detail: "New meetings are picked up by the Brain ingestion queue.",
       badge: "Connected",
     };
   }
