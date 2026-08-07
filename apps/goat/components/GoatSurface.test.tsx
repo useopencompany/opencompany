@@ -28,6 +28,10 @@ import {
   buildGoatOnboardingKickoffPrompt,
   queueGoatOnboardingKickoff,
 } from "@/lib/onboarding-kickoff";
+import {
+  clearAllOptimisticGoatChatSummaries,
+  useOptimisticGoatChatSummaries,
+} from "@/lib/optimistic-chat-summaries";
 import { cancelGoatTaskAction, continueGoatTaskAction } from "@/lib/tasks";
 import { GoatSurface, type GoatTaskView } from "./GoatSurface";
 
@@ -345,6 +349,7 @@ describe("GoatSurface chat streaming UI", () => {
 
   afterEach(() => {
     clearAllLocalGoatChatStates();
+    clearAllOptimisticGoatChatSummaries();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -400,8 +405,10 @@ describe("GoatSurface chat streaming UI", () => {
           defaultModel={DEFAULT_GOAT_MODEL}
           initialChat={null}
           userWorkosId="user_1"
+          workspaceId="workspace_1"
         />
         <LocalChatStatesProbe />
+        <OptimisticChatSummariesProbe />
       </>,
     );
 
@@ -433,6 +440,9 @@ describe("GoatSurface chat streaming UI", () => {
     });
     expect(body.newSessionId).toMatch(/^goat_chat_/);
     expect(body.message.id).toMatch(/^ui_background_/);
+    expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
+      `${body.newSessionId}:Research Q3`,
+    );
     await waitFor(() =>
       expect(screen.getByTestId("local-chat-states")).toHaveTextContent(
         `${body.newSessionId}:working`,
@@ -4976,6 +4986,12 @@ function LocalChatStatesProbe() {
   const states = useLocalGoatChatStates();
   const entries = [...states.entries()].map(([sessionId, state]) => `${sessionId}:${state}`);
   return <div data-testid="local-chat-states">{entries.join(",") || "none"}</div>;
+}
+
+function OptimisticChatSummariesProbe() {
+  const summaries = useOptimisticGoatChatSummaries();
+  const entries = summaries.map((entry) => `${entry.chat.id}:${entry.chat.title}`);
+  return <div data-testid="optimistic-chat-summaries">{entries.join(",") || "none"}</div>;
 }
 
 async function nextAnimationFrame() {

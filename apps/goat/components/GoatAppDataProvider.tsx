@@ -24,6 +24,11 @@ import type { GoatFeatureFlags } from "@/lib/feature-flags";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
 import {
+  mergeOptimisticGoatChatSummaries,
+  reconcileOptimisticGoatChatSummaries,
+  useOptimisticGoatChatSummaries,
+} from "@/lib/optimistic-chat-summaries";
+import {
   createGoatCollections,
   type GoatChatSessionRow,
   type GoatCodexChatSessionRow,
@@ -137,9 +142,27 @@ export function GoatAppDataProvider({
     liveSnapshot?.initialData === initialData || liveSnapshotMatchesScope
       ? liveSnapshot.value
       : initialValue;
+  const optimisticChats = useOptimisticGoatChatSummaries();
+  const recentChats = useMemo(
+    () =>
+      mergeOptimisticGoatChatSummaries({
+        persistedChats: value.recentChats,
+        optimisticChats,
+        workspaceId: value.workspace.id,
+      }),
+    [optimisticChats, value.recentChats, value.workspace.id],
+  );
+  const contextValue = useMemo(
+    () => (recentChats.length === value.recentChats.length ? value : { ...value, recentChats }),
+    [recentChats, value],
+  );
+
+  useLayoutEffect(() => {
+    reconcileOptimisticGoatChatSummaries(value.recentChats);
+  }, [value.recentChats]);
 
   return (
-    <GoatAppDataContext.Provider value={value}>
+    <GoatAppDataContext.Provider value={contextValue}>
       {children}
       <GoatAppLiveDataSync initialData={initialData} onData={updateLiveData} />
     </GoatAppDataContext.Provider>
