@@ -3,6 +3,8 @@
 import { getDb } from "@opencompany/db/client";
 import {
   disconnectGoatInfisicalConnection,
+  type GoatInfisicalHost,
+  isGoatInfisicalHost,
   loadGoatInfisicalConnectionMetadata,
 } from "@opencompany/db/goat-infisical-auth";
 import { revalidatePath } from "next/cache";
@@ -12,6 +14,7 @@ export type GoatInfisicalAuthSettings = {
   status: "connected" | "needs_reauth" | "disconnected" | null;
   statusReason: string | null;
   accountEmail: string | null;
+  host: GoatInfisicalHost | null;
   lastValidatedAt: string | null;
 };
 
@@ -35,27 +38,47 @@ export async function loadCurrentGoatInfisicalAuthSettings(): Promise<GoatInfisi
     status: connection?.status ?? null,
     statusReason: connection?.statusReason ?? null,
     accountEmail: connection?.accountEmail ?? null,
+    host: connection?.host ?? null,
     lastValidatedAt: connection?.lastValidatedAt?.toISOString() ?? null,
   };
 }
 
-export async function startGoatInfisicalAuth() {
+export async function startGoatInfisicalAuth(input: { host: GoatInfisicalHost }) {
   const gate = await requireWorkspaceAdmin();
   if (!gate.ok) return gate;
+  if (!isGoatInfisicalHost(input.host)) {
+    return { ok: false as const, error: "Choose a supported Infisical region." };
+  }
   try {
     const response = await callRunnerJson<RunnerFlowResponse>(
       "/internal/goat/infisical-auth/start",
       {
         workspaceId: gate.workspaceId,
         requestedByWorkosId: gate.userWorkosId,
+        host: input.host,
       },
     );
+    if (infisicalFlowHost(response.flow) !== input.host) {
+      return {
+        ok: false as const,
+        error: "The selected Infisical region is still updating. Please try again in a minute.",
+      };
+    }
     return { ok: true as const, flow: response.flow };
   } catch (error) {
     return {
       ok: false as const,
       error: error instanceof Error ? error.message : "Could not start Infisical authentication.",
     };
+  }
+}
+
+function infisicalFlowHost(flow: GoatInfisicalAuthFlow) {
+  if (!flow.loginUrl) return null;
+  try {
+    return new URL(flow.loginUrl).origin;
+  } catch {
+    return null;
   }
 }
 

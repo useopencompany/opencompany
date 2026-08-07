@@ -1,8 +1,10 @@
 import { shellQuote } from "@opencompany/agent-runtime";
 import {
   GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
-  GOAT_INFISICAL_HOST,
   type GoatInfisicalAuthBundle,
+  type GoatInfisicalHost,
+  isGoatInfisicalHost,
+  isGoatInfisicalSessionDomain,
   newGoatInfisicalAuthFlowId,
   saveGoatInfisicalConnection,
 } from "@opencompany/db/goat-infisical-auth";
@@ -54,9 +56,13 @@ export type InfisicalAuthFlowStatus = {
 export async function startGoatInfisicalAuthFlow(input: {
   workspaceId: string;
   requestedByWorkosId: string;
+  host: GoatInfisicalHost;
   env: RunnerEnv;
 }): Promise<InfisicalAuthFlowStatus> {
   await requireWorkspaceAdmin(input.workspaceId, input.requestedByWorkosId);
+  if (!isGoatInfisicalHost(input.host)) {
+    throw new Error("Unsupported Infisical host.");
+  }
   let failureStage: InfisicalAuthStartStage = "supersede_active_flows";
   let sandbox: SandboxHandle | null = null;
   try {
@@ -85,10 +91,10 @@ export async function startGoatInfisicalAuthFlow(input: {
     await ensureInfisicalTmuxInstalled(createdSandbox);
 
     failureStage = "prepare_login";
-    await prepareInfisicalAuthSandbox(createdSandbox);
+    await prepareInfisicalAuthSandbox(createdSandbox, input.host);
 
     failureStage = "wait_for_login_url";
-    const loginUrl = await waitForLoginUrl(createdSandbox);
+    const loginUrl = await waitForLoginUrl(createdSandbox, input.host);
     if (!loginUrl) {
       throw new Error("Infisical did not provide a browser login link.");
     }
@@ -113,6 +119,7 @@ export async function startGoatInfisicalAuthFlow(input: {
       workspace_id: input.workspaceId,
       flow_id: id,
       sandbox_id: createdSandbox.sandboxId,
+      infisical_host: input.host,
     });
     return {
       id,
@@ -144,6 +151,11 @@ export async function completeGoatInfisicalAuthFlow(input: {
   const flow = await loadFlow(input.workspaceId, input.requestedByWorkosId, input.flowId);
   if (!flow) return null;
   if (isTerminalStatus(flow.status)) return flowStatus(flow);
+
+  const host = infisicalHostFromLoginUrl(flow.loginUrl);
+  if (!host) {
+    throw new Error("Infisical authentication flow has an unsupported host.");
+  }
 
   const now = new Date();
   if (flow.expiresAt <= now) {
@@ -195,7 +207,7 @@ export async function completeGoatInfisicalAuthFlow(input: {
       throw new Error("Infisical rejected the browser token.");
     }
 
-    const loginStatus = await validateInfisicalLogin(sandbox);
+    const loginStatus = await validateInfisicalLogin(sandbox, host);
     if (loginStatus.email !== browserCredentials.email) {
       throw new Error("Infisical authenticated a different account than the browser token.");
     }
@@ -209,6 +221,7 @@ export async function completeGoatInfisicalAuthFlow(input: {
       db: getDb(),
       workspaceId: input.workspaceId,
       authBundle,
+      host,
       accountEmail: loginStatus.email,
       cliVersion: INFISICAL_CLI_VERSION,
       expiresAt: loginStatus.expiresAt,
@@ -227,6 +240,7 @@ export async function completeGoatInfisicalAuthFlow(input: {
       workspace_id: input.workspaceId,
       flow_id: input.flowId,
       sandbox_id: flow.sandboxId,
+      infisical_host: host,
     });
     return {
       ...flowStatus(flow),
@@ -255,9 +269,11 @@ export async function completeGoatInfisicalAuthFlow(input: {
   }
 }
 
-export function parseInfisicalLoginUrl(output: string) {
+export function parseInfisicalLoginUrl(output: string, expectedHost: GoatInfisicalHost) {
+  if (!isGoatInfisicalHost(expectedHost)) return null;
   const unwrappedOutput = output.replace(/\r?\n/g, "");
-  const match = unwrappedOutput.match(/https:\/\/app\.infisical\.com\/login\?callback_port=\d+/);
+  const escapedHost = expectedHost.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = unwrappedOutput.match(new RegExp(`${escapedHost}/login\\?callback_port=\\d+`));
   if (!match) return null;
   try {
     const url = new URL(match[0]);
@@ -265,6 +281,16 @@ export function parseInfisicalLoginUrl(output: string) {
     return Number.isInteger(callbackPort) && callbackPort > 0 && callbackPort <= 65_535
       ? url.toString()
       : null;
+  } catch {
+    return null;
+  }
+}
+
+export function infisicalHostFromLoginUrl(loginUrl: string | null): GoatInfisicalHost | null {
+  if (!loginUrl) return null;
+  try {
+    const url = new URL(loginUrl);
+    return url.pathname === "/login" && isGoatInfisicalHost(url.origin) ? url.origin : null;
   } catch {
     return null;
   }
@@ -363,7 +389,7 @@ export async function ensureInfisicalTmuxInstalled(sandbox: SandboxHandle) {
   );
 }
 
-async function prepareInfisicalAuthSandbox(sandbox: SandboxHandle) {
+async function prepareInfisicalAuthSandbox(sandbox: SandboxHandle, host: GoatInfisicalHost) {
   await sandbox.commands.run(
     [
       `rm -rf ${shellQuote(INFISICAL_AUTH_HOME)} ${shellQuote("/home/user/.infisical")} ${shellQuote(INFISICAL_KEYRING_ROOT)}`,
@@ -377,7 +403,7 @@ async function prepareInfisicalAuthSandbox(sandbox: SandboxHandle) {
     [
       "#!/usr/bin/env bash",
       "export HOME=/home/user",
-      `infisical login --domain=${shellQuote(GOAT_INFISICAL_HOST)}`,
+      `infisical login --domain=${shellQuote(host)}`,
       "login_exit=$?",
       `printf '%s' "$login_exit" > ${shellQuote(INFISICAL_LOGIN_EXIT)}`,
       'exit "$login_exit"',
@@ -395,11 +421,11 @@ async function prepareInfisicalAuthSandbox(sandbox: SandboxHandle) {
   );
 }
 
-async function waitForLoginUrl(sandbox: SandboxHandle) {
+async function waitForLoginUrl(sandbox: SandboxHandle, host: GoatInfisicalHost) {
   const deadline = Date.now() + INFISICAL_LINK_WAIT_MS;
   while (Date.now() < deadline) {
     const output = await captureLoginPane(sandbox);
-    const loginUrl = parseInfisicalLoginUrl(output);
+    const loginUrl = parseInfisicalLoginUrl(output, host);
     if (loginUrl) return loginUrl;
     await delay(250);
   }
@@ -463,7 +489,7 @@ async function waitForLoginExit(sandbox: SandboxHandle) {
   throw new Error("Infisical authentication timed out.");
 }
 
-async function validateInfisicalLogin(sandbox: SandboxHandle) {
+async function validateInfisicalLogin(sandbox: SandboxHandle, host: GoatInfisicalHost) {
   const result = await sandbox.commands.run("HOME=/home/user infisical login status --json", {
     user: "user",
     timeoutMs: 30_000,
@@ -485,7 +511,8 @@ async function validateInfisicalLogin(sandbox: SandboxHandle) {
       candidate &&
         typeof candidate === "object" &&
         (candidate as Record<string, unknown>).principalType === "user" &&
-        (candidate as Record<string, unknown>).status === "authenticated",
+        (candidate as Record<string, unknown>).status === "authenticated" &&
+        isGoatInfisicalSessionDomain((candidate as Record<string, unknown>).domain, host),
     ),
   );
   const email = typeof session?.email === "string" ? session.email.trim() : "";

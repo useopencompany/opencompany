@@ -357,14 +357,15 @@ redactor so accidental command output cannot persist them in the chat transcript
 reconciliation still checks warm sandboxes on every turn, while unchanged configurations skip file
 uploads.
 
-Workspace admins can also connect one Infisical Cloud account under Settings → Integrations. The
-runner completes Infisical's real CLI browser-token fallback in a short-lived auth sandbox, stores
-only the encrypted file-vault bundle, and restores it into persistent Codex and Claude Code
-sandboxes. Credential generations reconcile reconnects and disconnects before coding turns, while
-Infisical project and environment selection remains repository-local through `.infisical.json` or
-explicit CLI flags. The connected account's Infisical permissions are the authorization boundary;
-admins should use a dedicated least-privilege account because coding agents can invoke read and
-write CLI commands directly.
+Workspace admins can also connect one Infisical Cloud account under Settings → Integrations. They
+select the US or EU region before login, and the runner keeps that allowlisted host bound to the
+entire authentication flow and saved connection. The runner completes Infisical's real CLI
+browser-token fallback in a short-lived auth sandbox, stores only the encrypted file-vault bundle,
+and restores it into persistent Codex and Claude Code sandboxes. Credential generations reconcile
+reconnects and disconnects before coding turns, while Infisical project and environment selection
+remains repository-local through `.infisical.json` or explicit CLI flags. The connected account's
+Infisical permissions are the authorization boundary; admins should use a dedicated least-privilege
+account because coding agents can invoke read and write CLI commands directly.
 
 ### Codex execution
 

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mintGoatCodingWorkspaceAccess } from "./goat-coding-workspace-runtime";
 import { verifyGoatDictationTicket } from "./goat-dictation-auth";
 import { wakeGoatTaskWorker } from "./goat-worker";
+import { startGoatInfisicalAuthFlow } from "./infisical-auth";
 import { enqueueRunnerJob } from "./jobs";
 import { getSandboxLifecycleStatus, killSandbox } from "./sandbox";
 import { createServer } from "./server";
@@ -37,6 +38,17 @@ vi.mock("./goat-coding-workspace-runtime", async (importOriginal) => {
 vi.mock("./sandbox", () => ({
   getSandboxLifecycleStatus: vi.fn(async () => "running"),
   killSandbox: vi.fn(async () => true),
+}));
+
+vi.mock("./infisical-auth", () => ({
+  completeGoatInfisicalAuthFlow: vi.fn(async () => null),
+  startGoatInfisicalAuthFlow: vi.fn(async () => ({
+    id: "ginff_eu",
+    status: "link_ready",
+    loginUrl: "https://eu.infisical.com/login?callback_port=23456",
+    statusReason: null,
+    expiresAt: "2026-08-07T09:00:00.000Z",
+  })),
 }));
 
 const env = {
@@ -120,6 +132,71 @@ describe("runner server CORS", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+});
+
+describe("Goat Infisical authentication", () => {
+  it("passes an allowlisted EU host to the auth flow", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/goat/infisical-auth/start",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+      payload: {
+        workspaceId: "workspace_1",
+        requestedByWorkosId: "user_1",
+        host: "https://eu.infisical.com",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(startGoatInfisicalAuthFlow).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      requestedByWorkosId: "user_1",
+      host: "https://eu.infisical.com",
+      env,
+    });
+  });
+
+  it("rejects an untrusted Infisical host before starting a sandbox", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/goat/infisical-auth/start",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+      payload: {
+        workspaceId: "workspace_1",
+        requestedByWorkosId: "user_1",
+        host: "https://evil.example",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(startGoatInfisicalAuthFlow).not.toHaveBeenCalled();
+  });
+
+  it("keeps omitted hosts on US during a rolling deployment", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/goat/infisical-auth/start",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+      payload: {
+        workspaceId: "workspace_1",
+        requestedByWorkosId: "user_1",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(startGoatInfisicalAuthFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ host: "https://app.infisical.com" }),
+    );
   });
 });
 

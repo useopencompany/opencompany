@@ -1,3 +1,4 @@
+import { GOAT_INFISICAL_US_HOST, isGoatInfisicalHost } from "@opencompany/db/goat-infisical-auth";
 import { createLogger } from "@opencompany/observability";
 import Fastify from "fastify";
 import { abortSession, archiveSession } from "./agent-loop";
@@ -375,17 +376,26 @@ export function createServer(
   app.post("/internal/goat/infisical-auth/start", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
     const body = request.body as
-      | { workspaceId?: unknown; requestedByWorkosId?: unknown }
+      | { workspaceId?: unknown; requestedByWorkosId?: unknown; host?: unknown }
       | undefined;
     const workspaceId = typeof body?.workspaceId === "string" ? body.workspaceId.trim() : "";
     const requestedByWorkosId =
       typeof body?.requestedByWorkosId === "string" ? body.requestedByWorkosId.trim() : "";
-    if (!workspaceId || !requestedByWorkosId) {
-      reply.status(400).send({ error: "workspaceId and requestedByWorkosId are required." });
+    // Default omitted hosts to US while older Goat deployments drain during a rolling release.
+    const host = body?.host === undefined ? GOAT_INFISICAL_US_HOST : body.host;
+    if (!workspaceId || !requestedByWorkosId || !isGoatInfisicalHost(host)) {
+      reply.status(400).send({
+        error: "workspaceId, requestedByWorkosId, and a supported Infisical host are required.",
+      });
       return;
     }
     try {
-      const flow = await startGoatInfisicalAuthFlow({ workspaceId, requestedByWorkosId, env });
+      const flow = await startGoatInfisicalAuthFlow({
+        workspaceId,
+        requestedByWorkosId,
+        host,
+        env,
+      });
       reply.send({ ok: true, flow });
     } catch (error) {
       const forbidden =
