@@ -9,43 +9,23 @@ import {
   type ValidatedBrokerToken,
 } from "./llm-broker-tokens";
 
-vi.mock("./agent-loop", () => ({
-  abortSession: vi.fn(async () => undefined),
-  archiveSession: vi.fn(async () => undefined),
-}));
-
-vi.mock("./jobs", () => ({
-  enqueueRunnerJob: vi.fn(async () => ({ id: 1, status: "pending" })),
-}));
-
 const env = {
   databaseUrl: "postgres://example",
   internalToken: "internal-secret",
   streamTokenSecret: "stream-secret",
-  e2bApiKey: "e2b",
   vercelAiGatewayApiKey: "gateway-upstream-key",
   openaiCodexApiKey: "openai-upstream-key",
   publicUrl: "https://runner.example.com",
   llmBrokerEnabled: true,
-  integrationCredentialEncryptionKey: Buffer.alloc(32, 0),
   exaApiKey: undefined,
   goatBrowserEnabled: false,
-  agentBrowserProvider: undefined,
-  browserlessApiKey: undefined,
-  browserlessApiUrl: undefined,
-  browserlessTtl: undefined,
-  browserlessStealth: undefined,
-  xApiBearerToken: undefined,
-  supadataApiKey: undefined,
-  ampApiKey: undefined,
-  e2bTemplate: undefined,
   ampE2bTemplate: undefined,
   codexE2bTemplate: undefined,
   e2bSandboxIdleTimeoutMs: 30_000,
-  opencodeTimeoutMs: 1_200_000,
-  toolArgRepairEnabled: false,
+  codexTimeoutMs: 3_600_000,
+  codexModel: "gpt-5.6-sol",
+  goatCodexChatIdleTimeoutMs: 300_000,
   jobLeaseTtlMs: 300_000,
-  jobMaxLeaseBusyAttempts: 10,
   goatTaskWorkerEnabled: false,
   workerConcurrency: 2,
   port: 3040,
@@ -552,14 +532,14 @@ describe("server integration", () => {
 
     const response = await server.inject({
       method: "POST",
-      url: "/internal/sessions/session-1/start",
+      url: "/internal/goat/dictation/access",
       headers: {
         authorization: "Bearer internal-secret",
         "content-type": "application/json",
       },
-      payload: { ignored: true },
+      payload: { userWorkosId: "user_1" },
     });
-    expect(response.statusCode).toBe(202);
+    expect(response.statusCode).toBe(200);
 
     await server.close();
   });

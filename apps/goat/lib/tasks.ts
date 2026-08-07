@@ -1,6 +1,5 @@
 "use server";
 
-import { randomUUID } from "node:crypto";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { captureGoatTaskSpawned } from "@opencompany/analytics/goat/server";
 import { getDb } from "@opencompany/db/client";
@@ -22,7 +21,6 @@ import {
 import {
   createGoatTaskSession,
   enqueueGoatTaskSessionTurn,
-  goatTaskSessionExecutionEnabled,
 } from "@opencompany/db/goat-task-sessions";
 import { and, asc, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { after } from "next/server";
@@ -36,7 +34,7 @@ import {
   resolveGoatSkillMentions,
 } from "@/lib/skills";
 import { normalizeGoatTaskName } from "@/lib/task-display";
-import { triggerGoatCodexChatWake, triggerGoatTaskRun } from "@/lib/task-runner";
+import { triggerGoatCodexChatWake } from "@/lib/task-runner";
 import { GOAT_TASK_PROMPT_MAX_LENGTH } from "@/lib/task-validation";
 
 export type ArchiveTaskResult = {
@@ -510,125 +508,13 @@ export async function continueGoatTaskAction(
     return { ok: true, error: null, messageId: continued.id };
   }
 
-  const messageId = safeGoatTaskMessageId(clientMessageId) ?? `goat_task_msg_${randomUUID()}`;
-  const now = new Date();
-  const result = await getDb().execute(sql`
-    WITH continued_task AS (
-      UPDATE goat.tasks AS task
-      SET status = 'queued',
-          stage = 'queued',
-          result = NULL,
-          error = NULL,
-          reported_outcome = NULL,
-          outcome_comment = NULL,
-          next_run_at = ${now},
-          lease_id = NULL,
-          lease_owner = NULL,
-          lease_expires_at = NULL,
-          updated_at = ${now}
-      WHERE task.id = ${normalizedTaskId}
-        AND task.user_workos_id = ${task?.userWorkosId ?? user.workosUserId}
-        AND (
-          task.workspace_id = ${workspace.id}
-          OR (task.workspace_id IS NULL AND task.user_workos_id = ${user.workosUserId})
-        )
-        AND task.archived_at IS NULL
-        AND task.status IN ('succeeded', 'failed', 'canceled')
-      RETURNING task.id, task.user_workos_id
-    ),
-    inserted_message AS (
-      INSERT INTO goat.task_messages (
-        id,
-        task_id,
-        user_workos_id,
-        role,
-        status,
-        content,
-        model_message,
-        created_at,
-        updated_at,
-        completed_at
-      )
-      SELECT
-        ${messageId},
-        task.id,
-        task.user_workos_id,
-        'user',
-        'completed',
-        ${content},
-        ${JSON.stringify({ role: "user", content })}::jsonb,
-        ${now},
-        ${now},
-        ${now}
-      FROM continued_task AS task
-      RETURNING id, task_id, user_workos_id
-    ),
-    inserted_message_event AS (
-      INSERT INTO goat.task_events (
-        task_id,
-        user_workos_id,
-        message_id,
-        type,
-        payload,
-        created_at
-      )
-      SELECT
-        message.task_id,
-        message.user_workos_id,
-        message.id,
-        'message.created',
-        ${JSON.stringify({ role: "user", status: "completed" })}::jsonb,
-        ${now}
-      FROM inserted_message AS message
-      RETURNING id
-    ),
-    inserted_status_event AS (
-      INSERT INTO goat.task_events (
-        task_id,
-        user_workos_id,
-        message_id,
-        type,
-        payload,
-        created_at
-      )
-      SELECT
-        message.task_id,
-        message.user_workos_id,
-        message.id,
-        'task.status',
-        ${JSON.stringify({ status: "queued", stage: "queued" })}::jsonb,
-        ${now}
-      FROM inserted_message AS message
-      RETURNING id
-    )
-    SELECT message.id, message.task_id
-    FROM inserted_message AS message
-    WHERE EXISTS (SELECT 1 FROM inserted_message_event)
-      AND EXISTS (SELECT 1 FROM inserted_status_event)
-  `);
-  const continued = rowsFromExecute<{ id: string; task_id: string }>(result)[0];
-  if (!continued) {
-    return {
-      ok: false,
-      error: "Wait for this task to finish before sending another message.",
-      messageId: null,
-    };
-  }
-
-  try {
-    await triggerGoatTaskRun(continued.task_id, {
-      task_id: continued.task_id,
-      event: "goat.runner_task_continued_dispatch",
-    });
-  } catch (error) {
-    console.warn("Goat runner dispatch failed; the continued task remains queued for polling.", {
-      event: "goat.runner_task_continued_dispatch_failed",
-      task_id: continued.task_id,
-      error,
-    });
-  }
-
-  return { ok: true, error: null, messageId: continued.id };
+  // Tasks without a session predate durable session execution; the legacy runner drain
+  // that executed them is gone, so they can only be read, not continued.
+  return {
+    ok: false,
+    error: "This task predates durable task sessions and can no longer be continued. Start a new task instead.",
+    messageId: null,
+  };
 }
 
 export async function createGoatTaskForUser(input: {
@@ -655,8 +541,6 @@ export async function createGoatTaskForUser(input: {
     throw new Error(TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE);
   }
 
-  const id = `goat_task_${randomUUID()}`;
-  const userMessageId = `goat_task_msg_${randomUUID()}`;
   const now = new Date();
   const name = normalizeGoatTaskName(input.name, input.prompt);
   const tools = input.harnessSpec ? [] : await getGoatAvailableHarnessTools(input.userWorkosId);
@@ -671,181 +555,28 @@ export async function createGoatTaskForUser(input: {
     maxModelSteps: 16,
     resultMode: "assistant_final",
   };
-  const sessionExecutionEnabled = goatTaskSessionExecutionEnabled();
   const attachments = input.attachments ?? [];
-  if (sessionExecutionEnabled) {
-    let task: GoatTask;
-    try {
-      task = await createGoatTaskSession({
-        userWorkosId: input.userWorkosId,
-        workspaceId: input.workspaceId ?? null,
-        brainRef: input.brainRef ?? null,
-        prompt: input.prompt,
-        name,
-        harnessSpec,
-        scheduleId: input.scheduleId ?? null,
-        scheduledFor: input.scheduledFor ?? null,
-        workflowId: input.workflowId ?? null,
-        workflowBrainRef: input.workflowBrainRef ?? null,
-        attachments,
-        attachmentTexts: input.attachmentTexts ?? null,
-        now,
-      });
-    } catch (error) {
-      if (!(error instanceof Error) || error.message !== "Unable to create Goat task session.") {
-        throw error;
-      }
-      const currentTaskSpawningState = await loadGoatTaskSpawningState(input.userWorkosId);
-      if (currentTaskSpawningState === null) {
-        throw new Error("Unable to create a Goat task for an unknown user.");
-      }
-      if (!currentTaskSpawningState) {
-        throw new Error(TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE);
-      }
+  let task: GoatTask;
+  try {
+    task = await createGoatTaskSession({
+      userWorkosId: input.userWorkosId,
+      workspaceId: input.workspaceId ?? null,
+      brainRef: input.brainRef ?? null,
+      prompt: input.prompt,
+      name,
+      harnessSpec,
+      scheduleId: input.scheduleId ?? null,
+      scheduledFor: input.scheduledFor ?? null,
+      workflowId: input.workflowId ?? null,
+      workflowBrainRef: input.workflowBrainRef ?? null,
+      attachments,
+      attachmentTexts: input.attachmentTexts ?? null,
+      now,
+    });
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== "Unable to create Goat task session.") {
       throw error;
     }
-    captureGoatTaskSpawnedAfterResponse(task, input.workspaceId ?? null);
-    await triggerGoatCodexChatWake().catch((error) => {
-      console.warn("Goat durable task wake failed; the turn remains queued for polling.", {
-        event: "goat.durable_task_created_wake_failed",
-        task_id: task.id,
-        error,
-      });
-    });
-    return task;
-  }
-  if (attachments.length > 0) {
-    throw new Error("Workflow attachments require durable task sessions.");
-  }
-
-  const modelMessage = { role: "user", content: input.prompt };
-  const task = rowsFromExecute<GoatTaskRow>(
-    await getDb().execute(sql`
-      WITH enabled_user AS MATERIALIZED (
-        SELECT "user".workos_user_id
-        FROM goat.users AS "user"
-        WHERE "user".workos_user_id = ${input.userWorkosId}
-          AND "user".task_spawning_enabled = true
-        FOR UPDATE OF "user"
-      ),
-      resolved_workspace AS MATERIALIZED (
-        SELECT member.workspace_id
-        FROM goat.workspace_members AS member
-        INNER JOIN enabled_user AS "user"
-          ON "user".workos_user_id = member.user_workos_id
-        WHERE ${input.workspaceId ?? null}::text IS NULL
-           OR member.workspace_id = ${input.workspaceId ?? null}
-        ORDER BY
-          CASE WHEN member.workspace_id = ${input.workspaceId ?? null} THEN 0 ELSE 1 END,
-          member.created_at ASC,
-          member.workspace_id ASC
-        LIMIT 1
-      ),
-      created_task AS (
-        INSERT INTO goat.tasks (
-          id,
-          name,
-          user_workos_id,
-          workspace_id,
-          prompt,
-          model,
-          schedule_id,
-          scheduled_for,
-          workflow_id,
-          workflow_brain_ref,
-          status,
-          stage,
-          next_run_at,
-          created_at,
-          updated_at,
-          harness_spec
-        )
-        SELECT
-          ${id},
-          ${name},
-          "user".workos_user_id,
-          (SELECT workspace_id FROM resolved_workspace),
-          ${input.prompt},
-          ${harnessSpec.model},
-          ${input.scheduleId ?? null},
-          ${input.scheduledFor ?? null},
-          ${input.workflowId ?? null},
-          ${input.workflowBrainRef ?? null},
-          'queued',
-          'queued',
-          ${now},
-          ${now},
-          ${now},
-          ${JSON.stringify(harnessSpec)}::jsonb
-        FROM enabled_user AS "user"
-        WHERE ${input.workspaceId ?? null}::text IS NULL
-           OR EXISTS (SELECT 1 FROM resolved_workspace)
-        RETURNING *
-      ),
-      inserted_user_message AS (
-        INSERT INTO goat.task_messages (
-          id,
-          task_id,
-          user_workos_id,
-          role,
-          status,
-          content,
-          model_message,
-          created_at,
-          updated_at,
-          completed_at
-        )
-        SELECT
-          ${userMessageId},
-          task.id,
-          task.user_workos_id,
-          'user',
-          'completed',
-          task.prompt,
-          ${JSON.stringify(modelMessage)}::jsonb,
-          ${now},
-          ${now},
-          ${now}
-        FROM created_task AS task
-        RETURNING id
-      )
-      SELECT
-        task.id AS "id",
-        task.display_id AS "displayId",
-        task.name AS "name",
-        task.user_workos_id AS "userWorkosId",
-        task.workspace_id AS "workspaceId",
-        task.prompt AS "prompt",
-        task.model AS "model",
-        task.session_id AS "sessionId",
-        task.schedule_id AS "scheduleId",
-        task.scheduled_for AS "scheduledFor",
-        task.workflow_id AS "workflowId",
-        task.workflow_brain_ref AS "workflowBrainRef",
-        task.status AS "status",
-        task.stage AS "stage",
-        task.result AS "result",
-        task.error AS "error",
-        task.reported_outcome AS "reportedOutcome",
-        task.outcome_comment AS "outcomeComment",
-        task.harness_spec AS "harnessSpec",
-        task.debug_trace AS "debugTrace",
-        task.codex_engine_session_id AS "codexEngineSessionId",
-        task.sandbox_id AS "sandboxId",
-        task.attempts AS "attempts",
-        task.next_run_at AS "nextRunAt",
-        task.lease_id AS "leaseId",
-        task.lease_owner AS "leaseOwner",
-        task.lease_expires_at AS "leaseExpiresAt",
-        task.archived_at AS "archivedAt",
-        task.created_at AS "createdAt",
-        task.updated_at AS "updatedAt"
-      FROM created_task AS task
-      WHERE EXISTS (SELECT 1 FROM inserted_user_message)
-    `),
-  ).map(goatTaskFromRow)[0];
-
-  if (!task) {
     const currentTaskSpawningState = await loadGoatTaskSpawningState(input.userWorkosId);
     if (currentTaskSpawningState === null) {
       throw new Error("Unable to create a Goat task for an unknown user.");
@@ -853,24 +584,16 @@ export async function createGoatTaskForUser(input: {
     if (!currentTaskSpawningState) {
       throw new Error(TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE);
     }
-    throw new Error("Unable to create Goat task.");
+    throw error;
   }
-
   captureGoatTaskSpawnedAfterResponse(task, input.workspaceId ?? null);
-
-  try {
-    await triggerGoatTaskRun(id, {
-      task_id: id,
-      event: "goat.runner_task_created_dispatch",
-    });
-  } catch (error) {
-    console.warn("Goat runner dispatch failed; the task remains queued for polling.", {
-      event: "goat.runner_task_created_dispatch_failed",
-      task_id: id,
+  await triggerGoatCodexChatWake().catch((error) => {
+    console.warn("Goat durable task wake failed; the turn remains queued for polling.", {
+      event: "goat.durable_task_created_wake_failed",
+      task_id: task.id,
       error,
     });
-  }
-
+  });
   return task;
 }
 
@@ -979,11 +702,6 @@ async function cancelSessionBackedGoatTask(input: {
   return rowsFromExecute<{ id: string }>(result).length > 0;
 }
 
-function safeGoatTaskMessageId(value: string | null | undefined) {
-  const trimmed = value?.trim();
-  return trimmed && /^goat_task_msg_[0-9a-f-]{36}$/i.test(trimmed) ? trimmed : null;
-}
-
 function goatTaskVisibleInWorkspace(input: { userWorkosId: string; workspaceId: string }) {
   return or(
     eq(goatTasks.workspaceId, input.workspaceId),
@@ -998,34 +716,6 @@ async function loadGoatTaskSpawningState(userWorkosId: string): Promise<boolean 
     .where(eq(goatUsers.workosUserId, userWorkosId))
     .limit(1);
   return user ? user.enabled : null;
-}
-
-type GoatTaskRow = Omit<
-  GoatTask,
-  "scheduledFor" | "nextRunAt" | "leaseExpiresAt" | "archivedAt" | "createdAt" | "updatedAt"
-> & {
-  scheduledFor: Date | string | null;
-  nextRunAt: Date | string;
-  leaseExpiresAt: Date | string | null;
-  archivedAt: Date | string | null;
-  createdAt: Date | string;
-  updatedAt: Date | string;
-};
-
-function goatTaskFromRow(row: GoatTaskRow): GoatTask {
-  return {
-    ...row,
-    scheduledFor: row.scheduledFor ? toDate(row.scheduledFor) : null,
-    nextRunAt: toDate(row.nextRunAt),
-    leaseExpiresAt: row.leaseExpiresAt ? toDate(row.leaseExpiresAt) : null,
-    archivedAt: row.archivedAt ? toDate(row.archivedAt) : null,
-    createdAt: toDate(row.createdAt),
-    updatedAt: toDate(row.updatedAt),
-  };
-}
-
-function toDate(value: Date | string) {
-  return value instanceof Date ? value : new Date(value);
 }
 
 function rowsFromExecute<T>(result: unknown): T[] {

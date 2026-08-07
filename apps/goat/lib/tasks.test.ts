@@ -21,7 +21,6 @@ const mocks = vi.hoisted(() => {
     resolveGoatSkillMentions: vi.fn(async (): Promise<GoatWorkspaceSkill[]> => []),
     select: vi.fn(),
     triggerGoatCodexChatWake: vi.fn(),
-    triggerGoatTaskRun: vi.fn(),
   };
 });
 
@@ -38,7 +37,6 @@ vi.mock("@opencompany/db/client", () => ({
 
 vi.mock("@/lib/task-runner", () => ({
   triggerGoatCodexChatWake: mocks.triggerGoatCodexChatWake,
-  triggerGoatTaskRun: mocks.triggerGoatTaskRun,
 }));
 
 vi.mock("@/lib/integrations/google-data", () => ({
@@ -179,7 +177,6 @@ describe("createGoatTaskForUser", () => {
       }),
     ).rejects.toThrow("Tasks & Workflows is disabled");
 
-    expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
     expect(mocks.execute).not.toHaveBeenCalled();
     expect(mocks.captureGoatTaskSpawned).not.toHaveBeenCalled();
   });
@@ -205,7 +202,6 @@ describe("createGoatTaskForUser", () => {
         model: DEFAULT_GOAT_MODEL,
       }),
     ).rejects.toThrow("Tasks & Workflows is disabled");
-    expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
     expect(mocks.captureGoatTaskSpawned).not.toHaveBeenCalled();
   });
 
@@ -431,7 +427,6 @@ describe("continueGoatTaskAction", () => {
     expect(sqlTextFromExecuteCall(0)).toContain("INSERT INTO goat.codex_chat_turns");
     expect(sqlTextFromExecuteCall(0)).not.toContain("goat.task_messages");
     expect(mocks.triggerGoatCodexChatWake).toHaveBeenCalledOnce();
-    expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
   });
 
   it("activates selected skills when continuing a session-backed task", async () => {
@@ -509,8 +504,6 @@ describe("continueGoatTaskAction", () => {
       ok: false,
       messageId: null,
     });
-
-    expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
   });
 
   it("rejects an empty reply before touching the database", async () => {

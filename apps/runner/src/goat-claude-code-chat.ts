@@ -83,7 +83,7 @@ import {
   createOrConnectSandbox,
   type SandboxHandle,
 } from "./sandbox";
-import { materializeCodexSkillSnapshotsForSession } from "./skills";
+import { materializeCodexSkillSnapshotsForSession } from "./codex-managed-skills";
 
 const CLAUDE_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.claude_code.workDirectory;
 const CLAUDE_CHAT_PROMPTS_ROOT = "/home/user/.opencompany-goat/claude-chat-prompts";

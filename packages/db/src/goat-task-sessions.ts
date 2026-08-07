@@ -37,14 +37,6 @@ export type CreateGoatTaskSessionInput = {
   now?: Date;
 };
 
-export function goatTaskSessionExecutionEnabled(env?: {
-  GOAT_TASK_SESSION_EXECUTION_ENABLED?: string | undefined;
-}) {
-  const value =
-    env?.GOAT_TASK_SESSION_EXECUTION_ENABLED ?? process.env.GOAT_TASK_SESSION_EXECUTION_ENABLED;
-  return value?.trim().toLowerCase() !== "false";
-}
-
 // The one write path for every new session-backed task. Callers remain responsible
 // for validating product permissions and waking the durable turn worker.
 export async function createGoatTaskSession(

@@ -32,7 +32,7 @@ import { captureException, createLogger } from "@opencompany/observability";
 import { and, asc, desc, eq, lt, lte, or, type SQL, sql } from "drizzle-orm";
 import { downloadBlobBytes } from "./attachment-hydration";
 import { runCodexAppServerTurn } from "./codex-app-server";
-import { ensureCodexInstalled } from "./codex-tool";
+import { ensureCodexInstalled } from "./codex-cli";
 import { createKnownSecretRedactor, gitAuthHeader } from "./coding-agent-shared";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
@@ -74,7 +74,7 @@ import {
   type SandboxHandle,
   writeSandboxTextFiles,
 } from "./sandbox";
-import { materializeCodexSkillSnapshotsForSession } from "./skills";
+import { materializeCodexSkillSnapshotsForSession } from "./codex-managed-skills";
 import { rowsFromExecute } from "./sql-exec";
 
 export const CODEX_CHAT_HOME = "/home/user/.opencompany-goat/codex-chat-home";

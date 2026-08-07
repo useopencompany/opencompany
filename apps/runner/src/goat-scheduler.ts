@@ -5,10 +5,7 @@ import {
   captureGoatTaskSpawned,
 } from "@opencompany/analytics/goat/server";
 import type { GoatHarnessSpec } from "@opencompany/db/goat-schema";
-import {
-  createGoatTaskSession,
-  goatTaskSessionExecutionEnabled,
-} from "@opencompany/db/goat-task-sessions";
+import { createGoatTaskSession } from "@opencompany/db/goat-task-sessions";
 import { captureException } from "@opencompany/observability";
 import { type SQL, sql } from "drizzle-orm";
 import { getDb } from "./db";
@@ -375,106 +372,29 @@ async function createScheduledTask(
     now: Date;
   },
 ): Promise<CaptureGoatTaskSpawnedInput> {
-  if (goatTaskSessionExecutionEnabled()) {
-    const task = await createGoatTaskSession(
-      {
-        userWorkosId: input.userWorkosId,
-        workspaceId: input.workspaceId ?? null,
-        prompt: input.prompt,
-        name: input.name,
-        harnessSpec: input.harnessSpec,
-        scheduleId: input.scheduleId ?? null,
-        scheduledFor: input.scheduledFor,
-        workflowId: input.workflowId ?? null,
-        now: input.now,
-      },
-      tx,
-    );
-    return {
-      userWorkosId: task.userWorkosId,
-      workspaceId: input.workspaceId ?? task.harnessSpec.workflow?.workspaceId ?? null,
-      taskId: task.id,
-      displayId: task.displayId,
-      engine: task.harnessSpec.engine,
-      model: task.model,
-      workflowId: task.workflowId,
-      scheduleId: task.scheduleId,
-      trigger: "schedule",
-    };
-  }
-
-  const taskId = `goat_task_${randomUUID()}`;
-  const userMessageId = `goat_task_msg_${randomUUID()}`;
-  const modelMessage = { role: "user", content: input.prompt };
-  await tx.execute(sql`
-    WITH created_task AS (
-      INSERT INTO goat.tasks (
-        id,
-        name,
-        user_workos_id,
-        prompt,
-        model,
-        schedule_id,
-        scheduled_for,
-        workflow_id,
-        status,
-        stage,
-        next_run_at,
-        created_at,
-        updated_at,
-        harness_spec
-      )
-      VALUES (
-        ${taskId},
-        ${input.name},
-        ${input.userWorkosId},
-        ${input.prompt},
-        ${input.harnessSpec.model},
-        ${input.scheduleId ?? null},
-        ${input.scheduledFor},
-        ${input.workflowId ?? null},
-        'queued',
-        'queued',
-        ${input.now},
-        ${input.now},
-        ${input.now},
-        ${JSON.stringify(input.harnessSpec)}::jsonb
-      )
-      RETURNING id
-    )
-    INSERT INTO goat.task_messages (
-      id,
-      task_id,
-      user_workos_id,
-      role,
-      status,
-      content,
-      model_message,
-      created_at,
-      updated_at,
-      completed_at
-    )
-    SELECT
-      ${userMessageId},
-      task.id,
-      ${input.userWorkosId},
-      'user',
-      'completed',
-      ${input.prompt},
-      ${JSON.stringify(modelMessage)}::jsonb,
-      ${input.now},
-      ${input.now},
-      ${input.now}
-    FROM created_task AS task
-  `);
+  const task = await createGoatTaskSession(
+    {
+      userWorkosId: input.userWorkosId,
+      workspaceId: input.workspaceId ?? null,
+      prompt: input.prompt,
+      name: input.name,
+      harnessSpec: input.harnessSpec,
+      scheduleId: input.scheduleId ?? null,
+      scheduledFor: input.scheduledFor,
+      workflowId: input.workflowId ?? null,
+      now: input.now,
+    },
+    tx,
+  );
   return {
-    userWorkosId: input.userWorkosId,
-    workspaceId: input.workspaceId ?? input.harnessSpec.workflow?.workspaceId ?? null,
-    taskId,
-    engine: input.harnessSpec.engine,
-    model: input.harnessSpec.model,
-    workflowId: input.workflowId ?? null,
-    scheduleId: input.scheduleId ?? null,
+    userWorkosId: task.userWorkosId,
+    workspaceId: input.workspaceId ?? task.harnessSpec.workflow?.workspaceId ?? null,
+    taskId: task.id,
+    displayId: task.displayId,
+    engine: task.harnessSpec.engine,
+    model: task.model,
+    workflowId: task.workflowId,
+    scheduleId: task.scheduleId,
     trigger: "schedule",
   };
 }

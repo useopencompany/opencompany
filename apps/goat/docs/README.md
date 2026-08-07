@@ -518,9 +518,8 @@ statement it:
 - Persists the compiled harness, workflow, and schedule metadata on the projection.
 
 Callers validate product permissions, compile or seed the harness, then wake the shared durable chat
-worker. `GOAT_TASK_SESSION_EXECUTION_ENABLED=false` is a temporary rollback switch that routes new
-tasks to the legacy task queue. It defaults to enabled. Existing rows without `session_id` continue
-to drain through the legacy task worker and retain their old history.
+worker. Session-backed execution is the only task execution path; legacy rows without `session_id`
+retain their old history read-only and can no longer be continued.
 
 Available OpenCompany task tools are resolved from the same user-specific Brain, web, browser, and
 connected-action catalog as foreground chat. Codex task configuration still comes from the task
@@ -546,9 +545,6 @@ One fenced settlement statement completes the turn and runtime session, updates 
 projection, and writes the origin-chat notification. Success maps to `succeeded/completed`, failure
 to `failed/failed`, and interruption to `canceled/canceled`. A user reply to a terminal task queues
 a new turn on the existing session without collapsing history.
-
-`apps/runner/src/goat-worker.ts` remains only for rows with no `session_id`; it is a compatibility
-drain path and does not claim session-backed tasks.
 
 ## Harness Planning
 
@@ -813,14 +809,12 @@ Common changes and where they belong:
   `apps/runner/src/prompts/goat-harness-creation.ts`.
 - Change Goat Codex subscription auth: `apps/goat/lib/codex-auth.ts`,
   `apps/runner/src/codex-auth.ts`, and `packages/db/src/goat-codex-auth.ts`.
-- Change Goat Codex execution: `apps/runner/src/goat-codex.ts`.
+- Change Goat Codex execution: `apps/runner/src/goat-codex-chat.ts` (credential helpers live in
+  `apps/runner/src/goat-codex.ts`).
 - Add or change shared chat/task tools: `packages/goat-agent/src/chat-agent.ts` and the Goat app or
   runner callbacks passed into `createOpenCompanyChatToolContext`.
-- Change the task model loop: `executeGoatTask` in `apps/runner/src/goat-harness.ts` and
-  `runGoatTaskChatLoop` in `apps/runner/src/goat-task-chat-loop.ts`.
-- Move Goat onto full multi-agent sessions: start from `apps/runner/src/agent-loop.ts`,
-  `apps/runner/src/session-lifecycle.ts`, `apps/runner/src/delegation.ts`, and
-  `docs/agent-file.md`.
+- Change the task model loop: `runGoatTaskTurn` in `apps/runner/src/goat-task-turn.ts` and the
+  engine adapters in `apps/runner/src/goat-opencompany-chat.ts` / `goat-codex-chat.ts`.
 
 ## Current Constraints And Risks
 

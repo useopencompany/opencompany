@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "@ai-sdk/mcp": "^1.0.44",
-    "@durable-streams/client": "^0.2.6",
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/analytics": "workspace:*",
     "@opencompany/billing": "workspace:*",
@@ -21,13 +20,11 @@
     "@opencompany/goat-agent": "workspace:*",
     "@opencompany/goat-brain": "workspace:*",
     "@opencompany/goat-observability": "workspace:*",
-    "@opencompany/memory": "workspace:*",
     "@opencompany/observability": "workspace:*",
     "@sentry/bun": "^10.53.1",
     "@vercel/blob": "^2.4.0",
     "ai": "^6.0.189",
     "ajv": "8.20.0",
-    "cron-parser": "^5.6.1",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "e2b": "^2.21.0",
@@ -36,7 +33,6 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
-    "@durable-streams/server": "^0.3.7",
     "@electric-sql/pglite": "^0.5.4",
     "@types/node": "^25.9.1",
     "@types/ws": "^8.18.1",
