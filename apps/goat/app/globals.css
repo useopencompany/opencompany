@@ -225,6 +225,8 @@ body {
 .session-markdown th,
 .session-markdown td {
   border: 1px solid var(--color-border);
+  /* Preserve words during intrinsic column sizing, then break only when a cell truly overflows. */
+  overflow-wrap: break-word;
   padding: 0.35em 0.55em;
   text-align: left;
   vertical-align: top;
