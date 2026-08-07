@@ -483,6 +483,10 @@ describe("MessageBubble assistant errors", () => {
                   account: "@founder",
                   text: "We built this for small teams that want to move faster.",
                 },
+                {
+                  account: "@company",
+                  text: "A faster workflow for the small teams building what comes next.",
+                },
               ],
             },
           },
@@ -503,6 +507,11 @@ describe("MessageBubble assistant errors", () => {
     expect(screen.getByText("Post to X?")).toBeVisible();
     expect(
       screen.getByText("@founder — We built this for small teams that want to move faster."),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "@company — A faster workflow for the small teams building what comes next.",
+      ),
     ).toBeVisible();
     expect(screen.queryByText(/\[object Object\]/)).not.toBeInTheDocument();
   });
