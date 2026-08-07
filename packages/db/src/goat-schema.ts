@@ -458,6 +458,14 @@ export type GoatBrainTimelineEntryRow = {
 };
 export type GoatBrainDocumentVersionOperation = "overwrite" | "delete";
 
+// Wiki (brain v2): one wiki per workspace, pages in a tree. A page's `slug` is
+// its stable identity ([[wiki-links]] target slugs); `path` is its position as
+// the slug chain of its ancestors plus itself. Mirrors @opencompany/goat-wiki.
+export type GoatWikiKind = "project" | "person" | "company" | "research" | "meeting" | "other";
+export type GoatWikiPageFormat = GoatBrainDocumentFormat;
+export type GoatWikiPageVersionOperation = "write" | "move" | "delete";
+export type GoatWikiLinkKind = "page" | "source";
+
 export type GoatTaskMessageRole = "user" | "assistant" | "tool";
 export type GoatTaskMessageStatus = "created" | "running" | "completed" | "failed";
 export type GoatTaskModelUsagePhase = "planner" | "execution";
@@ -635,6 +643,9 @@ export const goatUsers = goat.table(
     autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
     imessageEnabled: boolean("imessage_enabled").notNull().default(false),
+    // Preview flag for the workspace wiki (brain v2). Gates the /wiki surface
+    // and the `wiki` agent tool per user while brain keeps running unchanged.
+    wikiEnabled: boolean("wiki_enabled").notNull().default(false),
     // Board vs list layout for the Tasks page; persisted per user across devices.
     taskViewMode: text("task_view_mode").notNull().default("board").$type<GoatTaskViewMode>(),
     preferredMcpClient: text("preferred_mcp_client").$type<GoatMcpClient>(),
@@ -2029,6 +2040,187 @@ export const goatBrainImportCandidates = goat.table(
       "goat_brain_import_candidates_provider_check",
       sql`${table.provider} IN ('public_web', 'github', 'jamie', 'granola', 'fathom', 'gmail', 'slack', 'linear')`,
     ),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Wiki (brain v2). One wiki per workspace — pages hang directly off the
+// workspace, there is no container table. See packages/goat-wiki for the
+// domain rules these tables store.
+// ---------------------------------------------------------------------------
+
+export const goatWikiPages = goat.table(
+  "wiki_pages",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    // Stable identity, unique per workspace; [[wiki-links]] target slugs so
+    // links survive restructuring.
+    slug: text("slug").notNull(),
+    // Tree position: ancestor slug chain plus own slug ("projects/site").
+    // Invariant (app-enforced): the last path segment equals `slug`.
+    path: text("path").notNull(),
+    // Display title derived from the body's first H1 (fallback: slug). Never identity.
+    title: text("title").notNull().default(""),
+    kind: text("kind").$type<GoatWikiKind>().notNull().default("other"),
+    // Markdown body WITHOUT frontmatter. The `kind:` frontmatter block is a
+    // serialization detail of the sandbox filesystem projection.
+    content: text("content").notNull().default(""),
+    contentHash: text("content_hash").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    // Binary-backed pages (uploads). Markdown pages leave these null.
+    format: text("format").$type<GoatWikiPageFormat>().notNull().default("markdown"),
+    mimeType: text("mime_type"),
+    originalFileName: text("original_file_name"),
+    assetStorageKey: text("asset_storage_key"),
+    // Machine-extracted text of the binary asset; regenerated, never user-edited.
+    assetExtractedText: text("asset_extracted_text"),
+    assetContentHash: text("asset_content_hash"),
+    assetSizeBytes: integer("asset_size_bytes"),
+    searchTsv: tsvector("search_tsv").generatedAlwaysAs(
+      (): SQL =>
+        sql`to_tsvector('english', coalesce("title", '') || ' ' || coalesce("content", '') || ' ' || coalesce("asset_extracted_text", ''))`,
+    ),
+    createdByWorkosId: text("created_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    updatedByWorkosId: text("updated_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceSlugIdx: uniqueIndex("goat_wiki_pages_workspace_slug_idx").on(
+      table.workspaceId,
+      table.slug,
+    ),
+    workspacePathIdx: uniqueIndex("goat_wiki_pages_workspace_path_idx").on(
+      table.workspaceId,
+      table.path,
+    ),
+    workspaceUpdatedIdx: index("goat_wiki_pages_workspace_updated_idx").on(
+      table.workspaceId,
+      table.updatedAt,
+    ),
+    searchTsvIdx: index("goat_wiki_pages_search_tsv_idx").using("gin", table.searchTsv),
+    titleTrgmIdx: index("goat_wiki_pages_title_trgm_idx").using(
+      "gin",
+      table.title.op("gin_trgm_ops"),
+    ),
+    kindCheck: check(
+      "goat_wiki_pages_kind_check",
+      sql`${table.kind} IN ('project', 'person', 'company', 'research', 'meeting', 'other')`,
+    ),
+    formatCheck: check(
+      "goat_wiki_pages_format_check",
+      sql`${table.format} IN ('markdown', 'pdf', 'docx', 'xlsx', 'srt', 'csv', 'tsv', 'json', 'text', 'image')`,
+    ),
+  }),
+);
+
+// Append-only history. Survives page deletion (page_id goes null) and powers
+// undo plus the `recent` change feed; line deltas are computed at write time
+// against the previous version so `recent` is a pure aggregation.
+export const goatWikiPageVersions = goat.table(
+  "wiki_page_versions",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    pageId: text("page_id").references(() => goatWikiPages.id, { onDelete: "set null" }),
+    slug: text("slug").notNull(),
+    path: text("path").notNull(),
+    title: text("title").notNull().default(""),
+    kind: text("kind").$type<GoatWikiKind>().notNull(),
+    content: text("content").notNull(),
+    contentHash: text("content_hash").notNull(),
+    operation: text("operation").$type<GoatWikiPageVersionOperation>().notNull(),
+    addedLines: integer("added_lines").notNull().default(0),
+    removedLines: integer("removed_lines").notNull().default(0),
+    actorWorkosId: text("actor_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceCreatedIdx: index("goat_wiki_page_versions_workspace_created_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+    pageCreatedIdx: index("goat_wiki_page_versions_page_created_idx").on(
+      table.pageId,
+      table.createdAt,
+    ),
+    operationCheck: check(
+      "goat_wiki_page_versions_operation_check",
+      sql`${table.operation} IN ('write', 'move', 'delete')`,
+    ),
+  }),
+);
+
+// Dated one-liners attached to a page, kept OUT of the markdown body so agents
+// only pay for timeline tokens when they explicitly ask for it and TipTap
+// editing stays plain markdown. `text` is markdown and may carry [[links]].
+export const goatWikiTimelineEntries = goat.table(
+  "wiki_timeline_entries",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    pageId: text("page_id")
+      .notNull()
+      .references(() => goatWikiPages.id, { onDelete: "cascade" }),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    text: text("text").notNull(),
+    createdByWorkosId: text("created_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pageAtIdx: index("goat_wiki_timeline_entries_page_at_idx").on(table.pageId, table.at),
+    workspaceAtIdx: index("goat_wiki_timeline_entries_workspace_at_idx").on(
+      table.workspaceId,
+      table.at,
+    ),
+  }),
+);
+
+// Derived link index, rebuilt from a page's body on every write. `target` is a
+// page slug (kind='page' — target page need not exist yet) or a source ref
+// (kind='source', e.g. "linear:issue:ENG-123"). Never edited directly; powers
+// backlinks and per-page source listings.
+export const goatWikiLinks = goat.table(
+  "wiki_links",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    fromPageId: text("from_page_id")
+      .notNull()
+      .references(() => goatWikiPages.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<GoatWikiLinkKind>().notNull(),
+    target: text("target").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    fromKindTargetIdx: uniqueIndex("goat_wiki_links_from_kind_target_idx").on(
+      table.fromPageId,
+      table.kind,
+      table.target,
+    ),
+    workspaceKindTargetIdx: index("goat_wiki_links_workspace_kind_target_idx").on(
+      table.workspaceId,
+      table.kind,
+      table.target,
+    ),
+    kindCheck: check("goat_wiki_links_kind_check", sql`${table.kind} IN ('page', 'source')`),
   }),
 );
 
@@ -4239,6 +4431,37 @@ export const goatBrainDocumentVersionsRelations = relations(
   }),
 );
 
+export const goatWikiPagesRelations = relations(goatWikiPages, ({ one, many }) => ({
+  workspace: one(goatWorkspaces, {
+    fields: [goatWikiPages.workspaceId],
+    references: [goatWorkspaces.id],
+  }),
+  versions: many(goatWikiPageVersions),
+  timelineEntries: many(goatWikiTimelineEntries),
+  links: many(goatWikiLinks),
+}));
+
+export const goatWikiPageVersionsRelations = relations(goatWikiPageVersions, ({ one }) => ({
+  page: one(goatWikiPages, {
+    fields: [goatWikiPageVersions.pageId],
+    references: [goatWikiPages.id],
+  }),
+}));
+
+export const goatWikiTimelineEntriesRelations = relations(goatWikiTimelineEntries, ({ one }) => ({
+  page: one(goatWikiPages, {
+    fields: [goatWikiTimelineEntries.pageId],
+    references: [goatWikiPages.id],
+  }),
+}));
+
+export const goatWikiLinksRelations = relations(goatWikiLinks, ({ one }) => ({
+  fromPage: one(goatWikiPages, {
+    fields: [goatWikiLinks.fromPageId],
+    references: [goatWikiPages.id],
+  }),
+}));
+
 export const goatBrainToolRunsRelations = relations(goatBrainToolRuns, ({ one }) => ({
   user: one(goatUsers, {
     fields: [goatBrainToolRuns.userWorkosId],
@@ -4729,6 +4952,11 @@ export type GoatWorkspaceCapability = typeof goatWorkspaceCapabilities.$inferSel
 export type GoatWorkspaceBilling = typeof goatWorkspaceBilling.$inferSelect;
 export type GoatWorkspaceIngestionReservation =
   typeof goatWorkspaceIngestionReservations.$inferSelect;
+export type GoatWikiPage = typeof goatWikiPages.$inferSelect;
+export type GoatWikiPageVersion = typeof goatWikiPageVersions.$inferSelect;
+export type GoatWikiTimelineEntry = typeof goatWikiTimelineEntries.$inferSelect;
+export type GoatWikiLink = typeof goatWikiLinks.$inferSelect;
+
 export type GoatBrain = typeof goatBrains.$inferSelect;
 export type GoatBrainMember = typeof goatBrainMembers.$inferSelect;
 export type GoatBrainFolder = typeof goatBrainFolders.$inferSelect;

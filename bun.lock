@@ -179,7 +179,7 @@
       },
       "devDependencies": {
         "@durable-streams/server": "^0.3.7",
-        "@electric-sql/pglite": "^0.5.4",
+        "@electric-sql/pglite": "^0.3.11",
         "@types/node": "^25.9.1",
         "@types/ws": "^8.18.1",
         "tsx": "^4.21.0",
@@ -333,12 +333,14 @@
         "@opencompany/agent-runtime": "workspace:*",
         "@opencompany/crypto": "workspace:*",
         "@opencompany/goat-brain": "workspace:*",
+        "@opencompany/goat-wiki": "workspace:*",
         "@vercel/blob": "^2.4.0",
         "dotenv": "^17.4.2",
         "drizzle-orm": "^0.45.2",
         "pg": "^8.13.1",
       },
       "devDependencies": {
+        "@electric-sql/pglite": "^0.3.11",
         "@types/node": "^25.9.1",
         "@types/pg": "^8.11.10",
         "drizzle-kit": "^0.31.10",
@@ -411,6 +413,18 @@
         "@opentelemetry/sdk-trace-node": "^2.2.0",
         "@opentelemetry/semantic-conventions": "^1.38.0",
         "@vercel/otel": "^2.0.0",
+      },
+      "devDependencies": {
+        "@types/node": "^25.9.1",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.7",
+      },
+    },
+    "packages/goat-wiki": {
+      "name": "@opencompany/goat-wiki",
+      "version": "0.1.0",
+      "dependencies": {
+        "yaml": "^2.9.0",
       },
       "devDependencies": {
         "@types/node": "^25.9.1",
@@ -629,7 +643,7 @@
 
     "@electric-sql/client": ["@electric-sql/client@1.5.20", "", { "dependencies": { "@microsoft/fetch-event-source": "^2.0.1" }, "optionalDependencies": { "@rollup/rollup-darwin-arm64": "^4.18.1" }, "bin": { "intent": "bin/intent.mjs" } }, "sha512-Ftf+ze/rZK9dBzvZqW7wrS74aQBToUlhQeUFm7KCTfOCkNJZ+7iZMm9JW/NjyIQjPOz4ApXg3VWOpeCbzsU3IQ=="],
 
-    "@electric-sql/pglite": ["@electric-sql/pglite@0.5.4", "", {}, "sha512-yYZUyyXrHU7tPlCjwZQJ6hIG9DscdCCn7Uk0mYKwC1FeHX286AbcmFveMiRBEak8e9iPupjsoVImN3yJZVed2g=="],
+    "@electric-sql/pglite": ["@electric-sql/pglite@0.3.16", "", {}, "sha512-mZkZfOd9OqTMHsK+1cje8OSzfAQcpD7JmILXTl5ahdempjUDdmg4euf1biDex5/LfQIDJ3gvCu6qDgdnDxfJmA=="],
 
     "@emnapi/core": ["@emnapi/core@1.10.0", "", { "dependencies": { "@emnapi/wasi-threads": "1.2.1", "tslib": "^2.4.0" } }, "sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw=="],
 
@@ -944,6 +958,8 @@
     "@opencompany/goat-brain": ["@opencompany/goat-brain@workspace:packages/goat-brain"],
 
     "@opencompany/goat-observability": ["@opencompany/goat-observability@workspace:packages/goat-observability"],
+
+    "@opencompany/goat-wiki": ["@opencompany/goat-wiki@workspace:packages/goat-wiki"],
 
     "@opencompany/inngest-dev": ["@opencompany/inngest-dev@workspace:apps/inngest-dev"],
 
