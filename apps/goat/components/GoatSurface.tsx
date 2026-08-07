@@ -1965,6 +1965,15 @@ export function GoatSurface({
         setPersistedChatSessionId(null);
         window.history.replaceState(null, "", chatHref(newSessionId));
       }
+      if (newSessionId) {
+        addOptimisticGoatChatSummary({
+          workspaceId,
+          sessionId: newSessionId,
+          prompt,
+          model: String(chatModel),
+          engine,
+        });
+      }
       beginActiveTurn();
       setEngineSubmitting(true);
       // Keep the object URLs alive for the optimistic user bubble.
@@ -2017,6 +2026,7 @@ export function GoatSurface({
           }
         })
         .catch((error) => {
+          if (newSessionId) removeOptimisticGoatChatSummary(newSessionId);
           const requestChatSessionId = existingEngineSessionId ?? newSessionId;
           clearLocalActiveTurnState(requestChatSessionId);
           clearActiveTurn();
@@ -2058,12 +2068,22 @@ export function GoatSurface({
       setPersistedChatSessionId(null);
       window.history.replaceState(null, "", chatHref(newSessionId));
     }
+    if (newSessionId) {
+      addOptimisticGoatChatSummary({
+        workspaceId,
+        sessionId: newSessionId,
+        prompt,
+        model: String(model),
+        engine: "opencompany",
+      });
+    }
     beginActiveTurn();
     // Clear without revoking previews: the optimistic bubble still shows them.
     composerAttachments.setAttachments([]);
     void sendMessage(message, {
       body: { sessionId: requestSessionId, newSessionId, model },
     }).catch((error) => {
+      if (newSessionId) removeOptimisticGoatChatSummary(newSessionId);
       const requestChatSessionId = requestSessionId ?? newSessionId;
       clearLocalActiveTurnState(requestChatSessionId);
       clearActiveTurn();
