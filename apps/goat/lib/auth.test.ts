@@ -8,11 +8,13 @@ import {
 import { recordGoatSignup } from "@opencompany/goat-observability";
 import { saveSession, withAuth } from "@workos-inc/authkit-nextjs";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   activateGoatWorkspaceForOrganization,
   adoptWorkOSOrganizationMemberships,
   completeGoatAuthentication,
+  currentGoatIdentity,
   currentGoatUser,
   GOAT_ACTIVE_BRAIN_COOKIE,
   GOAT_ACTIVE_WORKSPACE_COOKIE,
@@ -36,7 +38,6 @@ vi.mock("@opencompany/db/client", () => ({
 
 vi.mock("@opencompany/db/goat-workspaces", () => ({
   adoptGoatWorkspaceMembershipsFromOrgs: vi.fn(),
-  createDefaultGoatWorkspaceForUser: vi.fn(),
   DEFAULT_GOAT_BRAIN_SLUG: "default",
   getGoatBrainAccess: vi.fn(),
   listAccessibleGoatBrains: vi.fn(),
@@ -93,6 +94,7 @@ const recordGoatSignupMock = vi.mocked(recordGoatSignup);
 const withAuthMock = vi.mocked(withAuth);
 const saveSessionMock = vi.mocked(saveSession);
 const recordLastGoatAuthMethodMock = vi.mocked(recordLastGoatAuthMethod);
+const redirectMock = vi.mocked(redirect);
 
 const now = new Date("2026-01-01T00:00:00.000Z");
 const authUser = {
@@ -472,6 +474,45 @@ describe("completeGoatAuthentication", () => {
 describe("currentGoatUser", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("keeps a newly authenticated owner workspace-free until onboarding creates one", async () => {
+    const limit = vi.fn(async () => [goatUser]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+
+    getDbMock.mockReturnValue({ select } as never);
+    withAuthMock.mockResolvedValue({ user: authUser } as never);
+    listGoatWorkspacesForUserMock.mockResolvedValue([]);
+    ensureGoatWorkspaceOrganizationsForEntriesMock.mockResolvedValue([]);
+
+    await expect(currentGoatIdentity()).resolves.toEqual({
+      authUser,
+      organizationId: null,
+      user: goatUser,
+      workspaces: [],
+    });
+
+    expect(listGoatWorkspacesForUserMock).toHaveBeenCalledWith(authUser.id);
+    expect(listAccessibleGoatBrainsMock).not.toHaveBeenCalled();
+  });
+
+  it("routes a workspace-free authenticated owner into onboarding", async () => {
+    const limit = vi.fn(async () => [goatUser]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+
+    getDbMock.mockReturnValue({ select } as never);
+    withAuthMock.mockResolvedValue({ user: authUser } as never);
+    listGoatWorkspacesForUserMock.mockResolvedValue([]);
+    ensureGoatWorkspaceOrganizationsForEntriesMock.mockResolvedValue([]);
+
+    await currentGoatUser();
+
+    expect(redirectMock).toHaveBeenCalledWith("/onboarding");
+    expect(listAccessibleGoatBrainsMock).not.toHaveBeenCalled();
   });
 
   it("prefers the organization selected in the WorkOS session over the local cookie", async () => {
