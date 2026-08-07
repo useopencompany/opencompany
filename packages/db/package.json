@@ -68,6 +68,10 @@
       "types": "./src/goat-wiki.ts",
       "default": "./src/goat-wiki.ts"
     },
+    "./goat-wiki-migrate": {
+      "types": "./src/goat-wiki-migrate.ts",
+      "default": "./src/goat-wiki-migrate.ts"
+    },
     "./goat-brain-sources": {
       "types": "./src/goat-brain-sources.ts",
       "default": "./src/goat-brain-sources.ts"
