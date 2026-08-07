@@ -314,6 +314,11 @@ An artifact belongs to the user/workspace, not to the E2B sandbox and not exclus
 message. Archiving a chat must not destroy the file. A later Files/Library surface can expose the same
 objects without migration.
 
+In v1, the creating user owns the artifact. `workspace_id` is a tenancy and policy boundary, not an
+implicit grant to every workspace member. Another member gets access only through an existing
+authorized collaboration surface or an explicit share. Workspace-wide file visibility can be added
+later with a real permissions model; it must not emerge accidentally from a database foreign key.
+
 Keep ready artifacts until the owner deletes them or a workspace retention policy expires them. Even
 before a global Files view exists, the card overflow must provide Delete. Deletion should make every
 owner and share route unavailable immediately, leave a clear "File deleted" tombstone in historical
@@ -328,6 +333,11 @@ bytes, sanitize filenames, and reject symlinks, devices, sockets, and directorie
 should set `X-Content-Type-Options: nosniff`, private cache policy, and a safe `Content-Disposition`.
 Only formats with a deliberate safe preview path may render inline; everything else downloads as an
 attachment.
+
+Reuse the current attachment limits for the first release: at most five published files per turn and
+20 MB per file. Unlike input images, generated images do not need the model-provider-specific 5 MB
+input cap. Quotas can grow from observed founder workflows instead of starting with an unbounded file
+service.
 
 ### Keep artifacts separate from Brain
 
@@ -473,7 +483,8 @@ used as the input to another task.
 
 ## V1 UX
 
-1. The user asks for a file in any main-chat engine.
+1. The user asks for a file in a file-capable main-chat engine. Phase 1 covers Codex and Claude Code;
+   the default engine should route to the same capability only after it has a real byte-creation path.
 2. The agent works normally. Scratch files and command rows remain collapsed in the turn trace.
 3. When the final deliverable is ready, the agent publishes it.
 4. A compact file card appears at that position in the assistant turn, before or beside the final
