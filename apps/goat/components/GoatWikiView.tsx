@@ -59,10 +59,13 @@ export function GoatWikiView({
   const [error, setError] = useState<string | null>(null);
 
   // Server data wins whenever a fresh RSC payload arrives (router.refresh()
-  // after mutations, or a hard navigation).
-  useEffect(() => {
+  // after mutations, or a hard navigation). Render-time adjustment, per the
+  // React "derived state from props" pattern — no effect, no extra paint.
+  const [prevServerPages, setPrevServerPages] = useState(serverPages);
+  if (prevServerPages !== serverPages) {
+    setPrevServerPages(serverPages);
     setPages(serverPages);
-  }, [serverPages]);
+  }
 
   const selectedPath = useMemo(() => {
     const fromUrl = pathname.replace(/^\/wiki\/?/, "");
@@ -380,8 +383,6 @@ function WikiPageEditor({
   const [name, setName] = useState(page.title);
   const latestBody = useRef(page.body);
   const latestName = useRef(page.title);
-  const pathRef = useRef(page.path);
-  pathRef.current = page.path;
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flush = useCallback(async () => {
@@ -391,7 +392,7 @@ function WikiPageEditor({
     }
     setSaveState("saving");
     const result = await saveWikiPageAction({
-      path: pathRef.current,
+      path: page.path,
       body: latestBody.current,
       title: latestName.current,
     });
@@ -402,7 +403,7 @@ function WikiPageEditor({
       setSaveState("dirty");
       onError(result.error);
     }
-  }, [page.slug, onLocalUpdate, onError]);
+  }, [page.slug, page.path, onLocalUpdate, onError]);
 
   const queueSave = useCallback(() => {
     setSaveState("dirty");
@@ -508,9 +509,12 @@ function WikiPageEditor({
         </button>
         <select
           value=""
-          onChange={(event) => {
+          onChange={async (event) => {
             const to = event.target.value;
             if (!to) return;
+            // A pending debounced save targets the current path; land it
+            // before the path changes underneath it.
+            if (saveTimer.current) await flush();
             const fromPath = page.path;
             void moveWikiPageAction({
               slug: page.slug,
