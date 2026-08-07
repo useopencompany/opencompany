@@ -87,6 +87,7 @@ export async function materializeCodexSkillsForSession(input: {
   return materializeManagedNativeSkillTree({ sandbox: input.sandbox, root, skills });
 }
 
+// Codex and Claude Code consume the same skill format but scan different project roots.
 export async function materializeCodexSkillSnapshotsForSession(input: {
   sandbox: SandboxHandle;
   codexWorkRoot: string;

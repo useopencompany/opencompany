@@ -268,7 +268,7 @@ describe("materializeSkillsForSession", () => {
   });
 });
 
-describe("materializeCodexSkillsForSession", () => {
+describe("native coding skill materialization", () => {
   beforeEach(() => {
     loadExternalSkillFiles.mockReset();
     loadExternalSkillFiles.mockResolvedValue([]);
