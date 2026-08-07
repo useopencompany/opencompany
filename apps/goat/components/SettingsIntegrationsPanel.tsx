@@ -217,7 +217,7 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
   },
   x_account: {
     label: "X",
-    description: "Let Goat post new tweets from your X account.",
+    description: "Connect X accounts and publish account-specific posts from chat.",
     Icon: XIcon,
     tileClass: "bg-black text-white",
   },
