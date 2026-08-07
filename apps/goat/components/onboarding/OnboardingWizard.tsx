@@ -263,6 +263,7 @@ export function OnboardingWizard({
   const [workingFolders, setWorkingFolders] = useState<string[]>(() =>
     foldersForRole(normalizedInitialRole),
   );
+  const [activeBrainRef, setActiveBrainRef] = useState(brainRef);
   const [isPending, startTransition] = useTransition();
   const [slugCheck, setSlugCheck] = useState<{
     slug: string;
@@ -275,11 +276,11 @@ export function OnboardingWizard({
   const [showSourcesGate, setShowSourcesGate] = useState(false);
 
   const reloadSourceDetails = useCallback(async () => {
-    if (!brainRef) return null;
-    const next = await getGoatBrainSourcesAction(brainRef);
+    if (!activeBrainRef) return null;
+    const next = await getGoatBrainSourcesAction(activeBrainRef);
     setSourceDetails(next);
     return next;
-  }, [brainRef]);
+  }, [activeBrainRef]);
 
   const authorizedNotFeeding = useMemo(
     () => countGoatSourcesAuthorizedNotFeeding(sourceDetails),
@@ -332,7 +333,9 @@ export function OnboardingWizard({
         name: workspaceName,
         slug: effectiveSlug,
       });
-      return r.ok || toastFail(r.error);
+      if (!r.ok) return toastFail(r.error);
+      setActiveBrainRef(r.brainRef);
+      return true;
     }
     if (step.key === "brain") {
       const r = await saveGoatOnboardingBrainFoldersAction({
@@ -438,7 +441,7 @@ export function OnboardingWizard({
           )}
           {step.key === "sources" && (
             <SourcesStep
-              brainRef={brainRef}
+              brainRef={activeBrainRef}
               details={sourceDetails}
               reload={reloadSourceDetails}
               initialConnectionResult={initialConnectionResult}

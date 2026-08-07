@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { GoatMark } from "@/components/GoatMark";
-import { currentGoatUser } from "@/lib/auth";
+import { currentGoatIdentity } from "@/lib/auth";
 import { readGoatOrganizationOptions, readLastGoatAuthMethod } from "@/lib/auth-methods";
 
 type AuthPageSearchParams = Promise<{ invitation_token?: string; email?: string; error?: string }>;
@@ -18,8 +18,8 @@ export async function AuthPage({
   mode: "sign-in" | "sign-up";
   searchParams: AuthPageSearchParams;
 }) {
-  const context = await currentGoatUser({ optional: true });
-  if (context) redirect("/");
+  const identity = await currentGoatIdentity({ optional: true });
+  if (identity) redirect(identity.workspaces.length > 0 ? "/" : "/onboarding");
 
   const [params, lastUsedMethod, organizationOptions] = await Promise.all([
     searchParams,
