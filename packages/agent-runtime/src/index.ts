@@ -2,6 +2,7 @@ export * from "./after-session";
 export * from "./agent-file";
 export * from "./attachments";
 export * from "./brain";
+export * from "./chat-artifacts";
 export * from "./claude-code-events";
 export * from "./cloud-coding-engines";
 export * from "./codex-app-server-events";
