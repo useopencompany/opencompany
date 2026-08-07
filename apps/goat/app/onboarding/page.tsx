@@ -2,7 +2,7 @@ import { getGoatOnboarding } from "@opencompany/db/goat-workspaces";
 import { cookies } from "next/headers";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
-import { currentGoatUser } from "@/lib/auth";
+import { currentGoatIdentity, currentGoatUser } from "@/lib/auth";
 import { getGoatBrainSourcesAction } from "@/lib/brain-source-actions";
 import type { GoatOnboardingConnectionResult } from "@/lib/onboarding-integrations";
 
@@ -18,18 +18,25 @@ export default async function OnboardingPage({
     reason?: string;
   }>;
 }) {
-  const context = await currentGoatUser();
-  const userWorkosId = context.user.workosUserId;
+  const identity = await currentGoatIdentity();
+  const userWorkosId = identity.user.workosUserId;
   const name =
-    [context.user.firstName, context.user.lastName].filter(Boolean).join(" ").trim() || "Teammate";
+    [identity.user.firstName, identity.user.lastName].filter(Boolean).join(" ").trim() ||
+    "Teammate";
+
+  const [context, params, onboarding, cookieStore] = await Promise.all([
+    currentGoatUser({ optional: true }),
+    searchParams,
+    getGoatOnboarding(userWorkosId),
+    cookies(),
+  ]);
 
   // Real signal for "came from an invite": the active workspace was created by
   // someone else, so this user joined it rather than starting it.
-  const joinedByInvite = context.workspace.createdByWorkosId !== userWorkosId;
-  const params = await searchParams;
+  const joinedByInvite = context !== null && context.workspace.createdByWorkosId !== userWorkosId;
   const override = params.variant;
   const variant: "owner" | "member" =
-    override === "member"
+    context && override === "member"
       ? "member"
       : override === "owner"
         ? "owner"
@@ -37,13 +44,11 @@ export default async function OnboardingPage({
           ? "member"
           : "owner";
 
-  // Hydrate anything already persisted so the flow resumes cleanly (e.g. after an
-  // OAuth round-trip when connecting a source).
-  const [onboarding, sourceDetails, cookieStore] = await Promise.all([
-    getGoatOnboarding(userWorkosId),
-    context.activeBrain ? getGoatBrainSourcesAction(context.activeBrain.id) : null,
-    cookies(),
-  ]);
+  // Source hydration depends on the workspace/brain resolution above; all
+  // independent first-run reads already ran in parallel.
+  const sourceDetails = context?.activeBrain
+    ? await getGoatBrainSourcesAction(context.activeBrain.id)
+    : null;
   const connectionResult: GoatOnboardingConnectionResult | null =
     params.setup === "connected" || params.setup === "error"
       ? {
@@ -53,23 +58,24 @@ export default async function OnboardingPage({
         }
       : null;
 
-  const savedSlug = context.workspace.slug ?? "";
+  const savedSlug = context?.workspace.slug ?? "";
   const stepCookie = Number.parseInt(cookieStore.get(ONBOARDING_STEP_COOKIE)?.value ?? "", 10);
+  const requestedStep = Number.isNaN(stepCookie) ? 0 : stepCookie;
+  // A stale OAuth/onboarding cookie must never skip past workspace creation.
+  const initialStep = context ? requestedStep : Math.min(requestedStep, 1);
 
   return (
     <OnboardingWizard
       user={{
         name,
-        email: context.user.email,
-        avatarUrl: context.user.avatarUrl,
+        email: identity.user.email,
+        avatarUrl: identity.user.avatarUrl,
       }}
-      currentWorkspaceName={context.workspace.name}
-      brainRef={context.activeBrain?.id ?? null}
+      currentWorkspaceName={context?.workspace.name ?? ""}
+      brainRef={context?.activeBrain?.id ?? null}
       variant={variant}
-      initialStep={Number.isNaN(stepCookie) ? 0 : stepCookie}
-      // Manual entry: only prefill once the user has saved a slug (i.e. resuming),
-      // never the auto-generated "…'s Workspace" default.
-      initialWorkspaceName={savedSlug ? context.workspace.name : ""}
+      initialStep={initialStep}
+      initialWorkspaceName={savedSlug ? (context?.workspace.name ?? "") : ""}
       initialSlug={savedSlug}
       initialRole={onboarding?.role ?? null}
       initialCompanyUrl={onboarding?.contextUrls?.[0] ?? onboarding?.companyDomain ?? ""}

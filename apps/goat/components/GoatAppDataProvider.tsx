@@ -76,6 +76,8 @@ export type GoatBrainSummaryView = {
 export type GoatAppInitialData = {
   user: GoatUserView;
   workspace: GoatWorkspaceView;
+  // Billing plan of the current workspace, surfaced in the account menu.
+  plan: "hobby" | "pro";
   workspaces: GoatWorkspaceView[];
   workspaceMembers: GoatWorkspaceMemberView[];
   brains: GoatBrainSummaryView[];
