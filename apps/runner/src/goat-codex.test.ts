@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
-import { runGoatCodexTask } from "./goat-codex";
+import { persistRefreshedGoatCodexAuth, runGoatCodexTask } from "./goat-codex";
 
 const dbRows = vi.hoisted(() => [] as unknown[]);
 const order = vi.hoisted(() => [] as string[]);
@@ -77,6 +77,7 @@ describe("runGoatCodexTask", () => {
     dbRows.length = 0;
     order.length = 0;
     codexAuthMocks.loadGoatCodexCredential.mockResolvedValue(null);
+    codexAuthMocks.rotateGoatCodexCredential.mockResolvedValue(true);
     codexToolMocks.codexApiKeyFallbackEnabled.mockReturnValue(true);
     codexToolMocks.ensureCodexInstalled.mockResolvedValue(undefined);
     githubMocks.getGitHubWorkInstallationToken.mockResolvedValue("gh_secret_token");
@@ -373,12 +374,29 @@ describe("runGoatCodexTask", () => {
 
   it("refreshes ChatGPT auth from the app-server Codex home", async () => {
     const authJson = { OPENAI_API_KEY: "chatgpt_secret" };
+    const refreshedAuthJson = { OPENAI_API_KEY: "refreshed_chatgpt_secret" };
+    const lastRotatedAt = new Date("2026-08-01T12:00:00.000Z");
     codexAuthMocks.loadGoatCodexCredential.mockResolvedValueOnce({
       status: "connected",
       authJson,
+      lastRotatedAt,
     });
     const sandbox = fakeSandbox();
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+    appServerMocks.runCodexAppServerTurn.mockImplementationOnce(async () => {
+      await sandbox.files.write(
+        "/home/user/.opencompany-goat/codex-home/auth.json",
+        JSON.stringify(refreshedAuthJson),
+      );
+      return {
+        sessionId: "thread_new",
+        status: "success",
+        result: "Codex completed.",
+        error: null,
+        goal: null,
+        usage: null,
+      };
+    });
 
     await runGoatCodexTask({
       userWorkosId: "user_1",
@@ -393,18 +411,129 @@ describe("runGoatCodexTask", () => {
 
     expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
       expect.objectContaining({
-        auth: { kind: "chatgpt", authJson, brokered: false },
+        auth: {
+          kind: "chatgpt",
+          authJson,
+          credentialLastRotatedAt: lastRotatedAt,
+          brokered: false,
+        },
       }),
     );
     expect(sandbox.files.writes.get("/home/user/.opencompany-goat/codex-home/auth.json")).toBe(
-      JSON.stringify(authJson),
+      JSON.stringify(refreshedAuthJson),
     );
     expect(codexAuthMocks.rotateGoatCodexCredential).toHaveBeenCalledWith(
       expect.objectContaining({
         userWorkosId: "user_1",
-        authJson,
+        authJson: refreshedAuthJson,
+        expectedLastRotatedAt: lastRotatedAt,
       }),
     );
+  });
+
+  it("persists a rotated ChatGPT auth cache when the Codex turn fails", async () => {
+    const authJson = { tokens: { refresh_token: "old_refresh" } };
+    const refreshedAuthJson = { tokens: { refresh_token: "new_refresh" } };
+    const lastRotatedAt = new Date("2026-08-01T12:00:00.000Z");
+    codexAuthMocks.loadGoatCodexCredential.mockResolvedValueOnce({
+      status: "connected",
+      authJson,
+      lastRotatedAt,
+    });
+    const sandbox = fakeSandbox();
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+    appServerMocks.runCodexAppServerTurn.mockImplementationOnce(async () => {
+      await sandbox.files.write(
+        "/home/user/.opencompany-goat/codex-home/auth.json",
+        JSON.stringify(refreshedAuthJson),
+      );
+      throw new Error("Codex turn failed after refreshing auth.");
+    });
+
+    await expect(
+      runGoatCodexTask({
+        userWorkosId: "user_1",
+        taskId: "goat_task_1",
+        messageId: "msg_1",
+        prompt: "Run.",
+        systemPrompt: "Use Codex.",
+        model: "openai/gpt-5.5",
+        env: env(),
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("Codex turn failed after refreshing auth.");
+
+    expect(codexAuthMocks.rotateGoatCodexCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        authJson: refreshedAuthJson,
+        expectedLastRotatedAt: lastRotatedAt,
+      }),
+    );
+  });
+
+  it("keeps the stored credential connected when the sandbox auth cache cannot be read", async () => {
+    await expect(
+      persistRefreshedGoatCodexAuth({
+        sandbox: fakeSandbox() as never,
+        userWorkosId: "user_1",
+        auth: {
+          kind: "chatgpt",
+          authJson: { tokens: { refresh_token: "refresh" } },
+          credentialLastRotatedAt: new Date("2026-08-01T12:00:00.000Z"),
+          brokered: false,
+        },
+      }),
+    ).rejects.toThrow("Codex did not leave a readable auth cache after running.");
+
+    expect(codexAuthMocks.markGoatCodexCredentialNeedsReauth).not.toHaveBeenCalled();
+    expect(codexAuthMocks.rotateGoatCodexCredential).not.toHaveBeenCalled();
+  });
+
+  it("does not rewrite the credential when Codex did not rotate its auth cache", async () => {
+    const authJson = { tokens: { refresh_token: "refresh" } };
+    const sandbox = fakeSandbox();
+    await sandbox.files.write(
+      "/home/user/.opencompany-goat/codex-home/auth.json",
+      JSON.stringify(authJson),
+    );
+
+    await expect(
+      persistRefreshedGoatCodexAuth({
+        sandbox: sandbox as never,
+        userWorkosId: "user_1",
+        auth: {
+          kind: "chatgpt",
+          authJson,
+          credentialLastRotatedAt: new Date("2026-08-01T12:00:00.000Z"),
+          brokered: false,
+        },
+      }),
+    ).resolves.toBe("unchanged");
+
+    expect(codexAuthMocks.rotateGoatCodexCredential).not.toHaveBeenCalled();
+  });
+
+  it("does not replace a newer credential with a stale sandbox rotation", async () => {
+    const sandbox = fakeSandbox();
+    await sandbox.files.write(
+      "/home/user/.opencompany-goat/codex-home/auth.json",
+      JSON.stringify({ tokens: { refresh_token: "sandbox_refresh" } }),
+    );
+    codexAuthMocks.rotateGoatCodexCredential.mockResolvedValueOnce(false);
+
+    await expect(
+      persistRefreshedGoatCodexAuth({
+        sandbox: sandbox as never,
+        userWorkosId: "user_1",
+        auth: {
+          kind: "chatgpt",
+          authJson: { tokens: { refresh_token: "original_refresh" } },
+          credentialLastRotatedAt: new Date("2026-08-01T12:00:00.000Z"),
+          brokered: false,
+        },
+      }),
+    ).resolves.toBe("superseded");
   });
 });
 

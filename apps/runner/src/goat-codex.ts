@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { codexCliModelNameForModelId, shellQuote } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import {
@@ -7,6 +8,7 @@ import {
 } from "@opencompany/db/goat-codex-auth";
 import { goatIntegrationResources, goatIntegrations } from "@opencompany/db/goat-schema";
 import { type GoatBrainSkill, serializeGoatBrainSkillMarkdown } from "@opencompany/goat-brain";
+import { captureException, createLogger } from "@opencompany/observability";
 import type { LanguageModelUsage } from "ai";
 import { and, eq, ne, sql } from "drizzle-orm";
 import {
@@ -49,6 +51,7 @@ const GOAT_CODEX_SKILL_FINGERPRINT = "goat-codex-v1";
 const CODEX_DIRECT_BASE_URL = "https://api.openai.com/v1";
 const CODEX_DIRECT_API_KEY_ENV_VAR = "CODEX_API_KEY";
 const BROKER_TOKEN_ENV_VAR = "OPENCOMPANY_LLM_BROKER_TOKEN";
+const logger = createLogger({ service: "opencompany-runner", runtime: "goat-codex" });
 
 type GoatCodexRepositoryAccess = {
   integrationId: string;
@@ -300,37 +303,51 @@ async function runGoatCodexCommand(input: {
       : {}),
   };
 
-  const summary = await runCodexAppServerTurn({
-    sandbox: input.sandbox,
-    codexWorkRoot: CODEX_WORKDIR,
-    codexHome: CODEX_HOME,
-    skillFingerprint: materializedSkills?.fingerprint ?? GOAT_CODEX_SKILL_FINGERPRINT,
-    skills: invokedSkills,
-    task,
-    model: input.model,
-    reasoningEffort: input.reasoningEffort ?? "high",
-    planModeReasoningEffort: null,
-    goalMode: input.goalMode ?? null,
-    existingEngineSessionId: input.existingEngineSessionId ?? null,
-    auth: input.auth,
-    githubAuth: { githubToken, githubAuthHeader },
-    timeoutMs: input.env.codexTimeoutMs,
-    checkAbort: async () => {
-      assertNotAborted(input.signal);
-    },
-    onRuntimeEvents: input.onRuntimeEvents ?? (async () => undefined),
-    onActivity: async (activity) => {
-      await input.onOutput?.(redact(activity));
-    },
-  });
+  let summary: Awaited<ReturnType<typeof runCodexAppServerTurn>>;
+  try {
+    summary = await runCodexAppServerTurn({
+      sandbox: input.sandbox,
+      codexWorkRoot: CODEX_WORKDIR,
+      codexHome: CODEX_HOME,
+      skillFingerprint: materializedSkills?.fingerprint ?? GOAT_CODEX_SKILL_FINGERPRINT,
+      skills: invokedSkills,
+      task,
+      model: input.model,
+      reasoningEffort: input.reasoningEffort ?? "high",
+      planModeReasoningEffort: null,
+      goalMode: input.goalMode ?? null,
+      existingEngineSessionId: input.existingEngineSessionId ?? null,
+      auth: input.auth,
+      githubAuth: { githubToken, githubAuthHeader },
+      timeoutMs: input.env.codexTimeoutMs,
+      checkAbort: async () => {
+        assertNotAborted(input.signal);
+      },
+      onRuntimeEvents: input.onRuntimeEvents ?? (async () => undefined),
+      onActivity: async (activity) => {
+        await input.onOutput?.(redact(activity));
+      },
+    });
+  } finally {
+    await persistRefreshedGoatCodexAuth({
+      sandbox: input.sandbox,
+      userWorkosId: input.userWorkosId,
+      auth: input.auth,
+    }).catch((error) => {
+      captureException(error, {
+        event: "opencompany.goat_codex_auth_persist_failed",
+        task_id: input.taskId,
+      });
+      logger.warn("Failed to persist refreshed Goat Codex auth", {
+        event: "opencompany.goat_codex_auth_persist_failed",
+        task_id: input.taskId,
+        error,
+      });
+    });
+  }
   if (summary.sessionId) {
     await input.onEngineSessionId?.(summary.sessionId);
   }
-  await persistRefreshedGoatCodexAuth({
-    sandbox: input.sandbox,
-    userWorkosId: input.userWorkosId,
-    auth: input.auth,
-  });
 
   const diff = input.repository
     ? await collectGitDiffSummary({
@@ -480,7 +497,12 @@ export async function loadGoatCodexCliAuth(userWorkosId: string): Promise<CodexC
     return null;
   }
   if (!credential || credential.status !== "connected") return null;
-  return { kind: "chatgpt", authJson: credential.authJson, brokered: false };
+  return {
+    kind: "chatgpt",
+    authJson: credential.authJson,
+    credentialLastRotatedAt: credential.lastRotatedAt,
+    brokered: false,
+  };
 }
 
 export async function persistRefreshedGoatCodexAuth(input: {
@@ -494,38 +516,27 @@ export async function persistRefreshedGoatCodexAuth(input: {
   try {
     const raw = await input.sandbox.files.read(`${input.codexHome ?? CODEX_HOME}/auth.json`);
     content = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
-  } catch {
-    await markGoatCodexCredentialNeedsReauth({
-      db: getDb(),
-      userWorkosId: input.userWorkosId,
-      statusReason: "Codex did not leave a readable auth cache after running.",
-    });
-    return;
+  } catch (error) {
+    throw new Error("Codex did not leave a readable auth cache after running.", { cause: error });
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
-  } catch {
-    await markGoatCodexCredentialNeedsReauth({
-      db: getDb(),
-      userWorkosId: input.userWorkosId,
-      statusReason: "Codex auth cache was malformed after running.",
-    });
-    return;
+  } catch (error) {
+    throw new Error("Codex auth cache was malformed after running.", { cause: error });
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    await markGoatCodexCredentialNeedsReauth({
-      db: getDb(),
-      userWorkosId: input.userWorkosId,
-      statusReason: "Codex auth cache was malformed after running.",
-    });
-    return;
+    throw new Error("Codex auth cache was malformed after running.");
   }
-  await rotateGoatCodexCredential({
+  if (isDeepStrictEqual(parsed, input.auth.authJson)) return "unchanged" as const;
+
+  const rotated = await rotateGoatCodexCredential({
     db: getDb(),
     userWorkosId: input.userWorkosId,
     authJson: parsed as Record<string, unknown>,
+    expectedLastRotatedAt: input.auth.credentialLastRotatedAt,
   });
+  return rotated ? ("rotated" as const) : ("superseded" as const);
 }
 
 async function resolveRepositoryAccess(input: {

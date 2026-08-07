@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CodexAppServerRequest } from "./codex-app-server";
 import type { RunnerEnv } from "./env";
 import {
+  CODEX_CHAT_HOME,
   claimCodexChatRecovery,
   createTurnAbortCheck,
   GoatCodexChatInterruptedError,
@@ -309,6 +310,36 @@ describe("runGoatCodexChatTurn", () => {
             detail: "original",
           },
         ],
+      }),
+    );
+  });
+
+  it("persists a staged ChatGPT auth cache after an ordinary turn failure", async () => {
+    const auth = {
+      kind: "chatgpt" as const,
+      authJson: { tokens: { refresh_token: "refresh" } },
+      credentialLastRotatedAt: new Date("2026-08-01T12:00:00.000Z"),
+      brokered: false as const,
+    };
+    codexAuthMocks.loadGoatCodexCliAuth.mockResolvedValueOnce(auth);
+    appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(
+      new Error("Codex failed after rotating its auth cache."),
+    );
+
+    await expect(
+      runGoatCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(codexAuthMocks.persistRefreshedGoatCodexAuth).toHaveBeenCalledOnce();
+    expect(codexAuthMocks.persistRefreshedGoatCodexAuth).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        auth,
+        codexHome: CODEX_CHAT_HOME,
       }),
     );
   });
