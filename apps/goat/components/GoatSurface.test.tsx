@@ -1150,7 +1150,17 @@ describe("GoatSurface chat streaming UI", () => {
 
   it("updates the URL without a server navigation and sends the reserved id", async () => {
     const user = userEvent.setup();
-    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(
+      <>
+        <GoatSurface
+          tasks={[]}
+          defaultModel={DEFAULT_GOAT_MODEL}
+          initialChat={null}
+          workspaceId="workspace_1"
+        />
+        <OptimisticChatSummariesProbe />
+      </>,
+    );
 
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start now");
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -1166,6 +1176,9 @@ describe("GoatSurface chat streaming UI", () => {
       newSessionId: optimisticSessionId,
       model: DEFAULT_GOAT_MODEL,
     });
+    expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
+      `${optimisticSessionId}:Start now`,
+    );
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
@@ -1188,7 +1201,17 @@ describe("GoatSurface chat streaming UI", () => {
   it("keeps the reserved detail URL and reuses its id when the first send is retried", async () => {
     const user = userEvent.setup();
     chatMock.sendError = new Error("network failed");
-    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(
+      <>
+        <GoatSurface
+          tasks={[]}
+          defaultModel={DEFAULT_GOAT_MODEL}
+          initialChat={null}
+          workspaceId="workspace_1"
+        />
+        <OptimisticChatSummariesProbe />
+      </>,
+    );
 
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Try again");
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -1196,6 +1219,7 @@ describe("GoatSurface chat streaming UI", () => {
     await waitFor(() => expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Try again"));
     const firstRequest = chatMock.preparedRequestBodies[0] as { newSessionId: string };
     expect(historyMock.replaceState).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent("none");
 
     chatMock.sendError = null;
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -1205,6 +1229,9 @@ describe("GoatSurface chat streaming UI", () => {
       sessionId: null,
       newSessionId: firstRequest.newSessionId,
     });
+    expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
+      `${firstRequest.newSessionId}:Try again`,
+    );
     expect(historyMock.replaceState).toHaveBeenCalledTimes(1);
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
@@ -2332,13 +2359,17 @@ describe("GoatSurface chat streaming UI", () => {
     window.localStorage.setItem("opencompany-goat-main-chat-selection:user_1", DEFAULT_GOAT_MODEL);
 
     render(
-      <GoatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        codexConnected
-        userWorkosId="user_1"
-      />,
+      <>
+        <GoatSurface
+          tasks={[]}
+          defaultModel={DEFAULT_GOAT_MODEL}
+          initialChat={null}
+          codexConnected
+          userWorkosId="user_1"
+          workspaceId="workspace_1"
+        />
+        <OptimisticChatSummariesProbe />
+      </>,
     );
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
@@ -2375,6 +2406,9 @@ describe("GoatSurface chat streaming UI", () => {
       },
       model: "openai/gpt-5.6-sol",
     });
+    expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
+      `${body.newSessionId}:@codex check repo access`,
+    );
     expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBe(
       DEFAULT_GOAT_MODEL,
     );
