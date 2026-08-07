@@ -7,6 +7,7 @@ import type {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
 import { extractClaudeScheduleWakeup, runGoatClaudeCodeChatTurn } from "./goat-claude-code-chat";
+import { GoatCodexChatRetryableInfrastructureError } from "./goat-codex-chat-errors";
 
 const authMocks = vi.hoisted(() => ({
   loadGoatClaudeCodeCredential: vi.fn(),
@@ -46,6 +47,7 @@ const sandboxMocks = vi.hoisted(() => ({
   armSandboxActiveTimeoutById: vi.fn(),
   armSandboxIdleTimeout: vi.fn(),
   createOrConnectSandbox: vi.fn(),
+  isRetryableCommandStreamError: vi.fn(),
 }));
 
 const skillMocks = vi.hoisted(() => ({
@@ -140,6 +142,7 @@ vi.mock("./sandbox", () => ({
   armSandboxActiveTimeoutById: sandboxMocks.armSandboxActiveTimeoutById,
   armSandboxIdleTimeout: sandboxMocks.armSandboxIdleTimeout,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
+  isRetryableCommandStreamError: sandboxMocks.isRetryableCommandStreamError,
 }));
 
 vi.mock("./skills", () => ({
@@ -257,6 +260,7 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
     sandboxMocks.armSandboxActiveTimeoutById.mockResolvedValue(true);
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
+    sandboxMocks.isRetryableCommandStreamError.mockReturnValue(false);
     skillMocks.materializeCodexSkillSnapshotsForSession.mockResolvedValue(undefined);
     taskMocks.buildGoatTaskTerminalProjection.mockReturnValue({ taskId: "goat_task_1" });
     taskMocks.markGoatTaskTurnRunning.mockResolvedValue(undefined);
@@ -284,6 +288,35 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
     );
     expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 300_000);
     expect(sandboxMocks.armSandboxActiveTimeoutById).not.toHaveBeenCalled();
+  });
+
+  it("defers an E2B command stream timeout instead of failing its durable task", async () => {
+    const error = new Error("2: [unknown] The operation timed out.");
+    error.name = "SandboxError";
+    sandboxMocks.isRetryableCommandStreamError.mockReturnValueOnce(true);
+    cliMocks.runClaudeCodeCliProcess.mockRejectedValueOnce(error);
+    const harnessSpec = harnessSpecForClaudeTask();
+
+    await expect(
+      runGoatClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession(),
+        taskContext: {
+          task: taskForHarness(harnessSpec),
+          harnessSpec,
+        },
+        env: env(),
+      }),
+    ).rejects.toMatchObject({
+      name: GoatCodexChatRetryableInfrastructureError.name,
+      cause: error,
+    });
+
+    for (const result of eventMocks.createGoatCodexChatProjector.mock.results) {
+      expect(result.value.fail).not.toHaveBeenCalled();
+      expect(result.value.finalize).not.toHaveBeenCalled();
+    }
+    expect(taskMocks.buildGoatTaskTerminalProjection).not.toHaveBeenCalled();
   });
 
   it("projects a task wakeup as the next durable task turn", async () => {

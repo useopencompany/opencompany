@@ -30,6 +30,7 @@ import {
   getSandboxLifecycleStatus,
   githubRemoteMatches,
   guardCommandStreamCallbacks,
+  isRetryableCommandStreamError,
   isRetryableSandboxAcquisitionError,
   prepareWorkspace,
   resolveSandboxBrainRelativePath,
@@ -70,6 +71,25 @@ describe("isRetryableSandboxAcquisitionError", () => {
     expect(isRetryableSandboxAcquisitionError(authentication)).toBe(false);
     expect(isRetryableSandboxAcquisitionError(template)).toBe(false);
     expect(isRetryableSandboxAcquisitionError(invalid)).toBe(false);
+  });
+});
+
+describe("isRetryableCommandStreamError", () => {
+  it("recognizes the E2B unknown-code command watch timeout", () => {
+    const error = new Error("2: [unknown] The operation timed out.");
+    error.name = "SandboxError";
+
+    expect(isRetryableCommandStreamError(error)).toBe(true);
+  });
+
+  it("does not retry killed commands or unrelated sandbox failures", () => {
+    const commandTimeout = new Error("The operation timed out.");
+    commandTimeout.name = "TimeoutError";
+    const unrelated = new Error("2: [unknown] stream closed unexpectedly");
+    unrelated.name = "SandboxError";
+
+    expect(isRetryableCommandStreamError(commandTimeout)).toBe(false);
+    expect(isRetryableCommandStreamError(unrelated)).toBe(false);
   });
 });
 
