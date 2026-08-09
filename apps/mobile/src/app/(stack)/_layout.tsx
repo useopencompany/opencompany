@@ -1,4 +1,5 @@
 import { Stack, useNavigation } from "expo-router";
+import { KeyboardController } from "react-native-keyboard-controller";
 
 export default function StackLayout() {
   // TS doesn't know the type of navigation, so we cast it to include openDrawer
@@ -18,7 +19,10 @@ export default function StackLayout() {
               type: "sfSymbol",
               name: "sidebar.left",
             },
-            onPress: () => navigation.openDrawer(),
+            onPress: () => {
+              KeyboardController.dismiss();
+              navigation.openDrawer();
+            },
           },
         ],
       }}
