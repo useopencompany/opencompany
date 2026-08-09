@@ -1,10 +1,14 @@
 "use client";
 
 // Notion-style "/" menu for the wiki editor. Typing "/" opens a small command
-// list; "page" creates a sub-page of the current page, inserts a [[slug|Name]]
-// link at the cursor, and navigates into it. The command list is data-driven
-// so more entries can join without another plugin.
+// list; "page" creates a sub-page of the current page and inserts a bare
+// [[slug]] link at the cursor — the chip renders the target's live title, so
+// the link follows renames. Page creation is optimistic (local-first), so the
+// whole interaction is synchronous: no network gap between pressing Enter and
+// seeing the link. The command list is data-driven so more entries can join
+// without another plugin.
 
+import { PluginKey } from "@tiptap/pm/state";
 import { ReactRenderer } from "@tiptap/react";
 import { Suggestion, type SuggestionOptions } from "@tiptap/suggestion";
 import { FilePlus2 } from "lucide-react";
@@ -17,13 +21,20 @@ export type WikiSlashCommandItem = {
 };
 
 export type WikiSlashCommandHandlers = {
-  /** Creates the sub-page and returns its link target, or null on failure. */
-  createPage: () => Promise<{ slug: string; title: string } | null>;
+  /**
+   * Creates the sub-page (optimistically — must return synchronously) and
+   * returns its link target, or null when creation is not possible.
+   */
+  createPage: () => { slug: string; title: string } | null;
 };
 
 const WIKI_SLASH_ITEMS: WikiSlashCommandItem[] = [
   { id: "page", label: "Page", description: "Create a sub-page and link it here" },
 ];
+
+// A dedicated key: the default Suggestion key is shared module-wide and would
+// collide with any other suggestion plugin on the same editor.
+const WIKI_SLASH_PLUGIN_KEY = new PluginKey("wikiSlashCommand");
 
 export function filterWikiSlashItems(query: string): WikiSlashCommandItem[] {
   const q = query.trim().toLowerCase();
@@ -37,15 +48,14 @@ export function createWikiSlashCommandSuggestion(
 ): Omit<SuggestionOptions<WikiSlashCommandItem>, "editor"> {
   return {
     char: "/",
+    pluginKey: WIKI_SLASH_PLUGIN_KEY,
     allowSpaces: false,
     items: ({ query }) => filterWikiSlashItems(query),
     command: ({ editor, range, props }) => {
       if (props.id !== "page") return;
-      editor.chain().focus().deleteRange(range).run();
-      void handlers.createPage().then((created) => {
-        if (!created) return;
-        editor.chain().focus().insertContent(`[[${created.slug}|${created.title}]] `).run();
-      });
+      const created = handlers.createPage();
+      if (!created) return;
+      editor.chain().focus().deleteRange(range).insertContent(`[[${created.slug}]] `).run();
     },
     render: () => {
       let component: ReactRenderer<WikiSlashListHandle, WikiSlashListProps> | null = null;
@@ -69,7 +79,7 @@ export function createWikiSlashCommandSuggestion(
           });
           container = document.createElement("div");
           container.style.position = "fixed";
-          container.style.zIndex = "50";
+          container.style.zIndex = "90";
           container.appendChild(component.element);
           document.body.appendChild(container);
           position(props.clientRect);
@@ -121,12 +131,13 @@ const WikiSlashList = forwardRef<WikiSlashListHandle, WikiSlashListProps>(functi
 
   useImperativeHandle(ref, () => ({
     onKeyDown: ({ event }) => {
+      if (items.length === 0) return false;
       if (event.key === "ArrowDown") {
-        setSelectedIndex((index) => (index + 1) % Math.max(items.length, 1));
+        setSelectedIndex((index) => (index + 1) % items.length);
         return true;
       }
       if (event.key === "ArrowUp") {
-        setSelectedIndex((index) => (index - 1 + items.length) % Math.max(items.length, 1));
+        setSelectedIndex((index) => (index - 1 + items.length) % items.length);
         return true;
       }
       if (event.key === "Enter" || event.key === "Tab") {
@@ -141,11 +152,18 @@ const WikiSlashList = forwardRef<WikiSlashListHandle, WikiSlashListProps>(functi
   if (items.length === 0) return null;
 
   return (
-    <div className="min-w-52 overflow-hidden rounded-lg border border-edge bg-surface shadow-lg">
+    <div
+      role="listbox"
+      aria-label="Wiki commands"
+      className="min-w-52 overflow-hidden rounded-lg border border-edge bg-surface shadow-lg"
+    >
       {items.map((item, index) => (
         <button
           key={item.id}
           type="button"
+          role="option"
+          aria-selected={index === selectedIndex}
+          onMouseEnter={() => setSelectedIndex(index)}
           onMouseDown={(event) => {
             event.preventDefault();
             command(item);
