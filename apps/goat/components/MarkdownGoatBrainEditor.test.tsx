@@ -19,6 +19,36 @@ describe("MarkdownGoatBrainEditor", () => {
     expect(sourceLink.getAttribute("rel")).toBe("noopener noreferrer");
   });
 
+  it("renders page chips with the live page title, following renames", async () => {
+    const { rerender } = render(
+      <MarkdownGoatBrainEditor
+        content="See [[acme|Frozen label]]."
+        onChange={vi.fn()}
+        brainLinks={{ acme: "/wiki/acme" }}
+        pageTitles={{ acme: "Acme Corp" }}
+        readOnly
+      />,
+    );
+
+    expect((await screen.findByRole("link", { name: "Acme Corp" })).getAttribute("href")).toBe(
+      "/wiki/acme",
+    );
+
+    rerender(
+      <MarkdownGoatBrainEditor
+        content="See [[acme|Frozen label]]."
+        onChange={vi.fn()}
+        brainLinks={{ acme: "/wiki/acme" }}
+        pageTitles={{ acme: "Acme Inc" }}
+        readOnly
+      />,
+    );
+
+    expect((await screen.findByRole("link", { name: "Acme Inc" })).getAttribute("href")).toBe(
+      "/wiki/acme",
+    );
+  });
+
   it("keeps a leading link collapsed in read-only documents", async () => {
     const { container } = render(
       <MarkdownGoatBrainEditor

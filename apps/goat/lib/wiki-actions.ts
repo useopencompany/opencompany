@@ -3,24 +3,34 @@
 // Server actions for the wiki UI. Every mutation funnels through the same
 // storage layer as the `wiki` agent tool, so versioning, link rebuilds, and
 // validation are identical no matter who edits.
+//
+// The wiki UI is local-first: it applies mutations optimistically to its
+// Electric-synced TanStack DB collections and calls these actions to persist.
+// Each action returns the Postgres txids of its wiki-table statements so the
+// client can hold optimistic state exactly until the write streams back.
 
 import {
   addWikiTimelineEntry,
   deleteWikiPage,
-  listWikiTimeline,
-  moveWikiPage,
   resolveWikiPages,
   WikiError,
   writeWikiPage,
 } from "@opencompany/db/goat-wiki";
 import { isValidWikiKind, isValidWikiSlug, wikiSlugFromTitle } from "@opencompany/goat-wiki";
-import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
 
 async function requireWikiContext() {
   const { user, workspace } = await currentGoatUser();
   if (!user.wikiEnabled) throw new WikiError("The wiki preview is not enabled for this user.");
   return { user, workspace };
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function requireOptionalUuid(id: string | undefined): string | undefined {
+  if (id === undefined) return undefined;
+  if (!UUID_PATTERN.test(id)) throw new WikiError("Invalid id.");
+  return id;
 }
 
 type WikiActionResult<T = Record<string, never>> =
@@ -30,7 +40,6 @@ type WikiActionResult<T = Record<string, never>> =
 async function runWikiAction<T>(action: () => Promise<T>): Promise<WikiActionResult<T>> {
   try {
     const result = await action();
-    revalidatePath("/wiki", "layout");
     return { ok: true, ...result };
   } catch (error) {
     if (error instanceof WikiError) return { ok: false, error: error.message };
@@ -43,7 +52,7 @@ export async function saveWikiPageAction(input: {
   body: string;
   kind?: string;
   title?: string;
-}): Promise<WikiActionResult<{ path: string; title: string }>> {
+}): Promise<WikiActionResult<{ path: string; title: string; txids: number[] }>> {
   return runWikiAction(async () => {
     const { user, workspace } = await requireWikiContext();
     const result = await writeWikiPage({
@@ -54,25 +63,36 @@ export async function saveWikiPageAction(input: {
       ...(input.title?.trim() ? { title: input.title.trim() } : {}),
       actorWorkosId: user.workosUserId,
     });
-    return { path: result.page.path, title: result.page.title };
+    return { path: result.page.path, title: result.page.title, txids: result.txids };
   });
 }
 
 export async function createWikiPageAction(input: {
   parentPath: string | null;
   title: string;
-}): Promise<WikiActionResult<{ path: string; slug: string; title: string }>> {
+  /** Client-generated row id, so an optimistic insert syncs onto the same row. */
+  id?: string;
+  /** Client-chosen slug (validated); derived from the title when absent. */
+  slug?: string;
+}): Promise<WikiActionResult<{ path: string; slug: string; title: string; txids: number[] }>> {
   return runWikiAction(async () => {
     const { user, workspace } = await requireWikiContext();
+    const id = requireOptionalUuid(input.id);
     const title = input.title.trim() || "Untitled";
-    const baseSlug = wikiSlugFromTitle(title) ?? "untitled";
-    // Names may repeat (Notion-style); slugs may not. Suffix until free.
-    let slug = baseSlug;
-    for (let suffix = 2; ; suffix += 1) {
-      const taken = await resolveWikiPages(workspace.id, [slug]);
-      if (taken.pages.length === 0) break;
-      slug = `${baseSlug.slice(0, 76)}-${suffix}`;
-      if (!isValidWikiSlug(slug)) throw new WikiError(`Cannot derive a slug from "${title}".`);
+    let slug = input.slug?.trim();
+    if (slug !== undefined && !isValidWikiSlug(slug)) {
+      throw new WikiError(`Invalid slug "${slug}".`);
+    }
+    if (!slug) {
+      const baseSlug = wikiSlugFromTitle(title) ?? "untitled";
+      // Names may repeat (Notion-style); slugs may not. Suffix until free.
+      slug = baseSlug;
+      for (let suffix = 2; ; suffix += 1) {
+        const taken = await resolveWikiPages(workspace.id, [slug]);
+        if (taken.pages.length === 0) break;
+        slug = `${baseSlug.slice(0, 76)}-${suffix}`;
+        if (!isValidWikiSlug(slug)) throw new WikiError(`Cannot derive a slug from "${title}".`);
+      }
     }
     const path = input.parentPath ? `${input.parentPath}/${slug}` : slug;
     const result = await writeWikiPage({
@@ -80,53 +100,22 @@ export async function createWikiPageAction(input: {
       path,
       body: "",
       title,
+      ...(id ? { id } : {}),
       actorWorkosId: user.workosUserId,
     });
-    return { path: result.page.path, slug: result.page.slug, title: result.page.title };
-  });
-}
-
-export async function setWikiPageKindAction(input: {
-  slug: string;
-  kind: string;
-}): Promise<WikiActionResult<Record<string, never>>> {
-  return runWikiAction(async () => {
-    const { user, workspace } = await requireWikiContext();
-    if (!isValidWikiKind(input.kind)) throw new WikiError(`Invalid kind "${input.kind}".`);
-    const { pages } = await resolveWikiPages(workspace.id, [input.slug]);
-    const page = pages[0];
-    if (!page) throw new WikiError(`No wiki page "${input.slug}".`);
-    await writeWikiPage({
-      workspaceId: workspace.id,
-      path: page.path,
-      body: page.content,
-      kind: input.kind,
-      actorWorkosId: user.workosUserId,
-    });
-    return {} as Record<string, never>;
-  });
-}
-
-export async function moveWikiPageAction(input: {
-  slug: string;
-  newParentPath: string | null;
-}): Promise<WikiActionResult<{ path: string }>> {
-  return runWikiAction(async () => {
-    const { user, workspace } = await requireWikiContext();
-    const result = await moveWikiPage({
-      workspaceId: workspace.id,
-      slug: input.slug,
-      newParentPath: input.newParentPath,
-      actorWorkosId: user.workosUserId,
-    });
-    return { path: result.page.path };
+    return {
+      path: result.page.path,
+      slug: result.page.slug,
+      title: result.page.title,
+      txids: result.txids,
+    };
   });
 }
 
 export async function deleteWikiPageAction(input: {
   slug: string;
   recursive?: boolean;
-}): Promise<WikiActionResult<{ deletedPaths: string[] }>> {
+}): Promise<WikiActionResult<{ deletedPaths: string[]; txids: number[] }>> {
   return runWikiAction(async () => {
     const { user, workspace } = await requireWikiContext();
     const result = await deleteWikiPage({
@@ -135,37 +124,20 @@ export async function deleteWikiPageAction(input: {
       ...(input.recursive !== undefined ? { recursive: input.recursive } : {}),
       actorWorkosId: user.workosUserId,
     });
-    return { deletedPaths: result.deletedPaths };
+    return { deletedPaths: result.deletedPaths, txids: result.txids };
   });
-}
-
-export async function getWikiTimelineAction(input: {
-  slug: string;
-}): Promise<WikiActionResult<{ entries: Array<{ id: string; at: string; text: string }> }>> {
-  try {
-    const { workspace } = await requireWikiContext();
-    const entries = await listWikiTimeline({ workspaceId: workspace.id, slug: input.slug });
-    return {
-      ok: true,
-      entries: entries.map((entry) => ({
-        id: entry.id,
-        at: entry.at.toISOString(),
-        text: entry.text,
-      })),
-    };
-  } catch (error) {
-    if (error instanceof WikiError) return { ok: false, error: error.message };
-    throw error;
-  }
 }
 
 export async function addWikiTimelineEntryAction(input: {
   slug: string;
   text: string;
   at?: string;
-}): Promise<WikiActionResult<{ at: string }>> {
+  /** Client-generated entry id, so an optimistic insert syncs onto the same row. */
+  id?: string;
+}): Promise<WikiActionResult<{ at: string; txid: number }>> {
   return runWikiAction(async () => {
     const { user, workspace } = await requireWikiContext();
+    const id = requireOptionalUuid(input.id);
     const at = input.at?.trim() ? new Date(input.at.trim()) : new Date();
     if (Number.isNaN(at.getTime())) throw new WikiError("Invalid date.");
     const entry = await addWikiTimelineEntry({
@@ -173,8 +145,9 @@ export async function addWikiTimelineEntryAction(input: {
       slug: input.slug,
       at,
       text: input.text,
+      ...(id ? { id } : {}),
       actorWorkosId: user.workosUserId,
     });
-    return { at: entry.at.toISOString() };
+    return { at: entry.at.toISOString(), txid: entry.txid };
   });
 }

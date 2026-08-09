@@ -24,11 +24,13 @@ import { isExternalHref, sourceChipDisplay, sourceHrefForRef } from "@/lib/brain
 import type { GoatSkillCatalogItem } from "@/lib/skills";
 
 const EMPTY_BRAIN_LINKS: Record<string, string> = {};
+const EMPTY_PAGE_TITLES: Record<string, string> = {};
 
 export function MarkdownGoatBrainEditor({
   content,
   onChange,
   brainLinks = EMPTY_BRAIN_LINKS,
+  pageTitles = EMPTY_PAGE_TITLES,
   readOnly = false,
   onNavigateInternal,
   compact = false,
@@ -39,6 +41,10 @@ export function MarkdownGoatBrainEditor({
   content: string;
   onChange: (content: string) => void;
   brainLinks?: Record<string, string>;
+  // Live titles for `page` links, keyed by slug. When a target resolves here,
+  // its chip renders this title instead of the authored label, so renaming a
+  // page updates every link to it instantly (Notion-style).
+  pageTitles?: Record<string, string>;
   readOnly?: boolean;
   // Handle an internal brain href client-side. Return true if handled; when
   // omitted or it returns false, the link falls back to a full-page navigation.
@@ -88,6 +94,7 @@ export function MarkdownGoatBrainEditor({
         }),
         WikiLinkDecoration.configure({
           brainLinks,
+          pageTitles,
           editingEnabled: !readOnly,
           onNavigateInternal: navigateInternal,
         }),
@@ -152,17 +159,23 @@ export function MarkdownGoatBrainEditor({
     // would fire onUpdate → onChange without a real edit (phantom dirty/autosave).
     if (editor.isEditable !== !readOnly) editor.setEditable(!readOnly, false);
     const current = WIKI_LINK_PLUGIN_KEY.getState(editor.state);
-    if (current && current.brainLinks === brainLinks && current.editingEnabled === !readOnly) {
+    if (
+      current &&
+      current.brainLinks === brainLinks &&
+      current.pageTitles === pageTitles &&
+      current.editingEnabled === !readOnly
+    ) {
       return;
     }
     editor.view.dispatch(
       editor.state.tr.setMeta(WIKI_LINK_PLUGIN_KEY, {
         brainLinks,
+        pageTitles,
         editingEnabled: !readOnly,
         onNavigateInternal: navigateInternal,
       } satisfies WikiLinkPluginState),
     );
-  }, [brainLinks, editor, navigateInternal, readOnly]);
+  }, [brainLinks, editor, navigateInternal, pageTitles, readOnly]);
 
   return (
     <div className="relative">
@@ -234,6 +247,7 @@ const GITHUB_ICON =
 
 type WikiLinkPluginState = {
   brainLinks: Record<string, string>;
+  pageTitles: Record<string, string>;
   editingEnabled: boolean;
   onNavigateInternal: ((href: string) => boolean) | undefined;
 };
@@ -243,7 +257,7 @@ const WIKI_LINK_PLUGIN_KEY = new PluginKey<WikiLinkPluginState>("wikiLinkDecorat
 const WikiLinkDecoration = Extension.create<WikiLinkPluginState>({
   name: "wikiLinkDecoration",
   addOptions() {
-    return { brainLinks: {}, editingEnabled: true, onNavigateInternal: undefined };
+    return { brainLinks: {}, pageTitles: {}, editingEnabled: true, onNavigateInternal: undefined };
   },
   addProseMirrorPlugins() {
     const initialState = this.options;
@@ -302,12 +316,17 @@ const WikiLinkDecoration = Extension.create<WikiLinkPluginState>({
                   }
 
                   // Collapsed: hide the raw markup and render a compact chip in its place.
+                  // Page links prefer the target's live title over the authored
+                  // label, so renames propagate to every referencing document.
+                  const liveTitle =
+                    link.kind === "page" ? pluginState.pageTitles[link.target] : undefined;
                   const chip =
                     link.kind === "source"
                       ? sourceChipDisplay(link.target, label)
-                      : { icon: "link" as const, label };
-                  // Preserve the fuller authored label as a tooltip when we shorten it.
-                  const chipTitle = chip.label !== label ? label : undefined;
+                      : { icon: "link" as const, label: liveTitle || label };
+                  // Preserve the fuller authored label as a tooltip when we shorten
+                  // it — but not when the live page title replaced it on purpose.
+                  const chipTitle = !liveTitle && chip.label !== label ? label : undefined;
                   decorations.push(Decoration.inline(start, end, { class: "wiki-brain-hidden" }));
                   decorations.push(
                     Decoration.widget(
