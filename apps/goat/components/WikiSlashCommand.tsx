@@ -1,18 +1,27 @@
 "use client";
 
 // Notion-style "/" menu for the wiki editor. Typing "/" opens a small command
-// list; "page" creates a sub-page of the current page and inserts a bare
-// [[slug]] link at the cursor — the chip renders the target's live title, so
-// the link follows renames. Page creation is optimistic (local-first), so the
-// whole interaction is synchronous: no network gap between pressing Enter and
-// seeing the link. The command list is data-driven so more entries can join
-// without another plugin.
+// list; "page" creates a sub-page of the current page, inserts a bare
+// [[slug]] link at the cursor (the chip renders the target's live title), and
+// opens the new page ready to name. Page creation is optimistic (local-first),
+// so the whole interaction is synchronous.
+//
+// The list itself is the design system's cmdk-based Command component — the
+// same battle-tested primitive as the app's command palette. The editor keeps
+// keyboard focus; the tiptap Suggestion plugin forwards ArrowUp/ArrowDown/
+// Enter to cmdk as native keydown events, which is the established pattern
+// for tiptap slash menus built on cmdk.
 
+import {
+  Command,
+  CommandEmpty,
+  CommandItem,
+  CommandList,
+} from "@opencompany/ui/components/command";
 import { PluginKey } from "@tiptap/pm/state";
 import { ReactRenderer } from "@tiptap/react";
 import { Suggestion, type SuggestionOptions } from "@tiptap/suggestion";
 import { FilePlus2 } from "lucide-react";
-import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 
 export type WikiSlashCommandItem = {
   id: string;
@@ -20,12 +29,21 @@ export type WikiSlashCommandItem = {
   description: string;
 };
 
+export type WikiSlashCreatedPage = {
+  id: string;
+  slug: string;
+  path: string;
+  title: string;
+};
+
 export type WikiSlashCommandHandlers = {
   /**
    * Creates the sub-page (optimistically — must return synchronously) and
-   * returns its link target, or null when creation is not possible.
+   * returns it, or null when creation is not possible.
    */
-  createPage: () => { slug: string; title: string } | null;
+  createPage: () => WikiSlashCreatedPage | null;
+  /** Called after the link is inserted, e.g. to open the new page. */
+  onPageCreated?: (page: WikiSlashCreatedPage) => void;
 };
 
 const WIKI_SLASH_ITEMS: WikiSlashCommandItem[] = [
@@ -35,6 +53,8 @@ const WIKI_SLASH_ITEMS: WikiSlashCommandItem[] = [
 // A dedicated key: the default Suggestion key is shared module-wide and would
 // collide with any other suggestion plugin on the same editor.
 const WIKI_SLASH_PLUGIN_KEY = new PluginKey("wikiSlashCommand");
+
+const FORWARDED_KEYS = new Set(["ArrowUp", "ArrowDown", "Enter", "Tab"]);
 
 export function filterWikiSlashItems(query: string): WikiSlashCommandItem[] {
   const q = query.trim().toLowerCase();
@@ -56,9 +76,10 @@ export function createWikiSlashCommandSuggestion(
       const created = handlers.createPage();
       if (!created) return;
       editor.chain().focus().deleteRange(range).insertContent(`[[${created.slug}]] `).run();
+      handlers.onPageCreated?.(created);
     },
     render: () => {
-      let component: ReactRenderer<WikiSlashListHandle, WikiSlashListProps> | null = null;
+      let component: ReactRenderer<unknown, WikiSlashMenuProps> | null = null;
       let container: HTMLDivElement | null = null;
 
       const position = (clientRect?: (() => DOMRect | null) | null) => {
@@ -70,7 +91,7 @@ export function createWikiSlashCommandSuggestion(
 
       return {
         onStart: (props) => {
-          component = new ReactRenderer(WikiSlashList, {
+          component = new ReactRenderer(WikiSlashMenu, {
             props: {
               items: props.items,
               command: (item: WikiSlashCommandItem) => props.command(item),
@@ -91,7 +112,21 @@ export function createWikiSlashCommandSuggestion(
           });
           position(props.clientRect);
         },
-        onKeyDown: (props) => component?.ref?.onKeyDown(props) ?? false,
+        onKeyDown: ({ event }) => {
+          if (!FORWARDED_KEYS.has(event.key)) return false;
+          // The editor keeps focus; drive cmdk by replaying the key on its
+          // root element (Tab confirms like Enter).
+          const commandRoot = container?.querySelector("[cmdk-root]");
+          if (!commandRoot) return false;
+          commandRoot.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              key: event.key === "Tab" ? "Enter" : event.key,
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+          return true;
+        },
         onExit: () => {
           component?.destroy();
           container?.remove();
@@ -110,75 +145,33 @@ export function createWikiSlashCommandPlugin(
   return Suggestion({ editor, ...createWikiSlashCommandSuggestion(handlers) });
 }
 
-type WikiSlashListProps = {
+type WikiSlashMenuProps = {
   items: WikiSlashCommandItem[];
   command: (item: WikiSlashCommandItem) => void;
 };
 
-type WikiSlashListHandle = {
-  onKeyDown: (props: { event: KeyboardEvent }) => boolean;
-};
-
-const WikiSlashList = forwardRef<WikiSlashListHandle, WikiSlashListProps>(function WikiSlashList(
-  { items, command },
-  ref,
-) {
-  const [selectedIndex, setSelectedIndex] = useState(0);
-
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [items]);
-
-  useImperativeHandle(ref, () => ({
-    onKeyDown: ({ event }) => {
-      if (items.length === 0) return false;
-      if (event.key === "ArrowDown") {
-        setSelectedIndex((index) => (index + 1) % items.length);
-        return true;
-      }
-      if (event.key === "ArrowUp") {
-        setSelectedIndex((index) => (index - 1 + items.length) % items.length);
-        return true;
-      }
-      if (event.key === "Enter" || event.key === "Tab") {
-        const item = items[selectedIndex];
-        if (item) command(item);
-        return true;
-      }
-      return false;
-    },
-  }));
-
+function WikiSlashMenu({ items, command }: WikiSlashMenuProps) {
   if (items.length === 0) return null;
 
   return (
-    <div
-      role="listbox"
-      aria-label="Wiki commands"
-      className="min-w-52 overflow-hidden rounded-lg border border-edge bg-surface shadow-lg"
+    <Command
+      shouldFilter={false}
+      // Keep focus (and the caret) in the editor while clicking the menu.
+      onMouseDown={(event) => event.preventDefault()}
+      className="min-w-56 rounded-lg border border-edge bg-surface shadow-lg"
     >
-      {items.map((item, index) => (
-        <button
-          key={item.id}
-          type="button"
-          role="option"
-          aria-selected={index === selectedIndex}
-          onMouseEnter={() => setSelectedIndex(index)}
-          onMouseDown={(event) => {
-            event.preventDefault();
-            command(item);
-          }}
-          className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[13px] ${
-            index === selectedIndex ? "bg-surface-sunken text-ink" : "text-ink-muted"
-          }`}
-        >
-          <FilePlus2 className="h-3.5 w-3.5 shrink-0 text-ink-subtle" />
-          <span className="flex min-w-0 flex-col">
-            <span className="font-medium">{item.label}</span>
-            <span className="truncate text-[11.5px] text-ink-subtle">{item.description}</span>
-          </span>
-        </button>
-      ))}
-    </div>
+      <CommandList>
+        <CommandEmpty>No commands.</CommandEmpty>
+        {items.map((item) => (
+          <CommandItem key={item.id} value={item.id} onSelect={() => command(item)}>
+            <FilePlus2 className="h-3.5 w-3.5 shrink-0 text-ink-subtle" />
+            <span className="flex min-w-0 flex-col">
+              <span className="text-[13px] font-medium">{item.label}</span>
+              <span className="truncate text-[11.5px] text-ink-subtle">{item.description}</span>
+            </span>
+          </CommandItem>
+        ))}
+      </CommandList>
+    </Command>
   );
-});
+}

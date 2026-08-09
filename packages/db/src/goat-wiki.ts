@@ -240,7 +240,8 @@ export type WikiWriteInput = {
    * Explicit display name (the Notion-style "name" field). When absent the
    * title derives from the body's first H1, falling back to the existing
    * title on updates so agent rewrites without an H1 never clobber a
-   * human-set name.
+   * human-set name. An explicit empty string is honored — the UI renders it
+   * as "Untitled", exactly like Notion.
    */
   title?: string;
   actorWorkosId?: string | null;
@@ -287,7 +288,10 @@ export async function writeWikiPage(
 
   if (existing) {
     const kind = input.kind ?? existing.kind;
-    const title = input.title?.trim() || deriveWikiTitle(input.body, existing.title.trim() || slug);
+    const title =
+      input.title !== undefined
+        ? input.title.trim()
+        : deriveWikiTitle(input.body, existing.title.trim() || slug);
     if (existing.content === input.body && existing.kind === kind && existing.title === title) {
       return { page: existing, action: "unchanged", createdAncestors, txids: ancestors.txids };
     }
@@ -322,7 +326,7 @@ export async function writeWikiPage(
     body: input.body,
     kind: input.kind ?? DEFAULT_WIKI_KIND,
     ...(input.id ? { id: input.id } : {}),
-    ...(input.title?.trim() ? { title: input.title.trim() } : {}),
+    ...(input.title !== undefined ? { title: input.title.trim() } : {}),
     actorWorkosId: input.actorWorkosId ?? null,
   });
   return { page, action: "created", createdAncestors, txids: [...ancestors.txids, txid] };

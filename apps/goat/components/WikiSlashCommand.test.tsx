@@ -12,10 +12,19 @@ import {
 } from "./WikiSlashCommand";
 
 // jsdom has no layout; ProseMirror's post-dispatch scrollIntoView asks ranges
-// for client rects. Stub them so editor dispatches don't throw.
+// for client rects, and cmdk needs ResizeObserver + element scrollIntoView.
 beforeAll(() => {
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   Range.prototype.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0);
+  vi.stubGlobal(
+    "ResizeObserver",
+    class ResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  window.HTMLElement.prototype.scrollIntoView = vi.fn();
 });
 
 describe("filterWikiSlashItems", () => {
@@ -75,35 +84,55 @@ async function mountWithSlashMenuOpen(handlers: WikiSlashCommandHandlers) {
   return editor as NonNullable<ReturnType<typeof useEditor>>;
 }
 
+const CREATED_PAGE = { id: "page-1", slug: "untitled", path: "parent/untitled", title: "" };
+
 describe("wiki slash command menu", () => {
-  it("creates the page and inserts a bare [[slug]] link on Enter", async () => {
-    const createPage = vi.fn().mockReturnValue({ slug: "untitled", title: "Untitled" });
-    const editor = await mountWithSlashMenuOpen({ createPage });
+  it("creates the page, inserts a bare [[slug]] link, and opens it on Enter", async () => {
+    const createPage = vi.fn().mockReturnValue(CREATED_PAGE);
+    const onPageCreated = vi.fn();
+    const editor = await mountWithSlashMenuOpen({ createPage, onPageCreated });
 
     fireEvent.keyDown(editor.view.dom, { key: "Enter" });
 
-    expect(createPage).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(createPage).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(editor.getMarkdown()).toContain("[[untitled]]"));
     expect(editor.getMarkdown()).not.toContain("/page");
+    expect(onPageCreated).toHaveBeenCalledWith(CREATED_PAGE);
+  });
+
+  it("navigates the cmdk selection with arrow keys without leaking into the editor", async () => {
+    const createPage = vi.fn().mockReturnValue(CREATED_PAGE);
+    const editor = await mountWithSlashMenuOpen({ createPage });
+
+    fireEvent.keyDown(editor.view.dom, { key: "ArrowDown" });
+    fireEvent.keyDown(editor.view.dom, { key: "ArrowUp" });
+    expect(editor.getMarkdown()).toContain("/page");
+
+    fireEvent.keyDown(editor.view.dom, { key: "Enter" });
+    await waitFor(() => expect(createPage).toHaveBeenCalledTimes(1));
   });
 
   it("creates the page and inserts the link on click", async () => {
-    const createPage = vi.fn().mockReturnValue({ slug: "untitled", title: "Untitled" });
-    const editor = await mountWithSlashMenuOpen({ createPage });
+    const createPage = vi.fn().mockReturnValue(CREATED_PAGE);
+    const onPageCreated = vi.fn();
+    const editor = await mountWithSlashMenuOpen({ createPage, onPageCreated });
 
-    fireEvent.mouseDown(screen.getByText("Create a sub-page and link it here"));
+    fireEvent.click(screen.getByText("Create a sub-page and link it here"));
 
-    expect(createPage).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(createPage).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(editor.getMarkdown()).toContain("[[untitled]]"));
+    expect(onPageCreated).toHaveBeenCalledWith(CREATED_PAGE);
   });
 
   it("keeps the /page text when creation is refused", async () => {
     const createPage = vi.fn().mockReturnValue(null);
-    const editor = await mountWithSlashMenuOpen({ createPage });
+    const onPageCreated = vi.fn();
+    const editor = await mountWithSlashMenuOpen({ createPage, onPageCreated });
 
     fireEvent.keyDown(editor.view.dom, { key: "Enter" });
 
-    expect(createPage).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(createPage).toHaveBeenCalledTimes(1));
     expect(editor.getMarkdown()).toContain("/page");
+    expect(onPageCreated).not.toHaveBeenCalled();
   });
 });
