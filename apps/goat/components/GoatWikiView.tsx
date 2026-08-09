@@ -617,7 +617,12 @@ function WikiPageEditor({
       });
     },
     mutationFn: async ({ transaction }) => {
-      const txids = await persistWikiPageWrites(asWikiPageWriteMutations(transaction.mutations));
+      // A row can vanish between the keystroke and the debounced flush (page
+      // deleted); saving it would silently re-create the page.
+      const mutations = asWikiPageWriteMutations(transaction.mutations).filter(
+        (mutation) => collections.pages.get(mutation.original.id) !== undefined,
+      );
+      const txids = await persistWikiPageWrites(mutations);
       // The write is durable once the action returns; waiting for the txids to
       // stream back only holds optimistic state so nothing flickers. A missed
       // txid (e.g. Electric briefly unreachable) must not fail the save.

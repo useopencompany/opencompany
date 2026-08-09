@@ -25,6 +25,14 @@ async function requireWikiContext() {
   return { user, workspace };
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function requireOptionalUuid(id: string | undefined): string | undefined {
+  if (id === undefined) return undefined;
+  if (!UUID_PATTERN.test(id)) throw new WikiError("Invalid id.");
+  return id;
+}
+
 type WikiActionResult<T = Record<string, never>> =
   | ({ ok: true } & T)
   | { ok: false; error: string };
@@ -69,6 +77,7 @@ export async function createWikiPageAction(input: {
 }): Promise<WikiActionResult<{ path: string; slug: string; title: string; txids: number[] }>> {
   return runWikiAction(async () => {
     const { user, workspace } = await requireWikiContext();
+    const id = requireOptionalUuid(input.id);
     const title = input.title.trim() || "Untitled";
     let slug = input.slug?.trim();
     if (slug !== undefined && !isValidWikiSlug(slug)) {
@@ -91,7 +100,7 @@ export async function createWikiPageAction(input: {
       path,
       body: "",
       title,
-      ...(input.id ? { id: input.id } : {}),
+      ...(id ? { id } : {}),
       actorWorkosId: user.workosUserId,
     });
     return {
@@ -128,6 +137,7 @@ export async function addWikiTimelineEntryAction(input: {
 }): Promise<WikiActionResult<{ at: string; txid: number }>> {
   return runWikiAction(async () => {
     const { user, workspace } = await requireWikiContext();
+    const id = requireOptionalUuid(input.id);
     const at = input.at?.trim() ? new Date(input.at.trim()) : new Date();
     if (Number.isNaN(at.getTime())) throw new WikiError("Invalid date.");
     const entry = await addWikiTimelineEntry({
@@ -135,7 +145,7 @@ export async function addWikiTimelineEntryAction(input: {
       slug: input.slug,
       at,
       text: input.text,
-      ...(input.id ? { id: input.id } : {}),
+      ...(id ? { id } : {}),
       actorWorkosId: user.workosUserId,
     });
     return { at: entry.at.toISOString(), txid: entry.txid };
