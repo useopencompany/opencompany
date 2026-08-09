@@ -17,6 +17,7 @@ test-results
 .source
 .claude/
 *.profraw
+.firecrawl
 
 # Per-developer Goat Quick build settings.
 apps/goat-macos/Config/Local.xcconfig
