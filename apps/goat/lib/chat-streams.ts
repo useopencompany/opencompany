@@ -11,9 +11,6 @@ import { createResumableStreamContext, type ResumableStreamContext } from "resum
 const ACTIVE_STREAM_TTL_SECONDS = 30 * 60;
 const STOP_SIGNAL_TTL_SECONDS = 10 * 60;
 const STOP_POLL_INTERVAL_MS = 1_000;
-// Slightly above the chat route's maxDuration so a watcher can never outlive
-// its turn by much when cleanup is missed.
-const STOP_WATCH_MAX_MS = 250_000;
 
 export function isGoatChatResumeEnabled() {
   return Boolean(redisUrl());
@@ -82,13 +79,8 @@ export async function requestGoatChatStop(sessionId: string) {
  * when it appears. Returns a cleanup function.
  */
 export function watchGoatChatStop(streamId: string, onStop: () => void) {
-  const startedAt = Date.now();
   let stopped = false;
   const interval = setInterval(() => {
-    if (Date.now() - startedAt > STOP_WATCH_MAX_MS) {
-      cleanup();
-      return;
-    }
     void getRedis()
       .then((redis) => redis.get(stopSignalKey(streamId)))
       .then((value) => {
