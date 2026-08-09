@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatUser } from "@/lib/auth";
 import { createDbGoatChatStore } from "@/lib/chat";
 import {
+  clearActiveGoatChatStream,
   getActiveGoatChatStream,
   getGoatChatStreamContext,
   isGoatChatResumeEnabled,
@@ -17,6 +18,7 @@ vi.mock("@/lib/chat", () => ({
 }));
 
 vi.mock("@/lib/chat-streams", () => ({
+  clearActiveGoatChatStream: vi.fn(async () => undefined),
   getActiveGoatChatStream: vi.fn(),
   getGoatChatStreamContext: vi.fn(),
   isGoatChatResumeEnabled: vi.fn(),
@@ -78,6 +80,32 @@ describe("GET /api/chat/[sessionId]/stream", () => {
     expect(response.headers.get("content-type")).toContain("text/event-stream");
     expect(resumeExistingStream).toHaveBeenCalledWith("goat_chat_stream_1");
     await expect(response.text()).resolves.toContain('"type":"start"');
+  });
+
+  it("clears a stale pointer when the resumable stream is already gone", async () => {
+    vi.mocked(getActiveGoatChatStream).mockResolvedValue("goat_chat_stream_stale");
+    vi.mocked(getGoatChatStreamContext).mockReturnValue({
+      resumeExistingStream: vi.fn(async () => null),
+    } as never);
+
+    const response = await GET(streamRequest(), params("session_1"));
+
+    expect(response.status).toBe(204);
+    expect(clearActiveGoatChatStream).toHaveBeenCalledWith("session_1", "goat_chat_stream_stale");
+  });
+
+  it("clears a stale pointer when the resumable producer cannot be reached", async () => {
+    vi.mocked(getActiveGoatChatStream).mockResolvedValue("goat_chat_stream_stale");
+    vi.mocked(getGoatChatStreamContext).mockReturnValue({
+      resumeExistingStream: vi.fn(async () => {
+        throw new Error("producer unavailable");
+      }),
+    } as never);
+
+    const response = await GET(streamRequest(), params("session_1"));
+
+    expect(response.status).toBe(204);
+    expect(clearActiveGoatChatStream).toHaveBeenCalledWith("session_1", "goat_chat_stream_stale");
   });
 });
 

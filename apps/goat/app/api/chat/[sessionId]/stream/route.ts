@@ -2,6 +2,7 @@ import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { currentGoatUser } from "@/lib/auth";
 import { createDbGoatChatStore } from "@/lib/chat";
 import {
+  clearActiveGoatChatStream,
   getActiveGoatChatStream,
   getGoatChatStreamContext,
   isGoatChatResumeEnabled,
@@ -31,10 +32,23 @@ export async function GET(
   const streamId = await getActiveGoatChatStream(session.id);
   if (!streamId) return noActiveStream();
 
-  const stream = await getGoatChatStreamContext()
-    .resumeExistingStream(streamId)
-    .catch(() => null);
-  if (!stream) return noActiveStream();
+  let stream: ReadableStream<string> | null;
+  try {
+    stream = await getGoatChatStreamContext().resumeExistingStream(streamId);
+  } catch (error) {
+    console.warn("Goat chat resumable stream could not be replayed.", {
+      event: "goat.chat_resumable_stream_replay_failed",
+      session_id: session.id,
+      stream_id: streamId,
+      error,
+    });
+    await clearActiveGoatChatStream(session.id, streamId);
+    return noActiveStream();
+  }
+  if (!stream) {
+    await clearActiveGoatChatStream(session.id, streamId);
+    return noActiveStream();
+  }
 
   return new Response(stream.pipeThrough(new TextEncoderStream()), {
     headers: UI_MESSAGE_STREAM_HEADERS,
