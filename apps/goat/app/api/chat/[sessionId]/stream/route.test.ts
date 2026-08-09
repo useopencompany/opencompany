@@ -107,6 +107,21 @@ describe("GET /api/chat/[sessionId]/stream", () => {
     expect(response.status).toBe(204);
     expect(clearActiveGoatChatStream).toHaveBeenCalledWith("session_1", "goat_chat_stream_stale");
   });
+
+  it("retries a transient replay failure without clearing a healthy stream", async () => {
+    vi.mocked(getActiveGoatChatStream).mockResolvedValue("goat_chat_stream_1");
+    const resumeExistingStream = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("temporary read failure"))
+      .mockResolvedValueOnce(stringStream(['data: {"type":"start"}\n\n']));
+    vi.mocked(getGoatChatStreamContext).mockReturnValue({ resumeExistingStream } as never);
+
+    const response = await GET(streamRequest(), params("session_1"));
+
+    expect(response.status).toBe(200);
+    expect(resumeExistingStream).toHaveBeenCalledTimes(2);
+    expect(clearActiveGoatChatStream).not.toHaveBeenCalled();
+  });
 });
 
 function params(sessionId: string) {

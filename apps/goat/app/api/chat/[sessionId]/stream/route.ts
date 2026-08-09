@@ -32,18 +32,27 @@ export async function GET(
   const streamId = await getActiveGoatChatStream(session.id);
   if (!streamId) return noActiveStream();
 
-  let stream: ReadableStream<string> | null;
+  const streamContext = getGoatChatStreamContext();
+  let stream: ReadableStream<string> | null | undefined;
   try {
-    stream = await getGoatChatStreamContext().resumeExistingStream(streamId);
+    stream = await streamContext.resumeExistingStream(streamId);
   } catch (error) {
-    console.warn("Goat chat resumable stream could not be replayed.", {
-      event: "goat.chat_resumable_stream_replay_failed",
-      session_id: session.id,
-      stream_id: streamId,
-      error,
-    });
-    await clearActiveGoatChatStream(session.id, streamId);
-    return noActiveStream();
+    try {
+      // One retry keeps a transient durable-stream read failure from making a
+      // healthy producer unreachable. A second failure means this pointer can
+      // no longer help the client reconnect.
+      stream = await streamContext.resumeExistingStream(streamId);
+    } catch (retryError) {
+      console.warn("Goat chat resumable stream could not be replayed.", {
+        event: "goat.chat_resumable_stream_replay_failed",
+        session_id: session.id,
+        stream_id: streamId,
+        error,
+        retry_error: retryError,
+      });
+      await clearActiveGoatChatStream(session.id, streamId);
+      return noActiveStream();
+    }
   }
   if (!stream) {
     await clearActiveGoatChatStream(session.id, streamId);

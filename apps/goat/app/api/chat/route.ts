@@ -1365,7 +1365,7 @@ export async function POST(request: Request): Promise<Response> {
     model: turn.session.model,
   });
   let modelCostRecordPromise: Promise<void> | null = null;
-  const recordFinalModelCost = (usage?: LanguageModelUsage) => {
+  const recordFinalModelCost = (usage: LanguageModelUsage) => {
     modelCostRecordPromise ??= recordChatModelCost({
       model: turn.session.model,
       usage,
