@@ -1,24 +1,18 @@
-import {
-  Button,
-  Host,
-  HStack,
-  Image,
-  RNHostView,
-  TextField,
-  useNativeState,
-} from "@expo/ui/swift-ui";
+import { Button, Host, HStack, Image, TextField, useNativeState } from "@expo/ui/swift-ui";
 import {
   accessibilityLabel,
+  background,
   buttonStyle,
+  font,
   foregroundStyle,
   frame,
   glassEffect,
   layoutPriority,
   padding,
+  shapes,
 } from "@expo/ui/swift-ui/modifiers";
 import { router, Stack } from "expo-router";
-import { SymbolView } from "expo-symbols";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -38,13 +32,18 @@ export default function FirstStackScreen() {
             <Text key={index}>{text}</Text>
           ))}
         </KeyboardChatScrollView>
-        <KeyboardStickyView className="px-6 pb-2" offset={{ closed: -bottom }}>
+        <KeyboardStickyView className="px-6" offset={{ closed: -bottom }}>
           <Host matchContents={{ vertical: true }} style={{ width: "100%" }}>
             <HStack
               modifiers={[
                 padding({ horizontal: 10, vertical: 6 }),
                 frame({ maxWidth: Infinity }),
-                glassEffect(),
+                glassEffect({
+                  glass: {
+                    variant: "regular",
+                    interactive: true,
+                  },
+                }),
               ]}
             >
               <Button
@@ -58,23 +57,20 @@ export default function FirstStackScreen() {
                 text={inputState}
                 modifiers={[layoutPriority(1), frame({ maxWidth: Infinity })]}
               />
-              <RNHostView matchContents>
-                <Pressable
-                  accessibilityLabel="Send message"
-                  accessibilityRole="button"
-                  onPress={() => {}}
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: 15,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    backgroundColor: "#007AFF",
-                  }}
-                >
-                  <SymbolView name="arrow.up" size={14} tintColor="white" weight="semibold" />
-                </Pressable>
-              </RNHostView>
+              <Button
+                onPress={() => {}}
+                modifiers={[buttonStyle("plain"), accessibilityLabel("Send message")]}
+              >
+                <Image
+                  systemName="arrow.up"
+                  modifiers={[
+                    font({ size: 14, weight: "bold" }),
+                    foregroundStyle("white"),
+                    frame({ width: 30, height: 30 }),
+                    background("#007AFF", shapes.circle()),
+                  ]}
+                />
+              </Button>
             </HStack>
           </Host>
         </KeyboardStickyView>

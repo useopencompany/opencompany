@@ -1,104 +1,120 @@
-import { Button, Host, HStack, Image, Text, VStack } from "@expo/ui/swift-ui";
-import {
-  accessibilityLabel,
-  background,
-  bold,
-  buttonStyle,
-  clipShape,
-  font,
-  foregroundStyle,
-  frame,
-  padding,
-} from "@expo/ui/swift-ui/modifiers";
-import { router, Stack } from "expo-router";
-import type { SFSymbol } from "expo-symbols";
-import { PlatformColor, View } from "react-native";
+import { router } from "expo-router";
+import { type SFSymbol, SymbolView } from "expo-symbols";
+import { Pressable, ScrollView, Text, View } from "react-native";
+import { withUniwind } from "uniwind";
 
-const primaryLabelColor = PlatformColor("label");
-const secondaryLabelColor = PlatformColor("secondaryLabel");
-const iconBackgroundColor = PlatformColor("secondarySystemFill");
+type AttachmentAction = {
+  label: string;
+  icon: SFSymbol;
+};
 
-const attachmentActions: { label: string; icon: SFSymbol }[] = [
+type ToolAction = AttachmentAction & {
+  description?: string;
+};
+
+const attachmentActions: AttachmentAction[] = [
   { label: "Camera", icon: "camera" },
-  { label: "Photos", icon: "photo.on.rectangle.angled" },
+  { label: "Photos", icon: "photo.on.rectangle" },
   { label: "Files", icon: "paperclip" },
-  { label: "Plugins", icon: "puzzlepiece.extension" },
-  { label: "Think harder", icon: "brain" },
 ];
+
+const toolActions: ToolAction[] = [
+  {
+    label: "Create image",
+    description: "Visualize anything",
+    icon: "paintbrush.pointed",
+  },
+  {
+    label: "Thinking",
+    description: "Think longer for better answers",
+    icon: "lightbulb",
+  },
+  {
+    label: "Deep research",
+    description: "Get a detailed report",
+    icon: "binoculars",
+  },
+  {
+    label: "Web search",
+    description: "Find real-time news and info",
+    icon: "globe",
+  },
+  { label: "Add files", icon: "paperclip" },
+];
+
+const StyledSymbolView = withUniwind(SymbolView, {
+  tintColor: {
+    fromClassName: "tintColorClassName",
+    styleProperty: "color",
+  },
+});
+
+function dismissWithAction(label: string) {
+  console.log(label);
+  router.back();
+}
 
 export default function AttachmentSheet() {
   return (
-    <>
-      <View className="flex-1 px-4 pt-5">
-        <Host matchContents={{ vertical: true }} style={{ width: "100%" }}>
-          <VStack
-            alignment="leading"
-            spacing={16}
-            modifiers={[frame({ maxWidth: Infinity, alignment: "leading" })]}
+    <ScrollView
+      contentContainerClassName="px-7 pt-7"
+      showsVerticalScrollIndicator={false}
+      bounces={false}
+    >
+      <View className="flex-row gap-3">
+        {attachmentActions.map((action) => (
+          <Pressable
+            accessibilityLabel={action.label}
+            accessibilityRole="button"
+            className="h-[84px] flex-1 items-center justify-center gap-2 rounded-[17px] bg-neutral-200 active:opacity-55 dark:bg-neutral-800"
+            key={action.label}
+            onPress={() => dismissWithAction(action.label)}
           >
-            <VStack alignment="leading" spacing={4}>
-              <Text
-                modifiers={[
-                  font({ textStyle: "title2" }),
-                  bold(),
-                  foregroundStyle(primaryLabelColor),
-                ]}
-              >
-                Add to message
-              </Text>
-              <Text
-                modifiers={[
-                  font({ textStyle: "subheadline" }),
-                  foregroundStyle(secondaryLabelColor),
-                ]}
-              >
-                Choose what you want to include.
-              </Text>
-            </VStack>
-
-            <VStack
-              alignment="leading"
-              spacing={2}
-              modifiers={[frame({ maxWidth: Infinity, alignment: "leading" })]}
-            >
-              {attachmentActions.map((action) => (
-                <Button
-                  key={action.label}
-                  onPress={() => {
-                    console.log(action.label);
-                    router.back();
-                  }}
-                  modifiers={[buttonStyle("plain"), accessibilityLabel(action.label)]}
-                >
-                  <HStack
-                    spacing={14}
-                    modifiers={[
-                      padding({ horizontal: 8, vertical: 6 }),
-                      frame({ maxWidth: Infinity, alignment: "leading" }),
-                    ]}
-                  >
-                    <Image
-                      systemName={action.icon}
-                      size={22}
-                      modifiers={[
-                        foregroundStyle(primaryLabelColor),
-                        frame({ width: 44, height: 44 }),
-                        background(iconBackgroundColor),
-                        clipShape("circle"),
-                      ]}
-                    />
-                    <Text
-                      modifiers={[font({ textStyle: "body" }), foregroundStyle(primaryLabelColor)]}
-                    >
-                      {action.label}
-                    </Text>
-                  </HStack>
-                </Button>
-              ))}
-            </VStack>
-          </VStack>
-        </Host>
+            <StyledSymbolView
+              name={action.icon}
+              size={25}
+              tintColorClassName="text-neutral-950 dark:text-neutral-50"
+              weight="medium"
+            />
+            <Text className="font-medium text-[17px] text-neutral-950 leading-[21px] tracking-[-0.2px] dark:text-neutral-50">
+              {action.label}
+            </Text>
+          </Pressable>
+        ))}
       </View>
-    </>
+
+      <View className="mt-[25px] mb-[22px] h-px bg-neutral-200 dark:bg-neutral-800" />
+
+      <View>
+        {toolActions.map((action) => (
+          <Pressable
+            accessibilityLabel={action.label}
+            accessibilityRole="button"
+            className="h-[66px] flex-row items-center active:opacity-55"
+            key={action.label}
+            onPress={() => dismissWithAction(action.label)}
+          >
+            <View className="w-10 items-center justify-center">
+              <StyledSymbolView
+                name={action.icon}
+                size={25}
+                tintColorClassName="text-neutral-950 dark:text-neutral-50"
+                weight="regular"
+              />
+            </View>
+            <View className="flex-1">
+              <Text className="font-semibold text-[17px] text-neutral-950 leading-[21px] tracking-[-0.25px] dark:text-neutral-50">
+                {action.label}
+              </Text>
+              {action.description ? (
+                <Text className="mt-0.5 text-[15px] text-neutral-500 leading-5 tracking-[-0.15px] dark:text-neutral-400">
+                  {action.description}
+                </Text>
+              ) : null}
+            </View>
+          </Pressable>
+        ))}
+      </View>
+    </ScrollView>
   );
 }

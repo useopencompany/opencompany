@@ -3,21 +3,19 @@ import "../global.css";
 import { DarkTheme, DefaultTheme, ThemeProvider } from "expo-router";
 import Drawer from "expo-router/drawer";
 import { View } from "react-native";
-import { useCSSVariable, useUniwind } from "uniwind";
+import { useCSSVariable, useResolveClassNames, useUniwind } from "uniwind";
 import { SCREEN_CORNER_RADIUS } from "@/lib/screen-corner-radius";
 import { Sidebar } from "@/widgets/sidebar";
 
 export function RootNavigator() {
   const { theme } = useUniwind();
-  // Sits behind everything, so it's what shows through the rounded corners of
-  // the screen content once the drawer has slid it aside.
-  const backdrop = theme === "dark" ? "#111111" : "#F7F7F5";
+  const backgroundColor = useCSSVariable("--color-background") as string;
 
   const darkTheme: ReactNavigation.Theme = {
     ...DarkTheme,
     colors: {
       ...DarkTheme.colors,
-      background: useCSSVariable("--color-stone-700") as string,
+      background: backgroundColor,
     },
   };
 
@@ -25,18 +23,19 @@ export function RootNavigator() {
     ...DefaultTheme,
     colors: {
       ...DefaultTheme.colors,
-      background: useCSSVariable("--color-white") as string,
+      background: backgroundColor,
     },
   };
 
   return (
     <ThemeProvider value={theme === "dark" ? darkTheme : lightTheme}>
-      <View style={{ flex: 1, backgroundColor: backdrop }}>
+      {/* Sits between the drawer and content (covers the area around the rounded corners of the scene) */}
+      <View className="flex-1 bg-background-secondary">
         <Drawer
           screenOptions={{
             drawerType: "back",
             overlayColor: "transparent",
-            drawerStyle: { width: 310, backgroundColor: backdrop },
+            drawerStyle: useResolveClassNames("w-xs bg-background-secondary"),
             swipeEdgeWidth: 120,
             headerShown: false,
             sceneStyle: {

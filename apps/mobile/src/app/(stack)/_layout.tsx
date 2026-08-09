@@ -36,7 +36,7 @@ export default function StackLayout() {
           gestureEnabled: true,
           sheetGrabberVisible: true,
           contentStyle: { backgroundColor: "transparent" },
-          sheetAllowedDetents: [0.6, 1],
+          sheetAllowedDetents: [0.65],
         }}
       />
     </Stack>
