@@ -1,2 +1,16 @@
 @import "tailwindcss";
 @import "uniwind";
+
+@layer theme {
+  :root {
+    @variant light {
+      --color-background: #f7f7f5;
+      --color-background-secondary: #f1f1ef;
+    }
+
+    @variant dark {
+      --color-background: #10120f;
+      --color-background-secondary: #f1f1ef;
+    }
+  }
+}
