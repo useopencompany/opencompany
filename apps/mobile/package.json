@@ -5,7 +5,10 @@
   "dependencies": {
     "@expo/ui": "~57.0.9",
     "expo": "~57.0.11",
+    "expo-auth-session": "~57.0.6",
     "expo-constants": "~57.0.9",
+    "expo-crypto": "~57.0.1",
+    "expo-dev-client": "~57.0.10",
     "expo-device": "~57.0.1",
     "expo-font": "~57.0.1",
     "expo-glass-effect": "~57.0.1",
@@ -39,7 +42,8 @@
     "prebuild:ios": "expo prebuild -p ios",
     "lint": "oxlint --fix",
     "typecheck": "tsc --noEmit",
-    "expo:doctor": "bunx expo-doctor@latest"
+    "expo:doctor": "bunx expo-doctor@latest",
+    "env:pull:development": "infisical export --output-file=./.env --env=development"
   },
   "private": true
 }
