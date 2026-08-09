@@ -990,6 +990,16 @@ export function GoatSurface({
     () => recentChats.filter((chat) => !optimisticallyArchivedChatIds.has(chat.id)),
     [optimisticallyArchivedChatIds, recentChats],
   );
+  const paletteChats = useMemo(
+    () =>
+      [
+        ...paletteRecentChats.map((chat) => ({ chat, archived: false })),
+        ...archivedChats.map((chat) => ({ chat, archived: true })),
+      ].toSorted(
+        (a, b) => new Date(b.chat.updatedAt).getTime() - new Date(a.chat.updatedAt).getTime(),
+      ),
+    [archivedChats, paletteRecentChats],
+  );
   const showEngineComposerControls = composerEngine !== null;
 
   useEffect(() => {
@@ -2592,54 +2602,51 @@ export function GoatSurface({
                   </CommandItem>
                 </CommandGroup>
                 <CommandEmpty>No matching chats.</CommandEmpty>
-                {paletteRecentChats.length > 0 ? (
+                {paletteChats.length > 0 ? (
                   <CommandGroup heading="Chats">
-                    {paletteRecentChats.map((chat) => (
+                    {paletteChats.map(({ chat, archived }) => (
                       <CommandItem
                         key={chat.id}
-                        value={`chat ${chat.title} ${chat.id}`}
-                        onSelect={() => jumpToChat(chat)}
+                        value={`chat ${archived ? "archived " : ""}${chat.title} ${chat.id}`}
+                        onSelect={() => (archived ? restoreAndOpenChat(chat) : jumpToChat(chat))}
                         className="gap-3"
                       >
-                        <MessageSquare
-                          size={16}
-                          strokeWidth={2}
-                          className="shrink-0 text-ink-subtle"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-[13px] font-medium text-ink">{chat.title}</p>
-                          <p className="truncate text-[12px] text-ink-subtle">{chat.preview}</p>
-                        </div>
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                ) : null}
-                {archivedChats.length > 0 ? (
-                  <CommandGroup heading="Archived">
-                    {archivedChats.map((chat) => (
-                      <CommandItem
-                        key={chat.id}
-                        value={`archived ${chat.title} ${chat.id}`}
-                        onSelect={() => restoreAndOpenChat(chat)}
-                        className="gap-3"
-                      >
-                        {restoringChatId === chat.id ? (
+                        {archived && restoringChatId === chat.id ? (
                           <LoaderCircle
                             size={16}
                             strokeWidth={2}
                             className="shrink-0 animate-spin text-ink-subtle"
                           />
-                        ) : (
+                        ) : archived ? (
                           <Archive size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+                        ) : (
+                          <MessageSquare
+                            size={16}
+                            strokeWidth={2}
+                            className="shrink-0 text-ink-subtle"
+                          />
                         )}
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-[13px] font-medium text-ink">{chat.title}</p>
-                          <p className="truncate text-[12px] text-ink-subtle">Archived chat</p>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <p className="truncate text-[13px] font-medium text-ink">
+                              {chat.title}
+                            </p>
+                            {archived ? (
+                              <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10px] font-medium leading-4 text-ink-subtle">
+                                Archived
+                              </span>
+                            ) : null}
+                          </div>
+                          {archived ? null : (
+                            <p className="truncate text-[12px] text-ink-subtle">{chat.preview}</p>
+                          )}
                         </div>
-                        <CommandShortcut className="flex items-center gap-1">
-                          <RotateCcw size={12} strokeWidth={2} />
-                          Restore
-                        </CommandShortcut>
+                        {archived ? (
+                          <CommandShortcut className="flex items-center gap-1">
+                            <RotateCcw size={12} strokeWidth={2} />
+                            Restore
+                          </CommandShortcut>
+                        ) : null}
                       </CommandItem>
                     ))}
                   </CommandGroup>

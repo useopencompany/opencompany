@@ -2,70 +2,165 @@
 
 // The wiki surface: a Notion-lite tree of markdown pages with subpages.
 //
-// The server ships every page (bodies included) once; selection, the tree, and
-// backlinks are pure client state, so navigating between pages is instant —
-// the URL updates via history.pushState and the App Router keeps usePathname
-// in sync without a server round-trip. Mutations go through server actions
-// (the same storage layer as the `wiki` agent tool) with optimistic local
-// updates; router.refresh() reconciles in the background.
+// Local-first: the tree, page bodies, and timelines are Electric-synced
+// TanStack DB collections (see lib/wiki-collections.ts). Every mutation is
+// applied optimistically — a rename is visible in the sidebar and in every
+// [[link]] chip on the same keystroke — and persisted through the same server
+// actions/storage layer the `wiki` agent tool uses, with Postgres txids
+// holding optimistic state exactly until the write streams back. The server
+// ships one initial payload for first paint; the live collections take over
+// as soon as the shape syncs. Navigation is pure client state via
+// history.pushState.
 
-import { movedWikiPath, WIKI_KINDS, wikiPageLinkTargets } from "@opencompany/goat-wiki";
+import {
+  WIKI_KINDS,
+  type WikiKind,
+  wikiPageLinkTargets,
+  wikiSlugFromTitle,
+} from "@opencompany/goat-wiki";
+import { debounceStrategy, useLiveQuery, usePacedMutations } from "@tanstack/react-db";
 import {
   BookOpen,
+  Check,
   ChevronDown,
   ChevronRight,
   CornerDownRight,
   History,
+  MoreHorizontal,
   Plus,
   Trash2,
 } from "lucide-react";
-import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
+import {
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import {
-  addWikiTimelineEntryAction,
-  createWikiPageAction,
-  deleteWikiPageAction,
-  getWikiTimelineAction,
-  moveWikiPageAction,
-  saveWikiPageAction,
-  setWikiPageKindAction,
-} from "@/lib/wiki-actions";
+  asWikiPageWriteMutations,
+  type GoatWikiCollections,
+  type GoatWikiPageRow,
+  getGoatWikiCollections,
+  persistWikiPageWrites,
+} from "@/lib/wiki-collections";
 
 export type WikiPageData = {
+  id: string;
   slug: string;
   path: string;
   title: string;
-  kind: string;
+  kind: WikiKind;
   body: string;
-  updatedAt: string;
-  timelineCount: number;
 };
 
 type TreeNode = WikiPageData & { children: TreeNode[] };
 
-const SAVE_DEBOUNCE_MS = 800;
+const SAVE_DEBOUNCE_MS = 500;
 
-export function GoatWikiView({
-  pages: serverPages,
+const subscribeToHydration = () => () => undefined;
+const getClientHydrationSnapshot = () => true;
+const getServerHydrationSnapshot = () => false;
+
+// TanStack DB has no server snapshot for useLiveQuery and Electric collections
+// must never sync server-side, so the live view mounts post-hydration; the
+// server payload paints a read-only frame for the first client render.
+export function GoatWikiView(props: {
+  workspaceId: string;
+  pages: WikiPageData[];
+  initialPath: string | null;
+}) {
+  const hydrated = useSyncExternalStore(
+    subscribeToHydration,
+    getClientHydrationSnapshot,
+    getServerHydrationSnapshot,
+  );
+  if (!hydrated) return <GoatWikiStaticFrame pages={props.pages} initialPath={props.initialPath} />;
+  return <GoatWikiLiveView {...props} />;
+}
+
+function GoatWikiStaticFrame({
+  pages,
   initialPath,
 }: {
   pages: WikiPageData[];
   initialPath: string | null;
 }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const [pages, setPages] = useState(serverPages);
-  const [error, setError] = useState<string | null>(null);
+  const nodes = buildTree(pages);
+  const page = initialPath ? (pages.find((entry) => entry.path === initialPath) ?? null) : null;
+  const noop = () => undefined;
+  return (
+    <div className="flex h-full min-h-0 w-full">
+      <WikiTreeSidebar
+        nodes={nodes}
+        selectedPath={initialPath}
+        onSelect={noop}
+        onCreate={noop}
+        onDelete={noop}
+      />
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+        {page ? (
+          <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-5">
+            <input
+              value={page.title}
+              readOnly
+              placeholder="Untitled"
+              className="mt-3 w-full bg-transparent text-[26px] font-semibold leading-8 text-ink outline-none placeholder:text-ink-subtle/50"
+            />
+            <div className="mt-4 flex-1">
+              <MarkdownGoatBrainEditor content={page.body} onChange={noop} readOnly />
+            </div>
+          </div>
+        ) : (
+          <WikiEmptyState hasPages={pages.length > 0} onCreate={noop} />
+        )}
+      </div>
+    </div>
+  );
+}
 
-  // Server data wins whenever a fresh RSC payload arrives (router.refresh()
-  // after mutations, or a hard navigation). Render-time adjustment, per the
-  // React "derived state from props" pattern — no effect, no extra paint.
-  const [prevServerPages, setPrevServerPages] = useState(serverPages);
-  if (prevServerPages !== serverPages) {
-    setPrevServerPages(serverPages);
-    setPages(serverPages);
-  }
+function GoatWikiLiveView({
+  workspaceId,
+  pages: initialPages,
+  initialPath,
+}: {
+  workspaceId: string;
+  pages: WikiPageData[];
+  initialPath: string | null;
+}) {
+  const pathname = usePathname();
+  const [error, setError] = useState<string | null>(null);
+  const collections = useMemo(() => getGoatWikiCollections(workspaceId), [workspaceId]);
+
+  const { data: pageRows, isLoading: pagesLoading } = useLiveQuery(
+    (q) => q.from({ page: collections.pages }),
+    [collections],
+  );
+  const { data: timelineRows } = useLiveQuery(
+    (q) => q.from({ entry: collections.timelineEntries }),
+    [collections],
+  );
+
+  // Until the shape has synced once, render the server payload; mutations are
+  // deferred because they need the collection rows to exist.
+  const syncReady = !pagesLoading;
+  const pages: WikiPageData[] = useMemo(() => {
+    if (!syncReady) return initialPages;
+    return ((pageRows ?? []) as GoatWikiPageRow[]).map(pageRowToData);
+  }, [initialPages, pageRows, syncReady]);
+
+  const timelineCountByPageId = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const row of timelineRows ?? []) {
+      counts.set(row.page_id, (counts.get(row.page_id) ?? 0) + 1);
+    }
+    return counts;
+  }, [timelineRows]);
 
   const selectedPath = useMemo(() => {
     const fromUrl = pathname.replace(/^\/wiki\/?/, "");
@@ -79,6 +174,10 @@ export function GoatWikiView({
   const nodes = useMemo(() => buildTree(pages), [pages]);
   const wikiLinks = useMemo(
     () => Object.fromEntries(pages.map((page) => [page.slug, `/wiki/${page.path}`])),
+    [pages],
+  );
+  const pageTitles = useMemo(
+    () => Object.fromEntries(pages.map((page) => [page.slug, page.title || "Untitled"])),
     [pages],
   );
   const backlinksBySlug = useMemo(() => {
@@ -101,29 +200,99 @@ export function GoatWikiView({
     window.setTimeout(() => setError(null), 6_000);
   }, []);
 
+  const trackPersistence = useCallback(
+    (tx: { isPersisted: { promise: Promise<unknown> } }) => {
+      tx.isPersisted.promise.catch((cause: unknown) =>
+        surfaceError(cause instanceof Error ? cause.message : undefined),
+      );
+    },
+    [surfaceError],
+  );
+
+  // Pages created this session whose title the editor should focus, so a new
+  // page lands ready to name — the Notion flow.
+  const focusTitlePageIdRef = useRef<string | null>(null);
+
   const createPage = useCallback(
-    async (parentPath: string | null, title: string) => {
-      const result = await createWikiPageAction({ parentPath, title });
-      if (!result.ok) {
-        surfaceError(result.error);
+    (parentPath: string | null, title: string) => {
+      if (!syncReady) {
+        surfaceError("The wiki is still syncing — try again in a moment.");
         return null;
       }
-      setPages((current) => [
-        ...current,
-        {
-          slug: result.slug,
-          path: result.path,
-          title: result.title,
+      const slug = availableWikiSlug(title, pages);
+      if (!slug) {
+        surfaceError(`Cannot derive a page name from "${title}".`);
+        return null;
+      }
+      const id = crypto.randomUUID();
+      const path = parentPath ? `${parentPath}/${slug}` : slug;
+      const now = new Date().toISOString();
+      trackPersistence(
+        collections.pages.insert({
+          id,
+          workspace_id: workspaceId,
+          slug,
+          path,
+          title,
           kind: "other",
-          body: "",
-          updatedAt: new Date().toISOString(),
-          timelineCount: 0,
-        },
-      ]);
-      router.refresh();
-      return result;
+          content: "",
+          content_hash: "",
+          size_bytes: 0,
+          format: "markdown",
+          mime_type: null,
+          original_file_name: null,
+          asset_storage_key: null,
+          asset_content_hash: null,
+          asset_size_bytes: null,
+          created_by_workos_id: null,
+          updated_by_workos_id: null,
+          created_at: now,
+          updated_at: now,
+        }),
+      );
+      return { id, slug, path, title };
     },
-    [router, surfaceError],
+    [collections, pages, surfaceError, syncReady, trackPersistence, workspaceId],
+  );
+
+  // New pages start with an empty name ("Untitled" placeholder) and open with
+  // the title focused, ready to type — the Notion flow.
+  const openCreatedPage = useCallback(
+    (created: { id: string; path: string }) => {
+      focusTitlePageIdRef.current = created.id;
+      navigate(created.path);
+    },
+    [navigate],
+  );
+
+  const createAndOpenPage = useCallback(
+    (parentPath: string | null) => {
+      const created = createPage(parentPath, "");
+      if (created) openCreatedPage(created);
+    },
+    [createPage, openCreatedPage],
+  );
+
+  const deletePage = useCallback(
+    (target: WikiPageData) => {
+      if (!syncReady) {
+        surfaceError("The wiki is still syncing — try again in a moment.");
+        return;
+      }
+      const doomed = pages.filter(
+        (entry) => entry.path === target.path || entry.path.startsWith(`${target.path}/`),
+      );
+      const message =
+        doomed.length > 1
+          ? `Delete "${target.title || target.slug}" and all its subpages?`
+          : `Delete "${target.title || target.slug}"?`;
+      if (!window.confirm(message)) return;
+      trackPersistence(collections.pages.delete(doomed.map((entry) => entry.id)));
+      if (selectedPath === target.path || selectedPath?.startsWith(`${target.path}/`)) {
+        navigate(null);
+      }
+    },
+    [collections, navigate, pages, selectedPath, surfaceError, syncReady, trackPersistence],
   );
 
   return (
@@ -132,10 +301,8 @@ export function GoatWikiView({
         nodes={nodes}
         selectedPath={selectedPath}
         onSelect={navigate}
-        onCreate={async (title) => {
-          const created = await createPage(null, title);
-          if (created) navigate(created.path);
-        }}
+        onCreate={(parentPath) => createAndOpenPage(parentPath)}
+        onDelete={(node) => deletePage(node)}
       />
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
         {error ? (
@@ -145,39 +312,24 @@ export function GoatWikiView({
         ) : null}
         {page ? (
           <WikiPageEditor
-            key={page.slug}
+            key={page.id}
             page={page}
             pages={pages}
+            collections={collections}
+            editable={syncReady}
             wikiLinks={wikiLinks}
+            pageTitles={pageTitles}
             backlinks={backlinksBySlug.get(page.slug) ?? []}
+            timelineCount={timelineCountByPageId.get(page.id) ?? 0}
+            focusTitlePageIdRef={focusTitlePageIdRef}
             onError={surfaceError}
             onNavigate={navigate}
-            onLocalUpdate={(slug, patch) =>
-              setPages((current) =>
-                current.map((entry) => (entry.slug === slug ? { ...entry, ...patch } : entry)),
-              )
-            }
-            onMove={(slug, fromPath, toPath) =>
-              setPages((current) =>
-                current.map((entry) => ({
-                  ...entry,
-                  path: movedWikiPath(entry.path, fromPath, toPath),
-                })),
-              )
-            }
-            onDelete={(deletedPaths) =>
-              setPages((current) => current.filter((entry) => !deletedPaths.includes(entry.path)))
-            }
-            onCreateSubpage={(title) => createPage(page.path, title)}
+            onDelete={() => deletePage(page)}
+            onCreateSubpage={() => createPage(page.path, "")}
+            onOpenCreatedSubpage={openCreatedPage}
           />
         ) : (
-          <WikiEmptyState
-            hasPages={pages.length > 0}
-            onCreate={async (title) => {
-              const created = await createPage(null, title);
-              if (created) navigate(created.path);
-            }}
-          />
+          <WikiEmptyState hasPages={pages.length > 0} onCreate={() => createAndOpenPage(null)} />
         )}
       </div>
     </div>
@@ -186,19 +338,29 @@ export function GoatWikiView({
 
 // --- sidebar ----------------------------------------------------------------
 
+type WikiContextMenuState = {
+  x: number;
+  y: number;
+  /** The right-clicked page, or null for the sidebar background. */
+  node: WikiPageData | null;
+};
+
 function WikiTreeSidebar({
   nodes,
   selectedPath,
   onSelect,
   onCreate,
+  onDelete,
 }: {
   nodes: TreeNode[];
   selectedPath: string | null;
   onSelect: (path: string) => void;
-  onCreate: (title: string) => Promise<void>;
+  onCreate: (parentPath: string | null) => void;
+  onDelete: (node: TreeNode) => void;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [creating, setCreating] = useState(false);
+  const [contextMenu, setContextMenu] = useState<WikiContextMenuState | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
   const toggle = (path: string) => {
     setCollapsed((current) => {
@@ -207,6 +369,36 @@ function WikiTreeSidebar({
       else next.add(path);
       return next;
     });
+  };
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const onPointerDown = (event: MouseEvent) => {
+      if (contextMenuRef.current?.contains(event.target as Node)) return;
+      close();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("scroll", close, true);
+    window.addEventListener("blur", close);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("scroll", close, true);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("resize", close);
+    };
+  }, [contextMenu]);
+
+  const openContextMenu = (event: React.MouseEvent, node: TreeNode | null) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({ x: event.clientX, y: event.clientY, node });
   };
 
   return (
@@ -218,36 +410,87 @@ function WikiTreeSidebar({
         <button
           type="button"
           title="New page"
-          onClick={() => setCreating(true)}
+          onClick={() => onCreate(null)}
           className="rounded p-1 text-ink-subtle hover:bg-surface-sunken hover:text-ink"
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        {creating ? (
-          <NewPageInput
-            onDone={async (title) => {
-              setCreating(false);
-              if (title) await onCreate(title);
-            }}
-          />
-        ) : null}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: right-click target only; creation is reachable via the header button */}
+      <div
+        className="min-h-0 flex-1 overflow-y-auto px-2 pb-3"
+        onContextMenu={(event) => openContextMenu(event, null)}
+      >
         {nodes.map((node) => (
           <WikiTreeRow
-            key={node.path}
+            key={node.id}
             node={node}
             depth={0}
             selectedPath={selectedPath}
             collapsed={collapsed}
             onToggle={toggle}
             onSelect={onSelect}
+            onContextMenu={openContextMenu}
           />
         ))}
-        {nodes.length === 0 && !creating ? (
+        {nodes.length === 0 ? (
           <p className="px-2 pt-2 text-[12.5px] leading-5 text-ink-subtle">No pages yet.</p>
         ) : null}
       </div>
+      {contextMenu ? (
+        <div
+          ref={contextMenuRef}
+          role="menu"
+          aria-label="Wiki page actions"
+          className="fixed z-[90] min-w-[180px] overflow-hidden rounded-md border border-border-strong bg-surface-raised py-1 text-[12.5px] text-ink shadow-[0_10px_30px_rgba(0,0,0,0.14),0_2px_8px_rgba(0,0,0,0.08)]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          {contextMenu.node ? (
+            <>
+              <WikiMenuItem
+                autoFocus
+                icon={<CornerDownRight size={14} strokeWidth={1.8} />}
+                label="New sub-page"
+                onClick={() => {
+                  const parentPath = contextMenu.node?.path ?? null;
+                  setContextMenu(null);
+                  onCreate(parentPath);
+                }}
+              />
+              <WikiMenuItem
+                icon={<Plus size={14} strokeWidth={1.8} />}
+                label="New page"
+                onClick={() => {
+                  setContextMenu(null);
+                  onCreate(null);
+                }}
+              />
+              <MenuDivider />
+              <WikiMenuItem
+                icon={<Trash2 size={14} strokeWidth={1.8} />}
+                label="Delete"
+                danger
+                onClick={() => {
+                  const node = contextMenu.node;
+                  setContextMenu(null);
+                  if (node) onDelete(node as TreeNode);
+                }}
+              />
+            </>
+          ) : (
+            <WikiMenuItem
+              autoFocus
+              icon={<Plus size={14} strokeWidth={1.8} />}
+              label="New page"
+              onClick={() => {
+                setContextMenu(null);
+                onCreate(null);
+              }}
+            />
+          )}
+        </div>
+      ) : null}
     </aside>
   );
 }
@@ -259,6 +502,7 @@ function WikiTreeRow({
   collapsed,
   onToggle,
   onSelect,
+  onContextMenu,
 }: {
   node: TreeNode;
   depth: number;
@@ -266,12 +510,14 @@ function WikiTreeRow({
   collapsed: Set<string>;
   onToggle: (path: string) => void;
   onSelect: (path: string) => void;
+  onContextMenu: (event: React.MouseEvent, node: TreeNode) => void;
 }) {
   const isCollapsed = collapsed.has(node.path);
   const isSelected = selectedPath === node.path;
 
   return (
     <div>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: right-click affordance on the row container */}
       <div
         className={`group flex items-center gap-1 rounded-md py-1 pr-1 text-[13px] leading-5 ${
           isSelected
@@ -279,6 +525,7 @@ function WikiTreeRow({
             : "text-ink-muted hover:bg-surface-sunken/60 hover:text-ink"
         }`}
         style={{ paddingLeft: `${depth * 14 + 4}px` }}
+        onContextMenu={(event) => onContextMenu(event, node)}
       >
         {node.children.length > 0 ? (
           <button
@@ -302,53 +549,24 @@ function WikiTreeRow({
           className="min-w-0 flex-1 truncate text-left"
           title={node.path}
         >
-          {node.title || node.slug}
+          {node.title || "Untitled"}
         </button>
       </div>
       {!isCollapsed
         ? node.children.map((child) => (
             <WikiTreeRow
-              key={child.path}
+              key={child.id}
               node={child}
               depth={depth + 1}
               selectedPath={selectedPath}
               collapsed={collapsed}
               onToggle={onToggle}
               onSelect={onSelect}
+              onContextMenu={onContextMenu}
             />
           ))
         : null}
     </div>
-  );
-}
-
-function NewPageInput({ onDone }: { onDone: (title: string | null) => Promise<void> | void }) {
-  const [title, setTitle] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    if (busy) return;
-    const trimmed = title.trim();
-    if (!trimmed) return void onDone(null);
-    setBusy(true);
-    await onDone(trimmed);
-    setBusy(false);
-  };
-
-  return (
-    <input
-      autoFocus
-      value={title}
-      disabled={busy}
-      onChange={(event) => setTitle(event.target.value)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") void submit();
-        if (event.key === "Escape") void onDone(null);
-      }}
-      onBlur={() => void submit()}
-      placeholder="Page title…"
-      className="mb-1 w-full rounded-md border border-edge bg-surface px-2 py-1 text-[13px] text-ink outline-none placeholder:text-ink-subtle"
-    />
   );
 }
 
@@ -357,81 +575,134 @@ function NewPageInput({ onDone }: { onDone: (title: string | null) => Promise<vo
 function WikiPageEditor({
   page,
   pages,
+  collections,
+  editable,
   wikiLinks,
+  pageTitles,
   backlinks,
+  timelineCount,
+  focusTitlePageIdRef,
   onError,
   onNavigate,
-  onLocalUpdate,
-  onMove,
   onDelete,
   onCreateSubpage,
+  onOpenCreatedSubpage,
 }: {
   page: WikiPageData;
   pages: WikiPageData[];
+  collections: GoatWikiCollections;
+  editable: boolean;
   wikiLinks: Record<string, string>;
+  pageTitles: Record<string, string>;
   backlinks: Array<{ path: string; title: string }>;
+  timelineCount: number;
+  focusTitlePageIdRef: RefObject<string | null>;
   onError: (message: string | undefined) => void;
   onNavigate: (path: string | null) => void;
-  onLocalUpdate: (slug: string, patch: Partial<WikiPageData>) => void;
-  onMove: (slug: string, fromPath: string, toPath: string) => void;
-  onDelete: (deletedPaths: string[]) => void;
-  onCreateSubpage: (title: string) => Promise<{ slug: string; title: string; path: string } | null>;
+  onDelete: () => void;
+  onCreateSubpage: () => { id: string; slug: string; path: string; title: string } | null;
+  onOpenCreatedSubpage: (created: { id: string; path: string }) => void;
 }) {
-  const router = useRouter();
-  const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving">("saved");
+  const [saveState, setSaveState] = useState<"saved" | "dirty">("saved");
   const [showTimeline, setShowTimeline] = useState(false);
-  const [name, setName] = useState(page.title);
-  const latestBody = useRef(page.body);
-  const latestName = useRef(page.title);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [titleFocused, setTitleFocused] = useState(false);
+  const pendingSaves = useRef(0);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
 
-  const flush = useCallback(async () => {
-    if (saveTimer.current) {
-      clearTimeout(saveTimer.current);
-      saveTimer.current = null;
-    }
-    setSaveState("saving");
-    const result = await saveWikiPageAction({
-      path: page.path,
-      body: latestBody.current,
-      title: latestName.current,
-    });
-    if (result.ok) {
-      setSaveState("saved");
-      onLocalUpdate(page.slug, { body: latestBody.current, title: result.title });
-    } else {
+  // The focused input owns its text (no cursor fights with the store); the
+  // optimistic collection update on each keystroke keeps the sidebar and every
+  // [[link]] chip in sync on the same keystroke. When the input is not
+  // focused, external edits (agents, other tabs) flow back in.
+  const [titleDraft, setTitleDraft] = useState(page.title);
+  const [prevSyncedTitle, setPrevSyncedTitle] = useState(page.title);
+  if (page.title !== prevSyncedTitle) {
+    setPrevSyncedTitle(page.title);
+    if (!titleFocused) setTitleDraft(page.title);
+  }
+
+  const savePage = usePacedMutations<{ title?: string; content?: string }>({
+    onMutate: (patch) => {
+      collections.pages.update(page.id, (draft) => {
+        if (patch.title !== undefined) draft.title = patch.title;
+        if (patch.content !== undefined) draft.content = patch.content;
+      });
+    },
+    mutationFn: async ({ transaction }) => {
+      // A row can vanish between the keystroke and the debounced flush (page
+      // deleted); saving it would silently re-create the page.
+      const mutations = asWikiPageWriteMutations(transaction.mutations).filter(
+        (mutation) => collections.pages.get(mutation.original.id) !== undefined,
+      );
+      const txids = await persistWikiPageWrites(mutations);
+      // The write is durable once the action returns; waiting for the txids to
+      // stream back only holds optimistic state so nothing flickers. A missed
+      // txid (e.g. Electric briefly unreachable) must not fail the save.
+      await Promise.all(
+        txids.map((txid) => collections.pages.utils.awaitTxId(txid).catch(() => undefined)),
+      );
+    },
+    strategy: debounceStrategy({ wait: SAVE_DEBOUNCE_MS }),
+  });
+
+  const queueSave = useCallback(
+    (patch: { title?: string; content?: string }) => {
       setSaveState("dirty");
-      onError(result.error);
-    }
-  }, [page.slug, page.path, onLocalUpdate, onError]);
-
-  const queueSave = useCallback(() => {
-    setSaveState("dirty");
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => void flush(), SAVE_DEBOUNCE_MS);
-  }, [flush]);
-
-  // Flush pending edits when the tab hides or the page unmounts.
-  useEffect(() => {
-    const onHide = () => {
-      if (saveTimer.current) void flush();
-    };
-    window.addEventListener("visibilitychange", onHide);
-    return () => {
-      window.removeEventListener("visibilitychange", onHide);
-      onHide();
-    };
-  }, [flush]);
-
-  const parentOptions = useMemo(
-    () => pages.filter((item) => item.path !== page.path && !item.path.startsWith(`${page.path}/`)),
-    [pages, page.path],
+      pendingSaves.current += 1;
+      savePage(patch).isPersisted.promise.then(
+        () => {
+          pendingSaves.current -= 1;
+          if (pendingSaves.current === 0) setSaveState("saved");
+        },
+        (cause: unknown) => {
+          pendingSaves.current -= 1;
+          onError(cause instanceof Error ? cause.message : undefined);
+        },
+      );
+    },
+    [onError, savePage],
   );
+
+  // A page created this session opens with its empty name focused, ready to
+  // type — like Notion.
+  useEffect(() => {
+    if (focusTitlePageIdRef.current !== page.id) return;
+    focusTitlePageIdRef.current = null;
+    titleInputRef.current?.focus();
+  }, [focusTitlePageIdRef, page.id]);
+
+  const setKind = useCallback(
+    (kind: WikiKind) => {
+      if (!editable) return;
+      collections.pages
+        .update(page.id, (draft) => {
+          draft.kind = kind;
+        })
+        .isPersisted.promise.catch((cause: unknown) =>
+          onError(cause instanceof Error ? cause.message : undefined),
+        );
+    },
+    [collections, editable, onError, page.id],
+  );
+
+  // The editor captures its slash-command handlers once at mount; route them
+  // through refs so `/page` always sees the current tree.
+  const createSubpageRef = useRef(onCreateSubpage);
+  const openCreatedSubpageRef = useRef(onOpenCreatedSubpage);
+  useEffect(() => {
+    createSubpageRef.current = onCreateSubpage;
+    openCreatedSubpageRef.current = onOpenCreatedSubpage;
+  }, [onCreateSubpage, onOpenCreatedSubpage]);
+  const [slashHandlers] = useState(() => ({
+    createPage: () => createSubpageRef.current(),
+    onPageCreated: (created: { id: string; path: string }) =>
+      openCreatedSubpageRef.current(created),
+  }));
+
   const segments = page.path.split("/");
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-5">
-      {/* Breadcrumbs + status */}
+      {/* Breadcrumbs + status + page menu */}
       <div className="flex items-center justify-between gap-3">
         <nav className="flex min-w-0 items-center gap-1 text-[12.5px] text-ink-subtle">
           <BookOpen className="h-3.5 w-3.5 shrink-0" />
@@ -439,7 +710,7 @@ function WikiPageEditor({
             const ancestorPath = segments.slice(0, index + 1).join("/");
             const isLast = index === segments.length - 1;
             const ancestor = pages.find((entry) => entry.path === ancestorPath);
-            const label = ancestor?.title || segment;
+            const label = ancestor ? ancestor.title || "Untitled" : segment;
             return (
               <span key={ancestorPath} className="flex min-w-0 items-center gap-1">
                 <span className="text-ink-subtle/60">/</span>
@@ -458,143 +729,59 @@ function WikiPageEditor({
             );
           })}
         </nav>
-        <span className="shrink-0 text-[11.5px] text-ink-subtle">
-          {saveState === "saved" ? "Saved" : saveState === "saving" ? "Saving…" : "Unsaved"}
-        </span>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span className="text-[11.5px] text-ink-subtle">
+            {saveState === "saved" ? "Saved" : "Saving…"}
+          </span>
+          <WikiPageMenu
+            page={page}
+            timelineCount={timelineCount}
+            showTimeline={showTimeline}
+            onSetKind={setKind}
+            onToggleTimeline={() => setShowTimeline((current) => !current)}
+            onDelete={onDelete}
+          />
+        </div>
       </div>
 
       {/* Name (Notion-style page title, separate from the markdown body) */}
       <input
-        value={name}
+        ref={titleInputRef}
+        value={titleDraft}
+        readOnly={!editable}
+        onFocus={() => setTitleFocused(true)}
+        onBlur={() => setTitleFocused(false)}
         onChange={(event) => {
-          setName(event.target.value);
-          latestName.current = event.target.value;
-          onLocalUpdate(page.slug, { title: event.target.value });
-          queueSave();
+          setTitleDraft(event.target.value);
+          queueSave({ title: event.target.value });
         }}
         placeholder="Untitled"
         className="mt-3 w-full bg-transparent text-[26px] font-semibold leading-8 text-ink outline-none placeholder:text-ink-subtle/50"
       />
 
-      {/* Page controls */}
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px]">
-        <select
-          value={page.kind}
-          onChange={(event) => {
-            onLocalUpdate(page.slug, { kind: event.target.value });
-            void setWikiPageKindAction({ slug: page.slug, kind: event.target.value }).then(
-              (result) => {
-                if (!result.ok) onError(result.error);
-              },
-            );
-          }}
-          className="rounded-md border border-edge bg-surface px-1.5 py-0.5 text-ink-muted"
-          title="Page kind"
-        >
-          {WIKI_KINDS.map((kind) => (
-            <option key={kind} value={kind}>
-              {kind}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onClick={async () => {
-            const created = await onCreateSubpage("Untitled");
-            if (created) onNavigate(created.path);
-          }}
-          className="flex items-center gap-1 rounded-md border border-edge px-2 py-0.5 text-ink-muted hover:bg-surface-sunken hover:text-ink"
-        >
-          <CornerDownRight className="h-3 w-3" /> Subpage
-        </button>
-        <select
-          value=""
-          onChange={async (event) => {
-            const to = event.target.value;
-            if (!to) return;
-            // A pending debounced save targets the current path; land it
-            // before the path changes underneath it.
-            if (saveTimer.current) await flush();
-            const fromPath = page.path;
-            void moveWikiPageAction({
-              slug: page.slug,
-              newParentPath: to === "/" ? null : to,
-            }).then((result) => {
-              if (result.ok) {
-                onMove(page.slug, fromPath, result.path);
-                onNavigate(result.path);
-              } else onError(result.error);
-            });
-          }}
-          className="rounded-md border border-edge bg-surface px-1.5 py-0.5 text-ink-muted"
-          title="Move page"
-        >
-          <option value="">Move to…</option>
-          {segments.length > 1 ? <option value="/">/ (root)</option> : null}
-          {parentOptions.map((item) => (
-            <option key={item.path} value={item.path}>
-              /{item.path}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onClick={() => setShowTimeline((current) => !current)}
-          className={`flex items-center gap-1 rounded-md border border-edge px-2 py-0.5 hover:bg-surface-sunken hover:text-ink ${showTimeline ? "text-ink" : "text-ink-muted"}`}
-        >
-          <History className="h-3 w-3" /> Timeline
-          {page.timelineCount > 0 ? ` (${page.timelineCount})` : ""}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            const hasChildren = pages.some((item) => item.path.startsWith(`${page.path}/`));
-            const message = hasChildren
-              ? `Delete "${page.title || page.slug}" and all its subpages?`
-              : `Delete "${page.title || page.slug}"?`;
-            if (!window.confirm(message)) return;
-            void deleteWikiPageAction({ slug: page.slug, recursive: true }).then((result) => {
-              if (result.ok) {
-                onDelete(result.deletedPaths);
-                onNavigate(null);
-                router.refresh();
-              } else onError(result.error);
-            });
-          }}
-          className="ml-auto flex items-center gap-1 rounded-md px-2 py-0.5 text-ink-subtle hover:bg-red-50 hover:text-red-600"
-        >
-          <Trash2 className="h-3 w-3" /> Delete
-        </button>
-      </div>
-
       {/* Body */}
       <div className="mt-4 flex-1">
         <MarkdownGoatBrainEditor
           content={page.body}
-          onChange={(content) => {
-            latestBody.current = content;
-            queueSave();
-          }}
+          readOnly={!editable}
+          onChange={(content) => queueSave({ content })}
           brainLinks={wikiLinks}
+          pageTitles={pageTitles}
           onNavigateInternal={(href) => {
             onNavigate(href.replace(/^\/wiki\//, ""));
             return true;
           }}
           placeholder="Write, or type / for commands…"
-          wikiSlashCommands={{
-            createPage: async () => {
-              const created = await onCreateSubpage("Untitled");
-              return created ? { slug: created.slug, title: created.title } : null;
-            },
-          }}
+          wikiSlashCommands={slashHandlers}
         />
       </div>
 
       {showTimeline ? (
         <WikiTimelinePanel
           page={page}
+          collections={collections}
+          editable={editable}
           onError={onError}
-          onAdded={() => onLocalUpdate(page.slug, { timelineCount: page.timelineCount + 1 })}
         />
       ) : null}
 
@@ -621,49 +808,187 @@ function WikiPageEditor({
   );
 }
 
+// --- page menu (⋯) ----------------------------------------------------------
+
+function WikiPageMenu({
+  page,
+  timelineCount,
+  showTimeline,
+  onSetKind,
+  onToggleTimeline,
+  onDelete,
+}: {
+  page: WikiPageData;
+  timelineCount: number;
+  showTimeline: boolean;
+  onSetKind: (kind: WikiKind) => void;
+  onToggleTimeline: () => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={menuRef} className="relative">
+      <button
+        type="button"
+        title="Page options"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className={`rounded-md p-1 hover:bg-surface-sunken hover:text-ink ${open ? "bg-surface-sunken text-ink" : "text-ink-subtle"}`}
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          aria-label="Page options"
+          className="absolute right-0 top-full z-[90] mt-1 min-w-[190px] overflow-hidden rounded-md border border-border-strong bg-surface-raised py-1 text-[12.5px] text-ink shadow-[0_10px_30px_rgba(0,0,0,0.14),0_2px_8px_rgba(0,0,0,0.08)]"
+        >
+          <p className="px-2.5 pt-1 pb-0.5 text-[11px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+            Kind
+          </p>
+          {WIKI_KINDS.map((kind) => (
+            <WikiMenuItem
+              key={kind}
+              icon={
+                page.kind === kind ? (
+                  <Check size={14} strokeWidth={1.8} />
+                ) : (
+                  <span className="inline-block w-3.5" />
+                )
+              }
+              label={kind}
+              onClick={() => {
+                setOpen(false);
+                if (kind !== page.kind) onSetKind(kind);
+              }}
+            />
+          ))}
+          <MenuDivider />
+          <WikiMenuItem
+            icon={<History size={14} strokeWidth={1.8} />}
+            label={`${showTimeline ? "Hide timeline" : "Timeline"}${timelineCount > 0 ? ` (${timelineCount})` : ""}`}
+            onClick={() => {
+              setOpen(false);
+              onToggleTimeline();
+            }}
+          />
+          <MenuDivider />
+          <WikiMenuItem
+            icon={<Trash2 size={14} strokeWidth={1.8} />}
+            label="Delete page"
+            danger
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// --- shared menu bits -------------------------------------------------------
+
+function WikiMenuItem({
+  icon,
+  label,
+  onClick,
+  danger = false,
+  autoFocus = false,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+  autoFocus?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      autoFocus={autoFocus}
+      onClick={onClick}
+      className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left focus:outline-none ${
+        danger
+          ? "text-red-600 hover:bg-red-50 focus-visible:bg-red-50"
+          : "text-ink-muted hover:bg-surface-sunken hover:text-ink focus-visible:bg-surface-sunken"
+      }`}
+    >
+      <span className="shrink-0 text-ink-subtle">{icon}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </button>
+  );
+}
+
+function MenuDivider() {
+  return <div className="my-1 h-px bg-edge" />;
+}
+
 // --- timeline ---------------------------------------------------------------
 
 function WikiTimelinePanel({
   page,
+  collections,
+  editable,
   onError,
-  onAdded,
 }: {
   page: WikiPageData;
+  collections: GoatWikiCollections;
+  editable: boolean;
   onError: (message: string | undefined) => void;
-  onAdded: () => void;
 }) {
-  const [entries, setEntries] = useState<Array<{ id: string; at: string; text: string }> | null>(
-    null,
-  );
   const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
+  const { data: entryRows } = useLiveQuery(
+    (q) => q.from({ entry: collections.timelineEntries }),
+    [collections],
+  );
+  const entries = useMemo(
+    () =>
+      (entryRows ?? [])
+        .filter((entry) => entry.page_id === page.id)
+        .toSorted((a, b) => b.at.localeCompare(a.at)),
+    [entryRows, page.id],
+  );
 
-  useEffect(() => {
-    let cancelled = false;
-    void getWikiTimelineAction({ slug: page.slug }).then((result) => {
-      if (cancelled) return;
-      if (result.ok) setEntries(result.entries);
-      else onError(result.error);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [page.slug, onError]);
-
-  const submit = async () => {
+  const submit = () => {
     const trimmed = text.trim();
-    if (!trimmed || busy) return;
-    setBusy(true);
-    const result = await addWikiTimelineEntryAction({ slug: page.slug, text: trimmed });
-    setBusy(false);
-    if (result.ok) {
-      setText("");
-      setEntries((current) => [
-        { id: `local-${result.at}`, at: result.at, text: trimmed },
-        ...(current ?? []),
-      ]);
-      onAdded();
-    } else onError(result.error);
+    if (!trimmed || !editable) return;
+    setText("");
+    const now = new Date().toISOString();
+    collections.timelineEntries
+      .insert({
+        id: crypto.randomUUID(),
+        workspace_id: collections.pages.get(page.id)?.workspace_id ?? "",
+        page_id: page.id,
+        at: now,
+        text: trimmed,
+        created_by_workos_id: null,
+        created_at: now,
+      })
+      .isPersisted.promise.catch((cause: unknown) =>
+        onError(cause instanceof Error ? cause.message : undefined),
+      );
   };
 
   return (
@@ -674,26 +999,24 @@ function WikiTimelinePanel({
       <div className="mt-2 flex gap-2">
         <input
           value={text}
-          disabled={busy}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter") void submit();
+            if (event.key === "Enter") submit();
           }}
           placeholder="Add an entry — what happened?"
           className="flex-1 rounded-md border border-edge bg-surface px-2 py-1 text-[13px] text-ink outline-none placeholder:text-ink-subtle"
         />
       </div>
       <ul className="mt-2 flex flex-col gap-1.5">
-        {(entries ?? []).map((entry) => (
+        {entries.map((entry) => (
           <li key={entry.id} className="flex gap-2 text-[13px] leading-5">
             <span className="shrink-0 tabular-nums text-ink-subtle">{entry.at.slice(0, 10)}</span>
             <span className="min-w-0 text-ink-muted">{entry.text}</span>
           </li>
         ))}
-        {entries !== null && entries.length === 0 ? (
+        {entries.length === 0 ? (
           <li className="text-[12.5px] text-ink-subtle">No entries yet.</li>
         ) : null}
-        {entries === null ? <li className="text-[12.5px] text-ink-subtle">Loading…</li> : null}
       </ul>
     </div>
   );
@@ -701,15 +1024,7 @@ function WikiTimelinePanel({
 
 // --- empty state ------------------------------------------------------------
 
-function WikiEmptyState({
-  hasPages,
-  onCreate,
-}: {
-  hasPages: boolean;
-  onCreate: (title: string) => Promise<void>;
-}) {
-  const [creating, setCreating] = useState(false);
-
+function WikiEmptyState({ hasPages, onCreate }: { hasPages: boolean; onCreate: () => void }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
       <BookOpen className="h-8 w-8 text-ink-subtle" />
@@ -723,29 +1038,41 @@ function WikiEmptyState({
             : "Markdown pages with subpages, for you and your agents. Agents browse it like a filesystem; you get a lightweight Notion."}
         </p>
       </div>
-      {creating ? (
-        <div className="w-56">
-          <NewPageInput
-            onDone={async (title) => {
-              setCreating(false);
-              if (title) await onCreate(title);
-            }}
-          />
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setCreating(true)}
-          className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-[13px] text-ink-muted hover:bg-surface-sunken hover:text-ink"
-        >
-          <Plus className="h-3.5 w-3.5" /> New page
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={onCreate}
+        className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-[13px] text-ink-muted hover:bg-surface-sunken hover:text-ink"
+      >
+        <Plus className="h-3.5 w-3.5" /> New page
+      </button>
     </div>
   );
 }
 
 // --- helpers ----------------------------------------------------------------
+
+function pageRowToData(row: GoatWikiPageRow): WikiPageData {
+  return {
+    id: row.id,
+    slug: row.slug,
+    path: row.path,
+    title: row.title,
+    kind: row.kind,
+    body: row.content,
+  };
+}
+
+/** Workspace-unique slug for a new page title; null when nothing usable remains. */
+function availableWikiSlug(title: string, pages: WikiPageData[]): string | null {
+  const base = wikiSlugFromTitle(title.trim() || "Untitled") ?? "untitled";
+  const taken = new Set(pages.map((page) => page.slug));
+  if (!taken.has(base)) return base;
+  for (let suffix = 2; suffix < 1_000; suffix += 1) {
+    const candidate = `${base.slice(0, 76)}-${suffix}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return null;
+}
 
 function buildTree(items: WikiPageData[]): TreeNode[] {
   const nodesByPath = new Map<string, TreeNode>();

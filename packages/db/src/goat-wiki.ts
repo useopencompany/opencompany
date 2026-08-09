@@ -18,7 +18,7 @@ import {
   wikiSlugFromPath,
   wikiSourceRefTargets,
 } from "@opencompany/goat-wiki";
-import { and, asc, desc, eq, gte, inArray, like, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, inArray, like, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import {
   type GoatWikiLinkKind,
@@ -33,6 +33,17 @@ import {
 import { listGoatWorkspacesForUser } from "./goat-workspaces";
 
 type DbClient = any;
+
+// Postgres txid of a mutation statement, captured in the same statement so the
+// Electric-synced UI can hold its optimistic state until the write streams
+// back. 32-bit (::xid) to match the txids Electric reports.
+const TXID_COLUMN = sql<string>`pg_current_xact_id()::xid::text`;
+
+function txidFromRow(row: { txid?: string | null } | undefined, context: string): number {
+  const txid = Number(row?.txid);
+  if (!Number.isFinite(txid)) throw new WikiError(`Expected a txid from ${context}.`);
+  return txid;
+}
 
 const MAX_WIKI_PAGE_BYTES = 1_000_000;
 const FTS_CANDIDATE_LIMIT = 50;
@@ -142,22 +153,6 @@ export async function listWikiPagesWithBodies(
     .orderBy(asc(goatWikiPages.path));
 }
 
-/** Timeline entry count per page id, for badges without loading entries. */
-export async function getWikiTimelineCounts(
-  workspaceId: string,
-  db: DbClient = getDb(),
-): Promise<Map<string, number>> {
-  const rows: Array<{ pageId: string; count: number }> = await db
-    .select({
-      pageId: goatWikiTimelineEntries.pageId,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(goatWikiTimelineEntries)
-    .where(eq(goatWikiTimelineEntries.workspaceId, workspaceId))
-    .groupBy(goatWikiTimelineEntries.pageId);
-  return new Map(rows.map((row) => [row.pageId, row.count]));
-}
-
 /**
  * Resolves page references that may be slugs or paths ("website-redesign" or
  * "projects/website-redesign"). Unknown refs are reported, not thrown, so a
@@ -234,12 +229,19 @@ export type WikiWriteInput = {
   workspaceId: string;
   path: string;
   body: string;
+  /**
+   * Explicit page id for creates, so a client that inserted the page
+   * optimistically (Electric/TanStack DB) syncs back onto the same row.
+   * Ignored on updates.
+   */
+  id?: string;
   kind?: WikiKind;
   /**
    * Explicit display name (the Notion-style "name" field). When absent the
    * title derives from the body's first H1, falling back to the existing
    * title on updates so agent rewrites without an H1 never clobber a
-   * human-set name.
+   * human-set name. An explicit empty string is honored — the UI renders it
+   * as "Untitled", exactly like Notion.
    */
   title?: string;
   actorWorkosId?: string | null;
@@ -250,6 +252,8 @@ export type WikiWriteResult = {
   action: "created" | "updated" | "unchanged";
   /** Stub ancestor pages auto-created so a deep write never dangles. */
   createdAncestors: string[];
+  /** Txids of the wiki_pages statements, for Electric optimistic-state matching. */
+  txids: number[];
 };
 
 export async function writeWikiPage(
@@ -274,21 +278,25 @@ export async function writeWikiPage(
     );
   }
 
-  const createdAncestors = await ensureAncestorPages(
+  const ancestors = await ensureAncestorPages(
     db,
     input.workspaceId,
     path,
     input.actorWorkosId ?? null,
   );
+  const createdAncestors = ancestors.created;
 
   if (existing) {
     const kind = input.kind ?? existing.kind;
-    const title = input.title?.trim() || deriveWikiTitle(input.body, existing.title.trim() || slug);
+    const title =
+      input.title !== undefined
+        ? input.title.trim()
+        : deriveWikiTitle(input.body, existing.title.trim() || slug);
     if (existing.content === input.body && existing.kind === kind && existing.title === title) {
-      return { page: existing, action: "unchanged", createdAncestors };
+      return { page: existing, action: "unchanged", createdAncestors, txids: ancestors.txids };
     }
     const delta = lineDelta(existing.content, input.body);
-    const updated: GoatWikiPage[] = await db
+    const updated: Array<GoatWikiPage & { txid: string }> = await db
       .update(goatWikiPages)
       .set({
         content: input.body,
@@ -300,22 +308,28 @@ export async function writeWikiPage(
         updatedAt: new Date(),
       })
       .where(eq(goatWikiPages.id, existing.id))
-      .returning();
-    const page = firstRow(updated, "wiki page update");
+      .returning({ ...getTableColumns(goatWikiPages), txid: TXID_COLUMN });
+    const { txid, ...page } = firstRow(updated, "wiki page update");
     await recordVersion(db, page, "write", delta, input.actorWorkosId ?? null);
     await rebuildLinks(db, page);
-    return { page, action: "updated", createdAncestors };
+    return {
+      page,
+      action: "updated",
+      createdAncestors,
+      txids: [...ancestors.txids, txidFromRow({ txid }, "wiki page update")],
+    };
   }
 
-  const page = await insertPage(db, {
+  const { page, txid } = await insertPage(db, {
     workspaceId: input.workspaceId,
     path,
     body: input.body,
     kind: input.kind ?? DEFAULT_WIKI_KIND,
-    ...(input.title?.trim() ? { title: input.title.trim() } : {}),
+    ...(input.id ? { id: input.id } : {}),
+    ...(input.title !== undefined ? { title: input.title.trim() } : {}),
     actorWorkosId: input.actorWorkosId ?? null,
   });
-  return { page, action: "created", createdAncestors };
+  return { page, action: "created", createdAncestors, txids: [...ancestors.txids, txid] };
 }
 
 export type WikiMoveResult = {
@@ -323,6 +337,8 @@ export type WikiMoveResult = {
   fromPath: string;
   /** Descendant pages whose paths were rewritten along with the move. */
   movedDescendants: number;
+  /** Txids of the wiki_pages statements, for Electric optimistic-state matching. */
+  txids: number[];
 };
 
 export async function moveWikiPage(
@@ -347,7 +363,7 @@ export async function moveWikiPage(
   }
   const newPath = parent ? `${parent}/${page.slug}` : page.slug;
   if (!isValidWikiPath(newPath)) throw new WikiError(`Invalid destination path "${newPath}".`);
-  if (newPath === page.path) return { page, fromPath: page.path, movedDescendants: 0 };
+  if (newPath === page.path) return { page, fromPath: page.path, movedDescendants: 0, txids: [] };
   const collision = await pageByPath(db, input.workspaceId, newPath);
   if (collision) throw new WikiError(`A page already exists at "${newPath}".`);
 
@@ -364,20 +380,23 @@ export async function moveWikiPage(
   // neon-http has no interactive transactions; order the writes so a crash
   // mid-move leaves descendants under the old prefix (repairable by re-running
   // the move), never two pages claiming one path.
-  const movedRows: GoatWikiPage[] = await db
+  const movedRows: Array<GoatWikiPage & { txid: string }> = await db
     .update(goatWikiPages)
     .set({ path: newPath, updatedByWorkosId: input.actorWorkosId ?? null, updatedAt: new Date() })
     .where(eq(goatWikiPages.id, page.id))
-    .returning();
-  const moved = firstRow(movedRows, "wiki page move");
+    .returning({ ...getTableColumns(goatWikiPages), txid: TXID_COLUMN });
+  const { txid, ...moved } = firstRow(movedRows, "wiki page move");
+  const txids = [txidFromRow({ txid }, "wiki page move")];
   for (const descendant of descendants) {
-    await db
+    const descendantRows: Array<{ txid: string }> = await db
       .update(goatWikiPages)
       .set({ path: movedWikiPath(descendant.path, fromPath, newPath) })
-      .where(eq(goatWikiPages.id, descendant.id));
+      .where(eq(goatWikiPages.id, descendant.id))
+      .returning({ txid: TXID_COLUMN });
+    txids.push(txidFromRow(descendantRows[0], "wiki descendant move"));
   }
   await recordVersion(db, moved, "move", { added: 0, removed: 0 }, input.actorWorkosId ?? null);
-  return { page: moved, fromPath, movedDescendants: descendants.length };
+  return { page: moved, fromPath, movedDescendants: descendants.length, txids };
 }
 
 export async function deleteWikiPage(
@@ -388,7 +407,7 @@ export async function deleteWikiPage(
     actorWorkosId?: string | null;
   },
   db: DbClient = getDb(),
-): Promise<{ deletedPaths: string[] }> {
+): Promise<{ deletedPaths: string[]; txids: number[] }> {
   const page = await requirePageBySlug(db, input.workspaceId, input.slug);
   const descendants: GoatWikiPage[] = await db
     .select()
@@ -405,6 +424,7 @@ export async function deleteWikiPage(
     );
   }
   const doomed = [...descendants].sort((a, b) => b.path.length - a.path.length).concat(page);
+  const txids: number[] = [];
   for (const target of doomed) {
     await recordVersion(
       db,
@@ -413,9 +433,13 @@ export async function deleteWikiPage(
       { added: 0, removed: 0 },
       input.actorWorkosId ?? null,
     );
-    await db.delete(goatWikiPages).where(eq(goatWikiPages.id, target.id));
+    const deletedRows: Array<{ txid: string }> = await db
+      .delete(goatWikiPages)
+      .where(eq(goatWikiPages.id, target.id))
+      .returning({ txid: TXID_COLUMN });
+    txids.push(txidFromRow(deletedRows[0], "wiki page delete"));
   }
-  return { deletedPaths: doomed.map((target) => target.path) };
+  return { deletedPaths: doomed.map((target) => target.path), txids };
 }
 
 // ---------------------------------------------------------------------------
@@ -442,25 +466,28 @@ export async function addWikiTimelineEntry(
     slug: string;
     at: Date;
     text: string;
+    /** Explicit entry id for optimistic client inserts (Electric sync-back). */
+    id?: string;
     actorWorkosId?: string | null;
   },
   db: DbClient = getDb(),
-): Promise<GoatWikiTimelineEntry> {
+): Promise<GoatWikiTimelineEntry & { txid: number }> {
   const text = input.text.trim();
   if (!text) throw new WikiError("Timeline entry text is required.");
   const page = await requirePageBySlug(db, input.workspaceId, input.slug);
-  const inserted: GoatWikiTimelineEntry[] = await db
+  const inserted: Array<GoatWikiTimelineEntry & { txid: string }> = await db
     .insert(goatWikiTimelineEntries)
     .values({
-      id: randomUUID(),
+      id: input.id ?? randomUUID(),
       workspaceId: input.workspaceId,
       pageId: page.id,
       at: input.at,
       text,
       createdByWorkosId: input.actorWorkosId ?? null,
     })
-    .returning();
-  return firstRow(inserted, "wiki timeline insert");
+    .returning({ ...getTableColumns(goatWikiTimelineEntries), txid: TXID_COLUMN });
+  const { txid, ...entry } = firstRow(inserted, "wiki timeline insert");
+  return { ...entry, txid: txidFromRow({ txid }, "wiki timeline insert") };
 }
 
 // ---------------------------------------------------------------------------
@@ -670,15 +697,16 @@ async function insertPage(
     path: string;
     body: string;
     kind: WikiKind;
+    id?: string;
     title?: string;
     actorWorkosId: string | null;
   },
-): Promise<GoatWikiPage> {
+): Promise<{ page: GoatWikiPage; txid: number }> {
   const slug = wikiSlugFromPath(input.path);
-  const insertedPages: GoatWikiPage[] = await db
+  const insertedPages: Array<GoatWikiPage & { txid: string }> = await db
     .insert(goatWikiPages)
     .values({
-      id: randomUUID(),
+      id: input.id ?? randomUUID(),
       workspaceId: input.workspaceId,
       slug,
       path: input.path,
@@ -690,8 +718,8 @@ async function insertPage(
       createdByWorkosId: input.actorWorkosId,
       updatedByWorkosId: input.actorWorkosId,
     })
-    .returning();
-  const page = firstRow(insertedPages, "wiki page insert");
+    .returning({ ...getTableColumns(goatWikiPages), txid: TXID_COLUMN });
+  const { txid, ...page } = firstRow(insertedPages, "wiki page insert");
   await recordVersion(
     db,
     page,
@@ -700,7 +728,7 @@ async function insertPage(
     input.actorWorkosId,
   );
   await rebuildLinks(db, page);
-  return page;
+  return { page, txid: txidFromRow({ txid }, "wiki page insert") };
 }
 
 /** Creates empty stub pages for any missing ancestors of `path`, top-down. */
@@ -709,8 +737,9 @@ async function ensureAncestorPages(
   workspaceId: string,
   path: string,
   actorWorkosId: string | null,
-): Promise<string[]> {
+): Promise<{ created: string[]; txids: number[] }> {
   const created: string[] = [];
+  const txids: number[] = [];
   const segments = path.split("/");
   for (let depth = 1; depth < segments.length; depth += 1) {
     const ancestorPath = segments.slice(0, depth).join("/");
@@ -724,7 +753,7 @@ async function ensureAncestorPages(
       }
       continue;
     }
-    await insertPage(db, {
+    const inserted = await insertPage(db, {
       workspaceId,
       path: ancestorPath,
       body: "",
@@ -732,8 +761,9 @@ async function ensureAncestorPages(
       actorWorkosId,
     });
     created.push(ancestorPath);
+    txids.push(inserted.txid);
   }
-  return created;
+  return { created, txids };
 }
 
 async function pageByPath(
