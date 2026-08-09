@@ -1,5 +1,5 @@
-import { Stack } from "expo-router";
+import { RootNavigator } from "@/pages/root-navigator";
 
 export default function RootLayout() {
-  return <Stack />;
+  return <RootNavigator />;
 }

@@ -1,0 +1,130 @@
+// Folder-specific settings
+//
+// For a full list of overridable settings, and general information on folder-specific settings,
+// see the documentation: https://zed.dev/docs/configuring-zed#settings-files
+{
+  "tab_size": 2,
+  "use_on_type_format": false,
+  "format_on_save": "on",
+  "languages": {
+    "JavaScript": {
+      "language_servers": [
+        "biome",
+        "!eslint",
+        "!typescript-language-server",
+        "!oxlint",
+        "!oxfmt",
+        "!oxc",
+        "..."
+      ],
+      "formatter": { "language_server": { "name": "biome" } },
+      "code_actions_on_format": {
+        "source.fixAll.biome": true,
+        "source.organizeImports.biome": true
+      }
+    },
+    "TypeScript": {
+      "language_servers": [
+        "biome",
+        "vtsls",
+        "!typescript-ls",
+        "!eslint",
+        "!typescript-language-server",
+        "!oxlint",
+        "!oxfmt",
+        "!oxc",
+        "..."
+      ],
+      "formatter": { "language_server": { "name": "biome" } },
+      "code_actions_on_format": {
+        "source.fixAll.biome": true,
+        "source.organizeImports.biome": true
+      }
+    },
+    "TSX": {
+      "language_servers": [
+        "vtsls",
+        "biome",
+        "!typescript-ls",
+        "!eslint",
+        "!biome",
+        "!typescript-language-server",
+        "!oxlint",
+        "!oxfmt",
+        "!oxc",
+        "..."
+      ],
+      "formatter": { "language_server": { "name": "biome" } },
+      "code_actions_on_format": {
+        "source.fixAll.biome": true,
+        "source.organizeImports.biome": true
+      }
+    },
+    "JSON": {
+      "formatter": { "language_server": { "name": "biome" } },
+      "code_actions_on_format": {
+        "source.fixAll.biome": true,
+        "source.organizeImports.biome": true
+      }
+    },
+    "JSONC": {
+      "formatter": { "language_server": { "name": "biome" } },
+      "code_actions_on_format": {
+        "source.fixAll.biome": true,
+        "source.organizeImports.biome": true
+      }
+    },
+    "CSS": {
+      "formatter": { "language_server": { "name": "biome" } },
+      "code_actions_on_format": {
+        "source.fixAll.biome": true,
+        "source.organizeImports.biome": true
+      }
+    }
+  },
+  "lsp": {
+    "tailwindcss-language-server": {
+      "settings": {
+        "classAttributes": [
+          "class",
+          "className",
+          "headerClassName",
+          "contentContainerClassName",
+          "columnWrapperClassName",
+          "endFillColorClassName",
+          "imageClassName",
+          "tintColorClassName",
+          "ios_backgroundColorClassName",
+          "thumbColorClassName",
+          "trackColorOnClassName",
+          "trackColorOffClassName",
+          "selectionColorClassName",
+          "cursorColorClassName",
+          "underlineColorAndroidClassName",
+          "placeholderTextColorClassName",
+          "selectionHandleColorClassName",
+          "colorsClassName",
+          "progressBackgroundColorClassName",
+          "titleColorClassName",
+          "underlayColorClassName",
+          "colorClassName",
+          "drawerBackgroundColorClassName",
+          "statusBarBackgroundColorClassName",
+          "backdropColorClassName",
+          "backgroundColorClassName",
+          "ListFooterComponentClassName",
+          "ListHeaderComponentClassName"
+        ],
+        "classFunctions": ["useResolveClassNames"]
+      }
+    },
+    "oxlint": {
+      "initialization_options": {
+        "settings": {
+          "run": "onType",
+          "unusedDisableDirectives": "deny"
+        }
+      }
+    }
+  }
+}
