@@ -7,7 +7,9 @@
     "icon": "./assets/images/icon.png",
     "scheme": "opencompany",
     "userInterfaceStyle": "automatic",
-    "platforms": ["ios"],
+    "platforms": [
+      "ios"
+    ],
     "ios": {
       "icon": "./assets/ios.icon",
       "supportsTablet": false,
@@ -31,6 +33,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "1370f590-6c69-4e42-86e9-9bd68058d0f4"
+      }
     }
   }
 }
