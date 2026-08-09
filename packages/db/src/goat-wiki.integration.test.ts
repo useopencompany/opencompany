@@ -95,6 +95,17 @@ describe("writeWikiPage", () => {
     expect(pages[0]?.title).toBe("Q3 Plan v2");
   });
 
+  it("honors an explicit empty title on create and clear (Notion-style Untitled)", async () => {
+    // The UI creates pages with an empty name; nothing may auto-fill it.
+    await writeWikiPage({ workspaceId: WS, path: "fresh-page", body: "", title: "" }, db);
+    let { pages } = await resolveWikiPages(WS, ["fresh-page"], db);
+    expect(pages[0]?.title).toBe("");
+    // Clearing an existing name sticks, even when the body has an H1.
+    await writeWikiPage({ workspaceId: WS, path: "fresh-page", body: "# Heading", title: "" }, db);
+    ({ pages } = await resolveWikiPages(WS, ["fresh-page"], db));
+    expect(pages[0]?.title).toBe("");
+  });
+
   it("updates in place and reports unchanged writes", async () => {
     await writeWikiPage({ workspaceId: WS, path: "notes", body: "a\nb" }, db);
     const updated = await writeWikiPage({ workspaceId: WS, path: "notes", body: "a\nb\nc" }, db);

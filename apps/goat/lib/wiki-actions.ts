@@ -60,7 +60,9 @@ export async function saveWikiPageAction(input: {
       path: input.path,
       body: input.body,
       ...(isValidWikiKind(input.kind) ? { kind: input.kind } : {}),
-      ...(input.title?.trim() ? { title: input.title.trim() } : {}),
+      // An explicit title is honored even when empty — clearing the name field
+      // must stick ("Untitled"), not resurrect the old title.
+      ...(input.title !== undefined ? { title: input.title } : {}),
       actorWorkosId: user.workosUserId,
     });
     return { path: result.page.path, title: result.page.title, txids: result.txids };
@@ -78,7 +80,9 @@ export async function createWikiPageAction(input: {
   return runWikiAction(async () => {
     const { user, workspace } = await requireWikiContext();
     const id = requireOptionalUuid(input.id);
-    const title = input.title.trim() || "Untitled";
+    // Empty titles are valid (rendered as "Untitled", Notion-style); the slug
+    // still needs a usable base name.
+    const title = input.title.trim();
     let slug = input.slug?.trim();
     if (slug !== undefined && !isValidWikiSlug(slug)) {
       throw new WikiError(`Invalid slug "${slug}".`);

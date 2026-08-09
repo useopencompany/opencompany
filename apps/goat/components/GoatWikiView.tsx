@@ -255,14 +255,22 @@ function GoatWikiLiveView({
     [collections, pages, surfaceError, syncReady, trackPersistence, workspaceId],
   );
 
-  const createAndOpenPage = useCallback(
-    (parentPath: string | null) => {
-      const created = createPage(parentPath, "Untitled");
-      if (!created) return;
+  // New pages start with an empty name ("Untitled" placeholder) and open with
+  // the title focused, ready to type — the Notion flow.
+  const openCreatedPage = useCallback(
+    (created: { id: string; path: string }) => {
       focusTitlePageIdRef.current = created.id;
       navigate(created.path);
     },
-    [createPage, navigate],
+    [navigate],
+  );
+
+  const createAndOpenPage = useCallback(
+    (parentPath: string | null) => {
+      const created = createPage(parentPath, "");
+      if (created) openCreatedPage(created);
+    },
+    [createPage, openCreatedPage],
   );
 
   const deletePage = useCallback(
@@ -317,7 +325,8 @@ function GoatWikiLiveView({
             onError={surfaceError}
             onNavigate={navigate}
             onDelete={() => deletePage(page)}
-            onCreateSubpage={() => createPage(page.path, "Untitled")}
+            onCreateSubpage={() => createPage(page.path, "")}
+            onOpenCreatedSubpage={openCreatedPage}
           />
         ) : (
           <WikiEmptyState hasPages={pages.length > 0} onCreate={() => createAndOpenPage(null)} />
@@ -577,6 +586,7 @@ function WikiPageEditor({
   onNavigate,
   onDelete,
   onCreateSubpage,
+  onOpenCreatedSubpage,
 }: {
   page: WikiPageData;
   pages: WikiPageData[];
@@ -590,7 +600,8 @@ function WikiPageEditor({
   onError: (message: string | undefined) => void;
   onNavigate: (path: string | null) => void;
   onDelete: () => void;
-  onCreateSubpage: () => { slug: string; title: string } | null;
+  onCreateSubpage: () => { id: string; slug: string; path: string; title: string } | null;
+  onOpenCreatedSubpage: (created: { id: string; path: string }) => void;
 }) {
   const [saveState, setSaveState] = useState<"saved" | "dirty">("saved");
   const [showTimeline, setShowTimeline] = useState(false);
@@ -651,12 +662,12 @@ function WikiPageEditor({
     [onError, savePage],
   );
 
-  // A page created this session opens ready to name, like Notion.
+  // A page created this session opens with its empty name focused, ready to
+  // type — like Notion.
   useEffect(() => {
     if (focusTitlePageIdRef.current !== page.id) return;
     focusTitlePageIdRef.current = null;
     titleInputRef.current?.focus();
-    titleInputRef.current?.select();
   }, [focusTitlePageIdRef, page.id]);
 
   const setKind = useCallback(
@@ -674,13 +685,17 @@ function WikiPageEditor({
   );
 
   // The editor captures its slash-command handlers once at mount; route them
-  // through a ref so `/page` always sees the current tree.
+  // through refs so `/page` always sees the current tree.
   const createSubpageRef = useRef(onCreateSubpage);
+  const openCreatedSubpageRef = useRef(onOpenCreatedSubpage);
   useEffect(() => {
     createSubpageRef.current = onCreateSubpage;
-  }, [onCreateSubpage]);
+    openCreatedSubpageRef.current = onOpenCreatedSubpage;
+  }, [onCreateSubpage, onOpenCreatedSubpage]);
   const [slashHandlers] = useState(() => ({
     createPage: () => createSubpageRef.current(),
+    onPageCreated: (created: { id: string; path: string }) =>
+      openCreatedSubpageRef.current(created),
   }));
 
   const segments = page.path.split("/");
@@ -695,7 +710,7 @@ function WikiPageEditor({
             const ancestorPath = segments.slice(0, index + 1).join("/");
             const isLast = index === segments.length - 1;
             const ancestor = pages.find((entry) => entry.path === ancestorPath);
-            const label = ancestor?.title || segment;
+            const label = ancestor ? ancestor.title || "Untitled" : segment;
             return (
               <span key={ancestorPath} className="flex min-w-0 items-center gap-1">
                 <span className="text-ink-subtle/60">/</span>
