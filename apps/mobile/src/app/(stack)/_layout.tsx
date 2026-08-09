@@ -26,6 +26,19 @@ export default function StackLayout() {
           },
         ],
       }}
-    />
+    >
+      <Stack.Screen
+        name="attachment-sheet"
+        options={{
+          presentation: "formSheet",
+          animation: "default",
+          headerShown: false,
+          gestureEnabled: true,
+          sheetGrabberVisible: true,
+          contentStyle: { backgroundColor: "transparent" },
+          sheetAllowedDetents: [0.6, 1],
+        }}
+      />
+    </Stack>
   );
 }
