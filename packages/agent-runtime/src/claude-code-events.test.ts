@@ -173,6 +173,50 @@ describe("createClaudeCodeEventNormalizer", () => {
     expect(failed[0]?.payload).toMatchObject({ status: "failed", error: "denied" });
   });
 
+  it("extracts safe file metadata from a Claude publish_artifact result", () => {
+    const normalizer = createClaudeCodeEventNormalizer();
+    normalizer.normalize(
+      assistantEvent([
+        {
+          type: "tool_use",
+          id: "publish_1",
+          name: "mcp__opencompany_actions__publish_artifact",
+          input: { path: "plan.md" },
+        },
+      ]),
+    );
+    const [event] = normalizer.normalize(
+      toolResultEvent([
+        {
+          type: "tool_result",
+          tool_use_id: "publish_1",
+          content: JSON.stringify({
+            ok: true,
+            artifact: {
+              artifactId: "artifact_1",
+              artifactVersionId: "version_1",
+              version: 1,
+              title: "Plan",
+              filename: "plan.md",
+              mediaType: "text/markdown",
+              sizeBytes: 42,
+              state: "ready",
+            },
+          }),
+        },
+      ]),
+    );
+
+    expect(event).toMatchObject({
+      type: "mcp_tool.completed",
+      payload: {
+        server: "opencompany_actions",
+        tool: "publish_artifact",
+        artifact: { artifactVersionId: "version_1", state: "ready" },
+      },
+    });
+  });
+
   it("extracts text from array tool_result content", () => {
     const normalizer = createClaudeCodeEventNormalizer();
     normalizer.normalize(

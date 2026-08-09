@@ -336,6 +336,7 @@ describe("cancelGoatTaskAction", () => {
         autoModelRoutingEnabled: false,
         chatCapabilitiesBetaEnabled: false,
         imessageEnabled: false,
+        wikiEnabled: false,
         taskViewMode: "board",
         preferredMcpClient: null,
         mcpSetupCompletedAt: null,

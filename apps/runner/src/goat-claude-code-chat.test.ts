@@ -56,7 +56,7 @@ const sandboxMocks = vi.hoisted(() => ({
 }));
 
 const skillMocks = vi.hoisted(() => ({
-  materializeCodexSkillSnapshotsForSession: vi.fn(),
+  materializeClaudeSkillSnapshotsForSession: vi.fn(),
 }));
 
 const harnessMocks = vi.hoisted(() => ({
@@ -155,7 +155,7 @@ vi.mock("./sandbox", () => ({
 }));
 
 vi.mock("./skills", () => ({
-  materializeCodexSkillSnapshotsForSession: skillMocks.materializeCodexSkillSnapshotsForSession,
+  materializeClaudeSkillSnapshotsForSession: skillMocks.materializeClaudeSkillSnapshotsForSession,
 }));
 
 describe("isClaudeCodeAuthenticationFailure", () => {
@@ -291,7 +291,7 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
     sandboxMocks.isRetryableCommandStreamError.mockReturnValue(false);
     harnessMocks.getGoatWorkflowHarnessSkillSnapshots.mockReturnValue([]);
-    skillMocks.materializeCodexSkillSnapshotsForSession.mockResolvedValue(undefined);
+    skillMocks.materializeClaudeSkillSnapshotsForSession.mockResolvedValue(undefined);
     taskMocks.buildGoatTaskTerminalProjection.mockReturnValue({ taskId: "goat_task_1" });
     taskMocks.markGoatTaskTurnRunning.mockResolvedValue(undefined);
   });
@@ -343,9 +343,9 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
       env: env(),
     });
 
-    expect(skillMocks.materializeCodexSkillSnapshotsForSession).toHaveBeenCalledWith({
+    expect(skillMocks.materializeClaudeSkillSnapshotsForSession).toHaveBeenCalledWith({
       sandbox,
-      codexWorkRoot: "/home/user/opencompany-goat/claude-chat",
+      claudeWorkRoot: "/home/user/opencompany-goat/claude-chat",
       skills: [
         {
           id: "smooth-shadow-ring",
@@ -361,7 +361,7 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
     expect(sandbox.files.write).toHaveBeenCalledWith(
       "/home/user/.opencompany-goat/claude-chat-prompts/prompt-goat_codex_turn_1.txt",
       expect.stringContaining(
-        "/home/user/opencompany-goat/claude-chat/.agents/skills/smooth-shadow-ring/SKILL.md",
+        "/home/user/opencompany-goat/claude-chat/.claude/skills/smooth-shadow-ring/SKILL.md",
       ),
     );
   });

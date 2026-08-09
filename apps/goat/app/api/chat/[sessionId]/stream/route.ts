@@ -2,6 +2,7 @@ import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { currentGoatUser } from "@/lib/auth";
 import { createDbGoatChatStore } from "@/lib/chat";
 import {
+  clearActiveGoatChatStream,
   getActiveGoatChatStream,
   getGoatChatStreamContext,
   isGoatChatResumeEnabled,
@@ -31,10 +32,32 @@ export async function GET(
   const streamId = await getActiveGoatChatStream(session.id);
   if (!streamId) return noActiveStream();
 
-  const stream = await getGoatChatStreamContext()
-    .resumeExistingStream(streamId)
-    .catch(() => null);
-  if (!stream) return noActiveStream();
+  const streamContext = getGoatChatStreamContext();
+  let stream: ReadableStream<string> | null | undefined;
+  try {
+    stream = await streamContext.resumeExistingStream(streamId);
+  } catch (error) {
+    try {
+      // One retry keeps a transient durable-stream read failure from making a
+      // healthy producer unreachable. A second failure means this pointer can
+      // no longer help the client reconnect.
+      stream = await streamContext.resumeExistingStream(streamId);
+    } catch (retryError) {
+      console.warn("Goat chat resumable stream could not be replayed.", {
+        event: "goat.chat_resumable_stream_replay_failed",
+        session_id: session.id,
+        stream_id: streamId,
+        error,
+        retry_error: retryError,
+      });
+      await clearActiveGoatChatStream(session.id, streamId);
+      return noActiveStream();
+    }
+  }
+  if (!stream) {
+    await clearActiveGoatChatStream(session.id, streamId);
+    return noActiveStream();
+  }
 
   return new Response(stream.pipeThrough(new TextEncoderStream()), {
     headers: UI_MESSAGE_STREAM_HEADERS,

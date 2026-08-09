@@ -4,7 +4,11 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { closeGoatChatSessionAction, markGoatChatSeenAction } from "@/lib/chat-actions";
+import {
+  closeGoatChatSessionAction,
+  markGoatChatSeenAction,
+  reopenGoatChatSessionAction,
+} from "@/lib/chat-actions";
 import {
   GOAT_CHAT_COMPOSER_FOCUS_EVENT,
   GOAT_HOME_NAVIGATION_EVENT,
@@ -79,6 +83,7 @@ vi.mock("@/lib/chat-actions", () => ({
   })),
   getGoatChatShareAction: vi.fn(async () => ({ ok: true, shareId: null })),
   markGoatChatSeenAction: vi.fn(async () => ({ ok: true, error: null })),
+  reopenGoatChatSessionAction: vi.fn(async () => ({ ok: true, error: null })),
   revokeGoatChatShareAction: vi.fn(async () => ({ ok: true })),
 }));
 
@@ -1150,7 +1155,17 @@ describe("GoatSurface chat streaming UI", () => {
 
   it("updates the URL without a server navigation and sends the reserved id", async () => {
     const user = userEvent.setup();
-    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(
+      <>
+        <GoatSurface
+          tasks={[]}
+          defaultModel={DEFAULT_GOAT_MODEL}
+          initialChat={null}
+          workspaceId="workspace_1"
+        />
+        <OptimisticChatSummariesProbe />
+      </>,
+    );
 
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start now");
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -1166,6 +1181,9 @@ describe("GoatSurface chat streaming UI", () => {
       newSessionId: optimisticSessionId,
       model: DEFAULT_GOAT_MODEL,
     });
+    expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
+      `${optimisticSessionId}:Start now`,
+    );
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
@@ -1188,7 +1206,17 @@ describe("GoatSurface chat streaming UI", () => {
   it("keeps the reserved detail URL and reuses its id when the first send is retried", async () => {
     const user = userEvent.setup();
     chatMock.sendError = new Error("network failed");
-    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(
+      <>
+        <GoatSurface
+          tasks={[]}
+          defaultModel={DEFAULT_GOAT_MODEL}
+          initialChat={null}
+          workspaceId="workspace_1"
+        />
+        <OptimisticChatSummariesProbe />
+      </>,
+    );
 
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Try again");
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -1196,6 +1224,7 @@ describe("GoatSurface chat streaming UI", () => {
     await waitFor(() => expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Try again"));
     const firstRequest = chatMock.preparedRequestBodies[0] as { newSessionId: string };
     expect(historyMock.replaceState).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent("none");
 
     chatMock.sendError = null;
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -1205,6 +1234,9 @@ describe("GoatSurface chat streaming UI", () => {
       sessionId: null,
       newSessionId: firstRequest.newSessionId,
     });
+    expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
+      `${firstRequest.newSessionId}:Try again`,
+    );
     expect(historyMock.replaceState).toHaveBeenCalledTimes(1);
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
@@ -2332,13 +2364,17 @@ describe("GoatSurface chat streaming UI", () => {
     window.localStorage.setItem("opencompany-goat-main-chat-selection:user_1", DEFAULT_GOAT_MODEL);
 
     render(
-      <GoatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        codexConnected
-        userWorkosId="user_1"
-      />,
+      <>
+        <GoatSurface
+          tasks={[]}
+          defaultModel={DEFAULT_GOAT_MODEL}
+          initialChat={null}
+          codexConnected
+          userWorkosId="user_1"
+          workspaceId="workspace_1"
+        />
+        <OptimisticChatSummariesProbe />
+      </>,
     );
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
@@ -2375,6 +2411,9 @@ describe("GoatSurface chat streaming UI", () => {
       },
       model: "openai/gpt-5.6-sol",
     });
+    expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
+      `${body.newSessionId}:@codex check repo access`,
+    );
     expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBe(
       DEFAULT_GOAT_MODEL,
     );
@@ -3899,6 +3938,63 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(result);
 
     expect(routerMock.push).toHaveBeenCalledWith("/chat/chat_1");
+  });
+
+  it("mixes archived chats into the Cmd+K palette by recency and restores them", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        recentChats={[
+          {
+            id: "chat_newest",
+            title: "Newest active",
+            model: DEFAULT_GOAT_MODEL,
+            preview: "Newest preview",
+            updatedAt: "2026-08-09T12:00:00.000Z",
+          },
+          {
+            id: "chat_oldest",
+            title: "Oldest active",
+            model: DEFAULT_GOAT_MODEL,
+            preview: "Oldest preview",
+            updatedAt: "2026-08-07T12:00:00.000Z",
+          },
+        ]}
+        archivedChats={[
+          {
+            id: "chat_archived",
+            title: "Middle archived",
+            model: DEFAULT_GOAT_MODEL,
+            preview: "Middle preview",
+            updatedAt: "2026-08-08T12:00:00.000Z",
+            archived: true,
+          },
+        ]}
+      />,
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    const newestOption = within(dialog).getByRole("option", { name: /Newest active/ });
+    const archivedOption = within(dialog).getByRole("option", { name: /Middle archived/ });
+    const oldestOption = within(dialog).getByRole("option", { name: /Oldest active/ });
+
+    expect(newestOption.compareDocumentPosition(archivedOption)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(archivedOption.compareDocumentPosition(oldestOption)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(within(archivedOption).getByText("Archived")).toHaveClass("rounded-full");
+
+    await user.click(archivedOption);
+
+    await waitFor(() => expect(reopenGoatChatSessionAction).toHaveBeenCalledWith("chat_archived"));
+    expect(routerMock.push).toHaveBeenCalledWith("/chat/chat_archived");
   });
 
   it("drills from Cmd+K search into compose on Enter, prefilled with the typed query", async () => {

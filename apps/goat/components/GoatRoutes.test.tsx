@@ -34,6 +34,7 @@ const appDataMock = vi.hoisted(() => ({
 const userPreferencesMock = vi.hoisted(() => ({
   updateGoatTaskSpawningAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateGoatAutoModelRoutingAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updateGoatWikiEnabledAction: vi.fn(async () => ({ ok: true, enabled: true })),
   updateGoatImessageEnabledAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
 
@@ -112,6 +113,7 @@ vi.mock("@/lib/user-preferences", () => ({
   updateGoatTaskSpawningAction: userPreferencesMock.updateGoatTaskSpawningAction,
   updateGoatAutoModelRoutingAction: userPreferencesMock.updateGoatAutoModelRoutingAction,
   updateGoatImessageEnabledAction: userPreferencesMock.updateGoatImessageEnabledAction,
+  updateGoatWikiEnabledAction: userPreferencesMock.updateGoatWikiEnabledAction,
 }));
 
 vi.mock("@/lib/workflow-actions", () => ({

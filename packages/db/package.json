@@ -64,6 +64,14 @@
       "types": "./src/goat-brain-read.ts",
       "default": "./src/goat-brain-read.ts"
     },
+    "./goat-wiki": {
+      "types": "./src/goat-wiki.ts",
+      "default": "./src/goat-wiki.ts"
+    },
+    "./goat-wiki-migrate": {
+      "types": "./src/goat-wiki-migrate.ts",
+      "default": "./src/goat-wiki-migrate.ts"
+    },
     "./goat-brain-sources": {
       "types": "./src/goat-brain-sources.ts",
       "default": "./src/goat-brain-sources.ts"
@@ -180,16 +188,18 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/crypto": "workspace:*",
     "@opencompany/goat-brain": "workspace:*",
-    "@neondatabase/serverless": "^1.1.0",
+    "@opencompany/goat-wiki": "workspace:*",
     "@vercel/blob": "^2.4.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.13.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.3.11",
     "@types/node": "^25.9.1",
     "@types/pg": "^8.11.10",
     "drizzle-kit": "^0.31.10",

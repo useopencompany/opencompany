@@ -11,6 +11,7 @@ import {
 import type { RunnerEnv } from "./env";
 import { wakeGoatBrainImportWorker } from "./goat-brain-import-worker";
 import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
+import { publishGoatClaudeChatArtifact } from "./goat-chat-artifacts";
 import { wakeGoatCodexChatWorker } from "./goat-codex-chat-worker";
 import {
   GoatCodingWorkspaceAccessError,
@@ -132,6 +133,45 @@ export function createServer(
     }
     wakeGoatCodexChatWorker();
     reply.status(202).send({ ok: true });
+  });
+
+  app.post("/internal/goat/chat-artifacts/publish", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const body = request.body as
+      | {
+          codexChatSessionId?: unknown;
+          codexChatTurnId?: unknown;
+          toolCallId?: unknown;
+          arguments?: unknown;
+        }
+      | undefined;
+    const codexChatSessionId =
+      typeof body?.codexChatSessionId === "string" ? body.codexChatSessionId.trim() : "";
+    const codexChatTurnId =
+      typeof body?.codexChatTurnId === "string" ? body.codexChatTurnId.trim() : "";
+    const toolCallId = typeof body?.toolCallId === "string" ? body.toolCallId.trim() : "";
+    if (
+      !codexChatSessionId ||
+      codexChatSessionId.length > 256 ||
+      !codexChatTurnId ||
+      codexChatTurnId.length > 256 ||
+      !toolCallId ||
+      toolCallId.length > 500
+    ) {
+      reply
+        .status(400)
+        .send({ ok: false, error: "Session, turn, and tool call ids are required." });
+      return;
+    }
+    const result = await publishGoatClaudeChatArtifact({
+      codexChatSessionId,
+      codexChatTurnId,
+      toolCallId,
+      arguments: body?.arguments,
+      env,
+      signal: request.signal,
+    });
+    reply.status(result.ok ? 200 : 409).send(result);
   });
 
   app.get("/internal/goat/codex-chat/sandboxes/:sandboxId/status", async (request, reply) => {

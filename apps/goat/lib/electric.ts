@@ -6,6 +6,7 @@ type ShapeWhere = {
 type ShapeWhereContext = {
   authorizedChatSessionId?: string | null | undefined;
   authorizedBrainRef?: string | null | undefined;
+  authorizedWikiWorkspaceId?: string | null | undefined;
   workspaceId?: string | null | undefined;
 };
 
@@ -23,6 +24,38 @@ const BRAIN_SHAPE_TABLES = new Set([
   "brain_import_runs",
   "goat.brain_import_runs",
 ]);
+
+const WIKI_SHAPE_TABLES = new Set([
+  "wiki_pages",
+  "goat.wiki_pages",
+  "wiki_timeline_entries",
+  "goat.wiki_timeline_entries",
+]);
+
+// Pages sync everything except search_tsv (derived) and asset_extracted_text:
+// binary-backed rows can carry large machine-extracted text that only search
+// needs, never the UI.
+const WIKI_PAGE_COLUMNS = [
+  "id",
+  "workspace_id",
+  "slug",
+  "path",
+  "title",
+  "kind",
+  "content",
+  "content_hash",
+  "size_bytes",
+  "format",
+  "mime_type",
+  "original_file_name",
+  "asset_storage_key",
+  "asset_content_hash",
+  "asset_size_bytes",
+  "created_by_workos_id",
+  "updated_by_workos_id",
+  "created_at",
+  "updated_at",
+] as const;
 
 // Source items carry full raw/normalized payloads (whole meeting transcripts);
 // the activity feed only needs the descriptive columns.
@@ -257,6 +290,24 @@ const SHAPE_SCOPES = {
     where: scopedBrainSourceItemWhere,
     columns: BRAIN_SOURCE_ITEM_COLUMNS,
   },
+  wiki_pages: {
+    table: "goat.wiki_pages",
+    where: scopedWikiWorkspaceWhere,
+    columns: WIKI_PAGE_COLUMNS,
+  },
+  "goat.wiki_pages": {
+    table: "goat.wiki_pages",
+    where: scopedWikiWorkspaceWhere,
+    columns: WIKI_PAGE_COLUMNS,
+  },
+  wiki_timeline_entries: {
+    table: "goat.wiki_timeline_entries",
+    where: scopedWikiWorkspaceWhere,
+  },
+  "goat.wiki_timeline_entries": {
+    table: "goat.wiki_timeline_entries",
+    where: scopedWikiWorkspaceWhere,
+  },
 } as const;
 
 export function goatElectricBaseUrl() {
@@ -277,6 +328,7 @@ export function buildGoatElectricOriginUrl(input: {
   workspaceId?: string | null | undefined;
   authorizedChatSessionId?: string | null | undefined;
   authorizedBrainRef?: string | null | undefined;
+  authorizedWikiWorkspaceId?: string | null | undefined;
   sourceId?: string | null | undefined;
   sourceSecret?: string | null | undefined;
   electricSecret?: string | null | undefined;
@@ -300,6 +352,7 @@ export function buildGoatElectricOriginUrl(input: {
   const resolved = scope.where(input.userWorkosId, input.requestUrl, {
     authorizedChatSessionId: input.authorizedChatSessionId,
     authorizedBrainRef: input.authorizedBrainRef,
+    authorizedWikiWorkspaceId: input.authorizedWikiWorkspaceId,
     workspaceId: input.workspaceId,
   });
   if (!resolved) return null;
@@ -409,6 +462,28 @@ function scopedCodexChatSessionWhere(
   return {
     clause: `"chat_session_id" = $1`,
     params: [sessionId],
+  };
+}
+
+export function goatElectricWikiShapeRequested(requestUrl: URL) {
+  const table = requestUrl.searchParams.get("table");
+  return Boolean(table && WIKI_SHAPE_TABLES.has(table));
+}
+
+// Wiki shapes are workspace-wide by design (the wiki is one tree per
+// workspace); the route only authorizes them when the wiki preview is enabled
+// for the requesting user, and the workspace always comes from the server-side
+// session context, never from client params.
+function scopedWikiWorkspaceWhere(
+  _userWorkosId: string,
+  _requestUrl: URL,
+  context: ShapeWhereContext,
+): ShapeWhere | null {
+  if (!context.authorizedWikiWorkspaceId) return null;
+
+  return {
+    clause: `"workspace_id" = $1`,
+    params: [context.authorizedWikiWorkspaceId],
   };
 }
 
