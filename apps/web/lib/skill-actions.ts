@@ -3,11 +3,8 @@
 import { isValidGoatBrainId } from "@opencompany/goat-brain";
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
-import {
-  type GoatSkillImportCandidate,
-  GoatSkillImportError,
-  previewGoatSkillImport,
-} from "@/lib/skill-import";
+import type { GoatSkillImportCandidate } from "@/lib/skill-import";
+import { GoatSkillImportError, previewGoatSkillImport } from "@/lib/skill-import";
 import {
   archiveGoatSkill,
   createGoatSkill,
@@ -15,8 +12,6 @@ import {
   type GoatSkillMutationResult,
   updateGoatSkill,
 } from "@/lib/skills";
-
-export type { GoatSkillImportCandidate };
 
 // Authoring skills is a workspace-admin mutation, mirroring the old Brain-folder
 // authoring gate (manual content was admin-only).

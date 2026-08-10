@@ -62,11 +62,11 @@ import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import {
   archiveGoatSkillAction,
   createGoatSkillAction,
-  type GoatSkillImportCandidate,
   importGoatSkillAction,
   previewGoatSkillImportAction,
   updateGoatSkillAction,
 } from "@/lib/skill-actions";
+import type { GoatSkillImportCandidate } from "@/lib/skill-import";
 import type { GoatSkillListItem, GoatSkillSource, GoatWorkspaceSkill } from "@/lib/skills";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
 import {
