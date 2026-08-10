@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
 import {
   type GoatChatSessionSkill,
+  type GoatSkillSourceType,
   type GoatSkillStatus,
   goatChatSessionSkills,
   goatSkills,
@@ -34,17 +35,31 @@ type Db = ReturnType<typeof getDb>;
 // Brain-doc shape (`GoatBrainSkill`).
 export type GoatWorkspaceSkill = GoatBrainSkill;
 
+// Provenance for a skill imported from an external SKILL.md. `null` on a skill means
+// hand-authored in Goat, still fully editable.
+export type GoatSkillSource = {
+  type: GoatSkillSourceType;
+  url: string;
+  ref: string;
+  path: string;
+  resolvedCommit: string;
+};
+
 export type GoatSkillListItem = {
   slug: string;
   name: string;
   description: string;
   status: GoatSkillStatus;
   updatedAt: Date;
+  source: GoatSkillSource | null;
 };
 
 export type GoatSkillCatalogItem = Pick<GoatWorkspaceSkill, "id" | "name" | "description">;
 
-export type GoatSkillDetail = GoatWorkspaceSkill & { status: GoatSkillStatus };
+export type GoatSkillDetail = GoatWorkspaceSkill & {
+  status: GoatSkillStatus;
+  source: GoatSkillSource | null;
+};
 
 export type GoatSkillMentionRef = { id: string };
 
@@ -122,11 +137,23 @@ export async function listGoatSkills(
       description: goatSkills.description,
       status: goatSkills.status,
       updatedAt: goatSkills.updatedAt,
+      sourceType: goatSkills.sourceType,
+      sourceUrl: goatSkills.sourceUrl,
+      sourceRef: goatSkills.sourceRef,
+      sourcePath: goatSkills.sourcePath,
+      resolvedCommit: goatSkills.resolvedCommit,
     })
     .from(goatSkills)
     .where(and(eq(goatSkills.workspaceId, workspaceId), isNull(goatSkills.archivedAt)))
     .orderBy(desc(goatSkills.updatedAt));
-  return rows;
+  return rows.map((row) => ({
+    slug: row.slug,
+    name: row.name,
+    description: row.description,
+    status: row.status,
+    updatedAt: row.updatedAt,
+    source: toGoatSkillSource(row),
+  }));
 }
 
 export async function getGoatSkill(
@@ -141,6 +168,11 @@ export async function getGoatSkill(
       description: goatSkills.description,
       instructions: goatSkills.instructions,
       status: goatSkills.status,
+      sourceType: goatSkills.sourceType,
+      sourceUrl: goatSkills.sourceUrl,
+      sourceRef: goatSkills.sourceRef,
+      sourcePath: goatSkills.sourcePath,
+      resolvedCommit: goatSkills.resolvedCommit,
     })
     .from(goatSkills)
     .where(
@@ -158,6 +190,24 @@ export async function getGoatSkill(
     description: row.description,
     instructions: row.instructions,
     status: row.status,
+    source: toGoatSkillSource(row),
+  };
+}
+
+function toGoatSkillSource(row: {
+  sourceType: GoatSkillSourceType | null;
+  sourceUrl: string | null;
+  sourceRef: string | null;
+  sourcePath: string | null;
+  resolvedCommit: string | null;
+}): GoatSkillSource | null {
+  if (!row.sourceType || !row.sourceUrl) return null;
+  return {
+    type: row.sourceType,
+    url: row.sourceUrl,
+    ref: row.sourceRef ?? "",
+    path: row.sourcePath ?? "",
+    resolvedCommit: row.resolvedCommit ?? "",
   };
 }
 
@@ -347,6 +397,72 @@ export async function createGoatSkill(input: {
   return { ok: true, slug };
 }
 
+// Imports a skill resolved from an external SKILL.md (see apps/goat/lib/skill-import.ts) into
+// the workspace catalog. Re-importing the same source (workspaceId + sourceUrl/sourceRef/
+// sourcePath) reuses the existing row instead of creating a duplicate — the unique index
+// `goat_skills_workspace_source_idx` backs this, but we check first for a friendlier result
+// than a constraint-violation error. Lands as "active" immediately: unlike a blank hand-authored
+// draft, an imported skill's instructions are already complete.
+export async function createImportedGoatSkill(input: {
+  workspaceId: string;
+  createdByWorkosId: string;
+  name: string;
+  description: string;
+  instructions: string;
+  source: {
+    type: GoatSkillSourceType;
+    url: string;
+    ref: string;
+    path: string;
+  };
+  resolvedCommit: string;
+  integrity: string;
+  db?: Db;
+}): Promise<GoatSkillMutationResult> {
+  const invalid = validateGoatSkillFields({
+    name: input.name,
+    description: input.description,
+    instructions: input.instructions,
+    status: "active",
+  });
+  if (invalid) return { ok: false, message: invalid };
+
+  const db = input.db ?? getDb();
+  const [existing] = await db
+    .select({ slug: goatSkills.slug })
+    .from(goatSkills)
+    .where(
+      and(
+        eq(goatSkills.workspaceId, input.workspaceId),
+        eq(goatSkills.sourceUrl, input.source.url),
+        eq(goatSkills.sourceRef, input.source.ref),
+        eq(goatSkills.sourcePath, input.source.path),
+        isNull(goatSkills.archivedAt),
+      ),
+    )
+    .limit(1);
+  if (existing) return { ok: true, slug: existing.slug };
+
+  const slug = await uniqueGoatSkillSlug(db, input.workspaceId, input.name);
+  await db.insert(goatSkills).values({
+    id: `goat_skill_${randomUUID()}`,
+    workspaceId: input.workspaceId,
+    slug,
+    name: input.name.trim(),
+    description: input.description.trim(),
+    instructions: input.instructions,
+    status: "active",
+    createdByWorkosId: input.createdByWorkosId,
+    sourceType: input.source.type,
+    sourceUrl: input.source.url,
+    sourceRef: input.source.ref,
+    sourcePath: input.source.path,
+    resolvedCommit: input.resolvedCommit,
+    integrity: input.integrity,
+  });
+  return { ok: true, slug };
+}
+
 export async function updateGoatSkill(input: {
   workspaceId: string;
   slug: string;
@@ -358,6 +474,24 @@ export async function updateGoatSkill(input: {
   const invalid = validateGoatSkillFields(input);
   if (invalid) return { ok: false, message: invalid };
   const db = getDb();
+  const [target] = await db
+    .select({ sourceType: goatSkills.sourceType, sourceUrl: goatSkills.sourceUrl })
+    .from(goatSkills)
+    .where(
+      and(
+        eq(goatSkills.workspaceId, input.workspaceId),
+        eq(goatSkills.slug, input.slug),
+        isNull(goatSkills.archivedAt),
+      ),
+    )
+    .limit(1);
+  if (!target) return { ok: false, message: "Skill not found." };
+  if (target.sourceType) {
+    return {
+      ok: false,
+      message: `This skill was imported from ${target.sourceUrl} and can't be edited here. Remove and re-import if the source changed.`,
+    };
+  }
   const result = await db
     .update(goatSkills)
     .set({

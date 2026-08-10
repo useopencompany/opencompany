@@ -165,7 +165,7 @@ export const USE_ACTION_PARAMS_DESCRIPTION =
   GOAT_ACTION_TOOL_CONTRACT.execute.inputSchema.properties.params.description;
 
 export const LIST_SKILLS_TOOL_DESCRIPTION =
-  "Discover user-authored skills available from the active workspace. Skills are reusable workflows and operating instructions that may help with the user's request. Search by a short task-focused query, or omit query to browse. The result contains catalog metadata for matching only, not instructions. Call list_skills before use_skill; a skill id returned successfully remains eligible for use on later turns in this chat while it is still available.";
+  "Discover user-authored skills available from the active workspace. Skills are reusable workflows and operating instructions that may help with the user's request. Search by a short task-focused query, or omit query to browse. The result contains catalog metadata for matching only, not instructions. Call list_skills before use_skill; a skill id returned successfully remains eligible for use on later turns in this chat while it is still available. Check this proactively when a task might benefit from a documented playbook, even if the user didn't ask for a skill by name — don't assume none exists without checking.";
 
 export const LIST_SKILLS_QUERY_DESCRIPTION =
   'Optional task-focused search across skill ids, names, and descriptions. Use a few distinctive words, for example "product feature" or "customer interview". Omit to browse the catalog.';

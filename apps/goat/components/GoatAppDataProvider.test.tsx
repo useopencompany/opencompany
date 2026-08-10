@@ -1,11 +1,15 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   GoatAppDataProvider,
   type GoatAppInitialData,
   useGoatAppData,
 } from "@/components/GoatAppDataProvider";
+import {
+  addOptimisticGoatChatSummary,
+  clearAllOptimisticGoatChatSummaries,
+} from "@/lib/optimistic-chat-summaries";
 
 const mocks = vi.hoisted(() => {
   const liveQueryResult: { data: unknown[]; isLoading: boolean } = {
@@ -36,6 +40,10 @@ describe("GoatAppDataProvider", () => {
     mocks.useLiveQuery.mockClear();
   });
 
+  afterEach(() => {
+    clearAllOptimisticGoatChatSummaries();
+  });
+
   it("server-renders from initial data without starting live queries", () => {
     const html = renderToString(
       <GoatAppDataProvider initialData={initialData()}>
@@ -55,6 +63,28 @@ describe("GoatAppDataProvider", () => {
     );
 
     expect(mocks.useLiveQuery).toHaveBeenCalled();
+  });
+
+  it("publishes a newly submitted background chat before its persisted row arrives", () => {
+    render(
+      <GoatAppDataProvider initialData={initialData()}>
+        <RecentChatTitleProbe onRender={() => {}} />
+      </GoatAppDataProvider>,
+    );
+
+    expect(screen.getByTestId("recent").textContent).toBe("empty");
+
+    act(() => {
+      addOptimisticGoatChatSummary({
+        workspaceId: "workspace_1",
+        sessionId: "goat_chat_123e4567-e89b-42d3-a456-426614174000",
+        prompt: "Research Q3 launch options",
+        model: "anthropic/claude-sonnet-5",
+        engine: "opencompany",
+      });
+    });
+
+    expect(screen.getByTestId("recent").textContent).toBe("Research Q3 launch options");
   });
 
   it("attaches codex_chat runtime to Claude Code chats so the home card is not stuck 'Connecting'", () => {
@@ -278,7 +308,7 @@ function initialData(): GoatAppInitialData {
     schedules: [],
     recentChats: [],
     integrations: {} as GoatAppInitialData["integrations"],
-    featureFlags: { taskSpawning: false, autoModelRouting: false, imessage: false },
+    featureFlags: { taskSpawning: false, autoModelRouting: false, imessage: false, wiki: false },
     codexConnected: false,
     claudeCodeConnected: false,
     chatResumeEnabled: false,

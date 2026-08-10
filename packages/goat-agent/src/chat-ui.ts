@@ -1,8 +1,12 @@
-import type { CodexCommandToolInput, CodexCommandToolOutput } from "@opencompany/agent-runtime";
 import {
+  type CodexCommandToolInput,
+  type CodexCommandToolOutput,
   GOAT_ACTION_TOOL_CONTRACT,
+  GOAT_CHAT_ARTIFACT_DATA_PART_TYPE,
   type GoatActionExecutionResponse,
   type GoatActionGatewayResponse,
+  type GoatPublishedChatArtifact,
+  parseGoatPublishedChatArtifact,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { BrowserToolName } from "@opencompany/browser-tools";
@@ -552,9 +556,13 @@ export type GoatChatTools = {
   };
 } & GoatBrowserChatTools;
 
+export type GoatChatDataTypes = {
+  "artifact-file": GoatPublishedChatArtifact;
+};
+
 export type GoatChatUiMessage = UIMessage<
   GoatChatMessageMetadata,
-  Record<string, never>,
+  GoatChatDataTypes,
   GoatChatTools
 >;
 
@@ -917,6 +925,11 @@ function parseDebugTraceUiMessageParts(value: unknown): GoatChatUiMessage["parts
     }
     if (part.type === "reasoning" && typeof part.text === "string") {
       parts.push({ type: "reasoning", text: part.text, state: "done" });
+      continue;
+    }
+    if (part.type === GOAT_CHAT_ARTIFACT_DATA_PART_TYPE) {
+      const artifact = parseGoatPublishedChatArtifact({ ok: true, artifact: part.data });
+      if (artifact) parts.push({ type: GOAT_CHAT_ARTIFACT_DATA_PART_TYPE, data: artifact });
       continue;
     }
     if (isPersistedToolPart(part)) {

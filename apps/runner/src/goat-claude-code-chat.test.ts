@@ -6,7 +6,11 @@ import type {
 } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
-import { extractClaudeScheduleWakeup, runGoatClaudeCodeChatTurn } from "./goat-claude-code-chat";
+import {
+  extractClaudeScheduleWakeup,
+  isClaudeCodeAuthenticationFailure,
+  runGoatClaudeCodeChatTurn,
+} from "./goat-claude-code-chat";
 import { GoatCodexChatRetryableInfrastructureError } from "./goat-codex-chat-errors";
 
 const authMocks = vi.hoisted(() => ({
@@ -52,7 +56,7 @@ const sandboxMocks = vi.hoisted(() => ({
 }));
 
 const skillMocks = vi.hoisted(() => ({
-  materializeCodexSkillSnapshotsForSession: vi.fn(),
+  materializeClaudeSkillSnapshotsForSession: vi.fn(),
 }));
 
 const harnessMocks = vi.hoisted(() => ({
@@ -151,8 +155,27 @@ vi.mock("./sandbox", () => ({
 }));
 
 vi.mock("./skills", () => ({
-  materializeCodexSkillSnapshotsForSession: skillMocks.materializeCodexSkillSnapshotsForSession,
+  materializeClaudeSkillSnapshotsForSession: skillMocks.materializeClaudeSkillSnapshotsForSession,
 }));
+
+describe("isClaudeCodeAuthenticationFailure", () => {
+  it.each([
+    "Failed to authenticate. API Error: 401",
+    "OAuth token has expired",
+    "Unauthorized: login expired",
+    "Invalid API key",
+  ])("recognizes rejected credentials: %s", (message) => {
+    expect(isClaudeCodeAuthenticationFailure(message)).toBe(true);
+  });
+
+  it.each([
+    "You're out of usage credits · resets 10am (UTC)",
+    "Credit balance is too low",
+    "5-hour limit reached - resets 10am (UTC)",
+  ])("keeps credentials connected for usage limits: %s", (message) => {
+    expect(isClaudeCodeAuthenticationFailure(message)).toBe(false);
+  });
+});
 
 describe("extractClaudeScheduleWakeup", () => {
   it("uses the last valid ScheduleWakeup call and clamps its delay", () => {
@@ -268,7 +291,7 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
     sandboxMocks.isRetryableCommandStreamError.mockReturnValue(false);
     harnessMocks.getGoatWorkflowHarnessSkillSnapshots.mockReturnValue([]);
-    skillMocks.materializeCodexSkillSnapshotsForSession.mockResolvedValue(undefined);
+    skillMocks.materializeClaudeSkillSnapshotsForSession.mockResolvedValue(undefined);
     taskMocks.buildGoatTaskTerminalProjection.mockReturnValue({ taskId: "goat_task_1" });
     taskMocks.markGoatTaskTurnRunning.mockResolvedValue(undefined);
   });
@@ -320,9 +343,9 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
       env: env(),
     });
 
-    expect(skillMocks.materializeCodexSkillSnapshotsForSession).toHaveBeenCalledWith({
+    expect(skillMocks.materializeClaudeSkillSnapshotsForSession).toHaveBeenCalledWith({
       sandbox,
-      codexWorkRoot: "/home/user/opencompany-goat/claude-chat",
+      claudeWorkRoot: "/home/user/opencompany-goat/claude-chat",
       skills: [
         {
           id: "smooth-shadow-ring",
@@ -338,7 +361,7 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
     expect(sandbox.files.write).toHaveBeenCalledWith(
       "/home/user/.opencompany-goat/claude-chat-prompts/prompt-goat_codex_turn_1.txt",
       expect.stringContaining(
-        "/home/user/opencompany-goat/claude-chat/.agents/skills/smooth-shadow-ring/SKILL.md",
+        "/home/user/opencompany-goat/claude-chat/.claude/skills/smooth-shadow-ring/SKILL.md",
       ),
     );
   });

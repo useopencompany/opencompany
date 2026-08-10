@@ -1,3 +1,4 @@
+import { GOAT_PUBLISH_ARTIFACT_TOOL_NAME, parseGoatPublishedChatArtifact } from "./chat-artifacts";
 import type { CodexAppServerNormalizedEvent } from "./codex-app-server-events";
 
 // Translates Claude Code headless stream-json events (`claude -p --output-format
@@ -349,11 +350,23 @@ function normalizeUserMessage(
         tool: started.tool,
         status: isError ? "failed" : "completed",
         error: isError ? (truncate(outputText, 600) ?? "Tool failed.") : undefined,
+        ...(started.tool === GOAT_PUBLISH_ARTIFACT_TOOL_NAME
+          ? { artifact: publishedArtifactFromText(outputText) ?? undefined }
+          : {}),
       }),
     );
   }
 
   return stampParent(events, parentToolCallId);
+}
+
+function publishedArtifactFromText(value: string | null) {
+  if (!value) return null;
+  try {
+    return parseGoatPublishedChatArtifact(JSON.parse(value) as unknown);
+  } catch {
+    return null;
+  }
 }
 
 // Subagent (Task) steps arrive as top-level assistant/user messages tagged with
