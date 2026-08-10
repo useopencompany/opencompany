@@ -64,6 +64,7 @@ const groups = {
       "ELECTRIC_URL",
       "MONID_API_KEY",
       "GOAT_STRIPE_API_KEY",
+      "GOAT_STRIPE_WEBHOOK_SECRET",
       "GOAT_STRIPE_CHECKOUT_ENABLED",
       "GOAT_X_CLIENT_ID",
       "GOAT_X_CLIENT_SECRET",

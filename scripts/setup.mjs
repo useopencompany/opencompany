@@ -116,6 +116,7 @@ const LOCAL_RUNNER_REQUIRED_ENV_KEYS = [
 const STRIPE_ENV_KEYS = ["STRIPE_SECRET_KEY"];
 const STRIPE_OPTIONAL_ENV_KEYS = [
   "GOAT_STRIPE_API_KEY",
+  "GOAT_STRIPE_WEBHOOK_SECRET",
   "GOAT_STRIPE_CHECKOUT_ENABLED",
   "CRON_SECRET",
   "STRIPE_LISTEN_DISABLED",
@@ -124,6 +125,7 @@ const STRIPE_OPTIONAL_ENV_KEYS = [
 ];
 const GOAT_BILLING_LOCAL_ENV_KEYS = [
   "GOAT_STRIPE_API_KEY",
+  "GOAT_STRIPE_WEBHOOK_SECRET",
   "GOAT_STRIPE_CHECKOUT_ENABLED",
   "CRON_SECRET",
 ];
@@ -224,6 +226,7 @@ const GOAT_LOCAL_ENV_KEYS = [
   "RUNNER_INTERNAL_URL",
   "RUNNER_INTERNAL_TOKEN",
   "GOAT_STRIPE_API_KEY",
+  "GOAT_STRIPE_WEBHOOK_SECRET",
   "GOAT_STRIPE_CHECKOUT_ENABLED",
   "CRON_SECRET",
   ...GITHUB_WORK_INTEGRATION_ENV_KEYS,
@@ -875,6 +878,11 @@ async function ensureStripe(state) {
     cliCredentials ??= readStripeSecretKeyFromCli();
     return cliCredentials;
   };
+  let cliWebhookSecret;
+  const getCliWebhookSecret = () => {
+    cliWebhookSecret ??= readStripeWebhookSecretFromCli();
+    return cliWebhookSecret;
+  };
   if (state.stripeSecretKey === "set") {
     ok("STRIPE_SECRET_KEY is set");
   } else {
@@ -928,7 +936,7 @@ async function ensureStripe(state) {
   if (state.stripeWebhookSecret === "set") {
     ok("STRIPE_WEBHOOK_SECRET is set");
   } else {
-    const result = readStripeWebhookSecretFromCli();
+    const result = getCliWebhookSecret();
     if (result.ok) {
       updates.STRIPE_WEBHOOK_SECRET = result.secret;
       ok("Will write STRIPE_WEBHOOK_SECRET from Stripe CLI");
@@ -938,6 +946,27 @@ async function ensureStripe(state) {
           "Forwarded Stripe webhooks will fail signature verification until it is set.",
       );
     }
+  }
+
+  const webhookEnv = { ...readEffectiveLocalEnv(), ...updates };
+  if (isPlaceholder(webhookEnv.GOAT_STRIPE_WEBHOOK_SECRET)) {
+    if (!isPlaceholder(webhookEnv.STRIPE_WEBHOOK_SECRET)) {
+      updates.GOAT_STRIPE_WEBHOOK_SECRET = webhookEnv.STRIPE_WEBHOOK_SECRET;
+      ok("Will mirror the local Stripe listener secret to GOAT_STRIPE_WEBHOOK_SECRET");
+    } else {
+      const result = getCliWebhookSecret();
+      if (result.ok) {
+        updates.GOAT_STRIPE_WEBHOOK_SECRET = result.secret;
+        ok("Will write GOAT_STRIPE_WEBHOOK_SECRET from Stripe CLI");
+      } else {
+        warn(
+          `GOAT_STRIPE_WEBHOOK_SECRET is missing and could not be read from Stripe CLI: ${result.message} ` +
+            "Forwarded Stripe webhooks will fail signature verification until it is set.",
+        );
+      }
+    }
+  } else {
+    ok("GOAT_STRIPE_WEBHOOK_SECRET is set");
   }
 
   if (Object.keys(updates).length > 0) {

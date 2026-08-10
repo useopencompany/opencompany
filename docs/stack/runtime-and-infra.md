@@ -47,18 +47,20 @@ build system that already owns the monorepo graph.
 
 ## Next.js
 
-**What it is:** React framework for the web application.
+**What it is:** React framework for the web applications.
 
-**What it does for us:** Hosts the product UI, App Router routes, server actions, auth routes,
-health checks, Stripe webhook route, and Inngest endpoint.
+**What it does for us:** Hosts the product UIs, App Router routes, server actions, auth routes,
+health checks, the surviving Goat Stripe webhook route, and the legacy Inngest endpoint.
 
 **Where it is used:**
 
-- `apps/web`.
-- `apps/web/app`.
+- `apps/goat` and `apps/goat/app`.
+- `apps/goat/app/api/stripe/webhook/route.ts` (surviving webhook owner).
+- `apps/goat/next.config.mjs`.
+- `apps/web` and `apps/web/app` during the legacy-product retirement window.
 - `apps/web/app/api/healthz/route.ts`.
 - `apps/web/app/api/inngest/route.ts`.
-- `apps/web/app/api/stripe/webhook/route.ts`.
+- `apps/web/app/api/stripe/webhook/route.ts` remains available for cutover rollback.
 - `apps/web/next.config.mjs`.
 
 **Why we use it:** It gives us a production-ready web framework with server components/actions,
@@ -71,17 +73,18 @@ operate; or the app needs runtime characteristics that Vercel/Next cannot provid
 
 ## Vercel
 
-**What it is:** Hosting and deployment platform for the web app.
+**What it is:** Hosting and deployment platform for the web apps.
 
-**What it does for us:** Builds and deploys `apps/web`, serves the UI and API routes, and is the web
-release target in the production workflow.
+**What it does for us:** Builds and deploys the separate Goat and legacy web projects, serves their
+UIs and API routes, and is their release target in the production workflow.
 
 **Where it is used:**
 
 - `vercel.json`.
+- `apps/goat/vercel.json`.
 - `.github/workflows/release-production.yml`.
 - `docs/deployment.md`.
-- Infisical `/web` sync target.
+- Infisical `/goat` and `/web` sync targets.
 
 **Why we use it:** It is the natural deployment target for Next.js and keeps web hosting overhead
 low while the product is changing quickly.

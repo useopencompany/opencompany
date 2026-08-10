@@ -3,7 +3,12 @@
 // Runs before production migrations when Goat is in the release scope. It
 // reads Vercel env values only to validate them and never prints them.
 
-const requiredGoatKeys = ["GOAT_STRIPE_API_KEY", "GOAT_STRIPE_CHECKOUT_ENABLED", "CRON_SECRET"];
+const requiredGoatKeys = [
+  "GOAT_STRIPE_API_KEY",
+  "GOAT_STRIPE_WEBHOOK_SECRET",
+  "GOAT_STRIPE_CHECKOUT_ENABLED",
+  "CRON_SECRET",
+];
 const requiredWebKeys = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"];
 
 const goatProjectId = requiredProcessEnv("GOAT_VERCEL_PROJECT_ID");
@@ -23,6 +28,9 @@ const [goatValues, webValues] = await Promise.all([
 const invalid = [];
 if (!goatValues.GOAT_STRIPE_API_KEY.startsWith("rk_live_")) {
   invalid.push("Goat GOAT_STRIPE_API_KEY must be a live restricted Stripe key.");
+}
+if (!goatValues.GOAT_STRIPE_WEBHOOK_SECRET.startsWith("whsec_")) {
+  invalid.push("Goat GOAT_STRIPE_WEBHOOK_SECRET must be a Stripe webhook signing secret.");
 }
 if (!/^[rs]k_live_/.test(webValues.STRIPE_SECRET_KEY)) {
   invalid.push("Web STRIPE_SECRET_KEY must be a live Stripe key.");
