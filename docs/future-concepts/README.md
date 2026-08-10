@@ -10,6 +10,10 @@ the owning spec, architecture doc, migration plan, or code comments.
 
 ## Concepts
 
+- [OpenCompany Headless Core Architecture](./headless-core-architecture.md) -
+  reference architecture for the foundation refactor: product vocabulary,
+  universal Runs, versioned API and stream contracts, Postgres durability,
+  Electric read sync, and the minimal web/mobile monorepo shape.
 - [Folder State Architecture](./folder-state-architecture.md) - future model for
   workspace file materialization across Postgres, object storage, GitHub, and
   runtime sandboxes.
