@@ -21,7 +21,10 @@
       "!**/test-results",
       "!packages/protocol/openapi/**",
       "!drizzle/meta",
-      "!bun.lock"
+      "!apps/web/next-env.d.ts",
+      "!bun.lock",
+      "!**/*.icon",
+      "!apps/mobile/src/uniwind-types.d.ts"
     ]
   },
   "linter": {
