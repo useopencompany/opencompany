@@ -8,6 +8,7 @@ type Status = "idle" | "loading" | "success" | "error";
 type EmailCaptureFormProps = {
   className?: string;
   ctaLabel?: string;
+  source?: string;
 };
 
 // Squared, monospace email capture — one input, one action, styled to match
@@ -15,6 +16,7 @@ type EmailCaptureFormProps = {
 export function EmailCaptureForm({
   className,
   ctaLabel = "Get early access",
+  source = "ship",
 }: EmailCaptureFormProps) {
   const inputId = useId();
   const [email, setEmail] = useState("");
@@ -41,7 +43,7 @@ export function EmailCaptureForm({
           const response = await fetch("/api/early-access", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email, source: "ship" }),
+            body: JSON.stringify({ email, source }),
           });
 
           if (!response.ok) {
@@ -72,7 +74,7 @@ export function EmailCaptureForm({
         <button
           type="submit"
           disabled={status === "loading"}
-          data-visitors-event="ship-early-access"
+          data-visitors-event={`${source}-early-access`}
           className="shrink-0 whitespace-nowrap bg-black px-4 py-2.5 font-medium font-mono text-[13px] text-white transition hover:bg-black/85 disabled:opacity-60"
         >
           {status === "loading" ? "Sending…" : ctaLabel}

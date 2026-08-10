@@ -18,12 +18,22 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 1,
     },
     {
+      url: `${siteUrl}/pricing`,
+      changeFrequency: "weekly",
+      priority: 0.8,
+    },
+    {
       url: `${siteUrl}/use-cases`,
       changeFrequency: "weekly",
       priority: 0.8,
     },
     {
       url: `${siteUrl}/ship`,
+      changeFrequency: "weekly",
+      priority: 0.9,
+    },
+    {
+      url: `${siteUrl}/benchmarks`,
       changeFrequency: "weekly",
       priority: 0.9,
     },

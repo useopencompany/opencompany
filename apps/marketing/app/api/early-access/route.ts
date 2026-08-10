@@ -1,5 +1,12 @@
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Maps the form's `source` to the label recorded in HubSpot. Add an entry here
+// whenever a new page grows an EmailCaptureForm.
+const PAGE_NAMES: Record<string, string> = {
+  ship: "Ship early access",
+  benchmarks: "Benchmarks ranking alerts",
+};
+
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -37,7 +44,7 @@ export async function POST(request: Request) {
         fields: [{ name: "email", value: email }],
         context: {
           pageUri: request.headers.get("referer") ?? undefined,
-          pageName: "Ship early access",
+          pageName: PAGE_NAMES[source] ?? "Early access",
         },
       }),
     },

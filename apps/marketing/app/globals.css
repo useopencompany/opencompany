@@ -13,6 +13,19 @@
     sans-serif;
   --font-mono:
     var(--font-geist-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /*
+   * ink/canvas tokens: components across this app (Hero, Pricing, Faq, ...)
+   * use text-ink and bg-canvas, but @opencompany/ui only ships the
+   * shadcn-style background/foreground pair — these were never registered,
+   * so the utilities silently no-op. Light-mode-only values, matching
+   * apps/web and apps/goat's palette (this app pins data-theme="light",
+   * no dark variant).
+   */
+  --color-ink: #111111;
+  --color-ink-muted: #6b6b6b;
+  --color-ink-subtle: #9a9a96;
+  --color-canvas: #f7f7f5;
 }
 
 /*

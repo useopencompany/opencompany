@@ -17,6 +17,9 @@ export function TopNav() {
           <Link href="/pricing" className={navLinkClassName}>
             pricing
           </Link>
+          <Link href="/benchmarks" className={navLinkClassName}>
+            benchmarks
+          </Link>
           <Link href="/blog" className={navLinkClassName}>
             blog
           </Link>
@@ -71,6 +74,9 @@ export function TopNav() {
             >
               <Link href="/pricing" className={`${navLinkClassName} block px-3 py-2`}>
                 pricing
+              </Link>
+              <Link href="/benchmarks" className={`${navLinkClassName} block px-3 py-2`}>
+                benchmarks
               </Link>
               <Link href="/blog" className={`${navLinkClassName} block px-3 py-2`}>
                 blog
