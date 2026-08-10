@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { PostgresRunExecutionRepository } from "@opencompany/db/chat-repository";
 import {
   type GoatCodexChatTurn,
   type GoatCodexChatTurnSettings,
@@ -216,6 +217,30 @@ export async function runClaimedTurn(
   }
   const { session, task } = claimedSession;
   const taskContext = task ? { task, harnessSpec: task.harnessSpec } : null;
+  const execution = new PostgresRunExecutionRepository((query) => getDb().execute(query));
+  const requestedAttemptId = `run_attempt_${randomUUID()}`;
+  const attempt = await execution.startAttempt({
+    worker: { workerId: leaseOwner },
+    runId: turn.id,
+    attemptId: requestedAttemptId,
+    leaseId,
+  });
+  if (!attempt) throw new GoatCodexChatLeaseLostError();
+  const canonicalAttemptId = attempt.id;
+  const startedEvents = await execution.appendEvents({
+    worker: { workerId: leaseOwner },
+    runId: turn.id,
+    attemptId: canonicalAttemptId,
+    leaseId,
+    events: [
+      {
+        id: `run_event_${randomUUID()}`,
+        type: "run.started",
+        payload: { attemptNumber: attempt.number },
+      },
+    ],
+  });
+  if (startedEvents.length !== 1) throw new GoatCodexChatLeaseLostError();
 
   if (turn.attempts === 1) {
     const queueStartedAt =
@@ -306,6 +331,7 @@ export async function runClaimedTurn(
         turn,
         session,
         env,
+        canonicalAttemptId,
         ...(taskContext ? { taskContext } : {}),
         ...(recoveryRequired ? { recovery: { reason: "lease_reclaimed" as const } } : {}),
         shouldAbort: () =>
@@ -338,6 +364,16 @@ export async function runClaimedTurn(
     if (heartbeatAbort) void runPromise?.catch(() => undefined);
   }
   if (retryableError) {
+    const failedAttempt = await execution.finishAttempt({
+      worker: { workerId: leaseOwner },
+      runId: turn.id,
+      attemptId: canonicalAttemptId,
+      leaseId,
+      status: "failed",
+      errorCode: "retryable_infrastructure",
+      errorMessage: retryableError.message,
+    });
+    if (!failedAttempt) throw new GoatCodexChatLeaseLostError();
     const retryAt = goatCodexChatRetryAt(new Date(), turn.attempts);
     await deferGoatCodexChatTurnForRetry({
       turnId: turn.id,
@@ -365,6 +401,16 @@ export async function runClaimedTurn(
     return;
   }
   if (handedOff) {
+    const abandonedAttempt = await execution.finishAttempt({
+      worker: { workerId: leaseOwner },
+      runId: turn.id,
+      attemptId: canonicalAttemptId,
+      leaseId,
+      status: "abandoned",
+      errorCode: "worker_handoff",
+      errorMessage: "The worker handed this Run off during shutdown.",
+    });
+    if (!abandonedAttempt) throw new GoatCodexChatLeaseLostError();
     await releaseGoatCodexChatTurnForHandoff({ turnId: turn.id, leaseId, leaseOwner });
   }
 }

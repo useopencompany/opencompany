@@ -1,6 +1,8 @@
 import { createRoute, OpenAPIHono, type RouteHandler, z } from "@hono/zod-openapi";
 import { RunEventSchema } from "./events";
 import {
+  AttachmentUploadBodySchema,
+  AttachmentUploadEnvelopeSchema,
   CancelRunEnvelopeSchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
@@ -16,7 +18,7 @@ import {
 } from "./schemas";
 import { OPENAPI_DOCUMENT_VERSION, PROTOCOL_VERSION } from "./version";
 
-const bearerSecurity = [{ bearerAuth: [] }];
+const actorSecurity = [{ bearerAuth: [] }, { sessionCookie: [] }];
 const errorResponse = {
   description: "A structured protocol error.",
   content: { "application/json": { schema: ErrorEnvelopeSchema } },
@@ -26,7 +28,7 @@ export const listConversationsRoute = createRoute({
   method: "get",
   path: "/v1/conversations",
   tags: ["Chat"],
-  security: bearerSecurity,
+  security: actorSecurity,
   request: {
     query: z.object({
       cursor: z.string().optional(),
@@ -46,7 +48,7 @@ export const getConversationRoute = createRoute({
   method: "get",
   path: "/v1/conversations/{conversationId}",
   tags: ["Chat"],
-  security: bearerSecurity,
+  security: actorSecurity,
   request: { params: z.object({ conversationId: ResourceIdSchema }) },
   responses: {
     200: {
@@ -61,7 +63,7 @@ export const listMessagesRoute = createRoute({
   method: "get",
   path: "/v1/conversations/{conversationId}/messages",
   tags: ["Chat"],
-  security: bearerSecurity,
+  security: actorSecurity,
   request: {
     params: z.object({ conversationId: ResourceIdSchema }),
     query: z.object({
@@ -82,7 +84,7 @@ export const createMessageRoute = createRoute({
   method: "post",
   path: "/v1/messages",
   tags: ["Chat"],
-  security: bearerSecurity,
+  security: actorSecurity,
   request: {
     headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
     body: { required: true, content: { "application/json": { schema: CreateMessageBodySchema } } },
@@ -96,11 +98,31 @@ export const createMessageRoute = createRoute({
   },
 });
 
+export const uploadAttachmentRoute = createRoute({
+  method: "post",
+  path: "/v1/attachments",
+  tags: ["Chat"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "multipart/form-data": { schema: AttachmentUploadBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Actor-scoped attachment uploaded and ready for one Message command.",
+      content: { "application/json": { schema: AttachmentUploadEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const getRunRoute = createRoute({
   method: "get",
   path: "/v1/runs/{runId}",
   tags: ["Runs"],
-  security: bearerSecurity,
+  security: actorSecurity,
   request: { params: z.object({ runId: ResourceIdSchema }) },
   responses: {
     200: {
@@ -115,7 +137,7 @@ export const streamRunEventsRoute = createRoute({
   method: "get",
   path: "/v1/runs/{runId}/events",
   tags: ["Runs"],
-  security: bearerSecurity,
+  security: actorSecurity,
   request: {
     params: z.object({ runId: ResourceIdSchema }),
     headers: z.object({ "last-event-id": CursorSchema.optional() }),
@@ -134,7 +156,7 @@ export const cancelRunRoute = createRoute({
   method: "post",
   path: "/v1/runs/{runId}/cancel",
   tags: ["Runs"],
-  security: bearerSecurity,
+  security: actorSecurity,
   request: { params: z.object({ runId: ResourceIdSchema }) },
   responses: {
     202: {
@@ -149,7 +171,7 @@ export const resolveApprovalRoute = createRoute({
   method: "post",
   path: "/v1/runs/{runId}/approvals/{approvalId}",
   tags: ["Approvals"],
-  security: bearerSecurity,
+  security: actorSecurity,
   request: {
     params: z.object({ runId: ResourceIdSchema, approvalId: ResourceIdSchema }),
     body: {
@@ -171,18 +193,28 @@ export type V1RouteHandlers = {
   getConversation: RouteHandler<typeof getConversationRoute>;
   listMessages: RouteHandler<typeof listMessagesRoute>;
   createMessage: RouteHandler<typeof createMessageRoute>;
+  uploadAttachment: RouteHandler<typeof uploadAttachmentRoute>;
   getRun: RouteHandler<typeof getRunRoute>;
   streamRunEvents: RouteHandler<typeof streamRunEventsRoute>;
   cancelRun: RouteHandler<typeof cancelRunRoute>;
   resolveApproval: RouteHandler<typeof resolveApprovalRoute>;
 };
 
-export function createV1Router(handlers: V1RouteHandlers) {
-  return new OpenAPIHono()
+export function createV1Router(
+  handlers: V1RouteHandlers,
+  options: {
+    beforeRoutes?: (app: OpenAPIHono) => void;
+    defaultHook?: NonNullable<ConstructorParameters<typeof OpenAPIHono>[0]>["defaultHook"];
+  } = {},
+) {
+  const app = new OpenAPIHono(options.defaultHook ? { defaultHook: options.defaultHook } : {});
+  options.beforeRoutes?.(app);
+  return app
     .openapi(listConversationsRoute, handlers.listConversations)
     .openapi(getConversationRoute, handlers.getConversation)
     .openapi(listMessagesRoute, handlers.listMessages)
     .openapi(createMessageRoute, handlers.createMessage)
+    .openapi(uploadAttachmentRoute, handlers.uploadAttachment)
     .openapi(getRunRoute, handlers.getRun)
     .openapi(streamRunEventsRoute, handlers.streamRunEvents)
     .openapi(cancelRunRoute, handlers.cancelRun)
@@ -197,6 +229,11 @@ export function createOpenApiDocument() {
     type: "http",
     scheme: "bearer",
     bearerFormat: "JWT",
+  });
+  app.openAPIRegistry.registerComponent("securitySchemes", "sessionCookie", {
+    type: "apiKey",
+    in: "cookie",
+    name: "wos-session",
   });
   return app.getOpenAPIDocument({
     openapi: OPENAPI_DOCUMENT_VERSION,
@@ -233,6 +270,23 @@ const contractDocumentHandlers: V1RouteHandlers = {
         meta,
       },
       202,
+    ),
+  uploadAttachment: (c) =>
+    c.json(
+      {
+        data: {
+          attachment: {
+            id: "attachment_contract",
+            filename: "brief.pdf",
+            mediaType: "application/pdf",
+            sizeBytes: 1024,
+            kind: "document",
+          },
+          expiresAt: placeholderTime,
+        },
+        meta,
+      },
+      201,
     ),
   getRun: (c) =>
     c.json(

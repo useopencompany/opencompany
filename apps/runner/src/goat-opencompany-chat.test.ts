@@ -187,7 +187,7 @@ describe("consumeGoatOpenCompanyChatStream", () => {
     const controller = new AbortController();
     const leaseLost = new GoatCodexChatLeaseLostError();
     controller.abort(leaseLost);
-    const project = vi.fn(async () => undefined);
+    const project = vi.fn(async (_projection: GoatOpenCompanyChatProjection) => undefined);
 
     await expect(
       consumeGoatOpenCompanyChatStream({
@@ -200,6 +200,39 @@ describe("consumeGoatOpenCompanyChatStream", () => {
       }),
     ).rejects.toBe(leaseLost);
     expect(project).not.toHaveBeenCalled();
+  });
+
+  it("projects a native tool approval request as durable approval state", async () => {
+    const project = vi.fn(async (_projection: GoatOpenCompanyChatProjection) => undefined);
+    const result = await consumeGoatOpenCompanyChatStream({
+      fullStream: streamParts(
+        {
+          type: "tool-call",
+          toolCallId: "tool_approval_1",
+          toolName: "use_action",
+          input: { action: "crm.update", params: { id: "customer_1" } },
+        },
+        {
+          type: "tool-approval-request",
+          toolCallId: "tool_approval_1",
+          approvalId: "approval_1",
+        },
+        { type: "finish", finishReason: "tool-calls" },
+      ),
+      sink: { project, recordStepUsage: vi.fn(async () => undefined) },
+      signal: new AbortController().signal,
+      flushIntervalMs: 0,
+    });
+
+    expect(result.parts).toEqual([
+      expect.objectContaining({
+        type: "tool-use_action",
+        toolCallId: "tool_approval_1",
+        state: "approval-requested",
+        approval: { id: "approval_1" },
+      }),
+    ]);
+    expect(project.mock.calls.at(-1)?.[0]).toEqual(result);
   });
 
   it("force-flushes the newest throttled text when the user interrupts", async () => {
@@ -301,6 +334,48 @@ describe("goatOpenCompanyModelMessagesFromStored", () => {
 
     expect(JSON.stringify(modelMessages)).toContain("report.docx");
     expect(JSON.stringify(modelMessages)).toContain("Revenue was up 18% in Q2.");
+  });
+
+  it("replays the trusted approval response when a paused Run continues", async () => {
+    const messages = [
+      storedMessage({
+        id: "user_approval",
+        role: "user",
+        content: "Look up the customer.",
+      }),
+      storedMessage({
+        id: "assistant_approval",
+        role: "assistant",
+        content: "",
+        debugTrace: {
+          schemaVersion: "opencompany.chat.debug.v1",
+          model: "anthropic/claude-sonnet-5",
+          uiMessageParts: [
+            {
+              type: "tool-use_action",
+              toolCallId: "tool_call_approval",
+              state: "approval-responded",
+              input: { action: "crm.lookup", params: { customer: "Acme" } },
+              approval: { id: "approval_1", approved: true },
+            },
+          ],
+        },
+      }),
+      storedMessage({
+        id: "user_later",
+        role: "user",
+        content: "Do not include this queued turn.",
+      }),
+    ];
+
+    const modelMessages = await goatOpenCompanyModelMessagesFromStored(messages, "user_approval", {
+      includeCurrentAssistantMessage: true,
+    });
+    const serialized = JSON.stringify(modelMessages);
+
+    expect(serialized).toContain("crm.lookup");
+    expect(serialized).toContain('"approved":true');
+    expect(serialized).not.toContain("Do not include this queued turn.");
   });
 
   it("dedupes copied workflow attachments during OpenCompany replay", async () => {

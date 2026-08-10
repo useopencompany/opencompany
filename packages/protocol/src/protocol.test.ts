@@ -12,6 +12,7 @@ describe("headless protocol", () => {
       "/v1/conversations/{conversationId}",
       "/v1/conversations/{conversationId}/messages",
       "/v1/messages",
+      "/v1/attachments",
       "/v1/runs/{runId}",
       "/v1/runs/{runId}/events",
       "/v1/runs/{runId}/cancel",

@@ -1,8 +1,11 @@
+import { randomUUID } from "node:crypto";
 import {
   captureGoatLlmUsageRecorded,
   captureGoatModelSpendRecorded,
 } from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
+import type { RunApprovalDraft, RunEventDraft, RunExecutionRepository } from "@opencompany/core";
+import { PostgresRunExecutionRepository } from "@opencompany/db/chat-repository";
 import { recordGoatCreditDebit } from "@opencompany/db/goat-credits";
 import type { GoatChatMessageDebugTrace } from "@opencompany/db/goat-schema";
 import { recordGoatModelCost, recordGoatModelUsageTokens } from "@opencompany/goat-observability";
@@ -58,10 +61,16 @@ export function createGoatOpenCompanyChatProjector(input: {
     model: string;
     leaseId: string;
     leaseOwner: string;
+    canonicalAttemptId?: string;
     turnStartedAt?: Date;
   };
+  execution?: RunExecutionRepository;
 }) {
   const { target } = input;
+  const execution =
+    input.execution ?? new PostgresRunExecutionRepository((query) => getDb().execute(query));
+  let lastProjectedContent: string | null = null;
+  const toolEventStates = new Map<string, "started" | "completed" | "failed">();
 
   const turnLeaseSubquery = (options: { runningOnly: boolean }) => sql`
     SELECT 1
@@ -124,6 +133,36 @@ export function createGoatOpenCompanyChatProjector(input: {
         terminalStatus: options.aborted ? "interrupted" : "failed",
       });
     }
+    return { content, projection: effectiveProjection };
+  };
+
+  const appendEvents = async (events: readonly RunEventDraft[]) => {
+    if (!target.canonicalAttemptId) return;
+    const inserted = await execution.appendEvents({
+      worker: { workerId: target.leaseOwner },
+      runId: target.turnId,
+      attemptId: target.canonicalAttemptId,
+      leaseId: target.leaseId,
+      events,
+    });
+    if (inserted.length !== events.length) throw new GoatCodexChatLeaseLostError();
+  };
+
+  const appendProjectionEvents = async (
+    projection: GoatOpenCompanyChatProjection,
+    content: string,
+  ) => {
+    const events: RunEventDraft[] = [];
+    if (content !== lastProjectedContent) {
+      events.push({
+        id: `run_event_${randomUUID()}`,
+        type: "message.content_updated",
+        payload: { messageId: target.assistantMessageId, content, complete: false },
+      });
+      lastProjectedContent = content;
+    }
+    events.push(...toolEventsFromProjection(projection.parts, toolEventStates));
+    await appendEvents(events);
   };
 
   const hydrateEmptyProjectionFromPersistedMessage = async (
@@ -176,8 +215,9 @@ export function createGoatOpenCompanyChatProjector(input: {
       );
     },
 
-    project(projection: GoatOpenCompanyChatProjection) {
-      return writeAssistantMessage(projection);
+    async project(projection: GoatOpenCompanyChatProjection) {
+      const written = await writeAssistantMessage(projection);
+      await appendProjectionEvents(written.projection, written.content);
     },
 
     async recordStepUsage(input: { stepIndex: number; usage: LanguageModelUsage }) {
@@ -211,13 +251,32 @@ export function createGoatOpenCompanyChatProjector(input: {
       if (row.interrupt_requested_at) throw new GoatOpenCompanyChatInterruptedError();
     },
 
+    async paused(
+      projection: GoatOpenCompanyChatProjection,
+      approvals: readonly RunApprovalDraft[],
+    ) {
+      if (!target.canonicalAttemptId || approvals.length === 0) {
+        throw new GoatCodexChatLeaseLostError();
+      }
+      const written = await writeAssistantMessage(projection);
+      await appendProjectionEvents(written.projection, written.content);
+      const persisted = await execution.pauseForApprovals({
+        worker: { workerId: target.leaseOwner },
+        runId: target.turnId,
+        attemptId: target.canonicalAttemptId,
+        leaseId: target.leaseId,
+        approvals,
+      });
+      if (persisted.length !== approvals.length) throw new GoatCodexChatLeaseLostError();
+    },
+
     async completed(
       projection: GoatOpenCompanyChatProjection,
       taskCompletion?: GoatTaskTurnCompletion | null,
     ) {
       const completedAt = new Date();
       const durationMs = elapsedTurnDurationMs(target.turnStartedAt, completedAt);
-      await writeAssistantMessage(projection, {
+      const written = await writeAssistantMessage(projection, {
         ...(durationMs !== undefined ? { durationMs } : {}),
       });
       await settleGoatDurableTurn({
@@ -227,6 +286,15 @@ export function createGoatOpenCompanyChatProjector(input: {
         error: null,
         completedAt,
         taskCompletion,
+        ...(target.canonicalAttemptId
+          ? {
+              canonicalRun: canonicalRunSettlement(
+                target.canonicalAttemptId,
+                target.assistantMessageId,
+                written.content,
+              ),
+            }
+          : {}),
       });
     },
 
@@ -236,7 +304,7 @@ export function createGoatOpenCompanyChatProjector(input: {
     ) {
       const completedAt = new Date();
       const durationMs = elapsedTurnDurationMs(target.turnStartedAt, completedAt);
-      await writeAssistantMessage(projection, {
+      const written = await writeAssistantMessage(projection, {
         aborted: true,
         preservePersistedOnEmpty: true,
         ...(durationMs !== undefined ? { durationMs } : {}),
@@ -248,6 +316,15 @@ export function createGoatOpenCompanyChatProjector(input: {
         error: null,
         completedAt,
         taskCompletion,
+        ...(target.canonicalAttemptId
+          ? {
+              canonicalRun: canonicalRunSettlement(
+                target.canonicalAttemptId,
+                target.assistantMessageId,
+                written.content,
+              ),
+            }
+          : {}),
       });
     },
 
@@ -258,7 +335,7 @@ export function createGoatOpenCompanyChatProjector(input: {
     ) {
       const completedAt = new Date();
       const durationMs = elapsedTurnDurationMs(target.turnStartedAt, completedAt);
-      await writeAssistantMessage(projection, {
+      const written = await writeAssistantMessage(projection, {
         error,
         preservePersistedOnEmpty: true,
         ...(durationMs !== undefined ? { durationMs } : {}),
@@ -270,9 +347,69 @@ export function createGoatOpenCompanyChatProjector(input: {
         error,
         completedAt,
         taskCompletion,
+        ...(target.canonicalAttemptId
+          ? {
+              canonicalRun: canonicalRunSettlement(
+                target.canonicalAttemptId,
+                target.assistantMessageId,
+                written.content,
+              ),
+            }
+          : {}),
       });
     },
   };
+}
+
+function canonicalRunSettlement(attemptId: string, assistantMessageId: string, content: string) {
+  return { attemptId, assistantMessageId, content };
+}
+
+function toolEventsFromProjection(
+  parts: readonly GoatOpenCompanyChatUiPart[],
+  states: Map<string, "started" | "completed" | "failed">,
+): RunEventDraft[] {
+  const events: RunEventDraft[] = [];
+  for (const part of parts) {
+    const toolCallId = typeof part.toolCallId === "string" ? part.toolCallId : null;
+    const state = typeof part.state === "string" ? part.state : null;
+    if (!toolCallId || !state) continue;
+    const prior = states.get(toolCallId);
+    if (!prior) {
+      const name =
+        typeof part.toolName === "string"
+          ? part.toolName
+          : part.type.startsWith("tool-")
+            ? part.type.slice("tool-".length)
+            : "tool";
+      events.push({
+        id: `run_event_${randomUUID()}`,
+        type: "tool.started",
+        payload: { toolCallId, name },
+      });
+      states.set(toolCallId, "started");
+    }
+    if (state === "output-available" && states.get(toolCallId) !== "completed") {
+      events.push({
+        id: `run_event_${randomUUID()}`,
+        type: "tool.completed",
+        payload: { toolCallId },
+      });
+      states.set(toolCallId, "completed");
+    } else if (state === "output-error" && states.get(toolCallId) !== "failed") {
+      events.push({
+        id: `run_event_${randomUUID()}`,
+        type: "tool.failed",
+        payload: {
+          toolCallId,
+          code: "tool_error",
+          message: typeof part.errorText === "string" ? part.errorText : "Tool execution failed.",
+        },
+      });
+      states.set(toolCallId, "failed");
+    }
+  }
+  return events;
 }
 
 async function recordOpenCompanyChatModelCost(input: {

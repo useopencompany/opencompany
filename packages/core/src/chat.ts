@@ -4,6 +4,7 @@ import {
   CHAT_READ_PERMISSION,
   CHAT_WRITE_PERMISSION,
 } from "./actor";
+import { CHAT_ATTACHMENTS_PER_MESSAGE } from "./attachments";
 
 export const CHAT_ENGINES = ["opencompany", "codex", "claude_code"] as const;
 export type ChatEngine = (typeof CHAT_ENGINES)[number];
@@ -174,6 +175,13 @@ export type RunEventDraft = {
   payload: Readonly<Record<string, unknown>>;
 };
 
+export type RunApprovalDraft = {
+  id: string;
+  kind: string;
+  prompt: string;
+  options?: readonly string[];
+};
+
 // Worker-facing durability port. Lease fencing remains a persistence concern; the application
 // core names only Runs, Attempts, workers, and semantic events.
 export interface RunExecutionRepository {
@@ -190,6 +198,13 @@ export interface RunExecutionRepository {
     leaseId: string;
     events: readonly RunEventDraft[];
   }): Promise<readonly RunEvent[]>;
+  pauseForApprovals(input: {
+    worker: WorkerIdentity;
+    runId: string;
+    attemptId: string;
+    leaseId: string;
+    approvals: readonly RunApprovalDraft[];
+  }): Promise<readonly RunApproval[]>;
   finishAttempt(input: {
     worker: WorkerIdentity;
     runId: string;
@@ -263,7 +278,6 @@ export class CoreError extends Error {
 }
 
 const MAX_MESSAGE_LENGTH = 10_000;
-const MAX_ATTACHMENTS = 20;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
 const MAX_RESOURCE_ID_LENGTH = 256;
 const MAX_MODEL_ID_LENGTH = 256;
@@ -321,10 +335,10 @@ export class ChatApplicationService {
         `Message content cannot exceed ${MAX_MESSAGE_LENGTH} characters.`,
       );
     }
-    if (attachmentIds.length > MAX_ATTACHMENTS) {
+    if (attachmentIds.length > CHAT_ATTACHMENTS_PER_MESSAGE) {
       throw new CoreError(
         "invalid_argument",
-        `A Message cannot contain more than ${MAX_ATTACHMENTS} attachments.`,
+        `A Message cannot contain more than ${CHAT_ATTACHMENTS_PER_MESSAGE} attachments.`,
       );
     }
     if (new Set(attachmentIds).size !== attachmentIds.length) {
@@ -420,9 +434,6 @@ export class ChatApplicationService {
     const answer = input.answer?.trim();
     if (input.resolution === "answered" && !answer) {
       throw new CoreError("invalid_argument", "An answer is required for this resolution.");
-    }
-    if (input.resolution !== "answered" && answer) {
-      throw new CoreError("invalid_argument", "An answer is only valid for an answered approval.");
     }
     if (input.resolution !== "answered" && answer) {
       throw new CoreError("invalid_argument", "An answer is only valid for an answered approval.");

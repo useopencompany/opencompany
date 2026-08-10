@@ -2,6 +2,8 @@ import type { AgentModelId, CodexReasoningEffort } from "@opencompany/agent-runt
 import {
   APPROVAL_RESOLUTIONS,
   type ApprovalResolution,
+  CHAT_ATTACHMENT_FORMATS,
+  type ChatAttachmentFormat,
   RUN_APPROVAL_STATUSES,
   RUN_ATTEMPT_STATUSES,
   RUN_EVENT_TYPES,
@@ -558,7 +560,13 @@ export type GoatCodexChatSessionStatus =
   | "failed"
   | "interrupted"
   | "closed";
-export type GoatCodexChatTurnStatus = "queued" | "running" | "completed" | "failed" | "interrupted";
+export type GoatCodexChatTurnStatus =
+  | "queued"
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const GOAT_CODEX_APP_SERVER_EVENT_TYPES = [
   "assistant.delta",
   "assistant.completed",
@@ -599,6 +607,7 @@ export const GOAT_CODEX_CHAT_EVENT_TYPES: readonly GoatCodexChatEventType[] =
   );
 
 export type GoatCodexChatTurnSettings = {
+  approvalContinuation?: boolean;
   reasoningEffort?: CodexReasoningEffort;
   planModeReasoningEffort?: CodexReasoningEffort | null;
   wakeupChain?: number;
@@ -4004,8 +4013,8 @@ export const goatCodexChatTurns = goat.table(
       table.assistantMessageId,
     ),
     statusCheck: check(
-      "goat_codex_chat_turns_status_check",
-      sql`${table.status} IN ('queued', 'running', 'completed', 'failed', 'interrupted')`,
+      "goat_codex_chat_turns_status_v2_check",
+      sql`${table.status} IN ('queued', 'running', 'paused', 'completed', 'failed', 'interrupted')`,
     ),
     eventSequenceCheck: check(
       "goat_codex_chat_turns_event_sequence_check",
@@ -4177,6 +4186,65 @@ export const goatRunEvents = goat.table(
     schemaVersionCheck: check(
       "goat_run_events_schema_version_check",
       sql`${table.schemaVersion} = 1`,
+    ),
+  }),
+);
+
+// Uploads are actor/workspace scoped before a Message can reference them. Private blob locators
+// and extracted text remain persistence details; the protocol carries only the opaque id and
+// public metadata. claimed_message_id is deliberately retained as an immutable audit reference
+// rather than an FK so normal conversation deletion cannot make an upload reusable.
+export const goatChatAttachmentUploads = goat.table(
+  "chat_attachment_uploads",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    format: text("format").$type<ChatAttachmentFormat>().notNull(),
+    mediaType: text("media_type").notNull(),
+    filename: text("filename").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    blobPathname: text("blob_pathname").notNull(),
+    blobUrl: text("blob_url").notNull(),
+    extractedText: text("extracted_text"),
+    claimedMessageId: text("claimed_message_id"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    actorUnclaimedIdx: index("goat_chat_attachment_uploads_actor_unclaimed_idx")
+      .on(table.userWorkosId, table.workspaceId, table.expiresAt)
+      .where(sql`${table.claimedAt} IS NULL`),
+    claimedMessageIdx: index("goat_chat_attachment_uploads_claimed_message_idx").on(
+      table.claimedMessageId,
+    ),
+    blobPathnameIdx: uniqueIndex("goat_chat_attachment_uploads_blob_pathname_idx").on(
+      table.blobPathname,
+    ),
+    formatCheck: check(
+      "goat_chat_attachment_uploads_format_check",
+      sql`${table.format} IN (${sql.join(
+        CHAT_ATTACHMENT_FORMATS.map((format) => sql`${format}`),
+        sql`, `,
+      )})`,
+    ),
+    sizeCheck: check(
+      "goat_chat_attachment_uploads_size_check",
+      sql`${table.sizeBytes} > 0 AND ${table.sizeBytes} <= 20971520`,
+    ),
+    lifecycleCheck: check(
+      "goat_chat_attachment_uploads_lifecycle_check",
+      sql`(${table.claimedAt} IS NULL AND ${table.claimedMessageId} IS NULL)
+        OR (${table.claimedAt} IS NOT NULL AND ${table.claimedMessageId} IS NOT NULL)`,
+    ),
+    expiryCheck: check(
+      "goat_chat_attachment_uploads_expiry_check",
+      sql`${table.expiresAt} > ${table.createdAt}`,
     ),
   }),
 );

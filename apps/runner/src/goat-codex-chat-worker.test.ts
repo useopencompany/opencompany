@@ -485,11 +485,24 @@ describe("runClaimedTurn", () => {
 
     const input = chatMocks.runGoatCodexChatTurn.mock.calls[0]?.[0];
     expect(input).toEqual(
-      expect.objectContaining({ turn: expect.objectContaining({ attempts: 1 }) }),
+      expect.objectContaining({
+        turn: expect.objectContaining({ attempts: 1 }),
+        canonicalAttemptId: "updated",
+      }),
     );
     expect(input).not.toHaveProperty("recovery");
     expect(dbMock.select).toHaveBeenCalledOnce();
     expect(dbMock.leftJoin).toHaveBeenCalledOnce();
+    expect(
+      dbMock.execute.mock.calls.some(([query]) =>
+        sqlText(query).includes("INSERT INTO goat.run_attempts"),
+      ),
+    ).toBe(true);
+    expect(
+      dbMock.execute.mock.calls.some(([query]) =>
+        sqlText(query).includes("INSERT INTO goat.run_events"),
+      ),
+    ).toBe(true);
     expect(telemetry.recordGoatHistogram).toHaveBeenCalledWith(
       "goat.codex_chat.queue_wait_ms",
       5_000,

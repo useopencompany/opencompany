@@ -14,16 +14,17 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type ChatRepositoryIdFactory,
+  PostgresChatAttachmentRepository,
   PostgresChatRepository,
   PostgresRunExecutionRepository,
 } from "./chat-repository";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const migrationPath = path.join(
-  repositoryRoot,
-  "drizzle",
+const migrationPaths = [
   "0198_goat_headless_chat_foundation.sql",
-);
+  "0199_goat_chat_attachment_uploads.sql",
+  "0200_goat_chat_run_pausing.sql",
+].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
 describe("Postgres Chat repositories", () => {
@@ -59,9 +60,11 @@ describe("Postgres Chat repositories", () => {
         'migration_message', 'migration_assistant', 'Preserve me'
       );
     `);
-    const migration = await readFile(migrationPath, "utf8");
-    for (const statement of migration.split("--> statement-breakpoint")) {
-      if (statement.trim()) await database.exec(statement);
+    for (const migrationPath of migrationPaths) {
+      const migration = await readFile(migrationPath, "utf8");
+      for (const statement of migration.split("--> statement-breakpoint")) {
+        if (statement.trim()) await database.exec(statement);
+      }
     }
     const migrated = await database.query<{ id: string; event_sequence: number }>(`
       SELECT id, event_sequence
@@ -143,26 +146,31 @@ describe("Postgres Chat repositories", () => {
   });
 
   it("replays an attachment command without resolving the upload again", async () => {
+    const uploads = new PostgresChatAttachmentRepository(
+      execute,
+      () => new Date("2026-08-10T20:00:00.000Z"),
+    );
+    await expect(
+      uploads.create({
+        actor: actor(),
+        id: "attachment_1",
+        format: "pdf",
+        mediaType: "application/pdf",
+        filename: "launch-plan.pdf",
+        sizeBytes: 2048,
+        blobPathname: "goat-chat/user_1/launch-plan.pdf",
+        blobUrl: "https://blob.invalid/launch-plan.pdf",
+        extractedText: "Private extracted launch context",
+        expiresAt: new Date("2026-08-11T20:00:00.000Z"),
+      }),
+    ).resolves.toMatchObject({ id: "attachment_1", format: "pdf" });
     let resolutionCount = 0;
     const attachmentRepository = new PostgresChatRepository(execute, {
       ids: deterministicIds(),
       now: () => new Date("2026-08-10T20:00:00.000Z"),
-      resolveAttachments: async () => {
+      resolveAttachments: async (input) => {
         resolutionCount += 1;
-        return {
-          attachments: [
-            {
-              id: "attachment_1",
-              kind: "pdf",
-              mediaType: "application/pdf",
-              filename: "launch-plan.pdf",
-              sizeBytes: 2048,
-              blobPathname: "goat-chat/user_1/launch-plan.pdf",
-              blobUrl: "https://blob.invalid/launch-plan.pdf",
-            },
-          ],
-          attachmentTexts: { attachment_1: "Private extracted launch context" },
-        };
+        return uploads.resolve(input);
       },
     });
     const attachmentService = new ChatApplicationService(attachmentRepository);
@@ -194,6 +202,38 @@ describe("Postgres Chat repositories", () => {
       },
     ]);
     expect(JSON.stringify(page)).not.toMatch(/blobPathname|blobUrl/u);
+    expect(
+      (
+        await database.query<{ claimed_message_id: string; claimed_at: Date }>(`
+          SELECT claimed_message_id, claimed_at
+          FROM goat.chat_attachment_uploads
+          WHERE id = 'attachment_1'
+        `)
+      ).rows,
+    ).toMatchObject([{ claimed_message_id: first.messageId, claimed_at: expect.any(Date) }]);
+
+    await expect(
+      attachmentService.createMessage(actor(), {
+        ...command,
+        idempotencyKey: "reuse-attachment",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+    expect(
+      (
+        await database.query<{ count: number }>(`
+          SELECT COUNT(*)::int AS count
+          FROM goat.chat_command_idempotency
+          WHERE idempotency_key = 'reuse-attachment'
+        `)
+      ).rows,
+    ).toEqual([{ count: 0 }]);
+    expect(
+      (
+        await database.query<{ count: number }>(`
+          SELECT COUNT(*)::int AS count FROM goat.chat_sessions
+        `)
+      ).rows,
+    ).toEqual([{ count: 1 }]);
 
     await expect(
       attachmentService.createMessage(actor({ workspaceId: "workspace_2" }), {
@@ -201,7 +241,7 @@ describe("Postgres Chat repositories", () => {
         idempotencyKey: "unauthorized-attachment",
       }),
     ).rejects.toMatchObject({ code: "not_found" });
-    expect(resolutionCount).toBe(1);
+    expect(resolutionCount).toBe(2);
   });
 
   it("pins a legacy owner-only conversation to the actor workspace without changing its model", async () => {
@@ -308,20 +348,63 @@ describe("Postgres Chat repositories", () => {
       model: "provider/model",
     });
     await database.query(
-      `INSERT INTO goat.run_approvals (id, run_id, kind, prompt, options)
-       VALUES ('approval_1', $1, 'tool', 'Allow the customer lookup?', '["Approve", "Deny"]')`,
+      `UPDATE goat.codex_chat_turns
+       SET status = 'running', attempts = 1, lease_id = 'lease_approval',
+           lease_owner = 'worker_approval'
+       WHERE id = $1`,
       [created.runId],
     );
+    await database.query(
+      `UPDATE goat.chat_messages AS message
+       SET debug_trace = jsonb_build_object(
+         'schemaVersion', 'opencompany.chat.debug.v1',
+         'uiMessageParts', jsonb_build_array(jsonb_build_object(
+           'type', 'tool-use_action',
+           'toolCallId', 'tool_call_1',
+           'state', 'approval-requested',
+           'input', jsonb_build_object('action', 'crm.lookup'),
+           'approval', jsonb_build_object('id', 'approval_1')
+         ))
+       )
+       FROM goat.codex_chat_turns AS run
+       WHERE run.id = $1 AND message.id = run.assistant_message_id`,
+      [created.runId],
+    );
+    const execution = new PostgresRunExecutionRepository(
+      execute,
+      () => new Date("2026-08-10T20:01:00.000Z"),
+    );
+    await execution.startAttempt({
+      worker: { workerId: "worker_approval" },
+      runId: created.runId,
+      attemptId: "attempt_approval",
+      leaseId: "lease_approval",
+    });
+    await expect(
+      execution.pauseForApprovals({
+        worker: { workerId: "worker_approval" },
+        runId: created.runId,
+        attemptId: "attempt_approval",
+        leaseId: "lease_approval",
+        approvals: [
+          {
+            id: "approval_1",
+            kind: "use_action",
+            prompt: "Approve crm.lookup?",
+            options: ["approved", "denied"],
+          },
+        ],
+      }),
+    ).resolves.toMatchObject([{ id: "approval_1", status: "pending" }]);
 
     const command = {
       runId: created.runId,
       approvalId: "approval_1",
-      resolution: "answered" as const,
-      answer: "Use the read-only lookup.",
+      resolution: "approved" as const,
     };
     await expect(service.resolveApproval(actor(), command)).resolves.toMatchObject({
       idempotentReplay: false,
-      resolution: "answered",
+      resolution: "approved",
     });
     await expect(service.resolveApproval(actor(), command)).resolves.toMatchObject({
       idempotentReplay: true,
@@ -333,16 +416,34 @@ describe("Postgres Chat repositories", () => {
         resolution: "denied",
       }),
     ).rejects.toMatchObject({ code: "idempotency_conflict" });
-    await expect(
-      service.resolveApproval(actor(), { ...command, answer: "Use the mutating lookup." }),
-    ).rejects.toMatchObject({ code: "idempotency_conflict" });
     expect(
       (
         await database.query<{ status: string; resolution: string }>(`
           SELECT status, resolution FROM goat.run_approvals WHERE id = 'approval_1'
         `)
       ).rows,
-    ).toEqual([{ status: "resolved", resolution: "answered" }]);
+    ).toEqual([{ status: "resolved", resolution: "approved" }]);
+    expect(
+      (
+        await database.query<{ status: string; settings: Record<string, unknown> }>(
+          "SELECT status, settings FROM goat.codex_chat_turns WHERE id = $1",
+          [created.runId],
+        )
+      ).rows,
+    ).toEqual([{ status: "queued", settings: { approvalContinuation: true } }]);
+    const assistant = await database.query<{ debug_trace: { uiMessageParts: unknown[] } }>(
+      `SELECT message.debug_trace
+       FROM goat.chat_messages AS message
+       JOIN goat.codex_chat_turns AS run ON run.assistant_message_id = message.id
+       WHERE run.id = $1`,
+      [created.runId],
+    );
+    expect(assistant.rows[0]?.debug_trace.uiMessageParts).toEqual([
+      expect.objectContaining({
+        state: "approval-responded",
+        approval: expect.objectContaining({ id: "approval_1", approved: true }),
+      }),
+    ]);
     expect(
       (
         await database.query<{ sequence: number; type: string }>(
@@ -352,7 +453,9 @@ describe("Postgres Chat repositories", () => {
       ).rows,
     ).toEqual([
       { sequence: 1, type: "run.queued" },
-      { sequence: 2, type: "approval.resolved" },
+      { sequence: 2, type: "approval.requested" },
+      { sequence: 3, type: "run.paused" },
+      { sequence: 4, type: "approval.resolved" },
     ]);
   });
 
@@ -427,6 +530,136 @@ describe("Postgres Chat repositories", () => {
     await expect(service.listRunEvents(actor(), { runId: created.runId })).resolves.toMatchObject({
       nextSequence: 3,
     });
+  });
+
+  it("cancels a paused approval Run when the user sends a new Message", async () => {
+    const paused = await service.createMessage(actor(), {
+      idempotencyKey: "send-paused-before-new-message",
+      content: "Change the customer record",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+    await database.query("UPDATE goat.codex_chat_turns SET status = 'paused' WHERE id = $1", [
+      paused.runId,
+    ]);
+    await database.query(
+      `INSERT INTO goat.run_approvals (id, run_id, kind, prompt, options)
+       VALUES ('approval_talked_past', $1, 'use_action', 'Approve crm.update?', '["approved","denied"]')`,
+      [paused.runId],
+    );
+    await database.query(
+      `UPDATE goat.chat_messages AS message
+       SET debug_trace = jsonb_build_object(
+         'schemaVersion', 'opencompany.chat.debug.v1',
+         'uiMessageParts', jsonb_build_array(jsonb_build_object(
+           'type', 'tool-use_action',
+           'toolCallId', 'tool_call_talked_past',
+           'state', 'approval-requested',
+           'approval', jsonb_build_object('id', 'approval_talked_past')
+         ))
+       )
+       FROM goat.codex_chat_turns AS run
+       WHERE run.id = $1 AND message.id = run.assistant_message_id`,
+      [paused.runId],
+    );
+
+    await expect(
+      service.createMessage(actor(), {
+        idempotencyKey: "send-after-paused-approval",
+        conversationId: paused.conversationId,
+        content: "Skip that and summarize the account instead",
+        engine: "opencompany",
+        model: "provider/model",
+      }),
+    ).resolves.toMatchObject({ conversationId: paused.conversationId });
+
+    expect(
+      (
+        await database.query<{ status: string }>(
+          "SELECT status FROM goat.codex_chat_turns WHERE id = $1",
+          [paused.runId],
+        )
+      ).rows,
+    ).toEqual([{ status: "interrupted" }]);
+    expect(
+      (
+        await database.query<{ status: string; resolution: string }>(
+          "SELECT status, resolution FROM goat.run_approvals WHERE id = 'approval_talked_past'",
+        )
+      ).rows,
+    ).toEqual([{ status: "canceled", resolution: "canceled" }]);
+    const oldAssistant = await database.query<{ debug_trace: { uiMessageParts: unknown[] } }>(
+      `SELECT message.debug_trace
+       FROM goat.chat_messages AS message
+       JOIN goat.codex_chat_turns AS run ON run.assistant_message_id = message.id
+       WHERE run.id = $1`,
+      [paused.runId],
+    );
+    expect(oldAssistant.rows[0]?.debug_trace.uiMessageParts).toEqual([
+      expect.objectContaining({ state: "output-denied" }),
+    ]);
+    expect(
+      (
+        await database.query<{ type: string }>(
+          "SELECT type FROM goat.run_events WHERE run_id = $1 ORDER BY sequence DESC LIMIT 1",
+          [paused.runId],
+        )
+      ).rows,
+    ).toEqual([{ type: "run.canceled" }]);
+  });
+
+  it("abandons the prior Attempt when an expired Run lease is reclaimed", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "send-recovered-worker",
+      content: "Recover this",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'running', attempts = 1, lease_id = 'lease_old', lease_owner = 'worker_old'
+       WHERE id = $1`,
+      [created.runId],
+    );
+    const execution = new PostgresRunExecutionRepository(
+      execute,
+      () => new Date("2026-08-10T20:02:00.000Z"),
+    );
+    await execution.startAttempt({
+      worker: { workerId: "worker_old" },
+      runId: created.runId,
+      attemptId: "attempt_old",
+      leaseId: "lease_old",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET attempts = 2, lease_id = 'lease_new', lease_owner = 'worker_new'
+       WHERE id = $1`,
+      [created.runId],
+    );
+
+    await expect(
+      execution.startAttempt({
+        worker: { workerId: "worker_new" },
+        runId: created.runId,
+        attemptId: "attempt_new",
+        leaseId: "lease_new",
+      }),
+    ).resolves.toMatchObject({ id: "attempt_new", number: 2, status: "running" });
+    expect(
+      (
+        await database.query<{ id: string; status: string; error_code: string | null }>(
+          `SELECT id, status, error_code
+           FROM goat.run_attempts
+           WHERE run_id = $1
+           ORDER BY number`,
+          [created.runId],
+        )
+      ).rows,
+    ).toEqual([
+      { id: "attempt_old", status: "abandoned", error_code: "lease_reclaimed" },
+      { id: "attempt_new", status: "running", error_code: null },
+    ]);
   });
 
   it("projects queued cancellation to the assistant, runtime, and semantic log", async () => {

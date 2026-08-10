@@ -124,6 +124,29 @@ export const MessagePageSchema = z
   .strict()
   .openapi("MessagePage");
 
+export const AttachmentUploadBodySchema = z
+  .object({
+    file: z
+      .file()
+      .max(20 * 1024 * 1024)
+      .openapi({ type: "string", format: "binary" }),
+  })
+  .strict()
+  .openapi("AttachmentUploadBody");
+
+export const AttachmentUploadEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        attachment: AttachmentSchema,
+        expiresAt: TimestampSchema,
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("AttachmentUploadEnvelope");
+
 export const CreateMessageBodySchema = z
   .object({
     conversationId: ResourceIdSchema.optional(),
@@ -132,7 +155,7 @@ export const CreateMessageBodySchema = z
     content: z.string().max(10_000),
     engine: ChatEngineSchema,
     model: z.string().min(1).max(256).optional(),
-    attachmentIds: z.array(ResourceIdSchema).max(20).optional(),
+    attachmentIds: z.array(ResourceIdSchema).max(5).optional(),
   })
   .strict()
   .refine(
@@ -214,5 +237,6 @@ export const ResolveApprovalEnvelopeSchema = z
 export type ConversationDto = z.infer<typeof ConversationSchema>;
 export type MessageDto = z.infer<typeof MessageSchema>;
 export type RunDto = z.infer<typeof RunSchema>;
+export type AttachmentUploadEnvelope = z.infer<typeof AttachmentUploadEnvelopeSchema>;
 export type CreateMessageBody = z.infer<typeof CreateMessageBodySchema>;
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelopeSchema>;

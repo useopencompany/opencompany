@@ -1401,6 +1401,20 @@
       "when": 1786394604046,
       "tag": "0198_goat_headless_chat_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 200,
+      "version": "7",
+      "when": 1786397000000,
+      "tag": "0199_goat_chat_attachment_uploads",
+      "breakpoints": true
+    },
+    {
+      "idx": 201,
+      "version": "7",
+      "when": 1786399000000,
+      "tag": "0200_goat_chat_run_pausing",
+      "breakpoints": true
     }
   ]
 }

@@ -104,6 +104,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
   session: GoatCodexChatSession;
   env: RunnerEnv;
   taskContext?: GoatTaskTurnContext | undefined;
+  canonicalAttemptId?: string;
   shouldAbort?: () => Error | null;
 }): Promise<"settled" | "handed_off"> {
   const { turn, session, env } = input;
@@ -129,11 +130,15 @@ export async function runGoatOpenCompanyChatTurn(input: {
       model: session.model,
       leaseId,
       leaseOwner,
+      ...(input.canonicalAttemptId ? { canonicalAttemptId: input.canonicalAttemptId } : {}),
       turnStartedAt:
         turn.runAfter && turn.runAfter > turn.createdAt ? turn.runAfter : turn.createdAt,
     },
   });
-  let projection: GoatOpenCompanyChatProjection = { parts: [] };
+  let projection = turn.settings.approvalContinuation
+    ? await loadGoatOpenCompanyChatProjection(turn.assistantMessageId)
+    : { parts: [] };
+  await projector.started();
 
   if (turn.interruptRequestedAt) {
     await projector.interrupted(
@@ -182,10 +187,9 @@ export async function runGoatOpenCompanyChatTurn(input: {
       currentUserMessageId: turn.userMessageId,
       modelId: runtime.model,
       blobToken: env.blobReadWriteToken,
+      includeCurrentAssistantMessage: turn.settings.approvalContinuation === true,
     });
     throwIfAborted(generationController.signal);
-    await projector.started();
-
     const gateway = createGateway({ apiKey: env.vercelAiGatewayApiKey });
     const { streamText } = getBraintrustAISDK(ai);
     const attribution = createGoatGatewayAttribution({
@@ -223,8 +227,15 @@ export async function runGoatOpenCompanyChatTurn(input: {
         },
         recordStepUsage: (usage) => projector.recordStepUsage(usage),
       },
+      initialProjection: projection,
     });
     await abortWatcher.checkNow();
+    const pendingApprovals = approvalDraftsFromProjection(projection);
+    if (pendingApprovals.length > 0) {
+      await abortWatcher.stop();
+      await projector.paused(projection, pendingApprovals);
+      return "settled";
+    }
     projection = withCompletedResponseFallback(projection);
     const taskResult = projectionText(projection);
     const taskOutcome = input.taskContext
@@ -310,8 +321,9 @@ export async function consumeGoatOpenCompanyChatStream(input: {
   sink: Pick<GoatOpenCompanyChatProjector, "project" | "recordStepUsage">;
   flushIntervalMs?: number;
   now?: () => number;
+  initialProjection?: GoatOpenCompanyChatProjection;
 }): Promise<GoatOpenCompanyChatProjection> {
-  const parts: GoatOpenCompanyChatUiPart[] = [];
+  const parts: GoatOpenCompanyChatUiPart[] = cloneParts(input.initialProjection?.parts ?? []);
   const textPartIndexes = new Map<string, number>();
   const reasoningPartIndexes = new Map<string, number>();
   const toolPartIndexes = new Map<string, number>();
@@ -323,6 +335,10 @@ export async function consumeGoatOpenCompanyChatStream(input: {
   let latestUsage: LanguageModelUsage | undefined;
   let finishReason: string | undefined;
   let stepIndex = 0;
+
+  for (const [index, part] of parts.entries()) {
+    if (typeof part.toolCallId === "string") toolPartIndexes.set(part.toolCallId, index);
+  }
 
   const projection = (): GoatOpenCompanyChatProjection => ({
     parts: cloneParts(parts),
@@ -493,6 +509,18 @@ export async function consumeGoatOpenCompanyChatStream(input: {
           }
           await flush(true);
         }
+      } else if (part.type === "tool-approval-request") {
+        const toolCallId = readString(part.toolCallId);
+        const approvalId = readString(part.approvalId);
+        const index = toolCallId ? toolPartIndexes.get(toolCallId) : undefined;
+        if (toolCallId && approvalId && index !== undefined) {
+          replacePart(index, {
+            ...partAt(parts, index),
+            state: "approval-requested",
+            approval: { id: approvalId },
+          });
+          await flush(true);
+        }
       } else if (part.type === "tool-result") {
         const toolCallId = readString(part.toolCallId);
         const toolName = readString(part.toolName);
@@ -583,7 +611,11 @@ export async function consumeGoatOpenCompanyChatStream(input: {
 export async function goatOpenCompanyModelMessagesFromStored(
   storedMessages: readonly GoatStoredChatMessage[],
   currentUserMessageId: string,
-  options?: { modelId?: string | undefined; blobToken?: string | undefined },
+  options?: {
+    modelId?: string | undefined;
+    blobToken?: string | undefined;
+    includeCurrentAssistantMessage?: boolean;
+  },
 ) {
   const currentIndex = storedMessages.findIndex(
     (message) => message.id === currentUserMessageId && message.role === "user",
@@ -591,7 +623,12 @@ export async function goatOpenCompanyModelMessagesFromStored(
   if (currentIndex < 0) {
     throw new Error(`OpenCompany chat user message ${currentUserMessageId} was not found.`);
   }
-  const replayMessages = storedMessages.slice(0, currentIndex + 1);
+  const nextMessage = storedMessages[currentIndex + 1];
+  const replayMessages = storedMessages.slice(
+    0,
+    currentIndex +
+      (options?.includeCurrentAssistantMessage && nextMessage?.role === "assistant" ? 2 : 1),
+  );
   const uiMessages = replayMessages.map((message) => toGoatChatUiMessage(message));
   return convertToModelMessages(
     await hydrateGoatOpenCompanyAttachmentParts({
@@ -608,6 +645,7 @@ async function loadGoatOpenCompanyChatModelMessages(input: {
   currentUserMessageId: string;
   modelId: string;
   blobToken: string | undefined;
+  includeCurrentAssistantMessage: boolean;
 }) {
   const rows = await getDb()
     .select({
@@ -635,7 +673,22 @@ async function loadGoatOpenCompanyChatModelMessages(input: {
   return goatOpenCompanyModelMessagesFromStored(storedMessages, input.currentUserMessageId, {
     modelId: input.modelId,
     blobToken: input.blobToken,
+    includeCurrentAssistantMessage: input.includeCurrentAssistantMessage,
   });
+}
+
+async function loadGoatOpenCompanyChatProjection(
+  assistantMessageId: string,
+): Promise<GoatOpenCompanyChatProjection> {
+  const [message] = await getDb()
+    .select({ debugTrace: goatChatMessages.debugTrace })
+    .from(goatChatMessages)
+    .where(eq(goatChatMessages.id, assistantMessageId))
+    .limit(1);
+  const parts = message?.debugTrace?.uiMessageParts;
+  return {
+    parts: Array.isArray(parts) ? (structuredClone(parts) as GoatOpenCompanyChatUiPart[]) : [],
+  };
 }
 
 async function hydrateGoatOpenCompanyAttachmentParts(input: {
@@ -1105,6 +1158,29 @@ function projectionText(projection: GoatOpenCompanyChatProjection) {
     .flatMap((part) => (part.type === "text" && typeof part.text === "string" ? [part.text] : []))
     .join("")
     .trim();
+}
+
+function approvalDraftsFromProjection(projection: GoatOpenCompanyChatProjection) {
+  const seen = new Set<string>();
+  return projection.parts.flatMap((part) => {
+    if (part.state !== "approval-requested" || !isRecord(part.approval)) return [];
+    const approvalId = readString(part.approval.id);
+    const toolCallId = readString(part.toolCallId);
+    if (!approvalId || !toolCallId || seen.has(approvalId)) return [];
+    seen.add(approvalId);
+    const toolName =
+      readString(part.toolName) ??
+      (part.type.startsWith("tool-") ? part.type.slice("tool-".length) : "tool");
+    const action = isRecord(part.input) ? readString(part.input.action) : null;
+    return [
+      {
+        id: approvalId,
+        kind: toolName,
+        prompt: action ? `Approve ${action}?` : `Approve ${toolName}?`,
+        options: ["approved", "denied"] as const,
+      },
+    ];
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
