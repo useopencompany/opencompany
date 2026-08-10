@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Archiving a chat no longer risks crashing the page — you'll see a clear error and can retry if something goes wrong (#1155) — @opencompany-bot.
 - A chat's unread status and a task's ability to keep going no longer break right after we ship an update (#1150, #1151, #1154) — @opencompany-bot.
 - If a model provider errors out mid-reply, you keep whatever it had already written instead of losing the response (#1152) — @opencompany-bot.
-- Shared links to the pricing, use-cases, media, and blog pages now show a preview image on X, WhatsApp, and Slack (#1126) — @opencompany-bot.
+- Shared links to the pricing, use-cases, media, ship, and blog pages now show a preview image on X, WhatsApp, and Slack (#1126) — @opencompany-bot.
 - The chat header now lines up correctly with the sidebar above it (#1134) — @opencompany-bot.
 
 ## [1.10.0] - 2026-08-07
