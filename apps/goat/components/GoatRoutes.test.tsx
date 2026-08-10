@@ -409,7 +409,9 @@ describe("GoatSkillsSettingsRoute", () => {
       url: "github.com/o/r",
     });
 
-    await userEvent.click(screen.getByRole("button", { name: "Import skill" }));
+    const importButton = screen.getByRole("button", { name: "Import skill" });
+    await waitFor(() => expect(importButton).toBeEnabled());
+    await userEvent.click(importButton);
 
     await waitFor(() =>
       expect(skillActionsMock.importGoatSkillAction).toHaveBeenCalledWith({
