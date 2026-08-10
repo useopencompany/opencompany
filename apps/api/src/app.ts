@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { Actor, ChatApplicationService, RunEvent } from "@opencompany/core";
+import {
+  type Actor,
+  CHAT_ATTACHMENT_MAX_BYTES,
+  type ChatApplicationService,
+  type RunEvent,
+} from "@opencompany/core";
 import { GOAT_SPANS, withGoatSpan } from "@opencompany/goat-observability";
 import { captureException, createLogger } from "@opencompany/observability";
 import {
@@ -12,6 +17,7 @@ import {
   type V1RouteHandlers,
 } from "@opencompany/protocol";
 import type { Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { requestId } from "hono/request-id";
 import { secureHeaders } from "hono/secure-headers";
 import { streamSSE } from "hono/streaming";
@@ -27,6 +33,7 @@ const EVENT_BATCH_SIZE = 100;
 const EVENT_POLL_MS = 1_000;
 const HEARTBEAT_MS = 15_000;
 const TERMINAL_RUN_STATUSES = new Set(["completed", "failed", "canceled"]);
+const MULTIPART_ENVELOPE_BYTES = 64 * 1024;
 
 export type CreateApiAppInput = {
   chat: ChatApplicationService;
@@ -275,6 +282,17 @@ export function createApiApp(input: CreateApiAppInput) {
           },
         );
       });
+      router.use(
+        "/v1/attachments",
+        bodyLimit({
+          maxSize: CHAT_ATTACHMENT_MAX_BYTES + MULTIPART_ENVELOPE_BYTES,
+          onError: (c) =>
+            apiErrorResponse(
+              c,
+              new ApiError(413, "invalid_request", "The attachment upload is too large."),
+            ),
+        }),
+      );
     },
     defaultHook(result, c) {
       if (result.success) return;

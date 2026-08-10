@@ -131,6 +131,34 @@ describe("canonical Hono API", () => {
     expect(JSON.stringify(json)).not.toMatch(/blob|pathname|url/iu);
   });
 
+  it("rejects oversized multipart bodies before buffering the upload", async () => {
+    let uploadCalled = false;
+    const app = testApp(fakeRepository(), {
+      attachments: {
+        async upload() {
+          uploadCalled = true;
+          throw new Error("Oversized uploads must not reach storage.");
+        },
+      },
+    });
+    const response = await app.request("/v1/attachments", {
+      method: "POST",
+      headers: {
+        "Content-Length": String(21 * 1024 * 1024),
+        "Content-Type": "multipart/form-data; boundary=test",
+        "X-Request-Id": "request_oversized",
+      },
+      body: "--test--\r\n",
+    });
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "invalid_request", requestId: "request_oversized", retryable: false },
+      meta: { apiVersion: "v1" },
+    });
+    expect(uploadCalled).toBe(false);
+  });
+
   it("enforces rate limits without making them a durability dependency", async () => {
     const limiter: ApiRateLimiter = {
       consume: () => ({ allowed: false, retryAfterSeconds: 7 }),
