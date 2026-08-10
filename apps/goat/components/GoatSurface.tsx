@@ -183,6 +183,7 @@ import {
   removeOptimisticGoatChatSummary,
 } from "@/lib/optimistic-chat-summaries";
 import type { GoatSkillCatalogItem } from "@/lib/skills";
+import { continueGoatTask } from "@/lib/task-client";
 import {
   createGoatCollections,
   type GoatChatMessageRow,
@@ -202,7 +203,7 @@ import {
   deriveGoatTaskWorkflowSteps,
   type GoatTaskWorkflowStepView,
 } from "@/lib/task-workflow-activity";
-import { archiveGoatTaskAction, cancelGoatTaskAction, continueGoatTaskAction } from "@/lib/tasks";
+import { archiveGoatTaskAction, cancelGoatTaskAction } from "@/lib/tasks";
 import { updateGoatTimezoneAction } from "@/lib/user-preferences";
 import type { GoatWorkflowCatalogItem } from "@/lib/workflows";
 
@@ -1564,13 +1565,8 @@ export function GoatSurface({
       setMessages((current) => [...current, optimisticMessage]);
       const continueTask =
         taskSkillMentions.length > 0
-          ? continueGoatTaskAction(
-              activeTaskConversation.taskId,
-              prompt,
-              messageId,
-              taskSkillMentions,
-            )
-          : continueGoatTaskAction(activeTaskConversation.taskId, prompt, messageId);
+          ? continueGoatTask(activeTaskConversation.taskId, prompt, messageId, taskSkillMentions)
+          : continueGoatTask(activeTaskConversation.taskId, prompt, messageId);
       void continueTask
         .then((result) => {
           if (!mountedRef.current) return;

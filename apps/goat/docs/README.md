@@ -730,7 +730,9 @@ The UI maps this projection to Tasks rows while task detail renders the linked c
 natively. Goat task pages subscribe to `goat.tasks` plus the standard session messages and runtime
 state. Legacy rows without a session still subscribe to `goat.task_messages` and `goat.task_events`
 for read compatibility. Origin chats subscribe to `goat.chat_messages`, so task completion
-notifications appear without a manual refresh.
+notifications appear without a manual refresh. Replies use
+`POST /api/tasks/[taskId]/continue` instead of a Server Action so an open task remains replyable
+when production deploys a newer build in the background.
 
 Settings and Brain use the same pattern for `goat.integrations`, `goat.brain_folders`, and
 `goat.brain_documents`. Server props are initial render fallbacks; after hydration, live Electric
