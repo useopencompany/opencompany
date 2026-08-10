@@ -4,13 +4,14 @@ import {
   useKeyboardScrollToEnd,
 } from "@legendapp/list/keyboard";
 import type { LegendListRef, LegendListRenderItemProps } from "@legendapp/list/react-native";
-import { LinearGradient } from "expo-linear-gradient";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Linking, StyleSheet, useColorScheme, View } from "react-native";
-import type { MarkdownStyle } from "react-native-enriched-markdown";
-import { KeyboardGestureArea, KeyboardStickyView } from "react-native-keyboard-controller";
+import { useEffect, useRef, useState } from "react";
+import { Alert, Linking, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useCSSVariable, useResolveClassNames, useUniwind } from "uniwind";
 
+import { StyledKeyboardGestureArea } from "@/shared/ui/styled-keyboard-gesture-area";
+import { StyledKeyboardStickyView } from "@/shared/ui/styled-keyboard-sticky-view";
+import { StyledLinearGradient } from "@/shared/ui/styled-linear-gradient";
 import {
   type ChatMessage as ChatMessageModel,
   createMessageIdentity,
@@ -19,110 +20,9 @@ import {
 import { useMarkdownStream } from "../model/use-markdown-stream";
 import { ChatComposer } from "./ChatComposer";
 import { ChatMessage } from "./ChatMessage";
+import { useChatMarkdownStyle } from "./use-chat-markdown-style";
 
 const CHAT_TOP_CLEARANCE = 70;
-const LIGHT_COMPOSER_GRADIENT = ["rgba(250, 250, 249, 0)", "#FAFAF9"] as const;
-const DARK_COMPOSER_GRADIENT = ["rgba(17, 17, 17, 0)", "#111111"] as const;
-
-const LIGHT_MARKDOWN_STYLE: MarkdownStyle = {
-  paragraph: { color: "#171717", fontSize: 16, lineHeight: 24, marginBottom: 12 },
-  h1: { color: "#0A0A0A", fontSize: 28, lineHeight: 34, marginBottom: 12 },
-  h2: { color: "#0A0A0A", fontSize: 23, lineHeight: 29, marginBottom: 10, marginTop: 8 },
-  h3: { color: "#171717", fontSize: 19, lineHeight: 25, marginBottom: 8, marginTop: 6 },
-  strong: { color: "#0A0A0A", fontWeight: "bold" },
-  em: { color: "#262626", fontStyle: "italic" },
-  link: { color: "#0066CC", underline: true },
-  code: {
-    backgroundColor: "#EDEDED",
-    borderColor: "#D4D4D4",
-    color: "#9F1239",
-    fontFamily: "Menlo",
-    fontSize: 14,
-  },
-  codeBlock: {
-    backgroundColor: "#F5F5F5",
-    borderColor: "#D4D4D4",
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    color: "#171717",
-    fontFamily: "Menlo",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 12,
-    padding: 12,
-  },
-  list: {
-    bulletColor: "#404040",
-    color: "#171717",
-    fontSize: 16,
-    gapWidth: 8,
-    lineHeight: 24,
-    marginBottom: 12,
-    markerColor: "#404040",
-  },
-  blockquote: {
-    backgroundColor: "#F5F5F5",
-    borderColor: "#A3A3A3",
-    borderWidth: 3,
-    color: "#525252",
-    fontSize: 16,
-    gapWidth: 12,
-    lineHeight: 24,
-    marginBottom: 12,
-  },
-  image: { borderRadius: 12, height: 220, marginBottom: 14, marginTop: 4 },
-  thematicBreak: { color: "#D4D4D4", height: 1, marginBottom: 18, marginTop: 10 },
-};
-
-const DARK_MARKDOWN_STYLE: MarkdownStyle = {
-  paragraph: { color: "#F5F5F5", fontSize: 16, lineHeight: 24, marginBottom: 12 },
-  h1: { color: "#FFFFFF", fontSize: 28, lineHeight: 34, marginBottom: 12 },
-  h2: { color: "#FFFFFF", fontSize: 23, lineHeight: 29, marginBottom: 10, marginTop: 8 },
-  h3: { color: "#FAFAFA", fontSize: 19, lineHeight: 25, marginBottom: 8, marginTop: 6 },
-  strong: { color: "#FFFFFF", fontWeight: "bold" },
-  em: { color: "#E5E5E5", fontStyle: "italic" },
-  link: { color: "#66B3FF", underline: true },
-  code: {
-    backgroundColor: "#262626",
-    borderColor: "#525252",
-    color: "#FDA4AF",
-    fontFamily: "Menlo",
-    fontSize: 14,
-  },
-  codeBlock: {
-    backgroundColor: "#1F1F1F",
-    borderColor: "#525252",
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    color: "#F5F5F5",
-    fontFamily: "Menlo",
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 12,
-    padding: 12,
-  },
-  list: {
-    bulletColor: "#D4D4D4",
-    color: "#F5F5F5",
-    fontSize: 16,
-    gapWidth: 8,
-    lineHeight: 24,
-    marginBottom: 12,
-    markerColor: "#D4D4D4",
-  },
-  blockquote: {
-    backgroundColor: "#1F1F1F",
-    borderColor: "#737373",
-    borderWidth: 3,
-    color: "#D4D4D4",
-    fontSize: 16,
-    gapWidth: 12,
-    lineHeight: 24,
-    marginBottom: 12,
-  },
-  image: { borderRadius: 12, height: 220, marginBottom: 14, marginTop: 4 },
-  thematicBreak: { color: "#525252", height: 1, marginBottom: 18, marginTop: 10 },
-};
 
 function replaceAssistantMessage(
   messages: ChatMessageModel[],
@@ -136,8 +36,13 @@ function replaceAssistantMessage(
 
 export function StreamingChat() {
   const insets = useSafeAreaInsets();
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === "dark";
+  const { theme } = useUniwind();
+  const [gradientStart, gradientEnd] = useCSSVariable([
+    "--color-background-transparent",
+    "--color-background-deep",
+  ]) as [string, string];
+  const listStyle = useResolveClassNames("flex-1");
+  const listContentStyle = useResolveClassNames("px-[18px]");
   const [messages, setMessages] = useState<ChatMessageModel[]>(seedMessages);
   const [input, setInput] = useState("");
   const [isResponseActive, setIsResponseActive] = useState(false);
@@ -148,17 +53,11 @@ export function StreamingChat() {
   const responseActiveRef = useRef(false);
   const isMountedRef = useRef(true);
   const animationFrameRef = useRef<number | null>(null);
-  const markdownStyle = useMemo(
-    () => (isDark ? DARK_MARKDOWN_STYLE : LIGHT_MARKDOWN_STYLE),
-    [isDark],
-  );
-  const anchoredEndSpace = useMemo(
-    () =>
-      anchorIndex === undefined
-        ? undefined
-        : { anchorIndex, anchorOffset: insets.top + CHAT_TOP_CLEARANCE },
-    [anchorIndex, insets.top],
-  );
+  const markdownStyle = useChatMarkdownStyle();
+  const anchoredEndSpace =
+    anchorIndex === undefined
+      ? undefined
+      : { anchorIndex, anchorOffset: insets.top + CHAT_TOP_CLEARANCE };
   const { contentInsetEndAdjustment, onComposerLayout } = useKeyboardChatComposerInset(
     listRef,
     composerRef,
@@ -180,7 +79,7 @@ export function StreamingChat() {
     };
   }, []);
 
-  const handleLinkPress = useCallback((url: string) => {
+  const handleLinkPress = (url: string) => {
     let parsedUrl: URL;
 
     try {
@@ -206,41 +105,38 @@ export function StreamingChat() {
         },
       },
     ]);
-  }, []);
+  };
 
-  const startResponse = useCallback(
-    (assistantId: string) => {
-      const didStart = startMarkdownStream({
-        onStreamingStart: () => {
-          setMessages((currentMessages) =>
-            replaceAssistantMessage(currentMessages, assistantId, { status: "streaming" }),
-          );
-        },
-        onChunk: (content) => {
-          setMessages((currentMessages) =>
-            replaceAssistantMessage(currentMessages, assistantId, { content }),
-          );
-        },
-        onComplete: () => {
-          setMessages((currentMessages) =>
-            replaceAssistantMessage(currentMessages, assistantId, { status: "complete" }),
-          );
-          setAnchorIndex(undefined);
-          setIsResponseActive(false);
-          responseActiveRef.current = false;
-        },
-      });
-
-      if (!didStart) {
+  const startResponse = (assistantId: string) => {
+    const didStart = startMarkdownStream({
+      onStreamingStart: () => {
+        setMessages((currentMessages) =>
+          replaceAssistantMessage(currentMessages, assistantId, { status: "streaming" }),
+        );
+      },
+      onChunk: (content) => {
+        setMessages((currentMessages) =>
+          replaceAssistantMessage(currentMessages, assistantId, { content }),
+        );
+      },
+      onComplete: () => {
+        setMessages((currentMessages) =>
+          replaceAssistantMessage(currentMessages, assistantId, { status: "complete" }),
+        );
         setAnchorIndex(undefined);
         setIsResponseActive(false);
         responseActiveRef.current = false;
-      }
-    },
-    [startMarkdownStream],
-  );
+      },
+    });
 
-  const handleSend = useCallback(() => {
+    if (!didStart) {
+      setAnchorIndex(undefined);
+      setIsResponseActive(false);
+      responseActiveRef.current = false;
+    }
+  };
+
+  const handleSend = () => {
     const trimmedInput = input.trim();
 
     if (trimmedInput.length === 0 || responseActiveRef.current) {
@@ -276,7 +172,7 @@ export function StreamingChat() {
     animationFrameRef.current = requestAnimationFrame(() => {
       animationFrameRef.current = null;
 
-      void scrollMessageToEnd({ animated: true, closeKeyboard: true })
+      void scrollMessageToEnd({ animated: false, closeKeyboard: false })
         .catch(() => {
           freeze.set(false);
           console.warn("Unable to coordinate the chat scroll before streaming.");
@@ -287,40 +183,37 @@ export function StreamingChat() {
           }
         });
     });
-  }, [freeze, input, messages.length, scrollMessageToEnd, startResponse]);
+  };
 
-  const renderItem = useCallback(
-    ({ item }: LegendListRenderItemProps<ChatMessageModel>) => (
-      <ChatMessage
-        isDark={isDark}
-        message={item}
-        markdownStyle={markdownStyle}
-        onLinkPress={handleLinkPress}
-      />
-    ),
-    [handleLinkPress, isDark, markdownStyle],
+  const renderItem = ({ item }: LegendListRenderItemProps<ChatMessageModel>) => (
+    <ChatMessage
+      message={item}
+      markdownStyle={markdownStyle}
+      onLinkPress={handleLinkPress}
+      themeKey={theme}
+    />
   );
 
   return (
-    <View style={[styles.container, isDark ? styles.containerDark : null]}>
-      <KeyboardGestureArea
+    <View className="flex-1 bg-background">
+      <StyledKeyboardGestureArea
+        className="flex-1 bg-background"
         interpolator="ios"
         offset={composerPillHeight}
-        style={[styles.container, isDark ? styles.containerDark : null]}
         textInputNativeID="chat-composer"
       >
         <KeyboardAwareLegendList
           alignItemsAtEnd
           anchoredEndSpace={anchoredEndSpace}
           applyWorkaroundForContentInsetHitTestBug
-          contentContainerStyle={{
-            paddingHorizontal: 18,
-            paddingTop: insets.top + CHAT_TOP_CLEARANCE,
-          }}
+          contentContainerStyle={[
+            listContentStyle,
+            { paddingTop: insets.top + CHAT_TOP_CLEARANCE },
+          ]}
           contentInsetAdjustmentBehavior="never"
           contentInsetEndAdjustment={contentInsetEndAdjustment}
           data={messages}
-          extraData={isDark}
+          extraData={theme}
           freeze={freeze}
           initialScrollAtEnd
           keyboardDismissMode="interactive"
@@ -332,23 +225,22 @@ export function StreamingChat() {
           ref={listRef}
           renderItem={renderItem}
           scrollIndicatorInsets={{ bottom: -insets.bottom }}
-          style={styles.list}
+          style={listStyle}
         />
-      </KeyboardGestureArea>
+      </StyledKeyboardGestureArea>
 
-      <KeyboardStickyView
+      <StyledKeyboardStickyView
+        className="absolute right-0 bottom-0 left-0"
         offset={{ closed: 0, opened: insets.bottom }}
-        style={styles.composerWrapper}
       >
-        <LinearGradient
-          colors={isDark ? DARK_COMPOSER_GRADIENT : LIGHT_COMPOSER_GRADIENT}
+        <StyledLinearGradient
+          className="absolute right-0 -top-[52px] bottom-0 left-0"
+          colors={[gradientStart, gradientEnd]}
           pointerEvents="none"
-          style={styles.composerGradient}
         />
         <ChatComposer
           bottomInset={insets.bottom}
           disabled={isResponseActive}
-          isDark={isDark}
           onChangeText={setInput}
           onComposerLayout={onComposerLayout}
           onPillHeightChange={setComposerPillHeight}
@@ -356,33 +248,7 @@ export function StreamingChat() {
           value={input}
           wrapperRef={composerRef}
         />
-      </KeyboardStickyView>
+      </StyledKeyboardStickyView>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  composerWrapper: {
-    bottom: 0,
-    left: 0,
-    position: "absolute",
-    right: 0,
-  },
-  composerGradient: {
-    bottom: 0,
-    left: 0,
-    position: "absolute",
-    right: 0,
-    top: -52,
-  },
-  container: {
-    backgroundColor: "#FAFAF9",
-    flex: 1,
-  },
-  containerDark: {
-    backgroundColor: "#111111",
-  },
-  list: {
-    flex: 1,
-  },
-});

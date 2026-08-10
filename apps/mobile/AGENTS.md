@@ -31,3 +31,16 @@ We prefer using native UI components where possible to achieve the best performa
 ## Routing
 
 We use Expo Router with file-based navigation. The API is similar to React Navigation, but recently started diverging from it, so always use `expo-router` skill when working with routing and linking.
+
+## Animations
+
+We use Reanimated 4 for animations. Never use `Animated` from RN, only `import Reanimated from "react-native-reanimated"`. Always offload animations to UI thread using Reanimated or Worklets.
+
+## React Compiler
+
+React Compiler is enabled is the mobile app. Don't use `useMemo`, `useCallback`, or `memo` unless the compiler doesn't do so (rare) - only after debugging performance issues.
+
+## Coding Style
+
+- Prefer `interface` over `type`
+- Do not create separate interfaces for props, just inline the type definition in the function component

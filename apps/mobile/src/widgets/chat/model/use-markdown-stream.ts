@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 import {
   getNextChunkIndex,
@@ -18,7 +18,7 @@ export function useMarkdownStream() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeRef = useRef(false);
 
-  const cancel = useCallback(() => {
+  const cancel = () => {
     if (timeoutRef.current !== null) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
@@ -30,41 +30,38 @@ export function useMarkdownStream() {
     }
 
     activeRef.current = false;
-  }, []);
+  };
 
-  const start = useCallback(
-    ({ onStreamingStart, onChunk, onComplete }: StartMarkdownStreamOptions) => {
-      if (activeRef.current) {
-        return false;
-      }
+  const start = ({ onStreamingStart, onChunk, onComplete }: StartMarkdownStreamOptions) => {
+    if (activeRef.current) {
+      return false;
+    }
 
-      activeRef.current = true;
-      let currentIndex = 0;
+    activeRef.current = true;
+    let currentIndex = 0;
 
-      timeoutRef.current = setTimeout(() => {
-        timeoutRef.current = null;
-        onStreamingStart();
+    timeoutRef.current = setTimeout(() => {
+      timeoutRef.current = null;
+      onStreamingStart();
 
-        intervalRef.current = setInterval(() => {
-          currentIndex = getNextChunkIndex(currentIndex, sampleMarkdown.length);
-          onChunk(sampleMarkdown.slice(0, currentIndex));
+      intervalRef.current = setInterval(() => {
+        currentIndex = getNextChunkIndex(currentIndex, sampleMarkdown.length);
+        onChunk(sampleMarkdown.slice(0, currentIndex));
 
-          if (currentIndex === sampleMarkdown.length) {
-            if (intervalRef.current !== null) {
-              clearInterval(intervalRef.current);
-              intervalRef.current = null;
-            }
-
-            activeRef.current = false;
-            onComplete();
+        if (currentIndex === sampleMarkdown.length) {
+          if (intervalRef.current !== null) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
           }
-        }, STREAMING_INTERVAL_MS);
-      }, THINKING_DELAY_MS);
 
-      return true;
-    },
-    [],
-  );
+          activeRef.current = false;
+          onComplete();
+        }
+      }, STREAMING_INTERVAL_MS);
+    }, THINKING_DELAY_MS);
+
+    return true;
+  };
 
   useEffect(() => cancel, [cancel]);
 

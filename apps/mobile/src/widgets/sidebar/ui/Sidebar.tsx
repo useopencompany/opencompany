@@ -1,4 +1,5 @@
-import { Button, Host } from "@expo/ui/swift-ui";
+import { Host } from "@expo/ui";
+import { Button } from "@expo/ui/swift-ui";
 import {
   buttonBorderShape,
   buttonStyle,
@@ -6,10 +7,12 @@ import {
   labelStyle,
 } from "@expo/ui/swift-ui/modifiers";
 import { Drawer, useDrawerProgress } from "expo-router/drawer";
-import { type SFSymbol, SymbolView } from "expo-symbols";
-import { Pressable, ScrollView, Text, useColorScheme, View } from "react-native";
-import Animated, { interpolate, useAnimatedStyle } from "react-native-reanimated";
+import type { SFSymbol } from "expo-symbols";
+import { Pressable, ScrollView, Text, View } from "react-native";
+import Reanimated, { interpolate, useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
 
 const NAV_ITEMS: { label: string; icon: SFSymbol }[] = [
   { label: "Images", icon: "photo" },
@@ -33,11 +36,7 @@ const RECENT_CHATS = [
 ];
 
 export function Sidebar() {
-  const scheme = useColorScheme();
   const insets = useSafeAreaInsets();
-  const isDark = scheme === "dark";
-  const text = isDark ? "#F5F5F5" : "#1A1A1A";
-  const muted = isDark ? "#8A8A8A" : "#7A7A7A";
 
   // 0 while closed, 1 while fully open, tracking the gesture in between. Driven
   // by the same value that translates the screen content, so the sidebar eases
@@ -49,18 +48,13 @@ export function Sidebar() {
   }));
 
   return (
-    <Animated.View style={[{ flex: 1, paddingTop: insets.top }, revealStyle]}>
+    <Reanimated.View
+      className="flex-1 bg-sidebar"
+      style={[revealStyle, { paddingTop: insets.top }]}
+    >
       {/* Sticky header */}
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          paddingHorizontal: 20,
-          paddingVertical: 12,
-        }}
-      >
-        <Text style={{ fontSize: 20, fontWeight: "700", color: text }}>Open Company</Text>
+      <View className="flex-row items-center justify-between px-5 py-3">
+        <Text className="text-[20px] font-bold text-sidebar-foreground">Open Company</Text>
         <Host matchContents>
           <Button
             label="Search"
@@ -84,44 +78,29 @@ export function Sidebar() {
           <Pressable
             key={item.label}
             onPress={() => {}}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 12,
-              paddingHorizontal: 20,
-              paddingVertical: 10,
-            }}
+            className="flex-row items-center gap-3 px-5 py-2.5 active:bg-secondary"
           >
-            <SymbolView name={item.icon} size={20} tintColor={text} />
-            <Text style={{ fontSize: 16, fontWeight: "600", color: text }}>{item.label}</Text>
+            <StyledSymbolView
+              name={item.icon}
+              size={20}
+              tintColorClassName="accent-sidebar-foreground"
+            />
+            <Text className="text-[16px] font-semibold text-sidebar-foreground">{item.label}</Text>
           </Pressable>
         ))}
 
-        <Text
-          style={{
-            fontSize: 13,
-            fontWeight: "600",
-            color: muted,
-            paddingHorizontal: 20,
-            paddingTop: 24,
-            paddingBottom: 8,
-          }}
-        >
+        <Text className="px-5 pt-6 pb-2 text-[13px] font-semibold text-muted-foreground">
           Recents
         </Text>
 
         {RECENT_CHATS.map((chat) => (
-          <Pressable
-            key={chat}
-            onPress={() => {}}
-            style={{ paddingHorizontal: 20, paddingVertical: 10 }}
-          >
-            <Text numberOfLines={1} style={{ fontSize: 15, color: text }}>
+          <Pressable key={chat} onPress={() => {}} className="px-5 py-2.5 active:bg-secondary">
+            <Text numberOfLines={1} className="text-[15px] text-sidebar-foreground">
               {chat}
             </Text>
           </Pressable>
         ))}
       </ScrollView>
-    </Animated.View>
+    </Reanimated.View>
   );
 }
