@@ -36,7 +36,8 @@ import {
   clearAllOptimisticGoatChatSummaries,
   useOptimisticGoatChatSummaries,
 } from "@/lib/optimistic-chat-summaries";
-import { cancelGoatTaskAction, continueGoatTaskAction } from "@/lib/tasks";
+import { continueGoatTask } from "@/lib/task-client";
+import { cancelGoatTaskAction } from "@/lib/tasks";
 import { GoatSurface, type GoatTaskView } from "./GoatSurface";
 
 const chatMock = vi.hoisted(() => ({
@@ -99,7 +100,10 @@ vi.mock("@/lib/chat-attachment-upload", () => ({
 vi.mock("@/lib/tasks", () => ({
   archiveGoatTaskAction: vi.fn(async () => ({ ok: true, error: null })),
   cancelGoatTaskAction: vi.fn(async () => ({ ok: true, error: null })),
-  continueGoatTaskAction: vi.fn(async (_taskId: string, _prompt: string, messageId: string) => ({
+}));
+
+vi.mock("@/lib/task-client", () => ({
+  continueGoatTask: vi.fn(async (_taskId: string, _prompt: string, messageId: string) => ({
     ok: true,
     error: null,
     messageId,
@@ -335,7 +339,7 @@ describe("GoatSurface chat streaming UI", () => {
     vi.mocked(closeGoatChatSessionAction).mockClear();
     vi.mocked(markGoatChatSeenAction).mockClear();
     vi.mocked(cancelGoatTaskAction).mockClear();
-    vi.mocked(continueGoatTaskAction).mockClear();
+    vi.mocked(continueGoatTask).mockClear();
     attachmentUploadMock.upload.mockReset();
     attachmentUploadMock.upload.mockResolvedValue({
       blobUrl: "https://blob.test/goat-chat/user_1/brief.pdf",
@@ -872,7 +876,7 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
-      expect(continueGoatTaskAction).toHaveBeenCalledWith(
+      expect(continueGoatTask).toHaveBeenCalledWith(
         "goat_task_1",
         "Please check the afternoon too",
         expect.stringMatching(/^goat_chat_msg_[0-9a-f-]{36}$/),
@@ -928,7 +932,7 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
-      expect(continueGoatTaskAction).toHaveBeenCalledWith(
+      expect(continueGoatTask).toHaveBeenCalledWith(
         "goat_task_1",
         "@skill/product-work investigate the mention menu",
         expect.stringMatching(/^goat_chat_msg_[0-9a-f-]{36}$/),
@@ -1008,7 +1012,7 @@ describe("GoatSurface chat streaming UI", () => {
       description: "#task research competitors",
       model: DEFAULT_GOAT_MODEL,
     });
-    expect(continueGoatTaskAction).not.toHaveBeenCalled();
+    expect(continueGoatTask).not.toHaveBeenCalled();
     expect(cancelGoatTaskAction).not.toHaveBeenCalled();
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
   });
