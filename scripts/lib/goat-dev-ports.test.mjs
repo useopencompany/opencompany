@@ -11,7 +11,6 @@ test("Goat dev keeps conventional ports outside Conductor", () => {
     app: "3002",
     runner: "3040",
     https: "3443",
-    durableStreams: "4150",
     isolated: false,
   });
 });
@@ -23,14 +22,12 @@ test("Goat dev respects explicitly configured fixed ports outside Conductor", ()
         GOAT_PORT: "3102",
         GOAT_HTTPS_PORT: "3543",
         RUNNER_INTERNAL_URL: "http://localhost:3140",
-        DURABLE_STREAMS_DEV_PORT: "4250",
       },
     }),
     {
       app: "3102",
       runner: "3140",
       https: "3543",
-      durableStreams: "4250",
       isolated: false,
     },
   );
@@ -43,7 +40,6 @@ test("Conductor allocation provides isolated ports for every Goat service", () =
       GOAT_PORT: "3002",
       GOAT_HTTPS_PORT: "3443",
       RUNNER_INTERNAL_URL: "http://localhost:3040",
-      DURABLE_STREAMS_DEV_PORT: "4150",
     },
   });
 
@@ -51,8 +47,7 @@ test("Conductor allocation provides isolated ports for every Goat service", () =
     app: "55010",
     runner: "55011",
     https: "55012",
-    durableStreams: "55013",
-    electric: "55014",
+    electric: "55013",
     isolated: true,
   });
   assert.deepEqual(isolatedGoatDevEnvironment(ports), {
@@ -63,8 +58,7 @@ test("Conductor allocation provides isolated ports for every Goat service", () =
     PORT: "55011",
     RUNNER_INTERNAL_URL: "http://localhost:55011",
     RUNNER_PUBLIC_URL: "http://localhost:55011",
-    DURABLE_STREAMS_DEV_PORT: "55013",
-    ELECTRIC_URL: "http://localhost:55014",
+    ELECTRIC_URL: "http://localhost:55013",
   });
 });
 
@@ -75,7 +69,6 @@ test("Conductor keeps conventional ports when they are available", () => {
       GOAT_PORT: "3002",
       GOAT_HTTPS_PORT: "3443",
       RUNNER_INTERNAL_URL: "http://localhost:3040",
-      DURABLE_STREAMS_DEV_PORT: "4150",
     },
     portIsAvailable: () => true,
   });
@@ -84,7 +77,6 @@ test("Conductor keeps conventional ports when they are available", () => {
     app: "3002",
     runner: "3040",
     https: "3443",
-    durableStreams: "4150",
     isolated: false,
   });
 });
@@ -99,24 +91,7 @@ test("Conductor falls back to its isolated range when a conventional port is bus
     app: "55010",
     runner: "55011",
     https: "55012",
-    durableStreams: "55013",
-    electric: "55014",
-    isolated: true,
-  });
-});
-
-test("Conductor isolates Durable Streams when its conventional port is busy", () => {
-  const ports = selectGoatDevPorts({
-    env: { CONDUCTOR_PORT: "55010" },
-    portIsAvailable: (port) => port !== "4150",
-  });
-
-  assert.deepEqual(ports, {
-    app: "55010",
-    runner: "55011",
-    https: "55012",
-    durableStreams: "55013",
-    electric: "55014",
+    electric: "55013",
     isolated: true,
   });
 });

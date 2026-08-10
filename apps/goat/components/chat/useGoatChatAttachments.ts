@@ -19,8 +19,7 @@ import {
 import { uploadGoatChatAttachmentBlob } from "@/lib/chat-attachment-upload";
 
 // Drag/drop, paste and file-pick attachment handling for the Goat chat
-// composer. Adapted from apps/web useComposerAttachments: owns the pending
-// state, client-side validation/capability gate, upload lifecycle, window-wide
+// composer. Owns the pending state, client-side validation/capability gate, upload lifecycle, window-wide
 // drop interception and the drop-overlay state.
 export function useGoatChatAttachments(opts: {
   // Blob uploads are scoped to goat-chat/{userWorkosId}/ (enforced server-side).

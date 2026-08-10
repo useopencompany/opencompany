@@ -48,7 +48,7 @@ Tokens are defined in `src/styles/globals.css` using shadcn names
 (`background`, `foreground`, `primary`, `muted`, `accent`, `destructive`, …) plus
 OpenCompany semantics (`success`, `warning`, `info`, `brand`, `sidebar`, …). Dark
 mode is driven by `data-theme="dark"` with a `prefers-color-scheme` fallback —
-the same convention used in `apps/web`.
+the same convention used in Goat.
 
 ## Adding components
 

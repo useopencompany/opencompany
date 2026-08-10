@@ -12,7 +12,7 @@ test("Electric keeps its conventional identity outside Conductor", () => {
 test("Electric is isolated for each Conductor workspace", () => {
   assert.deepEqual(resolveElectricDevConfig({ CONDUCTOR_PORT: "55010" }), {
     container: "opencompany-electric-55010",
-    port: "55014",
+    port: "55013",
   });
 });
 
@@ -29,7 +29,7 @@ test("explicit Electric overrides take precedence", () => {
 
 test("Electric rejects a Conductor range that exceeds the TCP port limit", () => {
   assert.throws(
-    () => resolveElectricDevConfig({ CONDUCTOR_PORT: "65532" }),
+    () => resolveElectricDevConfig({ CONDUCTOR_PORT: "65533" }),
     /no available Electric port/,
   );
 });

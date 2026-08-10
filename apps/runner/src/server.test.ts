@@ -34,7 +34,6 @@ vi.mock("./infisical-auth", () => ({
 }));
 
 const env = {
-  databaseUrl: "postgres://example",
   internalToken: "internal-secret",
   streamTokenSecret: "stream-secret",
   vercelAiGatewayApiKey: "gateway",
@@ -42,13 +41,9 @@ const env = {
   openaiApiKey: "openai",
   goatDictationRealtimeModel: undefined,
   goatDictationFinalModel: undefined,
-  publicUrl: undefined,
-  llmBrokerEnabled: true,
   exaApiKey: undefined,
   goatBrowserEnabled: false,
-  ampE2bTemplate: undefined,
   codexE2bTemplate: undefined,
-  e2bSandboxIdleTimeoutMs: 30_000,
   codexTimeoutMs: 1_200_000,
   codexModel: "gpt-5.5",
   goatCodexChatIdleTimeoutMs: 1_800_000,

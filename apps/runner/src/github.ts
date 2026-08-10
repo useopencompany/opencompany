@@ -211,24 +211,6 @@ function normalizeGitHubApiPath(path: string | undefined) {
   }
 }
 
-export async function getGitHubInstallationToken(
-  installationId = process.env.GITHUB_APP_INSTALLATION_ID,
-) {
-  if (!hasGitHubWorkspaceAppEnv()) return null;
-  if (!installationId) {
-    throw new Error("GITHUB_APP_INSTALLATION_ID is required for managed GitHub workspace cloning.");
-  }
-
-  return getInstallationToken({
-    installationId,
-    appId: requiredEnv("GITHUB_APP_ID"),
-    privateKey: requiredEnv("GITHUB_APP_PRIVATE_KEY"),
-    cachePrefix: "workspace",
-    purpose: "managed workspace",
-    envNames: ["GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY"],
-  });
-}
-
 export async function getGitHubWorkInstallationToken(input: {
   installationId: string;
   repositoryFullName?: string;
@@ -387,39 +369,6 @@ export async function fetchGitHubWorkRepository(input: {
   };
 }
 
-export async function createDraftPullRequest(input: {
-  installationId?: string;
-  repositoryFullName: string;
-  title: string;
-  head: string;
-  base: string;
-  body: string;
-  draft?: boolean;
-}) {
-  const token = input.installationId
-    ? await getGitHubWorkInstallationToken({
-        installationId: input.installationId,
-        repositoryFullName: input.repositoryFullName,
-      })
-    : await getGitHubInstallationToken();
-  if (!token) {
-    throw new Error("GitHub App credentials are required to create pull requests.");
-  }
-
-  return githubRequest<{ html_url?: string; number?: number }>({
-    token,
-    path: `/repos/${input.repositoryFullName}/pulls`,
-    method: "POST",
-    body: {
-      title: input.title,
-      head: input.head,
-      base: input.base,
-      body: input.body,
-      draft: input.draft ?? true,
-    },
-  });
-}
-
 async function githubRequest<T>(input: {
   token: string;
   path: string;
@@ -447,10 +396,6 @@ async function githubRequest<T>(input: {
   }
 
   return (await response.json()) as T;
-}
-
-function hasGitHubWorkspaceAppEnv() {
-  return Boolean(process.env.GITHUB_APP_ID && process.env.GITHUB_APP_PRIVATE_KEY);
 }
 
 function hasGitHubIntegrationAppEnv() {

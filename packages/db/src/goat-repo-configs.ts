@@ -15,11 +15,10 @@ import { and, asc, eq } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import type * as goatSchema from "./goat-schema";
 import { goatIntegrationResources, goatIntegrations, goatRepoConfigs } from "./goat-schema";
-import type * as publicSchema from "./schema";
 
 const REPO_CONFIG_ENCRYPTION_KEY_VERSION = DEFAULT_ENCRYPTION_KEY_VERSION;
 
-type DbSchema = typeof publicSchema & typeof goatSchema;
+type DbSchema = typeof goatSchema;
 export type GoatRepoConfigDb = Pick<
   PgDatabase<PgQueryResultHKT, DbSchema>,
   "delete" | "insert" | "select" | "update"

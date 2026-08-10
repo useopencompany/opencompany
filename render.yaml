@@ -24,7 +24,7 @@ services:
         sync: false
       # Optional: runner DB pool size (default 10). Size it as RUNNER_WORKER_CONCURRENCY plus
       # headroom for HTTP routes, the poller, and lease heartbeats. Hard ceiling is Neon's
-      # max_connections (~901), shared with the web app + Inngest: keep instances * max well
+      # max_connections (~901), shared with Goat and support services: keep instances * max well
       # under it.
       - key: RUNNER_DB_POOL_MAX
         sync: false
@@ -62,15 +62,8 @@ services:
         sync: false
       - key: GOAT_OTEL_EXPORTER_OTLP_HEADERS
         sync: false
-      # LLM broker (llm-broker.ts). The broker URL defaults to Render's own
-      # RENDER_EXTERNAL_URL, so these are optional overrides: the kill switch reverts
-      # sandboxed CLIs to direct key injection without a deploy, and the codex key is the
-      # server-side upstream credential for the broker's `openai` provider (use a
-      # budget-capped OpenAI project key).
-      - key: RUNNER_LLM_BROKER_ENABLED
-        sync: false
-      - key: RUNNER_LLM_BROKER_PUBLIC_URL
-        sync: false
+      # Server-side upstream credential for the LLM broker's `openai` provider. Use a
+      # budget-capped OpenAI project key.
       - key: OPENAI_CODEX_API_KEY
         sync: false
       # Private Vercel Blob store token. The runner downloads attachment bytes (images/PDFs)
@@ -96,15 +89,7 @@ services:
         sync: false
       - key: OPENCOMPANY_CODEX_E2B_TEMPLATE
         sync: false
-      - key: RUNNER_E2B_IDLE_TIMEOUT_MS
-        sync: false
       - key: RUNNER_INSTANCE_ID
-        sync: false
-      - key: GITHUB_APP_ID
-        sync: false
-      - key: GITHUB_APP_INSTALLATION_ID
-        sync: false
-      - key: GITHUB_APP_PRIVATE_KEY
         sync: false
       - key: BETTER_STACK_ERRORS_DSN
         sync: false

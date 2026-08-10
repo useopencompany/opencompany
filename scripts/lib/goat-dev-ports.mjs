@@ -7,7 +7,6 @@ import { findPortListeners, normalizePort } from "./port-kill.mjs";
 const DEFAULT_GOAT_PORT = "3002";
 const DEFAULT_RUNNER_PORT = "3040";
 const DEFAULT_GOAT_HTTPS_PORT = "3443";
-const DEFAULT_DURABLE_STREAMS_PORT = "4150";
 
 export function resolveGoatDevPorts({ env = process.env } = {}) {
   const conductorBase = optionalPort(env.CONDUCTOR_PORT, "CONDUCTOR_PORT");
@@ -16,8 +15,7 @@ export function resolveGoatDevPorts({ env = process.env } = {}) {
       app: conductorBase,
       runner: offsetPort(conductorBase, 1, "runner"),
       https: offsetPort(conductorBase, 2, "Goat HTTPS"),
-      durableStreams: offsetPort(conductorBase, 3, "Durable Streams"),
-      electric: offsetPort(conductorBase, 4, "Electric"),
+      electric: offsetPort(conductorBase, 3, "Electric"),
       isolated: true,
     };
   }
@@ -34,7 +32,7 @@ export function selectGoatDevPorts({
   if (!allocated.isolated) return allocated;
 
   const conventional = resolveConventionalGoatDevPorts({ env });
-  const requiredPorts = [conventional.app, conventional.runner, conventional.durableStreams];
+  const requiredPorts = [conventional.app, conventional.runner];
   if (!httpsDisabled) requiredPorts.push(conventional.https);
 
   return requiredPorts.every((port) => portIsAvailable(port)) ? conventional : allocated;
@@ -45,9 +43,6 @@ function resolveConventionalGoatDevPorts({ env }) {
     app: optionalPort(env.GOAT_PORT, "GOAT_PORT") ?? DEFAULT_GOAT_PORT,
     runner: configuredRunnerPort(env) ?? DEFAULT_RUNNER_PORT,
     https: optionalPort(env.GOAT_HTTPS_PORT, "GOAT_HTTPS_PORT") ?? DEFAULT_GOAT_HTTPS_PORT,
-    durableStreams:
-      optionalPort(env.DURABLE_STREAMS_DEV_PORT, "DURABLE_STREAMS_DEV_PORT") ??
-      DEFAULT_DURABLE_STREAMS_PORT,
     isolated: false,
   };
 }
@@ -67,7 +62,6 @@ export function isolatedGoatDevEnvironment(ports, { httpsDisabled = false } = {}
     PORT: ports.runner,
     RUNNER_INTERNAL_URL: runnerOrigin,
     RUNNER_PUBLIC_URL: runnerOrigin,
-    DURABLE_STREAMS_DEV_PORT: ports.durableStreams,
     ELECTRIC_URL: `http://localhost:${ports.electric}`,
   };
 }

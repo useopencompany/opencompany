@@ -5,8 +5,7 @@ import { eq } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 
 // Serves a brain asset's bytes (PDF today) from the PRIVATE Vercel Blob
-// store. Mirrors apps/web/app/api/attachments/[id]/route.ts: auth-scoped raw
-// byte endpoint; the blob URL never leaves the server — clients only hold the
+// store. Uses an auth-scoped raw byte endpoint; the blob URL never leaves the server — clients only hold the
 // opaque document id and fetch through here, so a private blob can never be
 // linked outside the brain's membership.
 export async function GET(

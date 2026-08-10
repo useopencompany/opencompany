@@ -5,7 +5,6 @@ import { loadEncryptionKey } from "@opencompany/crypto";
 const DEFAULT_CODEX_TIMEOUT_MS = 60 * 60 * 1000;
 
 export type RunnerEnv = {
-  databaseUrl: string;
   internalToken: string;
   streamTokenSecret: string;
   vercelAiGatewayApiKey: string;
@@ -18,13 +17,6 @@ export type RunnerEnv = {
   openaiApiKey?: string | undefined;
   goatDictationRealtimeModel?: string | undefined;
   goatDictationFinalModel?: string | undefined;
-  // Public base URL of this runner (Render's RENDER_EXTERNAL_URL, or
-  // RUNNER_LLM_BROKER_PUBLIC_URL to override). E2B cloud sandboxes use it to call back
-  // into runner-hosted routes: the LLM broker and Goat's Google tool bridge. Unset
-  // local dev disables those callback-only features. Deliberately NOT the web-side
-  // RUNNER_PUBLIC_URL: the runner loads the repo-root .env, where that var points at
-  // localhost in local dev and would wrongly activate sandbox callbacks.
-  publicUrl: string | undefined;
   // Wildcard preview hostname routed to this runner, for example preview.goat.example.com.
   // Capability labels are prepended to this domain. A port may be included for local development.
   previewBaseDomain?: string | undefined;
@@ -32,9 +24,6 @@ export type RunnerEnv = {
   // Public Goat origin used only by the runner host to call private, bearer-protected
   // endpoints. Integration credentials and this bearer token never enter Codex sandboxes.
   goatAppUrl?: string | undefined;
-  // Kill switch for the LLM broker: set RUNNER_LLM_BROKER_ENABLED=false to revert to
-  // direct key injection without a deploy.
-  llmBrokerEnabled: boolean;
   exaApiKey: string | undefined;
   goatBrowserEnabled: boolean;
   // Google OAuth client, shared by the Gmail, Google Calendar, and Google Drive integrations. The runner
@@ -46,9 +35,7 @@ export type RunnerEnv = {
   // token endpoint before snapshot enrichment.
   hubspotOAuthClientId?: string | undefined;
   hubspotOAuthClientSecret?: string | undefined;
-  ampE2bTemplate: string | undefined;
   codexE2bTemplate: string | undefined;
-  e2bSandboxIdleTimeoutMs: number;
   blobReadWriteToken?: string | undefined;
   // Wall-clock ceiling for a single Codex engine turn: timeouts surface partial output but
   // never publish a pull request.
@@ -59,15 +46,12 @@ export type RunnerEnv = {
   // on idle timeout E2B pauses it and Sandbox.connect auto-resumes on the next message.
   goatCodexChatIdleTimeoutMs: number;
   // Delivery-lease TTL for runner jobs. The lease heartbeats every 5s while a job runs, so this only
-  // matters when the heartbeat stops (deploy, instance recycle, GC, network blip). The old 90s was
-  // shorter than such gaps during a long blocking tool call, letting another instance re-claim the
-  // job and replay the whole turn (double model + opencode billing). Sized to absorb a normal deploy.
+  // matters when the heartbeat stops (deploy, instance recycle, GC, or network blip).
   jobLeaseTtlMs: number;
-  // Durable Goat chat turn lease TTL. Kept shorter than the generic job delivery lease so a dead
-  // worker's chat turn can be reclaimed quickly without changing the older job queue's deploy buffer.
+  // Durable Goat chat turn lease TTL. Kept shorter than the ingestion-job delivery lease so a dead
+  // worker's chat turn can be reclaimed quickly.
   goatCodexChatLeaseTtlMs?: number | undefined;
-  // Explicit opt-in for the experimental Goat task worker. Defaults off so normal runner
-  // deployments keep serving existing agent work without polling Goat tables or exposing Goat tools.
+  // Explicit opt-in for Goat's durable task worker and runner-hosted tools.
   goatTaskWorkerEnabled: boolean;
   workerConcurrency: number;
   port: number;
@@ -82,7 +66,6 @@ export function loadEnv(): RunnerEnv {
   requiredEnv("E2B_API_KEY");
   loadEncryptionKey();
   return {
-    databaseUrl: requiredEnv("DATABASE_URL"),
     internalToken: requiredEnv("RUNNER_INTERNAL_TOKEN"),
     streamTokenSecret: requiredEnv("RUNNER_STREAM_TOKEN_SECRET"),
     vercelAiGatewayApiKey: requiredEnv("VERCEL_AI_GATEWAY_API_KEY"),
@@ -90,20 +73,16 @@ export function loadEnv(): RunnerEnv {
     openaiApiKey: optionalEnv("OPENAI_API_KEY"),
     goatDictationRealtimeModel: optionalEnv("GOAT_DICTATION_REALTIME_MODEL"),
     goatDictationFinalModel: optionalEnv("GOAT_DICTATION_FINAL_MODEL"),
-    publicUrl: optionalEnv("RUNNER_LLM_BROKER_PUBLIC_URL") ?? optionalEnv("RENDER_EXTERNAL_URL"),
     previewBaseDomain: optionalPreviewBaseDomainEnv(),
     previewProtocol: optionalPreviewProtocolEnv(),
     goatAppUrl: optionalEnv("GOAT_NEXT_PUBLIC_APP_URL"),
-    llmBrokerEnabled: optionalBooleanEnv("RUNNER_LLM_BROKER_ENABLED", true),
     exaApiKey: optionalEnv("EXA_API_KEY"),
     goatBrowserEnabled: optionalBooleanEnv("RUNNER_GOAT_BROWSER_ENABLED", false),
     googleOAuthClientId: optionalEnv("GOOGLE_OAUTH_CLIENT_ID"),
     googleOAuthClientSecret: optionalEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
     hubspotOAuthClientId: optionalEnv("GOAT_HUBSPOT_CLIENT_ID"),
     hubspotOAuthClientSecret: optionalEnv("GOAT_HUBSPOT_CLIENT_SECRET"),
-    ampE2bTemplate: optionalEnv("OPENCOMPANY_AMP_E2B_TEMPLATE"),
     codexE2bTemplate: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE"),
-    e2bSandboxIdleTimeoutMs: optionalPositiveIntegerEnv("RUNNER_E2B_IDLE_TIMEOUT_MS", 30_000),
     blobReadWriteToken: optionalEnv("BLOB_READ_WRITE_TOKEN"),
     codexTimeoutMs: optionalPositiveIntegerEnv("RUNNER_CODEX_TIMEOUT_MS", DEFAULT_CODEX_TIMEOUT_MS),
     codexModel: optionalEnv("RUNNER_CODEX_MODEL") ?? "gpt-5.6-sol",
@@ -188,16 +167,4 @@ function optionalPositiveIntegerEnv(name: string, fallback: number) {
 
 function defaultInstanceId() {
   return `${hostname()}-${process.pid}-${randomUUID().slice(0, 8)}`;
-}
-
-// Whether sandboxed CLIs route their model calls through the runner's LLM broker. Both
-// conditions matter: without a public URL the sandbox cannot reach the broker (local
-// dev), and the env flag is the no-deploy kill switch.
-export function brokerActive(env: Pick<RunnerEnv, "publicUrl" | "llmBrokerEnabled">): boolean {
-  return env.llmBrokerEnabled && Boolean(env.publicUrl);
-}
-
-// Base URL the sandbox-side CLI config points at for a given broker provider.
-export function brokerBaseUrl(publicUrl: string, provider: "gateway" | "openai"): string {
-  return `${publicUrl.replace(/\/+$/, "")}/broker/${provider}/v1`;
 }

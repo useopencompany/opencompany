@@ -104,20 +104,16 @@ describe("createLogger", () => {
     });
   });
 
-  it("adds preview and Render correlation fields to server logs", () => {
-    process.env.PREVIEW_ENV = "true";
-    process.env.PREVIEW_PR_NUMBER = "42";
+  it("adds Render correlation fields to server logs", () => {
     process.env.RENDER_GIT_COMMIT = "render-sha";
     process.env.RENDER_SERVICE_ID = "srv_123";
     process.env.RENDER_INSTANCE_ID = "inst_123";
     const logger = createLogger({ service: "opencompany-test", runtime: "server" });
 
-    logger.info("Hello from preview", { session_id: "ses_123" });
+    logger.info("Hello from Render", { session_id: "ses_123" });
 
     const record = JSON.parse(vi.mocked(console.info).mock.calls[0]?.[0] as string);
     expect(record).toMatchObject({
-      preview_env: true,
-      preview_pr_number: "42",
       render_git_commit: "render-sha",
       render_service_id: "srv_123",
       render_instance_id: "inst_123",
@@ -125,18 +121,14 @@ describe("createLogger", () => {
     });
   });
 
-  it("does not add preview correlation fields to browser logs", () => {
+  it("does not add Render correlation fields to browser logs", () => {
     vi.stubGlobal("window", {});
-    process.env.PREVIEW_ENV = "true";
-    process.env.PREVIEW_PR_NUMBER = "42";
     process.env.RENDER_SERVICE_ID = "srv_123";
     const logger = createLogger({ service: "opencompany-test", runtime: "browser" });
 
     logger.info("Hello from browser");
 
     const record = JSON.parse(vi.mocked(console.info).mock.calls[0]?.[0] as string);
-    expect(record).not.toHaveProperty("preview_env");
-    expect(record).not.toHaveProperty("preview_pr_number");
     expect(record).not.toHaveProperty("render_service_id");
   });
 });

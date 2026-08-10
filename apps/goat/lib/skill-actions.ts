@@ -108,8 +108,8 @@ export type GoatSkillImportPreviewResult =
   | { status: "ambiguous"; candidates: GoatSkillImportCandidate[] }
   | { status: "error"; message: string };
 
-// Read-only: resolves and previews an external SKILL.md without writing anything. Mirrors
-// apps/web's resolve-then-confirm shape (SaveSkillResult in apps/web/lib/skills/actions.ts) —
+// Read-only: resolves and previews an external SKILL.md without writing anything. Uses a
+// resolve-then-confirm shape:
 // the import step below re-resolves from the URL rather than trusting client-echoed preview
 // data, so this step never needs to be trusted for persistence, only for display.
 export async function previewGoatSkillImportAction(input: {

@@ -24,43 +24,17 @@ const CHECK_MODE = argv.includes("--check");
 const PULL_ENV_MODE = argv.includes("--pull-env");
 const START_DEV_MODE = argv.includes("--dev");
 const STRIPE_MODE = argv.includes("--stripe");
-const PERSONAL_ENV_MODE = argv.includes("--personal-env");
 const SHARED_DATABASE_MODE =
   argv.includes("--shared-db") || process.env.OPENCOMPANY_SHARED_DATABASE === "1";
 const PERSONAL_ENV_PATH = ".env.override.local";
-const PERSONAL_ENV_TEMPLATE = `# Personal local overrides.
-# This file is gitignored and has higher precedence than .env.local.
-# Use it for developer-owned resources that should survive \`bun run env:pull\`.
-#
-# Personal Neon project for isolated local databases:
-# NEON_PROJECT_ID=""
-# NEON_API_KEY=""
-# NEON_PARENT_BRANCH=""
-# NEON_BRANCH_TTL_HOURS="24"
-#
-# Optional: point local workspace repos at a personal/dev GitHub org.
-# OPENCOMPANY_GITHUB_ORG=""
-`;
-
 // .nvmrc pins this project to Node 22.
 const MIN_NODE = [20, 20, 0];
-const WORKOS_ENV_KEYS = [
-  "WORKOS_CLIENT_ID",
-  "WORKOS_API_KEY",
-  "WORKOS_COOKIE_PASSWORD",
-  "NEXT_PUBLIC_WORKOS_REDIRECT_URI",
-];
+const WORKOS_ENV_KEYS = ["WORKOS_CLIENT_ID", "WORKOS_API_KEY", "WORKOS_COOKIE_PASSWORD"];
 const LINEAR_ENV_KEYS = [
   "LINEAR_API_KEY",
   "LINEAR_TEAM_ID",
   "LINEAR_FEEDBACK_PROJECT_ID",
   "LINEAR_FEEDBACK_LABELS",
-];
-const GITHUB_ENV_KEYS = [
-  "OPENCOMPANY_GITHUB_ORG",
-  "GITHUB_APP_ID",
-  "GITHUB_APP_INSTALLATION_ID",
-  "GITHUB_APP_PRIVATE_KEY",
 ];
 const GITHUB_WORK_INTEGRATION_ENV_KEYS = [
   "GITHUB_INTEGRATION_APP_ID",
@@ -84,7 +58,6 @@ const GOAT_X_INTEGRATION_ENV_KEYS = [
 const RUNNER_ENV_KEYS = [
   "RUNNER_PUBLIC_URL",
   "RUNNER_INTERNAL_URL",
-  "RUNNER_LLM_BROKER_PUBLIC_URL",
   "RUNNER_INTERNAL_TOKEN",
   "RUNNER_STREAM_TOKEN_SECRET",
   "RUNNER_ALLOWED_ORIGINS",
@@ -92,14 +65,8 @@ const RUNNER_ENV_KEYS = [
   "VERCEL_AI_GATEWAY_API_KEY",
   "EXA_API_KEY",
   "APIFY_API_TOKEN",
-  "X_API_BEARER_TOKEN",
-  "SUPADATA_API_KEY",
-  "AMP_API_KEY",
   "OPENAI_CODEX_API_KEY",
-  "OPENCOMPANY_E2B_TEMPLATE",
-  "OPENCOMPANY_AMP_E2B_TEMPLATE",
-  "RUNNER_E2B_IDLE_TIMEOUT_MS",
-  "RUNNER_LLM_BROKER_ENABLED",
+  "OPENCOMPANY_CODEX_E2B_TEMPLATE",
   "RUNNER_CODEX_MODEL",
   "RUNNER_CODEX_TIMEOUT_MS",
   "RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS",
@@ -113,7 +80,6 @@ const LOCAL_RUNNER_REQUIRED_ENV_KEYS = [
   "E2B_API_KEY",
   "VERCEL_AI_GATEWAY_API_KEY",
 ];
-const STRIPE_ENV_KEYS = ["STRIPE_SECRET_KEY"];
 const STRIPE_OPTIONAL_ENV_KEYS = [
   "GOAT_STRIPE_API_KEY",
   "GOAT_STRIPE_WEBHOOK_SECRET",
@@ -163,7 +129,6 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   "NEON_ROLE_NAME",
   "NEON_BRANCH_NAME",
   "WORKOS_REDIRECT_URI",
-  "PLAYWRIGHT_PORT",
   "NEXT_PUBLIC_POSTHOG_TOKEN",
   "NEXT_PUBLIC_POSTHOG_HOST",
   "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
@@ -172,8 +137,8 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   "OPENCOMPANY_NGROK_REQUIRED",
   "OPENCOMPANY_NGROK_URL",
   "NGROK_AUTHTOKEN",
-  ...STRIPE_ENV_KEYS,
   ...STRIPE_OPTIONAL_ENV_KEYS,
+  ...GOAT_X_INTEGRATION_ENV_KEYS,
   ...LINEAR_ENV_KEYS,
   ...RUNNER_ENV_KEYS,
   ...OBSERVABILITY_ENV_KEYS,
@@ -182,30 +147,25 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
 ];
 const SHARED_DEV_ENV_KEYS = [
   ...WORKOS_ENV_KEYS,
-  ...GITHUB_ENV_KEYS,
   ...GITHUB_WORK_INTEGRATION_ENV_KEYS,
   ...INTEGRATION_CREDENTIAL_ENV_KEYS,
   ...GOOGLE_INTEGRATION_ENV_KEYS,
-  ...GOAT_X_INTEGRATION_ENV_KEYS,
 ];
 const NEON_ENV_KEYS = ["NEON_PROJECT_ID"];
 const INFISICAL_DEV_ENV = "dev";
-const INFISICAL_DEV_PATHS = ["/web", "/runner"];
-const LOCAL_WORKOS_REDIRECT_URI = "http://localhost:3000/auth/callback";
-const LEGACY_LOCAL_GOAT_APP_URL = "http://localhost:3002";
+const INFISICAL_DEV_PATHS = ["/goat", "/runner"];
+const HTTP_LOCAL_GOAT_APP_URL = "http://localhost:3002";
 const LOCAL_GOAT_APP_URL = goatHttpsOrigin(process.env);
 const LOCAL_GOAT_WORKOS_REDIRECT_URI = `${LOCAL_GOAT_APP_URL}/auth/callback`;
 const GOAT_ENV_PATH = "apps/goat/.env.local";
 const LOCAL_ONLY_ENV_KEYS = new Set([
   "DATABASE_URL",
   "NEON_BRANCH",
-  "INNGEST_DEV",
   "OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS",
   "GOAT_PORT",
   "GOAT_HTTPS_PORT",
   "GOAT_NEXT_PUBLIC_APP_URL",
   "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
-  "RUNNER_LLM_BROKER_PUBLIC_URL",
 ]);
 const LOCAL_DEV_DEFAULT_ENV_VALUES = {
   OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS: "louis@acta.so",
@@ -213,7 +173,6 @@ const LOCAL_DEV_DEFAULT_ENV_VALUES = {
   GOAT_HTTPS_PORT: goatHttpsPort(process.env),
   GOAT_NEXT_PUBLIC_APP_URL: LOCAL_GOAT_APP_URL,
   GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: LOCAL_GOAT_WORKOS_REDIRECT_URI,
-  RUNNER_LLM_BROKER_PUBLIC_URL: "",
 };
 const GOAT_LOCAL_ENV_KEYS = [
   "GOAT_PORT",
@@ -394,8 +353,7 @@ function inspectState() {
     databaseUrl: isPlaceholder(env.DATABASE_URL) ? "placeholder" : "set",
     neonProject: isPlaceholder(env.NEON_PROJECT_ID) ? "placeholder" : "set",
     neonBranch: isPlaceholder(env.NEON_BRANCH) ? "placeholder" : "set",
-    stripeSecretKey: isPlaceholder(env.STRIPE_SECRET_KEY) ? "placeholder" : "set",
-    stripeWebhookSecret: isPlaceholder(env.STRIPE_WEBHOOK_SECRET) ? "placeholder" : "set",
+    stripeWebhookSecret: isPlaceholder(env.GOAT_STRIPE_WEBHOOK_SECRET) ? "placeholder" : "set",
     goatBilling: goatBillingMissing.length === 0 ? "ready" : "placeholder",
     goatBillingMissingKeys: goatBillingMissing,
   };
@@ -589,10 +547,10 @@ async function ensureLocalDevDefaults() {
 
 function shouldReplaceLocalDefault(key, current, next) {
   if (key === "GOAT_NEXT_PUBLIC_APP_URL") {
-    return current === LEGACY_LOCAL_GOAT_APP_URL && next !== current;
+    return current === HTTP_LOCAL_GOAT_APP_URL && next !== current;
   }
   if (key === "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI") {
-    return current === `${LEGACY_LOCAL_GOAT_APP_URL}/auth/callback` && next !== current;
+    return current === `${HTTP_LOCAL_GOAT_APP_URL}/auth/callback` && next !== current;
   }
   return false;
 }
@@ -623,21 +581,10 @@ async function ensureGoatEnvFile() {
   );
 }
 
-async function ensurePersonalEnvFile() {
-  step("Personal env override file");
-  if (existsSync(PERSONAL_ENV_PATH)) {
-    ok(`${PERSONAL_ENV_PATH} already exists`);
-    return;
-  }
-
-  writeFileSync(PERSONAL_ENV_PATH, PERSONAL_ENV_TEMPLATE);
-  ok(`Created ${PERSONAL_ENV_PATH}`);
-}
-
 function canPullSharedDevEnvFromInfisical() {
   if (!existsSync(".infisical.json")) return false;
 
-  const result = spawnSync("infisical", ["export", "--env", INFISICAL_DEV_ENV, "--path", "/web"], {
+  const result = spawnSync("infisical", ["export", "--env", INFISICAL_DEV_ENV, "--path", "/goat"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -676,11 +623,6 @@ function pullSharedDevEnvFromInfisical({
       pulled[secret.key] = secret.value;
     }
   }
-  pulled.NEXT_PUBLIC_WORKOS_REDIRECT_URI = LOCAL_WORKOS_REDIRECT_URI;
-  if (!isPlaceholder(pulled.WORKOS_REDIRECT_URI)) {
-    pulled.WORKOS_REDIRECT_URI = LOCAL_WORKOS_REDIRECT_URI;
-  }
-
   const requiredKeys = [
     ...SHARED_DEV_ENV_KEYS,
     ...LOCAL_RUNNER_REQUIRED_ENV_KEYS,
@@ -716,7 +658,7 @@ function pullGoatBillingDevEnvFromInfisical() {
 
   const result = spawnSync(
     "infisical",
-    ["export", "--env", INFISICAL_DEV_ENV, "--path", "/web", "--format", "json"],
+    ["export", "--env", INFISICAL_DEV_ENV, "--path", "/goat", "--format", "json"],
     { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
   );
   if (result.status !== 0) return [];
@@ -741,7 +683,7 @@ function pullSharedDevEnv(options = {}) {
   if (existsSync(".infisical.json")) {
     throw new Error(
       "Infisical is linked but shared dev env could not be pulled. " +
-        "Run `infisical login` and check the dev /web and /runner folders.",
+        "Run `infisical login` and check the dev /goat and /runner folders.",
     );
   }
 
@@ -841,7 +783,7 @@ async function ensureGitHubIntegrationEnv(state) {
     throw new Error(
       `${source} env pull finished but GitHub integration app values are still placeholders: ${after.githubIntegrationMissingKeys.join(
         ", ",
-      )}. Add them in Infisical dev /web, then run \`bun run env:pull\` again.`,
+      )}. Add them in Infisical dev /goat, then run \`bun run env:pull\` again.`,
     );
   }
   ok(`GitHub integration app credentials configured from ${source}`);
@@ -883,21 +825,6 @@ async function ensureStripe(state) {
     cliWebhookSecret ??= readStripeWebhookSecretFromCli();
     return cliWebhookSecret;
   };
-  if (state.stripeSecretKey === "set") {
-    ok("STRIPE_SECRET_KEY is set");
-  } else {
-    const result = getCliCredentials();
-    if (result.ok) {
-      updates.STRIPE_SECRET_KEY = result.key;
-      ok(`Will write STRIPE_SECRET_KEY from Stripe CLI profile "${result.projectName}"`);
-    } else {
-      warn(
-        `STRIPE_SECRET_KEY is missing and could not be read from Stripe CLI: ${result.message} ` +
-          "Credit checkout will fail until it is set.",
-      );
-    }
-  }
-
   const env = { ...readEffectiveLocalEnv(), ...updates };
   if (isPlaceholder(env.GOAT_STRIPE_API_KEY)) {
     const result = getCliCredentials();
@@ -912,7 +839,7 @@ async function ensureStripe(state) {
       }
     } else if (result.ok) {
       warn(
-        "Stripe CLI returned a non-restricted test key without an expiry. Run `stripe login` to refresh the CLI profile, or create a restricted test key for Goat billing and store it in Infisical dev /web.",
+        "Stripe CLI returned a non-restricted test key without an expiry. Run `stripe login` to refresh the CLI profile, or create a restricted test key for Goat billing and store it in Infisical dev /goat.",
       );
     } else {
       warn(`GOAT_STRIPE_API_KEY is missing: ${result.message}`);
@@ -934,39 +861,18 @@ async function ensureStripe(state) {
   }
 
   if (state.stripeWebhookSecret === "set") {
-    ok("STRIPE_WEBHOOK_SECRET is set");
+    ok("GOAT_STRIPE_WEBHOOK_SECRET is set");
   } else {
     const result = getCliWebhookSecret();
     if (result.ok) {
-      updates.STRIPE_WEBHOOK_SECRET = result.secret;
-      ok("Will write STRIPE_WEBHOOK_SECRET from Stripe CLI");
+      updates.GOAT_STRIPE_WEBHOOK_SECRET = result.secret;
+      ok("Will write GOAT_STRIPE_WEBHOOK_SECRET from Stripe CLI");
     } else {
       warn(
-        `STRIPE_WEBHOOK_SECRET is missing and could not be read from Stripe CLI: ${result.message} ` +
+        `GOAT_STRIPE_WEBHOOK_SECRET is missing and could not be read from Stripe CLI: ${result.message} ` +
           "Forwarded Stripe webhooks will fail signature verification until it is set.",
       );
     }
-  }
-
-  const webhookEnv = { ...readEffectiveLocalEnv(), ...updates };
-  if (isPlaceholder(webhookEnv.GOAT_STRIPE_WEBHOOK_SECRET)) {
-    if (!isPlaceholder(webhookEnv.STRIPE_WEBHOOK_SECRET)) {
-      updates.GOAT_STRIPE_WEBHOOK_SECRET = webhookEnv.STRIPE_WEBHOOK_SECRET;
-      ok("Will mirror the local Stripe listener secret to GOAT_STRIPE_WEBHOOK_SECRET");
-    } else {
-      const result = getCliWebhookSecret();
-      if (result.ok) {
-        updates.GOAT_STRIPE_WEBHOOK_SECRET = result.secret;
-        ok("Will write GOAT_STRIPE_WEBHOOK_SECRET from Stripe CLI");
-      } else {
-        warn(
-          `GOAT_STRIPE_WEBHOOK_SECRET is missing and could not be read from Stripe CLI: ${result.message} ` +
-            "Forwarded Stripe webhooks will fail signature verification until it is set.",
-        );
-      }
-    }
-  } else {
-    ok("GOAT_STRIPE_WEBHOOK_SECRET is set");
   }
 
   if (Object.keys(updates).length > 0) {
@@ -1147,15 +1053,6 @@ async function ensureGoatLocalHttps() {
 }
 
 async function main() {
-  if (PERSONAL_ENV_MODE) {
-    console.log("\n\x1b[1mPersonal env override\x1b[0m");
-    await ensurePersonalEnvFile();
-    console.log(
-      `\nAdd personal values to \x1b[1m${PERSONAL_ENV_PATH}\x1b[0m, then run \x1b[1mbun run setup\x1b[0m.\n`,
-    );
-    return;
-  }
-
   if (PULL_ENV_MODE) {
     console.log("\n\x1b[1mPull shared dev env\x1b[0m");
     await ensureEnvFile(inspectState());
@@ -1206,11 +1103,8 @@ async function main() {
         reason: `pull shared development env vars into .env.local (${missingShared.join(", ")})`,
       });
     }
-    if (state.stripeSecretKey === "placeholder" || state.stripeWebhookSecret === "placeholder") {
-      const missingStripe = [
-        ...(state.stripeSecretKey === "placeholder" ? ["STRIPE_SECRET_KEY"] : []),
-        ...(state.stripeWebhookSecret === "placeholder" ? ["STRIPE_WEBHOOK_SECRET"] : []),
-      ];
+    if (state.stripeWebhookSecret === "placeholder") {
+      const missingStripe = ["GOAT_STRIPE_WEBHOOK_SECRET"];
       nextSteps.push({
         command: "bun run setup:stripe",
         reason: `copy local Stripe CLI credentials into .env.local (${missingStripe.join(", ")})`,
@@ -1243,8 +1137,7 @@ async function main() {
     if (electric === "missing") {
       nextSteps.push({
         command: "brew install orbstack",
-        reason:
-          "install a container runtime so setup can start local Electric (the agents/sessions UI reads through it and 503s without it)",
+        reason: "install a container runtime so setup can start local Electric for Goat data sync",
       });
     } else if (electric === "stopped") {
       nextSteps.push({
@@ -1254,7 +1147,7 @@ async function main() {
     } else if (!electricUrlSet) {
       nextSteps.push({
         command: "bun run setup",
-        reason: "start local Electric and set ELECTRIC_URL for live agents/sessions sync",
+        reason: "start local Electric and set ELECTRIC_URL for Goat data sync",
       });
     }
     if (!existsSync(GOAT_ENV_PATH)) {
@@ -1321,7 +1214,7 @@ async function main() {
   }
 
   console.log(
-    "\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Starting \x1b[1mbun run dev\x1b[0m — open http://localhost:3000\n",
+    `\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Starting \x1b[1mbun run dev\x1b[0m — open ${LOCAL_GOAT_APP_URL}\n`,
   );
   run("bun", ["run", "dev"]);
 }

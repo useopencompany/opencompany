@@ -90,8 +90,6 @@ export type GoatGoogleIntegrationStatePayload = {
   provider: GoatGoogleIntegrationProvider;
   userWorkosId: string;
   returnTo: string;
-  oauthRedirectUri?: string;
-  targetOrigin?: string;
   expiresAt: number;
   nonce: string;
 };
@@ -103,17 +101,10 @@ export function isGoatGoogleIntegrationConfigured() {
 export function createGoatGoogleIntegrationState(
   input: Omit<GoatGoogleIntegrationStatePayload, "expiresAt" | "nonce">,
 ) {
-  const oauthRedirectUri = sanitizeGoatGoogleOAuthRedirectUri(
-    input.oauthRedirectUri,
-    input.provider,
-  );
-  const targetOrigin = sanitizeTargetOrigin(input.targetOrigin);
   const payload: GoatGoogleIntegrationStatePayload = {
     provider: input.provider,
     userWorkosId: input.userWorkosId,
     returnTo: sanitizeReturnTo(input.returnTo),
-    ...(oauthRedirectUri ? { oauthRedirectUri } : {}),
-    ...(targetOrigin ? { targetOrigin } : {}),
     expiresAt: Date.now() + 10 * 60 * 1000,
     nonce: crypto.randomUUID(),
   };
@@ -135,17 +126,10 @@ export function verifyGoatGoogleIntegrationState(state: string): GoatGoogleInteg
     throw new Error("Google integration state expired.");
   }
 
-  const oauthRedirectUri = sanitizeGoatGoogleOAuthRedirectUri(
-    payload.oauthRedirectUri,
-    payload.provider,
-  );
-  const targetOrigin = sanitizeTargetOrigin(payload.targetOrigin);
   return {
     provider: payload.provider,
     userWorkosId: payload.userWorkosId,
     returnTo: sanitizeReturnTo(payload.returnTo),
-    ...(oauthRedirectUri ? { oauthRedirectUri } : {}),
-    ...(targetOrigin ? { targetOrigin } : {}),
     expiresAt: payload.expiresAt,
     nonce: payload.nonce,
   };
@@ -230,17 +214,7 @@ export function appendGoatGoogleIntegrationStatus(
 }
 
 export function goatGoogleOAuthRedirectUri(config: GoatGoogleProviderConfig) {
-  const brokerCallbackUrl = goatGoogleOAuthBrokerCallbackUrl();
-  if (brokerCallbackUrl && isPreviewGoogleOAuthTargetOrigin(getGoatAppUrl())) {
-    return brokerCallbackUrl;
-  }
   return goatGoogleDirectCallbackUrl(config);
-}
-
-export function goatGoogleOAuthTargetOriginForState() {
-  if (!goatGoogleOAuthBrokerCallbackUrl()) return undefined;
-  const targetOrigin = sanitizeTargetOrigin(getGoatAppUrl());
-  return targetOrigin && isPreviewGoogleOAuthTargetOrigin(targetOrigin) ? targetOrigin : undefined;
 }
 
 export function goatGoogleDirectCallbackUrl(
@@ -277,8 +251,6 @@ function isGoatGoogleIntegrationStatePayload(
       record.provider === "google_drive") &&
     typeof record.userWorkosId === "string" &&
     typeof record.returnTo === "string" &&
-    (record.oauthRedirectUri === undefined || typeof record.oauthRedirectUri === "string") &&
-    (record.targetOrigin === undefined || typeof record.targetOrigin === "string") &&
     typeof record.expiresAt === "number" &&
     typeof record.nonce === "string"
   );
@@ -287,65 +259,6 @@ function isGoatGoogleIntegrationStatePayload(
 function sanitizeReturnTo(value: string) {
   if (!value.startsWith("/") || value.startsWith("//")) return "/settings";
   return value;
-}
-
-function goatGoogleOAuthBrokerCallbackUrl() {
-  const value = process.env.GOOGLE_OAUTH_CALLBACK_URL?.trim();
-  if (!value) return undefined;
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "https:" && !isLocalhost(url)) return undefined;
-    url.hash = "";
-    return url.toString();
-  } catch {
-    return undefined;
-  }
-}
-
-function sanitizeTargetOrigin(value: unknown) {
-  if (typeof value !== "string" || !value.trim()) return undefined;
-  try {
-    const url = new URL(value.trim());
-    const origin = url.origin;
-    if (isPreviewGoogleOAuthTargetOrigin(origin) || isLocalhost(url)) return origin;
-    return undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function isPreviewGoogleOAuthTargetOrigin(origin: string) {
-  return /^https:\/\/pr-\d+\.preview\.opencompany\.cloud$/.test(origin);
-}
-
-function sanitizeGoatGoogleOAuthRedirectUri(
-  value: unknown,
-  provider: GoatGoogleIntegrationProvider,
-) {
-  if (typeof value !== "string" || !value.trim()) return undefined;
-  try {
-    const url = new URL(value.trim());
-    if (url.hash) url.hash = "";
-    if (url.protocol !== "https:" && !isLocalhost(url)) return undefined;
-
-    const config = GOAT_GOOGLE_PROVIDER_CONFIG[provider];
-    if (
-      url.pathname === "/api/google/callback" ||
-      url.pathname === `/api/integrations/${config.routeSegment}/callback`
-    ) {
-      return url.toString();
-    }
-  } catch {
-    return undefined;
-  }
-  return undefined;
-}
-
-function isLocalhost(url: URL) {
-  return (
-    (url.protocol === "http:" || url.protocol === "https:") &&
-    (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1")
-  );
 }
 
 function signStateBody(body: string) {

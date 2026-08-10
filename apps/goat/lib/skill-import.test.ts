@@ -44,7 +44,7 @@ describe("previewGoatSkillImport", () => {
 
     expect(preview.status).toBe("resolved");
     if (preview.status !== "resolved") return;
-    // Proposes a Goat-scheme slug from the name, ignoring the resolver's own apps/web-scheme
+    // Proposes a Goat-scheme slug from the name, ignoring the resolver's source slug
     // skillId entirely (that id is tied to the built-in skill namespace, not Goat's).
     expect(preview.proposedSlug).toBe("my-skill");
     expect(preview.name).toBe("My Skill");

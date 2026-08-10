@@ -9,21 +9,13 @@ const requiredGoatKeys = [
   "GOAT_STRIPE_CHECKOUT_ENABLED",
   "CRON_SECRET",
 ];
-const requiredWebKeys = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"];
 
 const goatProjectId = requiredProcessEnv("GOAT_VERCEL_PROJECT_ID");
-const webProjectId = requiredProcessEnv("VERCEL_PROJECT_ID");
 const teamId = requiredProcessEnv("VERCEL_ORG_ID");
 const token = requiredProcessEnv("VERCEL_TOKEN");
 
-const [goatEnv, webEnv] = await Promise.all([
-  listProductionEnv(goatProjectId, "Goat"),
-  listProductionEnv(webProjectId, "web"),
-]);
-const [goatValues, webValues] = await Promise.all([
-  readRequiredValues(goatProjectId, goatEnv, requiredGoatKeys, "Goat"),
-  readRequiredValues(webProjectId, webEnv, requiredWebKeys, "web"),
-]);
+const goatEnv = await listProductionEnv(goatProjectId, "Goat");
+const goatValues = await readRequiredValues(goatProjectId, goatEnv, requiredGoatKeys, "Goat");
 
 const invalid = [];
 if (!goatValues.GOAT_STRIPE_API_KEY.startsWith("rk_live_")) {
@@ -31,12 +23,6 @@ if (!goatValues.GOAT_STRIPE_API_KEY.startsWith("rk_live_")) {
 }
 if (!goatValues.GOAT_STRIPE_WEBHOOK_SECRET.startsWith("whsec_")) {
   invalid.push("Goat GOAT_STRIPE_WEBHOOK_SECRET must be a Stripe webhook signing secret.");
-}
-if (!/^[rs]k_live_/.test(webValues.STRIPE_SECRET_KEY)) {
-  invalid.push("Web STRIPE_SECRET_KEY must be a live Stripe key.");
-}
-if (!webValues.STRIPE_WEBHOOK_SECRET.startsWith("whsec_")) {
-  invalid.push("Web STRIPE_WEBHOOK_SECRET must be a Stripe webhook signing secret.");
 }
 if (goatValues.GOAT_STRIPE_CHECKOUT_ENABLED !== "true") {
   invalid.push(

@@ -71,9 +71,8 @@ Ship this as its own PR — it is pure hardening and unblocks everything else.
 
 ## Step 2 — Upload path (UI → blob → row → job)
 
-- **Upload route** `apps/goat/app/api/brain-assets/upload/route.ts`, modeled
-  on `apps/web/app/api/upload/route.ts` (`handleUpload` from
-  `@vercel/blob/client`, private store): auth = brain access for the current
+- **Upload route** `apps/goat/app/api/brain-assets/upload/route.ts` (`handleUpload`
+  from `@vercel/blob/client`, private store): auth = brain access for the current
   user; allowlist `application/pdf` only in v1; size cap 20MB.
 - **On upload complete** (server action):
   - slug the filename → `brainId` (existing id pattern, collision-suffix);
@@ -89,8 +88,7 @@ Ship this as its own PR — it is pure hardening and unblocks everything else.
 - **UI entry points** in `GoatBrainView`: drag-and-drop onto the folder pane +
   an "Upload file" affordance in the new-document menu. Reuse the existing
   ingest indicators for the pending state.
-- **Serving route** `apps/goat/app/api/brain-assets/[docId]/route.ts`, modeled
-  on `apps/web/app/api/attachments/[id]/route.ts`: resolve doc → check brain
+- **Serving route** `apps/goat/app/api/brain-assets/[docId]/route.ts`: resolve doc → check brain
   access → private blob `get` → stream with stored `mimeType` and
   `Content-Disposition: inline`.
 

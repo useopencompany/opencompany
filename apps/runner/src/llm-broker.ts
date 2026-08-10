@@ -18,7 +18,7 @@ import {
 } from "./llm-broker-usage";
 
 // The runner-hosted LLM broker: an authenticated reverse proxy in front of the model
-// providers used by sandboxed CLIs (opencode, codex, the memory CLI). The sandbox only
+// providers used by sandboxed coding CLIs. The sandbox only
 // ever sees a short-lived per-delegation token (llm-broker-tokens.ts); the real provider
 // key is attached here, server-side, and usage is metered per upstream request as the
 // billable record. Upstreams are pinned per provider — the client controls nothing about
@@ -124,8 +124,6 @@ function tokenAllowsEndpoint(token: ValidatedBrokerToken, endpoint: BrokerEndpoi
       return endpoint === "responses" || endpoint === "models";
     case "opencode_coder":
       return endpoint === "chat.completions" || endpoint === "models";
-    case "memory":
-      return endpoint === "chat.completions" || endpoint === "embeddings";
     default:
       return false;
   }

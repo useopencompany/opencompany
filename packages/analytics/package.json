@@ -4,9 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
     "./events": "./src/events.ts",
-    "./client": "./src/client.tsx",
     "./goat": "./src/goat.ts",
     "./goat/client": "./src/goat-client.tsx",
     "./goat/events": "./src/goat-events.ts",
