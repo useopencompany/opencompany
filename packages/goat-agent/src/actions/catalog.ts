@@ -19,7 +19,7 @@ import type {
 import { resolveXAccountActions } from "./x-account";
 
 // Managed (Monid) capabilities need server-only execution + billing, so their
-// resolution lives in the host app (apps/goat) and is injected here. The runner
+// resolution lives in the host app (apps/web) and is injected here. The runner
 // passes nothing — background/headless runs never expose managed capabilities
 // (they require a persisted chat session + approval), exactly like the Slack bot.
 export type GoatManagedCapabilitiesResolution = {

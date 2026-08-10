@@ -1,27 +1,27 @@
 // Called by: scripts/dev.mjs and scripts/setup.mjs.
-// Purpose: local HTTPS/HTTP2 proxy for Goat dev so Electric long-poll shapes
+// Purpose: local HTTPS/HTTP2 proxy for web dev so Electric long-poll shapes
 // do not consume the browser's small HTTP/1.1 connection pool.
 
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const DEFAULT_GOAT_HTTPS_PORT = "3443";
-export const GOAT_HTTPS_DISABLED_VALUES = new Set(["1", "true", "yes", "on"]);
+export const DEFAULT_WEB_HTTPS_PORT = "3443";
+export const WEB_HTTPS_DISABLED_VALUES = new Set(["1", "true", "yes", "on"]);
 
-export function goatHttpsDisabled(env = process.env) {
-  return GOAT_HTTPS_DISABLED_VALUES.has(
+export function webHttpsDisabled(env = process.env) {
+  return WEB_HTTPS_DISABLED_VALUES.has(
     String(env.OPENCOMPANY_GOAT_HTTPS_DISABLED ?? "")
       .trim()
       .toLowerCase(),
   );
 }
 
-export function goatHttpsPort(env = process.env) {
-  return String(env.GOAT_HTTPS_PORT?.trim() || DEFAULT_GOAT_HTTPS_PORT);
+export function webHttpsPort(env = process.env) {
+  return String(env.GOAT_HTTPS_PORT?.trim() || DEFAULT_WEB_HTTPS_PORT);
 }
 
-export function goatHttpsOrigin(env = process.env) {
+export function webHttpsOrigin(env = process.env) {
   const configured = env.GOAT_NEXT_PUBLIC_APP_URL?.trim();
   if (configured?.startsWith("https://localhost")) {
     try {
@@ -30,7 +30,7 @@ export function goatHttpsOrigin(env = process.env) {
       // Fall through to the default port.
     }
   }
-  return `https://localhost:${goatHttpsPort(env)}`;
+  return `https://localhost:${webHttpsPort(env)}`;
 }
 
 export function caddyState() {
@@ -73,36 +73,36 @@ export function trustCaddyLocalCA({ stdio = "inherit" } = {}) {
   });
 }
 
-export async function startGoatLocalHttpsProxy({
+export async function startWebLocalHttpsProxy({
   targetPort,
   env = process.env,
   onWarning = console.warn,
 } = {}) {
-  if (goatHttpsDisabled(env)) {
-    onWarning("\nGoat local HTTPS is disabled by OPENCOMPANY_GOAT_HTTPS_DISABLED=1.\n");
+  if (webHttpsDisabled(env)) {
+    onWarning("\nWeb local HTTPS is disabled by OPENCOMPANY_GOAT_HTTPS_DISABLED=1.\n");
     return null;
   }
   if (!targetPort) {
-    throw new Error("startGoatLocalHttpsProxy requires targetPort.");
+    throw new Error("startWebLocalHttpsProxy requires targetPort.");
   }
 
   const state = caddyState();
   if (!state.available) {
     onWarning(
-      "\nCaddy is not installed, so Goat local dev will use HTTP/1.1. " +
+      "\nCaddy is not installed, so web local dev will use HTTP/1.1. " +
         "Run `bun run setup` or `brew install caddy` to enable local HTTPS/HTTP2.\n",
     );
     return null;
   }
 
-  const origin = goatHttpsOrigin(env);
+  const origin = webHttpsOrigin(env);
   const url = new URL(origin);
   const host = url.hostname || "localhost";
   const port = url.port || "443";
   const configDir = join(".context", "caddy");
-  const configPath = join(configDir, "goat.Caddyfile");
+  const configPath = join(configDir, "web.Caddyfile");
   mkdirSync(configDir, { recursive: true });
-  writeFileSync(configPath, goatCaddyfile({ host, port, targetPort }));
+  writeFileSync(configPath, webCaddyfile({ host, port, targetPort }));
 
   const child = spawn("caddy", ["run", "--config", configPath], {
     stdio: ["ignore", "ignore", "pipe"],
@@ -116,7 +116,7 @@ export async function startGoatLocalHttpsProxy({
   const earlyExit = await waitForEarlyExit(child, 900);
   if (earlyExit) {
     const details = stderr.trim() ? `\n${indent(stderr.trim())}` : "";
-    onWarning(`\nCaddy could not start Goat local HTTPS; falling back to HTTP.${details}\n`);
+    onWarning(`\nCaddy could not start web local HTTPS; falling back to HTTP.${details}\n`);
     return null;
   }
 
@@ -130,7 +130,7 @@ export async function startGoatLocalHttpsProxy({
   };
 }
 
-function goatCaddyfile({ host, port, targetPort }) {
+function webCaddyfile({ host, port, targetPort }) {
   return `{
 \tskip_install_trust
 }

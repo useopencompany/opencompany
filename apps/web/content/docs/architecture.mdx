@@ -1,0 +1,56 @@
+---
+title: Architecture
+description: The current Goat runtime shape from browser chat to durable task execution.
+---
+
+## High-level flow
+
+```text
+Browser
+  GoatSurface
+    POST /api/chat
+      persist user message
+      stream foreground assistant response
+      optionally create a durable task session and first turn
+
+Runner
+  shared durable turn worker
+    claim a queued turn with a fenced lease and per-session FIFO
+    load the linked task projection
+    plan the task harness when needed
+    execute the selected engine adapter
+    settle messages, usage, runtime state, and task outcome
+
+Goat UI
+  read chat and task state
+  subscribe to updates through Electric-backed collections
+```
+
+## Foreground chat
+
+The chat entry point is `apps/web/app/api/chat/route.ts`. It authenticates the current Goat user, validates the submitted message, stores the user turn, and streams a response through Vercel AI Gateway.
+
+The chat agent can answer directly or use the tools assembled in `packages/goat-agent/src/chat-agent.ts`:
+
+- `goat_brain` for durable personal context.
+- `web_fetch` for reading known public URLs when Exa is configured.
+- `web_search` when Exa is configured.
+- `start_task` for work that belongs in Tasks.
+- `start_workflow` when the user explicitly asks to run an active workspace workflow.
+
+## Durable tasks
+
+Durable tasks start in `apps/web/lib/tasks.ts` and `packages/db/src/goat-task-sessions.ts`. Creation writes a task-kind chat session, a thin `goat.tasks` projection, native chat messages, engine runtime state, and the first `goat.codex_chat_turn` in one database statement.
+
+`apps/runner/src/goat-codex-chat-worker.ts` owns the queue. It preserves one active turn per session, heartbeats a fenced lease, reclaims expired work after a crash, and hands active turns off during deploys. Task turns load their projection through `apps/runner/src/goat-task-turn.ts` and execute through the normal OpenCompany or Codex chat adapter.
+
+Settlement updates the turn, runtime session, task projection, assistant message, workflow state, and origin-chat notification atomically. Legacy task rows without `session_id` remain readable but cannot be continued.
+
+## Data boundaries
+
+Goat owns the surviving execution model:
+
+- Current chat and task rows live under the Goat schema.
+- The runner owns durable turns, coding sandboxes, Brain ingestion, integration workers, and runtime access.
+- Shared schema changes belong in `packages/db` and require a Drizzle migration.
+- The retired first-generation `.agent` session engine is not a Goat dependency.

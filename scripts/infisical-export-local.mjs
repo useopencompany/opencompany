@@ -22,14 +22,14 @@ const preserveLocalKeys = new Set([
   "GOAT_NEXT_PUBLIC_APP_URL",
   "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
 ]);
-const LOCAL_GOAT_HTTPS_PORT = "3443";
-const LOCAL_GOAT_APP_URL = `https://localhost:${LOCAL_GOAT_HTTPS_PORT}`;
+const LOCAL_WEB_HTTPS_PORT = "3443";
+const LOCAL_WEB_APP_URL = `https://localhost:${LOCAL_WEB_HTTPS_PORT}`;
 const localDefaultLines = [
   'OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS="louis@acta.so"',
   'GOAT_PORT="3002"',
-  `GOAT_HTTPS_PORT="${LOCAL_GOAT_HTTPS_PORT}"`,
-  `GOAT_NEXT_PUBLIC_APP_URL=${JSON.stringify(LOCAL_GOAT_APP_URL)}`,
-  `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI=${JSON.stringify(`${LOCAL_GOAT_APP_URL}/auth/callback`)}`,
+  `GOAT_HTTPS_PORT="${LOCAL_WEB_HTTPS_PORT}"`,
+  `GOAT_NEXT_PUBLIC_APP_URL=${JSON.stringify(LOCAL_WEB_APP_URL)}`,
+  `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI=${JSON.stringify(`${LOCAL_WEB_APP_URL}/auth/callback`)}`,
 ];
 const chunks = [];
 for (const path of paths) {

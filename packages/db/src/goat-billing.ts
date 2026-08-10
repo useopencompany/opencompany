@@ -956,7 +956,7 @@ export async function settleGoatAutoRefill(
 }
 
 // Workspaces due for an auto-refill charge — the reconcile-cron sweep that
-// covers debits recorded outside apps/goat (the runner's ingestion debits).
+// covers debits recorded outside apps/web (the runner's ingestion debits).
 export async function listGoatAutoRefillCandidates(
   options: { now?: Date; limit?: number; db?: DbLike } = {},
 ) {
