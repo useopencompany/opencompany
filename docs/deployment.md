@@ -95,6 +95,9 @@ Create/import the web project from this repo.
 - Production branch: `main`
 - Enable "Automatically expose System Environment Variables".
 - Enable Skew Protection.
+- Set Goat's Skew Protection maximum age to at least seven days. Task and chat tabs are long-lived,
+  and a shorter window makes their Server Actions expire immediately after the next deployment if
+  the previous production build is older than that window. The release workflow enforces this.
 - If available, enable Rolling Releases with manual approval stages.
 - Automatic Git deploys are disabled in `vercel.json` with `git.deploymentEnabled: false`.
   Keep this disabled so pull requests, including forks without Vercel access, do not create Vercel
