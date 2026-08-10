@@ -397,7 +397,7 @@ export async function createGoatSkill(input: {
   return { ok: true, slug };
 }
 
-// Imports a skill resolved from an external SKILL.md (see apps/goat/lib/skill-import.ts) into
+// Imports a skill resolved from an external SKILL.md (see apps/web/lib/skill-import.ts) into
 // the workspace catalog. Re-importing the same source (workspaceId + sourceUrl/sourceRef/
 // sourcePath) reuses the existing row instead of creating a duplicate — the unique index
 // `goat_skills_workspace_source_idx` backs this, but we check first for a friendlier result

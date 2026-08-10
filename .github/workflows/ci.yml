@@ -136,6 +136,9 @@ jobs:
           scripts/lib/neon-branch-config.test.mjs
           scripts/lib/release-scope.test.mjs
           scripts/lib/release-smoke.test.mjs
+          scripts/lib/web-dev-env.test.mjs
+          scripts/lib/web-dev-ports.test.mjs
+          scripts/lib/web-dev-proxy.test.mjs
 
   secrets:
     name: Secret scan

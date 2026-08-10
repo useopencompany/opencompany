@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Called by: @opencompany/stripe-webhooks `bun run dev`, usually through the root dev stack.
-// Purpose: forwards Stripe CLI webhook events to the Goat app.
+// Purpose: forwards Stripe CLI webhook events to the web app.
 
 import "./load-env.mjs";
 import { spawn } from "node:child_process";
@@ -15,7 +15,7 @@ if (disabled) {
 
 function appOrigin() {
   // Use Next.js directly so the Stripe CLI does not encounter Caddy's local certificate.
-  // scripts/dev.mjs exports the branch-isolated Goat port.
+  // scripts/dev.mjs exports the branch-isolated web port through the retained GOAT_PORT contract.
   return `http://localhost:${process.env.GOAT_PORT?.trim() || "3002"}`;
 }
 
@@ -28,7 +28,7 @@ const webhookSecretKey = "GOAT_STRIPE_WEBHOOK_SECRET";
 
 if (!process.env[webhookSecretKey]?.trim()) {
   console.warn(
-    `${webhookSecretKey} is not set. Goat will reject forwarded Stripe webhooks until .env.local uses the whsec_ value printed by stripe listen.`,
+    `${webhookSecretKey} is not set. The web app will reject forwarded Stripe webhooks until .env.local uses the whsec_ value printed by stripe listen.`,
   );
 }
 

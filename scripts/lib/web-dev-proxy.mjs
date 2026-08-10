@@ -1,5 +1,5 @@
-// Called by: scripts/dev.mjs in Goat app mode.
-// Purpose: expose the Goat app and runner callback routes through one local port.
+// Called by: scripts/dev.mjs in web app mode.
+// Purpose: expose the web app and runner callback routes through one local port.
 
 import { createServer, request as httpRequest } from "node:http";
 import { connect } from "node:net";
@@ -17,8 +17,8 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
-export async function startGoatDevProxy({ appPort, runnerPort }) {
-  const appTarget = { label: "Goat app", port: String(appPort) };
+export async function startWebDevProxy({ appPort, runnerPort }) {
+  const appTarget = { label: "web app", port: String(appPort) };
   const runnerTarget = { label: "runner", port: String(runnerPort) };
 
   const server = createServer((request, response) => {
@@ -42,7 +42,7 @@ export async function startGoatDevProxy({ appPort, runnerPort }) {
   const address = server.address();
   if (!address || typeof address === "string") {
     server.close();
-    throw new Error("Goat dev proxy did not bind to a local port.");
+    throw new Error("Web dev proxy did not bind to a local port.");
   }
 
   return {

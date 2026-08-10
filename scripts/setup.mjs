@@ -5,11 +5,11 @@ import { chmodSync, copyFileSync, existsSync, readFileSync, writeFileSync } from
 import { argv, exit, versions } from "node:process";
 import {
   caddyState,
-  goatHttpsDisabled,
-  goatHttpsOrigin,
-  goatHttpsPort,
   homebrewAvailable,
   installCaddyWithHomebrew,
+  webHttpsDisabled,
+  webHttpsOrigin,
+  webHttpsPort,
 } from "./lib/caddy-dev.mjs";
 import {
   directDatabaseUrl,
@@ -154,10 +154,10 @@ const SHARED_DEV_ENV_KEYS = [
 const NEON_ENV_KEYS = ["NEON_PROJECT_ID"];
 const INFISICAL_DEV_ENV = "dev";
 const INFISICAL_DEV_PATHS = ["/goat", "/runner"];
-const HTTP_LOCAL_GOAT_APP_URL = "http://localhost:3002";
-const LOCAL_GOAT_APP_URL = goatHttpsOrigin(process.env);
-const LOCAL_GOAT_WORKOS_REDIRECT_URI = `${LOCAL_GOAT_APP_URL}/auth/callback`;
-const GOAT_ENV_PATH = "apps/goat/.env.local";
+const HTTP_LOCAL_WEB_APP_URL = "http://localhost:3002";
+const LOCAL_WEB_APP_URL = webHttpsOrigin(process.env);
+const LOCAL_WEB_WORKOS_REDIRECT_URI = `${LOCAL_WEB_APP_URL}/auth/callback`;
+const WEB_ENV_PATH = "apps/web/.env.local";
 const LOCAL_ONLY_ENV_KEYS = new Set([
   "DATABASE_URL",
   "NEON_BRANCH",
@@ -170,11 +170,11 @@ const LOCAL_ONLY_ENV_KEYS = new Set([
 const LOCAL_DEV_DEFAULT_ENV_VALUES = {
   OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS: "louis@acta.so",
   GOAT_PORT: "3002",
-  GOAT_HTTPS_PORT: goatHttpsPort(process.env),
-  GOAT_NEXT_PUBLIC_APP_URL: LOCAL_GOAT_APP_URL,
-  GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: LOCAL_GOAT_WORKOS_REDIRECT_URI,
+  GOAT_HTTPS_PORT: webHttpsPort(process.env),
+  GOAT_NEXT_PUBLIC_APP_URL: LOCAL_WEB_APP_URL,
+  GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: LOCAL_WEB_WORKOS_REDIRECT_URI,
 };
-const GOAT_LOCAL_ENV_KEYS = [
+const WEB_LOCAL_ENV_KEYS = [
   "GOAT_PORT",
   "GOAT_HTTPS_PORT",
   "DATABASE_URL",
@@ -547,37 +547,37 @@ async function ensureLocalDevDefaults() {
 
 function shouldReplaceLocalDefault(key, current, next) {
   if (key === "GOAT_NEXT_PUBLIC_APP_URL") {
-    return current === HTTP_LOCAL_GOAT_APP_URL && next !== current;
+    return current === HTTP_LOCAL_WEB_APP_URL && next !== current;
   }
   if (key === "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI") {
-    return current === `${HTTP_LOCAL_GOAT_APP_URL}/auth/callback` && next !== current;
+    return current === `${HTTP_LOCAL_WEB_APP_URL}/auth/callback` && next !== current;
   }
   return false;
 }
 
-async function ensureGoatEnvFile() {
-  step("Goat app env file");
+async function ensureWebEnvFile() {
+  step("Web app env file");
 
   const env = readEffectiveLocalEnv();
-  const goatAppUrl = env.GOAT_NEXT_PUBLIC_APP_URL || LOCAL_GOAT_APP_URL;
-  const goatRedirectUri = env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI || `${goatAppUrl}/auth/callback`;
+  const webAppUrl = env.GOAT_NEXT_PUBLIC_APP_URL || LOCAL_WEB_APP_URL;
+  const webRedirectUri = env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI || `${webAppUrl}/auth/callback`;
   const values = {
-    GOAT_NEXT_PUBLIC_APP_URL: goatAppUrl,
-    GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
-    NEXT_PUBLIC_APP_URL: goatAppUrl,
-    NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
-    WORKOS_REDIRECT_URI: goatRedirectUri,
+    GOAT_NEXT_PUBLIC_APP_URL: webAppUrl,
+    GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
+    NEXT_PUBLIC_APP_URL: webAppUrl,
+    NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
+    WORKOS_REDIRECT_URI: webRedirectUri,
   };
 
-  for (const key of GOAT_LOCAL_ENV_KEYS) {
+  for (const key of WEB_LOCAL_ENV_KEYS) {
     if (!isPlaceholder(env[key])) {
       values[key] = env[key];
     }
   }
 
-  writeEnvValues(GOAT_ENV_PATH, values);
+  writeEnvValues(WEB_ENV_PATH, values);
   ok(
-    `Updated ${GOAT_ENV_PATH} with Goat-local DB/Auth/runner/GitHub/Electric/observability/analytics env`,
+    `Updated ${WEB_ENV_PATH} with web-local DB/Auth/runner/GitHub/Electric/observability/analytics env`,
   );
 }
 
@@ -1021,22 +1021,22 @@ async function ensureElectric() {
   }
 }
 
-async function ensureGoatLocalHttps() {
-  step("Goat local HTTPS");
+async function ensureWebLocalHttps() {
+  step("Web local HTTPS");
 
-  if (goatHttpsDisabled(process.env)) {
-    warn("OPENCOMPANY_GOAT_HTTPS_DISABLED is set; Goat local dev will use HTTP.");
+  if (webHttpsDisabled(process.env)) {
+    warn("OPENCOMPANY_GOAT_HTTPS_DISABLED is set; web local dev will use HTTP.");
     return;
   }
 
   let state = caddyState();
   if (!state.available && process.platform === "darwin" && homebrewAvailable()) {
-    warn("Caddy is not installed. Installing it with Homebrew for Goat local HTTPS/HTTP2.");
+    warn("Caddy is not installed. Installing it with Homebrew for web local HTTPS/HTTP2.");
     const install = installCaddyWithHomebrew();
     if (install.status === 0) {
       state = caddyState();
     } else {
-      warn("Homebrew could not install Caddy. `bun run dev:goat` will fall back to HTTP.");
+      warn("Homebrew could not install Caddy. `bun run dev:web` will fall back to HTTP.");
       return;
     }
   }
@@ -1044,12 +1044,12 @@ async function ensureGoatLocalHttps() {
   if (!state.available) {
     warn(
       "Caddy is not installed. Install it with `brew install caddy` " +
-        "to enable Goat local HTTPS/HTTP2.",
+        "to enable web local HTTPS/HTTP2.",
     );
     return;
   }
 
-  ok(`Caddy is installed; dev:goat will serve Goat at ${goatHttpsOrigin(process.env)}`);
+  ok(`Caddy is installed; dev:web will serve the web app at ${webHttpsOrigin(process.env)}`);
 }
 
 async function main() {
@@ -1062,7 +1062,7 @@ async function main() {
       requireNeonProject: !SHARED_DATABASE_MODE && state.neonProject !== "set",
     });
     await ensureLocalDevDefaults();
-    await ensureGoatEnvFile();
+    await ensureWebEnvFile();
     ok(`Updated .env.local with shared setup values from ${source}`);
     return;
   }
@@ -1072,7 +1072,7 @@ async function main() {
     await ensureEnvFile(inspectState());
     await ensureLocalDevDefaults();
     await ensureStripe(inspectState());
-    await ensureGoatEnvFile();
+    await ensureWebEnvFile();
     return;
   }
 
@@ -1137,7 +1137,7 @@ async function main() {
     if (electric === "missing") {
       nextSteps.push({
         command: "brew install orbstack",
-        reason: "install a container runtime so setup can start local Electric for Goat data sync",
+        reason: "install a container runtime so setup can start local Electric for web data sync",
       });
     } else if (electric === "stopped") {
       nextSteps.push({
@@ -1147,19 +1147,20 @@ async function main() {
     } else if (!electricUrlSet) {
       nextSteps.push({
         command: "bun run setup",
-        reason: "start local Electric and set ELECTRIC_URL for Goat data sync",
+        reason: "start local Electric and set ELECTRIC_URL for web data sync",
       });
     }
-    if (!existsSync(GOAT_ENV_PATH)) {
+    if (!existsSync(WEB_ENV_PATH)) {
       nextSteps.push({
         command: "bun run setup",
-        reason: `write ${GOAT_ENV_PATH} for direct Goat app local tooling`,
+        reason: `write ${WEB_ENV_PATH} for direct web app local tooling`,
       });
     }
-    if (!goatHttpsDisabled(process.env) && !caddy.available) {
+    if (!webHttpsDisabled(process.env) && !caddy.available) {
       nextSteps.push({
         command: "bun run setup",
-        reason: "install/check Caddy so `bun run dev:goat` serves local Goat over HTTPS/HTTP2",
+        reason:
+          "install/check Caddy so `bun run dev:web` serves the local web app over HTTPS/HTTP2",
       });
     }
     console.log(
@@ -1169,9 +1170,7 @@ async function main() {
           electric,
           electricUrl: electricUrlSet ? "set" : "placeholder",
           caddy: caddy.available ? "ready" : "missing",
-          goatLocalHttps: goatHttpsDisabled(process.env)
-            ? "disabled"
-            : goatHttpsOrigin(process.env),
+          webLocalHttps: webHttpsDisabled(process.env) ? "disabled" : webHttpsOrigin(process.env),
           nextSteps,
         },
         null,
@@ -1203,18 +1202,18 @@ async function main() {
   await ensureStripe(inspectState());
   await runMigrations();
   await ensureElectric();
-  await ensureGoatLocalHttps();
-  await ensureGoatEnvFile();
+  await ensureWebLocalHttps();
+  await ensureWebEnvFile();
 
   if (!START_DEV_MODE) {
     console.log(
-      "\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Run \x1b[1mbun run dev\x1b[0m or \x1b[1mbun run dev:goat\x1b[0m when ready.\n",
+      "\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Run \x1b[1mbun run dev\x1b[0m or \x1b[1mbun run dev:web\x1b[0m when ready.\n",
     );
     return;
   }
 
   console.log(
-    `\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Starting \x1b[1mbun run dev\x1b[0m — open ${LOCAL_GOAT_APP_URL}\n`,
+    `\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Starting \x1b[1mbun run dev\x1b[0m — open ${LOCAL_WEB_APP_URL}\n`,
   );
   run("bun", ["run", "dev"]);
 }

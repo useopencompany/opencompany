@@ -107,7 +107,7 @@ export async function runGoatAutoRefill(workspaceId: string) {
 }
 
 // Reconcile-cron sweep: covers balance drops from debits recorded outside
-// apps/goat (the runner's ingestion debits).
+// apps/web (the runner's ingestion debits).
 export async function sweepGoatAutoRefills(limit = 25) {
   const candidates = await listGoatAutoRefillCandidates({ limit });
   let charged = 0;

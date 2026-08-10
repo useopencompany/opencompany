@@ -1,5 +1,5 @@
 // The pointer/copy contract: how brain writers cite external sources. The
-// canonical prose lives in apps/goat/docs/brain/pointer-copy-contract.md; this
+// canonical prose lives in apps/web/docs/brain/pointer-copy-contract.md; this
 // constant is the prompt-ready form every brain writing agent must embed so
 // the enforced rule and the documented rule cannot drift apart.
 export const GOAT_BRAIN_POINTER_COPY_RULE = [

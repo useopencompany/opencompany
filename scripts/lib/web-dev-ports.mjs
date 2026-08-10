@@ -1,53 +1,53 @@
-// Called by: scripts/dev.mjs in Goat app mode.
+// Called by: scripts/dev.mjs in web app mode.
 // Purpose: isolate each Conductor workspace's local services without changing
 // the conventional fixed ports used outside Conductor.
 
 import { findPortListeners, normalizePort } from "./port-kill.mjs";
 
-const DEFAULT_GOAT_PORT = "3002";
+const DEFAULT_WEB_PORT = "3002";
 const DEFAULT_RUNNER_PORT = "3040";
-const DEFAULT_GOAT_HTTPS_PORT = "3443";
+const DEFAULT_WEB_HTTPS_PORT = "3443";
 
-export function resolveGoatDevPorts({ env = process.env } = {}) {
+export function resolveWebDevPorts({ env = process.env } = {}) {
   const conductorBase = optionalPort(env.CONDUCTOR_PORT, "CONDUCTOR_PORT");
   if (conductorBase) {
     return {
       app: conductorBase,
       runner: offsetPort(conductorBase, 1, "runner"),
-      https: offsetPort(conductorBase, 2, "Goat HTTPS"),
+      https: offsetPort(conductorBase, 2, "web HTTPS"),
       electric: offsetPort(conductorBase, 3, "Electric"),
       isolated: true,
     };
   }
 
-  return resolveConventionalGoatDevPorts({ env });
+  return resolveConventionalWebDevPorts({ env });
 }
 
-export function selectGoatDevPorts({
+export function selectWebDevPorts({
   env = process.env,
   httpsDisabled = false,
   portIsAvailable = (port) => findPortListeners(port).length === 0,
 } = {}) {
-  const allocated = resolveGoatDevPorts({ env });
+  const allocated = resolveWebDevPorts({ env });
   if (!allocated.isolated) return allocated;
 
-  const conventional = resolveConventionalGoatDevPorts({ env });
+  const conventional = resolveConventionalWebDevPorts({ env });
   const requiredPorts = [conventional.app, conventional.runner];
   if (!httpsDisabled) requiredPorts.push(conventional.https);
 
   return requiredPorts.every((port) => portIsAvailable(port)) ? conventional : allocated;
 }
 
-function resolveConventionalGoatDevPorts({ env }) {
+function resolveConventionalWebDevPorts({ env }) {
   return {
-    app: optionalPort(env.GOAT_PORT, "GOAT_PORT") ?? DEFAULT_GOAT_PORT,
+    app: optionalPort(env.GOAT_PORT, "GOAT_PORT") ?? DEFAULT_WEB_PORT,
     runner: configuredRunnerPort(env) ?? DEFAULT_RUNNER_PORT,
-    https: optionalPort(env.GOAT_HTTPS_PORT, "GOAT_HTTPS_PORT") ?? DEFAULT_GOAT_HTTPS_PORT,
+    https: optionalPort(env.GOAT_HTTPS_PORT, "GOAT_HTTPS_PORT") ?? DEFAULT_WEB_HTTPS_PORT,
     isolated: false,
   };
 }
 
-export function isolatedGoatDevEnvironment(ports, { httpsDisabled = false } = {}) {
+export function isolatedWebDevEnvironment(ports, { httpsDisabled = false } = {}) {
   if (!ports.isolated) return {};
 
   const httpOrigin = `http://localhost:${ports.app}`;

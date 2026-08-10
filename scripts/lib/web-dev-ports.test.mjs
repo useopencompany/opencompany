@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  isolatedGoatDevEnvironment,
-  resolveGoatDevPorts,
-  selectGoatDevPorts,
-} from "./goat-dev-ports.mjs";
+  isolatedWebDevEnvironment,
+  resolveWebDevPorts,
+  selectWebDevPorts,
+} from "./web-dev-ports.mjs";
 
-test("Goat dev keeps conventional ports outside Conductor", () => {
-  assert.deepEqual(resolveGoatDevPorts({ env: {} }), {
+test("web dev keeps conventional ports outside Conductor", () => {
+  assert.deepEqual(resolveWebDevPorts({ env: {} }), {
     app: "3002",
     runner: "3040",
     https: "3443",
@@ -15,9 +15,9 @@ test("Goat dev keeps conventional ports outside Conductor", () => {
   });
 });
 
-test("Goat dev respects explicitly configured fixed ports outside Conductor", () => {
+test("web dev respects explicitly configured fixed ports outside Conductor", () => {
   assert.deepEqual(
-    resolveGoatDevPorts({
+    resolveWebDevPorts({
       env: {
         GOAT_PORT: "3102",
         GOAT_HTTPS_PORT: "3543",
@@ -33,8 +33,8 @@ test("Goat dev respects explicitly configured fixed ports outside Conductor", ()
   );
 });
 
-test("Conductor allocation provides isolated ports for every Goat service", () => {
-  const ports = resolveGoatDevPorts({
+test("Conductor allocation provides isolated ports for every web-stack service", () => {
+  const ports = resolveWebDevPorts({
     env: {
       CONDUCTOR_PORT: "55010",
       GOAT_PORT: "3002",
@@ -50,7 +50,7 @@ test("Conductor allocation provides isolated ports for every Goat service", () =
     electric: "55013",
     isolated: true,
   });
-  assert.deepEqual(isolatedGoatDevEnvironment(ports), {
+  assert.deepEqual(isolatedWebDevEnvironment(ports), {
     GOAT_PORT: "55010",
     GOAT_HTTPS_PORT: "55012",
     GOAT_NEXT_PUBLIC_APP_URL: "https://localhost:55012",
@@ -63,7 +63,7 @@ test("Conductor allocation provides isolated ports for every Goat service", () =
 });
 
 test("Conductor keeps conventional ports when they are available", () => {
-  const ports = selectGoatDevPorts({
+  const ports = selectWebDevPorts({
     env: {
       CONDUCTOR_PORT: "55010",
       GOAT_PORT: "3002",
@@ -82,7 +82,7 @@ test("Conductor keeps conventional ports when they are available", () => {
 });
 
 test("Conductor falls back to its isolated range when a conventional port is busy", () => {
-  const ports = selectGoatDevPorts({
+  const ports = selectWebDevPorts({
     env: { CONDUCTOR_PORT: "55010" },
     portIsAvailable: (port) => port !== "3002",
   });
@@ -97,7 +97,7 @@ test("Conductor falls back to its isolated range when a conventional port is bus
 });
 
 test("disabled local HTTPS does not force an isolated range when only 3443 is busy", () => {
-  const ports = selectGoatDevPorts({
+  const ports = selectWebDevPorts({
     env: { CONDUCTOR_PORT: "55010" },
     httpsDisabled: true,
     portIsAvailable: (port) => port !== "3443",
@@ -107,18 +107,18 @@ test("disabled local HTTPS does not force an isolated range when only 3443 is bu
   assert.equal(ports.app, "3002");
 });
 
-test("Conductor allocation uses the HTTP Goat origin when local HTTPS is disabled", () => {
-  const ports = resolveGoatDevPorts({ env: { CONDUCTOR_PORT: "55010" } });
+test("Conductor allocation uses the HTTP web origin when local HTTPS is disabled", () => {
+  const ports = resolveWebDevPorts({ env: { CONDUCTOR_PORT: "55010" } });
 
   assert.equal(
-    isolatedGoatDevEnvironment(ports, { httpsDisabled: true }).GOAT_NEXT_PUBLIC_APP_URL,
+    isolatedWebDevEnvironment(ports, { httpsDisabled: true }).GOAT_NEXT_PUBLIC_APP_URL,
     "http://localhost:55010",
   );
 });
 
 test("Conductor allocation rejects a base port without room for companion services", () => {
   assert.throws(
-    () => resolveGoatDevPorts({ env: { CONDUCTOR_PORT: "65535" } }),
+    () => resolveWebDevPorts({ env: { CONDUCTOR_PORT: "65535" } }),
     /leaves no available runner port/,
   );
 });

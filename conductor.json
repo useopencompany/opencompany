@@ -1,6 +1,6 @@
 {
   "scripts": {
     "setup": "bun install",
-    "run": "sh -c 'bun --filter @opencompany/goat dev --hostname 0.0.0.0 --port ${CONDUCTOR_PORT:-3002}'"
+    "run": "sh -c 'bun --filter @opencompany/web dev --hostname 0.0.0.0 --port ${CONDUCTOR_PORT:-3002}'"
   }
 }

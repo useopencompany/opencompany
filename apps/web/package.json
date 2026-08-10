@@ -1,13 +1,13 @@
 {
-  "name": "@opencompany/goat",
+  "name": "@opencompany/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node ../../scripts/next-goat.mjs dev",
-    "build": "node ../../scripts/next-goat.mjs build",
-    "vercel-build": "bun --cwd ../.. turbo build --filter=@opencompany/goat",
-    "start": "node ../../scripts/next-goat.mjs start",
+    "dev": "node ../../scripts/next-web.mjs dev",
+    "build": "node ../../scripts/next-web.mjs build",
+    "vercel-build": "bun --cwd ../.. turbo build --filter=@opencompany/web",
+    "start": "node ../../scripts/next-web.mjs start",
     "docs:generate": "fumadocs-mdx",
     "capabilities:contract": "bun scripts/check-managed-capabilities.ts",
     "lint": "eslint .",

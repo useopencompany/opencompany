@@ -1,54 +1,54 @@
 // Called by: scripts/dev.mjs.
-// Purpose: resolves Goat dev environment without letting public tunnels replace
+// Purpose: resolves the web dev environment without letting public tunnels replace
 // local WorkOS callbacks.
 
-export function resolveGoatDevEnv({
+export function resolveWebDevEnv({
   port = "3002",
   processEnv = process.env,
   tunnelEnv = {},
-  goatHttpsEnv = {},
+  webHttpsEnv = {},
 } = {}) {
   const localHttpAppUrl = `http://localhost:${port}`;
-  const configuredAppUrl = configuredGoatAppUrl(processEnv, goatHttpsEnv);
-  const goatAppUrl =
-    trimmed(goatHttpsEnv.GOAT_NEXT_PUBLIC_APP_URL) ||
+  const configuredAppUrl = configuredWebAppUrl(processEnv, webHttpsEnv);
+  const webAppUrl =
+    trimmed(webHttpsEnv.GOAT_NEXT_PUBLIC_APP_URL) ||
     trimmed(tunnelEnv.GOAT_NEXT_PUBLIC_APP_URL) ||
     trimmed(tunnelEnv.NEXT_PUBLIC_APP_URL) ||
     configuredAppUrl ||
     localHttpAppUrl;
 
   const localRedirectAppUrl =
-    trimmed(goatHttpsEnv.GOAT_NEXT_PUBLIC_APP_URL) || configuredAppUrl || localHttpAppUrl;
-  const goatRedirectUri =
-    trimmed(goatHttpsEnv.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI) ||
-    configuredGoatRedirectUri(processEnv, goatHttpsEnv) ||
+    trimmed(webHttpsEnv.GOAT_NEXT_PUBLIC_APP_URL) || configuredAppUrl || localHttpAppUrl;
+  const webRedirectUri =
+    trimmed(webHttpsEnv.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI) ||
+    configuredWebRedirectUri(processEnv, webHttpsEnv) ||
     `${localRedirectAppUrl}/auth/callback`;
 
   return {
-    GOAT_NEXT_PUBLIC_APP_URL: goatAppUrl,
-    GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
-    NEXT_PUBLIC_APP_URL: goatAppUrl,
-    NEXT_PUBLIC_WORKOS_REDIRECT_URI: goatRedirectUri,
-    WORKOS_REDIRECT_URI: goatRedirectUri,
+    GOAT_NEXT_PUBLIC_APP_URL: webAppUrl,
+    GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
+    NEXT_PUBLIC_APP_URL: webAppUrl,
+    NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
+    WORKOS_REDIRECT_URI: webRedirectUri,
     RUNNER_GOAT_TASK_WORKER_ENABLED: "true",
     RUNNER_ALLOWED_ORIGINS: appendCsvValues(
       processEnv.RUNNER_ALLOWED_ORIGINS,
-      [goatAppUrl, tunnelEnv.NEXT_PUBLIC_APP_URL, tunnelEnv.GOAT_NEXT_PUBLIC_APP_URL].filter(
+      [webAppUrl, tunnelEnv.NEXT_PUBLIC_APP_URL, tunnelEnv.GOAT_NEXT_PUBLIC_APP_URL].filter(
         Boolean,
       ),
     ),
     RUNNER_PREVIEW_BASE_DOMAIN:
       trimmed(processEnv.RUNNER_PREVIEW_BASE_DOMAIN) ||
-      localPreviewBaseDomain(goatAppUrl, processEnv.RUNNER_PUBLIC_URL),
+      localPreviewBaseDomain(webAppUrl, processEnv.RUNNER_PUBLIC_URL),
     RUNNER_PREVIEW_PROTOCOL:
       trimmed(processEnv.RUNNER_PREVIEW_PROTOCOL) ||
-      previewProtocol(goatAppUrl, processEnv.RUNNER_PUBLIC_URL),
+      previewProtocol(webAppUrl, processEnv.RUNNER_PUBLIC_URL),
   };
 }
 
-function previewProtocol(goatAppUrl, runnerPublicUrl) {
+function previewProtocol(webAppUrl, runnerPublicUrl) {
   try {
-    const appUrl = new URL(goatAppUrl);
+    const appUrl = new URL(webAppUrl);
     if (appUrl.hostname === "localhost") return appUrl.protocol === "https:" ? "https" : "http";
   } catch {
     // Fall through to the runner origin.
@@ -63,9 +63,9 @@ function previewProtocol(goatAppUrl, runnerPublicUrl) {
   return "http";
 }
 
-function localPreviewBaseDomain(goatAppUrl, runnerPublicUrl) {
+function localPreviewBaseDomain(webAppUrl, runnerPublicUrl) {
   try {
-    const appUrl = new URL(goatAppUrl);
+    const appUrl = new URL(webAppUrl);
     if (appUrl.protocol === "https:" && appUrl.hostname === "localhost") {
       return `preview.localhost:${appUrl.port || "443"}`;
     }
@@ -79,21 +79,21 @@ function localPreviewBaseDomain(goatAppUrl, runnerPublicUrl) {
   }
 }
 
-function configuredGoatAppUrl(env, goatHttpsEnv) {
+function configuredWebAppUrl(env, webHttpsEnv) {
   const configured = env.GOAT_NEXT_PUBLIC_APP_URL?.trim();
   if (!configured) return null;
-  if (configured.startsWith("https://localhost") && !goatHttpsEnv.GOAT_NEXT_PUBLIC_APP_URL) {
+  if (configured.startsWith("https://localhost") && !webHttpsEnv.GOAT_NEXT_PUBLIC_APP_URL) {
     return null;
   }
   return configured;
 }
 
-function configuredGoatRedirectUri(env, goatHttpsEnv) {
+function configuredWebRedirectUri(env, webHttpsEnv) {
   const configured = env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim();
   if (!configured) return null;
   if (
     configured.startsWith("https://localhost") &&
-    !goatHttpsEnv.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI
+    !webHttpsEnv.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI
   ) {
     return null;
   }

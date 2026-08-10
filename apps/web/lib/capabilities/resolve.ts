@@ -21,7 +21,7 @@ import {
 // needs server-only modules + billing. Injected into the shared
 // resolveGoatActionCatalog (@opencompany/goat-agent) so the runner — which never
 // exposes managed capabilities — can keep the loop identical without pulling in
-// this branch. Was previously inline in apps/goat/lib/actions/catalog.ts.
+// this branch. Was previously inline in apps/web/lib/actions/catalog.ts.
 export async function resolveGoatManagedCapabilities(
   workspaceId: string,
 ): Promise<GoatManagedCapabilitiesResolution> {

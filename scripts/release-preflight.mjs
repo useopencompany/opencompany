@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 // Called by: release workflow checks and root `bun run release:preflight`.
-// Purpose: validates required release, Goat, runner, and smoke-check environment variables.
+// Purpose: validates required release, web, runner, and smoke-check environment variables.
 
 import "./load-env.mjs";
 
 const groups = {
-  goat: {
-    label: "Vercel Goat app",
+  web: {
+    label: "Vercel web app",
     required: [
       "DATABASE_URL",
       "WORKOS_CLIENT_ID",
@@ -147,7 +147,7 @@ const groups = {
 // build and runtime. Presence in project metadata is therefore the truth for
 // "is it set" — readability is not required for the deploy to work.
 const VERCEL_PROJECT_BY_GROUP = {
-  goat: process.env.GOAT_VERCEL_PROJECT_ID,
+  web: process.env.GOAT_VERCEL_PROJECT_ID,
 };
 
 async function vercelProductionEnvKeys(projectId) {
@@ -212,7 +212,7 @@ for (const name of selected) {
   }
 }
 
-if (selected.some((name) => name === "goat" || name === "runner")) {
+if (selected.some((name) => name === "web" || name === "runner")) {
   const latitudeApiKeySet = !isUnset(process.env.LATITUDE_API_KEY);
   const latitudeProjectSet = !isUnset(process.env.LATITUDE_PROJECT_SLUG);
   if (latitudeApiKeySet !== latitudeProjectSet) {
@@ -235,11 +235,11 @@ if (!isUnset(githubIntegrationStateSecret) && githubIntegrationStateSecret.lengt
   console.log("\nGITHUB_INTEGRATION_STATE_SECRET must be at least 32 characters.");
 }
 
-const goatRedirectUri = process.env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI;
+const webRedirectUri = process.env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI;
 if (
-  goatRedirectUri &&
-  !goatRedirectUri.startsWith("https://") &&
-  !goatRedirectUri.includes("localhost")
+  webRedirectUri &&
+  !webRedirectUri.startsWith("https://") &&
+  !webRedirectUri.includes("localhost")
 ) {
   failed = true;
   console.log(
@@ -261,7 +261,7 @@ function selectGroups() {
     .map((arg) => arg.slice(2))
     .filter((arg) => groups[arg]);
 
-  return requested.length > 0 ? requested : ["goat", "runner"];
+  return requested.length > 0 ? requested : ["web", "runner"];
 }
 
 function isUnset(value) {

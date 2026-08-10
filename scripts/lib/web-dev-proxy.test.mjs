@@ -4,12 +4,12 @@ import { createServer, request as httpRequest } from "node:http";
 import { connect } from "node:net";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { startGoatDevProxy } from "./goat-dev-proxy.mjs";
+import { startWebDevProxy } from "./web-dev-proxy.mjs";
 
-test("Goat dev proxy routes app traffic and runner callback traffic", async (t) => {
+test("web dev proxy routes app traffic and runner callback traffic", async (t) => {
   const app = await startJsonServer("app");
   const runner = await startJsonServer("runner");
-  const proxy = await startGoatDevProxy({ appPort: app.port, runnerPort: runner.port });
+  const proxy = await startWebDevProxy({ appPort: app.port, runnerPort: runner.port });
 
   t.after(async () => {
     await proxy.close();
@@ -28,10 +28,10 @@ test("Goat dev proxy routes app traffic and runner callback traffic", async (t) 
   );
 });
 
-test("Goat dev proxy survives an HTTP client disconnect", async (t) => {
+test("web dev proxy survives an HTTP client disconnect", async (t) => {
   const app = await startStreamingServer();
   const runner = await startJsonServer("runner");
-  const proxy = await startGoatDevProxy({ appPort: app.port, runnerPort: runner.port });
+  const proxy = await startWebDevProxy({ appPort: app.port, runnerPort: runner.port });
 
   t.after(async () => {
     await proxy.close();
@@ -48,10 +48,10 @@ test("Goat dev proxy survives an HTTP client disconnect", async (t) => {
   assert.equal((await getJson(proxy.port, "/health")).target, "streaming-app");
 });
 
-test("Goat dev proxy survives an upgraded client disconnect", async (t) => {
+test("web dev proxy survives an upgraded client disconnect", async (t) => {
   const app = await startUpgradeServer();
   const runner = await startJsonServer("runner");
-  const proxy = await startGoatDevProxy({ appPort: app.port, runnerPort: runner.port });
+  const proxy = await startWebDevProxy({ appPort: app.port, runnerPort: runner.port });
 
   t.after(async () => {
     await proxy.close();

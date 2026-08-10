@@ -10,7 +10,7 @@ import type { GoatSkillSourceType } from "@opencompany/db/goat-schema";
 // in V1 (see docs/future-concepts/goat-plugins-alignment-proposal.md) — a resolved skill's
 // SKILL.md body becomes `instructions`; any other bundled files (scripts/, references/) are
 // reported but not imported. Goat also has its own slug scheme (`uniqueGoatSkillSlug` in
-// apps/goat/lib/skills.ts, workspace-scoped), so the resolver's own `ensureSkillMountId` /
+// apps/web/lib/skills.ts, workspace-scoped), so the resolver's own `ensureSkillMountId` /
 // `reservedIds` is intentionally unused here: this only proposes a slug; the create step is what
 // makes it unique within the Goat workspace.
 
