@@ -1447,17 +1447,19 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getAllByText("Claude Sonnet 5").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Claude Opus 4.8")).toBeInTheDocument();
     expect(screen.getByText("GPT 5.5")).toBeInTheDocument();
+    expect(screen.getByText("Qwen 3.8 Max")).toBeInTheDocument();
+    expect(screen.getByText("Alibaba")).toBeInTheDocument();
     expect(screen.getAllByText("Kimi K3").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("Kimi K2.6")).toBeInTheDocument();
     expect(screen.queryByText("GPT 5.4 Mini")).not.toBeInTheDocument();
     expect(screen.queryByText("Local Codex")).not.toBeInTheDocument();
 
-    await user.click(screen.getByText("Claude Opus 4.8"));
+    await user.click(screen.getByText("Qwen 3.8 Max"));
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Compare");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
-      model: "anthropic/claude-opus-4.8",
+      model: "alibaba/qwen3.8-max",
     });
   });
 

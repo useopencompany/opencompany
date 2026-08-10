@@ -6574,6 +6574,7 @@ function GoatModelProviderIcon({
 
 function modelProviderLabel(id: string) {
   const provider = id.split("/")[0] ?? "";
+  if (provider === "alibaba") return "Alibaba";
   if (provider === "anthropic") return "Anthropic";
   if (provider === "deepseek") return "DeepSeek";
   if (provider === "moonshotai") return "Moonshot";

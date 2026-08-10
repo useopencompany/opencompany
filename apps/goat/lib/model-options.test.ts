@@ -23,6 +23,19 @@ describe("Goat model options", () => {
     expect(goatModelContextWindowTokens("deepseek/deepseek-v4-pro")).toBe(1_000_000);
   });
 
+  it("offers Qwen 3.8 Max in main chat with its full context window", () => {
+    expect(GOAT_MODELS).toContainEqual(
+      expect.objectContaining({
+        id: "alibaba/qwen3.8-max",
+        label: "Qwen 3.8 Max",
+        supportsImages: true,
+        supportsReasoning: true,
+      }),
+    );
+    expect(normalizeGoatModel("alibaba/qwen3.8-max")).toBe("alibaba/qwen3.8-max");
+    expect(goatModelContextWindowTokens("alibaba/qwen3.8-max")).toBe(1_000_000);
+  });
+
   it("preserves the GLM model used by workflow tasks", () => {
     expect(GOAT_MODELS).toContainEqual(
       expect.objectContaining({
