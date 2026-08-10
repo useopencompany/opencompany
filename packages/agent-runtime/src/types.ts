@@ -84,6 +84,7 @@ export type AgentModelId =
   | "anthropic/claude-fable-5"
   | "google/gemini-3-flash"
   | "google/gemini-3.1-flash-lite-preview"
+  | "alibaba/qwen3.8-max"
   | "deepseek/deepseek-v4-pro"
   | "deepseek/deepseek-v4-flash"
   | "mistral/mistral-medium-3.5"
