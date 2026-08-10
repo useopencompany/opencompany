@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { LAST_UPDATED } from "@/lib/benchmarks-data";
 import { GridBackdrop } from "../GridBackdrop";
 
@@ -29,10 +30,18 @@ export function BenchmarksHero() {
           Cross-verified against the benchmarks the community still trusts — not another
           leaderboard, our judgment on which numbers are worth believing.
         </p>
-        <p className="mt-6 inline-flex items-center gap-2 rounded-full border border-border bg-background px-3.5 py-1.5 font-medium font-mono text-[12px] text-ink-subtle shadow-sm">
-          <span aria-hidden="true" className="size-2 rounded-full bg-violet-500" />
-          Updated {formatUpdatedDate(LAST_UPDATED)}
-        </p>
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+          <p className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3.5 py-1.5 font-medium font-mono text-[12px] text-ink-subtle shadow-sm">
+            <span aria-hidden="true" className="size-2 rounded-full bg-violet-500" />
+            Updated {formatUpdatedDate(LAST_UPDATED)}
+          </p>
+          <Link
+            href="/benchmarks/charts"
+            className="font-mono text-[12px] text-violet-600 underline decoration-violet-500/30 underline-offset-2 hover:decoration-violet-500"
+          >
+            See it as charts →
+          </Link>
+        </div>
       </div>
     </section>
   );
