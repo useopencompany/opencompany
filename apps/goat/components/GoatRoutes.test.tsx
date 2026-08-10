@@ -56,6 +56,8 @@ const skillActionsMock = vi.hoisted(() => ({
     description: "Does an imported thing",
     instructions: "Use this when imported.",
     extraFiles: [] as string[],
+    resolvedCommit: "a".repeat(40),
+    integrity: `sha256:${"b".repeat(64)}`,
   })),
   importGoatSkillAction: vi.fn(async () => ({
     status: "imported" as const,
@@ -410,6 +412,8 @@ describe("GoatSkillsSettingsRoute", () => {
     await waitFor(() =>
       expect(skillActionsMock.importGoatSkillAction).toHaveBeenCalledWith({
         url: "github.com/o/r",
+        expectedResolvedCommit: "a".repeat(40),
+        expectedIntegrity: `sha256:${"b".repeat(64)}`,
       }),
     );
     await waitFor(() =>

@@ -102,6 +102,8 @@ export type GoatSkillImportPreviewResult =
       description: string;
       instructions: string;
       extraFiles: string[];
+      resolvedCommit: string;
+      integrity: string;
     }
   | { status: "ambiguous"; candidates: GoatSkillImportCandidate[] }
   | { status: "error"; message: string };
@@ -134,6 +136,8 @@ export async function previewGoatSkillImportAction(input: {
       description: preview.description,
       instructions: preview.instructions,
       extraFiles: preview.extraFiles,
+      resolvedCommit: preview.resolvedCommit,
+      integrity: preview.integrity,
     };
   } catch (error) {
     if (error instanceof GoatSkillImportError) return { status: "error", message: error.message };
@@ -152,9 +156,19 @@ export type GoatSkillImportResult =
 export async function importGoatSkillAction(input: {
   url: string;
   selectedPath?: string;
+  expectedResolvedCommit: string;
+  expectedIntegrity: string;
 }): Promise<GoatSkillImportResult> {
-  if (!input || typeof input.url !== "string" || !input.url.trim()) {
-    return { status: "error", message: "A skill URL is required." };
+  if (
+    !input ||
+    typeof input.url !== "string" ||
+    !input.url.trim() ||
+    typeof input.expectedResolvedCommit !== "string" ||
+    !/^[0-9a-f]{40}$/i.test(input.expectedResolvedCommit) ||
+    typeof input.expectedIntegrity !== "string" ||
+    !/^sha256:[0-9a-f]{64}$/i.test(input.expectedIntegrity)
+  ) {
+    return { status: "error", message: "Preview this skill again before importing it." };
   }
   const gate = await requireWorkspaceAdmin();
   if (!gate.ok) return { status: "error", message: gate.message };
@@ -165,6 +179,15 @@ export async function importGoatSkillAction(input: {
     });
     if (resolved.status === "ambiguous") {
       return { status: "ambiguous", candidates: resolved.candidates };
+    }
+    if (
+      resolved.resolvedCommit !== input.expectedResolvedCommit ||
+      resolved.integrity !== input.expectedIntegrity
+    ) {
+      return {
+        status: "error",
+        message: "This skill changed since the preview. Preview it again before importing.",
+      };
     }
     const result = await createImportedGoatSkill({
       workspaceId: gate.workspaceId,

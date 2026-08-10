@@ -1460,6 +1460,8 @@ type ImportPreviewState = {
   description: string;
   instructions: string;
   extraFiles: string[];
+  resolvedCommit: string;
+  integrity: string;
 };
 
 function ImportSkillDialog({
@@ -1514,18 +1516,23 @@ function ImportSkillDialog({
         description: result.description,
         instructions: result.instructions,
         extraFiles: result.extraFiles,
+        resolvedCommit: result.resolvedCommit,
+        integrity: result.integrity,
       });
     });
   };
 
   const confirmImport = () => {
     const trimmed = url.trim();
-    if (!trimmed) return;
+    if (!trimmed || !preview) return;
+    const confirmedPreview = preview;
     setError(null);
     startImporting(async () => {
       const result = await importGoatSkillAction({
         url: trimmed,
         ...(selectedPath !== undefined ? { selectedPath } : {}),
+        expectedResolvedCommit: confirmedPreview.resolvedCommit,
+        expectedIntegrity: confirmedPreview.integrity,
       });
       if (result.status === "imported") {
         onImported(result.slug);
