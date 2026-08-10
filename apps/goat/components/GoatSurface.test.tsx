@@ -4,11 +4,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  closeGoatChatSessionAction,
-  markGoatChatSeenAction,
-  reopenGoatChatSessionAction,
-} from "@/lib/chat-actions";
+import { closeGoatChatSessionAction, reopenGoatChatSessionAction } from "@/lib/chat-actions";
+import { markGoatChatSeen } from "@/lib/chat-client";
 import {
   GOAT_CHAT_COMPOSER_FOCUS_EVENT,
   GOAT_HOME_NAVIGATION_EVENT,
@@ -36,7 +33,8 @@ import {
   clearAllOptimisticGoatChatSummaries,
   useOptimisticGoatChatSummaries,
 } from "@/lib/optimistic-chat-summaries";
-import { cancelGoatTaskAction, continueGoatTaskAction } from "@/lib/tasks";
+import { continueGoatTask } from "@/lib/task-client";
+import { cancelGoatTaskAction } from "@/lib/tasks";
 import { GoatSurface, type GoatTaskView } from "./GoatSurface";
 
 const chatMock = vi.hoisted(() => ({
@@ -82,9 +80,12 @@ vi.mock("@/lib/chat-actions", () => ({
     shareId: "goat_chat_share_123e4567-e89b-42d3-a456-426614174000",
   })),
   getGoatChatShareAction: vi.fn(async () => ({ ok: true, shareId: null })),
-  markGoatChatSeenAction: vi.fn(async () => ({ ok: true, error: null })),
   reopenGoatChatSessionAction: vi.fn(async () => ({ ok: true, error: null })),
   revokeGoatChatShareAction: vi.fn(async () => ({ ok: true })),
+}));
+
+vi.mock("@/lib/chat-client", () => ({
+  markGoatChatSeen: vi.fn(async () => ({ ok: true, error: null })),
 }));
 
 // Server action module; importing it for real drags authkit into jsdom.
@@ -99,7 +100,10 @@ vi.mock("@/lib/chat-attachment-upload", () => ({
 vi.mock("@/lib/tasks", () => ({
   archiveGoatTaskAction: vi.fn(async () => ({ ok: true, error: null })),
   cancelGoatTaskAction: vi.fn(async () => ({ ok: true, error: null })),
-  continueGoatTaskAction: vi.fn(async (_taskId: string, _prompt: string, messageId: string) => ({
+}));
+
+vi.mock("@/lib/task-client", () => ({
+  continueGoatTask: vi.fn(async (_taskId: string, _prompt: string, messageId: string) => ({
     ok: true,
     error: null,
     messageId,
@@ -333,9 +337,9 @@ describe("GoatSurface chat streaming UI", () => {
     historyMock.replaceState.mockReset();
     vi.spyOn(window.history, "replaceState").mockImplementation(historyMock.replaceState);
     vi.mocked(closeGoatChatSessionAction).mockClear();
-    vi.mocked(markGoatChatSeenAction).mockClear();
+    vi.mocked(markGoatChatSeen).mockClear();
     vi.mocked(cancelGoatTaskAction).mockClear();
-    vi.mocked(continueGoatTaskAction).mockClear();
+    vi.mocked(continueGoatTask).mockClear();
     attachmentUploadMock.upload.mockReset();
     attachmentUploadMock.upload.mockResolvedValue({
       blobUrl: "https://blob.test/goat-chat/user_1/brief.pdf",
@@ -796,14 +800,14 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    await waitFor(() => expect(markGoatChatSeenAction).toHaveBeenCalledWith(initialChat.id));
-    vi.mocked(markGoatChatSeenAction).mockClear();
+    await waitFor(() => expect(markGoatChatSeen).toHaveBeenCalledWith(initialChat.id));
+    vi.mocked(markGoatChatSeen).mockClear();
 
     await act(async () => {
       chatMock.status = "streaming";
       chatMock.startWithSessionId?.(initialChat.id, DEFAULT_GOAT_MODEL);
     });
-    expect(markGoatChatSeenAction).not.toHaveBeenCalled();
+    expect(markGoatChatSeen).not.toHaveBeenCalled();
 
     chatMock.status = "ready";
     rerender(
@@ -815,7 +819,7 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    await waitFor(() => expect(markGoatChatSeenAction).toHaveBeenCalledWith(initialChat.id));
+    await waitFor(() => expect(markGoatChatSeen).toHaveBeenCalledWith(initialChat.id));
   });
 
   it("continues a session-backed workflow task through the same chat composer", async () => {
@@ -872,7 +876,7 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
-      expect(continueGoatTaskAction).toHaveBeenCalledWith(
+      expect(continueGoatTask).toHaveBeenCalledWith(
         "goat_task_1",
         "Please check the afternoon too",
         expect.stringMatching(/^goat_chat_msg_[0-9a-f-]{36}$/),
@@ -928,7 +932,7 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
-      expect(continueGoatTaskAction).toHaveBeenCalledWith(
+      expect(continueGoatTask).toHaveBeenCalledWith(
         "goat_task_1",
         "@skill/product-work investigate the mention menu",
         expect.stringMatching(/^goat_chat_msg_[0-9a-f-]{36}$/),
@@ -1008,7 +1012,7 @@ describe("GoatSurface chat streaming UI", () => {
       description: "#task research competitors",
       model: DEFAULT_GOAT_MODEL,
     });
-    expect(continueGoatTaskAction).not.toHaveBeenCalled();
+    expect(continueGoatTask).not.toHaveBeenCalled();
     expect(cancelGoatTaskAction).not.toHaveBeenCalled();
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
   });
@@ -1443,17 +1447,19 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getAllByText("Claude Sonnet 5").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Claude Opus 4.8")).toBeInTheDocument();
     expect(screen.getByText("GPT 5.5")).toBeInTheDocument();
+    expect(screen.getByText("Qwen 3.8 Max")).toBeInTheDocument();
+    expect(screen.getByText("Alibaba")).toBeInTheDocument();
     expect(screen.getAllByText("Kimi K3").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("Kimi K2.6")).toBeInTheDocument();
     expect(screen.queryByText("GPT 5.4 Mini")).not.toBeInTheDocument();
     expect(screen.queryByText("Local Codex")).not.toBeInTheDocument();
 
-    await user.click(screen.getByText("Claude Opus 4.8"));
+    await user.click(screen.getByText("Qwen 3.8 Max"));
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Compare");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
-      model: "anthropic/claude-opus-4.8",
+      model: "alibaba/qwen3.8-max",
     });
   });
 

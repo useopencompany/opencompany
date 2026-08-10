@@ -425,6 +425,19 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     ratings: { capability: 1, speed: 3, cost: 1 },
   },
   {
+    id: "alibaba/qwen3.8-max",
+    type: "model",
+    contextWindowTokens: 1_000_000,
+    label: "Qwen 3.8 Max",
+    description:
+      "Flagship Qwen model for long-horizon coding, professional work, and visual understanding.",
+    category: "Deep",
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: false,
+    ratings: { capability: 3, speed: 2, cost: 2 },
+  },
+  {
     id: "deepseek/deepseek-v4-pro",
     type: "model",
     contextWindowTokens: 1_000_000,

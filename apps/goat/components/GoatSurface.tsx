@@ -107,16 +107,13 @@ import {
   GOAT_AD_HOC_TASK_TOKEN,
   hasGoatAdHocTaskToken,
 } from "@/lib/ad-hoc-task";
-import {
-  closeGoatChatSessionAction,
-  markGoatChatSeenAction,
-  reopenGoatChatSessionAction,
-} from "@/lib/chat-actions";
+import { closeGoatChatSessionAction, reopenGoatChatSessionAction } from "@/lib/chat-actions";
 import { GOAT_CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import {
   AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES,
   AUTO_GOAT_MODEL_SELECTION,
 } from "@/lib/chat-auto-model";
+import { markGoatChatSeen } from "@/lib/chat-client";
 import {
   type GoatChatModelSelection,
   persistLastGoatChatSelection,
@@ -183,6 +180,7 @@ import {
   removeOptimisticGoatChatSummary,
 } from "@/lib/optimistic-chat-summaries";
 import type { GoatSkillCatalogItem } from "@/lib/skills";
+import { continueGoatTask } from "@/lib/task-client";
 import {
   createGoatCollections,
   type GoatChatMessageRow,
@@ -202,7 +200,7 @@ import {
   deriveGoatTaskWorkflowSteps,
   type GoatTaskWorkflowStepView,
 } from "@/lib/task-workflow-activity";
-import { archiveGoatTaskAction, cancelGoatTaskAction, continueGoatTaskAction } from "@/lib/tasks";
+import { archiveGoatTaskAction, cancelGoatTaskAction } from "@/lib/tasks";
 import { updateGoatTimezoneAction } from "@/lib/user-preferences";
 import type { GoatWorkflowCatalogItem } from "@/lib/workflows";
 
@@ -1072,7 +1070,7 @@ export function GoatSurface({
     ].join(":");
     if (lastSeenMarkRef.current === markKey) return;
     lastSeenMarkRef.current = markKey;
-    void markGoatChatSeenAction(chatSessionId).catch(() => undefined);
+    void markGoatChatSeen(chatSessionId).catch(() => undefined);
   }, [
     activeChatSummary?.updatedAt,
     chatMessages.length,
@@ -1564,13 +1562,8 @@ export function GoatSurface({
       setMessages((current) => [...current, optimisticMessage]);
       const continueTask =
         taskSkillMentions.length > 0
-          ? continueGoatTaskAction(
-              activeTaskConversation.taskId,
-              prompt,
-              messageId,
-              taskSkillMentions,
-            )
-          : continueGoatTaskAction(activeTaskConversation.taskId, prompt, messageId);
+          ? continueGoatTask(activeTaskConversation.taskId, prompt, messageId, taskSkillMentions)
+          : continueGoatTask(activeTaskConversation.taskId, prompt, messageId);
       void continueTask
         .then((result) => {
           if (!mountedRef.current) return;
@@ -2705,7 +2698,7 @@ export function GoatSurface({
             </div>
           ) : (
             <div className="flex min-h-0 w-full flex-1 flex-col items-center">
-              <div className="w-full px-6 pb-2 pt-3">
+              <div className="w-full px-6 pb-2 pt-1">
                 <div className="flex w-full items-center justify-between gap-3">
                   <ChatTitleHeader
                     title={activeChatTitle}
@@ -6578,6 +6571,7 @@ function GoatModelProviderIcon({
 
 function modelProviderLabel(id: string) {
   const provider = id.split("/")[0] ?? "";
+  if (provider === "alibaba") return "Alibaba";
   if (provider === "anthropic") return "Anthropic";
   if (provider === "deepseek") return "DeepSeek";
   if (provider === "moonshotai") return "Moonshot";

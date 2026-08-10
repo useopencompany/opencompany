@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { BlogIndex } from "@/components/marketing/BlogIndex";
 import { BlogShell } from "@/components/marketing/BlogShell";
 import { getAllPosts } from "@/lib/blog";
+import { DEFAULT_SOCIAL_IMAGE } from "@/lib/social-image";
 
 const title = "Blog — opencompany";
 const description = "Guides, deep dives, and practical advice on running AI agents in production.";
@@ -22,11 +23,13 @@ export const metadata: Metadata = {
     siteName: "opencompany",
     title,
     description,
+    images: [DEFAULT_SOCIAL_IMAGE],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title,
     description,
+    images: [DEFAULT_SOCIAL_IMAGE],
   },
 };
 

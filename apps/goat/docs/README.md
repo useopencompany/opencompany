@@ -106,6 +106,16 @@ current user's active workspace, rejects unavailable references, and caps a turn
 skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores an immutable snapshot
 in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original version.
 
+Besides hand-authoring, `/settings/skills` lets an admin import a skill from a public GitHub or
+skills.sh URL (`apps/goat/lib/skill-import.ts`, reusing the same resolver `apps/web`'s external
+skills use). An imported row carries `source_type`/`source_url`/`source_ref`/`source_path` on
+`goat.skills`, lands `active` immediately, and is read-only — `updateGoatSkill` rejects edits to
+any row with a non-null `source_type`. Import is instructions-only in this iteration: bundled
+`scripts/`/`references/` files in the source repo are reported but not materialized, since Goat
+skills are plain text injected into the prompt, not files on disk the runner mounts. See
+`docs/future-concepts/goat-plugins-alignment-proposal.md` for where this fits into the broader
+skills/integrations direction.
+
 Selecting a workflow with `#<id>` changes the composer action from **Send message** to **Start
 task**. Submission posts directly to `/api/workflows`, creates a task-flavored chat session and its
 first durable turn, and leaves the current Home or chat surface in place. It does not call the
@@ -720,7 +730,9 @@ The UI maps this projection to Tasks rows while task detail renders the linked c
 natively. Goat task pages subscribe to `goat.tasks` plus the standard session messages and runtime
 state. Legacy rows without a session still subscribe to `goat.task_messages` and `goat.task_events`
 for read compatibility. Origin chats subscribe to `goat.chat_messages`, so task completion
-notifications appear without a manual refresh.
+notifications appear without a manual refresh. Replies use
+`POST /api/tasks/[taskId]/continue` instead of a Server Action so an open task remains replyable
+when production deploys a newer build in the background.
 
 Settings and Brain use the same pattern for `goat.integrations`, `goat.brain_folders`, and
 `goat.brain_documents`. Server props are initial render fallbacks; after hydration, live Electric
