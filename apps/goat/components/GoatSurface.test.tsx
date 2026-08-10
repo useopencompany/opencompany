@@ -3529,6 +3529,32 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.queryByText("Market research")).not.toBeInTheDocument();
   });
 
+  it("restores a home chat when the archive request rejects", async () => {
+    const user = userEvent.setup();
+    vi.mocked(closeGoatChatSessionAction).mockRejectedValueOnce(new Error("network unavailable"));
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        recentChats={[
+          {
+            id: "chat_1",
+            title: "Market research",
+            model: DEFAULT_GOAT_MODEL,
+            preview: "Compare the latest pricing.",
+            updatedAt: currentTimestamp(),
+          },
+        ]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Archive Market research" }));
+
+    await waitFor(() => expect(screen.getByText("Market research")).toBeInTheDocument());
+    expect(routerMock.refresh).not.toHaveBeenCalled();
+  });
+
   it("opens the same composer as main chat with Cmd+K and starts a background chat without navigating", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
