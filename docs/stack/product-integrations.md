@@ -29,27 +29,32 @@ customer requirement pushes us toward another auth provider.
 
 **What it is:** Payments platform.
 
-**What it does for us:** Handles credit top-up checkout sessions and webhook confirmation. App-side
-billing records track pending/open/fulfilled checkout state and workspace balances.
+**What it does for us:** Handles Goat subscriptions, credit top-up Checkout sessions, off-session
+auto-refill, and retained legacy-customer billing compatibility. App-side billing records track
+pending/open/fulfilled Checkout state, subscription projections, and workspace balances. The Goat
+webhook is the durable confirmation point for those flows.
 
 **Where it is used:**
 
-- `apps/web/lib/billing/stripe.ts`.
-- `apps/web/lib/billing/actions.ts`.
-- `apps/web/lib/billing/service.ts`.
-- `apps/web/app/api/stripe/webhook/route.ts`.
+- `apps/goat/lib/billing/stripe.ts`.
+- `apps/goat/app/api/stripe/webhook/route.ts` (surviving webhook owner).
+- `apps/goat/lib/billing/legacy-*` (isolated legacy-customer compatibility).
+- `apps/web/lib/billing/*` and `apps/web/app/api/stripe/webhook/route.ts` remain deployed only for
+  the documented cutover rollback window.
 - `apps/stripe-webhooks`.
 - `scripts/stripe-listen.mjs`.
-- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_CLI_PROJECT_NAME` in `.env.example`.
+- `GOAT_STRIPE_API_KEY`, `GOAT_STRIPE_WEBHOOK_SECRET`, `GOAT_STRIPE_CHECKOUT_ENABLED`, and the
+  rollback-window `STRIPE_*` values in `.env.example`.
+- `docs/legacy-product-retirement.md`.
 
 **Why we use it:** Stripe Checkout keeps the payment surface small and lets us avoid handling card
 details directly. Webhooks give us a durable fulfillment point for credits.
 
 **Owner:** Product Engineering / Finance.
 
-**Reconsider if:** We need subscriptions, invoices, tax, marketplace payouts, or revenue recognition
-that changes the billing model. Those should be explicit Stripe architecture decisions, not organic
-extensions to top-ups.
+**Reconsider if:** Tax, marketplace payouts, revenue recognition, or separating current and legacy
+customers into different Stripe accounts materially changes the billing model. Those should be
+explicit Stripe architecture decisions, not organic extensions to the webhook.
 
 ## Linear
 
