@@ -9,7 +9,7 @@ subnets, including cloud metadata addresses.
 ## Authentication
 
 Vercel deployments receive Sandbox authentication through OIDC automatically.
-For local development, link the Goat Vercel project and run `vercel env pull`;
+For local development, link the web Vercel project and run `vercel env pull`;
 the resulting `VERCEL_OIDC_TOKEN` lasts 12 hours. Outside Vercel, configure
 `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and `VERCEL_PROJECT_ID`.
 
@@ -25,7 +25,7 @@ Chromium at build time:
 ```sh
 export VERCEL_TEAM_SLUG=your-team
 export VERCEL_PROJECT_SLUG=your-goat-project
-apps/goat/sandbox-image/build-push.sh
+apps/web/sandbox-image/build-push.sh
 ```
 
 For local VCR authentication, `vercel env pull` supplies

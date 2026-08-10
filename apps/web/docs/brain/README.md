@@ -8,7 +8,7 @@ read plane.
 
 This section is the fast-orientation reference for anyone (human or agent) working on the brain.
 The pages below are contracts and maps, not design narratives — for the original design rationale
-see `apps/goat/research/goat-brain-v1.md` and issue #597.
+see `apps/web/research/goat-brain-v1.md` and issue #597.
 
 ## Pages
 
@@ -49,10 +49,10 @@ see `apps/goat/research/goat-brain-v1.md` and issue #597.
 | CLI | `packages/goat-brain/src/cli/index.ts` |
 | DB tables (Drizzle) | `packages/db/src/goat-schema.ts` (`goatBrain*` exports) |
 | DB ↔ file materialization | `packages/db/src/goat-brain-files.ts` |
-| Chat tools | `apps/goat/lib/brain-cli.ts` (`goat_brain`), `apps/goat/lib/brain-capture.ts` (`save_to_brain`) |
+| Chat tools | `apps/web/lib/brain-cli.ts` (`goat_brain`), `apps/web/lib/brain-capture.ts` (`save_to_brain`) |
 | Ingestion worker + handlers | `apps/runner/src/goat-brain-ingest-worker.ts`, `goat-brain-agent-ingest.ts`, `goat-brain-jamie-writes.ts` |
 | Source item normalization | `packages/goat-brain/src/source-items.ts` |
-| User-level MCP connector | `apps/goat/app/mcp/route.ts`, `apps/goat/lib/mcp-server.ts` |
+| User-level MCP connector | `apps/web/app/mcp/route.ts`, `apps/web/lib/mcp-server.ts` |
 
 ## Invariants worth memorizing
 

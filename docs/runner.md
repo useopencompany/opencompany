@@ -1,7 +1,7 @@
 # Goat runner
 
-`apps/runner` is the durable support service for Goat. It is a Bun/Fastify process deployed on
-Render and started locally by `bun run dev:goat`.
+`apps/runner` is OpenCompany's durable support service. It is a Bun/Fastify process deployed on
+Render and started locally by `bun run dev:web`.
 
 ## Responsibilities
 
@@ -33,6 +33,6 @@ upstreams. See [LLM token broker](./llm-token-broker.md).
 
 ## Verification
 
-Run runner unit tests and typecheck, then exercise the real Goat path that wakes the touched worker.
+Run runner unit tests and typecheck, then exercise the real web path that wakes the touched worker.
 For deployment changes, verify `/healthz` reports the expected release and create a representative
-durable turn through Goat rather than calling worker internals alone.
+durable turn through the web app rather than calling worker internals alone.

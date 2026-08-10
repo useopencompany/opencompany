@@ -17,10 +17,10 @@ bun run secrets:check
 ```
 
 TruffleHog must be installed for the local secret scan. CI runs the same scan on pull requests.
-For focused checks, use Turborepo filters such as `bun run test --filter @opencompany/goat` and
+For focused checks, use Turborepo filters such as `bun run test --filter @opencompany/web` and
 `bun run test --filter @opencompany/runner`.
 
-UI changes require a real-path browser check against `bun run dev:goat`, including the primary
+UI changes require a real-path browser check against `bun run dev:web`, including the primary
 flow and an obvious error or empty state. Document anything that could not be exercised because an
 external provider or fixture was unavailable.
 

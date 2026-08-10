@@ -107,7 +107,7 @@ merge) against a materialized copy of the brain. The system prompt embeds
 
 ### 2. Explicit captures from chat or MCP (agentic)
 
-Chat's `save_to_brain` tool (`apps/goat/lib/brain-capture.ts`) is available to every member with
+Chat's `save_to_brain` tool (`apps/web/lib/brain-capture.ts`) is available to every member with
 access to an active brain. It is capture-first: it immediately
 writes a **draft page in `inbox/`** (status `draft`) so the user sees the save instantly, then
 records a source item and enqueues a `brain_agent_ingest` job. `runGoatChatCaptureAgentIngest`

@@ -5,7 +5,7 @@ description: How to keep Goat documentation current while the app changes.
 
 ## Source files
 
-Write documentation in `apps/goat/content/docs`.
+Write documentation in `apps/web/content/docs`.
 
 Each page is an MDX file with frontmatter:
 
@@ -16,7 +16,7 @@ description: One sentence summary.
 ---
 ```
 
-Update `apps/goat/content/docs/meta.json` when adding, removing, or reordering pages.
+Update `apps/web/content/docs/meta.json` when adding, removing, or reordering pages.
 
 ## When to update docs
 
@@ -35,8 +35,8 @@ Small internal refactors do not need docs unless they invalidate an existing pag
 Before merging a docs change that touches MDX routing or rendering, run:
 
 ```bash
-bun --filter @opencompany/goat typecheck
-bun --filter @opencompany/goat build
+bun --filter @opencompany/web typecheck
+bun --filter @opencompany/web build
 ```
 
-For copy-only changes, typecheck is usually enough. For route or rendering changes, open `/docs` in the Goat app and click at least one nested docs page.
+For copy-only changes, typecheck is usually enough. For route or rendering changes, open `/docs` in the web app and click at least one nested docs page.

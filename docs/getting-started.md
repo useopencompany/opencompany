@@ -8,34 +8,34 @@
 - Neon CLI access to the development project
 - Docker or OrbStack for local Electric
 - Stripe CLI for local billing webhooks
-- Caddy for Goat's local HTTPS origin (setup can install it with Homebrew on macOS)
+- Caddy for the web app's local HTTPS origin (setup can install it with Homebrew on macOS)
 
 ## Bootstrap
 
 ```bash
 bun install --frozen-lockfile
 bun run setup
-bun run dev:goat
+bun run dev:web
 ```
 
 Setup copies `.env.example` to `.env.local` when needed, pulls Infisical `dev` values from `/goat`
 and `/runner`, creates or reuses a Neon child branch named for the current Git branch, runs the
 checked-in migrations, starts local Electric, and mirrors the required values to
-`apps/goat/.env.local`. It is safe to rerun.
+`apps/web/.env.local`. It is safe to rerun.
 
 Use `bun run setup -- --check` for a read-only readiness report. `bun run env:pull` refreshes shared
 development values, and `bun run setup:stripe` refreshes local Stripe configuration.
 
 ## Local stack
 
-`bun run dev` and `bun run dev:goat` start the same current stack:
+`bun run dev` and `bun run dev:web` start the same current stack:
 
-- Goat, normally at `https://localhost:3443`;
-- the Goat runner, normally at `http://localhost:3040`;
-- Stripe CLI forwarding to Goat's webhook;
+- the OpenCompany web app, normally at `https://localhost:3443`;
+- the runner, normally at `http://localhost:3040`;
+- Stripe CLI forwarding to the web app's unchanged `/api/stripe/webhook` route;
 - Electric and the local HTTPS/tunnel helpers used by integrations.
 
-Use `bun run dev:logs -- --source goat --tail 100` or `--source runner` to inspect the gitignored
+Use `bun run dev:logs -- --source web --tail 100` or `--source runner` to inspect the gitignored
 Turbo log. Do not paste unredacted local logs into issues because provider output can be sensitive.
 
 ## Database isolation
@@ -46,7 +46,7 @@ Delete an abandoned branch with `bun run db:branch:delete` after resolving its e
 
 ## First verification
 
-Open Goat, sign in through WorkOS, send a foreground chat message, and confirm live updates arrive.
+Open the web app, sign in through WorkOS, send a foreground chat message, and confirm live updates arrive.
 For changes touching the runner, create the relevant task or cloud coding turn and verify its
 durable status in the UI. For billing work, run `bun run setup:stripe` and confirm the local Stripe
 listener forwards a signed event to `/api/stripe/webhook`.

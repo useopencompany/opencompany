@@ -28,7 +28,7 @@ Goat UI
 
 ## Foreground chat
 
-The chat entry point is `apps/goat/app/api/chat/route.ts`. It authenticates the current Goat user, validates the submitted message, stores the user turn, and streams a response through Vercel AI Gateway.
+The chat entry point is `apps/web/app/api/chat/route.ts`. It authenticates the current Goat user, validates the submitted message, stores the user turn, and streams a response through Vercel AI Gateway.
 
 The chat agent can answer directly or use the tools assembled in `packages/goat-agent/src/chat-agent.ts`:
 
@@ -40,7 +40,7 @@ The chat agent can answer directly or use the tools assembled in `packages/goat-
 
 ## Durable tasks
 
-Durable tasks start in `apps/goat/lib/tasks.ts` and `packages/db/src/goat-task-sessions.ts`. Creation writes a task-kind chat session, a thin `goat.tasks` projection, native chat messages, engine runtime state, and the first `goat.codex_chat_turn` in one database statement.
+Durable tasks start in `apps/web/lib/tasks.ts` and `packages/db/src/goat-task-sessions.ts`. Creation writes a task-kind chat session, a thin `goat.tasks` projection, native chat messages, engine runtime state, and the first `goat.codex_chat_turn` in one database statement.
 
 `apps/runner/src/goat-codex-chat-worker.ts` owns the queue. It preserves one active turn per session, heartbeats a fenced lease, reclaims expired work after a crash, and hands active turns off during deploys. Task turns load their projection through `apps/runner/src/goat-task-turn.ts` and execute through the normal OpenCompany or Codex chat adapter.
 

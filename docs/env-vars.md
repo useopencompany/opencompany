@@ -7,23 +7,24 @@ duplicating every optional provider variable.
 
 | Environment/path | Consumers | Contents |
 | --- | --- | --- |
-| `dev` `/goat` | local Goat | shared auth, integration, billing, Electric, and product values |
+| `dev` `/goat` | local web | shared auth, integration, billing, Electric, and product values |
 | `dev` `/runner` | local runner | runner tokens, provider credentials, sandbox configuration |
-| `prod` `/goat` | Vercel Goat | production product and webhook configuration |
+| `prod` `/goat` | Vercel web | production product and webhook configuration |
 | `prod` `/runner` | Render runner | production worker and broker configuration |
 | `prod` `/release` | GitHub Actions | production URLs, project/service IDs, deploy tokens, DB URL |
 | `prod` `/ci/turbo` | GitHub Actions | optional Turborepo remote-cache credentials |
 
-Values are scoped: a secret in `/runner` does not reach Goat, and a secret in `/goat` does not
+The `/goat` path and `GOAT_*` keys are retained compatibility contracts for the web app. Values are
+scoped: a secret in `/runner` does not reach web, and a secret in `/goat` does not
 reach the runner. Shared provider credentials must be present in both paths when both runtimes use
 them.
 
 ## Required groups
 
-`scripts/release-preflight.mjs` is the executable source of truth for required Goat, runner, and
+`scripts/release-preflight.mjs` is the executable source of truth for required web, runner, and
 release variables. Important contracts include:
 
-- Goat: database, WorkOS, canonical Goat URL, Vercel AI Gateway, Blob, runner token/URL, Electric,
+- Web: database, WorkOS, canonical URL, Vercel AI Gateway, Blob, runner token/URL, Electric,
   managed capabilities, Stripe, X OAuth, cron, and Goat PostHog values.
 - Runner: database, internal/stream tokens, Goat origin, allowed origins, integration encryption,
   E2B, model providers, GitHub/X integration credentials, and Goat PostHog values.
@@ -35,7 +36,7 @@ Google OAuth uses the direct Goat callback URLs listed in `.env.example`.
 ## Local generated values
 
 `bun run setup` writes branch-specific `DATABASE_URL`, local ports/origins, runner tokens, and
-Electric configuration to `.env.local` and mirrors the Goat subset into `apps/goat/.env.local`.
+Electric configuration to `.env.local` and mirrors the web subset into `apps/web/.env.local`.
 Do not put branch database URLs or generated local tokens in Infisical. `.env.override.local` may
 override a developer's generated values and remains gitignored.
 

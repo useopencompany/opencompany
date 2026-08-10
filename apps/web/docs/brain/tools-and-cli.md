@@ -39,12 +39,12 @@ Every surface that reads or writes a brain, and what each is allowed to do.
 | `delete <id>` | `--dry-run` to preview, `--force` to delete. Chat should only ever `--dry-run`. |
 | `folder create --path <p>` | Validate/create a free-form folder. |
 
-## Chat tools (`apps/goat`)
+## Chat tools (`apps/web`)
 
 | Tool | Where | Capability |
 | --- | --- | --- |
-| `goat_brain` | `apps/goat/lib/brain-cli.ts` + shared read surface in `apps/goat/lib/brain-surface.ts` | Reads (`query`/`get`/`timeline`/`list`) are served in-process by the [read plane](./retrieval-planes.md) (`@opencompany/db/goat-brain-read`) — no materialization, no CLI spawn. Main chat exposes the same read-only command surface as MCP and does not expose write commands. |
-| `save_to_brain` | `apps/goat/lib/brain-capture.ts` | Capture-only for all members with access to the active brain: instant draft page in `inbox/` + durable curation job. Canonical integration refs can be copied with content or hydrated in the runner from a ref + integration id. This is the intended chat write path. See [ingestion.md](./ingestion.md#2-explicit-captures-from-chat-or-mcp-agentic). |
+| `goat_brain` | `apps/web/lib/brain-cli.ts` + shared read surface in `apps/web/lib/brain-surface.ts` | Reads (`query`/`get`/`timeline`/`list`) are served in-process by the [read plane](./retrieval-planes.md) (`@opencompany/db/goat-brain-read`) — no materialization, no CLI spawn. Main chat exposes the same read-only command surface as MCP and does not expose write commands. |
+| `save_to_brain` | `apps/web/lib/brain-capture.ts` | Capture-only for all members with access to the active brain: instant draft page in `inbox/` + durable curation job. Canonical integration refs can be copied with content or hydrated in the runner from a ref + integration id. This is the intended chat write path. See [ingestion.md](./ingestion.md#2-explicit-captures-from-chat-or-mcp-agentic). |
 
 ## Runner ingestion agents
 
@@ -55,10 +55,10 @@ System prompts embed `GOAT_BRAIN_POINTER_COPY_RULE`. Dispatch and leasing live i
 
 ## MCP connector (external agents)
 
-`apps/goat/app/mcp/route.ts` exposes one user-level MCP server at `/mcp`, OAuth-authenticated via
+`apps/web/app/mcp/route.ts` exposes one user-level MCP server at `/mcp`, OAuth-authenticated via
 WorkOS AuthKit. The token identifies the user; every tool call authorizes the addressed brain by
 workspace/brain membership, so one connector spans all brains the user can access. Tool
-registration lives in `apps/goat/lib/mcp-server.ts`. Current canonical tool surface: `goat_brain`,
+registration lives in `apps/web/lib/mcp-server.ts`. Current canonical tool surface: `goat_brain`,
 the same read-only command surface used by main chat (`query`, `list`, `get`, `timeline`, `help`,
 `doctor`); `save_to_brain`, the capture-only write path; plus `list_brains` and an optional `brain`
 argument (id, or slug when unique; auto-selected when the user has exactly one brain). Compatibility

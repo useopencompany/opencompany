@@ -1,16 +1,17 @@
-# Goat LLM System
+# OpenCompany system map
 
-This is the current-state map of how Goat answers chat messages and runs durable LLM tasks. It is
+This is the current-state map of how the OpenCompany web app answers chat messages and starts
+durable LLM tasks that execute through the runner. It is
 intended as a baseline before changing the system.
 
 For the Brain (Goat's knowledge store — data model, ingestion, tools, contracts), see the
 [brain section](./brain/README.md).
 
-## Current Shape
+## Current shape
 
-Goat has three LLM paths:
+OpenCompany has three LLM paths:
 
-1. **Foreground chat:** a short-lived AI SDK stream from the browser to `apps/goat/app/api/chat`.
+1. **Foreground chat:** a short-lived AI SDK stream from the browser to `apps/web/app/api/chat`.
    This agent answers directly, reads connected integrations, calls `goat_brain`, captures with
    `save_to_brain`, calls `start_task`, or explicitly starts an active workspace workflow.
 2. **Background task:** a durable chat session and leased turn with a thin `goat.tasks`
@@ -25,7 +26,7 @@ Goat has three LLM paths:
    read-only action catalog (`list_actions`/`use_action`) from the policy-driven action gateway —
    including metered managed reads when enabled. Codex uses app-server dynamic tools, while Claude
    Code uses a turn-scoped internal MCP server
-   (`apps/goat/app/api/internal/claude-actions`) since that is Claude Code's only custom-tool
+   (`apps/web/app/api/internal/claude-actions`) since that is Claude Code's only custom-tool
    mechanism. Brain tools remain Codex-only for now.
 
 ## High-Level Flow
@@ -70,12 +71,12 @@ Goat UI
 
 Entry points:
 
-- `apps/goat/app/page.tsx`
-- `apps/goat/components/GoatSurface.tsx`
-- `apps/goat/app/api/chat/route.ts`
-- `apps/goat/lib/chat.ts`
-- `apps/goat/lib/chat-agent.ts`
-- `apps/goat/lib/chat-ui.ts`
+- `apps/web/app/page.tsx`
+- `apps/web/components/GoatSurface.tsx`
+- `apps/web/app/api/chat/route.ts`
+- `apps/web/lib/chat.ts`
+- `apps/web/lib/chat-agent.ts`
+- `apps/web/lib/chat-ui.ts`
 
 `GoatHomePage` loads two things server-side: the current user's unarchived tasks and the most
 recent open chat session. It passes those into `GoatSurface`.
@@ -97,7 +98,7 @@ skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores
 in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original version.
 
 Besides hand-authoring, `/settings/skills` lets an admin import a skill from a public GitHub or
-skills.sh URL (`apps/goat/lib/skill-import.ts`, using the shared public-skill resolver). An imported
+skills.sh URL (`apps/web/lib/skill-import.ts`, using the shared public-skill resolver). An imported
 row carries `source_type`/`source_url`/`source_ref`/`source_path` on
 `goat.skills`, lands `active` immediately, and is read-only — `updateGoatSkill` rejects edits to
 any row with a non-null `source_type`. Import is instructions-only in this iteration: bundled
@@ -156,7 +157,7 @@ matching `/chat/<id>` URL immediately with the native History API, without start
 navigation; the server persists that exact id. The stream attaches `sessionId` in message metadata so
 the client can confirm ownership and start the authorized message subscription. Persisted chat
 sessions and messages then arrive through TanStack DB collections backed by Electric shapes. Other
-persisted Goat app state such as tasks, task run events, integrations, and Brain documents uses the
+persisted OpenCompany web app state such as tasks, task run events, integrations, and Brain documents uses the
 same live-data path.
 
 Stopping generation calls `stop()`, which aborts the HTTP request. Closing chat clears local state,
@@ -169,7 +170,7 @@ The link button in a persisted chat header opens sharing controls. The owner can
 one opaque `goat.chat_session_shares` token for their session, copy `/share/<token>`, or stop
 sharing. Stopping sharing deletes the token so the public transcript and its attachment routes stop
 resolving immediately. Sharing again creates a new token; a revoked URL never becomes valid again.
-Shared routes sit outside the authenticated Goat app shell, render the existing transcript UI
+Shared routes sit outside the authenticated OpenCompany web app shell, render the existing transcript UI
 without a composer or mutation controls, and can serve that session's attachments through a
 token-scoped byte route. The link reads the current session on each request, so later messages are
 included; the copy confirmation says this explicitly. Normal `/chat/<id>` routes remain
@@ -204,7 +205,7 @@ This is only a persisted notification; Goat does not automatically spend another
 model turn when the task finishes.
 
 The chat agent's system prompt is built by `createOpenCompanyChatSystemPrompt`, assembled from
-structured blocks in `apps/goat/lib/prompts/main-chat.ts`. The route injects runtime context such as
+structured blocks in `apps/web/lib/prompts/main-chat.ts`. The route injects runtime context such as
 the current date and a compact DB-backed `user_context` profile with the user's name, email, and
 timezone. `goat_brain` is always available. When Exa is configured, `web_fetch` reads up to four
 known URLs per chat turn through the Contents API while `web_search` discovers current public-web
@@ -248,7 +249,7 @@ provider credentials remain server-side. Deeper or multi-source connected-accoun
 through background tasks.
 
 Managed X, LinkedIn, YouTube, Instagram, TikTok, prospecting, and Semrush SEO actions use a fixed
-server-to-server endpoint allowlist in `apps/goat/lib/capabilities/catalog.ts`. Prospecting includes
+server-to-server endpoint allowlist in `apps/web/lib/capabilities/catalog.ts`. Prospecting includes
 bounded PDL person search across current title and seniority, person or company location, company
 industry, provider-estimated company employee count, and work-email availability. When the user
 already knows whom they want to contact, the focused PDL person-enrichment action accepts a LinkedIn
@@ -277,7 +278,7 @@ Managed X profile discovery uses X's People-ranked search rather than an exact b
 It can also page through the public followers of a supplied profile with the provider's opaque
 cursor.
 
-Run `bun run goat:capabilities:contract` with `MONID_API_KEY` to inspect every allowlisted
+Run `bun run web:capabilities:contract` with `MONID_API_KEY` to inspect every allowlisted
 endpoint and fail on removal or pricing/input-contract drift, including whether parameters belong
 in the request body, query, or path. The command never calls the paid run API and is intentionally
 opt-in.
@@ -320,11 +321,11 @@ background, delegated, or recurring tasks.
 
 Entry points:
 
-- `apps/goat/components/GoatSurface.tsx`
-- `apps/goat/components/CodingWorkspacePanel.tsx`
-- `apps/goat/app/api/codex-chat/*` and `apps/goat/app/api/claude-chat/*`
-- `apps/goat/app/api/coding-workspaces/*`
-- `apps/goat/lib/codex-chat.ts`
+- `apps/web/components/GoatSurface.tsx`
+- `apps/web/components/CodingWorkspacePanel.tsx`
+- `apps/web/app/api/codex-chat/*` and `apps/web/app/api/claude-chat/*`
+- `apps/web/app/api/coding-workspaces/*`
+- `apps/web/lib/codex-chat.ts`
 - `apps/runner/src/goat-codex-chat.ts`
 - `apps/runner/src/goat-claude-code-chat.ts`
 - `apps/runner/src/goat-coding-workspace-runtime*.ts`
@@ -465,8 +466,8 @@ out of E2B the way Codex does. Instead, `apps/runner/src/goat-claude-code-chat.t
 short-lived, HMAC-signed ticket bound to that one `codexChatSessionId`/`codexChatTurnId`
 (`packages/agent-runtime/src/goat-claude-action-gateway-auth.ts`, signed with
 `RUNNER_INTERNAL_TOKEN` as the HMAC key) and writes it into an `--mcp-config` file pointing at
-`apps/goat/app/api/internal/claude-actions`, a streamable-HTTP MCP server
-(`apps/goat/lib/claude-actions.ts`) that verifies the ticket instead of the raw bearer token. The
+`apps/web/app/api/internal/claude-actions`, a streamable-HTTP MCP server
+(`apps/web/lib/claude-actions.ts`) that verifies the ticket instead of the raw bearer token. The
 ticket only proves "mint this turn's action calls"; it expires with the turn and cannot reach any
 other internal route, unlike `RUNNER_INTERNAL_TOKEN` itself, which is deliberately never placed in
 the Claude Code sandbox. The MCP adapter derives a retry-stable invocation id from the turn,
@@ -513,8 +514,8 @@ from `#task`, workflow, or schedule entry points. Selecting a coding chat still 
 
 Entry points:
 
-- `apps/goat/lib/tasks.ts`
-- `apps/goat/lib/workflow-tasks.ts`
+- `apps/web/lib/tasks.ts`
+- `apps/web/lib/workflow-tasks.ts`
 - `apps/runner/src/goat-scheduler.ts`
 - `packages/db/src/goat-task-sessions.ts`
 
@@ -650,7 +651,7 @@ failure, or interruption halts the workflow. Current step state remains on the t
 
 Entry points:
 
-- `apps/goat/lib/capabilities/google-calendar.ts`
+- `apps/web/lib/capabilities/google-calendar.ts`
 - `packages/goat-agent/src/actions/catalog.ts`
 - `packages/goat-agent/src/actions/execute.ts`
 - `packages/db/src/goat-integrations.ts`
@@ -772,27 +773,27 @@ Goat has multiple LLM roles but not nested durable agents:
 Common changes and where they belong:
 
 - Change when chat starts a task: `createOpenCompanyChatSystemPrompt` in
-  `apps/goat/lib/prompts/main-chat.ts` and `createOpenCompanyChatToolContext` in
-  `apps/goat/lib/chat-agent.ts`.
+  `apps/web/lib/prompts/main-chat.ts` and `createOpenCompanyChatToolContext` in
+  `apps/web/lib/chat-agent.ts`.
 - Change lightweight chat web access: `web_fetch`/`web_search` in
-  `apps/goat/lib/chat-agent.ts` and their Exa callbacks in `apps/goat/app/api/chat/route.ts`.
+  `apps/web/lib/chat-agent.ts` and their Exa callbacks in `apps/web/app/api/chat/route.ts`.
 - Change managed chat capabilities: the endpoint allowlist and validators in
-  `apps/goat/lib/capabilities/catalog.ts`, execution policy in
-  `apps/goat/lib/capabilities/execute.ts`, and workspace controls in
-  `apps/goat/app/(app)/settings/workspace/capabilities`.
-- Change chat streaming behavior: `apps/goat/app/api/chat/route.ts` and
-  `apps/goat/components/GoatSurface.tsx`.
-- Change task creation defaults: `createGoatTaskForUser` in `apps/goat/lib/tasks.ts`.
-- Change runner dispatch: `apps/goat/lib/task-runner.ts` and the Goat route in
+  `apps/web/lib/capabilities/catalog.ts`, execution policy in
+  `apps/web/lib/capabilities/execute.ts`, and workspace controls in
+  `apps/web/app/(app)/settings/workspace/capabilities`.
+- Change chat streaming behavior: `apps/web/app/api/chat/route.ts` and
+  `apps/web/components/GoatSurface.tsx`.
+- Change task creation defaults: `createGoatTaskForUser` in `apps/web/lib/tasks.ts`.
+- Change runner dispatch: `apps/web/lib/task-runner.ts` and the Goat route in
   `apps/runner/src/server.ts`.
 - Change planner behavior or harness spec schema: `planGoatHarnessForTask` in
   `apps/runner/src/goat-harness.ts` and prompt blocks in
   `apps/runner/src/prompts/goat-harness-creation.ts`.
-- Change Goat Codex subscription auth: `apps/goat/lib/codex-auth.ts`,
+- Change Goat Codex subscription auth: `apps/web/lib/codex-auth.ts`,
   `apps/runner/src/codex-auth.ts`, and `packages/db/src/goat-codex-auth.ts`.
 - Change Goat Codex execution: `apps/runner/src/goat-codex-chat.ts` (credential helpers live in
   `apps/runner/src/goat-codex.ts`).
-- Add or change shared chat/task tools: `packages/goat-agent/src/chat-agent.ts` and the Goat app or
+- Add or change shared chat/task tools: `packages/goat-agent/src/chat-agent.ts` and the web app or
   runner callbacks passed into `createOpenCompanyChatToolContext`.
 - Change the task model loop: `runGoatTaskTurn` in `apps/runner/src/goat-task-turn.ts` and the
   engine adapters in `apps/runner/src/goat-opencompany-chat.ts` / `goat-codex-chat.ts`.

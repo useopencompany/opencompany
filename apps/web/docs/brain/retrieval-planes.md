@@ -9,7 +9,7 @@ librarian) and per-brain addressing are unchanged and summarized at the end.
 ## Why rework: cost anatomy of one read today
 
 Every consumer (chat `goat_brain` tool, MCP `query_brain`, ingestion agent) reads the brain the
-same way (`apps/goat/lib/brain-cli.ts`, `apps/runner/src/goat-brain-agent-ingest.ts`):
+same way (`apps/web/lib/brain-cli.ts`, `apps/runner/src/goat-brain-agent-ingest.ts`):
 
 | Step | Cost | Notes |
 | --- | --- | --- |

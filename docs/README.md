@@ -2,7 +2,7 @@
 
 Start with:
 
-- [Goat system map](../apps/goat/docs/README.md) — current chat, task, workflow, Brain, coding, and runner paths.
+- [OpenCompany system map](../apps/web/docs/README.md) — current chat, task, workflow, Brain, coding, and runner paths.
 - [Getting started](./getting-started.md) — local prerequisites, branch-isolated setup, and development.
 - [Architecture](./architecture.md) — application, runner, database, and integration boundaries.
 - [Database](./database.md) — Neon branches, Drizzle schemas, and migration rules.
