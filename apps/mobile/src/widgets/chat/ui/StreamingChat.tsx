@@ -42,7 +42,7 @@ export function StreamingChat() {
     "--color-background-deep",
   ]) as [string, string];
   const listStyle = useResolveClassNames("flex-1");
-  const listContentStyle = useResolveClassNames("px-[18px]");
+  const listContentStyle = useResolveClassNames("px-[18px] pb-5");
   const [messages, setMessages] = useState<ChatMessageModel[]>(seedMessages);
   const [input, setInput] = useState("");
   const [isResponseActive, setIsResponseActive] = useState(false);
@@ -206,7 +206,7 @@ export function StreamingChat() {
         offset={{ closed: 0, opened: insets.bottom }}
       >
         <StyledLinearGradient
-          className="absolute right-0 -top-[52px] bottom-0 left-0"
+          className="absolute right-0 top-0 bottom-0 left-0"
           colors={[gradientStart, gradientEnd]}
           pointerEvents="none"
         />
