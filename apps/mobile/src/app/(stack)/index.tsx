@@ -59,18 +59,18 @@ export default function FirstStackScreen() {
       <Stack.Screen options={{ headerTransparent: true, headerTitle: "" }} />
 
       <KeyboardChatScrollView
-        inverted
-        contentContainerClassName="px-6 gap-y-6 pt-24 bg-red-500"
+        contentContainerClassName="px-6 gap-y-4 pt-32 pb-32"
         contentInsetAdjustmentBehavior="never"
       >
         {messages.map((text, index) => (
-          <View key={index} className="rounded-2xl bg-neutral-200">
+          <View key={index} className="rounded-2xl bg-neutral-200 p-4">
             <Text>{text}</Text>
           </View>
         ))}
       </KeyboardChatScrollView>
       <KeyboardStickyView
         style={{ paddingHorizontal: COMPOSER_INSET.opened }}
+        className="absolute left-0 bottom-0 right-0 z-1"
         offset={{ closed: -bottom }}
       >
         <Host matchContents={{ vertical: true }} style={{ width: "100%" }}>
