@@ -393,12 +393,55 @@
               "maxLength": 256,
               "example": "run_019fed53"
             },
-            "maxItems": 20
+            "maxItems": 5
           }
         },
         "required": [
           "content",
           "engine"
+        ],
+        "additionalProperties": false
+      },
+      "AttachmentUploadEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attachment": {
+                "$ref": "#/components/schemas/Attachment"
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "attachment",
+              "expiresAt"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "AttachmentUploadBody": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary"
+          }
+        },
+        "required": [
+          "file"
         ],
         "additionalProperties": false
       },
@@ -1967,6 +2010,50 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CreateMessageEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/attachments": {
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachmentUploadBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Actor-scoped attachment uploaded and ready for one Message command.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentUploadEnvelope"
                 }
               }
             }

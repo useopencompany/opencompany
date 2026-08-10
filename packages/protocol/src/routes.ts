@@ -1,6 +1,8 @@
 import { createRoute, OpenAPIHono, type RouteHandler, z } from "@hono/zod-openapi";
 import { RunEventSchema } from "./events";
 import {
+  AttachmentUploadBodySchema,
+  AttachmentUploadEnvelopeSchema,
   CancelRunEnvelopeSchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
@@ -96,6 +98,26 @@ export const createMessageRoute = createRoute({
   },
 });
 
+export const uploadAttachmentRoute = createRoute({
+  method: "post",
+  path: "/v1/attachments",
+  tags: ["Chat"],
+  security: bearerSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "multipart/form-data": { schema: AttachmentUploadBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Actor-scoped attachment uploaded and ready for one Message command.",
+      content: { "application/json": { schema: AttachmentUploadEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const getRunRoute = createRoute({
   method: "get",
   path: "/v1/runs/{runId}",
@@ -171,6 +193,7 @@ export type V1RouteHandlers = {
   getConversation: RouteHandler<typeof getConversationRoute>;
   listMessages: RouteHandler<typeof listMessagesRoute>;
   createMessage: RouteHandler<typeof createMessageRoute>;
+  uploadAttachment: RouteHandler<typeof uploadAttachmentRoute>;
   getRun: RouteHandler<typeof getRunRoute>;
   streamRunEvents: RouteHandler<typeof streamRunEventsRoute>;
   cancelRun: RouteHandler<typeof cancelRunRoute>;
@@ -183,6 +206,7 @@ export function createV1Router(handlers: V1RouteHandlers) {
     .openapi(getConversationRoute, handlers.getConversation)
     .openapi(listMessagesRoute, handlers.listMessages)
     .openapi(createMessageRoute, handlers.createMessage)
+    .openapi(uploadAttachmentRoute, handlers.uploadAttachment)
     .openapi(getRunRoute, handlers.getRun)
     .openapi(streamRunEventsRoute, handlers.streamRunEvents)
     .openapi(cancelRunRoute, handlers.cancelRun)
@@ -233,6 +257,23 @@ const contractDocumentHandlers: V1RouteHandlers = {
         meta,
       },
       202,
+    ),
+  uploadAttachment: (c) =>
+    c.json(
+      {
+        data: {
+          attachment: {
+            id: "attachment_contract",
+            filename: "brief.pdf",
+            mediaType: "application/pdf",
+            sizeBytes: 1024,
+            kind: "document",
+          },
+          expiresAt: placeholderTime,
+        },
+        meta,
+      },
+      201,
     ),
   getRun: (c) =>
     c.json(

@@ -4,6 +4,7 @@ import {
   CHAT_READ_PERMISSION,
   CHAT_WRITE_PERMISSION,
 } from "./actor";
+import { CHAT_ATTACHMENTS_PER_MESSAGE } from "./attachments";
 
 export const CHAT_ENGINES = ["opencompany", "codex", "claude_code"] as const;
 export type ChatEngine = (typeof CHAT_ENGINES)[number];
@@ -263,7 +264,6 @@ export class CoreError extends Error {
 }
 
 const MAX_MESSAGE_LENGTH = 10_000;
-const MAX_ATTACHMENTS = 20;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
 const MAX_RESOURCE_ID_LENGTH = 256;
 const MAX_MODEL_ID_LENGTH = 256;
@@ -321,10 +321,10 @@ export class ChatApplicationService {
         `Message content cannot exceed ${MAX_MESSAGE_LENGTH} characters.`,
       );
     }
-    if (attachmentIds.length > MAX_ATTACHMENTS) {
+    if (attachmentIds.length > CHAT_ATTACHMENTS_PER_MESSAGE) {
       throw new CoreError(
         "invalid_argument",
-        `A Message cannot contain more than ${MAX_ATTACHMENTS} attachments.`,
+        `A Message cannot contain more than ${CHAT_ATTACHMENTS_PER_MESSAGE} attachments.`,
       );
     }
     if (new Set(attachmentIds).size !== attachmentIds.length) {

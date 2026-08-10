@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   type Actor,
+  type ChatAttachmentFormat,
   type ChatRepository,
   type Conversation,
   type ConversationPage,
@@ -35,6 +36,28 @@ export type ChatAttachmentResolver = (input: {
   attachmentIds: readonly string[];
 }) => Promise<ResolvedChatAttachments>;
 
+export type CreateChatAttachmentUploadInput = {
+  actor: Actor;
+  id: string;
+  format: ChatAttachmentFormat;
+  mediaType: string;
+  filename: string;
+  sizeBytes: number;
+  blobPathname: string;
+  blobUrl: string;
+  extractedText: string | null;
+  expiresAt: Date;
+};
+
+export type ChatAttachmentUpload = {
+  id: string;
+  format: ChatAttachmentFormat;
+  mediaType: string;
+  filename: string;
+  sizeBytes: number;
+  expiresAt: Date;
+};
+
 export type ChatRepositoryIdFactory = {
   command(): string;
   conversation(): string;
@@ -52,6 +75,95 @@ const defaultIds: ChatRepositoryIdFactory = {
   run: () => `run_${randomUUID()}`,
   event: () => `event_${randomUUID()}`,
 };
+
+export class PostgresChatAttachmentRepository {
+  constructor(
+    private readonly execute: ChatSqlExecute,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
+
+  async create(input: CreateChatAttachmentUploadInput): Promise<ChatAttachmentUpload | null> {
+    const createdAt = this.now();
+    const [row] = await this.rows<ChatAttachmentUploadRow>(sql`
+      INSERT INTO goat.chat_attachment_uploads (
+        id, user_workos_id, workspace_id, format, media_type, filename, size_bytes,
+        blob_pathname, blob_url, extracted_text, expires_at, created_at
+      )
+      SELECT
+        ${input.id}, ${input.actor.userId}, ${input.actor.workspaceId}, ${input.format},
+        ${input.mediaType}, ${input.filename}, ${input.sizeBytes}, ${input.blobPathname},
+        ${input.blobUrl}, ${input.extractedText}, ${input.expiresAt}, ${createdAt}
+      WHERE EXISTS (
+        SELECT 1
+        FROM goat.workspace_members AS member
+        WHERE member.workspace_id = ${input.actor.workspaceId}
+          AND member.user_workos_id = ${input.actor.userId}
+      )
+      RETURNING
+        id, format, media_type AS "mediaType", filename, size_bytes AS "sizeBytes",
+        expires_at AS "expiresAt"
+    `);
+    return row ? mapAttachmentUpload(row) : null;
+  }
+
+  async resolve(input: {
+    actor: Actor;
+    attachmentIds: readonly string[];
+  }): Promise<ResolvedChatAttachments> {
+    if (input.attachmentIds.length === 0) return { attachments: [], attachmentTexts: null };
+    const rows = await this.rows<ResolvedAttachmentRow>(sql`
+      SELECT
+        upload.id,
+        upload.format,
+        upload.media_type AS "mediaType",
+        upload.filename,
+        upload.size_bytes AS "sizeBytes",
+        upload.blob_pathname AS "blobPathname",
+        upload.blob_url AS "blobUrl",
+        upload.extracted_text AS "extractedText"
+      FROM goat.chat_attachment_uploads AS upload
+      WHERE upload.user_workos_id = ${input.actor.userId}
+        AND upload.workspace_id = ${input.actor.workspaceId}
+        AND upload.claimed_at IS NULL
+        AND upload.expires_at > ${this.now()}
+        AND upload.id IN (${sql.join(
+          input.attachmentIds.map((id) => sql`${id}`),
+          sql`, `,
+        )})
+        AND EXISTS (
+          SELECT 1
+          FROM goat.workspace_members AS member
+          WHERE member.workspace_id = ${input.actor.workspaceId}
+            AND member.user_workos_id = ${input.actor.userId}
+        )
+    `);
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const ordered = input.attachmentIds.map((id) => byId.get(id));
+    if (ordered.some((row) => !row)) {
+      throw new CoreError("invalid_argument", "An attachment is unavailable or has expired.");
+    }
+    const resolved = ordered as ResolvedAttachmentRow[];
+    const attachmentTexts = Object.fromEntries(
+      resolved.flatMap((row) => (row.extractedText ? [[row.id, row.extractedText]] : [])),
+    );
+    return {
+      attachments: resolved.map((row) => ({
+        id: row.id,
+        kind: row.format,
+        mediaType: row.mediaType,
+        filename: row.filename,
+        sizeBytes: row.sizeBytes,
+        blobPathname: row.blobPathname,
+        blobUrl: row.blobUrl,
+      })),
+      attachmentTexts: Object.keys(attachmentTexts).length > 0 ? attachmentTexts : null,
+    };
+  }
+
+  private async rows<Row>(query: SQL): Promise<Row[]> {
+    return rowsFromExecute<Row>(await this.execute(query));
+  }
+}
 
 export class PostgresChatRepository implements ChatRepository {
   constructor(
@@ -286,6 +398,12 @@ export class PostgresChatRepository implements ChatRepository {
       input.command.content,
       resolvedAttachments.attachments[0]?.filename,
     );
+    const attachmentIdList = attachmentIds.length
+      ? sql.join(
+          attachmentIds.map((id) => sql`${id}`),
+          sql`, `,
+        )
+      : sql`NULL`;
 
     const [reservation] = await this.rows<CreateResultRow>(sql`
       WITH membership AS MATERIALIZED (
@@ -313,6 +431,17 @@ export class PostgresChatRepository implements ChatRepository {
           )
           AND EXISTS (SELECT 1 FROM membership)
       ),
+      eligible_attachments AS MATERIALIZED (
+        SELECT upload.id
+        FROM goat.chat_attachment_uploads AS upload
+        WHERE upload.user_workos_id = ${input.actor.userId}
+          AND upload.workspace_id = ${input.actor.workspaceId}
+          AND upload.claimed_at IS NULL
+          AND upload.expires_at > ${now}
+          AND upload.id IN (${attachmentIdList})
+          AND EXISTS (SELECT 1 FROM membership)
+        FOR UPDATE
+      ),
       reservation AS MATERIALIZED (
         INSERT INTO goat.chat_command_idempotency (
           command_id, user_workos_id, workspace_id, idempotency_key, request_hash,
@@ -324,6 +453,7 @@ export class PostgresChatRepository implements ChatRepository {
           ${input.command.idempotencyKey}, ${requestHash}, ${conversationId}, ${messageId},
           ${assistantMessageId}, ${runtimeId}, ${runId}, ${now}, ${now}
         WHERE EXISTS (SELECT 1 FROM membership)
+          AND (SELECT COUNT(*) FROM eligible_attachments) = ${attachmentIds.length}
           AND (
             ${input.command.conversationId ?? null}::text IS NULL
             OR EXISTS (SELECT 1 FROM authorized_existing)
@@ -389,6 +519,15 @@ export class PostgresChatRepository implements ChatRepository {
           )
         RETURNING id, chat_session_id, status, active_turn_id
       ),
+      claimed_attachments AS MATERIALIZED (
+        UPDATE goat.chat_attachment_uploads AS upload
+        SET claimed_message_id = winner.message_id,
+            claimed_at = ${now}
+        FROM winner
+        WHERE upload.id IN (SELECT id FROM eligible_attachments)
+          AND upload.claimed_at IS NULL
+        RETURNING upload.id
+      ),
       inserted_user_message AS (
         INSERT INTO goat.chat_messages (
           id, session_id, role, content, attachments, attachment_texts, created_at, updated_at
@@ -399,6 +538,7 @@ export class PostgresChatRepository implements ChatRepository {
         FROM winner AS reservation
         JOIN target_chat ON true
         JOIN upserted_runtime ON upserted_runtime.chat_session_id = target_chat.id
+        WHERE (SELECT COUNT(*) FROM claimed_attachments) = ${attachmentIds.length}
         RETURNING id
       ),
       inserted_assistant_message AS (
@@ -477,6 +617,9 @@ export class PostgresChatRepository implements ChatRepository {
     `);
 
     if (!reservation) {
+      if (attachmentIds.length > 0) {
+        throw new CoreError("invalid_argument", "An attachment is unavailable or has expired.");
+      }
       throw new CoreError("not_found", "Conversation or workspace membership not found.");
     }
     return createMessageResult(reservation, requestHash);
@@ -957,6 +1100,26 @@ type RunAttemptRow = {
   errorMessage?: string | null;
 };
 
+type ChatAttachmentUploadRow = {
+  id: string;
+  format: ChatAttachmentFormat;
+  mediaType: string;
+  filename: string;
+  sizeBytes: number;
+  expiresAt: Date | string;
+};
+
+type ResolvedAttachmentRow = {
+  id: string;
+  format: GoatChatMessageAttachment["kind"];
+  mediaType: string;
+  filename: string;
+  sizeBytes: number;
+  blobPathname: string;
+  blobUrl: string;
+  extractedText: string | null;
+};
+
 type CreateResultRow = {
   commandId: string;
   requestHash: string;
@@ -1130,6 +1293,17 @@ function mapRunAttempt(row: RunAttemptRow): RunAttempt {
         : null,
     errorCode: row.errorCode ?? row.error_code ?? null,
     errorMessage: row.errorMessage ?? row.error_message ?? null,
+  };
+}
+
+function mapAttachmentUpload(row: ChatAttachmentUploadRow): ChatAttachmentUpload {
+  return {
+    id: row.id,
+    format: row.format,
+    mediaType: row.mediaType,
+    filename: row.filename,
+    sizeBytes: row.sizeBytes,
+    expiresAt: asDate(row.expiresAt),
   };
 }
 

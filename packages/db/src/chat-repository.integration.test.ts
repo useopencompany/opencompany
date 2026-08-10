@@ -14,16 +14,16 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type ChatRepositoryIdFactory,
+  PostgresChatAttachmentRepository,
   PostgresChatRepository,
   PostgresRunExecutionRepository,
 } from "./chat-repository";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const migrationPath = path.join(
-  repositoryRoot,
-  "drizzle",
+const migrationPaths = [
   "0198_goat_headless_chat_foundation.sql",
-);
+  "0199_goat_chat_attachment_uploads.sql",
+].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
 describe("Postgres Chat repositories", () => {
@@ -59,9 +59,11 @@ describe("Postgres Chat repositories", () => {
         'migration_message', 'migration_assistant', 'Preserve me'
       );
     `);
-    const migration = await readFile(migrationPath, "utf8");
-    for (const statement of migration.split("--> statement-breakpoint")) {
-      if (statement.trim()) await database.exec(statement);
+    for (const migrationPath of migrationPaths) {
+      const migration = await readFile(migrationPath, "utf8");
+      for (const statement of migration.split("--> statement-breakpoint")) {
+        if (statement.trim()) await database.exec(statement);
+      }
     }
     const migrated = await database.query<{ id: string; event_sequence: number }>(`
       SELECT id, event_sequence
@@ -143,26 +145,31 @@ describe("Postgres Chat repositories", () => {
   });
 
   it("replays an attachment command without resolving the upload again", async () => {
+    const uploads = new PostgresChatAttachmentRepository(
+      execute,
+      () => new Date("2026-08-10T20:00:00.000Z"),
+    );
+    await expect(
+      uploads.create({
+        actor: actor(),
+        id: "attachment_1",
+        format: "pdf",
+        mediaType: "application/pdf",
+        filename: "launch-plan.pdf",
+        sizeBytes: 2048,
+        blobPathname: "goat-chat/user_1/launch-plan.pdf",
+        blobUrl: "https://blob.invalid/launch-plan.pdf",
+        extractedText: "Private extracted launch context",
+        expiresAt: new Date("2026-08-11T20:00:00.000Z"),
+      }),
+    ).resolves.toMatchObject({ id: "attachment_1", format: "pdf" });
     let resolutionCount = 0;
     const attachmentRepository = new PostgresChatRepository(execute, {
       ids: deterministicIds(),
       now: () => new Date("2026-08-10T20:00:00.000Z"),
-      resolveAttachments: async () => {
+      resolveAttachments: async (input) => {
         resolutionCount += 1;
-        return {
-          attachments: [
-            {
-              id: "attachment_1",
-              kind: "pdf",
-              mediaType: "application/pdf",
-              filename: "launch-plan.pdf",
-              sizeBytes: 2048,
-              blobPathname: "goat-chat/user_1/launch-plan.pdf",
-              blobUrl: "https://blob.invalid/launch-plan.pdf",
-            },
-          ],
-          attachmentTexts: { attachment_1: "Private extracted launch context" },
-        };
+        return uploads.resolve(input);
       },
     });
     const attachmentService = new ChatApplicationService(attachmentRepository);
@@ -194,6 +201,22 @@ describe("Postgres Chat repositories", () => {
       },
     ]);
     expect(JSON.stringify(page)).not.toMatch(/blobPathname|blobUrl/u);
+    expect(
+      (
+        await database.query<{ claimed_message_id: string; claimed_at: Date }>(`
+          SELECT claimed_message_id, claimed_at
+          FROM goat.chat_attachment_uploads
+          WHERE id = 'attachment_1'
+        `)
+      ).rows,
+    ).toMatchObject([{ claimed_message_id: first.messageId, claimed_at: expect.any(Date) }]);
+
+    await expect(
+      attachmentService.createMessage(actor(), {
+        ...command,
+        idempotencyKey: "reuse-attachment",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
 
     await expect(
       attachmentService.createMessage(actor({ workspaceId: "workspace_2" }), {
@@ -201,7 +224,7 @@ describe("Postgres Chat repositories", () => {
         idempotencyKey: "unauthorized-attachment",
       }),
     ).rejects.toMatchObject({ code: "not_found" });
-    expect(resolutionCount).toBe(1);
+    expect(resolutionCount).toBe(2);
   });
 
   it("pins a legacy owner-only conversation to the actor workspace without changing its model", async () => {
