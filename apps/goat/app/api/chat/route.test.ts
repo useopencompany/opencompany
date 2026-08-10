@@ -2786,6 +2786,53 @@ describe("POST /api/chat", () => {
     );
   });
 
+  it("preserves streamed text when the provider errors before the UI stream can finish", async () => {
+    mockAuth();
+    mockCreateTurn();
+    mockPersistGoatChatAssistantMessage().mockResolvedValue({} as never);
+    mockStreamText().mockImplementation((options: unknown) => {
+      const generation = options as {
+        onChunk: (event: { chunk: { type: "text-delta"; id: string; text: string } }) => void;
+        onError: (event: { error: unknown }) => void;
+      };
+      return {
+        toUIMessageStreamResponse: vi.fn(
+          async (responseOptions: { onError: (error: unknown) => string }) => {
+            generation.onChunk({
+              chunk: { type: "text-delta", id: "text_1", text: "The fitting quote" },
+            });
+            generation.onChunk({
+              chunk: { type: "text-delta", id: "text_1", text: " is already here." },
+            });
+            generation.onError({
+              error: { message: "HttpError: HTTP 500: provider runtime failed" },
+            });
+            responseOptions.onError(new Error("Goat could not answer that right now."));
+            await Promise.resolve();
+            return new Response(null, { status: 200 });
+          },
+        ),
+      } as never;
+    });
+
+    const response = await POST(validChatRequest("Find a fitting quote."));
+
+    expect(response.status).toBe(200);
+    expect(persistGoatChatAssistantMessage).toHaveBeenCalledWith(
+      {
+        sessionId: "session_1",
+        content: "The fitting quote is already here.",
+        taskId: null,
+        debugTrace: expect.objectContaining({
+          error: "Goat chat stream ended before completion.",
+          finishReason: "error",
+          uiMessageParts: [{ type: "text", text: "The fitting quote is already here." }],
+        }),
+      },
+      expect.anything(),
+    );
+  });
+
   it("retries final assistant persistence with a server id when the streamed id write fails", async () => {
     mockAuth();
     mockCreateTurn();

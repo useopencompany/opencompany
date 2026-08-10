@@ -1385,10 +1385,22 @@ export async function POST(request: Request): Promise<Response> {
   };
   let assistantPersisted = false;
   let assistantPersistPromise: Promise<void> | null = null;
+  const streamedAssistantText = new Map<string, string>();
+  const streamedAssistantTextOrder: string[] = [];
+  const streamedAssistantParts = () =>
+    streamedAssistantTextOrder.flatMap((id) => {
+      const text = streamedAssistantText.get(id);
+      return text ? [{ type: "text" as const, text }] : [];
+    });
   const persistFallbackAssistantMessage = (error: unknown, finishReason: string) => {
     if (assistantPersisted || assistantPersistPromise) return assistantPersistPromise;
     const startedTask = toolContext.getStartedTask();
-    if (!startedTask && !toolContext.hasVisibleToolActivity()) return null;
+    const partialParts = streamedAssistantParts();
+    const partialContent = partialParts
+      .map((part) => part.text)
+      .join("")
+      .trim();
+    if (!startedTask && !toolContext.hasVisibleToolActivity() && !partialContent) return null;
 
     const fallbackTrace = {
       ...debugTrace,
@@ -1396,6 +1408,7 @@ export async function POST(request: Request): Promise<Response> {
       ...(generationSignal.aborted ? { aborted: true } : {}),
       error: error instanceof Error ? error.message : "Goat chat stream ended before completion.",
       finishReason,
+      ...(partialParts.length ? { uiMessageParts: partialParts } : {}),
     };
     finishChatTelemetry(
       generationSignal.aborted ? "aborted" : "failure",
@@ -1412,9 +1425,11 @@ export async function POST(request: Request): Promise<Response> {
       persistGoatChatAssistantMessage(
         {
           sessionId: turn.session.id,
-          content: startedTask
-            ? normalizeAgentText("", startedTask)
-            : "Goat stopped before it could finish.",
+          content: partialContent
+            ? normalizeAgentText(partialContent, startedTask)
+            : startedTask
+              ? normalizeAgentText("", startedTask)
+              : "Goat stopped before it could finish.",
           taskId: startedTask?.id ?? null,
           debugTrace: fallbackTrace,
         },
@@ -1510,7 +1525,17 @@ export async function POST(request: Request): Promise<Response> {
       stepStartedAt.set(stepNumber, performance.now());
       generationWatchdog.startStep(stepNumber);
     },
-    onChunk: () => generationWatchdog.noteChunk(),
+    onChunk: (event) => {
+      generationWatchdog.noteChunk();
+      const chunk = event?.chunk;
+      if (!chunk) return;
+      if (chunk.type !== "text-delta" || !chunk.text) return;
+      if (!streamedAssistantText.has(chunk.id)) streamedAssistantTextOrder.push(chunk.id);
+      streamedAssistantText.set(
+        chunk.id,
+        `${streamedAssistantText.get(chunk.id) ?? ""}${chunk.text}`,
+      );
+    },
     onStepFinish: ({ stepNumber }) => {
       generationWatchdog.finishStep(stepNumber);
       const startedAt = stepStartedAt.get(stepNumber);
