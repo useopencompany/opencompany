@@ -81,10 +81,20 @@ export async function closeGoatChatSessionAction(
   if (!trimmed) return { ok: true, error: null };
 
   const { user } = await currentGoatUser();
-  const closed = await archiveGoatChatSessionForUser({
-    userWorkosId: user.workosUserId,
-    chatSessionId: trimmed,
-  });
+  let closed: boolean;
+  try {
+    closed = await archiveGoatChatSessionForUser({
+      userWorkosId: user.workosUserId,
+      chatSessionId: trimmed,
+    });
+  } catch (error) {
+    console.error("[goat] Failed to archive chat session", {
+      event: "goat.chat_archive_failed",
+      chat_session_id: trimmed,
+      error,
+    });
+    return { ok: false, error: "Could not archive that chat." };
+  }
   if (!closed) {
     return { ok: false, error: "Could not archive that chat." };
   }

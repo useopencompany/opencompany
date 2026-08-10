@@ -710,6 +710,33 @@ describe("GoatSidebar", () => {
     );
   });
 
+  it("keeps the sidebar usable when archiving a chat rejects", async () => {
+    const user = userEvent.setup();
+    chatActionsMock.closeGoatChatSessionAction.mockRejectedValueOnce(
+      new Error("network unavailable"),
+    );
+    recentChatsMock.value = [
+      {
+        id: "goat_chat_archive",
+        title: "Archive me",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        preview: "Ready",
+        updatedAt: "2026-07-14T09:00:00.000Z",
+        pinnedAt: null,
+      },
+    ];
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const archiveButton = screen.getByRole("button", { name: "Archive Archive me" });
+    await user.click(archiveButton);
+
+    expect(chatActionsMock.closeGoatChatSessionAction).toHaveBeenCalledWith("goat_chat_archive");
+    await waitFor(() => expect(archiveButton).toBeEnabled());
+    expect(routerMock.push).not.toHaveBeenCalled();
+  });
+
   it("collapses to zero width and toggles via the sidebar button", () => {
     pathnameMock.value = "/";
     const onToggleCollapsed = vi.fn();

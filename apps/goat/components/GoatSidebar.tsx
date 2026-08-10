@@ -334,7 +334,7 @@ function GoatSidebarRecentChats() {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const localChatStates = useLocalGoatChatStates();
-  const [archivingId, setArchivingId] = useState<string | null>(null);
+  const [archivingIds, setArchivingIds] = useState<Set<string>>(() => new Set());
   const [pinningIds, setPinningIds] = useState<Set<string>>(() => new Set());
   const [pinOverrides, setPinOverrides] = useState<Map<string, boolean>>(() => new Map());
   const [previousRecentChats, setPreviousRecentChats] = useState(recentChats);
@@ -363,17 +363,27 @@ function GoatSidebarRecentChats() {
   const unpinnedChats = recentChats.filter((chat) => !isPinned(chat));
 
   const archiveChat = (chatId: string, chatTitle: string, href: string) => {
-    setArchivingId(chatId);
+    if (archivingIds.has(chatId)) return;
+    setArchivingIds((current) => new Set(current).add(chatId));
     startTransition(async () => {
-      const result = await closeGoatChatSessionAction(chatId);
-      setArchivingId((current) => (current === chatId ? null : current));
-      if (!result.ok) {
-        toast.error(result.error ?? `Could not archive "${chatTitle}".`);
-        return;
-      }
-      // If we archived the chat we're currently viewing, drop back to home.
-      if (pathname === href) {
-        router.push("/");
+      try {
+        const result = await closeGoatChatSessionAction(chatId);
+        if (!result.ok) {
+          toast.error(result.error ?? `Could not archive "${chatTitle}".`);
+          return;
+        }
+        // If we archived the chat we're currently viewing, drop back to home.
+        if (pathname === href) {
+          router.push("/");
+        }
+      } catch {
+        toast.error(`Could not archive "${chatTitle}".`);
+      } finally {
+        setArchivingIds((current) => {
+          const next = new Set(current);
+          next.delete(chatId);
+          return next;
+        });
       }
     });
   };
@@ -427,7 +437,7 @@ function GoatSidebarRecentChats() {
         active={pathname === href}
         localState={localChatStates.get(chat.id) ?? null}
         pinned={pinned}
-        archiving={archivingId === chat.id}
+        archiving={archivingIds.has(chat.id)}
         pinning={pinningIds.has(chat.id)}
         onPrefetch={() => router.prefetch(href)}
         onRequestComposerFocus={() => requestGoatChatComposerFocus(chat.id)}

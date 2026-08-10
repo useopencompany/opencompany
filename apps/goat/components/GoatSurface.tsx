@@ -1418,10 +1418,15 @@ export function GoatSurface({
   const archiveChat = (chat: GoatChatSummaryView) => {
     setOptimisticallyArchivedChatIds((current) => new Set(current).add(chat.id));
     startArchiveTransition(async () => {
-      const result = await closeGoatChatSessionAction(chat.id);
-      if (result.ok) {
-        router.refresh();
-        return;
+      try {
+        const result = await closeGoatChatSessionAction(chat.id);
+        if (result.ok) {
+          router.refresh();
+          return;
+        }
+        toast.error(result.error ?? "Could not archive chat.");
+      } catch {
+        toast.error("Could not archive chat.");
       }
 
       setOptimisticallyArchivedChatIds((current) => {
@@ -1429,7 +1434,6 @@ export function GoatSurface({
         next.delete(chat.id);
         return next;
       });
-      toast.error(result.error ?? "Could not archive chat.");
     });
   };
 
