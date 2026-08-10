@@ -107,16 +107,13 @@ import {
   GOAT_AD_HOC_TASK_TOKEN,
   hasGoatAdHocTaskToken,
 } from "@/lib/ad-hoc-task";
-import {
-  closeGoatChatSessionAction,
-  markGoatChatSeenAction,
-  reopenGoatChatSessionAction,
-} from "@/lib/chat-actions";
+import { closeGoatChatSessionAction, reopenGoatChatSessionAction } from "@/lib/chat-actions";
 import { GOAT_CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import {
   AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES,
   AUTO_GOAT_MODEL_SELECTION,
 } from "@/lib/chat-auto-model";
+import { markGoatChatSeen } from "@/lib/chat-client";
 import {
   type GoatChatModelSelection,
   persistLastGoatChatSelection,
@@ -1073,7 +1070,7 @@ export function GoatSurface({
     ].join(":");
     if (lastSeenMarkRef.current === markKey) return;
     lastSeenMarkRef.current = markKey;
-    void markGoatChatSeenAction(chatSessionId).catch(() => undefined);
+    void markGoatChatSeen(chatSessionId).catch(() => undefined);
   }, [
     activeChatSummary?.updatedAt,
     chatMessages.length,
