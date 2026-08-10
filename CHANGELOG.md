@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-08-10
+
+### Added
+- Import skills from a public GitHub repo or a skills.sh page by pasting a link, so your workspace can reuse skills other people have published instead of writing your own from scratch (#1140) — @opencompany-bot.
+- Qwen 3.8 Max is now available as a chat model (#1153) — @opencompany-bot.
+
+### Changed
+- Wiki pages are faster and closer to Notion: edits show up instantly, and a new `/` slash menu lets you insert blocks and links without leaving the keyboard (#1148, #1149) — @opencompany-bot.
+- Cmd+K now shows archived chats alongside active ones, sorted by recency, so you can jump back into an old conversation without digging through the archive separately (#1147) — @opencompany-bot.
+
+### Fixed
+- Chats that stalled mid-response now recover on their own instead of hanging indefinitely (#1146) — @opencompany-bot.
+- Archiving a chat no longer risks crashing the page — you'll see a clear error and can retry if something goes wrong (#1155) — @opencompany-bot.
+- A chat's unread status and a task's ability to keep going no longer break right after we ship an update (#1150, #1151, #1154) — @opencompany-bot.
+- If a model provider errors out mid-reply, you keep whatever it had already written instead of losing the response (#1152) — @opencompany-bot.
+- Shared links to the pricing, use-cases, media, and blog pages now show a preview image on X, WhatsApp, and Slack (#1126) — @opencompany-bot.
+- The chat header now lines up correctly with the sidebar above it (#1134) — @opencompany-bot.
+
 ## [1.10.0] - 2026-08-07
 
 ### Added
