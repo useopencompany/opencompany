@@ -25,6 +25,31 @@
         "vitest": "^4.1.7",
       },
     },
+    "apps/api": {
+      "name": "@opencompany/api",
+      "version": "0.1.0",
+      "dependencies": {
+        "@hono/node-server": "^1.19.11",
+        "@opencompany/core": "workspace:*",
+        "@opencompany/db": "workspace:*",
+        "@opencompany/file-extract": "workspace:*",
+        "@opencompany/goat-observability": "workspace:*",
+        "@opencompany/observability": "workspace:*",
+        "@opencompany/protocol": "workspace:*",
+        "@vercel/blob": "^2.4.0",
+        "@workos-inc/node": "^9.3.1",
+        "drizzle-orm": "^0.45.2",
+        "hono": "4.12.28",
+        "jose": "^5.10.0",
+        "pg": "^8.13.1",
+      },
+      "devDependencies": {
+        "@types/node": "^25.9.1",
+        "@types/pg": "^8.11.10",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.7",
+      },
+    },
     "apps/design-system": {
       "name": "@opencompany/design-system",
       "version": "0.2.0",
@@ -825,6 +850,8 @@
     "@opencompany/agent-runtime": ["@opencompany/agent-runtime@workspace:packages/agent-runtime"],
 
     "@opencompany/analytics": ["@opencompany/analytics@workspace:packages/analytics"],
+
+    "@opencompany/api": ["@opencompany/api@workspace:apps/api"],
 
     "@opencompany/billing": ["@opencompany/billing@workspace:packages/billing"],
 

@@ -1,0 +1,34 @@
+{
+  "name": "@opencompany/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/server.ts",
+    "start": "bun src/server.ts",
+    "build": "tsc --noEmit --project tsconfig.json",
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.11",
+    "@opencompany/core": "workspace:*",
+    "@opencompany/db": "workspace:*",
+    "@opencompany/file-extract": "workspace:*",
+    "@opencompany/goat-observability": "workspace:*",
+    "@opencompany/observability": "workspace:*",
+    "@opencompany/protocol": "workspace:*",
+    "@vercel/blob": "^2.4.0",
+    "@workos-inc/node": "^9.3.1",
+    "drizzle-orm": "^0.45.2",
+    "hono": "4.12.28",
+    "jose": "^5.10.0",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@types/pg": "^8.11.10",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
+}

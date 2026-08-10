@@ -91,6 +91,18 @@ export function validateChatAttachment(input: {
   };
 }
 
+export function isTextExtractableChatAttachment(format: ChatAttachmentFormat): boolean {
+  return (
+    format === "docx" ||
+    format === "xlsx" ||
+    format === "srt" ||
+    format === "csv" ||
+    format === "tsv" ||
+    format === "json" ||
+    format === "text"
+  );
+}
+
 function normalizeChatAttachmentMediaType(input: { filename?: string; mediaType: string }) {
   const mediaType = input.mediaType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
   const filename = input.filename?.trim().toLowerCase() ?? "";

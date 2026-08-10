@@ -453,7 +453,16 @@ export class PostgresChatRepository implements ChatRepository {
           ${input.command.idempotencyKey}, ${requestHash}, ${conversationId}, ${messageId},
           ${assistantMessageId}, ${runtimeId}, ${runId}, ${now}, ${now}
         WHERE EXISTS (SELECT 1 FROM membership)
-          AND (SELECT COUNT(*) FROM eligible_attachments) = ${attachmentIds.length}
+          AND (
+            (SELECT COUNT(*) FROM eligible_attachments) = ${attachmentIds.length}
+            OR EXISTS (
+              SELECT 1
+              FROM goat.chat_command_idempotency AS concurrent_replay
+              WHERE concurrent_replay.user_workos_id = ${input.actor.userId}
+                AND concurrent_replay.workspace_id = ${input.actor.workspaceId}
+                AND concurrent_replay.idempotency_key = ${input.command.idempotencyKey}
+            )
+          )
           AND (
             ${input.command.conversationId ?? null}::text IS NULL
             OR EXISTS (SELECT 1 FROM authorized_existing)

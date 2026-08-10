@@ -18,7 +18,7 @@ import {
 } from "./schemas";
 import { OPENAPI_DOCUMENT_VERSION, PROTOCOL_VERSION } from "./version";
 
-const bearerSecurity = [{ bearerAuth: [] }];
+const actorSecurity = [{ bearerAuth: [] }, { sessionCookie: [] }];
 const errorResponse = {
   description: "A structured protocol error.",
   content: { "application/json": { schema: ErrorEnvelopeSchema } },
@@ -28,7 +28,7 @@ export const listConversationsRoute = createRoute({
   method: "get",
   path: "/v1/conversations",
   tags: ["Chat"],
-  security: bearerSecurity,
+  security: actorSecurity,
   request: {
     query: z.object({
       cursor: z.string().optional(),
@@ -48,7 +48,7 @@ export const getConversationRoute = createRoute({
   method: "get",
   path: "/v1/conversations/{conversationId}",
   tags: ["Chat"],
-  security: bearerSecurity,
+  security: actorSecurity,
   request: { params: z.object({ conversationId: ResourceIdSchema }) },
   responses: {
     200: {
@@ -63,7 +63,7 @@ export const listMessagesRoute = createRoute({
   method: "get",
   path: "/v1/conversations/{conversationId}/messages",
   tags: ["Chat"],
-  security: bearerSecurity,
+  security: actorSecurity,
   request: {
     params: z.object({ conversationId: ResourceIdSchema }),
     query: z.object({
@@ -84,7 +84,7 @@ export const createMessageRoute = createRoute({
   method: "post",
   path: "/v1/messages",
   tags: ["Chat"],
-  security: bearerSecurity,
+  security: actorSecurity,
   request: {
     headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
     body: { required: true, content: { "application/json": { schema: CreateMessageBodySchema } } },
@@ -102,7 +102,7 @@ export const uploadAttachmentRoute = createRoute({
   method: "post",
   path: "/v1/attachments",
   tags: ["Chat"],
-  security: bearerSecurity,
+  security: actorSecurity,
   request: {
     body: {
       required: true,
@@ -122,7 +122,7 @@ export const getRunRoute = createRoute({
   method: "get",
   path: "/v1/runs/{runId}",
   tags: ["Runs"],
-  security: bearerSecurity,
+  security: actorSecurity,
   request: { params: z.object({ runId: ResourceIdSchema }) },
   responses: {
     200: {
@@ -137,7 +137,7 @@ export const streamRunEventsRoute = createRoute({
   method: "get",
   path: "/v1/runs/{runId}/events",
   tags: ["Runs"],
-  security: bearerSecurity,
+  security: actorSecurity,
   request: {
     params: z.object({ runId: ResourceIdSchema }),
     headers: z.object({ "last-event-id": CursorSchema.optional() }),
@@ -156,7 +156,7 @@ export const cancelRunRoute = createRoute({
   method: "post",
   path: "/v1/runs/{runId}/cancel",
   tags: ["Runs"],
-  security: bearerSecurity,
+  security: actorSecurity,
   request: { params: z.object({ runId: ResourceIdSchema }) },
   responses: {
     202: {
@@ -171,7 +171,7 @@ export const resolveApprovalRoute = createRoute({
   method: "post",
   path: "/v1/runs/{runId}/approvals/{approvalId}",
   tags: ["Approvals"],
-  security: bearerSecurity,
+  security: actorSecurity,
   request: {
     params: z.object({ runId: ResourceIdSchema, approvalId: ResourceIdSchema }),
     body: {
@@ -200,8 +200,16 @@ export type V1RouteHandlers = {
   resolveApproval: RouteHandler<typeof resolveApprovalRoute>;
 };
 
-export function createV1Router(handlers: V1RouteHandlers) {
-  return new OpenAPIHono()
+export function createV1Router(
+  handlers: V1RouteHandlers,
+  options: {
+    beforeRoutes?: (app: OpenAPIHono) => void;
+    defaultHook?: NonNullable<ConstructorParameters<typeof OpenAPIHono>[0]>["defaultHook"];
+  } = {},
+) {
+  const app = new OpenAPIHono(options.defaultHook ? { defaultHook: options.defaultHook } : {});
+  options.beforeRoutes?.(app);
+  return app
     .openapi(listConversationsRoute, handlers.listConversations)
     .openapi(getConversationRoute, handlers.getConversation)
     .openapi(listMessagesRoute, handlers.listMessages)
@@ -221,6 +229,11 @@ export function createOpenApiDocument() {
     type: "http",
     scheme: "bearer",
     bearerFormat: "JWT",
+  });
+  app.openAPIRegistry.registerComponent("securitySchemes", "sessionCookie", {
+    type: "apiKey",
+    in: "cookie",
+    name: "wos-session",
   });
   return app.getOpenAPIDocument({
     openapi: OPENAPI_DOCUMENT_VERSION,
