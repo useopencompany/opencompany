@@ -259,6 +259,185 @@ export class PostgresChatRepository implements ChatRepository {
     return conversation ? mapConversation(conversation) : null;
   }
 
+  async updateConversation(input: {
+    actor: Actor;
+    conversationId: string;
+    command: { archived?: boolean; pinned?: boolean; markSeen?: true };
+  }) {
+    const now = this.options.now?.() ?? new Date();
+    const archived = input.command.archived ?? null;
+    const pinned = input.command.pinned ?? null;
+    const markSeen = input.command.markSeen ?? null;
+    const [row] = await this.rows<{ conversationId: string; transactionId: string }>(sql`
+      WITH locked_owner AS MATERIALIZED (
+        SELECT owner.workos_user_id
+        FROM goat.users AS owner
+        WHERE owner.workos_user_id = ${input.actor.userId}
+        FOR UPDATE
+      ),
+      authorized AS MATERIALIZED (
+        SELECT chat.id
+        FROM goat.chat_sessions AS chat
+        JOIN locked_owner ON locked_owner.workos_user_id = chat.user_workos_id
+        WHERE chat.id = ${input.conversationId}
+          AND chat.kind = 'chat'
+          AND EXISTS (
+            SELECT 1 FROM goat.workspace_members AS member
+            WHERE member.workspace_id = ${input.actor.workspaceId}
+              AND member.user_workos_id = ${input.actor.userId}
+          )
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM goat.codex_chat_sessions AS candidate
+              WHERE candidate.chat_session_id = chat.id
+            )
+            OR EXISTS (
+              SELECT 1 FROM goat.codex_chat_sessions AS candidate
+              WHERE candidate.chat_session_id = chat.id
+                AND candidate.user_workos_id = ${input.actor.userId}
+                AND (
+                  candidate.workspace_id IS NULL
+                  OR candidate.workspace_id = ${input.actor.workspaceId}
+                )
+            )
+          )
+          AND (
+            (${pinned}::boolean IS NULL AND ${markSeen}::boolean IS NULL)
+            OR chat.closed_at IS NULL
+          )
+      ),
+      updated_chat AS MATERIALIZED (
+        UPDATE goat.chat_sessions AS chat
+        SET closed_at = CASE
+              WHEN ${archived}::boolean IS NULL THEN chat.closed_at
+              WHEN ${archived}::boolean THEN COALESCE(chat.closed_at, ${now})
+              ELSE NULL
+            END,
+            pinned_at = CASE
+              WHEN ${pinned}::boolean IS NULL THEN chat.pinned_at
+              WHEN ${pinned}::boolean THEN COALESCE(chat.pinned_at, ${now})
+              ELSE NULL
+            END,
+            last_seen_at = CASE
+              WHEN ${markSeen}::boolean IS TRUE
+              THEN GREATEST(COALESCE(chat.last_seen_at, '-infinity'::timestamptz), ${now})
+              ELSE chat.last_seen_at
+            END,
+            updated_at = CASE
+              WHEN ${archived}::boolean IS NOT NULL
+                AND (${archived}::boolean <> (chat.closed_at IS NOT NULL))
+              THEN ${now}
+              ELSE chat.updated_at
+            END
+        WHERE chat.id IN (SELECT id FROM authorized)
+          AND (
+            ${pinned}::boolean IS DISTINCT FROM TRUE
+            OR chat.pinned_at IS NOT NULL
+            OR (
+              SELECT count(*)
+              FROM goat.chat_sessions AS existing_pin
+              WHERE existing_pin.user_workos_id = ${input.actor.userId}
+                AND existing_pin.kind = 'chat'
+                AND existing_pin.closed_at IS NULL
+                AND existing_pin.pinned_at IS NOT NULL
+                AND existing_pin.id <> chat.id
+            ) < 20
+          )
+        RETURNING chat.id
+      ),
+      changed_turns AS MATERIALIZED (
+        UPDATE goat.codex_chat_turns AS run
+        SET status = CASE
+              WHEN run.status IN ('queued', 'paused') THEN 'interrupted'
+              ELSE run.status
+            END,
+            interrupt_requested_at = CASE
+              WHEN run.status = 'running' THEN COALESCE(run.interrupt_requested_at, ${now})
+              ELSE run.interrupt_requested_at
+            END,
+            completed_at = CASE
+              WHEN run.status IN ('queued', 'paused') THEN ${now}
+              ELSE run.completed_at
+            END,
+            event_sequence = run.event_sequence + 1,
+            updated_at = ${now}
+        WHERE ${archived}::boolean IS TRUE
+          AND run.chat_session_id IN (SELECT id FROM updated_chat)
+          AND run.user_workos_id = ${input.actor.userId}
+          AND (
+            run.status IN ('queued', 'paused')
+            OR (run.status = 'running' AND run.interrupt_requested_at IS NULL)
+          )
+        RETURNING run.id, run.assistant_message_id, run.status, run.event_sequence
+      ),
+      canceled_approvals AS (
+        UPDATE goat.run_approvals AS approval
+        SET status = 'canceled',
+            resolution = 'canceled',
+            response = jsonb_build_object('resolution', 'canceled'),
+            resolved_at = ${now},
+            updated_at = ${now}
+        WHERE approval.run_id IN (SELECT id FROM changed_turns)
+          AND approval.status = 'pending'
+        RETURNING approval.id
+      ),
+      inserted_events AS (
+        INSERT INTO goat.run_events (
+          id, run_id, sequence, schema_version, type, payload, created_at
+        )
+        SELECT
+          'run_event_' || gen_random_uuid()::text,
+          changed.id,
+          changed.event_sequence,
+          1,
+          CASE
+            WHEN changed.status = 'interrupted' THEN 'run.canceled'
+            ELSE 'run.cancel_requested'
+          END,
+          jsonb_build_object('by', 'user'),
+          ${now}
+        FROM changed_turns AS changed
+        RETURNING run_id, sequence
+      ),
+      aborted_messages AS (
+        UPDATE goat.chat_messages AS message
+        SET debug_trace = COALESCE(
+              message.debug_trace,
+              '{"schemaVersion":"opencompany.chat.debug.v1","steps":[]}'::jsonb
+            ) || jsonb_build_object('aborted', true),
+            updated_at = ${now}
+        FROM changed_turns AS changed
+        WHERE changed.status = 'interrupted'
+          AND message.id = changed.assistant_message_id
+          AND message.role = 'assistant'
+        RETURNING message.id
+      ),
+      closed_runtime AS (
+        UPDATE goat.codex_chat_sessions AS runtime
+        SET status = 'closed',
+            active_turn_id = NULL,
+            updated_at = ${now}
+        WHERE ${archived}::boolean IS TRUE
+          AND runtime.chat_session_id IN (SELECT id FROM updated_chat)
+          AND runtime.user_workos_id = ${input.actor.userId}
+        RETURNING runtime.id
+      ),
+      notified AS MATERIALIZED (
+        SELECT pg_notify(
+          ${RUN_EVENT_NOTIFY_CHANNEL},
+          jsonb_build_object('runId', run_id, 'sequence', sequence)::text
+        )
+        FROM inserted_events
+      )
+      SELECT
+        updated_chat.id AS "conversationId",
+        pg_current_xact_id()::text AS "transactionId",
+        (SELECT count(*) FROM notified) AS "notifyCount"
+      FROM updated_chat
+    `);
+    return row ? { conversationId: row.conversationId, transactionId: row.transactionId } : null;
+  }
+
   async listMessages(input: {
     actor: Actor;
     conversationId: string;
@@ -346,6 +525,7 @@ export class PostgresChatRepository implements ChatRepository {
         reservation.request_hash AS "requestHash",
         reservation.conversation_id AS "conversationId",
         reservation.message_id AS "messageId",
+        reservation.assistant_message_id AS "assistantMessageId",
         reservation.run_id AS "runId",
         reservation.transaction_id AS "transactionId",
         true AS replayed,
@@ -395,6 +575,9 @@ export class PostgresChatRepository implements ChatRepository {
     const resolvedAttachments = await this.resolveAttachments(input.actor, attachmentIds);
     const attachmentsJson = JSON.stringify(resolvedAttachments.attachments);
     const attachmentTextsJson = JSON.stringify(resolvedAttachments.attachmentTexts);
+    const settingsJson = JSON.stringify({
+      ...(input.command.mentions?.length ? { mentions: input.command.mentions } : {}),
+    });
     const title = conversationTitle(
       input.command.content,
       resolvedAttachments.attachments[0]?.filename,
@@ -661,7 +844,7 @@ export class PostgresChatRepository implements ChatRepository {
         SELECT
           reservation.run_id, ${input.actor.userId}, upserted_runtime.id, target_chat.id,
           reservation.message_id, reservation.assistant_message_id, 'queued',
-          ${input.command.content}, '{}'::jsonb, 1, ${now}, ${now}
+          ${input.command.content}, ${settingsJson}::jsonb, 1, ${now}, ${now}
         FROM winner AS reservation
         JOIN target_chat ON true
         JOIN upserted_runtime ON upserted_runtime.chat_session_id = target_chat.id
@@ -707,6 +890,7 @@ export class PostgresChatRepository implements ChatRepository {
         reservation.request_hash AS "requestHash",
         reservation.conversation_id AS "conversationId",
         reservation.message_id AS "messageId",
+        reservation.assistant_message_id AS "assistantMessageId",
         reservation.run_id AS "runId",
         reservation.transaction_id AS "transactionId",
         reservation.command_id <> ${commandId} AS replayed,
@@ -1212,8 +1396,10 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
         type: "approval.requested",
         payload: {
           approvalId: approval.id,
+          toolCallId: approval.toolCallId,
           kind: approval.kind,
           prompt: approval.prompt,
+          ...(approval.action ? { action: approval.action } : {}),
           ...(approval.options ? { options: approval.options } : {}),
         },
       })),
@@ -1240,6 +1426,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
       approval_input AS MATERIALIZED (
         SELECT
           item.value ->> 'id' AS id,
+          item.value ->> 'toolCallId' AS tool_call_id,
           item.value ->> 'kind' AS kind,
           item.value ->> 'prompt' AS prompt,
           item.value -> 'options' AS options,
@@ -1249,10 +1436,10 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
       ),
       inserted_approvals AS MATERIALIZED (
         INSERT INTO goat.run_approvals (
-          id, run_id, attempt_id, kind, prompt, options, status, created_at, updated_at
+          id, run_id, attempt_id, tool_call_id, kind, prompt, options, status, created_at, updated_at
         )
         SELECT
-          approval.id, fenced.run_id, fenced.id, approval.kind, approval.prompt,
+          approval.id, fenced.run_id, fenced.id, approval.tool_call_id, approval.kind, approval.prompt,
           approval.options, 'pending', ${pausedAt}, ${pausedAt}
         FROM approval_input AS approval
         CROSS JOIN fenced_attempt AS fenced
@@ -1439,6 +1626,8 @@ type RunApprovalRow = {
   run_id?: string;
   attemptId?: string | null;
   attempt_id?: string | null;
+  toolCallId?: string | null;
+  tool_call_id?: string | null;
   kind: string;
   prompt: string;
   options: string[] | null;
@@ -1478,6 +1667,7 @@ type CreateResultRow = {
   requestHash: string;
   conversationId: string;
   messageId: string;
+  assistantMessageId: string;
   runId: string;
   transactionId: number | string;
   replayed: boolean;
@@ -1490,6 +1680,7 @@ type CommandPreflightRow = {
   requestHash: string | null;
   conversationId: string | null;
   messageId: string | null;
+  assistantMessageId: string | null;
   runId: string | null;
   transactionId: number | string | null;
   replayed: boolean;
@@ -1505,6 +1696,7 @@ function createMessageResultFromPreflight(
     !row.requestHash ||
     !row.conversationId ||
     !row.messageId ||
+    !row.assistantMessageId ||
     !row.runId ||
     row.transactionId === null
   ) {
@@ -1516,6 +1708,7 @@ function createMessageResultFromPreflight(
       requestHash: row.requestHash,
       conversationId: row.conversationId,
       messageId: row.messageId,
+      assistantMessageId: row.assistantMessageId,
       runId: row.runId,
       transactionId: row.transactionId,
       replayed: row.replayed,
@@ -1542,6 +1735,7 @@ function createMessageResult(row: CreateResultRow, requestHash: string): CreateM
   return {
     conversationId: row.conversationId,
     messageId: row.messageId,
+    assistantMessageId: row.assistantMessageId,
     runId: row.runId,
     transactionId,
     idempotentReplay: row.replayed,
@@ -1654,6 +1848,7 @@ function mapRunApproval(row: RunApprovalRow): RunApproval {
     id: row.id,
     runId: row.runId ?? row.run_id ?? "",
     attemptId: row.attemptId ?? row.attempt_id ?? null,
+    toolCallId: row.toolCallId ?? row.tool_call_id ?? null,
     kind: row.kind,
     prompt: row.prompt,
     options: row.options,
@@ -1701,6 +1896,7 @@ function hashCommand(command: CreateMessageCommand) {
         engine: command.engine,
         model: command.model,
         attachmentIds: command.attachmentIds ?? [],
+        mentions: command.mentions ?? [],
       }),
     )
     .digest("hex");

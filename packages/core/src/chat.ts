@@ -82,6 +82,11 @@ export type MessageAttachment = {
   kind: "image" | "document" | "audio" | "video" | "other";
 };
 
+export type MessageMention = {
+  kind: "skill";
+  id: string;
+};
+
 export type Run = {
   id: string;
   conversationId: string;
@@ -110,6 +115,7 @@ export type RunApproval = {
   id: string;
   runId: string;
   attemptId: string | null;
+  toolCallId: string | null;
   kind: string;
   prompt: string;
   options: readonly string[] | null;
@@ -150,14 +156,27 @@ export type CreateMessageCommand = {
   engine: ChatEngine;
   model: string;
   attachmentIds?: readonly string[];
+  mentions?: readonly MessageMention[];
 };
 
 export type CreateMessageResult = {
   conversationId: string;
   messageId: string;
+  assistantMessageId: string;
   runId: string;
   transactionId: string;
   idempotentReplay: boolean;
+};
+
+export type UpdateConversationCommand = {
+  archived?: boolean;
+  pinned?: boolean;
+  markSeen?: true;
+};
+
+export type UpdateConversationResult = {
+  conversationId: string;
+  transactionId: string;
 };
 
 export type RunEventPage = {
@@ -177,8 +196,10 @@ export type RunEventDraft = {
 
 export type RunApprovalDraft = {
   id: string;
+  toolCallId: string;
   kind: string;
   prompt: string;
+  action?: string;
   options?: readonly string[];
 };
 
@@ -253,6 +274,11 @@ export interface ChatRepository {
     actor: Actor;
     command: CreateMessageCommand;
   }): Promise<CreateMessageResult>;
+  updateConversation(input: {
+    actor: Actor;
+    conversationId: string;
+    command: UpdateConversationCommand;
+  }): Promise<UpdateConversationResult | null>;
   getRun(input: { actor: Actor; runId: string }): Promise<Run | null>;
   listRunEvents(input: {
     actor: Actor;
@@ -281,6 +307,7 @@ const MAX_MESSAGE_LENGTH = 10_000;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
 const MAX_RESOURCE_ID_LENGTH = 256;
 const MAX_MODEL_ID_LENGTH = 256;
+const MAX_MESSAGE_MENTIONS = 16;
 
 export class ChatApplicationService {
   constructor(private readonly repository: ChatRepository) {}
@@ -344,6 +371,24 @@ export class ChatApplicationService {
     if (new Set(attachmentIds).size !== attachmentIds.length) {
       throw new CoreError("invalid_argument", "Attachment references must be unique.");
     }
+    const mentions = (input.mentions ?? []).map((mention) => ({
+      kind: mention.kind,
+      id: resourceId(mention.id, "mention.id"),
+    }));
+    if (mentions.length > MAX_MESSAGE_MENTIONS) {
+      throw new CoreError(
+        "invalid_argument",
+        `A Message cannot contain more than ${MAX_MESSAGE_MENTIONS} mentions.`,
+      );
+    }
+    if (mentions.some((mention) => mention.kind !== "skill")) {
+      throw new CoreError("invalid_argument", "Unknown Message mention kind.");
+    }
+    if (
+      new Set(mentions.map((mention) => `${mention.kind}:${mention.id}`)).size !== mentions.length
+    ) {
+      throw new CoreError("invalid_argument", "Message mentions must be unique.");
+    }
     const idempotencyKey = input.idempotencyKey.trim();
     if (
       !idempotencyKey ||
@@ -383,8 +428,31 @@ export class ChatApplicationService {
         ? { clientMessageId: resourceId(input.clientMessageId, "clientMessageId") }
         : {}),
       ...(attachmentIds.length ? { attachmentIds } : {}),
+      ...(mentions.length ? { mentions } : {}),
     };
     return this.repository.createMessageAndRun({ actor, command });
+  }
+
+  async updateConversation(
+    actor: Actor,
+    conversationId: string,
+    command: UpdateConversationCommand,
+  ): Promise<UpdateConversationResult> {
+    requirePermission(actor, CHAT_WRITE_PERMISSION);
+    if (
+      command.archived === undefined &&
+      command.pinned === undefined &&
+      command.markSeen === undefined
+    ) {
+      throw new CoreError("invalid_argument", "A Conversation update is required.");
+    }
+    const result = await this.repository.updateConversation({
+      actor,
+      conversationId: resourceId(conversationId, "conversationId"),
+      command,
+    });
+    if (!result) throw new CoreError("not_found", "Conversation not found.");
+    return result;
   }
 
   async getRun(actor: Actor, runId: string): Promise<Run> {

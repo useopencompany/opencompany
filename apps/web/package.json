@@ -32,6 +32,7 @@
     "@opencompany/goat-observability": "workspace:*",
     "@opencompany/goat-wiki": "workspace:*",
     "@opencompany/observability": "workspace:*",
+    "@opencompany/protocol": "workspace:*",
     "@opencompany/ui": "workspace:*",
     "@tanstack/electric-db-collection": "^0.3.5",
     "@tanstack/react-db": "^0.1.85",

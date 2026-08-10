@@ -183,6 +183,57 @@
         ],
         "additionalProperties": false
       },
+      "UpdateConversationEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "conversationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "transactionId": {
+                "type": "string",
+                "pattern": "^[0-9]+$/u"
+              }
+            },
+            "required": [
+              "conversationId",
+              "transactionId"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateConversationBody": {
+        "type": "object",
+        "properties": {
+          "archived": {
+            "type": "boolean"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "markSeen": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "MessagePage": {
         "type": "object",
         "properties": {
@@ -319,6 +370,12 @@
                 "maxLength": 256,
                 "example": "run_019fed53"
               },
+              "assistantMessageId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
               "runId": {
                 "type": "string",
                 "minLength": 1,
@@ -336,6 +393,7 @@
             "required": [
               "conversationId",
               "messageId",
+              "assistantMessageId",
               "runId",
               "transactionId",
               "replayed"
@@ -399,11 +457,40 @@
               "example": "run_019fed53"
             },
             "maxItems": 5
+          },
+          "mentions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageMention"
+            },
+            "maxItems": 16
           }
         },
         "required": [
           "content",
           "engine"
+        ],
+        "additionalProperties": false
+      },
+      "MessageMention": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "skill"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
         ],
         "additionalProperties": false
       },
@@ -1194,12 +1281,22 @@
                     "maxLength": 256,
                     "example": "run_019fed53"
                   },
+                  "toolCallId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "example": "run_019fed53"
+                  },
                   "kind": {
                     "type": "string",
                     "minLength": 1
                   },
                   "prompt": {
                     "type": "string"
+                  },
+                  "action": {
+                    "type": "string",
+                    "minLength": 1
                   },
                   "options": {
                     "type": "array",
@@ -1915,6 +2012,64 @@
             }
           }
         }
+      },
+      "patch": {
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "conversationId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateConversationBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated conversation and Electric transaction boundary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateConversationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/conversations/{conversationId}/messages": {
@@ -2319,6 +2474,125 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ResolveApprovalEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/read-models/{readModel}": {
+      "get": {
+        "tags": [
+          "Read models"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "chat-conversations-v1",
+                "chat-messages-v1",
+                "chat-runs-v1"
+              ]
+            },
+            "required": true,
+            "name": "readModel",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": false,
+            "name": "conversationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "handle",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "live",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "log",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "expired_handle",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "cache-buster",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized, versioned Electric read-model stream.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "nullable": true
                 }
               }
             }

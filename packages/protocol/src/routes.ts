@@ -4,6 +4,7 @@ import {
   AttachmentUploadBodySchema,
   AttachmentUploadEnvelopeSchema,
   CancelRunEnvelopeSchema,
+  ChatReadModelSchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
   CreateMessageBodySchema,
@@ -15,6 +16,8 @@ import {
   ResolveApprovalEnvelopeSchema,
   ResourceIdSchema,
   RunEnvelopeSchema,
+  UpdateConversationBodySchema,
+  UpdateConversationEnvelopeSchema,
 } from "./schemas";
 import { OPENAPI_DOCUMENT_VERSION, PROTOCOL_VERSION } from "./version";
 
@@ -54,6 +57,27 @@ export const getConversationRoute = createRoute({
     200: {
       description: "A conversation.",
       content: { "application/json": { schema: ConversationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const updateConversationRoute = createRoute({
+  method: "patch",
+  path: "/v1/conversations/{conversationId}",
+  tags: ["Chat"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ conversationId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: UpdateConversationBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Updated conversation and Electric transaction boundary.",
+      content: { "application/json": { schema: UpdateConversationEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -188,9 +212,37 @@ export const resolveApprovalRoute = createRoute({
   },
 });
 
+export const streamReadModelRoute = createRoute({
+  method: "get",
+  path: "/v1/read-models/{readModel}",
+  tags: ["Read models"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ readModel: ChatReadModelSchema }),
+    query: z.object({
+      conversationId: ResourceIdSchema.optional(),
+      offset: z.string().optional(),
+      handle: z.string().optional(),
+      live: z.string().optional(),
+      cursor: z.string().optional(),
+      log: z.string().optional(),
+      expired_handle: z.string().optional(),
+      "cache-buster": z.string().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Authorized, versioned Electric read-model stream.",
+      content: { "application/json": { schema: z.unknown() } },
+    },
+    default: errorResponse,
+  },
+});
+
 export type V1RouteHandlers = {
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
+  updateConversation: RouteHandler<typeof updateConversationRoute>;
   listMessages: RouteHandler<typeof listMessagesRoute>;
   createMessage: RouteHandler<typeof createMessageRoute>;
   uploadAttachment: RouteHandler<typeof uploadAttachmentRoute>;
@@ -198,6 +250,7 @@ export type V1RouteHandlers = {
   streamRunEvents: RouteHandler<typeof streamRunEventsRoute>;
   cancelRun: RouteHandler<typeof cancelRunRoute>;
   resolveApproval: RouteHandler<typeof resolveApprovalRoute>;
+  streamReadModel: RouteHandler<typeof streamReadModelRoute>;
 };
 
 export function createV1Router(
@@ -212,13 +265,15 @@ export function createV1Router(
   return app
     .openapi(listConversationsRoute, handlers.listConversations)
     .openapi(getConversationRoute, handlers.getConversation)
+    .openapi(updateConversationRoute, handlers.updateConversation)
     .openapi(listMessagesRoute, handlers.listMessages)
     .openapi(createMessageRoute, handlers.createMessage)
     .openapi(uploadAttachmentRoute, handlers.uploadAttachment)
     .openapi(getRunRoute, handlers.getRun)
     .openapi(streamRunEventsRoute, handlers.streamRunEvents)
     .openapi(cancelRunRoute, handlers.cancelRun)
-    .openapi(resolveApprovalRoute, handlers.resolveApproval);
+    .openapi(resolveApprovalRoute, handlers.resolveApproval)
+    .openapi(streamReadModelRoute, handlers.streamReadModel);
 }
 
 export type V1AppType = ReturnType<typeof createV1Router>;
@@ -256,6 +311,8 @@ const placeholderConversation = {
 const contractDocumentHandlers: V1RouteHandlers = {
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   getConversation: (c) => c.json({ data: placeholderConversation, meta }, 200),
+  updateConversation: (c) =>
+    c.json({ data: { conversationId: "conversation_contract", transactionId: "1" }, meta }, 200),
   listMessages: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   createMessage: (c) =>
     c.json(
@@ -263,6 +320,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
         data: {
           conversationId: "conversation_contract",
           messageId: "message_contract",
+          assistantMessageId: "message_assistant_contract",
           runId: "run_contract",
           transactionId: "1",
           replayed: false,
@@ -322,4 +380,5 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  streamReadModel: (c) => c.json([], 200),
 };

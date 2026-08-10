@@ -1175,8 +1175,10 @@ function approvalDraftsFromProjection(projection: GoatOpenCompanyChatProjection)
     return [
       {
         id: approvalId,
+        toolCallId,
         kind: toolName,
         prompt: action ? `Approve ${action}?` : `Approve ${toolName}?`,
+        ...(action ? { action } : {}),
         options: ["approved", "denied"] as const,
       },
     ];

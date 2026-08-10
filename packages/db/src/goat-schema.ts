@@ -10,6 +10,7 @@ import {
   type RunApprovalStatus,
   type RunAttemptStatus,
   type RunEventType,
+  type RunStatus,
 } from "@opencompany/core";
 import type { EncryptedPayload } from "@opencompany/crypto";
 import { relations, type SQL, sql } from "drizzle-orm";
@@ -608,6 +609,7 @@ export const GOAT_CODEX_CHAT_EVENT_TYPES: readonly GoatCodexChatEventType[] =
 
 export type GoatCodexChatTurnSettings = {
   approvalContinuation?: boolean;
+  mentions?: Array<{ kind: "skill"; id: string }>;
   reasoningEffort?: CodexReasoningEffort;
   planModeReasoningEffort?: CodexReasoningEffort | null;
   wakeupChain?: number;
@@ -4110,6 +4112,7 @@ export const goatRunApprovals = goat.table(
     attemptId: text("attempt_id").references(() => goatRunAttempts.id, {
       onDelete: "set null",
     }),
+    toolCallId: text("tool_call_id"),
     kind: text("kind").notNull(),
     prompt: text("prompt").notNull(),
     options: jsonb("options").$type<string[]>(),
@@ -4187,6 +4190,76 @@ export const goatRunEvents = goat.table(
       "goat_run_events_schema_version_check",
       sql`${table.schemaVersion} = 1`,
     ),
+  }),
+);
+
+// Electric projects these additive tables through fixed /v1 read-model names. Actor/workspace
+// scope is retained for server authorization but omitted from the client-visible column sets.
+export const goatConversationReadModelV1 = goat.table(
+  "conversation_read_model_v1",
+  {
+    id: text("id").primaryKey(),
+    actorId: text("actor_id").notNull(),
+    workspaceId: text("workspace_id"),
+    title: text("title").notNull(),
+    engine: text("engine").$type<GoatChatEngine>().notNull(),
+    model: text("model").notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    pinnedAt: timestamp("pinned_at", { withTimezone: true }),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    actorWorkspaceUpdatedIdx: index(
+      "goat_conversation_read_model_v1_actor_workspace_updated_idx",
+    ).on(table.actorId, table.workspaceId, table.updatedAt),
+  }),
+);
+
+export const goatMessageReadModelV1 = goat.table(
+  "message_read_model_v1",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id").notNull(),
+    actorId: text("actor_id").notNull(),
+    workspaceId: text("workspace_id"),
+    role: text("role").$type<GoatChatMessage["role"]>().notNull(),
+    content: text("content").notNull(),
+    taskId: text("task_id"),
+    presentation: jsonb("presentation").$type<GoatChatMessageDebugTrace>(),
+    attachments: jsonb("attachments").$type<GoatChatMessageAttachment[]>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    actorWorkspaceConversationIdx: index(
+      "goat_message_read_model_v1_actor_workspace_conversation_idx",
+    ).on(table.actorId, table.workspaceId, table.conversationId, table.createdAt),
+  }),
+);
+
+export const goatRunReadModelV1 = goat.table(
+  "run_read_model_v1",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id").notNull(),
+    actorId: text("actor_id").notNull(),
+    workspaceId: text("workspace_id"),
+    triggerMessageId: text("trigger_message_id").notNull(),
+    assistantMessageId: text("assistant_message_id").notNull(),
+    status: text("status").$type<RunStatus>().notNull(),
+    engine: text("engine").$type<GoatChatEngine>().notNull(),
+    model: text("model").notNull(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    actorWorkspaceConversationIdx: index(
+      "goat_run_read_model_v1_actor_workspace_conversation_idx",
+    ).on(table.actorId, table.workspaceId, table.conversationId, table.createdAt),
   }),
 );
 

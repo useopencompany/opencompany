@@ -1,0 +1,31 @@
+"use client";
+
+import { createOpenCompanyClient } from "@opencompany/protocol";
+
+export async function uploadHeadlessChatAttachment(
+  input: { file: File },
+  options: { baseUrl?: string; fetch?: typeof globalThis.fetch } = {},
+) {
+  const baseUrl = options.baseUrl ?? (typeof window === "undefined" ? "" : window.location.origin);
+  if (!baseUrl) throw new Error("The canonical Chat API base URL is unavailable.");
+  const client = createOpenCompanyClient(baseUrl, {
+    ...(options.fetch ? { fetch: options.fetch } : {}),
+  });
+  const response = await client.v1.attachments.$post({ form: { file: input.file } });
+  if (!response.ok) throw await headlessChatResponseError(response);
+  const envelope = await response.json();
+  return { id: envelope.data.attachment.id };
+}
+
+async function headlessChatResponseError(response: Response) {
+  const body = (await response.json().catch(() => null)) as {
+    error?: { message?: unknown; requestId?: unknown };
+  } | null;
+  const message = typeof body?.error?.message === "string" ? body.error.message : null;
+  const requestId = typeof body?.error?.requestId === "string" ? body.error.requestId : null;
+  return new Error(
+    `${message ?? `The attachment upload failed with HTTP ${response.status}.`}${
+      requestId ? ` (request ${requestId})` : ""
+    }`,
+  );
+}

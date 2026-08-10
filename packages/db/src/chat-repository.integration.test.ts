@@ -24,6 +24,7 @@ const migrationPaths = [
   "0198_goat_headless_chat_foundation.sql",
   "0199_goat_chat_attachment_uploads.sql",
   "0200_goat_chat_run_pausing.sql",
+  "0201_goat_chat_read_models_v1.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -67,12 +68,15 @@ describe("Postgres Chat repositories", () => {
       }
     }
     const migrated = await database.query<{ id: string; event_sequence: number }>(`
-      SELECT id, event_sequence
-      FROM goat.codex_chat_turns
-      WHERE id = 'migration_run'
+      SELECT id, event_sequence FROM goat.codex_chat_turns WHERE id = 'migration_run'
+    `);
+    const migratedProjection = await database.query<{ id: string; content: string }>(`
+      SELECT id, content FROM goat.message_read_model_v1 WHERE id = 'migration_message'
     `);
     legacySurvivedMigration =
-      migrated.rows[0]?.id === "migration_run" && migrated.rows[0].event_sequence === 0;
+      migrated.rows[0]?.id === "migration_run" &&
+      migrated.rows[0].event_sequence === 0 &&
+      migratedProjection.rows[0]?.content === "Preserve me";
     await database.exec(`
       DELETE FROM goat.codex_chat_turns;
       DELETE FROM goat.codex_chat_sessions;
@@ -124,6 +128,7 @@ describe("Postgres Chat repositories", () => {
     expect(first).toMatchObject({
       conversationId: "conversation_client_1",
       messageId: "message_client_1",
+      assistantMessageId: expect.any(String),
       idempotentReplay: false,
     });
     expect(replay).toEqual({ ...first, idempotentReplay: true });
@@ -139,6 +144,30 @@ describe("Postgres Chat repositories", () => {
         SELECT sequence, type FROM goat.run_events ORDER BY sequence
       `),
     ).toMatchObject({ rows: [{ sequence: 1, type: "run.queued" }] });
+    expect(
+      await database.query<{ status: string; conversation_id: string }>(`
+        SELECT status, conversation_id FROM goat.run_read_model_v1
+      `),
+    ).toMatchObject({
+      rows: [{ status: "queued", conversation_id: first.conversationId }],
+    });
+    expect(
+      await database.query<{ conversation_id: string; presentation: unknown }>(
+        `
+        SELECT conversation_id, presentation
+        FROM goat.message_read_model_v1
+        WHERE id = $1
+      `,
+        [first.assistantMessageId],
+      ),
+    ).toMatchObject({
+      rows: [
+        {
+          conversation_id: first.conversationId,
+          presentation: { schemaVersion: "opencompany.chat.debug.v1" },
+        },
+      ],
+    });
 
     await expect(
       service.createMessage(actor(), { ...command, content: "A different command" }),
@@ -308,6 +337,116 @@ describe("Postgres Chat repositories", () => {
     ).rejects.toBeInstanceOf(CoreError);
   });
 
+  it("updates canonical Conversation state and safely archives an active queued Run", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "send-before-conversation-update",
+      content: "Keep this durable",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+    await database.query(
+      `INSERT INTO goat.run_approvals (id, run_id, kind, prompt, options)
+       VALUES ('approval_before_archive', $1, 'use_action', 'Approve?', '["approved","denied"]')`,
+      [created.runId],
+    );
+
+    const presented = await service.updateConversation(actor(), created.conversationId, {
+      pinned: true,
+      markSeen: true,
+    });
+    expect(presented).toEqual({
+      conversationId: created.conversationId,
+      transactionId: expect.stringMatching(/^[0-9]+$/u),
+    });
+    expect(
+      (
+        await database.query<{
+          pinned_at: Date | null;
+          last_seen_at: Date | null;
+          archived_at: Date | null;
+        }>(
+          `SELECT pinned_at, last_seen_at, archived_at
+           FROM goat.conversation_read_model_v1
+           WHERE id = $1`,
+          [created.conversationId],
+        )
+      ).rows,
+    ).toEqual([
+      {
+        pinned_at: new Date("2026-08-10T20:00:00.000Z"),
+        last_seen_at: new Date("2026-08-10T20:00:00.000Z"),
+        archived_at: null,
+      },
+    ]);
+
+    await expect(
+      service.updateConversation(
+        actor({ userId: "user_2", workspaceId: "workspace_2" }),
+        created.conversationId,
+        { archived: true },
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+
+    await expect(
+      service.updateConversation(actor(), created.conversationId, { archived: true }),
+    ).resolves.toMatchObject({ conversationId: created.conversationId });
+    expect(
+      (
+        await database.query<{
+          archived_at: Date | null;
+          run_status: string;
+          runtime_status: string;
+          active_turn_id: string | null;
+          approval_status: string;
+          approval_resolution: string | null;
+        }>(
+          `SELECT
+             projection.archived_at,
+             run.status AS run_status,
+             runtime.status AS runtime_status,
+             runtime.active_turn_id,
+             approval.status AS approval_status,
+             approval.resolution AS approval_resolution
+           FROM goat.conversation_read_model_v1 AS projection
+           JOIN goat.codex_chat_turns AS run ON run.chat_session_id = projection.id
+           JOIN goat.codex_chat_sessions AS runtime ON runtime.id = run.codex_chat_session_id
+           JOIN goat.run_approvals AS approval ON approval.run_id = run.id
+           WHERE projection.id = $1`,
+          [created.conversationId],
+        )
+      ).rows,
+    ).toEqual([
+      {
+        archived_at: new Date("2026-08-10T20:00:00.000Z"),
+        run_status: "interrupted",
+        runtime_status: "closed",
+        active_turn_id: null,
+        approval_status: "canceled",
+        approval_resolution: "canceled",
+      },
+    ]);
+    expect(
+      (
+        await database.query<{ type: string }>(
+          "SELECT type FROM goat.run_events WHERE run_id = $1 ORDER BY sequence",
+          [created.runId],
+        )
+      ).rows,
+    ).toEqual([{ type: "run.queued" }, { type: "run.canceled" }]);
+
+    await expect(
+      service.updateConversation(actor(), created.conversationId, { archived: false }),
+    ).resolves.toMatchObject({ conversationId: created.conversationId });
+    expect(
+      (
+        await database.query<{ archived_at: Date | null }>(
+          "SELECT archived_at FROM goat.conversation_read_model_v1 WHERE id = $1",
+          [created.conversationId],
+        )
+      ).rows,
+    ).toEqual([{ archived_at: null }]);
+  });
+
   it("pages authorized Messages without exposing their private storage metadata", async () => {
     const created = await service.createMessage(actor(), {
       idempotencyKey: "send-messages",
@@ -389,6 +528,7 @@ describe("Postgres Chat repositories", () => {
         approvals: [
           {
             id: "approval_1",
+            toolCallId: "tool_call_1",
             kind: "use_action",
             prompt: "Approve crm.lookup?",
             options: ["approved", "denied"],

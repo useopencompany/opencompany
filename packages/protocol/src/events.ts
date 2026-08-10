@@ -47,8 +47,12 @@ export const RunEventSchema = z
       z
         .object({
           approvalId: ResourceIdSchema,
+          // Added after the first durable-event rollout. Optional while pre-existing event rows
+          // drain; all newly projected approvals include it.
+          toolCallId: ResourceIdSchema.optional(),
           kind: z.string().min(1),
           prompt: z.string(),
+          action: z.string().min(1).optional(),
           options: z.array(z.string()).optional(),
         })
         .strict(),

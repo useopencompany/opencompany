@@ -2,7 +2,7 @@
 
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { GoatMcpClient } from "@opencompany/db/goat-schema";
-import { useLiveQuery } from "@tanstack/react-db";
+import { type Collection, useLiveQuery } from "@tanstack/react-db";
 import {
   createContext,
   type ReactNode,
@@ -21,6 +21,11 @@ import {
   isGoatChatRuntimeActive,
 } from "@/lib/chat-ui";
 import type { GoatFeatureFlags } from "@/lib/feature-flags";
+import {
+  getHeadlessChatConversations,
+  type HeadlessChatConversationReadModel,
+} from "@/lib/headless-chat-collections";
+import { HEADLESS_CHAT_ENABLED } from "@/lib/headless-chat-feature";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
 import {
@@ -207,9 +212,25 @@ function GoatAppLiveDataSubscriptions({
         : undefined,
     [initialData.featureFlags.taskSpawning, collections],
   );
-  const { data: chatSessionRows, isLoading: chatsLoading } = useLiveQuery((q) =>
-    q.from({ session: collections.chatSessions }),
+  const headlessConversations = useMemo(
+    () => (HEADLESS_CHAT_ENABLED ? getHeadlessChatConversations() : null),
+    [],
   );
+  // Both collections are read-only here and narrowed to their selected schema below. Erasing the
+  // row generic lets this remain one hook/subscription, so the rollback switch cannot perturb the
+  // rest of the provider's subscription lifecycle.
+  const selectedChatCollection = (headlessConversations ??
+    collections.chatSessions) as unknown as Collection<
+    Record<string, unknown>,
+    string | number,
+    Record<string, unknown>
+  >;
+  const { data: chatRows, isLoading: chatsLoading } = useLiveQuery(
+    () => selectedChatCollection,
+    [selectedChatCollection],
+  );
+  const chatSessionRows = HEADLESS_CHAT_ENABLED ? undefined : chatRows;
+  const headlessConversationRows = HEADLESS_CHAT_ENABLED ? chatRows : undefined;
   const { data: codexChatSessionRows } = useLiveQuery((q) =>
     q.from({ codexSession: collections.codexChatSessions }),
   );
@@ -246,6 +267,77 @@ function GoatAppLiveDataSubscriptions({
   ]);
 
   const recentChats = useMemo(() => {
+    if (HEADLESS_CHAT_ENABLED) {
+      if (chatsLoading && !headlessConversationRows?.length) return initialData.recentChats;
+      const initialById = new Map(initialData.recentChats.map((chat) => [chat.id, chat]));
+      const codexRuntimeByChatId = new Map(
+        ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[]).map((row) => [
+          row.chat_session_id,
+          {
+            status: row.status,
+            activeTurnId: row.active_turn_id,
+            error: row.error,
+            updatedAt: row.updated_at,
+          },
+        ]),
+      );
+      const toSummary = (row: HeadlessChatConversationReadModel): GoatChatSummaryView => {
+        const initial = initialById.get(row.id);
+        const durableRuntime = codexRuntimeByChatId.get(row.id);
+        const codexRuntime = hasDurableChatRuntime(row.engine)
+          ? (durableRuntime ?? initial?.codexRuntime ?? null)
+          : null;
+        return {
+          id: row.id,
+          title: row.title,
+          model: row.model as AgentModelId,
+          engine: row.engine,
+          codexComposerSettings: initial?.codexComposerSettings ?? null,
+          codexRuntime,
+          state: deriveGoatChatState({
+            updatedAt: row.updatedAt,
+            lastSeenAt: row.lastSeenAt,
+            codexRuntime,
+          }),
+          preview: initial?.preview ?? "No messages yet.",
+          updatedAt: row.updatedAt,
+          lastSeenAt: row.lastSeenAt,
+          pinnedAt: row.pinnedAt,
+        };
+      };
+      const openRows = (
+        (headlessConversationRows ?? []) as HeadlessChatConversationReadModel[]
+      ).filter((row) => !row.archivedAt);
+      const activeRuntimeChatIds = new Set(
+        ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[])
+          .filter((row) =>
+            isGoatChatRuntimeActive({ status: row.status, activeTurnId: row.active_turn_id }),
+          )
+          .map((row) => row.chat_session_id),
+      );
+      const pinned = openRows
+        .filter((row) => row.pinnedAt)
+        .toSorted(
+          (a, b) => new Date(b.pinnedAt ?? 0).getTime() - new Date(a.pinnedAt ?? 0).getTime(),
+        )
+        .slice(0, GOAT_PINNED_CHAT_LIMIT)
+        .map(toSummary);
+      const activeRuntime = openRows
+        .filter((row) => !row.pinnedAt && activeRuntimeChatIds.has(row.id))
+        .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        .map(toSummary);
+      const recent = openRows
+        .filter(
+          (row) =>
+            !row.pinnedAt &&
+            !activeRuntimeChatIds.has(row.id) &&
+            isRecentGoatHomeActivity(row.updatedAt),
+        )
+        .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        .slice(0, 8)
+        .map(toSummary);
+      return [...pinned, ...activeRuntime, ...recent];
+    }
     if (chatsLoading && !chatSessionRows?.length) return initialData.recentChats;
     const initialById = new Map(initialData.recentChats.map((chat) => [chat.id, chat]));
     const codexRuntimeByChatId = new Map(
@@ -317,7 +409,13 @@ function GoatAppLiveDataSubscriptions({
       .slice(0, 8)
       .map(toSummary);
     return [...pinned, ...activeRuntime, ...recent];
-  }, [chatSessionRows, chatsLoading, codexChatSessionRows, initialData.recentChats]);
+  }, [
+    chatSessionRows,
+    chatsLoading,
+    codexChatSessionRows,
+    headlessConversationRows,
+    initialData.recentChats,
+  ]);
 
   const archivedChats = useMemo<GoatChatSummaryView[]>(() => {
     const codexRuntimeByChatId = new Map(
@@ -331,6 +429,28 @@ function GoatAppLiveDataSubscriptions({
         },
       ]),
     );
+    if (HEADLESS_CHAT_ENABLED) {
+      return ((headlessConversationRows ?? []) as HeadlessChatConversationReadModel[])
+        .filter((row) => row.archivedAt)
+        .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        .slice(0, GOAT_ARCHIVED_CHAT_LIMIT)
+        .map((row) => ({
+          id: row.id,
+          title: row.title,
+          model: row.model as AgentModelId,
+          engine: row.engine,
+          codexComposerSettings: null,
+          codexRuntime: hasDurableChatRuntime(row.engine)
+            ? (codexRuntimeByChatId.get(row.id) ?? null)
+            : null,
+          state: "done_seen",
+          preview: "Archived",
+          updatedAt: row.updatedAt,
+          lastSeenAt: row.lastSeenAt,
+          pinnedAt: null,
+          archived: true,
+        }));
+    }
     return ((chatSessionRows ?? []) as GoatChatSessionRow[])
       .filter((row) => row.closed_at && row.kind !== "task")
       .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
@@ -351,7 +471,7 @@ function GoatAppLiveDataSubscriptions({
         pinnedAt: null,
         archived: true,
       }));
-  }, [chatSessionRows, codexChatSessionRows]);
+  }, [chatSessionRows, codexChatSessionRows, headlessConversationRows]);
 
   const integrations = useMemo(() => {
     if (integrationsLoading && !integrationRows?.length) return initialData.integrations;

@@ -4,7 +4,7 @@ import {
   type ChatRepository,
   type CreateMessageCommand,
 } from "@opencompany/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApiApp } from "./app";
 import type { AttachmentUploadService } from "./attachments";
 import { ApiError } from "./errors";
@@ -64,6 +64,7 @@ describe("canonical Hono API", () => {
       data: {
         conversationId: "conversation_1",
         messageId: "message_user_1",
+        assistantMessageId: "message_assistant_1",
         runId: "run_1",
         transactionId: "42",
         replayed: false,
@@ -83,6 +84,7 @@ describe("canonical Hono API", () => {
     });
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/event-stream");
+    expect(response.headers.get("x-opencompany-run-status")).toBe("completed");
     const body = await response.text();
     expect(body).not.toContain("v1:1");
     expect(body).toContain("id: v1:2");
@@ -95,6 +97,75 @@ describe("canonical Hono API", () => {
       headers: { "Last-Event-ID": "v1:2" },
     });
     expect(conflict.status).toBe(400);
+  });
+
+  it("closes the SSE response at a durable approval boundary", async () => {
+    const repository = fakeRepository();
+    repository.getRun = async () => ({
+      id: "run_1",
+      conversationId: "conversation_1",
+      triggerMessageId: "message_user_1",
+      status: "paused",
+      engine: "opencompany",
+      model: "provider/default",
+      attemptCount: 1,
+      createdAt,
+      updatedAt: createdAt,
+    });
+    repository.listRunEvents = async ({ afterSequence }) => ({
+      events:
+        afterSequence > 0
+          ? []
+          : [
+              {
+                id: "event_paused",
+                runId: "run_1",
+                attemptId: "attempt_1",
+                sequence: 1,
+                type: "run.paused",
+                payload: { reason: "approval_required" },
+                createdAt,
+              },
+            ],
+      nextSequence: 1,
+    });
+    const response = await testApp(repository).request("/v1/runs/run_1/events");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-opencompany-run-status")).toBe("paused");
+    await expect(response.text()).resolves.toContain("event: run.paused");
+  });
+
+  it("updates Conversation state through the canonical command boundary", async () => {
+    const repository = fakeRepository();
+    const app = testApp(repository);
+    const response = await app.request("/v1/conversations/conversation_1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived: true }),
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: { conversationId: "conversation_1", transactionId: "42" },
+    });
+
+    const invalid = await app.request("/v1/conversations/conversation_1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(invalid.status).toBe(400);
+  });
+
+  it("authorizes a child read model before contacting Electric", async () => {
+    const repository = fakeRepository();
+    repository.getConversation = async () => null;
+    const stream = vi.fn(async () => Response.json([]));
+    const app = testApp(repository, { readModels: { stream } });
+    const response = await app.request(
+      "/v1/read-models/chat-messages-v1?conversationId=conversation_other",
+    );
+    expect(response.status).toBe(404);
+    expect(stream).not.toHaveBeenCalled();
   });
 
   it("uploads a private attachment through the typed multipart operation", async () => {
@@ -217,12 +288,17 @@ function fakeRepository(): FakeRepository {
       createdAt,
       updatedAt: createdAt,
     }),
+    updateConversation: async ({ conversationId }) => ({
+      conversationId,
+      transactionId: "42",
+    }),
     listMessages: async () => ({ messages: [], nextCursor: null }),
     createMessageAndRun: async ({ command }) => {
       repository.lastCommand = command;
       return {
         conversationId: "conversation_1",
         messageId: "message_user_1",
+        assistantMessageId: "message_assistant_1",
         runId: "run_1",
         transactionId: "42",
         idempotentReplay: false,

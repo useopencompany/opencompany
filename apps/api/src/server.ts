@@ -13,6 +13,7 @@ import { createLogger } from "@opencompany/observability";
 import { createApiApp } from "./app";
 import { createAttachmentUploadService } from "./attachments";
 import { createWorkOsApiAuthenticator } from "./auth";
+import { ElectricChatReadModelProxy } from "./electric-read-models";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "server" });
@@ -27,11 +28,13 @@ const chat = new ChatApplicationService(
   }),
 );
 const notifier = new PostgresRunEventNotifier(database.pool);
+const readModels = createElectricReadModels();
 const app = createApiApp({
   chat,
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),
   authenticate: createWorkOsApiAuthenticator(execute),
   notifier,
+  ...(readModels ? { readModels } : {}),
 });
 const port = resolvePort();
 const server = serve({ fetch: app.fetch, port });
@@ -75,4 +78,22 @@ function resolvePort() {
     throw new Error("PORT must be an integer between 1 and 65535.");
   }
   return value;
+}
+
+function createElectricReadModels() {
+  const electricUrl = process.env.ELECTRIC_URL?.trim();
+  if (!electricUrl) return null;
+  return new ElectricChatReadModelProxy({
+    electricUrl,
+    ...(process.env.ELECTRIC_SOURCE_ID?.trim()
+      ? { sourceId: process.env.ELECTRIC_SOURCE_ID.trim() }
+      : {}),
+    ...(process.env.ELECTRIC_SOURCE_SECRET?.trim()
+      ? { sourceSecret: process.env.ELECTRIC_SOURCE_SECRET.trim() }
+      : {}),
+    ...(process.env.ELECTRIC_SECRET?.trim()
+      ? { electricSecret: process.env.ELECTRIC_SECRET.trim() }
+      : {}),
+    ...(process.env.ELECTRIC_TOKEN?.trim() ? { token: process.env.ELECTRIC_TOKEN.trim() } : {}),
+  });
 }
