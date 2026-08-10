@@ -94,6 +94,10 @@ import {
   parseGoatChatAttachmentsInput,
 } from "@/lib/chat-attachments";
 import { isAutoGoatModelSelection } from "@/lib/chat-auto-model";
+import {
+  createGoatChatGenerationWatchdog,
+  GOAT_CHAT_STEP_TIMEOUT_MS,
+} from "@/lib/chat-generation-timeout";
 import { type GoatChatModelRoutingResult, resolveAutoGoatModel } from "@/lib/chat-model-router";
 import { parseOptimisticGoatChatSessionId } from "@/lib/chat-navigation";
 import { resolveGoatChatRequestContext } from "@/lib/chat-request-auth";
@@ -156,6 +160,7 @@ import {
   updateGoatTaskScheduleForUser,
 } from "@/lib/task-schedules";
 import { createGoatTaskForUser } from "@/lib/tasks";
+import { runWikiToolForUser } from "@/lib/wiki-tool";
 import { createGoatTaskFromWorkflow, generateGoatWorkflowTaskTitle } from "@/lib/workflow-tasks";
 import { listGoatWorkflowCatalog, readGoatWorkflowMentionRef } from "@/lib/workflows";
 
@@ -166,6 +171,9 @@ const logger = createLogger({
   service: "opencompany-goat",
   runtime: "goat-chat",
 });
+
+const GOAT_CHAT_TIMEOUT_MESSAGE =
+  "Goat stopped because the model did not respond in time. Please try again.";
 
 type ChatRequestBody = {
   sessionId?: unknown;
@@ -741,7 +749,34 @@ export async function POST(request: Request): Promise<Response> {
   // signal keeps its old meaning: disconnect cancels generation.
   const resumeEnabled = isGoatChatResumeEnabled();
   const stopController = new AbortController();
-  const generationSignal = resumeEnabled ? stopController.signal : request.signal;
+  const explicitAbortSignal = resumeEnabled ? stopController.signal : request.signal;
+  const stepStartedAt = new Map<number, number>();
+  const generationWatchdog = createGoatChatGenerationWatchdog({
+    abortSignal: explicitAbortSignal,
+    onFirstChunk: ({ stepNumber, durationMs }) => {
+      recordGoatHistogram(GOAT_METRICS.chatModelFirstChunkDurationMs, durationMs, {
+        "goat.model": telemetryModel,
+        "goat.step_number": stepNumber,
+      });
+    },
+    onTimeout: (timeout) => {
+      const attributes = {
+        "goat.model": telemetryModel,
+        "goat.timeout_phase": timeout.phase,
+        "goat.step_number": timeout.stepNumber,
+      };
+      recordGoatCounter(GOAT_METRICS.chatModelTimeoutsTotal, 1, attributes);
+      logger.warn("Goat chat model timed out", {
+        event: "goat.chat_model_timeout",
+        chat_session_id: turn.session.id,
+        chat_message_id: turn.userMessageId,
+        model: telemetryModel,
+        timeout_phase: timeout.phase,
+        step_number: timeout.stepNumber,
+      });
+    },
+  });
+  const generationSignal = generationWatchdog.signal;
   const capabilityTurnState: GoatCapabilityTurnState = {
     quotedTotalUsdMicros: 0,
     admittedToolCallIds: [],
@@ -886,6 +921,18 @@ export async function POST(request: Request): Promise<Response> {
               };
             },
           },
+        }
+      : {}),
+    // Workspace wiki (preview): the whole read/write surface rides one tool,
+    // present only for users who enabled the flag in preferences.
+    ...(context.user.wikiEnabled
+      ? {
+          runWiki: (toolInput) =>
+            runWikiToolForUser({
+              workspaceId: context.workspace.id,
+              userWorkosId: context.user.workosUserId,
+              toolInput,
+            }),
         }
       : {}),
     // goat_brain is read-only for everyone (recall/inspect). The only write path
@@ -1317,6 +1364,25 @@ export async function POST(request: Request): Promise<Response> {
   let debugTrace: GoatChatMessageDebugTrace = createOpenCompanyChatDebugTrace({
     model: turn.session.model,
   });
+  let modelCostRecordPromise: Promise<void> | null = null;
+  const recordFinalModelCost = (usage: LanguageModelUsage) => {
+    modelCostRecordPromise ??= recordChatModelCost({
+      model: turn.session.model,
+      usage,
+      workspaceId: context.workspace.id,
+      userWorkosId: context.user.workosUserId,
+      chatSessionId: turn.session.id,
+      userMessageId: turn.userMessageId,
+      // A continuation is a second debit for the same user message; suffix
+      // the key so it is not deduped against the paused turn's debit.
+      ...(turn.respondedApprovals.length > 0
+        ? {
+            idempotencyKeySuffix: `:approval:${turn.respondedApprovals[0]?.approvalId ?? "unknown"}`,
+          }
+        : {}),
+    });
+    return modelCostRecordPromise;
+  };
   let assistantPersisted = false;
   let assistantPersistPromise: Promise<void> | null = null;
   const persistFallbackAssistantMessage = (error: unknown, finishReason: string) => {
@@ -1435,10 +1501,30 @@ export async function POST(request: Request): Promise<Response> {
       { ignoreIncompleteToolCalls: true },
     ),
     stopWhen: stepCountIs(maxChatSteps),
+    timeout: { stepMs: GOAT_CHAT_STEP_TIMEOUT_MS },
     // Providers deliver tokens in bursts; re-chunk to word-level with a small
     // delay so streamed text reads as a steady flow instead of jumps.
     experimental_transform: smoothStream(),
     abortSignal: generationSignal,
+    experimental_onStepStart: ({ stepNumber }) => {
+      stepStartedAt.set(stepNumber, performance.now());
+      generationWatchdog.startStep(stepNumber);
+    },
+    onChunk: () => generationWatchdog.noteChunk(),
+    onStepFinish: ({ stepNumber }) => {
+      generationWatchdog.finishStep(stepNumber);
+      const startedAt = stepStartedAt.get(stepNumber);
+      stepStartedAt.delete(stepNumber);
+      if (startedAt === undefined) return;
+      recordGoatHistogram(
+        GOAT_METRICS.chatModelStepDurationMs,
+        Math.max(0, Math.round(performance.now() - startedAt)),
+        {
+          "goat.model": telemetryModel,
+          "goat.step_number": stepNumber,
+        },
+      );
+    },
     tools: toolContext.tools,
     prepareStep: ({ stepNumber }: { stepNumber: number }) =>
       prepareOpenCompanyChatStep({
@@ -1451,10 +1537,12 @@ export async function POST(request: Request): Promise<Response> {
     ...(toolContext.repairToolCall
       ? { experimental_repairToolCall: toolContext.repairToolCall }
       : {}),
-    providerOptions: goatGatewayProviderOptions(
-      gatewayAttribution,
-      GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
-    ),
+    providerOptions: goatGatewayProviderOptions(gatewayAttribution, {
+      gateway: {
+        ...GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS.gateway,
+        sort: "ttft",
+      },
+    }),
     ...latitudeTelemetry({
       name: "chat-turn",
       feature: "chat",
@@ -1468,22 +1556,9 @@ export async function POST(request: Request): Promise<Response> {
       },
     }),
     async onFinish(event) {
+      generationWatchdog.finish();
       const finishReason = stringifyFinishReason(event.finishReason);
-      await recordChatModelCost({
-        model: turn.session.model,
-        usage: event.totalUsage,
-        workspaceId: context.workspace.id,
-        userWorkosId: context.user.workosUserId,
-        chatSessionId: turn.session.id,
-        userMessageId: turn.userMessageId,
-        // A continuation is a second debit for the same user message; suffix
-        // the key so it is not deduped against the paused turn's debit.
-        ...(turn.respondedApprovals.length > 0
-          ? {
-              idempotencyKeySuffix: `:approval:${turn.respondedApprovals[0]?.approvalId ?? "unknown"}`,
-            }
-          : {}),
-      });
+      await recordFinalModelCost(event.totalUsage);
       debugTrace = createOpenCompanyChatDebugTrace({
         model: turn.session.model,
         steps: event.steps,
@@ -1491,7 +1566,35 @@ export async function POST(request: Request): Promise<Response> {
       });
       await recordBrowserSandboxUsage();
     },
+    onAbort(event) {
+      const timeout =
+        generationWatchdog.timeout ??
+        (!explicitAbortSignal.aborted ? generationWatchdog.markStepTimeout() : null);
+      generationWatchdog.finish();
+      debugTrace = createOpenCompanyChatDebugTrace({
+        model: turn.session.model,
+        steps: event.steps,
+        finishReason: timeout ? "timeout" : "abort",
+        ...(timeout ? { error: GOAT_CHAT_TIMEOUT_MESSAGE } : {}),
+      });
+      const completedUsage = aggregateChatStepUsage(event.steps);
+      if (completedUsage) after(recordFinalModelCost(completedUsage));
+      after(recordBrowserSandboxUsage());
+      if (timeout) {
+        finishChatTelemetry("failure", {
+          "goat.chat_session_id": turn.session.id,
+          "goat.chat_message_id": turn.userMessageId,
+          "goat.model": turn.session.model,
+          "goat.task_started": Boolean(toolContext.getStartedTask()),
+          "goat.task_id": toolContext.getStartedTask()?.id,
+          "goat.failure_category": "timeout",
+          "goat.timeout_phase": timeout.phase,
+          "goat.step_number": timeout.stepNumber,
+        });
+      }
+    },
     onError(event) {
+      generationWatchdog.finish();
       finishChatTelemetry(
         "failure",
         {
@@ -1567,6 +1670,7 @@ export async function POST(request: Request): Promise<Response> {
       return "Goat could not answer that right now.";
     },
     onFinish: async ({ responseMessage, finishReason, isAborted }) => {
+      generationWatchdog.finish();
       releaseStreamCoordination();
       await recordBrowserSandboxUsage();
       if (assistantPersistPromise) await assistantPersistPromise;
@@ -1579,7 +1683,8 @@ export async function POST(request: Request): Promise<Response> {
       const rawContent = textFromGoatChatUiMessage(settledResponseMessage);
       const hasAssistantParts = hasDisplayableAssistantParts(settledResponseMessage);
       const isAwaitingApproval = pendingApprovalIdsFromStoredParts(responseParts).length > 0;
-      if (isAborted && !rawContent && !startedTask && !hasAssistantParts) {
+      const generationTimeout = generationWatchdog.timeout;
+      if (isAborted && !generationTimeout && !rawContent && !startedTask && !hasAssistantParts) {
         finishChatTelemetry("aborted", {
           "goat.chat_session_id": turn.session.id,
           "goat.chat_message_id": turn.userMessageId,
@@ -1587,6 +1692,12 @@ export async function POST(request: Request): Promise<Response> {
           "goat.task_started": false,
         });
         return;
+      }
+      if (generationTimeout && (rawContent || startedTask || hasAssistantParts)) {
+        recordGoatCounter(GOAT_METRICS.chatPartialRecoveriesTotal, 1, {
+          "goat.model": turn.session.model,
+          "goat.timeout_phase": generationTimeout.phase,
+        });
       }
 
       const finishReasonText = stringifyFinishReason(finishReason);
@@ -1596,15 +1707,23 @@ export async function POST(request: Request): Promise<Response> {
         durationMs: elapsedChatDurationMs(),
         ...(isAborted ? { aborted: true } : {}),
         ...(responseParts.length ? { uiMessageParts: responseParts } : {}),
-        ...(finishReasonText ? { finishReason: finishReasonText } : {}),
+        ...(generationTimeout
+          ? { finishReason: "timeout" }
+          : finishReasonText
+            ? { finishReason: finishReasonText }
+            : {}),
       };
       const assistantMessageInput = {
         sessionId: turn.session.id,
         ...(responseMessageId ? { messageId: responseMessageId } : {}),
         content:
-          !rawContent && !startedTask && ((isAborted && hasAssistantParts) || isAwaitingApproval)
-            ? ""
-            : normalizeAgentText(rawContent, startedTask),
+          generationTimeout && !rawContent && !startedTask && !hasAssistantParts
+            ? GOAT_CHAT_TIMEOUT_MESSAGE
+            : !rawContent &&
+                !startedTask &&
+                ((isAborted && hasAssistantParts) || isAwaitingApproval)
+              ? ""
+              : normalizeAgentText(rawContent, startedTask),
         // A continuation upsert must not drop a task the paused turn already
         // linked to this message.
         taskId: startedTask?.id ?? turn.continuationTaskId ?? null,
@@ -1628,12 +1747,19 @@ export async function POST(request: Request): Promise<Response> {
         );
       }
       assistantPersisted = true;
-      finishChatTelemetry(isAborted ? "aborted" : "success", {
+      finishChatTelemetry(generationTimeout ? "failure" : isAborted ? "aborted" : "success", {
         "goat.chat_session_id": turn.session.id,
         "goat.chat_message_id": turn.userMessageId,
         "goat.model": turn.session.model,
         "goat.task_started": Boolean(startedTask),
         "goat.task_id": startedTask?.id,
+        ...(generationTimeout
+          ? {
+              "goat.failure_category": "timeout",
+              "goat.timeout_phase": generationTimeout.phase,
+              "goat.step_number": generationTimeout.stepNumber,
+            }
+          : {}),
       });
     },
   });
@@ -1839,6 +1965,50 @@ async function executeChatActionCall(input: {
       },
     };
   }
+}
+
+function aggregateChatStepUsage(
+  steps: readonly { readonly usage: LanguageModelUsage }[],
+): LanguageModelUsage | undefined {
+  if (steps.length === 0) return undefined;
+  const total = steps.reduce(
+    (accumulator, step) => {
+      const usage = normalizeChatModelUsage(step.usage);
+      accumulator.inputTokens += usage.inputTokens;
+      accumulator.inputNoCacheTokens += usage.inputNoCacheTokens;
+      accumulator.inputCacheReadTokens += usage.inputCacheReadTokens;
+      accumulator.inputCacheWriteTokens += usage.inputCacheWriteTokens;
+      accumulator.outputTokens += usage.outputTokens;
+      accumulator.outputTextTokens += usage.outputTextTokens;
+      accumulator.outputReasoningTokens += usage.outputReasoningTokens;
+      accumulator.totalTokens += usage.totalTokens;
+      return accumulator;
+    },
+    {
+      inputTokens: 0,
+      inputNoCacheTokens: 0,
+      inputCacheReadTokens: 0,
+      inputCacheWriteTokens: 0,
+      outputTokens: 0,
+      outputTextTokens: 0,
+      outputReasoningTokens: 0,
+      totalTokens: 0,
+    },
+  );
+  return {
+    inputTokens: total.inputTokens,
+    inputTokenDetails: {
+      noCacheTokens: total.inputNoCacheTokens,
+      cacheReadTokens: total.inputCacheReadTokens,
+      cacheWriteTokens: total.inputCacheWriteTokens,
+    },
+    outputTokens: total.outputTokens,
+    outputTokenDetails: {
+      textTokens: total.outputTextTokens,
+      reasoningTokens: total.outputReasoningTokens,
+    },
+    totalTokens: total.totalTokens,
+  };
 }
 
 async function recordChatModelCost(input: {

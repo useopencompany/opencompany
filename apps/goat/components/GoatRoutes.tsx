@@ -6,11 +6,15 @@ import type {
 } from "@opencompany/db/goat-repo-configs";
 import type { LucideIcon } from "lucide-react";
 import {
+  AlertTriangle,
   Archive,
   ArrowLeft,
+  BookOpen,
   CalendarClock,
   Check,
   CircleUserRound,
+  ExternalLink,
+  Link2,
   ListTodo,
   Loader2,
   Mail,
@@ -58,14 +62,18 @@ import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import {
   archiveGoatSkillAction,
   createGoatSkillAction,
+  type GoatSkillImportCandidate,
+  importGoatSkillAction,
+  previewGoatSkillImportAction,
   updateGoatSkillAction,
 } from "@/lib/skill-actions";
-import type { GoatSkillListItem, GoatWorkspaceSkill } from "@/lib/skills";
+import type { GoatSkillListItem, GoatSkillSource, GoatWorkspaceSkill } from "@/lib/skills";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
 import {
   updateGoatAutoModelRoutingAction,
   updateGoatImessageEnabledAction,
   updateGoatTaskSpawningAction,
+  updateGoatWikiEnabledAction,
 } from "@/lib/user-preferences";
 import { createGoatWorkflowAction } from "@/lib/workflow-actions";
 import type { GoatWorkflowListItem } from "@/lib/workflows";
@@ -246,6 +254,13 @@ export function GoatPreferencesSettingsRoute() {
           description="Pair your phone so Goat can text you important updates over iMessage."
           checked={featureFlags.imessage}
           update={updateGoatImessageEnabledAction}
+        />
+        <BetaFeatureSwitch
+          icon={BookOpen}
+          label="Wiki (preview)"
+          description="The next version of Brain: one workspace wiki of markdown pages with subpages, built for you and your agents."
+          checked={featureFlags.wiki}
+          update={updateGoatWikiEnabledAction}
         />
       </section>
     </GoatSettingsContent>
@@ -893,6 +908,7 @@ export function GoatSkillsSettingsRoute({
 }) {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   return (
     <GoatSettingsContent
@@ -900,7 +916,7 @@ export function GoatSkillsSettingsRoute({
       description="Reusable capabilities the agent applies when you attach them with @skill in chat."
     >
       {canEdit ? (
-        <div className="-mt-2 flex">
+        <div className="-mt-2 flex gap-2">
           <button
             type="button"
             onClick={() => setCreating(true)}
@@ -908,6 +924,14 @@ export function GoatSkillsSettingsRoute({
           >
             <Plus size={14} strokeWidth={2} />
             New skill
+          </button>
+          <button
+            type="button"
+            onClick={() => setImporting(true)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            <Link2 size={14} strokeWidth={2} />
+            Import from a link
           </button>
         </div>
       ) : null}
@@ -943,6 +967,13 @@ export function GoatSkillsSettingsRoute({
           onCreated={(slug) => router.push(`/settings/skills/${encodeURIComponent(slug)}`)}
         />
       ) : null}
+
+      {importing ? (
+        <ImportSkillDialog
+          onClose={() => setImporting(false)}
+          onImported={(slug) => router.push(`/settings/skills/${encodeURIComponent(slug)}`)}
+        />
+      ) : null}
     </GoatSettingsContent>
   );
 }
@@ -960,6 +991,7 @@ function SkillListRow({ skill }: { skill: GoatSkillListItem }) {
             {skill.name}
           </span>
           <ItemStatusBadge status={skill.status} />
+          {skill.source ? <ImportedBadge /> : null}
         </span>
         {skill.description.trim() ? (
           <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
@@ -978,10 +1010,12 @@ export function GoatSkillEditorRoute({
   skill,
   initialStatus,
   canEdit,
+  source,
 }: {
   skill: GoatWorkspaceSkill;
   initialStatus: "draft" | "active";
   canEdit: boolean;
+  source: GoatSkillSource | null;
 }) {
   const router = useRouter();
   const [name, setName] = useState(skill.name);
@@ -992,6 +1026,10 @@ export function GoatSkillEditorRoute({
   const [saved, setSaved] = useState(false);
   const [isSaving, startSaving] = useTransition();
   const [isArchiving, startArchiving] = useTransition();
+  // Imported skills are read-only regardless of admin status — the content lives at the
+  // source; edit there and re-import. Only Archive stays available.
+  const isReadOnly = source !== null;
+  const canEditFields = canEdit && !isReadOnly;
 
   const markDirty = () => {
     if (saved) setSaved(false);
@@ -1035,7 +1073,9 @@ export function GoatSkillEditorRoute({
       description={`Attach this skill with @skill/${skill.id} in chat.`}
       backLink={{ href: "/settings/skills", label: "Skills" }}
     >
-      {canEdit ? null : (
+      {isReadOnly ? (
+        <SkillSourceNotice source={source} />
+      ) : canEdit ? null : (
         <p className="text-[13px] leading-5 text-ink-subtle">
           Only workspace admins can edit skills.
         </p>
@@ -1045,7 +1085,7 @@ export function GoatSkillEditorRoute({
         <EditorField label="Name">
           <input
             value={name}
-            disabled={!canEdit}
+            disabled={!canEditFields}
             onChange={(event) => {
               setName(event.target.value);
               markDirty();
@@ -1057,7 +1097,7 @@ export function GoatSkillEditorRoute({
         <EditorField label="Description">
           <input
             value={description}
-            disabled={!canEdit}
+            disabled={!canEditFields}
             onChange={(event) => {
               setDescription(event.target.value);
               markDirty();
@@ -1070,7 +1110,7 @@ export function GoatSkillEditorRoute({
         <EditorField label="Status">
           <WorkflowSkillStatusToggle
             value={status}
-            disabled={!canEdit}
+            disabled={!canEditFields}
             onChange={(next) => {
               setStatus(next);
               markDirty();
@@ -1080,7 +1120,7 @@ export function GoatSkillEditorRoute({
 
         <EditorField label="Instructions">
           <div
-            className={`rounded-lg border border-border bg-surface px-3 py-2.5 transition-colors focus-within:ring-1 focus-within:ring-ink/20 ${!canEdit ? "opacity-70" : ""}`}
+            className={`rounded-lg border border-border bg-surface px-3 py-2.5 transition-colors focus-within:ring-1 focus-within:ring-ink/20 ${!canEditFields ? "opacity-70" : ""}`}
           >
             <MarkdownGoatBrainEditor
               content={instructions}
@@ -1088,7 +1128,7 @@ export function GoatSkillEditorRoute({
                 setInstructions(value);
                 markDirty();
               }}
-              readOnly={!canEdit}
+              readOnly={!canEditFields}
               compact
               placeholder="Describe the capability this skill gives the agent."
             />
@@ -1105,9 +1145,32 @@ export function GoatSkillEditorRoute({
           isSaving={isSaving}
           isArchiving={isArchiving}
           saved={saved}
+          showSave={!isReadOnly}
         />
       ) : null}
     </GoatSettingsContent>
+  );
+}
+
+function SkillSourceNotice({ source }: { source: GoatSkillSource }) {
+  const shortCommit = source.resolvedCommit ? source.resolvedCommit.slice(0, 7) : null;
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2.5 text-[12.5px] leading-5 text-ink-subtle">
+      <Link2 size={14} strokeWidth={2} className="shrink-0" />
+      <span className="min-w-0 flex-1">
+        Imported from{" "}
+        <a
+          href={source.url}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-0.5 font-medium text-ink underline decoration-border underline-offset-2 hover:decoration-ink"
+        >
+          {source.url.replace(/^https:\/\//, "")}
+          <ExternalLink size={11} strokeWidth={2} />
+        </a>
+        {shortCommit ? ` · ${shortCommit}` : ""}. Remove and re-import if the source changed.
+      </span>
+    </div>
   );
 }
 
@@ -1133,25 +1196,29 @@ function EditorActions({
   isSaving,
   isArchiving,
   saved,
+  showSave = true,
 }: {
   onSave: () => void;
   onArchive: () => void;
   isSaving: boolean;
   isArchiving: boolean;
   saved: boolean;
+  showSave?: boolean;
 }) {
   return (
     <div className="flex items-center gap-3">
-      <button
-        type="button"
-        onClick={onSave}
-        disabled={isSaving}
-        className="inline-flex h-9 items-center gap-1.5 rounded-md border border-ink bg-ink px-4 text-[13px] font-medium text-canvas transition-colors duration-150 hover:bg-ink/90 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {isSaving ? <Loader2 size={14} strokeWidth={2} className="animate-spin" /> : null}
-        Save
-      </button>
-      {saved && !isSaving ? (
+      {showSave ? (
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={isSaving}
+          className="inline-flex h-9 items-center gap-1.5 rounded-md border border-ink bg-ink px-4 text-[13px] font-medium text-canvas transition-colors duration-150 hover:bg-ink/90 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isSaving ? <Loader2 size={14} strokeWidth={2} className="animate-spin" /> : null}
+          Save
+        </button>
+      ) : null}
+      {showSave && saved && !isSaving ? (
         <span className="inline-flex items-center gap-1 text-[12.5px] font-medium text-success">
           <Check size={13} strokeWidth={2} />
           Saved
@@ -1229,6 +1296,15 @@ function ItemStatusBadge({ status }: { status: "draft" | "active" }) {
   return (
     <span className="inline-flex shrink-0 items-center rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
       Draft
+    </span>
+  );
+}
+
+function ImportedBadge() {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
+      <Link2 size={10} strokeWidth={2} />
+      Imported
     </span>
   );
 }
@@ -1382,6 +1458,251 @@ function NewItemDialog({
             {isPending ? <Loader2 size={13} strokeWidth={2} className="animate-spin" /> : null}
             {submitLabel}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type ImportPreviewState = {
+  name: string;
+  description: string;
+  instructions: string;
+  extraFiles: string[];
+  resolvedCommit: string;
+  integrity: string;
+};
+
+function ImportSkillDialog({
+  onClose,
+  onImported,
+}: {
+  onClose: () => void;
+  onImported: (slug: string) => void;
+}) {
+  const [url, setUrl] = useState("");
+  const [selectedPath, setSelectedPath] = useState<string | undefined>(undefined);
+  const [candidates, setCandidates] = useState<GoatSkillImportCandidate[] | null>(null);
+  const [preview, setPreview] = useState<ImportPreviewState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isResolving, startResolving] = useTransition();
+  const [isImporting, startImporting] = useTransition();
+
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const resolve = (path?: string) => {
+    const trimmed = url.trim();
+    if (!trimmed) {
+      setError("Provide a GitHub or skills.sh URL.");
+      return;
+    }
+    setError(null);
+    startResolving(async () => {
+      const result = await previewGoatSkillImportAction({
+        url: trimmed,
+        ...(path !== undefined ? { selectedPath: path } : {}),
+      });
+      if (result.status === "error") {
+        setError(result.message);
+        setCandidates(null);
+        setPreview(null);
+        return;
+      }
+      if (result.status === "ambiguous") {
+        setCandidates(result.candidates);
+        setPreview(null);
+        return;
+      }
+      setCandidates(null);
+      setPreview({
+        name: result.name,
+        description: result.description,
+        instructions: result.instructions,
+        extraFiles: result.extraFiles,
+        resolvedCommit: result.resolvedCommit,
+        integrity: result.integrity,
+      });
+    });
+  };
+
+  const confirmImport = () => {
+    const trimmed = url.trim();
+    if (!trimmed || !preview) return;
+    const confirmedPreview = preview;
+    setError(null);
+    startImporting(async () => {
+      const result = await importGoatSkillAction({
+        url: trimmed,
+        ...(selectedPath !== undefined ? { selectedPath } : {}),
+        expectedResolvedCommit: confirmedPreview.resolvedCommit,
+        expectedIntegrity: confirmedPreview.integrity,
+      });
+      if (result.status === "imported") {
+        onImported(result.slug);
+        return;
+      }
+      if (result.status === "ambiguous") {
+        setCandidates(result.candidates);
+        setPreview(null);
+        return;
+      }
+      setError(result.message);
+    });
+  };
+
+  const pending = isResolving || isImporting;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        className="absolute inset-0 cursor-default bg-black/40"
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Import a skill"
+        className="shadow-ring-xl relative flex max-h-[85vh] w-full max-w-[560px] flex-col overflow-hidden rounded-xl bg-surface p-5"
+      >
+        <h2 className="text-[15px] font-semibold leading-tight text-ink">Import a skill</h2>
+        <p className="mt-1 text-[12.5px] leading-5 text-ink-subtle">
+          Paste a public GitHub or skills.sh URL pointing at a SKILL.md. It&apos;s imported
+          read-only — remove and re-import if the source changes.
+        </p>
+
+        <div className="mt-4 flex flex-col gap-3 overflow-y-auto">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[12px] font-medium text-ink-subtle">URL</span>
+            <div className="flex gap-2">
+              {/* biome-ignore lint/a11y/noAutofocus: focus the URL field when the dialog opens */}
+              <input
+                autoFocus
+                value={url}
+                disabled={pending}
+                onChange={(event) => {
+                  setUrl(event.target.value);
+                  setSelectedPath(undefined);
+                  setCandidates(null);
+                  setPreview(null);
+                  if (error) setError(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    resolve();
+                  }
+                }}
+                placeholder="github.com/owner/repo"
+                className="h-9 flex-1 rounded-md border border-border bg-canvas px-2.5 text-[13px] text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20"
+              />
+              <button
+                type="button"
+                onClick={() => resolve()}
+                disabled={pending}
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isResolving ? (
+                  <Loader2 size={13} strokeWidth={2} className="animate-spin" />
+                ) : null}
+                Preview
+              </button>
+            </div>
+          </label>
+
+          {error ? <div className="text-[12.5px] leading-5 text-warning">{error}</div> : null}
+
+          {candidates ? (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[12px] font-medium text-ink-subtle">
+                This repository has multiple skills — pick one
+              </span>
+              <ul className="flex flex-col gap-1.5">
+                {candidates.map((candidate) => (
+                  <li key={candidate.path}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedPath(candidate.path);
+                        resolve(candidate.path);
+                      }}
+                      disabled={pending}
+                      className="w-full rounded-lg border border-border bg-canvas px-3 py-2 text-left transition-colors duration-150 hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <span className="block text-[13px] font-medium leading-tight text-ink">
+                        {candidate.name}
+                      </span>
+                      {candidate.description.trim() ? (
+                        <span className="mt-0.5 block text-[12px] leading-4 text-ink-subtle">
+                          {candidate.description}
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {preview ? (
+            <div className="flex flex-col gap-3">
+              <EditorField label="Name">
+                <div className={`${EDITOR_INPUT_CLASS} flex items-center opacity-70`}>
+                  {preview.name}
+                </div>
+              </EditorField>
+              {preview.description.trim() ? (
+                <EditorField label="Description">
+                  <div className={`${EDITOR_INPUT_CLASS} flex items-center opacity-70`}>
+                    {preview.description}
+                  </div>
+                </EditorField>
+              ) : null}
+              <EditorField label="Instructions">
+                <div className="max-h-[220px] overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-canvas px-3 py-2.5 text-[13px] leading-5 text-ink opacity-70">
+                  {preview.instructions}
+                </div>
+              </EditorField>
+              {preview.extraFiles.length > 0 ? (
+                <div className="flex items-start gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2.5 text-[12.5px] leading-5 text-ink-subtle">
+                  <AlertTriangle size={14} strokeWidth={2} className="mt-0.5 shrink-0" />
+                  <span>
+                    This skill also includes {preview.extraFiles.length} supporting file
+                    {preview.extraFiles.length === 1 ? "" : "s"} ({preview.extraFiles.join(", ")})
+                    that won&apos;t be imported — Goat skills are instructions-only for now.
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-8 items-center rounded-md px-3 text-[13px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            Cancel
+          </button>
+          {preview ? (
+            <button
+              type="button"
+              onClick={confirmImport}
+              disabled={pending}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-ink bg-ink px-3 text-[13px] font-medium text-canvas transition-colors duration-150 hover:bg-ink/90 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isImporting ? <Loader2 size={13} strokeWidth={2} className="animate-spin" /> : null}
+              Import skill
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

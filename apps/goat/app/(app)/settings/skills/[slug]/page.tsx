@@ -29,6 +29,7 @@ export default async function SkillEditorPage({ params }: SkillEditorPageProps) 
       skill={skill}
       initialStatus={skill.status}
       canEdit={context.role === "admin"}
+      source={skill.source}
     />
   );
 }

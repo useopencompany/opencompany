@@ -43,6 +43,28 @@ export async function updateGoatTaskSpawningAction(enabled: boolean) {
   } as const;
 }
 
+export async function updateGoatWikiEnabledAction(enabled: boolean) {
+  const { user } = await currentGoatUser();
+  const nextEnabled = enabled === true;
+  if (nextEnabled === user.wikiEnabled) {
+    return { ok: true, enabled: nextEnabled } as const;
+  }
+
+  const [updated] = await getDb()
+    .update(goatUsers)
+    .set({ wikiEnabled: nextEnabled, updatedAt: new Date() })
+    .where(eq(goatUsers.workosUserId, user.workosUserId))
+    .returning({ wikiEnabled: goatUsers.wikiEnabled });
+
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  revalidatePath("/wiki");
+  return {
+    ok: Boolean(updated),
+    enabled: updated?.wikiEnabled ?? user.wikiEnabled,
+  } as const;
+}
+
 export async function updateGoatTaskViewModeAction(mode: GoatTaskViewMode) {
   const { user } = await currentGoatUser();
   if (!isGoatTaskViewMode(mode)) return { ok: false, mode: user.taskViewMode } as const;

@@ -3,7 +3,7 @@ import { BROWSER_TOOL_NAMES } from "@opencompany/browser-tools";
 import { recordGoatChatModelRoutingAttempt } from "@opencompany/db/goat-chat-model-routing";
 import { GOAT_ACTION_EFFECTS_READ } from "@opencompany/goat-agent/actions/types";
 import { convertToModelMessages, streamText } from "ai";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
 import { executeGoatAction } from "@/lib/actions/execute";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
@@ -261,6 +261,10 @@ describe("POST /api/chat", () => {
         outcome: "timeout",
       },
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("rejects unauthenticated requests", async () => {
@@ -1343,9 +1347,11 @@ describe("POST /api/chat", () => {
     });
     expect(mockStreamText()).toHaveBeenCalledWith(
       expect.objectContaining({
+        timeout: { stepMs: 180_000 },
         providerOptions: {
           gateway: {
             caching: "auto",
+            sort: "ttft",
             user: expect.stringMatching(/^goat-[0-9a-f]{16}$/),
             tags: expect.arrayContaining([
               "app:goat",
@@ -1374,7 +1380,7 @@ describe("POST /api/chat", () => {
       chatSessionId: "session_1",
       userMessageId: "user_message_1",
       toolCallId: "tool_call_1",
-      signal: request.signal,
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -2519,6 +2525,144 @@ describe("POST /api/chat", () => {
         }),
       },
       expect.anything(),
+    );
+  });
+
+  it("persists a visible retry message when the model never produces output", async () => {
+    vi.useFakeTimers();
+    mockAuth();
+    mockCreateTurn();
+    mockStreamText().mockImplementation((streamOptions: unknown) => {
+      const generation = streamOptions as {
+        abortSignal: AbortSignal;
+        experimental_onStepStart: (event: { stepNumber: number }) => void;
+        onAbort: (event: { steps: [] }) => void;
+      };
+      return {
+        toUIMessageStreamResponse: vi.fn(
+          async (uiOptions: {
+            onFinish: (event: {
+              responseMessage: {
+                id: string;
+                role: "assistant";
+                parts: [];
+              };
+              finishReason: string;
+              isAborted: boolean;
+            }) => Promise<void>;
+          }) => {
+            generation.experimental_onStepStart({ stepNumber: 0 });
+            await vi.advanceTimersByTimeAsync(45_000);
+            expect(generation.abortSignal.aborted).toBe(true);
+            generation.onAbort({ steps: [] });
+            await uiOptions.onFinish({
+              responseMessage: { id: "assistant_1", role: "assistant", parts: [] },
+              finishReason: "stop",
+              isAborted: true,
+            });
+            return new Response(null, { status: 200 });
+          },
+        ),
+      } as never;
+    });
+
+    const response = await POST(validChatRequest("Summarize our launch plan."));
+
+    expect(response.status).toBe(200);
+    expect(persistGoatChatAssistantMessage).toHaveBeenCalledWith(
+      {
+        sessionId: "session_1",
+        messageId: "assistant_1",
+        content: "Goat stopped because the model did not respond in time. Please try again.",
+        taskId: null,
+        debugTrace: expect.objectContaining({
+          aborted: true,
+          error: "Goat stopped because the model did not respond in time. Please try again.",
+          finishReason: "timeout",
+        }),
+      },
+      expect.anything(),
+    );
+  });
+
+  it("preserves completed text when a later model step stops responding", async () => {
+    vi.useFakeTimers();
+    mockAuth();
+    mockCreateTurn();
+    const completedStep = {
+      usage: {
+        inputTokens: 1_200,
+        inputTokenDetails: {
+          noCacheTokens: 1_000,
+          cacheReadTokens: 200,
+          cacheWriteTokens: 0,
+        },
+        outputTokens: 80,
+        outputTokenDetails: { textTokens: 60, reasoningTokens: 20 },
+        totalTokens: 1_280,
+      },
+      toolCalls: [],
+      toolResults: [],
+    };
+    mockStreamText().mockImplementation((streamOptions: unknown) => {
+      const generation = streamOptions as {
+        experimental_onStepStart: (event: { stepNumber: number }) => void;
+        onChunk: () => void;
+        onAbort: (event: { steps: Array<typeof completedStep> }) => void;
+      };
+      return {
+        toUIMessageStreamResponse: vi.fn(
+          async (uiOptions: {
+            onFinish: (event: {
+              responseMessage: {
+                id: string;
+                role: "assistant";
+                parts: Array<{ type: "text"; text: string }>;
+              };
+              finishReason: string;
+              isAborted: boolean;
+            }) => Promise<void>;
+          }) => {
+            generation.experimental_onStepStart({ stepNumber: 0 });
+            generation.onChunk();
+            generation.experimental_onStepStart({ stepNumber: 1 });
+            await vi.advanceTimersByTimeAsync(45_000);
+            generation.onAbort({ steps: [completedStep] });
+            await uiOptions.onFinish({
+              responseMessage: {
+                id: "assistant_1",
+                role: "assistant",
+                parts: [{ type: "text", text: "I found three relevant customer reports." }],
+              },
+              finishReason: "stop",
+              isAborted: true,
+            });
+            return new Response(null, { status: 200 });
+          },
+        ),
+      } as never;
+    });
+
+    const response = await POST(validChatRequest("Review our customer reports."));
+
+    expect(response.status).toBe(200);
+    expect(persistGoatChatAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session_1",
+        content: "I found three relevant customer reports.",
+        debugTrace: expect.objectContaining({
+          aborted: true,
+          finishReason: "timeout",
+        }),
+      }),
+      expect.anything(),
+    );
+    expect(analyticsMocks.captureGoatLlmUsageRecorded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputTokens: 1_200,
+        outputTokens: 80,
+        totalTokens: 1_280,
+      }),
     );
   });
 

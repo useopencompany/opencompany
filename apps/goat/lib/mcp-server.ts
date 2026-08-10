@@ -1,10 +1,17 @@
 import { randomUUID } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { getWikiAccessForUser } from "@opencompany/db/goat-wiki";
 import type { GoatBrainWithWorkspace } from "@opencompany/db/goat-workspaces";
 import {
   getGoatBrainAccess,
   listAccessibleGoatBrainsForUser,
 } from "@opencompany/db/goat-workspaces";
+import {
+  WIKI_TOOL_COMMANDS,
+  WIKI_TOOL_DESCRIPTION,
+  WIKI_TOOL_NAME,
+  type WikiToolInput,
+} from "@opencompany/goat-wiki/tool";
 import * as z from "zod/v4-mini";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
@@ -42,6 +49,7 @@ import {
   searchBrainToToolInput,
 } from "@/lib/brain-tools";
 import type { GoatBrainToolInput } from "@/lib/chat-ui";
+import { runWikiToolForUser } from "@/lib/wiki-tool";
 
 // Tool registration for the user-level Goat MCP connector: one surface spanning
 // every brain the token's user can access, addressed via an optional `brain`
@@ -388,6 +396,108 @@ export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContex
                 : "already_queued_or_completed",
           },
         });
+      } catch (error) {
+        return mcpTextToolResult({
+          ok: false,
+          stdout: "",
+          stderr: "",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+  );
+}
+
+// --- wiki (preview) ---------------------------------------------------------------------------
+
+const wikiNonEmptyString = z.string().check(z.minLength(1));
+
+// Mirrors WIKI_TOOL_INPUT_JSON_SCHEMA in zod-mini (the MCP SDK wants a zod
+// shape), plus an MCP-only `workspace` selector for users in several
+// workspaces — chat resolves the workspace from the session instead.
+const wikiToolMcpInputSchema = {
+  command: z.enum([...WIKI_TOOL_COMMANDS]),
+  pages: z.optional(
+    z.union([
+      wikiNonEmptyString,
+      z.array(wikiNonEmptyString).check(z.minLength(1), z.maxLength(20)),
+    ]),
+  ),
+  path: z.optional(wikiNonEmptyString),
+  body: z.optional(z.string()),
+  kind: z.optional(z.enum(["project", "person", "company", "research", "meeting", "other"])),
+  query: z.optional(wikiNonEmptyString),
+  since: z.optional(wikiNonEmptyString),
+  to: z.optional(wikiNonEmptyString),
+  recursive: z.optional(z.boolean()),
+  ignoreCase: z.optional(z.boolean()),
+  at: z.optional(wikiNonEmptyString),
+  text: z.optional(wikiNonEmptyString),
+  limit: z.optional(z.number().check(z.int(), z.minimum(1), z.maximum(200))),
+  offset: z.optional(z.number().check(z.int(), z.minimum(0), z.maximum(Number.MAX_SAFE_INTEGER))),
+  workspace: z.optional(wikiNonEmptyString),
+};
+
+const WIKI_TOOL_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
+} as const;
+
+export function registerGoatWikiTool(server: McpServer, ctx: GoatMcpToolContext) {
+  server.registerTool(
+    WIKI_TOOL_NAME,
+    {
+      title: "Workspace wiki (preview)",
+      description: `${WIKI_TOOL_DESCRIPTION} Available only to users who enabled the wiki preview in Preferences; pass "workspace" (id or slug) when you belong to more than one workspace.`,
+      inputSchema: wikiToolMcpInputSchema,
+      annotations: WIKI_TOOL_ANNOTATIONS,
+    },
+    async (args: WikiToolInput & { workspace?: string | undefined }) => {
+      try {
+        const access = await getWikiAccessForUser(ctx.userWorkosId);
+        if (!access.enabled) {
+          return mcpTextToolResult({
+            ok: false,
+            stdout: "",
+            stderr: "",
+            error:
+              "The wiki preview is not enabled for this user. Enable it under Preferences in the app.",
+          });
+        }
+        const wanted = args.workspace?.trim();
+        const matches = wanted
+          ? access.workspaces.filter(
+              (workspace) => workspace.id === wanted || workspace.slug === wanted,
+            )
+          : access.workspaces;
+        const workspace = matches.length === 1 ? matches[0] : undefined;
+        if (!workspace) {
+          const listing = access.workspaces
+            .map((entry) => `- ${entry.id}${entry.slug ? ` (${entry.slug})` : ""} — ${entry.name}`)
+            .join("\n");
+          return mcpTextToolResult({
+            ok: false,
+            stdout: "",
+            stderr: "",
+            error:
+              access.workspaces.length === 0
+                ? "You are not a member of any workspace."
+                : `Pass "workspace" with one of:\n${listing}`,
+          });
+        }
+        const { workspace: _workspace, ...toolInput } = args;
+        const output = await runWikiToolForUser({
+          workspaceId: workspace.id,
+          userWorkosId: ctx.userWorkosId,
+          toolInput,
+        });
+        return mcpTextToolResult(
+          output.ok
+            ? { ok: true, stdout: "", stderr: "", parsed: output.result }
+            : { ok: false, stdout: "", stderr: "", error: output.error },
+        );
       } catch (error) {
         return mcpTextToolResult({
           ok: false,

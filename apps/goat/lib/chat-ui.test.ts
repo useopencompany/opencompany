@@ -116,6 +116,48 @@ describe("toGoatChatUiMessage", () => {
     ]);
   });
 
+  it("rehydrates safe generated-file parts without private storage metadata", () => {
+    const message = storedAssistantMessage({
+      content: "Here is the plan.",
+      debugTrace: {
+        uiMessageParts: [
+          { type: "text", text: "Here is the plan." },
+          {
+            type: "data-artifact-file",
+            data: {
+              artifactId: "artifact_1",
+              artifactVersionId: "version_1",
+              version: 1,
+              title: "Launch plan",
+              filename: "launch-plan.md",
+              mediaType: "text/markdown",
+              sizeBytes: 42,
+              state: "ready",
+              blobPathname: "private/should-not-survive",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(toGoatChatUiMessage(message).parts).toEqual([
+      { type: "text", text: "Here is the plan." },
+      {
+        type: "data-artifact-file",
+        data: {
+          artifactId: "artifact_1",
+          artifactVersionId: "version_1",
+          version: 1,
+          title: "Launch plan",
+          filename: "launch-plan.md",
+          mediaType: "text/markdown",
+          sizeBytes: 42,
+          state: "ready",
+        },
+      },
+    ]);
+  });
+
   it.each([
     "Tasks",
     "Results",

@@ -1,7 +1,9 @@
 "use client";
 
+import type { GoatPublishedChatArtifact } from "@opencompany/agent-runtime";
 import type { ReactNode } from "react";
 import type { GoatChatUiAttachment, GoatChatUiMessage } from "@/lib/chat-ui";
+import { ArtifactFileCard } from "./ArtifactFileCard";
 import { AssistantTextBubble } from "./AssistantTextBubble";
 import {
   type AssistantRenderItem,
@@ -31,6 +33,7 @@ export function MessageBubble({
   readOnly = false,
   isTaskSession = false,
   attachmentSrc,
+  artifactHref,
 }: {
   message: GoatChatUiMessage;
   taskLookup: ChatTaskLookup;
@@ -43,6 +46,7 @@ export function MessageBubble({
   readOnly?: boolean;
   isTaskSession?: boolean;
   attachmentSrc?: (messageId: string, attachment: GoatChatUiAttachment) => string | undefined;
+  artifactHref?: (artifact: GoatPublishedChatArtifact) => string;
 }) {
   if (message.role === "user") {
     return <UserMessageBubble message={message} {...(attachmentSrc ? { attachmentSrc } : {})} />;
@@ -59,6 +63,7 @@ export function MessageBubble({
       allowActionApproval={allowActionApproval}
       readOnly={readOnly}
       isTaskSession={isTaskSession}
+      {...(artifactHref ? { artifactHref } : {})}
     />
   );
 }
@@ -74,6 +79,7 @@ function AssistantTurn({
   allowActionApproval,
   readOnly,
   isTaskSession,
+  artifactHref,
 }: {
   message: GoatChatUiMessage;
   taskLookup: ChatTaskLookup;
@@ -85,6 +91,7 @@ function AssistantTurn({
   allowActionApproval: boolean;
   readOnly: boolean;
   isTaskSession: boolean;
+  artifactHref?: (artifact: GoatPublishedChatArtifact) => string;
 }) {
   const error = message.metadata?.error;
   // In task sessions this metadata identifies the surrounding run; in regular chats it is also
@@ -111,6 +118,19 @@ function AssistantTurn({
       );
     }
     if (item.type === "reasoning") return <ReasoningItem key={item.key} text={item.text} />;
+    if (item.type === "artifact") {
+      return (
+        <ArtifactFileCard
+          key={item.key}
+          artifact={item.artifact}
+          href={
+            artifactHref?.(item.artifact) ??
+            `/api/chat-artifacts/${encodeURIComponent(item.artifact.artifactId)}/versions/${encodeURIComponent(item.artifact.artifactVersionId)}`
+          }
+          readOnly={readOnly || nested}
+        />
+      );
+    }
     if (item.type === "task") {
       return <TaskCard key={item.key} task={item.task} readOnly={readOnly} />;
     }

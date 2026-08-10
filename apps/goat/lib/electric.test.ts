@@ -25,6 +25,53 @@ describe("buildGoatElectricOriginUrl", () => {
     expect(url?.searchParams.get("where")).not.toBe("1=1");
   });
 
+  it("scopes goat.wiki_pages to the authorized wiki workspace and strips heavy columns", () => {
+    const url = buildGoatElectricOriginUrl({
+      electricUrl: "https://electric.example.com",
+      requestUrl: new URL("https://goat.example.com/api/electric/v1/shape?table=goat.wiki_pages"),
+      userWorkosId: "user_123",
+      workspaceId: "workspace_123",
+      authorizedWikiWorkspaceId: "workspace_123",
+    });
+
+    expect(url).not.toBeNull();
+    expect(url?.searchParams.get("table")).toBe("goat.wiki_pages");
+    expect(url?.searchParams.get("where")).toBe('"workspace_id" = $1');
+    expect(url?.searchParams.get("params[1]")).toBe("workspace_123");
+    const columns = url?.searchParams.get("columns")?.split(",") ?? [];
+    expect(columns).toContain("content");
+    expect(columns).not.toContain("search_tsv");
+    expect(columns).not.toContain("asset_extracted_text");
+  });
+
+  it("scopes goat.wiki_timeline_entries to the authorized wiki workspace", () => {
+    const url = buildGoatElectricOriginUrl({
+      electricUrl: "https://electric.example.com",
+      requestUrl: new URL(
+        "https://goat.example.com/api/electric/v1/shape?table=goat.wiki_timeline_entries",
+      ),
+      userWorkosId: "user_123",
+      workspaceId: "workspace_123",
+      authorizedWikiWorkspaceId: "workspace_123",
+    });
+
+    expect(url).not.toBeNull();
+    expect(url?.searchParams.get("where")).toBe('"workspace_id" = $1');
+    expect(url?.searchParams.get("params[1]")).toBe("workspace_123");
+  });
+
+  it("rejects wiki shapes without route authorization (wiki preview disabled)", () => {
+    const url = buildGoatElectricOriginUrl({
+      electricUrl: "https://electric.example.com",
+      requestUrl: new URL("https://goat.example.com/api/electric/v1/shape?table=goat.wiki_pages"),
+      userWorkosId: "user_123",
+      workspaceId: "workspace_123",
+      authorizedWikiWorkspaceId: null,
+    });
+
+    expect(url).toBeNull();
+  });
+
   it("rejects unknown tables", () => {
     const url = buildGoatElectricOriginUrl({
       electricUrl: "https://electric.example.com",

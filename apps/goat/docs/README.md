@@ -106,6 +106,16 @@ current user's active workspace, rejects unavailable references, and caps a turn
 skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores an immutable snapshot
 in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original version.
 
+Besides hand-authoring, `/settings/skills` lets an admin import a skill from a public GitHub or
+skills.sh URL (`apps/goat/lib/skill-import.ts`, reusing the same resolver `apps/web`'s external
+skills use). An imported row carries `source_type`/`source_url`/`source_ref`/`source_path` on
+`goat.skills`, lands `active` immediately, and is read-only — `updateGoatSkill` rejects edits to
+any row with a non-null `source_type`. Import is instructions-only in this iteration: bundled
+`scripts/`/`references/` files in the source repo are reported but not materialized, since Goat
+skills are plain text injected into the prompt, not files on disk the runner mounts. See
+`docs/future-concepts/goat-plugins-alignment-proposal.md` for where this fits into the broader
+skills/integrations direction.
+
 Selecting a workflow with `#<id>` changes the composer action from **Send message** to **Start
 task**. Submission posts directly to `/api/workflows`, creates a task-flavored chat session and its
 first durable turn, and leaves the current Home or chat surface in place. It does not call the
@@ -142,6 +152,14 @@ The composer also accepts PDF, DOCX, XLSX, SRT, PNG, JPEG, and WebP files. SRT M
 normalized because browsers report them inconsistently. Foreground chat stores bounded extracted
 SRT text for the initial and follow-up turns; persistent cloud coding chats receive the original
 file in their sandbox.
+
+Codex and Claude Code can explicitly publish finished sandbox outputs back into main chat with the
+host-provided `publish_artifact` tool. Publication copies an allowlisted file (maximum 20 MB, five
+per turn) into private blob storage and creates a stable `chat_artifacts` identity plus an immutable
+`chat_artifact_versions` row. The assistant message stores only safe file metadata and the exact
+version reference; sandbox paths and blob locators never reach the browser. Owner and opaque
+chat-share routes authorize every open/download request. Deleting a file archives the logical
+artifact, tombstones its message cards, revokes byte routes, and best-effort purges all versions.
 
 When a new chat is submitted, the client reserves its final `goat_chat_<uuid>` id and moves to the
 matching `/chat/<id>` URL immediately with the native History API, without starting a server
@@ -680,6 +698,8 @@ Important tables:
   all three engines (the legacy table name is intentionally retained).
 - `goat.codex_chat_interactions`: pending/resolved/canceled server-initiated requests and responses.
 - `goat.codex_chat_events`: normalized persistent cloud coding event audit rows.
+- `goat.chat_artifacts` and `goat.chat_artifact_versions`: owner/workspace-scoped logical files and
+  immutable generated-file versions published by Codex or Claude Code chat turns.
 - `goat.action_turns`: expiring, per-session-turn action discovery, invocation, call-budget, quote,
   and async-run governance shared across harness transports and app instances.
 - `goat.capability_runs`: durable managed-capability approval, execution, settlement, and cost audit
