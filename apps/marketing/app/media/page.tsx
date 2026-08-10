@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { BlogShell } from "@/components/marketing/BlogShell";
+import { DEFAULT_SOCIAL_IMAGE } from "@/lib/social-image";
 
 const title = "Sponsor OpenCompany — the channel for the startup scene";
 const description =
@@ -18,11 +19,13 @@ export const metadata: Metadata = {
     siteName: "opencompany",
     title,
     description,
+    images: [DEFAULT_SOCIAL_IMAGE],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title,
     description,
+    images: [DEFAULT_SOCIAL_IMAGE],
   },
 };
 

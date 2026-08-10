@@ -10,16 +10,11 @@ import { SiteFooter } from "@/components/marketing/SiteFooter";
 import { TopNav } from "@/components/marketing/TopNav";
 import { UseCases } from "@/components/marketing/UseCases";
 import { WhatIsOpenCompany } from "@/components/marketing/WhatIsOpenCompany";
+import { DEFAULT_SOCIAL_IMAGE } from "@/lib/social-image";
 
 const title = "opencompany — The workspace where agents run your company";
 const description =
   "opencompany is the workspace where agents and humans run your company — a living wiki, workflows, and sessions for every team, on the AI subscriptions you already pay for.";
-const socialImage = {
-  url: "/product-brain-overview-v2.png",
-  width: 2448,
-  height: 1852,
-  alt: "opencompany workspace overview with connected sources, recent activity, and linked knowledge",
-};
 
 export const metadata: Metadata = {
   title,
@@ -34,13 +29,13 @@ export const metadata: Metadata = {
     siteName: "opencompany",
     title,
     description,
-    images: [socialImage],
+    images: [DEFAULT_SOCIAL_IMAGE],
   },
   twitter: {
     card: "summary_large_image",
     title,
     description,
-    images: [socialImage],
+    images: [DEFAULT_SOCIAL_IMAGE],
   },
 };
 

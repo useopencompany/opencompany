@@ -7,6 +7,7 @@ import { ShipFeatures } from "@/components/marketing/ShipFeatures";
 import { ShipHero } from "@/components/marketing/ShipHero";
 import { SiteFooter } from "@/components/marketing/SiteFooter";
 import { TopNav } from "@/components/marketing/TopNav";
+import { DEFAULT_SOCIAL_IMAGE } from "@/lib/social-image";
 
 const title = "Ship — turn feature ideas into shipped PRs | opencompany";
 const description =
@@ -25,11 +26,13 @@ export const metadata: Metadata = {
     siteName: "opencompany",
     title,
     description,
+    images: [DEFAULT_SOCIAL_IMAGE],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title,
     description,
+    images: [DEFAULT_SOCIAL_IMAGE],
   },
 };
 

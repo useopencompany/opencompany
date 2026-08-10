@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { SiteFooter } from "@/components/marketing/SiteFooter";
 import { TopNav } from "@/components/marketing/TopNav";
+import { DEFAULT_SOCIAL_IMAGE } from "@/lib/social-image";
 
 const title = "Use cases — opencompany";
 const description =
@@ -19,11 +20,13 @@ export const metadata: Metadata = {
     siteName: "opencompany",
     title,
     description,
+    images: [DEFAULT_SOCIAL_IMAGE],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title,
     description,
+    images: [DEFAULT_SOCIAL_IMAGE],
   },
 };
 
