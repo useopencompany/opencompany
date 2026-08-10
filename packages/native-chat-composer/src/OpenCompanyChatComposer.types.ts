@@ -16,6 +16,4 @@ export interface NativeChatComposerViewProps extends ViewProps {
   onAttachmentPress?: () => void;
   onComposerHeightChange?: (event: NativeSyntheticEvent<HeightEvent>) => void;
   onSend?: (event: NativeSyntheticEvent<ValueEvent>) => void;
-  onTextChange?: (event: NativeSyntheticEvent<ValueEvent>) => void;
-  value?: string;
 }

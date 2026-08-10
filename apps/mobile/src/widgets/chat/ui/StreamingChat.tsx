@@ -1,16 +1,8 @@
 import { KeyboardAwareLegendList, useKeyboardScrollToEnd } from "@legendapp/list/keyboard";
 import type { LegendListRef, LegendListRenderItemProps } from "@legendapp/list/react-native";
-import {
-  type ComponentProps,
-  type ComponentType,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
-import { Alert, type LayoutChangeEvent, Linking, View } from "react-native";
-import { useSharedValue, withSpring, withTiming } from "react-native-reanimated";
+import { type RefObject, useRef, useState } from "react";
+import { Alert, Linking, View } from "react-native";
+import { useSharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCSSVariable, useResolveClassNames, useUniwind } from "uniwind";
 
@@ -28,90 +20,22 @@ import { ChatMessage } from "./ChatMessage";
 import { useChatMarkdownStyle } from "./use-chat-markdown-style";
 
 const CHAT_TOP_CLEARANCE = 70;
-const COMPOSER_INSET_TIMING_DURATION = 180;
-const COMPOSER_INSET_SPRING_SETTLE_DELAY = 240;
 
-type ComposerInsetBehavior = "immediate" | "spring" | "timing";
-
-function useChatComposerInset(
-  listRef: React.RefObject<LegendListRef | null>,
-  composerRef: React.RefObject<View | null>,
-  initialHeight: number,
-  behavior: ComposerInsetBehavior,
-) {
+function useChatComposerInset(listRef: RefObject<LegendListRef | null>, initialHeight: number) {
   const contentInsetEndAdjustment = useSharedValue(initialHeight);
   const lastHeightRef = useRef<number | null>(null);
-  const reportTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const reportListInset = useCallback(
-    (height: number) => {
-      listRef.current?.reportContentInset({ bottom: height });
-    },
-    [listRef],
-  );
+  const reportHeight = (height: number) => {
+    if (!Number.isFinite(height) || height === lastHeightRef.current) {
+      return;
+    }
 
-  const reportHeight = useCallback(
-    (height: number) => {
-      if (!Number.isFinite(height) || height === lastHeightRef.current) {
-        return;
-      }
+    lastHeightRef.current = height;
+    contentInsetEndAdjustment.value = height;
+    listRef.current?.reportContentInset({ bottom: height });
+  };
 
-      lastHeightRef.current = height;
-
-      if (reportTimeoutRef.current !== null) {
-        clearTimeout(reportTimeoutRef.current);
-        reportTimeoutRef.current = null;
-      }
-
-      if (behavior === "timing") {
-        contentInsetEndAdjustment.value = withTiming(height, {
-          duration: COMPOSER_INSET_TIMING_DURATION,
-        });
-        reportTimeoutRef.current = setTimeout(() => {
-          reportTimeoutRef.current = null;
-          reportListInset(height);
-        }, COMPOSER_INSET_TIMING_DURATION);
-        return;
-      }
-
-      if (behavior === "spring") {
-        contentInsetEndAdjustment.value = withSpring(height, {
-          damping: 22,
-          mass: 0.75,
-          stiffness: 260,
-        });
-        reportTimeoutRef.current = setTimeout(() => {
-          reportTimeoutRef.current = null;
-          reportListInset(height);
-        }, COMPOSER_INSET_SPRING_SETTLE_DELAY);
-        return;
-      }
-
-      contentInsetEndAdjustment.value = height;
-      reportListInset(height);
-    },
-    [behavior, contentInsetEndAdjustment, reportListInset],
-  );
-
-  useLayoutEffect(() => {
-    composerRef.current?.measure((_x, _y, _width, height) => reportHeight(height));
-  }, [composerRef, reportHeight]);
-
-  useEffect(
-    () => () => {
-      if (reportTimeoutRef.current !== null) {
-        clearTimeout(reportTimeoutRef.current);
-      }
-    },
-    [],
-  );
-
-  const onComposerLayout = useCallback(
-    (event: LayoutChangeEvent) => reportHeight(event.nativeEvent.layout.height),
-    [reportHeight],
-  );
-
-  return { contentInsetEndAdjustment, onComposerHeightChange: reportHeight, onComposerLayout };
+  return { contentInsetEndAdjustment, onComposerHeightChange: reportHeight };
 }
 
 function replaceAssistantMessage(
@@ -124,13 +48,7 @@ function replaceAssistantMessage(
   );
 }
 
-export function StreamingChat({
-  composer: Composer = ChatComposer,
-  composerInsetBehavior = "immediate",
-}: {
-  composer?: ComponentType<ComponentProps<typeof ChatComposer>>;
-  composerInsetBehavior?: ComposerInsetBehavior;
-}) {
+export function StreamingChat() {
   const insets = useSafeAreaInsets();
   const { theme } = useUniwind();
   const [gradientStart, gradientEnd] = useCSSVariable([
@@ -140,19 +58,19 @@ export function StreamingChat({
   const listStyle = useResolveClassNames("flex-1");
   const listContentStyle = useResolveClassNames("px-[18px] pb-5");
   const [messages, setMessages] = useState<ChatMessageModel[]>(seedMessages);
-  const [input, setInput] = useState("");
   const [isResponseActive, setIsResponseActive] = useState(false);
   const [anchorIndex, setAnchorIndex] = useState<number>();
   const [composerPillHeight, setComposerPillHeight] = useState(52);
   const listRef = useRef<LegendListRef>(null);
-  const composerRef = useRef<View>(null);
   const markdownStyle = useChatMarkdownStyle();
   const anchoredEndSpace =
     anchorIndex === undefined
       ? undefined
       : { anchorIndex, anchorOffset: insets.top + CHAT_TOP_CLEARANCE };
-  const { contentInsetEndAdjustment, onComposerHeightChange, onComposerLayout } =
-    useChatComposerInset(listRef, composerRef, insets.bottom + 68, composerInsetBehavior);
+  const { contentInsetEndAdjustment, onComposerHeightChange } = useChatComposerInset(
+    listRef,
+    insets.bottom + 68,
+  );
   const { freeze, scrollMessageToEnd } = useKeyboardScrollToEnd({ listRef });
   const { start: startMarkdownStream } = useMarkdownStream();
 
@@ -241,17 +159,12 @@ export function StreamingChat({
         status: "thinking",
       },
     ]);
-    setInput("");
-
     requestAnimationFrame(() => {
       void scrollMessageToEnd({ animated: true, closeKeyboard: true }).then(() =>
         startResponse(assistantIdentity.id),
       );
     });
   };
-
-  const handleSend = () => sendDraft(input);
-  const handleSendText = (draft: string) => sendDraft(draft);
 
   const renderItem = ({ item }: LegendListRenderItemProps<ChatMessageModel>) => (
     <ChatMessage
@@ -306,17 +219,12 @@ export function StreamingChat({
           colors={[gradientStart, gradientEnd]}
           pointerEvents="none"
         />
-        <Composer
+        <ChatComposer
           bottomInset={insets.bottom}
           disabled={isResponseActive}
-          onChangeText={setInput}
           onComposerHeightChange={onComposerHeightChange}
-          onComposerLayout={onComposerLayout}
           onPillHeightChange={setComposerPillHeight}
-          onSend={handleSend}
-          onSendText={handleSendText}
-          value={input}
-          wrapperRef={composerRef}
+          onSend={sendDraft}
         />
       </StyledKeyboardStickyView>
     </View>

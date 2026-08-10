@@ -18,28 +18,23 @@ private enum ComposerMetrics {
   static let lineHeightEpsilon: CGFloat = 1
   static let outerTopPadding: CGFloat = 8
   static let outerBottomPadding: CGFloat = 8
+  static let keyboardWidthAnimationDuration = 0.25
 }
 
 final class OpenCompanyChatComposerViewProps: ExpoSwiftUI.ViewProps {
-  @Field var value = ""
   @Field var disabled = false
   @Field var bottomInset: Double = 0
   @Field var accentColor: Color = .blue
   @Field var accentForegroundColor: Color = .white
 
-  let onTextChange = EventDispatcher()
   let onSend = EventDispatcher()
   let onAttachmentPress = EventDispatcher()
   let onComposerHeightChange = EventDispatcher()
 }
 
 private final class ComposerModel: ObservableObject {
-  @Published var text: String
+  @Published var text = ""
   private var lastReportedHeight: CGFloat?
-
-  init(text: String) {
-    self.text = text
-  }
 
   func reportHeight(_ height: CGFloat, dispatcher: EventDispatcher) {
     if let lastReportedHeight, abs(lastReportedHeight - height) < 0.25 {
@@ -53,7 +48,7 @@ private final class ComposerModel: ObservableObject {
 
 struct OpenCompanyChatComposerView: ExpoSwiftUI.View {
   @ObservedObject var props: OpenCompanyChatComposerViewProps
-  @StateObject private var model: ComposerModel
+  @StateObject private var model = ComposerModel()
   @FocusState private var isInputFocused: Bool
   @State private var isExpanded = false
   @State private var isKeyboardVisible = false
@@ -61,25 +56,21 @@ struct OpenCompanyChatComposerView: ExpoSwiftUI.View {
   @State private var measuredCollapsedContentHeight: CGFloat?
   @State private var measuredExpandedContentHeight: CGFloat?
 
-  init(props: OpenCompanyChatComposerViewProps) {
-    self.props = props
-    _model = StateObject(wrappedValue: ComposerModel(text: props.value))
-  }
-
   var body: some View {
     composer
       .padding(.horizontal, horizontalInset)
+      .animation(
+        .spring(
+          duration: ComposerMetrics.keyboardWidthAnimationDuration,
+          bounce: 0
+        ),
+        value: horizontalInset
+      )
       .padding(.top, ComposerMetrics.outerTopPadding)
       .padding(.bottom, max(0, CGFloat(props.bottomInset)) + ComposerMetrics.outerBottomPadding)
       .frame(maxWidth: .infinity)
       .fixedSize(horizontal: false, vertical: true)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-      .onAppear {
-        synchronizeExternalValue(props.value)
-      }
-      .onChange(of: props.value) { value in
-        synchronizeExternalValue(value)
-      }
       .onReceive(
         NotificationCenter.default.publisher(
           for: UIResponder.keyboardWillChangeFrameNotification
@@ -208,7 +199,6 @@ struct OpenCompanyChatComposerView: ExpoSwiftUI.View {
       get: { model.text },
       set: { value in
         model.text = value
-        props.onTextChange(["value": value])
         if value.isEmpty {
           isExpanded = false
         }
@@ -294,16 +284,6 @@ struct OpenCompanyChatComposerView: ExpoSwiftUI.View {
       > singleLineHeight + ComposerMetrics.lineHeightEpsilon
   }
 
-  private func synchronizeExternalValue(_ value: String) {
-    guard model.text != value else {
-      return
-    }
-    model.text = value
-    if value.isEmpty {
-      isExpanded = false
-    }
-  }
-
   private func send() {
     let draft = model.text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !props.disabled, !draft.isEmpty else {
@@ -312,39 +292,41 @@ struct OpenCompanyChatComposerView: ExpoSwiftUI.View {
 
     model.text = ""
     isExpanded = false
-    props.onTextChange(["value": ""])
     props.onSend(["value": draft])
   }
 
   private func updateKeyboardVisibility(from notification: Notification) {
     guard let userInfo = notification.userInfo,
-      let endFrameValue = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue
+      let endFrameValue = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue,
+      let screen = notification.object as? UIScreen
     else {
       return
     }
 
     let endFrame = endFrameValue.cgRectValue
-    let screenHeight =
-      (UIApplication.shared.connectedScenes.first as? UIWindowScene)?
-      .screen.bounds.height ?? UIScreen.main.bounds.height
-    let nextIsKeyboardVisible = endFrame.minY < screenHeight - 1
-    let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
-    let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int
-    let animation: Animation
-
-    switch curveValue.flatMap(UIView.AnimationCurve.init(rawValue:)) {
-    case .easeIn:
-      animation = .easeIn(duration: duration)
-    case .easeOut:
-      animation = .easeOut(duration: duration)
-    case .linear:
-      animation = .linear(duration: duration)
-    default:
-      animation = .easeInOut(duration: duration)
+    let nextIsKeyboardVisible = endFrame.minY < screen.bounds.height - 1
+    guard nextIsKeyboardVisible != isKeyboardVisible else {
+      return
     }
 
-    withAnimation(animation) {
-      isKeyboardVisible = nextIsKeyboardVisible
+    // Keyboard presentation starts inside the TextField focus transaction, which can
+    // suppress SwiftUI layout animations. Apply the visibility change on the next run
+    // loop so the horizontal inset receives its own animation transaction.
+    DispatchQueue.main.async {
+      guard nextIsKeyboardVisible != isKeyboardVisible else {
+        return
+      }
+
+      var transaction = Transaction(
+        animation: .spring(
+          duration: ComposerMetrics.keyboardWidthAnimationDuration,
+          bounce: 0
+        )
+      )
+      transaction.disablesAnimations = false
+      withTransaction(transaction) {
+        isKeyboardVisible = nextIsKeyboardVisible
+      }
     }
   }
 }
