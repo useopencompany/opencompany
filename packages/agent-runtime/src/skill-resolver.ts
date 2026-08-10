@@ -1,5 +1,4 @@
 import { parse as parseYaml } from "yaml";
-import { computeSkillFolderIntegrity, isKnownAgentSkillId, isValidSkillMountId } from "./skills";
 import type { AgentRemoteSkillSource, AgentSkillFile } from "./types";
 
 // Limits applied to every resolve / re-resolve. Skills are small text bundles; anything
@@ -43,8 +42,8 @@ export type SkillTreeEntry = {
   size?: number;
 };
 
-// Network boundary. Web and runner supply concrete implementations (unauthenticated GitHub
-// requests to api.github.com / raw.githubusercontent.com only). Keeping it injected makes the
+// Network boundary. Callers supply concrete implementations (unauthenticated GitHub requests to
+// api.github.com / raw.githubusercontent.com only). Keeping it injected makes the
 // resolver pure and unit-testable, and keeps the SSRF surface in one small place.
 export type SkillResolverFetcher = {
   defaultBranch(owner: string, repo: string): Promise<string>;
@@ -108,7 +107,7 @@ function encodeRepoPath(path: string): string {
 }
 
 // Unauthenticated GitHub fetcher for public repositories (V1). A private repo or bad URL reads
-// as 404 and surfaces as a clean "couldn't read that repository" error. Shared by web and runner.
+// as 404 and surfaces as a clean "couldn't read that repository" error.
 export function createGitHubSkillFetcher(): SkillResolverFetcher {
   return {
     async defaultBranch(owner, repo) {
@@ -325,12 +324,18 @@ export function slugifySkillName(name: string): string {
     .replace(/-+$/g, "");
 }
 
-// Ensure the slug is a valid mount id that doesn't collide with a built-in skill or an
-// already-reserved id in the workspace. Appends a short integrity-derived suffix on collision.
+const SKILL_MOUNT_ID_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+
+export function isValidSkillMountId(id: string): boolean {
+  return SKILL_MOUNT_ID_RE.test(id) && !id.includes("--");
+}
+
+// Ensure the slug is a valid mount id that doesn't collide with an already-reserved id.
+// Appends a short integrity-derived suffix on collision.
 export function ensureSkillMountId(slug: string, integrity: string, reserved: Set<string>): string {
   const suffix = integrity.replace(/^sha256:/, "").slice(0, 6);
   let base = isValidSkillMountId(slug) ? slug : `skill-${suffix}`;
-  if (!isKnownAgentSkillId(base) && !reserved.has(base)) return base;
+  if (!reserved.has(base)) return base;
   const withSuffix = `${base.slice(0, 57)}-${suffix}`;
   base = isValidSkillMountId(withSuffix) ? withSuffix : `skill-${suffix}`;
   return base;
@@ -436,6 +441,22 @@ export function validateSkillFiles(files: AgentSkillFile[]): string | null {
     return `Skill is too large (max ${Math.floor(SKILL_RESOLVER_LIMITS.maxTotalBytes / 1024)} KB).`;
   }
   return null;
+}
+
+// Canonical content hash for a skill folder. Order-independent, path-sensitive, and usable in
+// both browser and server runtimes through Web Crypto.
+export async function computeSkillFolderIntegrity(files: AgentSkillFile[]): Promise<string> {
+  const sorted = [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const parts: string[] = [];
+  for (const file of sorted) parts.push(file.path, "\0", file.content, "\0");
+  const digest = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(parts.join("")),
+  );
+  const hex = Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `sha256:${hex}`;
 }
 
 async function gatherSkillFiles(input: {

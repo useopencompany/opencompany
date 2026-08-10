@@ -42,7 +42,7 @@ export async function startGoatCodexDeviceAuthFlow(input: {
     metadata: {
       user_id: input.userWorkosId,
     },
-    template: input.env.ampE2bTemplate ?? "amp",
+    template: input.env.codexE2bTemplate ?? "codex",
   });
 
   try {

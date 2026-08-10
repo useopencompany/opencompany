@@ -1,14 +1,13 @@
-export const RELEASE_SURFACES = ["web", "goat", "marketing", "runner"];
+export const RELEASE_SURFACES = ["goat", "marketing", "runner"];
 
 const PACKAGE_SURFACES = new Map([
-  ["@opencompany/web", ["web"]],
   ["@opencompany/goat", ["goat"]],
   ["@opencompany/marketing", ["marketing"]],
   ["@opencompany/runner", ["runner"]],
 ]);
 
 const ALL_SURFACES = RELEASE_SURFACES;
-const VERCEL_SURFACES = ["web", "goat", "marketing"];
+const VERCEL_SURFACES = ["goat", "marketing"];
 
 const FORCE_RULES = [
   { files: [".github/workflows/release-production.yml"], surfaces: ALL_SURFACES },
@@ -26,9 +25,8 @@ const FORCE_RULES = [
     surfaces: ALL_SURFACES,
   },
   { files: ["scripts/release-vercel-deploy.mjs"], surfaces: VERCEL_SURFACES },
-  { files: ["vercel.json", "scripts/next-app.mjs"], surfaces: ["web"] },
   { files: ["scripts/next-goat.mjs"], surfaces: ["goat"] },
-  { files: ["scripts/load-env.mjs"], surfaces: ["web", "goat"] },
+  { files: ["scripts/load-env.mjs"], surfaces: ["goat"] },
   {
     files: [".dockerignore", "Dockerfile.runner", "render.yaml", "scripts/render-release.mjs"],
     surfaces: ["runner"],

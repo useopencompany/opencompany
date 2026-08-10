@@ -97,8 +97,8 @@ skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores
 in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original version.
 
 Besides hand-authoring, `/settings/skills` lets an admin import a skill from a public GitHub or
-skills.sh URL (`apps/goat/lib/skill-import.ts`, reusing the same resolver `apps/web`'s external
-skills use). An imported row carries `source_type`/`source_url`/`source_ref`/`source_path` on
+skills.sh URL (`apps/goat/lib/skill-import.ts`, using the shared public-skill resolver). An imported
+row carries `source_type`/`source_url`/`source_ref`/`source_path` on
 `goat.skills`, lands `active` immediately, and is read-only — `updateGoatSkill` rejects edits to
 any row with a non-null `source_type`. Import is instructions-only in this iteration: bundled
 `scripts/`/`references/` files in the source repo are reported but not materialized, since Goat

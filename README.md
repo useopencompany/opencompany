@@ -1,63 +1,64 @@
 # opencompany
 
-An open platform for running AI agents inside a company.
-
-Agents are **plain-text files** — Markdown with a small YAML header — versioned in a GitHub repo per workspace. The `.agent` file is the portable contract, while Postgres is the interactive source of truth for saved app state. GitHub stores asynchronously materialized, versioned copies. Vercel AI Gateway is the runtime.
-
-## The model
-
-- **Workspace** — a tenant. One company, one managed private GitHub repo, one set of members.
-- **Agent** — a `.agent` file at `agents/<slug>.agent` in the workspace repo. Title, instructions, model, tools — one file, no separate config.
-- **Mentions** — write `@exa` or `@deep` in the body. The editor parses mentions and rewrites the frontmatter, so the instructions stay the source of truth.
-- **Sync** — every save commits to Postgres immediately and queues an asynchronous GitHub write. The editor never blocks on GitHub, and failed GitHub sync does not make the app save unsaved.
-- **Runtime** — agents run through Vercel AI Gateway, which abstracts OpenAI, Anthropic, and other providers behind a single API.
-
-The `.agent` file is the contract. Anything that touches an agent — the UI, the sync worker, the runtime — reads or writes that format. See [docs/agent-file.md](./docs/agent-file.md) for the full spec.
+OpenCompany is the Goat application: an AI workspace with chat, durable tasks and workflows,
+connected integrations, Brain knowledge, and cloud coding sessions.
 
 ## Stack
 
-Turborepo on Bun · Next.js (App Router) · Drizzle on Neon Postgres · WorkOS AuthKit · Inngest background jobs · Vercel AI Gateway · GitHub App for managed repos · Better Stack-compatible error capture · deployed on Vercel and Render.
-
-The maintained technology register lives at [docs/stack/README.md](./docs/stack/README.md). It tracks what each major dependency or vendor does for us, why it is in the stack, who owns it, and what would make us replace it.
+The monorepo uses Bun and Turborepo. Goat is a Next.js App Router application deployed on Vercel;
+the durable runner is a Fastify service deployed on Render. Data lives in branch-isolated Neon
+Postgres and is accessed through Drizzle. WorkOS provides authentication, Electric provides live
+database sync, and Vercel AI Gateway fronts model providers.
 
 ## Quick start
 
 ```bash
 bun install
 bun run setup
-bun run dev
+bun run dev:goat
 ```
 
-`bun run setup` is idempotent: it copies `.env.example`, pulls shared dev env vars from Infisical when linked, creates or reuses a Neon branch for the current Git branch, and runs migrations. `bun run dev` attempts to start ngrok first when the local ngrok CLI is authenticated, giving GitHub and other callback/webhook integrations a stable public URL for local testing. See [docs/getting-started.md](./docs/getting-started.md) for the new engineer checklist and full walkthrough.
+`bun run setup` pulls development values from Infisical, creates or reuses a Neon branch tied to
+the current Git branch, runs migrations, and writes local app env files. `bun run dev` and
+`bun run dev:goat` both start Goat, the runner, Stripe CLI webhook forwarding, Electric, and the
+local HTTPS/tunnel support needed by integrations.
 
-## Repo layout
+See [Getting started](./docs/getting-started.md) for prerequisites and troubleshooting.
 
-- `apps/web` — the Next.js app
-- `packages/db` — shared Drizzle schema and client
-- `scripts` — setup, env-pull, and Neon branching automation
-- `drizzle` — checked-in migrations
-- `docs` — concept, format spec, and operational guides
-- `docs/future-concepts` — speculative product and architecture ideas to consider before related implementation work
-- `.agents/skills` — agent skills, the source of truth (`.claude/skills` mirrors it with symlinks)
+## Repository layout
+
+- `apps/goat` — the current product application and HTTP integration/webhook surface.
+- `apps/runner` — Goat background workers, durable turns, Brain ingestion, and cloud coding.
+- `apps/stripe-webhooks` — local Stripe CLI forwarding for Goat billing.
+- `apps/marketing` — the public marketing site.
+- `apps/design-system` and `packages/ui` — shared UI development.
+- `packages/db` — Goat schema plus isolated billing and LLM-broker compatibility schemas.
+- `packages/goat-*` — Goat agent, Brain, observability, and wiki support.
+- `drizzle` — immutable migration history.
+- `scripts` — local setup, Neon branching, release, and operational checks.
 
 ## Quality gates
 
-Every PR runs on GitHub Actions: `format:check`, `lint`, `typecheck`, `build`, `test`, and TruffleHog secret scanning. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full list and the local commands.
+```bash
+bun run format:check
+bun run lint
+bun run typecheck
+bun run build
+bun run test
+bun run db:migrations:check
+bun run secrets:check
+```
 
-## Docs
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the review and verification expectations.
 
-- [Working in this repo](./AGENTS.md) — conventions, work loop, and quality bar for humans and coding agents alike (`CLAUDE.md` just imports it)
-- [The `.agent` file format](./docs/agent-file.md) — deep dive into the file that defines every agent
-- [Getting started](./docs/getting-started.md) — new engineer checklist and local dev setup in under five minutes
-- [Architecture](./docs/architecture.md) — runtime shape, sync, and database model
-- [Future concepts](./docs/future-concepts/README.md) — speculative product and architecture notes
-- [Technology stack](./docs/stack/README.md) — technology register, owners, and replacement triggers
-- [Database](./docs/database.md) — Neon branching, schema changes, Drizzle
-- [Deployment](./docs/deployment.md) — production release flow, Vercel, Render, env, smoke checks
-- [Secret management](./docs/secret-management.md) — Infisical source of truth and sync setup
-- [LLM token broker](./docs/llm-token-broker.md) — per-delegation tokens that keep raw provider keys out of agent sandboxes
-- [Environment variables](./docs/env-vars.md) — where every runtime and release env var lives
-- [Agent MCP](./docs/agent-mcp.md) — local SigNoz MCP setup for Conductor, Claude Code, and Codex
-- [Auth](./docs/auth.md) — WorkOS AuthKit, env vars, identity model
-- [Observability](./docs/observability.md) — production error capture and launch debugging
-- [Contributing](./CONTRIBUTING.md)
+## Documentation
+
+- [Goat system map](./apps/goat/docs/README.md)
+- [Getting started](./docs/getting-started.md)
+- [Architecture](./docs/architecture.md)
+- [Database and migrations](./docs/database.md)
+- [Runner](./docs/runner.md)
+- [Deployment](./docs/deployment.md)
+- [Environment variables](./docs/env-vars.md)
+- [Secret management](./docs/secret-management.md)
+- [Legacy product retirement record](./docs/legacy-product-retirement.md)

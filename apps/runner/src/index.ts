@@ -37,7 +37,6 @@ import { startGoatLinearFlushWorker } from "./goat-linear-flush-worker";
 import { startGoatTaskScheduleWorker } from "./goat-scheduler";
 import { startGoatSlackFlushWorker } from "./goat-slack-flush-worker";
 import { settleExpiredBrokerTokens } from "./llm-broker-tokens";
-import { assertPreviewIdentity } from "./preview-guard";
 import { createServer } from "./server";
 
 const logger = createLogger({
@@ -57,13 +56,9 @@ installProcessErrorBackstop();
 
 const env = loadEnv();
 assertRunnerDbConfig();
-// Refuse to boot a preview runner that can't prove its DB belongs to its preview branch,
-// and refuse to boot a prod runner carrying stray preview identity. This makes "preview
-// runner polling the prod job queue" structurally impossible (issue #351 §6).
-await assertPreviewIdentity();
 // The LLM broker can be left holding unsettled tokens if a runner dies mid-delegation.
-// Sweep them on the same 60s cadence the legacy stale-run sweep used: cheap partial-index
-// scan, and the settlement CAS makes it safe across instances.
+// Sweep them every 60s; the partial-index scan is cheap and the settlement CAS makes it safe
+// across instances.
 const LLM_BROKER_SWEEP_INTERVAL_MS = 60_000;
 const llmBrokerSweepTimer = setInterval(() => {
   void settleExpiredBrokerTokens()

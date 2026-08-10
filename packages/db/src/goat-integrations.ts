@@ -16,7 +16,6 @@ import {
   goatIntegrationCredentials,
   goatIntegrations,
 } from "./goat-schema";
-import type * as publicSchema from "./schema";
 
 export type GoatGoogleOAuthTokens = {
   access_token: string;
@@ -26,7 +25,7 @@ export type GoatGoogleOAuthTokens = {
   id_token?: string;
 };
 
-type DbSchema = typeof publicSchema & typeof goatSchema;
+type DbSchema = typeof goatSchema;
 type GoatIntegrationDb = Pick<
   PgDatabase<PgQueryResultHKT, DbSchema>,
   "insert" | "select" | "update"

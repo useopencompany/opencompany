@@ -4,8 +4,7 @@ import type { BrokerProvider } from "./llm-broker-tokens";
 // Pure usage extraction + pricing for the LLM broker (llm-broker.ts). Everything here is
 // side-effect free so the response-shape handling is unit-testable without a proxy.
 //
-// Field tolerance mirrors packages/memory/src/retrieval/gateway.ts: the broker fronts
-// both the Vercel AI Gateway's OpenAI-compatible endpoints (chat/embeddings, any routed
+// The broker fronts both the Vercel AI Gateway's OpenAI-compatible endpoints (chat, any routed
 // provider) and OpenAI's Responses API (codex), so token fields may arrive in either
 // naming convention; the Gateway may additionally report a dollar cost.
 

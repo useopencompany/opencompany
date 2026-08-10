@@ -13,11 +13,11 @@
  * Token NAMES follow the shadcn/ui convention (background, foreground, primary,
  * muted, accent, destructive, …) so shadcn components and third-party registries
  * drop in cleanly. Token VALUES are seeded from OpenCompany's existing palette
- * (apps/web/app/globals.css) so the system matches the product's look.
+ * from the original product stylesheet so the system keeps its visual language.
  *
  * Theming uses the `@theme inline` indirection: utilities reference `var(--token)`
  * at runtime, and we swap the raw `--token` values per color scheme. Dark mode is
- * driven by `data-theme="dark"` (the convention already used in apps/web) with a
+ * driven by `data-theme="dark"` (the convention used by Goat) with a
  * `prefers-color-scheme` fallback for system preference.
  */
 

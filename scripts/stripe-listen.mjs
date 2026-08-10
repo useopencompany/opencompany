@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Called by: @opencompany/stripe-webhooks `bun run dev`, usually through the root dev stack.
-// Purpose: forwards Stripe CLI webhook events to the app selected by scripts/dev.mjs.
+// Purpose: forwards Stripe CLI webhook events to the Goat app.
 
 import "./load-env.mjs";
 import { spawn } from "node:child_process";
@@ -14,23 +14,9 @@ if (disabled) {
 }
 
 function appOrigin() {
-  if (process.env.OPENCOMPANY_DEV_APP === "goat") {
-    // Use Next.js directly so the Stripe CLI does not encounter Caddy's local
-    // certificate. scripts/dev.mjs exports the branch-isolated Goat port.
-    return `http://localhost:${process.env.GOAT_PORT?.trim() || "3002"}`;
-  }
-
-  const raw = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (!raw || raw.includes("...")) return "http://localhost:3000";
-
-  try {
-    const url = new URL(raw);
-    return url.hostname === "localhost" || url.hostname === "127.0.0.1"
-      ? url.origin
-      : "http://localhost:3000";
-  } catch {
-    return "http://localhost:3000";
-  }
+  // Use Next.js directly so the Stripe CLI does not encounter Caddy's local certificate.
+  // scripts/dev.mjs exports the branch-isolated Goat port.
+  return `http://localhost:${process.env.GOAT_PORT?.trim() || "3002"}`;
 }
 
 const forwardTo = `${appOrigin()}/api/stripe/webhook`;
@@ -38,14 +24,11 @@ const events =
   process.env.STRIPE_LISTEN_EVENTS?.trim() ||
   "checkout.session.completed,checkout.session.async_payment_succeeded,checkout.session.async_payment_failed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,invoice.paid,invoice.payment_failed,payment_intent.succeeded,payment_intent.payment_failed";
 const stripeCliProjectName = process.env.STRIPE_CLI_PROJECT_NAME?.trim();
-const webhookSecretKey =
-  process.env.OPENCOMPANY_DEV_APP === "goat"
-    ? "GOAT_STRIPE_WEBHOOK_SECRET"
-    : "STRIPE_WEBHOOK_SECRET";
+const webhookSecretKey = "GOAT_STRIPE_WEBHOOK_SECRET";
 
 if (!process.env[webhookSecretKey]?.trim()) {
   console.warn(
-    `${webhookSecretKey} is not set. The selected app will reject forwarded Stripe webhooks until .env.local uses the whsec_ value printed by stripe listen.`,
+    `${webhookSecretKey} is not set. Goat will reject forwarded Stripe webhooks until .env.local uses the whsec_ value printed by stripe listen.`,
   );
 }
 

@@ -1,7 +1,7 @@
 // Legacy-product credit fulfillment used only by the shared Stripe webhook.
 // The Goat and legacy web products bill through the same Stripe account, so the
 // webhook that now lives in this app still receives legacy checkout and
-// auto-refill events. Ported verbatim from apps/web/lib/billing/service.ts;
+// auto-refill events. Ported verbatim from the retired billing service;
 // these write to the legacy (public-schema) billing tables, not goat.*.
 
 import { USD_MICROS_PER_CENT } from "@opencompany/billing";
@@ -10,7 +10,7 @@ import {
   autoRefillAttempts,
   type WorkspaceBillingSettings,
   workspaceBillingSettings,
-} from "@opencompany/db/schema";
+} from "@opencompany/db/legacy-billing-schema";
 import { and, eq, sql } from "drizzle-orm";
 import type Stripe from "stripe";
 

@@ -2,7 +2,7 @@
 // products bill through the same Stripe account, so the shared webhook that
 // now lives in this app still receives legacy setup-mode checkouts and
 // auto-refill PaymentIntent events. Ported verbatim from the webhook section
-// of apps/web/lib/billing/auto-refill.ts; these write to the legacy
+// of the retired billing implementation; these write to the legacy
 // (public-schema) billing tables, not goat.*.
 
 import type Stripe from "stripe";

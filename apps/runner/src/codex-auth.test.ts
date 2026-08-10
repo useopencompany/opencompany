@@ -125,7 +125,7 @@ describe("startGoatCodexDeviceAuthFlow", () => {
     );
     expect(mocks.killSandbox).toHaveBeenCalledWith("sbx_old");
     expect(mocks.order.indexOf("kill:sbx_old")).toBeLessThan(mocks.order.indexOf("create"));
-    expect(mocks.sandboxCreate).toHaveBeenCalledWith("amp", {
+    expect(mocks.sandboxCreate).toHaveBeenCalledWith("codex", {
       envs: {},
       metadata: { user_id: "user_1" },
       timeoutMs: 20 * 60 * 1000,
@@ -202,18 +202,13 @@ function fakeSandbox() {
 
 function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
   return {
-    databaseUrl: "postgres://test",
     internalToken: "internal",
     streamTokenSecret: "stream",
     vercelAiGatewayApiKey: "gateway",
     openaiCodexApiKey: undefined,
-    publicUrl: undefined,
-    llmBrokerEnabled: true,
     exaApiKey: "exa",
     goatBrowserEnabled: false,
-    ampE2bTemplate: undefined,
     codexE2bTemplate: undefined,
-    e2bSandboxIdleTimeoutMs: 30_000,
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",
     goatCodexChatIdleTimeoutMs: 1_800_000,

@@ -1,17 +1,18 @@
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool, type PoolConfig } from "pg";
 import * as goatSchema from "./goat-schema";
-import * as publicSchema from "./schema";
+import * as legacyBillingSchema from "./legacy-billing-schema";
+import * as llmBrokerSchema from "./llm-broker-schema";
 
-const schema = { ...publicSchema, ...goatSchema };
+const schema = { ...legacyBillingSchema, ...llmBrokerSchema, ...goatSchema };
 
 // Pooled driver for long-lived services (the runner). Unlike the default
 // `neon-http` client in `./client` — which issues one HTTPS request per query and
 // has no interactive transactions — this keeps a small bounded pool of persistent
 // sockets and exposes real `db.transaction(...)`. It must connect to Neon's direct
 // (non-pooled) endpoint, not the `-pooler` host, so session-level features
-// (interactive transactions, LISTEN/NOTIFY) are available. The web app stays on
-// `neon-http`; do not import this from web code.
+// (interactive transactions, LISTEN/NOTIFY) are available. The Next.js app stays on
+// `neon-http`; do not import this from serverless route code.
 
 export type PooledDb = NodePgDatabase<typeof schema>;
 

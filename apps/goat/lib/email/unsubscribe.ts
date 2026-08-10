@@ -3,7 +3,7 @@ import { skipPendingGoatOnboardingEmailsForEmail } from "@opencompany/db/goat-on
 import { getGoatAppUrl } from "@/lib/app-url";
 import { trimmed } from "@/lib/email/client";
 
-// Signed one-click unsubscribe, mirrored from apps/web/lib/email/unsubscribe.ts.
+// Signed one-click unsubscribe support.
 // The token is an HMAC over {email, type} using RESEND_API_KEY as the signing
 // secret (same convention as web — it never leaves the server). Unsubscribing
 // stops the remaining onboarding sequence for that address; there is no Resend

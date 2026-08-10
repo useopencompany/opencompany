@@ -18,7 +18,7 @@ export type PendingGoatChatAttachment = {
 };
 
 // "Drop files to attach" overlay shown over the composer while a file drag is
-// active. Adapted from apps/web ComposerDropOverlay.
+// active. Adapted from the original composer overlay.
 export function GoatComposerDropOverlay({ className }: { className?: string }) {
   return (
     <div

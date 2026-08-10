@@ -20,7 +20,6 @@
       "!**/playwright-report",
       "!**/test-results",
       "!drizzle/meta",
-      "!apps/web/next-env.d.ts",
       "!bun.lock"
     ]
   },

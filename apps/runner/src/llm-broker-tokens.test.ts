@@ -332,30 +332,6 @@ describe("settleBrokerToken", () => {
     expect(toolUsageRows).toHaveLength(0);
     expect(recordDebit).not.toHaveBeenCalled();
   });
-
-  it("maps memory and codex tool names to their display providers", async () => {
-    const { store, toolUsageRows } = createFakeStore();
-    const minted = await mintBrokerToken({ ...MINT_INPUT, toolName: "memory" }, store);
-    await store.recordSpend({
-      tokenId: minted.tokenId,
-      sessionId: "session-1",
-      endpoint: "embeddings",
-      model: "openai/text-embedding-3-small",
-      streamed: false,
-      upstreamStatus: 200,
-      inputTokens: 10,
-      inputCacheReadTokens: 0,
-      inputCacheWriteTokens: 0,
-      outputTokens: 0,
-      costUsdMicros: 50,
-      usageParsed: true,
-      latencyMs: 50,
-      rawUsage: {},
-    });
-    const { deps } = settlementDeps(store);
-    await settleBrokerToken(minted.tokenId, deps);
-    expect(toolUsageRows[0]).toMatchObject({ provider: "vercel-ai-gateway" });
-  });
 });
 
 describe("withBrokerDelegation", () => {

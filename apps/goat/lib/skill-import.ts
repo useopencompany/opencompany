@@ -6,14 +6,13 @@ import {
 } from "@opencompany/agent-runtime";
 import type { GoatSkillSourceType } from "@opencompany/db/goat-schema";
 
-// Goat-specific wrapper around the shared skill resolver (packages/agent-runtime/src/skill-
-// resolver.ts, the same one `apps/web`'s external skills use). Goat skills are instructions-only
+// Goat-specific wrapper around the shared skill resolver. Goat skills are instructions-only
 // in V1 (see docs/future-concepts/goat-plugins-alignment-proposal.md) — a resolved skill's
 // SKILL.md body becomes `instructions`; any other bundled files (scripts/, references/) are
 // reported but not imported. Goat also has its own slug scheme (`uniqueGoatSkillSlug` in
 // apps/goat/lib/skills.ts, workspace-scoped), so the resolver's own `ensureSkillMountId` /
-// `reservedIds` (tied to apps/web's built-in skill namespace) are intentionally unused here —
-// this only proposes a slug; the create step is what makes it unique.
+// `reservedIds` is intentionally unused here: this only proposes a slug; the create step is what
+// makes it unique within the Goat workspace.
 
 export class GoatSkillImportError extends Error {
   constructor(message: string) {

@@ -13,7 +13,7 @@ export const ELECTRIC_HEALTH_URL = `${ELECTRIC_LOCAL_URL}/v1/health`;
 export function resolveElectricDevConfig(env = process.env) {
   const conductorPort = optionalPort(env.CONDUCTOR_PORT, "CONDUCTOR_PORT");
   const explicitPort = optionalPort(env.ELECTRIC_DEV_PORT, "ELECTRIC_DEV_PORT");
-  const port = explicitPort ?? (conductorPort ? offsetPort(conductorPort, 4) : "3010");
+  const port = explicitPort ?? (conductorPort ? offsetPort(conductorPort, 3) : "3010");
   const container =
     env.ELECTRIC_CONTAINER_NAME?.trim() ||
     (conductorPort ? `opencompany-electric-${conductorPort}` : "opencompany-electric");
@@ -62,15 +62,14 @@ export function directDatabaseUrl(env = process.env) {
  *
  * Security mode: Electric is secure-by-default and its HTTP API is public unless an
  * ELECTRIC_SECRET is set. When `env.ELECTRIC_SECRET` is present we run secure — every
- * request must carry the `secret` query param, which the web auth proxy injects
- * server-side (apps/web/app/api/electric/v1/shape/route.ts). With no secret we run
+ * request must carry the `secret` query param, which the Goat auth proxy injects server-side.
+ * With no secret we run
  * insecure, which is safe for local dev only because the container binds to localhost
- * behind the same-origin proxy. Shared/preview deployments MUST set ELECTRIC_SECRET
- * (issue #351).
+ * behind the same-origin proxy. Shared deployments MUST set ELECTRIC_SECRET.
  *
  * Storage: when `env.ELECTRIC_STORAGE_DIR` is set we point Electric's on-disk shape
  * log at it. Electric's storage is NOT disposable — it must stay in sync with the
- * Postgres replication slot — so previews back this with a persistent volume.
+ * Postgres replication slot.
  */
 export function dockerRunArgs(databaseUrl, { detached = false, env = process.env } = {}) {
   const secret = env.ELECTRIC_SECRET?.trim();

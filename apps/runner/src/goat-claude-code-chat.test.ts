@@ -718,18 +718,13 @@ function taskForHarness(harnessSpec: GoatHarnessSpec): GoatTask {
 
 function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
   return {
-    databaseUrl: "postgres://test",
     internalToken: "internal",
     streamTokenSecret: "stream",
     vercelAiGatewayApiKey: "gateway",
     openaiCodexApiKey: "codex",
-    publicUrl: undefined,
-    llmBrokerEnabled: true,
     exaApiKey: "exa",
     goatBrowserEnabled: false,
-    ampE2bTemplate: undefined,
     codexE2bTemplate: undefined,
-    e2bSandboxIdleTimeoutMs: 30_000,
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",
     goatCodexChatIdleTimeoutMs: 300_000,

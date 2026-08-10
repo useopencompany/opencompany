@@ -1,6 +1,6 @@
 import { type ErrorResponse, Resend, type Response as ResendResponse } from "resend";
 
-// Minimal typed wrapper around the Resend SDK, mirrored from apps/web/lib/email/client.ts.
+// Minimal typed wrapper around the Resend SDK.
 // Goat only sends transactional/lifecycle email (no contact/segment sync), so the surface
 // used here is emails.send — the rest of the type is kept for parity with web.
 export type ResendEmailClient = {

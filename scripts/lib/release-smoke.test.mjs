@@ -15,9 +15,9 @@ test("uses a surface-specific expected release", () => {
 
 test("an explicit empty surface release disables the global fallback", () => {
   assert.equal(
-    expectedReleaseFor("web", {
+    expectedReleaseFor("goat", {
       EXPECTED_RELEASE: "fallback",
-      EXPECTED_WEB_RELEASE: "",
+      EXPECTED_GOAT_RELEASE: "",
     }),
     "",
   );
@@ -29,4 +29,5 @@ test("preserves the global expected release for existing callers", () => {
 
 test("rejects unknown smoke-check surfaces", () => {
   assert.throws(() => expectedReleaseFor("marketing", {}), /Unknown smoke-check surface/);
+  assert.throws(() => expectedReleaseFor("web", {}), /Unknown smoke-check surface/);
 });
