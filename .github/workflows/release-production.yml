@@ -320,6 +320,13 @@ jobs:
               throw new Error(`Goat Vercel project rootDirectory must be apps/goat, got ${project.rootDirectory ?? "<unset>"}.`);
             }
 
+            const minimumSkewProtectionMaxAge = 7 * 24 * 60 * 60;
+            if ((project.skewProtectionMaxAge ?? 0) < minimumSkewProtectionMaxAge) {
+              throw new Error(
+                `Goat Vercel Skew Protection maximum age must be at least ${minimumSkewProtectionMaxAge} seconds, got ${project.skewProtectionMaxAge ?? "<unset>"}.`,
+              );
+            }
+
             mkdirSync(".vercel", { recursive: true });
             writeFileSync(
               ".vercel/project.json",
