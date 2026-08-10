@@ -1,6 +1,14 @@
 @import "tailwindcss";
 @import "uniwind";
 
+@utility screen-shadow-light {
+  box-shadow: -4px 0 20px -2px rgba(0, 0, 0, 0.24);
+}
+
+@utility screen-shadow-dark {
+  box-shadow: 0 0 0 1px #525252;
+}
+
 @layer theme {
   :root {
     @variant light {
