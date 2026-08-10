@@ -1219,6 +1219,7 @@ function codexTurn() {
     recoveryAttempts: 0,
     engineRecoveryRequired: false,
     engineTurnBaselineIds: null,
+    eventSequence: 0,
     leaseId: "lease_1",
     leaseOwner: "runner_1",
     leaseExpiresAt: new Date("2026-07-10T12:05:00Z"),

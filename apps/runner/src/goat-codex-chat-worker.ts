@@ -54,6 +54,7 @@ type ClaimedTurnRow = {
   recovery_attempts: number;
   engine_recovery_required: boolean;
   engine_turn_baseline_ids: string[] | null;
+  event_sequence: number;
   lease_id: string | null;
   lease_owner: string | null;
   lease_expires_at: Date | string | null;
@@ -734,6 +735,7 @@ function turnFromRow(row: ClaimedTurnRow): GoatCodexChatTurn {
     recoveryAttempts: row.recovery_attempts,
     engineRecoveryRequired: row.engine_recovery_required,
     engineTurnBaselineIds: row.engine_turn_baseline_ids,
+    eventSequence: row.event_sequence,
     leaseId: row.lease_id,
     leaseOwner: row.lease_owner,
     leaseExpiresAt: dateFromRow(row.lease_expires_at),

@@ -1,0 +1,117 @@
+import { z } from "@hono/zod-openapi";
+import { CursorSchema, MessageSchema, ResourceIdSchema, TimestampSchema } from "./schemas";
+import { EVENT_SCHEMA_VERSION } from "./version";
+
+const baseEvent = {
+  id: ResourceIdSchema,
+  runId: ResourceIdSchema,
+  attemptId: ResourceIdSchema.nullable(),
+  cursor: CursorSchema,
+  schemaVersion: z.literal(EVENT_SCHEMA_VERSION),
+  occurredAt: TimestampSchema,
+};
+
+function event<T extends string, S extends z.ZodType>(type: T, payload: S) {
+  return z.object({ ...baseEvent, type: z.literal(type), payload }).strict();
+}
+
+export const RunEventSchema = z
+  .discriminatedUnion("type", [
+    event(
+      "run.queued",
+      z.object({ conversationId: ResourceIdSchema, triggerMessageId: ResourceIdSchema }).strict(),
+    ),
+    event("run.started", z.object({ attemptNumber: z.number().int().positive() }).strict()),
+    event("run.cancel_requested", z.object({ by: z.enum(["user", "system"]) }).strict()),
+    event("message.created", z.object({ message: MessageSchema }).strict()),
+    event(
+      "message.content_updated",
+      z
+        .object({ messageId: ResourceIdSchema, content: z.string(), complete: z.boolean() })
+        .strict(),
+    ),
+    event(
+      "tool.started",
+      z.object({ toolCallId: ResourceIdSchema, name: z.string().min(1) }).strict(),
+    ),
+    event(
+      "tool.completed",
+      z.object({ toolCallId: ResourceIdSchema, summary: z.string().optional() }).strict(),
+    ),
+    event(
+      "tool.failed",
+      z.object({ toolCallId: ResourceIdSchema, code: z.string(), message: z.string() }).strict(),
+    ),
+    event(
+      "approval.requested",
+      z
+        .object({
+          approvalId: ResourceIdSchema,
+          kind: z.string().min(1),
+          prompt: z.string(),
+          options: z.array(z.string()).optional(),
+        })
+        .strict(),
+    ),
+    event(
+      "approval.resolved",
+      z
+        .object({
+          approvalId: ResourceIdSchema,
+          resolution: z.enum(["approved", "denied", "answered", "canceled"]),
+        })
+        .strict(),
+    ),
+    event(
+      "artifact.published",
+      z
+        .object({
+          artifactId: ResourceIdSchema,
+          title: z.string(),
+          filename: z.string(),
+          mediaType: z.string(),
+          sizeBytes: z.number().int().min(0),
+        })
+        .strict(),
+    ),
+    event("run.paused", z.object({ reason: z.string() }).strict()),
+    event("run.completed", z.object({ messageId: ResourceIdSchema }).strict()),
+    event(
+      "run.failed",
+      z.object({ code: z.string(), message: z.string(), retryable: z.boolean() }).strict(),
+    ),
+    event("run.canceled", z.object({ by: z.enum(["user", "system"]) }).strict()),
+  ])
+  .openapi("RunEvent");
+
+export const RunEventTypes = RunEventSchema.options.map(
+  (schema: (typeof RunEventSchema.options)[number]) => schema.shape.type.value,
+);
+
+export type RunEventDto = z.infer<typeof RunEventSchema>;
+
+export function encodeEventCursor(sequence: number | bigint): string {
+  if (typeof sequence === "number" && (!Number.isSafeInteger(sequence) || sequence < 1)) {
+    throw new Error("Event sequence must be a positive safe integer.");
+  }
+  if (typeof sequence === "bigint" && sequence < 1n) {
+    throw new Error("Event sequence must be positive.");
+  }
+  return `v1:${sequence.toString()}`;
+}
+
+export function decodeEventCursor(cursor: string | null | undefined): number {
+  if (!cursor) return 0;
+  const parsed = CursorSchema.safeParse(cursor);
+  if (!parsed.success) throw new Error("Invalid event cursor.");
+  const sequence = Number(cursor.slice(3));
+  if (!Number.isSafeInteger(sequence)) throw new Error("Event cursor exceeds safe range.");
+  return sequence;
+}
+
+export const formatEventCursor = encodeEventCursor;
+export const parseEventCursor = decodeEventCursor;
+
+export function parseRunEvent(value: unknown): RunEventDto {
+  return RunEventSchema.parse(value);
+}

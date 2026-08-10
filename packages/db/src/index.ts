@@ -1,3 +1,4 @@
+export * from "./chat-repository";
 export * from "./client";
 export * from "./goat-action-governance";
 export * from "./goat-brain-files";
