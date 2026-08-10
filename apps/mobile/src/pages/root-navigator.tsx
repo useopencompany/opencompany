@@ -11,7 +11,11 @@ export function RootNavigator() {
   const { theme } = useUniwind();
   const backgroundColor = useCSSVariable("--color-background") as string;
   const drawerStyle = useResolveClassNames("w-xs bg-sidebar");
-  const sceneStaticStyle = useResolveClassNames("overflow-hidden border-continuous");
+  const sceneStaticStyle = useResolveClassNames(
+    theme === "dark"
+      ? "overflow-hidden border-continuous screen-shadow-dark"
+      : "overflow-hidden border-continuous screen-shadow-light",
+  );
 
   const darkTheme: ReactNavigation.Theme = {
     ...DarkTheme,
@@ -33,7 +37,9 @@ export function RootNavigator() {
     <ThemeProvider value={theme === "dark" ? darkTheme : lightTheme}>
       {/* Sits between the drawer and content (covers the area around the rounded corners of the scene) */}
       <View className="flex-1 bg-sidebar">
+        {/* Avoid native screen containers clipping the scene shadow. */}
         <Drawer
+          detachInactiveScreens={false}
           screenOptions={{
             drawerType: "back",
             overlayColor: "transparent",
