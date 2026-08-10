@@ -1,6 +1,12 @@
-# AGENTS.md
+# Agent coding guidelines
 
-How to work in this repo. Read this before you touch code.
+You're working on opencompany: an agent workspace to get tasks done and build agent workflows, supporting multiple harnesses, multiplayer, and self-building wiki for realtime context.
+
+Agents are plain-text `.agent` files backed by GitHub, Postgres, and the runtime. The `.agent` file is the product contract. Anything that edits, syncs, parses, stores, or runs an agent must preserve that contract. Read `docs/agent-file.md` before changing agent format behavior.
+
+GitHub is the source of truth for managed workspace repos, while the app stores the latest editable state in Postgres and syncs GitHub asynchronously. Preserve that product model unless the task is explicitly about changing it.
+
+Read the nested `AGENTS.md` files when reading/editing files inside folders that contain it.
 
 ## North Star
 
@@ -8,7 +14,7 @@ We are building world-class software: high quality, high reliability, excellent 
 
 Use judgment. The goal is not to follow rules mechanically; the goal is to ship correct, maintainable work with clear verification.
 
-## Repo Facts
+## Stack
 
 - Package manager: `bun@1.3.2`
 - Runtime: Node `>=20.20.0`
@@ -17,9 +23,9 @@ Use judgment. The goal is not to follow rules mechanically; the goal is to ship 
 - New Goat app: `apps/goat`
 - Shared runner service: `apps/runner`
 - Database package: `packages/db`
-- Agent file contract: `docs/agent-file.md`
+- `.agent` file contract: `docs/agent-file.md`
 
-Useful commands:
+## Scripts
 
 - Install dependencies: `bun install`
 - Local setup: `bun run setup`
@@ -30,24 +36,13 @@ Useful commands:
 - Unit tests: `bun run test`
 - Web E2E tests when UI behavior needs browser verification: `bun run --filter @opencompany/web test:e2e`
 - Secret scan when available: `bun run secrets:check`
+- Use Turborebo filtering syntax to run commands against specific apps/packages: `bun run dev --filter @opencompany/goat`
 
 The user usually keeps a dev server running. Do not start another one unless asked or unless you have confirmed it is needed.
 
-### Cloud coding sandboxes
+## App Generations
 
-When the system prompt gives you a staged environment file for this repository:
-
-1. Never inspect or print it. If `.env.local` is missing, copy the staged file there and set mode `600`.
-2. Run `bun install --frozen-lockfile`, then `bun run setup`, before starting any development process.
-3. For Goat work, start `bun run dev:goat` only after setup succeeds. Do not use `setup:dev`, which starts the legacy web stack.
-
-Cloud setup refreshes the schema-only `cloud-base` Neon branch and creates a sandbox-unique child branch from it. Do not override that parent or start the dev server against an unset `DATABASE_URL`.
-
-Local dev logs: `bun run dev` and `bun run dev:stream` write Turbo task output to `.context/logs/dev-turbo.json`. Use `bun run dev:logs -- --source runner --tail 100`, `bun run dev:logs -- --source web --tail 100`, `bun run dev:logs -- --errors`, or `bun run dev:logs -- --grep <text>` when debugging. The log file is gitignored and may contain sensitive terminal output, so summarize relevant lines instead of pasting large raw excerpts.
-
-## App Boundaries
-
-This monorepo contains two product generations. `apps/web` is the older OpenCompany app. `apps/goat` is the new Goat app and should be treated as a separate product surface, even when a similarly named feature also exists in `apps/web`.
+This monorepo contains two product generations. `apps/web` is the older OpenCompany app. `apps/goat` is the new Goat app (internal name) and should be treated as a separate product surface, even when a similarly named feature also exists in `apps/web`.
 
 When the user says "Goat" or the task is clearly about Goat:
 
@@ -58,23 +53,6 @@ When the user says "Goat" or the task is clearly about Goat:
 
 If a request could reasonably refer to either app, inspect the relevant entry points and establish the target surface before editing. Do not default to `apps/web` merely because it is older or more complete.
 
-## Product Context
-
-OpenCompany is a platform for running company-owned AI agents.
-
-Agents are plain-text `.agent` files backed by GitHub, Postgres, and the runtime. The `.agent` file is the product contract. Anything that edits, syncs, parses, stores, or runs an agent must preserve that contract. Read `docs/agent-file.md` before changing agent format behavior.
-
-GitHub is the source of truth for managed workspace repos, while the app stores the latest editable state in Postgres and syncs GitHub asynchronously. Preserve that product model unless the task is explicitly about changing it.
-
-## Work Loop
-
-1. Read the surrounding code and relevant docs before writing.
-2. For non-trivial changes, form a short plan and identify the real contract being changed.
-3. Make the narrowest correct change that fits existing patterns.
-4. Verify with the lightest command or browser check that proves the behavior.
-5. Read the diff as if reviewing someone else’s PR.
-6. Report what changed, what was verified, and what could not be verified.
-
 ## Engineering Judgment
 
 - Correctness beats speed. Code that types and tests pass is not automatically correct.
@@ -83,7 +61,8 @@ GitHub is the source of truth for managed workspace repos, while the app stores 
 - Push back when a request would make the system worse. State the tradeoff and propose the better path.
 - Keep names precise. A good name should remove the need for a comment.
 - Delete dead code. Do not leave commented-out code or TODOs without a real tracking reason.
-- Comments should explain why something is surprising, not narrate what the code already says.
+- Write descriptive comments where some patterns are not clear.
+- DO NOT write unneccessary comments for obvious things, but make sure to comment complex logic or workarounds.
 - Validate user input and external API responses at boundaries. Internal code should be typed enough to avoid defensive clutter.
 
 ## Reliability And Safety
@@ -146,3 +125,15 @@ Useful docs:
 ## When In Doubt
 
 Ask whether a great engineering team would approve the diff. If not, do the extra work or explain the blocker.
+
+### Cloud coding sandboxes
+
+This section applies only when the system prompt gives you a staged environment file for this repository:
+
+1. Never inspect or print it. If `.env.local` is missing, copy the staged file there and set mode `600`.
+2. Run `bun install --frozen-lockfile`, then `bun run setup`, before starting any development process.
+3. For Goat work, start `bun run dev:goat` only after setup succeeds. Do not use `setup:dev`, which starts the legacy web stack.
+
+Cloud setup refreshes the schema-only `cloud-base` Neon branch and creates a sandbox-unique child branch from it. Do not override that parent or start the dev server against an unset `DATABASE_URL`.
+
+Local dev logs: `bun run dev` and `bun run dev:stream` write Turbo task output to `.context/logs/dev-turbo.json`. Use `bun run dev:logs -- --source runner --tail 100`, `bun run dev:logs -- --source web --tail 100`, `bun run dev:logs -- --errors`, or `bun run dev:logs -- --grep <text>` when debugging. The log file is gitignored and may contain sensitive terminal output, so summarize relevant lines instead of pasting large raw excerpts.

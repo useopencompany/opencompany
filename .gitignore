@@ -14,8 +14,8 @@ test-results
 .vercel/*
 !.vercel/project.json
 .env*.local
+*.local.*
 .source
-.claude/
 *.profraw
 
 # Per-developer Goat Quick build settings.
