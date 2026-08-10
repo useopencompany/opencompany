@@ -18,8 +18,8 @@ export default function SecondScreen() {
         <Stack.Toolbar.Button icon="square.and.arrow.up" onPress={() => Alert.alert("Share")} />
       </Stack.Toolbar>
       <Stack.Screen options={{ headerTransparent: true }} />
-      <View style={{ flex: 1, padding: 16, alignItems: "center", justifyContent: "center" }}>
-        <Text>Second Stack Screen</Text>
+      <View className="flex-1 items-center justify-center bg-background p-4">
+        <Text className="text-foreground">Second Stack Screen</Text>
       </View>
     </>
   );

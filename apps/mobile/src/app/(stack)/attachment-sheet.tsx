@@ -1,7 +1,8 @@
 import { router } from "expo-router";
-import { type SFSymbol, SymbolView } from "expo-symbols";
-import { Pressable, ScrollView, Text, View } from "react-native";
-import { withUniwind } from "uniwind";
+import type { SFSymbol } from "expo-symbols";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+
+import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
 
 type AttachmentAction = {
   label: string;
@@ -42,13 +43,6 @@ const toolActions: ToolAction[] = [
   { label: "Add files", icon: "paperclip" },
 ];
 
-const StyledSymbolView = withUniwind(SymbolView, {
-  tintColor: {
-    fromClassName: "tintColorClassName",
-    styleProperty: "color",
-  },
-});
-
 function dismissWithAction(label: string) {
   console.log(label);
   router.back();
@@ -66,24 +60,27 @@ export default function AttachmentSheet() {
           <Pressable
             accessibilityLabel={action.label}
             accessibilityRole="button"
-            className="h-[84px] flex-1 items-center justify-center gap-2 rounded-[17px] bg-neutral-200 active:opacity-55 dark:bg-neutral-800"
+            className="h-[84px] flex-1 items-center justify-center gap-2 rounded-[17px] border-continuous bg-secondary active:opacity-55"
             key={action.label}
             onPress={() => dismissWithAction(action.label)}
           >
             <StyledSymbolView
               name={action.icon}
               size={25}
-              tintColorClassName="text-neutral-950 dark:text-neutral-50"
+              tintColorClassName="accent-secondary-foreground"
               weight="medium"
             />
-            <Text className="font-medium text-[17px] text-neutral-950 leading-[21px] tracking-[-0.2px] dark:text-neutral-50">
+            <Text className="font-medium text-[17px] text-secondary-foreground leading-[21px] tracking-[-0.2px]">
               {action.label}
             </Text>
           </Pressable>
         ))}
       </View>
 
-      <View className="mt-[25px] mb-[22px] h-px bg-neutral-200 dark:bg-neutral-800" />
+      <View
+        className="mt-[25px] mb-[22px] bg-border-subtle"
+        style={{ height: StyleSheet.hairlineWidth }}
+      />
 
       <View>
         {toolActions.map((action) => (
@@ -98,16 +95,16 @@ export default function AttachmentSheet() {
               <StyledSymbolView
                 name={action.icon}
                 size={25}
-                tintColorClassName="text-neutral-950 dark:text-neutral-50"
+                tintColorClassName="accent-foreground"
                 weight="regular"
               />
             </View>
             <View className="flex-1">
-              <Text className="font-semibold text-[17px] text-neutral-950 leading-[21px] tracking-[-0.25px] dark:text-neutral-50">
+              <Text className="font-semibold text-[17px] text-foreground leading-[21px] tracking-[-0.25px]">
                 {action.label}
               </Text>
               {action.description ? (
-                <Text className="mt-0.5 text-[15px] text-neutral-500 leading-5 tracking-[-0.15px] dark:text-neutral-400">
+                <Text className="mt-0.5 text-[15px] text-muted-foreground leading-5 tracking-[-0.15px]">
                   {action.description}
                 </Text>
               ) : null}

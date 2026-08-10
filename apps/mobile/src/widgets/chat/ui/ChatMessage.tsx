@@ -1,48 +1,53 @@
-import { memo } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import type { MarkdownStyle } from "react-native-enriched-markdown";
-import Animated, { FadeIn } from "react-native-reanimated";
+import Reanimated, { FadeIn } from "react-native-reanimated";
 import { StreamdownText } from "react-native-streamdown";
 
 import type { ChatMessage as ChatMessageModel } from "../model/chat";
 
-type ChatMessageProps = {
-  isDark: boolean;
+export function ChatMessage({
+  message,
+  markdownStyle,
+  onLinkPress,
+  themeKey,
+}: {
   message: ChatMessageModel;
   markdownStyle: MarkdownStyle;
   onLinkPress: (url: string) => void;
-};
-
-function ChatMessageComponent({ isDark, message, markdownStyle, onLinkPress }: ChatMessageProps) {
+  themeKey: string;
+}) {
   if (message.role === "user") {
     return (
-      <Animated.View
+      <Reanimated.View
+        className="mb-[22px] max-w-[82%] self-end rounded-[20px] border-continuous bg-primary px-4 py-[11px]"
         entering={message.isNew ? FadeIn.duration(300) : undefined}
-        style={styles.userMessage}
       >
-        <Text selectable style={styles.userMessageText}>
+        <Text selectable className="text-[16px] text-primary-foreground leading-[22px]">
           {message.content}
         </Text>
-      </Animated.View>
+      </Reanimated.View>
     );
   }
 
   if (message.status === "thinking") {
     return (
-      <View accessibilityLabel="Assistant is thinking" style={styles.assistantMessage}>
-        <View style={styles.thinkingRow}>
-          <View style={styles.thinkingDot} />
-          <Text style={styles.thinkingText}>Thinking…</Text>
+      <View
+        accessibilityLabel="Assistant is thinking"
+        className="mb-[22px] min-w-full self-stretch"
+      >
+        <View className="min-h-[30px] flex-row items-center gap-2">
+          <View className="h-2 w-2 rounded-full bg-muted-foreground" />
+          <Text className="text-[15px] text-muted-foreground italic">Thinking…</Text>
         </View>
       </View>
     );
   }
 
   return (
-    <View style={styles.assistantMessage}>
+    <View className="mb-[22px] min-w-full self-stretch">
       <StreamdownText
         flavor="github"
-        key={isDark ? "dark" : "light"}
+        key={themeKey}
         markdown={message.content}
         markdownStyle={markdownStyle}
         onLinkPress={(event) => onLinkPress(event.url)}
@@ -50,44 +55,3 @@ function ChatMessageComponent({ isDark, message, markdownStyle, onLinkPress }: C
     </View>
   );
 }
-
-export const ChatMessage = memo(ChatMessageComponent);
-
-const styles = StyleSheet.create({
-  assistantMessage: {
-    alignSelf: "stretch",
-    marginBottom: 22,
-    minWidth: "100%",
-  },
-  thinkingDot: {
-    backgroundColor: "#737373",
-    borderRadius: 4,
-    height: 8,
-    width: 8,
-  },
-  thinkingRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 8,
-    minHeight: 30,
-  },
-  thinkingText: {
-    color: "#737373",
-    fontSize: 15,
-    fontStyle: "italic",
-  },
-  userMessage: {
-    alignSelf: "flex-end",
-    backgroundColor: "#007AFF",
-    borderRadius: 20,
-    marginBottom: 22,
-    maxWidth: "82%",
-    paddingHorizontal: 16,
-    paddingVertical: 11,
-  },
-  userMessageText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    lineHeight: 22,
-  },
-});
