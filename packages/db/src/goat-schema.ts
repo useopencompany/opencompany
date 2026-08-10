@@ -55,6 +55,10 @@ export type GoatWorkflowStep = {
   instructions: string;
 };
 export type GoatSkillStatus = "draft" | "active";
+// A skill imported from an external SKILL.md source. `null` on the row itself means
+// hand-authored in Goat. Matches `AgentRemoteSkillSource["type"]`
+// (packages/agent-runtime/src/skill-resolver.ts) exactly — no translation layer needed.
+export type GoatSkillSourceType = "github" | "skills.sh";
 
 export type GoatHarnessEngine = "opencompany" | "codex" | "claude_code";
 
@@ -2905,6 +2909,15 @@ export const goatSkills = goat.table(
     createdByWorkosId: text("created_by_workos_id").references(() => goatUsers.workosUserId, {
       onDelete: "set null",
     }),
+    // Source provenance for imported skills. NULL sourceType = hand-authored in Goat (the
+    // original, still-supported path). Non-NULL means the row was resolved from an external
+    // SKILL.md and is read-only — see updateGoatSkill in apps/goat/lib/skills.ts.
+    sourceType: text("source_type").$type<GoatSkillSourceType>(),
+    sourceUrl: text("source_url"),
+    sourceRef: text("source_ref"),
+    sourcePath: text("source_path"),
+    resolvedCommit: text("resolved_commit"),
+    integrity: text("integrity"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
@@ -2918,7 +2931,20 @@ export const goatSkills = goat.table(
       table.archivedAt,
       table.updatedAt,
     ),
+    // Prevents importing the same skill twice into one workspace; importGoatSkillAction looks
+    // this up first and reuses the existing row instead of relying on this to reject.
+    workspaceSourceIdx: uniqueIndex("goat_skills_workspace_source_idx")
+      .on(table.workspaceId, table.sourceUrl, table.sourceRef, table.sourcePath)
+      .where(sql`${table.sourceType} IS NOT NULL AND ${table.archivedAt} IS NULL`),
     statusCheck: check("goat_skills_status_check", sql`${table.status} IN ('draft', 'active')`),
+    sourceTypeCheck: check(
+      "goat_skills_source_type_check",
+      sql`${table.sourceType} IS NULL OR ${table.sourceType} IN ('github', 'skills.sh')`,
+    ),
+    sourceUrlRequiredCheck: check(
+      "goat_skills_source_url_required_check",
+      sql`${table.sourceType} IS NULL OR ${table.sourceUrl} IS NOT NULL`,
+    ),
   }),
 );
 

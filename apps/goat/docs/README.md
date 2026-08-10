@@ -106,6 +106,16 @@ current user's active workspace, rejects unavailable references, and caps a turn
 skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores an immutable snapshot
 in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original version.
 
+Besides hand-authoring, `/settings/skills` lets an admin import a skill from a public GitHub or
+skills.sh URL (`apps/goat/lib/skill-import.ts`, reusing the same resolver `apps/web`'s external
+skills use). An imported row carries `source_type`/`source_url`/`source_ref`/`source_path` on
+`goat.skills`, lands `active` immediately, and is read-only — `updateGoatSkill` rejects edits to
+any row with a non-null `source_type`. Import is instructions-only in this iteration: bundled
+`scripts/`/`references/` files in the source repo are reported but not materialized, since Goat
+skills are plain text injected into the prompt, not files on disk the runner mounts. See
+`docs/future-concepts/goat-plugins-alignment-proposal.md` for where this fits into the broader
+skills/integrations direction.
+
 Selecting a workflow with `#<id>` changes the composer action from **Send message** to **Start
 task**. Submission posts directly to `/api/workflows`, creates a task-flavored chat session and its
 first durable turn, and leaves the current Home or chat surface in place. It does not call the
