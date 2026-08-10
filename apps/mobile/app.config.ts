@@ -13,9 +13,22 @@ export default {
     icon: IS_DEV ? "./assets/ios-dev.icon" : "./assets/ios.icon",
     supportsTablet: false,
     bundleIdentifier: IS_DEV ? "cloud.opencompany.mobile-dev" : "cloud.opencompany.mobile",
+    infoPlist: {
+      CADisableMinimumFrameDurationOnPhone: true,
+      NSPhotoLibraryAddUsageDescription:
+        "OpenCompany needs permission to save images from chat messages to your photo library.",
+    },
   },
   plugins: [
     "expo-router",
+    [
+      "expo-build-properties",
+      {
+        ios: {
+          deploymentTarget: "26.0",
+        },
+      },
+    ],
     [
       "expo-splash-screen",
       {

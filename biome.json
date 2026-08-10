@@ -21,7 +21,9 @@
       "!**/test-results",
       "!drizzle/meta",
       "!apps/web/next-env.d.ts",
-      "!bun.lock"
+      "!bun.lock",
+      "!**/*.icon",
+      "!apps/mobile/src/uniwind-types.d.ts"
     ]
   },
   "linter": {
