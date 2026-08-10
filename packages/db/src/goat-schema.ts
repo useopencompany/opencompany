@@ -560,7 +560,13 @@ export type GoatCodexChatSessionStatus =
   | "failed"
   | "interrupted"
   | "closed";
-export type GoatCodexChatTurnStatus = "queued" | "running" | "completed" | "failed" | "interrupted";
+export type GoatCodexChatTurnStatus =
+  | "queued"
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "interrupted";
 export const GOAT_CODEX_APP_SERVER_EVENT_TYPES = [
   "assistant.delta",
   "assistant.completed",
@@ -601,6 +607,7 @@ export const GOAT_CODEX_CHAT_EVENT_TYPES: readonly GoatCodexChatEventType[] =
   );
 
 export type GoatCodexChatTurnSettings = {
+  approvalContinuation?: boolean;
   reasoningEffort?: CodexReasoningEffort;
   planModeReasoningEffort?: CodexReasoningEffort | null;
   wakeupChain?: number;
@@ -4006,8 +4013,8 @@ export const goatCodexChatTurns = goat.table(
       table.assistantMessageId,
     ),
     statusCheck: check(
-      "goat_codex_chat_turns_status_check",
-      sql`${table.status} IN ('queued', 'running', 'completed', 'failed', 'interrupted')`,
+      "goat_codex_chat_turns_status_v2_check",
+      sql`${table.status} IN ('queued', 'running', 'paused', 'completed', 'failed', 'interrupted')`,
     ),
     eventSequenceCheck: check(
       "goat_codex_chat_turns_event_sequence_check",

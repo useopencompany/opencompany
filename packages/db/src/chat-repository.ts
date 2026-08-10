@@ -13,6 +13,7 @@ import {
   type MessagePage,
   type ResolveApprovalResult,
   type Run,
+  type RunApproval,
   type RunAttempt,
   type RunEvent,
   type RunEventPage,
@@ -405,7 +406,9 @@ export class PostgresChatRepository implements ChatRepository {
         )
       : sql`NULL`;
 
-    const [reservation] = await this.rows<CreateResultRow>(sql`
+    let reservations: CreateResultRow[];
+    try {
+      reservations = await this.rows<CreateResultRow>(sql`
       WITH membership AS MATERIALIZED (
         SELECT 1
         FROM goat.workspace_members
@@ -454,16 +457,6 @@ export class PostgresChatRepository implements ChatRepository {
           ${assistantMessageId}, ${runtimeId}, ${runId}, ${now}, ${now}
         WHERE EXISTS (SELECT 1 FROM membership)
           AND (
-            (SELECT COUNT(*) FROM eligible_attachments) = ${attachmentIds.length}
-            OR EXISTS (
-              SELECT 1
-              FROM goat.chat_command_idempotency AS concurrent_replay
-              WHERE concurrent_replay.user_workos_id = ${input.actor.userId}
-                AND concurrent_replay.workspace_id = ${input.actor.workspaceId}
-                AND concurrent_replay.idempotency_key = ${input.command.idempotencyKey}
-            )
-          )
-          AND (
             ${input.command.conversationId ?? null}::text IS NULL
             OR EXISTS (SELECT 1 FROM authorized_existing)
             OR EXISTS (
@@ -496,6 +489,102 @@ export class PostgresChatRepository implements ChatRepository {
         SELECT id, model FROM created_chat
         UNION ALL
         SELECT id, model FROM authorized_existing WHERE EXISTS (SELECT 1 FROM winner)
+      ),
+      dismissed_approvals AS MATERIALIZED (
+        UPDATE goat.run_approvals AS approval
+        SET status = 'canceled',
+            resolution = 'canceled',
+            response = jsonb_build_object('resolution', 'canceled'),
+            resolved_at = ${now},
+            updated_at = ${now}
+        FROM goat.codex_chat_turns AS paused, target_chat AS chat
+        WHERE approval.run_id = paused.id
+          AND approval.status = 'pending'
+          AND paused.chat_session_id = chat.id
+          AND paused.user_workos_id = ${input.actor.userId}
+          AND paused.status = 'paused'
+        RETURNING approval.id, approval.run_id
+      ),
+      dismissed_approval_messages AS MATERIALIZED (
+        UPDATE goat.chat_messages AS message
+        SET debug_trace = jsonb_set(
+              message.debug_trace,
+              '{uiMessageParts}',
+              COALESCE(
+                (
+                  SELECT jsonb_agg(
+                    CASE
+                      WHEN part.value ->> 'state' = 'approval-requested'
+                        AND part.value -> 'approval' ->> 'id' IN (
+                          SELECT dismissed.id
+                          FROM dismissed_approvals AS dismissed
+                          WHERE dismissed.run_id = paused.id
+                        )
+                      THEN part.value || jsonb_build_object(
+                        'state', 'output-denied',
+                        'approval', (part.value -> 'approval') || jsonb_build_object(
+                          'approved', false,
+                          'reason', 'The user continued without responding to this approval.'
+                        )
+                      )
+                      ELSE part.value
+                    END
+                    ORDER BY part.ordinality
+                  )
+                  FROM jsonb_array_elements(
+                    COALESCE(message.debug_trace -> 'uiMessageParts', '[]'::jsonb)
+                  ) WITH ORDINALITY AS part(value, ordinality)
+                ),
+                '[]'::jsonb
+              )
+            ),
+            updated_at = ${now}
+        FROM goat.codex_chat_turns AS paused
+        WHERE message.id = paused.assistant_message_id
+          AND message.role = 'assistant'
+          AND message.debug_trace IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM dismissed_approvals AS dismissed
+            WHERE dismissed.run_id = paused.id
+          )
+        RETURNING paused.id AS run_id
+      ),
+      canceled_paused_runs AS MATERIALIZED (
+        UPDATE goat.codex_chat_turns AS paused
+        SET status = 'interrupted',
+            completed_at = ${now},
+            event_sequence = paused.event_sequence + 1,
+            updated_at = ${now}
+        FROM target_chat AS chat
+        WHERE paused.chat_session_id = chat.id
+          AND paused.user_workos_id = ${input.actor.userId}
+          AND paused.status = 'paused'
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM dismissed_approvals AS dismissed
+              WHERE dismissed.run_id = paused.id
+            )
+            OR EXISTS (
+              SELECT 1 FROM dismissed_approval_messages AS message
+              WHERE message.run_id = paused.id
+            )
+          )
+        RETURNING paused.id, paused.event_sequence
+      ),
+      canceled_pause_events AS MATERIALIZED (
+        INSERT INTO goat.run_events (
+          id, run_id, sequence, schema_version, type, payload, created_at
+        )
+        SELECT
+          'run_event_' || gen_random_uuid()::text,
+          canceled.id,
+          canceled.event_sequence,
+          1,
+          'run.canceled',
+          jsonb_build_object('by', 'user'),
+          ${now}
+        FROM canceled_paused_runs AS canceled
+        RETURNING run_id, sequence
       ),
       upserted_runtime AS MATERIALIZED (
         INSERT INTO goat.codex_chat_sessions (
@@ -600,7 +689,11 @@ export class PostgresChatRepository implements ChatRepository {
           ${RUN_EVENT_NOTIFY_CHANNEL},
           jsonb_build_object('runId', run_id, 'sequence', sequence)::text
         )
-        FROM inserted_event
+        FROM (
+          SELECT run_id, sequence FROM inserted_event
+          UNION ALL
+          SELECT run_id, sequence FROM canceled_pause_events
+        ) AS event
       ),
       updated_chat AS (
         UPDATE goat.chat_sessions AS chat
@@ -617,13 +710,21 @@ export class PostgresChatRepository implements ChatRepository {
         reservation.run_id AS "runId",
         reservation.transaction_id AS "transactionId",
         reservation.command_id <> ${commandId} AS replayed,
-        (
-          reservation.command_id <> ${commandId}
-          OR EXISTS (SELECT 1 FROM inserted_run)
-        ) AS materialized,
+        CASE
+          WHEN reservation.command_id <> ${commandId} OR EXISTS (SELECT 1 FROM inserted_run)
+            THEN true
+          ELSE jsonb_array_length(jsonb_build_object('reason', 'unmaterialized')) = 0
+        END AS materialized,
         (SELECT count(*) FROM notified) AS "notifyCount"
       FROM reservation
-    `);
+      `);
+    } catch (error) {
+      if (attachmentIds.length > 0 && isUnmaterializedGuardError(error)) {
+        throw new CoreError("invalid_argument", "An attachment is unavailable or has expired.");
+      }
+      throw error;
+    }
+    const [reservation] = reservations;
 
     if (!reservation) {
       if (attachmentIds.length > 0) {
@@ -706,17 +807,20 @@ export class PostgresChatRepository implements ChatRepository {
       ),
       changed AS (
         UPDATE goat.codex_chat_turns AS run
-        SET status = CASE WHEN run.status = 'queued' THEN 'interrupted' ELSE run.status END,
+        SET status = CASE WHEN run.status IN ('queued', 'paused') THEN 'interrupted' ELSE run.status END,
             interrupt_requested_at = CASE
               WHEN run.status = 'running' THEN ${now}
               ELSE run.interrupt_requested_at
             END,
-            completed_at = CASE WHEN run.status = 'queued' THEN ${now} ELSE run.completed_at END,
+            completed_at = CASE
+              WHEN run.status IN ('queued', 'paused') THEN ${now}
+              ELSE run.completed_at
+            END,
             event_sequence = run.event_sequence + 1,
             updated_at = ${now}
         WHERE run.id IN (SELECT id FROM authorized)
           AND (
-            run.status = 'queued'
+            run.status IN ('queued', 'paused')
             OR (run.status = 'running' AND run.interrupt_requested_at IS NULL)
           )
         RETURNING run.id, run.status, run.event_sequence
@@ -762,7 +866,7 @@ export class PostgresChatRepository implements ChatRepository {
             SELECT 1
             FROM goat.codex_chat_turns AS pending
             WHERE pending.codex_chat_session_id = runtime.id
-              AND pending.status IN ('queued', 'running')
+              AND pending.status IN ('queued', 'running', 'paused')
               AND pending.id NOT IN (SELECT id FROM changed WHERE status = 'interrupted')
           )
         RETURNING runtime.id
@@ -830,15 +934,90 @@ export class PostgresChatRepository implements ChatRepository {
             updated_at = ${now}
         WHERE approval.id IN (SELECT id FROM authorized)
           AND approval.status = 'pending'
-        RETURNING approval.id
+        RETURNING approval.id, approval.run_id
+      ),
+      rewritten_assistant AS MATERIALIZED (
+        UPDATE goat.chat_messages AS message
+        SET debug_trace = jsonb_set(
+              message.debug_trace,
+              '{uiMessageParts}',
+              COALESCE(
+                (
+                  SELECT jsonb_agg(
+                    CASE
+                      WHEN part.value ->> 'state' = 'approval-requested'
+                        AND part.value -> 'approval' ->> 'id' = ${input.command.approvalId}
+                      THEN part.value || jsonb_build_object(
+                        'state', 'approval-responded',
+                        'approval', jsonb_build_object(
+                          'id', ${input.command.approvalId}::text,
+                          'approved', ${input.command.resolution === "approved"}::boolean,
+                          'reason', ${
+                            input.command.resolution === "approved"
+                              ? null
+                              : (input.command.answer ?? "Denied by user.")
+                          }::text
+                        )
+                      )
+                      ELSE part.value
+                    END
+                    ORDER BY part.ordinality
+                  )
+                  FROM jsonb_array_elements(
+                    COALESCE(message.debug_trace -> 'uiMessageParts', '[]'::jsonb)
+                  ) WITH ORDINALITY AS part(value, ordinality)
+                ),
+                '[]'::jsonb
+              )
+            ),
+            updated_at = ${now}
+        FROM changed
+        JOIN goat.codex_chat_turns AS run ON run.id = changed.run_id
+        WHERE message.id = run.assistant_message_id
+          AND message.role = 'assistant'
+          AND message.debug_trace IS NOT NULL
+        RETURNING message.id
       ),
       advanced_run AS MATERIALIZED (
         UPDATE goat.codex_chat_turns AS run
         SET event_sequence = run.event_sequence + 1,
+            status = CASE
+              WHEN EXISTS (
+                SELECT 1
+                FROM goat.run_approvals AS pending
+                WHERE pending.run_id = run.id
+                  AND pending.status = 'pending'
+                  AND pending.id NOT IN (SELECT id FROM changed)
+              ) THEN 'paused'
+              ELSE 'queued'
+            END,
+            settings = CASE
+              WHEN EXISTS (
+                SELECT 1
+                FROM goat.run_approvals AS pending
+                WHERE pending.run_id = run.id
+                  AND pending.status = 'pending'
+                  AND pending.id NOT IN (SELECT id FROM changed)
+              ) THEN run.settings
+              ELSE jsonb_set(run.settings, '{approvalContinuation}', 'true'::jsonb, true)
+            END,
             updated_at = ${now}
         WHERE run.id = ${input.command.runId}
+          AND run.status = 'paused'
           AND EXISTS (SELECT 1 FROM changed)
-        RETURNING run.id, run.event_sequence
+          AND EXISTS (SELECT 1 FROM rewritten_assistant)
+        RETURNING run.id, run.event_sequence, run.status, run.codex_chat_session_id
+      ),
+      queued_runtime AS MATERIALIZED (
+        UPDATE goat.codex_chat_sessions AS runtime
+        SET status = 'queued',
+            active_turn_id = run.id,
+            error = NULL,
+            updated_at = ${now}
+        FROM advanced_run AS run
+        WHERE runtime.id = run.codex_chat_session_id
+          AND run.status = 'queued'
+        RETURNING runtime.id
       ),
       inserted_event AS (
         INSERT INTO goat.run_events (
@@ -920,6 +1099,17 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
           AND lease_id = ${input.leaseId}
           AND lease_owner = ${input.worker.workerId}
       ),
+      abandoned AS (
+        UPDATE goat.run_attempts AS attempt
+        SET status = 'abandoned',
+            error_code = 'lease_reclaimed',
+            error_message = 'The worker lease expired and execution was reclaimed.',
+            completed_at = ${startedAt}
+        WHERE attempt.run_id IN (SELECT id FROM fenced_run)
+          AND attempt.status = 'running'
+          AND attempt.lease_id IS DISTINCT FROM ${input.leaseId}
+        RETURNING attempt.id
+      ),
       inserted AS (
         INSERT INTO goat.run_attempts (
           id, run_id, number, status, worker_id, lease_id, started_at, created_at
@@ -928,6 +1118,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
           ${input.attemptId}, fenced_run.id, fenced_run.attempts, 'running',
           ${input.worker.workerId}, ${input.leaseId}, ${startedAt}, ${startedAt}
         FROM fenced_run
+        LEFT JOIN (SELECT COUNT(*) AS abandoned_count FROM abandoned) AS recovery ON TRUE
         ON CONFLICT DO NOTHING
         RETURNING *
       )
@@ -1012,6 +1203,139 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
     return rows.map(mapRunEvent);
   }
 
+  async pauseForApprovals(input: Parameters<RunExecutionRepository["pauseForApprovals"]>[0]) {
+    if (input.approvals.length === 0) return [];
+    const pausedAt = this.now();
+    const eventDrafts = [
+      ...input.approvals.map((approval) => ({
+        id: `run_event_${randomUUID()}`,
+        type: "approval.requested",
+        payload: {
+          approvalId: approval.id,
+          kind: approval.kind,
+          prompt: approval.prompt,
+          ...(approval.options ? { options: approval.options } : {}),
+        },
+      })),
+      {
+        id: `run_event_${randomUUID()}`,
+        type: "run.paused",
+        payload: { reason: "approval_required" },
+      },
+    ];
+    const rows = await this.rows<RunApprovalRow>(sql`
+      WITH fenced_attempt AS MATERIALIZED (
+        SELECT attempt.id, attempt.run_id
+        FROM goat.run_attempts AS attempt
+        JOIN goat.codex_chat_turns AS run ON run.id = attempt.run_id
+        WHERE attempt.id = ${input.attemptId}
+          AND attempt.run_id = ${input.runId}
+          AND attempt.status = 'running'
+          AND attempt.lease_id = ${input.leaseId}
+          AND attempt.worker_id = ${input.worker.workerId}
+          AND run.status = 'running'
+          AND run.lease_id = ${input.leaseId}
+          AND run.lease_owner = ${input.worker.workerId}
+      ),
+      approval_input AS MATERIALIZED (
+        SELECT
+          item.value ->> 'id' AS id,
+          item.value ->> 'kind' AS kind,
+          item.value ->> 'prompt' AS prompt,
+          item.value -> 'options' AS options,
+          item.ordinality
+        FROM jsonb_array_elements(${JSON.stringify(input.approvals)}::jsonb)
+          WITH ORDINALITY AS item(value, ordinality)
+      ),
+      inserted_approvals AS MATERIALIZED (
+        INSERT INTO goat.run_approvals (
+          id, run_id, attempt_id, kind, prompt, options, status, created_at, updated_at
+        )
+        SELECT
+          approval.id, fenced.run_id, fenced.id, approval.kind, approval.prompt,
+          approval.options, 'pending', ${pausedAt}, ${pausedAt}
+        FROM approval_input AS approval
+        CROSS JOIN fenced_attempt AS fenced
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM goat.run_approvals AS existing
+          JOIN approval_input AS requested ON requested.id = existing.id
+        )
+        ON CONFLICT DO NOTHING
+        RETURNING *
+      ),
+      finished_attempt AS MATERIALIZED (
+        UPDATE goat.run_attempts AS attempt
+        SET status = 'completed', completed_at = ${pausedAt}
+        FROM fenced_attempt AS fenced
+        WHERE attempt.id = fenced.id
+          AND (SELECT COUNT(*) FROM inserted_approvals) = ${input.approvals.length}
+        RETURNING attempt.id
+      ),
+      paused_run AS MATERIALIZED (
+        UPDATE goat.codex_chat_turns AS run
+        SET status = 'paused',
+            lease_id = NULL,
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            event_sequence = run.event_sequence + ${eventDrafts.length},
+            updated_at = ${pausedAt}
+        FROM fenced_attempt AS fenced
+        WHERE run.id = fenced.run_id
+          AND EXISTS (SELECT 1 FROM finished_attempt)
+          AND EXISTS (
+            SELECT 1
+            FROM goat.codex_chat_sessions AS runtime
+            WHERE runtime.id = run.codex_chat_session_id
+          )
+        RETURNING run.id, run.event_sequence - ${eventDrafts.length} AS base_sequence,
+                  run.codex_chat_session_id
+      ),
+      event_input AS MATERIALIZED (
+        SELECT
+          item.value ->> 'id' AS id,
+          item.value ->> 'type' AS type,
+          item.value -> 'payload' AS payload,
+          item.ordinality
+        FROM jsonb_array_elements(${JSON.stringify(eventDrafts)}::jsonb)
+          WITH ORDINALITY AS item(value, ordinality)
+      ),
+      inserted_events AS MATERIALIZED (
+        INSERT INTO goat.run_events (
+          id, run_id, attempt_id, sequence, schema_version, type, payload, created_at
+        )
+        SELECT
+          event.id, run.id, ${input.attemptId}, run.base_sequence + event.ordinality,
+          1, event.type, event.payload, ${pausedAt}
+        FROM event_input AS event
+        CROSS JOIN paused_run AS run
+        RETURNING run_id, sequence
+      ),
+      idled_runtime AS MATERIALIZED (
+        UPDATE goat.codex_chat_sessions AS runtime
+        SET status = 'idle', active_turn_id = NULL, updated_at = ${pausedAt}
+        FROM paused_run AS run
+        WHERE runtime.id = run.codex_chat_session_id
+        RETURNING runtime.id
+      ),
+      notified AS MATERIALIZED (
+        SELECT pg_notify(
+          ${RUN_EVENT_NOTIFY_CHANNEL},
+          jsonb_build_object('runId', run_id, 'sequence', max(sequence))::text
+        )
+        FROM inserted_events
+        GROUP BY run_id
+      )
+      SELECT approval.*
+      FROM inserted_approvals AS approval
+      WHERE (SELECT COUNT(*) FROM inserted_events) = ${eventDrafts.length}
+        AND EXISTS (SELECT 1 FROM idled_runtime)
+        AND EXISTS (SELECT 1 FROM notified)
+      ORDER BY approval.created_at ASC, approval.id ASC
+    `);
+    return rows.map(mapRunApproval);
+  }
+
   async finishAttempt(input: Parameters<RunExecutionRepository["finishAttempt"]>[0]) {
     const completedAt = this.now();
     const [row] = await this.rows<RunAttemptRow>(sql`
@@ -1068,7 +1392,7 @@ type MessagePageRow = {
   updatedAt: Date | string | null;
 };
 
-type LegacyRunStatus = "queued" | "running" | "completed" | "failed" | "interrupted";
+type LegacyRunStatus = "queued" | "running" | "paused" | "completed" | "failed" | "interrupted";
 type RunRow = {
   id: string;
   conversationId: string;
@@ -1107,6 +1431,26 @@ type RunAttemptRow = {
   errorCode?: string | null;
   error_message?: string | null;
   errorMessage?: string | null;
+};
+
+type RunApprovalRow = {
+  id: string;
+  runId?: string;
+  run_id?: string;
+  attemptId?: string | null;
+  attempt_id?: string | null;
+  kind: string;
+  prompt: string;
+  options: string[] | null;
+  status: RunApproval["status"];
+  resolution: RunApproval["resolution"];
+  response: Record<string, unknown> | null;
+  createdAt?: Date | string;
+  created_at?: Date | string;
+  updatedAt?: Date | string;
+  updated_at?: Date | string;
+  resolvedAt?: Date | string | null;
+  resolved_at?: Date | string | null;
 };
 
 type ChatAttachmentUploadRow = {
@@ -1305,6 +1649,26 @@ function mapRunAttempt(row: RunAttemptRow): RunAttempt {
   };
 }
 
+function mapRunApproval(row: RunApprovalRow): RunApproval {
+  return {
+    id: row.id,
+    runId: row.runId ?? row.run_id ?? "",
+    attemptId: row.attemptId ?? row.attempt_id ?? null,
+    kind: row.kind,
+    prompt: row.prompt,
+    options: row.options,
+    status: row.status,
+    resolution: row.resolution,
+    response: row.response,
+    createdAt: asDate(row.createdAt ?? row.created_at ?? new Date(0)),
+    updatedAt: asDate(row.updatedAt ?? row.updated_at ?? new Date(0)),
+    resolvedAt:
+      (row.resolvedAt ?? row.resolved_at)
+        ? asDate(row.resolvedAt ?? row.resolved_at ?? new Date(0))
+        : null,
+  };
+}
+
 function mapAttachmentUpload(row: ChatAttachmentUploadRow): ChatAttachmentUpload {
   return {
     id: row.id,
@@ -1410,4 +1774,14 @@ function rowsFromExecute<Row>(result: unknown): Row[] {
     if (Array.isArray(rows)) return rows as Row[];
   }
   return [];
+}
+
+function isUnmaterializedGuardError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { code?: unknown; message?: unknown };
+  return (
+    record.code === "22023" ||
+    (typeof record.message === "string" &&
+      record.message.includes("cannot get array length of a non-array"))
+  );
 }

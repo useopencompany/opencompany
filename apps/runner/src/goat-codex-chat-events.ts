@@ -16,6 +16,8 @@ import {
   captureGoatLlmUsageRecorded,
   type GoatLlmUsageAnalyticsStage,
 } from "@opencompany/analytics/goat/server";
+import type { RunEventDraft, RunExecutionRepository } from "@opencompany/core";
+import { PostgresRunExecutionRepository } from "@opencompany/db/chat-repository";
 import {
   GOAT_CODEX_CHAT_EVENT_TYPES,
   type GoatChatMessageDebugTrace,
@@ -51,6 +53,7 @@ export type GoatCodexChatProjectorTarget = {
   engine: GoatAnalyticsEngine;
   leaseId: string;
   leaseOwner: string;
+  canonicalAttemptId?: string;
   planMode: boolean;
   turnCreatedAt?: Date;
 };
@@ -66,13 +69,44 @@ export function createGoatCodexChatProjector(input: {
   // Engines that don't speak the codex app-server protocol (Claude Code) inject their
   // own raw-event → normalized-event translation; everything downstream is shared.
   normalizeEvent?: (raw: Record<string, unknown>) => CodexAppServerNormalizedEvent[];
+  execution?: RunExecutionRepository;
 }) {
   const { target, redact } = input;
+  const execution =
+    input.execution ?? new PostgresRunExecutionRepository((query) => getDb().execute(query));
   const normalizeEvent = input.normalizeEvent ?? normalizeCodexAppServerEvent;
   let parts: CodexUiMessagePart[] = input.initialParts ?? [];
   let turnError: string | null = null;
   let auditFailureReported = false;
+  let lastProjectedContent: string | null = null;
+  const toolEventStates = new Map<string, "started" | "completed" | "failed">();
+  const publishedArtifactIds = new Set<string>();
   const outputAccumulator = createCodexCommandOutputAccumulator();
+
+  const appendProjectionEvents = async (content: string) => {
+    if (!target.canonicalAttemptId) return;
+    const events: RunEventDraft[] = [];
+    if (content !== lastProjectedContent) {
+      events.push({
+        id: `run_event_${randomUUID()}`,
+        type: "message.content_updated",
+        payload: { messageId: target.assistantMessageId, content, complete: false },
+      });
+      lastProjectedContent = content;
+    }
+    events.push(
+      ...semanticEventsFromCodexParts(parts, toolEventStates, publishedArtifactIds, redact),
+    );
+    if (events.length === 0) return;
+    const inserted = await execution.appendEvents({
+      worker: { workerId: target.leaseOwner },
+      runId: target.turnId,
+      attemptId: target.canonicalAttemptId,
+      leaseId: target.leaseId,
+      events,
+    });
+    if (inserted.length !== events.length) throw new GoatCodexChatLeaseLostError();
+  };
 
   const writeAssistantMessage = async (
     options: {
@@ -113,6 +147,8 @@ export function createGoatCodexChatProjector(input: {
         RETURNING message.id
       `),
     );
+    await appendProjectionEvents(content);
+    return content;
   };
 
   const insertEventRow = async (event: CodexAppServerNormalizedEvent) => {
@@ -304,6 +340,7 @@ export function createGoatCodexChatProjector(input: {
     error: string | null;
     completedAt?: Date;
     taskCompletion?: GoatTaskTurnCompletion | null | undefined;
+    content: string;
   }) => {
     const now = options.completedAt ?? new Date();
     await settleGoatDurableTurn({
@@ -313,6 +350,15 @@ export function createGoatCodexChatProjector(input: {
       error: options.error,
       completedAt: now,
       taskCompletion: options.taskCompletion,
+      ...(target.canonicalAttemptId
+        ? {
+            canonicalRun: {
+              attemptId: target.canonicalAttemptId,
+              assistantMessageId: target.assistantMessageId,
+              content: options.content,
+            },
+          }
+        : {}),
     });
   };
 
@@ -496,7 +542,7 @@ export function createGoatCodexChatProjector(input: {
           if (target.planMode) {
             parts = offerCodexPlanImplementation(parts).parts;
           }
-          await writeAssistantMessage({
+          const content = await writeAssistantMessage({
             error: null,
             usage,
             durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
@@ -507,13 +553,14 @@ export function createGoatCodexChatProjector(input: {
             error: null,
             completedAt,
             taskCompletion: options.taskCompletion,
+            content,
           });
           return;
         }
         const error =
           summary.error ?? turnError ?? `Codex finished with status: ${summary.status}.`;
         parts = finalizeCodexUiMessageParts(parts, "failed", error).parts;
-        await writeAssistantMessage({
+        const content = await writeAssistantMessage({
           error,
           usage,
           durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
@@ -524,6 +571,7 @@ export function createGoatCodexChatProjector(input: {
           error,
           completedAt,
           taskCompletion: options.taskCompletion,
+          content,
         });
       });
     },
@@ -534,7 +582,7 @@ export function createGoatCodexChatProjector(input: {
         await cancelPendingInteractions();
         await reconcilePublishedArtifacts();
         parts = finalizeCodexUiMessageParts(parts, "interrupted").parts;
-        await writeAssistantMessage({
+        const content = await writeAssistantMessage({
           aborted: true,
           durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
         });
@@ -544,6 +592,7 @@ export function createGoatCodexChatProjector(input: {
           error: null,
           completedAt,
           taskCompletion,
+          content,
         });
       });
     },
@@ -560,7 +609,7 @@ export function createGoatCodexChatProjector(input: {
         await cancelPendingInteractions();
         await reconcilePublishedArtifacts();
         parts = finalizeCodexUiMessageParts(parts, "failed", error).parts;
-        await writeAssistantMessage({
+        const content = await writeAssistantMessage({
           error,
           durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
         });
@@ -570,6 +619,7 @@ export function createGoatCodexChatProjector(input: {
           error,
           completedAt,
           taskCompletion: options.taskCompletion,
+          content,
         });
       });
     },
@@ -647,6 +697,97 @@ function assertRowsChanged(result: unknown) {
 function elapsedTurnDurationMs(startedAt: Date | undefined, completedAt: Date) {
   if (!startedAt || Number.isNaN(startedAt.getTime())) return undefined;
   return Math.max(0, completedAt.getTime() - startedAt.getTime());
+}
+
+function semanticEventsFromCodexParts(
+  parts: readonly CodexUiMessagePart[],
+  toolStates: Map<string, "started" | "completed" | "failed">,
+  artifactIds: Set<string>,
+  redact: (value: string) => string,
+) {
+  const events: RunEventDraft[] = [];
+  const visit = (values: readonly CodexUiMessagePart[]) => {
+    for (const part of values) {
+      const record = part as unknown as Record<string, unknown>;
+      const type = typeof record.type === "string" ? record.type : "";
+      const toolCallId = typeof record.toolCallId === "string" ? record.toolCallId : null;
+      const state = typeof record.state === "string" ? record.state : null;
+      if (toolCallId && state && (type === "dynamic-tool" || type.startsWith("tool-"))) {
+        if (!toolStates.has(toolCallId)) {
+          events.push({
+            id: `run_event_${randomUUID()}`,
+            type: "tool.started",
+            payload: {
+              toolCallId,
+              name:
+                typeof record.toolName === "string"
+                  ? record.toolName
+                  : type.slice("tool-".length) || "tool",
+            },
+          });
+          toolStates.set(toolCallId, "started");
+        }
+        if (
+          (state === "output-available" || state === "completed") &&
+          toolStates.get(toolCallId) !== "completed"
+        ) {
+          events.push({
+            id: `run_event_${randomUUID()}`,
+            type: "tool.completed",
+            payload: { toolCallId },
+          });
+          toolStates.set(toolCallId, "completed");
+        } else if (
+          (state === "output-error" || state === "failed" || state === "output-denied") &&
+          toolStates.get(toolCallId) !== "failed"
+        ) {
+          events.push({
+            id: `run_event_${randomUUID()}`,
+            type: "tool.failed",
+            payload: {
+              toolCallId,
+              code: state === "output-denied" ? "denied" : "tool_error",
+              message:
+                typeof record.errorText === "string"
+                  ? redact(record.errorText)
+                  : state === "output-denied"
+                    ? "Tool execution was denied."
+                    : "Tool execution failed.",
+            },
+          });
+          toolStates.set(toolCallId, "failed");
+        }
+      }
+      if (type === "data-artifact-file" && isRecord(record.data)) {
+        const artifact = record.data;
+        const artifactId = typeof artifact.artifactId === "string" ? artifact.artifactId : null;
+        if (
+          artifactId &&
+          !artifactIds.has(artifactId) &&
+          typeof artifact.title === "string" &&
+          typeof artifact.filename === "string" &&
+          typeof artifact.mediaType === "string" &&
+          typeof artifact.sizeBytes === "number"
+        ) {
+          events.push({
+            id: `run_event_${randomUUID()}`,
+            type: "artifact.published",
+            payload: {
+              artifactId,
+              title: redact(artifact.title),
+              filename: redact(artifact.filename),
+              mediaType: artifact.mediaType,
+              sizeBytes: artifact.sizeBytes,
+            },
+          });
+          artifactIds.add(artifactId);
+        }
+      }
+      if (Array.isArray(record.children)) visit(record.children as CodexUiMessagePart[]);
+    }
+  };
+  visit(parts);
+  return events;
 }
 
 function collectProjectedArtifactVersionIds(parts: readonly CodexUiMessagePart[]) {
@@ -758,4 +899,8 @@ export async function loadCodexChatAssistantMessageParts(assistantMessageId: str
 // runs over the serialized JSON rather than individual fields.
 function redactJson(value: unknown, redact: (value: string) => string): unknown {
   return JSON.parse(redact(JSON.stringify(value ?? null)));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

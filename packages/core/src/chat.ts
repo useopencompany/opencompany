@@ -175,6 +175,13 @@ export type RunEventDraft = {
   payload: Readonly<Record<string, unknown>>;
 };
 
+export type RunApprovalDraft = {
+  id: string;
+  kind: string;
+  prompt: string;
+  options?: readonly string[];
+};
+
 // Worker-facing durability port. Lease fencing remains a persistence concern; the application
 // core names only Runs, Attempts, workers, and semantic events.
 export interface RunExecutionRepository {
@@ -191,6 +198,13 @@ export interface RunExecutionRepository {
     leaseId: string;
     events: readonly RunEventDraft[];
   }): Promise<readonly RunEvent[]>;
+  pauseForApprovals(input: {
+    worker: WorkerIdentity;
+    runId: string;
+    attemptId: string;
+    leaseId: string;
+    approvals: readonly RunApprovalDraft[];
+  }): Promise<readonly RunApproval[]>;
   finishAttempt(input: {
     worker: WorkerIdentity;
     runId: string;
@@ -420,9 +434,6 @@ export class ChatApplicationService {
     const answer = input.answer?.trim();
     if (input.resolution === "answered" && !answer) {
       throw new CoreError("invalid_argument", "An answer is required for this resolution.");
-    }
-    if (input.resolution !== "answered" && answer) {
-      throw new CoreError("invalid_argument", "An answer is only valid for an answered approval.");
     }
     if (input.resolution !== "answered" && answer) {
       throw new CoreError("invalid_argument", "An answer is only valid for an answered approval.");

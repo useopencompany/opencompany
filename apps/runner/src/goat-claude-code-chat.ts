@@ -171,6 +171,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
   session: GoatCodexChatSession;
   env: RunnerEnv;
   taskContext?: GoatTaskTurnContext | undefined;
+  canonicalAttemptId?: string;
   recovery?: { reason: "lease_reclaimed" };
   shouldAbort?: () => Error | null;
 }): Promise<"settled" | "handed_off"> {
@@ -194,6 +195,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
     engine: session.engine,
     leaseId,
     leaseOwner,
+    ...(input.canonicalAttemptId ? { canonicalAttemptId: input.canonicalAttemptId } : {}),
     planMode: false,
     turnCreatedAt: turn.runAfter && turn.runAfter > turn.createdAt ? turn.runAfter : turn.createdAt,
   };

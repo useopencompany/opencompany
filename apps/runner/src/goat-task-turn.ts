@@ -11,6 +11,7 @@ import {
   goatAnalyticsUsageSourceForEngine,
 } from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
+import { RUN_EVENT_NOTIFY_CHANNEL } from "@opencompany/db/chat-repository";
 import { recordGoatCreditDebit } from "@opencompany/db/goat-credits";
 import {
   type GoatCodexChatSession,
@@ -473,6 +474,11 @@ export async function settleGoatDurableTurn(input: {
   error: string | null;
   completedAt: Date;
   taskCompletion?: GoatTaskTurnCompletion | null | undefined;
+  canonicalRun?: {
+    attemptId: string;
+    assistantMessageId: string;
+    content: string;
+  };
 }) {
   const { target } = input;
   const completion = input.taskCompletion ?? null;
@@ -497,6 +503,46 @@ export async function settleGoatDurableTurn(input: {
         ? taskFailedNotification(completion.taskDisplayId, input.error ?? "")
         : null
     : null;
+  const canonicalEvents = input.canonicalRun
+    ? [
+        {
+          id: `run_event_${randomUUID()}`,
+          type: "message.content_updated",
+          payload: {
+            messageId: input.canonicalRun.assistantMessageId,
+            content: input.canonicalRun.content,
+            complete: true,
+          },
+        },
+        input.turnStatus === "completed"
+          ? {
+              id: `run_event_${randomUUID()}`,
+              type: "run.completed",
+              payload: { messageId: input.canonicalRun.assistantMessageId },
+            }
+          : input.turnStatus === "interrupted"
+            ? {
+                id: `run_event_${randomUUID()}`,
+                type: "run.canceled",
+                payload: { by: "user" },
+              }
+            : {
+                id: `run_event_${randomUUID()}`,
+                type: "run.failed",
+                payload: {
+                  code: "execution_failed",
+                  message: input.error ?? "Chat execution failed.",
+                  retryable: false,
+                },
+              },
+      ]
+    : [];
+  const canonicalAttemptStatus =
+    input.turnStatus === "completed"
+      ? "completed"
+      : input.turnStatus === "interrupted"
+        ? "canceled"
+        : "failed";
 
   const result = await getDb().execute(sql`
     WITH settled_turn AS (
@@ -504,13 +550,87 @@ export async function settleGoatDurableTurn(input: {
       SET status = ${input.turnStatus},
           error = ${input.error},
           completed_at = ${input.completedAt},
+          event_sequence = turn.event_sequence + ${canonicalEvents.length},
           updated_at = ${input.completedAt}
       WHERE turn.id = ${target.turnId}
         AND turn.user_workos_id = ${target.userWorkosId}
         AND turn.lease_id = ${target.leaseId}
         AND turn.lease_owner = ${target.leaseOwner}
         AND turn.status = 'running'
-      RETURNING turn.id
+        AND (
+          NOT ${Boolean(input.canonicalRun)}
+          OR EXISTS (
+            SELECT 1
+            FROM goat.run_attempts AS attempt
+            WHERE attempt.id = ${input.canonicalRun?.attemptId ?? null}
+              AND attempt.run_id = turn.id
+              AND attempt.status = 'running'
+              AND attempt.lease_id = ${target.leaseId}
+              AND attempt.worker_id = ${target.leaseOwner}
+          )
+        )
+      RETURNING turn.id, turn.event_sequence - ${canonicalEvents.length} AS base_sequence
+    ),
+    finished_canonical_attempt AS (
+      UPDATE goat.run_attempts AS attempt
+      SET status = ${canonicalAttemptStatus},
+          error_code = ${input.turnStatus === "failed" ? "execution_failed" : null},
+          error_message = ${input.turnStatus === "failed" ? input.error : null},
+          completed_at = ${input.completedAt}
+      FROM settled_turn AS run
+      WHERE attempt.id = ${input.canonicalRun?.attemptId ?? null}
+        AND attempt.run_id = run.id
+        AND attempt.status = 'running'
+        AND attempt.lease_id = ${target.leaseId}
+      RETURNING attempt.id
+    ),
+    canonical_event_input AS MATERIALIZED (
+      SELECT
+        item.value ->> 'id' AS id,
+        item.value ->> 'type' AS type,
+        item.value -> 'payload' AS payload,
+        item.ordinality
+      FROM jsonb_array_elements(${JSON.stringify(canonicalEvents)}::jsonb)
+        WITH ORDINALITY AS item(value, ordinality)
+    ),
+    inserted_canonical_events AS (
+      INSERT INTO goat.run_events (
+        id, run_id, attempt_id, sequence, schema_version, type, payload, created_at
+      )
+      SELECT
+        event.id,
+        run.id,
+        ${input.canonicalRun?.attemptId ?? null},
+        run.base_sequence + event.ordinality,
+        1,
+        event.type,
+        event.payload,
+        ${input.completedAt}
+      FROM canonical_event_input AS event
+      CROSS JOIN settled_turn AS run
+      WHERE EXISTS (SELECT 1 FROM finished_canonical_attempt)
+      RETURNING run_id, sequence
+    ),
+    notified_canonical_events AS MATERIALIZED (
+      SELECT pg_notify(
+        ${RUN_EVENT_NOTIFY_CHANNEL},
+        jsonb_build_object('runId', run_id, 'sequence', max(sequence))::text
+      )
+      FROM inserted_canonical_events
+      GROUP BY run_id
+    ),
+    canonical_settlement_guard AS MATERIALIZED (
+      SELECT CASE
+        WHEN NOT ${Boolean(input.canonicalRun)}
+          OR (
+            EXISTS (SELECT 1 FROM finished_canonical_attempt)
+            AND (SELECT COUNT(*) FROM inserted_canonical_events) = ${canonicalEvents.length}
+            AND (SELECT COUNT(*) FROM notified_canonical_events) = 1
+          )
+        THEN 1
+        ELSE jsonb_array_length(jsonb_build_object('reason', 'canonical_settlement_failed'))
+      END AS materialized
+      FROM settled_turn
     ),
     workflow_origin_attachments AS (
       SELECT origin.attachments, origin.attachment_texts
@@ -848,7 +968,9 @@ export async function settleGoatDurableTurn(input: {
     )
     SELECT runtime.id
     FROM updated_runtime AS runtime
+    CROSS JOIN canonical_settlement_guard AS canonical_guard
     WHERE EXISTS (SELECT 1 FROM updated_task_chat)
+      AND canonical_guard.materialized = 1
       AND (
         NOT ${Boolean(next?.chatSessionId)}
         OR (

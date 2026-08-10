@@ -106,6 +106,7 @@
         "@opencompany/agent-runtime": "workspace:*",
         "@opencompany/analytics": "workspace:*",
         "@opencompany/billing": "workspace:*",
+        "@opencompany/core": "workspace:*",
         "@opencompany/crypto": "workspace:*",
         "@opencompany/db": "workspace:*",
         "@opencompany/file-extract": "workspace:*",

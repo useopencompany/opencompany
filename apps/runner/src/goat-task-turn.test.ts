@@ -252,6 +252,41 @@ describe("session-backed task turns", () => {
     expect(statement).toContain("EXISTS (");
   });
 
+  it("settles the canonical Attempt and terminal event log in the fenced turn statement", async () => {
+    await settleGoatDurableTurn({
+      target: {
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        codexChatSessionId: "runtime_1",
+        chatSessionId: "goat_chat_1",
+        turnId: "turn_1",
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+      },
+      turnStatus: "completed",
+      sessionStatus: "idle",
+      error: null,
+      completedAt: new Date("2026-07-30T09:30:00.000Z"),
+      canonicalRun: {
+        attemptId: "attempt_1",
+        assistantMessageId: "assistant_message_1",
+        content: "Finished response",
+      },
+    });
+
+    const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]);
+    expect(query.sql).toContain("finished_canonical_attempt AS");
+    expect(query.sql).toContain("inserted_canonical_events AS");
+    expect(query.sql).toContain("canonical_settlement_guard AS MATERIALIZED");
+    expect(query.sql).toContain("event_sequence = turn.event_sequence +");
+    expect(query.sql).toContain("pg_notify");
+    expect(query.params).toContain("attempt_1");
+    expect(query.params).toContainEqual(
+      expect.stringContaining('"type":"message.content_updated"'),
+    );
+    expect(query.params).toContainEqual(expect.stringContaining('"type":"run.completed"'));
+  });
+
   it("settles the current lease, projects the task, queues the next workflow step in a fresh session, and dedupes notification", async () => {
     const completion = buildGoatTaskTurnCompletion({
       context: context(workflowSpec()),
