@@ -40,10 +40,6 @@ services:
         sync: false
       - key: RUNNER_STREAM_TOKEN_SECRET
         sync: false
-      - key: DURABLE_STREAMS_URL
-        sync: false
-      - key: DURABLE_STREAMS_TOKEN
-        sync: false
       - key: INTEGRATION_CREDENTIAL_ENCRYPTION_KEY
         sync: false
       - key: RUNNER_ALLOWED_ORIGINS
@@ -85,8 +81,6 @@ services:
         sync: false
       - key: APIFY_API_TOKEN
         sync: false
-      - key: SUPADATA_API_KEY
-        sync: false
       # Google OAuth client, used by the runner to refresh Gmail/Calendar access tokens.
       - key: GOOGLE_OAUTH_CLIENT_ID
         sync: false
@@ -97,21 +91,8 @@ services:
         sync: false
       - key: GOAT_X_CLIENT_SECRET
         sync: false
-      # Optional Goat rendered-browser task tools. Production uses Browserless by default when
-      # RUNNER_GOAT_BROWSER_ENABLED=true unless AGENT_BROWSER_PROVIDER overrides it.
+      # Optional Goat rendered-browser task tools.
       - key: RUNNER_GOAT_BROWSER_ENABLED
-        sync: false
-      - key: AGENT_BROWSER_PROVIDER
-        sync: false
-      - key: BROWSERLESS_API_KEY
-        sync: false
-      - key: BROWSERLESS_API_URL
-        sync: false
-      - key: BROWSERLESS_TTL
-        sync: false
-      - key: BROWSERLESS_STEALTH
-        sync: false
-      - key: OPENCOMPANY_E2B_TEMPLATE
         sync: false
       - key: OPENCOMPANY_CODEX_E2B_TEMPLATE
         sync: false

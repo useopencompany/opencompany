@@ -13,8 +13,9 @@ Goat has three LLM paths:
 1. **Foreground chat:** a short-lived AI SDK stream from the browser to `apps/goat/app/api/chat`.
    This agent answers directly, reads connected integrations, calls `goat_brain`, captures with
    `save_to_brain`, calls `start_task`, or explicitly starts an active workspace workflow.
-2. **Background task:** a durable row in `goat.tasks` claimed by `apps/runner`, planned into a
-   `goat.harness.v1` config, then executed by an AI SDK model loop in the runner process.
+2. **Background task:** a durable chat session and leased turn with a thin `goat.tasks`
+   projection, planned into a `goat.harness.v1` config and executed by the shared runner turn
+   worker.
 3. **Persistent cloud coding chat:** Goat chat engine modes for Codex and Claude Code backed by a
    persistent E2B sandbox. Uploaded images, PDFs, Word files, Excel files, and SRT subtitles are
    materialized into that sandbox. Each engine keeps its own resumable thread/session state and
@@ -26,15 +27,6 @@ Goat has three LLM paths:
    Code uses a turn-scoped internal MCP server
    (`apps/goat/app/api/internal/claude-actions`) since that is Claude Code's only custom-tool
    mechanism. Brain tools remain Codex-only for now.
-
-The Goat task path is not currently a full OpenCompany `.agent` session. It reuses runner
-infrastructure, Vercel AI Gateway, leases, observability, and server-side tools, but it
-does not yet use `agent_sessions`, `.agent` files, Brain mounts, skills, approvals, or
-`delegate_to_agent`. It does expose selected user-scoped MCP integrations through the Goat
-task harness, including Linear and Latitude.
-
-The wider OpenCompany runner does have a full multi-agent session loop. Goat can either keep its
-lighter task harness and grow it, or move durable Goat work onto that full session substrate.
 
 ## High-Level Flow
 
@@ -49,28 +41,26 @@ Browser
         OR survey connected integrations with list_actions/use_action
            and capture focused findings with save_to_brain
         OR, when Tasks & Workflows is enabled in Preferences, call start_task
-          insert goat.tasks row
-          POST /internal/goat/tasks/:taskId/run
+          create task chat session, projection, runtime, and first leased turn
+          POST /internal/goat/codex-chat/wake
         OR, when the user explicitly asks to run an active workflow, call start_workflow
-          compile the workflow and insert its goat.tasks row
-          POST /internal/goat/tasks/:taskId/run
+          compile the workflow and create its durable task session
+          POST /internal/goat/codex-chat/wake
   GoatSurface #task / #workflow submit
     POST /api/tasks or /api/workflows
-      insert goat.tasks row without creating a chat session or chat messages
+      create durable task session and first turn
   GoatSurface cloud coding modes
     POST /api/codex-chat/messages or /api/claude-chat/messages
       persist the message and attachment metadata
       enqueue a turn for the shared cloud coding chat worker
 
 Runner
-  Goat task worker wakes/polls
-    claim queued task with lease
-    plan harness spec with Gateway planner model
-    create durable assistant task message
-    streamText with Gateway, Exa, Gmail, Calendar, Linear MCP, and Latitude MCP tools
-      append durable message and tool events
-    use final assistant message as the task result
-    mark task succeeded, failed, or canceled
+  Shared durable turn worker wakes/polls
+    claim queued goat.codex_chat_turn with lease and per-session FIFO
+    load the linked task projection and plan when needed
+    execute through the selected OpenCompany, Codex, or Claude engine adapter
+    persist messages, events, artifacts, usage, and task outcome
+    settle the turn, runtime session, and task projection atomically
 
 Goat UI
   subscribes to Electric task, chat, and cloud coding shapes
@@ -538,9 +528,8 @@ statement it:
 - Persists the compiled harness, workflow, and schedule metadata on the projection.
 
 Callers validate product permissions, compile or seed the harness, then wake the shared durable chat
-worker. `GOAT_TASK_SESSION_EXECUTION_ENABLED=false` is a temporary rollback switch that routes new
-tasks to the legacy task queue. It defaults to enabled. Existing rows without `session_id` continue
-to drain through the legacy task worker and retain their old history.
+worker. Session-backed execution is the only task execution path; legacy rows without `session_id`
+retain their old history read-only and can no longer be continued.
 
 Available OpenCompany task tools are resolved from the same user-specific Brain, web, browser, and
 connected-action catalog as foreground chat. Codex task configuration still comes from the task
@@ -566,9 +555,6 @@ One fenced settlement statement completes the turn and runtime session, updates 
 projection, and writes the origin-chat notification. Success maps to `succeeded/completed`, failure
 to `failed/failed`, and interruption to `canceled/canceled`. A user reply to a terminal task queues
 a new turn on the existing session without collapsing history.
-
-`apps/runner/src/goat-worker.ts` remains only for rows with no `session_id`; it is a compatibility
-drain path and does not claim session-backed tasks.
 
 ## Harness Planning
 
@@ -765,54 +751,21 @@ not exposed through Electric; only the aggregate `brain_import_runs` row is brai
 progress. Provenance is recorded now so a later undo flow can identify affected versions without
 reconstructing history.
 
-## Relationship To The Full Agent Runtime
+## Retired Legacy Runtime Boundary
 
-The full OpenCompany agent runner is documented in root docs and lives mostly in `apps/runner/src`.
-Key files:
-
-- `docs/agent-file.md`
-- `docs/agent-turn-vocabulary.md`
-- `docs/stack/ai-and-agent-runtime.md`
-- `apps/runner/src/agent-loop.ts`
-- `apps/runner/src/session-lifecycle.ts`
-- `apps/runner/src/delegation.ts`
-- `apps/runner/src/tool-dispatcher.ts`
-
-That path works differently from Goat tasks:
-
-- Sessions are rows in `agent_sessions`.
-- The runtime config is compiled from a `.agent` file plus bundle context.
-- `runMessage` answers one user message per lease and loops over queued steering messages.
-- `resolveAgentRuntimeConfig` builds the system prompt and enabled runtime tools.
-- `ensureSandbox` creates/connects E2B and prepares a real workspace layout.
-- The sandbox may materialize Brain files, agent bundle files, skills, and attachments.
-- `createToolSet` exposes hosted tools, sandbox tools, MCP tools, coding-agent tools, and
-  delegation tools.
-- `delegate_to_agent` creates inspectable child sessions for referenced workspace agents.
-- Runs can suspend for approvals, user questions, or child-agent waits.
-- Brain and agent bundle changes are synced back after turns.
-
-In other words, the current Goat task harness is a small specialized LLM worker. The full runner is
-the general multi-agent substrate.
+Current Goat execution does not depend on the first-generation `.agent` session engine. Its
+generic session jobs, Durable Streams publisher, hosted/MCP tool loop, delegation machinery, and
+legacy task-message drain were removed from the runner. Historical database rows and migrations
+remain readable; old task rows without `session_id` are read-only.
 
 ## What "Multi-Agent" Means Today
 
-For Goat specifically, there are multiple LLM roles but not yet multiple durable agents:
+Goat has multiple LLM roles but not nested durable agents:
 
 - Foreground chat model: triages the user's input and may start a task.
 - Harness planner model: selects the execution harness spec.
 - Harness execution model: performs the task with tools.
-- Runner-hosted tools: execute private Google API calls and Exa search in the runner process.
-
-For the broader platform, multi-agent means actual nested agent sessions:
-
-- `.agent` files can reference other agents.
-- The parent model gets `delegate_to_agent`.
-- Delegation creates child sessions with their own leases, model turns, tools, sandbox state, and
-  transcript.
-- Parent sessions can await child completion and receive child results.
-
-Goat does not currently expose that parent/child session model in its app surface.
+- Runner-hosted tools: execute private integrations and search in the runner process.
 
 ## Tweak Points
 
@@ -837,14 +790,12 @@ Common changes and where they belong:
   `apps/runner/src/prompts/goat-harness-creation.ts`.
 - Change Goat Codex subscription auth: `apps/goat/lib/codex-auth.ts`,
   `apps/runner/src/codex-auth.ts`, and `packages/db/src/goat-codex-auth.ts`.
-- Change Goat Codex execution: `apps/runner/src/goat-codex.ts`.
+- Change Goat Codex execution: `apps/runner/src/goat-codex-chat.ts` (credential helpers live in
+  `apps/runner/src/goat-codex.ts`).
 - Add or change shared chat/task tools: `packages/goat-agent/src/chat-agent.ts` and the Goat app or
   runner callbacks passed into `createOpenCompanyChatToolContext`.
-- Change the task model loop: `executeGoatTask` in `apps/runner/src/goat-harness.ts` and
-  `runGoatTaskChatLoop` in `apps/runner/src/goat-task-chat-loop.ts`.
-- Move Goat onto full multi-agent sessions: start from `apps/runner/src/agent-loop.ts`,
-  `apps/runner/src/session-lifecycle.ts`, `apps/runner/src/delegation.ts`, and
-  `docs/agent-file.md`.
+- Change the task model loop: `runGoatTaskTurn` in `apps/runner/src/goat-task-turn.ts` and the
+  engine adapters in `apps/runner/src/goat-opencompany-chat.ts` / `goat-codex-chat.ts`.
 
 ## Current Constraints And Risks
 

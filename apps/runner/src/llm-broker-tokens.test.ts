@@ -148,17 +148,14 @@ const MINT_INPUT = {
 
 function settlementDeps(store: BrokerTokenStore) {
   const recordDebit = vi.fn(async () => ({ ok: true as const }));
-  const appendEvent = vi.fn(async () => null);
   const getDbImpl = vi.fn(() => ({ fake: true }));
   return {
     deps: {
       store,
       recordDebit: recordDebit as never,
-      appendEvent: appendEvent as never,
       getDbImpl: getDbImpl as never,
     },
     recordDebit,
-    appendEvent,
   };
 }
 
@@ -212,7 +209,7 @@ describe("mintBrokerToken / validateBrokerToken", () => {
 });
 
 describe("settleBrokerToken", () => {
-  it("bills the metered spend once: tool usage row + debit + runtime event", async () => {
+  it("bills the metered spend once: tool usage row + debit", async () => {
     const { store, tokens, toolUsageRows } = createFakeStore();
     const minted = await mintBrokerToken(MINT_INPUT, store);
     await store.recordSpend({
@@ -232,7 +229,7 @@ describe("settleBrokerToken", () => {
       rawUsage: {},
     });
 
-    const { deps, recordDebit, appendEvent } = settlementDeps(store);
+    const { deps, recordDebit } = settlementDeps(store);
     const result = await settleBrokerToken(minted.tokenId, deps);
 
     expect(result).toMatchObject({ settled: true, billed: true, toolUsageId: 1 });
@@ -254,17 +251,6 @@ describe("settleBrokerToken", () => {
         platformFeeUsdMicros: 0,
         totalCostUsdMicros: 1_000_000,
         metadata: expect.objectContaining({ brokerTokenId: minted.tokenId }),
-      }),
-    );
-    expect(appendEvent).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        type: "session.tool_usage",
-        payload: expect.objectContaining({
-          provider: "opencode",
-          operation: "brokered",
-          chargedCostUsdMicros: 1_000_000,
-        }),
       }),
     );
     expect(tokens.get(minted.tokenId)?.settledToolUsageId).toBe(1);
@@ -339,13 +325,12 @@ describe("settleBrokerToken", () => {
     const { store, toolUsageRows } = createFakeStore();
     const minted = await mintBrokerToken(MINT_INPUT, store);
 
-    const { deps, recordDebit, appendEvent } = settlementDeps(store);
+    const { deps, recordDebit } = settlementDeps(store);
     const result = await settleBrokerToken(minted.tokenId, deps);
 
     expect(result).toEqual({ settled: true, billed: false });
     expect(toolUsageRows).toHaveLength(0);
     expect(recordDebit).not.toHaveBeenCalled();
-    expect(appendEvent).not.toHaveBeenCalled();
   });
 
   it("maps memory and codex tool names to their display providers", async () => {

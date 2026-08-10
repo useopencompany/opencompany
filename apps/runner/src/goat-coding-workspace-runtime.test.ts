@@ -126,6 +126,9 @@ describe("Goat coding workspace preview port discovery", () => {
 ss() {
   printf 'LISTEN 0 511 *:3003 *:* users:(("node",pid=%s,fd=3))\n' "$$"
 }
+readlink() {
+  pwd
+}
 ${command}
 `,
           ],
