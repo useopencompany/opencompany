@@ -82,6 +82,7 @@ export function ChatComposer({
         matchContents={{ vertical: true }}
         onLayoutContent={(event) => onPillHeightChange(event.nativeEvent.height)}
         seedColor={accent}
+        ignoreSafeArea="all"
         style={{ width: "100%" }}
       >
         <HStack
