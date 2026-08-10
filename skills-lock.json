@@ -38,6 +38,12 @@
       "computedHash": "ed80519bc628e98a9b56d897ed27a205e3511981ffbdfc7d0fefd472aba8e224",
       "wellKnownDigest": "sha256:4530e014b0499b09aa99f7aa6468065021d7ebbf429524ddfcb5348e596f9db5"
     },
+    "swiftui-expert-skill": {
+      "source": "avdlee/swiftui-agent-skill",
+      "sourceType": "github",
+      "skillPath": "swiftui-expert-skill/SKILL.md",
+      "computedHash": "f903fb98352328f65ee7b433cfbc36fd11e08861d0ba81dc12cdc0feca1e59ea"
+    },
     "uniwind": {
       "source": "uni-stack/uniwind",
       "sourceType": "github",
