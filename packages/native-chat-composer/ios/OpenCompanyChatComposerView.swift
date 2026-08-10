@@ -187,7 +187,7 @@ struct OpenCompanyChatComposerView: ExpoSwiftUI.View {
       }
       .buttonStyle(.plain)
       .disabled(isSendDisabled)
-      .opacity(isSendDisabled ? 0.4 : 1)
+      .opacity(isSendDisabled ? 0.6 : 1)
       .animation(.easeInOut(duration: 0.1), value: isSendDisabled)
       .accessibilityLabel("Send message")
     }
