@@ -4,7 +4,7 @@ import {
   useKeyboardScrollToEnd,
 } from "@legendapp/list/keyboard";
 import type { LegendListRef, LegendListRenderItemProps } from "@legendapp/list/react-native";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Alert, Linking, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCSSVariable, useResolveClassNames, useUniwind } from "uniwind";
@@ -50,9 +50,6 @@ export function StreamingChat() {
   const [composerPillHeight, setComposerPillHeight] = useState(52);
   const listRef = useRef<LegendListRef>(null);
   const composerRef = useRef<View>(null);
-  const responseActiveRef = useRef(false);
-  const isMountedRef = useRef(true);
-  const animationFrameRef = useRef<number | null>(null);
   const markdownStyle = useChatMarkdownStyle();
   const anchoredEndSpace =
     anchorIndex === undefined
@@ -65,19 +62,6 @@ export function StreamingChat() {
   );
   const { freeze, scrollMessageToEnd } = useKeyboardScrollToEnd({ listRef });
   const { start: startMarkdownStream } = useMarkdownStream();
-
-  useEffect(() => {
-    isMountedRef.current = true;
-
-    return () => {
-      isMountedRef.current = false;
-      responseActiveRef.current = false;
-
-      if (animationFrameRef.current !== null) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
-  }, []);
 
   const handleLinkPress = (url: string) => {
     let parsedUrl: URL;
@@ -125,25 +109,22 @@ export function StreamingChat() {
         );
         setAnchorIndex(undefined);
         setIsResponseActive(false);
-        responseActiveRef.current = false;
       },
     });
 
     if (!didStart) {
       setAnchorIndex(undefined);
       setIsResponseActive(false);
-      responseActiveRef.current = false;
     }
   };
 
   const handleSend = () => {
     const trimmedInput = input.trim();
 
-    if (trimmedInput.length === 0 || responseActiveRef.current) {
+    if (trimmedInput.length === 0 || isResponseActive) {
       return;
     }
 
-    responseActiveRef.current = true;
     setIsResponseActive(true);
 
     const userMessageIndex = messages.length;
@@ -169,19 +150,10 @@ export function StreamingChat() {
     ]);
     setInput("");
 
-    animationFrameRef.current = requestAnimationFrame(() => {
-      animationFrameRef.current = null;
-
-      void scrollMessageToEnd({ animated: false, closeKeyboard: false })
-        .catch(() => {
-          freeze.set(false);
-          console.warn("Unable to coordinate the chat scroll before streaming.");
-        })
-        .then(() => {
-          if (isMountedRef.current) {
-            startResponse(assistantIdentity.id);
-          }
-        });
+    requestAnimationFrame(() => {
+      void scrollMessageToEnd({ animated: true, closeKeyboard: true }).then(() =>
+        startResponse(assistantIdentity.id),
+      );
     });
   };
 
