@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { shellQuote } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { createLogger } from "@opencompany/observability";
-import { buildCodexConfigForAuth, type CodexCliAuth } from "./codex-tool";
+import { buildCodexConfigForAuth, type CodexCliAuth } from "./codex-cli";
 import { buildGitHubCommandEnv, truncateText } from "./coding-agent-shared";
 import type { SandboxHandle } from "./sandbox";
 

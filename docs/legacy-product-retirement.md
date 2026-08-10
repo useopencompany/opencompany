@@ -4,10 +4,12 @@ Issue [#1156](https://github.com/useopencompany/opencompany-experimental/issues/
 retires the first-generation `apps/web` product without changing the current Goat product's
 names, storage contracts, or behavior. The work is split into independently deployable changes:
 
-1. Rescue the shared Stripe webhook into `apps/goat` and cut production traffic over safely.
-2. Remove the legacy runner/session execution engine after confirming the durable Goat turn path
-   owns every current execution entry point.
-3. Delete `apps/web` and its remaining packages, workflows, setup paths, and operational docs.
+1. Completed in PR #1157: rescue the shared Stripe webhook into `apps/goat` and cut production
+   traffic over safely.
+2. Current phase: remove the legacy runner/session execution engine after confirming the durable
+   Goat turn path owns every current execution entry point.
+3. Remaining phase: delete `apps/web` and its remaining packages, workflows, setup paths, and
+   operational docs.
 
 No phase introduces a schema-drop migration. Existing rows and migration history remain readable.
 
@@ -23,12 +25,33 @@ No phase introduces a schema-drop migration. Existing rows and migration history
 | Current Goat database schema and migration history | `packages/db/src/goat-*` and existing Drizzle migrations | Keep. No destructive migration is part of this work. |
 | Legacy billing tables needed by the compatibility webhook | Public-schema billing definitions in `packages/db` | Keep, then isolate during phase 3. Do not emit drop DDL. |
 | LLM broker tables used by the runner | Public-schema broker definitions in `packages/db` | Keep and isolate during phase 3. |
-| Generic `.agent` sessions, jobs, tool loop, Durable Streams, delegation, hosted/MCP tools, and old Goat task-message execution | Legacy portions of `apps/runner` | Delete in phase 2. Preserve the durable session/turn lease, recovery, interrupt, and artifact paths. |
+| Generic `.agent` sessions, jobs, tool loop, Durable Streams, delegation, hosted/MCP tools, and old Goat task-message execution | Legacy portions of `apps/runner` | Deleted in phase 2. The durable session/turn lease, recovery, interrupt, managed-skill, credential-rotation, and artifact paths remain. |
 | WhatsApp and message delivery | `apps/web` plus `packages/messaging` | Delete in phase 3 after the legacy app is no longer deployed. There is no Goat consumer. |
-| File-backed legacy memory tools | Generic runner plus `packages/memory` | Delete in phase 2/3. Goat Brain remains in `packages/goat-brain`. |
+| File-backed legacy memory tools | Generic runner plus `packages/memory` | Runner execution path deleted in phase 2. The package remains only for `apps/web` and is deleted with that app in phase 3. Goat Brain remains in `packages/goat-brain`. |
 | Legacy Inngest functions and local dev shim | `apps/web` plus `apps/inngest-dev` | Delete in phase 3. Current runner workers remain. |
 | Shared runtime/database/analytics packages | `packages/agent-runtime`, `packages/db`, `packages/analytics` | Prune only exports without a surviving import. Keep current engine events, schedules, billing analytics, and compatibility schemas. |
 | Legacy preview/release/deployment paths | Root workflows, scripts, Vercel configuration, and docs | Delete in phase 3 after the Stripe cutover. Keep Goat, runner, marketing, branch-isolated Neon, and release health checks. |
+
+## Runtime consolidation boundary
+
+Phase 2 traces the runner from `src/index.ts`, its HTTP routes, durable worker roots, and package
+scripts. It retains:
+
+- The durable `goat.codex_chat_turns` worker, including fenced lease heartbeats, crash recovery,
+  deploy handoff, interruption, per-session FIFO, task settlement, and sandbox lifecycle.
+- OpenCompany, Codex, and Claude engine adapters; generated chat artifacts; managed native skills;
+  generation-safe Codex credential rotation; and Infisical keyring injection.
+- Brain ingestion/import, integration polling and flush workers, schedules, coding-workspace and
+  dictation transports, the LLM broker, billing usage, and runner health checks.
+
+It removes the generic `agent_sessions` job queue and routes, model/tool loop, delegation,
+Durable Streams publisher, hosted and MCP tool implementations, memory CLI bridge, legacy Codex
+task executor, and the non-session Goat task-message drain. New tasks always use
+`createGoatTaskSession`; pre-session task rows remain readable but cannot be continued.
+
+There is no schema or migration change. The public-schema legacy rows remain intact. `apps/web`
+still exists until phase 3, but its retired session endpoints no longer have a runner execution
+owner; the Stripe rollback route remains available independently.
 
 ## Stripe production cutover
 
