@@ -3,11 +3,7 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
 import type { GoatChatMessageAttachment, GoatHarnessSpec } from "./goat-schema";
-import {
-  createGoatTaskSession,
-  enqueueGoatTaskSessionTurn,
-  goatTaskSessionExecutionEnabled,
-} from "./goat-task-sessions";
+import { createGoatTaskSession, enqueueGoatTaskSessionTurn } from "./goat-task-sessions";
 
 const harnessSpec: GoatHarnessSpec = {
   schemaVersion: "goat.harness.v1",
@@ -22,16 +18,6 @@ const harnessSpec: GoatHarnessSpec = {
 };
 
 describe("Goat task sessions", () => {
-  it("defaults the cutover on and supports an explicit rollback", () => {
-    expect(goatTaskSessionExecutionEnabled({})).toBe(true);
-    expect(goatTaskSessionExecutionEnabled({ GOAT_TASK_SESSION_EXECUTION_ENABLED: "false" })).toBe(
-      false,
-    );
-    expect(
-      goatTaskSessionExecutionEnabled({ GOAT_TASK_SESSION_EXECUTION_ENABLED: " FALSE " }),
-    ).toBe(false);
-  });
-
   it("creates the task projection, native messages, runtime, and first turn in one statement", async () => {
     const execute = vi.fn(async (_query: SQL) => [taskRow()]);
 

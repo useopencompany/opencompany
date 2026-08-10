@@ -1,46 +1,44 @@
 # Contributing
 
-This repo is optimized for small, reviewable PRs from humans and coding agents.
+Keep pull requests focused, reviewable, and fully verified.
 
 ## Local checks
 
-Before opening a PR, run the same gates that CI runs:
+Run the CI-equivalent gates before opening a pull request:
 
 ```bash
-bun run format:check   # biome
-bun run lint           # eslint (next config)
-bun run typecheck      # tsc --noEmit
-bun run build          # next build
-bun run test           # vitest, unit tests only
+bun run format:check
+bun run lint
+bun run typecheck
+bun run build
+bun run test
+bun run db:migrations:check
+bun run secrets:check
 ```
 
-If `trufflehog` is installed locally (`brew install trufflehog`), also run `bun run secrets:check`. CI runs it on every PR regardless.
+TruffleHog must be installed for the local secret scan. CI runs the same scan on pull requests.
+For focused checks, use Turborepo filters such as `bun run test --filter @opencompany/web` and
+`bun run test --filter @opencompany/runner`.
 
-End-to-end tests live in `apps/web/e2e` and run against a local dev server. They are **not** in CI yet — there's no Postgres service wired up — so they are opt-in:
+UI changes require a real-path browser check against `bun run dev:web`, including the primary
+flow and an obvious error or empty state. Document anything that could not be exercised because an
+external provider or fixture was unavailable.
 
-```bash
-bun run --filter @opencompany/web test:e2e
-```
+## Schema and environment changes
 
-## Tooling notes
+- Any change to `packages/db/src/goat-schema.ts`, `legacy-billing-schema.ts`, or
+  `llm-broker-schema.ts` needs a reviewed Drizzle migration unless it is strictly a TypeScript-only
+  model adjustment with no database effect.
+- Never rewrite migration history or run production migrations from a development task.
+- New env vars must be added to `.env.example`, the appropriate Infisical path, release preflight,
+  and operational documentation.
+- Goat production secrets live in `prod` `/goat`; runner secrets live in `prod` `/runner`; release
+  credentials live in `prod` `/release`.
 
-- **Biome is the formatter; ESLint is the linter.** Biome handles formatting and import ordering only — its lint rules are off. ESLint stays on for Next-specific rules. Don't enable both without auditing rule overlap.
-- **CI placeholder envs.** The workflow injects placeholder values for `DATABASE_URL` / `WORKOS_*` so `next build` can run without a real database. Production builds still need real secrets via Vercel.
-- **Secret scanning.** TruffleHog runs on every PR (free, AGPL-3.0 — no license signup required, unlike gitleaks-action). It scans for verified and unknown secrets across the diff. Enable GitHub's native push protection too — it catches leaks before they hit CI.
+## Tooling
 
-## Labels
+Biome owns formatting and import ordering. ESLint owns linting, including Next.js rules. Tests use
+Vitest. Bun `1.3.2` and Node `20.20.0` or newer are required.
 
-Use these when they clarify review risk:
-
-- `schema` — Drizzle schema or migration changes
-- `env` — environment variable or setup changes
-- `auth` — WorkOS or session changes
-- `ci` — workflow, test, or tooling changes
-- `risk:high` — production data, auth, billing, or broad user flows
-
-## Conventions
-
-- Add a Drizzle migration for any change to `packages/db/src/schema.ts` or
-  `packages/db/src/goat-schema.ts`. CI enforces this on pull requests.
-- Update `.env.example` and the relevant doc when adding an env var.
-- Prefer unit-testable pure modules (see `apps/web/lib/onboarding/validation.ts`) over deeply mocked server-action tests.
+Useful review labels are `schema`, `env`, `auth`, `ci`, and `risk:high` for production data,
+authentication, billing, or broad user flows.

@@ -1,29 +1,36 @@
 import { NextResponse } from "next/server";
-import { currentWorkspace } from "@/lib/auth";
+import { currentGoatUser } from "@/lib/auth";
 import {
-  appendIntegrationStatus,
-  buildGitHubInstallUrl,
-  createGitHubIntegrationState,
-  isGitHubWorkIntegrationConfigured,
+  appendGoatGitHubIntegrationStatus,
+  buildGoatGitHubInstallUrl,
+  createGoatGitHubIntegrationState,
+  isGoatGitHubIntegrationConfigured,
 } from "@/lib/integrations/github";
 
 export async function GET(request: Request) {
-  // skipOnboarding: the onboarding integrations step opens this OAuth flow in a popup before
-  // onboarding is marked complete; the default gate would bounce the popup to /onboarding.
-  const { user, workspace } = await currentWorkspace({ requireAdmin: true, skipOnboarding: true });
+  const { user, workspace, role } = await currentGoatUser();
   const url = new URL(request.url);
-  const intent = url.searchParams.get("intent") === "agent" ? "agent" : "settings";
-  const returnTo = url.searchParams.get("returnTo") ?? "/company/integrations";
-  if (!isGitHubWorkIntegrationConfigured()) {
-    return NextResponse.redirect(new URL(appendIntegrationStatus(returnTo, "error"), url));
+  const returnTo = url.searchParams.get("returnTo") ?? "/settings";
+
+  // GitHub App installations are workspace-owned plumbing; only admins may
+  // connect them.
+  if (role !== "admin") {
+    return NextResponse.redirect(
+      new URL(appendGoatGitHubIntegrationStatus(returnTo, "error", "admin_required"), url),
+    );
   }
 
-  const state = createGitHubIntegrationState({
+  if (!isGoatGitHubIntegrationConfigured()) {
+    return NextResponse.redirect(
+      new URL(appendGoatGitHubIntegrationStatus(returnTo, "error", "not_configured"), url),
+    );
+  }
+
+  const state = createGoatGitHubIntegrationState({
+    userWorkosId: user.workosUserId,
     workspaceId: workspace.id,
-    userId: user.id,
-    intent,
     returnTo,
   });
 
-  return NextResponse.redirect(buildGitHubInstallUrl(state));
+  return NextResponse.redirect(buildGoatGitHubInstallUrl(state));
 }

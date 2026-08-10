@@ -1,72 +1,26 @@
 ---
-title: Welcome to opencompany
-description: An open platform for running AI agents inside your company. Here's how it works.
+title: Goat
+description: Living notes for the experimental just-in-time agent harness.
 ---
 
-## What opencompany is
+## What these docs are
 
-opencompany is a place to build and run the AI agents your company uses every day — for research, ops, sales, support, anything you'd normally hand to a teammate or a script.
+These docs are the working reference for Goat: how the app is shaped, how the task harness runs, and what decisions are current enough to build on.
 
-The thing that makes it different is how agents are stored. Every agent is a **plain text file** in a private GitHub repo that belongs to your workspace. No proprietary database, no closed format. If you can read Markdown, you can read your agents.
+They are intentionally close to the app code. The source lives in `apps/web/content/docs`, and the rendered docs live at `/docs` inside the web app.
 
-This means:
+## Current product shape
 
-- You can see exactly what an agent does — its instructions are right there in the file.
-- Every change is versioned in Git. You get history, diffs, and pull requests for free.
-- You can edit in the opencompany editor, in GitHub, or in your favorite code editor. They all read the same file.
+Goat has two user-facing paths:
 
-## The core ideas
+- **Chat** for direct answers, quick tool use, and starting durable background work.
+- **Results** for tasks that keep running through the runner service and stream durable status back into the app.
 
-### Workspace
+The app is still experimental. Treat these docs as a living map of the current implementation, not as a frozen public manual.
 
-A workspace is your company's space in opencompany. It has its own members, its own private GitHub repo, and its own set of agents. Most companies will only ever need one.
+## Where to start
 
-### Agent
-
-An agent is one job your company wants done. "Research investors." "Triage incoming bugs." "Draft replies to support tickets." Each agent is a single `.agent` file with a title, instructions, the AI model that runs it, and the tools it can use.
-
-### Instructions
-
-The body of an agent file is just Markdown — the same plain text you'd use to write a doc. You describe the outcome you want, the constraints that matter, and how the agent should behave. The AI model reads it the same way a new teammate would read an SOP.
-
-### Mentions
-
-Inside the instructions, you can write mentions like `@exa`, `@amp`, or `@web-app` as readable references. The model is explicit per-agent config; tools, integrations, and trigger drafts live in the YAML frontmatter, which the builder writes for you.
-
-### Sync
-
-Everything you save in the opencompany editor is committed to your workspace's GitHub repo. Edits in either place flow through. Your agents are yours, in Git, forever.
-
-## A tiny example
-
-Here's what an agent file looks like end to end:
-
-```yaml
----
-title: "Investor research"
-model: openai/gpt-5.4
-tools:
-  - id: exa
-    type: hosted_tool
-integrations:
-  github:
-    repositories: []
-triggers: []
----
-
-Find recent fund announcements with @exa. Write a one-paragraph brief for
-each fund covering thesis, check size, and a recent investment. Accuracy
-matters more than speed.
-```
-
-That's the whole thing. A header that says who this agent is and what it can use, and a body of instructions in plain English. The builder keeps the YAML current when you change models, tools, repositories, or trigger drafts.
-
-## What you can do today
-
-- **Create agents** in the editor at `/agents`. Give them a title, write instructions, and configure models, tools, integrations, and trigger drafts in the inspector.
-- **Edit agents** any time. Saves are instant — the GitHub commit happens in the background a few seconds later.
-- **Read the file format** in detail on the next page if you want to understand every option, or if you're planning to author agents directly in your editor.
-
-## Where to go next
-
-- [The `.agent` file](/docs/agent-file) — every field, every option, in plain language.
+- [Architecture](/docs/architecture) explains the main runtime pieces and request flow.
+- [Brain](/docs/brain) explains the knowledge graph: document model, ingestion, and retrieval.
+- [Integrations](/docs/integrations) explains external connectors and source ingestion setup.
+- [Docs workflow](/docs/docs-workflow) explains how to update this documentation as the app changes.

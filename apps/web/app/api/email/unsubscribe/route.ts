@@ -1,5 +1,8 @@
 import { captureException } from "@opencompany/observability";
-import { unsubscribeResendContact, verifyEmailUnsubscribeToken } from "@/lib/email/unsubscribe";
+import {
+  unsubscribeGoatOnboardingEmails,
+  verifyGoatEmailUnsubscribeToken,
+} from "@/lib/email/unsubscribe";
 
 export const dynamic = "force-dynamic";
 
@@ -30,12 +33,12 @@ export async function GET(request: Request) {
   const token = tokenFromRequest(request);
 
   try {
-    const result = await unsubscribeResendContact({ token });
+    const result = await unsubscribeGoatOnboardingEmails({ token });
     return htmlResponse(
-      `<main><h1 style="font-size:20px;margin:0 0 12px">You're unsubscribed</h1><p style="margin:0">We won't send signup welcome emails to ${escapeHtml(result.email)}.</p></main>`,
+      `<main><h1 style="font-size:20px;margin:0 0 12px">You're unsubscribed</h1><p style="margin:0">We won't send any more onboarding emails to ${escapeHtml(result.email)}.</p></main>`,
     );
   } catch (error) {
-    captureException(error, { event: "opencompany.email_unsubscribe_failed", method: "GET" });
+    captureException(error, { event: "opencompany.goat_email_unsubscribe_failed", method: "GET" });
     return htmlResponse(
       '<main><h1 style="font-size:20px;margin:0 0 12px">This unsubscribe link is invalid</h1><p style="margin:0">Reply to the email and we can help.</p></main>',
       400,
@@ -47,11 +50,11 @@ export async function POST(request: Request) {
   const token = tokenFromRequest(request);
 
   try {
-    verifyEmailUnsubscribeToken(token);
-    await unsubscribeResendContact({ token });
+    verifyGoatEmailUnsubscribeToken(token);
+    await unsubscribeGoatOnboardingEmails({ token });
     return new Response(null, { status: 200 });
   } catch (error) {
-    captureException(error, { event: "opencompany.email_unsubscribe_failed", method: "POST" });
+    captureException(error, { event: "opencompany.goat_email_unsubscribe_failed", method: "POST" });
     return new Response(null, { status: 400 });
   }
 }

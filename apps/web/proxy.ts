@@ -1,104 +1,53 @@
 import { authkit, handleAuthkitHeaders } from "@workos-inc/authkit-nextjs";
 import { type NextRequest, NextResponse } from "next/server";
-import { getWorkOSRedirectUri } from "@/lib/workos";
+import { isInitialDocumentRequest, localGoatHttpsRedirectUrl } from "@/lib/local-https-redirect";
+import { getGoatWorkOSRedirectUri } from "@/lib/workos";
 
-// Next.js 16 renamed Middleware to Proxy; keep this file as proxy.ts.
-// https://nextjs.org/docs/app/getting-started/proxy
-
-const SIGN_UP_PATHS = ["/auth/sign-up"];
-// Keep in sync with SKIP_ONBOARDING_COOKIE in lib/auth.ts (not imported to keep the
-// proxy bundle free of the db/WorkOS server dependencies).
-const SKIP_ONBOARDING_COOKIE = "opencompany-skip-onboarding";
-const GOOGLE_OAUTH_BROKER_HOST = "oauth.opencompany.cloud";
-const GOOGLE_OAUTH_BROKER_PATH = "/api/google/callback";
-
-const UNAUTHENTICATED_PATHS = [
-  "/",
+const UNAUTHENTICATED_PATHS = new Set([
+  "/auth/callback",
+  "/auth/invite",
+  "/auth/sign-in",
   "/signin",
   "/signup",
-  "/auth/callback",
-  "/auth/organization",
-  "/auth/sign-in",
-  "/auth/sign-up",
-  "/changelog",
   "/api/healthz",
-  GOOGLE_OAUTH_BROKER_PATH,
-  "/api/inngest",
   "/api/stripe/webhook",
-];
-
-function isInitialDocumentRequest(request: NextRequest) {
-  const accept = request.headers.get("accept") ?? "";
-  const isDocumentRequest = accept.includes("text/html");
-  const isRscRequest = request.headers.has("RSC") || request.headers.has("Next-Router-State-Tree");
-  const isPrefetch =
-    request.headers.get("Purpose") === "prefetch" ||
-    request.headers.get("Sec-Purpose") === "prefetch" ||
-    request.headers.has("Next-Router-Prefetch");
-
-  return isDocumentRequest && !isRscRequest && !isPrefetch;
-}
-
-function isUnauthenticatedPath(pathname: string) {
-  return (
-    UNAUTHENTICATED_PATHS.includes(pathname) ||
-    pathname === "/docs" ||
-    pathname.startsWith("/docs/")
-  );
-}
-
-function screenHintFor(pathname: string) {
-  return SIGN_UP_PATHS.includes(pathname) ? "sign-up" : "sign-in";
-}
+  "/mcp",
+  "/changelog",
+]);
+const UNAUTHENTICATED_PREFIXES = ["/.well-known/oauth-", "/share/"];
 
 export default async function proxy(request: NextRequest) {
-  if (
-    request.nextUrl.hostname === GOOGLE_OAUTH_BROKER_HOST &&
-    request.nextUrl.pathname !== GOOGLE_OAUTH_BROKER_PATH
-  ) {
-    return new NextResponse("Not found", { status: 404 });
+  const localHttpsRedirect = localGoatHttpsRedirectUrl(request);
+  if (localHttpsRedirect) {
+    return NextResponse.redirect(localHttpsRedirect);
   }
 
-  // Preview/dev convenience: visiting any URL with ?skipOnboarding persists a cookie that
-  // lets lib/auth.ts treat the user as onboarded. Never honored in production (the cookie
-  // check in lib/auth.ts is also gated on VERCEL_ENV !== "production").
-  const wantsSkipOnboarding =
-    request.nextUrl.searchParams.has("skipOnboarding") && process.env.VERCEL_ENV !== "production";
-
-  let refreshFailed = false;
-  const { session, headers, authorizationUrl } = await authkit(request, {
-    redirectUri: getWorkOSRedirectUri(),
-    screenHint: screenHintFor(request.nextUrl.pathname),
-    onSessionRefreshError: () => {
-      refreshFailed = true;
-    },
+  const { session, headers } = await authkit(request, {
+    redirectUri: getGoatWorkOSRedirectUri(),
   });
-
-  if (wantsSkipOnboarding) {
-    const secure = request.nextUrl.protocol === "https:" ? "; Secure" : "";
-    headers.append(
-      "Set-Cookie",
-      `${SKIP_ONBOARDING_COOKIE}=1; Path=/; Max-Age=604800; SameSite=Lax${secure}`,
-    );
-  }
 
   if (isUnauthenticatedPath(request.nextUrl.pathname) || session.user) {
     return handleAuthkitHeaders(request, headers);
   }
 
   if (!isInitialDocumentRequest(request)) {
-    if (refreshFailed) {
-      headers.delete("Set-Cookie");
-    }
-
     return handleAuthkitHeaders(request, headers);
   }
 
-  return handleAuthkitHeaders(request, headers, { redirect: authorizationUrl ?? "/auth/sign-in" });
+  return handleAuthkitHeaders(request, headers, {
+    redirect: new URL("/signin", request.url).toString(),
+  });
 }
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|favicon.svg|icon-traced.svg|brand(?:/.*)?|docs(?:/.*)?).*)",
+    "/((?!_next/static|_next/image|favicon.ico|favicon.svg|icon(?:/.*)?|apple-icon(?:/.*)?|manifest\\.webmanifest).*)",
   ],
 };
+
+export function isUnauthenticatedPath(pathname: string) {
+  return (
+    UNAUTHENTICATED_PATHS.has(pathname) ||
+    UNAUTHENTICATED_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  );
+}

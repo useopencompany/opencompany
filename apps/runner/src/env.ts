@@ -5,10 +5,8 @@ import { loadEncryptionKey } from "@opencompany/crypto";
 const DEFAULT_CODEX_TIMEOUT_MS = 60 * 60 * 1000;
 
 export type RunnerEnv = {
-  databaseUrl: string;
   internalToken: string;
   streamTokenSecret: string;
-  e2bApiKey: string;
   vercelAiGatewayApiKey: string;
   // Platform OpenAI key for codex_coder runs, used only server-side by the LLM broker
   // (llm-broker.ts) as the upstream credential for the "openai" provider. Never enters
@@ -19,13 +17,6 @@ export type RunnerEnv = {
   openaiApiKey?: string | undefined;
   goatDictationRealtimeModel?: string | undefined;
   goatDictationFinalModel?: string | undefined;
-  // Public base URL of this runner (Render's RENDER_EXTERNAL_URL, or
-  // RUNNER_LLM_BROKER_PUBLIC_URL to override). E2B cloud sandboxes use it to call back
-  // into runner-hosted routes: the LLM broker and Goat's Google tool bridge. Unset
-  // local dev disables those callback-only features. Deliberately NOT the web-side
-  // RUNNER_PUBLIC_URL: the runner loads the repo-root .env, where that var points at
-  // localhost in local dev and would wrongly activate sandbox callbacks.
-  publicUrl: string | undefined;
   // Wildcard preview hostname routed to this runner, for example preview.goat.example.com.
   // Capability labels are prepended to this domain. A port may be included for local development.
   previewBaseDomain?: string | undefined;
@@ -33,21 +24,8 @@ export type RunnerEnv = {
   // Public Goat origin used only by the runner host to call private, bearer-protected
   // endpoints. Integration credentials and this bearer token never enter Codex sandboxes.
   goatAppUrl?: string | undefined;
-  // Kill switch for the LLM broker: set RUNNER_LLM_BROKER_ENABLED=false to revert to
-  // direct key injection without a deploy.
-  llmBrokerEnabled: boolean;
-  integrationCredentialEncryptionKey: Buffer;
   exaApiKey: string | undefined;
   goatBrowserEnabled: boolean;
-  agentBrowserProvider: string | undefined;
-  browserlessApiKey: string | undefined;
-  browserlessApiUrl: string | undefined;
-  browserlessTtl: string | undefined;
-  browserlessStealth: string | undefined;
-  xApiBearerToken: string | undefined;
-  apifyApiToken?: string | undefined;
-  supadataApiKey: string | undefined;
-  ampApiKey: string | undefined;
   // Google OAuth client, shared by the Gmail, Google Calendar, and Google Drive integrations. The runner
   // needs it to refresh per-account access tokens against Google's token endpoint.
   googleOAuthClientId?: string | undefined;
@@ -57,41 +35,23 @@ export type RunnerEnv = {
   // token endpoint before snapshot enrichment.
   hubspotOAuthClientId?: string | undefined;
   hubspotOAuthClientSecret?: string | undefined;
-  e2bTemplate: string | undefined;
-  ampE2bTemplate: string | undefined;
   codexE2bTemplate: string | undefined;
-  e2bSandboxIdleTimeoutMs: number;
   blobReadWriteToken?: string | undefined;
-  // Wall-clock ceiling for a single opencode_coder delegation. Large monorepo tasks routinely
-  // exceed the old hard 10 minutes; tunable per environment. On timeout the run no longer throws
-  // away its work — the partial diff + resumable opencode session id are surfaced (opencode-tool.ts).
-  // The job lease heartbeats while the command runs, so its TTL does not need to match this ceiling.
-  opencodeTimeoutMs: number;
-  // Wall-clock ceiling for a single Codex engine turn or codex_coder delegation. Mirrors
-  // opencode timeout behavior: timeouts surface partial output but never publish a pull request.
+  // Wall-clock ceiling for a single Codex engine turn: timeouts surface partial output but
+  // never publish a pull request.
   codexTimeoutMs: number;
   codexModel: string;
   // Idle timeout for persistent Goat codex-chat sandboxes. Unlike per-task sandboxes (killed after
   // each run), a chat sandbox stays alive across turns so files and the app-server daemon survive;
   // on idle timeout E2B pauses it and Sandbox.connect auto-resumes on the next message.
   goatCodexChatIdleTimeoutMs: number;
-  // Kill switch for the model-based deferred-tool argument repair layer (Layer 3). Deterministic
-  // validation + coercion always run; this only gates the small-model fallback. Default on.
-  toolArgRepairEnabled: boolean;
   // Delivery-lease TTL for runner jobs. The lease heartbeats every 5s while a job runs, so this only
-  // matters when the heartbeat stops (deploy, instance recycle, GC, network blip). The old 90s was
-  // shorter than such gaps during a long blocking tool call, letting another instance re-claim the
-  // job and replay the whole turn (double model + opencode billing). Sized to absorb a normal deploy.
+  // matters when the heartbeat stops (deploy, instance recycle, GC, or network blip).
   jobLeaseTtlMs: number;
-  // Durable Goat chat turn lease TTL. Kept shorter than the generic job delivery lease so a dead
-  // worker's chat turn can be reclaimed quickly without changing the older job queue's deploy buffer.
+  // Durable Goat chat turn lease TTL. Kept shorter than the ingestion-job delivery lease so a dead
+  // worker's chat turn can be reclaimed quickly.
   goatCodexChatLeaseTtlMs?: number | undefined;
-  // Hard ceiling on how many times a job may be re-claimed while its execution (run) lease is busy
-  // elsewhere. Lease-busy re-claims are normally deferred indefinitely; this caps the runaway case
-  // (one job hit 17) by giving up once the in-flight run clearly owns the message.
-  jobMaxLeaseBusyAttempts: number;
-  // Explicit opt-in for the experimental Goat task worker. Defaults off so normal runner
-  // deployments keep serving existing agent work without polling Goat tables or exposing Goat tools.
+  // Explicit opt-in for Goat's durable task worker and runner-hosted tools.
   goatTaskWorkerEnabled: boolean;
   workerConcurrency: number;
   port: number;
@@ -100,58 +60,41 @@ export type RunnerEnv = {
 };
 
 export function loadEnv(): RunnerEnv {
+  // Boot guards for env the runner consumes outside RunnerEnv: the e2b SDK reads
+  // E2B_API_KEY from process.env itself, and @opencompany/db credential modules load the
+  // integration credential encryption key lazily. Fail fast here instead of mid-request.
+  requiredEnv("E2B_API_KEY");
+  loadEncryptionKey();
   return {
-    databaseUrl: requiredEnv("DATABASE_URL"),
     internalToken: requiredEnv("RUNNER_INTERNAL_TOKEN"),
     streamTokenSecret: requiredEnv("RUNNER_STREAM_TOKEN_SECRET"),
-    e2bApiKey: requiredEnv("E2B_API_KEY"),
     vercelAiGatewayApiKey: requiredEnv("VERCEL_AI_GATEWAY_API_KEY"),
     openaiCodexApiKey: optionalEnv("OPENAI_CODEX_API_KEY"),
     openaiApiKey: optionalEnv("OPENAI_API_KEY"),
     goatDictationRealtimeModel: optionalEnv("GOAT_DICTATION_REALTIME_MODEL"),
     goatDictationFinalModel: optionalEnv("GOAT_DICTATION_FINAL_MODEL"),
-    publicUrl: optionalEnv("RUNNER_LLM_BROKER_PUBLIC_URL") ?? optionalEnv("RENDER_EXTERNAL_URL"),
     previewBaseDomain: optionalPreviewBaseDomainEnv(),
     previewProtocol: optionalPreviewProtocolEnv(),
     goatAppUrl: optionalEnv("GOAT_NEXT_PUBLIC_APP_URL"),
-    llmBrokerEnabled: optionalBooleanEnv("RUNNER_LLM_BROKER_ENABLED", true),
-    integrationCredentialEncryptionKey: requiredEncryptionKey(),
     exaApiKey: optionalEnv("EXA_API_KEY"),
     goatBrowserEnabled: optionalBooleanEnv("RUNNER_GOAT_BROWSER_ENABLED", false),
-    agentBrowserProvider:
-      optionalEnv("AGENT_BROWSER_PROVIDER") ??
-      (process.env.NODE_ENV === "production" ? "browserless" : undefined),
-    browserlessApiKey: optionalEnv("BROWSERLESS_API_KEY"),
-    browserlessApiUrl: optionalEnv("BROWSERLESS_API_URL"),
-    browserlessTtl: optionalEnv("BROWSERLESS_TTL"),
-    browserlessStealth: optionalEnv("BROWSERLESS_STEALTH"),
-    xApiBearerToken: optionalEnv("X_API_BEARER_TOKEN"),
-    apifyApiToken: optionalEnv("APIFY_API_TOKEN"),
-    supadataApiKey: optionalEnv("SUPADATA_API_KEY"),
-    ampApiKey: optionalEnv("AMP_API_KEY"),
     googleOAuthClientId: optionalEnv("GOOGLE_OAUTH_CLIENT_ID"),
     googleOAuthClientSecret: optionalEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
     hubspotOAuthClientId: optionalEnv("GOAT_HUBSPOT_CLIENT_ID"),
     hubspotOAuthClientSecret: optionalEnv("GOAT_HUBSPOT_CLIENT_SECRET"),
-    e2bTemplate: process.env.OPENCOMPANY_E2B_TEMPLATE || undefined,
-    ampE2bTemplate: optionalEnv("OPENCOMPANY_AMP_E2B_TEMPLATE"),
     codexE2bTemplate: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE"),
-    e2bSandboxIdleTimeoutMs: optionalPositiveIntegerEnv("RUNNER_E2B_IDLE_TIMEOUT_MS", 30_000),
     blobReadWriteToken: optionalEnv("BLOB_READ_WRITE_TOKEN"),
-    opencodeTimeoutMs: optionalPositiveIntegerEnv("RUNNER_OPENCODE_TIMEOUT_MS", 1_200_000),
     codexTimeoutMs: optionalPositiveIntegerEnv("RUNNER_CODEX_TIMEOUT_MS", DEFAULT_CODEX_TIMEOUT_MS),
     codexModel: optionalEnv("RUNNER_CODEX_MODEL") ?? "gpt-5.6-sol",
     goatCodexChatIdleTimeoutMs: optionalPositiveIntegerEnv(
       "RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS",
       5 * 60_000,
     ),
-    toolArgRepairEnabled: optionalBooleanEnv("RUNNER_TOOL_ARG_REPAIR_ENABLED", true),
     jobLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_JOB_LEASE_TTL_MS", 300_000),
     goatCodexChatLeaseTtlMs: optionalPositiveIntegerEnv(
       "RUNNER_GOAT_CODEX_CHAT_LEASE_TTL_MS",
       90_000,
     ),
-    jobMaxLeaseBusyAttempts: optionalPositiveIntegerEnv("RUNNER_JOB_MAX_LEASE_BUSY_ATTEMPTS", 10),
     goatTaskWorkerEnabled: optionalBooleanEnv("RUNNER_GOAT_TASK_WORKER_ENABLED", false),
     // Max parallel sessions this instance runs. Sessions are I/O-bound (mostly waiting on
     // model token streaming + remote E2B sandboxes), so this is bounded by the single
@@ -174,10 +117,6 @@ function requiredEnv(name: string) {
     throw new Error(`${name} is required.`);
   }
   return value;
-}
-
-function requiredEncryptionKey() {
-  return loadEncryptionKey();
 }
 
 function optionalEnv(name: string) {
@@ -228,16 +167,4 @@ function optionalPositiveIntegerEnv(name: string, fallback: number) {
 
 function defaultInstanceId() {
   return `${hostname()}-${process.pid}-${randomUUID().slice(0, 8)}`;
-}
-
-// Whether sandboxed CLIs route their model calls through the runner's LLM broker. Both
-// conditions matter: without a public URL the sandbox cannot reach the broker (local
-// dev), and the env flag is the no-deploy kill switch.
-export function brokerActive(env: Pick<RunnerEnv, "publicUrl" | "llmBrokerEnabled">): boolean {
-  return env.llmBrokerEnabled && Boolean(env.publicUrl);
-}
-
-// Base URL the sandbox-side CLI config points at for a given broker provider.
-export function brokerBaseUrl(publicUrl: string, provider: "gateway" | "openai"): string {
-  return `${publicUrl.replace(/\/+$/, "")}/broker/${provider}/v1`;
 }

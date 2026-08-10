@@ -22,9 +22,9 @@ import {
   completeAutoRefillSetup,
   handleAutoRefillPaymentIntentFailed,
   handleAutoRefillPaymentIntentSucceeded,
-} from "@/lib/billing/auto-refill";
-import { fulfillCheckoutSession } from "@/lib/billing/service";
-import { getStripe, getStripeWebhookSecret } from "@/lib/billing/stripe";
+} from "@/lib/billing/legacy-auto-refill";
+import { fulfillCheckoutSession } from "@/lib/billing/legacy-credits";
+import { getGoatStripe, getGoatStripeWebhookSecret } from "@/lib/billing/stripe";
 
 export const runtime = "nodejs";
 
@@ -36,10 +36,10 @@ export async function POST(request: Request) {
 
   let event: Stripe.Event;
   try {
-    event = getStripe().webhooks.constructEvent(
+    event = getGoatStripe().webhooks.constructEvent(
       await request.text(),
       signature,
-      getStripeWebhookSecret(),
+      getGoatStripeWebhookSecret(),
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid Stripe webhook.";
@@ -293,7 +293,7 @@ async function captureGoatTopUpPaymentMethod(session: Stripe.Checkout.Session) {
   const workspaceId = session.metadata?.goatWorkspaceId;
   const paymentIntentId = stripeObjectId(session.payment_intent);
   if (!workspaceId || !paymentIntentId) return;
-  const intent = await getStripe().paymentIntents.retrieve(paymentIntentId);
+  const intent = await getGoatStripe().paymentIntents.retrieve(paymentIntentId);
   const paymentMethodId = stripeObjectId(intent.payment_method);
   if (!paymentMethodId) return;
   await setGoatAutoRefillPaymentMethod({ workspaceId, paymentMethodId });

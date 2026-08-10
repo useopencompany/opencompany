@@ -1,8 +1,5 @@
-export type UserTimezoneSource = "unset" | "browser" | "manual";
-
-export const DEFAULT_USER_TIMEZONE = "UTC";
-
-export const COMMON_TIMEZONES = [
+const FALLBACK_TIMEZONES = [
+  "UTC",
   "America/Los_Angeles",
   "America/Denver",
   "America/Chicago",
@@ -16,53 +13,20 @@ export const COMMON_TIMEZONES = [
   "Asia/Singapore",
   "Asia/Tokyo",
   "Australia/Sydney",
-] as const;
-
-const FALLBACK_TIMEZONES = [
-  DEFAULT_USER_TIMEZONE,
-  ...COMMON_TIMEZONES,
-  "America/Anchorage",
-  "America/Honolulu",
-  "America/Mexico_City",
-  "America/Phoenix",
-  "America/Toronto",
-  "America/Vancouver",
-  "Europe/Amsterdam",
-  "Europe/Dublin",
-  "Europe/Madrid",
-  "Europe/Rome",
-  "Europe/Stockholm",
-  "Asia/Bangkok",
-  "Asia/Hong_Kong",
-  "Asia/Seoul",
-  "Pacific/Auckland",
 ];
 
 export function supportedTimezones() {
   const supported =
     typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
-  return uniqueSorted([DEFAULT_USER_TIMEZONE, ...supported, ...FALLBACK_TIMEZONES]);
-}
-
-export function normalizeUserTimezone(value: string | null | undefined) {
-  const timezone = value?.trim() || DEFAULT_USER_TIMEZONE;
-  return isValidTimezone(timezone) ? timezone : null;
-}
-
-export function normalizeUserTimezoneSource(value: string | null | undefined): UserTimezoneSource {
-  return value === "browser" || value === "manual" ? value : "unset";
-}
-
-export function browserTimezone() {
-  if (typeof window === "undefined") return null;
-  return normalizeUserTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const values = new Set([...supported, ...FALLBACK_TIMEZONES].filter(isValidTimezone));
+  return [...values].sort((left, right) => left.localeCompare(right));
 }
 
 export function timezoneLabel(timezone: string, now = new Date()) {
-  return `${timezone} (${timezoneOffsetLabel(timezone, now)})`;
+  return `${timezone} (UTC${timezoneOffsetLabel(timezone, now)})`;
 }
 
-export function timezoneOffsetLabel(timezone: string, now = new Date()) {
+function timezoneOffsetLabel(timezone: string, now: Date) {
   try {
     const part = new Intl.DateTimeFormat("en-US", {
       timeZone: timezone,
@@ -70,14 +34,10 @@ export function timezoneOffsetLabel(timezone: string, now = new Date()) {
     })
       .formatToParts(now)
       .find((item) => item.type === "timeZoneName")?.value;
-    return part ?? "UTC";
+    return (part ?? "UTC").replace("UTC", "").replace("GMT", "") || "+0";
   } catch {
-    return "UTC";
+    return "+0";
   }
-}
-
-export function timezoneSearchLabel(timezone: string) {
-  return timezone.replace(/[_/]/g, " ");
 }
 
 function isValidTimezone(timezone: string) {
@@ -87,10 +47,4 @@ function isValidTimezone(timezone: string) {
   } catch {
     return false;
   }
-}
-
-function uniqueSorted(values: string[]) {
-  return [...new Set(values.filter(isValidTimezone))].sort((left, right) =>
-    left.localeCompare(right),
-  );
 }

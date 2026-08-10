@@ -6,67 +6,6 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
-// Shapes for the ask_user_question tool. A question prompt is what the model asks; an
-// answer is what the user submits back, one entry per question, in the same order.
-export type AgentSessionQuestionOption = {
-  label: string;
-  description?: string;
-};
-
-export type AgentSessionQuestionPrompt = {
-  header: string;
-  question: string;
-  options: AgentSessionQuestionOption[];
-  allowMultiple: boolean;
-  allowOther: boolean;
-};
-
-export type AgentSessionQuestionAnswer = {
-  // Labels of the options the user selected (empty when only a free-text "other" was given).
-  selectedLabels: string[];
-  // Free-text answer when the question allowed "other"; undefined otherwise.
-  otherText?: string;
-};
-
-export type AgentSessionQuestionResolutionSource = "user" | "abort" | "timeout" | "superseded";
-
-export type TiptapMark = {
-  type: string;
-  attrs?: Record<string, JsonValue>;
-};
-
-export type TiptapNode = {
-  type?: string;
-  text?: string;
-  attrs?: Record<string, JsonValue>;
-  marks?: TiptapMark[];
-  content?: TiptapNode[];
-};
-
-export type TiptapDoc = {
-  type: "doc";
-  content?: TiptapNode[];
-};
-
-export type AgentToolId =
-  | "exa"
-  | "x"
-  | "youtube"
-  | "tiktok"
-  | "instagram"
-  | "neon"
-  | "amp"
-  | "opencode"
-  | "codex"
-  | "linear"
-  | "slack"
-  | "posthog"
-  | "betterstack"
-  | "braintrust"
-  | "notion"
-  | "gmail"
-  | "google_calendar"
-  | "google_drive";
 export type AgentModelId =
   | "openai/gpt-5.6-sol"
   | "openai/gpt-5.6-terra"
@@ -117,176 +56,16 @@ export type AgentModelId =
 
 export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
-export type AgentHostedToolConfig = {
-  id:
-    | "exa"
-    | "x"
-    | "youtube"
-    | "tiktok"
-    | "instagram"
-    | "neon"
-    | "gmail"
-    | "google_calendar"
-    | "google_drive";
-  type: "tool" | "hosted_tool";
-  label: string;
-  description: string;
-};
-
-export type AgentCodingToolConfig = {
-  id: "amp" | "opencode" | "codex";
-  type: "coding_agent";
-  provider: "amp" | "opencode" | "codex";
-  label: string;
-  description: string;
-  prCapable: boolean;
-};
-
-export type AgentMcpToolConfig = {
-  id: "linear" | "slack" | "posthog" | "betterstack" | "braintrust" | "notion";
-  type: "mcp";
-  server: "linear" | "slack" | "posthog" | "betterstack" | "braintrust" | "notion";
-  label: string;
-  description: string;
-};
-
-export type AgentConfigTool = AgentHostedToolConfig | AgentCodingToolConfig | AgentMcpToolConfig;
-
-export type AgentBrainReference = {
-  path: string;
-  type: "file" | "folder";
-};
-
-export type AgentReference = {
-  path: string;
-  name: string;
-};
-
 export type AgentSkillFile = {
-  // Path relative to the skill folder, e.g. "SKILL.md" or "references/format.md".
   path: string;
   content: string;
 };
 
 export type AgentRemoteSkillSource = {
-  // `github`: a public GitHub repository. `skills.sh`: a skills.sh page, resolved through
-  // its backing GitHub repository. Both ultimately fetch from GitHub in V1.
   type: "github" | "skills.sh";
-  // Canonical https repository url, e.g. https://github.com/owner/repo.
   url: string;
-  // The branch or tag the user requested. We track its latest HEAD (not a pinned commit).
   ref: string;
-  // Skill directory within the repository, "" = repository root.
   path: string;
-};
-
-export type AgentWorkspaceSkillSource = {
-  // A company-owned skill authored inside OpenCompany and synced into the workspace repo.
-  type: "workspace";
-  // Repo path to the skill directory, e.g. skills/brand-voice.
-  path: string;
-};
-
-export type AgentSkillSource = AgentRemoteSkillSource | AgentWorkspaceSkillSource;
-
-// A built-in skill shipped in code (serialized as a bare string id in YAML).
-export type AgentBuiltinSkillReference = {
-  id: string;
-};
-
-// An external skill resolved from a web source. Serialized as a YAML object. The file
-// contents live in `workspace_skill_snapshots`; the frontmatter only carries provenance
-// plus a denormalized name/description for the pure prompt-advertisement path.
-export type AgentExternalSkillReference = {
-  id: string;
-  name: string;
-  description: string;
-  source: AgentSkillSource;
-};
-
-export type AgentSkillReference = AgentBuiltinSkillReference | AgentExternalSkillReference;
-
-export function isExternalSkillReference(
-  reference: AgentSkillReference,
-): reference is AgentExternalSkillReference {
-  return (
-    "source" in reference &&
-    !!(reference as AgentExternalSkillReference).source &&
-    typeof (reference as AgentExternalSkillReference).source === "object"
-  );
-}
-
-export function isRemoteSkillReference(
-  reference: AgentSkillReference,
-): reference is AgentExternalSkillReference & { source: AgentRemoteSkillSource } {
-  return (
-    isExternalSkillReference(reference) &&
-    (reference.source.type === "github" || reference.source.type === "skills.sh")
-  );
-}
-
-export function isWorkspaceSkillReference(
-  reference: AgentSkillReference,
-): reference is AgentExternalSkillReference & { source: AgentWorkspaceSkillSource } {
-  return isExternalSkillReference(reference) && reference.source.type === "workspace";
-}
-
-export type AgentAfterSessionConfig = {
-  enabled: boolean;
-  prompt: string;
-  idleDelaySeconds: number;
-};
-
-export type AgentGitHubRepositoryBinding = {
-  provider: "github";
-  resourceType: "repository";
-  externalId: string;
-  displayName: string;
-  connection: {
-    externalId: string;
-    label: string;
-    accountName: string | null;
-    accountType: string | null;
-  };
-};
-
-export type AgentGitHubRepositoryConfig = {
-  id: string;
-  fullName: string;
-  defaultBranch: string;
-  binding?: AgentGitHubRepositoryBinding;
-};
-
-export type AgentNeonDatabaseBinding = {
-  provider: "neon";
-  resourceType: "database";
-  externalId: string;
-  displayName: string;
-  connection: {
-    externalId: string;
-    label: string;
-    accountName: string | null;
-    accountType: string | null;
-  };
-};
-
-export type AgentNeonDatabaseConfig = {
-  id: string;
-  projectId: string;
-  branchId: string;
-  databaseName: string;
-  roleName: string;
-  displayName: string;
-  binding?: AgentNeonDatabaseBinding;
-};
-
-export type AgentGitHubPullRequestTriggerConfig = {
-  id: string;
-  type: "github.pull_request";
-  repository: string;
-  events: Array<"opened" | "reopened" | "synchronize" | "ready_for_review">;
-  branches: string[];
-  enabled: boolean;
 };
 
 export type AgentScheduleTriggerConfig = {
@@ -298,41 +77,33 @@ export type AgentScheduleTriggerConfig = {
   enabled: boolean;
 };
 
-export type AgentTriggerConfig = AgentGitHubPullRequestTriggerConfig | AgentScheduleTriggerConfig;
-
+// Migration-only compatibility types used by packages/db/src/schema.ts. The retired
+// agent runtime has no parser or execution consumer for these shapes; they remain here
+// solely so the preserved Drizzle model can describe historical JSON columns without
+// reintroducing the legacy runtime modules.
 export type AgentEngine = "opencompany" | "codex";
 
-export type AgentConfig = {
-  schemaVersion: "agent.v1";
-  title: string;
-  instructions: string;
-  engine: AgentEngine;
-  model: {
-    provider: "vercel-ai-gateway";
-    name: AgentModelId;
-  };
-  tools: AgentConfigTool[];
-  brain: AgentBrainReference[];
-  agents?: AgentReference[];
-  skills?: AgentSkillReference[];
-  afterSession?: AgentAfterSessionConfig;
-  integrations: {
-    github: {
-      repositories: AgentGitHubRepositoryConfig[];
-      // Live integration-wide scope: the agent may target any repository accessible to the
-      // workspace's GitHub connection(s), resolved at session/tool time rather than expanded
-      // into `repositories`. Set if and only if the body mentions plain `@github`.
-      allRepositories?: boolean;
-    };
-    neon?: {
-      databases: AgentNeonDatabaseConfig[];
-    };
-  };
-  triggers: AgentTriggerConfig[];
+export type AgentConfig = Record<string, JsonValue>;
+
+export type AgentSessionQuestionPrompt = {
+  header: string;
+  question: string;
+  options: Array<{ label: string; description?: string }>;
+  allowMultiple: boolean;
+  allowOther: boolean;
 };
 
-export type AgentFile = {
-  title: string;
-  body: string;
-  config: AgentConfig;
+export type AgentSessionQuestionAnswer = {
+  selectedLabels: string[];
+  otherText?: string;
+};
+
+export type TiptapDoc = {
+  type: "doc";
+  content?: Array<{
+    type: string;
+    text?: string;
+    attrs?: Record<string, JsonValue>;
+    content?: TiptapDoc["content"];
+  }>;
 };

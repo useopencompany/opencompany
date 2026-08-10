@@ -12,7 +12,7 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     h2: ({ children, id, ...props }) => (
       <h2
         id={id ?? slugFromChildren(children)}
-        className="mt-10 scroll-mt-16 border-t border-border-subtle pt-8 text-[20px] font-semibold leading-7 tracking-[-0.01em] text-ink first:mt-0 first:border-t-0 first:pt-0"
+        className="mt-10 scroll-mt-16 border-t border-border-subtle pt-8 text-[20px] font-semibold leading-7 text-ink first:mt-0 first:border-t-0 first:pt-0"
         {...props}
       >
         {children}
@@ -21,19 +21,19 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     h3: ({ children, id, ...props }) => (
       <h3
         id={id ?? slugFromChildren(children)}
-        className="mt-7 scroll-mt-16 text-[15px] font-semibold leading-6 tracking-[-0.005em] text-ink"
+        className="mt-7 scroll-mt-16 text-[15px] font-semibold leading-6 text-ink"
         {...props}
       >
         {children}
       </h3>
     ),
     p: ({ children, ...props }) => (
-      <p className="mt-3 text-[14px] leading-7 tracking-[-0.005em] text-ink-muted" {...props}>
+      <p className="mt-3 text-[14px] leading-7 text-ink-muted" {...props}>
         {children}
       </p>
     ),
     ul: ({ children, ...props }) => (
-      <ul className="mt-3 space-y-2 pl-5 text-[14px] leading-7 text-ink-muted" {...props}>
+      <ul className="mt-3 list-disc space-y-2 pl-5 text-[14px] leading-7 text-ink-muted" {...props}>
         {children}
       </ul>
     ),
@@ -73,7 +73,7 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     ),
     pre: ({ children, ...props }) => (
       <pre
-        className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface-raised p-4 text-[12.5px] leading-6 text-ink shadow-[0_1px_0_rgba(0,0,0,0.02)]"
+        className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface-raised p-4 text-[12.5px] leading-6 text-ink"
         {...props}
       >
         {children}
@@ -86,6 +86,23 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
       >
         {children}
       </blockquote>
+    ),
+    table: ({ children, ...props }) => (
+      <div className="mt-4 overflow-x-auto">
+        <table className="w-full border-collapse text-left text-[13px]" {...props}>
+          {children}
+        </table>
+      </div>
+    ),
+    th: ({ children, ...props }) => (
+      <th className="border-b border-border-strong px-3 py-2 font-medium text-ink" {...props}>
+        {children}
+      </th>
+    ),
+    td: ({ children, ...props }) => (
+      <td className="border-b border-border-subtle px-3 py-2 text-ink-muted" {...props}>
+        {children}
+      </td>
     ),
     ...components,
   };

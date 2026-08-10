@@ -6,16 +6,15 @@ import { planReleaseSurfaces } from "./release-scope.mjs";
 test("maps Turbo affected packages to production surfaces", () => {
   assert.deepEqual(
     planReleaseSurfaces({
-      affectedPackages: ["@opencompany/analytics", "@opencompany/goat", "@opencompany/runner"],
+      affectedPackages: ["@opencompany/analytics", "@opencompany/web", "@opencompany/runner"],
     }),
-    { web: false, goat: true, marketing: false, runner: true },
+    { web: true, marketing: false, runner: true },
   );
 });
 
 test("manual releases deploy every requested surface", () => {
   assert.deepEqual(planReleaseSurfaces({ deployAll: true, deployRunner: false }), {
     web: true,
-    goat: true,
     marketing: true,
     runner: false,
   });
@@ -24,14 +23,13 @@ test("manual releases deploy every requested surface", () => {
 test("release workflow changes conservatively deploy every surface", () => {
   assert.deepEqual(
     planReleaseSurfaces({ changedFiles: [".github/workflows/release-production.yml"] }),
-    { web: true, goat: true, marketing: true, runner: true },
+    { web: true, marketing: true, runner: true },
   );
 });
 
 test("Vercel orchestration changes deploy only Vercel surfaces", () => {
   assert.deepEqual(planReleaseSurfaces({ changedFiles: ["scripts/release-vercel-deploy.mjs"] }), {
     web: true,
-    goat: true,
     marketing: true,
     runner: false,
   });
@@ -40,7 +38,6 @@ test("Vercel orchestration changes deploy only Vercel surfaces", () => {
 test("runner image changes deploy only the runner", () => {
   assert.deepEqual(planReleaseSurfaces({ changedFiles: ["Dockerfile.runner"] }), {
     web: false,
-    goat: false,
     marketing: false,
     runner: true,
   });
@@ -49,7 +46,6 @@ test("runner image changes deploy only the runner", () => {
 test("unrelated documentation changes do not deploy an application", () => {
   assert.deepEqual(planReleaseSurfaces({ changedFiles: ["docs/getting-started.md"] }), {
     web: false,
-    goat: false,
     marketing: false,
     runner: false,
   });

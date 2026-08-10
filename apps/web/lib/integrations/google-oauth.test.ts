@@ -1,131 +1,83 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  buildGoogleAuthorizationUrl,
-  createGoogleIntegrationState,
-  exchangeGoogleCode,
-  GOOGLE_PROVIDER_CONFIG,
-  googleOAuthTargetOriginForState,
-  verifyGoogleIntegrationState,
-} from "@/lib/integrations/google-oauth";
+  buildGoatGoogleAuthorizationUrl,
+  createGoatGoogleIntegrationState,
+  GOAT_GOOGLE_PROVIDER_CONFIG,
+  goatGoogleOAuthRedirectUri,
+  verifyGoatGoogleIntegrationState,
+} from "./google-oauth";
 
-const gmailConfig = GOOGLE_PROVIDER_CONFIG.gmail;
-const driveConfig = GOOGLE_PROVIDER_CONFIG.google_drive;
-
-describe("Google OAuth helpers", () => {
+describe("Goat Google OAuth", () => {
   beforeEach(() => {
     vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "client-id");
-    vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "client-secret");
-    vi.stubEnv("GOOGLE_INTEGRATION_STATE_SECRET", "state-secret-with-enough-length");
-    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.opencompany.cloud");
+    vi.stubEnv("GOOGLE_INTEGRATION_STATE_SECRET", "state-secret");
+    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://goat.example.com");
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
-    vi.restoreAllMocks();
   });
 
-  it("uses the direct integration callback when broker callback is unset", () => {
-    const url = new URL(buildGoogleAuthorizationUrl(gmailConfig, "signed-state"));
-
-    expect(url.searchParams.get("redirect_uri")).toBe(
-      "https://app.opencompany.cloud/api/integrations/gmail/callback",
-    );
-  });
-
-  it("uses the broker callback when configured", () => {
-    vi.stubEnv("GOOGLE_OAUTH_CALLBACK_URL", "https://oauth.opencompany.cloud/api/google/callback");
-
-    const url = new URL(buildGoogleAuthorizationUrl(gmailConfig, "signed-state"));
-
-    expect(url.searchParams.get("redirect_uri")).toBe(
-      "https://oauth.opencompany.cloud/api/google/callback",
-    );
-  });
-
-  it("uses the production-safe per-file Drive scope", () => {
-    const url = new URL(buildGoogleAuthorizationUrl(driveConfig, "signed-state"));
-    const scopes = url.searchParams.get("scope")?.split(" ") ?? [];
-
-    expect(scopes).toContain("https://www.googleapis.com/auth/drive.file");
-    expect(scopes).not.toContain("https://www.googleapis.com/auth/drive");
-    expect(url.searchParams.get("redirect_uri")).toBe(
-      "https://app.opencompany.cloud/api/integrations/google-drive/callback",
-    );
-  });
-
-  it("exchanges tokens with the same broker redirect URI", async () => {
-    vi.stubEnv("GOOGLE_OAUTH_CALLBACK_URL", "https://oauth.opencompany.cloud/api/google/callback");
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ access_token: "access-token", expires_in: 60 }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await exchangeGoogleCode(gmailConfig, "auth-code");
-
-    const [, init] = fetchMock.mock.calls[0] ?? [];
-    const body = init?.body as URLSearchParams;
-    expect(body.get("redirect_uri")).toBe("https://oauth.opencompany.cloud/api/google/callback");
-  });
-
-  it("exchanges tokens with the signed redirect URI even if env changes", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ access_token: "access-token", expires_in: 60 }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    vi.stubEnv("GOOGLE_OAUTH_CALLBACK_URL", "");
-
-    await exchangeGoogleCode(
-      gmailConfig,
-      "auth-code",
-      "https://oauth.opencompany.cloud/api/google/callback",
-    );
-
-    const [, init] = fetchMock.mock.calls[0] ?? [];
-    const body = init?.body as URLSearchParams;
-    expect(body.get("redirect_uri")).toBe("https://oauth.opencompany.cloud/api/google/callback");
-  });
-
-  it("preserves a sanitized target origin in signed state", () => {
-    const state = createGoogleIntegrationState({
+  it("round-trips signed state for the Goat user", () => {
+    const state = createGoatGoogleIntegrationState({
       provider: "gmail",
-      workspaceId: "wks_123",
-      userId: "usr_123",
-      returnTo: "/company/integrations",
-      oauthRedirectUri: "https://oauth.opencompany.cloud/api/google/callback",
-      targetOrigin: "https://pr-42.preview.opencompany.cloud/settings?tab=integrations",
+      userWorkosId: "user_123",
+      returnTo: "/settings",
     });
 
-    expect(verifyGoogleIntegrationState(state)).toMatchObject({
+    expect(verifyGoatGoogleIntegrationState(state)).toMatchObject({
       provider: "gmail",
-      oauthRedirectUri: "https://oauth.opencompany.cloud/api/google/callback",
-      targetOrigin: "https://pr-42.preview.opencompany.cloud",
+      userWorkosId: "user_123",
+      returnTo: "/settings",
     });
   });
 
-  it("drops invalid target origins from signed state", () => {
-    const state = createGoogleIntegrationState({
-      provider: "gmail",
-      workspaceId: "wks_123",
-      userId: "usr_123",
-      returnTo: "/company/integrations",
-      targetOrigin: "not a url",
-    });
+  it("requests draft-capable Gmail, writable Calendar, and read-plus-edit Drive scopes", () => {
+    const gmailUrl = new URL(
+      buildGoatGoogleAuthorizationUrl(GOAT_GOOGLE_PROVIDER_CONFIG.gmail, "state"),
+    );
+    const calendarUrl = new URL(
+      buildGoatGoogleAuthorizationUrl(GOAT_GOOGLE_PROVIDER_CONFIG.google_calendar, "state"),
+    );
+    const driveUrl = new URL(
+      buildGoatGoogleAuthorizationUrl(GOAT_GOOGLE_PROVIDER_CONFIG.google_drive, "state"),
+    );
 
-    expect(verifyGoogleIntegrationState(state).targetOrigin).toBeUndefined();
+    const gmailScopes = gmailUrl.searchParams.get("scope")?.split(" ") ?? [];
+    expect(gmailScopes).toContain("https://www.googleapis.com/auth/gmail.readonly");
+    expect(calendarUrl.searchParams.get("scope")).toContain(
+      "https://www.googleapis.com/auth/calendar.readonly",
+    );
+    expect(calendarUrl.searchParams.get("scope")).toContain(
+      "https://www.googleapis.com/auth/calendar.events",
+    );
+    expect(gmailScopes).toContain("https://www.googleapis.com/auth/gmail.compose");
+    expect(gmailScopes).not.toContain("https://www.googleapis.com/auth/gmail.send");
+    expect(calendarUrl.searchParams.get("scope")).not.toContain("calendar.events.readonly");
+    expect(driveUrl.searchParams.get("scope")).toContain(
+      "https://www.googleapis.com/auth/drive.readonly",
+    );
+    expect(driveUrl.searchParams.get("scope")).toContain(
+      "https://www.googleapis.com/auth/documents",
+    );
+    expect(driveUrl.searchParams.get("scope")).toContain(
+      "https://www.googleapis.com/auth/spreadsheets",
+    );
+    expect(driveUrl.searchParams.get("scope")).not.toContain("gmail.readonly");
+    expect(driveUrl.searchParams.get("scope")).not.toContain("calendar.readonly");
   });
 
-  it("adds a preview target origin only for brokered preview deployments", () => {
-    vi.stubEnv("GOOGLE_OAUTH_CALLBACK_URL", "https://oauth.opencompany.cloud/api/google/callback");
-    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://pr-123.preview.opencompany.cloud");
-    expect(googleOAuthTargetOriginForState()).toBe("https://pr-123.preview.opencompany.cloud");
+  it("uses direct Goat callbacks", () => {
+    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.chat");
 
-    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.opencompany.cloud");
-    expect(googleOAuthTargetOriginForState()).toBeUndefined();
+    expect(
+      Object.values(GOAT_GOOGLE_PROVIDER_CONFIG).map((config) =>
+        goatGoogleOAuthRedirectUri(config),
+      ),
+    ).toEqual([
+      "https://opencompany.chat/api/integrations/gmail/callback",
+      "https://opencompany.chat/api/integrations/google-calendar/callback",
+      "https://opencompany.chat/api/integrations/google-drive/callback",
+    ]);
   });
 });

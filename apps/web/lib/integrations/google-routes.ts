@@ -1,108 +1,87 @@
-import { captureException, createLogger } from "@opencompany/observability";
+import { connectGoatGoogleIntegration } from "@opencompany/db/goat-integrations";
 import { NextResponse } from "next/server";
-import { currentWorkspace } from "@/lib/auth";
+import { currentGoatUser } from "@/lib/auth";
+import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 import {
-  appendGoogleIntegrationStatus,
-  buildGoogleAuthorizationUrl,
-  createGoogleIntegrationState,
-  exchangeGoogleCode,
-  fetchGoogleCalendarList,
-  fetchGoogleUserInfo,
-  GOOGLE_PROVIDER_CONFIG,
-  type GoogleIntegrationProvider,
-  googleOAuthRedirectUri,
-  googleOAuthTargetOriginForState,
-  isGoogleIntegrationConfigured,
-  verifyGoogleIntegrationState,
+  appendGoatGoogleIntegrationStatus,
+  buildGoatGoogleAuthorizationUrl,
+  createGoatGoogleIntegrationState,
+  exchangeGoatGoogleCode,
+  fetchGoatGoogleUserInfo,
+  GOAT_GOOGLE_PROVIDER_CONFIG,
+  type GoatGoogleIntegrationProvider,
+  goatGoogleOAuthRedirectUri,
+  isGoatGoogleIntegrationConfigured,
+  verifyGoatGoogleIntegrationState,
 } from "@/lib/integrations/google-oauth";
-import { connectGoogleIntegration } from "@/lib/integrations/google-service";
 
-const logger = createLogger({ service: "opencompany-web", runtime: "server" });
-
-// Both Gmail and Google Calendar route pairs are thin wrappers over these handlers; they pass
-// their own provider so the shared logic stays in one place.
-
-export async function handleGoogleOAuthStart(
-  provider: GoogleIntegrationProvider,
+export async function handleGoatGoogleOAuthStart(
+  provider: GoatGoogleIntegrationProvider,
   request: Request,
 ) {
-  // Per-user connection: any workspace member can attach their own Google account.
-  // skipOnboarding: the onboarding integrations step opens this in a popup before onboarding is
-  // marked complete; the default gate would render the onboarding stepper inside the popup.
-  const { user, workspace } = await currentWorkspace({ skipOnboarding: true });
+  const { user } = await currentGoatUser();
   const url = new URL(request.url);
-  const returnTo = url.searchParams.get("returnTo") ?? "/company/integrations";
-  const config = GOOGLE_PROVIDER_CONFIG[provider];
-  const oauthRedirectUri = googleOAuthRedirectUri(config);
-  const targetOrigin = googleOAuthTargetOriginForState();
+  const returnTo = url.searchParams.get("returnTo") ?? "/settings";
+  const config = GOAT_GOOGLE_PROVIDER_CONFIG[provider];
+  const oauthRedirectUri = goatGoogleOAuthRedirectUri(config);
 
-  if (!isGoogleIntegrationConfigured()) {
+  if (!isGoatGoogleIntegrationConfigured()) {
     return NextResponse.redirect(
-      new URL(appendGoogleIntegrationStatus(returnTo, provider, "error"), url),
+      new URL(appendGoatGoogleIntegrationStatus(returnTo, provider, "error"), url),
     );
   }
 
-  const state = createGoogleIntegrationState({
+  const state = createGoatGoogleIntegrationState({
     provider,
-    workspaceId: workspace.id,
-    userId: user.id,
+    userWorkosId: user.workosUserId,
     returnTo,
-    oauthRedirectUri,
-    ...(targetOrigin ? { targetOrigin } : {}),
   });
 
-  return NextResponse.redirect(buildGoogleAuthorizationUrl(config, state, oauthRedirectUri));
+  return NextResponse.redirect(buildGoatGoogleAuthorizationUrl(config, state, oauthRedirectUri));
 }
 
-export async function handleGoogleOAuthCallback(
-  provider: GoogleIntegrationProvider,
+export async function handleGoatGoogleOAuthCallback(
+  provider: GoatGoogleIntegrationProvider,
   request: Request,
 ) {
-  // skipOnboarding: see handleGoogleOAuthStart — this popup flow runs mid-onboarding too.
-  const current = await currentWorkspace({ skipOnboarding: true });
+  const current = await currentGoatUser();
   const url = new URL(request.url);
-  const config = GOOGLE_PROVIDER_CONFIG[provider];
+  const config = GOAT_GOOGLE_PROVIDER_CONFIG[provider];
   const errorRedirect = (returnTo: string) =>
-    NextResponse.redirect(new URL(appendGoogleIntegrationStatus(returnTo, provider, "error"), url));
+    NextResponse.redirect(
+      new URL(appendGoatGoogleIntegrationStatus(returnTo, provider, "error"), url),
+    );
 
   let state;
   try {
-    state = verifyGoogleIntegrationState(url.searchParams.get("state") ?? "");
+    state = verifyGoatGoogleIntegrationState(url.searchParams.get("state") ?? "");
   } catch (error) {
-    captureException(error, {
-      event: "opencompany.google_integration_callback_failed",
+    console.warn("Goat Google integration callback failed with invalid state.", {
+      event: "goat.google_integration_callback_failed",
       reason: "invalid_state",
       provider,
+      error,
     });
-    return errorRedirect("/company/integrations");
+    return errorRedirect("/settings");
   }
 
-  if (
-    state.provider !== provider ||
-    state.workspaceId !== current.workspace.id ||
-    state.userId !== current.user.id
-  ) {
-    logger.warn("Google integration callback state did not match current session", {
-      event: "opencompany.google_integration_callback_failed",
+  if (state.provider !== provider || state.userWorkosId !== current.user.workosUserId) {
+    console.warn("Goat Google integration callback state did not match current session.", {
+      event: "goat.google_integration_callback_failed",
       reason: "state_session_mismatch",
       provider,
     });
     return errorRedirect(state.returnTo);
   }
 
-  if (!isGoogleIntegrationConfigured()) {
-    logger.error("Google integration callback reached without required configuration", {
-      event: "opencompany.google_integration_callback_failed",
-      reason: "not_configured",
-      provider,
-    });
+  if (!isGoatGoogleIntegrationConfigured()) {
     return errorRedirect(state.returnTo);
   }
 
   const oauthError = url.searchParams.get("error");
   if (oauthError) {
-    logger.warn("Google integration OAuth returned an error", {
-      event: "opencompany.google_integration_callback_failed",
+    console.warn("Goat Google integration OAuth returned an error.", {
+      event: "goat.google_integration_callback_failed",
       reason: "oauth_error",
       provider,
       oauth_error: oauthError,
@@ -112,50 +91,51 @@ export async function handleGoogleOAuthCallback(
 
   const code = url.searchParams.get("code");
   if (!code) {
-    logger.warn("Google integration callback missing authorization code", {
-      event: "opencompany.google_integration_callback_failed",
-      reason: "missing_code",
-      provider,
-    });
     return errorRedirect(state.returnTo);
   }
 
   try {
-    const { tokens, expiresAt } = await exchangeGoogleCode(config, code, state.oauthRedirectUri);
-    const userInfo = await fetchGoogleUserInfo(tokens.access_token);
-    const calendars = config.syncsCalendars
-      ? await fetchGoogleCalendarList(tokens.access_token)
-      : undefined;
-
-    await connectGoogleIntegration({
+    const { tokens, expiresAt } = await exchangeGoatGoogleCode(
+      config,
+      code,
+      goatGoogleOAuthRedirectUri(config),
+    );
+    const userInfo = await fetchGoatGoogleUserInfo(tokens.access_token);
+    await connectGoatGoogleIntegration({
       provider,
-      workspaceId: current.workspace.id,
-      connectedByUserId: current.user.id,
+      userWorkosId: current.user.workosUserId,
       externalId: userInfo.sub,
       accountEmail: userInfo.email ?? null,
       accountName: userInfo.name ?? null,
       tokens,
       expiresAt,
-      ...(calendars ? { calendars } : {}),
+      scopes: readScopes(tokens.scope, config.scopes),
+    });
+    await captureGoatIntegrationAddedAnalytics({
+      userWorkosId: current.user.workosUserId,
+      workspaceId: current.workspace.id,
+      provider,
     });
 
     return NextResponse.redirect(
-      new URL(appendGoogleIntegrationStatus(state.returnTo, provider, "connected"), url),
+      new URL(appendGoatGoogleIntegrationStatus(state.returnTo, provider, "connected"), url),
     );
   } catch (error) {
-    captureException(error, {
-      event: "opencompany.google_integration_callback_failed",
+    console.warn("Goat Google integration callback failed while connecting account.", {
+      event: "goat.google_integration_callback_failed",
       reason: "connection_sync_failed",
       provider,
-      workspace_id: current.workspace.id,
-      user_id: current.user.id,
-    });
-    logger.error("Google integration callback failed while connecting account", {
-      event: "opencompany.google_integration_callback_failed",
-      reason: "connection_sync_failed",
-      provider,
-      error_message: error instanceof Error ? error.message : "Unknown error",
+      error,
     });
     return errorRedirect(state.returnTo);
   }
+}
+
+function readScopes(scope: string | undefined, fallback: string[]) {
+  if (!scope) return fallback;
+  const scopes = scope
+    .split(/\s+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return scopes.length > 0 ? scopes : fallback;
 }

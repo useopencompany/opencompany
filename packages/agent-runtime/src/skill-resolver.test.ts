@@ -79,12 +79,6 @@ describe("slugifySkillName / ensureSkillMountId", () => {
     expect(slugifySkillName("Improve Codebase Architecture")).toBe("improve-codebase-architecture");
   });
 
-  test("suffixes when colliding with a built-in id", () => {
-    const id = ensureSkillMountId("agent-self-edit", "sha256:abcdef1234567890", new Set());
-    expect(id).not.toBe("agent-self-edit");
-    expect(id).toContain("abcdef");
-  });
-
   test("suffixes when colliding with a reserved workspace id", () => {
     const id = ensureSkillMountId("pdf", "sha256:abcdef1234567890", new Set(["pdf"]));
     expect(id).toBe("pdf-abcdef");

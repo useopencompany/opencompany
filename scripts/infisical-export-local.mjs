@@ -10,30 +10,26 @@ const env = readFlag("--env") ?? "dev";
 const outputFile = readFlag("--output-file") ?? ".env.local";
 const paths = readListFlag("--path");
 if (paths.length === 0) {
-  paths.push("/web", "/runner");
+  paths.push("/goat", "/runner");
 }
 
 const preserveLocalKeys = new Set([
   "DATABASE_URL",
   "NEON_BRANCH",
-  "INNGEST_DEV",
   "OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS",
   "GOAT_PORT",
   "GOAT_HTTPS_PORT",
   "GOAT_NEXT_PUBLIC_APP_URL",
   "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
-  "RUNNER_LLM_BROKER_PUBLIC_URL",
 ]);
-const LOCAL_WORKOS_REDIRECT_URI = "http://localhost:3000/auth/callback";
-const LOCAL_GOAT_HTTPS_PORT = "3443";
-const LOCAL_GOAT_APP_URL = `https://localhost:${LOCAL_GOAT_HTTPS_PORT}`;
+const LOCAL_WEB_HTTPS_PORT = "3443";
+const LOCAL_WEB_APP_URL = `https://localhost:${LOCAL_WEB_HTTPS_PORT}`;
 const localDefaultLines = [
   'OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS="louis@acta.so"',
   'GOAT_PORT="3002"',
-  `GOAT_HTTPS_PORT="${LOCAL_GOAT_HTTPS_PORT}"`,
-  `GOAT_NEXT_PUBLIC_APP_URL=${JSON.stringify(LOCAL_GOAT_APP_URL)}`,
-  `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI=${JSON.stringify(`${LOCAL_GOAT_APP_URL}/auth/callback`)}`,
-  'RUNNER_LLM_BROKER_PUBLIC_URL=""',
+  `GOAT_HTTPS_PORT="${LOCAL_WEB_HTTPS_PORT}"`,
+  `GOAT_NEXT_PUBLIC_APP_URL=${JSON.stringify(LOCAL_WEB_APP_URL)}`,
+  `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI=${JSON.stringify(`${LOCAL_WEB_APP_URL}/auth/callback`)}`,
 ];
 const chunks = [];
 for (const path of paths) {
@@ -53,7 +49,6 @@ for (const path of paths) {
 
   const lines = result.stdout
     .split("\n")
-    .map((line) => localizeDevWorkOSRedirect(line))
     .filter((line) => {
       const match = line.match(/^([A-Z0-9_]+)=/);
       return !match || !preserveLocalKeys.has(match[1]);
@@ -112,11 +107,4 @@ function appendMissingLocalDefaults(lines) {
   );
 
   return [...lines, ...localDefaultLines.filter((line) => !seen.has(line.split("=")[0]))];
-}
-
-function localizeDevWorkOSRedirect(line) {
-  if (env !== "dev") return line;
-  const match = line.match(/^(NEXT_PUBLIC_WORKOS_REDIRECT_URI|WORKOS_REDIRECT_URI)=/);
-  if (!match) return line;
-  return `${match[1]}=${JSON.stringify(LOCAL_WORKOS_REDIRECT_URI)}`;
 }

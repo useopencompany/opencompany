@@ -3,13 +3,12 @@ import { calculateHostedToolUsageCost, recordWorkspaceUsageDebit } from "@openco
 import { createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { getDb } from "./db";
-import { appendRuntimeEvent } from "./events";
 import { rowsFromExecute } from "./sql-exec";
 
 const brokerLogger = createLogger({ service: "opencompany-runner", runtime: "llm-broker" });
 
 // Per-delegation tokens for the runner-hosted LLM broker (see llm-broker.ts). A hosted
-// coding tool or the memory CLI authenticates to the broker with one of these opaque
+// coding tool authenticates to the broker with one of these opaque
 // tokens instead of a raw provider key; the broker meters every upstream request against
 // the token, and `settleBrokerToken` turns the metered total into the single billable
 // agent_session_tool_usage row for the delegation.
@@ -403,7 +402,6 @@ export async function validateBrokerToken(
 // Map the delegation's tool to the provider label used in tool-usage breakdowns, matching
 // what the tool's own (now display-only) usage rows report.
 function settlementProvider(toolName: string): string {
-  if (toolName === "memory") return "vercel-ai-gateway";
   if (toolName === "codex_coder") return "codex";
   if (toolName === "opencode_coder") return "opencode";
   return toolName;
@@ -417,7 +415,6 @@ export type BrokerSettlementResult =
 type SettlementDeps = {
   store: BrokerTokenStore;
   recordDebit: typeof recordWorkspaceUsageDebit;
-  appendEvent: typeof appendRuntimeEvent;
   // Lazy so DB-less unit tests can inject everything without a configured database.
   getDbImpl: typeof getDb;
 };
@@ -428,7 +425,6 @@ export async function settleBrokerToken(
 ): Promise<BrokerSettlementResult> {
   const store = deps?.store ?? createDbBrokerTokenStore();
   const recordDebit = deps?.recordDebit ?? recordWorkspaceUsageDebit;
-  const appendEvent = deps?.appendEvent ?? appendRuntimeEvent;
   const getDbImpl = deps?.getDbImpl ?? getDb;
 
   const totals = await store.claimSettlement(tokenId);
@@ -498,25 +494,6 @@ export async function settleBrokerToken(
         },
       });
     }
-
-    // Unconditional (lease-less) append so the session cost UI rolls the brokered cost in.
-    // Same payload shape as recordToolUsage's session.tool_usage event.
-    await appendEvent(getDbImpl(), {
-      sessionId: totals.sessionId,
-      messageId: totals.messageId,
-      type: "session.tool_usage",
-      payload: {
-        messageId: totals.messageId ?? "",
-        toolCallId: totals.toolCallId ?? providerRequestId,
-        toolName: totals.toolName,
-        provider,
-        operation,
-        costUsdMicros: cost.providerCostUsdMicros,
-        providerCostUsdMicros: cost.providerCostUsdMicros,
-        platformFeeUsdMicros: cost.platformFeeUsdMicros,
-        chargedCostUsdMicros: cost.totalCostUsdMicros,
-      },
-    });
 
     return {
       settled: true,

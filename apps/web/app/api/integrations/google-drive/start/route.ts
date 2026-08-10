@@ -1,5 +1,5 @@
-import { handleGoogleOAuthStart } from "@/lib/integrations/google-routes";
+import { handleGoatGoogleOAuthStart } from "@/lib/integrations/google-routes";
 
 export async function GET(request: Request) {
-  return handleGoogleOAuthStart("google_drive", request);
+  return handleGoatGoogleOAuthStart("google_drive", request);
 }

@@ -1,55 +1,65 @@
-import { captureServerEvent } from "@opencompany/analytics/server";
-import { captureException } from "@opencompany/observability";
-import { handleAuth } from "@workos-inc/authkit-nextjs";
-
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+import { completeGoatAuthentication } from "@/lib/auth";
 import {
-  provisionDefaultOrganization,
-  refreshIntoWorkspaceOrganization,
-  syncUserAndWorkspace,
-} from "@/lib/auth";
-import { dispatchSignupWelcomeEmailRequested } from "@/lib/email/events";
+  consumeGoatOAuthStateCookie,
+  organizationSelectionFromError,
+  safeGoatReturnPathname,
+  setGoatOrganizationSelection,
+} from "@/lib/auth-methods";
+import { getGoatAppUrl } from "@/lib/workos";
+import { getWorkOSClient } from "@/lib/workos-client";
 
-export const GET = handleAuth({
-  returnPathname: "/onboarding",
-  onSuccess: async ({ user, organizationId }) => {
-    try {
-      const context = organizationId
-        ? await syncUserAndWorkspace(user, organizationId, "admin")
-        : await provisionDefaultOrganization(user);
+// authkit-nextjs's getWorkOS() doesn't thread WORKOS_CLIENT_ID down into
+// userManagement's per-call default, so calls made directly against the SDK
+// (bypassing authkit-nextjs's own callback handler) need it passed explicitly.
+const WORKOS_CLIENT_ID = process.env.WORKOS_CLIENT_ID ?? "";
 
-      if (!organizationId) {
-        await refreshIntoWorkspaceOrganization(context.workspace);
-      }
+function signInErrorRedirect(reason: string) {
+  const url = new URL("/signin", getGoatAppUrl());
+  url.searchParams.set("error", reason);
+  return NextResponse.redirect(url);
+}
 
-      if (context.isNewUser) {
-        await captureServerEvent("signup_completed", context.user.id, {
-          user_id: context.user.id,
-          workspace_id: context.workspace.id,
-        });
+// Handles the Google OAuth leg of our custom sign-in/sign-up UI. We don't use
+// authkit-nextjs's handleAuth()/getSignInUrl() here because those are wired to
+// the hosted AuthKit picker (provider: "authkit"); this route instead pairs
+// with lib/auth-actions.ts's startGoogleAuth, which targets GoogleOAuth
+// directly and stores its own CSRF state cookie.
+export async function GET(request: NextRequest) {
+  const code = request.nextUrl.searchParams.get("code");
+  const state = request.nextUrl.searchParams.get("state");
+  const statePayload = await consumeGoatOAuthStateCookie();
 
-        try {
-          await dispatchSignupWelcomeEmailRequested({
-            userId: context.user.id,
-            workspaceId: context.workspace.id,
-            email: context.user.email,
-            firstName: context.user.firstName,
-            lastName: context.user.lastName,
-          });
-        } catch (error) {
-          captureException(error, {
-            event: "opencompany.signup_welcome_email_dispatch_failed",
-            user_id: context.user.id,
-            workspace_id: context.workspace.id,
-          });
-        }
-      }
-    } catch (error) {
-      captureException(error, {
-        event: "opencompany.auth_callback_failed",
-        user_id: user.id,
-        organization_id: organizationId,
+  if (!code || !state || !statePayload || state !== statePayload.state) {
+    return signInErrorRedirect("oauth_state");
+  }
+
+  const ipAddress = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const userAgent = request.headers.get("user-agent") ?? undefined;
+
+  try {
+    const authResponse = await getWorkOSClient().userManagement.authenticateWithCode({
+      clientId: WORKOS_CLIENT_ID,
+      code,
+      ...(statePayload.invitationToken ? { invitationToken: statePayload.invitationToken } : {}),
+      ...(ipAddress ? { ipAddress } : {}),
+      ...(userAgent ? { userAgent } : {}),
+    });
+    await completeGoatAuthentication(authResponse, request);
+    return NextResponse.redirect(
+      new URL(safeGoatReturnPathname(statePayload.returnPathname), getGoatAppUrl()),
+    );
+  } catch (error) {
+    const selection = organizationSelectionFromError(error);
+    if (selection) {
+      await setGoatOrganizationSelection({
+        ...selection,
+        returnPathname: safeGoatReturnPathname(statePayload.returnPathname),
       });
-      throw error;
+      return NextResponse.redirect(new URL("/signin", getGoatAppUrl()));
     }
-  },
-});
+    console.error("[goat] Failed to complete Google sign-in", error);
+    return signInErrorRedirect("oauth_failed");
+  }
+}

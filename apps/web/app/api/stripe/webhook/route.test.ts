@@ -14,8 +14,8 @@ import {
   recordGoatAutoRefillCredit,
 } from "@opencompany/db/goat-credits";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fulfillCheckoutSession } from "@/lib/billing/service";
-import { getStripe, getStripeWebhookSecret } from "@/lib/billing/stripe";
+import { fulfillCheckoutSession } from "@/lib/billing/legacy-credits";
+import { getGoatStripe, getGoatStripeWebhookSecret } from "@/lib/billing/stripe";
 import { POST } from "./route";
 
 vi.mock("@opencompany/analytics/server", () => ({
@@ -52,13 +52,13 @@ vi.mock("@opencompany/db/goat-credits", () => ({
   }),
 }));
 
-vi.mock("@/lib/billing/service", () => ({
+vi.mock("@/lib/billing/legacy-credits", () => ({
   fulfillCheckoutSession: vi.fn(),
 }));
 
 vi.mock("@/lib/billing/stripe", () => ({
-  getStripe: vi.fn(),
-  getStripeWebhookSecret: vi.fn(),
+  getGoatStripe: vi.fn(),
+  getGoatStripeWebhookSecret: vi.fn(),
 }));
 
 vi.mock("next/server", async (importOriginal) => {
@@ -85,8 +85,8 @@ const recordGoatAutoRefillCreditMock = vi.mocked(recordGoatAutoRefillCredit);
 const releasePendingForWorkspaceMock = vi.mocked(releasePendingForWorkspace);
 const setGoatAutoRefillPaymentMethodMock = vi.mocked(setGoatAutoRefillPaymentMethod);
 const settleGoatAutoRefillMock = vi.mocked(settleGoatAutoRefill);
-const getStripeMock = vi.mocked(getStripe);
-const getStripeWebhookSecretMock = vi.mocked(getStripeWebhookSecret);
+const getGoatStripeMock = vi.mocked(getGoatStripe);
+const getGoatStripeWebhookSecretMock = vi.mocked(getGoatStripeWebhookSecret);
 
 function request(signature: string | null) {
   return new Request("https://app.example.com/api/stripe/webhook", {
@@ -106,7 +106,7 @@ function stripeWithEvent(event: Record<string, unknown>, extra: Record<string, u
 describe("Stripe webhook route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getStripeWebhookSecretMock.mockReturnValue("whsec_123");
+    getGoatStripeWebhookSecretMock.mockReturnValue("whsec_123");
     releasePendingForWorkspaceMock.mockResolvedValue(0);
   });
 
@@ -118,7 +118,7 @@ describe("Stripe webhook route", () => {
   });
 
   it("rejects invalid webhook signatures", async () => {
-    getStripeMock.mockReturnValue({
+    getGoatStripeMock.mockReturnValue({
       webhooks: {
         constructEvent: vi.fn(() => {
           throw new Error("signature mismatch");
@@ -143,7 +143,7 @@ describe("Stripe webhook route", () => {
       balanceCents: 5000,
       ledgerId: 22,
     });
-    getStripeMock.mockReturnValue(
+    getGoatStripeMock.mockReturnValue(
       stripeWithEvent({
         id: "evt_123",
         type: "checkout.session.completed",
@@ -171,7 +171,7 @@ describe("Stripe webhook route", () => {
       ok: false,
       reason: "already_fulfilled_or_mismatch",
     });
-    getStripeMock.mockReturnValue(
+    getGoatStripeMock.mockReturnValue(
       stripeWithEvent({
         id: "evt_123",
         type: "checkout.session.completed",
@@ -209,7 +209,7 @@ describe("Stripe webhook route", () => {
     const retrievePaymentIntent = vi
       .fn()
       .mockResolvedValue({ id: "pi_topup_1", payment_method: "pm_card_1" });
-    getStripeMock.mockReturnValue(
+    getGoatStripeMock.mockReturnValue(
       stripeWithEvent(
         {
           id: "evt_goat_delayed",
@@ -254,7 +254,7 @@ describe("Stripe webhook route", () => {
   });
 
   it("marks the Goat checkout record failed after a delayed payment fails", async () => {
-    getStripeMock.mockReturnValue(
+    getGoatStripeMock.mockReturnValue(
       stripeWithEvent({
         id: "evt_goat_failed",
         type: "checkout.session.async_payment_failed",
@@ -283,7 +283,7 @@ describe("Stripe webhook route", () => {
   });
 
   it("waits for the subscription webhook before granting Pro", async () => {
-    getStripeMock.mockReturnValue(
+    getGoatStripeMock.mockReturnValue(
       stripeWithEvent({
         id: "evt_goat_sub",
         type: "checkout.session.completed",
@@ -302,7 +302,7 @@ describe("Stripe webhook route", () => {
 
     expect(applyGoatStripeSubscriptionProjectionMock).not.toHaveBeenCalled();
 
-    getStripeMock.mockReturnValue(
+    getGoatStripeMock.mockReturnValue(
       stripeWithEvent({
         id: "evt_goat_sub_2",
         type: "customer.subscription.updated",
@@ -350,7 +350,7 @@ describe("Stripe webhook route", () => {
   });
 
   it("does not grant Pro from an unrelated Stripe subscription", async () => {
-    getStripeMock.mockReturnValue(
+    getGoatStripeMock.mockReturnValue(
       stripeWithEvent({
         id: "evt_other_sub",
         type: "customer.subscription.updated",
@@ -376,7 +376,7 @@ describe("Stripe webhook route", () => {
 
   it("marks a failed Pro invoice for attention", async () => {
     findGoatWorkspaceIdForStripeSubscriptionMock.mockResolvedValueOnce("goat_ws_1");
-    getStripeMock.mockReturnValue(
+    getGoatStripeMock.mockReturnValue(
       stripeWithEvent({
         id: "evt_invoice_failed",
         type: "invoice.payment_failed",
@@ -407,7 +407,7 @@ describe("Stripe webhook route", () => {
   });
 
   it("credits a Goat auto-refill PaymentIntent and releases paused ingestion", async () => {
-    getStripeMock.mockReturnValue(
+    getGoatStripeMock.mockReturnValue(
       stripeWithEvent({
         id: "evt_pi_goat",
         type: "payment_intent.succeeded",
@@ -451,7 +451,7 @@ describe("Stripe webhook route", () => {
       ok: false,
       reason: "duplicate",
     });
-    getStripeMock.mockReturnValue(
+    getGoatStripeMock.mockReturnValue(
       stripeWithEvent({
         id: "evt_pi_goat_replay",
         type: "payment_intent.succeeded",
@@ -475,7 +475,7 @@ describe("Stripe webhook route", () => {
   });
 
   it("disables Goat auto-refill after a failed off-session charge", async () => {
-    getStripeMock.mockReturnValue(
+    getGoatStripeMock.mockReturnValue(
       stripeWithEvent({
         id: "evt_pi_goat_failed",
         type: "payment_intent.payment_failed",
@@ -504,8 +504,8 @@ describe("Stripe webhook route", () => {
     expect(recordGoatAutoRefillCreditMock).not.toHaveBeenCalled();
   });
 
-  it("routes non-goat payment intents to the web auto-refill handler untouched", async () => {
-    getStripeMock.mockReturnValue(
+  it("routes non-goat payment intents to the legacy auto-refill handler untouched", async () => {
+    getGoatStripeMock.mockReturnValue(
       stripeWithEvent({
         id: "evt_123",
         type: "payment_intent.succeeded",

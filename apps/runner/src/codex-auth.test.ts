@@ -19,7 +19,7 @@ vi.mock("e2b", () => ({
   },
 }));
 
-vi.mock("./codex-tool", () => ({
+vi.mock("./codex-cli", () => ({
   ensureCodexInstalled: mocks.ensureCodexInstalled,
 }));
 
@@ -125,7 +125,7 @@ describe("startGoatCodexDeviceAuthFlow", () => {
     );
     expect(mocks.killSandbox).toHaveBeenCalledWith("sbx_old");
     expect(mocks.order.indexOf("kill:sbx_old")).toBeLessThan(mocks.order.indexOf("create"));
-    expect(mocks.sandboxCreate).toHaveBeenCalledWith("amp", {
+    expect(mocks.sandboxCreate).toHaveBeenCalledWith("codex", {
       envs: {},
       metadata: { user_id: "user_1" },
       timeoutMs: 20 * 60 * 1000,
@@ -202,36 +202,17 @@ function fakeSandbox() {
 
 function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
   return {
-    databaseUrl: "postgres://test",
     internalToken: "internal",
     streamTokenSecret: "stream",
-    e2bApiKey: "e2b",
     vercelAiGatewayApiKey: "gateway",
     openaiCodexApiKey: undefined,
-    publicUrl: undefined,
-    llmBrokerEnabled: true,
-    integrationCredentialEncryptionKey: Buffer.alloc(32, 0),
     exaApiKey: "exa",
     goatBrowserEnabled: false,
-    agentBrowserProvider: undefined,
-    browserlessApiKey: undefined,
-    browserlessApiUrl: undefined,
-    browserlessTtl: undefined,
-    browserlessStealth: undefined,
-    xApiBearerToken: undefined,
-    supadataApiKey: undefined,
-    ampApiKey: undefined,
-    e2bTemplate: undefined,
-    ampE2bTemplate: undefined,
     codexE2bTemplate: undefined,
-    e2bSandboxIdleTimeoutMs: 30_000,
-    opencodeTimeoutMs: 1_200_000,
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",
     goatCodexChatIdleTimeoutMs: 1_800_000,
-    toolArgRepairEnabled: false,
     jobLeaseTtlMs: 300_000,
-    jobMaxLeaseBusyAttempts: 10,
     goatTaskWorkerEnabled: false,
     workerConcurrency: 2,
     port: 3040,

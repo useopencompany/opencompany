@@ -174,8 +174,8 @@ jobs:
         if: ${{ github.event_name == 'workflow_run' && steps.production-release.outputs.should_release == 'false' }}
         run: echo "This automatic release was superseded before migrations/deploy, so production was not changed."
 
-      - name: Check Goat billing env before production changes
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true') && steps.release-scope.outputs.goat == 'true' }}
+      - name: Check web billing env before production changes
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
         run: node scripts/check-goat-billing-production-env.mjs
 
       - name: Create GitHub deployment
@@ -210,8 +210,8 @@ jobs:
               description: `Production release ${shortSha} is in progress.`,
             };
 
-            if (process.env.PRODUCTION_WEB_URL) {
-              status.environment_url = process.env.PRODUCTION_WEB_URL;
+            if (process.env.PRODUCTION_GOAT_URL) {
+              status.environment_url = process.env.PRODUCTION_GOAT_URL;
             }
 
             await github.rest.repos.createDeploymentStatus(status);
@@ -224,23 +224,6 @@ jobs:
       - name: Run production migrations
         if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
         run: bun run db:migrate
-
-      - name: Pull Vercel project config
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
-        run: bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$VERCEL_PROJECT_ID"
-
-      - name: Check Vercel web env
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
-        env:
-          OPENCOMPANY_LOAD_VERCEL_ENV: "1"
-        run: bun run release:preflight -- --web
-
-      - name: Build web
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
-        env:
-          OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
-          NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
-        run: bunx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$VERCEL_PROJECT_ID"
 
       - name: Re-check automatic release before deploy
         id: deploy-release
@@ -265,27 +248,22 @@ jobs:
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.runner == 'true' }}
         run: bun run release:render -- --trigger-only
 
-      - name: Deploy web
-        id: deploy-web
+      - name: Map web production app env
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
-        run: node scripts/release-vercel-deploy.mjs --label web
-
-      - name: Map Goat production app env
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.goat == 'true' }}
         run: |
-          goat_url="${PRODUCTION_GOAT_URL%/}"
-          if [ -z "$goat_url" ]; then
-            echo "PRODUCTION_GOAT_URL is required to deploy Goat."
+          web_url="${PRODUCTION_GOAT_URL%/}"
+          if [ -z "$web_url" ]; then
+            echo "PRODUCTION_GOAT_URL is required to deploy the web app."
             exit 1
           fi
 
           {
-            echo "GOAT_NEXT_PUBLIC_APP_URL=$goat_url"
-            echo "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI=$goat_url/auth/callback"
+            echo "GOAT_NEXT_PUBLIC_APP_URL=$web_url"
+            echo "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI=$web_url/auth/callback"
           } >> "$GITHUB_ENV"
 
-      - name: Check Vercel Goat project config
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.goat == 'true' }}
+      - name: Check Vercel web project config
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
         run: |
           rm -rf .vercel
 
@@ -307,7 +285,7 @@ jobs:
             );
 
             if (!response.ok) {
-              throw new Error(`Could not fetch Goat Vercel project metadata: ${response.status} ${response.statusText}`);
+              throw new Error(`Could not fetch web Vercel project metadata: ${response.status} ${response.statusText}`);
             }
 
             const project = await response.json();
@@ -316,14 +294,14 @@ jobs:
               throw new Error("Fetched Vercel project id does not match GOAT_VERCEL_PROJECT_ID.");
             }
 
-            if (project.rootDirectory !== "apps/goat") {
-              throw new Error(`Goat Vercel project rootDirectory must be apps/goat, got ${project.rootDirectory ?? "<unset>"}.`);
+            if (project.rootDirectory !== "apps/web") {
+              throw new Error(`Web Vercel project rootDirectory must be apps/web, got ${project.rootDirectory ?? "<unset>"}.`);
             }
 
             const minimumSkewProtectionMaxAge = 7 * 24 * 60 * 60;
             if ((project.skewProtectionMaxAge ?? 0) < minimumSkewProtectionMaxAge) {
               throw new Error(
-                `Goat Vercel Skew Protection maximum age must be at least ${minimumSkewProtectionMaxAge} seconds, got ${project.skewProtectionMaxAge ?? "<unset>"}.`,
+                `Web Vercel Skew Protection maximum age must be at least ${minimumSkewProtectionMaxAge} seconds, got ${project.skewProtectionMaxAge ?? "<unset>"}.`,
               );
             }
 
@@ -360,8 +338,8 @@ jobs:
           });
           NODE
 
-      - name: Check Vercel Goat env
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.goat == 'true' }}
+      - name: Check Vercel web env
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
         run: |
           node <<'NODE'
           const required = [
@@ -381,6 +359,7 @@ jobs:
             "RUNNER_INTERNAL_TOKEN",
             "ELECTRIC_URL",
             "GOAT_STRIPE_API_KEY",
+            "GOAT_STRIPE_WEBHOOK_SECRET",
             "GOAT_STRIPE_CHECKOUT_ENABLED",
             "CRON_SECRET",
             "GOAT_HUBSPOT_CLIENT_ID",
@@ -436,94 +415,72 @@ jobs:
           }
 
           async function main() {
-            const goatProjectId = process.env.GOAT_VERCEL_PROJECT_ID;
-            const webProjectId = process.env.VERCEL_PROJECT_ID;
+            const webProjectId = process.env.GOAT_VERCEL_PROJECT_ID;
             const teamId = process.env.VERCEL_ORG_ID;
             const token = process.env.VERCEL_TOKEN;
 
-            if (!goatProjectId || !webProjectId || !teamId || !token) {
-              throw new Error("GOAT_VERCEL_PROJECT_ID, VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
+            if (!webProjectId || !teamId || !token) {
+              throw new Error("GOAT_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
             }
 
-            if (goatProjectId === webProjectId) {
-              throw new Error("Goat and web must use separate Vercel projects.");
-            }
-
-            const [goatEnv, webEnv] = await Promise.all([
-              listProductionEnv(goatProjectId, "Goat", teamId, token),
-              listProductionEnv(webProjectId, "web", teamId, token),
-            ]);
-            const productionKeys = new Set(goatEnv.map((env) => env.key));
+            const webEnv = await listProductionEnv(webProjectId, "web", teamId, token);
+            const productionKeys = new Set(webEnv.map((env) => env.key));
             const missing = required.filter((key) => !productionKeys.has(key));
-            const requiredWebBilling = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"];
-            const webProductionKeys = new Set(webEnv.map((env) => env.key));
-            const missingWebBilling = requiredWebBilling.filter(
-              (key) => !webProductionKeys.has(key),
-            );
 
-            console.log(`Vercel Goat production env keys: ${required.length - missing.length}/${required.length} required present.`);
+            console.log(`Vercel web production env keys: ${required.length - missing.length}/${required.length} required present.`);
 
             if (missing.length > 0) {
-              throw new Error(`Missing Goat Vercel production env keys: ${missing.join(", ")}`);
-            }
-
-            if (missingWebBilling.length > 0) {
-              throw new Error(
-                `Missing web Vercel production env keys required by Goat billing: ${missingWebBilling.join(", ")}`,
-              );
+              throw new Error(`Missing web Vercel production env keys: ${missing.join(", ")}`);
             }
 
             const checkoutEnabled = await readEnvValue(
-              goatProjectId,
-              goatEnv,
+              webProjectId,
+              webEnv,
               "GOAT_STRIPE_CHECKOUT_ENABLED",
-              "Goat",
+              "web",
               teamId,
               token,
             );
             if (checkoutEnabled.trim() !== "true") {
               throw new Error(
-                "Goat GOAT_STRIPE_CHECKOUT_ENABLED must be true before a production billing release.",
+                "Web GOAT_STRIPE_CHECKOUT_ENABLED must be true before a production billing release.",
               );
             }
 
-            const expectedGoatOrigin = new URL(process.env.PRODUCTION_GOAT_URL).origin;
+            const webhookSecret = await readEnvValue(
+              webProjectId,
+              webEnv,
+              "GOAT_STRIPE_WEBHOOK_SECRET",
+              "web",
+              teamId,
+              token,
+            );
+            if (!webhookSecret.trim().startsWith("whsec_")) {
+              throw new Error(
+                "Web GOAT_STRIPE_WEBHOOK_SECRET must be a Stripe webhook signing secret.",
+              );
+            }
+
+            const expectedWebOrigin = new URL(process.env.PRODUCTION_GOAT_URL).origin;
             const expectedValues = new Map([
-              ["GOAT_NEXT_PUBLIC_APP_URL", expectedGoatOrigin],
-              ["GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI", `${expectedGoatOrigin}/auth/callback`],
+              ["GOAT_NEXT_PUBLIC_APP_URL", expectedWebOrigin],
+              ["GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI", `${expectedWebOrigin}/auth/callback`],
             ]);
-            const configuredGoatUrls = await Promise.all(
+            const configuredWebUrls = await Promise.all(
               Array.from(expectedValues.keys(), (key) =>
-                readEnvValue(goatProjectId, goatEnv, key, "Goat", teamId, token),
+                readEnvValue(webProjectId, webEnv, key, "web", teamId, token),
               ),
             );
             const mismatched = Array.from(expectedValues.entries())
-              .filter(([, expected], index) => configuredGoatUrls[index].trim() !== expected)
+              .filter(([, expected], index) => configuredWebUrls[index].trim() !== expected)
               .map(([key]) => key);
 
             if (mismatched.length > 0) {
               throw new Error(
-                `Goat Vercel production envs do not match PRODUCTION_GOAT_URL: ${mismatched.join(", ")}`,
+                `Web Vercel production envs do not match PRODUCTION_GOAT_URL: ${mismatched.join(", ")}`,
               );
             }
 
-            const credentialKeys = ["WORKOS_CLIENT_ID", "WORKOS_API_KEY"];
-            const [goatCredentials, webCredentials] = await Promise.all([
-              Promise.all(
-                credentialKeys.map((key) => readEnvValue(goatProjectId, goatEnv, key, "Goat", teamId, token)),
-              ),
-              Promise.all(
-                credentialKeys.map((key) => readEnvValue(webProjectId, webEnv, key, "web", teamId, token)),
-              ),
-            ]);
-
-            if (credentialKeys.some((_, index) => goatCredentials[index] === webCredentials[index])) {
-              throw new Error(
-                "Goat must use a separate WorkOS Application client id and API key from the legacy web app.",
-              );
-            }
-
-            console.log("Verified that Goat and web use separate WorkOS Application credentials.");
           }
 
           main().catch((error) => {
@@ -532,17 +489,17 @@ jobs:
           });
           NODE
 
-      - name: Build Goat
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.goat == 'true' }}
+      - name: Build web
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
         env:
           OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
           NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
         run: VERCEL_PROJECT_ID="$GOAT_VERCEL_PROJECT_ID" bunx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$GOAT_VERCEL_PROJECT_ID"
 
-      - name: Deploy Goat
-        id: deploy-goat
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.goat == 'true' }}
-        run: node scripts/release-vercel-deploy.mjs --label Goat --project-env GOAT_VERCEL_PROJECT_ID
+      - name: Deploy web
+        id: deploy-web
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
+        run: node scripts/release-vercel-deploy.mjs --label web --project-env GOAT_VERCEL_PROJECT_ID
 
       - name: Check Vercel marketing project config
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.marketing == 'true' }}
@@ -554,8 +511,7 @@ jobs:
 
           async function main() {
             const projectId = process.env.MARKETING_VERCEL_PROJECT_ID;
-            const webProjectId = process.env.VERCEL_PROJECT_ID;
-            const goatProjectId = process.env.GOAT_VERCEL_PROJECT_ID;
+            const webProjectId = process.env.GOAT_VERCEL_PROJECT_ID;
             const teamId = process.env.VERCEL_ORG_ID;
             const token = process.env.VERCEL_TOKEN;
 
@@ -563,8 +519,8 @@ jobs:
               throw new Error("MARKETING_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
             }
 
-            if (projectId === webProjectId || projectId === goatProjectId) {
-              throw new Error("Marketing must use a separate Vercel project from web and Goat.");
+            if (projectId === webProjectId) {
+              throw new Error("Marketing must use a separate Vercel project from web.");
             }
 
             const response = await fetch(
@@ -642,24 +598,14 @@ jobs:
       - name: Smoke check release
         if: ${{ (github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'true') || (github.event_name == 'workflow_dispatch' && inputs.smoke) }}
         env:
-          EXPECTED_WEB_RELEASE: ${{ steps.release-scope.outputs.web == 'true' && env.RELEASE_SHA || '' }}
-          EXPECTED_GOAT_RELEASE: ${{ steps.release-scope.outputs.goat == 'true' && env.RELEASE_SHA || '' }}
+          EXPECTED_GOAT_RELEASE: ${{ steps.release-scope.outputs.web == 'true' && env.RELEASE_SHA || '' }}
           EXPECTED_RUNNER_RELEASE: ${{ steps.release-scope.outputs.runner == 'true' && env.RELEASE_SHA || '' }}
-          SMOKE_WEB: "true"
           SMOKE_GOAT: "true"
           SMOKE_RUNNER: "true"
-          SMOKE_WEB_ATTEMPTS: "12"
           SMOKE_GOAT_ATTEMPTS: "12"
           SMOKE_RUNNER_ATTEMPTS: "12"
           SMOKE_DELAY_MS: "10000"
         run: bun run release:smoke
-
-      - name: Sync Inngest app
-        if: ${{ (github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'true') || github.event_name == 'workflow_dispatch' }}
-        env:
-          INNGEST_SYNC_ATTEMPTS: "6"
-          INNGEST_SYNC_DELAY_MS: "10000"
-        run: bun run release:inngest:sync
 
       - name: Finalize GitHub deployment
         if: ${{ always() && steps.github-deployment.outputs.deployment_id != '' }}
@@ -699,8 +645,8 @@ jobs:
               description,
             };
 
-            if (process.env.PRODUCTION_WEB_URL) {
-              status.environment_url = process.env.PRODUCTION_WEB_URL;
+            if (process.env.PRODUCTION_GOAT_URL) {
+              status.environment_url = process.env.PRODUCTION_GOAT_URL;
             }
 
             await github.rest.repos.createDeploymentStatus(status);

@@ -1,223 +1,123 @@
+import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import {
-  checkWorkspaceRunAllowance,
-  isSpendLimitReason,
-  usdMicrosToCents,
-  type WorkspaceRunAllowance,
-} from "@opencompany/billing";
-import { getDb } from "@opencompany/db/client";
-import { captureException } from "@opencompany/observability";
-import { after } from "next/server";
-import type Stripe from "stripe";
+  claimGoatAutoRefill,
+  ensureGoatMonthlyIncludedUsage,
+  GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS,
+  listGoatAutoRefillCandidates,
+  releasePendingForWorkspace,
+  settleGoatAutoRefill,
+} from "@opencompany/db/goat-billing";
 import {
-  fulfillAutoRefill,
-  hasRecentAutoRefillAttempt,
-  insertAutoRefillAttempt,
-  loadWorkspaceBillingSettings,
-  markAutoRefillAttemptFailed,
-  newAutoRefillAttemptId,
-  saveAutoRefillPaymentMethod,
-} from "@/lib/billing/service";
-import { getStripe } from "@/lib/billing/stripe";
+  getGoatCreditBalanceUsdMicros,
+  goatUsdMicrosToCents,
+  recordGoatAutoRefillCredit,
+} from "@opencompany/db/goat-credits";
+import Stripe from "stripe";
+import { assertGoatCheckoutEnabled, getGoatStripe } from "@/lib/billing/stripe";
 
-type Db = ReturnType<typeof getDb>;
+// Off-session wallet refill. The DB lease claim (claimGoatAutoRefill) is the
+// concurrency guard — concurrent triggers charge at most once per cooldown —
+// and the pi:{id} ledger idempotency key makes the synchronous credit and the
+// payment_intent.succeeded webhook safe to both run. A card decline disables
+// auto-refill (never loop on a failing card); transient errors keep it enabled
+// and the claim cooldown paces the retry.
 
-// Skip a fresh charge if one was attempted within this window. Guards against
-// several concurrent run gates each firing an off-session charge.
-export const AUTO_REFILL_COOLDOWN_MS = 2 * 60 * 1000;
-
-// Stripe rejects charges under $0.50; the settings validator enforces a higher
-// floor, but we re-check here defensively before charging.
-const STRIPE_MIN_CHARGE_CENTS = 50;
-
-export type AutoRefillResult = { recharged: boolean };
-
-// Attempts an off-session top-up if the workspace is eligible. Eligibility:
-// auto-refill enabled, healthy (not needs_attention), a saved card, an amount,
-// the balance is below threshold, the workspace is NOT capped by the weekly limit
-// (topping up wouldn't help), and no recent attempt (cooldown).
-//
-// On a synchronous Stripe success we credit immediately (the webhook is an
-// idempotent backstop) so the caller can re-check and let the run proceed.
-export async function maybeTriggerAutoRefill(input: {
-  workspaceId: string;
-  allowance: WorkspaceRunAllowance;
-  userId?: string | null;
-  db?: Db;
-}): Promise<AutoRefillResult> {
-  const db = input.db ?? getDb();
-  const { allowance } = input;
-
-  // Never refill into a wall — if a spend cap (daily or weekly) is the blocker, money
-  // won't help; the user must raise the limit or wait for the reset.
-  if (isSpendLimitReason(allowance.reason)) return { recharged: false };
-
-  const settings = await loadWorkspaceBillingSettings(input.workspaceId, db);
-  if (
-    !settings ||
-    !settings.autoRefillEnabled ||
-    settings.autoRefillStatus !== "ok" ||
-    !settings.stripeCustomerId ||
-    !settings.stripeDefaultPaymentMethodId ||
-    !settings.autoRefillAmountUsdMicros ||
-    settings.autoRefillAmountUsdMicros <= 0
-  ) {
-    return { recharged: false };
-  }
-
-  // Only refill when actually below the configured threshold.
-  if (
-    settings.autoRefillThresholdUsdMicros != null &&
-    allowance.balanceUsdMicros >= settings.autoRefillThresholdUsdMicros
-  ) {
-    return { recharged: false };
-  }
-
-  const amountCents = usdMicrosToCents(settings.autoRefillAmountUsdMicros);
-  if (amountCents < STRIPE_MIN_CHARGE_CENTS) return { recharged: false };
-
-  if (await hasRecentAutoRefillAttempt(input.workspaceId, AUTO_REFILL_COOLDOWN_MS, db)) {
-    return { recharged: false };
-  }
-
-  const attemptId = newAutoRefillAttemptId();
-  await insertAutoRefillAttempt({
-    id: attemptId,
-    workspaceId: input.workspaceId,
-    userId: input.userId ?? null,
-    amountUsdMicros: settings.autoRefillAmountUsdMicros,
-    db,
-  });
-
+export async function maybeTriggerGoatAutoRefill(workspaceId: string) {
   try {
-    const paymentIntent = await getStripe().paymentIntents.create(
-      {
-        amount: amountCents,
-        currency: "usd",
-        customer: settings.stripeCustomerId,
-        payment_method: settings.stripeDefaultPaymentMethodId,
-        off_session: true,
-        confirm: true,
-        metadata: { kind: "auto_refill", workspaceId: input.workspaceId, attemptId },
-      },
-      // attemptId is unique per attempt, so retrying create() is safe.
-      { idempotencyKey: `autorefill_${attemptId}` },
-    );
-
-    if (paymentIntent.status === "succeeded") {
-      const result = await fulfillAutoRefill({
-        attemptId,
-        stripePaymentIntentId: paymentIntent.id,
-        db,
-      });
-      after(() =>
-        captureServerEvent("auto_refill_succeeded", input.userId ?? input.workspaceId, {
-          workspace_id: input.workspaceId,
-          amount_cents: amountCents,
-          attempt_id: attemptId,
-        }),
-      );
-      return { recharged: result.ok || result.alreadyFulfilled };
-    }
-
-    // requires_action / processing — we can't unblock the user synchronously.
-    await markAutoRefillAttemptFailed({
-      attemptId,
-      workspaceId: input.workspaceId,
-      stripePaymentIntentId: paymentIntent.id,
-      error: `payment_intent_status_${paymentIntent.status}`,
-      needsAttention: true,
-    });
-    return { recharged: false };
+    await ensureGoatMonthlyIncludedUsage(workspaceId);
+    const balance = await getGoatCreditBalanceUsdMicros(workspaceId);
+    if (balance >= GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS) return;
+    await runGoatAutoRefill(workspaceId);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "auto_refill_charge_failed";
-    await markAutoRefillAttemptFailed({
-      attemptId,
-      workspaceId: input.workspaceId,
-      error: message,
-      needsAttention: true,
-    });
-    captureException(error, {
-      event: "opencompany.auto_refill_failed",
-      workspace_id: input.workspaceId,
-      attempt_id: attemptId,
-    });
-    after(() =>
-      captureServerEvent("auto_refill_failed", input.userId ?? input.workspaceId, {
-        workspace_id: input.workspaceId,
-        attempt_id: attemptId,
-        error: message,
-      }),
-    );
-    return { recharged: false };
+    console.error(`Goat auto-refill trigger failed for workspace ${workspaceId}.`, error);
   }
 }
 
-// Backstop entry point for the Inngest sweep: loads the current allowance for a
-// workspace and runs the same eligibility + charge logic.
-export async function runAutoRefillForWorkspace(workspaceId: string): Promise<AutoRefillResult> {
-  const db = getDb();
-  const allowance = await checkWorkspaceRunAllowance({ db, workspaceId });
-  return maybeTriggerAutoRefill({ workspaceId, allowance, db });
+export async function runGoatAutoRefill(workspaceId: string) {
+  assertGoatCheckoutEnabled();
+  const claim = await claimGoatAutoRefill(workspaceId);
+  if (!claim) return { charged: false as const, reason: "not_claimed" as const };
+  try {
+    const intent = await getGoatStripe().paymentIntents.create({
+      amount: claim.amountCents,
+      currency: "usd",
+      customer: claim.stripeCustomerId,
+      payment_method: claim.paymentMethodId,
+      off_session: true,
+      confirm: true,
+      description: "OpenCompany credits auto-refill",
+      metadata: {
+        billingProduct: "goat_auto_refill",
+        goatWorkspaceId: workspaceId,
+        amountCents: String(claim.amountCents),
+      },
+    });
+    if (intent.status !== "succeeded") {
+      // Off-session charges cannot complete extra authentication steps.
+      await settleGoatAutoRefill({
+        workspaceId,
+        disable: true,
+        error: `Auto-refill charge did not complete (status ${intent.status}).`,
+      });
+      await captureServerEvent("goat_billing_auto_refill_failed", workspaceId, {
+        workspace_id: workspaceId,
+        amount_cents: claim.amountCents,
+        reason: intent.status,
+      });
+      return { charged: false as const, reason: "not_succeeded" as const };
+    }
+    const credit = await recordGoatAutoRefillCredit({
+      workspaceId,
+      amountCents: claim.amountCents,
+      paymentIntentId: intent.id,
+    });
+    if (credit.ok) {
+      await captureGoatServerEvent("billing_topup_completed", workspaceId, {
+        workspace_id: workspaceId,
+        topup_type: "auto_refill",
+        amount_cents: claim.amountCents,
+        amount_usd: claim.amountCents / 100,
+        balance_cents: goatUsdMicrosToCents(credit.balanceUsdMicros),
+      });
+    }
+    await settleGoatAutoRefill({ workspaceId });
+    // Resume any balance-paused ingestion immediately instead of waiting for
+    // the hourly reconcile sweep.
+    await releasePendingForWorkspace(workspaceId).catch(() => undefined);
+    await captureServerEvent("goat_billing_auto_refill_succeeded", workspaceId, {
+      workspace_id: workspaceId,
+      amount_cents: claim.amountCents,
+    });
+    return { charged: true as const };
+  } catch (error) {
+    const isCardError = error instanceof Stripe.errors.StripeCardError;
+    await settleGoatAutoRefill({
+      workspaceId,
+      disable: isCardError,
+      error: error instanceof Error ? error.message : "Auto-refill charge failed.",
+    }).catch(() => undefined);
+    await captureServerEvent("goat_billing_auto_refill_failed", workspaceId, {
+      workspace_id: workspaceId,
+      amount_cents: claim.amountCents,
+      reason: isCardError ? "card_declined" : "charge_error",
+    });
+    return { charged: false as const, reason: "charge_failed" as const };
+  }
 }
 
-// ── Stripe webhook handlers ──────────────────────────────────────────────────
-
-function stripeIdOf(value: string | { id: string } | null | undefined): string | null {
-  if (!value) return null;
-  return typeof value === "string" ? value : value.id;
-}
-
-// Completes a setup-mode checkout: retrieves the saved card, marks it the
-// customer's default, and persists it so auto-refill can charge it off-session.
-export async function completeAutoRefillSetup(session: Stripe.Checkout.Session) {
-  if (session.mode !== "setup") return;
-  const workspaceId = session.metadata?.workspaceId;
-  const customerId = stripeIdOf(session.customer);
-  const setupIntentId = stripeIdOf(session.setup_intent);
-  if (!workspaceId || !customerId || !setupIntentId) return;
-
-  const stripe = getStripe();
-  const setupIntent = await stripe.setupIntents.retrieve(setupIntentId);
-  const paymentMethodId = stripeIdOf(setupIntent.payment_method);
-  if (!paymentMethodId) return;
-
-  const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
-  await stripe.customers.update(customerId, {
-    invoice_settings: { default_payment_method: paymentMethodId },
-  });
-
-  await saveAutoRefillPaymentMethod({
-    workspaceId,
-    stripeCustomerId: customerId,
-    paymentMethodId,
-    cardBrand: paymentMethod.card?.brand ?? null,
-    cardLast4: paymentMethod.card?.last4 ?? null,
-  });
-}
-
-// Idempotent backstop for an off-session refill that succeeded — the inline path
-// usually credits first; fulfillAutoRefill no-ops if already done.
-export async function handleAutoRefillPaymentIntentSucceeded(
-  paymentIntent: Stripe.PaymentIntent,
-  eventId: string,
-) {
-  if (paymentIntent.metadata?.kind !== "auto_refill") return;
-  const attemptId = paymentIntent.metadata.attemptId;
-  if (!attemptId) return;
-  await fulfillAutoRefill({ attemptId, stripePaymentIntentId: paymentIntent.id, eventId });
-}
-
-export async function handleAutoRefillPaymentIntentFailed(paymentIntent: Stripe.PaymentIntent) {
-  if (paymentIntent.metadata?.kind !== "auto_refill") return;
-  const attemptId = paymentIntent.metadata.attemptId;
-  const workspaceId = paymentIntent.metadata.workspaceId;
-  if (!attemptId || !workspaceId) return;
-  await markAutoRefillAttemptFailed({
-    attemptId,
-    workspaceId,
-    stripePaymentIntentId: paymentIntent.id,
-    error: paymentIntent.last_payment_error?.message ?? "auto_refill_payment_failed",
-    needsAttention: true,
-  });
+// Reconcile-cron sweep: covers balance drops from debits recorded outside
+// apps/web (the runner's ingestion debits).
+export async function sweepGoatAutoRefills(limit = 25) {
+  const candidates = await listGoatAutoRefillCandidates({ limit });
+  let charged = 0;
+  for (const workspaceId of candidates) {
+    try {
+      const result = await runGoatAutoRefill(workspaceId);
+      if (result.charged) charged += 1;
+    } catch (error) {
+      console.error(`Goat auto-refill sweep failed for workspace ${workspaceId}.`, error);
+    }
+  }
+  return { candidates: candidates.length, charged };
 }

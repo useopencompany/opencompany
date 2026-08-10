@@ -1,33 +1,29 @@
 import Stripe from "stripe";
 
+export { getGoatAppUrl } from "@/lib/app-url";
+
 let stripe: Stripe | undefined;
 
-export function getStripe() {
-  const secretKey = process.env.STRIPE_SECRET_KEY?.trim();
-  if (!secretKey) {
-    throw new Error("STRIPE_SECRET_KEY is required for Stripe billing.");
-  }
-
-  stripe ??= new Stripe(secretKey);
+export function getGoatStripe() {
+  const apiKey = process.env.GOAT_STRIPE_API_KEY?.trim();
+  if (!apiKey) throw new Error("GOAT_STRIPE_API_KEY is required for OpenCompany billing.");
+  stripe ??= new Stripe(apiKey, { apiVersion: "2026-04-22.dahlia" });
   return stripe;
 }
 
-export function getStripeWebhookSecret() {
-  const secret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
-  if (!secret) {
-    throw new Error("STRIPE_WEBHOOK_SECRET is required for Stripe webhooks.");
-  }
+export function getGoatStripeWebhookSecret() {
+  const secret = process.env.GOAT_STRIPE_WEBHOOK_SECRET?.trim();
+  if (!secret) throw new Error("GOAT_STRIPE_WEBHOOK_SECRET is required for Stripe webhooks.");
   return secret;
 }
 
-export function getAppUrl() {
-  const explicit = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (explicit) return explicit.replace(/\/$/, "");
-
-  const redirectUri = process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim();
-  if (redirectUri) {
-    return new URL(redirectUri).origin;
+export function assertGoatCheckoutEnabled() {
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.GOAT_STRIPE_CHECKOUT_ENABLED !== "true"
+  ) {
+    throw new Error(
+      "OpenCompany Checkout is disabled until Stripe Tax registrations are configured.",
+    );
   }
-
-  return "http://localhost:3000";
 }

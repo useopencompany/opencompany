@@ -14,11 +14,10 @@ import {
   type GoatIntegrationCredentialEncryptedPayload,
   goatClaudeCodeCredentials,
 } from "./goat-schema";
-import type * as publicSchema from "./schema";
 
 const ENCRYPTION_KEY_VERSION = 1;
 
-type DbSchema = typeof publicSchema & typeof goatSchema;
+type DbSchema = typeof goatSchema;
 type GoatClaudeCodeAuthDb = Pick<
   PgDatabase<PgQueryResultHKT, DbSchema>,
   "delete" | "insert" | "select" | "update"

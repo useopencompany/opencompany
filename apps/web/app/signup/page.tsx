@@ -1,17 +1,9 @@
-import { redirect } from "next/navigation";
-import SignupPanel from "@/components/SignupPanel";
-import { currentWorkspace, hasCompletedOnboarding } from "@/lib/auth";
+import { AuthPage } from "@/components/auth/AuthPage";
 
-export default async function SignUpPage() {
-  const context = await currentWorkspace({ optional: true, skipOnboarding: true });
-
-  if (context) {
-    if (!(await hasCompletedOnboarding(context.user))) {
-      redirect("/onboarding");
-    }
-
-    redirect("/");
-  }
-
-  return <SignupPanel />;
+export default function SignUpPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ invitation_token?: string; email?: string }>;
+}) {
+  return <AuthPage mode="sign-up" searchParams={searchParams} />;
 }

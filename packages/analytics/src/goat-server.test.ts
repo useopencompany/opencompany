@@ -283,22 +283,34 @@ describe("PostHog server analytics", () => {
     expect(posthog.capture).not.toHaveBeenCalled();
   });
 
-  it("keeps legacy web events on the legacy project configuration", async () => {
-    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_web_test");
+  it("keeps billing compatibility events on their retained project configuration", async () => {
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_billing_test");
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://eu.i.posthog.com");
 
-    await captureServerEvent("signup_started", "anonymous_123", {
-      entrypoint: "signup_page",
+    await captureServerEvent("credit_top_up_completed", "user_123", {
+      user_id: "user_123",
+      workspace_id: "workspace_123",
+      checkout_record_id: "checkout_123",
+      ledger_id: 42,
+      amount_cents: 2_000,
+      balance_cents: 5_000,
     });
 
     expect(posthog.constructor).toHaveBeenCalledWith(
-      "phc_web_test",
+      "phc_billing_test",
       expect.objectContaining({ host: "https://eu.i.posthog.com" }),
     );
     expect(posthog.capture).toHaveBeenCalledWith({
-      distinctId: "anonymous_123",
-      event: "signup_started",
-      properties: { entrypoint: "signup_page" },
+      distinctId: "user_123",
+      event: "credit_top_up_completed",
+      properties: {
+        user_id: "user_123",
+        workspace_id: "workspace_123",
+        checkout_record_id: "checkout_123",
+        ledger_id: 42,
+        amount_cents: 2_000,
+        balance_cents: 5_000,
+      },
     });
   });
 });

@@ -1,79 +1,89 @@
-import { AnalyticsProvider } from "@opencompany/analytics/client";
-import { redirect } from "next/navigation";
-import OnboardingForm from "@/components/OnboardingForm";
-import { ToastProvider } from "@/components/ToastProvider";
-import { currentWorkspace, hasCompletedOnboarding } from "@/lib/auth";
-import { loadWorkspaceIntegrationStateForWorkspace } from "@/lib/integrations/actions";
-import { loadGoogleIntegrationStateForWorkspace } from "@/lib/integrations/google-data";
-import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
-import { buildPersonalIntegrationDetails } from "@/lib/personal/integration-details-server";
-import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
-import { loadWorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
+import { getGoatOnboarding } from "@opencompany/db/goat-workspaces";
+import { cookies } from "next/headers";
+import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
+import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
+import { currentGoatIdentity, currentGoatUser } from "@/lib/auth";
+import { getGoatBrainSourcesAction } from "@/lib/brain-source-actions";
+import type { GoatOnboardingConnectionResult } from "@/lib/onboarding-integrations";
 
-type OnboardingPageProps = {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-};
+export const dynamic = "force-dynamic";
 
-async function hasOnboardingFlag(searchParams: OnboardingPageProps["searchParams"]) {
-  const params = await searchParams;
-  return Object.hasOwn(params, "onboarding");
-}
+export default async function OnboardingPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    variant?: string;
+    integration?: string;
+    setup?: string;
+    reason?: string;
+  }>;
+}) {
+  const identity = await currentGoatIdentity();
+  const userWorkosId = identity.user.workosUserId;
+  const name =
+    [identity.user.firstName, identity.user.lastName].filter(Boolean).join(" ").trim() ||
+    "Teammate";
 
-export default async function OnboardingPage({ searchParams }: OnboardingPageProps) {
-  const { authUser, user, workspace } = await currentWorkspace({ skipOnboarding: true });
-  const forceOnboarding = await hasOnboardingFlag(searchParams);
-
-  if (!forceOnboarding && (await hasCompletedOnboarding(user))) {
-    redirect("/");
-  }
-
-  const [workspaceIntegrations, googleState, mcpSettings, toolPolicies] = await Promise.all([
-    loadWorkspaceIntegrationStateForWorkspace(workspace.id),
-    loadGoogleIntegrationStateForWorkspace(workspace.id),
-    loadWorkspaceMcpSettingsForWorkspace(workspace.id),
-    loadWorkspaceToolPolicyOverrides(workspace.id),
+  const [context, params, onboarding, cookieStore] = await Promise.all([
+    currentGoatUser({ optional: true }),
+    searchParams,
+    getGoatOnboarding(userWorkosId),
+    cookies(),
   ]);
 
-  const integrationConnections: PersonalIntegrationConnections = {
-    github: workspaceIntegrations.github.status === "connected",
-    gmail: googleState.gmail.status === "connected",
-    google_calendar: googleState.google_calendar.status === "connected",
-    google_drive: googleState.google_drive.status === "connected",
-    linear: mcpSettings.linear.configured,
-    slack: mcpSettings.slack.configured,
-    posthog: mcpSettings.posthog.configured,
-    betterstack: mcpSettings.betterstack.configured,
-    braintrust: mcpSettings.braintrust.configured,
-    notion: mcpSettings.notion.configured,
-  };
+  // Real signal for "came from an invite": the active workspace was created by
+  // someone else, so this user joined it rather than starting it.
+  const joinedByInvite = context !== null && context.workspace.createdByWorkosId !== userWorkosId;
+  const override = params.variant;
+  const variant: "owner" | "member" =
+    context && override === "member"
+      ? "member"
+      : override === "owner"
+        ? "owner"
+        : joinedByInvite
+          ? "member"
+          : "owner";
 
-  const integrationDetails = buildPersonalIntegrationDetails({
-    github: workspaceIntegrations.github,
-    google: googleState,
-    mcp: mcpSettings,
-  });
+  // Source hydration depends on the workspace/brain resolution above; all
+  // independent first-run reads already ran in parallel.
+  const sourceDetails = context?.activeBrain
+    ? await getGoatBrainSourcesAction(context.activeBrain.id)
+    : null;
+  const connectionResult: GoatOnboardingConnectionResult | null =
+    params.setup === "connected" || params.setup === "error"
+      ? {
+          provider: params.integration ?? null,
+          status: params.setup,
+          reason: params.reason ?? null,
+        }
+      : null;
+
+  const savedSlug = context?.workspace.slug ?? "";
+  const stepCookie = Number.parseInt(cookieStore.get(ONBOARDING_STEP_COOKIE)?.value ?? "", 10);
+  const requestedStep = Number.isNaN(stepCookie) ? 0 : stepCookie;
+  // A stale OAuth/onboarding cookie must never skip past workspace creation.
+  const initialStep = context ? requestedStep : Math.min(requestedStep, 1);
 
   return (
-    <AnalyticsProvider
-      identity={{
-        userId: user.id,
-        workspaceId: workspace.id,
-        email: authUser.email,
-        firstName: authUser.firstName,
-        lastName: authUser.lastName,
+    <OnboardingWizard
+      user={{
+        workosUserId: identity.user.workosUserId,
+        name,
+        email: identity.user.email,
+        avatarUrl: identity.user.avatarUrl,
       }}
-    >
-      <ToastProvider>
-        <OnboardingForm
-          userEmail={authUser.email}
-          userId={user.id}
-          workspaceId={workspace.id}
-          forceOnboarding={forceOnboarding}
-          integrationConnections={integrationConnections}
-          integrationDetails={integrationDetails}
-          toolPolicies={toolPolicies}
-        />
-      </ToastProvider>
-    </AnalyticsProvider>
+      currentWorkspaceName={context?.workspace.name ?? ""}
+      brainRef={context?.activeBrain?.id ?? null}
+      variant={variant}
+      initialStep={initialStep}
+      initialWorkspaceId={context?.workspace.id ?? null}
+      initialWorkspaceName={savedSlug ? (context?.workspace.name ?? "") : ""}
+      initialSlug={savedSlug}
+      initialRole={onboarding?.role ?? null}
+      initialCompanyUrl={onboarding?.contextUrls?.[0] ?? onboarding?.companyDomain ?? ""}
+      initialReferral={onboarding?.referralSource ?? null}
+      initialSourceDetails={sourceDetails}
+      initialConnectionResult={connectionResult}
+    />
   );
 }

@@ -2,10 +2,10 @@ import type { TOCItemType } from "fumadocs-core/toc";
 import type { MDXContent } from "mdx/types";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import DocsView from "@/components/DocsView";
+import GoatDocsView from "@/components/GoatDocsView";
 import { source } from "@/lib/docs-source";
 
-type DocsPageProps = {
+type GoatDocsPageProps = {
   params: Promise<{
     slug?: string[];
   }>;
@@ -22,7 +22,7 @@ export function generateStaticParams() {
   return source.generateParams();
 }
 
-export async function generateMetadata({ params }: DocsPageProps): Promise<Metadata> {
+export async function generateMetadata({ params }: GoatDocsPageProps): Promise<Metadata> {
   const { slug } = await params;
   const page = source.getPage(slug);
 
@@ -34,12 +34,12 @@ export async function generateMetadata({ params }: DocsPageProps): Promise<Metad
   const title = data.title ?? "Documentation";
 
   return {
-    title: `${title} - opencompany docs`,
+    title: `${title} - Goat docs`,
     description: data.description,
   };
 }
 
-export default async function DocsPage({ params }: DocsPageProps) {
+export default async function GoatDocsPage({ params }: GoatDocsPageProps) {
   const { slug } = await params;
   const page = source.getPage(slug);
 
@@ -50,7 +50,7 @@ export default async function DocsPage({ params }: DocsPageProps) {
   const data = page.data as RenderableDocsData;
 
   return (
-    <DocsView
+    <GoatDocsView
       title={data.title ?? "Documentation"}
       description={data.description}
       url={page.url}

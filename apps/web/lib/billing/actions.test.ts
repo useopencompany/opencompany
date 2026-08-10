@@ -1,310 +1,261 @@
-import { captureServerEvent } from "@opencompany/analytics/server";
-import { captureException } from "@opencompany/observability";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { currentWorkspace } from "@/lib/auth";
+import { loadGoatBillingOverview, setGoatAutoRefillConfig } from "@opencompany/db/goat-billing";
 import {
-  createPendingCheckoutRecord,
-  markCheckoutRecordFailed,
-  markCheckoutRecordOpen,
-  newStripeCheckoutRecordId,
-} from "@/lib/billing/service";
-import { getAppUrl, getStripe } from "@/lib/billing/stripe";
-import { createCreditCheckoutSession } from "./actions";
-
-const redirectMock = vi.hoisted(() => vi.fn());
-
-vi.mock("next/navigation", () => ({
-  redirect: redirectMock,
-}));
-
-vi.mock("next/cache", () => ({
-  revalidatePath: vi.fn(),
-}));
-
-vi.mock("@opencompany/observability", () => ({
-  captureException: vi.fn(),
-}));
+  createGoatPendingCheckoutRecord,
+  markGoatCheckoutRecordOpen,
+} from "@opencompany/db/goat-credits";
+import { redirect } from "next/navigation";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { currentGoatUser } from "@/lib/auth";
+import { getGoatStripe } from "@/lib/billing/stripe";
+import {
+  createGoatCreditTopUpAction,
+  createGoatProCheckoutAction,
+  setGoatAutoRefillAction,
+} from "./actions";
 
 vi.mock("@opencompany/analytics/server", () => ({
   captureServerEvent: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("next/server", () => ({
-  after: (callback: () => unknown) => {
-    void callback();
-  },
+vi.mock("@opencompany/db/goat-billing", () => ({
+  GOAT_PRO_MONTHLY_PRICE_USD_CENTS: 2_000,
+  GOAT_PRO_STRIPE_PRODUCT_KEY: "goat_pro",
+  loadGoatBillingOverview: vi.fn(),
+  setGoatAutoRefillConfig: vi.fn(),
+  setGoatStripeCustomerId: vi.fn(),
 }));
 
-vi.mock("@/lib/auth", () => ({
-  AUTHENTICATION_REQUIRED_MESSAGE: "Your session expired. Sign in again to continue.",
-  currentWorkspace: vi.fn(),
+vi.mock("@opencompany/db/goat-credits", () => ({
+  createGoatPendingCheckoutRecord: vi.fn().mockResolvedValue(undefined),
+  markGoatCheckoutRecordFailed: vi.fn().mockResolvedValue(undefined),
+  markGoatCheckoutRecordOpen: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/lib/auth", () => ({ currentGoatUser: vi.fn() }));
 vi.mock("@/lib/billing/stripe", () => ({
-  getAppUrl: vi.fn(),
-  getStripe: vi.fn(),
+  assertGoatCheckoutEnabled: vi.fn(),
+  getGoatAppUrl: vi.fn(() => "https://goat.test"),
+  getGoatStripe: vi.fn(),
+}));
+vi.mock("next/navigation", () => ({
+  redirect: vi.fn(() => {
+    throw new Error("NEXT_REDIRECT");
+  }),
 }));
 
-vi.mock("@/lib/billing/service", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/billing/service")>();
-  return {
-    ...actual,
-    createPendingCheckoutRecord: vi.fn(),
-    markCheckoutRecordFailed: vi.fn(),
-    markCheckoutRecordOpen: vi.fn(),
-    newStripeCheckoutRecordId: vi.fn(),
-  };
-});
+describe("Goat billing actions", () => {
+  const checkoutCreate = vi.fn();
+  const subscriptionList = vi.fn();
 
-const currentWorkspaceMock = vi.mocked(currentWorkspace);
-const getStripeMock = vi.mocked(getStripe);
-const getAppUrlMock = vi.mocked(getAppUrl);
-const createPendingCheckoutRecordMock = vi.mocked(createPendingCheckoutRecord);
-const markCheckoutRecordFailedMock = vi.mocked(markCheckoutRecordFailed);
-const markCheckoutRecordOpenMock = vi.mocked(markCheckoutRecordOpen);
-const newStripeCheckoutRecordIdMock = vi.mocked(newStripeCheckoutRecordId);
-const captureExceptionMock = vi.mocked(captureException);
-const captureServerEventMock = vi.mocked(captureServerEvent);
-
-describe("createCreditCheckoutSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    redirectMock.mockImplementation((url: string) => {
-      throw new Error(`redirect:${url}`);
+    vi.mocked(currentGoatUser).mockResolvedValue({
+      role: "admin",
+      workspace: { id: "goat_ws_1", name: "Acme" },
+      user: { workosUserId: "user_1" },
+      authUser: { email: "admin@example.com" },
+    } as Awaited<ReturnType<typeof currentGoatUser>>);
+    vi.mocked(loadGoatBillingOverview).mockResolvedValue({
+      billing: { plan: "pro", stripeCustomerId: "cus_goat_1" },
+    } as unknown as Awaited<ReturnType<typeof loadGoatBillingOverview>>);
+    checkoutCreate.mockResolvedValue({
+      id: "cs_test_1",
+      url: "https://checkout.stripe.test/session",
     });
-    newStripeCheckoutRecordIdMock.mockReturnValue("chk_123");
-    getAppUrlMock.mockReturnValue("https://app.example.com");
-    currentWorkspaceMock.mockResolvedValue({
-      authUser: { email: "user@example.com" },
-      user: { id: "usr_123" },
-      workspace: { id: "wks_123" },
+    subscriptionList.mockResolvedValue({ data: [] });
+    vi.mocked(getGoatStripe).mockReturnValue({
+      checkout: { sessions: { create: checkoutCreate } },
+      subscriptions: { list: subscriptionList },
     } as never);
   });
 
-  it("rejects out-of-range top-up amounts", async () => {
-    const result = await createCreditCheckoutSession(499);
+  it("creates a payment-mode top-up Checkout for a Pro admin, saving the card", async () => {
+    await expect(createGoatCreditTopUpAction(1_000)).rejects.toThrow("NEXT_REDIRECT");
 
-    expect(result).toEqual({
-      ok: false,
-      error: "Top-up amount must be between 500 and 100000 cents.",
-    });
-    expect(getStripeMock).not.toHaveBeenCalled();
-    expect(createPendingCheckoutRecordMock).not.toHaveBeenCalled();
-    expect(captureServerEventMock).not.toHaveBeenCalled();
-  });
-
-  it("returns an auth error without starting checkout when the session is missing", async () => {
-    currentWorkspaceMock.mockResolvedValue(null);
-
-    const result = await createCreditCheckoutSession(2500);
-
-    expect(result).toEqual({
-      ok: false,
-      error: "Your session expired. Sign in again to continue.",
-    });
-    expect(getStripeMock).not.toHaveBeenCalled();
-    expect(createPendingCheckoutRecordMock).not.toHaveBeenCalled();
-    expect(captureServerEventMock).not.toHaveBeenCalled();
-  });
-
-  it("creates a Stripe Checkout Session with attribution metadata", async () => {
-    const create = vi.fn().mockResolvedValue({
-      id: "cs_test_123",
-      url: "https://checkout.stripe.com/c/pay/cs_test_123",
-    });
-    getStripeMock.mockReturnValue({ checkout: { sessions: { create } } } as never);
-
-    await expect(createCreditCheckoutSession(2500)).rejects.toThrow(
-      "redirect:https://checkout.stripe.com/c/pay/cs_test_123",
+    expect(createGoatPendingCheckoutRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "goat_ws_1",
+        userWorkosId: "user_1",
+        amountCents: 1_000,
+      }),
     );
-
-    expect(createPendingCheckoutRecordMock).toHaveBeenCalledWith({
-      id: "chk_123",
-      workspaceId: "wks_123",
-      userId: "usr_123",
-      amountCents: 2500,
+    const [params] = checkoutCreate.mock.calls[0] as [
+      {
+        mode: string;
+        allow_promotion_codes: boolean;
+        payment_intent_data: { setup_future_usage: string };
+        line_items: Array<{ price_data: { currency: string; unit_amount: number } }>;
+        metadata: Record<string, string>;
+      },
+    ];
+    expect(params.mode).toBe("payment");
+    expect(params.allow_promotion_codes).toBe(true);
+    // The saved card is what auto-refill charges off-session later.
+    expect(params.payment_intent_data).toEqual({ setup_future_usage: "off_session" });
+    expect(params.line_items[0]?.price_data).toMatchObject({
+      currency: "usd",
+      unit_amount: 1_000,
     });
-    expect(create).toHaveBeenCalledWith({
-      mode: "payment",
-      customer_email: "user@example.com",
-      success_url: "https://app.example.com/personal/settings?billing=success",
-      cancel_url: "https://app.example.com/personal/settings?billing=cancelled",
-      metadata: {
-        workspaceId: "wks_123",
-        userId: "usr_123",
-        amountCents: "2500",
-        checkoutRecordId: "chk_123",
+    expect(params.metadata.billingProduct).toBe("goat_topup");
+    expect(params.metadata.goatWorkspaceId).toBe("goat_ws_1");
+    expect(params.metadata.amountCents).toBe("1000");
+    expect(markGoatCheckoutRecordOpen).toHaveBeenCalledWith(
+      expect.objectContaining({ stripeCheckoutSessionId: "cs_test_1" }),
+    );
+    expect(redirect).toHaveBeenCalledWith("https://checkout.stripe.test/session");
+  });
+
+  it("rejects top-ups from non-admin members", async () => {
+    vi.mocked(currentGoatUser).mockResolvedValue({
+      role: "member",
+      workspace: { id: "goat_ws_1", name: "Acme" },
+      user: { workosUserId: "user_2" },
+      authUser: { email: "member@example.com" },
+    } as Awaited<ReturnType<typeof currentGoatUser>>);
+
+    await expect(createGoatCreditTopUpAction(1_000)).resolves.toEqual({
+      ok: false,
+      error: "Only workspace admins can add credits.",
+    });
+    expect(checkoutCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects top-ups on Hobby", async () => {
+    vi.mocked(loadGoatBillingOverview).mockResolvedValue({
+      billing: { plan: "hobby", stripeCustomerId: "cus_goat_1" },
+    } as unknown as Awaited<ReturnType<typeof loadGoatBillingOverview>>);
+
+    await expect(createGoatCreditTopUpAction(1_000)).resolves.toEqual({
+      ok: false,
+      error: "Upgrade this workspace to Pro before adding credits.",
+    });
+    expect(checkoutCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects top-up amounts outside the allowed range", async () => {
+    await expect(createGoatCreditTopUpAction(100)).resolves.toMatchObject({ ok: false });
+    await expect(createGoatCreditTopUpAction(1_000_000)).resolves.toMatchObject({ ok: false });
+    expect(checkoutCreate).not.toHaveBeenCalled();
+  });
+
+  it("starts a monthly seat subscription for workspace admins", async () => {
+    vi.mocked(currentGoatUser).mockResolvedValue({
+      role: "admin",
+      workspace: { id: "goat_ws_1", name: "Acme" },
+      user: { workosUserId: "user_1" },
+      authUser: { email: "admin@example.com" },
+    } as Awaited<ReturnType<typeof currentGoatUser>>);
+    vi.mocked(loadGoatBillingOverview).mockResolvedValue({
+      billing: {
+        plan: "hobby",
+        stripeCustomerId: "cus_goat_1",
+        stripeSubscriptionId: null,
+        subscriptionStatus: null,
       },
-      payment_intent_data: {
-        metadata: {
-          workspaceId: "wks_123",
-          userId: "usr_123",
-          amountCents: "2500",
-          checkoutRecordId: "chk_123",
-        },
-      },
-      line_items: [
-        {
-          quantity: 1,
+      memberCount: 3,
+    } as unknown as Awaited<ReturnType<typeof loadGoatBillingOverview>>);
+
+    await expect(createGoatProCheckoutAction()).rejects.toThrow("NEXT_REDIRECT");
+
+    const [params, options] = checkoutCreate.mock.calls[0] as [
+      {
+        mode: string;
+        line_items: Array<{
+          quantity: number;
           price_data: {
-            currency: "usd",
-            unit_amount: 2500,
-            product_data: { name: "$25 Open Company credits" },
-          },
+            unit_amount: number;
+            recurring: { interval: string };
+          };
+        }>;
+        metadata: Record<string, string>;
+        subscription_data: { metadata: Record<string, string> };
+      },
+      { idempotencyKey: string },
+    ];
+    expect(params.mode).toBe("subscription");
+    expect(params.line_items[0]).toMatchObject({
+      quantity: 3,
+      price_data: { unit_amount: 2_000, recurring: { interval: "month" } },
+    });
+    expect(params.metadata).toMatchObject({
+      billingProduct: "goat_pro",
+      goatWorkspaceId: "goat_ws_1",
+    });
+    expect(params.subscription_data.metadata).toEqual(params.metadata);
+    expect(options.idempotencyKey).toMatch(/^goat-pro-goat_ws_1-/);
+  });
+
+  it("does not let non-admin members change the plan", async () => {
+    vi.mocked(currentGoatUser).mockResolvedValue({
+      role: "member",
+      workspace: { id: "goat_ws_1", name: "Acme" },
+      user: { workosUserId: "user_2" },
+      authUser: { email: "member@example.com" },
+    } as Awaited<ReturnType<typeof currentGoatUser>>);
+
+    await expect(createGoatProCheckoutAction()).resolves.toEqual({
+      ok: false,
+      error: "Only workspace admins can change the plan.",
+    });
+    expect(checkoutCreate).not.toHaveBeenCalled();
+  });
+
+  it("does not create a duplicate Pro subscription while the webhook projection lags", async () => {
+    vi.mocked(currentGoatUser).mockResolvedValue({
+      role: "admin",
+      workspace: { id: "goat_ws_1", name: "Acme" },
+      user: { workosUserId: "user_1" },
+      authUser: { email: "admin@example.com" },
+    } as Awaited<ReturnType<typeof currentGoatUser>>);
+    vi.mocked(loadGoatBillingOverview).mockResolvedValue({
+      billing: {
+        plan: "hobby",
+        stripeCustomerId: "cus_goat_1",
+        stripeSubscriptionId: null,
+        subscriptionStatus: null,
+      },
+    } as unknown as Awaited<ReturnType<typeof loadGoatBillingOverview>>);
+    subscriptionList.mockResolvedValueOnce({
+      data: [
+        {
+          status: "active",
+          metadata: { billingProduct: "goat_pro", goatWorkspaceId: "goat_ws_1" },
         },
       ],
     });
-    expect(markCheckoutRecordOpenMock).toHaveBeenCalledWith({
-      id: "chk_123",
-      stripeCheckoutSessionId: "cs_test_123",
-      metadata: {
-        workspaceId: "wks_123",
-        userId: "usr_123",
-        amountCents: "2500",
-        checkoutRecordId: "chk_123",
-        stripeCheckoutSessionId: "cs_test_123",
-      },
-    });
-    expect(captureServerEventMock).toHaveBeenCalledWith("credit_top_up_started", "usr_123", {
-      user_id: "usr_123",
-      workspace_id: "wks_123",
-      checkout_record_id: "chk_123",
-      amount_cents: 2500,
-    });
-  });
 
-  it("uses the caller-provided return path for the Stripe redirect URLs", async () => {
-    const create = vi.fn().mockResolvedValue({
-      id: "cs_test_123",
-      url: "https://checkout.stripe.com/c/pay/cs_test_123",
-    });
-    getStripeMock.mockReturnValue({ checkout: { sessions: { create } } } as never);
-
-    await expect(createCreditCheckoutSession(2500, "/company/settings")).rejects.toThrow(
-      "redirect:https://checkout.stripe.com/c/pay/cs_test_123",
-    );
-
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        success_url: "https://app.example.com/company/settings?billing=success",
-        cancel_url: "https://app.example.com/company/settings?billing=cancelled",
-      }),
-    );
-  });
-
-  it("falls back to /personal/settings for unsafe return paths", async () => {
-    const create = vi.fn().mockResolvedValue({
-      id: "cs_test_123",
-      url: "https://checkout.stripe.com/c/pay/cs_test_123",
-    });
-    getStripeMock.mockReturnValue({ checkout: { sessions: { create } } } as never);
-
-    await expect(createCreditCheckoutSession(2500, "//evil.example.com/phish")).rejects.toThrow(
-      "redirect:https://checkout.stripe.com/c/pay/cs_test_123",
-    );
-
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        success_url: "https://app.example.com/personal/settings?billing=success",
-        cancel_url: "https://app.example.com/personal/settings?billing=cancelled",
-      }),
-    );
-  });
-
-  it("creates a Stripe Checkout Session for a custom top-up amount", async () => {
-    const create = vi.fn().mockResolvedValue({
-      id: "cs_test_123",
-      url: "https://checkout.stripe.com/c/pay/cs_test_123",
-    });
-    getStripeMock.mockReturnValue({ checkout: { sessions: { create } } } as never);
-
-    await expect(createCreditCheckoutSession(1234)).rejects.toThrow(
-      "redirect:https://checkout.stripe.com/c/pay/cs_test_123",
-    );
-
-    expect(createPendingCheckoutRecordMock).toHaveBeenCalledWith({
-      id: "chk_123",
-      workspaceId: "wks_123",
-      userId: "usr_123",
-      amountCents: 1234,
-    });
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        metadata: expect.objectContaining({ amountCents: "1234" }),
-        line_items: [
-          expect.objectContaining({
-            price_data: expect.objectContaining({
-              unit_amount: 1234,
-              product_data: { name: "$12.34 Open Company credits" },
-            }),
-          }),
-        ],
-      }),
-    );
-  });
-
-  it("marks the pending record failed when Stripe does not return a URL", async () => {
-    const create = vi.fn().mockResolvedValue({ id: "cs_test_123", url: null });
-    getStripeMock.mockReturnValue({ checkout: { sessions: { create } } } as never);
-
-    const result = await createCreditCheckoutSession(1000);
-
-    expect(result).toEqual({ ok: false, error: "Stripe did not return a Checkout URL." });
-    expect(markCheckoutRecordFailedMock).toHaveBeenCalledWith({
-      id: "chk_123",
-      error: "Stripe did not return a Checkout URL.",
-    });
-    expect(captureServerEventMock).not.toHaveBeenCalled();
-    expect(captureExceptionMock).not.toHaveBeenCalled();
-  });
-
-  it("captures checkout failures with workspace context", async () => {
-    const error = new Error("Stripe unavailable");
-    const create = vi.fn().mockRejectedValue(error);
-    getStripeMock.mockReturnValue({ checkout: { sessions: { create } } } as never);
-
-    const result = await createCreditCheckoutSession(1000);
-
-    expect(result).toEqual({ ok: false, error: "Stripe unavailable" });
-    expect(markCheckoutRecordFailedMock).toHaveBeenCalledWith({
-      id: "chk_123",
-      error: "Stripe unavailable",
-    });
-    expect(captureServerEventMock).not.toHaveBeenCalled();
-    expect(captureExceptionMock).toHaveBeenCalledWith(error, {
-      event: "opencompany.billing_checkout_failed",
-      workspace_id: "wks_123",
-      user_id: "usr_123",
-      checkout_record_id: "chk_123",
-      amount_cents: 1000,
-      checkout_stage: "create_stripe_session",
-    });
-  });
-
-  it("captures checkout configuration failures before creating a record", async () => {
-    const error = new Error("STRIPE_SECRET_KEY is required for Stripe billing.");
-    getStripeMock.mockImplementation(() => {
-      throw error;
-    });
-
-    const result = await createCreditCheckoutSession(1000);
-
-    expect(result).toEqual({
+    await expect(createGoatProCheckoutAction()).resolves.toMatchObject({
       ok: false,
-      error: "STRIPE_SECRET_KEY is required for Stripe billing.",
+      error: expect.stringContaining("already has a seat subscription"),
     });
-    expect(createPendingCheckoutRecordMock).not.toHaveBeenCalled();
-    expect(markCheckoutRecordFailedMock).not.toHaveBeenCalled();
-    expect(captureServerEventMock).not.toHaveBeenCalled();
-    expect(captureExceptionMock).toHaveBeenCalledWith(
-      error,
-      expect.objectContaining({
-        event: "opencompany.billing_checkout_failed",
-        workspace_id: "wks_123",
-        user_id: "usr_123",
-        amount_cents: 1000,
-        checkout_stage: "initialize",
-      }),
-    );
+    expect(checkoutCreate).not.toHaveBeenCalled();
+  });
+
+  it("saves auto-refill config when a payment method exists", async () => {
+    vi.mocked(setGoatAutoRefillConfig).mockResolvedValue({ enabled: true, amountCents: 2_000 });
+
+    await expect(setGoatAutoRefillAction({ enabled: true, amountCents: 2_000 })).resolves.toEqual({
+      ok: true,
+    });
+    expect(setGoatAutoRefillConfig).toHaveBeenCalledWith({
+      workspaceId: "goat_ws_1",
+      enabled: true,
+      amountCents: 2_000,
+    });
+  });
+
+  it("refuses to enable auto-refill before a card is saved", async () => {
+    vi.mocked(setGoatAutoRefillConfig).mockResolvedValue(null);
+
+    await expect(
+      setGoatAutoRefillAction({ enabled: true, amountCents: 2_000 }),
+    ).resolves.toMatchObject({ ok: false });
+  });
+
+  it("rejects auto-refill amounts outside the allowed range", async () => {
+    await expect(
+      setGoatAutoRefillAction({ enabled: true, amountCents: 100 }),
+    ).resolves.toMatchObject({ ok: false });
+    expect(setGoatAutoRefillConfig).not.toHaveBeenCalled();
   });
 });

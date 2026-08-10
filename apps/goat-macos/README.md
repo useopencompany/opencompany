@@ -37,7 +37,7 @@ cp apps/goat-macos/Config/Local.xcconfig.example apps/goat-macos/Config/Local.xc
 
 `Local.xcconfig` is gitignored. Debug builds use `http://127.0.0.1:3002` for Goat by default. Override `GOAT_API_BASE_URL` for another deployment. Release values should be passed by CI or a local uncommitted xcconfig; no credentials belong in the project.
 
-Start the Goat development stack with `bun run dev:goat`, open `apps/goat-macos/GoatQuick.xcodeproj`, select the `GoatQuick` scheme, and run it. It appears only in the menu bar.
+Start the OpenCompany web development stack with `bun run dev:web`, open `apps/goat-macos/GoatQuick.xcodeproj`, select the `GoatQuick` scheme, and run it. It appears only in the menu bar.
 
 Command-line verification:
 

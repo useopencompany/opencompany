@@ -3,34 +3,48 @@
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect } from "react";
 import {
-  ONBOARDING_CONNECTED_MESSAGE,
-  type OnboardingConnectedMessage,
-} from "@/lib/onboarding/setups";
+  GOAT_ONBOARDING_CONNECTION_MESSAGE,
+  GOAT_ONBOARDING_CONNECTION_STORAGE_KEY,
+  type GoatOnboardingConnectionMessage,
+} from "@/lib/onboarding-integrations";
 
-// Popup-closer for inline integration connect flows.
-//
-// Every OAuth start route (integrations + MCP) is opened in a popup with returnTo pointing here, and
-// every callback redirects back to this page with a status param: integrations append
-// `?integration=<id>&setup=connected|error`, MCPs append `?mcp=<id>&setup=connected|error[&reason]`.
-// We normalize that into a single message to the opener (the onboarding window) and close ourselves,
-// so the onboarding page can flip the row to "connected" without ever navigating away.
-
-function ConnectedNotifier() {
+function ConnectionNotifier() {
   const params = useSearchParams();
 
   useEffect(() => {
-    const message: OnboardingConnectedMessage = {
-      type: ONBOARDING_CONNECTED_MESSAGE,
-      provider: params.get("integration") ?? params.get("mcp"),
+    const message: GoatOnboardingConnectionMessage = {
+      type: GOAT_ONBOARDING_CONNECTION_MESSAGE,
+      provider: params.get("integration"),
       status: params.get("setup"),
       reason: params.get("reason"),
     };
-    try {
-      window.opener?.postMessage(message, window.location.origin);
-    } catch {
-      // If the opener is gone (popup reused / blocked) there's nothing to notify; just close.
+
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage(message, window.location.origin);
+      window.close();
+      return;
     }
+
+    window.localStorage.setItem(
+      GOAT_ONBOARDING_CONNECTION_STORAGE_KEY,
+      JSON.stringify({ ...message, completedAt: Date.now() }),
+    );
+
+    // A popup-blocked fallback opens this route in a plain tab with no usable
+    // window.opener, so the storage write above drives the wizard tab. Try to
+    // self-close; keep the redirect below as the safety net for tabs that
+    // can't close themselves (and for direct navigation back to onboarding).
     window.close();
+
+    const next = new URL("/onboarding", window.location.origin);
+    for (const key of ["integration", "setup", "reason"] as const) {
+      const value = params.get(key);
+      if (value) next.searchParams.set(key, value);
+    }
+    const timer = window.setTimeout(() => {
+      window.location.replace(`${next.pathname}${next.search}`);
+    }, 250);
+    return () => window.clearTimeout(timer);
   }, [params]);
 
   return null;
@@ -38,10 +52,10 @@ function ConnectedNotifier() {
 
 export default function OnboardingConnectedPage() {
   return (
-    <main className="flex min-h-screen w-screen items-center justify-center bg-canvas px-6">
-      <p className="text-[13px] text-ink-muted">You can close this window.</p>
+    <main className="flex h-dvh w-full items-center justify-center bg-canvas px-6 text-ink">
+      <p className="text-[13px] text-ink-subtle">Finishing your connection...</p>
       <Suspense fallback={null}>
-        <ConnectedNotifier />
+        <ConnectionNotifier />
       </Suspense>
     </main>
   );

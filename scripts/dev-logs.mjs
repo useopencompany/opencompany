@@ -7,7 +7,6 @@ const DEFAULT_LOG_FILE = ".context/logs/dev-turbo.json";
 const SOURCE_ALIASES = new Map([
   ["web", "@opencompany/web#dev"],
   ["runner", "@opencompany/runner#dev"],
-  ["inngest", "@opencompany/inngest-dev#dev"],
   ["stripe", "@opencompany/stripe-webhooks#dev"],
   ["turbo", "turbo"],
 ]);
@@ -197,7 +196,7 @@ function printHelp() {
   console.log(`Usage: bun run dev:logs -- [options] [query]
 
 Options:
-  --source <name>      Filter by source. Aliases: web, runner, inngest, stripe, turbo.
+  --source <name>      Filter by source. Aliases: web, runner, stripe, turbo.
   --tail <lines>       Number of matching records to print. Default: 200.
   --grep <query>       Filter records by text/source/level.
   --errors            Show likely errors and failures.

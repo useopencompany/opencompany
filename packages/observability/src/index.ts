@@ -13,8 +13,6 @@ export type ObservabilityContext = {
   agent_id?: string;
   session_id?: string;
   message_id?: string;
-  inngest_event_id?: string;
-  inngest_run_id?: string;
   sandbox_id?: string;
   model_provider?: string;
   model_name?: string;
@@ -230,8 +228,6 @@ function getServerRuntimeContext(): LogFields {
   if (isBrowser()) return {};
 
   return compactLogFields({
-    preview_env: isTrue(getEnv("PREVIEW_ENV")) ? true : undefined,
-    preview_pr_number: getEnv("PREVIEW_PR_NUMBER"),
     render_git_commit: getEnv("RENDER_GIT_COMMIT"),
     render_service_id: getEnv("RENDER_SERVICE_ID"),
     render_instance_id: getEnv("RENDER_INSTANCE_ID"),
@@ -293,7 +289,7 @@ function isBrowser() {
 }
 
 function isTimingEnabled() {
-  return getEnv("OPENCOMPANY_TIMING") === "1" || getEnv("OBSERVABILITY_TIMING") === "1";
+  return getEnv("OBSERVABILITY_TIMING") === "1";
 }
 
 export function isObservabilityEnabled() {

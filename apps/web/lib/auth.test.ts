@@ -1,44 +1,102 @@
 import { getDb } from "@opencompany/db/client";
-import { cookies } from "next/headers";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getWorkOSClient } from "@/lib/workos";
+import { goatUsers } from "@opencompany/db/goat-schema";
 import {
-  hasCompletedOnboarding,
-  loadCurrentWorkspaceContextReadOnly,
-  provisionDefaultOrganization,
-  syncUserAndWorkspace,
-} from "./auth";
+  adoptGoatWorkspaceMembershipsFromOrgs,
+  listAccessibleGoatBrains,
+  listGoatWorkspacesForUser,
+} from "@opencompany/db/goat-workspaces";
+import { recordGoatSignup } from "@opencompany/goat-observability";
+import { saveSession, withAuth } from "@workos-inc/authkit-nextjs";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  activateGoatWorkspaceForOrganization,
+  adoptWorkOSOrganizationMemberships,
+  completeGoatAuthentication,
+  currentGoatIdentity,
+  currentGoatUser,
+  GOAT_ACTIVE_BRAIN_COOKIE,
+  GOAT_ACTIVE_WORKSPACE_COOKIE,
+  syncGoatUser,
+} from "@/lib/auth";
+import { recordLastGoatAuthMethod } from "@/lib/auth-methods";
+import { getWorkOSClient } from "@/lib/workos-client";
+import { ensureGoatWorkspaceOrganizationsForEntries } from "@/lib/workos-organizations";
+
+const analyticsMocks = vi.hoisted(() => ({
+  captureGoatServerEvent: vi.fn(async () => {}),
+}));
+
+vi.mock("@opencompany/analytics/goat/server", () => ({
+  captureGoatServerEvent: analyticsMocks.captureGoatServerEvent,
+}));
 
 vi.mock("@opencompany/db/client", () => ({
   getDb: vi.fn(),
 }));
 
+vi.mock("@opencompany/db/goat-workspaces", () => ({
+  adoptGoatWorkspaceMembershipsFromOrgs: vi.fn(),
+  DEFAULT_GOAT_BRAIN_SLUG: "default",
+  getGoatBrainAccess: vi.fn(),
+  listAccessibleGoatBrains: vi.fn(),
+  listGoatWorkspacesForUser: vi.fn(),
+}));
+
+vi.mock("@opencompany/goat-observability", () => ({
+  recordGoatSignup: vi.fn(),
+}));
+
 vi.mock("@workos-inc/authkit-nextjs", () => ({
-  refreshSession: vi.fn(),
+  saveSession: vi.fn(),
   withAuth: vi.fn(),
 }));
 
-vi.mock("next/navigation", () => ({
-  redirect: vi.fn((path: string) => {
-    throw new Error(`redirect:${path}`);
-  }),
+vi.mock("@/lib/auth-methods", () => ({
+  recordLastGoatAuthMethod: vi.fn(),
 }));
 
 vi.mock("next/headers", () => ({
-  cookies: vi.fn(() => {
-    throw new Error("cookies called outside a request scope");
-  }),
+  cookies: vi.fn(),
 }));
 
-vi.mock("@/lib/workos", () => ({
+vi.mock("next/navigation", () => ({
+  redirect: vi.fn(),
+}));
+
+vi.mock("react", () => ({
+  cache: <T extends (...args: never[]) => unknown>(fn: T) => fn,
+}));
+
+vi.mock("@/lib/workos-client", () => ({
   getWorkOSClient: vi.fn(),
 }));
 
-const getDbMock = vi.mocked(getDb);
-const getWorkOSClientMock = vi.mocked(getWorkOSClient);
-const cookiesMock = vi.mocked(cookies);
-const originalEnv = { ...process.env };
+vi.mock("@/lib/billing/seats", () => ({
+  syncGoatStripeSeatQuantityForWorkspace: vi.fn().mockResolvedValue({ ok: true, changed: false }),
+}));
 
+vi.mock("@/lib/workos-organizations", () => ({
+  ensureGoatWorkspaceOrganizationsForEntries: vi.fn((entries) => entries),
+}));
+
+const getDbMock = vi.mocked(getDb);
+const adoptGoatWorkspaceMembershipsFromOrgsMock = vi.mocked(adoptGoatWorkspaceMembershipsFromOrgs);
+const cookiesMock = vi.mocked(cookies);
+const ensureGoatWorkspaceOrganizationsForEntriesMock = vi.mocked(
+  ensureGoatWorkspaceOrganizationsForEntries,
+);
+const getWorkOSClientMock = vi.mocked(getWorkOSClient);
+const listAccessibleGoatBrainsMock = vi.mocked(listAccessibleGoatBrains);
+const listGoatWorkspacesForUserMock = vi.mocked(listGoatWorkspacesForUser);
+const recordGoatSignupMock = vi.mocked(recordGoatSignup);
+const withAuthMock = vi.mocked(withAuth);
+const saveSessionMock = vi.mocked(saveSession);
+const recordLastGoatAuthMethodMock = vi.mocked(recordLastGoatAuthMethod);
+const redirectMock = vi.mocked(redirect);
+
+const now = new Date("2026-01-01T00:00:00.000Z");
 const authUser = {
   id: "user_123",
   email: "ada@example.com",
@@ -47,278 +105,461 @@ const authUser = {
   profilePictureUrl: null,
 };
 
-const appUser = {
-  id: "usr_user_123",
-  workosUserId: "user_123",
-  email: "ada@example.com",
-  firstName: "Ada",
-  lastName: "Lovelace",
-  avatarUrl: null,
-  createdAt: new Date("2026-01-01T00:00:00.000Z"),
-  updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+const goatUser = {
+  workosUserId: authUser.id,
+  email: authUser.email,
+  firstName: authUser.firstName,
+  lastName: authUser.lastName,
+  avatarUrl: authUser.profilePictureUrl,
+  timezone: "America/Los_Angeles",
+  taskSpawningEnabled: false,
+  createdAt: now,
+  updatedAt: now,
 };
 
-const workspace = {
-  id: "wks_123",
-  workosOrganizationId: "org_123",
-  name: "Ada's Workspace",
-  createdByUserId: "usr_user_123",
-  teamSize: null,
-  companyUrl: null,
-  createdAt: new Date("2026-01-01T00:00:00.000Z"),
-  updatedAt: new Date("2026-01-01T00:00:00.000Z"),
-};
-
-function returningOrThenable(returningValue: unknown[]) {
-  return {
-    returning: vi.fn(async () => returningValue),
-    then: (resolve: (value: unknown[]) => void) => Promise.resolve([]).then(resolve),
-  };
-}
-
-function createDbMock(input: { selectResults: unknown[][]; insertReturningResults: unknown[][] }) {
-  const selectResults = [...input.selectResults];
-  const insertReturningResults = [...input.insertReturningResults];
-  const insertedValues: unknown[] = [];
-  const execute = vi
-    .fn()
-    .mockResolvedValue({ rows: [{ ledgerId: 1, amountCents: 300, balanceCents: 300 }] });
-
-  const limit = vi.fn(async () => selectResults.shift() ?? []);
-  const where = vi.fn(() => ({ limit }));
-  // `innerJoin` is chainable and terminates in the same `where().limit()` shape the
-  // non-join callers use, so both query shapes share one mock.
-  const innerJoin = vi.fn(() => ({ innerJoin, where }));
-  const from = vi.fn(() => ({ where, innerJoin }));
-  const select = vi.fn(() => ({ from }));
-
-  const onConflictDoUpdate = vi.fn(() => returningOrThenable(insertReturningResults.shift() ?? []));
-  const onConflictDoNothing = vi.fn(() =>
-    returningOrThenable(insertReturningResults.shift() ?? []),
-  );
-  const values = vi.fn((value: unknown) => {
-    insertedValues.push(value);
-    return { onConflictDoUpdate, onConflictDoNothing };
-  });
+function createDbMock(input: { insertReturning: unknown[]; updateReturning?: unknown[] }) {
+  const insertReturning = vi.fn(async () => input.insertReturning);
+  const onConflictDoNothing = vi.fn(() => ({ returning: insertReturning }));
+  const values = vi.fn(() => ({ onConflictDoNothing }));
   const insert = vi.fn(() => ({ values }));
 
+  const updateReturning = vi.fn(async () => input.updateReturning ?? []);
+  const where = vi.fn(() => ({ returning: updateReturning }));
+  const set = vi.fn(() => ({ where }));
+  const update = vi.fn(() => ({ set }));
+
   return {
-    db: { select, insert, execute },
-    insertedValues,
-    execute,
+    db: { insert, update },
+    insert,
+    values,
+    onConflictDoNothing,
+    insertReturning,
+    update,
+    set,
+    where,
+    updateReturning,
   };
 }
 
-describe("workspace organization auth sync", () => {
+describe("syncGoatUser", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("records a Goat signup when user sync creates the user row", async () => {
+    const dbMock = createDbMock({ insertReturning: [goatUser] });
+    getDbMock.mockReturnValue(dbMock.db as never);
+
+    const result = await syncGoatUser(authUser as never);
+
+    expect(result).toBe(goatUser);
+    expect(dbMock.insert).toHaveBeenCalledWith(goatUsers);
+    expect(dbMock.values).toHaveBeenCalledWith({
+      workosUserId: authUser.id,
+      email: authUser.email,
+      firstName: authUser.firstName,
+      lastName: authUser.lastName,
+      avatarUrl: authUser.profilePictureUrl,
+      updatedAt: now,
+    });
+    expect(dbMock.onConflictDoNothing).toHaveBeenCalledWith({ target: goatUsers.workosUserId });
+    expect(dbMock.update).not.toHaveBeenCalled();
+    expect(recordGoatSignupMock).toHaveBeenCalledOnce();
+    expect(recordGoatSignupMock).toHaveBeenCalledWith({ source: "user_sync" });
+    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
+      "signup_completed",
+      authUser.id,
+      { source: "user_sync" },
+      {
+        email: authUser.email,
+        firstName: authUser.firstName,
+        lastName: authUser.lastName,
+      },
+    );
+  });
+
+  it("updates an existing Goat user without recording another signup", async () => {
+    const updatedUser = { ...goatUser, firstName: "Augusta" };
+    const dbMock = createDbMock({ insertReturning: [], updateReturning: [updatedUser] });
+    getDbMock.mockReturnValue(dbMock.db as never);
+
+    const result = await syncGoatUser({ ...authUser, firstName: "Augusta" } as never);
+
+    expect(result).toBe(updatedUser);
+    expect(dbMock.update).toHaveBeenCalledWith(goatUsers);
+    expect(dbMock.set).toHaveBeenCalledWith({
+      email: authUser.email,
+      firstName: "Augusta",
+      lastName: authUser.lastName,
+      avatarUrl: authUser.profilePictureUrl,
+      updatedAt: now,
+    });
+    expect(recordGoatSignupMock).not.toHaveBeenCalled();
+    expect(analyticsMocks.captureGoatServerEvent).not.toHaveBeenCalled();
+  });
+
+  it("throws when neither insert nor update returns a user", async () => {
+    const dbMock = createDbMock({ insertReturning: [], updateReturning: [] });
+    getDbMock.mockReturnValue(dbMock.db as never);
+
+    await expect(syncGoatUser(authUser as never)).rejects.toThrow("Unable to sync the Goat user.");
+    expect(recordGoatSignupMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("adoptWorkOSOrganizationMemberships", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env = { ...originalEnv };
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("imports all active workspace memberships returned by WorkOS", async () => {
+    const listOrganizationMemberships = vi.fn(async () => ({
+      data: [
+        { organizationId: "org_personal", role: { slug: "admin" } },
+        { organizationId: "org_invited", role: { slug: "member" } },
+      ],
+    }));
     getWorkOSClientMock.mockReturnValue({
-      organizations: {
-        createOrganization: vi.fn().mockResolvedValue({
-          id: "org_123",
-          name: "Ada's Workspace",
-        }),
-        getOrganization: vi.fn().mockResolvedValue({
-          id: "org_123",
-          name: "Ada's Workspace",
-        }),
-      },
+      userManagement: { listOrganizationMemberships },
+    } as never);
+
+    await adoptWorkOSOrganizationMemberships(authUser as never);
+
+    expect(listOrganizationMemberships).toHaveBeenCalledWith({
+      userId: authUser.id,
+      statuses: ["active"],
+    });
+    expect(adoptGoatWorkspaceMembershipsFromOrgsMock).toHaveBeenCalledWith({
+      userWorkosId: authUser.id,
+      memberships: [
+        { organizationId: "org_personal", role: "admin" },
+        { organizationId: "org_invited", role: "member" },
+      ],
+    });
+  });
+
+  it("does not block authentication when WorkOS membership lookup fails", async () => {
+    const error = new Error("WorkOS unavailable");
+    getWorkOSClientMock.mockReturnValue({
       userManagement: {
-        createOrganizationMembership: vi.fn().mockResolvedValue({ id: "om_123" }),
+        listOrganizationMemberships: vi.fn(async () => {
+          throw error;
+        }),
       },
     } as never);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(adoptWorkOSOrganizationMemberships(authUser as never)).resolves.toBeUndefined();
+
+    expect(adoptGoatWorkspaceMembershipsFromOrgsMock).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith(
+      "[goat] Failed to adopt WorkOS organization memberships",
+      error,
+    );
+  });
+});
+
+describe("activateGoatWorkspaceForOrganization", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it("loads an existing workspace by WorkOS organization id", async () => {
-    const { db, insertedValues, execute } = createDbMock({
-      selectResults: [[{ id: appUser.id }], [workspace]],
-      insertReturningResults: [[appUser]],
-    });
-    getDbMock.mockReturnValue(db as never);
-
-    const result = await syncUserAndWorkspace(authUser as never, "org_123", "admin");
-
-    expect(result.workspace).toEqual(workspace);
-    expect(getWorkOSClientMock().organizations.getOrganization).not.toHaveBeenCalled();
-    expect(execute).not.toHaveBeenCalled();
-    expect(insertedValues).toContainEqual(
-      expect.objectContaining({
-        workspaceId: "wks_123",
-        userId: "usr_user_123",
+  it("activates the Goat workspace and default brain mapped to the authenticated organization", async () => {
+    listGoatWorkspacesForUserMock.mockResolvedValue([
+      {
+        workspace: {
+          id: "goat_ws_personal",
+          workosOrganizationId: "org_personal",
+        },
         role: "admin",
-      }),
-    );
-  });
-
-  it("loads an existing workspace read-only without upserting route auth state", async () => {
-    const { db, insertedValues, execute } = createDbMock({
-      // One joined row now resolves user + workspace + role in a single round-trip.
-      selectResults: [[{ user: appUser, workspace, role: "member" }]],
-      insertReturningResults: [],
-    });
-    getDbMock.mockReturnValue(db as never);
-
-    const result = await loadCurrentWorkspaceContextReadOnly(authUser as never, "org_123");
-
-    expect(result?.user).toEqual(appUser);
-    expect(result?.workspace).toEqual(workspace);
-    expect(result?.role).toBe("member");
-    expect(result?.isNewUser).toBe(false);
-    expect(insertedValues).toEqual([]);
-    expect(execute).not.toHaveBeenCalled();
-  });
-
-  it("creates a default WorkOS Organization and local workspace for first sign-in", async () => {
-    const { db, insertedValues, execute } = createDbMock({
-      selectResults: [[], []],
-      insertReturningResults: [[appUser], [workspace]],
-    });
-    getDbMock.mockReturnValue(db as never);
-
-    const result = await provisionDefaultOrganization(authUser as never);
-
-    expect(result.workspace).toEqual(workspace);
-    expect(getWorkOSClientMock().organizations.createOrganization).toHaveBeenCalledWith({
-      name: "Ada Lovelace's Workspace",
-    });
-    expect(getWorkOSClientMock().userManagement.createOrganizationMembership).toHaveBeenCalledWith({
-      organizationId: "org_123",
-      userId: "user_123",
-      roleSlug: "admin",
-    });
-    expect(insertedValues).toContainEqual(
-      expect.objectContaining({
-        workosOrganizationId: "org_123",
-        createdByUserId: "usr_user_123",
-      }),
-    );
-    expect(insertedValues).toContainEqual(
-      expect.objectContaining({
-        workspaceId: "wks_123",
-        userId: "usr_user_123",
-        role: "admin",
-      }),
-    );
-    expect(execute).toHaveBeenCalledOnce();
-  });
-
-  it("reuses an existing default workspace without creating another WorkOS Organization", async () => {
-    const { db, insertedValues, execute } = createDbMock({
-      selectResults: [[{ id: appUser.id }], [workspace]],
-      insertReturningResults: [[appUser]],
-    });
-    getDbMock.mockReturnValue(db as never);
-
-    const result = await provisionDefaultOrganization(authUser as never);
-
-    expect(result.workspace).toEqual(workspace);
-    expect(getWorkOSClientMock().organizations.createOrganization).not.toHaveBeenCalled();
-    expect(
-      getWorkOSClientMock().userManagement.createOrganizationMembership,
-    ).not.toHaveBeenCalled();
-    expect(insertedValues).toContainEqual(
-      expect.objectContaining({
-        workspaceId: "wks_123",
-        userId: "usr_user_123",
-        role: "admin",
-      }),
-    );
-    expect(execute).not.toHaveBeenCalled();
-  });
-
-  it("grants signup credit when a new user creates a workspace for an existing organization", async () => {
-    const { db, execute } = createDbMock({
-      selectResults: [[], []],
-      insertReturningResults: [[appUser], [workspace]],
-    });
-    getDbMock.mockReturnValue(db as never);
-
-    const result = await syncUserAndWorkspace(authUser as never, "org_123", "admin");
-
-    expect(result.workspace).toEqual(workspace);
-    expect(getWorkOSClientMock().organizations.getOrganization).toHaveBeenCalledWith("org_123");
-    expect(execute).toHaveBeenCalledOnce();
-  });
-
-  it("treats configured local bypass emails as onboarded without querying onboarding responses", async () => {
-    process.env.NODE_ENV = "development";
-    delete process.env.CI;
-    delete process.env.VERCEL_ENV;
-    process.env.OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS = "louis@acta.so";
+      },
+      {
+        workspace: {
+          id: "goat_ws_invited",
+          workosOrganizationId: "org_invited",
+        },
+        role: "member",
+      },
+    ] as never);
+    listAccessibleGoatBrainsMock.mockResolvedValue([
+      { id: "brain_other", slug: "other" },
+      { id: "brain_default", slug: "default" },
+    ] as never);
+    const cookieStore = {
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+    cookiesMock.mockResolvedValue(cookieStore as never);
 
     await expect(
-      hasCompletedOnboarding({
-        id: "usr_louis",
-        email: "Louis@Acta.so",
+      activateGoatWorkspaceForOrganization({
+        userWorkosId: authUser.id,
+        organizationId: "org_invited",
       }),
     ).resolves.toBe(true);
 
-    expect(getDbMock).not.toHaveBeenCalled();
+    expect(listAccessibleGoatBrainsMock).toHaveBeenCalledWith({
+      userWorkosId: authUser.id,
+      workspaceId: "goat_ws_invited",
+    });
+    expect(cookieStore.set).toHaveBeenNthCalledWith(
+      1,
+      GOAT_ACTIVE_WORKSPACE_COOKIE,
+      "goat_ws_invited",
+      {
+        path: "/",
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 365,
+      },
+    );
+    expect(cookieStore.set).toHaveBeenNthCalledWith(2, GOAT_ACTIVE_BRAIN_COOKIE, "brain_default", {
+      path: "/",
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 365,
+    });
+    expect(cookieStore.delete).not.toHaveBeenCalled();
   });
 
-  it("ignores local onboarding bypass emails in production", async () => {
-    process.env.NODE_ENV = "production";
-    process.env.OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS = "louis@acta.so";
-    const { db } = createDbMock({
-      selectResults: [[]],
-      insertReturningResults: [],
-    });
-    getDbMock.mockReturnValue(db as never);
+  it("does not change cookies when the organization has no accessible Goat workspace", async () => {
+    listGoatWorkspacesForUserMock.mockResolvedValue([
+      {
+        workspace: {
+          id: "goat_ws_personal",
+          workosOrganizationId: "org_personal",
+        },
+        role: "admin",
+      },
+    ] as never);
 
     await expect(
-      hasCompletedOnboarding({
-        id: "usr_louis",
-        email: "louis@acta.so",
+      activateGoatWorkspaceForOrganization({
+        userWorkosId: authUser.id,
+        organizationId: "org_legacy_web",
       }),
     ).resolves.toBe(false);
 
-    expect(getDbMock).toHaveBeenCalledOnce();
+    expect(listAccessibleGoatBrainsMock).not.toHaveBeenCalled();
+    expect(cookiesMock).not.toHaveBeenCalled();
   });
 
-  it("treats the skip-onboarding cookie as onboarded on preview deployments", async () => {
-    process.env.VERCEL_ENV = "preview";
-    cookiesMock.mockReturnValueOnce({
-      get: (name: string) =>
-        name === "opencompany-skip-onboarding" ? { name, value: "1" } : undefined,
+  it("clears a stale active brain when the invited workspace has no accessible brain", async () => {
+    listGoatWorkspacesForUserMock.mockResolvedValue([
+      {
+        workspace: {
+          id: "goat_ws_invited",
+          workosOrganizationId: "org_invited",
+        },
+        role: "member",
+      },
+    ] as never);
+    listAccessibleGoatBrainsMock.mockResolvedValue([]);
+    const cookieStore = {
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+    cookiesMock.mockResolvedValue(cookieStore as never);
+
+    await activateGoatWorkspaceForOrganization({
+      userWorkosId: authUser.id,
+      organizationId: "org_invited",
+    });
+
+    expect(cookieStore.set).toHaveBeenCalledWith(
+      GOAT_ACTIVE_WORKSPACE_COOKIE,
+      "goat_ws_invited",
+      expect.any(Object),
+    );
+    expect(cookieStore.delete).toHaveBeenCalledWith(GOAT_ACTIVE_BRAIN_COOKIE);
+  });
+});
+
+describe("completeGoatAuthentication", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function mockSyncAndAdopt() {
+    const dbMock = createDbMock({ insertReturning: [goatUser] });
+    getDbMock.mockReturnValue(dbMock.db as never);
+    getWorkOSClientMock.mockReturnValue({
+      userManagement: {
+        listOrganizationMemberships: vi.fn(async () => ({ data: [] })),
+      },
+    } as never);
+    return dbMock;
+  }
+
+  it("seals the session, records the auth method, and activates the invited workspace", async () => {
+    mockSyncAndAdopt();
+    listGoatWorkspacesForUserMock.mockResolvedValue([
+      {
+        workspace: { id: "goat_ws_invited", workosOrganizationId: "org_invited" },
+        role: "member",
+      },
+    ] as never);
+    listAccessibleGoatBrainsMock.mockResolvedValue([
+      { id: "brain_default", slug: "default" },
+    ] as never);
+    const cookieStore = { set: vi.fn(), delete: vi.fn() };
+    cookiesMock.mockResolvedValue(cookieStore as never);
+
+    const authResponse = {
+      user: authUser,
+      organizationId: "org_invited",
+      accessToken: "at_123",
+      refreshToken: "rt_123",
+      authenticationMethod: "MagicAuth",
+    };
+
+    await completeGoatAuthentication(authResponse as never, "https://my.opencompany.chat");
+
+    expect(saveSessionMock).toHaveBeenCalledWith(authResponse, "https://my.opencompany.chat");
+    expect(recordLastGoatAuthMethodMock).toHaveBeenCalledWith("MagicAuth");
+    expect(cookieStore.set).toHaveBeenCalledWith(
+      "goat-active-workspace",
+      "goat_ws_invited",
+      expect.any(Object),
+    );
+  });
+
+  it("skips workspace activation when the auth response has no organization", async () => {
+    mockSyncAndAdopt();
+
+    const authResponse = {
+      user: authUser,
+      accessToken: "at_123",
+      refreshToken: "rt_123",
+      authenticationMethod: "GoogleOAuth",
+    };
+
+    await completeGoatAuthentication(authResponse as never, "https://my.opencompany.chat");
+
+    expect(listGoatWorkspacesForUserMock).not.toHaveBeenCalled();
+  });
+
+  it("does not block authentication when workspace activation fails", async () => {
+    mockSyncAndAdopt();
+    listGoatWorkspacesForUserMock.mockRejectedValue(new Error("Database unavailable"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const authResponse = {
+      user: authUser,
+      organizationId: "org_invited",
+      accessToken: "at_123",
+      refreshToken: "rt_123",
+      authenticationMethod: "MagicAuth",
+    };
+
+    await expect(
+      completeGoatAuthentication(authResponse as never, "https://my.opencompany.chat"),
+    ).resolves.toBeUndefined();
+
+    expect(consoleError).toHaveBeenCalledWith(
+      "[goat] Failed to activate the authenticated workspace",
+      expect.any(Error),
+    );
+  });
+});
+
+describe("currentGoatUser", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("keeps a newly authenticated owner workspace-free until onboarding creates one", async () => {
+    const limit = vi.fn(async () => [goatUser]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+
+    getDbMock.mockReturnValue({ select } as never);
+    withAuthMock.mockResolvedValue({ user: authUser } as never);
+    listGoatWorkspacesForUserMock.mockResolvedValue([]);
+    ensureGoatWorkspaceOrganizationsForEntriesMock.mockResolvedValue([]);
+
+    await expect(currentGoatIdentity()).resolves.toEqual({
+      authUser,
+      organizationId: null,
+      user: goatUser,
+      workspaces: [],
+    });
+
+    expect(listGoatWorkspacesForUserMock).toHaveBeenCalledWith(authUser.id);
+    expect(listAccessibleGoatBrainsMock).not.toHaveBeenCalled();
+  });
+
+  it("routes a workspace-free authenticated owner into onboarding", async () => {
+    const limit = vi.fn(async () => [goatUser]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+
+    getDbMock.mockReturnValue({ select } as never);
+    withAuthMock.mockResolvedValue({ user: authUser } as never);
+    listGoatWorkspacesForUserMock.mockResolvedValue([]);
+    ensureGoatWorkspaceOrganizationsForEntriesMock.mockResolvedValue([]);
+
+    await currentGoatUser();
+
+    expect(redirectMock).toHaveBeenCalledWith("/onboarding");
+    expect(listAccessibleGoatBrainsMock).not.toHaveBeenCalled();
+  });
+
+  it("prefers the organization selected in the WorkOS session over the local cookie", async () => {
+    const workspaces = [
+      {
+        workspace: {
+          id: "goat_ws_personal",
+          workosOrganizationId: "org_personal",
+          name: "Personal",
+        },
+        role: "admin",
+      },
+      {
+        workspace: {
+          id: "goat_ws_company",
+          workosOrganizationId: "org_company",
+          name: "Analytical Co",
+        },
+        role: "member",
+      },
+    ];
+    const selectedBrain = { id: "brain_company", slug: "general" };
+    const limit = vi.fn(async () => [goatUser]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+
+    getDbMock.mockReturnValue({ select } as never);
+    withAuthMock.mockResolvedValue({
+      user: authUser,
+      organizationId: "org_company",
+    } as never);
+    listGoatWorkspacesForUserMock.mockResolvedValue(workspaces as never);
+    ensureGoatWorkspaceOrganizationsForEntriesMock.mockResolvedValue(workspaces as never);
+    listAccessibleGoatBrainsMock.mockResolvedValue([selectedBrain] as never);
+    cookiesMock.mockResolvedValue({
+      get: vi.fn(() => ({ value: "goat_ws_personal" })),
     } as never);
 
-    await expect(hasCompletedOnboarding("usr_louis")).resolves.toBe(true);
+    const result = await currentGoatUser();
 
-    expect(getDbMock).not.toHaveBeenCalled();
-  });
-
-  it("ignores the skip-onboarding cookie in production", async () => {
-    process.env.VERCEL_ENV = "production";
-    const { db } = createDbMock({
-      selectResults: [[]],
-      insertReturningResults: [],
+    expect(result.workspace.id).toBe("goat_ws_company");
+    expect(result.role).toBe("member");
+    expect(result.activeBrain).toBe(selectedBrain);
+    expect(listAccessibleGoatBrainsMock).toHaveBeenCalledWith({
+      userWorkosId: authUser.id,
+      workspaceId: "goat_ws_company",
     });
-    getDbMock.mockReturnValue(db as never);
-
-    await expect(hasCompletedOnboarding("usr_louis")).resolves.toBe(false);
-
-    expect(cookiesMock).not.toHaveBeenCalled();
-    expect(getDbMock).toHaveBeenCalledOnce();
-  });
-
-  it("ignores local onboarding bypass emails in CI", async () => {
-    process.env.NODE_ENV = "test";
-    process.env.CI = "true";
-    process.env.OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS = "louis@acta.so";
-    const { db } = createDbMock({
-      selectResults: [[]],
-      insertReturningResults: [],
-    });
-    getDbMock.mockReturnValue(db as never);
-
-    await expect(
-      hasCompletedOnboarding({
-        id: "usr_louis",
-        email: "louis@acta.so",
-      }),
-    ).resolves.toBe(false);
-
-    expect(getDbMock).toHaveBeenCalledOnce();
   });
 });

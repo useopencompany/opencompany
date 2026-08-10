@@ -1,46 +1,9 @@
 import { type ErrorResponse, Resend, type Response as ResendResponse } from "resend";
 
+// Minimal typed wrapper around the Resend SDK.
+// Goat only sends transactional/lifecycle email (no contact/segment sync), so the surface
+// used here is emails.send — the rest of the type is kept for parity with web.
 export type ResendEmailClient = {
-  contacts: {
-    create: (payload: {
-      email: string;
-      firstName?: string;
-      lastName?: string;
-      unsubscribed?: boolean;
-      segments?: { id: string }[];
-    }) => Promise<ResendResponse<{ object: "contact"; id: string }>>;
-    get: (payload: { email: string }) => Promise<
-      ResendResponse<{
-        object: "contact";
-        id: string;
-        email: string;
-        first_name: string | null;
-        last_name: string | null;
-        unsubscribed: boolean;
-        created_at: string;
-        properties: Record<string, unknown>;
-      }>
-    >;
-    update: (payload: {
-      email: string;
-      firstName?: string | null;
-      lastName?: string | null;
-      unsubscribed?: boolean;
-    }) => Promise<ResendResponse<{ object: "contact"; id: string }>>;
-    segments: {
-      list: (payload: { email: string; limit?: number }) => Promise<
-        ResendResponse<{
-          object: "list";
-          has_more: boolean;
-          data: Array<{ id: string; name: string; created_at: string }>;
-        }>
-      >;
-      add: (payload: {
-        email: string;
-        segmentId: string;
-      }) => Promise<ResendResponse<{ id: string }>>;
-    };
-  };
   emails: {
     send: (
       payload: {
@@ -66,7 +29,7 @@ export function trimmed(value: string | undefined) {
 }
 
 export function getResendClient(apiKey: string): ResendEmailClient {
-  resendClient ??= new Resend(apiKey);
+  resendClient ??= new Resend(apiKey) as unknown as ResendEmailClient;
   return resendClient;
 }
 

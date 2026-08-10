@@ -54,8 +54,9 @@ Do not reuse the legacy project's token.
 
 Store the Goat project's API host and project token in:
 
-- Infisical `prod` + `/goat`, synced to the Goat Vercel project
-- Infisical `prod` + `/web`, synced to the legacy Vercel project for the shared Stripe webhook
+- Infisical `prod` + `/goat`, synced to the existing web Vercel project
+- Infisical `prod` + `/web`, synced temporarily to the legacy Vercel project for the Stripe
+  cutover rollback route
 - Infisical `prod` + `/runner`, synced to Render for completed Brain ingestion events
 - Infisical `dev` + `/web` when local Goat analytics are needed
 - Infisical `dev` + `/runner` when local Brain ingestion analytics are needed

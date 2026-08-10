@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Called by: @opencompany/stripe-webhooks `bun run dev`, usually through the root dev stack.
-// Purpose: forwards Stripe CLI webhook events to the local web app.
+// Purpose: forwards Stripe CLI webhook events to the web app.
 
 import "./load-env.mjs";
 import { spawn } from "node:child_process";
@@ -14,26 +14,21 @@ if (disabled) {
 }
 
 function appOrigin() {
-  const raw = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (!raw) return "http://localhost:3000";
-
-  try {
-    return new URL(raw).origin;
-  } catch {
-    console.warn(`Ignoring invalid NEXT_PUBLIC_APP_URL=${raw}; using http://localhost:3000.`);
-    return "http://localhost:3000";
-  }
+  // Use Next.js directly so the Stripe CLI does not encounter Caddy's local certificate.
+  // scripts/dev.mjs exports the branch-isolated web port through the retained GOAT_PORT contract.
+  return `http://localhost:${process.env.GOAT_PORT?.trim() || "3002"}`;
 }
 
 const forwardTo = `${appOrigin()}/api/stripe/webhook`;
 const events =
   process.env.STRIPE_LISTEN_EVENTS?.trim() ||
-  "checkout.session.completed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,invoice.paid,invoice.payment_failed,payment_intent.succeeded,payment_intent.payment_failed";
+  "checkout.session.completed,checkout.session.async_payment_succeeded,checkout.session.async_payment_failed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,invoice.paid,invoice.payment_failed,payment_intent.succeeded,payment_intent.payment_failed";
 const stripeCliProjectName = process.env.STRIPE_CLI_PROJECT_NAME?.trim();
+const webhookSecretKey = "GOAT_STRIPE_WEBHOOK_SECRET";
 
-if (!process.env.STRIPE_WEBHOOK_SECRET?.trim()) {
+if (!process.env[webhookSecretKey]?.trim()) {
   console.warn(
-    "STRIPE_WEBHOOK_SECRET is not set. The app will reject forwarded Stripe webhooks until .env.local uses the whsec_ value printed by stripe listen.",
+    `${webhookSecretKey} is not set. The web app will reject forwarded Stripe webhooks until .env.local uses the whsec_ value printed by stripe listen.`,
   );
 }
 

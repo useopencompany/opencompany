@@ -4,7 +4,7 @@ import type { LucideIcon, LucideProps } from "./types";
 // OpenCompany product mark. Typed as LucideIcon for drop-in compatibility, and
 // filled with `currentColor` so it adopts the surrounding text color (use
 // `text-foreground`, `text-primary`, etc.) instead of a fixed light/dark asset.
-// Path sourced from apps/web/public/brand/opencompany-mark-*.svg (210x210 viewBox).
+// OpenCompany mark path, retained in its original 210x210 viewBox.
 export const OpenCompanyMark: LucideIcon = forwardRef<SVGSVGElement, LucideProps>(
   function OpenCompanyMark({ size = 24, ...props }, ref) {
     return (

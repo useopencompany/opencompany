@@ -1,15 +1,10 @@
-import { captureException } from "@opencompany/observability";
-import { getSignInUrl } from "@workos-inc/authkit-nextjs";
-import { redirect } from "next/navigation";
-import { getWorkOSRedirectUri } from "@/lib/workos";
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
-export async function GET() {
-  let url: string;
-  try {
-    url = await getSignInUrl({ redirectUri: getWorkOSRedirectUri() });
-  } catch (error) {
-    captureException(error, { event: "opencompany.auth_sign_in_url_failed" });
-    throw error;
-  }
-  redirect(url);
+// Compat redirect for bookmarked/cached links to the old hosted-AuthKit entry
+// point. The real sign-in page now lives at /signin.
+export function GET(request: NextRequest) {
+  const url = new URL("/signin", request.url);
+  url.search = request.nextUrl.search;
+  return NextResponse.redirect(url);
 }

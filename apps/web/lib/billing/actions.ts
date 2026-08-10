@@ -1,397 +1,333 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { captureServerEvent } from "@opencompany/analytics/server";
-import { centsToUsdMicros } from "@opencompany/billing";
-import { captureException } from "@opencompany/observability";
-import { revalidatePath } from "next/cache";
+import {
+  GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+  GOAT_PRO_STRIPE_PRODUCT_KEY,
+  loadGoatBillingOverview,
+  setGoatAutoRefillConfig,
+  setGoatStripeCustomerId,
+} from "@opencompany/db/goat-billing";
+import {
+  GOAT_MAX_TOP_UP_USD_CENTS,
+  GOAT_MIN_TOP_UP_USD_CENTS,
+} from "@opencompany/db/goat-billing-constants";
+import {
+  createGoatPendingCheckoutRecord,
+  markGoatCheckoutRecordFailed,
+  markGoatCheckoutRecordOpen,
+} from "@opencompany/db/goat-credits";
 import { redirect } from "next/navigation";
-import { after } from "next/server";
-import { AUTHENTICATION_REQUIRED_MESSAGE, currentWorkspace } from "@/lib/auth";
-import {
-  isValidAutoRefillAmountCents,
-  isValidAutoRefillThresholdCents,
-  isValidDailySpendLimitCents,
-  isValidTopUpAmountCents,
-  isValidWeeklySpendLimitCents,
-  MAX_AUTO_REFILL_AMOUNT_CENTS,
-  MAX_DAILY_SPEND_LIMIT_CENTS,
-  MAX_TOP_UP_AMOUNT_CENTS,
-  MAX_WEEKLY_SPEND_LIMIT_CENTS,
-  MIN_AUTO_REFILL_AMOUNT_CENTS,
-  MIN_DAILY_SPEND_LIMIT_CENTS,
-  MIN_TOP_UP_AMOUNT_CENTS,
-  MIN_WEEKLY_SPEND_LIMIT_CENTS,
-} from "@/lib/billing/constants";
-import {
-  createPendingCheckoutRecord,
-  loadWorkspaceBillingSettings,
-  markCheckoutRecordFailed,
-  markCheckoutRecordOpen,
-  newStripeCheckoutRecordId,
-  redeemCreditCodeForWorkspace,
-  upsertWorkspaceBillingSettings,
-} from "@/lib/billing/service";
-import { getAppUrl, getStripe } from "@/lib/billing/stripe";
+import { currentGoatUser } from "@/lib/auth";
+import { assertGoatCheckoutEnabled, getGoatAppUrl, getGoatStripe } from "@/lib/billing/stripe";
 
-function revalidateBillingSurfaces() {
-  revalidatePath("/company/settings");
-  revalidatePath("/personal/settings");
-}
+export type GoatBillingActionResult = { ok: false; error: string } | never;
 
-function formatTopUpName(amountCents: number) {
-  return `$${amountCents / 100} Open Company credits`;
-}
-
-// Checkout can start from either settings surface (/company/settings or
-// /personal/settings); callers pass where Stripe should send the user back to.
-// Only same-origin absolute paths are accepted ("//" would be protocol-relative).
-function safeReturnPath(returnPath: string | undefined) {
-  if (returnPath && returnPath.startsWith("/") && !returnPath.startsWith("//")) {
-    return returnPath;
-  }
-  return "/personal/settings";
-}
-
-export async function createCreditCheckoutSession(amountCents: number, returnPath?: string) {
-  if (!isValidTopUpAmountCents(amountCents)) {
-    return {
-      ok: false as const,
-      error: `Top-up amount must be between ${MIN_TOP_UP_AMOUNT_CENTS} and ${MAX_TOP_UP_AMOUNT_CENTS} cents.`,
-    };
-  }
-
-  const context = await currentWorkspace({ optional: true });
-  if (!context) {
-    return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
-  }
-
-  const { authUser, user, workspace } = context;
-  let checkoutRecordId: string | undefined;
-  let pendingRecordCreated = false;
-  let checkoutStage = "initialize";
-  let checkoutUrl = "";
-  const metadataBase = {
-    workspaceId: workspace.id,
-    userId: user.id,
-    amountCents: String(amountCents),
+function billingError(error: unknown, fallback: string): GoatBillingActionResult {
+  return {
+    ok: false,
+    error: error instanceof Error ? error.message : fallback,
   };
+}
 
-  try {
-    const stripe = getStripe();
-    const appUrl = getAppUrl();
-    checkoutRecordId = newStripeCheckoutRecordId();
-    const metadata = {
-      ...metadataBase,
-      checkoutRecordId,
+async function ensureGoatStripeCustomerId(context: {
+  workspaceId: string;
+  workspaceName: string;
+  email: string;
+  existingCustomerId: string | null;
+}) {
+  if (context.existingCustomerId) return context.existingCustomerId;
+  const customer = await getGoatStripe().customers.create({
+    email: context.email,
+    name: context.workspaceName,
+    metadata: { goatWorkspaceId: context.workspaceId },
+  });
+  return (
+    (await setGoatStripeCustomerId({
+      workspaceId: context.workspaceId,
+      stripeCustomerId: customer.id,
+    })) ?? customer.id
+  );
+}
+
+// Purchased credits are a Pro entitlement and change shared workspace billing,
+// so only workspace admins may start Checkout.
+export async function createGoatCreditTopUpAction(
+  amountCents: number,
+): Promise<GoatBillingActionResult> {
+  const context = await currentGoatUser();
+  if (context.role !== "admin") {
+    return { ok: false, error: "Only workspace admins can add credits." };
+  }
+  if (
+    !Number.isSafeInteger(amountCents) ||
+    amountCents < GOAT_MIN_TOP_UP_USD_CENTS ||
+    amountCents > GOAT_MAX_TOP_UP_USD_CENTS
+  ) {
+    return {
+      ok: false,
+      error: `Credit top-ups must be between $${GOAT_MIN_TOP_UP_USD_CENTS / 100} and $${GOAT_MAX_TOP_UP_USD_CENTS / 100}.`,
     };
-
-    checkoutStage = "create_pending_record";
-    await createPendingCheckoutRecord({
+  }
+  let checkoutUrl: string;
+  const checkoutRecordId = `goat_chk_${randomUUID().replace(/-/g, "")}`;
+  try {
+    const overview = await loadGoatBillingOverview(context.workspace.id);
+    if (overview.billing.plan !== "pro") {
+      return { ok: false, error: "Upgrade this workspace to Pro before adding credits." };
+    }
+    assertGoatCheckoutEnabled();
+    const customerId = await ensureGoatStripeCustomerId({
+      workspaceId: context.workspace.id,
+      workspaceName: context.workspace.name,
+      email: context.authUser.email,
+      existingCustomerId: overview.billing.stripeCustomerId,
+    });
+    await createGoatPendingCheckoutRecord({
       id: checkoutRecordId,
-      workspaceId: workspace.id,
-      userId: user.id,
+      workspaceId: context.workspace.id,
+      userWorkosId: context.user.workosUserId,
       amountCents,
     });
-    pendingRecordCreated = true;
-
-    checkoutStage = "create_stripe_session";
-    const session = await stripe.checkout.sessions.create({
+    const appUrl = getGoatAppUrl();
+    const session = await getGoatStripe().checkout.sessions.create({
       mode: "payment",
-      customer_email: authUser.email,
-      success_url: `${appUrl}${safeReturnPath(returnPath)}?billing=success`,
-      cancel_url: `${appUrl}${safeReturnPath(returnPath)}?billing=cancelled`,
-      metadata,
-      payment_intent_data: { metadata },
+      customer: customerId,
+      allow_promotion_codes: true,
+      success_url: `${appUrl}/settings/workspace/billing?topup=success`,
+      cancel_url: `${appUrl}/settings/workspace/billing?topup=cancelled`,
+      automatic_tax: { enabled: true },
+      billing_address_collection: "required",
+      customer_update: { address: "auto", name: "auto" },
+      // Save the card for off-session auto-refill charges; the webhook records
+      // the resulting payment method on fulfillment.
+      payment_intent_data: { setup_future_usage: "off_session" },
       line_items: [
         {
-          quantity: 1,
           price_data: {
             currency: "usd",
             unit_amount: amountCents,
-            product_data: { name: formatTopUpName(amountCents) },
+            tax_behavior: "exclusive",
+            product_data: {
+              name: "OpenCompany credits",
+              description: "Usage credits for chat and brain ingestion",
+            },
           },
+          quantity: 1,
         },
       ],
+      metadata: {
+        billingProduct: "goat_topup",
+        goatWorkspaceId: context.workspace.id,
+        userWorkosId: context.user.workosUserId,
+        checkoutRecordId,
+        amountCents: String(amountCents),
+      },
     });
-
     if (!session.url) {
-      await markCheckoutRecordFailed({
+      await markGoatCheckoutRecordFailed({
         id: checkoutRecordId,
         error: "Stripe did not return a Checkout URL.",
       });
-      return { ok: false as const, error: "Stripe did not return a Checkout URL." };
+      return { ok: false, error: "Stripe did not return a Checkout URL." };
     }
-
-    checkoutStage = "mark_checkout_open";
-    await markCheckoutRecordOpen({
+    await markGoatCheckoutRecordOpen({
       id: checkoutRecordId,
       stripeCheckoutSessionId: session.id,
       metadata: {
-        ...metadata,
-        stripeCheckoutSessionId: session.id,
+        goatWorkspaceId: context.workspace.id,
+        userWorkosId: context.user.workosUserId,
+        checkoutRecordId,
+        amountCents: String(amountCents),
       },
     });
-
-    checkoutUrl = session.url;
-    const capturedCheckoutRecordId = checkoutRecordId;
-    after(() =>
-      captureServerEvent("credit_top_up_started", user.id, {
-        user_id: user.id,
-        workspace_id: workspace.id,
-        checkout_record_id: capturedCheckoutRecordId,
-        amount_cents: amountCents,
-      }),
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not start checkout.";
-
-    captureException(error, {
-      event: "opencompany.billing_checkout_failed",
-      workspace_id: workspace.id,
-      user_id: user.id,
-      checkout_record_id: checkoutRecordId,
+    await captureServerEvent("goat_billing_topup_started", context.user.workosUserId, {
+      user_id: context.user.workosUserId,
+      workspace_id: context.workspace.id,
       amount_cents: amountCents,
-      checkout_stage: checkoutStage,
     });
-
-    if (checkoutRecordId && pendingRecordCreated) {
-      try {
-        await markCheckoutRecordFailed({ id: checkoutRecordId, error: message });
-      } catch (markError) {
-        captureException(markError, {
-          event: "opencompany.billing_checkout_mark_failed",
-          workspace_id: workspace.id,
-          user_id: user.id,
-          checkout_record_id: checkoutRecordId,
-          amount_cents: amountCents,
-        });
-      }
-    }
-
-    return { ok: false as const, error: message };
+    checkoutUrl = session.url;
+  } catch (error) {
+    await markGoatCheckoutRecordFailed({
+      id: checkoutRecordId,
+      error: error instanceof Error ? error.message : "Top-up checkout failed to start.",
+    }).catch(() => undefined);
+    return billingError(error, "Could not start the credit top-up checkout.");
   }
-
   redirect(checkoutUrl);
 }
 
-export async function redeemCreditCode(code: string) {
-  const context = await currentWorkspace({ optional: true });
-  if (!context) {
-    return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
+export async function createGoatProCheckoutAction(): Promise<GoatBillingActionResult> {
+  const context = await currentGoatUser();
+  if (context.role !== "admin") {
+    return { ok: false, error: "Only workspace admins can change the plan." };
   }
 
-  const { user, workspace } = context;
-  const result = await redeemCreditCodeForWorkspace({
-    code,
-    workspaceId: workspace.id,
-    userId: user.id,
-  });
-
-  if (result.ok) {
-    revalidatePath("/company/settings");
-    revalidatePath("/", "layout");
-  }
-
-  return result;
-}
-
-// ── Spending limit + automatic refill settings ──────────────────────────────
-
-export async function updateSpendLimit(input: {
-  enabled: boolean;
-  weeklyLimitCents: number | null;
-}) {
-  const context = await currentWorkspace({ optional: true });
-  if (!context) {
-    return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
-  }
-  const { workspace } = context;
-
-  let weeklySpendLimitUsdMicros: number | null = null;
-  if (input.weeklyLimitCents != null) {
-    if (!isValidWeeklySpendLimitCents(input.weeklyLimitCents)) {
-      return {
-        ok: false as const,
-        error: `Weekly limit must be between $${MIN_WEEKLY_SPEND_LIMIT_CENTS / 100} and $${
-          MAX_WEEKLY_SPEND_LIMIT_CENTS / 100
-        }.`,
-      };
-    }
-    weeklySpendLimitUsdMicros = centsToUsdMicros(input.weeklyLimitCents);
-  } else if (input.enabled) {
-    return { ok: false as const, error: "Set a weekly limit amount before enabling it." };
-  }
-
-  await upsertWorkspaceBillingSettings(workspace.id, {
-    spendLimitEnabled: input.enabled,
-    weeklySpendLimitUsdMicros,
-  });
-
-  after(() =>
-    captureServerEvent("spend_limit_updated", context.user.id, {
-      workspace_id: workspace.id,
-      enabled: input.enabled,
-      weekly_limit_cents: input.weeklyLimitCents,
-    }),
-  );
-
-  revalidateBillingSurfaces();
-  return { ok: true as const };
-}
-
-export async function updateDailySpendLimit(input: {
-  enabled: boolean;
-  dailyLimitCents: number | null;
-}) {
-  const context = await currentWorkspace({ optional: true });
-  if (!context) {
-    return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
-  }
-  const { workspace } = context;
-
-  let dailySpendLimitUsdMicros: number | null = null;
-  if (input.dailyLimitCents != null) {
-    if (!isValidDailySpendLimitCents(input.dailyLimitCents)) {
-      return {
-        ok: false as const,
-        error: `Daily limit must be between $${MIN_DAILY_SPEND_LIMIT_CENTS / 100} and $${
-          MAX_DAILY_SPEND_LIMIT_CENTS / 100
-        }.`,
-      };
-    }
-    dailySpendLimitUsdMicros = centsToUsdMicros(input.dailyLimitCents);
-  } else if (input.enabled) {
-    return { ok: false as const, error: "Set a daily limit amount before enabling it." };
-  }
-
-  await upsertWorkspaceBillingSettings(workspace.id, {
-    dailySpendLimitEnabled: input.enabled,
-    dailySpendLimitUsdMicros,
-  });
-
-  after(() =>
-    captureServerEvent("daily_spend_limit_updated", context.user.id, {
-      workspace_id: workspace.id,
-      enabled: input.enabled,
-      daily_limit_cents: input.dailyLimitCents,
-    }),
-  );
-
-  revalidateBillingSurfaces();
-  return { ok: true as const };
-}
-
-export async function updateAutoRefillSettings(input: {
-  enabled: boolean;
-  thresholdCents: number;
-  amountCents: number;
-}) {
-  const context = await currentWorkspace({ optional: true });
-  if (!context) {
-    return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
-  }
-  const { workspace } = context;
-
-  if (input.enabled) {
-    const settings = await loadWorkspaceBillingSettings(workspace.id);
-    if (!settings?.stripeDefaultPaymentMethodId) {
-      return { ok: false as const, error: "Add a card before enabling automatic refill." };
-    }
-    if (!isValidAutoRefillAmountCents(input.amountCents)) {
-      return {
-        ok: false as const,
-        error: `Refill amount must be between $${MIN_AUTO_REFILL_AMOUNT_CENTS / 100} and $${
-          MAX_AUTO_REFILL_AMOUNT_CENTS / 100
-        }.`,
-      };
-    }
-    if (!isValidAutoRefillThresholdCents(input.thresholdCents)) {
-      return { ok: false as const, error: "Choose a valid refill threshold." };
-    }
-  }
-
-  await upsertWorkspaceBillingSettings(workspace.id, {
-    autoRefillEnabled: input.enabled,
-    autoRefillThresholdUsdMicros: centsToUsdMicros(input.thresholdCents),
-    autoRefillAmountUsdMicros: centsToUsdMicros(input.amountCents),
-    // Re-enabling clears a prior decline/SCA flag so charges resume.
-    ...(input.enabled ? { autoRefillStatus: "ok" as const } : {}),
-  });
-
-  after(() =>
-    captureServerEvent("auto_refill_enabled", context.user.id, {
-      workspace_id: workspace.id,
-      enabled: input.enabled,
-      threshold_cents: input.thresholdCents,
-      amount_cents: input.amountCents,
-    }),
-  );
-
-  revalidateBillingSurfaces();
-  return { ok: true as const };
-}
-
-export async function disableAutoRefill() {
-  const context = await currentWorkspace({ optional: true });
-  if (!context) {
-    return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
-  }
-  await upsertWorkspaceBillingSettings(context.workspace.id, { autoRefillEnabled: false });
-  revalidateBillingSurfaces();
-  return { ok: true as const };
-}
-
-// Starts a Stripe Checkout in "setup" mode to save a card for off-session
-// auto-refill charges. Creates/reuses the workspace's Stripe customer, then
-// redirects to Stripe. The saved card is persisted from the webhook on return.
-export async function startAutoRefillSetup(returnPath?: string) {
-  const context = await currentWorkspace({ optional: true });
-  if (!context) {
-    return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
-  }
-  const { authUser, user, workspace } = context;
-
-  let redirectUrl = "";
+  let checkoutUrl: string;
   try {
-    const stripe = getStripe();
-    const appUrl = getAppUrl();
-
-    const settings = await loadWorkspaceBillingSettings(workspace.id);
-    let customerId = settings?.stripeCustomerId ?? null;
-    if (!customerId) {
-      const customer = await stripe.customers.create({
-        email: authUser.email,
-        metadata: { workspaceId: workspace.id },
-      });
-      customerId = customer.id;
-      await upsertWorkspaceBillingSettings(workspace.id, { stripeCustomerId: customerId });
+    assertGoatCheckoutEnabled();
+    const overview = await loadGoatBillingOverview(context.workspace.id);
+    if (overview.billing.plan === "pro") {
+      return { ok: false, error: "This workspace already has an active seat subscription." };
+    }
+    if (
+      overview.billing.stripeSubscriptionId &&
+      overview.billing.subscriptionStatus !== "canceled" &&
+      overview.billing.subscriptionStatus !== "incomplete_expired"
+    ) {
+      return {
+        ok: false,
+        error: "This workspace already has a Stripe subscription. Open billing management instead.",
+      };
     }
 
-    const metadata = { kind: "auto_refill_setup", workspaceId: workspace.id, userId: user.id };
-    const session = await stripe.checkout.sessions.create({
-      mode: "setup",
-      // Setup-mode Checkout uses dynamic payment methods, which require a currency to
-      // resolve eligible methods. Without it Stripe rejects the request ("currency is
-      // required in setup mode") — this is what broke "Add a card" in production.
-      currency: "usd",
+    const customerId = await ensureGoatStripeCustomerId({
+      workspaceId: context.workspace.id,
+      workspaceName: context.workspace.name,
+      email: context.authUser.email,
+      existingCustomerId: overview.billing.stripeCustomerId,
+    });
+    const stripe = getGoatStripe();
+    const subscriptions = await stripe.subscriptions.list({
       customer: customerId,
-      success_url: `${appUrl}${safeReturnPath(returnPath)}?billing=card_saved`,
-      cancel_url: `${appUrl}${safeReturnPath(returnPath)}?billing=cancelled`,
-      metadata,
-      setup_intent_data: { metadata },
+      status: "all",
+      limit: 10,
     });
-
-    if (!session.url) {
-      return { ok: false as const, error: "Stripe did not return a setup URL." };
+    const existingPro = subscriptions.data.find(
+      (subscription) =>
+        subscription.metadata.billingProduct === GOAT_PRO_STRIPE_PRODUCT_KEY &&
+        subscription.status !== "canceled" &&
+        subscription.status !== "incomplete_expired",
+    );
+    if (existingPro) {
+      return {
+        ok: false,
+        error: "This workspace already has a seat subscription. Open billing management instead.",
+      };
     }
-    redirectUrl = session.url;
-  } catch (error) {
-    captureException(error, {
-      event: "opencompany.auto_refill_setup_failed",
-      workspace_id: workspace.id,
-    });
-    return { ok: false as const, error: "Could not start card setup. Please try again." };
-  }
+    const seatQuantity = Math.max(1, Math.floor(overview.memberCount ?? 1));
+    const appUrl = getGoatAppUrl();
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "subscription",
+        customer: customerId,
+        allow_promotion_codes: true,
+        success_url: `${appUrl}/settings/workspace/billing?checkout=success`,
+        cancel_url: `${appUrl}/settings/workspace/billing?checkout=cancelled`,
+        automatic_tax: { enabled: true },
+        billing_address_collection: "required",
+        tax_id_collection: { enabled: true },
+        customer_update: { address: "auto", name: "auto" },
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              unit_amount: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+              tax_behavior: "exclusive",
+              recurring: { interval: "month" },
+              product_data: {
+                name: "OpenCompany seat",
+                description: "$20/month with $20/month of included at-cost usage",
+              },
+            },
+            quantity: seatQuantity,
+          },
+        ],
+        metadata: {
+          billingProduct: GOAT_PRO_STRIPE_PRODUCT_KEY,
+          goatWorkspaceId: context.workspace.id,
+        },
+        subscription_data: {
+          metadata: {
+            billingProduct: GOAT_PRO_STRIPE_PRODUCT_KEY,
+            goatWorkspaceId: context.workspace.id,
+          },
+        },
+      },
+      {
+        idempotencyKey: `goat-pro-${context.workspace.id}-${Math.floor(Date.now() / 3_600_000)}`,
+      },
+    );
+    if (!session.url) return { ok: false, error: "Stripe did not return a Checkout URL." };
 
-  redirect(redirectUrl);
+    await captureServerEvent("goat_billing_pro_checkout_started", context.user.workosUserId, {
+      user_id: context.user.workosUserId,
+      workspace_id: context.workspace.id,
+      monthly_price_usd_cents: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+    });
+    checkoutUrl = session.url;
+  } catch (error) {
+    return billingError(error, "Could not start seat checkout.");
+  }
+  redirect(checkoutUrl);
+}
+
+// v5: recurring auto-top-up schedules; v4 only refills at the fixed threshold.
+export async function setGoatAutoRefillAction(input: {
+  enabled: boolean;
+  amountCents: number;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const context = await currentGoatUser();
+  if (context.role !== "admin") {
+    return { ok: false, error: "Only workspace admins can manage auto-refill." };
+  }
+  if (
+    !Number.isSafeInteger(input.amountCents) ||
+    input.amountCents < GOAT_MIN_TOP_UP_USD_CENTS ||
+    input.amountCents > GOAT_MAX_TOP_UP_USD_CENTS
+  ) {
+    return {
+      ok: false,
+      error: `Auto-refill amounts must be between $${GOAT_MIN_TOP_UP_USD_CENTS / 100} and $${GOAT_MAX_TOP_UP_USD_CENTS / 100}.`,
+    };
+  }
+  try {
+    const overview = await loadGoatBillingOverview(context.workspace.id);
+    if (overview.billing.plan !== "pro") {
+      return { ok: false, error: "Upgrade this workspace to Pro before enabling auto-refill." };
+    }
+    const updated = await setGoatAutoRefillConfig({
+      workspaceId: context.workspace.id,
+      enabled: input.enabled,
+      amountCents: input.amountCents,
+    });
+    if (!updated) {
+      return {
+        ok: false,
+        error: "Add credits once first — auto-refill charges the card saved during a top-up.",
+      };
+    }
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update auto-refill.",
+    };
+  }
+}
+
+export async function createGoatBillingPortalAction(): Promise<GoatBillingActionResult> {
+  const context = await currentGoatUser();
+  if (context.role !== "admin") {
+    return { ok: false, error: "Only workspace admins can manage billing." };
+  }
+  let portalUrl: string;
+  try {
+    const { billing } = await loadGoatBillingOverview(context.workspace.id);
+    if (!billing.stripeCustomerId) {
+      return {
+        ok: false,
+        error: "This workspace does not have a Stripe billing account yet.",
+      };
+    }
+    const session = await getGoatStripe().billingPortal.sessions.create({
+      customer: billing.stripeCustomerId,
+      return_url: `${getGoatAppUrl()}/settings/workspace/billing`,
+    });
+    portalUrl = session.url;
+  } catch (error) {
+    return billingError(error, "Could not open Stripe billing management.");
+  }
+  redirect(portalUrl);
 }

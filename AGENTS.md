@@ -1,10 +1,7 @@
 # Agent coding guidelines
 
-You're working on opencompany: an agent workspace to get tasks done and build agent workflows, supporting multiple harnesses, multiplayer, and self-building wiki for realtime context.
-
-Agents are plain-text `.agent` files backed by GitHub, Postgres, and the runtime. The `.agent` file is the product contract. Anything that edits, syncs, parses, stores, or runs an agent must preserve that contract. Read `docs/agent-file.md` before changing agent format behavior.
-
-GitHub is the source of truth for managed workspace repos, while the app stores the latest editable state in Postgres and syncs GitHub asynchronously. Preserve that product model unless the task is explicitly about changing it.
+You're working on OpenCompany: an AI workspace for chat, durable tasks and workflows,
+connected integrations, Brain knowledge, and cloud coding sessions.
 
 Read the nested `AGENTS.md` files when reading/editing files inside folders that contain it.
 
@@ -18,12 +15,10 @@ Use judgment. The goal is not to follow rules mechanically; the goal is to ship 
 
 - Package manager: `bun@1.3.2`
 - Runtime: Node `>=20.20.0`
-- Stack: Turborepo, Bun, Next.js App Router, Drizzle, Neon Postgres, WorkOS AuthKit, Inngest, Vercel AI Gateway, GitHub App integration.
-- Legacy app: `apps/web`
-- New Goat app: `apps/goat`
+- Stack: Turborepo, Bun, Next.js App Router, Drizzle, Neon Postgres, WorkOS AuthKit, Vercel AI Gateway, GitHub App integration.
+- Product app: `apps/web`
 - Shared runner service: `apps/runner`
 - Database package: `packages/db`
-- `.agent` file contract: `docs/agent-file.md`
 
 ## Scripts
 
@@ -34,24 +29,24 @@ Use judgment. The goal is not to follow rules mechanically; the goal is to ship 
 - Typecheck: `bun run typecheck`
 - Build: `bun run build`
 - Unit tests: `bun run test`
-- Web E2E tests when UI behavior needs browser verification: `bun run --filter @opencompany/web test:e2e`
+- UI behavior: run `bun run dev:web` and verify the real route in a browser
 - Secret scan when available: `bun run secrets:check`
-- Use Turborebo filtering syntax to run commands against specific apps/packages: `bun run dev --filter @opencompany/goat`
+- Use Turborebo filtering syntax to run commands against specific apps/packages: `bun run dev --filter @opencompany/web`
 
 The user usually keeps a dev server running. Do not start another one unless asked or unless you have confirmed it is needed.
 
-## App Generations
+## OpenCompany product surface
 
-This monorepo contains two product generations. `apps/web` is the older OpenCompany app. `apps/goat` is the new Goat app (internal name) and should be treated as a separate product surface, even when a similarly named feature also exists in `apps/web`.
-
-When the user says "Goat" or the task is clearly about Goat:
-
-- Start in `apps/goat`; do not edit `apps/web` unless the task explicitly crosses both apps or a shared dependency requires it.
-- "Goat runner" means the Goat-specific execution paths inside the shared `apps/runner` package. Look first at `goat-*` modules, `/internal/goat/*` routes, and the `RUNNER_GOAT_TASK_WORKER_ENABLED` gate. There is currently no separate `apps/goat-runner` package.
-- Follow Goat-specific shared code into `packages/db/src/goat-*`, `packages/goat-brain`, and `packages/goat-observability` as needed. Only modify generic or legacy paths when tracing confirms they are shared by the Goat flow.
-- Use `apps/goat/docs/README.md` for the current Goat app/runner flow and `bun run dev:goat` for the Goat development stack.
-
-If a request could reasonably refer to either app, inspect the relevant entry points and establish the target surface before editing. Do not default to `apps/web` merely because it is older or more complete.
+- Start in `apps/web` for product and API work.
+- `web` is the Next.js client and composition root. "Goat runner" means the retained Goat-domain
+  execution paths inside `apps/runner`. Look first at `goat-*`
+  modules, `/internal/goat/*` routes, and the `RUNNER_GOAT_TASK_WORKER_ENABLED` gate. There is no
+  separate runner package.
+- Follow shared code into `packages/db/src/goat-*`, `packages/goat-brain`, and
+  `packages/goat-observability` as needed. Preserve the isolated legacy-billing and LLM-broker
+  compatibility schemas unless a task explicitly retires those contracts.
+- Use `apps/web/docs/README.md` for the current app/runner flow and `bun run dev:web` for the
+  local product stack.
 
 ## Engineering Judgment
 
@@ -78,7 +73,7 @@ If a request could reasonably refer to either app, inspect the relevant entry po
 - Any change to `packages/db/src/schema.ts` needs a Drizzle migration.
 - Migration or data-destructive work gets extra scrutiny. Explain rollback implications before running one-way operations.
 - New env vars require `.env.example` and the relevant docs update.
-- Production env vars must be added to the runtime-specific Infisical path and verified in the hosted service before release: Goat uses `prod` + `/goat`, legacy web uses `prod` + `/web`, and the runner uses `prod` + `/runner`. Do not assume a value in `/web` reaches Goat. Add required variables to the matching release preflight so a missing sync fails the release instead of silently disabling behavior.
+- Production env vars must be added to the runtime-specific Infisical path and verified in the hosted service before release: the web app retains the compatibility path `prod` + `/goat`, the runner uses `prod` + `/runner`, and release automation uses `prod` + `/release`. Add required variables to the matching release preflight so a missing sync fails the release instead of silently disabling behavior.
 - Local setup should use branch-isolated Neon DBs through `bun run setup`. Avoid shared database mode unless explicitly needed.
 - Do not run production migrations or production-affecting scripts unless the user explicitly asks.
 
@@ -132,7 +127,7 @@ This section applies only when the system prompt gives you a staged environment 
 
 1. Never inspect or print it. If `.env.local` is missing, copy the staged file there and set mode `600`.
 2. Run `bun install --frozen-lockfile`, then `bun run setup`, before starting any development process.
-3. For Goat work, start `bun run dev:goat` only after setup succeeds. Do not use `setup:dev`, which starts the legacy web stack.
+3. Start `bun run dev:web` only after setup succeeds.
 
 Cloud setup refreshes the schema-only `cloud-base` Neon branch and creates a sandbox-unique child branch from it. Do not override that parent or start the dev server against an unset `DATABASE_URL`.
 

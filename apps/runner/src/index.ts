@@ -13,10 +13,7 @@ import {
 } from "@opencompany/observability";
 import { flushBraintrust } from "@opencompany/observability/braintrust";
 import * as Sentry from "@sentry/bun";
-import { listActiveRuns } from "./active-runs";
 import { assertRunnerDbConfig, closeDb } from "./db";
-import { sweepDeadParentDelegatedChildren, sweepDelegationBackstop } from "./delegation";
-import { flushAllSessionStreams } from "./durable-streams";
 import { loadEnv } from "./env";
 import { startGoatAttioFlushWorker } from "./goat-attio-flush-worker";
 import { setGoatBrainImportWakeup, startGoatBrainImportWorker } from "./goat-brain-import-worker";
@@ -39,12 +36,8 @@ import { startGoatHubspotFlushWorker } from "./goat-hubspot-flush-worker";
 import { startGoatLinearFlushWorker } from "./goat-linear-flush-worker";
 import { startGoatTaskScheduleWorker } from "./goat-scheduler";
 import { startGoatSlackFlushWorker } from "./goat-slack-flush-worker";
-import { setGoatTaskWakeup, startGoatTaskWorker } from "./goat-worker";
-import { setRunnerJobWakeup, startRunnerJobWorker } from "./jobs";
 import { settleExpiredBrokerTokens } from "./llm-broker-tokens";
-import { assertPreviewIdentity } from "./preview-guard";
 import { createServer } from "./server";
-import { interruptActiveRuns, interruptStaleActiveRuns } from "./session-interruptions";
 
 const logger = createLogger({
   service: "opencompany-runner",
@@ -63,52 +56,27 @@ installProcessErrorBackstop();
 
 const env = loadEnv();
 assertRunnerDbConfig();
-// Refuse to boot a preview runner that can't prove its DB belongs to its preview branch,
-// and refuse to boot a prod runner carrying stray preview identity. This makes "preview
-// runner polling the prod job queue" structurally impossible (issue #351 §6).
-await assertPreviewIdentity();
-const jobWorker = startRunnerJobWorker(env, {
-  concurrency: env.workerConcurrency,
-  // Piggyback the LLM-broker leftover settlement on the 60s stale-run sweep: tokens left
-  // unsettled by a runner death mid-delegation get billed here. Cheap partial-index scan;
-  // the settlement CAS makes it safe across instances.
-  staleRunSweep: async () => {
-    const [interrupted, settledBrokerTokens] = await Promise.all([
-      interruptStaleActiveRuns(),
-      settleExpiredBrokerTokens().catch((error) => {
-        logger.warn("LLM broker leftover settlement failed", {
-          event: "opencompany.llm_broker_sweep_failed",
-          error,
+// The LLM broker can be left holding unsettled tokens if a runner dies mid-delegation.
+// Sweep them every 60s; the partial-index scan is cheap and the settlement CAS makes it safe
+// across instances.
+const LLM_BROKER_SWEEP_INTERVAL_MS = 60_000;
+const llmBrokerSweepTimer = setInterval(() => {
+  void settleExpiredBrokerTokens()
+    .then((settled) => {
+      if (settled > 0) {
+        logger.info("Settled leftover LLM broker tokens", {
+          event: "opencompany.llm_broker_sweep_settled",
+          settled_count: settled,
         });
-        return 0;
-      }),
-      // Delegation safety nets: re-wake any parent parked awaiting children that have all finished
-      // (lost-wake backstop), and abort children orphaned by a dead parent.
-      sweepDelegationBackstop().catch((error) => {
-        logger.warn("Delegation backstop sweep failed", {
-          event: "opencompany.delegation_backstop_sweep_failed",
-          error,
-        });
-        return 0;
-      }),
-      sweepDeadParentDelegatedChildren().catch((error) => {
-        logger.warn("Dead-parent delegated child sweep failed", {
-          event: "opencompany.delegation_dead_parent_sweep_failed",
-          error,
-        });
-        return 0;
-      }),
-    ]);
-    if (settledBrokerTokens > 0) {
-      logger.info("Settled leftover LLM broker tokens", {
-        event: "opencompany.llm_broker_sweep_settled",
-        settled_count: settledBrokerTokens,
+      }
+    })
+    .catch((error) => {
+      logger.warn("LLM broker leftover settlement failed", {
+        event: "opencompany.llm_broker_sweep_failed",
+        error,
       });
-    }
-    return interrupted;
-  },
-});
-const goatTaskWorker = env.goatTaskWorkerEnabled ? startGoatTaskWorker(env) : null;
+    });
+}, LLM_BROKER_SWEEP_INTERVAL_MS);
 const goatCodexChatWorker = env.goatTaskWorkerEnabled
   ? startGoatCodexChatWorker(env, {
       sandboxSweep: () =>
@@ -131,27 +99,18 @@ const goatFathomPollWorker = env.goatTaskWorkerEnabled ? startGoatFathomPollWork
 const goatGoogleDriveSyncWorker = env.goatTaskWorkerEnabled
   ? startGoatGoogleDriveSyncWorker(env)
   : null;
-const goatTaskScheduleWorker =
-  env.goatTaskWorkerEnabled && goatTaskWorker && goatCodexChatWorker
-    ? startGoatTaskScheduleWorker({
-        onTaskCreated: () => {
-          goatTaskWorker.notify();
-          goatCodexChatWorker.notify();
-        },
-      })
-    : null;
-if (!goatTaskWorker) {
+const goatTaskScheduleWorker = goatCodexChatWorker
+  ? startGoatTaskScheduleWorker({
+      onTaskCreated: () => {
+        goatCodexChatWorker.notify();
+      },
+    })
+  : null;
+if (!goatCodexChatWorker) {
   logger.info("Goat task worker disabled", {
     event: "opencompany.goat_task_worker_disabled",
   });
 }
-// Let any in-process enqueue (delegation spawn, child-finish parent-wake) nudge the worker
-// immediately instead of waiting out the poll interval — the same wake the HTTP server uses.
-setRunnerJobWakeup(jobWorker.notify);
-setGoatTaskWakeup(() => {
-  goatTaskWorker?.notify();
-  goatTaskScheduleWorker?.notify();
-});
 setGoatBrainIngestWakeup(() => {
   goatBrainIngestWorker?.notify();
 });
@@ -164,44 +123,23 @@ setGoatBrainImportWakeup(() => {
 setGoatCodexChatWakeup(() => {
   goatCodexChatWorker?.notify();
 });
-const server = createServer(env, { onJobEnqueued: jobWorker.notify });
+const server = createServer(env);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     logger.info("Runner shutdown started", {
       event: "opencompany.runner_shutdown_started",
       signal,
-      active_job_count: jobWorker.activeCount(),
-      active_goat_task_count: goatTaskWorker?.activeCount() ?? 0,
       active_goat_brain_ingest_count: goatBrainIngestWorker?.activeCount() ?? 0,
       active_goat_google_drive_sync_count: goatGoogleDriveSyncWorker?.activeCount() ?? 0,
       active_goat_brain_import_count: goatBrainImportWorker?.activeCount() ?? 0,
       active_goat_codex_chat_count: goatCodexChatWorker?.activeCount() ?? 0,
-      active_run_count: listActiveRuns().length,
     });
-    // Stop accepting work and drain in-flight jobs/requests first, flush any pending
-    // Durable Stream batches so live viewers don't lose the tail of an in-flight turn,
-    // then close the DB pool so no checked-out connection is cut mid-query, then flush
-    // telemetry.
+    clearInterval(llmBrokerSweepTimer);
+    // Stop accepting work and drain in-flight requests first, then close the DB pool so
+    // no checked-out connection is cut mid-query, then flush telemetry.
     void Promise.allSettled([
-      jobWorker.stop({
-        interruptAfterMs: RENDER_SHUTDOWN_DRAIN_MS,
-        postInterruptWaitMs: RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS,
-        onInterrupt: async () => {
-          logger.warn("Runner shutdown interrupting runs", {
-            event: "opencompany.runner_shutdown_interrupting_runs",
-            active_job_count: jobWorker.activeCount(),
-            active_run_count: listActiveRuns().length,
-          });
-          const interrupted = await interruptActiveRuns("runner_shutdown");
-          logger.warn("Runner shutdown interrupted runs", {
-            event: "opencompany.runner_shutdown_interrupted_runs",
-            interrupted_run_count: interrupted,
-          });
-        },
-      }),
       goatTaskScheduleWorker?.stop() ?? Promise.resolve(),
-      goatTaskWorker?.stop() ?? Promise.resolve(),
       goatCodexChatWorker?.stop({
         handoffAfterMs: RENDER_SHUTDOWN_DRAIN_MS,
         postHandoffWaitMs: RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS,
@@ -226,7 +164,6 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       goatGoogleDriveSyncWorker?.stop() ?? Promise.resolve(),
       server.close(),
     ])
-      .then(() => Promise.allSettled([flushAllSessionStreams()]))
       .then(() => Promise.allSettled([closeDb()]))
       .then(() => {
         logger.info("Runner shutdown finished", {

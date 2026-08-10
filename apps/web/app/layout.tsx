@@ -1,42 +1,54 @@
+import { Toaster } from "@opencompany/ui/components/sonner";
+import { TooltipProvider } from "@opencompany/ui/components/tooltip";
 import { AuthKitProvider } from "@workos-inc/authkit-nextjs/components";
 import type { Metadata, Viewport } from "next";
+import type * as React from "react";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
 
-const isLocalDev = process.env.NODE_ENV === "development" && !process.env.VERCEL_ENV;
-
 export const metadata: Metadata = {
-  title: isLocalDev ? "opencompany (local)" : "opencompany",
-  description: "Company workspace for agents, inbox, and shared context.",
-  appleWebApp: {
-    capable: true,
-    title: "OpenCompany",
-    statusBarStyle: "black-translucent",
+  title: {
+    default: "opencompany",
+    template: "%s - opencompany",
   },
+  description: "Experimental just-in-time agent harness.",
   icons: {
-    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
-    shortcut: [{ url: "/favicon.svg", type: "image/svg+xml" }],
-    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    icon: [
+      {
+        url: "/icon/oc-icon-v3.svg",
+        type: "image/svg+xml",
+        media: "(prefers-color-scheme: light)",
+      },
+      {
+        url: "/icon/oc-icon-v3_white.svg",
+        type: "image/svg+xml",
+        media: "(prefers-color-scheme: dark)",
+      },
+    ],
+    shortcut: [{ url: "/icon/oc-icon-v3.svg", type: "image/svg+xml" }],
   },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f7f7f5" },
-    { media: "(prefers-color-scheme: dark)", color: "#111111" },
+    { media: "(prefers-color-scheme: dark)", color: "#10120f" },
   ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" data-theme="system" suppressHydrationWarning>
-      <body className="font-sans antialiased text-[14px] text-ink">
+      <body className="h-dvh overflow-hidden bg-canvas font-sans text-ink antialiased">
         <ThemeProvider initialTheme="system">
-          <AuthKitProvider>{children}</AuthKitProvider>
+          <AuthKitProvider>
+            <TooltipProvider>
+              {children}
+              <Toaster />
+            </TooltipProvider>
+          </AuthKitProvider>
         </ThemeProvider>
       </body>
     </html>

@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 export function GET() {
   return Response.json({
     ok: true,
-    service: "opencompany-web",
+    service: "opencompany-goat",
     environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "development",
     release:
       process.env.RELEASE_SHA ??
