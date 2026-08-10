@@ -11,6 +11,12 @@ export function getGoatStripe() {
   return stripe;
 }
 
+export function getGoatStripeWebhookSecret() {
+  const secret = process.env.GOAT_STRIPE_WEBHOOK_SECRET?.trim();
+  if (!secret) throw new Error("GOAT_STRIPE_WEBHOOK_SECRET is required for Stripe webhooks.");
+  return secret;
+}
+
 export function assertGoatCheckoutEnabled() {
   if (
     process.env.NODE_ENV === "production" &&

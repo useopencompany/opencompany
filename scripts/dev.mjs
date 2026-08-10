@@ -115,6 +115,7 @@ dev = spawn(turboBin, ["dev", ...turboArgs], {
     ...goatHttpsEnv,
     ...durableEnv,
     ...envForAppMode(),
+    OPENCOMPANY_DEV_APP: appMode,
     INNGEST_DEV: process.env.INNGEST_DEV ?? "1",
   },
 });

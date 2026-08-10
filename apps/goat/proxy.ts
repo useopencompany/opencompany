@@ -10,6 +10,7 @@ const UNAUTHENTICATED_PATHS = new Set([
   "/signin",
   "/signup",
   "/api/healthz",
+  "/api/stripe/webhook",
   "/mcp",
   "/changelog",
 ]);

@@ -381,6 +381,7 @@ jobs:
             "RUNNER_INTERNAL_TOKEN",
             "ELECTRIC_URL",
             "GOAT_STRIPE_API_KEY",
+            "GOAT_STRIPE_WEBHOOK_SECRET",
             "GOAT_STRIPE_CHECKOUT_ENABLED",
             "CRON_SECRET",
             "GOAT_HUBSPOT_CLIENT_ID",
@@ -484,6 +485,20 @@ jobs:
             if (checkoutEnabled.trim() !== "true") {
               throw new Error(
                 "Goat GOAT_STRIPE_CHECKOUT_ENABLED must be true before a production billing release.",
+              );
+            }
+
+            const webhookSecret = await readEnvValue(
+              goatProjectId,
+              goatEnv,
+              "GOAT_STRIPE_WEBHOOK_SECRET",
+              "Goat",
+              teamId,
+              token,
+            );
+            if (!webhookSecret.trim().startsWith("whsec_")) {
+              throw new Error(
+                "Goat GOAT_STRIPE_WEBHOOK_SECRET must be a Stripe webhook signing secret.",
               );
             }
 
