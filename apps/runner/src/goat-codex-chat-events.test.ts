@@ -156,6 +156,49 @@ describe("createGoatCodexChatProjector", () => {
     expect(sessionUpdate).toContain("ELSE idle");
   });
 
+  it("recovers a committed publication into the terminal assistant message", async () => {
+    mocks.execute
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            artifactId: "artifact_1",
+            artifactVersionId: "version_1",
+            version: 1,
+            title: "Launch plan",
+            description: "The final plan.",
+            filename: "plan.md",
+            mediaType: "text/markdown",
+            sizeBytes: 42,
+            state: "ready",
+          },
+        ],
+      })
+      .mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const projector = createGoatCodexChatProjector({
+      target: projectorTarget(),
+      redact: (value) => value,
+    });
+
+    await projector.finalize({
+      sessionId: "codex_thread_1",
+      status: "success",
+      result: "The plan is ready.",
+      error: null,
+      usage: null,
+      goal: null,
+    });
+
+    const messageUpdate = mocks.execute.mock.calls
+      .map(([query]) => query)
+      .find((query) => sqlText(query).includes("UPDATE goat.chat_messages AS message"));
+    expect(queryValues(messageUpdate)).toContainEqual(
+      expect.stringContaining(
+        '"type":"data-artifact-file","data":{"artifactId":"artifact_1","artifactVersionId":"version_1"',
+      ),
+    );
+  });
+
   it("captures Codex token usage in PostHog analytics when a turn finalizes", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     const projector = createGoatCodexChatProjector({
@@ -382,4 +425,22 @@ function sqlText(query: unknown): string {
       return "";
     })
     .join("");
+}
+
+function queryValues(query: unknown) {
+  const values: unknown[] = [];
+  const visit = (value: unknown) => {
+    if (!value || typeof value !== "object") {
+      if (typeof value !== "undefined") values.push(value);
+      return;
+    }
+    if ("queryChunks" in value && Array.isArray((value as { queryChunks?: unknown }).queryChunks)) {
+      for (const chunk of (value as { queryChunks: unknown[] }).queryChunks) visit(chunk);
+      return;
+    }
+    if ("value" in value && Array.isArray((value as { value?: unknown }).value)) return;
+    values.push(value);
+  };
+  visit(query);
+  return values;
 }

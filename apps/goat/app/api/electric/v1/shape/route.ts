@@ -9,6 +9,7 @@ import {
   goatElectricBrainRef,
   goatElectricChatMessagesSessionId,
   goatElectricCodexChatSessionId,
+  goatElectricWikiShapeRequested,
   hasInvalidElectricCloudSecretPair,
 } from "@/lib/electric";
 
@@ -40,6 +41,12 @@ export async function GET(request: Request): Promise<Response> {
     requestUrl,
     userWorkosId: context.user.workosUserId,
   });
+  // Wiki shapes are tied to the session's active workspace and gated on the
+  // per-user wiki preview flag, mirroring the /wiki surface and `wiki` tool.
+  const authorizedWikiWorkspaceId =
+    goatElectricWikiShapeRequested(requestUrl) && context.user.wikiEnabled
+      ? context.workspace.id
+      : null;
 
   const originUrl = buildGoatElectricOriginUrl({
     electricUrl,
@@ -48,6 +55,7 @@ export async function GET(request: Request): Promise<Response> {
     workspaceId: context.workspace.id,
     authorizedChatSessionId,
     authorizedBrainRef,
+    authorizedWikiWorkspaceId,
     sourceId,
     sourceSecret,
     electricSecret,

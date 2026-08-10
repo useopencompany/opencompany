@@ -29,6 +29,7 @@
     "@opencompany/db": "workspace:*",
     "@opencompany/goat-brain": "workspace:*",
     "@opencompany/goat-observability": "workspace:*",
+    "@opencompany/goat-wiki": "workspace:*",
     "ai": "^6.0.189",
     "ajv": "8.20.0",
     "drizzle-orm": "^0.45.2"

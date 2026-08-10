@@ -41,6 +41,98 @@ describe("MessageBubble scheduled wakeups", () => {
   });
 });
 
+describe("MessageBubble generated files", () => {
+  const message: GoatChatUiMessage = {
+    id: "assistant_artifact",
+    role: "assistant",
+    parts: [
+      { type: "text", text: "Here is the launch plan." },
+      {
+        type: "data-artifact-file",
+        data: {
+          artifactId: "artifact_1",
+          artifactVersionId: "version_1",
+          version: 1,
+          title: "Launch plan",
+          filename: "launch-plan.md",
+          mediaType: "text/markdown",
+          sizeBytes: 2_048,
+          state: "ready",
+        },
+      },
+    ],
+  };
+
+  it("renders versioned open and download links", () => {
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByText("Launch plan")).toBeVisible();
+    expect(screen.getByText("launch-plan.md · 2.0 KB · v1")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Open Launch plan" })).toHaveAttribute(
+      "href",
+      "/api/chat-artifacts/artifact_1/versions/version_1",
+    );
+    expect(screen.getByRole("link", { name: "Download Launch plan" })).toHaveAttribute(
+      "href",
+      "/api/chat-artifacts/artifact_1/versions/version_1?download=1",
+    );
+  });
+
+  it("deletes through the owner route and becomes a tombstone", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchMock = vi.fn(async () =>
+      Response.json({ ok: true, state: "deleted" }, { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    await user.click(screen.getByRole("button", { name: "Delete Launch plan" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/chat-artifacts/artifact_1", {
+        method: "DELETE",
+      }),
+    );
+    expect(await screen.findByText("File deleted")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Open Launch plan" })).not.toBeInTheDocument();
+  });
+
+  it("uses a public share href and hides deletion in read-only chat", () => {
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        readOnly
+        artifactHref={() => "/share/share_1/artifacts/artifact_1/versions/version_1"}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "Open Launch plan" })).toHaveAttribute(
+      "href",
+      "/share/share_1/artifacts/artifact_1/versions/version_1",
+    );
+    expect(screen.queryByRole("button", { name: "Delete Launch plan" })).not.toBeInTheDocument();
+  });
+
+  it("reacts to a tombstone synced from another card or client", () => {
+    const { rerender } = render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+    const deletedMessage: GoatChatUiMessage = {
+      ...message,
+      parts: message.parts.map((part) =>
+        part.type === "data-artifact-file"
+          ? { ...part, data: { ...part.data, state: "deleted" as const } }
+          : part,
+      ),
+    };
+
+    rerender(<MessageBubble message={deletedMessage} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByText("File deleted")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Open Launch plan" })).not.toBeInTheDocument();
+  });
+});
+
 describe("MessageBubble assistant errors", () => {
   it("renders the turn error even when the assistant produced no parts", () => {
     const message: GoatChatUiMessage = {

@@ -5,6 +5,7 @@ import { toast } from "@opencompany/ui/components/sonner";
 import type { LucideIcon } from "lucide-react";
 import {
   Archive,
+  BookOpen,
   Check,
   ChevronsUpDown,
   House,
@@ -112,6 +113,7 @@ export function GoatSidebar({
   const homeActive = pathname === "/";
   const tasksActive = pathname === "/tasks" || pathname.startsWith("/tasks/");
   const workflowsActive = pathname === "/workflows" || pathname.startsWith("/workflows/");
+  const wikiActive = pathname === "/wiki" || pathname.startsWith("/wiki/");
 
   return (
     <aside
@@ -167,6 +169,9 @@ export function GoatSidebar({
                 active={workflowsActive}
               />
             </>
+          ) : null}
+          {featureFlags.wiki ? (
+            <SidebarNavRow href="/wiki" icon={BookOpen} label="Wiki" active={wikiActive} />
           ) : null}
           {!mcpSetup.completedAt ? (
             <SidebarNavRow

@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   Archive,
   ArrowLeft,
+  BookOpen,
   CalendarClock,
   Check,
   CircleUserRound,
@@ -72,6 +73,7 @@ import {
   updateGoatAutoModelRoutingAction,
   updateGoatImessageEnabledAction,
   updateGoatTaskSpawningAction,
+  updateGoatWikiEnabledAction,
 } from "@/lib/user-preferences";
 import { createGoatWorkflowAction } from "@/lib/workflow-actions";
 import type { GoatWorkflowListItem } from "@/lib/workflows";
@@ -252,6 +254,13 @@ export function GoatPreferencesSettingsRoute() {
           description="Pair your phone so Goat can text you important updates over iMessage."
           checked={featureFlags.imessage}
           update={updateGoatImessageEnabledAction}
+        />
+        <BetaFeatureSwitch
+          icon={BookOpen}
+          label="Wiki (preview)"
+          description="The next version of Brain: one workspace wiki of markdown pages with subpages, built for you and your agents."
+          checked={featureFlags.wiki}
+          update={updateGoatWikiEnabledAction}
         />
       </section>
     </GoatSettingsContent>

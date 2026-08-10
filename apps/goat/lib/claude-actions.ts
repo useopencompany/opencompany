@@ -1,11 +1,16 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   GOAT_ACTION_TOOL_CONTRACT,
+  GOAT_PUBLISH_ARTIFACT_INPUT_JSON_SCHEMA,
+  GOAT_PUBLISH_ARTIFACT_TOOL_DESCRIPTION,
+  GOAT_PUBLISH_ARTIFACT_TOOL_NAME,
   type GoatActionGatewayRequest,
   type GoatActionGatewayResponse,
+  type GoatPublishArtifactToolResponse,
 } from "@opencompany/agent-runtime";
 import * as z from "zod/v4-mini";
 import { executeGoatActionGateway } from "@/lib/codex-actions";
+import { requestGoatChatArtifactPublication } from "@/lib/task-runner";
 
 export type GoatClaudeActionToolContext = {
   codexChatSessionId: string;
@@ -15,6 +20,7 @@ export type GoatClaudeActionToolContext = {
 
 type GoatClaudeActionToolDependencies = {
   executeAction: typeof executeGoatActionGateway;
+  publishArtifact: typeof requestGoatChatArtifactPublication;
 };
 
 // MCP requires Zod validators, while Codex accepts JSON Schema directly. Build
@@ -22,6 +28,7 @@ type GoatClaudeActionToolDependencies = {
 // requiredness, descriptions, and annotations cannot drift between harnesses.
 const listActionsInputSchema = mcpInputSchema(GOAT_ACTION_TOOL_CONTRACT.list.inputSchema);
 const useActionInputSchema = mcpInputSchema(GOAT_ACTION_TOOL_CONTRACT.execute.inputSchema);
+const publishArtifactInputSchema = mcpInputSchema(GOAT_PUBLISH_ARTIFACT_INPUT_JSON_SCHEMA);
 
 export function registerGoatClaudeActionTools(
   server: McpServer,
@@ -29,6 +36,32 @@ export function registerGoatClaudeActionTools(
   dependencies: Partial<GoatClaudeActionToolDependencies> = {},
 ) {
   const executeAction = dependencies.executeAction ?? executeGoatActionGateway;
+  const publishArtifact = dependencies.publishArtifact ?? requestGoatChatArtifactPublication;
+
+  server.registerTool(
+    GOAT_PUBLISH_ARTIFACT_TOOL_NAME,
+    {
+      title: "Publish file",
+      description: GOAT_PUBLISH_ARTIFACT_TOOL_DESCRIPTION,
+      inputSchema: publishArtifactInputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async (args, extra) => {
+      const response = await publishArtifact({
+        codexChatSessionId: ctx.codexChatSessionId,
+        codexChatTurnId: ctx.codexChatTurnId,
+        toolCallId: mcpInvocationId(ctx.codexChatTurnId, extra.sessionId, extra.requestId),
+        arguments: args,
+        ...(ctx.signal ? { signal: ctx.signal } : {}),
+      });
+      return mcpPublishResult(response);
+    },
+  );
 
   server.registerTool(
     GOAT_ACTION_TOOL_CONTRACT.list.name,
@@ -90,9 +123,11 @@ function mcpInputSchema(schema: ContractInputSchema): Record<string, z.ZodMiniTy
       let validator: z.ZodMiniType =
         property.type === "string"
           ? z.string()
-          : property.type === "object"
-            ? z.record(z.string(), z.unknown())
-            : z.unknown();
+          : property.type === "integer"
+            ? z.number().check(z.int())
+            : property.type === "object"
+              ? z.record(z.string(), z.unknown())
+              : z.unknown();
       if (property.description) {
         validator = validator.check(z.meta({ description: property.description }));
       }
@@ -124,6 +159,14 @@ async function runGateway(
 }
 
 function mcpResult(response: GoatActionGatewayResponse) {
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(response) }],
+    structuredContent: response as unknown as Record<string, unknown>,
+    isError: !response.ok,
+  };
+}
+
+function mcpPublishResult(response: GoatPublishArtifactToolResponse) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(response) }],
     structuredContent: response as unknown as Record<string, unknown>,

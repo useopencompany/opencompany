@@ -349,6 +349,58 @@ describe("normalizeCodexAppServerEvent", () => {
     });
   });
 
+  it("keeps only safe published-file metadata from publish_artifact results", () => {
+    const [event] = normalizeCodexAppServerEvent({
+      method: "item/completed",
+      params: {
+        item: {
+          id: "publish_1",
+          type: "dynamicToolCall",
+          tool: "publish_artifact",
+          status: "completed",
+          success: true,
+          contentItems: [
+            {
+              type: "inputText",
+              text: JSON.stringify({
+                ok: true,
+                artifact: {
+                  artifactId: "artifact_1",
+                  artifactVersionId: "version_1",
+                  version: 1,
+                  title: "Launch plan",
+                  filename: "launch-plan.md",
+                  mediaType: "text/markdown",
+                  sizeBytes: 120,
+                  state: "ready",
+                  blobPathname: "private/never-project-this",
+                },
+              }),
+            },
+          ],
+        },
+      },
+    });
+
+    expect(event).toMatchObject({
+      type: "dynamic_tool.completed",
+      payload: {
+        tool: "publish_artifact",
+        artifact: {
+          artifactId: "artifact_1",
+          artifactVersionId: "version_1",
+          version: 1,
+          title: "Launch plan",
+          filename: "launch-plan.md",
+          mediaType: "text/markdown",
+          sizeBytes: 120,
+          state: "ready",
+        },
+      },
+    });
+    expect(event?.payload.artifact).not.toHaveProperty("blobPathname");
+  });
+
   it("maps user questions and approval requests", () => {
     expect(
       normalizeCodexAppServerEvent({

@@ -1,0 +1,48 @@
+{
+  "name": "@opencompany/goat-wiki",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./schema": {
+      "types": "./src/schema.ts",
+      "default": "./src/schema.ts"
+    },
+    "./links": {
+      "types": "./src/links.ts",
+      "default": "./src/links.ts"
+    },
+    "./document": {
+      "types": "./src/document.ts",
+      "default": "./src/document.ts"
+    },
+    "./fs": {
+      "types": "./src/fs.ts",
+      "default": "./src/fs.ts"
+    },
+    "./time": {
+      "types": "./src/time.ts",
+      "default": "./src/time.ts"
+    },
+    "./tool": {
+      "types": "./src/tool.ts",
+      "default": "./src/tool.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
+}
