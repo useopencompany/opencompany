@@ -1,0 +1,36 @@
+{
+  "name": "@opencompany/native-chat-composer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native SwiftUI chat composer for OpenCompany mobile",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "scripts": {
+    "build": "node internal/module_scripts/build.js",
+    "clean": "node internal/module_scripts/clean.js",
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "prepare": "node internal/module_scripts/prepare.js"
+  },
+  "keywords": [
+    "react-native",
+    "expo",
+    "native-chat-composer",
+    "OpenCompanyChatComposer"
+  ],
+  "author": "OpenCompany",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "@babel/core": "^7.26.0",
+    "@types/react": "~19.2.2",
+    "babel-preset-expo": "~57.0.6",
+    "expo": "~57.0.11",
+    "react-native": "0.86.2",
+    "typescript": "~6.0.3"
+  },
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

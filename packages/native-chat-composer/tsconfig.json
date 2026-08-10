@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "lib": ["dom", "DOM.Iterable", "esnext"],
+    "jsx": "react-native",
+    "target": "esnext",
+    "moduleResolution": "bundler",
+    "module": "esnext",
+    "moduleDetection": "force",
+    "esModuleInterop": true,
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+    "inlineSources": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": false,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": false,
+    "rootDir": "./src",
+    "outDir": "./build"
+  },
+  "include": ["./src"],
+  "exclude": ["**/__mocks__/*", "**/__tests__/*"]
+}

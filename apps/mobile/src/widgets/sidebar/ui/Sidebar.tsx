@@ -6,6 +6,7 @@ import {
   controlSize,
   labelStyle,
 } from "@expo/ui/swift-ui/modifiers";
+import { type Href, router } from "expo-router";
 import { Drawer, useDrawerProgress } from "expo-router/drawer";
 import type { SFSymbol } from "expo-symbols";
 import { Pressable, ScrollView, Text, View } from "react-native";
@@ -14,7 +15,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
 
-const NAV_ITEMS: { label: string; icon: SFSymbol }[] = [
+const NAV_ITEMS: { label: string; icon: SFSymbol; href?: Href }[] = [
+  { label: "Composer Playground", icon: "slider.horizontal.3", href: "/composer-playground" },
   { label: "Images", icon: "photo" },
   { label: "Library", icon: "books.vertical" },
   { label: "Projects", icon: "folder" },
@@ -77,7 +79,11 @@ export function Sidebar() {
         {NAV_ITEMS.map((item) => (
           <Pressable
             key={item.label}
-            onPress={() => {}}
+            onPress={() => {
+              if (item.href) {
+                router.push(item.href);
+              }
+            }}
             className="flex-row items-center gap-3 px-5 py-2.5 active:bg-secondary"
           >
             <StyledSymbolView
