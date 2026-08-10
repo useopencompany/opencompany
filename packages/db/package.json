@@ -12,6 +12,10 @@
       "types": "./src/client.ts",
       "default": "./src/client.ts"
     },
+    "./chat-repository": {
+      "types": "./src/chat-repository.ts",
+      "default": "./src/chat-repository.ts"
+    },
     "./goat-claude-code-auth": {
       "types": "./src/goat-claude-code-auth.ts",
       "default": "./src/goat-claude-code-auth.ts"
@@ -178,6 +182,7 @@
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
     "@opencompany/agent-runtime": "workspace:*",
+    "@opencompany/core": "workspace:*",
     "@opencompany/crypto": "workspace:*",
     "@opencompany/goat-brain": "workspace:*",
     "@opencompany/goat-wiki": "workspace:*",

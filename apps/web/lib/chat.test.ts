@@ -1,4 +1,5 @@
 import type {
+  GoatChatMessageAttachment,
   GoatChatMessageDebugTrace,
   GoatChatSession,
   GoatCodexChatTurnSettings,
@@ -205,6 +206,49 @@ describe("createGoatChatUserTurn", () => {
     expect(second.messages.map((message) => textFromGoatChatUiMessage(message))).toEqual([
       "hello",
       "continue",
+    ]);
+  });
+
+  it("preserves the stored model and attachment context across a follow-up", async () => {
+    const { store, messages } = createInMemoryChatStore();
+    const attachment: GoatChatMessageAttachment = {
+      id: "attachment_1",
+      kind: "pdf",
+      mediaType: "application/pdf",
+      filename: "launch-plan.pdf",
+      sizeBytes: 2048,
+      blobPathname: "private/launch-plan.pdf",
+      blobUrl: "https://blob.invalid/launch-plan.pdf",
+    };
+    const first = await createGoatChatUserTurn(
+      {
+        userWorkosId: "user_1",
+        prompt: "Review this plan",
+        model: DEFAULT_GOAT_MODEL,
+        attachments: [attachment],
+        attachmentTexts: { attachment_1: "Private extracted launch context" },
+      },
+      store,
+    );
+
+    const followUp = await createGoatChatUserTurn(
+      {
+        userWorkosId: "user_1",
+        sessionId: first.session.id,
+        prompt: "What is the biggest risk?",
+        model: "openai/gpt-5.5",
+      },
+      store,
+    );
+
+    expect(followUp.session.model).toBe(DEFAULT_GOAT_MODEL);
+    expect(messages[0]).toMatchObject({
+      attachments: [attachment],
+      attachmentTexts: { attachment_1: "Private extracted launch context" },
+    });
+    expect(followUp.messages.map((message) => textFromGoatChatUiMessage(message))).toEqual([
+      "Review this plan",
+      "What is the biggest risk?",
     ]);
   });
 

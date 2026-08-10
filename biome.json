@@ -19,6 +19,7 @@
       "!**/coverage",
       "!**/playwright-report",
       "!**/test-results",
+      "!packages/protocol/openapi/**",
       "!drizzle/meta",
       "!bun.lock"
     ]

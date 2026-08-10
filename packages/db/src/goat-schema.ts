@@ -1,4 +1,14 @@
 import type { AgentModelId, CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import {
+  APPROVAL_RESOLUTIONS,
+  type ApprovalResolution,
+  RUN_APPROVAL_STATUSES,
+  RUN_ATTEMPT_STATUSES,
+  RUN_EVENT_TYPES,
+  type RunApprovalStatus,
+  type RunAttemptStatus,
+  type RunEventType,
+} from "@opencompany/core";
 import type { EncryptedPayload } from "@opencompany/crypto";
 import { relations, type SQL, sql } from "drizzle-orm";
 import {
@@ -3975,6 +3985,7 @@ export const goatCodexChatTurns = goat.table(
     recoveryAttempts: integer("recovery_attempts").notNull().default(0),
     engineRecoveryRequired: boolean("engine_recovery_required").notNull().default(false),
     engineTurnBaselineIds: jsonb("engine_turn_baseline_ids").$type<string[]>(),
+    eventSequence: integer("event_sequence").notNull().default(0),
     leaseId: text("lease_id"),
     leaseOwner: text("lease_owner"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
@@ -3995,6 +4006,177 @@ export const goatCodexChatTurns = goat.table(
     statusCheck: check(
       "goat_codex_chat_turns_status_check",
       sql`${table.status} IN ('queued', 'running', 'completed', 'failed', 'interrupted')`,
+    ),
+    eventSequenceCheck: check(
+      "goat_codex_chat_turns_event_sequence_check",
+      sql`${table.eventSequence} >= 0`,
+    ),
+  }),
+);
+
+// The first canonical headless Chat write path is intentionally backed by the existing durable
+// runtime tables. These additive rows provide the protocol concepts that were previously implicit:
+// command idempotency, explicit execution attempts, and a semantic event log. Physical legacy
+// names stay confined to persistence adapters and never cross the core or wire boundary.
+export const goatChatCommandIdempotency = goat.table(
+  "chat_command_idempotency",
+  {
+    commandId: text("command_id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    conversationId: text("conversation_id").notNull(),
+    messageId: text("message_id").notNull(),
+    assistantMessageId: text("assistant_message_id").notNull(),
+    runtimeId: text("runtime_id").notNull(),
+    runId: text("run_id").notNull(),
+    transactionId: bigint("transaction_id", { mode: "number" })
+      .notNull()
+      .default(sql`pg_current_xact_id()::xid::text::bigint`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    touchedAt: timestamp("touched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    actorKeyIdx: uniqueIndex("goat_chat_command_idempotency_actor_key_idx").on(
+      table.userWorkosId,
+      table.workspaceId,
+      table.idempotencyKey,
+    ),
+    requestHashCheck: check(
+      "goat_chat_command_idempotency_request_hash_check",
+      sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    keyLengthCheck: check(
+      "goat_chat_command_idempotency_key_length_check",
+      sql`length(${table.idempotencyKey}) BETWEEN 1 AND 200`,
+    ),
+  }),
+);
+
+export const goatRunAttempts = goat.table(
+  "run_attempts",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => goatCodexChatTurns.id, { onDelete: "cascade" }),
+    number: integer("number").notNull(),
+    status: text("status").$type<RunAttemptStatus>().notNull(),
+    workerId: text("worker_id").notNull(),
+    leaseId: text("lease_id"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    runNumberIdx: uniqueIndex("goat_run_attempts_run_number_idx").on(table.runId, table.number),
+    leaseIdx: uniqueIndex("goat_run_attempts_lease_idx")
+      .on(table.leaseId)
+      .where(sql`${table.leaseId} IS NOT NULL`),
+    statusCheck: check(
+      "goat_run_attempts_status_check",
+      sql`${table.status} IN (${sql.join(
+        RUN_ATTEMPT_STATUSES.map((status) => sql`${status}`),
+        sql`, `,
+      )})`,
+    ),
+    numberCheck: check("goat_run_attempts_number_check", sql`${table.number} > 0`),
+  }),
+);
+
+export const goatRunApprovals = goat.table(
+  "run_approvals",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => goatCodexChatTurns.id, { onDelete: "cascade" }),
+    attemptId: text("attempt_id").references(() => goatRunAttempts.id, {
+      onDelete: "set null",
+    }),
+    kind: text("kind").notNull(),
+    prompt: text("prompt").notNull(),
+    options: jsonb("options").$type<string[]>(),
+    status: text("status").$type<RunApprovalStatus>().notNull().default("pending"),
+    resolution: text("resolution").$type<ApprovalResolution>(),
+    response: jsonb("response").$type<Record<string, unknown>>(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    runStatusCreatedIdx: index("goat_run_approvals_run_status_created_idx").on(
+      table.runId,
+      table.status,
+      table.createdAt,
+    ),
+    attemptIdx: index("goat_run_approvals_attempt_idx").on(table.attemptId),
+    statusCheck: check(
+      "goat_run_approvals_status_check",
+      sql`${table.status} IN (${sql.join(
+        RUN_APPROVAL_STATUSES.map((status) => sql`${status}`),
+        sql`, `,
+      )})`,
+    ),
+    resolutionCheck: check(
+      "goat_run_approvals_resolution_check",
+      sql`${table.resolution} IS NULL OR ${table.resolution} IN (${sql.join(
+        APPROVAL_RESOLUTIONS.map((resolution) => sql`${resolution}`),
+        sql`, `,
+      )})`,
+    ),
+    lifecycleCheck: check(
+      "goat_run_approvals_lifecycle_check",
+      sql`(
+        ${table.status} = 'pending'
+        AND ${table.resolution} IS NULL
+        AND ${table.resolvedAt} IS NULL
+      ) OR (
+        ${table.status} IN ('resolved', 'canceled')
+        AND ${table.resolution} IS NOT NULL
+        AND ${table.resolvedAt} IS NOT NULL
+      )`,
+    ),
+  }),
+);
+
+export const goatRunEvents = goat.table(
+  "run_events",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => goatCodexChatTurns.id, { onDelete: "cascade" }),
+    attemptId: text("attempt_id").references(() => goatRunAttempts.id, {
+      onDelete: "set null",
+    }),
+    sequence: integer("sequence").notNull(),
+    schemaVersion: integer("schema_version").notNull().default(1),
+    type: text("type").$type<RunEventType>().notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    runSequenceIdx: uniqueIndex("goat_run_events_run_sequence_idx").on(table.runId, table.sequence),
+    attemptIdx: index("goat_run_events_attempt_idx").on(table.attemptId),
+    typeCheck: check(
+      "goat_run_events_type_check",
+      sql`${table.type} IN (${sql.join(
+        RUN_EVENT_TYPES.map((eventType) => sql`${eventType}`),
+        sql`, `,
+      )})`,
+    ),
+    sequenceCheck: check("goat_run_events_sequence_check", sql`${table.sequence} > 0`),
+    schemaVersionCheck: check(
+      "goat_run_events_schema_version_check",
+      sql`${table.schemaVersion} = 1`,
     ),
   }),
 );
@@ -4646,6 +4828,40 @@ export const goatCodexChatTurnsRelations = relations(goatCodexChatTurns, ({ one,
   interactions: many(goatCodexChatInteractions),
   events: many(goatCodexChatEvents),
   artifactVersions: many(goatChatArtifactVersions),
+  attempts: many(goatRunAttempts),
+  approvals: many(goatRunApprovals),
+  runEvents: many(goatRunEvents),
+}));
+
+export const goatRunAttemptsRelations = relations(goatRunAttempts, ({ one, many }) => ({
+  run: one(goatCodexChatTurns, {
+    fields: [goatRunAttempts.runId],
+    references: [goatCodexChatTurns.id],
+  }),
+  events: many(goatRunEvents),
+  approvals: many(goatRunApprovals),
+}));
+
+export const goatRunApprovalsRelations = relations(goatRunApprovals, ({ one }) => ({
+  run: one(goatCodexChatTurns, {
+    fields: [goatRunApprovals.runId],
+    references: [goatCodexChatTurns.id],
+  }),
+  attempt: one(goatRunAttempts, {
+    fields: [goatRunApprovals.attemptId],
+    references: [goatRunAttempts.id],
+  }),
+}));
+
+export const goatRunEventsRelations = relations(goatRunEvents, ({ one }) => ({
+  run: one(goatCodexChatTurns, {
+    fields: [goatRunEvents.runId],
+    references: [goatCodexChatTurns.id],
+  }),
+  attempt: one(goatRunAttempts, {
+    fields: [goatRunEvents.attemptId],
+    references: [goatRunAttempts.id],
+  }),
 }));
 
 export const goatChatArtifactsRelations = relations(goatChatArtifacts, ({ one, many }) => ({
@@ -5124,6 +5340,10 @@ export type GoatBrainDocumentVersion = typeof goatBrainDocumentVersions.$inferSe
 export type GoatBrainToolRun = typeof goatBrainToolRuns.$inferSelect;
 export type GoatCodexChatSession = typeof goatCodexChatSessions.$inferSelect;
 export type GoatCodexChatTurn = typeof goatCodexChatTurns.$inferSelect;
+export type GoatChatCommandIdempotency = typeof goatChatCommandIdempotency.$inferSelect;
+export type GoatRunAttempt = typeof goatRunAttempts.$inferSelect;
+export type GoatRunApproval = typeof goatRunApprovals.$inferSelect;
+export type GoatRunEvent = typeof goatRunEvents.$inferSelect;
 export type GoatChatArtifact = typeof goatChatArtifacts.$inferSelect;
 export type GoatChatArtifactVersion = typeof goatChatArtifactVersions.$inferSelect;
 export type GoatCodexChatInteraction = typeof goatCodexChatInteractions.$inferSelect;
