@@ -577,17 +577,26 @@ export async function consumeGoatOpenCompanyChatStream(input: {
           await flush(true);
         }
       } else if (part.type === "tool-approval-request") {
-        const toolCallId = readString(part.toolCallId);
+        // AI SDK 6 nests the tool call inside `toolCall`; see ToolApprovalRequestOutput.
+        // A missing or unmatched toolCallId must fail the turn, not be silently ignored,
+        // or the run settles "completed" while the model waits on an approval no one saw.
         const approvalId = readString(part.approvalId);
+        const toolCall = isRecord(part.toolCall) ? part.toolCall : null;
+        const toolCallId = toolCall ? readString(toolCall.toolCallId) : null;
         const index = toolCallId ? toolPartIndexes.get(toolCallId) : undefined;
-        if (toolCallId && approvalId && index !== undefined) {
-          replacePart(index, {
-            ...partAt(parts, index),
-            state: "approval-requested",
-            approval: { id: approvalId },
-          });
-          await flush(true);
+        if (!approvalId || !toolCallId || index === undefined) {
+          throw new Error(
+            "Received a tool-approval-request event that could not be correlated to a " +
+              `tracked tool call (approvalId=${approvalId ?? "missing"}, ` +
+              `toolCallId=${toolCallId ?? "missing"}).`,
+          );
         }
+        replacePart(index, {
+          ...partAt(parts, index),
+          state: "approval-requested",
+          approval: { id: approvalId },
+        });
+        await flush(true);
       } else if (part.type === "tool-result") {
         const toolCallId = readString(part.toolCallId);
         const toolName = readString(part.toolName);
@@ -1306,7 +1315,7 @@ function projectionText(projection: GoatOpenCompanyChatProjection) {
     .trim();
 }
 
-function approvalDraftsFromProjection(projection: GoatOpenCompanyChatProjection) {
+export function approvalDraftsFromProjection(projection: GoatOpenCompanyChatProjection) {
   const seen = new Set<string>();
   return projection.parts.flatMap((part) => {
     if (part.state !== "approval-requested" || !isRecord(part.approval)) return [];
