@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Called by: release workflow checks and root `bun run release:preflight`.
-// Purpose: validates required release, web, runner, and smoke-check environment variables.
+// Purpose: validates required release, web, API, runner, and smoke-check environment variables.
 
 import "./load-env.mjs";
 
@@ -22,6 +22,8 @@ const groups = {
       "BLOB_READ_WRITE_TOKEN",
       "RUNNER_PUBLIC_URL",
       "RUNNER_INTERNAL_TOKEN",
+      "GOAT_API_ORIGIN",
+      "NEXT_PUBLIC_GOAT_HEADLESS_CHAT",
       "ELECTRIC_URL",
       "MONID_API_KEY",
       "GOAT_STRIPE_API_KEY",
@@ -74,6 +76,40 @@ const groups = {
       "LATITUDE_TELEMETRY_DISABLED",
     ],
   },
+  api: {
+    label: "Render canonical Chat API",
+    required: [
+      "API_DATABASE_URL",
+      "WORKOS_CLIENT_ID",
+      "WORKOS_API_KEY",
+      "WORKOS_COOKIE_PASSWORD",
+      "GOAT_AUTHKIT_DOMAIN",
+      "GOAT_MACOS_OAUTH_AUDIENCE",
+      "BLOB_READ_WRITE_TOKEN",
+      "ELECTRIC_URL",
+      "REDIS_URL",
+    ],
+    optional: [
+      "API_DB_POOL_MAX",
+      "WORKOS_COOKIE_NAME",
+      "WORKOS_COOKIE_DOMAIN",
+      "GOAT_API_OAUTH_AUDIENCE",
+      "GOAT_DEFAULT_CHAT_MODEL",
+      "ELECTRIC_SOURCE_ID",
+      "ELECTRIC_SOURCE_SECRET",
+      "ELECTRIC_SECRET",
+      "ELECTRIC_TOKEN",
+      "BETTER_STACK_ERRORS_DSN",
+      "OBSERVABILITY_ENABLED",
+      "OBSERVABILITY_ENV",
+      "OBSERVABILITY_RELEASE",
+      "OBSERVABILITY_LOG_LEVEL",
+      "OBSERVABILITY_TIMING",
+      "GOAT_OBSERVABILITY_ENABLED",
+      "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
+      "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
+    ],
+  },
   runner: {
     label: "Render runner",
     required: [
@@ -85,13 +121,14 @@ const groups = {
       "RUNNER_ALLOWED_ORIGINS",
       "E2B_API_KEY",
       "VERCEL_AI_GATEWAY_API_KEY",
-      "OPENAI_API_KEY",
+      "OPENAI_CODEX_API_KEY",
       "GITHUB_INTEGRATION_APP_ID",
       "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
       "GOAT_X_CLIENT_ID",
       "GOAT_X_CLIENT_SECRET",
       "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
       "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
+      "REDIS_URL",
     ],
     optional: [
       "EXA_API_KEY",
@@ -102,6 +139,7 @@ const groups = {
       "RUNNER_PREVIEW_PROTOCOL",
       "GOAT_DICTATION_REALTIME_MODEL",
       "GOAT_DICTATION_FINAL_MODEL",
+      "OPENAI_API_KEY",
       "BETTER_STACK_ERRORS_DSN",
       "OBSERVABILITY_ENABLED",
       "OBSERVABILITY_ENV",
@@ -132,8 +170,10 @@ const groups = {
       "GOAT_VERCEL_PROJECT_ID",
       "MARKETING_VERCEL_PROJECT_ID",
       "RENDER_SERVICE_ID",
+      "RENDER_API_SERVICE_ID",
       "RENDER_API_KEY",
       "PRODUCTION_GOAT_URL",
+      "PRODUCTION_API_URL",
       "RUNNER_PUBLIC_URL",
     ],
     optional: [],
@@ -261,7 +301,7 @@ function selectGroups() {
     .map((arg) => arg.slice(2))
     .filter((arg) => groups[arg]);
 
-  return requested.length > 0 ? requested : ["web", "runner"];
+  return requested.length > 0 ? requested : ["web", "api", "runner"];
 }
 
 function isUnset(value) {

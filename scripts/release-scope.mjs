@@ -19,13 +19,21 @@ async function main() {
   let reason;
 
   if (options.deployAll) {
-    plan = planReleaseSurfaces({ deployAll: true, deployRunner: options.deployRunner });
+    plan = planReleaseSurfaces({
+      deployAll: true,
+      deployApi: options.deployApi,
+      deployRunner: options.deployRunner,
+    });
     reason = "full release requested";
   } else if (!isAncestor(options.base, options.head)) {
     console.warn(
       `Release base ${shortSha(options.base)} is not an ancestor of ${shortSha(options.head)}; deploying every surface.`,
     );
-    plan = planReleaseSurfaces({ deployAll: true, deployRunner: options.deployRunner });
+    plan = planReleaseSurfaces({
+      deployAll: true,
+      deployApi: options.deployApi,
+      deployRunner: options.deployRunner,
+    });
     reason = "release base was not an ancestor";
   } else {
     try {
@@ -34,13 +42,18 @@ async function main() {
       plan = planReleaseSurfaces({
         affectedPackages,
         changedFiles,
+        deployApi: options.deployApi,
         deployRunner: options.deployRunner,
       });
       reason = `${shortSha(options.base)}..${shortSha(options.head)}`;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`Could not calculate the release scope (${message}); deploying every surface.`);
-      plan = planReleaseSurfaces({ deployAll: true, deployRunner: options.deployRunner });
+      plan = planReleaseSurfaces({
+        deployAll: true,
+        deployApi: options.deployApi,
+        deployRunner: options.deployRunner,
+      });
       reason = "release scope calculation failed";
     }
   }
@@ -61,6 +74,7 @@ function parseArgs(args) {
     base: "",
     head: "",
     deployAll: false,
+    deployApi: true,
     deployRunner: true,
   };
 
@@ -68,6 +82,8 @@ function parseArgs(args) {
     const arg = args[index];
     if (arg === "--all") {
       options.deployAll = true;
+    } else if (arg === "--skip-api") {
+      options.deployApi = false;
     } else if (arg === "--skip-runner") {
       options.deployRunner = false;
     } else if (arg === "--base") {

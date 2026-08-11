@@ -414,7 +414,19 @@ export function createApiApp(input: CreateApiAppInput) {
     });
     return apiErrorResponse(c, error);
   });
-  app.get("/healthz", (c) => c.json({ ok: true }));
+  app.get("/healthz", (c) =>
+    c.json({
+      ok: true,
+      service: "opencompany-api",
+      environment: process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
+      release:
+        process.env.RENDER_GIT_COMMIT ??
+        process.env.OBSERVABILITY_RELEASE ??
+        process.env.GITHUB_SHA ??
+        null,
+      renderGitCommit: process.env.RENDER_GIT_COMMIT ?? null,
+    }),
+  );
   app.get("/openapi.json", (c) => c.json(createOpenApiDocument()));
   app.notFound((c) => apiErrorResponse(c, new ApiError(404, "not_found", "Route not found.")));
   return app;

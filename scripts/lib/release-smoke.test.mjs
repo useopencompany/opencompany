@@ -13,6 +13,16 @@ test("uses a surface-specific expected release", () => {
   );
 });
 
+test("uses the API-specific expected release", () => {
+  assert.equal(
+    expectedReleaseFor("api", {
+      EXPECTED_RELEASE: "fallback",
+      EXPECTED_API_RELEASE: "api-sha",
+    }),
+    "api-sha",
+  );
+});
+
 test("an explicit empty surface release disables the global fallback", () => {
   assert.equal(
     expectedReleaseFor("web", {

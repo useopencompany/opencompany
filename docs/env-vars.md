@@ -10,6 +10,7 @@ duplicating every optional provider variable.
 | `dev` `/goat` | local web | shared auth, integration, billing, Electric, and product values |
 | `dev` `/runner` | local runner | runner tokens, provider credentials, sandbox configuration |
 | `prod` `/goat` | Vercel web | production product and webhook configuration |
+| `prod` `/api` | Render canonical Chat API | database, auth, Blob, Electric, Redis, and telemetry configuration |
 | `prod` `/runner` | Render runner | production worker and broker configuration |
 | `prod` `/release` | GitHub Actions | production URLs, project/service IDs, deploy tokens, DB URL |
 | `prod` `/ci/turbo` | GitHub Actions | optional Turborepo remote-cache credentials |
@@ -21,21 +22,25 @@ them.
 
 ## Required groups
 
-`scripts/release-preflight.mjs` is the executable source of truth for required web, runner, and
+`scripts/release-preflight.mjs` is the executable source of truth for required web, API, runner, and
 release variables. Important contracts include:
 
 - Web: database, WorkOS, canonical URL, Vercel AI Gateway, Blob, runner token/URL, Electric,
-  managed capabilities, Stripe, X OAuth, cron, and Goat PostHog values.
+  managed capabilities, Stripe, X OAuth, cron, Goat PostHog, server-only API origin, and canonical
+  Chat flag values.
+- API: direct database, WorkOS session/OAuth, Blob, Electric, and Redis values.
 - Runner: database, internal/stream tokens, Goat origin, allowed origins, integration encryption,
-  E2B, model providers, GitHub/X integration credentials, and Goat PostHog values.
-- Release: production DB URL, Vercel/Render credentials and project IDs, Goat URL, runner URL.
+  E2B, model providers, GitHub/X integration credentials, Goat PostHog, and Redis values.
+- Release: production DB URL, Vercel/Render credentials and project/service IDs, Goat/API/runner
+  URLs.
 
-The canonical web Chat cohort additionally uses server-only `GOAT_API_ORIGIN` and the non-secret
-build flag `NEXT_PUBLIC_GOAT_HEADLESS_CHAT`. Both remain unset/false until the separately authorized
-`apps/api` production service and rollout smoke gate in
-[Headless Chat operations](./headless-chat-operations.md) are complete.
+The canonical web Chat cohort uses server-only `GOAT_API_ORIGIN` and the non-secret build flag
+`NEXT_PUBLIC_GOAT_HEADLESS_CHAT`. Configure the origin while the flag is `false`, pass the disabled
+smoke gate, then set the flag to `true` and redeploy web as documented in
+[Headless Chat operations](./headless-chat-operations.md).
 
-`REDIS_URL` is optional for correctness. When configured for both `apps/api` and `apps/runner`, it
+`REDIS_URL` is optional for correctness but required by the production activation preflight. When
+configured for both `apps/api` and `apps/runner`, it
 enables the canonical Chat transient presentation lane; without it both services retain durable
 Postgres streaming and reconnect behavior. The value is server-only and must never be copied to a
 `NEXT_PUBLIC_*` variable.

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Called by: .github/workflows/release-production.yml and root `bun run release:smoke`.
-// Purpose: polls production web and runner health checks after deployment.
+// Purpose: polls production web, API, and runner health checks after deployment.
 
 import { execFileSync } from "node:child_process";
 
@@ -9,12 +9,15 @@ import { expectedReleaseFor } from "./lib/release-smoke.mjs";
 
 const webUrl = normalizeBaseUrl(process.env.GOAT_URL || process.env.PRODUCTION_GOAT_URL);
 const webVercelDeployment = normalizeBaseUrl(process.env.SMOKE_GOAT_VERCEL_DEPLOYMENT);
+const apiUrl = normalizeBaseUrl(process.env.API_PUBLIC_URL || process.env.PRODUCTION_API_URL);
 const runnerUrl = normalizeBaseUrl(process.env.RUNNER_PUBLIC_URL);
 const attempts = Number(process.env.SMOKE_ATTEMPTS ?? "30");
 const webAttempts = Number(process.env.SMOKE_GOAT_ATTEMPTS ?? attempts);
+const apiAttempts = Number(process.env.SMOKE_API_ATTEMPTS ?? attempts);
 const runnerAttempts = Number(process.env.SMOKE_RUNNER_ATTEMPTS ?? attempts);
 const delayMs = Number(process.env.SMOKE_DELAY_MS ?? "10000");
 const checkWeb = booleanEnv("SMOKE_GOAT", true);
+const checkApi = booleanEnv("SMOKE_API", true);
 const checkRunner = booleanEnv("SMOKE_RUNNER", true);
 
 if (checkWeb && !webUrl && !webVercelDeployment) {
@@ -27,10 +30,19 @@ if (checkRunner && !runnerUrl) {
   process.exit(1);
 }
 
+if (checkApi && !apiUrl) {
+  console.error("API_PUBLIC_URL or PRODUCTION_API_URL is required.");
+  process.exit(1);
+}
+
 const checks = [];
 
 if (checkWeb) {
   checks.push(checkUntilReady("web", healthTarget("web"), webAttempts, delayMs));
+}
+
+if (checkApi) {
+  checks.push(checkUntilReady("api", `${apiUrl}/healthz`, apiAttempts, delayMs));
 }
 
 if (checkRunner) {

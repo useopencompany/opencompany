@@ -7,6 +7,10 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      deploy_api:
+        description: "Trigger the Render canonical Chat API deploy"
+        type: boolean
+        default: true
       deploy_runner:
         description: "Trigger the Render runner deploy"
         type: boolean
@@ -127,14 +131,18 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true' }}
         env:
           RELEASE_BASE_SHA: ${{ steps.release-base.outputs.base_sha }}
+          DEPLOY_API_INPUT: ${{ inputs.deploy_api }}
           DEPLOY_RUNNER_INPUT: ${{ inputs.deploy_runner }}
         run: |
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            if [[ "$DEPLOY_RUNNER_INPUT" == "true" ]]; then
-              bun run release:scope -- --all
-            else
-              bun run release:scope -- --all --skip-runner
+            scope_args=(--all)
+            if [[ "$DEPLOY_API_INPUT" != "true" ]]; then
+              scope_args+=(--skip-api)
             fi
+            if [[ "$DEPLOY_RUNNER_INPUT" != "true" ]]; then
+              scope_args+=(--skip-runner)
+            fi
+            bun run release:scope -- "${scope_args[@]}"
           elif [[ -n "$RELEASE_BASE_SHA" ]]; then
             bun run release:scope -- --base "$RELEASE_BASE_SHA" --head "$RELEASE_SHA"
           else
@@ -155,6 +163,36 @@ jobs:
       - name: Check release automation env
         if: ${{ github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true' }}
         run: bun run release:preflight -- --release
+
+      - name: Fetch canonical Chat API secrets from Infisical
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true') && steps.release-scope.outputs.api == 'true' }}
+        uses: Infisical/secrets-action@v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID || secrets.INFISICAL_MACHINE_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG || secrets.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: /api
+
+      - name: Check canonical Chat API env
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true') && steps.release-scope.outputs.api == 'true' }}
+        run: bun run release:preflight -- --api
+
+      - name: Fetch runner secrets from Infisical
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true') && steps.release-scope.outputs.runner == 'true' }}
+        uses: Infisical/secrets-action@v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID || secrets.INFISICAL_MACHINE_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG || secrets.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: /runner
+
+      - name: Check runner env
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true') && steps.release-scope.outputs.runner == 'true' }}
+        run: bun run release:preflight -- --runner
 
       - name: Re-check automatic release before production changes
         id: production-release
@@ -242,6 +280,13 @@ jobs:
       - name: Skip stale deploy
         if: ${{ github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'false' }}
         run: echo "This automatic release was superseded after build, so the planned production deploys were skipped."
+
+      - name: Trigger canonical Chat API deploy
+        id: trigger-api
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.api == 'true' }}
+        env:
+          RENDER_SERVICE_ID: ${{ env.RENDER_API_SERVICE_ID }}
+        run: bun run release:render -- --trigger-only
 
       - name: Trigger runner deploy
         id: trigger-runner
@@ -357,6 +402,8 @@ jobs:
             "VERCEL_AI_GATEWAY_API_KEY",
             "RUNNER_PUBLIC_URL",
             "RUNNER_INTERNAL_TOKEN",
+            "GOAT_API_ORIGIN",
+            "NEXT_PUBLIC_GOAT_HEADLESS_CHAT",
             "ELECTRIC_URL",
             "GOAT_STRIPE_API_KEY",
             "GOAT_STRIPE_WEBHOOK_SECRET",
@@ -462,9 +509,11 @@ jobs:
             }
 
             const expectedWebOrigin = new URL(process.env.PRODUCTION_GOAT_URL).origin;
+            const expectedApiOrigin = new URL(process.env.PRODUCTION_API_URL).origin;
             const expectedValues = new Map([
               ["GOAT_NEXT_PUBLIC_APP_URL", expectedWebOrigin],
               ["GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI", `${expectedWebOrigin}/auth/callback`],
+              ["GOAT_API_ORIGIN", expectedApiOrigin],
             ]);
             const configuredWebUrls = await Promise.all(
               Array.from(expectedValues.keys(), (key) =>
@@ -477,8 +526,20 @@ jobs:
 
             if (mismatched.length > 0) {
               throw new Error(
-                `Web Vercel production envs do not match PRODUCTION_GOAT_URL: ${mismatched.join(", ")}`,
+                `Web Vercel production origins do not match the release contract: ${mismatched.join(", ")}`,
               );
+            }
+
+            const headlessChatFlag = await readEnvValue(
+              webProjectId,
+              webEnv,
+              "NEXT_PUBLIC_GOAT_HEADLESS_CHAT",
+              "web",
+              teamId,
+              token,
+            );
+            if (!["true", "false"].includes(headlessChatFlag.trim())) {
+              throw new Error("Web NEXT_PUBLIC_GOAT_HEADLESS_CHAT must be exactly true or false.");
             }
 
           }
@@ -587,8 +648,25 @@ jobs:
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.marketing == 'true' }}
         run: node scripts/release-vercel-deploy.mjs --label marketing --project-env MARKETING_VERCEL_PROJECT_ID
 
-      - name: Cancel runner deploy after Vercel failure
+      - name: Cancel runner deploy after orchestration failure
         if: ${{ failure() && steps.trigger-runner.outputs.deploy_id != '' }}
+        run: bun run release:render -- --cancel "${{ steps.trigger-runner.outputs.deploy_id }}"
+
+      - name: Cancel API deploy after orchestration failure
+        if: ${{ failure() && steps.trigger-api.outputs.deploy_id != '' }}
+        env:
+          RENDER_SERVICE_ID: ${{ env.RENDER_API_SERVICE_ID }}
+        run: bun run release:render -- --cancel "${{ steps.trigger-api.outputs.deploy_id }}"
+
+      - name: Wait for canonical Chat API deploy
+        id: wait-api
+        if: ${{ steps.trigger-api.outputs.deploy_id != '' }}
+        env:
+          RENDER_SERVICE_ID: ${{ env.RENDER_API_SERVICE_ID }}
+        run: bun run release:render -- --wait "${{ steps.trigger-api.outputs.deploy_id }}"
+
+      - name: Cancel runner deploy after API failure
+        if: ${{ failure() && steps.wait-api.outcome == 'failure' && steps.trigger-runner.outputs.deploy_id != '' }}
         run: bun run release:render -- --cancel "${{ steps.trigger-runner.outputs.deploy_id }}"
 
       - name: Wait for runner deploy
@@ -599,10 +677,13 @@ jobs:
         if: ${{ (github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'true') || (github.event_name == 'workflow_dispatch' && inputs.smoke) }}
         env:
           EXPECTED_GOAT_RELEASE: ${{ steps.release-scope.outputs.web == 'true' && env.RELEASE_SHA || '' }}
+          EXPECTED_API_RELEASE: ${{ steps.release-scope.outputs.api == 'true' && env.RELEASE_SHA || '' }}
           EXPECTED_RUNNER_RELEASE: ${{ steps.release-scope.outputs.runner == 'true' && env.RELEASE_SHA || '' }}
           SMOKE_GOAT: "true"
+          SMOKE_API: "true"
           SMOKE_RUNNER: "true"
           SMOKE_GOAT_ATTEMPTS: "12"
+          SMOKE_API_ATTEMPTS: "12"
           SMOKE_RUNNER_ATTEMPTS: "12"
           SMOKE_DELAY_MS: "10000"
         run: bun run release:smoke

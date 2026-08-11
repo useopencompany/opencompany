@@ -1,9 +1,11 @@
-export const RELEASE_SURFACES = ["web", "marketing", "runner"];
+export const RELEASE_SURFACES = ["web", "marketing", "api", "runner"];
 
 const PACKAGE_SURFACES = new Map([
   ["@opencompany/web", ["web"]],
   ["@opencompany/marketing", ["marketing"]],
+  ["@opencompany/api", ["api"]],
   ["@opencompany/runner", ["runner"]],
+  ["@opencompany/chat-presentation", ["api", "runner"]],
 ]);
 
 const ALL_SURFACES = RELEASE_SURFACES;
@@ -21,15 +23,18 @@ const FORCE_RULES = [
       "scripts/lib/release-scope.mjs",
       "scripts/release-smoke.mjs",
       "scripts/lib/release-smoke.mjs",
+      "scripts/release-preflight.mjs",
     ],
     surfaces: ALL_SURFACES,
   },
   { files: ["scripts/release-vercel-deploy.mjs"], surfaces: VERCEL_SURFACES },
   { files: ["scripts/next-web.mjs"], surfaces: ["web"] },
   { files: ["scripts/load-env.mjs"], surfaces: ["web"] },
+  { files: ["Dockerfile.api"], surfaces: ["api"] },
+  { files: ["Dockerfile.runner"], surfaces: ["runner"] },
   {
-    files: [".dockerignore", "Dockerfile.runner", "render.yaml", "scripts/render-release.mjs"],
-    surfaces: ["runner"],
+    files: [".dockerignore", "render.yaml", "scripts/render-release.mjs"],
+    surfaces: ["api", "runner"],
   },
 ];
 
@@ -37,6 +42,7 @@ export function planReleaseSurfaces({
   affectedPackages = [],
   changedFiles = [],
   deployAll = false,
+  deployApi = true,
   deployRunner = true,
 } = {}) {
   const selected = new Set(deployAll ? RELEASE_SURFACES : []);
@@ -55,6 +61,10 @@ export function planReleaseSurfaces({
         }
       }
     }
+  }
+
+  if (!deployApi) {
+    selected.delete("api");
   }
 
   if (!deployRunner) {
