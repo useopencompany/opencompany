@@ -29,7 +29,7 @@ const SIDEBAR_SCROLL_VIEW_TEST_ID = "sidebar-scroll-view";
 // The native bar items render between SwiftUI's regular and large control sizes.
 // Scale the large visual treatment while preserving its full hit target.
 const SIDEBAR_ACTION_CONTROL_SCALE = 0.875;
-const SIDEBAR_ACTION_ICON_SCALE = 1.15;
+const SIDEBAR_ACTION_ICON_SCALE = 1.25;
 const StyledImage = withUniwind(ExpoImage);
 
 const NAV_ITEMS: { label: string; icon: SFSymbol; href: Href }[] = [
