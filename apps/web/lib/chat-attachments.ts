@@ -2,12 +2,14 @@ import { randomUUID } from "node:crypto";
 import { modelSupportsAttachments } from "@opencompany/agent-runtime";
 import type { GoatChatMessageAttachment } from "@opencompany/db/goat-schema";
 import { extractDocxText, extractUtf8Text, extractXlsxText } from "@opencompany/file-extract";
-import { get } from "@vercel/blob";
+import { downloadGoatChatAttachment } from "@opencompany/goat-agent/chat-attachment-storage";
 import {
   GOAT_CHAT_ATTACHMENT_MAX_PER_MESSAGE,
   validateGoatChatAttachmentCandidate,
 } from "@/lib/chat-attachment-formats";
 import type { GoatChatUiMessage, GoatStoredChatMessage } from "@/lib/chat-ui";
+
+export { downloadGoatChatAttachment };
 
 // Extracted text shown to the chat model; matches the brain capture cap so a
 // save_to_brain of the same content never silently exceeds it.
@@ -102,21 +104,6 @@ export async function extractGoatChatAttachmentTexts(
     }
   }
   return Object.keys(texts).length > 0 ? texts : null;
-}
-
-export async function downloadGoatChatAttachment(blobUrl: string): Promise<Buffer> {
-  const result = await get(blobUrl, { access: "private", useCache: false });
-  if (!result || result.statusCode !== 200 || !result.stream) {
-    throw new Error("Attachment blob is unavailable.");
-  }
-  const chunks: Uint8Array[] = [];
-  const reader = result.stream.getReader();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) chunks.push(value);
-  }
-  return Buffer.concat(chunks);
 }
 
 // Appends attachment parts to every user message before convertToModelMessages:

@@ -11,14 +11,13 @@ compatibility route is intentionally unchanged.
 ```text
 browser ---- direct /v1 + shared session ----> apps/api (Hono /v1) ----> Electric
   |
-  +---- pages, auth setup, model routing ----> apps/web <---- internal gateways ---- apps/runner
-                                                   |                                |
-                                                   +---- Postgres (authority) -------+
-                                                        ^                       |
-                                                        |                       |
-                                            apps/api ---+    Redis hot stream <--+
-                                                            | presentation deltas
-                                                            +----> apps/api SSE
+  +---- pages + auth setup -----------------> apps/web
+
+  apps/runner ---- shared application services ----> Postgres (authority)
+       |                                                ^
+       +---- Redis presentation deltas ----> apps/api --+
+                                              | SSE
+                                              +----> browser
 ```
 
 - `apps/api` authenticates, derives the Actor/workspace, validates commands, writes Messages/Runs,
@@ -31,10 +30,13 @@ browser ---- direct /v1 + shared session ----> apps/api (Hono /v1) ----> Electri
   `opencompany.chat`. The API allows credentialed CORS only from the configured web origin and
   rejects cookie-authenticated mutations without an allowed `Origin`. This keeps Vercel out of SSE
   and Electric long-poll response paths; same-origin `/v1` remains the local/unconfigured fallback.
-  Runner calls back to existing bearer-protected web host
-  gateways for user-authorized actions, Brain capture, task/schedule/workflow/skill/wiki behavior,
-  and browser sessions. These calls derive identity from the running durable turn; request bodies
-  cannot select a user or workspace.
+  Runner invokes shared application services in-process for actions and approvals, Brain capture,
+  task/schedule/workflow/skill/wiki behavior, browser sessions, artifact publication, and terminal
+  settlement. The queue claim establishes Attempt and lease authority; each application operation
+  re-derives its actor, workspace, membership, and Run/turn authority from persisted state. The old
+  bearer-protected web routes remain rollback adapters until the final route-deletion PR. Claude
+  Code's sandbox action transport and Auto model routing remain web-reachable until their next-PR
+  cutover.
 - Postgres is the authority and queue. `LISTEN/NOTIFY` only reduces latency. Redis carries optional
   five-minute, 1,024-entry-per-Run presentation replay and is not required for canonical execution
   or reconnect correctness.

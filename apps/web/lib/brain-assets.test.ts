@@ -3,8 +3,11 @@ import {
   goatBrainFilePathFor,
 } from "@opencompany/db/goat-brain-files";
 import { upsertGoatBrainSourceItemAndEnqueue } from "@opencompany/db/goat-brain-ingest";
+import {
+  documentViewFromFileRow,
+  nextAvailableGoatBrainId,
+} from "@opencompany/goat-agent/brain-files";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { documentViewFromFileRow, nextAvailableGoatBrainId } from "@/lib/brain";
 import { createGoatBrainAssetForUser } from "./brain-assets";
 
 vi.mock("@opencompany/analytics/goat", () => ({
@@ -19,7 +22,7 @@ vi.mock("@opencompany/db/goat-brain-ingest", () => ({
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND: "goat-brain-agent-ingest",
   upsertGoatBrainSourceItemAndEnqueue: vi.fn(),
 }));
-vi.mock("@/lib/brain", () => ({
+vi.mock("@opencompany/goat-agent/brain-files", () => ({
   documentViewFromFileRow: vi.fn(),
   nextAvailableGoatBrainId: vi.fn(),
 }));

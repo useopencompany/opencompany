@@ -1,6 +1,7 @@
 import {
   GOAT_ACTION_TOOL_CONTRACT,
   type GoatActionGatewayRequest,
+  type GoatActionGatewayResponse,
 } from "@opencompany/agent-runtime";
 import {
   createInMemoryGoatActionTurnGovernance,
@@ -13,10 +14,6 @@ import { createGoatCodexActionDynamicTools } from "./goat-codex-action-tools";
 const context = {
   codexChatSessionId: "codex_session_1",
   codexChatTurnId: "codex_turn_1",
-  env: {
-    goatAppUrl: "https://goat.example.com",
-    internalToken: "internal-secret",
-  },
   checkAbort: vi.fn(async () => undefined),
 };
 
@@ -33,43 +30,41 @@ describe("createGoatCodexActionDynamicTools", () => {
     ]);
   });
 
-  it("binds list requests to the current host session and bearer", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({
+  it("binds list requests to the current persisted host session", async () => {
+    const execute = vi.fn(
+      async (): Promise<GoatActionGatewayResponse> => ({
         ok: true,
         sources: [{ id: "gmail", label: "Gmail", description: "Email" }],
       }),
     );
     const [listTool] = createGoatCodexActionDynamicTools(context, {
-      fetch: fetchMock,
+      execute,
     });
 
     const output = await listTool!.execute(call(GOAT_ACTION_TOOL_CONTRACT.list.name, {}));
 
     expect(output.success).toBe(true);
-    expect(fetchMock).toHaveBeenCalledWith(
-      new URL("https://goat.example.com/api/internal/action-gateway"),
+    expect(execute).toHaveBeenCalledWith(
       expect.objectContaining({
-        method: "POST",
-        headers: {
-          authorization: "Bearer internal-secret",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
+        request: {
           operation: "list",
           sessionId: "codex_session_1",
           turnId: "codex_turn_1",
-        }),
+        },
       }),
     );
   });
 
   it("uses the app-server call id and rejects malformed execution locally", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({ ok: true, action: "gmail.search", result: [] }),
+    const execute = vi.fn(
+      async (): Promise<GoatActionGatewayResponse> => ({
+        ok: true,
+        action: "gmail.search",
+        result: [],
+      }),
     );
     const [, useTool] = createGoatCodexActionDynamicTools(context, {
-      fetch: fetchMock,
+      execute,
     });
 
     const valid = await useTool!.execute(
@@ -83,43 +78,39 @@ describe("createGoatCodexActionDynamicTools", () => {
     );
 
     expect(valid.success).toBe(true);
-    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(
-      JSON.stringify({
-        operation: "execute",
-        sessionId: "codex_session_1",
-        turnId: "codex_turn_1",
-        action: "gmail.search",
-        params: { query: "newer_than:1d" },
-        invocationId: "call_1",
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: {
+          operation: "execute",
+          sessionId: "codex_session_1",
+          turnId: "codex_turn_1",
+          action: "gmail.search",
+          params: { query: "newer_than:1d" },
+          invocationId: "call_1",
+        },
       }),
     );
     expect(invalid.success).toBe(false);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
-  it("returns a structured error without calling the network when unconfigured", async () => {
-    const fetchMock = vi.fn<typeof fetch>();
-    const [listTool] = createGoatCodexActionDynamicTools(
-      { ...context, env: { internalToken: "internal-secret" } },
-      { fetch: fetchMock },
-    );
+  it("does not call the network when the web origin is unavailable", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("web unavailable"));
+    const [listTool] = createGoatCodexActionDynamicTools(context, {
+      execute: async () => ({ ok: true, sources: [] }),
+    });
 
     const output = await listTool!.execute(call(GOAT_ACTION_TOOL_CONTRACT.list.name, {}));
 
-    expect(output).toMatchObject({ success: false });
-    const contentItem = output.contentItems[0];
-    expect(JSON.parse(contentItem?.type === "inputText" ? contentItem.text : "")).toMatchObject({
-      ok: false,
-      error: { code: "not_configured" },
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(output).toMatchObject({ success: true });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 
   it("surfaces call_budget on call 17 from the shared service", async () => {
     const governance = createInMemoryGoatActionTurnGovernance();
-    const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
-      const request = JSON.parse(String(init?.body)) as GoatActionGatewayRequest;
-      const result = await serveGoatActionRequest({
+    const execute = vi.fn(async ({ request }: { request: GoatActionGatewayRequest }) => {
+      return serveGoatActionRequest({
         request,
         catalog: {
           sources: [{ id: "gmail", label: "Gmail", description: "Email" }],
@@ -135,10 +126,9 @@ describe("createGoatCodexActionDynamicTools", () => {
         governance,
         execute: async ({ action }) => ({ ok: true, action, result: [] }),
       });
-      return Response.json(result);
     });
     const [listTool, useTool] = createGoatCodexActionDynamicTools(context, {
-      fetch: fetchMock,
+      execute,
     });
 
     await listTool!.execute(

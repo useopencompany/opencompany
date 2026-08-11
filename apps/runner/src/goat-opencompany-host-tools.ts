@@ -5,6 +5,7 @@ import type {
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { GoatHarnessEngine } from "@opencompany/db/goat-schema";
+import { executePersistedGoatChatHostTool } from "@opencompany/goat-agent/application/persisted-host-tools";
 import type {
   BrowserToolRunner,
   SkillDispatcher,
@@ -21,15 +22,14 @@ import type {
   ScheduleTaskToolOutput,
 } from "@opencompany/goat-agent/chat-ui";
 import type { RunnerEnv } from "./env";
-
-const GATEWAY_PATH = "/api/internal/headless-chat-tools";
-const GATEWAY_TIMEOUT_MS = 150_000;
-const GATEWAY_CLEANUP_TIMEOUT_MS = 15_000;
+import { wakeGoatCodexChatWorker } from "./goat-codex-chat-worker";
+import { planGoatHarnessForTask } from "./goat-harness";
+import { getGoatHarnessPlannerContextForRunner } from "./goat-harness-planner";
 
 type Context = {
   sessionId: string;
   turnId: string;
-  env: Pick<RunnerEnv, "goatAppUrl" | "internalToken">;
+  env: Pick<RunnerEnv, "vercelAiGatewayApiKey" | "goatBrowserEnabled">;
   signal: AbortSignal;
   mentionedSkillIds: string[];
   approvalContinuation: boolean;
@@ -65,16 +65,16 @@ export type GoatOpenCompanyHostTools = {
 
 export async function loadGoatOpenCompanyHostTools(
   context: Context,
-  dependencies: { fetch: typeof fetch } = { fetch: globalThis.fetch },
+  dependencies: { execute?: typeof executePersistedGoatChatHostTool } = {},
 ): Promise<GoatOpenCompanyHostTools | null> {
-  if (!context.env.goatAppUrl?.trim() || !context.env.internalToken.trim()) return null;
+  const execute = dependencies.execute ?? executePersistedGoatChatHostTool;
   const bootstrap = asBootstrap(
-    await callGateway(context, dependencies, "bootstrap", {
+    await callGateway(context, execute, "bootstrap", {
       mentionedSkillIds: context.mentionedSkillIds,
     }),
   );
   const call = (operation: GoatChatHostToolGatewayRequest["operation"], input?: object) =>
-    callGateway(context, dependencies, operation, input as Record<string, unknown> | undefined);
+    callGateway(context, execute, operation, input as Record<string, unknown> | undefined);
 
   return {
     bootstrap,
@@ -142,14 +142,7 @@ export async function loadGoatOpenCompanyHostTools(
         }
       : {}),
     close: async () => {
-      await callGateway(
-        context,
-        dependencies,
-        "browser_end_profile",
-        undefined,
-        false,
-        GATEWAY_CLEANUP_TIMEOUT_MS,
-      );
+      await callGateway(context, execute, "browser_end_profile", undefined, false);
     },
   };
 }
@@ -173,46 +166,44 @@ export function attachGoatHostSkillsToPrompt(
 
 async function callGateway(
   context: Context,
-  dependencies: { fetch: typeof fetch },
+  execute: typeof executePersistedGoatChatHostTool,
   operation: GoatChatHostToolGatewayRequest["operation"],
   input?: Record<string, unknown>,
   includeTurnSignal = true,
-  timeoutMs = GATEWAY_TIMEOUT_MS,
 ): Promise<unknown> {
-  const appUrl = context.env.goatAppUrl?.trim();
-  if (!appUrl) throw new Error("The Chat host-tool gateway is not configured.");
   const request: GoatChatHostToolGatewayRequest = {
     operation,
     sessionId: context.sessionId,
     turnId: context.turnId,
     ...(input ? { input } : {}),
   };
-  const response = await dependencies.fetch(new URL(GATEWAY_PATH, appUrl), {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${context.env.internalToken}`,
-      "content-type": "application/json",
+  const response = await execute({
+    request,
+    ...(includeTurnSignal ? { signal: context.signal } : {}),
+    runtime: {
+      wakeTaskWorker: wakeGoatCodexChatWorker,
+      defer: (work) => {
+        void work;
+      },
+      planHarness: async ({ actorId, prompt }) => {
+        const plannerContext = await getGoatHarnessPlannerContextForRunner(actorId, {
+          browserEnabled: context.env.goatBrowserEnabled,
+        });
+        const planned = await planGoatHarnessForTask({
+          prompt,
+          model: "moonshotai/kimi-k2.6",
+          availableTools: plannerContext.availableTools,
+          githubRepositories: plannerContext.githubRepositories,
+          gatewayApiKey: context.env.vercelAiGatewayApiKey,
+          userWorkosId: actorId,
+          signal: context.signal,
+        });
+        return planned.harnessSpec;
+      },
     },
-    body: JSON.stringify(request),
-    signal: includeTurnSignal
-      ? AbortSignal.any([context.signal, AbortSignal.timeout(timeoutMs)])
-      : AbortSignal.timeout(timeoutMs),
   });
-  const result = await readResponse(response);
-  if (!result.ok) throw new Error(result.error);
-  return result.result;
-}
-
-async function readResponse(response: Response): Promise<GoatChatHostToolGatewayResponse> {
-  try {
-    const value = (await response.json()) as unknown;
-    if (isRecord(value) && typeof value.ok === "boolean") {
-      return value as GoatChatHostToolGatewayResponse;
-    }
-  } catch {
-    // Avoid passing an HTML proxy response into model-visible errors.
-  }
-  return { ok: false, error: `The Chat host-tool gateway returned HTTP ${response.status}.` };
+  if (!response.ok) throw new Error(response.error);
+  return response.result;
 }
 
 function asBootstrap(value: unknown): GoatChatHostBootstrap {
