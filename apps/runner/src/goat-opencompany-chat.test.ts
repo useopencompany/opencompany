@@ -48,6 +48,37 @@ describe("hosted turn credit gate", () => {
 });
 
 describe("consumeGoatOpenCompanyChatStream", () => {
+  it("uses a responsive default cadence for durable text projections", async () => {
+    let clock = 0;
+    const project = vi.fn(async (_projection: GoatOpenCompanyChatProjection) => undefined);
+
+    await consumeGoatOpenCompanyChatStream({
+      fullStream: streamParts(
+        { type: "text-start", id: "text_1" },
+        { type: "text-delta", id: "text_1", text: "A" },
+        () => {
+          clock = 149;
+          return { type: "text-delta", id: "text_1", text: "B" };
+        },
+        () => {
+          clock = 150;
+          return { type: "text-delta", id: "text_1", text: "C" };
+        },
+        { type: "text-end", id: "text_1" },
+      ),
+      sink: { project, recordStepUsage: vi.fn(async () => undefined) },
+      signal: new AbortController().signal,
+      now: () => clock,
+    });
+
+    expect(project.mock.calls[0]?.[0]).toMatchObject({
+      parts: [{ type: "text", text: "A", state: "streaming" }],
+    });
+    expect(project.mock.calls[1]?.[0]).toMatchObject({
+      parts: [{ type: "text", text: "ABC", state: "streaming" }],
+    });
+  });
+
   it("accumulates throttled text, reasoning, and the complete tool lifecycle", async () => {
     let clock = 0;
     const project = vi.fn(async (_projection: GoatOpenCompanyChatProjection) => undefined);

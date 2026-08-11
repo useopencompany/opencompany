@@ -90,7 +90,10 @@ import {
   markGoatTaskTurnRunning,
 } from "./goat-task-turn";
 
-const ASSISTANT_PARTS_FLUSH_INTERVAL_MS = 500;
+// Durable snapshots feed the live SSE overlay, so this cadence is also the user's visible token
+// cadence. Keep it responsive without matching the 50ms browser render throttle one-for-one and
+// multiplying database writes unnecessarily.
+const ASSISTANT_PARTS_FLUSH_INTERVAL_MS = 150;
 const INTERRUPT_POLL_INTERVAL_MS = 500;
 
 const logger = createLogger({
