@@ -219,20 +219,27 @@ Issue [#1185](https://github.com/useopencompany/opencompany-experimental/issues/
 the live runner and sandbox call graph before extraction. The inventory below is the deletion gate;
 route names alone are not evidence that a transport is unused.
 
-| Current transport | Authoritative callers on 2026-08-11 | Shared owner / cutover | Removal boundary |
+| Audited transport | Authoritative callers on 2026-08-11 | Shared owner / cutover | Final result |
 | --- | --- | --- | --- |
-| `POST /api/internal/action-gateway` | OpenCompany and Codex runner adapters | action application service in `packages/goat-agent`, composed in-process by runner | keep as a web rollback adapter through direct-runner PR; delete in the final operations PR |
-| `POST /api/internal/codex-actions` | no direct current caller; compatibility alias only | same action service | keep with the action rollback adapter, then delete with it |
-| `POST /api/internal/codex-brain-capture` | OpenCompany and Codex runner adapters | Brain capture application service plus existing DB/Brain adapters | keep as a web rollback adapter through direct-runner PR; delete in the final operations PR |
-| `POST /api/internal/headless-chat-tools` | OpenCompany runner host-tool adapter | shared host-tool application service over Task, Workflow, schedule, skill, wiki, browser, and Brain ports | keep as a web rollback adapter through direct-runner PR; delete in the final operations PR |
-| `/api/internal/claude-actions` streamable HTTP MCP | Claude CLI inside the E2B sandbox | runner-hosted MCP transport over the same action and artifact services | move in the sandbox cutover PR; delete the web transport only after ticket/tenant/lease tests pass |
-| `POST /api/chat/model-route` | canonical web Chat transport before `POST /v1/messages` | canonical API Message/Run creation and the shared Auto-routing provider adapter | keep through shared extraction; delete after the API owns routing and stored-model replay |
-| `POST /api/internal/opencompany-chat/messages` | no code caller; documentation and route tests only | none | delete in the final operations PR after the repeated reference audit |
-| `POST /internal/goat/chat-artifacts/publish` on runner | web-hosted Claude MCP adapter | runner-owned artifact application service | retain during rollback; the runner-hosted MCP calls the service in-process, and the final PR may remove the orphaned internal adapter |
+| `POST /api/internal/action-gateway` | OpenCompany and Codex runner adapters | action application service in `packages/goat-agent`, composed in-process by runner | removed from web after the repeated caller audit |
+| `POST /api/internal/codex-actions` | no direct current caller; compatibility alias only | same action service | removed with the action adapter |
+| `POST /api/internal/codex-brain-capture` | OpenCompany and Codex runner adapters | Brain capture application service plus existing DB/Brain adapters | removed from web after in-process cutover |
+| `POST /api/internal/headless-chat-tools` | OpenCompany runner host-tool adapter | shared host-tool application service over Task, Workflow, schedule, skill, wiki, browser, and Brain ports | removed from web after in-process cutover |
+| `/api/internal/claude-actions` streamable HTTP MCP | Claude CLI inside the E2B sandbox | runner-hosted MCP transport over the same action and artifact services | removed from web after v2 ticket/tenant/lease tests and production runner health |
+| `POST /api/chat/model-route` | canonical web Chat transport before `POST /v1/messages` | canonical API Message/Run creation and the shared Auto-routing provider adapter | removed after API-owned routing and stored-model replay cutover |
+| `POST /api/internal/opencompany-chat/messages` | no code caller; documentation and route tests only | none | removed after the repeated audit again found no caller |
+| `POST /internal/goat/chat-artifacts/publish` on runner | web-hosted Claude MCP adapter | runner-owned artifact application service | removed; runner-hosted MCP invokes publication in-process |
 
 `GOAT_NEXT_PUBLIC_APP_URL` remains the canonical web origin for OAuth callbacks and other web
 presentation responsibilities. Phase 2 removes it only from runner capability enablement and
 execution; it is not a global environment-variable deletion.
+
+The repeated final audit retains `/api/chat` and `apps/web/lib/legacy-chat-route.ts` unchanged for
+macOS compatibility, plus web-to-runner wake, sandbox status/termination, auth brokerage,
+dictation, coding-workspace runtime access, Brain ingestion/import, Google Drive sync, and harness
+planning transports. Those are presentation/setup or worker-control responsibilities, not
+runner-to-web execution dependencies. Public web MCP, integration callbacks/webhooks, settings,
+Slack, and billing reconciliation continue to call the shared package implementations in-process.
 
 The Claude sandbox MCP transport will move to `apps/runner`, not `apps/api`. Current deployment
 evidence shows `opencompany-runner` is already a public Render web service, release preflight
@@ -244,22 +251,21 @@ call re-derives the session, Run/turn, membership, engine, contract version, and
 authority from Postgres. The capability contains no user/workspace identifier, provider
 credential, or `RUNNER_INTERNAL_TOKEN`.
 
-The extraction PR changes ownership only: the existing web routes continue to compose the shared
-services and all runner/sandbox URLs remain unchanged. The direct-runner and sandbox cutovers are
-separate rollback boundaries, and route deletion remains a fourth independently green change.
+The extraction PR changed ownership only: its web routes continued to compose the shared services
+and all runner/sandbox URLs remained unchanged. The direct-runner and sandbox cutovers were
+separate rollback boundaries, followed by a fourth independently green route-deletion change.
 Integration and managed-capability catalogs/execution, Brain capture/copy rules, skills, workflows,
 wiki operations, browser-profile persistence/provider code, Claude tool registration, and Auto
 routing now live under their existing shared package owners. Stripe auto-refill remains the same
 idempotent off-session flow but is owned by `packages/billing`; web compatibility modules only
 re-export or adapt these shared implementations for callers outside canonical Chat.
 
-The direct-runner PR removes normal runner calls to the action, Brain-capture, and host-tool web
+The direct-runner PR removed normal runner calls to the action, Brain-capture, and host-tool web
 routes. The runner now composes the same persisted services in-process, including durable action
 governance, attachment copy and Brain quota semantics, task worker wakeups, schedule planning,
 workflow/skill resolution, wiki access, browser-profile cleanup, and browser sandbox execution.
-Tests force the web-origin network lane unavailable while these adapters execute. The three web
-routes remain thin rollback adapters for this PR; the Claude sandbox MCP transport and Auto-routing
-model route remain the only execution cutovers intentionally deferred to the next PR.
+Tests force the web-origin network lane unavailable while these adapters execute. The routes stayed
+as rollback adapters until the later Claude and Auto cutovers were deployed.
 
 The sandbox/canonical cutover PR moves Claude's MCP URL to the runner's public
 `/internal/goat/claude-actions` endpoint. New v2 HMAC capabilities contain only opaque session,
@@ -267,8 +273,8 @@ Run, Attempt, lease, and expiry claims. They contain no Actor or workspace ident
 access to bearer-protected runner routes. The runner joins persisted session, turn, Attempt, and
 membership state before request admission and again before each tool operation; exact lease ID,
 worker ownership, lease expiry, active-turn state, contract version, engine, cancellation, and
-membership must still match. The web MCP route temporarily accepts v1 and v2 tickets as the rolling
-rollback adapter, while the new runner endpoint accepts v2 only.
+membership must still match. The runner endpoint accepts v2 only; the temporary web MCP rollback
+adapter was removed after the cutover deployment advertised v2 health.
 
 The same PR makes `POST /v1/messages` the canonical Auto-routing boundary. The API derives Actor
 and workspace from authentication, checks current membership and the persisted feature flag, and
@@ -276,8 +282,8 @@ resolves `model: "auto"` before Message/Run creation. An already accepted idempo
 Conversation model even if the response was lost; an existing authorized Conversation also reuses
 its stored model. Only a new command without stored state validates attachment ownership/expiry and
 calls the provider. The accepted response may include the resolved concrete model for client
-metadata. The browser no longer calls `/api/chat/model-route`; that route stays as a rollback
-adapter until the deletion PR.
+metadata. The browser no longer calls `/api/chat/model-route`, and that web route was removed after
+the cutover deployment.
 
 PR 1 does not change behavior or routing for existing clients:
 

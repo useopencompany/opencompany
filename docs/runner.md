@@ -34,6 +34,7 @@ upstreams. See [LLM token broker](./llm-token-broker.md).
 
 ## Verification
 
-Run runner unit tests and typecheck, then exercise the real web path that wakes the touched worker.
-For deployment changes, verify `/healthz` reports the expected release and create a representative
-durable turn through the web app rather than calling worker internals alone.
+Run runner unit tests and typecheck, then exercise the real product path that wakes the touched
+worker. For deployment changes, verify `/healthz` reports the expected release and Claude MCP
+capability version, then create a representative durable turn through the web app rather than
+calling worker internals alone.

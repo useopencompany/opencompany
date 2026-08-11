@@ -7,8 +7,8 @@ execution. Unmigrated product domains continue to use the existing web/runner bo
 ## Runtime boundaries
 
 - `apps/web` owns the Next.js UI, authenticated server actions for unmigrated domains, public
-  integration callbacks/webhooks, the same-origin `/v1` proxy, and temporary host-tool rollback
-  adapters. Its ordinary-Chat compatibility route is rollback-only.
+  integration callbacks/webhooks, and the same-origin `/v1` proxy. Its ordinary-Chat compatibility
+  route is rollback-only; it owns no canonical or coding-agent capability transport.
 - `apps/api` owns the versioned Hono `/v1` Chat API, WorkOS session/bearer authentication,
   authorization, canonical Auto model resolution, OpenAPI, semantic SSE, and authorized Electric
   read-model proxying.

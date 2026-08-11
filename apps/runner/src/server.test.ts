@@ -99,6 +99,21 @@ describe("runner server CORS", () => {
   });
 });
 
+describe("runner execution transport surface", () => {
+  it("does not expose the retired web-MCP artifact publication adapter", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/goat/chat-artifacts/publish",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+});
+
 describe("Goat Infisical authentication", () => {
   it("passes an allowlisted EU host to the auth flow", async () => {
     const server = createServer(env);

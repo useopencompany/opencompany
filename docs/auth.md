@@ -17,7 +17,10 @@ existing contract.
 
 The runner does not accept browser sessions. Private web-to-runner requests use
 `RUNNER_INTERNAL_TOKEN`, and browser-reachable runner transports use scoped signed tickets plus
-`RUNNER_ALLOWED_ORIGINS`.
+`RUNNER_ALLOWED_ORIGINS`. Claude Code receives only a short-lived capability bound to its persisted
+session, Run, Attempt, lease, and expiry. The runner re-derives Actor, workspace, membership, and
+live execution authority from Postgres; no user/workspace identifier, provider credential, or raw
+internal token enters the sandbox.
 
 OpenCompany's external integrations use provider-specific OAuth state secrets and encrypted credential
 storage. Google integrations use direct Goat callback routes; GitHub, Slack, Linear, HubSpot, X,
