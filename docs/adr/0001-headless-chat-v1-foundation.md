@@ -240,9 +240,11 @@ real but explicit cohort path rather than silently reducing capabilities:
   service rollout gate pass. PR 4 moves Auto model selection behind an authenticated web preflight
   that resolves one concrete model before the canonical command. Coding-chat metadata writes remain
   on their existing engine-specific path and are not part of the migrated ordinary-Chat resource.
-- The browser calls same-origin `/v1`; the Next proxy uses server-only `GOAT_API_ORIGIN`, forwards
-  the existing session cookie, and rejects missing, invalid, credential-bearing, or same-origin
-  targets. Browser code never receives the API origin or Electric credentials.
+- The browser calls same-origin `/v1`. Production uses an uncached Vercel external rewrite to the
+  server-only `GOAT_API_ORIGIN`; the App Router proxy remains the fail-closed/local fallback when
+  that origin is absent or invalid. Both preserve the existing session cookie, and configuration
+  rejects invalid, credential-bearing, or same-origin targets. Browser code never receives the API
+  origin or Electric credentials.
 - Electric collection URLs select only the fixed `chat-*-v1` names. The API chooses physical
   tables, columns, and actor/workspace predicates; client `table` or `where` parameters are ignored.
 - `apps/web/app/api/chat/route.ts` is a thin compatibility boundary. Its foreground implementation

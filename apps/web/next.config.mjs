@@ -1,4 +1,5 @@
 import { createMDX } from "fumadocs-mdx/next";
+import { headlessApiRouting } from "./headless-api-routing.mjs";
 import { SENSITIVE_CALLBACK_REQUEST_PATTERN } from "./request-logging.mjs";
 
 const release =
@@ -16,6 +17,7 @@ const releaseWorkflowDeploymentId =
 const deploymentId = vercelManagedDeploymentId
   ? ""
   : `goat-${releaseWorkflowDeploymentId || release}`.slice(0, 32);
+const headlessApi = headlessApiRouting();
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -29,6 +31,16 @@ const nextConfig = {
       ignore: [SENSITIVE_CALLBACK_REQUEST_PATTERN],
     },
   },
+  ...(headlessApi.rewrites.length > 0
+    ? {
+        async headers() {
+          return headlessApi.headers;
+        },
+        async rewrites() {
+          return { beforeFiles: headlessApi.rewrites, afterFiles: [], fallback: [] };
+        },
+      }
+    : {}),
   serverExternalPackages: ["@vercel/sandbox"],
   transpilePackages: [
     "@opencompany/agent-runtime",
