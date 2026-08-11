@@ -21,6 +21,28 @@ const actor: Actor = {
 const createdAt = new Date("2026-08-10T20:00:00.000Z");
 
 describe("canonical Hono API", () => {
+  it("reports the deployed API release for expected-SHA health gates", async () => {
+    const previousRelease = process.env.RENDER_GIT_COMMIT;
+    process.env.RENDER_GIT_COMMIT = "api-release-sha";
+    try {
+      const response = await testApp(fakeRepository()).request("/healthz");
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        ok: true,
+        service: "opencompany-api",
+        release: "api-release-sha",
+        renderGitCommit: "api-release-sha",
+      });
+    } finally {
+      if (previousRelease === undefined) {
+        delete process.env.RENDER_GIT_COMMIT;
+      } else {
+        process.env.RENDER_GIT_COMMIT = previousRelease;
+      }
+    }
+  });
+
   it("returns versioned structured authentication and validation errors", async () => {
     const repository = fakeRepository();
     const unauthenticated = createApiApp({

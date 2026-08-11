@@ -98,13 +98,18 @@ legacy path's approximately 50 ms cadence.
 
 ## Production rollout gate
 
-The implementation PR does not create a production service, deployment, or secret. Before setting
-`NEXT_PUBLIC_GOAT_HEADLESS_CHAT=true`, an authorized operator must:
+Issue #1171 authorizes `@louismorgner` to operate the staged production activation. The separately
+deployed Render service is named `opencompany-api`. API runtime values are owned by Infisical
+`prod` `/api`; Redis is shared with `prod` `/runner`; web origin/flag values remain in `prod`
+`/goat`; and release service IDs/origins remain in `prod` `/release`. Render's stable HTTPS URL is
+the initial server-only API origin, so a custom subdomain is not required for activation.
+
+Before setting `NEXT_PUBLIC_GOAT_HEADLESS_CHAT=true`, the operator must:
 
 1. Add `apps/api` as a separately deployable production service and include its `/healthz` in the
    release SHA/health gate.
-2. Provide its server-only database, WorkOS, blob, Electric, and observability configuration through
-   the normal Infisical/release path.
+2. Provide its server-only database, WorkOS, blob, Electric, Redis, and observability configuration
+   through Infisical `prod` `/api`; configure the same `REDIS_URL` in `prod` `/runner`.
 3. Configure web-only `GOAT_API_ORIGIN` to the credential-free API origin. Keep the origin private
    from browser variables.
 4. Deploy migration, runner, API, then web while `NEXT_PUBLIC_GOAT_HEADLESS_CHAT` is absent or false.
@@ -115,10 +120,9 @@ The implementation PR does not create a production service, deployment, or secre
 6. Set `NEXT_PUBLIC_GOAT_HEADLESS_CHAT=true`, deploy web, and repeat the web smoke set while watching
    correlated request/Run/Attempt logs and queue/event lag.
 
-This is a concrete operational authorization gate, not an application-code dependency. At the time
-of the PR4 audit, production had neither the API origin nor the cohort flag configured, and the
-release workflow did not own an API service. The code therefore remains off by default rather than
-routing production traffic to an absent service.
+Record expected-SHA health output, the complete disabled/enabled smoke matrices, responsive-cadence
+samples, a Redis-degraded fallback probe, and the real-traffic soak result on issues #1165 and #1171.
+Do not treat a healthy process as activation evidence unless its release SHA matches the release.
 
 ## Rollback and compatibility
 

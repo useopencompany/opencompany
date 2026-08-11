@@ -1,5 +1,72 @@
 services:
   - type: web
+    name: opencompany-api
+    runtime: docker
+    plan: standard
+    region: frankfurt
+    autoDeployTrigger: off
+    dockerfilePath: ./Dockerfile.api
+    healthCheckPath: /healthz
+    maxShutdownDelaySeconds: 60
+    # The Infisical -> Render integration syncs prod `/api` into this service. Redis improves
+    # presentation cadence, but the API remains correct when REDIS_URL is missing or unavailable.
+    envVars:
+      - key: API_DATABASE_URL
+        sync: false
+      - key: API_DB_POOL_MAX
+        sync: false
+      - key: WORKOS_CLIENT_ID
+        sync: false
+      - key: WORKOS_API_KEY
+        sync: false
+      - key: WORKOS_COOKIE_PASSWORD
+        sync: false
+      - key: WORKOS_COOKIE_NAME
+        sync: false
+      - key: WORKOS_COOKIE_DOMAIN
+        sync: false
+      - key: GOAT_AUTHKIT_DOMAIN
+        sync: false
+      - key: GOAT_API_OAUTH_AUDIENCE
+        sync: false
+      - key: GOAT_MACOS_OAUTH_AUDIENCE
+        sync: false
+      - key: GOAT_DEFAULT_CHAT_MODEL
+        sync: false
+      - key: BLOB_READ_WRITE_TOKEN
+        sync: false
+      - key: ELECTRIC_URL
+        sync: false
+      - key: ELECTRIC_SOURCE_ID
+        sync: false
+      - key: ELECTRIC_SOURCE_SECRET
+        sync: false
+      - key: ELECTRIC_SECRET
+        sync: false
+      - key: ELECTRIC_TOKEN
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: GOAT_OBSERVABILITY_ENABLED
+        sync: false
+      - key: GOAT_OTEL_EXPORTER_OTLP_ENDPOINT
+        sync: false
+      - key: GOAT_OTEL_EXPORTER_OTLP_HEADERS
+        sync: false
+      - key: BETTER_STACK_ERRORS_DSN
+        sync: false
+      - key: OBSERVABILITY_ENABLED
+        sync: false
+      - key: OBSERVABILITY_ENV
+        sync: false
+      - key: OBSERVABILITY_RELEASE
+        sync: false
+      - key: OBSERVABILITY_LOG_LEVEL
+        sync: false
+      - key: OBSERVABILITY_TIMING
+        sync: false
+
+  - type: web
     name: opencompany-runner
     runtime: docker
     plan: standard
@@ -69,6 +136,10 @@ services:
       # Private Vercel Blob store token. The runner downloads attachment bytes (images/PDFs)
       # to inline into model calls. Populated from Infisical prod `/runner`.
       - key: BLOB_READ_WRITE_TOKEN
+        sync: false
+      # Shared transient canonical Chat presentation stream. Postgres remains authoritative if
+      # this optional dependency is unavailable.
+      - key: REDIS_URL
         sync: false
       - key: EXA_API_KEY
         sync: false

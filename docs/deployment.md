@@ -1,26 +1,22 @@
 # Deployment
 
-Production releases are defined by `.github/workflows/release-production.yml` and target three
+Production releases are defined by `.github/workflows/release-production.yml` and target four
 surfaces:
 
 | Surface | Host | Responsibility |
 | --- | --- | --- |
 | Web | Vercel | product UI, APIs, callbacks, webhooks, cron routes |
+| Canonical Chat API | Render | Hono `/v1`, SSE, attachment commands, authorized read models |
 | Runner | Render | durable workers, internal transports, LLM broker |
 | Marketing | Vercel | public marketing site |
-
-The headless Chat Hono process in `apps/api` is not yet owned by this production workflow. Do not
-enable the canonical web cohort until an authorized infrastructure change adds that service and its
-health/release gates. See [Headless Chat operations](./headless-chat-operations.md) for the exact
-deployment order and configuration-only rollback.
 
 ## Release flow
 
 Merges to `main` trigger a release after CI succeeds. The workflow calculates affected surfaces,
-loads release credentials from Infisical `prod` `/release`, validates web and runner configuration,
-builds artifacts, runs production migrations once, deploys the selected surfaces, waits for Render,
-and runs release-aware web and runner health checks. Automatic releases re-check the current main
-SHA before migrations and deploy so a superseded run cannot publish stale code.
+loads release credentials from Infisical `prod` `/release`, validates web/API/runner configuration,
+builds artifacts, runs production migrations once, deploys the selected surfaces, waits for both
+Render services, and runs release-aware web/API/runner health checks. Automatic releases re-check
+the current main SHA before migrations and deploy so a superseded run cannot publish stale code.
 
 Manual dispatch can force surfaces and health checks. Do not bypass preflight or branch protection.
 
@@ -47,8 +43,9 @@ that revert, and repeat the same smoke checks. This topology change has no datab
 ## Configuration ownership
 
 - Web values: the retained Infisical compatibility path `prod` `/goat`, synced to the existing Vercel project.
+- API values: Infisical `prod` `/api`, synced to the `opencompany-api` Render service.
 - Runner values: Infisical `prod` `/runner`, synced to the Render service.
-- Release credentials and canonical URLs: Infisical `prod` `/release`.
+- Release credentials, Render service IDs, and canonical URLs: Infisical `prod` `/release`.
 
 Run `bun run infisical:release:preflight` to validate the release group. The hosted workflow also
 checks Vercel project metadata for sensitive values that cannot be read back through an env pull.
@@ -61,14 +58,19 @@ Never use a routine product release to drop compatibility tables or rewrite migr
 
 ## Health checks and rollback
 
-Web and runner `/healthz` responses include the deployed release. `scripts/release-smoke.mjs`
+Web, API, and runner `/healthz` responses include the deployed release. `scripts/release-smoke.mjs`
 requires the expected SHA, preventing a healthy but stale deployment from passing. A failed Vercel
-promotion cancels an in-flight Render deploy where possible.
+promotion cancels in-flight Render deploys where possible.
 
 Application rollback means redeploying a known-good commit through the same release workflow.
 Database migrations are forward-only; design them so the previous application remains compatible.
 External webhook/OAuth rollback may also require restoring a provider dashboard URL, which must be
 called out in the pull request.
+
+For canonical Chat, the immediate rollback is configuration-only: set
+`NEXT_PUBLIC_GOAT_HEADLESS_CHAT=false` and redeploy web. Existing canonical Runs continue to settle
+through the API and runner. The stable Render service URL is a valid server-only `GOAT_API_ORIGIN`;
+a custom API subdomain is optional and must preserve HTTPS plus the same origin contract.
 
 ## Stripe production endpoint
 
