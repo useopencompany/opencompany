@@ -128,7 +128,7 @@ export function Sidebar() {
         scrollViewTestID={SIDEBAR_SCROLL_VIEW_TEST_ID}
         topInset={insets.top}
       />
-      <View className="absolute inset-x-0 z-10 pl-5 pr-2" style={{ bottom: insets.bottom + 16 }}>
+      <View className="absolute inset-x-0 z-10 pl-5 pr-2" style={{ bottom: insets.bottom + 8 }}>
         <Host matchContents={{ vertical: true }}>
           <HStack>
             <Button
