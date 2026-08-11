@@ -19,8 +19,5 @@ export async function resolveGoatChatRequestContext(_request: Request): Promise<
 }
 
 function unauthorizedResponse(message: string) {
-  return new Response(message, {
-    status: 401,
-    headers: { "WWW-Authenticate": "Bearer" },
-  });
+  return new Response(message, { status: 401 });
 }
