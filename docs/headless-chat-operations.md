@@ -89,6 +89,37 @@ on a 500 ms cadence. Leaving it absent exercises the Postgres-only fallback.
   browser-profile cleanup operation may re-derive the same host identity after terminal settlement
   so completion, failure, and cancellation cannot leak a profile session.
 
+## Typed reasoning parts (issue #1192)
+
+Provider-designated user-visible reasoning is a typed, ordered `MessagePart` (`kind: "reasoning"`),
+not a Kimi-specific surface — any current or future reasoning-capable model streams through the same
+path. Only reasoning text a provider marks user-visible ever crosses the API boundary; hidden,
+encrypted, or internal chain-of-thought and raw provider metadata (`providerMetadata`,
+`callProviderMetadata`, `resultProviderMetadata`, `toolMetadata`) are stripped at the
+`packages/db` projection boundary and never appear in `Message.parts`, `message.part_updated`
+payloads, or client-visible logs.
+
+- The runner mints a stable `partId` per ordered part
+  (`` `${kind}_${assistantMessageId}_${index}` ``) the moment a `text-start`/`reasoning-start`
+  stream part is seen, and presents each part's deltas independently on the same 50 ms Redis
+  cadence and 500 ms durable `message.part_updated` cadence already used for text.
+  `message.content_updated` is unchanged and keeps deriving from text-kind parts only.
+- Ordering (`reasoning -> text -> tool -> reasoning -> text`) is preserved by array position in the
+  durable `parts` projection and by chunk-arrival order in the live SSE/presentation stream; both
+  converge on the same order because both are driven from the same underlying `uiMessageParts`
+  array.
+- Retry-attempt fencing for `message.part_updated` reuses the existing lease/Attempt check in
+  `RunExecutionRepository.appendEvents` (durable) and the existing `attemptNumber` comparison in the
+  API's stream loop (transient) — no new fencing mechanism was introduced.
+- Redis absence, expiry, or mid-stream failure degrades reasoning exactly like text: only streaming
+  smoothness is affected. The durable `message.part_updated` Event, gated by the same lease as every
+  other semantic Event, is what a reconnecting or non-Electric client needs to converge on the same
+  result.
+- Deployment order for this change follows the standing convention above (migration, runner, API,
+  then clients): the runner must be emitting `message.part_updated` and the API/protocol package
+  must accept it before a web build that consumes it deploys, so a rolling deploy never has a client
+  ahead of the backend for this event type.
+
 ## Controlled presentation cadence
 
 Run `REDIS_URL=<isolated-redis> bun run measure:chat-presentation` to drive 90 provider chunks at a

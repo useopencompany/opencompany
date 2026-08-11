@@ -16,6 +16,9 @@ bun run db:migrations:check
 bun run secrets:check
 ```
 
+Run `bun run openapi:check` after any change to `packages/protocol/src/{schemas,events,routes}.ts`;
+regenerate the committed artifact with `bun run openapi:generate` and commit the diff.
+
 TruffleHog must be installed for the local secret scan. CI runs the same scan on pull requests.
 For focused checks, use Turborepo filters such as `bun run test --filter @opencompany/web` and
 `bun run test --filter @opencompany/runner`.

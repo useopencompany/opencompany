@@ -378,6 +378,71 @@ describe("canonical Hono API", () => {
     expect(body).toContain("event: run.completed");
   });
 
+  it("delivers reasoning through the durable Event log alone when Redis presentation is not configured (issue #1192)", async () => {
+    const repository = fakeRepository();
+    repository.getRun = async () => ({
+      id: "run_1",
+      conversationId: "conversation_1",
+      triggerMessageId: "message_user_1",
+      status: "completed",
+      engine: "opencompany",
+      model: "provider/default",
+      attemptCount: 1,
+      createdAt,
+      updatedAt: createdAt,
+    });
+    repository.listRunEvents = async ({ afterSequence }) => {
+      const events = [
+        {
+          id: "event_1",
+          runId: "run_1",
+          attemptId: "attempt_1",
+          sequence: 1,
+          type: "message.part_updated" as const,
+          payload: {
+            messageId: "message_assistant_1",
+            partId: "reasoning_1",
+            kind: "reasoning",
+            order: 0,
+            state: "done",
+            text: "Checking the calendar.",
+          },
+          createdAt,
+        },
+        {
+          id: "event_2",
+          runId: "run_1",
+          attemptId: "attempt_1",
+          sequence: 2,
+          type: "message.content_updated" as const,
+          payload: { messageId: "message_assistant_1", content: "It is Friday.", complete: true },
+          createdAt,
+        },
+        {
+          id: "event_3",
+          runId: "run_1",
+          attemptId: "attempt_1",
+          sequence: 3,
+          type: "run.completed" as const,
+          payload: { messageId: "message_assistant_1" },
+          createdAt,
+        },
+      ].filter((event) => event.sequence > afterSequence);
+      return { events, nextSequence: events.at(-1)?.sequence ?? afterSequence };
+    };
+    // No `presentation` option is passed to testApp: models Redis being entirely absent or
+    // unconfigured. Reasoning must still reach the client through the durable Event log alone.
+    const app = testApp(repository);
+    const body = await responseBody(app.request("/v1/runs/run_1/events"));
+
+    expect(body).not.toContain("message.presentation_delta");
+    expect(body).toContain("event: message.part_updated");
+    expect(body).toContain('"kind":"reasoning"');
+    expect(body).toContain('"text":"Checking the calendar."');
+    expect(body).toContain('"content":"It is Friday."');
+    expect(body).toContain("event: run.completed");
+  });
+
   it("keeps streaming durably when Redis fails mid-stream", async () => {
     let reads = 0;
     const presentation: ChatPresentationReader = {
@@ -717,6 +782,8 @@ function presentationEntry(streamId: string, delta: string, startOffset = 0, att
       type: "message.presentation_delta" as const,
       payload: {
         messageId: "message_assistant_1",
+        partId: "text_message_assistant_1_0",
+        kind: "text" as const,
         startOffset,
         endOffset: startOffset + delta.length,
         delta,

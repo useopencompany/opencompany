@@ -24,6 +24,8 @@ const presentation = (cursor: string, delta = "Hi") => ({
   type: "message.presentation_delta",
   payload: {
     messageId: "message_2",
+    partId: "part_1",
+    kind: "text",
     startOffset: 0,
     endOffset: delta.length,
     delta,

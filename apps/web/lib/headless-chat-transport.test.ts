@@ -22,7 +22,13 @@ function event(sequence: number, type: string, payload: Record<string, unknown>)
   };
 }
 
-function presentationEvent(presentationCursor: string, delta: string, startOffset: number) {
+function presentationEvent(
+  presentationCursor: string,
+  delta: string,
+  startOffset: number,
+  partId = "text_1",
+  kind: "text" | "reasoning" = "text",
+) {
   return {
     runId: "run_1",
     attemptNumber: 1,
@@ -32,11 +38,31 @@ function presentationEvent(presentationCursor: string, delta: string, startOffse
     type: "message.presentation_delta",
     payload: {
       messageId: "message_assistant_1",
+      partId,
+      kind,
       startOffset,
       endOffset: startOffset + delta.length,
       delta,
     },
   };
+}
+
+function partUpdatedEvent(
+  sequence: number,
+  partId: string,
+  order: number,
+  state: "streaming" | "done",
+  text: string,
+  kind: "text" | "reasoning" = "text",
+) {
+  return event(sequence, "message.part_updated", {
+    messageId: "message_assistant_1",
+    partId,
+    kind,
+    order,
+    state,
+    text,
+  });
 }
 
 function sse(events: unknown[]) {
@@ -233,11 +259,7 @@ describe("canonical Chat transport", () => {
             triggerMessageId: "message_user_1",
           }),
           event(2, "run.started", { attemptNumber: 1 }),
-          event(3, "message.content_updated", {
-            messageId: "message_assistant_1",
-            content: "Working",
-            complete: false,
-          }),
+          partUpdatedEvent(3, "text_1", 0, "streaming", "Working"),
           event(4, "tool.started", { toolCallId: "tool_1", name: "use_action" }),
           event(5, "approval.requested", {
             approvalId: "approval_1",
@@ -304,7 +326,7 @@ describe("canonical Chat transport", () => {
     expect(chunks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ type: "start", messageId: "message_assistant_1" }),
-        { type: "text-delta", id: "text_message_assistant_1_1", delta: "Working" },
+        { type: "text-delta", id: "text_1", delta: "Working" },
         expect.objectContaining({ type: "tool-input-available", toolCallId: "tool_1" }),
         {
           type: "tool-approval-request",
@@ -312,6 +334,123 @@ describe("canonical Chat transport", () => {
           toolCallId: "tool_1",
         },
         expect.objectContaining({ type: "finish", finishReason: "tool-calls" }),
+      ]),
+    );
+  });
+
+  it("streams reasoning live before the first answer token, then a non-reasoning turn regresses cleanly (issue #1192)", async () => {
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/v1/messages") {
+        return Response.json(
+          {
+            data: {
+              conversationId: "conversation_1",
+              messageId: "message_user_1",
+              assistantMessageId: "message_assistant_1",
+              runId: "run_1",
+              transactionId: "42",
+              replayed: false,
+            },
+            meta: { apiVersion: "v1", protocolVersion: "1.1.0" },
+          },
+          { status: 202 },
+        );
+      }
+      if (url.pathname.endsWith("/events")) {
+        return sse([
+          // Reasoning streams live, ahead of any answer text.
+          presentationEvent("p1:1786449600000-0", "Checking", 0, "reasoning_1", "reasoning"),
+          presentationEvent("p1:1786449600010-0", " the calendar", 8, "reasoning_1", "reasoning"),
+          partUpdatedEvent(1, "reasoning_1", 0, "done", "Checking the calendar", "reasoning"),
+          presentationEvent("p1:1786449600020-0", "It is Friday.", 0, "text_1", "text"),
+          partUpdatedEvent(2, "text_1", 1, "done", "It is Friday.", "text"),
+          event(3, "run.completed", { messageId: "message_assistant_1" }),
+        ]);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const transport = new HeadlessChatTransport<UIMessage>({
+      baseUrl: "https://app.example.test",
+      fetch: fetchMock as typeof fetch,
+    });
+    const chunks = await collect(
+      await transport.sendMessages({
+        trigger: "submit-message",
+        chatId: "conversation_1",
+        messageId: undefined,
+        messages: [{ id: "user_1", role: "user", parts: [{ type: "text", text: "What day?" }] }],
+        abortSignal: undefined,
+      }),
+    );
+
+    const orderedTypes = chunks.map((chunk) => chunk.type);
+    expect(orderedTypes.indexOf("reasoning-start")).toBeGreaterThanOrEqual(0);
+    expect(orderedTypes.indexOf("reasoning-start")).toBeLessThan(
+      orderedTypes.indexOf("text-start"),
+    );
+    expect(chunks).toEqual(
+      expect.arrayContaining([
+        { type: "reasoning-start", id: "reasoning_1" },
+        { type: "reasoning-delta", id: "reasoning_1", delta: "Checking" },
+        { type: "reasoning-delta", id: "reasoning_1", delta: " the calendar" },
+        { type: "reasoning-end", id: "reasoning_1" },
+        { type: "text-start", id: "text_1" },
+        { type: "text-delta", id: "text_1", delta: "It is Friday." },
+        { type: "text-end", id: "text_1" },
+      ]),
+    );
+  });
+
+  it("regresses cleanly for a non-reasoning model turn (no reasoning chunks emitted)", async () => {
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/v1/messages") {
+        return Response.json(
+          {
+            data: {
+              conversationId: "conversation_1",
+              messageId: "message_user_1",
+              assistantMessageId: "message_assistant_1",
+              runId: "run_1",
+              transactionId: "42",
+              replayed: false,
+            },
+            meta: { apiVersion: "v1", protocolVersion: "1.1.0" },
+          },
+          { status: 202 },
+        );
+      }
+      if (url.pathname.endsWith("/events")) {
+        return sse([
+          partUpdatedEvent(1, "text_1", 0, "streaming", "It "),
+          partUpdatedEvent(2, "text_1", 0, "done", "It is Friday."),
+          event(3, "run.completed", { messageId: "message_assistant_1" }),
+        ]);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const transport = new HeadlessChatTransport<UIMessage>({
+      baseUrl: "https://app.example.test",
+      fetch: fetchMock as typeof fetch,
+    });
+    const chunks = await collect(
+      await transport.sendMessages({
+        trigger: "submit-message",
+        chatId: "conversation_1",
+        messageId: undefined,
+        messages: [{ id: "user_1", role: "user", parts: [{ type: "text", text: "What day?" }] }],
+        abortSignal: undefined,
+      }),
+    );
+
+    expect(chunks.some((chunk) => chunk.type.startsWith("reasoning-"))).toBe(false);
+    expect(chunks).toEqual(
+      expect.arrayContaining([
+        { type: "text-start", id: "text_1" },
+        { type: "text-delta", id: "text_1", delta: "It " },
+        { type: "text-delta", id: "text_1", delta: "is Friday." },
+        { type: "text-end", id: "text_1" },
       ]),
     );
   });
@@ -346,18 +485,13 @@ describe("canonical Chat transport", () => {
         return eventRequests === 1
           ? sse([presentationEvent("p1:1786449600000-0", "Hello", 0)])
           : sse([
-              event(1, "message.content_updated", {
-                messageId: "message_assistant_1",
-                content: "Hel",
-                complete: false,
-              }),
+              // Durable catch-up lagging behind the already-applied transient text must not
+              // regress the buffer.
+              partUpdatedEvent(1, "text_1", 0, "streaming", "Hel"),
               presentationEvent("p1:1786449600050-0", " world", 5),
+              // A replayed, already-applied offset range must be ignored, not re-applied.
               presentationEvent("p1:1786449600100-0", "Hello", 0),
-              event(2, "message.content_updated", {
-                messageId: "message_assistant_1",
-                content: "Hello world",
-                complete: true,
-              }),
+              partUpdatedEvent(2, "text_1", 0, "done", "Hello world"),
               event(3, "run.completed", { messageId: "message_assistant_1" }),
             ]);
       }
@@ -378,8 +512,8 @@ describe("canonical Chat transport", () => {
     );
 
     expect(chunks.filter((chunk) => chunk.type === "text-delta")).toEqual([
-      { type: "text-delta", id: "text_message_assistant_1_1", delta: "Hello" },
-      { type: "text-delta", id: "text_message_assistant_1_1", delta: " world" },
+      { type: "text-delta", id: "text_1", delta: "Hello" },
+      { type: "text-delta", id: "text_1", delta: " world" },
     ]);
     expect(replayQueries).toEqual([
       { durable: null, presentation: null },
@@ -422,11 +556,7 @@ describe("canonical Chat transport", () => {
         eventCursors.push(url.searchParams.get("cursor"));
         return eventCursors.length === 1
           ? sse([
-              event(1, "message.content_updated", {
-                messageId: "message_assistant_1",
-                content: "Working",
-                complete: true,
-              }),
+              partUpdatedEvent(1, "text_1", 0, "done", "Working"),
               event(2, "approval.requested", {
                 approvalId: "approval_1",
                 toolCallId: "tool_1",
@@ -436,11 +566,7 @@ describe("canonical Chat transport", () => {
               event(3, "run.paused", { reason: "approval_required" }),
             ])
           : sse([
-              event(4, "message.content_updated", {
-                messageId: "message_assistant_1",
-                content: "Working done",
-                complete: true,
-              }),
+              partUpdatedEvent(4, "text_2", 2, "done", " done"),
               event(5, "run.completed", { messageId: "message_assistant_1" }),
             ]);
       }
@@ -486,13 +612,13 @@ describe("canonical Chat transport", () => {
     expect(eventCursors).toEqual([null, "v1:3"]);
     expect(chunks).toEqual(
       expect.arrayContaining([
-        { type: "text-delta", id: "text_message_assistant_1_2", delta: " done" },
+        { type: "text-delta", id: "text_2", delta: " done" },
         expect.objectContaining({ type: "finish", finishReason: "stop" }),
       ]),
     );
   });
 
-  it("recovers a paused approval without session storage and suppresses persisted content", async () => {
+  it("recovers a paused approval without session storage by replaying full durable history", async () => {
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
       const url = requestUrl(input);
       if (url.pathname === "/v1/runs/run_1") {
@@ -524,21 +650,13 @@ describe("canonical Chat transport", () => {
       }
       if (url.pathname.endsWith("/events")) {
         return sse([
-          event(1, "message.content_updated", {
-            messageId: "message_assistant_1",
-            content: "Working",
-            complete: true,
-          }),
+          partUpdatedEvent(1, "text_1", 0, "done", "Working"),
           event(2, "run.paused", { reason: "approval_required" }),
           event(3, "approval.resolved", {
             approvalId: "approval_1",
             resolution: "approved",
           }),
-          event(4, "message.content_updated", {
-            messageId: "message_assistant_1",
-            content: "Working done",
-            complete: true,
-          }),
+          partUpdatedEvent(4, "text_2", 2, "done", " done"),
           event(5, "run.completed", { messageId: "message_assistant_1" }),
         ]);
       }
@@ -575,8 +693,12 @@ describe("canonical Chat transport", () => {
       }),
     );
 
+    // No prior sessionStorage entry means the stream replays every durable Event from the start
+    // (no cursor), reconstructing both the pre-pause text and the post-approval continuation as
+    // separate ordered parts rather than relying on a client-supplied seed.
     expect(chunks.filter((chunk) => chunk.type === "text-delta")).toEqual([
-      { type: "text-delta", id: "text_message_assistant_1_1", delta: " done" },
+      { type: "text-delta", id: "text_1", delta: "Working" },
+      { type: "text-delta", id: "text_2", delta: " done" },
     ]);
     expect(chunks.at(-1)).toEqual(
       expect.objectContaining({ type: "finish", finishReason: "stop" }),

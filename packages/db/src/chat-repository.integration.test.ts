@@ -26,6 +26,7 @@ const migrationPaths = [
   "0199_goat_chat_attachment_uploads.sql",
   "0200_goat_chat_run_pausing.sql",
   "0201_goat_chat_read_models_v1.sql",
+  "0202_goat_chat_reasoning_parts.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -501,6 +502,77 @@ describe("Postgres Chat repositories", () => {
         conversationId: created.conversationId,
       }),
     ).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("projects typed, ordered, redacted parts onto the durable Message contract (issue #1192)", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "typed-parts",
+      content: "Ping",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+    const uiMessageParts = [
+      {
+        type: "reasoning",
+        id: "reasoning_1",
+        text: "Checking the launch date",
+        state: "done",
+        providerMetadata: { hidden: "chain-of-thought-signature" },
+      },
+      { type: "text", id: "text_1", text: "It is Friday.", state: "done" },
+      {
+        type: "tool-goat_brain",
+        toolCallId: "tool_1",
+        state: "output-available",
+        input: { command: "query" },
+        output: { ok: true, stdout: "Friday." },
+        callProviderMetadata: { gateway: { callId: "call_1" } },
+        resultProviderMetadata: { gateway: { resultId: "result_1" } },
+      },
+      { type: "step-start" },
+      // Legacy row from before ids were minted: must not break projection or collide with a
+      // later id.
+      { type: "text", text: "legacy trailing text", state: "done" },
+    ];
+    await database.exec(`
+      UPDATE goat.chat_messages
+      SET debug_trace = '${JSON.stringify({
+        schemaVersion: "opencompany.chat.debug.v1",
+        uiMessageParts,
+      }).replace(/'/gu, "''")}'::jsonb
+      WHERE id = '${created.assistantMessageId}'
+    `);
+
+    const page = await service.listMessages(actor(), { conversationId: created.conversationId });
+    const assistantMessage = page.messages.find(
+      (message) => message.id === created.assistantMessageId,
+    );
+    if (!assistantMessage) throw new Error("Expected the assistant Message to be present.");
+
+    expect(assistantMessage.parts).toEqual([
+      {
+        type: "reasoning",
+        id: "reasoning_1",
+        order: 0,
+        text: "Checking the launch date",
+        state: "done",
+      },
+      { type: "text", id: "text_1", order: 1, text: "It is Friday.", state: "done" },
+      {
+        type: "tool",
+        id: "tool_1",
+        order: 2,
+        toolName: "goat_brain",
+        state: "output-available",
+        input: { command: "query" },
+        output: { ok: true, stdout: "Friday." },
+      },
+      { type: "text", id: "legacy_text_4", order: 4, text: "legacy trailing text", state: "done" },
+    ]);
+    // Hidden/internal provider fields never cross into the typed contract.
+    expect(JSON.stringify(assistantMessage.parts)).not.toMatch(
+      /providerMetadata|callProviderMetadata|resultProviderMetadata|chain-of-thought/u,
+    );
   });
 
   it("resolves durable approvals once and appends their semantic event", async () => {

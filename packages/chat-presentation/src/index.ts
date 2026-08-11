@@ -216,6 +216,10 @@ function coalesceFrames(
   if (
     pending?.attemptNumber !== next.attemptNumber ||
     pending.payload.messageId !== next.payload.messageId ||
+    // Reasoning and text now stream as independent parts on the same per-Run stream. Only
+    // contiguous deltas for the *same* part may merge; otherwise one part's frame would silently
+    // absorb another's and corrupt both offset chains.
+    pending.payload.partId !== next.payload.partId ||
     pending.payload.endOffset !== next.payload.startOffset
   ) {
     return next;

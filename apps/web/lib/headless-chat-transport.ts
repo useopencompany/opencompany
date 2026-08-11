@@ -9,17 +9,22 @@ import {
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 import { awaitHeadlessChatTransaction } from "./headless-chat-collections";
-import { HeadlessChatUiProjector } from "./headless-chat-ui-projector";
+import {
+  HeadlessChatUiProjector,
+  type HeadlessChatUiProjectorPart,
+} from "./headless-chat-ui-projector";
 
-const STORAGE_PREFIX = "opencompany:headless-chat:v1:";
+// v2: the durable/live part model (issue #1192) replaced the single cumulative `content`/
+// `textSegment` fields with an ordered `parts` array, so a stale v1 entry from before this
+// change must not be reused across a reload/reconnect.
+const STORAGE_PREFIX = "opencompany:headless-chat:v2:";
 
 type HeadlessRunState = {
   runId: string;
   conversationId: string;
   assistantMessageId: string;
   model: string;
-  content?: string;
-  textSegment?: number;
+  parts?: HeadlessChatUiProjectorPart[];
   startedToolCallIds?: string[];
   cursor?: string;
   presentationCursor?: string;
@@ -169,7 +174,9 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
           conversationId: run.conversationId,
           assistantMessageId: message.id,
           model: metadata.model ?? run.model,
-          content: textFromMessage(message),
+          // No cursor: the stream below replays every durable Event from the start, including
+          // the historical message.part_updated Events that already reconstruct this message's
+          // parts, so nothing needs to be seeded here.
           status: run.status,
         };
         writeRunStateAliases(chatId, state);
@@ -207,8 +214,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
       async start(controller) {
         const projector = new HeadlessChatUiProjector(
           state.assistantMessageId,
-          state.content,
-          state.textSegment,
+          state.parts,
           state.startedToolCallIds,
         );
         controller.enqueue({
@@ -239,8 +245,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
             },
           })) {
             for (const chunk of projector.project(event)) controller.enqueue(chunk);
-            state.content = projector.content;
-            state.textSegment = projector.segment;
+            state.parts = projector.partsSnapshot;
             state.startedToolCallIds = projector.startedToolCallIds;
             if (event.type !== "message.presentation_delta") {
               state.status = statusFromEvent(event, state.status);

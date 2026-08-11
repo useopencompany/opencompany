@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "OpenCompany Headless API",
-    "version": "1.0.0"
+    "version": "1.1.0"
   },
   "servers": [
     {
@@ -102,7 +102,7 @@
           "protocolVersion": {
             "type": "string",
             "enum": [
-              "1.0.0"
+              "1.1.0"
             ]
           }
         },
@@ -283,6 +283,12 @@
           "content": {
             "type": "string"
           },
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessagePart"
+            }
+          },
           "attachments": {
             "type": "array",
             "items": {
@@ -303,9 +309,161 @@
           "conversationId",
           "role",
           "content",
+          "parts",
           "attachments",
           "createdAt",
           "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "MessagePart": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/TextMessagePart"
+          },
+          {
+            "$ref": "#/components/schemas/ReasoningMessagePart"
+          },
+          {
+            "$ref": "#/components/schemas/ToolMessagePart"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "text": "#/components/schemas/TextMessagePart",
+            "reasoning": "#/components/schemas/ReasoningMessagePart",
+            "tool": "#/components/schemas/ToolMessagePart"
+          }
+        }
+      },
+      "TextMessagePart": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "text"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "streaming",
+              "done"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "order",
+          "text",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "ReasoningMessagePart": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "reasoning"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "streaming",
+              "done"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "order",
+          "text",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "ToolMessagePart": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "tool"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "toolName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "input-streaming",
+              "input-available",
+              "approval-requested",
+              "output-available",
+              "output-error"
+            ]
+          },
+          "input": {
+            "nullable": true
+          },
+          "output": {
+            "nullable": true
+          },
+          "errorText": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "order",
+          "toolName",
+          "state"
         ],
         "additionalProperties": false
       },
@@ -995,6 +1153,110 @@
                   "messageId",
                   "content",
                   "complete"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "runId",
+              "attemptId",
+              "cursor",
+              "schemaVersion",
+              "occurredAt",
+              "type",
+              "payload"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "runId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "attemptId": {
+                "type": "string",
+                "nullable": true,
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "cursor": {
+                "type": "string",
+                "pattern": "^v1:[1-9][0-9]*$/u",
+                "example": "v1:42",
+                "description": "Opaque, versioned event cursor."
+              },
+              "schemaVersion": {
+                "type": "number",
+                "enum": [
+                  1
+                ]
+              },
+              "occurredAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "message.part_updated"
+                ]
+              },
+              "payload": {
+                "type": "object",
+                "properties": {
+                  "messageId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "example": "run_019fed53"
+                  },
+                  "partId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "example": "run_019fed53"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "text",
+                      "reasoning"
+                    ]
+                  },
+                  "order": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "streaming",
+                      "done"
+                    ]
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "messageId",
+                  "partId",
+                  "kind",
+                  "order",
+                  "state",
+                  "text"
                 ],
                 "additionalProperties": false
               }
@@ -1843,6 +2105,19 @@
                 "maxLength": 256,
                 "example": "run_019fed53"
               },
+              "partId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "reasoning"
+                ]
+              },
               "startOffset": {
                 "type": "integer",
                 "minimum": 0
@@ -1860,6 +2135,8 @@
             },
             "required": [
               "messageId",
+              "partId",
+              "kind",
               "startOffset",
               "endOffset",
               "delta"

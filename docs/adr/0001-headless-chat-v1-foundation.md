@@ -409,6 +409,105 @@ Owner direction then narrowed PR 4 client evidence to web and deferred native wo
 API service remains an explicitly authorized operational gate, so mergeable code does not silently
 enable a nonexistent topology.
 
+## Addendum: typed reasoning parts (issue #1192, 2026-08-11)
+
+### Problem
+
+Models that emit user-visible reasoning (for example Kimi) streamed that reasoning into the
+runner's durable `uiMessageParts` projection, but the canonical live presentation path was
+text-and-tools only: `message.content_updated` and `message.presentation_delta` both derived
+exclusively from text-kind parts. A reasoning-capable Run therefore looked idle for the entire
+reasoning phase even though the model and runner were actively producing output, and the public
+`Message`/read-model contract had no typed field for reasoning at all — `content` was a flat
+string and the Electric `presentation` bag was untyped `Record<string, unknown>`.
+
+### Decision
+
+Reasoning becomes a typed, provider-neutral, ordered `MessagePart` alongside text and tool
+activity, carried through both the live/durable Event stream and the durable `/v1` Message
+contract:
+
+- **New durable Event type `message.part_updated`** (`packages/protocol/src/events.ts`):
+  `{ messageId, partId, kind: "text" | "reasoning", order, state: "streaming" | "done", text }`.
+  `partId` is minted once per part (`` `${kind}_${assistantMessageId}_${index}` ``) and stable for
+  its lifetime; `order` is the part's position in the message's ordered parts. This event is
+  additive to the existing `RunEventSchema` discriminated union — `message.content_updated`
+  keeps deriving from text-kind parts only and is unchanged, so it remains the compatible
+  final-answer text projection required by the issue.
+- **`message.presentation_delta` gains `partId` and `kind`** on its payload (still Redis-only,
+  still best-effort). `packages/chat-presentation`'s frame coalescing now keys on
+  `(attemptNumber, messageId, partId)` instead of `(attemptNumber, messageId)`, so a queued
+  reasoning delta can never be silently absorbed into an unrelated text delta's frame.
+- **Typed `Message.parts`** (`packages/protocol/src/schemas.ts`): a discriminated union of
+  `TextMessagePart | ReasoningMessagePart | ToolMessagePart`, each with a stable `id`/`order`.
+  `packages/db/src/chat-repository.ts` projects the runner's internal `uiMessageParts` bag into
+  this typed, public-safe shape for `/v1/conversations/{id}/messages` reads, stripping
+  `providerMetadata`/`callProviderMetadata`/`resultProviderMetadata`/`toolMetadata` in the same
+  pass — hidden or provider-internal fields never cross the typed boundary. The Electric
+  `chat-messages-v1` read model's existing `presentation` bag is intentionally left untyped and
+  unchanged: it already carries `uiMessageParts` end-to-end today and the web client's existing
+  `parseDebugTraceUiMessageParts` already reconstructs reasoning from it correctly for the
+  durable/refresh case, so retyping it was not required to close the live-stream gap.
+- **Retry-attempt fencing** reuses the existing mechanisms rather than inventing a new one: the
+  durable channel is fenced by the worker's lease/Attempt check already inside
+  `RunExecutionRepository.appendEvents` (a delayed/reclaimed worker's insert returns zero rows), and
+  the transient Redis channel is fenced by the existing `attemptNumber`-keyed comparison in
+  `apps/api/src/app.ts`'s stream loop. Both applied unmodified to the new event/frame shapes.
+- **Runner** (`apps/runner/src/goat-opencompany-chat.ts`): `presentPart` replaces the old
+  single-buffer `present` closure, tracking presented-so-far text per `partId` instead of one
+  cumulative message string, and is now called from the `reasoning-delta`/`reasoning-end` stream
+  handlers exactly as it already was from `text-delta`/`text-end` — this is the fix. The projector
+  (`goat-opencompany-chat-projector.ts`) diffs each part's `{state, text}` against the last flush
+  and emits `message.part_updated` only for parts that changed, mirroring the existing
+  `message.content_updated` cadence (500 ms durable, 50 ms presentation).
+- **Web** (`apps/web/lib/headless-chat-ui-projector.ts`): rewritten from a single cumulative text
+  buffer to a per-part map keyed by `partId`, driven by `message.part_updated` and
+  `message.presentation_delta`. `message.content_updated` is now a no-op for chunk emission on
+  this path (it would otherwise double-render text already streamed part-by-part) but remains on
+  the wire unchanged. `apps/web/components/chat/assistant-items.ts` and
+  `apps/web/components/chat/ReasoningItem.tsx` already handled `type: "reasoning"` parts generically
+  for the durable path, so no UI/provider-conditional code was added — reasoning renders through
+  the existing collapsed/expandable Thought surface for any model, not a Kimi-specific branch.
+
+### Versioning
+
+`PROTOCOL_VERSION` moves from `1.0.0` to `1.1.0` (`packages/protocol/src/version.ts`), a minor,
+additive bump: no existing event type, field, or route changed shape or was removed;
+`EVENT_SCHEMA_VERSION` (the per-event envelope version) stays `1` because the envelope itself is
+unchanged — only a new discriminated-union member and new optional-in-practice payload fields were
+added. `run_events.schema_version` similarly stays pinned at `1` (`CHECK (schema_version = 1)`);
+only the `goat_run_events_type_check` constraint widens (migration
+`0202_goat_chat_reasoning_parts.sql`) to allow the new type string.
+
+This is deliberately safe under the current deployment topology: `/v1` SSE and the typed `Message`
+contract have exactly one deployed consumer today, `apps/web`, built from the same monorepo/release
+as `packages/protocol` and `apps/api`. There is no independently-versioned native/mobile client
+consuming `/v1` yet (per ADR body above, that is a later, separately owned project). A client on an
+older `@opencompany/protocol` build would fail to `RunEventSchema.parse` an unrecognized
+`message.part_updated` type or a `Message.parts`/presentation-delta payload it doesn't know about;
+this addendum's compatibility argument is therefore "no independent consumer exists to break," not
+"the wire format tolerates unknown fields." Any future native/SDK consumer must pin its protocol
+package version to the API it targets, and this repository's established deployment order —
+migration, runner, API, compatibility adapter, then clients (see body above) — already guarantees
+the runner and API understand `message.part_updated` before any client build that could emit or
+expect it ships. `apps/web/lib/legacy-chat-route.ts` and `apps/web/app/api/chat/route.ts` do not
+call `/v1` at all and are unaffected.
+
+### Compatibility impact
+
+- `content` remains a plain string, unchanged, and is still exactly the concatenation of text-kind
+  parts — no consumer relying only on `content` sees any behavior change.
+- `/api/chat` (macOS) and `apps/web/lib/legacy-chat-route.ts` do not import `@opencompany/protocol`'s
+  event/message schemas for their own request/response shapes and are untouched by this change.
+- Migration `0202_goat_chat_reasoning_parts.sql` is additive-only (one constraint widened via
+  `NOT VALID` + `VALIDATE CONSTRAINT`); it does not lock the table for writes and does not touch any
+  existing row.
+- Redis remains optional: `message.part_updated` travels the same durable, lease-fenced path as
+  every other semantic Event, so an absent, expired, or failed Redis presentation lane can only
+  reduce reasoning's streaming smoothness, never withhold or corrupt it — verified in
+  `apps/api/src/app.test.ts` ("delivers reasoning through the durable Event log alone when Redis
+  presentation is not configured").
+
 ## Alternatives rejected
 
 - New parallel Conversation/Message/Run tables plus a full backfill would create two authorities,

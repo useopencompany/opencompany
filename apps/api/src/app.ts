@@ -7,6 +7,7 @@ import {
   type Actor,
   CHAT_ATTACHMENT_MAX_BYTES,
   type ChatApplicationService,
+  type Message,
   type RunEvent,
 } from "@opencompany/core";
 import {
@@ -630,23 +631,10 @@ function conversationDto(conversation: {
   };
 }
 
-function messageDto(message: {
-  id: string;
-  conversationId: string;
-  role: "user" | "assistant";
-  content: string;
-  attachments: readonly {
-    id: string;
-    filename: string;
-    mediaType: string;
-    sizeBytes: number;
-    kind: "image" | "document" | "audio" | "video" | "other";
-  }[];
-  createdAt: Date;
-  updatedAt: Date;
-}) {
+function messageDto(message: Message) {
   return {
     ...message,
+    parts: [...message.parts],
     attachments: [...message.attachments],
     createdAt: message.createdAt.toISOString(),
     updatedAt: message.updatedAt.toISOString(),

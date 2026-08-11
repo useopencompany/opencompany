@@ -83,9 +83,9 @@ describe("consumeGoatOpenCompanyChatStream", () => {
       parts: [{ type: "text", text: "ABCD", state: "streaming" }],
     });
     expect(present.mock.calls).toEqual([
-      [{ startOffset: 0, endOffset: 1, delta: "A" }],
-      [{ startOffset: 1, endOffset: 3, delta: "BC" }],
-      [{ startOffset: 3, endOffset: 4, delta: "D" }],
+      [{ partId: "text_message_0", kind: "text", startOffset: 0, endOffset: 1, delta: "A" }],
+      [{ partId: "text_message_0", kind: "text", startOffset: 1, endOffset: 3, delta: "BC" }],
+      [{ partId: "text_message_0", kind: "text", startOffset: 3, endOffset: 4, delta: "D" }],
     ]);
   });
 
@@ -279,6 +279,121 @@ describe("consumeGoatOpenCompanyChatStream", () => {
     expect(project.mock.calls.at(-1)?.[0]).toEqual(result);
   });
 
+  it("fixes issue #1192: reasoning deltas reach the live presentation channel before answer text", async () => {
+    // Baseline behavior before this fix (pinned while this test was a characterization test):
+    // `present()` was the only mechanism driving the live SSE/Redis presentation lane, and it was
+    // wired exclusively to text deltas. Reasoning was captured durably in `parts`, but a
+    // reasoning-capable model looked idle until the first answer token arrived even though the
+    // provider had already streamed reasoning. `presentPart` now drives both kinds independently,
+    // each with its own stable partId, so reasoning streams live ahead of the first answer token.
+    const project = vi.fn(async (_projection: GoatOpenCompanyChatProjection) => undefined);
+    const present = vi.fn();
+
+    const result = await consumeGoatOpenCompanyChatStream({
+      fullStream: streamParts(
+        { type: "reasoning-start", id: "reasoning_1" },
+        { type: "reasoning-delta", id: "reasoning_1", text: "Thinking about the launch date" },
+        { type: "reasoning-end", id: "reasoning_1" },
+        { type: "text-start", id: "text_1" },
+        { type: "text-delta", id: "text_1", text: "Friday." },
+        { type: "text-end", id: "text_1" },
+      ),
+      sink: { project, present, recordStepUsage: vi.fn(async () => undefined) },
+      signal: new AbortController().signal,
+      assistantMessageId: "assistant_1",
+      flushIntervalMs: 0,
+    });
+
+    expect(result.parts).toMatchObject([
+      {
+        type: "reasoning",
+        id: "reasoning_assistant_1_0",
+        text: "Thinking about the launch date",
+        state: "done",
+      },
+      { type: "text", id: "text_assistant_1_1", text: "Friday.", state: "done" },
+    ]);
+    // Reasoning is presented first, ahead of any answer text, with a distinct kind/partId; the
+    // text delta that follows never mixes with reasoning content.
+    expect(present.mock.calls).toEqual([
+      [
+        {
+          partId: "reasoning_assistant_1_0",
+          kind: "reasoning",
+          startOffset: 0,
+          endOffset: "Thinking about the launch date".length,
+          delta: "Thinking about the launch date",
+        },
+      ],
+      [
+        {
+          partId: "text_assistant_1_1",
+          kind: "text",
+          startOffset: 0,
+          endOffset: "Friday.".length,
+          delta: "Friday.",
+        },
+      ],
+    ]);
+  });
+
+  it("preserves reasoning -> text -> tool -> reasoning -> text interleaving in presented order", async () => {
+    const project = vi.fn(async (_projection: GoatOpenCompanyChatProjection) => undefined);
+    const present = vi.fn();
+
+    const result = await consumeGoatOpenCompanyChatStream({
+      fullStream: streamParts(
+        { type: "reasoning-start", id: "r1" },
+        { type: "reasoning-delta", id: "r1", text: "First, check the calendar." },
+        { type: "reasoning-end", id: "r1" },
+        { type: "text-start", id: "t1" },
+        { type: "text-delta", id: "t1", text: "Let me look that up." },
+        { type: "text-end", id: "t1" },
+        {
+          type: "tool-call",
+          toolCallId: "tool_1",
+          toolName: "goat_brain",
+          input: { command: "query" },
+        },
+        {
+          type: "tool-result",
+          toolCallId: "tool_1",
+          toolName: "goat_brain",
+          input: { command: "query" },
+          output: { ok: true, stdout: "Friday." },
+        },
+        { type: "reasoning-start", id: "r2" },
+        { type: "reasoning-delta", id: "r2", text: "The launch is Friday." },
+        { type: "reasoning-end", id: "r2" },
+        { type: "text-start", id: "t2" },
+        { type: "text-delta", id: "t2", text: "It's Friday." },
+        { type: "text-end", id: "t2" },
+      ),
+      sink: { project, present, recordStepUsage: vi.fn(async () => undefined) },
+      signal: new AbortController().signal,
+      assistantMessageId: "assistant_1",
+      flushIntervalMs: 0,
+    });
+
+    expect(result.parts.map((part) => part.type)).toEqual([
+      "reasoning",
+      "text",
+      "tool-goat_brain",
+      "reasoning",
+      "text",
+    ]);
+    // Live presentation order matches the durable interleave: each part is presented under its own
+    // stable id in the order it started, never merged or reordered.
+    expect(present.mock.calls.map((call) => [call[0].partId, call[0].kind, call[0].delta])).toEqual(
+      [
+        ["reasoning_assistant_1_0", "reasoning", "First, check the calendar."],
+        ["text_assistant_1_1", "text", "Let me look that up."],
+        ["reasoning_assistant_1_3", "reasoning", "The launch is Friday."],
+        ["text_assistant_1_4", "text", "It's Friday."],
+      ],
+    );
+  });
+
   it("force-flushes the newest throttled text when the user interrupts", async () => {
     const controller = new AbortController();
     const interrupted = new GoatOpenCompanyChatInterruptedError();
@@ -309,6 +424,8 @@ describe("consumeGoatOpenCompanyChatStream", () => {
       parts: [{ type: "text", text: "Partial text plus newest delta", state: "done" }],
     });
     expect(present.mock.calls.at(-1)?.[0]).toEqual({
+      partId: "text_message_0",
+      kind: "text",
       startOffset: "Partial text".length,
       endOffset: "Partial text plus newest delta".length,
       delta: " plus newest delta",

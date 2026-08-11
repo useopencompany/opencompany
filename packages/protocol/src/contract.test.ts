@@ -7,7 +7,12 @@ import {
   parseRunStreamEvent,
 } from "./client";
 import { createOpenApiDocument } from "./routes";
-import { CreateMessageBodySchema, ErrorEnvelopeSchema } from "./schemas";
+import {
+  CreateMessageBodySchema,
+  ErrorEnvelopeSchema,
+  MessagePartSchema,
+  MessageSchema,
+} from "./schemas";
 
 describe("v1 protocol contract", () => {
   it("validates canonical Message commands without accepting legacy physical vocabulary", () => {
@@ -39,7 +44,7 @@ describe("v1 protocol contract", () => {
           requestId: "request_1",
           retryable: false,
         },
-        meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+        meta: { apiVersion: "v1", protocolVersion: "1.1.0" },
       }),
     ).toMatchObject({ error: { code: "idempotency_conflict" } });
   });
@@ -83,6 +88,8 @@ describe("v1 protocol contract", () => {
       type: "message.presentation_delta",
       payload: {
         messageId: "message_2",
+        partId: "part_1",
+        kind: "text",
         startOffset: 5,
         endOffset: 11,
         delta: " world",
@@ -97,6 +104,81 @@ describe("v1 protocol contract", () => {
         payload: { ...event.payload, endOffset: 12 },
       }),
     ).toThrow(/offsets/u);
+  });
+
+  it("streams a typed, ordered reasoning part alongside text and rejects provider metadata leakage", () => {
+    const event = parseRunEvent({
+      schemaVersion: 1,
+      id: "event_2",
+      cursor: "v1:8",
+      runId: "run_1",
+      attemptId: "attempt_1",
+      occurredAt: "2026-08-11T10:00:00.000Z",
+      type: "message.part_updated",
+      payload: {
+        messageId: "message_2",
+        partId: "reasoning_message_2_0",
+        kind: "reasoning",
+        order: 0,
+        state: "streaming",
+        text: "Checking the launch date",
+      },
+    });
+    expect(event.type).toBe("message.part_updated");
+
+    expect(() =>
+      parseRunEvent({
+        ...event,
+        payload: { ...event.payload, providerMetadata: { hidden: "chain-of-thought" } },
+      }),
+    ).toThrow();
+
+    const message = MessageSchema.parse({
+      id: "message_2",
+      conversationId: "conversation_1",
+      role: "assistant",
+      content: "It is Friday.",
+      parts: [
+        {
+          type: "reasoning",
+          id: "reasoning_message_2_0",
+          order: 0,
+          text: "Checking the launch date",
+          state: "done",
+        },
+        { type: "text", id: "text_message_2_1", order: 1, text: "It is Friday.", state: "done" },
+        {
+          type: "tool",
+          id: "tool_call_1",
+          order: 2,
+          toolName: "goat_brain",
+          state: "output-available",
+          input: { command: "query" },
+          output: { ok: true },
+        },
+      ],
+      attachments: [],
+      createdAt: "2026-08-11T10:00:00.000Z",
+      updatedAt: "2026-08-11T10:00:01.000Z",
+    });
+    expect(message.parts.map((part: { type: string }) => part.type)).toEqual([
+      "reasoning",
+      "text",
+      "tool",
+    ]);
+
+    // Raw provider fields must never cross the typed boundary, even if a caller tries to smuggle
+    // them onto an otherwise-valid part.
+    expect(() =>
+      MessagePartSchema.parse({
+        type: "tool",
+        id: "tool_call_1",
+        order: 0,
+        toolName: "goat_brain",
+        state: "output-available",
+        callProviderMetadata: { gateway: { callId: "call_1" } },
+      }),
+    ).toThrow();
   });
 
   it("generates OpenAPI from the same schemas and exposes the typed Hono client", () => {

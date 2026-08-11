@@ -88,6 +88,46 @@ describe("Redis Chat presentation stream", () => {
     await stream.close();
   });
 
+  it("never merges a reasoning delta and a text delta for the same message (issue #1192)", async () => {
+    // Contiguous offsets for the SAME messageId but DIFFERENT parts. Before the partId-aware fix,
+    // `coalesceFrames` only checked messageId + contiguous offsets, so a queued reasoning delta
+    // could be silently absorbed into the next text delta's frame and corrupt both streams.
+    let clock = 0;
+    const onError = vi.fn();
+    const failing = fakeClient({
+      exec: vi.fn(async () => Promise.reject(new Error("connection reset"))),
+    });
+    const healthyXAdd = vi.fn();
+    const healthy = fakeClient({ xAdd: healthyXAdd });
+    const createClient = vi.fn(() => (createClient.mock.calls.length === 1 ? failing : healthy));
+    const stream = new RedisChatPresentationStream({
+      url: "redis://test",
+      createClient,
+      now: () => clock,
+      retryDelayMs: 10,
+      onError,
+    });
+
+    stream.publish(
+      frame({ partId: "reasoning_1", kind: "reasoning", delta: "A", startOffset: 0, endOffset: 1 }),
+    );
+    await eventually(() => expect(onError).toHaveBeenCalledOnce());
+    stream.publish(
+      frame({ partId: "reasoning_1", kind: "reasoning", delta: "B", startOffset: 1, endOffset: 2 }),
+    );
+    clock = 11;
+    stream.publish(
+      frame({ partId: "text_1", kind: "text", delta: "C", startOffset: 2, endOffset: 3 }),
+    );
+    await eventually(() => expect(createClient).toHaveBeenCalledTimes(2));
+    await eventually(() => expect(healthyXAdd).toHaveBeenCalled());
+
+    const published = JSON.parse(healthyXAdd.mock.calls[0]?.[2]?.frame as string);
+    expect(published.payload.partId).toBe("text_1");
+    expect(published.payload.delta).toBe("C");
+    await stream.close();
+  });
+
   it("fails open when a connected Redis command stops responding", async () => {
     const onError = vi.fn();
     const stream = new RedisChatPresentationStream({
@@ -131,6 +171,8 @@ function frame(
     type: "message.presentation_delta",
     payload: {
       messageId: "message_1",
+      partId: "text_message_1_0",
+      kind: "text",
       startOffset: 0,
       endOffset: 1,
       delta: "A",

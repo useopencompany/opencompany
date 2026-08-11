@@ -131,6 +131,67 @@ describe("createGoatOpenCompanyChatProjector", () => {
     expect(eventTypes.filter((type) => type === "tool.completed")).toHaveLength(1);
   });
 
+  it("emits message.part_updated for reasoning and text parts, deduped across flushes (issue #1192)", async () => {
+    const projector = createProjector();
+    await projector.started();
+
+    await projector.project({
+      parts: [{ type: "reasoning", id: "reasoning_1", text: "Thinking", state: "streaming" }],
+    });
+    await projector.project({
+      parts: [
+        { type: "reasoning", id: "reasoning_1", text: "Thinking it over", state: "done" },
+        { type: "text", id: "text_1", text: "Friday.", state: "done" },
+      ],
+    });
+    // A third flush with byte-identical parts must not re-emit either part_updated event.
+    await projector.project({
+      parts: [
+        { type: "reasoning", id: "reasoning_1", text: "Thinking it over", state: "done" },
+        { type: "text", id: "text_1", text: "Friday.", state: "done" },
+      ],
+    });
+
+    const partEvents = vi
+      .mocked(executionMock.appendEvents)
+      .mock.calls.flatMap(([call]) => call.events)
+      .filter((event) => event.type === "message.part_updated");
+
+    expect(partEvents).toEqual([
+      expect.objectContaining({
+        type: "message.part_updated",
+        payload: expect.objectContaining({
+          messageId: "assistant_message_1",
+          partId: "reasoning_1",
+          kind: "reasoning",
+          order: 0,
+          state: "streaming",
+          text: "Thinking",
+        }),
+      }),
+      expect.objectContaining({
+        type: "message.part_updated",
+        payload: expect.objectContaining({
+          partId: "reasoning_1",
+          kind: "reasoning",
+          order: 0,
+          state: "done",
+          text: "Thinking it over",
+        }),
+      }),
+      expect.objectContaining({
+        type: "message.part_updated",
+        payload: expect.objectContaining({
+          partId: "text_1",
+          kind: "text",
+          order: 1,
+          state: "done",
+          text: "Friday.",
+        }),
+      }),
+    ]);
+  });
+
   it("treats a missing lease row as lease loss before the stream can continue", async () => {
     dbMock.execute.mockResolvedValueOnce({ rows: [] });
 

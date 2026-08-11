@@ -36,6 +36,23 @@ export const RunEventSchema = z
         .object({ messageId: ResourceIdSchema, content: z.string(), complete: z.boolean() })
         .strict(),
     ),
+    // Additive (protocol 1.1.0, see ADR 0001 addendum "Typed reasoning parts"). Carries the
+    // cumulative text of one ordered assistant part (text or user-visible reasoning) and its
+    // lifecycle state. `message.content_updated` above is unchanged and keeps deriving from
+    // text-kind parts only, so it remains the compatible final-answer projection.
+    event(
+      "message.part_updated",
+      z
+        .object({
+          messageId: ResourceIdSchema,
+          partId: ResourceIdSchema,
+          kind: z.enum(["text", "reasoning"]),
+          order: z.number().int().min(0),
+          state: z.enum(["streaming", "done"]),
+          text: z.string(),
+        })
+        .strict(),
+    ),
     event(
       "tool.started",
       z.object({ toolCallId: ResourceIdSchema, name: z.string().min(1) }).strict(),
@@ -110,6 +127,11 @@ export const PresentationDeltaFrameSchema = z
     payload: z
       .object({
         messageId: ResourceIdSchema,
+        // Additive (protocol 1.1.0). Each frame now names the specific ordered part it
+        // continues, so this low-latency Redis lane can carry reasoning deltas alongside text
+        // deltas without the two streams corrupting each other's offsets.
+        partId: ResourceIdSchema,
+        kind: z.enum(["text", "reasoning"]),
         startOffset: z.number().int().min(0),
         endOffset: z.number().int().positive(),
         delta: z.string().min(1).max(262_144),

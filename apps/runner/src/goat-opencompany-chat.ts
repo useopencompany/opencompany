@@ -237,6 +237,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
     projection = await consumeGoatOpenCompanyChatStream({
       fullStream: stream.fullStream,
       signal: generationController.signal,
+      assistantMessageId: turn.assistantMessageId,
       sink: {
         project: async (nextProjection) => {
           projection = nextProjection;
@@ -245,7 +246,13 @@ export async function runGoatOpenCompanyChatTurn(input: {
         recordStepUsage: (usage) => projector.recordStepUsage(usage),
         ...(input.presentationPublisher
           ? {
-              present: (delta: { startOffset: number; endOffset: number; delta: string }) => {
+              present: (delta: {
+                partId: string;
+                kind: "text" | "reasoning";
+                startOffset: number;
+                endOffset: number;
+                delta: string;
+              }) => {
                 input.presentationPublisher?.publish({
                   runId: turn.id,
                   attemptNumber: turn.attempts,
@@ -360,14 +367,25 @@ export async function consumeGoatOpenCompanyChatStream(input: {
   fullStream: AsyncIterable<unknown>;
   signal: AbortSignal;
   sink: Pick<GoatOpenCompanyChatProjector, "project" | "recordStepUsage"> & {
-    present?: (input: { startOffset: number; endOffset: number; delta: string }) => void;
+    present?: (input: {
+      partId: string;
+      kind: "text" | "reasoning";
+      startOffset: number;
+      endOffset: number;
+      delta: string;
+    }) => void;
   };
+  // Stable prefix for minted part identities (`${kind}_${assistantMessageId}_${index}`). Optional
+  // so existing callers/tests that never present anything keep compiling; required in practice
+  // whenever `sink.present` is provided.
+  assistantMessageId?: string;
   flushIntervalMs?: number;
   presentationFlushIntervalMs?: number;
   now?: () => number;
   initialProjection?: GoatOpenCompanyChatProjection;
 }): Promise<GoatOpenCompanyChatProjection> {
   const parts: GoatOpenCompanyChatUiPart[] = cloneParts(input.initialProjection?.parts ?? []);
+  const assistantMessageId = input.assistantMessageId ?? "message";
   const textPartIndexes = new Map<string, number>();
   const reasoningPartIndexes = new Map<string, number>();
   const toolPartIndexes = new Map<string, number>();
@@ -378,7 +396,10 @@ export async function consumeGoatOpenCompanyChatStream(input: {
   const now = input.now ?? Date.now;
   let lastFlushAt = now() - flushIntervalMs;
   let lastPresentationAt = now() - presentationFlushIntervalMs;
-  let presentedContent = projectionText(input.initialProjection ?? { parts: [] });
+  // Presented-so-far text per minted part id. Independent per part (rather than one global
+  // cumulative string) so reasoning and text can each stream their own live delta without one
+  // part's offsets corrupting the other's.
+  const presentedParts = new Map<string, string>();
   let dirty = false;
   let latestUsage: LanguageModelUsage | undefined;
   let finishReason: string | undefined;
@@ -401,23 +422,45 @@ export async function consumeGoatOpenCompanyChatStream(input: {
     dirty = false;
     await input.sink.project(projection());
   };
-  const present = (force = false) => {
+  const presentPart = (index: number, force = false) => {
     if (!input.sink.present) return;
-    const content = projectionText(projection());
-    if (content === presentedContent) return;
-    if (!content.startsWith(presentedContent)) {
-      presentedContent = content;
+    const part = partAt(parts, index);
+    if (part.type !== "text" && part.type !== "reasoning") return;
+    const id = typeof part.id === "string" ? part.id : null;
+    if (!id) return;
+    const content = typeof part.text === "string" ? part.text : "";
+    const presented = presentedParts.get(id) ?? "";
+    if (content === presented) return;
+    if (!content.startsWith(presented)) {
+      presentedParts.set(id, content);
       return;
     }
     const currentTime = now();
     if (!force && currentTime - lastPresentationAt < presentationFlushIntervalMs) return;
-    const startOffset = presentedContent.length;
+    const startOffset = presented.length;
     const delta = content.slice(startOffset);
     if (!delta) return;
-    presentedContent = content;
+    presentedParts.set(id, content);
     lastPresentationAt = currentTime;
-    input.sink.present({ startOffset, endOffset: content.length, delta });
+    input.sink.present({
+      partId: id,
+      kind: part.type,
+      startOffset,
+      endOffset: content.length,
+      delta,
+    });
   };
+  // Finalization boundary (stream end, interrupt, or error): force-present every open text or
+  // reasoning part, not just whichever one last received a delta. Without this, a reasoning part
+  // that finished streaming just before a throttle tick could lose its final characters.
+  const presentAllOpenParts = (force: boolean) => {
+    if (!input.sink.present) return;
+    parts.forEach((part, index) => {
+      if (part.type === "text" || part.type === "reasoning") presentPart(index, force);
+    });
+  };
+  const mintPartId = (kind: "text" | "reasoning") =>
+    `${kind}_${assistantMessageId}_${parts.length}`;
   const appendPart = (part: GoatOpenCompanyChatUiPart) => {
     parts.push(part);
     dirty = true;
@@ -441,6 +484,7 @@ export async function consumeGoatOpenCompanyChatStream(input: {
             id,
             appendPart({
               type: "text",
+              id: mintPartId("text"),
               text: "",
               state: "streaming",
               ...providerMetadataFrom(part),
@@ -455,6 +499,7 @@ export async function consumeGoatOpenCompanyChatStream(input: {
             textPartIndexes.get(id) ??
             appendPart({
               type: "text",
+              id: mintPartId("text"),
               text: "",
               state: "streaming",
               ...providerMetadataFrom(part),
@@ -467,7 +512,7 @@ export async function consumeGoatOpenCompanyChatStream(input: {
             state: "streaming",
             ...providerMetadataFrom(part),
           });
-          present(false);
+          presentPart(index, false);
           await flush(false);
         }
       } else if (part.type === "text-end") {
@@ -478,7 +523,7 @@ export async function consumeGoatOpenCompanyChatStream(input: {
             state: "done",
             ...providerMetadataFrom(part),
           });
-          present(true);
+          presentPart(index, true);
         }
       } else if (part.type === "reasoning-start") {
         const id = readString(part.id);
@@ -487,6 +532,7 @@ export async function consumeGoatOpenCompanyChatStream(input: {
             id,
             appendPart({
               type: "reasoning",
+              id: mintPartId("reasoning"),
               text: "",
               state: "streaming",
               ...providerMetadataFrom(part),
@@ -501,6 +547,7 @@ export async function consumeGoatOpenCompanyChatStream(input: {
             reasoningPartIndexes.get(id) ??
             appendPart({
               type: "reasoning",
+              id: mintPartId("reasoning"),
               text: "",
               state: "streaming",
               ...providerMetadataFrom(part),
@@ -513,6 +560,10 @@ export async function consumeGoatOpenCompanyChatStream(input: {
             state: "streaming",
             ...providerMetadataFrom(part),
           });
+          // This is the #1192 fix: reasoning deltas now drive the live presentation channel the
+          // same way text deltas always have, instead of only ever reaching the 500 ms durable
+          // flush below.
+          presentPart(index, false);
           await flush(false);
         }
       } else if (part.type === "reasoning-end") {
@@ -523,6 +574,7 @@ export async function consumeGoatOpenCompanyChatStream(input: {
             state: "done",
             ...providerMetadataFrom(part),
           });
+          presentPart(index, true);
         }
       } else if (part.type === "tool-input-start") {
         const toolCallId = readString(part.id);
@@ -662,7 +714,7 @@ export async function consumeGoatOpenCompanyChatStream(input: {
       const finalizedParts = finalizeStreamingParts(parts);
       parts.splice(0, parts.length, ...finalizedParts);
       dirty = true;
-      present(true);
+      presentAllOpenParts(true);
       await flush(true);
     }
     throw error;
@@ -672,7 +724,7 @@ export async function consumeGoatOpenCompanyChatStream(input: {
   const finalizedParts = finalizeStreamingParts(parts);
   parts.splice(0, parts.length, ...finalizedParts);
   dirty = true;
-  present(true);
+  presentAllOpenParts(true);
   await flush(true);
   return projection();
 }

@@ -70,6 +70,7 @@ export function createGoatOpenCompanyChatProjector(input: {
   const execution =
     input.execution ?? new PostgresRunExecutionRepository((query) => getDb().execute(query));
   let lastProjectedContent: string | null = null;
+  const lastProjectedParts = new Map<string, { state: string; text: string }>();
   const toolEventStates = new Map<string, "started" | "completed" | "failed">();
 
   const turnLeaseSubquery = (options: { runningOnly: boolean }) => sql`
@@ -162,6 +163,9 @@ export function createGoatOpenCompanyChatProjector(input: {
       });
       lastProjectedContent = content;
     }
+    events.push(
+      ...partEventsFromProjection(target.assistantMessageId, projection.parts, lastProjectedParts),
+    );
     events.push(...toolEventsFromProjection(projection.parts, toolEventStates));
     await appendEvents(events);
   };
@@ -364,6 +368,42 @@ export function createGoatOpenCompanyChatProjector(input: {
 
 function canonicalRunSettlement(attemptId: string, assistantMessageId: string, content: string) {
   return { attemptId, assistantMessageId, content };
+}
+
+// Durable counterpart to the runner's live `presentPart` (goat-opencompany-chat.ts): emits
+// `message.part_updated` for every text/reasoning part whose text or lifecycle state changed
+// since the last flush, so a client with no Redis presentation lane still converges on the same
+// ordered parts through the semantic Event log alone. `message.content_updated` above is
+// unaffected and keeps deriving from text-kind parts only.
+function partEventsFromProjection(
+  assistantMessageId: string,
+  parts: readonly GoatOpenCompanyChatUiPart[],
+  lastProjected: Map<string, { state: string; text: string }>,
+): RunEventDraft[] {
+  const events: RunEventDraft[] = [];
+  parts.forEach((part, order) => {
+    if (part.type !== "text" && part.type !== "reasoning") return;
+    const partId = typeof part.id === "string" && part.id ? part.id : null;
+    if (!partId) return;
+    const state = part.state === "done" ? "done" : "streaming";
+    const text = typeof part.text === "string" ? part.text : "";
+    const prior = lastProjected.get(partId);
+    if (prior && prior.state === state && prior.text === text) return;
+    lastProjected.set(partId, { state, text });
+    events.push({
+      id: `run_event_${randomUUID()}`,
+      type: "message.part_updated",
+      payload: {
+        messageId: assistantMessageId,
+        partId,
+        kind: part.type,
+        order,
+        state,
+        text,
+      },
+    });
+  });
+  return events;
 }
 
 function toolEventsFromProjection(

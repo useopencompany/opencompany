@@ -12,6 +12,7 @@ import {
   type Message,
   type MessageAttachment,
   type MessagePage,
+  type MessagePart,
   type ResolveApprovalResult,
   type Run,
   type RunApproval,
@@ -20,9 +21,10 @@ import {
   type RunEventPage,
   type RunExecutionRepository,
   type RunStatus,
+  type ToolMessagePartState,
 } from "@opencompany/core";
 import { type SQL, sql } from "drizzle-orm";
-import type { GoatChatMessageAttachment } from "./goat-schema";
+import type { GoatChatMessageAttachment, GoatChatMessageDebugTrace } from "./goat-schema";
 
 export const RUN_EVENT_NOTIFY_CHANNEL = "goat_run_events_v1";
 
@@ -470,6 +472,7 @@ export class PostgresChatRepository implements ChatRepository {
         message.session_id AS "conversationId",
         message.role,
         message.content,
+        message.debug_trace AS "debugTrace",
         message.attachments,
         message.created_at AS "createdAt",
         message.updated_at AS "updatedAt"
@@ -1564,6 +1567,7 @@ type MessageRow = {
   conversationId: string;
   role: Message["role"];
   content: string;
+  debugTrace: GoatChatMessageDebugTrace | null;
   attachments: GoatChatMessageAttachment[] | null;
   createdAt: Date | string;
   updatedAt: Date | string;
@@ -1575,6 +1579,7 @@ type MessagePageRow = {
   conversationId: string | null;
   role: Message["role"] | null;
   content: string | null;
+  debugTrace: GoatChatMessageDebugTrace | null;
   attachments: GoatChatMessageAttachment[] | null;
   createdAt: Date | string | null;
   updatedAt: Date | string | null;
@@ -1789,10 +1794,70 @@ function mapMessage(row: MessageRow): Message {
     conversationId: row.conversationId,
     role: row.role,
     content: row.content,
+    parts: toPublicMessageParts(row.debugTrace?.uiMessageParts),
     attachments: (row.attachments ?? []).map(toPublicAttachment),
     createdAt: asDate(row.createdAt),
     updatedAt: asDate(row.updatedAt),
   };
+}
+
+const MESSAGE_PART_STATES = new Set(["streaming", "done"]);
+const TOOL_MESSAGE_PART_STATES = new Set([
+  "input-streaming",
+  "input-available",
+  "approval-requested",
+  "output-available",
+  "output-error",
+]);
+
+// Projects the runner's internal `uiMessageParts` bag (free-form, provider-adjacent) into the
+// typed, public-safe `Message.parts` contract. Hidden/internal fields such as `providerMetadata`,
+// `callProviderMetadata`, `resultProviderMetadata`, and `toolMetadata` are deliberately dropped
+// here: only provider-designated user-visible text ever reaches this boundary.
+function toPublicMessageParts(uiMessageParts: unknown[] | undefined): MessagePart[] {
+  if (!Array.isArray(uiMessageParts)) return [];
+  const parts: MessagePart[] = [];
+  uiMessageParts.forEach((raw, index) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+    const part = raw as Record<string, unknown>;
+    const type = typeof part.type === "string" ? part.type : null;
+    if (!type || type === "step-start") return;
+    const state = typeof part.state === "string" ? part.state : null;
+    if (type === "text" || type === "reasoning") {
+      parts.push({
+        type,
+        id: legacySafePartId(part.id, type, index),
+        order: index,
+        text: typeof part.text === "string" ? part.text : "",
+        state: state && MESSAGE_PART_STATES.has(state) ? (state as "streaming" | "done") : "done",
+      });
+      return;
+    }
+    if (type === "dynamic-tool" || type.startsWith("tool-")) {
+      const toolCallId = typeof part.toolCallId === "string" ? part.toolCallId : null;
+      if (!toolCallId) return;
+      const toolName =
+        typeof part.toolName === "string" ? part.toolName : type.slice("tool-".length) || "tool";
+      parts.push({
+        type: "tool",
+        id: toolCallId,
+        order: index,
+        toolName,
+        state:
+          state && TOOL_MESSAGE_PART_STATES.has(state)
+            ? (state as ToolMessagePartState)
+            : "output-available",
+        ...(part.input !== undefined ? { input: part.input } : {}),
+        ...(part.output !== undefined ? { output: part.output } : {}),
+        ...(typeof part.errorText === "string" ? { errorText: part.errorText } : {}),
+      });
+    }
+  });
+  return parts;
+}
+
+function legacySafePartId(value: unknown, type: string, index: number) {
+  return typeof value === "string" && value.trim() ? value : `legacy_${type}_${index}`;
 }
 
 function mapRun(row: RunRow): Run {

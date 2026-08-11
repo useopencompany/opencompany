@@ -42,6 +42,7 @@ export const RUN_EVENT_TYPES = [
   "run.cancel_requested",
   "message.created",
   "message.content_updated",
+  "message.part_updated",
   "tool.started",
   "tool.completed",
   "tool.failed",
@@ -64,11 +65,34 @@ export type Conversation = {
   updatedAt: Date;
 };
 
+export type MessagePartState = "streaming" | "done";
+export type ToolMessagePartState =
+  | "input-streaming"
+  | "input-available"
+  | "approval-requested"
+  | "output-available"
+  | "output-error";
+
+export type MessagePart =
+  | { type: "text"; id: string; order: number; text: string; state: MessagePartState }
+  | { type: "reasoning"; id: string; order: number; text: string; state: MessagePartState }
+  | {
+      type: "tool";
+      id: string;
+      order: number;
+      toolName: string;
+      state: ToolMessagePartState;
+      input?: unknown;
+      output?: unknown;
+      errorText?: string;
+    };
+
 export type Message = {
   id: string;
   conversationId: string;
   role: "user" | "assistant";
   content: string;
+  parts: readonly MessagePart[];
   attachments: readonly MessageAttachment[];
   createdAt: Date;
   updatedAt: Date;

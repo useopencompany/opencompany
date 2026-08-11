@@ -56,12 +56,72 @@ export const ConversationSchema = z
   .strict()
   .openapi("Conversation");
 
+// Provider-neutral, ordered assistant content. `text` and `reasoning` stream incrementally;
+// `tool` mirrors the existing tool.* event lifecycle so a terminal Message can reconstruct the
+// full reasoning -> text -> tool interleaving without replaying the Event log. Only
+// provider-designated user-visible reasoning may appear as a `reasoning` part: hidden, encrypted,
+// or internal chain-of-thought and raw provider metadata never cross this boundary.
+export const MessagePartStateSchema = z.enum(["streaming", "done"]);
+
+export const TextMessagePartSchema = z
+  .object({
+    type: z.literal("text"),
+    id: ResourceIdSchema,
+    order: z.number().int().min(0),
+    text: z.string(),
+    state: MessagePartStateSchema,
+  })
+  .strict()
+  .openapi("TextMessagePart");
+
+export const ReasoningMessagePartSchema = z
+  .object({
+    type: z.literal("reasoning"),
+    id: ResourceIdSchema,
+    order: z.number().int().min(0),
+    text: z.string(),
+    state: MessagePartStateSchema,
+  })
+  .strict()
+  .openapi("ReasoningMessagePart");
+
+export const ToolMessagePartStateSchema = z.enum([
+  "input-streaming",
+  "input-available",
+  "approval-requested",
+  "output-available",
+  "output-error",
+]);
+
+export const ToolMessagePartSchema = z
+  .object({
+    type: z.literal("tool"),
+    id: ResourceIdSchema,
+    order: z.number().int().min(0),
+    toolName: z.string().min(1),
+    state: ToolMessagePartStateSchema,
+    input: z.unknown().optional(),
+    output: z.unknown().optional(),
+    errorText: z.string().optional(),
+  })
+  .strict()
+  .openapi("ToolMessagePart");
+
+export const MessagePartSchema = z
+  .discriminatedUnion("type", [
+    TextMessagePartSchema,
+    ReasoningMessagePartSchema,
+    ToolMessagePartSchema,
+  ])
+  .openapi("MessagePart");
+
 export const MessageSchema = z
   .object({
     id: ResourceIdSchema,
     conversationId: ResourceIdSchema,
     role: z.enum(["user", "assistant"]),
     content: z.string(),
+    parts: z.array(MessagePartSchema),
     attachments: z.array(AttachmentSchema),
     createdAt: TimestampSchema,
     updatedAt: TimestampSchema,
@@ -345,6 +405,10 @@ export const ResolveApprovalEnvelopeSchema = z
 export type ConversationDto = z.infer<typeof ConversationSchema>;
 export type UpdateConversationBody = z.infer<typeof UpdateConversationBodySchema>;
 export type MessageDto = z.infer<typeof MessageSchema>;
+export type MessagePartDto = z.infer<typeof MessagePartSchema>;
+export type TextMessagePartDto = z.infer<typeof TextMessagePartSchema>;
+export type ReasoningMessagePartDto = z.infer<typeof ReasoningMessagePartSchema>;
+export type ToolMessagePartDto = z.infer<typeof ToolMessagePartSchema>;
 export type RunDto = z.infer<typeof RunSchema>;
 export type ChatReadModel = z.infer<typeof ChatReadModelSchema>;
 export type ConversationReadModel = z.infer<typeof ConversationReadModelSchema>;
