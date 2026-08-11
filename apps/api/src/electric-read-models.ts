@@ -19,6 +19,10 @@ const ELECTRIC_CURSOR_PARAMS = [
   "cache-buster",
 ] as const;
 
+// These columns cross the API boundary as decoded JSON values. Omitting their upstream JSONB
+// metadata prevents @electric-sql/client from parsing the already-decoded values a second time.
+const PREDECODED_READ_MODEL_FIELDS = new Set(["presentation", "attachments"]);
+
 export interface ChatReadModelService {
   stream(input: {
     actor: Actor;
@@ -189,54 +193,50 @@ function conversationShape(
 
 function projectElectricEntry(readModel: ChatReadModel, entry: unknown) {
   if (!isRecord(entry) || !isRecord(entry.value)) return entry;
+  const operation = isRecord(entry.headers) ? entry.headers.operation : undefined;
   return {
     key: entry.key,
     headers: entry.headers,
-    value: projectReadModelValue(readModel, entry.value),
+    value: projectReadModelValue(readModel, entry.value, operation !== "insert"),
   };
 }
 
-function projectReadModelValue(readModel: ChatReadModel, row: Record<string, unknown>) {
+function projectReadModelValue(
+  readModel: ChatReadModel,
+  row: Record<string, unknown>,
+  partial: boolean,
+) {
+  const columnNames = READ_MODEL_COLUMN_NAMES[
+    readModel as keyof typeof READ_MODEL_COLUMN_NAMES
+  ] as Record<string, string>;
+  const projected = Object.fromEntries(
+    Object.entries(columnNames).flatMap(([physicalName, publicName]) =>
+      Object.hasOwn(row, physicalName)
+        ? [[publicName, readModelFieldValue(publicName, row[physicalName])]]
+        : [],
+    ),
+  );
   switch (readModel) {
     case "chat-conversations-v1":
-      return ConversationReadModelSchema.parse({
-        id: row.id,
-        title: row.title,
-        engine: row.engine,
-        model: row.model,
-        archivedAt: row.archived_at ?? null,
-        pinnedAt: row.pinned_at ?? null,
-        lastSeenAt: row.last_seen_at ?? null,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      });
+      return (partial ? ConversationReadModelSchema.partial() : ConversationReadModelSchema).parse(
+        projected,
+      );
     case "chat-messages-v1":
-      return MessageReadModelSchema.parse({
-        id: row.id,
-        conversationId: row.conversation_id,
-        role: row.role,
-        content: row.content,
-        taskId: row.task_id ?? null,
-        presentation: row.presentation ?? null,
-        attachments: Array.isArray(row.attachments) ? row.attachments.map(publicAttachment) : null,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      });
+      return (partial ? MessageReadModelSchema.partial() : MessageReadModelSchema).parse(projected);
     case "chat-runs-v1":
-      return RunReadModelSchema.parse({
-        id: row.id,
-        conversationId: row.conversation_id,
-        triggerMessageId: row.trigger_message_id,
-        assistantMessageId: row.assistant_message_id,
-        status: row.status,
-        engine: row.engine,
-        model: row.model,
-        attemptCount: numberValue(row.attempt_count),
-        error: row.error ?? null,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      });
+      return (partial ? RunReadModelSchema.partial() : RunReadModelSchema).parse(projected);
   }
+}
+
+function readModelFieldValue(name: string, value: unknown) {
+  if (name.endsWith("At")) return timestampValue(value);
+  if (name === "attemptCount") return numberValue(value);
+  if (name === "presentation") return jsonValue(value);
+  if (name === "attachments") {
+    const attachments = jsonValue(value);
+    return Array.isArray(attachments) ? attachments.map(publicAttachment) : attachments;
+  }
+  return value;
 }
 
 function publicAttachment(value: unknown) {
@@ -253,6 +253,24 @@ function publicAttachment(value: unknown) {
 function numberValue(value: unknown) {
   const number = typeof value === "number" ? value : Number(value);
   return Number.isFinite(number) ? number : value;
+}
+
+function jsonValue(value: unknown) {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+function timestampValue(value: unknown) {
+  if (typeof value !== "string") return value;
+  // Electric serializes timestamptz values in PostgreSQL's wire form
+  // (`YYYY-MM-DD HH:mm:ss.SSS+00`). Canonical protocol timestamps are ISO 8601.
+  const isoCandidate = value.replace(" ", "T").replace(/([+-]\d{2})$/u, "$1:00");
+  const timestamp = new Date(isoCandidate);
+  return Number.isNaN(timestamp.getTime()) ? value : timestamp.toISOString();
 }
 
 function electricNoContentResponse(upstream: Response, readModel: ChatReadModel) {
@@ -313,7 +331,9 @@ function safeElectricHeaders(source: Headers, readModel: ChatReadModel) {
       JSON.stringify(
         Object.fromEntries(
           Object.entries(parsed).flatMap(([name, definition]) =>
-            names[name] ? [[names[name], definition]] : [],
+            names[name] && !PREDECODED_READ_MODEL_FIELDS.has(names[name])
+              ? [[names[name], definition]]
+              : [],
           ),
         ),
       ),

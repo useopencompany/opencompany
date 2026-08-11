@@ -7,6 +7,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { exit } from "node:process";
 import { startWebLocalHttpsProxy, webHttpsDisabled, webHttpsPort } from "./lib/caddy-dev.mjs";
+import { ELECTRIC_LOCAL_URL } from "./lib/electric-dev.mjs";
 import {
   envForTunnel,
   ngrokConfigState,
@@ -86,16 +87,27 @@ if (!tunnelDisabled) {
 }
 
 const turboBin = existsSync("node_modules/.bin/turbo") ? "node_modules/.bin/turbo" : "turbo";
+const devEnvironment = {
+  ...process.env,
+  ...tunnelEnv,
+  ...webHttpsEnv,
+  ...resolveWebDevEnv({ port, processEnv: process.env, tunnelEnv, webHttpsEnv }),
+  OPENCOMPANY_DEV_APP: "web",
+};
+useLocalElectric(devEnvironment);
 dev = spawn(turboBin, ["dev", ...turboArgs], {
   stdio: "inherit",
-  env: {
-    ...process.env,
-    ...tunnelEnv,
-    ...webHttpsEnv,
-    ...resolveWebDevEnv({ port, processEnv: process.env, tunnelEnv, webHttpsEnv }),
-    OPENCOMPANY_DEV_APP: "web",
-  },
+  env: devEnvironment,
 });
+
+function useLocalElectric(env) {
+  env.ELECTRIC_URL = ELECTRIC_LOCAL_URL;
+  // Electric Cloud credentials injected by Infisical identify a hosted source and must never be
+  // paired with the branch-local Electric service started by `bun run setup`.
+  delete env.ELECTRIC_SOURCE_ID;
+  delete env.ELECTRIC_SOURCE_SECRET;
+  delete env.ELECTRIC_TOKEN;
+}
 
 function stopWebDevProxy() {
   if (webDevProxy) {
