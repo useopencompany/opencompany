@@ -234,10 +234,10 @@ route names alone are not evidence that a transport is unused.
 presentation responsibilities. Phase 2 removes it only from runner capability enablement and
 execution; it is not a global environment-variable deletion.
 
-The repeated final audit retains `/api/chat` and `apps/web/lib/legacy-chat-route.ts` unchanged for
-macOS compatibility, plus web-to-runner wake, sandbox status/termination, auth brokerage,
-dictation, coding-workspace runtime access, Brain ingestion/import, Google Drive sync, and harness
-planning transports. Those are presentation/setup or worker-control responsibilities, not
+The repeated final audit retains `/api/chat` and `apps/web/lib/legacy-chat-route.ts` unchanged as
+the bounded browser rollback boundary for `NEXT_PUBLIC_GOAT_HEADLESS_CHAT`, plus web-to-runner
+wake, sandbox status/termination, auth brokerage, dictation, coding-workspace runtime access, Brain
+ingestion/import, Google Drive sync, and harness planning transports. Those are presentation/setup or worker-control responsibilities, not
 runner-to-web execution dependencies. Public web MCP, integration callbacks/webhooks, settings,
 Slack, and billing reconciliation continue to call the shared package implementations in-process.
 
@@ -298,8 +298,9 @@ PR 2 adds the independently deployable API and runner path without switching cli
 adapter may then translate the existing request to the canonical command/event service, but it may
 not contain a second model loop. PR 3 cuts web writes and live output to `/v1`, then restricts
 Electric to API-owned, actor-scoped, versioned Chat read models. By owner direction, PR 4 completes
-web runner parity, operability, observability, and rollout evidence. Expo/mobile and macOS-native
-implementation/tests move to a separate project; the existing macOS route remains unchanged.
+web runner parity, operability, observability, and rollout evidence. Expo/mobile and other native
+client implementation/tests move to a separate project; `/api/chat` remains unchanged as the
+bounded browser rollback route.
 
 The implementation audit before PR 3 found several foreground-only tools (task and schedule
 creation, Brain capture, skill activation, managed capabilities, browser, and wiki) that must be
@@ -377,15 +378,14 @@ The pre-change audit established these preservation gates:
   continuations, cancellation projections, and stale tool-call settlement.
 - `apps/web/app/api/chat/[chatId]/stream/route.test.ts`, stop tests, and
   `apps/web/lib/chat-streams.test.ts`: current resume, stop, and Redis-optional behavior.
-- `apps/web/lib/chat-request-auth.test.ts`: browser session and WorkOS bearer-token resolution.
+- `apps/web/lib/chat-request-auth.test.ts`: browser session resolution for the legacy route.
 - `apps/web/app/api/electric/v1/shape/route.test.ts`: current Electric authorization. PR 3 must
   replace physical-table selection for migrated Chat reads with versioned read models.
 - `apps/runner/src/goat-codex-chat-worker.test.ts` and related runner tests: claim fencing,
   heartbeat/retry, attachment and billing behavior, partial results, wakeups, and abandoned-work
   recovery.
-- Native test suites are deliberately not a gate for this owner-scoped web phase. The macOS project
-  remains untouched on its existing compatibility path; its migration and native evidence belong to
-  the later native project.
+- Native test suites are deliberately not a gate for this owner-scoped web phase; native client
+  evidence belongs to the later native project.
 - `packages/core`, `packages/protocol`, and `packages/db` tests: provider-independent Actor and
   application rules, strict/versioned DTOs and Events, generated OpenAPI currency, additive
   migration preservation, tenant isolation, atomic idempotency, explicit Attempts, lease fencing,

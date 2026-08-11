@@ -39,10 +39,7 @@ export function createWorkOsApiAuthenticator(
   options: AuthenticatorOptions = {},
 ): ApiAuthenticator {
   const cookieName = options.cookieName ?? process.env.WORKOS_COOKIE_NAME ?? DEFAULT_SESSION_COOKIE;
-  const audience =
-    options.audience ??
-    process.env.GOAT_API_OAUTH_AUDIENCE?.trim() ??
-    process.env.GOAT_MACOS_OAUTH_AUDIENCE?.trim();
+  const audience = options.audience ?? process.env.GOAT_API_OAUTH_AUDIENCE?.trim();
   const authKitDomain = normalizeOrigin(
     options.authKitDomain ?? process.env.GOAT_AUTHKIT_DOMAIN?.trim(),
   );

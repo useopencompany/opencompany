@@ -1,8 +1,0 @@
-#include "Shared.xcconfig"
-
-// Release values must be supplied by CI or Local.xcconfig.
-GOAT_API_BASE_URL =
-GOAT_OAUTH_ISSUER =
-GOAT_OAUTH_CLIENT_ID =
-
-#include? "Local.xcconfig"

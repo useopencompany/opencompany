@@ -1,7 +1,0 @@
-#include "Shared.xcconfig"
-
-GOAT_API_BASE_URL = http:/$()/127.0.0.1:3002
-GOAT_OAUTH_ISSUER =
-GOAT_OAUTH_CLIENT_ID =
-
-#include? "Local.xcconfig"
