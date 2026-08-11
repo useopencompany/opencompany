@@ -25,6 +25,9 @@ export function resolveWebDevEnv({
     `${localRedirectAppUrl}/auth/callback`;
 
   return {
+    ...(trimmed(webHttpsEnv.GOAT_NEXT_PUBLIC_APP_URL)
+      ? { NODE_USE_SYSTEM_CA: trimmed(processEnv.NODE_USE_SYSTEM_CA) || "1" }
+      : {}),
     GOAT_NEXT_PUBLIC_APP_URL: webAppUrl,
     GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
     NEXT_PUBLIC_APP_URL: webAppUrl,

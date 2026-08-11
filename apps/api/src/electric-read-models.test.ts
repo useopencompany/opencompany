@@ -25,11 +25,11 @@ describe("Electric Chat read models", () => {
               role: "user",
               content: "Review this",
               task_id: null,
-              presentation: {
+              presentation: JSON.stringify({
                 schemaVersion: "opencompany.chat.debug.v1",
                 uiMessageParts: [{ type: "text", text: "Review this" }],
-              },
-              attachments: [
+              }),
+              attachments: JSON.stringify([
                 {
                   id: "attachment_1",
                   filename: "brief.pdf",
@@ -39,13 +39,27 @@ describe("Electric Chat read models", () => {
                   blobUrl: "https://private.invalid/brief.pdf",
                   blobPathname: "private/brief.pdf",
                 },
-              ],
-              created_at: "2026-08-10T20:00:00.000Z",
-              updated_at: "2026-08-10T20:00:01.000Z",
+              ]),
+              created_at: "2026-08-10 20:00:00+00",
+              updated_at: "2026-08-10 20:00:01+00",
               actor_id: "must-not-cross",
               workspace_id: "must-not-cross",
             },
             old_value: { actor_id: "must-not-cross", content: "Old" },
+          },
+          {
+            headers: { operation: "update" },
+            key: '"message_1"',
+            value: {
+              id: "message_1",
+              content: "Updated review",
+              updated_at: "2026-08-10 20:00:02+00",
+            },
+          },
+          {
+            headers: { operation: "delete" },
+            key: '"message_2"',
+            value: { id: "message_2" },
           },
         ],
         {
@@ -53,6 +67,8 @@ describe("Electric Chat read models", () => {
             "electric-schema": JSON.stringify({
               id: { type: "text" },
               conversation_id: { type: "text" },
+              presentation: { type: "jsonb" },
+              attachments: { type: "jsonb" },
               actor_id: { type: "text" },
               updated_at: { type: "timestamptz" },
             }),
@@ -117,6 +133,20 @@ describe("Electric Chat read models", () => {
           createdAt: "2026-08-10T20:00:00.000Z",
           updatedAt: "2026-08-10T20:00:01.000Z",
         },
+      },
+      {
+        headers: { operation: "update" },
+        key: '"message_1"',
+        value: {
+          id: "message_1",
+          content: "Updated review",
+          updatedAt: "2026-08-10T20:00:02.000Z",
+        },
+      },
+      {
+        headers: { operation: "delete" },
+        key: '"message_2"',
+        value: { id: "message_2" },
       },
     ]);
   });
