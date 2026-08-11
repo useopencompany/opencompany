@@ -171,6 +171,7 @@ describe("createGoatOpenCompanyChatProjector", () => {
       [
         {
           id: "approval_1",
+          toolCallId: "tool_call_1",
           kind: "use_action",
           prompt: "Approve crm.update?",
           options: ["approved", "denied"],

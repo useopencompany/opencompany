@@ -162,6 +162,7 @@ export type GoatChatUiAttachment = {
 
 export type GoatChatMessageMetadata = {
   sessionId?: string;
+  runId?: string;
   model?: string;
   scheduledWakeup?: {
     reason: string;

@@ -137,6 +137,51 @@ describe("ChatApplicationService", () => {
     ).toThrow(/unique/i);
   });
 
+  it("normalizes skill mentions and rejects duplicate protocol references", async () => {
+    const repository = fakeRepository();
+    const service = new ChatApplicationService(repository);
+
+    await service.createMessage(actor(), command({ mentions: [{ kind: "skill", id: " sales " }] }));
+    expect(repository.createMessageAndRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.objectContaining({ mentions: [{ kind: "skill", id: "sales" }] }),
+      }),
+    );
+    expect(() =>
+      service.createMessage(
+        actor(),
+        command({
+          mentions: [
+            { kind: "skill", id: "sales" },
+            { kind: "skill", id: "sales" },
+          ],
+        }),
+      ),
+    ).toThrow(/unique/i);
+  });
+
+  it("keeps Conversation writes actor-scoped and rejects empty updates", async () => {
+    const repository = fakeRepository();
+    const service = new ChatApplicationService(repository);
+
+    await expect(
+      service.updateConversation(actor(), " conversation_1 ", { pinned: true }),
+    ).resolves.toEqual({ conversationId: "conversation_1", transactionId: "43" });
+    expect(repository.updateConversation).toHaveBeenCalledWith({
+      actor: actor(),
+      conversationId: "conversation_1",
+      command: { pinned: true },
+    });
+    await expect(service.updateConversation(actor(), "conversation_1", {})).rejects.toMatchObject({
+      code: "invalid_argument",
+    });
+    await expect(
+      service.updateConversation(actor({ permissions: [CHAT_READ_PERMISSION] }), "conversation_1", {
+        markSeen: true,
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+  });
+
   it("keeps cancellation and approval authorization in the application core", async () => {
     const repository = fakeRepository();
     const service = new ChatApplicationService(repository);
@@ -224,9 +269,14 @@ function fakeRepository(): ChatRepository & {
     createMessageAndRun: vi.fn(async () => ({
       conversationId: "conversation_1",
       messageId: "message_1",
+      assistantMessageId: "message_2",
       runId: "run_1",
       transactionId: "42",
       idempotentReplay: false,
+    })),
+    updateConversation: vi.fn(async ({ conversationId }) => ({
+      conversationId,
+      transactionId: "43",
     })),
     getRun: vi.fn(async () => null),
     listRunEvents: vi.fn(async () => ({ events: [], nextSequence: 12 })),

@@ -8,6 +8,10 @@ export const CursorSchema = z
   .openapi({ example: "v1:42", description: "Opaque, versioned event cursor." });
 export const TimestampSchema = z.iso.datetime({ offset: true });
 export const ChatEngineSchema = z.enum(["opencompany", "codex", "claude_code"]);
+export const MessageMentionSchema = z
+  .object({ kind: z.literal("skill"), id: ResourceIdSchema })
+  .strict()
+  .openapi("MessageMention");
 export const RunStatusSchema = z.enum([
   "queued",
   "running",
@@ -73,6 +77,73 @@ export const RunSchema = z
   .strict()
   .openapi("Run");
 
+// Electric read models are versioned protocol resources. Their implementation may project from
+// existing physical tables, but clients only select one of these fixed names and receive canonical
+// field names through the shared collection adapter.
+export const ChatReadModelSchema = z.enum([
+  "chat-conversations-v1",
+  "chat-messages-v1",
+  "chat-runs-v1",
+]);
+
+export const ChatPresentationAttachmentSchema = z
+  .object({
+    id: ResourceIdSchema,
+    filename: z.string().min(1).max(512),
+    mediaType: z.string().min(1).max(255),
+    sizeBytes: z.number().int().min(0),
+    kind: z.enum(["image", "pdf", "docx", "xlsx", "srt", "csv", "tsv", "json", "text"]),
+  })
+  .strict()
+  .openapi("ChatPresentationAttachment");
+
+export const ConversationReadModelSchema = z
+  .object({
+    id: ResourceIdSchema,
+    title: z.string(),
+    engine: ChatEngineSchema,
+    model: z.string(),
+    archivedAt: TimestampSchema.nullable(),
+    pinnedAt: TimestampSchema.nullable(),
+    lastSeenAt: TimestampSchema.nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("ConversationReadModelV1");
+
+export const MessageReadModelSchema = z
+  .object({
+    id: ResourceIdSchema,
+    conversationId: ResourceIdSchema,
+    role: z.enum(["user", "assistant"]),
+    content: z.string(),
+    taskId: ResourceIdSchema.nullable(),
+    presentation: z.record(z.string(), z.unknown()).nullable(),
+    attachments: z.array(ChatPresentationAttachmentSchema).nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("MessageReadModelV1");
+
+export const RunReadModelSchema = z
+  .object({
+    id: ResourceIdSchema,
+    conversationId: ResourceIdSchema,
+    triggerMessageId: ResourceIdSchema,
+    assistantMessageId: ResourceIdSchema,
+    status: RunStatusSchema,
+    engine: ChatEngineSchema,
+    model: z.string(),
+    attemptCount: z.number().int().min(0),
+    error: z.string().nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("RunReadModelV1");
+
 export const ErrorCodeSchema = z.enum([
   "authentication_required",
   "forbidden",
@@ -115,6 +186,33 @@ export const ConversationEnvelopeSchema = z
   .strict()
   .openapi("ConversationEnvelope");
 
+export const UpdateConversationBodySchema = z
+  .object({
+    archived: z.boolean().optional(),
+    pinned: z.boolean().optional(),
+    markSeen: z.literal(true).optional(),
+  })
+  .strict()
+  .refine(
+    (value: { archived?: boolean; pinned?: boolean; markSeen?: true }) =>
+      value.archived !== undefined || value.pinned !== undefined || value.markSeen !== undefined,
+    { message: "A Conversation update is required." },
+  )
+  .openapi("UpdateConversationBody");
+
+export const UpdateConversationEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        conversationId: ResourceIdSchema,
+        transactionId: z.string().regex(/^[0-9]+$/u),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("UpdateConversationEnvelope");
+
 export const MessagePageSchema = z
   .object({
     data: z.array(MessageSchema),
@@ -156,6 +254,7 @@ export const CreateMessageBodySchema = z
     engine: ChatEngineSchema,
     model: z.string().min(1).max(256).optional(),
     attachmentIds: z.array(ResourceIdSchema).max(5).optional(),
+    mentions: z.array(MessageMentionSchema).max(16).optional(),
   })
   .strict()
   .refine(
@@ -178,6 +277,7 @@ export const CreateMessageEnvelopeSchema = z
       .object({
         conversationId: ResourceIdSchema,
         messageId: ResourceIdSchema,
+        assistantMessageId: ResourceIdSchema,
         runId: ResourceIdSchema,
         transactionId: z.string().regex(/^[0-9]+$/u),
         replayed: z.boolean(),
@@ -235,8 +335,13 @@ export const ResolveApprovalEnvelopeSchema = z
   .openapi("ResolveApprovalEnvelope");
 
 export type ConversationDto = z.infer<typeof ConversationSchema>;
+export type UpdateConversationBody = z.infer<typeof UpdateConversationBodySchema>;
 export type MessageDto = z.infer<typeof MessageSchema>;
 export type RunDto = z.infer<typeof RunSchema>;
+export type ChatReadModel = z.infer<typeof ChatReadModelSchema>;
+export type ConversationReadModel = z.infer<typeof ConversationReadModelSchema>;
+export type MessageReadModel = z.infer<typeof MessageReadModelSchema>;
+export type RunReadModel = z.infer<typeof RunReadModelSchema>;
 export type AttachmentUploadEnvelope = z.infer<typeof AttachmentUploadEnvelopeSchema>;
 export type CreateMessageBody = z.infer<typeof CreateMessageBodySchema>;
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelopeSchema>;

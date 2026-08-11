@@ -164,6 +164,19 @@ import {
   DEFAULT_CODEX_CHAT_REASONING_EFFORT,
   type GoatCodexComposerSettingsView,
 } from "@/lib/codex-chat-settings";
+import { uploadHeadlessChatAttachment } from "@/lib/headless-chat-attachment-upload";
+import {
+  getHeadlessChatMessages,
+  getHeadlessChatRuns,
+  type HeadlessChatMessageReadModel,
+  type HeadlessChatRunReadModel,
+} from "@/lib/headless-chat-collections";
+import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
+import {
+  HEADLESS_CHAT_ENABLED,
+  hasChatAttachmentTransportMismatch,
+} from "@/lib/headless-chat-feature";
+import { HeadlessChatTransport, startHeadlessBackgroundChat } from "@/lib/headless-chat-transport";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { alwaysAllowGoatChatActionAction } from "@/lib/integration-account-actions";
 import {
@@ -589,6 +602,9 @@ export function GoatSurface({
       activeSelectedMentions.find((mention) => mention.kind === "engine"),
     ) ?? baseChatModel;
   const isAutoChatModel = chatModel === AUTO_GOAT_MODEL_SELECTION;
+  // Auto-routing still belongs to the compatibility route. Keep it on the rollback adapter until
+  // the canonical application service owns that model-selection decision.
+  const headlessChatActive = HEADLESS_CHAT_ENABLED && !isAutoChatModel;
   const activeTaskId = activeTaskConversation?.taskId ?? null;
   const activeTaskStatus = activeTaskConversation?.status ?? null;
   const isTaskConversationStopping = Boolean(
@@ -722,7 +738,7 @@ export function GoatSurface({
     [],
   );
 
-  const transport = useMemo(
+  const legacyTransport = useMemo(
     () =>
       new DefaultChatTransport<GoatChatUiMessage>({
         api: "/api/chat",
@@ -730,6 +746,14 @@ export function GoatSurface({
       }),
     [prepareSendMessagesRequest],
   );
+  const headlessTransport = useMemo(
+    () =>
+      new HeadlessChatTransport<GoatChatUiMessage>({
+        onReconciled: ({ conversationId }) => removeOptimisticGoatChatSummary(conversationId),
+      }),
+    [],
+  );
+  const transport = headlessChatActive ? headlessTransport : legacyTransport;
   const { balance: creditBalance, refetch: refetchCreditBalance } = useGoatCreditBalance();
   const {
     messages,
@@ -745,7 +769,7 @@ export function GoatSurface({
     // useChat holds only this surface's in-flight overlay; persisted history
     // comes from the Electric-synced liveChat state and is merged below.
     resume:
-      chatResumeEnabled &&
+      (headlessChatActive || chatResumeEnabled) &&
       !taskConversation &&
       Boolean(initialChat) &&
       (initialChat?.engine ?? "opencompany") === "opencompany",
@@ -874,6 +898,9 @@ export function GoatSurface({
       : isAutoChatModel
         ? { capabilities: AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES }
         : {}),
+    ...(headlessChatActive && !composerEngine
+      ? { upload: ({ file }: { file: File }) => uploadHeadlessChatAttachment({ file }) }
+      : {}),
   });
   const applyDictatedInput = useCallback(
     (nextInput: string) => {
@@ -1070,13 +1097,17 @@ export function GoatSurface({
     ].join(":");
     if (lastSeenMarkRef.current === markKey) return;
     lastSeenMarkRef.current = markKey;
-    void markGoatChatSeen(chatSessionId).catch(() => undefined);
+    const markSeen = headlessChatActive
+      ? updateHeadlessChatConversation(chatSessionId, { markSeen: true })
+      : markGoatChatSeen(chatSessionId);
+    void markSeen.catch(() => undefined);
   }, [
     activeChatSummary?.updatedAt,
     chatMessages.length,
     chatSessionId,
     isAgentWorking,
     latestAssistantMessageId,
+    headlessChatActive,
     mode,
     persistedChatSessionId,
   ]);
@@ -1419,7 +1450,13 @@ export function GoatSurface({
     setOptimisticallyArchivedChatIds((current) => new Set(current).add(chat.id));
     startArchiveTransition(async () => {
       try {
-        const result = await closeGoatChatSessionAction(chat.id);
+        const result =
+          HEADLESS_CHAT_ENABLED && (chat.engine ?? "opencompany") === "opencompany"
+            ? await updateHeadlessChatConversation(chat.id, { archived: true }).then(() => ({
+                ok: true,
+                error: null,
+              }))
+            : await closeGoatChatSessionAction(chat.id);
         if (result.ok) {
           router.refresh();
           return;
@@ -1495,7 +1532,13 @@ export function GoatSurface({
       startArchiveTransition(async () => {
         // The chat route only serves open sessions, so the archived chat must be
         // reopened before we navigate — otherwise the page would render empty.
-        const result = await reopenGoatChatSessionAction(chat.id);
+        const result =
+          HEADLESS_CHAT_ENABLED && (chat.engine ?? "opencompany") === "opencompany"
+            ? await updateHeadlessChatConversation(chat.id, { archived: false }).then(() => ({
+                ok: true,
+                error: null,
+              }))
+            : await reopenGoatChatSessionAction(chat.id);
         if (result.ok) {
           router.push(chatHref(chat.id));
           router.refresh();
@@ -1611,12 +1654,15 @@ export function GoatSurface({
       mediaType: attachment.mediaType,
       filename: attachment.filename,
       sizeBytes: attachment.sizeBytes,
-      // biome-ignore lint/style/noNonNullAssertion: filtered to ready attachments with blob fields
-      blobUrl: attachment.blobUrl!,
-      // biome-ignore lint/style/noNonNullAssertion: filtered to ready attachments with blob fields
-      blobPathname: attachment.blobPathname!,
+      ...(attachment.blobUrl ? { blobUrl: attachment.blobUrl } : {}),
+      ...(attachment.blobPathname ? { blobPathname: attachment.blobPathname } : {}),
       ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
     }));
+    const canonicalAttachmentTarget = headlessChatActive && !(backgroundEngine ?? activeEngine);
+    if (hasChatAttachmentTransportMismatch(readyAttachments, canonicalAttachmentTarget)) {
+      toast.error("Reattach files after switching models or engines.");
+      return;
+    }
 
     if (backgroundChat) {
       if (messagePrompt.length > BACKGROUND_CHAT_PROMPT_MAX_LENGTH) {
@@ -2236,12 +2282,23 @@ export function GoatSurface({
   const closeChat = useCallback(() => {
     if (isGenerating) {
       clearLocalActiveTurnState(chatSessionId);
+      if (headlessChatActive) void headlessTransport.cancel(chatInstanceKey).catch(() => {});
       void stop();
     }
     openChat(null);
     router.replace("/");
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, [chatSessionId, clearLocalActiveTurnState, isGenerating, openChat, router, stop]);
+  }, [
+    chatInstanceKey,
+    chatSessionId,
+    clearLocalActiveTurnState,
+    headlessTransport,
+    headlessChatActive,
+    isGenerating,
+    openChat,
+    router,
+    stop,
+  ]);
 
   const stopGeneration = useCallback(() => {
     if (activeTaskConversation) {
@@ -2286,7 +2343,9 @@ export function GoatSurface({
     clearLocalActiveTurnState(chatSessionId ?? lastAssistantMessage?.metadata?.sessionId ?? null);
     // With resumable streams, aborting the connection is only a disconnect;
     // the stop endpoint cancels the server-side generation itself.
-    if (chatResumeEnabled) {
+    if (headlessChatActive) {
+      void headlessTransport.cancel(chatInstanceKey).catch(() => undefined);
+    } else if (chatResumeEnabled) {
       const stopSessionId = chatSessionId ?? lastAssistantMessage?.metadata?.sessionId ?? null;
       if (stopSessionId) {
         void fetch(`/api/chat/${encodeURIComponent(stopSessionId)}/stop`, {
@@ -2299,9 +2358,12 @@ export function GoatSurface({
     activeEngineChat,
     activeTaskConversation,
     chatResumeEnabled,
+    chatInstanceKey,
     chatSessionId,
     clearLocalActiveTurnState,
     isTaskConversationStopping,
+    headlessTransport,
+    headlessChatActive,
     messages,
     router,
     stop,
@@ -2823,7 +2885,11 @@ export function GoatSurface({
           (!activeTaskConversation || activeTaskConversation.sessionBacked) &&
           chatSessionId &&
           persistedChatSessionId === chatSessionId ? (
-            <LiveChatMessages sessionId={chatSessionId} onChange={setLiveChat} />
+            <LiveChatMessages
+              sessionId={chatSessionId}
+              headless={headlessChatActive && !activeEngineChat && !activeTaskConversation}
+              onChange={setLiveChat}
+            />
           ) : null}
           {mode === "chat" &&
           (activeEngineChat?.engine === "codex" || activeEngineChat?.engine === "claude_code") ? (
@@ -3313,6 +3379,8 @@ function QuickChatComposer({
     ? (parsedBackgroundChatDirective.engine ?? selectedEngine)
     : selectedEngine;
   const isEngineChat = composerEngine !== null;
+  const headlessQuickChatActive =
+    HEADLESS_CHAT_ENABLED && chatModel !== AUTO_GOAT_MODEL_SELECTION && !isEngineChat;
   const adHocTaskMentionEnabled = taskSpawningEnabled && !selectedEngine;
   const backgroundAdHocTaskSelected = Boolean(
     parsedBackgroundChatDirective &&
@@ -3356,6 +3424,9 @@ function QuickChatComposer({
       : chatModel === AUTO_GOAT_MODEL_SELECTION
         ? { capabilities: AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES }
         : {}),
+    ...(headlessQuickChatActive
+      ? { upload: ({ file }: { file: File }) => uploadHeadlessChatAttachment({ file }) }
+      : {}),
   });
 
   // The dialog stays mounted across opens; reset to a pristine draft each time it closes
@@ -3654,12 +3725,14 @@ function QuickChatComposer({
       mediaType: attachment.mediaType,
       filename: attachment.filename,
       sizeBytes: attachment.sizeBytes,
-      // biome-ignore lint/style/noNonNullAssertion: filtered to ready attachments with blob fields
-      blobUrl: attachment.blobUrl!,
-      // biome-ignore lint/style/noNonNullAssertion: filtered to ready attachments with blob fields
-      blobPathname: attachment.blobPathname!,
+      ...(attachment.blobUrl ? { blobUrl: attachment.blobUrl } : {}),
+      ...(attachment.blobPathname ? { blobPathname: attachment.blobPathname } : {}),
       ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
     }));
+    if (hasChatAttachmentTransportMismatch(readyAttachments, headlessQuickChatActive)) {
+      toast.error("Reattach files after switching models or engines.");
+      return;
+    }
 
     if (
       taskSpawningEnabled &&
@@ -5765,17 +5838,23 @@ type LiveChatMessagesChange = Dispatch<
 
 function LiveChatMessages({
   sessionId,
+  headless,
   onChange,
 }: {
   sessionId: string;
+  headless: boolean;
   onChange: LiveChatMessagesChange;
 }) {
   const hydrated = useHydrated();
   if (!hydrated) return null;
-  return <LiveChatMessageSubscriber sessionId={sessionId} onChange={onChange} />;
+  return headless ? (
+    <HeadlessLiveChatMessageSubscriber sessionId={sessionId} onChange={onChange} />
+  ) : (
+    <LegacyLiveChatMessageSubscriber sessionId={sessionId} onChange={onChange} />
+  );
 }
 
-function LiveChatMessageSubscriber({
+function LegacyLiveChatMessageSubscriber({
   sessionId,
   onChange,
 }: {
@@ -5806,6 +5885,45 @@ function LiveChatMessageSubscriber({
     if (isLoading) return;
     onChange({ sessionId, messages: liveMessages });
   }, [isLoading, liveMessages, onChange, sessionId]);
+
+  return null;
+}
+
+function HeadlessLiveChatMessageSubscriber({
+  sessionId,
+  onChange,
+}: {
+  sessionId: string;
+  onChange: LiveChatMessagesChange;
+}) {
+  const messagesCollection = useMemo(() => getHeadlessChatMessages(sessionId), [sessionId]);
+  const runsCollection = useMemo(() => getHeadlessChatRuns(sessionId), [sessionId]);
+  const { data: rows, isLoading: messagesLoading } = useLiveQuery(
+    (q) => q.from({ message: messagesCollection }),
+    [messagesCollection],
+  );
+  const { data: runRows, isLoading: runsLoading } = useLiveQuery(
+    (q) => q.from({ run: runsCollection }),
+    [runsCollection],
+  );
+  const liveMessages = useMemo(() => {
+    const runsByAssistantMessage = new Map(
+      ((runRows ?? []) as HeadlessChatRunReadModel[]).map((run) => [run.assistantMessageId, run]),
+    );
+    return ((rows ?? []) as HeadlessChatMessageReadModel[])
+      .toSorted((a, b) =>
+        compareGoatChatMessageOrder(
+          { id: a.id, role: a.role, createdAt: a.createdAt },
+          { id: b.id, role: b.role, createdAt: b.createdAt },
+        ),
+      )
+      .map((row) => headlessChatMessageRowToUiMessage(row, runsByAssistantMessage.get(row.id)));
+  }, [rows, runRows]);
+
+  useEffect(() => {
+    if (messagesLoading || runsLoading) return;
+    onChange({ sessionId, messages: liveMessages });
+  }, [liveMessages, messagesLoading, onChange, runsLoading, sessionId]);
 
   return null;
 }
@@ -6276,6 +6394,39 @@ function chatMessageRowToUiMessage(row: GoatChatMessageRow): GoatChatUiMessage {
   });
 }
 
+function headlessChatMessageRowToUiMessage(
+  row: HeadlessChatMessageReadModel,
+  run?: HeadlessChatRunReadModel,
+): GoatChatUiMessage {
+  const message = toGoatChatUiMessage({
+    id: row.id,
+    sessionId: row.conversationId,
+    role: row.role,
+    content: row.content,
+    taskId: row.taskId,
+    debugTrace: row.presentation as GoatStoredChatMessage["debugTrace"],
+    attachments: row.attachments as GoatStoredChatMessage["attachments"],
+    attachmentTexts: null,
+    createdAt: new Date(row.createdAt),
+    updatedAt: new Date(row.updatedAt),
+    taskDisplayId: null,
+    taskName: null,
+    taskPrompt: null,
+    taskStatus: null,
+  });
+  if (row.role !== "assistant" || !run) return message;
+  return {
+    ...message,
+    metadata: {
+      ...message.metadata,
+      runId: run.id,
+      model: message.metadata?.model ?? run.model,
+      ...(run.status === "failed" && run.error ? { error: run.error } : {}),
+      ...(run.status === "canceled" ? { aborted: true } : {}),
+    },
+  };
+}
+
 function ResultRow({
   task,
   onArchive,
@@ -6661,6 +6812,26 @@ async function runBackgroundChatTurn(input: {
   newSessionId: string;
   metadata?: GoatChatMessageMetadata;
 }) {
+  const clientMessageId = newBackgroundChatMessageId();
+  if (HEADLESS_CHAT_ENABLED && input.model !== AUTO_GOAT_MODEL_SELECTION) {
+    await startHeadlessBackgroundChat({
+      content: input.prompt,
+      clientConversationId: input.newSessionId,
+      clientMessageId,
+      model: input.model,
+      ...(input.metadata?.attachments?.length
+        ? { attachmentIds: input.metadata.attachments.map((attachment) => attachment.id) }
+        : {}),
+      ...(input.metadata?.mentions?.length
+        ? {
+            mentions: input.metadata.mentions.flatMap((mention) =>
+              mention.kind === "skill" ? [{ kind: "skill" as const, id: mention.id }] : [],
+            ),
+          }
+        : {}),
+    });
+    return;
+  }
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -6669,7 +6840,7 @@ async function runBackgroundChatTurn(input: {
       newSessionId: input.newSessionId,
       model: input.model,
       message: {
-        id: newBackgroundChatMessageId(),
+        id: clientMessageId,
         role: "user",
         parts: [{ type: "text", text: input.prompt }],
         ...(input.metadata ? { metadata: input.metadata } : {}),

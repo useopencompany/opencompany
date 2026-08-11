@@ -23,6 +23,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { streamSSE } from "hono/streaming";
 import type { AttachmentUploadService } from "./attachments";
 import type { ApiAuthenticator } from "./auth";
+import type { ChatReadModelService } from "./electric-read-models";
 import { ApiError, errorResponse } from "./errors";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
 import { PollingRunEventNotifier, type RunEventNotifier } from "./run-event-notifier";
@@ -32,7 +33,9 @@ const meta = { apiVersion: "v1", protocolVersion: PROTOCOL_VERSION } as const;
 const EVENT_BATCH_SIZE = 100;
 const EVENT_POLL_MS = 1_000;
 const HEARTBEAT_MS = 15_000;
-const TERMINAL_RUN_STATUSES = new Set(["completed", "failed", "canceled"]);
+// A paused Run has reached an interaction boundary. Close this SSE response after the durable
+// run.paused event so clients can present approvals, then reconnect after resolving them.
+const TERMINAL_RUN_STATUSES = new Set(["paused", "completed", "failed", "canceled"]);
 const MULTIPART_ENVELOPE_BYTES = 64 * 1024;
 
 export type CreateApiAppInput = {
@@ -43,6 +46,7 @@ export type CreateApiAppInput = {
   rateLimiter?: ApiRateLimiter;
   defaultModel?: string;
   now?: () => Date;
+  readModels?: ChatReadModelService;
 };
 
 export function createApiApp(input: CreateApiAppInput) {
@@ -72,6 +76,16 @@ export function createApiApp(input: CreateApiAppInput) {
         c.req.valid("param").conversationId,
       );
       return c.json({ data: conversationDto(conversation), meta }, 200);
+    },
+    updateConversation: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.chat.updateConversation(
+        actor,
+        c.req.valid("param").conversationId,
+        c.req.valid("json"),
+      );
+      return c.json({ data: result, meta }, 200);
     },
     listMessages: async (c) => {
       const actor = actorFrom(c);
@@ -104,6 +118,7 @@ export function createApiApp(input: CreateApiAppInput) {
           data: {
             conversationId: result.conversationId,
             messageId: result.messageId,
+            assistantMessageId: result.assistantMessageId,
             runId: result.runId,
             transactionId: result.transactionId,
             replayed: result.idempotentReplay,
@@ -159,7 +174,11 @@ export function createApiApp(input: CreateApiAppInput) {
       } catch {
         throw new ApiError(400, "invalid_request", "The event cursor is invalid.");
       }
-      await input.chat.getRun(actor, runId);
+      const initialRun = await input.chat.getRun(actor, runId);
+      // A cursor may already point at the final durable event. In that case the response body is
+      // intentionally empty, so the shared client needs the authenticated status snapshot to
+      // distinguish terminal exhaustion from an early network disconnect.
+      c.header("X-OpenCompany-Run-Status", initialRun.status);
       return streamSSE(c, async (stream) => {
         let lastHeartbeatAt = now().getTime();
         try {
@@ -237,6 +256,37 @@ export function createApiApp(input: CreateApiAppInput) {
         },
         200,
       );
+    },
+    streamReadModel: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read-model", 300);
+      if (!input.readModels) {
+        throw new ApiError(503, "unavailable", "Electric read models are not configured.", true);
+      }
+      const params = c.req.valid("param");
+      const query = c.req.valid("query");
+      if (params.readModel !== "chat-conversations-v1") {
+        if (!query.conversationId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "conversationId is required for this read model.",
+          );
+        }
+        await input.chat.getConversation(actor, query.conversationId);
+      } else if (query.conversationId) {
+        throw new ApiError(
+          400,
+          "invalid_request",
+          "conversationId is not valid for this read model.",
+        );
+      }
+      return input.readModels.stream({
+        actor,
+        readModel: params.readModel,
+        ...(query.conversationId ? { conversationId: query.conversationId } : {}),
+        requestUrl: new URL(c.req.url),
+      }) as never;
     },
   };
 

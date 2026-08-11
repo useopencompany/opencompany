@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { createOpenCompanyClient } from "./client";
 import { decodeEventCursor, encodeEventCursor, RunEventSchema } from "./events";
 import { createOpenApiDocument } from "./routes";
-import { CreateMessageBodySchema, ResolveApprovalBodySchema } from "./schemas";
+import {
+  ChatReadModelSchema,
+  CreateMessageBodySchema,
+  MessageReadModelSchema,
+  ResolveApprovalBodySchema,
+} from "./schemas";
 
 describe("headless protocol", () => {
   it("publishes every canonical /v1 operation in OpenAPI", () => {
@@ -17,6 +22,7 @@ describe("headless protocol", () => {
       "/v1/runs/{runId}/events",
       "/v1/runs/{runId}/cancel",
       "/v1/runs/{runId}/approvals/{approvalId}",
+      "/v1/read-models/{readModel}",
     ]);
     expect(document.components?.securitySchemes).toHaveProperty("bearerAuth");
   });
@@ -31,6 +37,31 @@ describe("headless protocol", () => {
         sessionId: "goat_chat_1",
         turnId: "goat_codex_chat_turn_1",
         workosUserId: "user_1",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("validates skill mentions and keeps physical read-model fields server-side", () => {
+    expect(
+      CreateMessageBodySchema.safeParse({
+        content: "Use the sales skill",
+        engine: "opencompany",
+        mentions: [{ kind: "skill", id: "sales" }],
+      }).success,
+    ).toBe(true);
+    expect(ChatReadModelSchema.safeParse("goat.chat_messages").success).toBe(false);
+    expect(
+      MessageReadModelSchema.safeParse({
+        id: "message_1",
+        conversationId: "conversation_1",
+        role: "assistant",
+        content: "Done",
+        taskId: null,
+        presentation: null,
+        attachments: null,
+        createdAt: "2026-08-10T00:00:00.000Z",
+        updatedAt: "2026-08-10T00:00:00.000Z",
+        actor_id: "must-not-cross",
       }).success,
     ).toBe(false);
   });

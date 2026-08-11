@@ -84,6 +84,7 @@ describe("v1 protocol contract", () => {
       "/v1/runs/{runId}/events",
       "/v1/runs/{runId}/cancel",
       "/v1/runs/{runId}/approvals/{approvalId}",
+      "/v1/read-models/{readModel}",
     ]);
     expect(JSON.stringify(document)).not.toMatch(/workos|codex_chat_turn|lease_owner/iu);
 

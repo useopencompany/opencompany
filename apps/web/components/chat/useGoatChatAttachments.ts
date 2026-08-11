@@ -32,10 +32,17 @@ export function useGoatChatAttachments(opts: {
   // Cloud engines can make uploaded files available through their own filesystem even when
   // the gateway model catalog does not advertise native PDF/image message parts.
   capabilities?: { images: boolean; pdf: boolean };
+  // The canonical API returns an opaque attachment id. The legacy uploader additionally returns
+  // private blob locators for compatibility with the rollback transport.
+  upload?: (input: {
+    file: File;
+    mediaType: string;
+  }) => Promise<{ id?: string; blobUrl?: string; blobPathname?: string }>;
 }) {
   const { userWorkosId, modelName, enabled = true } = opts;
   const imagesOverride = opts.capabilities?.images;
   const pdfOverride = opts.capabilities?.pdf;
+  const upload = opts.upload;
   const [attachments, setAttachments] = useState<PendingGoatChatAttachment[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
   const dragCounterRef = useRef(0);
@@ -113,11 +120,23 @@ export function useGoatChatAttachments(opts: {
             status: "uploading",
             ...(validation.kind === "image" ? { previewUrl: URL.createObjectURL(file) } : {}),
           });
-          void uploadGoatChatAttachmentBlob(userWorkosId, file, validation.mediaType)
+          const uploadPromise = upload
+            ? upload({ file, mediaType: validation.mediaType })
+            : uploadGoatChatAttachmentBlob(userWorkosId, file, validation.mediaType);
+          void uploadPromise
             .then((res) => {
               if (mountedRef.current) {
                 setAttachments((cur) =>
-                  cur.map((a) => (a.id === id ? { ...a, status: "ready", ...res } : a)),
+                  cur.map((a) =>
+                    a.id === id
+                      ? {
+                          ...a,
+                          ...res,
+                          id: ("id" in res ? res.id : undefined) ?? a.id,
+                          status: "ready",
+                        }
+                      : a,
+                  ),
                 );
               }
             })
@@ -132,7 +151,7 @@ export function useGoatChatAttachments(opts: {
         return next;
       });
     },
-    [userWorkosId],
+    [upload, userWorkosId],
   );
 
   const removeAttachment = useCallback((id: string) => {

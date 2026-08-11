@@ -185,6 +185,30 @@ not contain a second model loop. PR 3 cuts web writes and live output to `/v1`, 
 Electric to API-owned, actor-scoped, versioned Chat read models. PR 4 adds mobile and either moves
 macOS to `/v1` or proves the thin adapter.
 
+The implementation audit before PR 3 found several foreground-only tools (task and schedule
+creation, Brain capture, skill activation, managed capabilities, browser, and wiki) that must be
+composed into the runner before a default-on cutover can preserve behavior. Therefore PR 3 ships a
+real but explicit cohort path rather than silently reducing capabilities:
+
+- `NEXT_PUBLIC_GOAT_HEADLESS_CHAT=true` selects canonical ordinary-Chat create, upload, cancel,
+  approval, archive, restore, pin, seen-state, SSE, and Conversation/Message/Run read-model traffic.
+  It is false by default until the PR 4 parity gate. Auto model selection stays on the compatibility
+  adapter until routing moves behind the canonical command service. Coding-chat metadata writes
+  remain on their existing engine-specific path and are not part of the migrated ordinary-Chat
+  resource.
+- The browser calls same-origin `/v1`; the Next proxy uses server-only `GOAT_API_ORIGIN`, forwards
+  the existing session cookie, and rejects missing, invalid, credential-bearing, or same-origin
+  targets. Browser code never receives the API origin or Electric credentials.
+- Electric collection URLs select only the fixed `chat-*-v1` names. The API chooses physical
+  tables, columns, and actor/workspace predicates; client `table` or `where` parameters are ignored.
+- `apps/web/app/api/chat/route.ts` is a thin compatibility boundary. Its foreground implementation
+  is isolated in `lib/legacy-chat-route.ts` solely for a flag rollback and continues to serve
+  unflagged deployments. It is not called by the canonical path and must not gain new behavior.
+
+Moving the default-on cohort gate from PR 3 to PR 4 is an evidence-driven boundary adjustment, not
+a new product scope: it keeps PR 3 independently deployable while the runner parity work remains in
+the rollout PR. Production configuration is not changed by these code PRs.
+
 The compatibility adapter can be removed only after web, mobile, and macOS canonical-path checks
 pass in CI and the agreed production soak has no unexplained command, Run settlement, reconnect, or
 tenant-isolation regressions. That removal is a separate reversible change. It requires
@@ -236,10 +260,10 @@ a temporary vocabulary translation in the DB adapter and a temporary compatibili
 both have explicit boundaries and removal conditions. Per-Run cursors make one stream simple and
 safe; aggregating Events across Runs would need a different cursor and is not promised in v1.
 
-The four PR boundaries from issue #1165 remain intact. PR 1 contains a real atomic repository and
-worker execution port rather than empty package scaffolding. Evidence has not required a boundary
-change. If later implementation evidence does, this ADR and the issue will record the change before
-the dependent PR begins.
+The four independently deployable PRs from issue #1165 remain intact. PR 1 contained a real atomic
+repository and worker execution port rather than empty package scaffolding. The verified
+foreground-only capability gap moved only the default-on cohort gate—not the web implementation—
+from PR 3 to PR 4. This ADR and the issue record that evidence before rollout begins.
 
 ## Alternatives rejected
 
