@@ -187,6 +187,20 @@ describe("createGoatOpenCompanyChatProjector", () => {
         approvals: [expect.objectContaining({ id: "approval_1" })],
       }),
     );
+    expect(executionMock.appendEvents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            type: "message.content_updated",
+            payload: expect.objectContaining({ complete: true }),
+          }),
+          expect.objectContaining({ type: "tool.started" }),
+        ],
+      }),
+    );
+    expect(vi.mocked(executionMock.appendEvents).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(executionMock.pauseForApprovals).mock.invocationCallOrder[0] ?? Infinity,
+    );
   });
 
   it("persists partial output as aborted and settles an interrupted turn", async () => {

@@ -15,6 +15,21 @@ const event = (sequence: number, type = "message.content_updated") => ({
       : { messageId: "message_2", content: `content ${sequence}`, complete: false },
 });
 
+const presentation = (cursor: string, delta = "Hi") => ({
+  runId: "run_1",
+  attemptNumber: 1,
+  presentationCursor: cursor,
+  schemaVersion: 1,
+  occurredAt: "2026-08-10T20:00:00.000Z",
+  type: "message.presentation_delta",
+  payload: {
+    messageId: "message_2",
+    startOffset: 0,
+    endOffset: delta.length,
+    delta,
+  },
+});
+
 describe("protocol SSE client", () => {
   it("parses chunked, multiline SSE data while ignoring heartbeats", async () => {
     const encoder = new TextEncoder();
@@ -65,6 +80,41 @@ describe("protocol SSE client", () => {
       fetch: async () => new Response(`data: ${JSON.stringify(wrongRun)}\n\n`),
     });
     await expect(stream.next()).rejects.toThrow(/another Run/u);
+  });
+
+  it("reconnects with independent durable and transient cursors", async () => {
+    const calls: Array<{ durable: string; presentation: string }> = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      calls.push({
+        durable: url.searchParams.get("cursor") ?? "",
+        presentation: url.searchParams.get("presentationCursor") ?? "",
+      });
+      const events =
+        calls.length === 1
+          ? [event(1), presentation("p1:1786449600000-0")]
+          : [event(2, "run.completed")];
+      return new Response(events.map((value) => `data: ${JSON.stringify(value)}\n\n`).join(""), {
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    });
+    const presentationCursors: string[] = [];
+
+    for await (const _event of streamRunEvents({
+      baseUrl: "https://api.example.test",
+      runId: "run_1",
+      fetch: fetchMock as typeof fetch,
+      reconnectDelayMs: 0,
+      onPresentationCursor: (cursor) => presentationCursors.push(cursor),
+    })) {
+      // Consume through the terminal durable event.
+    }
+
+    expect(calls).toEqual([
+      { durable: "", presentation: "" },
+      { durable: "v1:1", presentation: "p1:1786449600000-0" },
+    ]);
+    expect(presentationCursors).toEqual(["p1:1786449600000-0"]);
   });
 
   it("ends at a durable approval pause without reconnecting", async () => {

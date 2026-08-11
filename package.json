@@ -61,7 +61,8 @@
     "db:cloud-base:refresh": "node scripts/neon-cloud-base.mjs",
     "db:branch:create": "node scripts/neon-branch.mjs create",
     "db:branch:delete": "node scripts/neon-branch.mjs delete",
-    "electric:dev": "node scripts/electric-dev.mjs"
+    "electric:dev": "node scripts/electric-dev.mjs",
+    "measure:chat-presentation": "bun scripts/measure-headless-chat-presentation.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

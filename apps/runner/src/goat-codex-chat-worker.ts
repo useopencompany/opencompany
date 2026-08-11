@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { ChatPresentationPublisher } from "@opencompany/chat-presentation";
 import { PostgresRunExecutionRepository } from "@opencompany/db/chat-repository";
 import {
   type GoatCodexChatTurn,
@@ -186,7 +187,10 @@ export async function heartbeatGoatCodexChatTurn(input: {
 export async function runClaimedTurn(
   turn: GoatCodexChatTurn,
   env: RunnerEnv,
-  options: { handoffSignal?: AbortSignal } = {},
+  options: {
+    handoffSignal?: AbortSignal;
+    presentationPublisher?: ChatPresentationPublisher;
+  } = {},
 ) {
   const leaseId = turn.leaseId;
   const leaseOwner = turn.leaseOwner;
@@ -332,6 +336,9 @@ export async function runClaimedTurn(
         session,
         env,
         canonicalAttemptId,
+        ...(options.presentationPublisher
+          ? { presentationPublisher: options.presentationPublisher }
+          : {}),
         ...(taskContext ? { taskContext } : {}),
         ...(recoveryRequired ? { recovery: { reason: "lease_reclaimed" as const } } : {}),
         shouldAbort: () =>
@@ -576,6 +583,7 @@ export function startGoatCodexChatWorker(
     pollIntervalMs?: number;
     sandboxSweep?: () => Promise<number>;
     sandboxSweepIntervalMs?: number;
+    presentationPublisher?: ChatPresentationPublisher;
   } = {},
 ) {
   const concurrency = resolveGoatCodexChatWorkerConcurrency(env, options.concurrency);
@@ -649,6 +657,9 @@ export function startGoatCodexChatWorker(
           const handoffController = new AbortController();
           const running = runClaimedTurn(turn, env, {
             handoffSignal: handoffController.signal,
+            ...(options.presentationPublisher
+              ? { presentationPublisher: options.presentationPublisher }
+              : {}),
           })
             .catch((error) => {
               if (error instanceof GoatCodexChatLeaseLostError) return;

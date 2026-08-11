@@ -172,6 +172,45 @@ High-frequency model tokens are coalesced before durable `message.content_update
 Events cover Run transitions, tool/approval transitions, artifact publication, final Message
 references, errors, and cancellation. Raw provider streams stay out of the semantic log.
 
+### Transient presentation lane
+
+Client testing after PR #1172 measured canonical visible updates at approximately 223–308 ms even
+with a 150 ms durable projection throttle. The two sequential Postgres writes in that path are the
+measured bottleneck, while the legacy foreground stream presents provider output on approximately a
+50 ms cadence. This justifies the optional Redis hot-replay layer anticipated by the reference
+architecture without changing Postgres authority.
+
+The runner publishes append-only `message.presentation_delta` frames at no more than a 50 ms
+cadence and persists complete Message snapshots plus semantic Events on a 500 ms durability
+cadence. Each Redis Stream is scoped to one Run, capped at 1,024 entries, and expires five minutes
+after its most recent frame. It is not a queue, durable Event store, or general event bus. Publishing
+is best-effort and cannot apply backpressure to model execution or durable settlement.
+
+Presentation frames carry the Run ID, assistant Message ID, current Attempt number, append offset,
+delta, and a separate opaque `p1:` cursor. They are validated protocol events but are not durable Run
+Events. SSE therefore omits the `id` field for presentation frames. Only durable `v1:` cursors are
+written as SSE IDs, remain valid in `Last-Event-ID`, and define reconnect correctness.
+
+A client may additionally send its last `presentationCursor` query value. Every connection first
+catches up durable Events from Postgres, then reads Redis frames after that transient cursor (or the
+bounded hot window when no transient cursor exists). The client applies a delta only where its
+offset meets the current Message snapshot and ignores already-applied ranges. If trimming or expiry
+creates a gap, it stops applying transient deltas until a durable Message snapshot reaches the gap;
+it never guesses or duplicates content. An invalid transient cursor is rejected, but an unavailable
+or failed Redis read silently falls back to the existing Postgres loop.
+
+Attempt numbers fence presentation after recovery: the API accepts only frames matching the Run's
+authoritative current Attempt count, so a delayed old worker cannot overwrite recovered output.
+Multiple API instances read the same bounded stream independently without consumer groups. Slow
+consumers may lose animation frames when the length cap advances, then recover from Postgres.
+
+Before every `run.paused`, `run.completed`, `run.failed`, or `run.canceled` Event, the runner writes
+the latest complete assistant Message and appends a final durable
+`message.content_updated(complete=true)` Event. The terminal Event follows it in the same ordered
+durable sequence (and in the same settlement batch except at the approval pause boundary). Redis
+failure, expiry, process restart, or total absence can therefore reduce
+smoothness only; it cannot lose, corrupt, duplicate, or prevent work.
+
 ### Compatibility, rollout, and rollback
 
 PR 1 does not change behavior or routing for existing clients:

@@ -6,6 +6,13 @@ export const CursorSchema = z
   .string()
   .regex(/^v1:[1-9][0-9]*$/u)
   .openapi({ example: "v1:42", description: "Opaque, versioned event cursor." });
+export const PresentationCursorSchema = z
+  .string()
+  .regex(/^p1:[1-9][0-9]*-[0-9]+$/u)
+  .openapi({
+    example: "p1:1786449600000-0",
+    description: "Opaque, best-effort cursor within the transient presentation window.",
+  });
 export const TimestampSchema = z.iso.datetime({ offset: true });
 export const ChatEngineSchema = z.enum(["opencompany", "codex", "claude_code"]);
 export const MessageMentionSchema = z

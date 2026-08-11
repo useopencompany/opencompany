@@ -1,3 +1,4 @@
+import type { ChatPresentationReader } from "@opencompany/chat-presentation";
 import {
   type Actor,
   ChatApplicationService,
@@ -135,6 +136,124 @@ describe("canonical Hono API", () => {
     await expect(response.text()).resolves.toContain("event: run.paused");
   });
 
+  it("fans one Redis hot stream out through multiple API instances", async () => {
+    const presentation = presentationReader(({ afterStreamId }) =>
+      afterStreamId ? [] : [presentationEntry("1786449600000-0", "Hello")],
+    );
+    const first = streamingFixture({ presentation });
+    const second = streamingFixture({ presentation });
+
+    const [firstBody, secondBody] = await Promise.all([
+      responseBody(first.app.request("/v1/runs/run_1/events")),
+      responseBody(second.app.request("/v1/runs/run_1/events")),
+    ]);
+
+    for (const body of [firstBody, secondBody]) {
+      expect(body).toContain("event: message.presentation_delta");
+      expect(body).toContain('"delta":"Hello"');
+      expect(body).not.toContain("id: p1:");
+      expect(body.indexOf('"complete":true')).toBeLessThan(body.indexOf("event: run.completed"));
+    }
+  });
+
+  it("resumes transient replay independently from the durable cursor", async () => {
+    const read = vi.fn(async ({ afterStreamId }: { afterStreamId?: string }) => ({
+      status: "available" as const,
+      entries: [presentationEntry("1786449600050-0", " world", 5)],
+      nextStreamId: "1786449600050-0",
+    }));
+    const fixture = streamingFixture({ presentation: { read } });
+    const response = await fixture.app.request(
+      "/v1/runs/run_1/events?cursor=v1:1&presentationCursor=p1:1786449600000-0",
+    );
+    const body = await response.text();
+
+    expect(read).toHaveBeenCalledWith(
+      expect.objectContaining({ afterStreamId: "1786449600000-0" }),
+    );
+    expect(body).toContain('"presentationCursor":"p1:1786449600050-0"');
+    expect(body).toContain("id: v1:2");
+  });
+
+  it("falls back to durable terminal output when the hot window expired", async () => {
+    const fixture = streamingFixture({ presentation: presentationReader(() => []) });
+    const body = await responseBody(fixture.app.request("/v1/runs/run_1/events"));
+
+    expect(body).not.toContain("message.presentation_delta");
+    expect(body).toContain('"content":"Durable final"');
+    expect(body).toContain("event: run.completed");
+  });
+
+  it("keeps streaming durably when Redis fails mid-stream", async () => {
+    let reads = 0;
+    const presentation: ChatPresentationReader = {
+      async read() {
+        reads += 1;
+        return reads === 1
+          ? {
+              status: "available",
+              entries: [presentationEntry("1786449600000-0", "Hot")],
+              nextStreamId: "1786449600000-0",
+            }
+          : { status: "unavailable", entries: [], nextStreamId: "1786449600000-0" };
+      },
+    };
+    const fixture = streamingFixture({ presentation, waitsBeforeTerminal: 2 });
+    const body = await responseBody(fixture.app.request("/v1/runs/run_1/events"));
+
+    expect(reads).toBeGreaterThanOrEqual(2);
+    expect(body).toContain('"delta":"Hot"');
+    expect(body).toContain('"content":"Durable final"');
+    expect(body).toContain("event: run.completed");
+  });
+
+  it("drops stale recovered-Attempt frames and presents only the current Attempt", async () => {
+    const presentation = presentationReader(() => [
+      presentationEntry("1786449600000-0", "stale", 0, 1),
+      presentationEntry("1786449600050-0", "current", 0, 2),
+    ]);
+    const fixture = streamingFixture({ presentation, attemptCount: 2 });
+    const body = await responseBody(fixture.app.request("/v1/runs/run_1/events"));
+
+    expect(body).not.toContain('"delta":"stale"');
+    expect(body).toContain('"delta":"current"');
+  });
+
+  it("batches bounded hot replay for a slow consumer before durable completion", async () => {
+    const allEntries = Array.from({ length: 105 }, (_, index) =>
+      presentationEntry(`${1786449600000 + index}-0`, "x", index),
+    );
+    const limits: number[] = [];
+    const presentation: ChatPresentationReader = {
+      async read({ afterStreamId, limit = 100 }) {
+        limits.push(limit);
+        const start = afterStreamId
+          ? allEntries.findIndex((entry) => entry.streamId === afterStreamId) + 1
+          : 0;
+        const entries = allEntries.slice(start, start + limit);
+        return {
+          status: "available",
+          entries,
+          nextStreamId: entries.at(-1)?.streamId ?? afterStreamId ?? null,
+        };
+      },
+    };
+    const fixture = streamingFixture({ presentation });
+    const body = await responseBody(fixture.app.request("/v1/runs/run_1/events"));
+
+    expect(body.match(/event: message\.presentation_delta/gu)).toHaveLength(105);
+    expect(limits.every((limit) => limit === 100)).toBe(true);
+    expect(body).toContain("event: run.completed");
+  });
+
+  it("orders the final complete Message before durable cancellation", async () => {
+    const fixture = streamingFixture({ finalStatus: "canceled" });
+    const body = await responseBody(fixture.app.request("/v1/runs/run_1/events"));
+
+    expect(body.indexOf('"complete":true')).toBeGreaterThanOrEqual(0);
+    expect(body.indexOf('"complete":true')).toBeLessThan(body.indexOf("event: run.canceled"));
+  });
+
   it("updates Conversation state through the canonical command boundary", async () => {
     const repository = fakeRepository();
     const app = testApp(repository);
@@ -254,6 +373,10 @@ function testApp(
   });
 }
 
+async function responseBody(response: Response | Promise<Response>) {
+  return (await response).text();
+}
+
 function fakeAttachments(): AttachmentUploadService {
   return {
     upload: async () => {
@@ -361,4 +484,128 @@ function fakeRepository(): FakeRepository {
     }),
   };
   return repository;
+}
+
+function presentationEntry(streamId: string, delta: string, startOffset = 0, attemptNumber = 1) {
+  return {
+    streamId,
+    frame: {
+      runId: "run_1",
+      attemptNumber,
+      schemaVersion: 1 as const,
+      occurredAt: "2026-08-11T10:00:00.000Z",
+      type: "message.presentation_delta" as const,
+      payload: {
+        messageId: "message_assistant_1",
+        startOffset,
+        endOffset: startOffset + delta.length,
+        delta,
+      },
+    },
+  };
+}
+
+function presentationReader(
+  entries: (input: { afterStreamId?: string }) => ReturnType<typeof presentationEntry>[],
+): ChatPresentationReader {
+  return {
+    async read(input) {
+      const values = entries(input);
+      return {
+        status: "available",
+        entries: values,
+        nextStreamId: values.at(-1)?.streamId ?? input.afterStreamId ?? null,
+      };
+    },
+  };
+}
+
+function streamingFixture(options: {
+  presentation?: ChatPresentationReader;
+  attemptCount?: number;
+  waitsBeforeTerminal?: number;
+  finalStatus?: "completed" | "canceled";
+}) {
+  const repository = fakeRepository();
+  const attemptCount = options.attemptCount ?? 1;
+  const finalStatus = options.finalStatus ?? "completed";
+  let terminal = false;
+  let waits = 0;
+  repository.getRun = async () => ({
+    id: "run_1",
+    conversationId: "conversation_1",
+    triggerMessageId: "message_user_1",
+    status: terminal ? finalStatus : "running",
+    engine: "opencompany",
+    model: "provider/default",
+    attemptCount,
+    createdAt,
+    updatedAt: createdAt,
+  });
+  repository.listRunEvents = async ({ afterSequence }) => {
+    const terminalEvent =
+      finalStatus === "completed"
+        ? {
+            id: "event_3",
+            runId: "run_1",
+            attemptId: `attempt_${attemptCount}`,
+            sequence: 3,
+            type: "run.completed" as const,
+            payload: { messageId: "message_assistant_1" },
+            createdAt,
+          }
+        : {
+            id: "event_3",
+            runId: "run_1",
+            attemptId: `attempt_${attemptCount}`,
+            sequence: 3,
+            type: "run.canceled" as const,
+            payload: { by: "user" as const },
+            createdAt,
+          };
+    const events = [
+      {
+        id: "event_1",
+        runId: "run_1",
+        attemptId: `attempt_${attemptCount}`,
+        sequence: 1,
+        type: "run.started" as const,
+        payload: { attemptNumber: attemptCount },
+        createdAt,
+      },
+      ...(terminal
+        ? [
+            {
+              id: "event_2",
+              runId: "run_1",
+              attemptId: `attempt_${attemptCount}`,
+              sequence: 2,
+              type: "message.content_updated" as const,
+              payload: {
+                messageId: "message_assistant_1",
+                content: "Durable final",
+                complete: true,
+              },
+              createdAt,
+            },
+            terminalEvent,
+          ]
+        : []),
+    ].filter((event) => event.sequence > afterSequence);
+    return { events, nextSequence: events.at(-1)?.sequence ?? afterSequence };
+  };
+  const app = testApp(repository, {
+    ...(options.presentation ? { presentation: options.presentation } : {}),
+    notifier: {
+      async wait() {
+        waits += 1;
+        if (waits >= (options.waitsBeforeTerminal ?? 1)) {
+          terminal = true;
+          return true;
+        }
+        return false;
+      },
+    },
+  });
+  return { app };
 }

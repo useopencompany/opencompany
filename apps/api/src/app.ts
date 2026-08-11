@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
+  CHAT_PRESENTATION_READ_LIMIT,
+  type ChatPresentationReader,
+} from "@opencompany/chat-presentation";
+import {
   type Actor,
   CHAT_ATTACHMENT_MAX_BYTES,
   type ChatApplicationService,
@@ -11,8 +15,11 @@ import {
   createOpenApiDocument,
   createV1Router,
   decodeEventCursor,
+  decodePresentationCursor,
   encodeEventCursor,
+  encodePresentationCursor,
   PROTOCOL_VERSION,
+  PresentationDeltaEventSchema,
   RunEventSchema,
   type V1RouteHandlers,
 } from "@opencompany/protocol";
@@ -32,6 +39,7 @@ const logger = createLogger({ service: "opencompany-api", runtime: "hono" });
 const meta = { apiVersion: "v1", protocolVersion: PROTOCOL_VERSION } as const;
 const EVENT_BATCH_SIZE = 100;
 const EVENT_POLL_MS = 1_000;
+const PRESENTATION_POLL_MS = 20;
 const HEARTBEAT_MS = 15_000;
 // A paused Run has reached an interaction boundary. Close this SSE response after the durable
 // run.paused event so clients can present approvals, then reconnect after resolving them.
@@ -43,6 +51,7 @@ export type CreateApiAppInput = {
   attachments: AttachmentUploadService;
   authenticate: ApiAuthenticator;
   notifier?: RunEventNotifier;
+  presentation?: ChatPresentationReader;
   rateLimiter?: ApiRateLimiter;
   defaultModel?: string;
   now?: () => Date;
@@ -164,13 +173,18 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceRateLimit(rateLimiter, actor, "stream", 60);
       const runId = c.req.valid("param").runId;
       const queryCursor = c.req.valid("query").cursor;
+      const queryPresentationCursor = c.req.valid("query").presentationCursor;
       const headerCursor = c.req.valid("header")["last-event-id"];
       if (queryCursor && headerCursor && queryCursor !== headerCursor) {
         throw new ApiError(400, "invalid_request", "Conflicting event cursors were provided.");
       }
       let sequence: number;
+      let presentationStreamId: string | undefined;
       try {
         sequence = decodeEventCursor(queryCursor ?? headerCursor);
+        presentationStreamId = queryPresentationCursor
+          ? decodePresentationCursor(queryPresentationCursor)
+          : undefined;
       } catch {
         throw new ApiError(400, "invalid_request", "The event cursor is invalid.");
       }
@@ -181,34 +195,74 @@ export function createApiApp(input: CreateApiAppInput) {
       c.header("X-OpenCompany-Run-Status", initialRun.status);
       return streamSSE(c, async (stream) => {
         let lastHeartbeatAt = now().getTime();
+        let nextDurablePollAt = 0;
+        let durableWake = true;
+        let currentAttemptNumber = initialRun.attemptCount;
         try {
           while (!stream.aborted) {
-            const page = await input.chat.listRunEvents(actor, {
-              runId,
-              afterSequence: sequence,
-              limit: EVENT_BATCH_SIZE,
-            });
-            for (const event of page.events) {
-              const dto = runEventDto(event);
-              await stream.writeSSE({
-                id: dto.cursor,
-                event: dto.type,
-                data: JSON.stringify(dto),
-              });
-              sequence = event.sequence;
-            }
-            if (page.events.length >= EVENT_BATCH_SIZE) continue;
-            const run = await input.chat.getRun(actor, runId);
-            if (TERMINAL_RUN_STATUSES.has(run.status)) return;
             const currentTime = now().getTime();
+            if (durableWake || currentTime >= nextDurablePollAt) {
+              const page = await input.chat.listRunEvents(actor, {
+                runId,
+                afterSequence: sequence,
+                limit: EVENT_BATCH_SIZE,
+              });
+              for (const event of page.events) {
+                const dto = runEventDto(event);
+                await stream.writeSSE({
+                  id: dto.cursor,
+                  event: dto.type,
+                  data: JSON.stringify(dto),
+                });
+                sequence = event.sequence;
+              }
+              if (page.events.length >= EVENT_BATCH_SIZE) {
+                durableWake = true;
+                continue;
+              }
+              const run = await input.chat.getRun(actor, runId);
+              currentAttemptNumber = run.attemptCount;
+              if (TERMINAL_RUN_STATUSES.has(run.status)) return;
+              durableWake = false;
+              nextDurablePollAt = currentTime + EVENT_POLL_MS;
+            }
+            if (input.presentation) {
+              const hot = await input.presentation.read({
+                runId,
+                ...(presentationStreamId ? { afterStreamId: presentationStreamId } : {}),
+                limit: CHAT_PRESENTATION_READ_LIMIT,
+              });
+              let sawFutureAttempt = false;
+              for (const entry of hot.entries) {
+                if (entry.frame.attemptNumber < currentAttemptNumber) {
+                  presentationStreamId = entry.streamId;
+                  continue;
+                }
+                if (entry.frame.attemptNumber > currentAttemptNumber) {
+                  sawFutureAttempt = true;
+                  durableWake = true;
+                  break;
+                }
+                const dto = PresentationDeltaEventSchema.parse({
+                  ...entry.frame,
+                  presentationCursor: encodePresentationCursor(entry.streamId),
+                });
+                await stream.writeSSE({ event: dto.type, data: JSON.stringify(dto) });
+                presentationStreamId = entry.streamId;
+              }
+              if (!sawFutureAttempt && hot.entries.length === 0 && hot.nextStreamId) {
+                presentationStreamId = hot.nextStreamId;
+              }
+              if (hot.entries.length >= CHAT_PRESENTATION_READ_LIMIT) continue;
+            }
             if (currentTime - lastHeartbeatAt >= HEARTBEAT_MS) {
               await stream.write(": keep-alive\n\n");
               lastHeartbeatAt = currentTime;
             }
-            await notifier.wait({
+            durableWake = await notifier.wait({
               runId,
               signal: c.req.raw.signal,
-              timeoutMs: EVENT_POLL_MS,
+              timeoutMs: input.presentation ? PRESENTATION_POLL_MS : EVENT_POLL_MS,
             });
           }
         } catch (error) {

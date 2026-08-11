@@ -30,6 +30,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@hono/node-server": "^1.19.11",
+        "@opencompany/chat-presentation": "workspace:*",
         "@opencompany/core": "workspace:*",
         "@opencompany/db": "workspace:*",
         "@opencompany/file-extract": "workspace:*",
@@ -106,6 +107,7 @@
         "@opencompany/agent-runtime": "workspace:*",
         "@opencompany/analytics": "workspace:*",
         "@opencompany/billing": "workspace:*",
+        "@opencompany/chat-presentation": "workspace:*",
         "@opencompany/core": "workspace:*",
         "@opencompany/crypto": "workspace:*",
         "@opencompany/db": "workspace:*",
@@ -258,6 +260,19 @@
     "packages/browser-tools": {
       "name": "@opencompany/browser-tools",
       "version": "0.1.0",
+      "devDependencies": {
+        "@types/node": "^25.9.1",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.7",
+      },
+    },
+    "packages/chat-presentation": {
+      "name": "@opencompany/chat-presentation",
+      "version": "0.1.0",
+      "dependencies": {
+        "@opencompany/protocol": "workspace:*",
+        "redis": "^6.1.0",
+      },
       "devDependencies": {
         "@types/node": "^25.9.1",
         "typescript": "^6.0.3",
@@ -858,6 +873,8 @@
     "@opencompany/billing": ["@opencompany/billing@workspace:packages/billing"],
 
     "@opencompany/browser-tools": ["@opencompany/browser-tools@workspace:packages/browser-tools"],
+
+    "@opencompany/chat-presentation": ["@opencompany/chat-presentation@workspace:packages/chat-presentation"],
 
     "@opencompany/core": ["@opencompany/core@workspace:packages/core"],
 

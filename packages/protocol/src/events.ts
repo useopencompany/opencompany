@@ -1,5 +1,11 @@
 import { z } from "@hono/zod-openapi";
-import { CursorSchema, MessageSchema, ResourceIdSchema, TimestampSchema } from "./schemas";
+import {
+  CursorSchema,
+  MessageSchema,
+  PresentationCursorSchema,
+  ResourceIdSchema,
+  TimestampSchema,
+} from "./schemas";
 import { EVENT_SCHEMA_VERSION } from "./version";
 
 const baseEvent = {
@@ -94,6 +100,43 @@ export const RunEventTypes = RunEventSchema.options.map(
 
 export type RunEventDto = z.infer<typeof RunEventSchema>;
 
+export const PresentationDeltaFrameSchema = z
+  .object({
+    runId: ResourceIdSchema,
+    attemptNumber: z.number().int().positive(),
+    schemaVersion: z.literal(EVENT_SCHEMA_VERSION),
+    occurredAt: TimestampSchema,
+    type: z.literal("message.presentation_delta"),
+    payload: z
+      .object({
+        messageId: ResourceIdSchema,
+        startOffset: z.number().int().min(0),
+        endOffset: z.number().int().positive(),
+        delta: z.string().min(1).max(262_144),
+      })
+      .strict()
+      .refine(
+        (payload: { startOffset: number; endOffset: number; delta: string }) =>
+          payload.endOffset === payload.startOffset + payload.delta.length,
+        { message: "Presentation delta offsets must match the delta length." },
+      ),
+  })
+  .strict();
+
+export const PresentationDeltaEventSchema = PresentationDeltaFrameSchema.extend({
+  presentationCursor: PresentationCursorSchema,
+})
+  .strict()
+  .openapi("PresentationDeltaEvent");
+
+export const RunStreamEventSchema = z
+  .union([z.lazy(() => RunEventSchema), PresentationDeltaEventSchema])
+  .openapi("RunStreamEvent");
+
+export type PresentationDeltaFrameDto = z.infer<typeof PresentationDeltaFrameSchema>;
+export type PresentationDeltaEventDto = z.infer<typeof PresentationDeltaEventSchema>;
+export type RunStreamEventDto = z.infer<typeof RunStreamEventSchema>;
+
 export function encodeEventCursor(sequence: number | bigint): string {
   if (typeof sequence === "number" && (!Number.isSafeInteger(sequence) || sequence < 1)) {
     throw new Error("Event sequence must be a positive safe integer.");
@@ -116,6 +159,27 @@ export function decodeEventCursor(cursor: string | null | undefined): number {
 export const formatEventCursor = encodeEventCursor;
 export const parseEventCursor = decodeEventCursor;
 
+export function encodePresentationCursor(streamId: string): string {
+  if (!/^[1-9][0-9]*-[0-9]+$/u.test(streamId)) {
+    throw new Error("Invalid presentation stream ID.");
+  }
+  return `p1:${streamId}`;
+}
+
+export function decodePresentationCursor(cursor: string): string {
+  const parsed = PresentationCursorSchema.safeParse(cursor);
+  if (!parsed.success) throw new Error("Invalid presentation cursor.");
+  return cursor.slice(3);
+}
+
 export function parseRunEvent(value: unknown): RunEventDto {
   return RunEventSchema.parse(value);
+}
+
+export function parsePresentationDeltaFrame(value: unknown): PresentationDeltaFrameDto {
+  return PresentationDeltaFrameSchema.parse(value);
+}
+
+export function parseRunStreamEvent(value: unknown): RunStreamEventDto {
+  return RunStreamEventSchema.parse(value);
 }

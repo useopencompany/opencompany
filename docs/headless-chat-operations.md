@@ -18,8 +18,9 @@ apps/web ---------------> apps/api (Hono /v1)
   |                            |  |   v
 apps/runner <------------------+  | Electric
   | direct fenced claims          |
-  +-------------------------------+
-                 Postgres
+  +-------------------------------+---- Postgres (authority)
+  |                                    |
+  +---- presentation deltas ---- Redis hot stream ----> apps/api SSE
 ```
 
 - `apps/api` authenticates, derives the Actor/workspace, validates commands, writes Messages/Runs,
@@ -32,8 +33,9 @@ apps/runner <------------------+  | Electric
   gateways for user-authorized actions, Brain capture, task/schedule/workflow/skill/wiki behavior,
   and browser sessions. These calls derive identity from the running durable turn; request bodies
   cannot select a user or workspace.
-- Postgres is the authority and queue. `LISTEN/NOTIFY` only reduces latency. Redis is not required
-  for canonical execution or reconnect correctness.
+- Postgres is the authority and queue. `LISTEN/NOTIFY` only reduces latency. Redis carries optional
+  five-minute, 1,024-entry-per-Run presentation replay and is not required for canonical execution
+  or reconnect correctness.
 
 ## Local web slice
 
@@ -52,22 +54,47 @@ contract are available through `/v1` proxying only for versioned routes; direct 
 The services share the branch-isolated database. The API prefers `API_DATABASE_URL`, then
 `RUNNER_DATABASE_URL`, then a direct form of `DATABASE_URL`. Electric read models require the
 existing `ELECTRIC_URL` and server-only Electric credentials. Never expose or copy those values to
-browser variables.
+browser variables. When `REDIS_URL` is present in both API and runner environments, the runner
+publishes approximately 50 ms presentation deltas while durable Message/Event projection remains
+on a 500 ms cadence. Leaving it absent exercises the Postgres-only fallback.
 
 ## Failure and recovery
 
 - Closing the browser or an SSE connection does not cancel a Run. Reconnect uses the last `v1:N`
-  cursor, catches up from Postgres, and reads final Run/Message state.
+  cursor, catches up from Postgres, and reads final Run/Message state. A separate optional `p1:`
+  cursor replays only the bounded presentation window and is never sent as an SSE `id`.
 - API restarts do not affect execution. The runner polls/claims from Postgres even if a wakeup is
   lost.
 - Runner death stops its lease heartbeat. A later worker creates the next Attempt, reclaims the Run,
   and continues without changing Run identity or duplicating the user-visible Message.
 - Cancellation and approval resolution are idempotent durable commands. Partial content is retained
   on interruption/failure.
+- Redis startup failure, mid-stream failure, expiry, trimming, or API/runner restart may skip
+  animation frames but cannot stop a Run. Attempt numbers fence recovered workers, offset ranges
+  make repeated deltas idempotent, and the latest complete Message/Event precedes every terminal
+  Run Event.
 - Model-visible host operations fail closed if the turn is no longer running, workspace membership
   changed, the internal bearer is invalid, or the host contract is incompatible. The bounded
   browser-profile cleanup operation may re-derive the same host identity after terminal settlement
   so completion, failure, and cancellation cannot leak a profile session.
+
+## Controlled presentation cadence
+
+Run `REDIS_URL=<isolated-redis> bun run measure:chat-presentation` to drive 90 provider chunks at a
+controlled 50 ms interval through the runner delta projector, a real Redis 7 Stream, Hono SSE, and
+the shared protocol client. The provider timestamps are the equivalent legacy direct-stream
+baseline. On 2026-08-11, an isolated local Docker Redis run produced:
+
+| Path | Median interval | p95 interval | Range |
+| --- | ---: | ---: | ---: |
+| Legacy-equivalent provider → client | 51.9 ms | 52.8 ms | 50.1–53.3 ms |
+| Runner → Redis → API SSE → protocol client | 45.0 ms | 69.1 ms | 41.7–71.2 ms |
+
+The sample included all 90 deltas, with 13.3 ms median and 23.5 ms p95 provider-to-SSE delivery
+latency. Durable Message/Event projection remains 500 ms and terminal ordering remains
+Postgres-backed. This controlled result complements the prior full local product measurement: PR
+#1172's 150 ms database throttle produced visible updates around 223–308 ms, compared with the
+legacy path's approximately 50 ms cadence.
 
 ## Production rollout gate
 
