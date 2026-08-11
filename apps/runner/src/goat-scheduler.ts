@@ -4,8 +4,9 @@ import {
   type CaptureGoatTaskSpawnedInput,
   captureGoatTaskSpawned,
 } from "@opencompany/analytics/goat/server";
+import { type Actor, TASK_WRITE_PERMISSION, TaskApplicationService } from "@opencompany/core";
 import type { GoatHarnessSpec } from "@opencompany/db/goat-schema";
-import { createGoatTaskSession } from "@opencompany/db/goat-task-sessions";
+import { PostgresTaskRepository } from "@opencompany/db/task-repository";
 import { captureException } from "@opencompany/observability";
 import { type SQL, sql } from "drizzle-orm";
 import { getDb } from "./db";
@@ -15,6 +16,8 @@ const GOAT_SCHEDULE_POLL_INTERVAL_MS = 30_000;
 type DueScheduleRow = {
   id: string;
   userWorkosId: string;
+  workspaceId: string;
+  usedLegacyWorkspaceFallback: boolean;
   name: string;
   cron: string;
   timezone: string;
@@ -135,6 +138,8 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
         SELECT
           schedule.id,
           schedule.user_workos_id AS "userWorkosId",
+          member.workspace_id AS "workspaceId",
+          schedule.workspace_id IS NULL AS "usedLegacyWorkspaceFallback",
           schedule.name,
           schedule.cron,
           schedule.timezone,
@@ -144,6 +149,20 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
         FROM goat.task_schedules AS schedule
         INNER JOIN goat.users AS "user"
           ON "user".workos_user_id = schedule.user_workos_id
+        INNER JOIN LATERAL (
+          SELECT membership.workspace_id
+          FROM goat.workspace_members AS membership
+          WHERE membership.user_workos_id = schedule.user_workos_id
+            AND (
+              schedule.workspace_id IS NULL
+              OR membership.workspace_id = schedule.workspace_id
+            )
+          ORDER BY
+            CASE WHEN membership.workspace_id = schedule.workspace_id THEN 0 ELSE 1 END,
+            membership.created_at ASC,
+            membership.workspace_id ASC
+          LIMIT 1
+        ) AS member ON true
         WHERE schedule.enabled = true
           AND schedule.deleted_at IS NULL
           AND schedule.next_run_at <= ${now}
@@ -326,6 +345,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
 
     const createdTask = await createScheduledTask(tx, {
       userWorkosId: schedule.userWorkosId,
+      workspaceId: schedule.workspaceId,
       prompt: schedule.prompt,
       name: schedule.name,
       harnessSpec: schedule.plannedHarnessSpec,
@@ -333,6 +353,13 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
       scheduledFor,
       now,
     });
+    if (schedule.usedLegacyWorkspaceFallback) {
+      console.warn("A pre-cutover recurring Task schedule used its bounded workspace fallback.", {
+        event: "opencompany.legacy_task_schedule_workspace_fallback",
+        schedule_id: schedule.id,
+        workspace_id: schedule.workspaceId,
+      });
+    }
 
     await tx.execute(sql`
       UPDATE goat.task_schedule_runs
@@ -372,26 +399,42 @@ async function createScheduledTask(
     now: Date;
   },
 ): Promise<CaptureGoatTaskSpawnedInput> {
-  const task = await createGoatTaskSession(
-    {
-      userWorkosId: input.userWorkosId,
-      workspaceId: input.workspaceId ?? null,
-      prompt: input.prompt,
-      name: input.name,
-      harnessSpec: input.harnessSpec,
-      scheduleId: input.scheduleId ?? null,
-      scheduledFor: input.scheduledFor,
-      workflowId: input.workflowId ?? null,
-      now: input.now,
+  const workspaceId = input.workspaceId?.trim();
+  if (!workspaceId) throw new Error("A scheduled Task requires an owning workspace.");
+  const actor: Actor = {
+    userId: input.userWorkosId,
+    workspaceId,
+    role: "member",
+    permissions: [TASK_WRITE_PERMISSION],
+    authenticationMethod: "service",
+  };
+  const repository = new PostgresTaskRepository((query) => tx.execute(query), {
+    now: () => input.now,
+    resolveHarness: async () => input.harnessSpec,
+    compatibility: {
+      initialMessageContent: input.harnessSpec.initialUserMessage.trim() || input.prompt,
     },
-    tx,
-  );
+  });
+  const created = await new TaskApplicationService(repository).createTask(actor, {
+    idempotencyKey: `${input.workflowId ? "workflow" : "schedule"}:${
+      input.workflowId ?? input.scheduleId
+    }:${input.scheduledFor.toISOString()}`,
+    name: input.name,
+    goal: input.prompt,
+    engine: input.harnessSpec.engine,
+    model: input.harnessSpec.model,
+    source: "schedule",
+    ...(input.scheduleId ? { scheduleId: input.scheduleId } : {}),
+    ...(input.workflowId ? { workflowId: input.workflowId } : {}),
+    scheduledFor: input.scheduledFor,
+  });
+  const task = created.task;
   return {
-    userWorkosId: task.userWorkosId,
-    workspaceId: input.workspaceId ?? task.harnessSpec.workflow?.workspaceId ?? null,
+    userWorkosId: input.userWorkosId,
+    workspaceId,
     taskId: task.id,
     displayId: task.displayId,
-    engine: task.harnessSpec.engine,
+    engine: task.engine,
     model: task.model,
     workflowId: task.workflowId,
     scheduleId: task.scheduleId,

@@ -1429,6 +1429,13 @@
       "when": 1786480000000,
       "tag": "0202_goat_headless_task_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 204,
+      "version": "7",
+      "when": 1786483600000,
+      "tag": "0203_goat_task_schedule_workspace",
+      "breakpoints": true
     }
   ]
 }

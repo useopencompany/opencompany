@@ -76,6 +76,42 @@ describe("Goat Chat Task host tools", () => {
       description: "Prepare this week's report.",
     });
   });
+
+  it("binds an agent-created schedule to the active workspace", async () => {
+    const createSchedule = vi.fn(async () => ({
+      id: "schedule_1",
+      name: "Daily briefing",
+      cron: "0 9 * * *",
+      timezone: "Europe/London",
+      nextRunAt: new Date("2026-08-12T08:00:00.000Z"),
+      prompt: "Prepare the briefing.",
+    }));
+    const dependencies = testDependencies({ createSchedule });
+
+    await executeGoatChatHostToolService({
+      command: {
+        operation: "schedule_task",
+        sessionId: "runtime_1",
+        runId: "run_1",
+        input: {
+          name: "Daily briefing",
+          cron: "0 9 * * *",
+          prompt: "Prepare the briefing.",
+        },
+      },
+      dependencies,
+    });
+
+    expect(createSchedule).toHaveBeenCalledWith({
+      actorId: "user_1",
+      workspaceId: "workspace_1",
+      name: "Daily briefing",
+      sourceDescription: "",
+      cron: "0 9 * * *",
+      timezone: "Europe/London",
+      prompt: "Prepare the briefing.",
+    });
+  });
 });
 
 const taskResult = {

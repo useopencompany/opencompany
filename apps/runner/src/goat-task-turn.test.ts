@@ -69,8 +69,6 @@ describe("session-backed task turns", () => {
     });
     expect(completion.nextTurn).toMatchObject({
       engine: "codex",
-      chatSessionId: expect.stringMatching(/^goat_chat_/),
-      codexChatSessionId: expect.stringMatching(/^goat_codex_chat_/),
       chatModel: "openai/gpt-5.5",
       settings: { reasoningEffort: "xhigh" },
       prompt: expect.stringContaining("Step 2/2 — Implement"),
@@ -120,8 +118,6 @@ describe("session-backed task turns", () => {
 
     expect(completion.nextTurn).toMatchObject({
       engine: "claude_code",
-      chatSessionId: expect.stringMatching(/^goat_chat_/),
-      codexChatSessionId: expect.stringMatching(/^goat_codex_chat_/),
       chatModel: "anthropic/claude-sonnet-5",
       runtimeModel: "claude-sonnet-5",
       hostToolContractVersion: GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
@@ -207,8 +203,6 @@ describe("session-backed task turns", () => {
       settings: { reasoningEffort: "high", wakeupChain: 1 },
       prompt: expect.stringContaining("Inspect PR #42."),
     });
-    expect(completion.nextTurn?.chatSessionId).toBeUndefined();
-    expect(completion.nextTurn?.codexChatSessionId).toBeUndefined();
     expect(completion.nextTurn?.prompt).toContain("Automated scheduled wakeup");
     expect(completion.nextTurn?.settings).not.toHaveProperty("scheduledWakeup");
 
@@ -321,17 +315,14 @@ describe("session-backed task turns", () => {
     expect(canonicalEventTypes(query.params)).toEqual(["message.content_updated", terminalEvent]);
   });
 
-  it("settles the current lease, projects the task, queues the next workflow step in a fresh session, and dedupes notification", async () => {
+  it("settles the current lease and queues the next workflow Run in the same Conversation", async () => {
     const completion = buildGoatTaskTurnCompletion({
       context: context(workflowSpec()),
       result: "Repository audit complete.",
       reportedOutcome: "done",
       outcomeComment: "Ready.",
     });
-    expect(completion.nextTurn).toMatchObject({
-      chatSessionId: expect.stringMatching(/^goat_chat_/),
-      codexChatSessionId: expect.stringMatching(/^goat_codex_chat_/),
-    });
+    expect(completion.nextTurn).not.toBeNull();
 
     await settleGoatDurableTurn({
       target: {
@@ -353,24 +344,22 @@ describe("session-backed task turns", () => {
     const statement = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]).sql;
     expect(statement).toContain("WITH settled_turn AS");
     expect(statement).toContain("UPDATE goat.tasks AS task");
-    expect(statement).toContain("session_id = CASE");
-    expect(statement).toContain("workflow_origin_attachments AS");
     expect(statement).toContain("tagged_current_task_messages AS");
     expect(statement).toContain("SET task_id = task.id");
-    expect(statement).toContain("created_next_chat AS");
-    expect(statement).toContain("INSERT INTO goat.chat_sessions");
-    expect(statement).toContain("created_next_runtime AS");
-    expect(statement).toContain("INSERT INTO goat.codex_chat_sessions");
-    expect(statement).toContain("previous_runtime.brain_ref");
+    expect(statement).not.toContain("created_next_chat AS");
+    expect(statement).not.toContain("created_next_runtime AS");
     expect(statement).toContain("INSERT INTO goat.chat_messages");
     expect(statement).toContain("task_id");
     expect(statement).toContain("debug_trace");
     expect(statement).toContain("attachment_texts");
-    expect(statement).toContain("origin.role = 'user'");
-    expect(statement).toContain("SELECT attachments FROM workflow_origin_attachments");
     expect(statement).toContain("INSERT INTO goat.codex_chat_turns");
     expect(statement).toContain("run_after");
+    expect(statement).toContain("event_sequence");
+    expect(statement).toContain("next_queued_event AS");
+    expect(statement).toContain("'run.queued'");
+    expect(statement).toContain("notified_next_queued_event AS");
     expect(statement).toContain("UPDATE goat.codex_chat_sessions AS runtime");
+    expect(statement).toContain("codex_thread_id = CASE");
     expect(statement).toContain("task.status IN ('queued', 'running')");
     expect(statement).toContain("SELECT next.id");
     expect(statement).toContain("FROM next_turn AS next");
@@ -383,8 +372,8 @@ describe("session-backed task turns", () => {
       "user_1",
       {
         workspace_id: "workspace_1",
-        session_id: completion.nextTurn?.chatSessionId,
-        is_first_message: true,
+        session_id: "goat_chat_task_1",
+        is_first_message: false,
         engine: "codex",
         usage_source: "external_harness",
         model: completion.nextTurn?.chatModel,

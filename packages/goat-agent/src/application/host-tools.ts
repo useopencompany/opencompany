@@ -121,6 +121,7 @@ export type GoatChatHostToolServiceDependencies = {
   listSchedules: (actorId: string) => Promise<ScheduleView[]>;
   createSchedule: (input: {
     actorId: string;
+    workspaceId: string;
     name: string;
     sourceDescription: string;
     cron: string;
@@ -256,6 +257,7 @@ async function executeOperation(
       assertTaskTools(context);
       const created = await dependencies.createSchedule({
         actorId: context.actorId,
+        workspaceId: context.workspaceId,
         name: requiredString(toolInput.name, "name"),
         sourceDescription:
           optionalString(toolInput.sourceDescription) ?? optionalString(toolInput.reason) ?? "",

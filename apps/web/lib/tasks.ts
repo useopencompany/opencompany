@@ -1,6 +1,15 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import {
+  type Actor,
+  CHAT_WRITE_PERMISSION,
+  ChatApplicationService,
+  CoreError,
+  type TaskSource,
+} from "@opencompany/core";
+import { PostgresChatRepository } from "@opencompany/db/chat-repository";
 import { getDb } from "@opencompany/db/client";
 import type {
   GoatChatMessageAttachment,
@@ -8,6 +17,7 @@ import type {
   GoatHarnessSpec,
 } from "@opencompany/db/goat-schema";
 import {
+  goatChatSessions,
   goatTaskEvents,
   goatTaskMessages,
   goatTaskModelUsage,
@@ -15,7 +25,6 @@ import {
   goatTasks,
   goatTaskToolUsage,
 } from "@opencompany/db/goat-schema";
-import { enqueueGoatTaskSessionTurn } from "@opencompany/db/goat-task-sessions";
 import { createGoatTaskForActor } from "@opencompany/goat-agent/application/task-creation";
 import { and, asc, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { after } from "next/server";
@@ -317,9 +326,19 @@ export async function cancelGoatTaskAction(taskId: string): Promise<CancelTaskRe
   }
 
   const { user, workspace } = await currentGoatUser();
-  const now = new Date();
   const [sessionTask] = await getDb()
-    .select({ sessionId: goatTasks.sessionId, userWorkosId: goatTasks.userWorkosId })
+    .select({
+      sessionId: goatTasks.sessionId,
+      userWorkosId: goatTasks.userWorkosId,
+      runId: sql<string | null>`(
+        SELECT turn.id
+        FROM goat.codex_chat_turns AS turn
+        WHERE turn.chat_session_id = ${goatTasks.sessionId}
+          AND turn.status IN ('queued', 'running', 'paused')
+        ORDER BY turn.created_at DESC, turn.id DESC
+        LIMIT 1
+      )`,
+    })
     .from(goatTasks)
     .where(
       and(
@@ -331,16 +350,22 @@ export async function cancelGoatTaskAction(taskId: string): Promise<CancelTaskRe
       ),
     )
     .limit(1);
-  if (sessionTask?.sessionId) {
-    const result = await cancelSessionBackedGoatTask({
-      taskId,
-      userWorkosId: sessionTask.userWorkosId,
-      sessionId: sessionTask.sessionId,
-      now,
-    });
-    return result ? { ok: true, error: null } : { ok: false, error: "Could not stop task." };
+  if (sessionTask?.sessionId && sessionTask.runId) {
+    try {
+      await canonicalChatService().cancelRun(
+        canonicalChatActor(user.workosUserId, workspace.id),
+        sessionTask.runId,
+      );
+      return { ok: true, error: null };
+    } catch (error) {
+      if (error instanceof CoreError && error.code === "not_found") {
+        return { ok: false, error: "Could not stop task." };
+      }
+      throw error;
+    }
   }
 
+  const now = new Date();
   const result = await getDb().execute(sql`
     WITH canceled_task AS (
       UPDATE goat.tasks AS task
@@ -460,8 +485,14 @@ export async function continueGoatTaskAction(
     }
   }
   const [task] = await getDb()
-    .select({ sessionId: goatTasks.sessionId, userWorkosId: goatTasks.userWorkosId })
+    .select({
+      sessionId: goatTasks.sessionId,
+      userWorkosId: goatTasks.userWorkosId,
+      engine: goatChatSessions.engine,
+      model: goatChatSessions.model,
+    })
     .from(goatTasks)
+    .leftJoin(goatChatSessions, eq(goatChatSessions.id, goatTasks.sessionId))
     .where(
       and(
         eq(goatTasks.id, normalizedTaskId),
@@ -472,18 +503,27 @@ export async function continueGoatTaskAction(
       ),
     )
     .limit(1);
-  if (task?.sessionId) {
-    const continued = await enqueueGoatTaskSessionTurn({
-      taskId: normalizedTaskId,
-      userWorkosId: task.userWorkosId,
-      prompt: content,
-      skills: resolvedSkills.map((skill) => ({
-        ...skill,
-        brainRef: workspace.id,
-      })),
-      clientMessageId,
-    });
-    if (!continued) {
+  if (task?.sessionId && task.engine && task.model) {
+    let continued;
+    try {
+      continued = await canonicalChatService().createMessage(
+        canonicalChatActor(user.workosUserId, workspace.id),
+        {
+          conversationId: task.sessionId,
+          idempotencyKey: clientMessageId ?? `task:${normalizedTaskId}:message:${randomUUID()}`,
+          ...(clientMessageId ? { clientMessageId } : {}),
+          content,
+          engine: task.engine,
+          model: task.model,
+          ...(resolvedSkills.length > 0
+            ? {
+                mentions: resolvedSkills.map((skill) => ({ kind: "skill" as const, id: skill.id })),
+              }
+            : {}),
+        },
+      );
+    } catch (error) {
+      if (!(error instanceof CoreError) || error.code !== "not_found") throw error;
       return {
         ok: false,
         error: "Wait for this task to finish before sending another message.",
@@ -497,7 +537,7 @@ export async function continueGoatTaskAction(
         error,
       });
     });
-    return { ok: true, error: null, messageId: continued.id };
+    return { ok: true, error: null, messageId: continued.messageId };
   }
 
   // Tasks without a session predate durable session execution; the legacy runner drain
@@ -525,6 +565,8 @@ export async function createGoatTaskForUser(input: {
   workflowBrainRef?: string;
   attachments?: GoatChatMessageAttachment[];
   attachmentTexts?: Record<string, string> | null;
+  source?: TaskSource;
+  idempotencyKey?: string;
 }) {
   const { userWorkosId, ...command } = input;
   return createGoatTaskForActor(
@@ -536,84 +578,18 @@ export async function createGoatTaskForUser(input: {
   );
 }
 
-async function cancelSessionBackedGoatTask(input: {
-  taskId: string;
-  userWorkosId: string;
-  sessionId: string;
-  now: Date;
-}) {
-  const result = await getDb().execute(sql`
-    WITH canceled_task AS (
-      UPDATE goat.tasks AS task
-      SET status = 'canceled',
-          stage = 'canceled',
-          error = 'Stopped by user.',
-          lease_id = NULL,
-          lease_owner = NULL,
-          lease_expires_at = NULL,
-          updated_at = ${input.now}
-      WHERE task.id = ${input.taskId}
-        AND task.user_workos_id = ${input.userWorkosId}
-        AND task.session_id = ${input.sessionId}
-        AND task.status IN ('queued', 'running')
-      RETURNING task.id
-    ),
-    requested_running AS (
-      UPDATE goat.codex_chat_turns AS turn
-      SET interrupt_requested_at = COALESCE(turn.interrupt_requested_at, ${input.now}),
-          updated_at = ${input.now}
-      WHERE turn.chat_session_id = ${input.sessionId}
-        AND turn.user_workos_id = ${input.userWorkosId}
-        AND turn.status = 'running'
-        AND EXISTS (SELECT 1 FROM canceled_task)
-      RETURNING turn.id
-    ),
-    canceled_queued AS (
-      UPDATE goat.codex_chat_turns AS turn
-      SET status = 'interrupted',
-          completed_at = ${input.now},
-          updated_at = ${input.now}
-      WHERE turn.chat_session_id = ${input.sessionId}
-        AND turn.user_workos_id = ${input.userWorkosId}
-        AND turn.status = 'queued'
-        AND EXISTS (SELECT 1 FROM canceled_task)
-      RETURNING turn.assistant_message_id
-    ),
-    aborted_messages AS (
-      UPDATE goat.chat_messages AS message
-      SET debug_trace = COALESCE(
-            message.debug_trace,
-            jsonb_build_object('schemaVersion', 'goat.codex_chat.debug.v1')
-          ) || jsonb_build_object('aborted', true),
-          updated_at = ${input.now}
-      FROM canceled_queued AS turn
-      WHERE message.id = turn.assistant_message_id
-      RETURNING message.id
-    ),
-    settled_runtime AS (
-      UPDATE goat.codex_chat_sessions AS runtime
-      SET status = 'interrupted',
-          active_turn_id = NULL,
-          error = NULL,
-          updated_at = ${input.now}
-      WHERE runtime.chat_session_id = ${input.sessionId}
-        AND runtime.user_workos_id = ${input.userWorkosId}
-        AND NOT EXISTS (
-          SELECT 1
-          FROM goat.codex_chat_turns AS running
-          WHERE running.codex_chat_session_id = runtime.id
-            AND running.status = 'running'
-        )
-        AND EXISTS (SELECT 1 FROM canceled_task)
-      RETURNING runtime.id
-    )
-    SELECT task.id
-    FROM canceled_task AS task
-    CROSS JOIN (SELECT count(*) FROM requested_running) AS running_requests
-    CROSS JOIN (SELECT count(*) FROM aborted_messages) AS message_updates
-    CROSS JOIN (SELECT count(*) FROM settled_runtime) AS runtime_updates
-  `);
-  return rowsFromExecute<{ id: string }>(result).length > 0;
+function canonicalChatService() {
+  return new ChatApplicationService(new PostgresChatRepository((query) => getDb().execute(query)));
+}
+
+function canonicalChatActor(userId: string, workspaceId: string): Actor {
+  return {
+    userId,
+    workspaceId,
+    role: "member",
+    permissions: [CHAT_WRITE_PERMISSION],
+    authenticationMethod: "session",
+  };
 }
 
 function goatTaskVisibleInWorkspace(input: { userWorkosId: string; workspaceId: string }) {

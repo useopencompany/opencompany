@@ -382,6 +382,91 @@ describe("Postgres Task repository", () => {
     ]);
   });
 
+  it("bounds legacy producer metadata inside the canonical Task transaction", async () => {
+    const compatibilityService = new TaskApplicationService(
+      new PostgresTaskRepository(execute, {
+        ids: deterministicTaskIds(),
+        now: () => new Date("2026-08-11T10:00:00.000Z"),
+        compatibility: {
+          brainRef: "brain_1",
+          workflowBrainRef: "workflow_brain_1",
+          resolvedAttachments: {
+            attachments: [
+              {
+                id: "legacy_attachment_1",
+                kind: "pdf",
+                mediaType: "application/pdf",
+                filename: "legacy.pdf",
+                sizeBytes: 512,
+                blobPathname: "private/user_1/legacy.pdf",
+                blobUrl: "https://blob.invalid/legacy.pdf",
+              },
+            ],
+            attachmentTexts: { legacy_attachment_1: "Legacy attachment text" },
+          },
+        },
+        resolveHarness: async ({ command }) => ({
+          schemaVersion: "goat.harness.v1",
+          engine: command.engine,
+          model: command.model,
+          systemPrompt: "Prepared workflow",
+          initialUserMessage: command.goal,
+          tools: [],
+          skills: [],
+          maxModelSteps: 16,
+          resultMode: "assistant_final",
+        }),
+      }),
+    );
+
+    const created = await compatibilityService.createTask(actor(), {
+      idempotencyKey: "workflow-legacy-boundary-1",
+      goal: "Run the prepared workflow",
+      engine: "opencompany",
+      model: "moonshotai/kimi-k3",
+      source: "workflow",
+      workflowId: "workflow_1",
+      attachmentIds: ["legacy_attachment_1"],
+    });
+
+    expect(
+      await database.query<{
+        brain_ref: string;
+        workflow_brain_ref: string;
+        attachment_id: string;
+        task_id: string;
+      }>(
+        `SELECT
+           runtime.brain_ref,
+           task.workflow_brain_ref,
+           message.attachments->0->>'id' AS attachment_id,
+           event.payload->>'taskId' AS task_id
+         FROM goat.tasks AS task
+         JOIN goat.codex_chat_sessions AS runtime ON runtime.chat_session_id = task.session_id
+         JOIN goat.chat_messages AS message
+           ON message.session_id = task.session_id AND message.role = 'user'
+         JOIN goat.codex_chat_turns AS run ON run.chat_session_id = task.session_id
+         JOIN goat.run_events AS event ON event.run_id = run.id AND event.type = 'run.queued'
+         WHERE task.id = $1`,
+        [created.task.id],
+      ),
+    ).toMatchObject({
+      rows: [
+        {
+          brain_ref: "brain_1",
+          workflow_brain_ref: "workflow_brain_1",
+          attachment_id: "legacy_attachment_1",
+          task_id: created.task.id,
+        },
+      ],
+    });
+    expect(
+      await database.query<{ count: number }>(
+        "SELECT COUNT(*)::int AS count FROM goat.chat_attachment_uploads",
+      ),
+    ).toMatchObject({ rows: [{ count: 0 }] });
+  });
+
   it("archives only terminal Tasks and reflects the lifecycle in the read model", async () => {
     const created = await service.createTask(actor(), {
       idempotencyKey: "task-archive",

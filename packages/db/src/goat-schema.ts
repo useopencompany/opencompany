@@ -2820,6 +2820,9 @@ export const goatTaskSchedules = goat.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id").references(() => goatWorkspaces.id, {
+      onDelete: "cascade",
+    }),
     name: text("name").notNull(),
     sourceDescription: text("source_description").notNull().default(""),
     cron: text("cron").notNull(),
@@ -2846,6 +2849,10 @@ export const goatTaskSchedules = goat.table(
     ),
     userNextRunIdx: index("goat_task_schedules_user_next_run_idx").on(
       table.userWorkosId,
+      table.nextRunAt,
+    ),
+    workspaceNextRunIdx: index("goat_task_schedules_workspace_next_run_idx").on(
+      table.workspaceId,
       table.nextRunAt,
     ),
   }),

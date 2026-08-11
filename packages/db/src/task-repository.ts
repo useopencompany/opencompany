@@ -54,6 +54,12 @@ type PostgresTaskRepositoryOptions = {
     actor: Actor;
     command: CreateTaskCommand & { model: AgentModelId };
   }) => Promise<GoatHarnessSpec>;
+  compatibility?: {
+    resolvedAttachments?: ResolvedChatAttachments;
+    brainRef?: string | null;
+    workflowBrainRef?: string | null;
+    initialMessageContent?: string;
+  };
   now?: () => Date;
 };
 
@@ -220,10 +226,10 @@ export class PostgresTaskRepository implements TaskRepository {
       throw new CoreError("forbidden", "Tasks & Workflows is disabled for this actor.");
     }
 
-    const resolvedAttachments = await this.resolveAttachments(
-      input.actor,
-      input.command.attachmentIds ?? [],
-    );
+    const resolvedAttachments =
+      this.options.compatibility?.resolvedAttachments ??
+      (await this.resolveAttachments(input.actor, input.command.attachmentIds ?? []));
+    const attachmentsRequireClaim = !this.options.compatibility?.resolvedAttachments;
     const ids = this.options.ids ?? defaultIds;
     const commandId = ids.command();
     const taskId = ids.task();
@@ -235,6 +241,8 @@ export class PostgresTaskRepository implements TaskRepository {
     const eventId = ids.event();
     const now = this.options.now?.() ?? new Date();
     const assistantCreatedAt = new Date(now.getTime() + 1);
+    const initialMessageContent =
+      this.options.compatibility?.initialMessageContent ?? input.command.goal;
     const runtimeModel = runtimeModelName(input.command.engine, input.command.model);
     const model = getAgentModelDefinition(input.command.model)?.id;
     if (!runtimeModel || !model) {
@@ -255,7 +263,7 @@ export class PostgresTaskRepository implements TaskRepository {
           command: { ...input.command, model },
         })
       : defaultHarness({ ...input.command, model });
-    validateHarness(harness, input.command);
+    validateHarness(harness, input.command, initialMessageContent);
     const assistantDebugTrace = {
       schemaVersion:
         input.command.engine === "opencompany"
@@ -289,7 +297,8 @@ export class PostgresTaskRepository implements TaskRepository {
         eligible_attachments AS MATERIALIZED (
           SELECT upload.id
           FROM goat.chat_attachment_uploads AS upload
-          WHERE upload.user_workos_id = ${input.actor.userId}
+          WHERE ${attachmentsRequireClaim}::boolean
+            AND upload.user_workos_id = ${input.actor.userId}
             AND upload.workspace_id = ${input.actor.workspaceId}
             AND upload.claimed_at IS NULL
             AND upload.expires_at > ${now}
@@ -320,8 +329,13 @@ export class PostgresTaskRepository implements TaskRepository {
           SELECT brain.id
           FROM goat.brains AS brain
           WHERE brain.workspace_id = ${input.actor.workspaceId}
+            AND (
+              ${this.options.compatibility?.brainRef ?? null}::text IS NULL
+              OR brain.id = ${this.options.compatibility?.brainRef ?? null}
+            )
             AND EXISTS (SELECT 1 FROM winner)
           ORDER BY
+            CASE WHEN brain.id = ${this.options.compatibility?.brainRef ?? null} THEN 0 ELSE 1 END,
             CASE WHEN brain.slug = 'general' THEN 0 ELSE 1 END,
             brain.created_at ASC,
             brain.id ASC
@@ -340,7 +354,8 @@ export class PostgresTaskRepository implements TaskRepository {
         created_task AS MATERIALIZED (
           INSERT INTO goat.tasks (
             id, name, user_workos_id, workspace_id, prompt, source, model, session_id,
-            schedule_id, scheduled_for, workflow_id, status, stage, next_run_at,
+            schedule_id, scheduled_for, workflow_id, workflow_brain_ref,
+            status, stage, next_run_at,
             harness_spec, created_at, updated_at
           )
           SELECT
@@ -348,6 +363,7 @@ export class PostgresTaskRepository implements TaskRepository {
             ${input.actor.workspaceId}, ${input.command.goal}, ${input.command.source},
             ${input.command.model}, conversation.id, ${input.command.scheduleId ?? null},
             ${input.command.scheduledFor ?? null}, ${input.command.workflowId ?? null},
+            ${this.options.compatibility?.workflowBrainRef ?? null},
             'queued', 'queued', ${now}, ${JSON.stringify(harness)}::jsonb, ${now}, ${now}
           FROM winner
           JOIN created_conversation AS conversation ON conversation.id = winner.conversation_id
@@ -376,12 +392,15 @@ export class PostgresTaskRepository implements TaskRepository {
             id, session_id, role, content, attachments, attachment_texts, created_at, updated_at
           )
           SELECT
-            winner.message_id, task.session_id, 'user', ${input.command.goal},
+            winner.message_id, task.session_id, 'user', ${initialMessageContent},
             ${attachmentsJson(attachments)}::jsonb, ${attachmentTextsJson(attachmentTexts)}::jsonb,
             ${now}, ${now}
           FROM winner
           JOIN created_task AS task ON task.id = winner.task_id
-          WHERE (SELECT COUNT(*) FROM claimed_attachments) = ${attachmentIds.length}
+          WHERE (
+            NOT ${attachmentsRequireClaim}::boolean
+            OR (SELECT COUNT(*) FROM claimed_attachments) = ${attachmentIds.length}
+          )
           RETURNING id
         ),
         inserted_assistant_message AS MATERIALIZED (
@@ -418,7 +437,7 @@ export class PostgresTaskRepository implements TaskRepository {
           )
           SELECT
             winner.run_id, ${input.actor.userId}, runtime.id, task.session_id,
-            winner.message_id, winner.assistant_message_id, 'queued', ${input.command.goal},
+            winner.message_id, winner.assistant_message_id, 'queued', ${initialMessageContent},
             ${JSON.stringify(turnSettingsFromHarness(harness))}::jsonb, 1, ${now}, ${now}
           FROM winner
           JOIN created_task AS task ON task.id = winner.task_id
@@ -804,12 +823,16 @@ function defaultHarness(command: CreateTaskCommand & { model: AgentModelId }): G
   };
 }
 
-function validateHarness(harness: GoatHarnessSpec, command: CreateTaskCommand) {
+function validateHarness(
+  harness: GoatHarnessSpec,
+  command: CreateTaskCommand,
+  initialMessageContent: string,
+) {
   if (
     harness.schemaVersion !== "goat.harness.v1" ||
     harness.engine !== command.engine ||
     harness.model !== command.model ||
-    harness.initialUserMessage.trim() !== command.goal
+    harness.initialUserMessage.trim() !== initialMessageContent
   ) {
     throw new Error("The prepared Task execution does not match its canonical command.");
   }

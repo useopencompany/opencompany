@@ -119,8 +119,8 @@ export function compileGoatWorkflowHarnessSpec(input: {
     const stepSkillIds = new Set(
       extractGoatWorkflowSkillMentionRefs(step.instructions).map((mention) => mention.id),
     );
-    // Composer-invoked skills belong to the workflow's first user turn. Later steps run in
-    // isolated sessions and keep only the skills authored into those steps.
+    // Composer-invoked skills belong to the workflow's first user turn. Later steps stay in the
+    // same Conversation and use only the skills authored into those steps.
     if (index === 0) {
       for (const skillId of invokedSkillIds) stepSkillIds.add(skillId);
     }

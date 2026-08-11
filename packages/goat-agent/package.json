@@ -30,6 +30,7 @@
     "@opencompany/billing": "workspace:*",
     "@opencompany/browser-tools": "workspace:*",
     "@opencompany/crypto": "workspace:*",
+    "@opencompany/core": "workspace:*",
     "@opencompany/db": "workspace:*",
     "@opencompany/goat-brain": "workspace:*",
     "@opencompany/goat-observability": "workspace:*",

@@ -37,6 +37,7 @@ export async function listGoatTaskSchedulesForUser(userWorkosId: string) {
 
 export async function createGoatTaskScheduleForUser(input: {
   userWorkosId: string;
+  workspaceId: string;
   name: string;
   sourceDescription?: string;
   cron: string;

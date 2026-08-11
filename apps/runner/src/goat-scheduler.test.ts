@@ -1,6 +1,7 @@
 import { PGlite } from "@electric-sql/pglite";
 import type { GoatHarnessSpec } from "@opencompany/db/goat-schema";
 import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sweepDueGoatTaskSchedules } from "./goat-scheduler";
 
@@ -66,6 +67,7 @@ describe("sweepDueGoatTaskSchedules", () => {
         CREATE TABLE goat.task_schedules (
           id text PRIMARY KEY,
           user_workos_id text NOT NULL,
+          workspace_id text,
           name text NOT NULL,
           cron text NOT NULL,
           timezone text NOT NULL DEFAULT 'UTC',
@@ -111,7 +113,8 @@ describe("sweepDueGoatTaskSchedules", () => {
 
         CREATE TABLE goat.workspace_members (
           workspace_id text NOT NULL,
-          user_workos_id text NOT NULL
+          user_workos_id text NOT NULL,
+          created_at timestamptz NOT NULL DEFAULT now()
         );
       `);
       await pg.query(
@@ -120,6 +123,10 @@ describe("sweepDueGoatTaskSchedules", () => {
           VALUES ('user_1', 'founder@example.com', 'Europe/Amsterdam', true);
         `,
       );
+      await pg.query(`
+        INSERT INTO goat.workspace_members (workspace_id, user_workos_id)
+        VALUES ('workspace_1', 'user_1')
+      `);
       await pg.query(
         `
           INSERT INTO goat.task_schedules (
@@ -206,6 +213,8 @@ describe("sweepDueGoatTaskSchedules", () => {
         {
           id: "goat_task_schedule_1",
           userWorkosId: "user_1",
+          workspaceId: "workspace_1",
+          usedLegacyWorkspaceFallback: false,
           name: "Daily briefing",
           cron: "0 9 * * *",
           timezone: "UTC",
@@ -215,39 +224,17 @@ describe("sweepDueGoatTaskSchedules", () => {
         },
       ])
       .mockResolvedValueOnce([{ id: "goat_task_schedule_run_1" }])
-      .mockResolvedValueOnce([
-        {
-          id: "goat_task_1",
-          displayId: "TASK-1",
+      .mockResolvedValueOnce([{ authorized: true, featureEnabled: true, commandId: null }])
+      .mockImplementationOnce((query) =>
+        canonicalTaskCreateRow(query, {
           name: "Daily briefing",
-          userWorkosId: "user_1",
-          prompt: "Send a daily briefing.",
+          goal: "Send a daily briefing.",
           model: harnessSpec.model,
-          sessionId: "goat_chat_1",
           scheduleId: "goat_task_schedule_1",
-          scheduledFor: new Date("2026-06-03T09:00:00.000Z"),
-          status: "queued",
-          stage: "queued",
-          result: null,
-          error: null,
           workflowId: null,
-          workflowBrainRef: null,
-          reportedOutcome: null,
-          outcomeComment: null,
-          harnessSpec,
-          debugTrace: {},
-          codexEngineSessionId: null,
-          sandboxId: null,
-          attempts: 0,
-          nextRunAt: new Date("2026-06-03T12:00:00.000Z"),
-          leaseId: null,
-          leaseOwner: null,
-          leaseExpiresAt: null,
-          archivedAt: null,
-          createdAt: new Date("2026-06-03T12:00:00.000Z"),
-          updatedAt: new Date("2026-06-03T12:00:00.000Z"),
-        },
-      ])
+          scheduledFor: new Date("2026-06-03T09:00:00.000Z"),
+        }),
+      )
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
     mocks.transaction.mockImplementation(async (callback) => callback({ execute }));
@@ -264,7 +251,7 @@ describe("sweepDueGoatTaskSchedules", () => {
     expect(mocks.captureGoatTaskSpawned).toHaveBeenCalledWith(
       expect.objectContaining({
         userWorkosId: "user_1",
-        workspaceId: null,
+        workspaceId: "workspace_1",
         taskId: "goat_task_1",
         displayId: "TASK-1",
         engine: "opencompany",
@@ -275,8 +262,9 @@ describe("sweepDueGoatTaskSchedules", () => {
       }),
     );
     expect(sqlTextFromExecuteCall(execute, 0)).toContain("task_spawning_enabled");
-    expect(sqlTextFromExecuteCall(execute, 2)).toContain("INSERT INTO goat.chat_sessions");
-    expect(sqlTextFromExecuteCall(execute, 2)).toContain("INSERT INTO goat.codex_chat_turns");
+    expect(sqlTextFromExecuteCall(execute, 3)).toContain("INSERT INTO goat.chat_sessions");
+    expect(sqlTextFromExecuteCall(execute, 3)).toContain("INSERT INTO goat.codex_chat_turns");
+    expect(sqlTextFromExecuteCall(execute, 3)).toContain("'run.queued'");
   });
 
   it("skips duplicate schedule runs without creating another task", async () => {
@@ -286,6 +274,8 @@ describe("sweepDueGoatTaskSchedules", () => {
         {
           id: "goat_task_schedule_1",
           userWorkosId: "user_1",
+          workspaceId: "workspace_1",
+          usedLegacyWorkspaceFallback: false,
           name: "Daily briefing",
           cron: "0 9 * * *",
           timezone: "UTC",
@@ -339,39 +329,17 @@ describe("sweepDueGoatTaskSchedules", () => {
         },
       ])
       .mockResolvedValueOnce([{ id: "goat_workflow_schedule_run_1" }])
-      .mockResolvedValueOnce([
-        {
-          id: "goat_task_1",
-          displayId: "TASK-1",
+      .mockResolvedValueOnce([{ authorized: true, featureEnabled: true, commandId: null }])
+      .mockImplementationOnce((query) =>
+        canonicalTaskCreateRow(query, {
           name: "Weekly update",
-          userWorkosId: "user_1",
-          prompt: "Draft the weekday update.",
+          goal: "Draft the weekday update.",
           model: workflowHarnessSpec.model,
-          sessionId: "goat_chat_1",
           scheduleId: null,
-          scheduledFor: new Date("2026-06-03T09:00:00.000Z"),
-          status: "queued",
-          stage: "queued",
-          result: null,
-          error: null,
           workflowId: "weekly-update",
-          workflowBrainRef: null,
-          reportedOutcome: null,
-          outcomeComment: null,
-          harnessSpec: workflowHarnessSpec,
-          debugTrace: {},
-          codexEngineSessionId: null,
-          sandboxId: null,
-          attempts: 0,
-          nextRunAt: new Date("2026-06-03T12:00:00.000Z"),
-          leaseId: null,
-          leaseOwner: null,
-          leaseExpiresAt: null,
-          archivedAt: null,
-          createdAt: new Date("2026-06-03T12:00:00.000Z"),
-          updatedAt: new Date("2026-06-03T12:00:00.000Z"),
-        },
-      ])
+          scheduledFor: new Date("2026-06-03T09:00:00.000Z"),
+        }),
+      )
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
     mocks.transaction.mockImplementation(async (callback) => callback({ execute }));
@@ -399,9 +367,9 @@ describe("sweepDueGoatTaskSchedules", () => {
       }),
     );
     expect(sqlTextFromExecuteCall(execute, 1)).toContain("FROM goat.workflows");
-    expect(sqlTextFromExecuteCall(execute, 3)).toContain("INSERT INTO goat.chat_sessions");
-    expect(sqlTextFromExecuteCall(execute, 3)).toContain("workflow_id");
-    expect(sqlTextFromExecuteCall(execute, 4)).toContain("UPDATE goat.workflow_schedule_runs");
+    expect(sqlTextFromExecuteCall(execute, 4)).toContain("INSERT INTO goat.chat_sessions");
+    expect(sqlTextFromExecuteCall(execute, 4)).toContain("workflow_id");
+    expect(sqlTextFromExecuteCall(execute, 5)).toContain("UPDATE goat.workflow_schedule_runs");
   });
 });
 
@@ -414,6 +382,60 @@ function sqlTextFromExecuteCall(execute: ReturnType<typeof vi.fn>, callIndex: nu
       ?.map((chunk) => (typeof chunk === "string" ? "?" : (chunk?.value ?? []).join("")))
       .join("") ?? ""
   );
+}
+
+function canonicalTaskCreateRow(
+  query: SQL,
+  input: {
+    name: string;
+    goal: string;
+    model: string;
+    scheduleId: string | null;
+    workflowId: string | null;
+    scheduledFor: Date;
+  },
+) {
+  const compiled = new PgDialect().sqlToQuery(query);
+  const requestHash = compiled.params.find(
+    (value): value is string => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value),
+  );
+  if (!requestHash) throw new Error("Expected canonical Task request hash.");
+  const now = new Date("2026-06-03T12:00:00.000Z");
+  return [
+    {
+      authorized: true,
+      featureEnabled: true,
+      commandId: "task_command_1",
+      requestHash,
+      taskId: "goat_task_1",
+      reservedConversationId: "goat_chat_1",
+      messageId: "goat_chat_message_1",
+      assistantMessageId: "goat_chat_message_2",
+      runId: "goat_run_1",
+      transactionId: "1",
+      replayed: false,
+      materialized: true,
+      id: "goat_task_1",
+      displayId: "TASK-1",
+      name: input.name,
+      goal: input.goal,
+      taskConversationId: "goat_chat_1",
+      status: "queued",
+      source: "schedule",
+      engine: "opencompany",
+      model: input.model,
+      workflowId: input.workflowId,
+      scheduleId: input.scheduleId,
+      scheduledFor: input.scheduledFor,
+      result: null,
+      error: null,
+      reportedStatus: null,
+      outcomeComment: null,
+      archivedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+  ];
 }
 
 function pgliteQueryFromDrizzleSql(query: SQL) {

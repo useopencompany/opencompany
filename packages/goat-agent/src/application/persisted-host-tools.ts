@@ -90,11 +90,19 @@ export function executePersistedGoatChatHostTool(input: {
         workspaceRef: workspaceId,
         skills,
       }),
-    createTask: (task) => createGoatTaskForActor(task, taskDependencies),
+    createTask: (task) =>
+      createGoatTaskForActor(
+        {
+          ...task,
+          source: "agent",
+          idempotencyKey: `agent:${input.request.turnId}`,
+        },
+        taskDependencies,
+      ),
     listSchedules: listGoatTaskSchedulesForUser,
-    createSchedule: ({ actorId, ...schedule }) =>
+    createSchedule: ({ actorId, workspaceId, ...schedule }) =>
       createGoatTaskScheduleForUser(
-        { ...schedule, userWorkosId: actorId },
+        { ...schedule, userWorkosId: actorId, workspaceId },
         { planHarness: input.runtime.planHarness },
       ),
     updateSchedule: (actorId, scheduleId, schedule) =>
@@ -106,7 +114,15 @@ export function executePersistedGoatChatHostTool(input: {
       createGoatTaskFromWorkflow(
         { ...workflow, userWorkosId: actorId },
         {
-          createTask: (task) => createGoatTaskForActor(task, taskDependencies),
+          createTask: (task) =>
+            createGoatTaskForActor(
+              {
+                ...task,
+                source: "workflow",
+                idempotencyKey: `workflow:${input.request.turnId}`,
+              },
+              taskDependencies,
+            ),
         },
       ),
     listWorkflowCatalog: listGoatWorkflowCatalog,

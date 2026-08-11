@@ -1253,6 +1253,8 @@ export async function POST(request: Request): Promise<Response> {
               ...(task.name ? { name: task.name } : {}),
               prompt: task.prompt,
               model: task.model,
+              source: "agent",
+              idempotencyKey: `agent:${turn.userMessageId}`,
               ...(task.engine ? { engine: task.engine } : {}),
             });
             const attributes = {
@@ -1277,6 +1279,7 @@ export async function POST(request: Request): Promise<Response> {
           scheduleTask: async (schedule) => {
             const created = await createGoatTaskScheduleForUser({
               userWorkosId: context.user.workosUserId,
+              workspaceId: context.workspace.id,
               name: schedule.name,
               sourceDescription: schedule.sourceDescription ?? schedule.reason ?? "",
               cron: schedule.cron,

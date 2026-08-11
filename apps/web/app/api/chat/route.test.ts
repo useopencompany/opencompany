@@ -2073,6 +2073,8 @@ describe("POST /api/chat", () => {
       prompt: "Check repo access and report whether development work can start.",
       model: "openai/gpt-5.5",
       engine: "codex",
+      source: "agent",
+      idempotencyKey: "agent:user_message_1",
     });
   });
 
@@ -2125,6 +2127,8 @@ describe("POST /api/chat", () => {
       prompt: "Check repo access and report whether development work can start.",
       model: CODEX_DEFAULT_MODEL_ID,
       engine: "codex",
+      source: "agent",
+      idempotencyKey: "agent:user_message_1",
     });
   });
 
@@ -2179,6 +2183,8 @@ describe("POST /api/chat", () => {
       prompt: "Check repo access and report whether development work can start.",
       model: "openai/gpt-5.5",
       engine: "claude_code",
+      source: "agent",
+      idempotencyKey: "agent:user_message_1",
     });
   });
 

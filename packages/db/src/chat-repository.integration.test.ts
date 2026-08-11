@@ -87,12 +87,13 @@ describe("Postgres Chat repositories", () => {
       DELETE FROM goat.workspaces;
     `);
     await database.exec(`
-      INSERT INTO goat.users (workos_user_id) VALUES ('user_1'), ('user_2');
+      INSERT INTO goat.users (workos_user_id) VALUES ('user_1'), ('user_2'), ('user_3');
       INSERT INTO goat.workspaces (id) VALUES ('workspace_1'), ('workspace_2');
       INSERT INTO goat.workspace_members (id, workspace_id, user_workos_id, role)
       VALUES
         ('member_1', 'workspace_1', 'user_1', 'admin'),
-        ('member_2', 'workspace_2', 'user_2', 'admin');
+        ('member_2', 'workspace_2', 'user_2', 'admin'),
+        ('member_3', 'workspace_1', 'user_3', 'member');
     `);
     execute = async (query) => {
       const compiled = dialect.sqlToQuery(query);
@@ -875,7 +876,150 @@ describe("Postgres Chat repositories", () => {
       ).rows,
     ).toEqual([{ type: "run.queued" }, { type: "run.canceled" }]);
   });
+
+  it("continues and cancels a Task through canonical Messages, Runs, and Events", async () => {
+    await seedTerminalTask(database);
+    const sharedActor = actor({ userId: "user_3" });
+    const command = {
+      idempotencyKey: "task-follow-up-1",
+      conversationId: "task_conversation_1",
+      clientMessageId: "task_message_follow_up_1",
+      content: "Continue from the review findings.",
+      engine: "opencompany" as const,
+      model: "provider/model",
+      mentions: [{ kind: "skill" as const, id: "review" }],
+    };
+
+    const created = await service.createMessage(sharedActor, command);
+    await expect(service.createMessage(sharedActor, command)).resolves.toEqual({
+      ...created,
+      idempotentReplay: true,
+    });
+    await expect(service.getRun(sharedActor, created.runId)).resolves.toMatchObject({
+      conversationId: "task_conversation_1",
+      status: "queued",
+    });
+    await expect(
+      service.getRun(actor({ userId: "user_2", workspaceId: "workspace_2" }), created.runId),
+    ).rejects.toMatchObject({ code: "not_found" });
+
+    expect(
+      await database.query<{
+        status: string;
+        session_id: string;
+        host_tool_contract_version: string;
+        run_owner: string;
+      }>(`
+        SELECT
+          task.status, task.session_id, runtime.host_tool_contract_version,
+          run.user_workos_id AS run_owner
+        FROM goat.tasks AS task
+        JOIN goat.codex_chat_sessions AS runtime ON runtime.chat_session_id = task.session_id
+        JOIN goat.codex_chat_turns AS run ON run.id = '${created.runId}'
+        WHERE task.id = 'task_1'
+      `),
+    ).toMatchObject({
+      rows: [
+        {
+          status: "queued",
+          session_id: "task_conversation_1",
+          host_tool_contract_version: "goat.action.v1",
+          run_owner: "user_1",
+        },
+      ],
+    });
+    expect(
+      await database.query<{ task_id: string | null }>(
+        `SELECT task_id FROM goat.chat_messages WHERE id IN ($1, $2) ORDER BY role DESC`,
+        [created.messageId, created.assistantMessageId],
+      ),
+    ).toMatchObject({ rows: [{ task_id: "task_1" }, { task_id: "task_1" }] });
+    expect(
+      await database.query<{ type: string; task_id: string | null }>(
+        `SELECT type, payload->>'taskId' AS task_id
+         FROM goat.run_events WHERE run_id = $1 ORDER BY sequence`,
+        [created.runId],
+      ),
+    ).toMatchObject({ rows: [{ type: "run.queued", task_id: "task_1" }] });
+    expect(
+      await database.query<{ skill_id: string; activated_message_id: string }>(`
+        SELECT skill_id, activated_message_id
+        FROM goat.chat_session_skills
+        WHERE chat_session_id = 'task_conversation_1'
+      `),
+    ).toMatchObject({
+      rows: [{ skill_id: "review", activated_message_id: created.messageId }],
+    });
+
+    await expect(service.cancelRun(sharedActor, created.runId)).resolves.toMatchObject({
+      status: "canceled",
+      idempotentReplay: false,
+    });
+    expect(
+      await database.query<{ status: string; error: string }>(`
+        SELECT status, error FROM goat.tasks WHERE id = 'task_1'
+      `),
+    ).toMatchObject({ rows: [{ status: "canceled", error: "Stopped by user." }] });
+  });
+
+  it("does not let a malformed Task link broaden access to a normal Chat Run", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "private-chat-run",
+      content: "Keep this Chat private to its owner.",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+    await database.query(
+      `INSERT INTO goat.tasks (id, user_workos_id, workspace_id, session_id)
+       VALUES ('malformed_task_link', 'user_1', 'workspace_1', $1)`,
+      [created.conversationId],
+    );
+    const workspaceMember = actor({ userId: "user_3" });
+
+    await expect(service.getRun(workspaceMember, created.runId)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(service.cancelRun(workspaceMember, created.runId)).rejects.toMatchObject({
+      code: "not_found",
+    });
+  });
 });
+
+async function seedTerminalTask(database: PGlite) {
+  await database.exec(`
+    INSERT INTO goat.chat_sessions (
+      id, user_workos_id, title, model, engine, kind
+    ) VALUES (
+      'task_conversation_1', 'user_1', 'Review task', 'provider/model', 'opencompany', 'task'
+    );
+    INSERT INTO goat.tasks (
+      id, user_workos_id, workspace_id, session_id, status, stage, result
+    ) VALUES (
+      'task_1', 'user_1', 'workspace_1', 'task_conversation_1',
+      'succeeded', 'completed', 'Initial review complete.'
+    );
+    INSERT INTO goat.chat_messages (id, session_id, role, content, task_id)
+    VALUES
+      ('task_message_1', 'task_conversation_1', 'user', 'Review the repository.', 'task_1'),
+      ('task_assistant_1', 'task_conversation_1', 'assistant', 'Review complete.', 'task_1');
+    INSERT INTO goat.codex_chat_sessions (
+      id, user_workos_id, chat_session_id, engine, model, workspace_id,
+      host_tool_contract_version, status
+    ) VALUES (
+      'task_runtime_1', 'user_1', 'task_conversation_1', 'opencompany', 'provider/model',
+      'workspace_1', 'goat.action.v1', 'idle'
+    );
+    INSERT INTO goat.codex_chat_turns (
+      id, user_workos_id, codex_chat_session_id, chat_session_id,
+      user_message_id, assistant_message_id, status, prompt, completed_at
+    ) VALUES (
+      'task_run_1', 'user_1', 'task_runtime_1', 'task_conversation_1',
+      'task_message_1', 'task_assistant_1', 'completed', 'Review the repository.', now()
+    );
+    INSERT INTO goat.skills (id, workspace_id, slug, name, description, instructions)
+    VALUES ('skill_review', 'workspace_1', 'review', 'Review', 'Review carefully.', 'Be thorough.');
+  `);
+}
 
 function actor(overrides: Partial<Actor> = {}): Actor {
   return {
@@ -923,6 +1067,34 @@ const BASE_SCHEMA = `
     last_seen_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE TABLE goat.tasks (
+    id text PRIMARY KEY,
+    user_workos_id text NOT NULL REFERENCES goat.users(workos_user_id),
+    workspace_id text,
+    session_id text UNIQUE REFERENCES goat.chat_sessions(id),
+    source text NOT NULL DEFAULT 'manual',
+    status text NOT NULL DEFAULT 'queued',
+    stage text NOT NULL DEFAULT 'queued',
+    result text,
+    error text,
+    reported_outcome text,
+    outcome_comment text,
+    next_run_at timestamptz NOT NULL DEFAULT now(),
+    lease_id text,
+    lease_owner text,
+    lease_expires_at timestamptz,
+    archived_at timestamptz,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE TABLE goat.skills (
+    id text PRIMARY KEY,
+    workspace_id text NOT NULL,
+    slug text NOT NULL,
+    name text NOT NULL,
+    description text NOT NULL DEFAULT '',
+    instructions text NOT NULL DEFAULT '',
+    archived_at timestamptz
   );
   CREATE TABLE goat.chat_messages (
     id text PRIMARY KEY,
@@ -994,5 +1166,16 @@ const BASE_SCHEMA = `
     resolved_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE TABLE goat.chat_session_skills (
+    chat_session_id text NOT NULL REFERENCES goat.chat_sessions(id),
+    skill_id text NOT NULL,
+    brain_ref text NOT NULL,
+    activated_message_id text NOT NULL REFERENCES goat.chat_messages(id),
+    name text NOT NULL,
+    description text NOT NULL,
+    instructions text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (chat_session_id, skill_id)
   );
 `;
