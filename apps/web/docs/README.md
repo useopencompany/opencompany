@@ -513,20 +513,24 @@ Entry points:
 - `apps/web/lib/tasks.ts`
 - `apps/web/lib/workflow-tasks.ts`
 - `apps/runner/src/goat-scheduler.ts`
-- `packages/db/src/goat-task-sessions.ts`
+- `packages/goat-agent/src/application/task-creation.ts`
+- `packages/db/src/task-repository.ts`
 
-All ad-hoc, workflow, and scheduled task entry points call `createGoatTaskSession`. In one database
-statement it:
+All manual, workflow, schedule, and agent entry points call `TaskApplicationService.createTask`.
+`PostgresTaskRepository` materializes one canonical command in one database statement. It:
 
 - Creates a `goat.chat_sessions` row with `kind: "task"`.
 - Inserts the thin `goat.tasks` projection linked through `session_id`.
 - Inserts native user and pending assistant `goat.chat_messages`.
-- Creates the engine runtime row and enqueues the first leased `goat.codex_chat_turn`.
+- Creates the engine runtime row, enqueues the first canonical Run, and appends `run.queued`.
 - Persists the compiled harness, workflow, and schedule metadata on the projection.
 
 Callers validate product permissions, compile or seed the harness, then wake the shared durable chat
-worker. Session-backed execution is the only task execution path; legacy rows without `session_id`
-retain their old history read-only and can no longer be continued.
+worker. Follow-ups and cancellation use the canonical Message/Run service. Workflow steps and
+scheduled wakeups append Runs to the same Conversation and runtime; an engine change clears the
+provider thread before the next Attempt. The retained `goat-task-sessions` constructor/continuation
+has no production caller and exists only for the bounded rollback/drain window in issue #1190.
+Historical rows without `session_id` remain read-only.
 
 Available OpenCompany task tools are resolved from the same user-specific Brain, web, browser, and
 connected-action catalog as foreground chat. Codex task configuration still comes from the task

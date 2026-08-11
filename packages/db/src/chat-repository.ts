@@ -598,23 +598,67 @@ export class PostgresChatRepository implements ChatRepository {
           AND user_workos_id = ${input.actor.userId}
       ),
       authorized_existing AS MATERIALIZED (
-        SELECT chat.id, chat.model
+        SELECT
+          chat.id, chat.model, chat.kind, chat.user_workos_id AS owner_user_workos_id,
+          task.id AS task_id
         FROM goat.chat_sessions AS chat
         LEFT JOIN goat.codex_chat_sessions AS runtime ON runtime.chat_session_id = chat.id
+        LEFT JOIN goat.tasks AS task
+          ON task.session_id = chat.id
+         AND task.user_workos_id = chat.user_workos_id
         WHERE chat.id = ${input.command.conversationId ?? null}
-          AND chat.user_workos_id = ${input.actor.userId}
-          AND chat.kind = 'chat'
+          AND (
+            (chat.kind = 'chat' AND chat.user_workos_id = ${input.actor.userId})
+            OR (
+              chat.kind = 'task'
+              AND (
+                task.workspace_id = ${input.actor.workspaceId}
+                OR (
+                  task.workspace_id IS NULL
+                  AND task.user_workos_id = ${input.actor.userId}
+                )
+              )
+              AND task.archived_at IS NULL
+              AND task.status IN ('succeeded', 'failed', 'canceled')
+            )
+          )
           AND chat.engine = ${input.command.engine}
           AND chat.closed_at IS NULL
           AND (
             runtime.id IS NULL
             OR (
-              runtime.user_workos_id = ${input.actor.userId}
+              runtime.user_workos_id = chat.user_workos_id
               AND runtime.engine = ${input.command.engine}
               AND (runtime.workspace_id IS NULL OR runtime.workspace_id = ${input.actor.workspaceId})
             )
           )
           AND EXISTS (SELECT 1 FROM membership)
+      ),
+      continued_task AS MATERIALIZED (
+        UPDATE goat.tasks AS task
+        SET status = 'queued',
+            stage = 'queued',
+            result = NULL,
+            error = NULL,
+            reported_outcome = NULL,
+            outcome_comment = NULL,
+            next_run_at = ${now},
+            lease_id = NULL,
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            updated_at = ${now}
+        FROM authorized_existing AS existing
+        WHERE existing.kind = 'task'
+          AND task.id = existing.task_id
+          AND task.status IN ('succeeded', 'failed', 'canceled')
+        RETURNING task.id
+      ),
+      admitted_existing AS MATERIALIZED (
+        SELECT
+          existing.id, existing.model, existing.owner_user_workos_id, existing.task_id
+        FROM authorized_existing AS existing
+        WHERE existing.kind = 'chat'
+           OR existing.task_id IN (SELECT id FROM continued_task)
       ),
       eligible_attachments AS MATERIALIZED (
         SELECT upload.id
@@ -640,7 +684,7 @@ export class PostgresChatRepository implements ChatRepository {
         WHERE EXISTS (SELECT 1 FROM membership)
           AND (
             ${input.command.conversationId ?? null}::text IS NULL
-            OR EXISTS (SELECT 1 FROM authorized_existing)
+            OR EXISTS (SELECT 1 FROM admitted_existing)
             OR EXISTS (
               SELECT 1
               FROM goat.chat_command_idempotency AS prior
@@ -665,12 +709,15 @@ export class PostgresChatRepository implements ChatRepository {
           ${input.command.model}, ${input.command.engine}, 'chat', ${now}, ${now}, ${now}
         FROM winner AS reservation
         WHERE ${input.command.conversationId ?? null}::text IS NULL
-        RETURNING id, model
+        RETURNING
+          id, model, ${input.actor.userId}::text AS owner_user_workos_id,
+          NULL::text AS task_id
       ),
       target_chat AS MATERIALIZED (
-        SELECT id, model FROM created_chat
+        SELECT id, model, owner_user_workos_id, task_id FROM created_chat
         UNION ALL
-        SELECT id, model FROM authorized_existing WHERE EXISTS (SELECT 1 FROM winner)
+        SELECT id, model, owner_user_workos_id, task_id
+        FROM admitted_existing WHERE EXISTS (SELECT 1 FROM winner)
       ),
       dismissed_approvals AS MATERIALIZED (
         UPDATE goat.run_approvals AS approval
@@ -683,7 +730,7 @@ export class PostgresChatRepository implements ChatRepository {
         WHERE approval.run_id = paused.id
           AND approval.status = 'pending'
           AND paused.chat_session_id = chat.id
-          AND paused.user_workos_id = ${input.actor.userId}
+          AND paused.user_workos_id = chat.owner_user_workos_id
           AND paused.status = 'paused'
         RETURNING approval.id, approval.run_id
       ),
@@ -739,7 +786,7 @@ export class PostgresChatRepository implements ChatRepository {
             updated_at = ${now}
         FROM target_chat AS chat
         WHERE paused.chat_session_id = chat.id
-          AND paused.user_workos_id = ${input.actor.userId}
+          AND paused.user_workos_id = chat.owner_user_workos_id
           AND paused.status = 'paused'
           AND (
             NOT EXISTS (
@@ -774,13 +821,20 @@ export class PostgresChatRepository implements ChatRepository {
           host_tool_contract_version, active_turn_id, status, created_at, updated_at
         )
         SELECT
-          ${runtimeId}, ${input.actor.userId}, target_chat.id, ${input.command.engine},
-          target_chat.model, ${input.actor.workspaceId}, ${GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION},
+          ${runtimeId}, target_chat.owner_user_workos_id, target_chat.id, ${input.command.engine},
+          target_chat.model, ${input.actor.workspaceId},
+          CASE WHEN target_chat.task_id IS NULL
+            THEN ${GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION}
+            ELSE NULL
+          END,
           ${runId}, 'queued', ${now}, ${now}
         FROM target_chat
         ON CONFLICT (chat_session_id) DO UPDATE
         SET workspace_id = COALESCE(goat.codex_chat_sessions.workspace_id, EXCLUDED.workspace_id),
-            host_tool_contract_version = EXCLUDED.host_tool_contract_version,
+            host_tool_contract_version = COALESCE(
+              EXCLUDED.host_tool_contract_version,
+              goat.codex_chat_sessions.host_tool_contract_version
+            ),
             status = CASE
               WHEN goat.codex_chat_sessions.status IN ('queued', 'starting', 'running')
                 THEN goat.codex_chat_sessions.status
@@ -812,23 +866,47 @@ export class PostgresChatRepository implements ChatRepository {
       ),
       inserted_user_message AS (
         INSERT INTO goat.chat_messages (
-          id, session_id, role, content, attachments, attachment_texts, created_at, updated_at
+          id, session_id, role, content, task_id, attachments, attachment_texts,
+          created_at, updated_at
         )
         SELECT
           reservation.message_id, target_chat.id, 'user', ${input.command.content},
-          ${attachmentsJson}::jsonb, ${attachmentTextsJson}::jsonb, ${now}, ${now}
+          target_chat.task_id, ${attachmentsJson}::jsonb, ${attachmentTextsJson}::jsonb,
+          ${now}, ${now}
         FROM winner AS reservation
         JOIN target_chat ON true
         JOIN upserted_runtime ON upserted_runtime.chat_session_id = target_chat.id
         WHERE (SELECT COUNT(*) FROM claimed_attachments) = ${attachmentIds.length}
         RETURNING id
       ),
+      activated_skills AS MATERIALIZED (
+        INSERT INTO goat.chat_session_skills (
+          chat_session_id, skill_id, brain_ref, activated_message_id,
+          name, description, instructions, created_at
+        )
+        SELECT
+          target_chat.id, skill.slug, skill.workspace_id, inserted_user_message.id,
+          skill.name, skill.description, skill.instructions, ${now}
+        FROM inserted_user_message
+        JOIN target_chat ON true
+        CROSS JOIN jsonb_to_recordset(
+          COALESCE(${settingsJson}::jsonb -> 'mentions', '[]'::jsonb)
+        ) AS mention(kind text, id text)
+        JOIN goat.skills AS skill
+          ON mention.kind = 'skill'
+         AND skill.slug = mention.id
+         AND skill.workspace_id = ${input.actor.workspaceId}
+         AND skill.archived_at IS NULL
+        ON CONFLICT (chat_session_id, skill_id) DO NOTHING
+        RETURNING skill_id
+      ),
       inserted_assistant_message AS (
         INSERT INTO goat.chat_messages (
-          id, session_id, role, content, debug_trace, created_at, updated_at
+          id, session_id, role, content, task_id, debug_trace, created_at, updated_at
         )
         SELECT
           reservation.assistant_message_id, target_chat.id, 'assistant', '',
+          target_chat.task_id,
           '{"schemaVersion":"opencompany.chat.debug.v1","steps":[]}'::jsonb,
           ${now}, ${now}
         FROM winner AS reservation
@@ -843,7 +921,8 @@ export class PostgresChatRepository implements ChatRepository {
           created_at, updated_at
         )
         SELECT
-          reservation.run_id, ${input.actor.userId}, upserted_runtime.id, target_chat.id,
+            reservation.run_id, target_chat.owner_user_workos_id,
+            upserted_runtime.id, target_chat.id,
           reservation.message_id, reservation.assistant_message_id, 'queued',
           ${input.command.content}, ${settingsJson}::jsonb, 1, ${now}, ${now}
         FROM winner AS reservation
@@ -861,11 +940,13 @@ export class PostgresChatRepository implements ChatRepository {
           ${eventId}, inserted_run.id, 1, 1, 'run.queued',
           jsonb_build_object(
             'conversationId', reservation.conversation_id,
-            'triggerMessageId', reservation.message_id
+            'triggerMessageId', reservation.message_id,
+            'taskId', target_chat.task_id
           ),
           ${now}
         FROM inserted_run
         JOIN winner AS reservation ON reservation.run_id = inserted_run.id
+        JOIN target_chat ON true
         RETURNING id, run_id, sequence
       ),
       notified AS MATERIALIZED (
@@ -947,8 +1028,24 @@ export class PostgresChatRepository implements ChatRepository {
         ON event.run_id = run.id
        AND event.sequence > ${input.afterSequence}
       WHERE run.id = ${input.runId}
-        AND run.user_workos_id = ${input.actor.userId}
-        AND chat.kind = 'chat'
+        AND (
+          (chat.kind = 'chat' AND run.user_workos_id = ${input.actor.userId})
+          OR (
+            chat.kind = 'task'
+            AND EXISTS (
+              SELECT 1 FROM goat.tasks AS task
+              WHERE task.session_id = chat.id
+                AND task.user_workos_id = run.user_workos_id
+                AND (
+                  task.workspace_id = ${input.actor.workspaceId}
+                  OR (
+                    task.workspace_id IS NULL
+                    AND task.user_workos_id = ${input.actor.userId}
+                  )
+                )
+            )
+          )
+        )
         AND chat.closed_at IS NULL
         AND runtime.workspace_id = ${input.actor.workspaceId}
         AND EXISTS (
@@ -976,14 +1073,30 @@ export class PostgresChatRepository implements ChatRepository {
     const eventId = (this.options.ids ?? defaultIds).event();
     const [row] = await this.rows<{ status: LegacyRunStatus; replayed: boolean }>(sql`
       WITH authorized AS MATERIALIZED (
-        SELECT run.id
+        SELECT run.id, task.id AS task_id
         FROM goat.codex_chat_turns AS run
         JOIN goat.codex_chat_sessions AS runtime ON runtime.id = run.codex_chat_session_id
         JOIN goat.chat_sessions AS chat ON chat.id = run.chat_session_id
+        LEFT JOIN goat.tasks AS task
+          ON task.session_id = chat.id
+         AND task.user_workos_id = run.user_workos_id
+         AND (task.workspace_id = runtime.workspace_id OR task.workspace_id IS NULL)
         WHERE run.id = ${input.runId}
-          AND run.user_workos_id = ${input.actor.userId}
           AND runtime.workspace_id = ${input.actor.workspaceId}
-          AND chat.kind = 'chat'
+          AND (
+            (chat.kind = 'chat' AND run.user_workos_id = ${input.actor.userId})
+            OR (
+              chat.kind = 'task'
+              AND task.id IS NOT NULL
+              AND (
+                task.workspace_id = ${input.actor.workspaceId}
+                OR (
+                  task.workspace_id IS NULL
+                  AND task.user_workos_id = ${input.actor.userId}
+                )
+              )
+            )
+          )
           AND EXISTS (
             SELECT 1 FROM goat.workspace_members AS member
             WHERE member.workspace_id = ${input.actor.workspaceId}
@@ -1024,6 +1137,21 @@ export class PostgresChatRepository implements ChatRepository {
           ${now}
         FROM changed
         RETURNING id, run_id, sequence
+      ),
+      canceled_task AS (
+        UPDATE goat.tasks AS task
+        SET status = 'canceled',
+            stage = 'canceled',
+            error = 'Stopped by user.',
+            lease_id = NULL,
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            updated_at = ${now}
+        FROM authorized, changed
+        WHERE authorized.id = changed.id
+          AND task.id = authorized.task_id
+          AND task.status IN ('queued', 'running')
+        RETURNING task.id
       ),
       aborted_message AS (
         UPDATE goat.chat_messages AS message
@@ -1100,9 +1228,25 @@ export class PostgresChatRepository implements ChatRepository {
         JOIN goat.chat_sessions AS chat ON chat.id = run.chat_session_id
         WHERE approval.id = ${input.command.approvalId}
           AND run.id = ${input.command.runId}
-          AND run.user_workos_id = ${input.actor.userId}
           AND runtime.workspace_id = ${input.actor.workspaceId}
-          AND chat.kind = 'chat'
+          AND (
+            (chat.kind = 'chat' AND run.user_workos_id = ${input.actor.userId})
+            OR (
+              chat.kind = 'task'
+              AND EXISTS (
+                SELECT 1 FROM goat.tasks AS task
+                WHERE task.session_id = chat.id
+                  AND task.user_workos_id = run.user_workos_id
+                  AND (
+                    task.workspace_id = ${input.actor.workspaceId}
+                    OR (
+                      task.workspace_id IS NULL
+                      AND task.user_workos_id = ${input.actor.userId}
+                    )
+                  )
+              )
+            )
+          )
           AND chat.closed_at IS NULL
           AND EXISTS (
             SELECT 1 FROM goat.workspace_members AS member
@@ -1759,9 +1903,25 @@ function authorizedRunQuery(actor: Actor, runId: string) {
     JOIN goat.codex_chat_sessions AS runtime ON runtime.id = run.codex_chat_session_id
     JOIN goat.chat_sessions AS chat ON chat.id = run.chat_session_id
     WHERE run.id = ${runId}
-      AND run.user_workos_id = ${actor.userId}
       AND runtime.workspace_id = ${actor.workspaceId}
-      AND chat.kind = 'chat'
+      AND (
+        (chat.kind = 'chat' AND run.user_workos_id = ${actor.userId})
+        OR (
+          chat.kind = 'task'
+          AND EXISTS (
+            SELECT 1 FROM goat.tasks AS task
+            WHERE task.session_id = chat.id
+              AND task.user_workos_id = run.user_workos_id
+              AND (
+                task.workspace_id = ${actor.workspaceId}
+                OR (
+                  task.workspace_id IS NULL
+                  AND task.user_workos_id = ${actor.userId}
+                )
+              )
+          )
+        )
+      )
       AND chat.closed_at IS NULL
       AND EXISTS (
         SELECT 1 FROM goat.workspace_members AS member

@@ -64,6 +64,9 @@ vi.mock("next/cache", () => ({
 }));
 
 beforeEach(() => {
+  mocks.execute.mockReset();
+  mocks.select.mockReset();
+  mocks.triggerGoatCodexChatWake.mockReset().mockResolvedValue(undefined);
   mocks.resolveGoatSkillMentions.mockResolvedValue([]);
   vi.mocked(currentGoatUser).mockResolvedValue({
     user: { workosUserId: "user_1" },
@@ -76,49 +79,7 @@ describe("createGoatTaskForUser", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.select.mockReturnValue({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: vi.fn(async () => [{ enabled: true }]),
-        })),
-      })),
-    });
-    mocks.execute.mockResolvedValue([
-      {
-        id: "task_1",
-        displayId: "TASK-1",
-        userWorkosId: "user_1",
-        name: "Research x",
-        prompt: "Research x",
-        model: DEFAULT_GOAT_MODEL,
-        status: "queued",
-        stage: "queued",
-        result: null,
-        error: null,
-        harnessSpec: {
-          schemaVersion: "goat.harness.v1",
-          engine: "opencompany",
-          model: DEFAULT_GOAT_MODEL,
-          systemPrompt: "",
-          initialUserMessage: "Research x",
-          tools: ["exa_search", "gmail_search"],
-          skills: [],
-          maxModelSteps: 16,
-          resultMode: "assistant_final",
-        },
-        debugTrace: {},
-        codexEngineSessionId: null,
-        sandboxId: null,
-        attempts: 0,
-        nextRunAt: "2026-01-01T00:00:00.000Z",
-        leaseId: null,
-        leaseOwner: null,
-        leaseExpiresAt: null,
-        archivedAt: null,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      },
-    ]);
+    mockCanonicalTaskCreation();
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
   });
 
@@ -136,17 +97,17 @@ describe("createGoatTaskForUser", () => {
     });
 
     expect(task).toMatchObject({ id: "task_1", status: "queued", stage: "queued" });
-    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
     expect(mocks.captureGoatTaskSpawned).toHaveBeenCalledWith(
       expect.objectContaining({
         userWorkosId: "user_1",
-        workspaceId: null,
+        workspaceId: "workspace_1",
         taskId: "task_1",
         displayId: "TASK-1",
         engine: "opencompany",
         model: DEFAULT_GOAT_MODEL,
-        workflowId: undefined,
-        scheduleId: undefined,
+        workflowId: null,
+        scheduleId: null,
         trigger: "manual",
       }),
     );
@@ -157,17 +118,15 @@ describe("createGoatTaskForUser", () => {
         event: "goat.durable_task_created_wake_failed",
       }),
     );
-    expect(sqlTextFromExecuteCall(0)).toContain("task_spawning_enabled = true");
+    expect(sqlTextFromExecuteCall(1)).toContain("task_spawning_enabled");
+    expect(sqlTextFromExecuteCall(1)).toContain("'run.queued'");
   });
 
   it("does not create or dispatch a task when Tasks & Workflows is disabled", async () => {
-    mocks.select.mockReturnValue({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: vi.fn(async () => [{ enabled: false }]),
-        })),
-      })),
-    });
+    mockSelectRows([{ workspaceId: "workspace_1" }]);
+    mocks.execute
+      .mockReset()
+      .mockResolvedValueOnce([{ authorized: true, featureEnabled: false, commandId: null }]);
 
     await expect(
       createGoatTaskForUser({
@@ -177,23 +136,15 @@ describe("createGoatTaskForUser", () => {
       }),
     ).rejects.toThrow("Tasks & Workflows is disabled");
 
-    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.execute).toHaveBeenCalledOnce();
     expect(mocks.captureGoatTaskSpawned).not.toHaveBeenCalled();
   });
 
   it("reports a concurrent disable when the atomic insert is rejected", async () => {
-    mocks.select
-      .mockReturnValueOnce({
-        from: vi.fn(() => ({
-          where: vi.fn(() => ({ limit: vi.fn(async () => [{ enabled: true }]) })),
-        })),
-      })
-      .mockReturnValueOnce({
-        from: vi.fn(() => ({
-          where: vi.fn(() => ({ limit: vi.fn(async () => [{ enabled: false }]) })),
-        })),
-      });
-    mocks.execute.mockResolvedValueOnce([]);
+    mockSelectRows([{ workspaceId: "workspace_1" }]);
+    mocks.execute
+      .mockReset()
+      .mockResolvedValueOnce([{ authorized: true, featureEnabled: false, commandId: null }]);
 
     await expect(
       createGoatTaskForUser({
@@ -206,11 +157,7 @@ describe("createGoatTaskForUser", () => {
   });
 
   it("reports an unknown user separately from a disabled preference", async () => {
-    mocks.select.mockReturnValue({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({ limit: vi.fn(async () => []) })),
-      })),
-    });
+    mockSelectRows([]);
 
     await expect(
       createGoatTaskForUser({
@@ -218,7 +165,7 @@ describe("createGoatTaskForUser", () => {
         prompt: "Research x",
         model: DEFAULT_GOAT_MODEL,
       }),
-    ).rejects.toThrow("unknown user");
+    ).rejects.toThrow("workspace membership");
     expect(mocks.execute).not.toHaveBeenCalled();
     expect(mocks.captureGoatTaskSpawned).not.toHaveBeenCalled();
   });
@@ -312,7 +259,13 @@ describe("cancelGoatTaskAction", () => {
     mocks.select.mockReturnValue({
       from: vi.fn(() => ({
         where: vi.fn(() => ({
-          limit: vi.fn(async () => [{ sessionId: "goat_chat_task_1", userWorkosId: "user_1" }]),
+          limit: vi.fn(async () => [
+            {
+              sessionId: "goat_chat_task_1",
+              userWorkosId: "user_1",
+              runId: "goat_run_1",
+            },
+          ]),
         })),
       })),
     });
@@ -372,7 +325,7 @@ describe("cancelGoatTaskAction", () => {
   });
 
   it("cancels an active task for the current user", async () => {
-    mocks.execute.mockResolvedValueOnce([{ id: "goat_task_1" }]);
+    mocks.execute.mockResolvedValueOnce([{ status: "interrupted", replayed: false }]);
 
     await expect(cancelGoatTaskAction("goat_task_1")).resolves.toEqual({
       ok: true,
@@ -380,9 +333,11 @@ describe("cancelGoatTaskAction", () => {
     });
 
     expect(mocks.execute).toHaveBeenCalledTimes(1);
-    expect(sqlTextFromExecuteCall(0)).toContain("UPDATE goat.codex_chat_turns AS turn");
+    expect(sqlTextFromExecuteCall(0)).toContain("WITH authorized AS MATERIALIZED");
+    expect(sqlTextFromExecuteCall(0)).toContain("UPDATE goat.codex_chat_turns AS run");
     expect(sqlTextFromExecuteCall(0)).toContain("UPDATE goat.chat_messages AS message");
-    expect(sqlTextFromExecuteCall(0)).toContain("turn.status = 'running'");
+    expect(sqlTextFromExecuteCall(0)).toContain("'run.canceled'");
+    expect(sqlTextFromExecuteCall(0)).toContain("goat.run_events");
     expect(sqlTextFromExecuteCall(0)).toContain("'Stopped by user.'");
     expect(sqlTextFromExecuteCall(0)).not.toContain("goat.task_messages");
   });
@@ -400,18 +355,19 @@ describe("cancelGoatTaskAction", () => {
 describe("continueGoatTaskAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.select.mockReturnValue({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: vi.fn(async () => [{ sessionId: "goat_chat_task_1", userWorkosId: "user_1" }]),
-        })),
-      })),
-    });
+    mockSelectRows([
+      {
+        sessionId: "goat_chat_task_1",
+        userWorkosId: "user_1",
+        engine: "opencompany",
+        model: DEFAULT_GOAT_MODEL,
+      },
+    ]);
   });
 
   it("appends a user turn and requeues a completed task", async () => {
     const messageId = "goat_task_msg_11111111-1111-4111-8111-111111111111";
-    mocks.execute.mockResolvedValueOnce([{ id: messageId, task_id: "goat_task_1" }]);
+    mockCanonicalMessageCreation(messageId);
 
     await expect(
       continueGoatTaskAction("goat_task_1", "Check the afternoon too.", messageId),
@@ -421,12 +377,13 @@ describe("continueGoatTaskAction", () => {
       messageId,
     });
 
-    expect(sqlTextFromExecuteCall(0)).toContain(
+    expect(sqlTextFromExecuteCall(1)).toContain(
       "task.status IN ('succeeded', 'failed', 'canceled')",
     );
-    expect(sqlTextFromExecuteCall(0)).toContain("INSERT INTO goat.chat_messages");
-    expect(sqlTextFromExecuteCall(0)).toContain("INSERT INTO goat.codex_chat_turns");
-    expect(sqlTextFromExecuteCall(0)).not.toContain("goat.task_messages");
+    expect(sqlTextFromExecuteCall(1)).toContain("INSERT INTO goat.chat_messages");
+    expect(sqlTextFromExecuteCall(1)).toContain("INSERT INTO goat.codex_chat_turns");
+    expect(sqlTextFromExecuteCall(1)).toContain("'run.queued'");
+    expect(sqlTextFromExecuteCall(1)).not.toContain("goat.task_messages");
     expect(mocks.triggerGoatCodexChatWake).toHaveBeenCalledOnce();
   });
 
@@ -440,7 +397,7 @@ describe("continueGoatTaskAction", () => {
         instructions: "Think through the product job before implementation.",
       },
     ]);
-    mocks.execute.mockResolvedValueOnce([{ id: messageId, task_id: "goat_task_1" }]);
+    mockCanonicalMessageCreation(messageId);
 
     await expect(
       continueGoatTaskAction("goat_task_1", "@skill/product-work Check the session.", messageId, [
@@ -456,17 +413,9 @@ describe("continueGoatTaskAction", () => {
       workspaceId: "workspace_1",
       mentions: [{ id: "product-work" }],
     });
-    expect(sqlTextFromExecuteCall(0)).toContain("INSERT INTO goat.chat_session_skills");
-    expect(renderedExecuteCall(0).params).toContain(
-      JSON.stringify([
-        {
-          skill_id: "product-work",
-          brain_ref: "workspace_1",
-          name: "Product work",
-          description: "Shape and ship product changes.",
-          instructions: "Think through the product job before implementation.",
-        },
-      ]),
+    expect(sqlTextFromExecuteCall(1)).toContain("INSERT INTO goat.chat_session_skills");
+    expect(renderedExecuteCall(1).params).toContain(
+      JSON.stringify({ mentions: [{ kind: "skill", id: "product-work" }] }),
     );
     expect(mocks.triggerGoatCodexChatWake).toHaveBeenCalledOnce();
   });
@@ -476,14 +425,15 @@ describe("continueGoatTaskAction", () => {
       user: { workosUserId: "member_2" },
       workspace: { id: "workspace_1" },
     } as never);
-    mocks.select.mockReturnValue({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: vi.fn(async () => [{ sessionId: "goat_chat_task_1", userWorkosId: "owner_1" }]),
-        })),
-      })),
-    });
-    mocks.execute.mockResolvedValueOnce([{ id: "goat_chat_msg_1", task_id: "goat_task_1" }]);
+    mockSelectRows([
+      {
+        sessionId: "goat_chat_task_1",
+        userWorkosId: "owner_1",
+        engine: "opencompany",
+        model: DEFAULT_GOAT_MODEL,
+      },
+    ]);
+    mockCanonicalMessageCreation("goat_chat_msg_1");
 
     await expect(
       continueGoatTaskAction("goat_task_1", "Check the afternoon too."),
@@ -493,13 +443,16 @@ describe("continueGoatTaskAction", () => {
       messageId: "goat_chat_msg_1",
     });
 
-    const query = renderedExecuteCall(0);
-    expect(query.params).toContain("owner_1");
-    expect(query.params).not.toContain("member_2");
+    const query = renderedExecuteCall(1);
+    expect(query.params).toContain("member_2");
+    expect(sqlTextFromExecuteCall(1)).toContain("target_chat.owner_user_workos_id");
   });
 
   it("does not append another turn while the task is active or inaccessible", async () => {
-    mocks.execute.mockResolvedValueOnce([]);
+    mocks.execute
+      .mockReset()
+      .mockResolvedValueOnce([{ authorized: true, commandId: null }])
+      .mockResolvedValueOnce([]);
 
     await expect(continueGoatTaskAction("goat_task_1", "Check again.")).resolves.toMatchObject({
       ok: false,
@@ -508,13 +461,8 @@ describe("continueGoatTaskAction", () => {
   });
 
   it("keeps pre-session task history read-only", async () => {
-    mocks.select.mockReturnValue({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: vi.fn(async () => [{ sessionId: null, userWorkosId: "user_1" }]),
-        })),
-      })),
-    });
+    mockSelectRows([{ sessionId: null, userWorkosId: "user_1", engine: null, model: null }]);
+    mocks.execute.mockReset();
 
     await expect(continueGoatTaskAction("goat_task_legacy", "Check again.")).resolves.toEqual({
       ok: false,
@@ -536,6 +484,140 @@ describe("continueGoatTaskAction", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 });
+
+function mockSelectRows(...rowSets: unknown[][]) {
+  const pending = [...rowSets];
+  mocks.select.mockReset().mockImplementation(() => {
+    const rows = pending.shift() ?? [];
+    const chain = {
+      from: vi.fn(() => chain),
+      leftJoin: vi.fn(() => chain),
+      where: vi.fn(() => chain),
+      orderBy: vi.fn(() => chain),
+      limit: vi.fn(async () => rows),
+    };
+    return chain;
+  });
+}
+
+function mockCanonicalTaskCreation() {
+  const harnessSpec = {
+    schemaVersion: "goat.harness.v1" as const,
+    engine: "opencompany" as const,
+    model: DEFAULT_GOAT_MODEL,
+    systemPrompt: "",
+    initialUserMessage: "Research x",
+    tools: ["exa_search", "gmail_search"],
+    skills: [],
+    maxModelSteps: 16,
+    resultMode: "assistant_final" as const,
+  };
+  const createdAt = new Date("2026-01-01T00:00:00.000Z");
+  const physicalTask = {
+    id: "task_1",
+    displayId: "TASK-1",
+    userWorkosId: "user_1",
+    workspaceId: "workspace_1",
+    name: "Research x",
+    prompt: "Research x",
+    source: "manual" as const,
+    model: DEFAULT_GOAT_MODEL,
+    sessionId: "conversation_1",
+    scheduleId: null,
+    scheduledFor: null,
+    status: "queued" as const,
+    stage: "queued" as const,
+    result: null,
+    error: null,
+    workflowId: null,
+    workflowBrainRef: null,
+    reportedOutcome: null,
+    outcomeComment: null,
+    harnessSpec,
+    debugTrace: {},
+    codexEngineSessionId: null,
+    sandboxId: null,
+    attempts: 0,
+    nextRunAt: createdAt,
+    leaseId: null,
+    leaseOwner: null,
+    leaseExpiresAt: null,
+    archivedAt: null,
+    createdAt,
+    updatedAt: createdAt,
+  };
+  mockSelectRows([{ workspaceId: "workspace_1" }], [physicalTask]);
+  mocks.execute
+    .mockReset()
+    .mockResolvedValueOnce([{ authorized: true, featureEnabled: true, commandId: null }])
+    .mockImplementationOnce(async (query: SQL) => {
+      const requestHash = requestHashFromQuery(query);
+      return [
+        {
+          authorized: true,
+          featureEnabled: true,
+          commandId: "task_command_1",
+          requestHash,
+          taskId: "task_1",
+          reservedConversationId: "conversation_1",
+          messageId: "message_1",
+          assistantMessageId: "message_2",
+          runId: "run_1",
+          transactionId: "1",
+          replayed: false,
+          materialized: true,
+          id: "task_1",
+          displayId: "TASK-1",
+          name: "Research x",
+          goal: "Research x",
+          taskConversationId: "conversation_1",
+          status: "queued",
+          source: "manual",
+          engine: "opencompany",
+          model: DEFAULT_GOAT_MODEL,
+          workflowId: null,
+          scheduleId: null,
+          scheduledFor: null,
+          result: null,
+          error: null,
+          reportedStatus: null,
+          outcomeComment: null,
+          archivedAt: null,
+          createdAt,
+          updatedAt: createdAt,
+        },
+      ];
+    });
+}
+
+function mockCanonicalMessageCreation(messageId: string) {
+  mocks.execute
+    .mockReset()
+    .mockResolvedValueOnce([{ authorized: true, commandId: null }])
+    .mockImplementationOnce(async (query: SQL) => [
+      {
+        commandId: "command_1",
+        requestHash: requestHashFromQuery(query),
+        conversationId: "goat_chat_task_1",
+        messageId,
+        assistantMessageId: "goat_chat_assistant_1",
+        runId: "goat_run_1",
+        transactionId: "1",
+        replayed: false,
+        materialized: true,
+      },
+    ]);
+}
+
+function requestHashFromQuery(query: SQL) {
+  const requestHash = new PgDialect()
+    .sqlToQuery(query)
+    .params.find(
+      (value): value is string => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value),
+    );
+  if (!requestHash) throw new Error("Expected a canonical request hash.");
+  return requestHash;
+}
 
 function sqlTextFromExecuteCall(callIndex: number) {
   return renderedExecuteCall(callIndex).sql;

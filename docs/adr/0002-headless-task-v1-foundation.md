@@ -135,6 +135,20 @@ cutover or the canonical application service after it; no Task is written to two
 protocols. Deletion requires caller, queue, runner, release, and production evidence from the exact
 deployed SHA.
 
+PR 2 establishes that cutover boundary: manual, Workflow, schedule, and agent producers all invoke
+`TaskApplicationService`; Task follow-ups and cancellation invoke `ChatApplicationService`; and
+Workflow/scheduled internal handoffs append a canonical Run to the Task's original Conversation.
+The retained legacy constructor has no production caller. The shared worker emits
+`opencompany.legacy_task_run_claimed` and increments `goat.legacy_task_runs_total` only when it
+claims a Task Run without the canonical `run.queued` event. That signal is the bounded drain metric
+for PR 4, not a routing flag.
+
+Migration `0203_goat_task_schedule_workspace.sql` binds every new recurring schedule to the
+workspace in which it was created and revalidates that membership when it fires. Pre-cutover
+user-scoped schedules retain a nullable workspace only during the compatibility window; their
+deterministic fallback emits `opencompany.legacy_task_schedule_workspace_fallback` and must be
+resolved before PR 4 removes that branch.
+
 The frozen `/api/chat` and legacy Chat adapter are unaffected. Workflow invocation moves in this
 phase, but Workflow editor/catalog CRUD does not. Expo/mobile, macOS, broad web DB cleanup, runner
 renaming, and new infrastructure remain out of scope.

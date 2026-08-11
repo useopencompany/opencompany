@@ -1,4 +1,8 @@
-import type { GoatCodexChatSession, GoatCodexChatTurn } from "@opencompany/db/goat-schema";
+import type {
+  GoatCodexChatSession,
+  GoatCodexChatTurn,
+  GoatTask,
+} from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
 import {
@@ -18,6 +22,10 @@ import {
 } from "./goat-codex-chat-worker";
 
 const sessionRows = vi.hoisted(() => [] as GoatCodexChatSession[]);
+const claimedTaskContext = vi.hoisted(() => ({
+  task: null as GoatTask | null,
+  canonicalQueued: true,
+}));
 
 const dbMock = vi.hoisted(() => {
   const db = {
@@ -26,7 +34,13 @@ const dbMock = vi.hoisted(() => {
     from: vi.fn(() => db),
     leftJoin: vi.fn(() => db),
     where: vi.fn(() => db),
-    limit: vi.fn(async () => sessionRows.map((session) => ({ session, task: null }))),
+    limit: vi.fn(async () =>
+      sessionRows.map((session) => ({
+        session,
+        task: claimedTaskContext.task,
+        canonicalQueued: claimedTaskContext.canonicalQueued,
+      })),
+    ),
   };
   return db;
 });
@@ -36,7 +50,10 @@ const chatMocks = vi.hoisted(() => ({
   runGoatOpenCompanyChatTurn: vi.fn(),
 }));
 
-const telemetry = vi.hoisted(() => ({ recordGoatHistogram: vi.fn() }));
+const telemetry = vi.hoisted(() => ({
+  recordGoatCounter: vi.fn(),
+  recordGoatHistogram: vi.fn(),
+}));
 const sandboxMocks = vi.hoisted(() => ({
   armSandboxActiveTimeoutById: vi.fn(),
   armSandboxIdleTimeoutById: vi.fn(),
@@ -44,7 +61,11 @@ const sandboxMocks = vi.hoisted(() => ({
 
 vi.mock("@opencompany/goat-observability", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opencompany/goat-observability")>();
-  return { ...actual, recordGoatHistogram: telemetry.recordGoatHistogram };
+  return {
+    ...actual,
+    recordGoatCounter: telemetry.recordGoatCounter,
+    recordGoatHistogram: telemetry.recordGoatHistogram,
+  };
 });
 
 const eventMocks = vi.hoisted(() => ({
@@ -245,6 +266,8 @@ describe("Goat Codex chat worker shutdown", () => {
     });
     sessionRows.length = 0;
     sessionRows.push(session());
+    claimedTaskContext.task = null;
+    claimedTaskContext.canonicalQueued = true;
     let releaseSilentTurn: (() => void) | undefined;
     chatMocks.runGoatCodexChatTurn
       .mockImplementationOnce(
@@ -513,6 +536,32 @@ describe("runClaimedTurn", () => {
         "goat.attempt": 1,
       },
     );
+  });
+
+  it("records bounded compatibility usage only for pre-cutover Task Runs", async () => {
+    claimedTaskContext.task = {
+      id: "task_legacy_1",
+      source: "manual",
+      harnessSpec: {
+        schemaVersion: "goat.harness.v1",
+        engine: "codex",
+        model: "openai/gpt-5.5",
+        systemPrompt: "",
+        initialUserMessage: "Fix the bug.",
+        tools: [],
+        skills: [],
+        maxModelSteps: 16,
+        resultMode: "assistant_final",
+      },
+    } as unknown as GoatTask;
+    claimedTaskContext.canonicalQueued = false;
+
+    await runClaimedTurn(turn(), env());
+
+    expect(telemetry.recordGoatCounter).toHaveBeenCalledWith("goat.legacy_task_runs_total", 1, {
+      "goat.engine": "codex",
+      "goat.source": "manual",
+    });
   });
 
   it("does not count a scheduled delay as queue wait", async () => {

@@ -24,6 +24,7 @@
     "@opencompany/analytics": "workspace:*",
     "@opencompany/billing": "workspace:*",
     "@opencompany/browser-tools": "workspace:*",
+    "@opencompany/core": "workspace:*",
     "@opencompany/crypto": "workspace:*",
     "@opencompany/db": "workspace:*",
     "@opencompany/file-extract": "workspace:*",

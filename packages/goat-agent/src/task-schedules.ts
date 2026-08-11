@@ -45,6 +45,7 @@ export async function listGoatTaskSchedulesForUser(
 export async function createGoatTaskScheduleForUser(
   input: {
     userWorkosId: string;
+    workspaceId: string;
     name: string;
     sourceDescription?: string;
     cron: string;
@@ -78,9 +79,12 @@ export async function createGoatTaskScheduleForUser(
 
   const scheduleId = newGoatTaskScheduleId();
   const result = await getDb().execute(sql`
-    WITH enabled_user AS MATERIALIZED (
-      SELECT task_user.workos_user_id
+    WITH enabled_actor AS MATERIALIZED (
+      SELECT task_user.workos_user_id, member.workspace_id
       FROM goat.users AS task_user
+      JOIN goat.workspace_members AS member
+        ON member.user_workos_id = task_user.workos_user_id
+       AND member.workspace_id = ${input.workspaceId}
       WHERE task_user.workos_user_id = ${input.userWorkosId}
         AND task_user.task_spawning_enabled = true
       FOR UPDATE OF task_user
@@ -88,6 +92,7 @@ export async function createGoatTaskScheduleForUser(
     INSERT INTO goat.task_schedules (
       id,
       user_workos_id,
+      workspace_id,
       name,
       source_description,
       cron,
@@ -101,7 +106,8 @@ export async function createGoatTaskScheduleForUser(
     )
     SELECT
       ${scheduleId},
-      enabled_user.workos_user_id,
+      enabled_actor.workos_user_id,
+      enabled_actor.workspace_id,
       ${parsed.value.name},
       ${parsed.value.sourceDescription},
       ${parsed.value.cron},
@@ -112,7 +118,7 @@ export async function createGoatTaskScheduleForUser(
       ${nextRunAt},
       ${now},
       ${now}
-    FROM enabled_user
+    FROM enabled_actor
     RETURNING id
   `);
 
@@ -123,6 +129,7 @@ export async function createGoatTaskScheduleForUser(
   return {
     id: schedule.id,
     userWorkosId: input.userWorkosId,
+    workspaceId: input.workspaceId,
     name: parsed.value.name,
     sourceDescription: parsed.value.sourceDescription,
     cron: parsed.value.cron,

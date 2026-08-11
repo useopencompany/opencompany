@@ -51,11 +51,14 @@ export async function POST(request: Request) {
     );
   }
 
+  const idempotencyKey = request.headers.get("Idempotency-Key");
   const task = await createGoatTaskForUser({
     userWorkosId: context.user.workosUserId,
     workspaceId: context.workspace.id,
     prompt: parsed.value.prompt,
     model: parsed.value.model,
+    source: "manual",
+    ...(idempotencyKey ? { idempotencyKey } : {}),
     ...(engine ? { engine } : {}),
   });
 

@@ -57,6 +57,7 @@ describe("createGoatTaskScheduleForUser", () => {
   it("plans and stores a recurring task schedule", async () => {
     const schedule = await createGoatTaskScheduleForUser({
       userWorkosId: "user_1",
+      workspaceId: "workspace_1",
       name: "Daily briefing",
       sourceDescription: "daily at 9",
       cron: "0 9 * * *",
@@ -82,6 +83,7 @@ describe("createGoatTaskScheduleForUser", () => {
     await expect(
       createGoatTaskScheduleForUser({
         userWorkosId: "user_1",
+        workspaceId: "workspace_1",
         name: "Bad",
         cron: "0 0 9 * * *",
         timezone: "UTC",
@@ -104,6 +106,7 @@ describe("createGoatTaskScheduleForUser", () => {
     await expect(
       createGoatTaskScheduleForUser({
         userWorkosId: "user_1",
+        workspaceId: "workspace_1",
         name: "Daily briefing",
         cron: "0 9 * * *",
         timezone: "UTC",
@@ -121,6 +124,7 @@ describe("createGoatTaskScheduleForUser", () => {
     await expect(
       createGoatTaskScheduleForUser({
         userWorkosId: "user_1",
+        workspaceId: "workspace_1",
         name: "Daily briefing",
         cron: "0 9 * * *",
         timezone: "UTC",
@@ -131,6 +135,7 @@ describe("createGoatTaskScheduleForUser", () => {
     expect(mocks.execute).toHaveBeenCalledOnce();
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(sqlTextFromExecuteCall(0)).toContain("task_user.task_spawning_enabled = true");
+    expect(sqlTextFromExecuteCall(0)).toContain("member.workspace_id");
     expect(sqlTextFromExecuteCall(0)).toContain("FOR UPDATE OF task_user");
   });
 });

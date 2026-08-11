@@ -49,6 +49,25 @@ browser ---- direct /v1 + shared session ----> apps/api (Hono /v1) ----> Electri
   five-minute, 1,024-entry-per-Run presentation replay and is not required for canonical execution
   or reconnect correctness.
 
+### Canonical Task execution boundary
+
+New Tasks from manual, Workflow, schedule, and agent triggers use the same Task application service
+and enter the shared runner as canonical Runs with a sequence-1 `run.queued` Event. Task follow-ups
+and cancellation use the canonical Message/Run commands. Multi-step Workflows and scheduled
+wakeups keep the Task's original Conversation and runtime; retries create Attempts and never change
+Task or Conversation identity.
+
+The legacy Task-session constructor is retained only during issue #1190's rollback/drain window and
+has no production caller. A worker claim for a Task Run missing `run.queued` logs
+`opencompany.legacy_task_run_claimed` and increments `goat.legacy_task_runs_total`, labeled by
+engine and Task source. Before PR 4 deletion, verify that metric is zero for the issue's observation
+window on the exact deployed SHA. Do not manufacture evidence by mutating production rows.
+
+New recurring schedules persist their owning workspace and require the scheduling actor to remain a
+member when they fire. A pre-cutover schedule with no workspace uses a deterministic membership
+fallback and logs `opencompany.legacy_task_schedule_workspace_fallback`; inventory and resolve
+those rows before removing the fallback in PR 4.
+
 ## Local web slice
 
 After the normal `bun run setup`, start all four local pieces with the workspace's Infisical dev

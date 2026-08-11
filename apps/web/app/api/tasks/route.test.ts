@@ -63,7 +63,25 @@ describe("POST /api/tasks", () => {
       workspaceId: "workspace_1",
       prompt: "Research the market",
       model: "openai/gpt-5.5",
+      source: "manual",
     });
+  });
+
+  it("forwards the caller idempotency key to canonical Task creation", async () => {
+    await POST(
+      new Request("http://localhost/api/tasks", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "manual-task-1",
+        },
+        body: JSON.stringify({ description: "#task Research the market" }),
+      }),
+    );
+
+    expect(createGoatTaskForUser).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: "manual-task-1", source: "manual" }),
+    );
   });
 
   it("uses the normal default for an invalid model selection", async () => {

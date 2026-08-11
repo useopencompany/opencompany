@@ -25,7 +25,12 @@ export function createGoatTaskFromWorkflow(input: {
   attachmentTexts?: Record<string, string> | null;
 }): Promise<GoatTask> {
   return createSharedGoatTaskFromWorkflow(input, {
-    createTask: ({ actorId, ...task }) => createGoatTaskForUser({ ...task, userWorkosId: actorId }),
+    createTask: ({ actorId, ...task }) =>
+      createGoatTaskForUser({
+        ...task,
+        userWorkosId: actorId,
+        source: "workflow",
+      }),
     resolveWorkflow: resolveGoatWorkflowMention,
     preparation: {
       isCodexConnected: isGoatCodexConnectedForUser,
