@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { executeGoatActionGateway } from "@/lib/codex-actions";
+import { executeGoatActionHostGateway } from "@/lib/codex-actions";
 import { POST } from "./route";
 
 vi.mock("@/lib/codex-actions", () => ({
-  executeGoatActionGateway: vi.fn(),
+  executeGoatActionHostGateway: vi.fn(),
 }));
 
 vi.mock("next/server", () => ({
@@ -20,7 +20,7 @@ describe("POST /api/internal/action-gateway", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("RUNNER_INTERNAL_TOKEN", "shared-secret");
-    vi.mocked(executeGoatActionGateway).mockResolvedValue({
+    vi.mocked(executeGoatActionHostGateway).mockResolvedValue({
       ok: true,
       sources: [],
     });
@@ -30,7 +30,7 @@ describe("POST /api/internal/action-gateway", () => {
     const response = await POST(request({ operation: "list" }));
 
     expect(response.status).toBe(401);
-    expect(executeGoatActionGateway).not.toHaveBeenCalled();
+    expect(executeGoatActionHostGateway).not.toHaveBeenCalled();
   });
 
   it("accepts only bounded host identity fields", async () => {
@@ -51,7 +51,7 @@ describe("POST /api/internal/action-gateway", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(executeGoatActionGateway).toHaveBeenCalledWith({
+    expect(executeGoatActionHostGateway).toHaveBeenCalledWith({
       request: {
         operation: "execute",
         sessionId: "session_1",
@@ -60,6 +60,31 @@ describe("POST /api/internal/action-gateway", () => {
         params: { query: "from:ada" },
         invocationId: "call_1",
       },
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it.each([
+    "catalog",
+    "approval",
+  ] as const)("accepts the %s operation on the harness-neutral route", async (operation) => {
+    const response = await POST(
+      request(
+        operation === "catalog"
+          ? { operation }
+          : {
+              operation,
+              action: "linkedin.search",
+              params: { query: "founders" },
+              invocationId: "call_1",
+            },
+        "shared-secret",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(executeGoatActionHostGateway).toHaveBeenCalledWith({
+      request: expect.objectContaining({ operation }),
       signal: expect.any(AbortSignal),
     });
   });
@@ -84,7 +109,7 @@ describe("POST /api/internal/action-gateway", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(executeGoatActionGateway).toHaveBeenCalledWith({
+    expect(executeGoatActionHostGateway).toHaveBeenCalledWith({
       request: {
         operation: "execute",
         sessionId: "session_1",

@@ -9,6 +9,7 @@ export type GoatCodexBrainCaptureGatewayRequest = {
   sourceRef?: string;
   integrationId?: string;
   fallbackContent?: string;
+  attachmentIds?: string[];
 };
 
 export type GoatCodexBrainCaptureGatewayResponse =
@@ -16,9 +17,10 @@ export type GoatCodexBrainCaptureGatewayResponse =
       ok: true;
       status: "captured" | "already_captured" | "paused_by_plan";
       message?: string;
-      draftId: string;
-      path: string;
-      title: string;
+      draftId?: string;
+      path?: string;
+      title?: string;
+      assets?: Array<{ documentId: string; path: string; title: string }>;
     }
   | {
       ok: false;

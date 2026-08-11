@@ -9,6 +9,11 @@ surfaces:
 | Runner | Render | durable workers, internal transports, LLM broker |
 | Marketing | Vercel | public marketing site |
 
+The headless Chat Hono process in `apps/api` is not yet owned by this production workflow. Do not
+enable the canonical web cohort until an authorized infrastructure change adds that service and its
+health/release gates. See [Headless Chat operations](./headless-chat-operations.md) for the exact
+deployment order and configuration-only rollback.
+
 ## Release flow
 
 Merges to `main` trigger a release after CI succeeds. The workflow calculates affected surfaces,

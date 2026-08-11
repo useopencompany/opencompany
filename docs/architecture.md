@@ -1,18 +1,23 @@
 # Architecture
 
-OpenCompany has one product application. `web` is its Next.js client and composition root; `runner`
-is the current support service pending the headless split.
+OpenCompany has one product application. Ordinary Chat is the first headless vertical slice: `web`
+is its Next.js client, `api` is its public HTTP composition root, and `runner` owns durable
+execution. Unmigrated product domains continue to use the existing web/runner boundaries.
 
 ## Runtime boundaries
 
-- `apps/web` owns the Next.js UI, authenticated server actions, public integration callbacks and
-  webhooks, foreground AI SDK chat streams, and internal gateways called by the runner.
+- `apps/web` owns the Next.js UI, authenticated server actions for unmigrated domains, public
+  integration callbacks/webhooks, the same-origin `/v1` proxy, and authenticated host-tool
+  gateways called by the runner. Its ordinary-Chat compatibility route is rollback-only.
+- `apps/api` owns the versioned Hono `/v1` Chat API, WorkOS session/bearer authentication,
+  authorization, OpenAPI, semantic SSE, and authorized Electric read-model proxying.
 - `apps/runner` owns durable chat/task turns, cloud coding sandboxes, Brain ingestion and import,
   integration polling/flush, schedules, dictation transport, billing usage, and the LLM broker.
 - `apps/stripe-webhooks` is a local-only Stripe CLI process that forwards Goat billing events.
 - `apps/marketing` is released independently from the product.
 
 The detailed turn and message flow is maintained in [the OpenCompany system map](../apps/web/docs/README.md).
+Operational topology and rollout gates are in [Headless Chat operations](./headless-chat-operations.md).
 
 ## Data
 

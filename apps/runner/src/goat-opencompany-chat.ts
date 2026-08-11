@@ -22,6 +22,7 @@ import type { GoatResolvedActionCatalog } from "@opencompany/goat-agent/actions/
 import {
   createOpenCompanyChatToolContext,
   OPENCOMPANY_CHAT_MAX_STEPS,
+  OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX,
   prepareOpenCompanyChatStep,
   TASK_SYSTEM_BLOCK,
   TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
@@ -33,7 +34,11 @@ import type {
   WebFetchToolOutput,
   WebSearchToolOutput,
 } from "@opencompany/goat-agent/chat-ui";
-import { toGoatChatUiMessage } from "@opencompany/goat-agent/chat-ui";
+import {
+  replaceGoatChatUiMessageText,
+  textFromGoatChatUiMessage,
+  toGoatChatUiMessage,
+} from "@opencompany/goat-agent/chat-ui";
 import { executeGoatChatExaFetch } from "@opencompany/goat-agent/chat-web-fetch";
 import { executeGoatChatExaSearch } from "@opencompany/goat-agent/chat-web-search";
 import { resolveGoatImessageProvider } from "@opencompany/goat-agent/imessage/provider";
@@ -64,6 +69,8 @@ import {
   GoatCodexChatLeaseLostError,
   GoatTaskTurnTerminalError,
 } from "./goat-codex-chat-errors";
+import { createGoatOpenCompanyActionDispatcher } from "./goat-opencompany-action-gateway";
+import { createGoatOpenCompanyBrainCaptureRunner } from "./goat-opencompany-brain-capture";
 import {
   createGoatOpenCompanyChatProjector,
   GoatOpenCompanyChatInterruptedError,
@@ -71,6 +78,10 @@ import {
   type GoatOpenCompanyChatProjector,
   type GoatOpenCompanyChatUiPart,
 } from "./goat-opencompany-chat-projector";
+import {
+  attachGoatHostSkillsToPrompt,
+  loadGoatOpenCompanyHostTools,
+} from "./goat-opencompany-host-tools";
 import {
   buildGoatTaskTerminalProjection,
   buildGoatTaskTurnCompletion,
@@ -168,6 +179,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
     projector,
     ...(input.shouldAbort ? { shouldAbort: input.shouldAbort } : {}),
   });
+  let runtimeCleanup: (() => Promise<void>) | null = null;
 
   try {
     await abortWatcher.checkNow();
@@ -181,6 +193,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
       signal: generationController.signal,
       taskContext: input.taskContext,
     });
+    runtimeCleanup = runtime.cleanup;
     throwIfAborted(generationController.signal);
     const messages = await loadGoatOpenCompanyChatModelMessages({
       chatSessionId: session.chatSessionId,
@@ -188,6 +201,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
       modelId: runtime.model,
       blobToken: env.blobReadWriteToken,
       includeCurrentAssistantMessage: turn.settings.approvalContinuation === true,
+      activeSkills: runtime.activeSkills,
     });
     throwIfAborted(generationController.signal);
     const gateway = createGateway({ apiKey: env.vercelAiGatewayApiKey });
@@ -306,6 +320,13 @@ export async function runGoatOpenCompanyChatTurn(input: {
     return "settled";
   } finally {
     await abortWatcher.stop();
+    await runtimeCleanup?.().catch((error) => {
+      logger.warn("Durable OpenCompany Chat host cleanup failed", {
+        event: "opencompany.goat_opencompany_chat_host_cleanup_failed",
+        turn_id: turn.id,
+        error: errorMessage(error),
+      });
+    });
     await flushLatitude();
   }
 }
@@ -615,6 +636,12 @@ export async function goatOpenCompanyModelMessagesFromStored(
     modelId?: string | undefined;
     blobToken?: string | undefined;
     includeCurrentAssistantMessage?: boolean;
+    activeSkills?: Array<{
+      id: string;
+      name: string;
+      description: string;
+      instructions: string;
+    }>;
   },
 ) {
   const currentIndex = storedMessages.findIndex(
@@ -629,7 +656,15 @@ export async function goatOpenCompanyModelMessagesFromStored(
     currentIndex +
       (options?.includeCurrentAssistantMessage && nextMessage?.role === "assistant" ? 2 : 1),
   );
-  const uiMessages = replayMessages.map((message) => toGoatChatUiMessage(message));
+  const uiMessages = replayMessages.map((message) => {
+    const uiMessage = toGoatChatUiMessage(message);
+    return message.id === currentUserMessageId && options?.activeSkills?.length
+      ? replaceGoatChatUiMessageText(
+          uiMessage,
+          attachGoatHostSkillsToPrompt(textFromGoatChatUiMessage(uiMessage), options.activeSkills),
+        )
+      : uiMessage;
+  });
   return convertToModelMessages(
     await hydrateGoatOpenCompanyAttachmentParts({
       uiMessages,
@@ -646,6 +681,12 @@ async function loadGoatOpenCompanyChatModelMessages(input: {
   modelId: string;
   blobToken: string | undefined;
   includeCurrentAssistantMessage: boolean;
+  activeSkills?: Array<{
+    id: string;
+    name: string;
+    description: string;
+    instructions: string;
+  }>;
 }) {
   const rows = await getDb()
     .select({
@@ -674,6 +715,7 @@ async function loadGoatOpenCompanyChatModelMessages(input: {
     modelId: input.modelId,
     blobToken: input.blobToken,
     includeCurrentAssistantMessage: input.includeCurrentAssistantMessage,
+    ...(input.activeSkills ? { activeSkills: input.activeSkills } : {}),
   });
 }
 
@@ -857,8 +899,62 @@ async function resolveOpenCompanyChatRuntime(input: {
       permissionMode: action.permissionMode,
     })),
   };
+  const directActionDispatcher =
+    dispatcherCatalog.actions.length > 0
+      ? {
+          catalog: dispatcherCatalog,
+          execute: (call: {
+            action: string;
+            params: Record<string, unknown>;
+            toolCallId: string;
+          }) =>
+            executeGoatAction({
+              catalog: onCatalog,
+              actionId: call.action,
+              params: call.params,
+              userWorkosId: turn.userWorkosId,
+              workspaceId,
+              chatSessionId: session.chatSessionId,
+              toolCallId: call.toolCallId,
+              signal,
+              currentDate: new Date(),
+              userTimezone: "UTC",
+            }),
+        }
+      : null;
+  const actionDispatcher = taskContext
+    ? directActionDispatcher
+    : await createGoatOpenCompanyActionDispatcher({
+        sessionId: session.id,
+        turnId: turn.id,
+        env,
+        signal,
+        approvalContinuation: Boolean(turn.settings.approvalContinuation),
+      });
+  const hostTools = taskContext
+    ? null
+    : await loadGoatOpenCompanyHostTools({
+        sessionId: session.id,
+        turnId: turn.id,
+        env,
+        signal,
+        mentionedSkillIds: (turn.settings.mentions ?? []).map((mention) => mention.id),
+        approvalContinuation: Boolean(turn.settings.approvalContinuation),
+      });
+  if (!taskContext && (!actionDispatcher || !hostTools)) {
+    throw new Error("The durable Chat host gateways are not configured.");
+  }
 
   const currentDate = new Date();
+  const brainCapture =
+    brain && !taskContext
+      ? createGoatOpenCompanyBrainCaptureRunner({
+          sessionId: session.id,
+          turnId: turn.id,
+          env,
+          signal,
+        })
+      : null;
   const exaApiKey = env.exaApiKey?.trim();
   const imessageDelivery =
     resolveGoatImessageProvider() !== null
@@ -892,6 +988,16 @@ async function resolveOpenCompanyChatRuntime(input: {
             }),
         }
       : {}),
+    ...(brainCapture ? { saveToBrain: brainCapture } : {}),
+    ...(hostTools?.startTask ? { startTask: hostTools.startTask } : {}),
+    ...(hostTools?.scheduleTask ? { scheduleTask: hostTools.scheduleTask } : {}),
+    ...(hostTools?.editTaskSchedule ? { editTaskSchedule: hostTools.editTaskSchedule } : {}),
+    ...(hostTools?.deleteTaskSchedule ? { deleteTaskSchedule: hostTools.deleteTaskSchedule } : {}),
+    ...(hostTools?.runWiki ? { runWiki: hostTools.runWiki as never } : {}),
+    ...(hostTools?.browserTools ? { browserTools: hostTools.browserTools } : {}),
+    ...(hostTools?.browserProfiles ? { browserProfiles: hostTools.browserProfiles } : {}),
+    ...(hostTools?.skills ? { skills: hostTools.skills } : {}),
+    ...(hostTools?.workflows ? { workflows: hostTools.workflows } : {}),
     ...(exaApiKey
       ? {
           webSearch: async (toolInput): Promise<WebSearchToolOutput> => {
@@ -925,26 +1031,7 @@ async function resolveOpenCompanyChatRuntime(input: {
           },
         }
       : {}),
-    ...(dispatcherCatalog.actions.length > 0
-      ? {
-          actions: {
-            catalog: dispatcherCatalog,
-            execute: (call) =>
-              executeGoatAction({
-                catalog: onCatalog,
-                actionId: call.action,
-                params: call.params,
-                userWorkosId: turn.userWorkosId,
-                workspaceId,
-                chatSessionId: session.chatSessionId,
-                toolCallId: call.toolCallId,
-                signal,
-                currentDate,
-                userTimezone: "UTC",
-              }),
-          },
-        }
-      : {}),
+    ...(actionDispatcher ? { actions: actionDispatcher } : {}),
     ...(taskContext
       ? {
           limits: {
@@ -959,20 +1046,29 @@ async function resolveOpenCompanyChatRuntime(input: {
     currentDate,
     webFetchEnabled: Boolean(exaApiKey),
     webSearchEnabled: Boolean(exaApiKey),
-    taskToolsEnabled: false,
-    scheduleToolsEnabled: false,
-    brainCaptureEnabled: false,
+    browserToolsEnabled: Boolean(hostTools?.browserTools),
+    taskToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
+    scheduleToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
+    brainCaptureEnabled: Boolean(brainCapture),
     activeBrain: brain
       ? {
           name: brain.name,
-          workspaceName: brain.name,
-          readOnly: true,
+          workspaceName: hostTools?.bootstrap.workspaceName ?? brain.name,
+          readOnly: !brainCapture,
         }
       : null,
-    ...(dispatcherCatalog.sources.length > 0
+    ...(hostTools
       ? {
-          actionSources: dispatcherCatalog.sources,
-          connectedIntegrations: dispatcherCatalog.sources,
+          userContext: hostTools.bootstrap.userContext,
+          recurringSchedules: hostTools.bootstrap.recurringSchedules,
+          skillsAvailable: hostTools.bootstrap.skills.length > 0,
+          workflows: hostTools.bootstrap.workflows,
+        }
+      : {}),
+    ...(actionDispatcher?.catalog.sources.length
+      ? {
+          actionSources: actionDispatcher.catalog.sources,
+          connectedIntegrations: actionDispatcher.catalog.sources,
         }
       : {}),
   });
@@ -990,11 +1086,15 @@ async function resolveOpenCompanyChatRuntime(input: {
   return {
     model,
     brain,
+    activeSkills: hostTools?.activeSkills ?? [],
     toolContext,
     system: [baseSystem, ...taskSystemBlocks].join("\n\n"),
     maxSteps: taskContext
       ? Math.max(1, taskContext.harnessSpec.maxModelSteps || OPENCOMPANY_CHAT_MAX_STEPS)
-      : OPENCOMPANY_CHAT_MAX_STEPS,
+      : hostTools?.browserTools
+        ? OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX
+        : OPENCOMPANY_CHAT_MAX_STEPS,
+    cleanup: hostTools?.close ?? (async () => undefined),
   };
 }
 

@@ -54,6 +54,82 @@ describe("canonical Chat transport", () => {
   beforeEach(() => vi.stubGlobal("sessionStorage", new MemoryStorage()));
   afterEach(() => vi.unstubAllGlobals());
 
+  it("resolves Auto on the authenticated web host before creating the canonical Run", async () => {
+    const requests: Array<{ path: string; body?: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : undefined;
+      requests.push({ path: url.pathname, ...(body ? { body } : {}) });
+      if (url.pathname === "/api/chat/model-route") {
+        return Response.json({ model: "moonshotai/kimi-k2.6", tier: "fast" });
+      }
+      if (url.pathname === "/v1/messages") {
+        return Response.json(
+          {
+            data: {
+              conversationId: "conversation_auto",
+              messageId: "message_auto",
+              assistantMessageId: "assistant_auto",
+              runId: "run_auto",
+              transactionId: "43",
+              replayed: false,
+            },
+            meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+          },
+          { status: 202 },
+        );
+      }
+      if (url.pathname.endsWith("/events")) {
+        return sse([
+          {
+            ...event(1, "run.completed", { messageId: "assistant_auto" }),
+            runId: "run_auto",
+          },
+        ]);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const transport = new HeadlessChatTransport<UIMessage>({
+      baseUrl: "https://app.example.test",
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await collect(
+      await transport.sendMessages({
+        trigger: "submit-message",
+        chatId: "conversation_auto",
+        messageId: undefined,
+        messages: [
+          {
+            id: "message_auto",
+            role: "user",
+            parts: [{ type: "text", text: "Route this" }],
+            metadata: { attachments: [{ id: "attachment_auto" }] },
+          },
+        ],
+        body: { newSessionId: "conversation_auto", model: "auto" },
+        abortSignal: undefined,
+      }),
+    );
+
+    expect(requests.slice(0, 2)).toEqual([
+      {
+        path: "/api/chat/model-route",
+        body: {
+          clientMessageId: "message_auto",
+          prompt: "Route this",
+          attachmentIds: ["attachment_auto"],
+        },
+      },
+      {
+        path: "/v1/messages",
+        body: expect.objectContaining({ model: "moonshotai/kimi-k2.6" }),
+      },
+    ]);
+  });
+
   it("creates a durable Run and translates validated semantic events into AI SDK chunks", async () => {
     let createBody: Record<string, unknown> | null = null;
     let idempotencyKey = "";

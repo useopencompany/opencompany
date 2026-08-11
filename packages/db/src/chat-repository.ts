@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runtime";
 import {
   type Actor,
   type ChatAttachmentFormat,
@@ -772,14 +773,16 @@ export class PostgresChatRepository implements ChatRepository {
       upserted_runtime AS MATERIALIZED (
         INSERT INTO goat.codex_chat_sessions (
           id, user_workos_id, chat_session_id, engine, model, workspace_id,
-          active_turn_id, status, created_at, updated_at
+          host_tool_contract_version, active_turn_id, status, created_at, updated_at
         )
         SELECT
           ${runtimeId}, ${input.actor.userId}, target_chat.id, ${input.command.engine},
-          target_chat.model, ${input.actor.workspaceId}, ${runId}, 'queued', ${now}, ${now}
+          target_chat.model, ${input.actor.workspaceId}, ${GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION},
+          ${runId}, 'queued', ${now}, ${now}
         FROM target_chat
         ON CONFLICT (chat_session_id) DO UPDATE
         SET workspace_id = COALESCE(goat.codex_chat_sessions.workspace_id, EXCLUDED.workspace_id),
+            host_tool_contract_version = EXCLUDED.host_tool_contract_version,
             status = CASE
               WHEN goat.codex_chat_sessions.status IN ('queued', 'starting', 'running')
                 THEN goat.codex_chat_sessions.status

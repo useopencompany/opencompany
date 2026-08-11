@@ -7,6 +7,7 @@ import {
   streamRunEvents,
 } from "@opencompany/protocol";
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
+import { AUTO_GOAT_MODEL_SELECTION } from "./chat-auto-model";
 import { awaitHeadlessChatTransaction } from "./headless-chat-collections";
 
 const STORAGE_PREFIX = "opencompany:headless-chat:v1:";
@@ -64,6 +65,16 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
 
     const request = requestContext(input.body);
     const metadata = messageMetadata(latest);
+    const attachmentIds = metadata.attachments?.map((attachment) => attachment.id) ?? [];
+    const model = await resolveHeadlessModel({
+      baseUrl: this.baseUrl(),
+      fetch: this.fetchImpl,
+      clientMessageId: latest.id,
+      ...(request.model ? { model: request.model } : {}),
+      prompt: textFromMessage(latest),
+      attachmentIds,
+      ...(input.abortSignal ? { signal: input.abortSignal } : {}),
+    });
     const body: CreateMessageBody = {
       ...(request.sessionId ? { conversationId: request.sessionId } : {}),
       ...(!request.sessionId && request.newSessionId
@@ -72,10 +83,8 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
       clientMessageId: latest.id,
       content: textFromMessage(latest),
       engine: "opencompany",
-      ...(request.model ? { model: request.model } : {}),
-      ...(metadata.attachments?.length
-        ? { attachmentIds: metadata.attachments.map((attachment) => attachment.id) }
-        : {}),
+      ...(model ? { model } : {}),
+      ...(attachmentIds.length ? { attachmentIds } : {}),
       ...(metadata.mentions?.length
         ? {
             mentions: metadata.mentions
@@ -98,7 +107,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
       runId: envelope.data.runId,
       conversationId: envelope.data.conversationId,
       assistantMessageId: envelope.data.assistantMessageId,
-      model: request.model ?? "",
+      model: model ?? "",
       status: "queued",
     };
     writeRunStateAliases(input.chatId, state);
@@ -332,6 +341,15 @@ export async function startHeadlessBackgroundChat(
 ) {
   const baseUrl = options.baseUrl ?? (typeof window === "undefined" ? "" : window.location.origin);
   if (!baseUrl) throw new Error("The canonical Chat API base URL is unavailable.");
+  const fetchImpl = options.fetch ?? globalThis.fetch;
+  const model = await resolveHeadlessModel({
+    baseUrl,
+    fetch: fetchImpl,
+    clientMessageId: input.clientMessageId,
+    model: input.model,
+    prompt: input.content,
+    attachmentIds: input.attachmentIds ?? [],
+  });
   const client = createOpenCompanyClient(baseUrl, {
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
@@ -342,7 +360,7 @@ export async function startHeadlessBackgroundChat(
       clientMessageId: input.clientMessageId,
       content: input.content,
       engine: "opencompany",
-      model: input.model,
+      model,
       ...(input.attachmentIds?.length ? { attachmentIds: input.attachmentIds } : {}),
       ...(input.mentions?.length ? { mentions: input.mentions } : {}),
     },
@@ -364,6 +382,34 @@ export async function startHeadlessBackgroundChat(
     void event;
   }
   return data;
+}
+
+async function resolveHeadlessModel(input: {
+  baseUrl: string;
+  fetch: typeof globalThis.fetch;
+  clientMessageId: string;
+  model?: string;
+  prompt: string;
+  attachmentIds: string[];
+  signal?: AbortSignal;
+}) {
+  if (input.model !== AUTO_GOAT_MODEL_SELECTION) return input.model;
+  const response = await input.fetch(new URL("/api/chat/model-route", input.baseUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      clientMessageId: input.clientMessageId,
+      prompt: input.prompt,
+      attachmentIds: input.attachmentIds,
+    }),
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  if (!response.ok) throw await responseError(response);
+  const value = (await response.json()) as { model?: unknown };
+  if (typeof value.model !== "string" || !value.model.trim()) {
+    throw new Error("Auto model routing returned an invalid model.");
+  }
+  return value.model;
 }
 
 function requestContext(body: object | undefined) {
@@ -430,10 +476,18 @@ function idempotencyKey(messageId: string) {
 
 async function responseError(response: Response) {
   const body = (await response.json().catch(() => null)) as {
-    error?: { message?: unknown; requestId?: unknown };
+    error?: string | { message?: unknown; requestId?: unknown };
   } | null;
-  const message = typeof body?.error?.message === "string" ? body.error.message : null;
-  const requestId = typeof body?.error?.requestId === "string" ? body.error.requestId : null;
+  const message =
+    typeof body?.error === "string"
+      ? body.error
+      : typeof body?.error?.message === "string"
+        ? body.error.message
+        : null;
+  const requestId =
+    typeof body?.error === "object" && typeof body.error.requestId === "string"
+      ? body.error.requestId
+      : null;
   return new Error(
     `${message ?? `The Chat API request failed with HTTP ${response.status}.`}${
       requestId ? ` (request ${requestId})` : ""

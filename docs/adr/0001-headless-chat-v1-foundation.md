@@ -102,6 +102,10 @@ opaque user ID, server-resolved workspace ID, role, permissions, authentication 
 optional session ID. A workspace ID from a request body or query is never trusted. Authorization is
 checked before invoking the application service and again in repository predicates.
 
+The web presentation is the rollout target for this phase. Bearer/PKCE remains a supported protocol
+and authentication seam for the later native project; no Expo or macOS-native client work is a
+phase gate after the issue owner's 2026-08-11 scope decision.
+
 During this slice, the identity adapter may set `Actor.userId` to the current WorkOS-backed user key
 because existing foreign keys use it. Core and protocol code do not know that mapping. A later
 additive identity migration will introduce internal user IDs, backfill provider identities, switch
@@ -182,8 +186,9 @@ PR 1 does not change behavior or routing for existing clients:
 PR 2 adds the independently deployable API and runner path without switching clients. A thin legacy
 adapter may then translate the existing request to the canonical command/event service, but it may
 not contain a second model loop. PR 3 cuts web writes and live output to `/v1`, then restricts
-Electric to API-owned, actor-scoped, versioned Chat read models. PR 4 adds mobile and either moves
-macOS to `/v1` or proves the thin adapter.
+Electric to API-owned, actor-scoped, versioned Chat read models. By owner direction, PR 4 completes
+web runner parity, operability, observability, and rollout evidence. Expo/mobile and macOS-native
+implementation/tests move to a separate project; the existing macOS route remains unchanged.
 
 The implementation audit before PR 3 found several foreground-only tools (task and schedule
 creation, Brain capture, skill activation, managed capabilities, browser, and wiki) that must be
@@ -192,10 +197,10 @@ real but explicit cohort path rather than silently reducing capabilities:
 
 - `NEXT_PUBLIC_GOAT_HEADLESS_CHAT=true` selects canonical ordinary-Chat create, upload, cancel,
   approval, archive, restore, pin, seen-state, SSE, and Conversation/Message/Run read-model traffic.
-  It is false by default until the PR 4 parity gate. Auto model selection stays on the compatibility
-  adapter until routing moves behind the canonical command service. Coding-chat metadata writes
-  remain on their existing engine-specific path and are not part of the migrated ordinary-Chat
-  resource.
+  It remains false by default until both the PR 4 parity gate and the separately authorized API
+  service rollout gate pass. PR 4 moves Auto model selection behind an authenticated web preflight
+  that resolves one concrete model before the canonical command. Coding-chat metadata writes remain
+  on their existing engine-specific path and are not part of the migrated ordinary-Chat resource.
 - The browser calls same-origin `/v1`; the Next proxy uses server-only `GOAT_API_ORIGIN`, forwards
   the existing session cookie, and rejects missing, invalid, credential-bearing, or same-origin
   targets. Browser code never receives the API origin or Electric credentials.
@@ -205,14 +210,25 @@ real but explicit cohort path rather than silently reducing capabilities:
   is isolated in `lib/legacy-chat-route.ts` solely for a flag rollback and continues to serve
   unflagged deployments. It is not called by the canonical path and must not gain new behavior.
 
-Moving the default-on cohort gate from PR 3 to PR 4 is an evidence-driven boundary adjustment, not
-a new product scope: it keeps PR 3 independently deployable while the runner parity work remains in
-the rollout PR. Production configuration is not changed by these code PRs.
+PR 4 composes web-owned interactive action governance, managed approvals, default-Brain capture
+(including chat attachments), task/schedule/workflow/skill/wiki behavior, public browser tools, and
+reattachable authenticated browser-profile sessions into durable runner execution through bounded,
+internal bearer-protected host gateways. Those gateways re-derive identity, membership, engine,
+host-contract version, and running-turn state from Postgres. They are compatibility adapters for
+web-owned product capabilities, not a second Chat execution loop.
 
-The compatibility adapter can be removed only after web, mobile, and macOS canonical-path checks
-pass in CI and the agreed production soak has no unexplained command, Run settlement, reconnect, or
-tenant-isolation regressions. That removal is a separate reversible change. It requires
-`@louismorgner` review if it changes native or mobile interaction behavior.
+Moving the default-on cohort gate out of PR 3 was an evidence-driven boundary adjustment. The PR 4
+audit then found a separate operational gate: production has no deployed `apps/api` service,
+`GOAT_API_ORIGIN`, or Chat cohort setting in the existing release topology. The issue explicitly
+forbids changing production infrastructure or secrets without authorization. Source therefore
+continues to require `NEXT_PUBLIC_GOAT_HEADLESS_CHAT=true`; enabling after the API service is
+authorized is a configuration-only rollout, and removal/false is the immediate rollback. The
+operational steps are recorded in `docs/headless-chat-operations.md`.
+
+The compatibility adapter cannot be removed in this web-only phase because surviving native clients
+remain a later project. Removal requires that later project's migration/compatibility decision plus
+an agreed web production soak with no unexplained command, Run settlement, reconnect, recovery, or
+tenant-isolation regressions. Any native UX change still requires `@louismorgner` review.
 
 Foreground requests already executing on the legacy path are allowed to finish there. We do not
 manufacture canonical Event history for work that began outside the durable queue. Client cutover
@@ -241,9 +257,9 @@ The pre-change audit established these preservation gates:
 - `apps/runner/src/goat-codex-chat-worker.test.ts` and related runner tests: claim fencing,
   heartbeat/retry, attachment and billing behavior, partial results, wakeups, and abandoned-work
   recovery.
-- `apps/goat-macos/GoatQuickTests`: PKCE/state, callback parsing, bearer request shape, secure-token
-  flow, one 401 retry, and stable identifiers. These tests require Xcode and cannot run in the Linux
-  sandbox; CI or a macOS reviewer must run them before native cutover.
+- Native test suites are deliberately not a gate for this owner-scoped web phase. The macOS project
+  remains untouched on its existing compatibility path; its migration and native evidence belong to
+  the later native project.
 - `packages/core`, `packages/protocol`, and `packages/db` tests: provider-independent Actor and
   application rules, strict/versioned DTOs and Events, generated OpenAPI currency, additive
   migration preservation, tenant isolation, atomic idempotency, explicit Attempts, lease fencing,
@@ -262,8 +278,10 @@ safe; aggregating Events across Runs would need a different cursor and is not pr
 
 The four independently deployable PRs from issue #1165 remain intact. PR 1 contained a real atomic
 repository and worker execution port rather than empty package scaffolding. The verified
-foreground-only capability gap moved only the default-on cohort gate—not the web implementation—
-from PR 3 to PR 4. This ADR and the issue record that evidence before rollout begins.
+foreground-only capability gap moved runner parity into PR 4 without changing the web protocol.
+Owner direction then narrowed PR 4 client evidence to web and deferred native work. The production
+API service remains an explicitly authorized operational gate, so mergeable code does not silently
+enable a nonexistent topology.
 
 ## Alternatives rejected
 
@@ -279,5 +297,5 @@ from PR 3 to PR 4. This ADR and the issue record that evidence before rollout be
   in Postgres.
 - Client-selected workspace IDs create a confused-deputy tenancy boundary.
 - Provider blob URLs and paths are not a stable or safe attachment protocol.
-- Cutting web and native clients over in this PR would couple contract, execution, read projection,
-  and UX rollback into one unsafe release.
+- Coupling web and native cutover would combine independent execution, deployment, and UX rollback
+  risks; native proof now belongs to its own owner-reviewed project.

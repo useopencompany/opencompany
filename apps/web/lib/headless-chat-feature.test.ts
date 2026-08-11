@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { hasChatAttachmentTransportMismatch } from "./headless-chat-feature";
+import { hasChatAttachmentTransportMismatch, isHeadlessChatEnabled } from "./headless-chat-feature";
 
 describe("headless Chat rollout boundary", () => {
+  it("requires the authorized service rollout before selecting canonical Chat", () => {
+    expect(isHeadlessChatEnabled(undefined)).toBe(false);
+    expect(isHeadlessChatEnabled("true")).toBe(true);
+    expect(isHeadlessChatEnabled("false")).toBe(false);
+  });
+
   it("requires re-upload when attachments cross the canonical/legacy transport switch", () => {
     const canonical = [{ id: "attachment_1" }];
     const legacy = [

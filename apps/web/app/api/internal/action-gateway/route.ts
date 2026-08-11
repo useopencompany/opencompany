@@ -1,10 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type {
-  GoatActionGatewayRequest,
   GoatActionGatewayResponse,
+  GoatActionHostGatewayRequest,
 } from "@opencompany/agent-runtime";
 import { NextResponse } from "next/server";
-import { executeGoatActionGateway } from "@/lib/codex-actions";
+import { executeGoatActionHostGateway } from "@/lib/codex-actions";
 
 export const runtime = "nodejs";
 export const maxDuration = 150;
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   const parsed = await parseRequest(request);
   if (!parsed.ok) return jsonError(400, "invalid_params", parsed.error);
 
-  const response = await executeGoatActionGateway({
+  const response = await executeGoatActionHostGateway({
     request: parsed.value,
     signal: request.signal,
   });
@@ -37,7 +37,7 @@ function validBearerToken(authorization: string | null, expectedToken: string) {
 
 async function parseRequest(
   request: Request,
-): Promise<{ ok: true; value: GoatActionGatewayRequest } | { ok: false; error: string }> {
+): Promise<{ ok: true; value: GoatActionHostGatewayRequest } | { ok: false; error: string }> {
   let value: unknown;
   try {
     value = await request.json();
@@ -50,6 +50,10 @@ async function parseRequest(
   const turnId = requiredString(value.turnId);
   if (!sessionId || !turnId) {
     return { ok: false, error: "sessionId and turnId are required." };
+  }
+
+  if (value.operation === "catalog") {
+    return { ok: true, value: { operation: "catalog", sessionId, turnId } };
   }
 
   if (value.operation === "list") {
@@ -68,7 +72,7 @@ async function parseRequest(
     };
   }
 
-  if (value.operation === "execute") {
+  if (value.operation === "approval" || value.operation === "execute") {
     const action = requiredString(value.action);
     const invocationId = requiredString(value.invocationId);
     if (!action || !invocationId || !isRecord(value.params)) {
@@ -80,7 +84,7 @@ async function parseRequest(
     return {
       ok: true,
       value: {
-        operation: "execute",
+        operation: value.operation,
         sessionId,
         turnId,
         action,
@@ -90,7 +94,10 @@ async function parseRequest(
     };
   }
 
-  return { ok: false, error: 'operation must be "list" or "execute".' };
+  return {
+    ok: false,
+    error: 'operation must be "catalog", "list", "approval", or "execute".',
+  };
 }
 
 function jsonError(status: number, code: string, message: string) {

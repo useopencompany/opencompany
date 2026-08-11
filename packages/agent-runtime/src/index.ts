@@ -7,6 +7,7 @@ export * from "./codex-ui-message-parts";
 export * from "./exa-search";
 export * from "./github-cli";
 export * from "./goat-actions";
+export * from "./goat-chat-host-tools";
 export * from "./goat-claude-action-gateway-auth";
 export * from "./goat-codex-brain-capture";
 export * from "./models";

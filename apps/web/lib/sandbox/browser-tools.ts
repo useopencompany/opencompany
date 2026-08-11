@@ -73,6 +73,7 @@ export function createChatBrowserToolSession(input: {
   signal: AbortSignal;
   createBrowserProfileAgentSession?: (profileId: string) => Promise<BrowserProfileAgentSession>;
   endBrowserProfileAgentSession?: (session: BrowserProfileAgentSession) => Promise<void>;
+  activeBrowserProfileAgentSession?: BrowserProfileAgentSession | null;
 }): ChatBrowserToolSession {
   const browserSessionId = goatChatSandboxName(input.chatSessionId);
   const budget = createBrowserObservationBudget();
@@ -81,7 +82,8 @@ export function createChatBrowserToolSession(input: {
   let startedAt: Date | null = null;
   let commandCount = 0;
   let queue = Promise.resolve();
-  let activeProfileSession: BrowserProfileAgentSession | null = null;
+  let activeProfileSession: BrowserProfileAgentSession | null =
+    input.activeBrowserProfileAgentSession ?? null;
   let activeProfileEndPromise: Promise<void> | null = null;
   let lastKnownUrl = "";
 

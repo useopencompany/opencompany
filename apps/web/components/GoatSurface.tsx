@@ -602,9 +602,7 @@ export function GoatSurface({
       activeSelectedMentions.find((mention) => mention.kind === "engine"),
     ) ?? baseChatModel;
   const isAutoChatModel = chatModel === AUTO_GOAT_MODEL_SELECTION;
-  // Auto-routing still belongs to the compatibility route. Keep it on the rollback adapter until
-  // the canonical application service owns that model-selection decision.
-  const headlessChatActive = HEADLESS_CHAT_ENABLED && !isAutoChatModel;
+  const headlessChatActive = HEADLESS_CHAT_ENABLED;
   const activeTaskId = activeTaskConversation?.taskId ?? null;
   const activeTaskStatus = activeTaskConversation?.status ?? null;
   const isTaskConversationStopping = Boolean(
@@ -3379,8 +3377,7 @@ function QuickChatComposer({
     ? (parsedBackgroundChatDirective.engine ?? selectedEngine)
     : selectedEngine;
   const isEngineChat = composerEngine !== null;
-  const headlessQuickChatActive =
-    HEADLESS_CHAT_ENABLED && chatModel !== AUTO_GOAT_MODEL_SELECTION && !isEngineChat;
+  const headlessQuickChatActive = HEADLESS_CHAT_ENABLED && !isEngineChat;
   const adHocTaskMentionEnabled = taskSpawningEnabled && !selectedEngine;
   const backgroundAdHocTaskSelected = Boolean(
     parsedBackgroundChatDirective &&
@@ -6813,7 +6810,7 @@ async function runBackgroundChatTurn(input: {
   metadata?: GoatChatMessageMetadata;
 }) {
   const clientMessageId = newBackgroundChatMessageId();
-  if (HEADLESS_CHAT_ENABLED && input.model !== AUTO_GOAT_MODEL_SELECTION) {
+  if (HEADLESS_CHAT_ENABLED) {
     await startHeadlessBackgroundChat({
       content: input.prompt,
       clientConversationId: input.newSessionId,
