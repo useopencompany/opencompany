@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-08-11
+
+### Changed
+- Chat runs on a rebuilt real-time backend: replies stream in faster and pick up right where they left off if your connection drops or you reload the page mid-response (#1167, #1168, #1169, #1170, #1172, #1173, #1175, #1176, #1177, #1178, #1179, #1180, #1181, #1182) — @louis and @opencompany-bot.
+
+### Fixed
+- Tool call results now stay in the right order instead of jumping around while a reply is still streaming in (#1183) — @louis.
+
 ## [1.11.0] - 2026-08-10
 
 ### Added
