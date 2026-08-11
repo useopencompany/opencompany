@@ -398,6 +398,22 @@ describe("Postgres Chat repositories", () => {
     await expect(
       service.updateConversation(actor(), created.conversationId, { archived: true }),
     ).resolves.toMatchObject({ conversationId: created.conversationId });
+    await expect(service.getConversation(actor(), created.conversationId)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(
+      service.getConversation(actor(), created.conversationId, { includeArchived: true }),
+    ).resolves.toMatchObject({ id: created.conversationId });
+    await expect(
+      service.getConversation(
+        actor({ userId: "user_2", workspaceId: "workspace_2" }),
+        created.conversationId,
+        { includeArchived: true },
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.updateConversation(actor(), created.conversationId, { markSeen: true }),
+    ).resolves.toMatchObject({ conversationId: created.conversationId });
     expect(
       (
         await database.query<{

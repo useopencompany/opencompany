@@ -109,6 +109,32 @@ describe("ChatApplicationService", () => {
     });
   });
 
+  it("opts into archived Conversation access only for internal read-model authorization", async () => {
+    const repository = fakeRepository();
+    repository.getConversation.mockResolvedValue({
+      id: "conversation_1",
+      title: "Archived Chat",
+      engine: "opencompany",
+      model: "openai/gpt-5.5",
+      createdAt: new Date("2026-08-11T15:00:00.000Z"),
+      updatedAt: new Date("2026-08-11T15:10:00.000Z"),
+    });
+    const service = new ChatApplicationService(repository);
+
+    await service.getConversation(actor(), " conversation_1 ");
+    await service.getConversation(actor(), " conversation_1 ", { includeArchived: true });
+
+    expect(repository.getConversation).toHaveBeenNthCalledWith(1, {
+      actor: actor(),
+      conversationId: "conversation_1",
+    });
+    expect(repository.getConversation).toHaveBeenNthCalledWith(2, {
+      actor: actor(),
+      conversationId: "conversation_1",
+      includeArchived: true,
+    });
+  });
+
   it("normalizes opaque attachment references without accepting provider locators", async () => {
     const repository = fakeRepository();
     const service = new ChatApplicationService(repository);
@@ -259,6 +285,7 @@ function command(overrides: Partial<CreateMessageCommand> = {}): CreateMessageCo
 
 function fakeRepository(): ChatRepository & {
   createMessageAndRun: ReturnType<typeof vi.fn>;
+  getConversation: ReturnType<typeof vi.fn>;
   listConversations: ReturnType<typeof vi.fn>;
   listRunEvents: ReturnType<typeof vi.fn>;
 } {

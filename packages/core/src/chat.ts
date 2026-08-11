@@ -263,7 +263,11 @@ export interface ChatRepository {
     cursor?: string;
     limit: number;
   }): Promise<ConversationPage>;
-  getConversation(input: { actor: Actor; conversationId: string }): Promise<Conversation | null>;
+  getConversation(input: {
+    actor: Actor;
+    conversationId: string;
+    includeArchived?: boolean;
+  }): Promise<Conversation | null>;
   listMessages(input: {
     actor: Actor;
     conversationId: string;
@@ -324,11 +328,16 @@ export class ChatApplicationService {
     });
   }
 
-  async getConversation(actor: Actor, conversationId: string): Promise<Conversation> {
+  async getConversation(
+    actor: Actor,
+    conversationId: string,
+    options: { includeArchived?: boolean } = {},
+  ): Promise<Conversation> {
     requirePermission(actor, CHAT_READ_PERMISSION);
     const result = await this.repository.getConversation({
       actor,
       conversationId: resourceId(conversationId, "conversationId"),
+      ...(options.includeArchived ? { includeArchived: true } : {}),
     });
     if (!result) throw new CoreError("not_found", "Conversation not found.");
     return result;

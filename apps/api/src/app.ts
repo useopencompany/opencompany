@@ -344,7 +344,7 @@ export function createApiApp(input: CreateApiAppInput) {
             "conversationId is required for this read model.",
           );
         }
-        await input.chat.getConversation(actor, query.conversationId);
+        await input.chat.getConversation(actor, query.conversationId, { includeArchived: true });
       } else if (query.conversationId) {
         throw new ApiError(
           400,
