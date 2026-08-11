@@ -158,7 +158,6 @@
       "dependencies": {
         "@expo/ui": "~57.0.9",
         "@legendapp/list": "3.3.3",
-        "@opencompany/native-chat-composer": "workspace:*",
         "expo": "~57.0.11",
         "expo-auth-session": "~57.0.6",
         "expo-build-properties": "~57.0.9",
@@ -492,23 +491,6 @@
         "@types/node": "^25.9.1",
         "typescript": "^6.0.3",
         "vitest": "^4.1.7",
-      },
-    },
-    "packages/native-chat-composer": {
-      "name": "@opencompany/native-chat-composer",
-      "version": "0.1.0",
-      "devDependencies": {
-        "@babel/core": "^7.26.0",
-        "@types/react": "~19.2.2",
-        "babel-preset-expo": "~57.0.6",
-        "expo": "~57.0.11",
-        "react-native": "0.86.2",
-        "typescript": "~6.0.3",
-      },
-      "peerDependencies": {
-        "expo": "*",
-        "react": "*",
-        "react-native": "*",
       },
     },
     "packages/observability": {
@@ -1396,8 +1378,6 @@
     "@opencompany/marketing": ["@opencompany/marketing@workspace:apps/marketing"],
 
     "@opencompany/mobile": ["@opencompany/mobile@workspace:apps/mobile"],
-
-    "@opencompany/native-chat-composer": ["@opencompany/native-chat-composer@workspace:packages/native-chat-composer"],
 
     "@opencompany/observability": ["@opencompany/observability@workspace:packages/observability"],
 
