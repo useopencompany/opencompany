@@ -28,7 +28,7 @@ import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { requestId } from "hono/request-id";
 import { secureHeaders } from "hono/secure-headers";
-import { streamSSE } from "hono/streaming";
+import { stream as streamResponse } from "hono/streaming";
 import type { AttachmentUploadService } from "./attachments";
 import type { ApiAuthenticator } from "./auth";
 import type { ChatReadModelService } from "./electric-read-models";
@@ -208,7 +208,9 @@ export function createApiApp(input: CreateApiAppInput) {
       // intentionally empty, so the shared client needs the authenticated status snapshot to
       // distinguish terminal exhaustion from an early network disconnect.
       c.header("X-OpenCompany-Run-Status", initialRun.status);
-      return streamSSE(c, async (stream) => {
+      c.header("Content-Type", "text/event-stream; charset=utf-8");
+      c.header("Cache-Control", "private, no-store, no-transform");
+      return streamResponse(c, async (stream) => {
         let lastHeartbeatAt = now().getTime();
         let nextDurablePollAt = 0;
         let durableWake = true;
@@ -224,7 +226,7 @@ export function createApiApp(input: CreateApiAppInput) {
               });
               for (const event of page.events) {
                 const dto = runEventDto(event);
-                await stream.writeSSE({
+                await writeSse(stream, {
                   id: dto.cursor,
                   event: dto.type,
                   data: JSON.stringify(dto),
@@ -262,7 +264,7 @@ export function createApiApp(input: CreateApiAppInput) {
                   ...entry.frame,
                   presentationCursor: encodePresentationCursor(entry.streamId),
                 });
-                await stream.writeSSE({ event: dto.type, data: JSON.stringify(dto) });
+                await writeSse(stream, { event: dto.type, data: JSON.stringify(dto) });
                 presentationStreamId = entry.streamId;
               }
               if (!sawFutureAttempt && hot.entries.length === 0 && hot.nextStreamId) {
@@ -457,6 +459,30 @@ export function createApiApp(input: CreateApiAppInput) {
   app.get("/openapi.json", (c) => c.json(createOpenApiDocument()));
   app.notFound((c) => apiErrorResponse(c, new ApiError(404, "not_found", "Route not found.")));
   return app;
+}
+
+type SseOutput = {
+  write(input: string): Promise<unknown>;
+};
+
+async function writeSse(output: SseOutput, message: { data: string; event?: string; id?: string }) {
+  for (const value of [message.event, message.id]) {
+    if (value && /[\r\n]/u.test(value)) {
+      throw new Error("SSE event names and IDs cannot contain newlines.");
+    }
+  }
+  const data = message.data
+    .split(/\r\n|\r|\n/u)
+    .map((line) => `data: ${line}`)
+    .join("\n");
+  const frame = [
+    message.event && `event: ${message.event}`,
+    data,
+    message.id && `id: ${message.id}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  await output.write(`${frame}\n\n`);
 }
 
 function enforceCookieMutationOrigin(request: Request, browserOrigins: readonly string[]) {

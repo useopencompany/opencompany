@@ -1,3 +1,6 @@
+import { once } from "node:events";
+import { request as requestHttp } from "node:http";
+import { serve } from "@hono/node-server";
 import type { ChatPresentationReader } from "@opencompany/chat-presentation";
 import {
   type Actor,
@@ -198,6 +201,34 @@ describe("canonical Hono API", () => {
       headers: { "Last-Event-ID": "v1:2" },
     });
     expect(conflict.status).toBe(400);
+  });
+
+  it("leaves hop-by-hop SSE framing to the Node server adapter", async () => {
+    const app = testApp(fakeRepository());
+    const directResponse = await app.request("/v1/runs/run_1/events");
+    expect(directResponse.headers.get("connection")).toBeNull();
+    expect(directResponse.headers.get("transfer-encoding")).toBeNull();
+    expect(directResponse.headers.get("cache-control")).toBe("private, no-store, no-transform");
+    await directResponse.body?.cancel();
+
+    const server = serve({ fetch: app.fetch, port: 0 });
+    if (!server.listening) await once(server, "listening");
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Expected a TCP test server.");
+      const response = await rawHttpResponse(address.port, "/v1/runs/run_1/events");
+      const transferEncodingHeaderCount = response.rawHeaders.filter(
+        (value, index) => index % 2 === 0 && value.toLowerCase() === "transfer-encoding",
+      ).length;
+
+      expect(response.statusCode).toBe(200);
+      expect(transferEncodingHeaderCount).toBe(1);
+      expect(response.body).toContain("event: run.completed");
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
   });
 
   it("closes the SSE response at a durable approval boundary", async () => {
@@ -475,6 +506,26 @@ function testApp(
 
 async function responseBody(response: Response | Promise<Response>) {
   return (await response).text();
+}
+
+function rawHttpResponse(port: number, path: string) {
+  return new Promise<{ body: string; rawHeaders: string[]; statusCode: number | undefined }>(
+    (resolve, reject) => {
+      const request = requestHttp({ host: "127.0.0.1", port, path }, (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () =>
+          resolve({
+            body: Buffer.concat(chunks).toString("utf8"),
+            rawHeaders: response.rawHeaders,
+            statusCode: response.statusCode,
+          }),
+        );
+      });
+      request.on("error", reject);
+      request.end();
+    },
+  );
 }
 
 function fakeAttachments(): AttachmentUploadService {
