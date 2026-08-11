@@ -14,9 +14,10 @@ surfaces:
 
 Merges to `main` trigger a release after CI succeeds. The workflow calculates affected surfaces,
 loads release credentials from Infisical `prod` `/release`, validates web/API/runner configuration,
-builds artifacts, runs production migrations once, deploys the selected surfaces, waits for both
-Render services, and runs release-aware web/API/runner health checks. Automatic releases re-check
-the current main SHA before migrations and deploy so a superseded run cannot publish stale code.
+pulls the current Vercel production environment before each prebuilt Vercel build, builds artifacts,
+runs production migrations once, deploys the selected surfaces, waits for both Render services, and
+runs release-aware web/API/runner health checks. Automatic releases re-check the current main SHA
+before migrations and deploy so a superseded run cannot publish stale code.
 
 Manual dispatch can force surfaces and health checks. Do not bypass preflight or branch protection.
 
@@ -69,8 +70,10 @@ called out in the pull request.
 
 For canonical Chat, the immediate rollback is configuration-only: set
 `NEXT_PUBLIC_GOAT_HEADLESS_CHAT=false` and redeploy web. Existing canonical Runs continue to settle
-through the API and runner. The stable Render service URL is a valid server-only `GOAT_API_ORIGIN`;
-a custom API subdomain is optional and must preserve HTTPS plus the same origin contract.
+through the API and runner. The release must pull the updated Vercel production environment before
+building because this public flag is compiled into the browser bundle. The stable Render service URL
+is a valid server-only `GOAT_API_ORIGIN`; a custom API subdomain is optional and must preserve HTTPS
+plus the same origin contract.
 
 ## Stripe production endpoint
 
