@@ -9,6 +9,8 @@ import { requestGoatChatArtifactPublication } from "@/lib/task-runner";
 export type GoatClaudeActionToolContext = {
   codexChatSessionId: string;
   codexChatTurnId: string;
+  attemptId?: string;
+  leaseId?: string;
   signal?: AbortSignal;
 };
 
@@ -45,6 +47,7 @@ export function registerGoatClaudeActionTools(
           ...input,
           codexChatSessionId: sessionId,
           codexChatTurnId: runId,
+          ...(context.attemptId ? { attemptId: context.attemptId, leaseId: context.leaseId } : {}),
         }),
     },
   );

@@ -1,13 +1,6 @@
-import { getDb } from "@opencompany/db/client";
-import {
-  goatChatAttachmentUploads,
-  goatChatMessages,
-  goatChatSessions,
-  goatCodexChatSessions,
-} from "@opencompany/db/goat-schema";
+import { AutoModelRoutingError } from "@opencompany/goat-agent/application/auto-model-routing";
+import { resolvePersistedAutoModelRouting } from "@opencompany/goat-agent/application/persisted-auto-model-routing";
 import { createLogger } from "@opencompany/observability";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
-import { resolveAutoGoatModel } from "@/lib/chat-model-router";
 import { resolveGoatChatRequestContext } from "@/lib/chat-request-auth";
 
 export const runtime = "nodejs";
@@ -18,71 +11,37 @@ const logger = createLogger({ service: "opencompany-goat", runtime: "chat-model-
 export async function POST(request: Request) {
   const auth = await resolveGoatChatRequestContext(request);
   if (!auth.ok) return auth.response;
-  if (!auth.context.user.autoModelRoutingEnabled) {
-    return Response.json({ error: "Auto model routing is not enabled." }, { status: 403 });
-  }
   const parsed = await parseRequest(request);
   if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
-  const [existing] = await getDb()
-    .select({ model: goatChatSessions.model })
-    .from(goatChatMessages)
-    .innerJoin(
-      goatChatSessions,
-      and(
-        eq(goatChatSessions.id, goatChatMessages.sessionId),
-        eq(goatChatSessions.userWorkosId, auth.context.user.workosUserId),
-      ),
-    )
-    .innerJoin(
-      goatCodexChatSessions,
-      and(
-        eq(goatCodexChatSessions.chatSessionId, goatChatSessions.id),
-        eq(goatCodexChatSessions.userWorkosId, auth.context.user.workosUserId),
-        eq(goatCodexChatSessions.workspaceId, auth.context.workspace.id),
-        eq(goatCodexChatSessions.engine, "opencompany"),
-      ),
-    )
-    .where(and(eq(goatChatMessages.id, parsed.clientMessageId), eq(goatChatMessages.role, "user")))
-    .limit(1);
-  if (existing?.model) {
+  let resolution;
+  try {
+    resolution = await resolvePersistedAutoModelRouting({
+      actorId: auth.context.user.workosUserId,
+      workspaceId: auth.context.workspace.id,
+      idempotencyKey: `web-message:${parsed.clientMessageId}`.slice(0, 200),
+      clientMessageId: parsed.clientMessageId,
+      prompt: parsed.prompt,
+      attachmentIds: parsed.attachmentIds,
+      gatewayApiKey: process.env.VERCEL_AI_GATEWAY_API_KEY?.trim(),
+    });
+  } catch (error) {
+    if (error instanceof AutoModelRoutingError) {
+      const status =
+        error.code === "attachments_unavailable" ? 400 : error.code === "unavailable" ? 503 : 403;
+      return Response.json({ error: error.message }, { status });
+    }
+    throw error;
+  }
+  if (resolution.source !== "routed") {
     return Response.json({
-      model: existing.model,
+      model: resolution.model,
       tier: "replay",
-      reason: "existing_message",
+      reason: resolution.source,
       outcome: "replayed",
     });
   }
-  const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
-  if (!gatewayApiKey) {
-    return Response.json({ error: "Chat model routing is not configured." }, { status: 503 });
-  }
-  const attachments = parsed.attachmentIds.length
-    ? await getDb()
-        .select({ id: goatChatAttachmentUploads.id, format: goatChatAttachmentUploads.format })
-        .from(goatChatAttachmentUploads)
-        .where(
-          and(
-            inArray(goatChatAttachmentUploads.id, parsed.attachmentIds),
-            eq(goatChatAttachmentUploads.userWorkosId, auth.context.user.workosUserId),
-            eq(goatChatAttachmentUploads.workspaceId, auth.context.workspace.id),
-            or(
-              isNull(goatChatAttachmentUploads.claimedAt),
-              eq(goatChatAttachmentUploads.claimedMessageId, parsed.clientMessageId),
-            ),
-          ),
-        )
-        .limit(parsed.attachmentIds.length)
-    : [];
-  if (attachments.length !== parsed.attachmentIds.length) {
-    return Response.json({ error: "One or more attachments are unavailable." }, { status: 400 });
-  }
-  const result = await resolveAutoGoatModel({
-    prompt: parsed.prompt,
-    attachments: attachments.map((attachment) => ({ kind: attachment.format })),
-    gatewayApiKey,
-    userWorkosId: auth.context.user.workosUserId,
-    workspaceId: auth.context.workspace.id,
-  });
+  const result = resolution.routing;
+  if (!result) throw new Error("Routed Auto resolution is missing diagnostics.");
   logger.info("Headless Chat model routed", {
     event: "opencompany.headless_chat_model_routed",
     tier: result.tier,

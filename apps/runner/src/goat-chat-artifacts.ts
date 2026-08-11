@@ -16,7 +16,9 @@ import {
   goatChatArtifactVersions,
   goatCodexChatSessions,
   goatCodexChatTurns,
+  goatWorkspaceMembers,
 } from "@opencompany/db/goat-schema";
+import { authorizePersistedGoatClaudeToolCapability } from "@opencompany/goat-agent/application/persisted-claude-capability";
 import { createLogger } from "@opencompany/observability";
 import { del, put } from "@vercel/blob";
 import { and, eq, sql } from "drizzle-orm";
@@ -268,9 +270,28 @@ export async function publishGoatClaudeChatArtifact(input: {
   codexChatTurnId: string;
   toolCallId: string;
   arguments: unknown;
+  attemptId?: string;
+  leaseId?: string;
   env: RunnerEnv;
   signal?: AbortSignal;
 }): Promise<GoatPublishArtifactToolResponse> {
+  if (Boolean(input.attemptId) !== Boolean(input.leaseId)) {
+    return { ok: false, error: "The Claude Code capability is incomplete." };
+  }
+  if (
+    input.attemptId &&
+    input.leaseId &&
+    !(await authorizePersistedGoatClaudeToolCapability({
+      capability: {
+        codexChatSessionId: input.codexChatSessionId,
+        codexChatTurnId: input.codexChatTurnId,
+        attemptId: input.attemptId,
+        leaseId: input.leaseId,
+      },
+    }))
+  ) {
+    return { ok: false, error: "This Claude Code turn is no longer active." };
+  }
   const [row] = await getDb()
     .select({
       session: goatCodexChatSessions,
@@ -281,10 +302,18 @@ export async function publishGoatClaudeChatArtifact(input: {
       goatCodexChatSessions,
       eq(goatCodexChatTurns.codexChatSessionId, goatCodexChatSessions.id),
     )
+    .innerJoin(
+      goatWorkspaceMembers,
+      and(
+        eq(goatWorkspaceMembers.workspaceId, goatCodexChatSessions.workspaceId),
+        eq(goatWorkspaceMembers.userWorkosId, goatCodexChatSessions.userWorkosId),
+      ),
+    )
     .where(
       and(
         eq(goatCodexChatTurns.id, input.codexChatTurnId),
         eq(goatCodexChatTurns.codexChatSessionId, input.codexChatSessionId),
+        ...(input.leaseId ? [eq(goatCodexChatTurns.leaseId, input.leaseId)] : []),
       ),
     )
     .limit(1);

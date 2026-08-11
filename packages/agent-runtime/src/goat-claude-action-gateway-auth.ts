@@ -5,21 +5,36 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 // round-trip through the trusted runner host process and the raw RUNNER_INTERNAL_TOKEN
 // never enters the sandbox. Handing the sandboxed agent that broad, multi-route token
 // would let a leaked ticket reach the brain-capture and task-runner routes too. This
-// ticket is a narrow, short-lived capability bound to one turn: it proves the caller
-// was minted by the runner for this codexChatSessionId/codexChatTurnId pair and
-// nothing else, the same way createGoatCodingWorkspaceTicket scopes preview access.
-const TICKET_VERSION = 1;
+// ticket is a narrow, short-lived capability bound to one persisted session, Run,
+// Attempt, and lease. It carries no Actor or workspace identity and grants no access
+// to other runner routes, the same way createGoatCodingWorkspaceTicket scopes preview access.
+const TICKET_VERSION = 2;
 
-type GoatClaudeActionGatewayTicketPayload = {
+export type GoatClaudeActionGatewayLegacyTicketPayload = {
   v: 1;
   codexChatSessionId: string;
   codexChatTurnId: string;
   expiresAt: number;
 };
 
+export type GoatClaudeActionGatewayTicketPayload = {
+  v: 2;
+  codexChatSessionId: string;
+  codexChatTurnId: string;
+  attemptId: string;
+  leaseId: string;
+  expiresAt: number;
+};
+
+export type VerifiedGoatClaudeActionGatewayTicket =
+  | GoatClaudeActionGatewayLegacyTicketPayload
+  | GoatClaudeActionGatewayTicketPayload;
+
 export function createGoatClaudeActionGatewayTicket(input: {
   codexChatSessionId: string;
   codexChatTurnId: string;
+  attemptId: string;
+  leaseId: string;
   secret: string;
   now?: number;
   ttlMs?: number;
@@ -30,6 +45,8 @@ export function createGoatClaudeActionGatewayTicket(input: {
       v: TICKET_VERSION,
       codexChatSessionId: input.codexChatSessionId,
       codexChatTurnId: input.codexChatTurnId,
+      attemptId: input.attemptId,
+      leaseId: input.leaseId,
       expiresAt,
     } satisfies GoatClaudeActionGatewayTicketPayload),
   ).toString("base64url");
@@ -42,7 +59,8 @@ export function verifyGoatClaudeActionGatewayTicket(input: {
   ticket: string;
   secret: string;
   now?: number;
-}): GoatClaudeActionGatewayTicketPayload | null {
+}): VerifiedGoatClaudeActionGatewayTicket | null {
+  if (!input.ticket || input.ticket.length > 4_096) return null;
   const separator = input.ticket.lastIndexOf(".");
   if (separator <= 0) return null;
 
@@ -53,9 +71,9 @@ export function verifyGoatClaudeActionGatewayTicket(input: {
   try {
     const value = JSON.parse(
       Buffer.from(encodedPayload, "base64url").toString("utf8"),
-    ) as Partial<GoatClaudeActionGatewayTicketPayload>;
+    ) as Partial<VerifiedGoatClaudeActionGatewayTicket>;
     if (
-      value.v !== TICKET_VERSION ||
+      (value.v !== 1 && value.v !== TICKET_VERSION) ||
       typeof value.codexChatSessionId !== "string" ||
       !value.codexChatSessionId ||
       typeof value.codexChatTurnId !== "string" ||
@@ -66,7 +84,16 @@ export function verifyGoatClaudeActionGatewayTicket(input: {
     ) {
       return null;
     }
-    return value as GoatClaudeActionGatewayTicketPayload;
+    if (
+      value.v === TICKET_VERSION &&
+      (typeof value.attemptId !== "string" ||
+        !value.attemptId ||
+        typeof value.leaseId !== "string" ||
+        !value.leaseId)
+    ) {
+      return null;
+    }
+    return value as VerifiedGoatClaudeActionGatewayTicket;
   } catch {
     return null;
   }

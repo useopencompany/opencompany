@@ -6,6 +6,7 @@ import {
   PostgresChatRepository,
 } from "@opencompany/db/chat-repository";
 import { createPooledDb } from "@opencompany/db/pool";
+import { resolvePersistedAutoModelRouting } from "@opencompany/goat-agent/application/persisted-auto-model-routing";
 import {
   registerGoatNodeObservability,
   shutdownGoatNodeObservability,
@@ -38,6 +39,12 @@ const app = createApiApp({
   authenticate: createWorkOsApiAuthenticator(execute),
   browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),
   notifier,
+  resolveAutoModel: (input) =>
+    resolvePersistedAutoModelRouting({
+      ...input,
+      gatewayApiKey: process.env.VERCEL_AI_GATEWAY_API_KEY?.trim(),
+      db: database.db,
+    }),
   ...(presentation ? { presentation } : {}),
   ...(readModels ? { readModels } : {}),
 });

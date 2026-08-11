@@ -1,4 +1,5 @@
 import { verifyGoatClaudeActionGatewayTicket } from "@opencompany/agent-runtime";
+import { authorizePersistedGoatClaudeToolCapability } from "@opencompany/goat-agent/application/persisted-claude-capability";
 import { createMcpHandler } from "mcp-handler";
 import { registerGoatClaudeActionTools } from "@/lib/claude-actions";
 
@@ -28,12 +29,26 @@ async function handleClaudeActionsRequest(request: Request) {
   if (!payload) {
     return Response.json({ error: "Unauthorized." }, { status: 401 });
   }
+  if (
+    payload.v === 2 &&
+    !(await authorizePersistedGoatClaudeToolCapability({
+      capability: {
+        codexChatSessionId: payload.codexChatSessionId,
+        codexChatTurnId: payload.codexChatTurnId,
+        attemptId: payload.attemptId,
+        leaseId: payload.leaseId,
+      },
+    }))
+  ) {
+    return Response.json({ error: "This Claude Code turn is no longer active." }, { status: 403 });
+  }
 
   const handler = createMcpHandler(
     (server) => {
       registerGoatClaudeActionTools(server, {
         codexChatSessionId: payload.codexChatSessionId,
         codexChatTurnId: payload.codexChatTurnId,
+        ...(payload.v === 2 ? { attemptId: payload.attemptId, leaseId: payload.leaseId } : {}),
         signal: request.signal,
       });
     },

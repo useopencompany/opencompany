@@ -6,6 +6,7 @@ import type { RunnerEnv } from "./env";
 import { wakeGoatBrainImportWorker } from "./goat-brain-import-worker";
 import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 import { publishGoatClaudeChatArtifact } from "./goat-chat-artifacts";
+import { registerGoatClaudeActionsMcpRoute } from "./goat-claude-actions-mcp";
 import { wakeGoatCodexChatWorker } from "./goat-codex-chat-worker";
 import {
   GoatCodingWorkspaceAccessError,
@@ -60,9 +61,12 @@ export function createServer(
     }
   });
 
+  registerGoatClaudeActionsMcpRoute(app, env);
+
   app.get("/healthz", async () => ({
     ok: true,
     service: "opencompany-runner",
+    capabilities: { claudeActionsMcp: "v2" },
     environment: process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
     release:
       process.env.RENDER_GIT_COMMIT ??
@@ -88,6 +92,8 @@ export function createServer(
       | {
           codexChatSessionId?: unknown;
           codexChatTurnId?: unknown;
+          attemptId?: unknown;
+          leaseId?: unknown;
           toolCallId?: unknown;
           arguments?: unknown;
         }
@@ -97,13 +103,18 @@ export function createServer(
     const codexChatTurnId =
       typeof body?.codexChatTurnId === "string" ? body.codexChatTurnId.trim() : "";
     const toolCallId = typeof body?.toolCallId === "string" ? body.toolCallId.trim() : "";
+    const attemptId = typeof body?.attemptId === "string" ? body.attemptId.trim() : "";
+    const leaseId = typeof body?.leaseId === "string" ? body.leaseId.trim() : "";
     if (
       !codexChatSessionId ||
       codexChatSessionId.length > 256 ||
       !codexChatTurnId ||
       codexChatTurnId.length > 256 ||
       !toolCallId ||
-      toolCallId.length > 500
+      toolCallId.length > 500 ||
+      Boolean(attemptId) !== Boolean(leaseId) ||
+      attemptId.length > 256 ||
+      leaseId.length > 256
     ) {
       reply
         .status(400)
@@ -115,6 +126,7 @@ export function createServer(
       codexChatTurnId,
       toolCallId,
       arguments: body?.arguments,
+      ...(attemptId ? { attemptId, leaseId } : {}),
       env,
       signal: request.signal,
     });

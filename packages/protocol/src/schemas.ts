@@ -288,6 +288,7 @@ export const CreateMessageEnvelopeSchema = z
         runId: ResourceIdSchema,
         transactionId: z.string().regex(/^[0-9]+$/u),
         replayed: z.boolean(),
+        model: z.string().min(1).max(256).optional(),
       })
       .strict(),
     meta: ProtocolMetadataSchema,

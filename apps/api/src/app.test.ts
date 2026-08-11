@@ -180,6 +180,69 @@ describe("canonical Hono API", () => {
     });
   });
 
+  it("resolves Auto inside the authenticated command boundary", async () => {
+    const repository = fakeRepository();
+    const resolveAutoModel = vi.fn(async () => ({
+      model: "moonshotai/kimi-k2.6",
+      source: "idempotency_replay" as const,
+    }));
+    const app = testApp(repository, { resolveAutoModel });
+    const response = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "send_auto_1" },
+      body: JSON.stringify({
+        clientConversationId: "conversation_auto",
+        clientMessageId: "message_auto",
+        content: "Route this",
+        engine: "opencompany",
+        model: "auto",
+        attachmentIds: ["attachment_1"],
+      }),
+    });
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      data: { model: "moonshotai/kimi-k2.6", replayed: false },
+    });
+    expect(resolveAutoModel).toHaveBeenCalledWith({
+      actorId: "user_1",
+      workspaceId: "workspace_1",
+      idempotencyKey: "send_auto_1",
+      clientMessageId: "message_auto",
+      prompt: "Route this",
+      attachmentIds: ["attachment_1"],
+    });
+    expect(repository.lastCommand).toMatchObject({
+      idempotencyKey: "send_auto_1",
+      model: "moonshotai/kimi-k2.6",
+    });
+  });
+
+  it("fails closed when Auto is not composed into the API", async () => {
+    const response = await testApp(fakeRepository()).request("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "send_auto_2" },
+      body: JSON.stringify({ content: "Route this", engine: "opencompany", model: "auto" }),
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "unavailable", retryable: true },
+    });
+  });
+
+  it("rejects Auto for cloud-coding engine commands", async () => {
+    const resolveAutoModel = vi.fn();
+    const response = await testApp(fakeRepository(), { resolveAutoModel }).request("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "send_auto_3" },
+      body: JSON.stringify({ content: "Route this", engine: "claude_code", model: "auto" }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(resolveAutoModel).not.toHaveBeenCalled();
+  });
+
   it("streams only events after Last-Event-ID and terminates after a durable terminal Run", async () => {
     const repository = fakeRepository();
     const app = testApp(repository);

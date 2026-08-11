@@ -261,6 +261,24 @@ Tests force the web-origin network lane unavailable while these adapters execute
 routes remain thin rollback adapters for this PR; the Claude sandbox MCP transport and Auto-routing
 model route remain the only execution cutovers intentionally deferred to the next PR.
 
+The sandbox/canonical cutover PR moves Claude's MCP URL to the runner's public
+`/internal/goat/claude-actions` endpoint. New v2 HMAC capabilities contain only opaque session,
+Run, Attempt, lease, and expiry claims. They contain no Actor or workspace identity and grant no
+access to bearer-protected runner routes. The runner joins persisted session, turn, Attempt, and
+membership state before request admission and again before each tool operation; exact lease ID,
+worker ownership, lease expiry, active-turn state, contract version, engine, cancellation, and
+membership must still match. The web MCP route temporarily accepts v1 and v2 tickets as the rolling
+rollback adapter, while the new runner endpoint accepts v2 only.
+
+The same PR makes `POST /v1/messages` the canonical Auto-routing boundary. The API derives Actor
+and workspace from authentication, checks current membership and the persisted feature flag, and
+resolves `model: "auto"` before Message/Run creation. An already accepted idempotency key reuses its
+Conversation model even if the response was lost; an existing authorized Conversation also reuses
+its stored model. Only a new command without stored state validates attachment ownership/expiry and
+calls the provider. The accepted response may include the resolved concrete model for client
+metadata. The browser no longer calls `/api/chat/model-route`; that route stays as a rollback
+adapter until the deletion PR.
+
 PR 1 does not change behavior or routing for existing clients:
 
 - Next `/api/chat`, `/api/chat/{id}/stream`, and stop/interaction routes continue to own their
@@ -285,8 +303,8 @@ real but explicit cohort path rather than silently reducing capabilities:
 - `NEXT_PUBLIC_GOAT_HEADLESS_CHAT=true` selects canonical ordinary-Chat create, upload, cancel,
   approval, archive, restore, pin, seen-state, SSE, and Conversation/Message/Run read-model traffic.
   It remains false by default until both the PR 4 parity gate and the separately authorized API
-  service rollout gate pass. PR 4 moves Auto model selection behind an authenticated web preflight
-  that resolves one concrete model before the canonical command. Coding-chat metadata writes remain
+  service rollout gate pass. That phase initially put Auto selection behind an authenticated web
+  preflight; issue #1185 supersedes it with API-owned command-time resolution. Coding-chat metadata writes remain
   on their existing engine-specific path and are not part of the migrated ordinary-Chat resource.
 - The browser calls `/v1` directly on the first-party `NEXT_PUBLIC_GOAT_API_ORIGIN`. Production uses
   `https://api.opencompany.chat`, which terminates TLS on the separately deployed Render API and

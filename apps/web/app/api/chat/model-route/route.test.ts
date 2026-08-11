@@ -1,53 +1,21 @@
-import { getDb } from "@opencompany/db/client";
+import { AutoModelRoutingError } from "@opencompany/goat-agent/application/auto-model-routing";
+import { resolvePersistedAutoModelRouting } from "@opencompany/goat-agent/application/persisted-auto-model-routing";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveAutoGoatModel } from "@/lib/chat-model-router";
 import { resolveGoatChatRequestContext } from "@/lib/chat-request-auth";
 import { POST } from "./route";
-
-const dbMocks = vi.hoisted(() => ({
-  existingRows: [] as Array<{ model: string }>,
-  attachmentRows: [] as Array<{ id: string; format: string }>,
-  select: vi.fn(),
-  from: vi.fn(),
-  innerJoin: vi.fn(),
-  where: vi.fn(),
-  limit: vi.fn(),
-  queryIndex: 0,
-}));
-
-vi.mock("@opencompany/db/client", () => ({
-  getDb: vi.fn(() => ({ select: dbMocks.select })),
-}));
 
 vi.mock("@/lib/chat-request-auth", () => ({
   resolveGoatChatRequestContext: vi.fn(),
 }));
 
-vi.mock("@/lib/chat-model-router", () => ({
-  resolveAutoGoatModel: vi.fn(),
+vi.mock("@opencompany/goat-agent/application/persisted-auto-model-routing", () => ({
+  resolvePersistedAutoModelRouting: vi.fn(),
 }));
-
-const builder = {
-  from: dbMocks.from,
-  innerJoin: dbMocks.innerJoin,
-  where: dbMocks.where,
-  limit: dbMocks.limit,
-};
 
 describe("POST /api/chat/model-route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("VERCEL_AI_GATEWAY_API_KEY", "gateway-key");
-    dbMocks.existingRows = [];
-    dbMocks.attachmentRows = [];
-    dbMocks.queryIndex = 0;
-    dbMocks.select.mockReturnValue(builder);
-    dbMocks.from.mockReturnValue(builder);
-    dbMocks.innerJoin.mockReturnValue(builder);
-    dbMocks.where.mockReturnValue(builder);
-    dbMocks.limit.mockImplementation(async () =>
-      dbMocks.queryIndex++ === 0 ? dbMocks.existingRows : dbMocks.attachmentRows,
-    );
     vi.mocked(resolveGoatChatRequestContext).mockResolvedValue({
       ok: true,
       context: {
@@ -58,17 +26,23 @@ describe("POST /api/chat/model-route", () => {
         workspace: { id: "workspace_1" },
       },
     } as never);
-    vi.mocked(resolveAutoGoatModel).mockResolvedValue({
+    vi.mocked(resolvePersistedAutoModelRouting).mockResolvedValue({
       model: "moonshotai/kimi-k2.6",
-      tier: "fast",
-      reason: "simple",
-      classifier: { outcome: "success", durationMs: 12 },
-    } as never);
+      source: "routed",
+      routing: {
+        model: "moonshotai/kimi-k2.6",
+        tier: "standard",
+        reason: "simple_answer",
+        classifier: {
+          model: "google/gemini-3.1-flash-lite",
+          outcome: "success",
+          durationMs: 12,
+        },
+      },
+    });
   });
 
   it("routes from host-verified identity and unclaimed attachment formats", async () => {
-    dbMocks.attachmentRows = [{ id: "attachment_1", format: "pdf" }];
-
     const response = await POST(
       request({
         clientMessageId: "message_1",
@@ -80,20 +54,24 @@ describe("POST /api/chat/model-route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       model: "moonshotai/kimi-k2.6",
-      tier: "fast",
+      tier: "standard",
     });
-    expect(getDb).toHaveBeenCalled();
-    expect(resolveAutoGoatModel).toHaveBeenCalledWith({
-      prompt: "Summarize this",
-      attachments: [{ kind: "pdf" }],
-      gatewayApiKey: "gateway-key",
-      userWorkosId: "user_1",
+    expect(resolvePersistedAutoModelRouting).toHaveBeenCalledWith({
+      actorId: "user_1",
       workspaceId: "workspace_1",
+      idempotencyKey: "web-message:message_1",
+      clientMessageId: "message_1",
+      prompt: "Summarize this",
+      attachmentIds: ["attachment_1"],
+      gatewayApiKey: "gateway-key",
     });
   });
 
   it("reuses the persisted model when an Auto command retries after commit", async () => {
-    dbMocks.existingRows = [{ model: "anthropic/claude-sonnet-5" }];
+    vi.mocked(resolvePersistedAutoModelRouting).mockResolvedValue({
+      model: "anthropic/claude-sonnet-5",
+      source: "idempotency_replay",
+    });
     vi.stubEnv("VERCEL_AI_GATEWAY_API_KEY", "");
 
     const response = await POST(
@@ -109,11 +87,16 @@ describe("POST /api/chat/model-route", () => {
       model: "anthropic/claude-sonnet-5",
       outcome: "replayed",
     });
-    expect(resolveAutoGoatModel).not.toHaveBeenCalled();
-    expect(dbMocks.select).toHaveBeenCalledTimes(1);
+    expect(resolvePersistedAutoModelRouting).toHaveBeenCalledOnce();
   });
 
   it("fails closed when an attachment is not owned and available in the active workspace", async () => {
+    vi.mocked(resolvePersistedAutoModelRouting).mockRejectedValue(
+      new AutoModelRoutingError(
+        "attachments_unavailable",
+        "One or more attachments are unavailable.",
+      ),
+    );
     const response = await POST(
       request({
         clientMessageId: "message_1",
@@ -123,24 +106,18 @@ describe("POST /api/chat/model-route", () => {
     );
 
     expect(response.status).toBe(400);
-    expect(resolveAutoGoatModel).not.toHaveBeenCalled();
   });
 
   it("honors the per-user Auto routing gate", async () => {
-    vi.mocked(resolveGoatChatRequestContext).mockResolvedValue({
-      ok: true,
-      context: {
-        user: { workosUserId: "user_1", autoModelRoutingEnabled: false },
-        workspace: { id: "workspace_1" },
-      },
-    } as never);
+    vi.mocked(resolvePersistedAutoModelRouting).mockRejectedValue(
+      new AutoModelRoutingError("disabled", "Auto model routing is not enabled."),
+    );
 
     const response = await POST(
       request({ clientMessageId: "message_1", prompt: "Hello", attachmentIds: [] }),
     );
 
     expect(response.status).toBe(403);
-    expect(resolveAutoGoatModel).not.toHaveBeenCalled();
   });
 });
 

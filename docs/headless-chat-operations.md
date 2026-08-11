@@ -15,6 +15,7 @@ browser ---- direct /v1 + shared session ----> apps/api (Hono /v1) ----> Electri
 
   apps/runner ---- shared application services ----> Postgres (authority)
        |                                                ^
+       +---- ticketed Claude MCP <---- E2B sandbox      |
        +---- Redis presentation deltas ----> apps/api --+
                                               | SSE
                                               +----> browser
@@ -35,8 +36,14 @@ browser ---- direct /v1 + shared session ----> apps/api (Hono /v1) ----> Electri
   settlement. The queue claim establishes Attempt and lease authority; each application operation
   re-derives its actor, workspace, membership, and Run/turn authority from persisted state. The old
   bearer-protected web routes remain rollback adapters until the final route-deletion PR. Claude
-  Code's sandbox action transport and Auto model routing remain web-reachable until their next-PR
-  cutover.
+  Code reaches the runner's `/internal/goat/claude-actions` MCP endpoint with a signed v2
+  session/Run/Attempt/lease capability; the runner rechecks persisted membership and live lease
+  authority on every MCP request and tool operation. The sandbox never receives actor/workspace
+  identifiers, provider credentials, or `RUNNER_INTERNAL_TOKEN`.
+- Canonical Auto selection is part of the authenticated `POST /v1/messages` command. The API
+  reuses an accepted idempotent command's model or an authorized Conversation's stored model before
+  consulting the provider, and returns the concrete model in the accepted response. The browser no
+  longer calls the web `/api/chat/model-route` preflight.
 - Postgres is the authority and queue. `LISTEN/NOTIFY` only reduces latency. Redis carries optional
   five-minute, 1,024-entry-per-Run presentation replay and is not required for canonical execution
   or reconnect correctness.
@@ -112,8 +119,10 @@ Before setting `NEXT_PUBLIC_GOAT_HEADLESS_CHAT=true`, the operator must:
 
 1. Add `apps/api` as a separately deployable production service and include its `/healthz` in the
    release SHA/health gate.
-2. Provide its server-only database, WorkOS, blob, Electric, Redis, and observability configuration
-   through Infisical `prod` `/api`; configure the same `REDIS_URL` in `prod` `/runner`.
+2. Provide its server-only database, WorkOS, Vercel AI Gateway, blob, Electric, Redis, and
+   observability configuration through Infisical `prod` `/api`; configure the same `REDIS_URL` in
+   `prod` `/runner`. Verify the runner's Render-provided `RENDER_EXTERNAL_URL` (or explicit
+   `RUNNER_PUBLIC_URL`) is the HTTPS origin written into Claude sandbox MCP configuration.
 3. Register `api.opencompany.chat` on the Render API service and point its DNS directly to Render.
    Configure web `NEXT_PUBLIC_GOAT_API_ORIGIN=https://api.opencompany.chat`, configure the API's
    exact credentialed browser-origin allowlist, and scope `WORKOS_COOKIE_DOMAIN` to
@@ -128,12 +137,18 @@ Before setting `NEXT_PUBLIC_GOAT_HEADLESS_CHAT=true`, the operator must:
    correlated request/Run/Attempt logs and queue/event lag.
 
 Direct-origin verification must show that `/healthz`, authenticated Run SSE, and Electric read
-models are served by Render without Vercel response headers. Verify a pre-existing browser session
+models are served by Render without Vercel response headers. Runner health must advertise
+`capabilities.claudeActionsMcp=v2`. Verify a pre-existing browser session
 is migrated to the shared cookie before its first cross-origin request, sign-out clears that shared
 cookie, disallowed origins receive no credentialed CORS access, and cookie-authenticated mutations
 from disallowed or missing origins are rejected. A rollback disables
 `NEXT_PUBLIC_GOAT_HEADLESS_CHAT` and redeploys web; the API service and additive DNS record can stay
 online.
+
+During the phase-2 rollback window, the old Claude MCP and Auto model routes remain deployed in web.
+Reverting the runner restores v1 web-hosted Claude tickets. Reverting the canonical Auto cutover
+must deploy the prior web transport before (or together with) the prior API so no client sends the
+literal `auto` selector to an API that predates server-side resolution.
 
 Record expected-SHA health output, the complete disabled/enabled smoke matrices, responsive-cadence
 samples, a Redis-degraded fallback probe, and the real-traffic soak result on issues #1165 and #1171.
