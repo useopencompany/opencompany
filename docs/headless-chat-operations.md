@@ -28,8 +28,10 @@ apps/runner <------------------+  | Electric
 - `apps/runner` claims queued Runs directly from Postgres, creates Attempts, heartbeats fenced
   leases, runs the model loop, and transactionally projects Messages, semantic Events, approvals,
   billing usage, cancellation, partial results, and terminal state.
-- `apps/web` never receives the private API origin. Its same-origin `/v1` route forwards the secure
-  browser session to `GOAT_API_ORIGIN`. Runner calls back to existing bearer-protected web host
+- Browser code never receives the private API origin. In production, an uncached Vercel external
+  rewrite forwards same-origin `/v1` requests and the secure browser session to the server-only
+  `GOAT_API_ORIGIN`. The App Router proxy remains the fail-closed/local fallback when that origin is
+  absent or invalid. Runner calls back to existing bearer-protected web host
   gateways for user-authorized actions, Brain capture, task/schedule/workflow/skill/wiki behavior,
   and browser sessions. These calls derive identity from the running durable turn; request bodies
   cannot select a user or workspace.
@@ -111,7 +113,8 @@ Before setting `NEXT_PUBLIC_GOAT_HEADLESS_CHAT=true`, the operator must:
 2. Provide its server-only database, WorkOS, blob, Electric, Redis, and observability configuration
    through Infisical `prod` `/api`; configure the same `REDIS_URL` in `prod` `/runner`.
 3. Configure web-only `GOAT_API_ORIGIN` to the credential-free API origin. Keep the origin private
-   from browser variables.
+   from browser variables. The production build installs an uncached Vercel external rewrite for
+   `/v1`; invalid or same-origin configuration leaves the fail-closed route handler active.
 4. Deploy migration, runner, API, then web while `NEXT_PUBLIC_GOAT_HEADLESS_CHAT` is absent or false.
 5. Smoke-test session auth and tenant isolation; create/upload/send; Auto routing; task creation;
    Brain read/text/attachment capture; integration and managed actions with approval; public and

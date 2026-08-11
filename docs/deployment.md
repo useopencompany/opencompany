@@ -73,7 +73,9 @@ For canonical Chat, the immediate rollback is configuration-only: set
 through the API and runner. The release must pull the updated Vercel production environment before
 building because this public flag is compiled into the browser bundle. The stable Render service URL
 is a valid server-only `GOAT_API_ORIGIN`; a custom API subdomain is optional and must preserve HTTPS
-plus the same origin contract.
+plus the same origin contract. A production build with a valid separate origin installs an uncached
+Vercel external rewrite for `/v1`; the fail-closed App Router proxy remains available when the
+origin is absent or invalid.
 
 ## Stripe production endpoint
 
