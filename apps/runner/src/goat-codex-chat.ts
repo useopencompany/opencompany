@@ -436,7 +436,6 @@ export async function runGoatCodexChatTurn(input: {
             createGoatCodexBrainCaptureDynamicTool({
               codexChatSessionId: session.id,
               codexChatTurnId: turn.id,
-              env,
               checkAbort,
             }),
           ]
@@ -445,7 +444,6 @@ export async function runGoatCodexChatTurn(input: {
         ? createGoatCodexActionDynamicTools({
             codexChatSessionId: session.id,
             codexChatTurnId: turn.id,
-            env,
             checkAbort,
           })
         : []),

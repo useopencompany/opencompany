@@ -6,10 +6,6 @@ import { createGoatCodexBrainCaptureDynamicTool } from "./goat-codex-brain-captu
 const context = {
   codexChatSessionId: "codex_session_1",
   codexChatTurnId: "codex_turn_1",
-  env: {
-    goatAppUrl: "https://goat.example.com",
-    internalToken: "internal-secret",
-  },
   checkAbort: vi.fn(async () => undefined),
 };
 
@@ -25,17 +21,18 @@ describe("createGoatCodexBrainCaptureDynamicTool", () => {
     expect(tool.spec.inputSchema).not.toHaveProperty("properties.attachmentIds");
   });
 
-  it("binds a faithful capture to the current host turn and bearer", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({
-        ok: true,
-        status: "captured",
-        draftId: "launch-decision",
-        path: "inbox/launch-decision.md",
-        title: "Launch decision",
-      }),
+  it("binds a faithful capture to the current persisted host turn", async () => {
+    const execute = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          status: "captured",
+          draftId: "launch-decision",
+          path: "inbox/launch-decision.md",
+          title: "Launch decision",
+        }) as const,
     );
-    const tool = createGoatCodexBrainCaptureDynamicTool(context, { fetch: fetchMock });
+    const tool = createGoatCodexBrainCaptureDynamicTool(context, { execute });
 
     const output = await tool.execute(
       call({
@@ -46,38 +43,28 @@ describe("createGoatCodexBrainCaptureDynamicTool", () => {
     );
 
     expect(output.success).toBe(true);
-    expect(fetchMock).toHaveBeenCalledWith(
-      new URL("https://goat.example.com/api/internal/codex-brain-capture"),
-      expect.objectContaining({
-        method: "POST",
-        headers: {
-          authorization: "Bearer internal-secret",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          codexChatSessionId: "codex_session_1",
-          codexChatTurnId: "codex_turn_1",
-          content: "The team approved the launch plan.",
-          title: "Launch decision",
-          intent: "Keep the rationale",
-        }),
-      }),
-    );
+    expect(execute).toHaveBeenCalledWith({
+      codexChatSessionId: "codex_session_1",
+      codexChatTurnId: "codex_turn_1",
+      content: "The team approved the launch plan.",
+      title: "Launch decision",
+      intent: "Keep the rationale",
+    });
   });
 
   it("rejects an empty capture locally", async () => {
-    const fetchMock = vi.fn<typeof fetch>();
-    const tool = createGoatCodexBrainCaptureDynamicTool(context, { fetch: fetchMock });
+    const execute = vi.fn();
+    const tool = createGoatCodexBrainCaptureDynamicTool(context, { execute });
 
     const output = await tool.execute(call({ title: "Nothing" }));
 
     expect(output.success).toBe(false);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("rejects oversized content instead of silently falling back to a source pointer", async () => {
-    const fetchMock = vi.fn<typeof fetch>();
-    const tool = createGoatCodexBrainCaptureDynamicTool(context, { fetch: fetchMock });
+    const execute = vi.fn();
+    const tool = createGoatCodexBrainCaptureDynamicTool(context, { execute });
 
     const output = await tool.execute(
       call({
@@ -87,12 +74,15 @@ describe("createGoatCodexBrainCaptureDynamicTool", () => {
     );
 
     expect(output.success).toBe(false);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
   });
 
-  it("rejects malformed success responses from the private gateway", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => Response.json({ ok: true }));
-    const tool = createGoatCodexBrainCaptureDynamicTool(context, { fetch: fetchMock });
+  it("returns a structured error when the shared service throws", async () => {
+    const tool = createGoatCodexBrainCaptureDynamicTool(context, {
+      execute: async () => {
+        throw new Error("persistence unavailable");
+      },
+    });
 
     const output = await tool.execute(call({ content: "Remember this." }));
 
@@ -100,21 +90,27 @@ describe("createGoatCodexBrainCaptureDynamicTool", () => {
     const contentItem = output.contentItems[0];
     expect(JSON.parse(contentItem?.type === "inputText" ? contentItem.text : "{}")).toMatchObject({
       ok: false,
-      error: expect.stringContaining("HTTP 200"),
+      error: expect.stringContaining("persistence unavailable"),
     });
   });
 
-  it("returns a structured error without calling the network when unconfigured", async () => {
-    const fetchMock = vi.fn<typeof fetch>();
-    const tool = createGoatCodexBrainCaptureDynamicTool(
-      { ...context, env: { internalToken: "internal-secret" } },
-      { fetch: fetchMock },
-    );
+  it("does not call the network when the web origin is unavailable", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("web unavailable"));
+    const tool = createGoatCodexBrainCaptureDynamicTool(context, {
+      execute: async () => ({
+        ok: true,
+        status: "captured",
+        draftId: "remember-this",
+        path: "inbox/remember-this.md",
+        title: "Remember this",
+      }),
+    });
 
     const output = await tool.execute(call({ content: "Remember this." }));
 
-    expect(output.success).toBe(false);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(output.success).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });
 

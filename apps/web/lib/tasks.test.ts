@@ -39,7 +39,7 @@ vi.mock("@/lib/task-runner", () => ({
   triggerGoatCodexChatWake: mocks.triggerGoatCodexChatWake,
 }));
 
-vi.mock("@/lib/integrations/google-data", () => ({
+vi.mock("@opencompany/goat-agent/integrations/google-data", () => ({
   getGoatAvailableHarnessTools: vi.fn(async () => ["exa_search", "gmail_search"]),
 }));
 

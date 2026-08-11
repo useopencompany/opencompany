@@ -253,6 +253,14 @@ routing now live under their existing shared package owners. Stripe auto-refill 
 idempotent off-session flow but is owned by `packages/billing`; web compatibility modules only
 re-export or adapt these shared implementations for callers outside canonical Chat.
 
+The direct-runner PR removes normal runner calls to the action, Brain-capture, and host-tool web
+routes. The runner now composes the same persisted services in-process, including durable action
+governance, attachment copy and Brain quota semantics, task worker wakeups, schedule planning,
+workflow/skill resolution, wiki access, browser-profile cleanup, and browser sandbox execution.
+Tests force the web-origin network lane unavailable while these adapters execute. The three web
+routes remain thin rollback adapters for this PR; the Claude sandbox MCP transport and Auto-routing
+model route remain the only execution cutovers intentionally deferred to the next PR.
+
 PR 1 does not change behavior or routing for existing clients:
 
 - Next `/api/chat`, `/api/chat/{id}/stream`, and stop/interaction routes continue to own their

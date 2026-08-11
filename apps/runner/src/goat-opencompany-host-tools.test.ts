@@ -31,12 +31,11 @@ const bootstrap: GoatChatHostBootstrap = {
 };
 
 describe("loadGoatOpenCompanyHostTools", () => {
-  it("composes web-owned tools and authenticated browser profiles through one host gateway", async () => {
+  it("composes shared tools and authenticated browser profiles through one persisted service", async () => {
     const requests: GoatChatHostToolGatewayRequest[] = [];
-    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      const request = JSON.parse(String(init?.body)) as GoatChatHostToolGatewayRequest;
+    const execute = vi.fn(async ({ request }: { request: GoatChatHostToolGatewayRequest }) => {
       requests.push(request);
-      return Response.json({
+      return {
         ok: true,
         result:
           request.operation === "bootstrap"
@@ -49,11 +48,11 @@ describe("loadGoatOpenCompanyHostTools", () => {
               : request.operation === "browser"
                 ? { ok: true, command: "browser_open", output: "opened" }
                 : { ok: true },
-      });
+      } as const;
     });
 
     const tools = await loadGoatOpenCompanyHostTools(context(), {
-      fetch: fetch as typeof globalThis.fetch,
+      execute,
     });
 
     expect(tools?.activeSkills).toHaveLength(1);
@@ -71,18 +70,18 @@ describe("loadGoatOpenCompanyHostTools", () => {
       "browser",
       "browser_end_profile",
     ]);
-    expect(fetch.mock.calls[0]?.[1]?.headers).toMatchObject({
-      authorization: "Bearer runner-secret",
-    });
+    expect(execute).toHaveBeenCalledTimes(4);
   });
 
-  it("fails closed when the internal host is not configured", async () => {
-    await expect(
-      loadGoatOpenCompanyHostTools({
-        ...context(),
-        env: { goatAppUrl: undefined, internalToken: "runner-secret" },
-      }),
-    ).resolves.toBeNull();
+  it("does not call the web origin", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("web unavailable"));
+    const tools = await loadGoatOpenCompanyHostTools(context(), {
+      execute: async () => ({ ok: true, result: bootstrap }),
+    });
+
+    expect(tools?.bootstrap).toEqual(bootstrap);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });
 
@@ -90,7 +89,7 @@ function context() {
   return {
     sessionId: "session_1",
     turnId: "turn_1",
-    env: { goatAppUrl: "https://app.example.com", internalToken: "runner-secret" },
+    env: { vercelAiGatewayApiKey: "gateway-key", goatBrowserEnabled: true },
     signal: new AbortController().signal,
     mentionedSkillIds: ["sales"],
     approvalContinuation: false,

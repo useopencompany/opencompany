@@ -1,20 +1,27 @@
-import type { GoatCodexBrainCaptureGatewayRequest } from "@opencompany/agent-runtime";
+import type {
+  GoatCodexBrainCaptureGatewayRequest,
+  GoatCodexBrainCaptureGatewayResponse,
+} from "@opencompany/agent-runtime";
 import { describe, expect, it, vi } from "vitest";
 import { createGoatOpenCompanyBrainCaptureRunner } from "./goat-opencompany-brain-capture";
 
 describe("createGoatOpenCompanyBrainCaptureRunner", () => {
   it("forwards canonical attachment ids with durable turn identity", async () => {
     let request: GoatCodexBrainCaptureGatewayRequest | null = null;
-    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      request = JSON.parse(String(init?.body)) as GoatCodexBrainCaptureGatewayRequest;
-      return Response.json({
-        ok: true,
-        status: "captured",
-        assets: [{ documentId: "document_1", path: "inbox/file.pdf", title: "file.pdf" }],
-      });
-    });
+    const execute = vi.fn(
+      async (
+        input: GoatCodexBrainCaptureGatewayRequest,
+      ): Promise<GoatCodexBrainCaptureGatewayResponse> => {
+        request = input;
+        return {
+          ok: true,
+          status: "captured",
+          assets: [{ documentId: "document_1", path: "inbox/file.pdf", title: "file.pdf" }],
+        };
+      },
+    );
     const capture = createGoatOpenCompanyBrainCaptureRunner(context(), {
-      fetch: fetch as typeof globalThis.fetch,
+      execute,
     });
 
     await expect(capture({ attachmentIds: ["attachment_1"] })).resolves.toMatchObject({
@@ -26,21 +33,24 @@ describe("createGoatOpenCompanyBrainCaptureRunner", () => {
       codexChatTurnId: "turn_1",
       attachmentIds: ["attachment_1"],
     });
-    expect(fetch.mock.calls[0]?.[1]?.headers).toMatchObject({
-      authorization: "Bearer runner-secret",
-    });
+    expect(execute).toHaveBeenCalledOnce();
   });
 
-  it("fails closed without an app URL", async () => {
-    const capture = createGoatOpenCompanyBrainCaptureRunner({
-      ...context(),
-      env: { goatAppUrl: undefined, internalToken: "runner-secret" },
+  it("captures without calling a web origin", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("web unavailable"));
+    const capture = createGoatOpenCompanyBrainCaptureRunner(context(), {
+      execute: async () => ({
+        ok: true,
+        status: "captured",
+        draftId: "remember-this",
+        path: "inbox/remember-this.md",
+        title: "Remember this",
+      }),
     });
 
-    await expect(capture({ content: "Remember this" })).resolves.toEqual({
-      ok: false,
-      error: "Brain capture is not configured.",
-    });
+    await expect(capture({ content: "Remember this" })).resolves.toMatchObject({ ok: true });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });
 
@@ -48,7 +58,6 @@ function context() {
   return {
     sessionId: "session_1",
     turnId: "turn_1",
-    env: { goatAppUrl: "https://app.example.com", internalToken: "runner-secret" },
     signal: new AbortController().signal,
   };
 }

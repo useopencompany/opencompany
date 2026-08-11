@@ -33,7 +33,7 @@ vi.mock("@opencompany/goat-agent/integrations/linear-mcp", () => ({
   getGoatLinearIntegrationState: mocks.getGoatLinearIntegrationState,
 }));
 
-vi.mock("@/lib/integrations/latitude-mcp", () => ({
+vi.mock("@opencompany/goat-agent/integrations/latitude-mcp", () => ({
   getGoatLatitudeIntegrationState: mocks.getGoatLatitudeIntegrationState,
 }));
 

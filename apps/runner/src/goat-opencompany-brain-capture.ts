@@ -2,26 +2,36 @@ import type {
   GoatCodexBrainCaptureGatewayRequest,
   GoatCodexBrainCaptureGatewayResponse,
 } from "@opencompany/agent-runtime";
+import { executePersistedGoatBrainCapture } from "@opencompany/goat-agent/application/persisted-brain-capture";
 import type { SaveToBrainToolInput, SaveToBrainToolOutput } from "@opencompany/goat-agent/chat-ui";
-import type { RunnerEnv } from "./env";
-
-const GATEWAY_PATH = "/api/internal/codex-brain-capture";
-const GATEWAY_TIMEOUT_MS = 30_000;
+import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 
 type Context = {
   sessionId: string;
   turnId: string;
-  env: Pick<RunnerEnv, "goatAppUrl" | "internalToken">;
   signal: AbortSignal;
+};
+
+type Dependencies = {
+  execute: (
+    request: GoatCodexBrainCaptureGatewayRequest,
+  ) => Promise<GoatCodexBrainCaptureGatewayResponse>;
+};
+
+const defaultDependencies: Dependencies = {
+  execute: (request) =>
+    executePersistedGoatBrainCapture({
+      request,
+      dependencies: { wakeIngest: async () => wakeGoatBrainIngestWorker() },
+    }),
 };
 
 export function createGoatOpenCompanyBrainCaptureRunner(
   context: Context,
-  dependencies: { fetch: typeof fetch } = { fetch: globalThis.fetch },
+  dependencies: Partial<Dependencies> = {},
 ) {
+  const resolvedDependencies = { ...defaultDependencies, ...dependencies };
   return async (input: SaveToBrainToolInput): Promise<SaveToBrainToolOutput> => {
-    const appUrl = context.env.goatAppUrl?.trim();
-    if (!appUrl) return { ok: false, error: "Brain capture is not configured." };
     if (!input.content?.trim() && !input.sourceRef?.trim() && !input.attachmentIds?.length) {
       return {
         ok: false,
@@ -41,35 +51,10 @@ export function createGoatOpenCompanyBrainCaptureRunner(
       ...(input.attachmentIds?.length ? { attachmentIds: input.attachmentIds } : {}),
     };
     try {
-      const response = await dependencies.fetch(new URL(GATEWAY_PATH, appUrl), {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${context.env.internalToken}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(request),
-        signal: AbortSignal.any([context.signal, AbortSignal.timeout(GATEWAY_TIMEOUT_MS)]),
-      });
-      return await readResponse(response);
+      return await resolvedDependencies.execute(request);
     } catch (error) {
       if (context.signal.aborted) throw context.signal.reason ?? error;
-      return { ok: false, error: "The Brain capture gateway could not be reached." };
+      return { ok: false, error: "The Brain capture service could not complete the request." };
     }
   };
-}
-
-async function readResponse(response: Response): Promise<GoatCodexBrainCaptureGatewayResponse> {
-  try {
-    const value = (await response.json()) as unknown;
-    if (isRecord(value) && typeof value.ok === "boolean") {
-      return value as GoatCodexBrainCaptureGatewayResponse;
-    }
-  } catch {
-    // Avoid passing an HTML proxy response through the model-facing tool.
-  }
-  return { ok: false, error: `The Brain capture gateway returned HTTP ${response.status}.` };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

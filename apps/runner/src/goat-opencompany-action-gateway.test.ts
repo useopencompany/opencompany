@@ -8,8 +8,7 @@ import { createGoatOpenCompanyActionDispatcher } from "./goat-opencompany-action
 describe("createGoatOpenCompanyActionDispatcher", () => {
   it("loads the host-authorized catalog and durably dispatches an interactive action", async () => {
     const requests: GoatActionHostGatewayRequest[] = [];
-    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      const request = JSON.parse(String(init?.body)) as GoatActionHostGatewayRequest;
+    const execute = vi.fn(async ({ request }: { request: GoatActionHostGatewayRequest }) => {
       requests.push(request);
       const response: GoatActionGatewayResponse =
         request.operation === "catalog"
@@ -44,11 +43,11 @@ describe("createGoatOpenCompanyActionDispatcher", () => {
                   actions: [],
                 }
               : { ok: true, action: request.action, result: { sent: true } };
-      return Response.json(response);
+      return response;
     });
 
     const dispatcher = await createGoatOpenCompanyActionDispatcher(context(), {
-      fetch: fetch as typeof globalThis.fetch,
+      execute,
     });
 
     expect(dispatcher?.catalog.actions).toEqual([
@@ -80,48 +79,48 @@ describe("createGoatOpenCompanyActionDispatcher", () => {
       turnId: "turn_1",
       invocationId: "call_1",
     });
-    expect(fetch.mock.calls[0]?.[1]?.headers).toMatchObject({
-      authorization: "Bearer runner-secret",
-    });
+    expect(execute).toHaveBeenCalledTimes(4);
   });
 
   it("prelists the recovered catalog only for an approval continuation", async () => {
-    const fetch = vi.fn(async () =>
-      Response.json({
-        ok: true,
-        catalog: {
-          sources: [{ id: "slack", label: "Slack", description: "Messages" }],
-          actions: [
-            {
-              id: "slack.post",
-              source: "slack",
-              description: "Post a message.",
-              params: { type: "object" },
-              permissionMode: "ask",
-            },
-          ],
-        },
-      } satisfies GoatActionGatewayResponse),
+    const execute = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          catalog: {
+            sources: [{ id: "slack", label: "Slack", description: "Messages" }],
+            actions: [
+              {
+                id: "slack.post",
+                source: "slack",
+                description: "Post a message.",
+                params: { type: "object" },
+                permissionMode: "ask",
+              },
+            ],
+          },
+        }) satisfies GoatActionGatewayResponse,
     );
 
     const dispatcher = await createGoatOpenCompanyActionDispatcher(
       { ...context(), approvalContinuation: true },
-      { fetch: fetch as typeof globalThis.fetch },
+      { execute },
     );
 
     expect(dispatcher?.prelistedSourceIds).toEqual(["slack"]);
   });
 
   it("treats an empty authorized catalog as a valid Chat runtime", async () => {
-    const fetch = vi.fn(async () =>
-      Response.json({
-        ok: true,
-        catalog: { sources: [], actions: [] },
-      } satisfies GoatActionGatewayResponse),
+    const execute = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          catalog: { sources: [], actions: [] },
+        }) satisfies GoatActionGatewayResponse,
     );
 
     const dispatcher = await createGoatOpenCompanyActionDispatcher(context(), {
-      fetch: fetch as typeof globalThis.fetch,
+      execute,
     });
 
     expect(dispatcher).not.toBeNull();
@@ -129,9 +128,12 @@ describe("createGoatOpenCompanyActionDispatcher", () => {
   });
 
   it("fails closed when action approval cannot be evaluated", async () => {
-    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      const request = JSON.parse(String(init?.body)) as GoatActionHostGatewayRequest;
-      return Response.json(
+    const execute = vi.fn(
+      async ({
+        request,
+      }: {
+        request: GoatActionHostGatewayRequest;
+      }): Promise<GoatActionGatewayResponse> =>
         request.operation === "catalog"
           ? {
               ok: true,
@@ -149,10 +151,9 @@ describe("createGoatOpenCompanyActionDispatcher", () => {
               },
             }
           : { ok: false, error: { code: "internal", message: "Unavailable." } },
-      );
-    });
+    );
     const dispatcher = await createGoatOpenCompanyActionDispatcher(context(), {
-      fetch: fetch as typeof globalThis.fetch,
+      execute,
     });
 
     await expect(
@@ -164,13 +165,15 @@ describe("createGoatOpenCompanyActionDispatcher", () => {
     ).rejects.toThrow("Action approval could not be evaluated.");
   });
 
-  it("fails closed when the internal gateway is not configured", async () => {
-    await expect(
-      createGoatOpenCompanyActionDispatcher({
-        ...context(),
-        env: { goatAppUrl: undefined, internalToken: "runner-secret" },
-      }),
-    ).resolves.toBeNull();
+  it("does not require a reachable web origin", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("web unavailable"));
+    const dispatcher = await createGoatOpenCompanyActionDispatcher(context(), {
+      execute: async () => ({ ok: true, catalog: { sources: [], actions: [] } }),
+    });
+
+    expect(dispatcher).not.toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });
 
@@ -178,10 +181,6 @@ function context() {
   return {
     sessionId: "session_1",
     turnId: "turn_1",
-    env: {
-      goatAppUrl: "https://app.example.com",
-      internalToken: "runner-secret",
-    },
     signal: new AbortController().signal,
     approvalContinuation: false,
   };

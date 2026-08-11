@@ -1,31 +1,26 @@
 import {
-  GOAT_ACTION_GATEWAY_TIMEOUT_MS,
   type GoatActionGatewayResponse,
   type GoatActionHostGatewayRequest,
 } from "@opencompany/agent-runtime";
+import { executeGoatActionHostGateway } from "@opencompany/goat-agent/application/persisted-action-gateway";
 import type { ActionDispatcher } from "@opencompany/goat-agent/chat-agent";
 import type { GoatChatActionCatalog, UseActionToolOutput } from "@opencompany/goat-agent/chat-ui";
-import type { RunnerEnv } from "./env";
-
-const GOAT_ACTION_GATEWAY_PATH = "/api/internal/action-gateway";
 
 type GatewayContext = {
   sessionId: string;
   turnId: string;
-  env: Pick<RunnerEnv, "goatAppUrl" | "internalToken">;
   signal: AbortSignal;
   approvalContinuation: boolean;
 };
 
-type GatewayDependencies = { fetch: typeof fetch };
+type GatewayDependencies = { execute: typeof executeGoatActionHostGateway };
 
-const defaultDependencies: GatewayDependencies = { fetch: globalThis.fetch };
+const defaultDependencies: GatewayDependencies = { execute: executeGoatActionHostGateway };
 
 export async function createGoatOpenCompanyActionDispatcher(
   context: GatewayContext,
   dependencies: Partial<GatewayDependencies> = {},
 ): Promise<ActionDispatcher | null> {
-  if (!context.env.goatAppUrl?.trim() || !context.env.internalToken.trim()) return null;
   const resolvedDependencies = { ...defaultDependencies, ...dependencies };
   const response = await callGateway(
     context,
@@ -102,36 +97,12 @@ async function callGateway(
   dependencies: GatewayDependencies,
   request: GoatActionHostGatewayRequest,
 ): Promise<GoatActionGatewayResponse> {
-  const appUrl = context.env.goatAppUrl?.trim();
-  if (!appUrl) return gatewayError("not_configured", "The action gateway is not configured.");
   try {
-    const timeoutSignal = AbortSignal.timeout(GOAT_ACTION_GATEWAY_TIMEOUT_MS);
-    const response = await dependencies.fetch(new URL(GOAT_ACTION_GATEWAY_PATH, appUrl), {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${context.env.internalToken}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(request),
-      signal: AbortSignal.any([context.signal, timeoutSignal]),
-    });
-    return await readGatewayResponse(response);
+    return await dependencies.execute({ request, signal: context.signal });
   } catch (error) {
     if (context.signal.aborted) throw context.signal.reason ?? error;
-    return gatewayError("gateway_error", "The action gateway could not be reached.");
+    return gatewayError("gateway_error", "The action service could not complete the request.");
   }
-}
-
-async function readGatewayResponse(response: Response): Promise<GoatActionGatewayResponse> {
-  try {
-    const value = (await response.json()) as unknown;
-    if (isRecord(value) && typeof value.ok === "boolean") {
-      return value as GoatActionGatewayResponse;
-    }
-  } catch {
-    // Never surface an HTML proxy response or internal URL to the model.
-  }
-  return gatewayError("gateway_error", `The action gateway returned HTTP ${response.status}.`);
 }
 
 function invalidAction(action: string): UseActionToolOutput {
@@ -147,8 +118,4 @@ function invalidAction(action: string): UseActionToolOutput {
 
 function gatewayError(code: string, message: string): GoatActionGatewayResponse {
   return { ok: false, error: { code, message } };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

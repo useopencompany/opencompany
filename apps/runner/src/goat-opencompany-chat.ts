@@ -975,7 +975,6 @@ async function resolveOpenCompanyChatRuntime(input: {
     : await createGoatOpenCompanyActionDispatcher({
         sessionId: session.id,
         turnId: turn.id,
-        env,
         signal,
         approvalContinuation: Boolean(turn.settings.approvalContinuation),
       });
@@ -999,7 +998,6 @@ async function resolveOpenCompanyChatRuntime(input: {
       ? createGoatOpenCompanyBrainCaptureRunner({
           sessionId: session.id,
           turnId: turn.id,
-          env,
           signal,
         })
       : null;

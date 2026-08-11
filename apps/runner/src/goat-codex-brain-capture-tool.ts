@@ -3,6 +3,7 @@ import {
   type GoatCodexBrainCaptureGatewayRequest,
   type GoatCodexBrainCaptureGatewayResponse,
 } from "@opencompany/agent-runtime";
+import { executePersistedGoatBrainCapture } from "@opencompany/goat-agent/application/persisted-brain-capture";
 import {
   SAVE_TO_BRAIN_FALLBACK_CONTENT_DESCRIPTION,
   SAVE_TO_BRAIN_INTEGRATION_ID_DESCRIPTION,
@@ -15,24 +16,26 @@ import type {
   CodexAppServerDynamicToolCall,
   CodexAppServerDynamicToolResponse,
 } from "./codex-app-server";
-import type { RunnerEnv } from "./env";
-
-const GOAT_CODEX_BRAIN_CAPTURE_GATEWAY_PATH = "/api/internal/codex-brain-capture";
-const GOAT_CODEX_BRAIN_CAPTURE_GATEWAY_TIMEOUT_MS = 30_000;
+import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 
 type GoatCodexBrainCaptureToolContext = {
   codexChatSessionId: string;
   codexChatTurnId: string;
-  env: Pick<RunnerEnv, "goatAppUrl" | "internalToken">;
   checkAbort: () => Promise<void>;
 };
 
 type GoatCodexBrainCaptureToolDependencies = {
-  fetch: typeof fetch;
+  execute: (
+    request: GoatCodexBrainCaptureGatewayRequest,
+  ) => Promise<GoatCodexBrainCaptureGatewayResponse>;
 };
 
 const defaultDependencies: GoatCodexBrainCaptureToolDependencies = {
-  fetch: globalThis.fetch,
+  execute: (request) =>
+    executePersistedGoatBrainCapture({
+      request,
+      dependencies: { wakeIngest: async () => wakeGoatBrainIngestWorker() },
+    }),
 };
 
 export function createGoatCodexBrainCaptureDynamicTool(
@@ -101,29 +104,9 @@ async function executeGatewayCall(input: {
   dependencies: GoatCodexBrainCaptureToolDependencies;
   request: GoatCodexBrainCaptureGatewayRequest;
 }): Promise<CodexAppServerDynamicToolResponse> {
-  const appUrl = input.context.env.goatAppUrl?.trim();
-  if (!appUrl) {
-    return modelResponse({
-      ok: false,
-      error: "Brain capture is not configured for this Codex runner.",
-    });
-  }
-
   try {
     await input.context.checkAbort();
-    const response = await input.dependencies.fetch(
-      new URL(GOAT_CODEX_BRAIN_CAPTURE_GATEWAY_PATH, appUrl),
-      {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${input.context.env.internalToken}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(input.request),
-        signal: AbortSignal.timeout(GOAT_CODEX_BRAIN_CAPTURE_GATEWAY_TIMEOUT_MS),
-      },
-    );
-    const result = await readGatewayResponse(response);
+    const result = await input.dependencies.execute(input.request);
     await input.context.checkAbort();
     return modelResponse(result);
   } catch (error) {
@@ -131,8 +114,8 @@ async function executeGatewayCall(input: {
       ok: false,
       error:
         error instanceof Error
-          ? `The Brain capture gateway could not be reached: ${error.message}`
-          : "The Brain capture gateway could not be reached.",
+          ? `The Brain capture service failed: ${error.message}`
+          : "The Brain capture service failed.",
     });
   }
 }
@@ -193,35 +176,6 @@ function captureRequest(
       ...(fallbackContent ? { fallbackContent } : {}),
     },
   };
-}
-
-async function readGatewayResponse(
-  response: Response,
-): Promise<GoatCodexBrainCaptureGatewayResponse> {
-  try {
-    const value = (await response.json()) as unknown;
-    if (isGatewayResponse(value)) return value;
-  } catch {
-    // Fall through to a bounded status-only error; never send an HTML proxy body to the model.
-  }
-  return {
-    ok: false,
-    error: `The Brain capture gateway returned HTTP ${response.status}.`,
-  };
-}
-
-function isGatewayResponse(value: unknown): value is GoatCodexBrainCaptureGatewayResponse {
-  if (!isRecord(value) || typeof value.ok !== "boolean") return false;
-  if (!value.ok) return typeof value.error === "string";
-  return (
-    (value.status === "captured" ||
-      value.status === "already_captured" ||
-      value.status === "paused_by_plan") &&
-    typeof value.draftId === "string" &&
-    typeof value.path === "string" &&
-    typeof value.title === "string" &&
-    (value.message === undefined || typeof value.message === "string")
-  );
 }
 
 function invalidParams(message: string): {
