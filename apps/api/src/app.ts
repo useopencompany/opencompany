@@ -7,7 +7,10 @@ import {
   type Actor,
   CHAT_ATTACHMENT_MAX_BYTES,
   type ChatApplicationService,
+  CoreError,
   type RunEvent,
+  type Task,
+  type TaskApplicationService,
 } from "@opencompany/core";
 import {
   AutoModelRoutingError,
@@ -35,7 +38,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { stream as streamResponse } from "hono/streaming";
 import type { AttachmentUploadService } from "./attachments";
 import type { ApiAuthenticator } from "./auth";
-import type { ChatReadModelService } from "./electric-read-models";
+import type { ReadModelService } from "./electric-read-models";
 import { ApiError, errorResponse } from "./errors";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
 import { PollingRunEventNotifier, type RunEventNotifier } from "./run-event-notifier";
@@ -65,6 +68,7 @@ const CORS_EXPOSE_HEADERS = [
 
 export type CreateApiAppInput = {
   chat: ChatApplicationService;
+  tasks: TaskApplicationService;
   attachments: AttachmentUploadService;
   authenticate: ApiAuthenticator;
   browserOrigins?: readonly string[];
@@ -73,7 +77,7 @@ export type CreateApiAppInput = {
   rateLimiter?: ApiRateLimiter;
   defaultModel?: string;
   now?: () => Date;
-  readModels?: ChatReadModelService;
+  readModels?: ReadModelService;
   resolveAutoModel?: (input: {
     actorId: string;
     workspaceId: string;
@@ -91,6 +95,99 @@ export function createApiApp(input: CreateApiAppInput) {
   const now = input.now ?? (() => new Date());
   const browserOrigins = [...(input.browserOrigins ?? [])];
   const handlers: V1RouteHandlers = {
+    listTasks: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const query = c.req.valid("query");
+      const page = await input.tasks.listTasks(actor, {
+        ...(query.cursor ? { cursor: query.cursor } : {}),
+        ...(query.limit ? { limit: query.limit } : {}),
+        archived: query.archived === "true",
+      });
+      return c.json({ data: page.tasks.map(taskDto), nextCursor: page.nextCursor, meta }, 200);
+    },
+    createTask: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "message", 30);
+      const body = c.req.valid("json");
+      const idempotencyKey = c.req.valid("header")["idempotency-key"];
+      const requestedModel =
+        body.model ??
+        input.defaultModel ??
+        process.env.GOAT_DEFAULT_CHAT_MODEL ??
+        "moonshotai/kimi-k3";
+      let autoResolution: AutoModelRoutingResolution | null = null;
+      if (requestedModel === "auto") {
+        if (body.engine !== "opencompany") {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "Auto model routing is available only for OpenCompany Tasks.",
+          );
+        }
+        if (!input.resolveAutoModel) {
+          throw new ApiError(503, "unavailable", "Task model routing is not configured.", true);
+        }
+        try {
+          autoResolution = await input.resolveAutoModel({
+            actorId: actor.userId,
+            workspaceId: actor.workspaceId,
+            idempotencyKey,
+            prompt: body.goal,
+            attachmentIds: body.attachmentIds ?? [],
+          });
+        } catch (error) {
+          throw autoRoutingApiError(error);
+        }
+        logger.info("Canonical Task model resolved", {
+          event: "opencompany.canonical_task_model_resolved",
+          source: autoResolution.source,
+          selected_model: autoResolution.model,
+        });
+      }
+      const result = await input.tasks.createTask(actor, {
+        idempotencyKey,
+        ...(body.name ? { name: body.name } : {}),
+        goal: body.goal,
+        engine: body.engine,
+        model: autoResolution?.model ?? requestedModel,
+        ...(body.attachmentIds ? { attachmentIds: body.attachmentIds } : {}),
+        source: "manual",
+      });
+      return c.json(
+        {
+          data: {
+            task: taskDto(result.task),
+            messageId: result.messageId,
+            assistantMessageId: result.assistantMessageId,
+            runId: result.runId,
+            transactionId: result.transactionId,
+            replayed: result.idempotentReplay,
+          },
+          meta,
+        },
+        202,
+      );
+    },
+    getTask: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const task = await input.tasks.getTask(actor, c.req.valid("param").taskId);
+      return c.json({ data: taskDto(task), meta }, 200);
+    },
+    updateTask: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.tasks.updateTask(
+        actor,
+        c.req.valid("param").taskId,
+        c.req.valid("json"),
+      );
+      return c.json(
+        { data: { task: taskDto(result.task), transactionId: result.transactionId }, meta },
+        200,
+      );
+    },
     listConversations: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -391,7 +488,16 @@ export function createApiApp(input: CreateApiAppInput) {
       }
       const params = c.req.valid("param");
       const query = c.req.valid("query");
-      if (params.readModel !== "chat-conversations-v1") {
+      if (params.readModel === "tasks-v1") {
+        if (query.conversationId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "conversationId is not valid for this read model.",
+          );
+        }
+        await input.tasks.listTasks(actor, { limit: 1 });
+      } else if (params.readModel !== "chat-conversations-v1") {
         if (!query.conversationId) {
           throw new ApiError(
             400,
@@ -399,7 +505,7 @@ export function createApiApp(input: CreateApiAppInput) {
             "conversationId is required for this read model.",
           );
         }
-        await input.chat.getConversation(actor, query.conversationId, { includeArchived: true });
+        await authorizeConversationRead(input, actor, query.conversationId);
       } else if (query.conversationId) {
         throw new ApiError(
           400,
@@ -628,6 +734,29 @@ function conversationDto(conversation: {
     createdAt: conversation.createdAt.toISOString(),
     updatedAt: conversation.updatedAt.toISOString(),
   };
+}
+
+function taskDto(task: Task) {
+  return {
+    ...task,
+    scheduledFor: task.scheduledFor?.toISOString() ?? null,
+    archivedAt: task.archivedAt?.toISOString() ?? null,
+    createdAt: task.createdAt.toISOString(),
+    updatedAt: task.updatedAt.toISOString(),
+  };
+}
+
+async function authorizeConversationRead(
+  input: Pick<CreateApiAppInput, "chat" | "tasks">,
+  actor: Actor,
+  conversationId: string,
+) {
+  try {
+    await input.chat.getConversation(actor, conversationId, { includeArchived: true });
+  } catch (error) {
+    if (!(error instanceof CoreError) || error.code !== "not_found") throw error;
+    await input.tasks.getTaskByConversation(actor, conversationId);
+  }
 }
 
 function messageDto(message: {

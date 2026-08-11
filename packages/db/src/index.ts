@@ -15,3 +15,4 @@ export * from "./goat-repo-configs";
 export * from "./goat-schema";
 export * from "./legacy-billing-schema";
 export * from "./llm-broker-schema";
+export * from "./task-repository";

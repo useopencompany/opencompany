@@ -1,12 +1,14 @@
 import { serve } from "@hono/node-server";
 import { RedisChatPresentationStream } from "@opencompany/chat-presentation";
-import { ChatApplicationService } from "@opencompany/core";
+import { ChatApplicationService, TaskApplicationService } from "@opencompany/core";
 import {
   PostgresChatAttachmentRepository,
   PostgresChatRepository,
 } from "@opencompany/db/chat-repository";
 import { createPooledDb } from "@opencompany/db/pool";
+import { PostgresTaskRepository } from "@opencompany/db/task-repository";
 import { resolvePersistedAutoModelRouting } from "@opencompany/goat-agent/application/persisted-auto-model-routing";
+import { getGoatAvailableHarnessTools } from "@opencompany/goat-agent/integrations/google-data";
 import {
   registerGoatNodeObservability,
   shutdownGoatNodeObservability,
@@ -16,7 +18,7 @@ import { createApiApp } from "./app";
 import { createAttachmentUploadService } from "./attachments";
 import { createWorkOsApiAuthenticator } from "./auth";
 import { parseBrowserOrigins } from "./browser-origins";
-import { ElectricChatReadModelProxy } from "./electric-read-models";
+import { ElectricReadModelProxy } from "./electric-read-models";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "server" });
@@ -30,11 +32,28 @@ const chat = new ChatApplicationService(
     resolveAttachments: (input) => attachmentRepository.resolve(input),
   }),
 );
+const tasks = new TaskApplicationService(
+  new PostgresTaskRepository(execute, {
+    resolveAttachments: (input) => attachmentRepository.resolve(input),
+    resolveHarness: async ({ actor, command }) => ({
+      schemaVersion: "goat.harness.v1",
+      engine: command.engine,
+      model: command.model,
+      systemPrompt: "",
+      initialUserMessage: command.goal,
+      tools: await getGoatAvailableHarnessTools(actor.userId),
+      skills: [],
+      maxModelSteps: 16,
+      resultMode: "assistant_final",
+    }),
+  }),
+);
 const notifier = new PostgresRunEventNotifier(database.pool);
 const presentation = createPresentationStream();
 const readModels = createElectricReadModels();
 const app = createApiApp({
   chat,
+  tasks,
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),
   authenticate: createWorkOsApiAuthenticator(execute),
   browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),
@@ -96,7 +115,7 @@ function resolvePort() {
 function createElectricReadModels() {
   const electricUrl = process.env.ELECTRIC_URL?.trim();
   if (!electricUrl) return null;
-  return new ElectricChatReadModelProxy({
+  return new ElectricReadModelProxy({
     electricUrl,
     ...(process.env.ELECTRIC_SOURCE_ID?.trim()
       ? { sourceId: process.env.ELECTRIC_SOURCE_ID.trim() }

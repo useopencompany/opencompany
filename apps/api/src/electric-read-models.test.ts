@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import { ElectricChatReadModelProxy } from "./electric-read-models";
+import { ElectricReadModelProxy } from "./electric-read-models";
 
 const actor = {
   userId: "user_1",
   workspaceId: "workspace_1",
   role: "member",
-  permissions: ["chat:read", "chat:write"],
+  permissions: ["chat:read", "chat:write", "task:read", "task:write"],
   authenticationMethod: "session" as const,
 };
 
-describe("Electric Chat read models", () => {
+describe("Electric read models", () => {
   it("selects the physical shape server-side and returns only canonical Message fields", async () => {
     let upstreamUrl = "";
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
@@ -85,7 +85,7 @@ describe("Electric Chat read models", () => {
         },
       );
     });
-    const proxy = new ElectricChatReadModelProxy({
+    const proxy = new ElectricReadModelProxy({
       electricUrl: "https://electric.example.test",
       fetch: fetchMock as typeof fetch,
     });
@@ -170,7 +170,7 @@ describe("Electric Chat read models", () => {
   });
 
   it("requires conversation scope for child read models", async () => {
-    const proxy = new ElectricChatReadModelProxy({
+    const proxy = new ElectricReadModelProxy({
       electricUrl: "https://electric.example.test",
       fetch: vi.fn() as typeof fetch,
     });
@@ -183,8 +183,89 @@ describe("Electric Chat read models", () => {
     ).rejects.toMatchObject({ status: 400, code: "invalid_request" });
   });
 
+  it("scopes the Task shape to the server-owned Workspace and nests canonical outcome fields", async () => {
+    let upstreamUrl = "";
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        upstreamUrl = String(input);
+        return Response.json([
+          {
+            headers: { operation: "insert" },
+            key: '"task_1"',
+            value: {
+              id: "task_1",
+              display_id: "TASK-1",
+              name: "Launch brief",
+              goal: "Prepare the launch brief",
+              conversation_id: "conversation_task_1",
+              status: "succeeded",
+              source: "manual",
+              engine: "opencompany",
+              model: "provider/model",
+              workflow_id: null,
+              schedule_id: null,
+              scheduled_for: null,
+              result: "Ready",
+              error: null,
+              reported_status: "done",
+              outcome_comment: "Reviewed",
+              archived_at: null,
+              created_at: "2026-08-11 10:00:00+00",
+              updated_at: "2026-08-11 10:01:00+00",
+              actor_id: "must-not-cross",
+              workspace_id: "must-not-cross",
+            },
+          },
+        ]);
+      }) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "tasks-v1",
+      requestUrl: new URL(
+        "https://api.example.test/v1/read-models/tasks-v1?table=goat.users&where=true",
+      ),
+    });
+    const requestedUrl = new URL(upstreamUrl);
+    expect(requestedUrl.searchParams.get("table")).toBe("goat.task_read_model_v1");
+    expect(requestedUrl.searchParams.get("where")).toContain('"workspace_id" = $2');
+    expect(requestedUrl.searchParams.get("params[1]")).toBe("user_1");
+    expect(requestedUrl.searchParams.get("params[2]")).toBe("workspace_1");
+    expect(await response.json()).toEqual([
+      {
+        headers: { operation: "insert" },
+        key: '"task_1"',
+        value: {
+          id: "task_1",
+          displayId: "TASK-1",
+          name: "Launch brief",
+          goal: "Prepare the launch brief",
+          conversationId: "conversation_task_1",
+          status: "succeeded",
+          source: "manual",
+          engine: "opencompany",
+          model: "provider/model",
+          workflowId: null,
+          scheduleId: null,
+          scheduledFor: null,
+          outcome: {
+            result: "Ready",
+            error: null,
+            reportedStatus: "done",
+            comment: "Reviewed",
+          },
+          archivedAt: null,
+          createdAt: "2026-08-11T10:00:00.000Z",
+          updatedAt: "2026-08-11T10:01:00.000Z",
+        },
+      },
+    ]);
+  });
+
   it("does not expose upstream Electric diagnostics", async () => {
-    const proxy = new ElectricChatReadModelProxy({
+    const proxy = new ElectricReadModelProxy({
       electricUrl: "https://electric.example.test",
       sourceId: "source_1",
       sourceSecret: "not-for-the-browser",
@@ -207,7 +288,7 @@ describe("Electric Chat read models", () => {
   });
 
   it("preserves recovery metadata without returning an upstream 409 body", async () => {
-    const proxy = new ElectricChatReadModelProxy({
+    const proxy = new ElectricReadModelProxy({
       electricUrl: "https://electric.example.test",
       fetch: vi.fn(
         async () =>
@@ -230,7 +311,7 @@ describe("Electric Chat read models", () => {
   });
 
   it("preserves a successful no-change long poll and its Electric cursor headers", async () => {
-    const proxy = new ElectricChatReadModelProxy({
+    const proxy = new ElectricReadModelProxy({
       electricUrl: "https://electric.example.test",
       fetch: vi.fn(
         async () =>

@@ -490,6 +490,7 @@ function task(harnessSpec: GoatHarnessSpec): GoatTask {
     userWorkosId: "user_1",
     workspaceId: "workspace_1",
     prompt: "Ship the requested change.",
+    source: "workflow",
     model: harnessSpec.model,
     sessionId: "goat_chat_task_1",
     scheduleId: null,

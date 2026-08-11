@@ -27,6 +27,17 @@ export const RunStatusSchema = z.enum([
   "failed",
   "canceled",
 ]);
+export const TaskStatusSchema = z.enum([
+  "queued",
+  "running",
+  "waiting",
+  "blocked",
+  "succeeded",
+  "failed",
+  "canceled",
+  "archived",
+]);
+export const TaskSourceSchema = z.enum(["manual", "workflow", "schedule", "agent"]);
 
 export const ProtocolMetadataSchema = z
   .object({ apiVersion: z.literal(API_VERSION), protocolVersion: z.literal(PROTOCOL_VERSION) })
@@ -84,6 +95,38 @@ export const RunSchema = z
   .strict()
   .openapi("Run");
 
+export const TaskOutcomeSchema = z
+  .object({
+    result: z.string().nullable(),
+    error: z.string().nullable(),
+    reportedStatus: z.enum(["done", "needs_attention"]).nullable(),
+    comment: z.string().nullable(),
+  })
+  .strict()
+  .openapi("TaskOutcome");
+
+export const TaskSchema = z
+  .object({
+    id: ResourceIdSchema,
+    displayId: z.string().min(1).max(64),
+    name: z.string().min(1).max(160),
+    goal: z.string().min(1).max(10_000),
+    conversationId: ResourceIdSchema,
+    status: TaskStatusSchema,
+    source: TaskSourceSchema,
+    engine: ChatEngineSchema,
+    model: z.string().min(1).max(256),
+    workflowId: ResourceIdSchema.nullable(),
+    scheduleId: ResourceIdSchema.nullable(),
+    scheduledFor: TimestampSchema.nullable(),
+    outcome: TaskOutcomeSchema,
+    archivedAt: TimestampSchema.nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("Task");
+
 // Electric read models are versioned protocol resources. Their implementation may project from
 // existing physical tables, but clients only select one of these fixed names and receive canonical
 // field names through the shared collection adapter.
@@ -91,6 +134,11 @@ export const ChatReadModelSchema = z.enum([
   "chat-conversations-v1",
   "chat-messages-v1",
   "chat-runs-v1",
+]);
+export const TaskReadModelNameSchema = z.literal("tasks-v1");
+export const ReadModelSchema = z.enum([
+  ...ChatReadModelSchema.options,
+  TaskReadModelNameSchema.value,
 ]);
 
 export const ChatPresentationAttachmentSchema = z
@@ -151,6 +199,8 @@ export const RunReadModelSchema = z
   .strict()
   .openapi("RunReadModelV1");
 
+export const TaskReadModelSchema = TaskSchema.openapi("TaskReadModelV1");
+
 export const ErrorCodeSchema = z.enum([
   "authentication_required",
   "forbidden",
@@ -187,6 +237,61 @@ export const ConversationPageSchema = z
   })
   .strict()
   .openapi("ConversationPage");
+
+export const TaskPageSchema = z
+  .object({
+    data: z.array(TaskSchema),
+    nextCursor: z.string().nullable(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("TaskPage");
+
+export const TaskEnvelopeSchema = z
+  .object({ data: TaskSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("TaskEnvelope");
+
+export const CreateTaskBodySchema = z
+  .object({
+    name: z.string().min(1).max(160).optional(),
+    goal: z.string().min(1).max(10_000),
+    engine: ChatEngineSchema,
+    model: z.string().min(1).max(256).optional(),
+    attachmentIds: z.array(ResourceIdSchema).max(5).optional(),
+  })
+  .strict()
+  .openapi("CreateTaskBody");
+
+export const CreateTaskEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        task: TaskSchema,
+        messageId: ResourceIdSchema,
+        assistantMessageId: ResourceIdSchema,
+        runId: ResourceIdSchema,
+        transactionId: z.string().regex(/^[0-9]+$/u),
+        replayed: z.boolean(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("CreateTaskEnvelope");
+
+export const UpdateTaskBodySchema = z
+  .object({ archived: z.boolean() })
+  .strict()
+  .openapi("UpdateTaskBody");
+
+export const UpdateTaskEnvelopeSchema = z
+  .object({
+    data: z.object({ task: TaskSchema, transactionId: z.string().regex(/^[0-9]+$/u) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("UpdateTaskEnvelope");
 
 export const ConversationEnvelopeSchema = z
   .object({ data: ConversationSchema, meta: ProtocolMetadataSchema })
@@ -347,9 +452,14 @@ export type UpdateConversationBody = z.infer<typeof UpdateConversationBodySchema
 export type MessageDto = z.infer<typeof MessageSchema>;
 export type RunDto = z.infer<typeof RunSchema>;
 export type ChatReadModel = z.infer<typeof ChatReadModelSchema>;
+export type ReadModel = z.infer<typeof ReadModelSchema>;
+export type TaskDto = z.infer<typeof TaskSchema>;
+export type TaskReadModel = z.infer<typeof TaskReadModelSchema>;
 export type ConversationReadModel = z.infer<typeof ConversationReadModelSchema>;
 export type MessageReadModel = z.infer<typeof MessageReadModelSchema>;
 export type RunReadModel = z.infer<typeof RunReadModelSchema>;
 export type AttachmentUploadEnvelope = z.infer<typeof AttachmentUploadEnvelopeSchema>;
 export type CreateMessageBody = z.infer<typeof CreateMessageBodySchema>;
+export type CreateTaskBody = z.infer<typeof CreateTaskBodySchema>;
+export type UpdateTaskBody = z.infer<typeof UpdateTaskBodySchema>;
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelopeSchema>;

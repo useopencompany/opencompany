@@ -11,6 +11,9 @@ import {
   type RunAttemptStatus,
   type RunEventType,
   type RunStatus,
+  TASK_SOURCES,
+  type TaskSource,
+  type TaskStatus,
 } from "@opencompany/core";
 import type { EncryptedPayload } from "@opencompany/crypto";
 import { relations, type SQL, sql } from "drizzle-orm";
@@ -3019,6 +3022,7 @@ export const goatTasks = goat.table(
       onDelete: "set null",
     }),
     prompt: text("prompt").notNull(),
+    source: text("source").$type<TaskSource>().notNull().default("manual"),
     model: text("model").$type<AgentModelId>().notNull(),
     sessionId: text("session_id").references(() => goatChatSessions.id, {
       onDelete: "set null",
@@ -3079,6 +3083,13 @@ export const goatTasks = goat.table(
     statusCheck: check(
       "goat_tasks_status_check",
       sql`${table.status} IN ('queued', 'running', 'succeeded', 'failed', 'canceled')`,
+    ),
+    sourceCheck: check(
+      "goat_tasks_source_check",
+      sql`${table.source} IN (${sql.join(
+        TASK_SOURCES.map((source) => sql`${source}`),
+        sql`, `,
+      )})`,
     ),
     stageCheck: check(
       "goat_tasks_stage_check",
@@ -4069,6 +4080,47 @@ export const goatChatCommandIdempotency = goat.table(
   }),
 );
 
+export const goatTaskCommandIdempotency = goat.table(
+  "task_command_idempotency",
+  {
+    commandId: text("command_id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    taskId: text("task_id").notNull(),
+    conversationId: text("conversation_id").notNull(),
+    messageId: text("message_id").notNull(),
+    assistantMessageId: text("assistant_message_id").notNull(),
+    runtimeId: text("runtime_id").notNull(),
+    runId: text("run_id").notNull(),
+    transactionId: bigint("transaction_id", { mode: "number" })
+      .notNull()
+      .default(sql`pg_current_xact_id()::xid::text::bigint`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    touchedAt: timestamp("touched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    actorKeyIdx: uniqueIndex("goat_task_command_idempotency_actor_key_idx").on(
+      table.userWorkosId,
+      table.workspaceId,
+      table.idempotencyKey,
+    ),
+    requestHashCheck: check(
+      "goat_task_command_idempotency_request_hash_check",
+      sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    keyLengthCheck: check(
+      "goat_task_command_idempotency_key_length_check",
+      sql`length(${table.idempotencyKey}) BETWEEN 1 AND 200`,
+    ),
+  }),
+);
+
 export const goatRunAttempts = goat.table(
   "run_attempts",
   {
@@ -4260,6 +4312,48 @@ export const goatRunReadModelV1 = goat.table(
     actorWorkspaceConversationIdx: index(
       "goat_run_read_model_v1_actor_workspace_conversation_idx",
     ).on(table.actorId, table.workspaceId, table.conversationId, table.createdAt),
+  }),
+);
+
+export const goatTaskReadModelV1 = goat.table(
+  "task_read_model_v1",
+  {
+    id: text("id").primaryKey(),
+    actorId: text("actor_id").notNull(),
+    workspaceId: text("workspace_id"),
+    displayId: text("display_id").notNull(),
+    name: text("name").notNull(),
+    goal: text("goal").notNull(),
+    conversationId: text("conversation_id").notNull(),
+    status: text("status").$type<TaskStatus>().notNull(),
+    source: text("source").$type<TaskSource>().notNull(),
+    engine: text("engine").$type<GoatChatEngine>().notNull(),
+    model: text("model").notNull(),
+    workflowId: text("workflow_id"),
+    scheduleId: text("schedule_id"),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }),
+    result: text("result"),
+    error: text("error"),
+    reportedStatus: text("reported_status").$type<GoatTaskReportedOutcome>(),
+    outcomeComment: text("outcome_comment"),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    workspaceArchivedUpdatedIdx: index("goat_task_read_model_v1_workspace_archived_updated_idx").on(
+      table.workspaceId,
+      table.archivedAt,
+      table.updatedAt,
+    ),
+    actorArchivedUpdatedIdx: index("goat_task_read_model_v1_actor_archived_updated_idx").on(
+      table.actorId,
+      table.archivedAt,
+      table.updatedAt,
+    ),
+    conversationIdx: uniqueIndex("goat_task_read_model_v1_conversation_idx").on(
+      table.conversationId,
+    ),
   }),
 );
 

@@ -7,6 +7,10 @@ import {
   ChatApplicationService,
   type ChatRepository,
   type CreateMessageCommand,
+  type CreateTaskCommand,
+  type Task,
+  TaskApplicationService,
+  type TaskRepository,
 } from "@opencompany/core";
 import { describe, expect, it, vi } from "vitest";
 import { createApiApp } from "./app";
@@ -18,7 +22,7 @@ const actor: Actor = {
   userId: "user_1",
   workspaceId: "workspace_1",
   role: "admin",
-  permissions: ["chat:read", "chat:write"],
+  permissions: ["chat:read", "chat:write", "task:read", "task:write"],
   authenticationMethod: "session",
 };
 const createdAt = new Date("2026-08-10T20:00:00.000Z");
@@ -50,6 +54,7 @@ describe("canonical Hono API", () => {
     const repository = fakeRepository();
     const unauthenticated = createApiApp({
       chat: new ChatApplicationService(repository),
+      tasks: new TaskApplicationService(fakeTaskRepository()),
       attachments: fakeAttachments(),
       authenticate: async () => {
         throw new ApiError(401, "authentication_required", "Authentication required.");
@@ -74,6 +79,58 @@ describe("canonical Hono API", () => {
     await expect(invalid.json()).resolves.toMatchObject({
       error: { code: "invalid_request", retryable: false },
       meta: { apiVersion: "v1" },
+    });
+  });
+
+  it("serves the canonical Task contract without exposing persistence vocabulary", async () => {
+    const tasks = fakeTaskRepository();
+    const app = testApp(fakeRepository(), {
+      tasks: new TaskApplicationService(tasks),
+      defaultModel: "moonshotai/kimi-k3",
+    });
+    const created = await app.request("/v1/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "task-create-1" },
+      body: JSON.stringify({ goal: "Prepare a launch brief", engine: "opencompany" }),
+    });
+
+    expect(created.status).toBe(202);
+    await expect(created.json()).resolves.toMatchObject({
+      data: {
+        task: {
+          id: "task_1",
+          conversationId: "conversation_task_1",
+          status: "queued",
+          source: "manual",
+        },
+        messageId: "message_task_user_1",
+        runId: "run_task_1",
+        transactionId: "43",
+        replayed: false,
+      },
+      meta: { apiVersion: "v1" },
+    });
+    expect(tasks.lastCommand).toMatchObject({
+      idempotencyKey: "task-create-1",
+      goal: "Prepare a launch brief",
+      engine: "opencompany",
+      model: "moonshotai/kimi-k3",
+      source: "manual",
+    });
+
+    const listed = await app.request("/v1/tasks?archived=false");
+    expect(listed.status).toBe(200);
+    expect(JSON.stringify(await listed.json())).not.toMatch(
+      /workos|session_id|harness|lease|goat_/iu,
+    );
+    const archived = await app.request("/v1/tasks/task_1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived: true }),
+    });
+    expect(archived.status).toBe(200);
+    await expect(archived.json()).resolves.toMatchObject({
+      data: { task: { id: "task_1", status: "archived" }, transactionId: "44" },
     });
   });
 
@@ -487,6 +544,26 @@ describe("canonical Hono API", () => {
     expect(stream).not.toHaveBeenCalled();
   });
 
+  it("authorizes canonical Message and Run read models through their owning Task", async () => {
+    const repository = fakeRepository();
+    repository.getConversation = vi.fn(async () => null);
+    const stream = vi.fn(async () => Response.json([]));
+    const app = testApp(repository, { readModels: { stream } });
+
+    const response = await app.request(
+      "/v1/read-models/chat-messages-v1?conversationId=conversation_task_1",
+    );
+
+    expect(response.status).toBe(200);
+    expect(stream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor,
+        readModel: "chat-messages-v1",
+        conversationId: "conversation_task_1",
+      }),
+    );
+  });
+
   it("uploads a private attachment through the typed multipart operation", async () => {
     const uploaded: File[] = [];
     const attachments: AttachmentUploadService = {
@@ -566,6 +643,7 @@ function testApp(
 ) {
   return createApiApp({
     chat: new ChatApplicationService(repository),
+    tasks: new TaskApplicationService(fakeTaskRepository()),
     attachments: fakeAttachments(),
     authenticate: async () => ({ actor }),
     defaultModel: "provider/default",
@@ -606,6 +684,59 @@ function fakeAttachments(): AttachmentUploadService {
 }
 
 type FakeRepository = ChatRepository & { lastCommand: CreateMessageCommand | null };
+
+type FakeTaskRepository = TaskRepository & { lastCommand: CreateTaskCommand | null };
+
+function fakeTaskRepository(): FakeTaskRepository {
+  const repository: FakeTaskRepository = {
+    lastCommand: null,
+    listTasks: async () => ({ tasks: [fakeTask()], nextCursor: null }),
+    getTask: async ({ taskId }) => (taskId === "task_1" ? fakeTask() : null),
+    getTaskByConversation: async ({ conversationId }) =>
+      conversationId === "conversation_task_1" ? fakeTask() : null,
+    createTaskAndRun: async ({ command }) => {
+      repository.lastCommand = command;
+      return {
+        task: fakeTask({
+          name: command.name ?? "Task",
+          goal: command.goal,
+          source: command.source,
+          engine: command.engine,
+          model: command.model,
+        }),
+        messageId: "message_task_user_1",
+        assistantMessageId: "message_task_assistant_1",
+        runId: "run_task_1",
+        transactionId: "43",
+        idempotentReplay: false,
+      };
+    },
+    updateTask: async () => ({ task: fakeTask({ status: "archived" }), transactionId: "44" }),
+  };
+  return repository;
+}
+
+function fakeTask(overrides: Partial<Task> = {}): Task {
+  return {
+    id: "task_1",
+    displayId: "TASK-1",
+    name: "Prepare the launch",
+    goal: "Prepare a launch brief",
+    conversationId: "conversation_task_1",
+    status: "queued" as const,
+    source: "manual" as const,
+    engine: "opencompany" as const,
+    model: "provider/default",
+    workflowId: null,
+    scheduleId: null,
+    scheduledFor: null,
+    outcome: { result: null, error: null, reportedStatus: null, comment: null },
+    archivedAt: null,
+    createdAt,
+    updatedAt: createdAt,
+    ...overrides,
+  };
+}
 
 function fakeRepository(): FakeRepository {
   const repository: FakeRepository = {

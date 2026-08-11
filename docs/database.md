@@ -36,3 +36,17 @@ coupling and journal consistency.
 Compatibility tables must not be dropped as incidental cleanup. Retiring their schemas requires a
 separate, explicitly destructive migration plan with production data verification and rollback
 analysis.
+
+## Canonical execution projections
+
+Canonical Chat and Task repositories map the public `Conversation`, `Message`, `Run`, `Attempt`,
+`Event`, and `Task` vocabulary onto retained physical Goat tables. Keep that mapping inside
+`packages/db/src/chat-repository.ts` and `packages/db/src/task-repository.ts`; API and client code
+must not depend on physical table or lease names.
+
+The `*_read_model_v1` tables are derived, API-owned Electric projections. Postgres source rows stay
+authoritative, and every Electric shape must use a fixed server-owned table, columns, predicate,
+Actor, and Workspace. Adding or changing a projection requires an additive migration, a backfill,
+and authorization tests. Historical sessionless Tasks are intentionally excluded from the
+canonical Task projection until the bounded compatibility migration in issue #1190; do not delete
+their legacy history while that adapter exists.
