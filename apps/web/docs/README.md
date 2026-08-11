@@ -25,9 +25,8 @@ OpenCompany has three LLM paths:
    runner-hosted dynamic tools. Both Codex and Claude Code chats expose the same externally
    read-only action catalog (`list_actions`/`use_action`) from the policy-driven action gateway —
    including metered managed reads when enabled. Codex uses app-server dynamic tools, while Claude
-   Code uses a turn-scoped internal MCP server
-   (`apps/web/app/api/internal/claude-actions`) since that is Claude Code's only custom-tool
-   mechanism. Brain tools remain Codex-only for now.
+   Code uses the runner's turn-scoped streamable-HTTP MCP server since that is Claude Code's only
+   custom-tool mechanism. Brain tools remain Codex-only for now.
 
 ## High-Level Flow
 
@@ -436,10 +435,10 @@ New Cloud Codex chats pin the user's active Brain and workspace on `goat.codex_c
 together with the host-tool contract version used to start the Codex thread. On `thread/start`, the
 runner registers `goat_brain`, `save_to_brain`, `list_actions`, and `use_action` through app-server's
 experimental `dynamicTools` API. The read-only `goat_brain` tool is handled directly by the runner.
-`save_to_brain` calls a private Goat gateway with `RUNNER_INTERNAL_TOKEN`, rechecks the running turn
-and current Brain access, then uses the same immediate-inbox-draft and background-curation pipeline
-as main chat. Its content-derived idempotency key lets a recovered Codex turn reuse the same
-completed capture.
+`save_to_brain` invokes the persisted Brain capture service in the runner process, rechecks the
+running turn and current Brain access, then uses the same immediate-inbox-draft and
+background-curation pipeline as main chat. Its content-derived idempotency key lets a recovered
+Codex turn reuse the same completed capture.
 
 The harness-neutral action gateway derives the user and workspace from the running turn, rechecks
 current workspace membership, connections, permissions, and action availability on every request,
@@ -452,25 +451,25 @@ effects. Provider credentials, the internal bearer, and database access never en
 `packages/goat-agent/src/actions/service.ts` is the common discovery/execution and governance
 service used by the AI SDK, Codex, and MCP adapters. Tool names, descriptions, input schemas,
 annotations, and structured gateway responses live once in the dependency-light
-`@opencompany/agent-runtime` contract. The `/api/internal/action-gateway` transport uses neutral
-session, turn, and invocation fields; the old `/api/internal/codex-actions` path only translates the
-previous field names during deploy overlap. Durable `goat.action_turns` rows atomically enforce the
+`@opencompany/agent-runtime` contract. The runner composes the service in-process; the old
+`/api/internal/action-gateway` and `/api/internal/codex-actions` transports remain rollback adapters
+only until the final route-deletion change. Durable `goat.action_turns` rows atomically enforce the
 16-call budget and discovery-before-execution rule, suppress repeated invocation dispatch, and
-persist metered quote totals and async-run claims across HTTP requests, process recovery, and app
-instances.
+persist metered quote totals and async-run claims across process recovery and app instances.
 
 Claude Code chats reach the same gateway (`executeGoatActionGateway`) and the same read-only
 policy, but through a different transport: the `claude` CLI runs entirely inside the sandbox and
 only supports custom tools over MCP, so there is no host-side app-server relay to keep credentials
 out of E2B the way Codex does. Instead, `apps/runner/src/goat-claude-code-chat.ts` mints a
-short-lived, HMAC-signed ticket bound to that one `codexChatSessionId`/`codexChatTurnId`
+short-lived, HMAC-signed v2 ticket bound to that one session/Run/Attempt/lease
 (`packages/agent-runtime/src/goat-claude-action-gateway-auth.ts`, signed with
 `RUNNER_INTERNAL_TOKEN` as the HMAC key) and writes it into an `--mcp-config` file pointing at
-`apps/web/app/api/internal/claude-actions`, a streamable-HTTP MCP server
-(`apps/web/lib/claude-actions.ts`) that verifies the ticket instead of the raw bearer token. The
-ticket only proves "mint this turn's action calls"; it expires with the turn and cannot reach any
-other internal route, unlike `RUNNER_INTERNAL_TOKEN` itself, which is deliberately never placed in
-the Claude Code sandbox. The MCP adapter derives a retry-stable invocation id from the turn,
+`apps/runner`'s `/internal/goat/claude-actions` streamable-HTTP MCP server. The runner verifies the
+ticket and re-derives the active engine, host contract, Attempt, exact live lease, current workspace
+membership, Actor, and workspace from Postgres on every request and tool operation. The ticket
+expires with the turn and cannot reach any other internal route; Actor/workspace identifiers,
+provider credentials, and `RUNNER_INTERNAL_TOKEN` are deliberately never placed in the Claude Code
+sandbox. The MCP adapter derives a retry-stable invocation id from the turn,
 transport session, and JSON-RPC request id, so independent HTTP calls are distinct and retries keep
 the same identity. It has no request-local authoritative counter; call 17 is rejected by the shared
 service exactly as it is for Codex.

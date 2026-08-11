@@ -53,6 +53,8 @@ function runnerPublicBaseUrl() {
 export async function requestGoatChatArtifactPublication(input: {
   codexChatSessionId: string;
   codexChatTurnId: string;
+  attemptId?: string;
+  leaseId?: string;
   toolCallId: string;
   arguments: unknown;
   signal?: AbortSignal;
@@ -78,6 +80,7 @@ export async function requestGoatChatArtifactPublication(input: {
       body: JSON.stringify({
         codexChatSessionId: input.codexChatSessionId,
         codexChatTurnId: input.codexChatTurnId,
+        ...(input.attemptId ? { attemptId: input.attemptId, leaseId: input.leaseId } : {}),
         toolCallId: input.toolCallId,
         arguments: input.arguments,
       }),

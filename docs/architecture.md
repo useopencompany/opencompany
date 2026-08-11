@@ -7,12 +7,14 @@ execution. Unmigrated product domains continue to use the existing web/runner bo
 ## Runtime boundaries
 
 - `apps/web` owns the Next.js UI, authenticated server actions for unmigrated domains, public
-  integration callbacks/webhooks, the same-origin `/v1` proxy, and authenticated host-tool
-  gateways called by the runner. Its ordinary-Chat compatibility route is rollback-only.
+  integration callbacks/webhooks, the same-origin `/v1` proxy, and temporary host-tool rollback
+  adapters. Its ordinary-Chat compatibility route is rollback-only.
 - `apps/api` owns the versioned Hono `/v1` Chat API, WorkOS session/bearer authentication,
-  authorization, OpenAPI, semantic SSE, and authorized Electric read-model proxying.
-- `apps/runner` owns durable chat/task turns, cloud coding sandboxes, Brain ingestion and import,
-  integration polling/flush, schedules, dictation transport, billing usage, and the LLM broker.
+  authorization, canonical Auto model resolution, OpenAPI, semantic SSE, and authorized Electric
+  read-model proxying.
+- `apps/runner` owns durable chat/task turns, cloud coding sandboxes, in-process execution
+  capabilities, the ticketed Claude MCP transport, Brain ingestion and import, integration
+  polling/flush, schedules, dictation transport, billing usage, and the LLM broker.
 - `apps/stripe-webhooks` is a local-only Stripe CLI process that forwards Goat billing events.
 - `apps/marketing` is released independently from the product.
 
@@ -42,6 +44,6 @@ persistent coding sandboxes; Vercel Sandbox supports browser-capable foreground 
 ## Integrations and security
 
 WorkOS sessions authenticate the web app. OAuth state and integration credentials are signed/encrypted at
-the application boundary. The runner is private behind `RUNNER_INTERNAL_TOKEN` and allowlisted Goat
-origins. Provider keys remain server-side; sandboxed CLIs use short-lived broker credentials or
-workspace-scoped injected auth.
+the application boundary. General runner routes remain private behind `RUNNER_INTERNAL_TOKEN`; its
+public sandbox/browser transports accept only scoped signed capabilities. Provider keys remain
+server-side; sandboxed CLIs use short-lived broker credentials or workspace-scoped injected auth.

@@ -1,3 +1,7 @@
+import {
+  GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
+  verifyGoatClaudeActionGatewayTicket,
+} from "@opencompany/agent-runtime";
 import type {
   GoatCodexChatSession,
   GoatCodexChatTurn,
@@ -141,6 +145,18 @@ vi.mock("./goat-task-turn", () => ({
   finalizeGoatTaskResult: taskMocks.finalizeGoatTaskResult,
   markGoatTaskTurnRunning: taskMocks.markGoatTaskTurnRunning,
 }));
+
+vi.mock("./infisical-sandbox-auth", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./infisical-sandbox-auth")>();
+  return {
+    ...original,
+    reconcileGoatInfisicalSandboxAuth: vi.fn(async () => ({
+      available: false,
+      promptFragment: "",
+      redactionValues: [],
+    })),
+  };
+});
 
 vi.mock("./repo-bootstrap", () => ({
   loadGoatRepositoryBootstrap: repoMocks.loadGoatRepositoryBootstrap,
@@ -294,6 +310,45 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
     skillMocks.materializeClaudeSkillSnapshotsForSession.mockResolvedValue(undefined);
     taskMocks.buildGoatTaskTerminalProjection.mockReturnValue({ taskId: "goat_task_1" });
     taskMocks.markGoatTaskTurnRunning.mockResolvedValue(undefined);
+  });
+
+  it("configures Claude MCP against the runner with an attempt-and-lease capability", async () => {
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+
+    await runGoatClaudeCodeChatTurn({
+      turn: claudeTurn(),
+      session: claudeSession({
+        workspaceId: "workspace_1",
+        hostToolContractVersion: GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
+      }),
+      canonicalAttemptId: "attempt_1",
+      env: env({ runnerPublicUrl: "https://runner.example.com" }),
+    });
+
+    const writeCalls = sandbox.files.write.mock.calls as unknown as Array<[string, string]>;
+    const configCall = writeCalls.find(([path]) => path.includes("/mcp-"));
+    expect(configCall).toBeDefined();
+    const config = JSON.parse(String(configCall?.[1])) as {
+      mcpServers: {
+        opencompany_actions: { url: string; headers: { "x-goat-action-ticket": string } };
+      };
+    };
+    expect(config.mcpServers.opencompany_actions.url).toBe(
+      "https://runner.example.com/internal/goat/claude-actions",
+    );
+    expect(
+      verifyGoatClaudeActionGatewayTicket({
+        ticket: config.mcpServers.opencompany_actions.headers["x-goat-action-ticket"],
+        secret: "internal",
+      }),
+    ).toMatchObject({
+      v: 2,
+      codexChatSessionId: "goat_codex_chat_1",
+      codexChatTurnId: "goat_codex_turn_1",
+      attemptId: "attempt_1",
+      leaseId: "lease_1",
+    });
   });
 
   it("caps finished durable task sandbox parking at 5 minutes", async () => {

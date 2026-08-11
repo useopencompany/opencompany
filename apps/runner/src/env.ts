@@ -17,13 +17,13 @@ export type RunnerEnv = {
   openaiApiKey?: string | undefined;
   goatDictationRealtimeModel?: string | undefined;
   goatDictationFinalModel?: string | undefined;
+  // Browser/sandbox-reachable runner origin. Render supplies RENDER_EXTERNAL_URL in hosted
+  // services; RUNNER_PUBLIC_URL is the explicit local and non-Render override.
+  runnerPublicUrl?: string | undefined;
   // Wildcard preview hostname routed to this runner, for example preview.goat.example.com.
   // Capability labels are prepended to this domain. A port may be included for local development.
   previewBaseDomain?: string | undefined;
   previewProtocol?: "http" | "https" | undefined;
-  // Public Goat origin used only by the runner host to call private, bearer-protected
-  // endpoints. Integration credentials and this bearer token never enter Codex sandboxes.
-  goatAppUrl?: string | undefined;
   exaApiKey: string | undefined;
   goatBrowserEnabled: boolean;
   // Google OAuth client, shared by the Gmail, Google Calendar, and Google Drive integrations. The runner
@@ -73,9 +73,9 @@ export function loadEnv(): RunnerEnv {
     openaiApiKey: optionalEnv("OPENAI_API_KEY"),
     goatDictationRealtimeModel: optionalEnv("GOAT_DICTATION_REALTIME_MODEL"),
     goatDictationFinalModel: optionalEnv("GOAT_DICTATION_FINAL_MODEL"),
+    runnerPublicUrl: optionalEnv("RUNNER_PUBLIC_URL") ?? optionalEnv("RENDER_EXTERNAL_URL"),
     previewBaseDomain: optionalPreviewBaseDomainEnv(),
     previewProtocol: optionalPreviewProtocolEnv(),
-    goatAppUrl: optionalEnv("GOAT_NEXT_PUBLIC_APP_URL"),
     exaApiKey: optionalEnv("EXA_API_KEY"),
     goatBrowserEnabled: optionalBooleanEnv("RUNNER_GOAT_BROWSER_ENABLED", false),
     googleOAuthClientId: optionalEnv("GOOGLE_OAUTH_CLIENT_ID"),

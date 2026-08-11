@@ -71,7 +71,7 @@ describe("canonical Chat transport", () => {
   beforeEach(() => vi.stubGlobal("sessionStorage", new MemoryStorage()));
   afterEach(() => vi.unstubAllGlobals());
 
-  it("resolves Auto on the authenticated web host before creating the canonical Run", async () => {
+  it("sends Auto to the canonical API and adopts its authoritative model", async () => {
     const requests: Array<{ path: string; body?: Record<string, unknown> }> = [];
     const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       const url = requestUrl(input);
@@ -79,9 +79,6 @@ describe("canonical Chat transport", () => {
         ? (JSON.parse(String(init.body)) as Record<string, unknown>)
         : undefined;
       requests.push({ path: url.pathname, ...(body ? { body } : {}) });
-      if (url.pathname === "/api/chat/model-route") {
-        return Response.json({ model: "moonshotai/kimi-k2.6", tier: "fast" });
-      }
       if (url.pathname === "/v1/messages") {
         return Response.json(
           {
@@ -92,6 +89,7 @@ describe("canonical Chat transport", () => {
               runId: "run_auto",
               transactionId: "43",
               replayed: false,
+              model: "moonshotai/kimi-k2.6",
             },
             meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
           },
@@ -113,7 +111,7 @@ describe("canonical Chat transport", () => {
       fetch: fetchMock as typeof fetch,
     });
 
-    await collect(
+    const chunks = await collect(
       await transport.sendMessages({
         trigger: "submit-message",
         chatId: "conversation_auto",
@@ -131,20 +129,16 @@ describe("canonical Chat transport", () => {
       }),
     );
 
-    expect(requests.slice(0, 2)).toEqual([
-      {
-        path: "/api/chat/model-route",
-        body: {
-          clientMessageId: "message_auto",
-          prompt: "Route this",
-          attachmentIds: ["attachment_auto"],
-        },
-      },
+    expect(requests.slice(0, 1)).toEqual([
       {
         path: "/v1/messages",
-        body: expect.objectContaining({ model: "moonshotai/kimi-k2.6" }),
+        body: expect.objectContaining({ model: "auto" }),
       },
     ]);
+    expect(chunks[0]).toMatchObject({
+      type: "start",
+      messageMetadata: { model: "moonshotai/kimi-k2.6" },
+    });
   });
 
   it("binds the default browser fetch while routing and streaming a canonical Run", async () => {
@@ -153,9 +147,6 @@ describe("canonical Chat transport", () => {
       if (this !== globalThis) throw new TypeError("Illegal invocation");
       const url = requestUrl(input);
       paths.push(url.pathname);
-      if (url.pathname === "/api/chat/model-route") {
-        return Promise.resolve(Response.json({ model: "moonshotai/kimi-k2.6", tier: "fast" }));
-      }
       if (url.pathname === "/v1/messages") {
         return Promise.resolve(
           Response.json(
@@ -167,6 +158,7 @@ describe("canonical Chat transport", () => {
                 runId: "run_bound",
                 transactionId: "44",
                 replayed: false,
+                model: "moonshotai/kimi-k2.6",
               },
               meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
             },
@@ -208,7 +200,7 @@ describe("canonical Chat transport", () => {
       }),
     );
 
-    expect(paths).toEqual(["/api/chat/model-route", "/v1/messages", "/v1/runs/run_bound/events"]);
+    expect(paths).toEqual(["/v1/messages", "/v1/runs/run_bound/events"]);
   });
 
   it("creates a durable Run and translates validated semantic events into AI SDK chunks", async () => {

@@ -89,6 +89,7 @@ const groups = {
       "API_BROWSER_ORIGINS",
       "GOAT_AUTHKIT_DOMAIN",
       "GOAT_MACOS_OAUTH_AUDIENCE",
+      "VERCEL_AI_GATEWAY_API_KEY",
       "BLOB_READ_WRITE_TOKEN",
       "ELECTRIC_URL",
       "REDIS_URL",

@@ -9,6 +9,10 @@ import {
   type ChatApplicationService,
   type RunEvent,
 } from "@opencompany/core";
+import {
+  AutoModelRoutingError,
+  type AutoModelRoutingResolution,
+} from "@opencompany/goat-agent/application/auto-model-routing";
 import { GOAT_SPANS, withGoatSpan } from "@opencompany/goat-observability";
 import { captureException, createLogger } from "@opencompany/observability";
 import {
@@ -70,6 +74,15 @@ export type CreateApiAppInput = {
   defaultModel?: string;
   now?: () => Date;
   readModels?: ChatReadModelService;
+  resolveAutoModel?: (input: {
+    actorId: string;
+    workspaceId: string;
+    idempotencyKey: string;
+    conversationId?: string;
+    clientMessageId?: string;
+    prompt: string;
+    attachmentIds: readonly string[];
+  }) => Promise<AutoModelRoutingResolution>;
 };
 
 export function createApiApp(input: CreateApiAppInput) {
@@ -128,14 +141,55 @@ export function createApiApp(input: CreateApiAppInput) {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "message", 30);
       const body = c.req.valid("json");
+      const idempotencyKey = c.req.valid("header")["idempotency-key"];
+      const requestedModel =
+        body.model ??
+        input.defaultModel ??
+        process.env.GOAT_DEFAULT_CHAT_MODEL ??
+        "moonshotai/kimi-k3";
+      let autoResolution: AutoModelRoutingResolution | null = null;
+      if (requestedModel === "auto") {
+        if (body.engine !== "opencompany") {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "Auto model routing is available only for OpenCompany Chat.",
+          );
+        }
+        if (!input.resolveAutoModel) {
+          throw new ApiError(503, "unavailable", "Chat model routing is not configured.", true);
+        }
+        try {
+          autoResolution = await input.resolveAutoModel({
+            actorId: actor.userId,
+            workspaceId: actor.workspaceId,
+            idempotencyKey,
+            ...(body.conversationId ? { conversationId: body.conversationId } : {}),
+            ...(body.clientMessageId ? { clientMessageId: body.clientMessageId } : {}),
+            prompt: body.content,
+            attachmentIds: body.attachmentIds ?? [],
+          });
+        } catch (error) {
+          throw autoRoutingApiError(error);
+        }
+        logger.info("Canonical Chat model resolved", {
+          event: "opencompany.canonical_chat_model_resolved",
+          source: autoResolution.source,
+          selected_model: autoResolution.model,
+          ...(autoResolution.routing
+            ? {
+                tier: autoResolution.routing.tier,
+                reason: autoResolution.routing.reason,
+                outcome: autoResolution.routing.classifier.outcome,
+                duration_ms: autoResolution.routing.classifier.durationMs,
+              }
+            : {}),
+        });
+      }
       const result = await input.chat.createMessage(actor, {
         ...body,
-        idempotencyKey: c.req.valid("header")["idempotency-key"],
-        model:
-          body.model ??
-          input.defaultModel ??
-          process.env.GOAT_DEFAULT_CHAT_MODEL ??
-          "moonshotai/kimi-k3",
+        idempotencyKey,
+        model: autoResolution?.model ?? requestedModel,
       });
       return c.json(
         {
@@ -146,6 +200,7 @@ export function createApiApp(input: CreateApiAppInput) {
             runId: result.runId,
             transactionId: result.transactionId,
             replayed: result.idempotentReplay,
+            ...(autoResolution ? { model: autoResolution.model } : {}),
           },
           meta,
         },
@@ -459,6 +514,19 @@ export function createApiApp(input: CreateApiAppInput) {
   app.get("/openapi.json", (c) => c.json(createOpenApiDocument()));
   app.notFound((c) => apiErrorResponse(c, new ApiError(404, "not_found", "Route not found.")));
   return app;
+}
+
+function autoRoutingApiError(error: unknown) {
+  if (!(error instanceof AutoModelRoutingError)) return error;
+  switch (error.code) {
+    case "not_permitted":
+    case "disabled":
+      return new ApiError(403, "forbidden", error.message);
+    case "attachments_unavailable":
+      return new ApiError(400, "invalid_request", error.message);
+    case "unavailable":
+      return new ApiError(503, "unavailable", error.message, true);
+  }
 }
 
 type SseOutput = {

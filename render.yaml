@@ -33,6 +33,9 @@ services:
         sync: false
       - key: GOAT_DEFAULT_CHAT_MODEL
         sync: false
+      # Canonical Auto model classification. Kept server-side in prod `/api`.
+      - key: VERCEL_AI_GATEWAY_API_KEY
+        sync: false
       - key: BLOB_READ_WRITE_TOKEN
         sync: false
       - key: ELECTRIC_URL
@@ -101,10 +104,12 @@ services:
         sync: false
       - key: NEXT_PUBLIC_GOAT_POSTHOG_HOST
         sync: false
-      # Canonical Goat origin for private, bearer-protected host calls made on behalf of
-      # Cloud Codex. Credentials and this origin are never injected into E2B.
+      # Canonical Goat origin used when shared integrations construct web callback URLs.
+      # The origin is not an execution transport and is never injected into E2B.
       - key: GOAT_NEXT_PUBLIC_APP_URL
         sync: false
+      # Claude MCP uses Render's automatic RENDER_EXTERNAL_URL. RUNNER_PUBLIC_URL remains an
+      # explicit override for non-Render deployments and local development, so it is not synced.
       - key: RUNNER_STREAM_TOKEN_SECRET
         sync: false
       - key: INTEGRATION_CREDENTIAL_ENCRYPTION_KEY

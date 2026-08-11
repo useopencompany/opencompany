@@ -117,7 +117,7 @@ const CLAUDE_CHAT_ACTIONS_PROMPT =
 const CLAUDE_CHAT_ARTIFACTS_PROMPT =
   "When you create a finished file the user should receive, call publish_artifact with its sandbox path so it appears as a durable file in chat. Do not publish source files, repository diffs, logs, or temporary work.";
 const CLAUDE_CHAT_ACTIONS_MCP_SERVER_NAME = "opencompany_actions";
-const CLAUDE_CHAT_ACTIONS_GATEWAY_PATH = "/api/internal/claude-actions";
+const CLAUDE_CHAT_ACTIONS_GATEWAY_PATH = "/internal/goat/claude-actions";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-claude-code-chat" });
 
@@ -312,24 +312,29 @@ export async function runGoatClaudeCodeChatTurn(input: {
     userWorkosId: turn.userWorkosId,
   });
   const github = await loadGoatGitHubAuthForUser(turn.userWorkosId);
+  const canonicalAttemptId = input.canonicalAttemptId;
   const hostGatewayEnabled =
     isGoatActionHostToolContractVersion(session.hostToolContractVersion) &&
     Boolean(session.workspaceId) &&
-    Boolean(env.goatAppUrl);
+    Boolean(env.runnerPublicUrl) &&
+    Boolean(canonicalAttemptId);
   const actionToolsEnabled = hostGatewayEnabled;
   const artifactToolsEnabled = hostGatewayEnabled;
   // Minted before the redactor so a leaked ticket (e.g. the agent cats its own MCP
   // config) is scrubbed from logs the same way the other sandbox credentials are.
-  const actionGatewayTicket = hostGatewayEnabled
-    ? createGoatClaudeActionGatewayTicket({
-        codexChatSessionId: session.id,
-        codexChatTurnId: turn.id,
-        secret: env.internalToken,
-        // Covers two full CLI runs plus headroom for setup and a fast stale-resume failure before
-        // a fresh run. The second full run may be the background-Agent continuation below.
-        ttlMs: env.codexTimeoutMs * 2 + 10 * 60_000,
-      }).ticket
-    : null;
+  const actionGatewayTicket =
+    hostGatewayEnabled && canonicalAttemptId
+      ? createGoatClaudeActionGatewayTicket({
+          codexChatSessionId: session.id,
+          codexChatTurnId: turn.id,
+          attemptId: canonicalAttemptId,
+          leaseId,
+          secret: env.internalToken,
+          // Covers two full CLI runs plus headroom for setup and a fast stale-resume failure before
+          // a fresh run. The second full run may be the background-Agent continuation below.
+          ttlMs: env.codexTimeoutMs * 2 + 10 * 60_000,
+        }).ticket
+      : null;
   const redact = createKnownSecretRedactor([
     auth.token,
     github?.githubToken ?? null,
@@ -466,7 +471,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
       ? await writeGoatClaudeActionsMcpConfig({
           sandbox,
           turnId: turn.id,
-          goatAppUrl: env.goatAppUrl,
+          runnerPublicUrl: env.runnerPublicUrl,
           ticket: actionGatewayTicket,
         })
       : null;
@@ -886,17 +891,18 @@ export function extractClaudeScheduleWakeup(
 async function writeGoatClaudeActionsMcpConfig(input: {
   sandbox: SandboxHandle;
   turnId: string;
-  goatAppUrl: string | undefined;
+  runnerPublicUrl: string | undefined;
   ticket: string;
 }) {
-  const appUrl = input.goatAppUrl;
-  if (!appUrl) throw new Error("goatAppUrl is required to enable Claude Code action tools.");
+  const runnerUrl = input.runnerPublicUrl;
+  if (!runnerUrl)
+    throw new Error("runnerPublicUrl is required to enable Claude Code action tools.");
 
   const config = {
     mcpServers: {
       [CLAUDE_CHAT_ACTIONS_MCP_SERVER_NAME]: {
         type: "http",
-        url: new URL(CLAUDE_CHAT_ACTIONS_GATEWAY_PATH, appUrl).toString(),
+        url: new URL(CLAUDE_CHAT_ACTIONS_GATEWAY_PATH, runnerUrl).toString(),
         headers: { "x-goat-action-ticket": input.ticket },
       },
     },
