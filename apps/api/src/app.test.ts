@@ -148,6 +148,7 @@ describe("canonical Hono API", () => {
       "X-OpenCompany-Run-Status",
     );
     expect(response.headers.get("access-control-expose-headers")).toContain("Electric-Handle");
+    expect(response.headers.get("access-control-expose-headers")).toContain("Electric-Up-To-Date");
     await response.body?.cancel();
   });
 

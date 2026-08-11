@@ -53,6 +53,7 @@ const CORS_EXPOSE_HEADERS = [
   "Electric-Handle",
   "Electric-Offset",
   "Electric-Schema",
+  "Electric-Up-To-Date",
   "Retry-After",
   "X-OpenCompany-Run-Status",
   "X-Request-Id",

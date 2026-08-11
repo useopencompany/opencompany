@@ -19,6 +19,18 @@ const ELECTRIC_CURSOR_PARAMS = [
   "cache-buster",
 ] as const;
 
+// Only Shape protocol metadata belongs on the reconstructed API response. In particular,
+// hop-by-hop headers such as Connection and Transfer-Encoding describe Electric's socket. If
+// they are copied here, the Node adapter can combine the upstream Transfer-Encoding with a new
+// Content-Length, producing an invalid response that the public edge rejects with a 502.
+const ELECTRIC_RESPONSE_HEADERS = [
+  "electric-cursor",
+  "electric-handle",
+  "electric-offset",
+  "electric-schema",
+  "electric-up-to-date",
+] as const;
+
 // These columns cross the API boundary as decoded JSON values. Omitting their upstream JSONB
 // metadata prevents @electric-sql/client from parsing the already-decoded values a second time.
 const PREDECODED_READ_MODEL_FIELDS = new Set(["presentation", "attachments"]);
@@ -298,10 +310,11 @@ function electricRecoveryResponse(upstream: Response, readModel: ChatReadModel) 
 }
 
 function safeElectricHeaders(source: Headers, readModel: ChatReadModel) {
-  const headers = new Headers(source);
-  headers.delete("content-encoding");
-  headers.delete("content-length");
-  headers.delete("set-cookie");
+  const headers = new Headers();
+  for (const name of ELECTRIC_RESPONSE_HEADERS) {
+    const value = source.get(name);
+    if (value !== null) headers.set(name, value);
+  }
   const schema = headers.get("electric-schema");
   if (schema) {
     let parsed: unknown;
