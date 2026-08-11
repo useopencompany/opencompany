@@ -312,7 +312,7 @@ describe("canonical Chat transport", () => {
     expect(chunks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ type: "start", messageId: "message_assistant_1" }),
-        { type: "text-delta", id: "text_message_assistant_1", delta: "Working" },
+        { type: "text-delta", id: "text_message_assistant_1_1", delta: "Working" },
         expect.objectContaining({ type: "tool-input-available", toolCallId: "tool_1" }),
         {
           type: "tool-approval-request",
@@ -386,8 +386,8 @@ describe("canonical Chat transport", () => {
     );
 
     expect(chunks.filter((chunk) => chunk.type === "text-delta")).toEqual([
-      { type: "text-delta", id: "text_message_assistant_1", delta: "Hello" },
-      { type: "text-delta", id: "text_message_assistant_1", delta: " world" },
+      { type: "text-delta", id: "text_message_assistant_1_1", delta: "Hello" },
+      { type: "text-delta", id: "text_message_assistant_1_1", delta: " world" },
     ]);
     expect(replayQueries).toEqual([
       { durable: null, presentation: null },
@@ -494,7 +494,7 @@ describe("canonical Chat transport", () => {
     expect(eventCursors).toEqual([null, "v1:3"]);
     expect(chunks).toEqual(
       expect.arrayContaining([
-        { type: "text-delta", id: "text_message_assistant_1", delta: " done" },
+        { type: "text-delta", id: "text_message_assistant_1_2", delta: " done" },
         expect.objectContaining({ type: "finish", finishReason: "stop" }),
       ]),
     );
@@ -584,7 +584,7 @@ describe("canonical Chat transport", () => {
     );
 
     expect(chunks.filter((chunk) => chunk.type === "text-delta")).toEqual([
-      { type: "text-delta", id: "text_message_assistant_1", delta: " done" },
+      { type: "text-delta", id: "text_message_assistant_1_1", delta: " done" },
     ]);
     expect(chunks.at(-1)).toEqual(
       expect.objectContaining({ type: "finish", finishReason: "stop" }),

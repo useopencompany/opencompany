@@ -14,6 +14,7 @@ import {
   headlessChatWebBaseUrl,
 } from "./headless-chat-api";
 import { awaitHeadlessChatTransaction } from "./headless-chat-collections";
+import { HeadlessChatUiProjector } from "./headless-chat-ui-projector";
 
 const STORAGE_PREFIX = "opencompany:headless-chat:v1:";
 
@@ -23,6 +24,8 @@ type HeadlessRunState = {
   assistantMessageId: string;
   model: string;
   content?: string;
+  textSegment?: number;
+  startedToolCallIds?: string[];
   cursor?: string;
   presentationCursor?: string;
   status: "queued" | "running" | "paused" | "completed" | "failed" | "canceled";
@@ -215,10 +218,12 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
     const baseUrl = this.baseUrl();
     return new ReadableStream<UIMessageChunk>({
       async start(controller) {
-        let text = state.content ?? "";
-        let textStarted = false;
-        const startedToolCalls = new Set<string>();
-        const textId = `text_${state.assistantMessageId}`;
+        const projector = new HeadlessChatUiProjector(
+          state.assistantMessageId,
+          state.content,
+          state.textSegment,
+          state.startedToolCallIds,
+        );
         controller.enqueue({
           type: "start",
           messageId: state.assistantMessageId,
@@ -246,84 +251,16 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
               writeRunStateAliases(chatId, state);
             },
           })) {
-            if (event.type === "message.presentation_delta") {
-              if (!textStarted) {
-                textStarted = true;
-                controller.enqueue({ type: "text-start", id: textId });
-              }
-              const { startOffset, endOffset, delta } = event.payload;
-              if (startOffset <= text.length && endOffset > text.length) {
-                const unseen = delta.slice(text.length - startOffset);
-                text += unseen;
-                state.content = text;
-                if (unseen) controller.enqueue({ type: "text-delta", id: textId, delta: unseen });
-              }
-            } else if (event.type === "message.content_updated") {
-              if (!textStarted) {
-                textStarted = true;
-                controller.enqueue({ type: "text-start", id: textId });
-              }
-              const next = event.payload.content;
-              // The canonical event is a snapshot. Runner projections are append-only during an
-              // attempt; if a future projector revises prior text, Electric remains authoritative
-              // and we avoid rendering a duplicated suffix in the transient overlay.
-              const delta = next.startsWith(text) ? next.slice(text.length) : "";
-              if (next.startsWith(text)) {
-                text = next;
-                state.content = next;
-              }
-              if (delta) controller.enqueue({ type: "text-delta", id: textId, delta });
-              if (event.payload.complete) {
-                controller.enqueue({ type: "text-end", id: textId });
-                textStarted = false;
-              }
-            } else if (event.type === "tool.started") {
-              startedToolCalls.add(event.payload.toolCallId);
-              controller.enqueue({
-                type: "tool-input-available",
-                toolCallId: event.payload.toolCallId,
-                toolName: event.payload.name,
-                input: {},
-              });
-            } else if (event.type === "tool.completed") {
-              controller.enqueue({
-                type: "tool-output-available",
-                toolCallId: event.payload.toolCallId,
-                output: { ok: true },
-              });
-            } else if (event.type === "tool.failed") {
-              controller.enqueue({
-                type: "tool-output-error",
-                toolCallId: event.payload.toolCallId,
-                errorText: event.payload.message,
-              });
-            } else if (event.type === "approval.requested") {
-              const toolCallId = event.payload.toolCallId ?? event.payload.approvalId;
-              if (!startedToolCalls.has(toolCallId)) {
-                startedToolCalls.add(toolCallId);
-                controller.enqueue({
-                  type: "tool-input-available",
-                  toolCallId,
-                  toolName: event.payload.kind,
-                  input: { action: event.payload.action ?? event.payload.kind },
-                });
-              }
-              controller.enqueue({
-                type: "tool-approval-request",
-                approvalId: event.payload.approvalId,
-                toolCallId,
-              });
-            } else if (event.type === "run.failed") {
-              controller.enqueue({ type: "error", errorText: event.payload.message });
-            } else if (event.type === "run.canceled") {
-              controller.enqueue({ type: "abort", reason: "Canceled by the user." });
-            }
+            for (const chunk of projector.project(event)) controller.enqueue(chunk);
+            state.content = projector.content;
+            state.textSegment = projector.segment;
+            state.startedToolCallIds = projector.startedToolCallIds;
             if (event.type !== "message.presentation_delta") {
               state.status = statusFromEvent(event, state.status);
             }
             writeRunStateAliases(chatId, state);
           }
-          if (textStarted) controller.enqueue({ type: "text-end", id: textId });
+          for (const chunk of projector.finish()) controller.enqueue(chunk);
           controller.enqueue({
             type: "finish",
             finishReason:

@@ -230,6 +230,7 @@ export class PostgresChatRepository implements ChatRepository {
   async getConversation(input: {
     actor: Actor;
     conversationId: string;
+    includeArchived?: boolean;
   }): Promise<Conversation | null> {
     const [conversation] = await this.rows<ConversationRow>(sql`
       SELECT
@@ -244,7 +245,7 @@ export class PostgresChatRepository implements ChatRepository {
       WHERE chat.id = ${input.conversationId}
         AND chat.user_workos_id = ${input.actor.userId}
         AND chat.kind = 'chat'
-        AND chat.closed_at IS NULL
+        AND (${input.includeArchived ?? false}::boolean OR chat.closed_at IS NULL)
         AND (
           runtime.id IS NULL
           OR runtime.workspace_id IS NULL
@@ -302,10 +303,7 @@ export class PostgresChatRepository implements ChatRepository {
                 )
             )
           )
-          AND (
-            (${pinned}::boolean IS NULL AND ${markSeen}::boolean IS NULL)
-            OR chat.closed_at IS NULL
-          )
+          AND (${pinned}::boolean IS NULL OR chat.closed_at IS NULL)
       ),
       updated_chat AS MATERIALIZED (
         UPDATE goat.chat_sessions AS chat

@@ -406,15 +406,21 @@ describe("canonical Hono API", () => {
     expect(invalid.status).toBe(400);
   });
 
-  it("authorizes a child read model before contacting Electric", async () => {
+  it("authorizes a child read model, including archived Conversations, before contacting Electric", async () => {
     const repository = fakeRepository();
-    repository.getConversation = async () => null;
+    const getConversation = vi.fn(async () => null);
+    repository.getConversation = getConversation;
     const stream = vi.fn(async () => Response.json([]));
     const app = testApp(repository, { readModels: { stream } });
     const response = await app.request(
       "/v1/read-models/chat-messages-v1?conversationId=conversation_other",
     );
     expect(response.status).toBe(404);
+    expect(getConversation).toHaveBeenCalledWith({
+      actor,
+      conversationId: "conversation_other",
+      includeArchived: true,
+    });
     expect(stream).not.toHaveBeenCalled();
   });
 
