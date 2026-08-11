@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { sseDataFields, streamRunEvents } from "./client";
 
 const event = (sequence: number, type = "message.content_updated") => ({
@@ -31,6 +31,8 @@ const presentation = (cursor: string, delta = "Hi") => ({
 });
 
 describe("protocol SSE client", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it("parses chunked, multiline SSE data while ignoring heartbeats", async () => {
     const encoder = new TextEncoder();
     const body = new ReadableStream<Uint8Array>({
@@ -70,6 +72,29 @@ describe("protocol SSE client", () => {
     expect(received).toEqual(["event_1", "event_2"]);
     expect(calls).toEqual(["", "v1:1"]);
     expect(cursors).toEqual(["v1:1", "v1:2"]);
+  });
+
+  it("binds the default browser fetch to its runtime receiver", async () => {
+    const fetchMock = vi.fn(function (this: unknown) {
+      if (this !== globalThis) throw new TypeError("Illegal invocation");
+      return Promise.resolve(
+        new Response(`data: ${JSON.stringify(event(1, "run.completed"))}\n\n`, {
+          headers: { "Content-Type": "text/event-stream" },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const received = [];
+    for await (const value of streamRunEvents({
+      baseUrl: "https://api.example.test",
+      runId: "run_1",
+    })) {
+      received.push(value.type);
+    }
+
+    expect(received).toEqual(["run.completed"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("rejects an event from another Run", async () => {

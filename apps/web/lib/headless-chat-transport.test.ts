@@ -147,6 +147,70 @@ describe("canonical Chat transport", () => {
     ]);
   });
 
+  it("binds the default browser fetch while routing and streaming a canonical Run", async () => {
+    const paths: string[] = [];
+    const fetchMock = vi.fn(function (this: unknown, input: URL | RequestInfo, init?: RequestInit) {
+      if (this !== globalThis) throw new TypeError("Illegal invocation");
+      const url = requestUrl(input);
+      paths.push(url.pathname);
+      if (url.pathname === "/api/chat/model-route") {
+        return Promise.resolve(Response.json({ model: "moonshotai/kimi-k2.6", tier: "fast" }));
+      }
+      if (url.pathname === "/v1/messages") {
+        return Promise.resolve(
+          Response.json(
+            {
+              data: {
+                conversationId: "conversation_bound",
+                messageId: "message_bound",
+                assistantMessageId: "assistant_bound",
+                runId: "run_bound",
+                transactionId: "44",
+                replayed: false,
+              },
+              meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+            },
+            { status: 202 },
+          ),
+        );
+      }
+      if (url.pathname.endsWith("/events")) {
+        return Promise.resolve(
+          sse([
+            {
+              ...event(1, "run.completed", { messageId: "assistant_bound" }),
+              runId: "run_bound",
+            },
+          ]),
+        );
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url} ${init?.method ?? "GET"}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const transport = new HeadlessChatTransport<UIMessage>({
+      baseUrl: "https://app.example.test",
+    });
+
+    await collect(
+      await transport.sendMessages({
+        trigger: "submit-message",
+        chatId: "conversation_bound",
+        messageId: undefined,
+        messages: [
+          {
+            id: "message_bound",
+            role: "user",
+            parts: [{ type: "text", text: "Route this" }],
+          },
+        ],
+        body: { newSessionId: "conversation_bound", model: "auto" },
+        abortSignal: undefined,
+      }),
+    );
+
+    expect(paths).toEqual(["/api/chat/model-route", "/v1/messages", "/v1/runs/run_bound/events"]);
+  });
+
   it("creates a durable Run and translates validated semantic events into AI SDK chunks", async () => {
     let createBody: Record<string, unknown> | null = null;
     let idempotencyKey = "";

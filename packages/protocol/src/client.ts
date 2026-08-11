@@ -50,7 +50,7 @@ export type RunEventStreamOptions = {
 export async function* streamRunEvents(
   options: RunEventStreamOptions,
 ): AsyncGenerator<RunStreamEventDto, void, void> {
-  const fetchImpl = options.fetch ?? globalThis.fetch;
+  const fetchImpl = bindFetchToRuntime(options.fetch);
   const maxReconnectAttempts = options.maxReconnectAttempts ?? 8;
   let cursor = options.cursor;
   let presentationCursor = options.presentationCursor;
@@ -108,6 +108,10 @@ export async function* streamRunEvents(
     }
     await abortableDelay(receivedEvent ? 0 : (options.reconnectDelayMs ?? 250), options.signal);
   }
+}
+
+function bindFetchToRuntime(fetchImpl = globalThis.fetch) {
+  return fetchImpl.bind(globalThis);
 }
 
 function isStreamEndRunStatus(value: string | null) {

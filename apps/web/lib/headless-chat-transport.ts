@@ -54,7 +54,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
   private readonly fetchImpl: typeof globalThis.fetch;
 
   constructor(private readonly options: TransportOptions = {}) {
-    this.fetchImpl = options.fetch ?? globalThis.fetch;
+    this.fetchImpl = bindFetchToRuntime(options.fetch);
   }
 
   async sendMessages(input: Parameters<ChatTransport<UI_MESSAGE>["sendMessages"]>[0]) {
@@ -363,7 +363,7 @@ export async function startHeadlessBackgroundChat(
 ) {
   const baseUrl = options.baseUrl ?? (typeof window === "undefined" ? "" : window.location.origin);
   if (!baseUrl) throw new Error("The canonical Chat API base URL is unavailable.");
-  const fetchImpl = options.fetch ?? globalThis.fetch;
+  const fetchImpl = bindFetchToRuntime(options.fetch);
   const model = await resolveHeadlessModel({
     baseUrl,
     fetch: fetchImpl,
@@ -372,9 +372,7 @@ export async function startHeadlessBackgroundChat(
     prompt: input.content,
     attachmentIds: input.attachmentIds ?? [],
   });
-  const client = createOpenCompanyClient(baseUrl, {
-    ...(options.fetch ? { fetch: options.fetch } : {}),
-  });
+  const client = createOpenCompanyClient(baseUrl, { fetch: fetchImpl });
   const response = await client.v1.messages.$post({
     header: { "idempotency-key": idempotencyKey(input.clientMessageId) },
     json: {
@@ -398,12 +396,16 @@ export async function startHeadlessBackgroundChat(
   for await (const event of streamRunEvents({
     baseUrl,
     runId: data.runId,
-    ...(options.fetch ? { fetch: options.fetch } : {}),
+    fetch: fetchImpl,
   })) {
     // Event projection and presentation are owned by Postgres/Electric; no transient UI overlay.
     void event;
   }
   return data;
+}
+
+function bindFetchToRuntime(fetchImpl = globalThis.fetch) {
+  return fetchImpl.bind(globalThis);
 }
 
 async function resolveHeadlessModel(input: {
