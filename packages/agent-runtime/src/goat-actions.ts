@@ -1,5 +1,6 @@
 export const GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION_V2 = "goat-codex-host-tools.v2";
 export const GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION = "goat-codex-host-tools.v3";
+export const GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION = "goat-chat-host-tools.v1";
 
 export const GOAT_ACTION_HOST_TOOL_CONTRACT_VERSIONS = [
   GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
@@ -102,6 +103,22 @@ export type GoatActionGatewayRequest =
       invocationId: string;
     };
 
+export type GoatActionHostGatewayRequest =
+  | GoatActionGatewayRequest
+  | {
+      operation: "catalog";
+      sessionId: string;
+      turnId: string;
+    }
+  | {
+      operation: "approval";
+      sessionId: string;
+      turnId: string;
+      action: string;
+      params: Record<string, unknown>;
+      invocationId: string;
+    };
+
 export type GoatActionExecutionResponse<
   Source extends string = string,
   ErrorCode extends string = string,
@@ -127,12 +144,23 @@ export type GoatActionExecutionResponse<
 export type GoatActionGatewayResponse =
   | {
       ok: true;
+      catalog: {
+        sources: GoatActionSource[];
+        actions: GoatActionDescriptor[];
+      };
+    }
+  | {
+      ok: true;
       sources: GoatActionSource[];
     }
   | {
       ok: true;
       source: GoatActionSource;
       actions: GoatActionDescriptor[];
+    }
+  | {
+      ok: true;
+      needsApproval: boolean;
     }
   | GoatActionExecutionResponse
   | {

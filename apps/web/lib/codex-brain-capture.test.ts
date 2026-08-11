@@ -95,6 +95,71 @@ describe("executeGoatCodexBrainCaptureGateway", () => {
     expect(firstSource.idempotencyKey).toBe(recoveredSource.idempotencyKey);
   });
 
+  it("resolves the default accessible Brain for an ordinary OpenCompany Chat", async () => {
+    const capture = vi.fn<typeof captureToGoatBrainInbox>(async () => ({
+      ok: true,
+      draftBrainId: "launch-decision",
+      path: "inbox/launch-decision.md",
+      title: "Launch decision",
+      jobId: "job_1",
+      enqueued: true,
+    }));
+
+    await executeGoatCodexBrainCaptureGateway({
+      request,
+      dependencies: {
+        loadContext: vi.fn(async () => ({
+          ...context,
+          brainRef: null,
+          allowDefaultBrain: true,
+        })),
+        listBrains: vi.fn(async () => [
+          { id: "brain_other", slug: "other" },
+          { id: "brain_default", slug: "general" },
+        ]) as never,
+        getBrainAccess: vi.fn(async () => ({ brain: { workspaceId: "workspace_1" } })),
+        capture,
+      },
+    });
+
+    expect(capture).toHaveBeenCalledWith(expect.objectContaining({ brainRef: "brain_default" }));
+  });
+
+  it("files canonical message attachments through the existing Brain asset boundary", async () => {
+    const saveAttachments = vi.fn(async () => ({
+      ok: true as const,
+      status: "captured" as const,
+      assets: [{ documentId: "document_1", path: "inbox/file.pdf", title: "file.pdf" }],
+    }));
+    const loadMessages = vi.fn(async () => [
+      { role: "user" as const, attachments: [{ id: "attachment_1" }] as never },
+    ]);
+
+    const response = await executeGoatCodexBrainCaptureGateway({
+      request: {
+        codexChatSessionId: request.codexChatSessionId,
+        codexChatTurnId: request.codexChatTurnId,
+        attachmentIds: ["attachment_1"],
+      },
+      dependencies: {
+        loadContext: vi.fn(async () => context),
+        getBrainAccess: vi.fn(async () => ({ brain: { workspaceId: "workspace_1" } })),
+        loadMessages,
+        saveAttachments: saveAttachments as never,
+      },
+    });
+
+    expect(response).toMatchObject({ ok: true, assets: [{ documentId: "document_1" }] });
+    expect(loadMessages).toHaveBeenCalledWith("chat_1");
+    expect(saveAttachments).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brainRef: "brain_1",
+        userWorkosId: "user_1",
+        attachmentIds: ["attachment_1"],
+      }),
+    );
+  });
+
   it("fails closed when the pinned Brain no longer belongs to an accessible workspace", async () => {
     const capture = vi.fn();
     const response = await executeGoatCodexBrainCaptureGateway({

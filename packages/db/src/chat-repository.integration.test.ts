@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
+import { GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runtime";
 import {
   type Actor,
   CHAT_READ_PERMISSION,
@@ -139,6 +140,13 @@ describe("Postgres Chat repositories", () => {
       `)
       ).rows,
     ).toEqual([{ count: 1 }]);
+    expect(
+      await database.query<{ host_tool_contract_version: string }>(`
+        SELECT host_tool_contract_version FROM goat.codex_chat_sessions
+      `),
+    ).toMatchObject({
+      rows: [{ host_tool_contract_version: GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION }],
+    });
     expect(
       await database.query<{ sequence: number; type: string }>(`
         SELECT sequence, type FROM goat.run_events ORDER BY sequence

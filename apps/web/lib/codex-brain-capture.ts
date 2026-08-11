@@ -1,15 +1,25 @@
 import { createHash } from "node:crypto";
 import {
   GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
+  GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION,
   type GoatCodexBrainCaptureGatewayRequest,
   type GoatCodexBrainCaptureGatewayResponse,
 } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
-import { goatCodexChatSessions, goatCodexChatTurns } from "@opencompany/db/goat-schema";
-import { getGoatBrainAccess } from "@opencompany/db/goat-workspaces";
+import {
+  goatChatMessages,
+  goatCodexChatSessions,
+  goatCodexChatTurns,
+} from "@opencompany/db/goat-schema";
+import {
+  DEFAULT_GOAT_BRAIN_SLUG,
+  getGoatBrainAccess,
+  listAccessibleGoatBrains,
+} from "@opencompany/db/goat-workspaces";
 import { createLogger } from "@opencompany/observability";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
+import { saveChatAttachmentsToGoatBrain } from "@/lib/chat-attachment-capture";
 
 const logger = createLogger({
   service: "opencompany-goat",
@@ -19,7 +29,8 @@ const logger = createLogger({
 type GoatCodexBrainCaptureContext = {
   userWorkosId: string;
   workspaceId: string;
-  brainRef: string;
+  brainRef: string | null;
+  allowDefaultBrain?: boolean;
   chatSessionId: string;
   userMessageId: string;
 };
@@ -32,13 +43,33 @@ type GoatCodexBrainCaptureDependencies = {
     userWorkosId: string;
     brainRef: string;
   }) => Promise<{ brain: { workspaceId: string } } | null>;
+  listBrains: typeof listAccessibleGoatBrains;
   capture: typeof captureToGoatBrainInbox;
+  loadMessages: (
+    chatSessionId: string,
+  ) => Promise<Parameters<typeof saveChatAttachmentsToGoatBrain>[0]["sessionMessages"]>;
+  saveAttachments: typeof saveChatAttachmentsToGoatBrain;
 };
 
 const defaultDependencies: GoatCodexBrainCaptureDependencies = {
   loadContext: loadGoatCodexBrainCaptureContext,
   getBrainAccess: (input) => getGoatBrainAccess(input),
+  listBrains: (input) => listAccessibleGoatBrains(input),
   capture: captureToGoatBrainInbox,
+  loadMessages: async (chatSessionId) => {
+    const rows = await getDb()
+      .select({ role: goatChatMessages.role, attachments: goatChatMessages.attachments })
+      .from(goatChatMessages)
+      .where(eq(goatChatMessages.sessionId, chatSessionId));
+    return rows.filter(
+      (
+        row,
+      ): row is typeof row & {
+        role: "user" | "assistant";
+      } => row.role === "user" || row.role === "assistant",
+    );
+  },
+  saveAttachments: saveChatAttachmentsToGoatBrain,
 };
 
 export async function executeGoatCodexBrainCaptureGateway(input: {
@@ -54,9 +85,23 @@ export async function executeGoatCodexBrainCaptureGateway(input: {
     };
   }
 
+  let brainRef = context.brainRef;
+  if (!brainRef && context.allowDefaultBrain) {
+    const brains = await dependencies.listBrains({
+      userWorkosId: context.userWorkosId,
+      workspaceId: context.workspaceId,
+    });
+    brainRef =
+      brains.find((candidate) => candidate.slug === DEFAULT_GOAT_BRAIN_SLUG)?.id ??
+      brains[0]?.id ??
+      null;
+  }
+  if (!brainRef) {
+    return { ok: false, error: "This chat does not have an accessible Brain." };
+  }
   const access = await dependencies.getBrainAccess({
     userWorkosId: context.userWorkosId,
-    brainRef: context.brainRef,
+    brainRef,
   });
   if (!access || access.brain.workspaceId !== context.workspaceId) {
     return {
@@ -71,13 +116,23 @@ export async function executeGoatCodexBrainCaptureGateway(input: {
   const sourceRef = optionalString(input.request.sourceRef);
   const integrationId = optionalString(input.request.integrationId);
   const fallbackContent = optionalString(input.request.fallbackContent);
-  if (!content && !sourceRef) {
-    return { ok: false, error: "save_to_brain needs content or sourceRef." };
+  const attachmentIds = input.request.attachmentIds ?? [];
+  if (!content && !sourceRef && attachmentIds.length === 0) {
+    return { ok: false, error: "save_to_brain needs content, sourceRef, or attachmentIds." };
   }
 
   try {
+    if (attachmentIds.length > 0) {
+      const sessionMessages = await dependencies.loadMessages(context.chatSessionId);
+      return dependencies.saveAttachments({
+        brainRef,
+        userWorkosId: context.userWorkosId,
+        attachmentIds,
+        sessionMessages,
+      });
+    }
     const captured = await dependencies.capture({
-      brainRef: context.brainRef,
+      brainRef,
       userWorkosId: context.userWorkosId,
       ...(content ? { text: content } : {}),
       ...(title ? { title } : {}),
@@ -90,7 +145,7 @@ export async function executeGoatCodexBrainCaptureGateway(input: {
         connectionId: context.chatSessionId,
         itemId: context.userMessageId,
         idempotencyKey: brainCaptureIdempotencyKey({
-          brainRef: context.brainRef,
+          brainRef,
           userMessageId: context.userMessageId,
           content,
           title,
@@ -170,6 +225,7 @@ async function loadGoatCodexBrainCaptureContext(
       brainRef: goatCodexChatSessions.brainRef,
       chatSessionId: goatCodexChatSessions.chatSessionId,
       userMessageId: goatCodexChatTurns.userMessageId,
+      engine: goatCodexChatSessions.engine,
     })
     .from(goatCodexChatSessions)
     .innerJoin(
@@ -183,17 +239,21 @@ async function loadGoatCodexBrainCaptureContext(
     .where(
       and(
         eq(goatCodexChatSessions.id, request.codexChatSessionId),
-        eq(goatCodexChatSessions.hostToolContractVersion, GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION),
+        inArray(goatCodexChatSessions.hostToolContractVersion, [
+          GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
+          GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION,
+        ]),
         eq(goatCodexChatTurns.status, "running"),
       ),
     )
     .limit(1);
 
-  if (!row?.workspaceId || !row.brainRef) return null;
+  if (!row?.workspaceId || (!row.brainRef && row.engine !== "opencompany")) return null;
   return {
     userWorkosId: row.userWorkosId,
     workspaceId: row.workspaceId,
     brainRef: row.brainRef,
+    allowDefaultBrain: row.engine === "opencompany",
     chatSessionId: row.chatSessionId,
     userMessageId: row.userMessageId,
   };

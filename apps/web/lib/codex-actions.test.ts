@@ -9,7 +9,7 @@ import {
 } from "@opencompany/goat-agent/actions/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GoatResolvedActionCatalog, ResolvedGoatAction } from "@/lib/actions/types";
-import { executeGoatActionGateway } from "@/lib/codex-actions";
+import { executeGoatActionGateway, executeGoatActionHostGateway } from "@/lib/codex-actions";
 
 function listRequest(source?: string): GoatActionGatewayRequest {
   return {
@@ -25,6 +25,11 @@ const context = {
   workspaceId: "workspace_1",
   chatSessionId: "chat_1",
   userTimezone: "Europe/Paris",
+};
+
+const interactiveContext = {
+  ...context,
+  policy: "foregroundInteractive" as const,
 };
 
 describe("executeGoatActionGateway", () => {
@@ -86,6 +91,100 @@ describe("executeGoatActionGateway", () => {
         { id: "posthog", kind: "integration", label: "PostHog", description: "Analytics" },
       ],
     });
+  });
+
+  it("returns the full interactive catalog only for a host-authorized OpenCompany turn", async () => {
+    const readAction = createReadAction();
+    const writeAction = {
+      ...createReadAction("gmail.send"),
+      capability: "write" as const,
+      effects: GOAT_ACTION_EFFECTS_WRITE,
+      permissionMode: "ask" as const,
+    };
+    const managedAction = {
+      ...createReadAction("linkedin.search", "linkedin"),
+      effects: GOAT_ACTION_EFFECTS_METERED_READ,
+    };
+    const recordSourceDiscovery = vi.fn();
+    const catalog: GoatResolvedActionCatalog = {
+      providers: [
+        { id: "gmail", kind: "integration", label: "Gmail", description: "Email" },
+        { id: "linkedin", kind: "managed", label: "LinkedIn", description: "Paid" },
+      ],
+      actions: [readAction, writeAction, managedAction],
+    };
+
+    const response = await executeGoatActionHostGateway({
+      request: { operation: "catalog", sessionId: "session_1", turnId: "turn_1" },
+      signal: new AbortController().signal,
+      dependencies: {
+        loadContext: vi.fn(async () => interactiveContext),
+        resolveCatalog: vi.fn(async () => catalog),
+        recordSourceDiscovery,
+      },
+    });
+
+    expect(response).toEqual({
+      ok: true,
+      catalog: {
+        sources: [
+          { id: "gmail", kind: "integration", label: "Gmail", description: "Email" },
+          { id: "linkedin", kind: "managed", label: "LinkedIn", description: "Paid" },
+        ],
+        actions: [
+          expect.objectContaining({ id: "gmail.search", permissionMode: "on" }),
+          expect.objectContaining({ id: "gmail.send", permissionMode: "ask" }),
+          expect.objectContaining({ id: "linkedin.search", permissionMode: "on" }),
+        ],
+      },
+    });
+    expect(recordSourceDiscovery).not.toHaveBeenCalled();
+  });
+
+  it("evaluates managed approval with durable turn state for interactive turns", async () => {
+    const managedAction = {
+      ...createReadAction("linkedin.search", "linkedin"),
+      effects: GOAT_ACTION_EFFECTS_METERED_READ,
+    };
+    const evaluateApproval = vi.fn(async () => true);
+    const recordSourceDiscovery = vi.fn(async () => undefined);
+    const catalog: GoatResolvedActionCatalog = {
+      providers: [{ id: "linkedin", kind: "managed", label: "LinkedIn", description: "Paid" }],
+      actions: [managedAction],
+    };
+
+    const response = await executeGoatActionHostGateway({
+      request: {
+        operation: "approval",
+        sessionId: "session_1",
+        turnId: "turn_1",
+        action: managedAction.id,
+        params: { query: "founders" },
+        invocationId: "call_1",
+      },
+      signal: new AbortController().signal,
+      dependencies: {
+        loadContext: vi.fn(async () => interactiveContext),
+        resolveCatalog: vi.fn(async () => catalog),
+        getCapabilityTurnState: () => ({
+          quotedTotalUsdMicros: 0,
+          admittedToolCallIds: [],
+          quotesByToolCallId: new Map(),
+          asyncRunsStarted: 0,
+        }),
+        evaluateApproval,
+        recordSourceDiscovery,
+      },
+    });
+
+    expect(response).toEqual({ ok: true, needsApproval: true });
+    expect(recordSourceDiscovery).toHaveBeenCalledWith({
+      turn: expect.objectContaining({ policy: "foregroundInteractive" }),
+      sourceId: "linkedin",
+    });
+    expect(evaluateApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ request: expect.objectContaining({ invocationId: "call_1" }) }),
+    );
   });
 
   it("includes Neon row queries only after their read-only permission is On", async () => {

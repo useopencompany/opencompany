@@ -8,6 +8,8 @@ Start with:
 - [Database](./database.md) — Neon branches, Drizzle schemas, and migration rules.
 - [Runner](./runner.md) — durable workers and internal endpoints.
 - [Deployment](./deployment.md) — production release and rollback flow.
+- [Headless Chat operations](./headless-chat-operations.md) — `/v1` topology, local setup,
+  rollout, rollback, and compatibility gates.
 - [Environment variables](./env-vars.md) and [secret management](./secret-management.md).
 - [Legacy retirement record](./legacy-product-retirement.md) — compatibility contracts and intentional history.
 

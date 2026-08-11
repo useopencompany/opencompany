@@ -97,6 +97,13 @@ vi.mock("@/lib/chat-attachment-upload", () => ({
   uploadGoatChatAttachmentBlob: attachmentUploadMock.upload,
 }));
 
+// This suite characterizes the rollback adapter and shared UI behavior. Canonical transport and
+// Auto preflight have focused tests in the headless Chat modules.
+vi.mock("@/lib/headless-chat-feature", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/headless-chat-feature")>()),
+  HEADLESS_CHAT_ENABLED: false,
+}));
+
 vi.mock("@/lib/tasks", () => ({
   archiveGoatTaskAction: vi.fn(async () => ({ ok: true, error: null })),
   cancelGoatTaskAction: vi.fn(async () => ({ ok: true, error: null })),

@@ -58,6 +58,7 @@ async function parseRequest(
 
   const content = boundedString(value.content, 64_000);
   const sourceRef = boundedString(value.sourceRef, 4_000);
+  const attachmentIds = boundedStringArray(value.attachmentIds, 8, 256);
   for (const [field, maxLength] of [
     ["content", 64_000],
     ["sourceRef", 4_000],
@@ -69,8 +70,11 @@ async function parseRequest(
       };
     }
   }
-  if (!content && !sourceRef) {
-    return { ok: false, error: "content or sourceRef is required." };
+  if (value.attachmentIds !== undefined && !attachmentIds) {
+    return { ok: false, error: "attachmentIds must contain at most 8 unique ids." };
+  }
+  if (!content && !sourceRef && !attachmentIds?.length) {
+    return { ok: false, error: "content, sourceRef, or attachmentIds is required." };
   }
   const optionalFields = [
     ["title", 200],
@@ -102,6 +106,7 @@ async function parseRequest(
       ...(sourceRef ? { sourceRef } : {}),
       ...(integrationId ? { integrationId } : {}),
       ...(fallbackContent ? { fallbackContent } : {}),
+      ...(attachmentIds?.length ? { attachmentIds } : {}),
     },
   };
 }
@@ -124,6 +129,15 @@ function isValidOptionalString(value: unknown, maxLength: number) {
     value === null ||
     (typeof value === "string" && value.trim().length <= maxLength)
   );
+}
+
+function boundedStringArray(value: unknown, maxItems: number, maxLength: number) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > maxItems) return null;
+  const values = value.map((item) => boundedString(item, maxLength));
+  if (values.some((item) => !item)) return null;
+  const strings = values as string[];
+  return new Set(strings).size === strings.length ? strings : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

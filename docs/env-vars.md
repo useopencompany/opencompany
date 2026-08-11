@@ -30,6 +30,11 @@ release variables. Important contracts include:
   E2B, model providers, GitHub/X integration credentials, and Goat PostHog values.
 - Release: production DB URL, Vercel/Render credentials and project IDs, Goat URL, runner URL.
 
+The canonical web Chat cohort additionally uses server-only `GOAT_API_ORIGIN` and the non-secret
+build flag `NEXT_PUBLIC_GOAT_HEADLESS_CHAT`. Both remain unset/false until the separately authorized
+`apps/api` production service and rollout smoke gate in
+[Headless Chat operations](./headless-chat-operations.md) are complete.
+
 The Stripe endpoint secret is `GOAT_STRIPE_WEBHOOK_SECRET`; there is no second product webhook.
 Google OAuth uses the direct Goat callback URLs listed in `.env.example`.
 

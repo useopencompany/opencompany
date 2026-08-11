@@ -287,6 +287,76 @@ export async function createAgentSession(input: {
   }
 }
 
+export async function resolveActiveAgentSession(input: {
+  userWorkosId: string;
+  chatSessionId: string;
+}) {
+  if (!browserProfilesAvailable()) return null;
+  const [row] = await getDb()
+    .select({
+      profileId: goatBrowserProfiles.id,
+      profileName: goatBrowserProfiles.name,
+      siteHost: goatBrowserProfiles.siteHost,
+      allowedHosts: goatBrowserProfiles.allowedHosts,
+      browserbaseSessionId: goatBrowserProfileSessions.browserbaseSessionId,
+      startedAt: goatBrowserProfileSessions.startedAt,
+    })
+    .from(goatBrowserProfileSessions)
+    .innerJoin(
+      goatBrowserProfiles,
+      and(
+        eq(goatBrowserProfiles.id, goatBrowserProfileSessions.profileId),
+        eq(goatBrowserProfiles.activeSessionId, goatBrowserProfileSessions.browserbaseSessionId),
+      ),
+    )
+    .where(
+      and(
+        eq(goatBrowserProfileSessions.userWorkosId, input.userWorkosId),
+        eq(goatBrowserProfiles.userWorkosId, input.userWorkosId),
+        eq(goatBrowserProfiles.status, "connected"),
+        eq(goatBrowserProfileSessions.chatSessionId, input.chatSessionId),
+        eq(goatBrowserProfileSessions.kind, "agent"),
+        isNull(goatBrowserProfileSessions.endedAt),
+      ),
+    )
+    .orderBy(desc(goatBrowserProfileSessions.createdAt))
+    .limit(1);
+  if (!row) return null;
+  let session: { connectUrl?: string };
+  try {
+    session = await browserbase().sessions.retrieve(row.browserbaseSessionId);
+  } catch {
+    await endAgentSession({
+      userWorkosId: input.userWorkosId,
+      profileId: row.profileId,
+      sessionId: row.browserbaseSessionId,
+    });
+    throw new Error("The authenticated browser session is no longer available.");
+  }
+  if (!session.connectUrl) {
+    await endAgentSession({
+      userWorkosId: input.userWorkosId,
+      profileId: row.profileId,
+      sessionId: row.browserbaseSessionId,
+    });
+    throw new Error("The authenticated browser session is no longer connectable.");
+  }
+  return {
+    profile: {
+      id: row.profileId,
+      name: row.profileName,
+      siteHost: row.siteHost,
+      allowedHosts: normalizeHostList(row.allowedHosts),
+    },
+    sessionId: row.browserbaseSessionId,
+    connectUrl: session.connectUrl,
+    liveViewPath: `/api/browser-profiles/${row.profileId}/live-view?sessionId=${encodeURIComponent(
+      row.browserbaseSessionId,
+    )}`,
+    startedAt: row.startedAt ?? new Date(),
+  } satisfies BrowserProfileAgentSession;
+}
+
 export async function endAgentSession(input: {
   userWorkosId: string;
   profileId: string;

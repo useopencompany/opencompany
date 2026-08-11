@@ -1,7 +1,9 @@
 import {
   GOAT_ACTION_HOST_TOOL_CONTRACT_VERSIONS,
+  GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION,
   type GoatActionGatewayRequest,
   type GoatActionGatewayResponse,
+  type GoatActionHostGatewayRequest,
 } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
@@ -19,7 +21,10 @@ import {
   goatUsers,
   goatWorkspaceMembers,
 } from "@opencompany/db/goat-schema";
-import { projectActionCatalog } from "@opencompany/goat-agent/actions/policy";
+import {
+  type GoatActionCatalogPolicyName,
+  projectActionCatalog,
+} from "@opencompany/goat-agent/actions/policy";
 import { serveGoatActionRequest } from "@opencompany/goat-agent/actions/service";
 import { and, eq, inArray } from "drizzle-orm";
 import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
@@ -29,24 +34,33 @@ import type {
   GoatCapabilityTurnState,
   GoatResolvedActionCatalog,
 } from "@/lib/actions/types";
+import { MANAGED_CAPABILITY_ACTIONS_BY_ID } from "@/lib/capabilities/catalog";
+import { evaluateManagedCapabilityApproval } from "@/lib/capabilities/execute";
 
 type GoatActionPrincipal = {
   userWorkosId: string;
   workspaceId: string;
   chatSessionId: string;
   userTimezone: string;
+  policy?: GoatActionCatalogPolicyName;
 };
 
 type GoatActionGatewayDependencies = {
-  loadContext: (request: GoatActionGatewayRequest) => Promise<GoatActionPrincipal | null>;
+  loadContext: (request: GoatActionHostGatewayRequest) => Promise<GoatActionPrincipal | null>;
   resolveCatalog: typeof resolveGoatActionCatalog;
   executeAction: typeof executeGoatAction;
   getCapabilityTurnState: (
-    request: GoatActionGatewayRequest,
+    request: GoatActionHostGatewayRequest,
     context: GoatActionPrincipal,
   ) => GoatCapabilityTurnState;
   recordSourceDiscovery: typeof recordGoatActionSourceDiscovery;
   claimInvocation: typeof claimGoatActionInvocation;
+  evaluateApproval: (input: {
+    request: Extract<GoatActionHostGatewayRequest, { operation: "approval" }>;
+    context: GoatActionPrincipal;
+    turnState: GoatCapabilityTurnState;
+    signal: AbortSignal;
+  }) => Promise<boolean>;
   now: () => Date;
 };
 
@@ -57,11 +71,20 @@ const defaultDependencies: GoatActionGatewayDependencies = {
   getCapabilityTurnState: getGoatCodexActionCapabilityTurnState,
   recordSourceDiscovery: recordGoatActionSourceDiscovery,
   claimInvocation: claimGoatActionInvocation,
+  evaluateApproval: evaluateGoatActionApproval,
   now: () => new Date(),
 };
 
-export async function executeGoatActionGateway(input: {
+export function executeGoatActionGateway(input: {
   request: GoatActionGatewayRequest;
+  signal: AbortSignal;
+  dependencies?: Partial<GoatActionGatewayDependencies>;
+}): Promise<GoatActionGatewayResponse> {
+  return executeGoatActionHostGateway(input);
+}
+
+export async function executeGoatActionHostGateway(input: {
+  request: GoatActionHostGatewayRequest;
   signal: AbortSignal;
   dependencies?: Partial<GoatActionGatewayDependencies>;
 }): Promise<GoatActionGatewayResponse> {
@@ -82,7 +105,7 @@ export async function executeGoatActionGateway(input: {
         userWorkosId: context.userWorkosId,
         workspaceId: context.workspaceId,
       }),
-      "cloudReadOnly",
+      context.policy ?? "cloudReadOnly",
     );
   } catch {
     return gatewayError("internal", "The action catalog could not be loaded.");
@@ -90,18 +113,43 @@ export async function executeGoatActionGateway(input: {
 
   const turn = actionTurnRef(input.request, context);
   try {
+    const serviceCatalog = {
+      sources: catalog.providers,
+      actions: catalog.actions.map((action) => ({
+        id: action.id,
+        source: action.provider,
+        description: action.description,
+        params: action.params,
+        permissionMode: action.permissionMode,
+      })),
+    };
+    if (input.request.operation === "catalog") {
+      return { ok: true, catalog: serviceCatalog };
+    }
+    if (input.request.operation === "approval") {
+      const approvalRequest = input.request;
+      const action = catalog.actions.find((candidate) => candidate.id === approvalRequest.action);
+      if (!action) {
+        return gatewayError(
+          "invalid_params",
+          `"${approvalRequest.action}" is not an available action.`,
+        );
+      }
+      if (action.permissionMode === "ask") return { ok: true, needsApproval: true };
+      await dependencies.recordSourceDiscovery({ turn, sourceId: action.provider });
+      return {
+        ok: true,
+        needsApproval: await dependencies.evaluateApproval({
+          request: approvalRequest,
+          context,
+          turnState: dependencies.getCapabilityTurnState(input.request, context),
+          signal: input.signal,
+        }),
+      };
+    }
     return await serveGoatActionRequest({
       request: input.request,
-      catalog: {
-        sources: catalog.providers,
-        actions: catalog.actions.map((action) => ({
-          id: action.id,
-          source: action.provider,
-          description: action.description,
-          params: action.params,
-          permissionMode: action.permissionMode,
-        })),
-      },
+      catalog: serviceCatalog,
       governance: {
         recordSourceDiscovery: (sourceId) => dependencies.recordSourceDiscovery({ turn, sourceId }),
         claimInvocation: ({ sourceId, invocationId, maxCalls }) =>
@@ -132,8 +180,28 @@ export async function executeGoatActionGateway(input: {
   }
 }
 
+async function evaluateGoatActionApproval(input: {
+  request: Extract<GoatActionHostGatewayRequest, { operation: "approval" }>;
+  context: GoatActionPrincipal;
+  turnState: GoatCapabilityTurnState;
+  signal: AbortSignal;
+}) {
+  const spec = MANAGED_CAPABILITY_ACTIONS_BY_ID.get(input.request.action);
+  if (!spec) return false;
+  return evaluateManagedCapabilityApproval({
+    spec,
+    params: input.request.params,
+    toolCallId: input.request.invocationId,
+    workspaceId: input.context.workspaceId,
+    userWorkosId: input.context.userWorkosId,
+    chatSessionId: input.context.chatSessionId,
+    turnState: input.turnState,
+    signal: input.signal,
+  });
+}
+
 function getGoatCodexActionCapabilityTurnState(
-  request: GoatActionGatewayRequest,
+  request: GoatActionHostGatewayRequest,
   context: GoatActionPrincipal,
 ): GoatCapabilityTurnState {
   const turn = actionTurnRef(request, context);
@@ -181,7 +249,7 @@ function getGoatCodexActionCapabilityTurnState(
 }
 
 async function loadGoatCodexActionContext(
-  request: GoatActionGatewayRequest,
+  request: GoatActionHostGatewayRequest,
 ): Promise<GoatActionPrincipal | null> {
   const [row] = await getDb()
     .select({
@@ -189,6 +257,7 @@ async function loadGoatCodexActionContext(
       workspaceId: goatCodexChatSessions.workspaceId,
       chatSessionId: goatCodexChatSessions.chatSessionId,
       userTimezone: goatUsers.timezone,
+      engine: goatCodexChatSessions.engine,
     })
     .from(goatCodexChatSessions)
     .innerJoin(
@@ -212,6 +281,7 @@ async function loadGoatCodexActionContext(
         eq(goatCodexChatSessions.id, request.sessionId),
         inArray(goatCodexChatSessions.hostToolContractVersion, [
           ...GOAT_ACTION_HOST_TOOL_CONTRACT_VERSIONS,
+          GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION,
         ]),
         eq(goatCodexChatTurns.status, "running"),
       ),
@@ -224,6 +294,7 @@ async function loadGoatCodexActionContext(
     workspaceId: row.workspaceId,
     chatSessionId: row.chatSessionId,
     userTimezone: row.userTimezone,
+    policy: row.engine === "opencompany" ? "foregroundInteractive" : "cloudReadOnly",
   };
 }
 
@@ -231,12 +302,12 @@ function gatewayError(code: string, message: string): GoatActionGatewayResponse 
   return { ok: false, error: { code, message } };
 }
 
-function actionTurnRef(request: GoatActionGatewayRequest, context: GoatActionPrincipal) {
+function actionTurnRef(request: GoatActionHostGatewayRequest, context: GoatActionPrincipal) {
   return {
     sessionId: request.sessionId,
     turnId: request.turnId,
     userWorkosId: context.userWorkosId,
     workspaceId: context.workspaceId,
-    policy: "cloudReadOnly" as const,
+    policy: context.policy ?? "cloudReadOnly",
   };
 }

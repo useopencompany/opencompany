@@ -67,6 +67,25 @@ describe("POST /api/internal/codex-brain-capture", () => {
     expect(executeGoatCodexBrainCaptureGateway).not.toHaveBeenCalled();
   });
 
+  it("accepts bounded canonical attachment ids without text", async () => {
+    const response = await POST(
+      request("shared-secret", {
+        content: undefined,
+        title: undefined,
+        attachmentIds: ["attachment_1"],
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(executeGoatCodexBrainCaptureGateway).toHaveBeenCalledWith({
+      request: {
+        codexChatSessionId: "session_1",
+        codexChatTurnId: "turn_1",
+        attachmentIds: ["attachment_1"],
+      },
+    });
+  });
+
   it("rejects oversized content instead of silently falling back to a source pointer", async () => {
     const response = await POST(
       request("shared-secret", {
