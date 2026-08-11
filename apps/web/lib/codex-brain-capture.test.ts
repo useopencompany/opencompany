@@ -1,6 +1,6 @@
 import type { GoatCodexBrainCaptureGatewayRequest } from "@opencompany/agent-runtime";
+import type { GoatBrainCaptureServiceDependencies } from "@opencompany/goat-agent/application/brain-capture";
 import { describe, expect, it, vi } from "vitest";
-import type { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { executeGoatCodexBrainCaptureGateway } from "@/lib/codex-brain-capture";
 
 const request: GoatCodexBrainCaptureGatewayRequest = {
@@ -11,16 +11,16 @@ const request: GoatCodexBrainCaptureGatewayRequest = {
 };
 
 const context = {
-  userWorkosId: "user_1",
+  actorId: "user_1",
   workspaceId: "workspace_1",
   brainRef: "brain_1",
-  chatSessionId: "chat_1",
-  userMessageId: "message_1",
+  conversationId: "chat_1",
+  messageId: "message_1",
 };
 
 describe("executeGoatCodexBrainCaptureGateway", () => {
   it("uses the pinned Brain and the existing capture-first pipeline", async () => {
-    const capture = vi.fn<typeof captureToGoatBrainInbox>(async () => ({
+    const capture = vi.fn<GoatBrainCaptureServiceDependencies["capture"]>(async () => ({
       ok: true as const,
       draftBrainId: "launch-decision",
       path: "inbox/launch-decision.md",
@@ -48,7 +48,7 @@ describe("executeGoatCodexBrainCaptureGateway", () => {
     expect(capture).toHaveBeenCalledWith(
       expect.objectContaining({
         brainRef: "brain_1",
-        userWorkosId: "user_1",
+        actorId: "user_1",
         text: "The team approved the launch plan.",
         title: "Launch decision",
         source: expect.objectContaining({
@@ -62,7 +62,7 @@ describe("executeGoatCodexBrainCaptureGateway", () => {
   });
 
   it("uses a content-derived key so a recovered call is idempotent", async () => {
-    const capture = vi.fn<typeof captureToGoatBrainInbox>(async () => ({
+    const capture = vi.fn<GoatBrainCaptureServiceDependencies["capture"]>(async () => ({
       ok: true as const,
       draftBrainId: "launch-decision",
       path: "inbox/launch-decision.md",
@@ -96,7 +96,7 @@ describe("executeGoatCodexBrainCaptureGateway", () => {
   });
 
   it("resolves the default accessible Brain for an ordinary OpenCompany Chat", async () => {
-    const capture = vi.fn<typeof captureToGoatBrainInbox>(async () => ({
+    const capture = vi.fn<GoatBrainCaptureServiceDependencies["capture"]>(async () => ({
       ok: true,
       draftBrainId: "launch-decision",
       path: "inbox/launch-decision.md",
@@ -154,7 +154,7 @@ describe("executeGoatCodexBrainCaptureGateway", () => {
     expect(saveAttachments).toHaveBeenCalledWith(
       expect.objectContaining({
         brainRef: "brain_1",
-        userWorkosId: "user_1",
+        actorId: "user_1",
         attachmentIds: ["attachment_1"],
       }),
     );

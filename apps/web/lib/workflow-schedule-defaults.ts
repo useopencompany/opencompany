@@ -1,3 +1,1 @@
-export const DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON = "0 9 * * 1-5";
-export const DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT = "Run this workflow.";
-export const DEFAULT_GOAT_WORKFLOW_SCHEDULE_TIMEZONE = "UTC";
+export * from "@opencompany/goat-agent/workflow-schedule-defaults";

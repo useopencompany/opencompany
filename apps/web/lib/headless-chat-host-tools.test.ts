@@ -27,11 +27,11 @@ describe("headless Chat host tools", () => {
       },
       dependencies: {
         loadContext: vi.fn(async () => ({
-          userWorkosId: "user_1",
+          actorId: "user_1",
           workspaceId: "workspace_1",
           workspaceName: "OpenCompany",
-          chatSessionId: "conversation_1",
-          userMessageId: "message_1",
+          conversationId: "conversation_1",
+          messageId: "message_1",
           brainRef: null,
           email: "ada@example.test",
           firstName: "Ada",

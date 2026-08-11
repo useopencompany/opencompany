@@ -34,7 +34,7 @@ vi.mock("@opencompany/db/goat-credits", () => ({
   getGoatCreditBalanceUsdMicros: mocks.getBalance,
   recordGoatCreditDebit: mocks.recordDebit,
 }));
-vi.mock("@/lib/billing/auto-refill", () => ({
+vi.mock("@opencompany/billing/auto-refill", () => ({
   maybeTriggerGoatAutoRefill: mocks.autoRefill,
 }));
 

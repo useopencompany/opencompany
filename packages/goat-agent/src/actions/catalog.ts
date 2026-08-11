@@ -18,10 +18,8 @@ import type {
 } from "./types";
 import { resolveXAccountActions } from "./x-account";
 
-// Managed (Monid) capabilities need server-only execution + billing, so their
-// resolution lives in the host app (apps/web) and is injected here. The runner
-// passes nothing — background/headless runs never expose managed capabilities
-// (they require a persisted chat session + approval), exactly like the Slack bot.
+// Managed (Monid) capabilities are injected so each composition root can bind
+// the same shared resolver only for surfaces whose persisted policy permits them.
 export type GoatManagedCapabilitiesResolution = {
   sources: GoatActionSourceDescriptor[];
   actions: ResolvedGoatAction[];
@@ -31,8 +29,7 @@ export type GoatManagedCapabilitiesResolver = (
 ) => Promise<GoatManagedCapabilitiesResolution>;
 
 export type GoatActionCatalogDeps = {
-  // Injected by the host app to add managed (Monid) capabilities. Omitted by
-  // the runner so tasks never surface managed actions.
+  // Omit this for background surfaces whose policy does not permit paid capabilities.
   resolveManagedCapabilities?: GoatManagedCapabilitiesResolver;
 };
 
@@ -45,7 +42,7 @@ export function isGoatChatActionsKilled(): boolean {
 // Resolves the user's connected providers into a flat action catalog. A
 // provider that is disconnected — or whose resolver throws — is simply absent;
 // one broken provider never takes down the others. Managed (Monid) capabilities
-// are merged in only when the host app injects a resolver.
+// are merged in only when the composition root injects their shared resolver.
 export async function resolveGoatActionCatalog(
   input: {
     userWorkosId: string;
