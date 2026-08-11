@@ -33,7 +33,12 @@ const FORCE_RULES = [
   { files: ["Dockerfile.api"], surfaces: ["api"] },
   { files: ["Dockerfile.runner"], surfaces: ["runner"] },
   {
-    files: [".dockerignore", "render.yaml", "scripts/render-release.mjs"],
+    files: [
+      ".dockerignore",
+      "render.yaml",
+      "scripts/render-release.mjs",
+      "scripts/lib/render-release.mjs",
+    ],
     surfaces: ["api", "runner"],
   },
 ];

@@ -1,9 +1,15 @@
 #!/usr/bin/env node
 
 // Called by: .github/workflows/release-production.yml and root `bun run release:render`.
-// Purpose: triggers and waits for the Render runner deploy for the release commit.
+// Purpose: triggers and waits for a Render service deploy for the release commit.
 
 import { appendFileSync } from "node:fs";
+
+import {
+  deployCommitMatches,
+  isFailedDeployStatus,
+  selectNewDeployForRelease,
+} from "./lib/render-release.mjs";
 
 const renderApiUrl = process.env.RENDER_API_URL ?? "https://api.render.com/v1";
 const serviceId = requiredEnv("RENDER_SERVICE_ID");
@@ -56,6 +62,7 @@ async function main() {
 }
 
 async function triggerDeploy(releaseSha) {
+  const existingDeployIds = new Set((await listDeploys()).map((deploy) => deploy.id));
   const response = await renderRequest(
     `/services/${serviceId}/deploys`,
     {
@@ -68,18 +75,18 @@ async function triggerDeploy(releaseSha) {
   );
 
   if (!response) {
-    return waitForTriggeredDeploy(releaseSha);
+    return waitForTriggeredDeploy(releaseSha, existingDeployIds);
   }
 
   assertDeployCommit(response, releaseSha);
   return response;
 }
 
-async function waitForTriggeredDeploy(releaseSha) {
+async function waitForTriggeredDeploy(releaseSha, existingDeployIds) {
   const deadline = Date.now() + 30000;
 
   while (Date.now() < deadline) {
-    const deploy = await findDeployForRelease(releaseSha);
+    const deploy = await findNewDeployForRelease(releaseSha, existingDeployIds);
     if (deploy) {
       assertDeployCommit(deploy, releaseSha);
       return deploy;
@@ -88,7 +95,7 @@ async function waitForTriggeredDeploy(releaseSha) {
   }
 
   throw new Error(
-    `Render accepted the deploy request but did not expose a deploy for ${releaseSha}.`,
+    `Render accepted the deploy request but did not expose its API-triggered deploy for ${releaseSha}.`,
   );
 }
 
@@ -110,11 +117,13 @@ async function cancelStaleInFlightDeploys() {
   }
 }
 
-async function findDeployForRelease(releaseSha) {
+async function listDeploys() {
   const response = await renderRequest(`/services/${serviceId}/deploys`);
-  const deploys = Array.isArray(response) ? response.map((item) => item.deploy ?? item) : [];
+  return Array.isArray(response) ? response.map((item) => item.deploy ?? item) : [];
+}
 
-  return deploys.find((deploy) => deployCommitMatches(deploy, releaseSha)) ?? null;
+async function findNewDeployForRelease(releaseSha, existingDeployIds) {
+  return selectNewDeployForRelease(await listDeploys(), releaseSha, existingDeployIds);
 }
 
 async function waitForDeploy(deployId, releaseSha) {
@@ -134,7 +143,7 @@ async function waitForDeploy(deployId, releaseSha) {
       return;
     }
 
-    if (isFailedStatus(status)) {
+    if (isFailedDeployStatus(status)) {
       throw new Error(`Render deploy ${deployId} failed with status ${status}.`);
     }
 
@@ -252,23 +261,6 @@ function assertDeployCommit(deploy, expectedSha) {
       `Render deploy ${deploy.id ?? "(unknown)"} is for ${commitId}, expected ${expectedSha}.`,
     );
   }
-}
-
-function deployCommitMatches(deploy, expectedSha) {
-  const commitId = deploy?.commit?.id;
-  return (
-    typeof commitId === "string" &&
-    (expectedSha.startsWith(commitId) || commitId.startsWith(expectedSha))
-  );
-}
-
-function isFailedStatus(status) {
-  return (
-    status === "build_failed" ||
-    status === "update_failed" ||
-    status === "canceled" ||
-    status === "pre_deploy_failed"
-  );
 }
 
 function parseJson(value) {

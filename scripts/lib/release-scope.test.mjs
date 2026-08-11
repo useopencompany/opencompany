@@ -72,6 +72,15 @@ test("runner image changes deploy only the runner", () => {
   });
 });
 
+test("Render orchestration changes deploy both Render services", () => {
+  assert.deepEqual(planReleaseSurfaces({ changedFiles: ["scripts/lib/render-release.mjs"] }), {
+    web: false,
+    marketing: false,
+    api: true,
+    runner: true,
+  });
+});
+
 test("unrelated documentation changes do not deploy an application", () => {
   assert.deepEqual(planReleaseSurfaces({ changedFiles: ["docs/getting-started.md"] }), {
     web: false,
