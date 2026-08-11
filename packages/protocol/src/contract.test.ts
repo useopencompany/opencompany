@@ -102,6 +102,8 @@ describe("v1 protocol contract", () => {
   it("generates OpenAPI from the same schemas and exposes the typed Hono client", () => {
     const document = createOpenApiDocument();
     expect(Object.keys(document.paths ?? {})).toEqual([
+      "/v1/tasks",
+      "/v1/tasks/{taskId}",
       "/v1/conversations",
       "/v1/conversations/{conversationId}",
       "/v1/conversations/{conversationId}/messages",

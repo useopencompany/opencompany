@@ -1,4 +1,10 @@
-import { type Actor, CHAT_READ_PERMISSION, CHAT_WRITE_PERMISSION } from "@opencompany/core";
+import {
+  type Actor,
+  CHAT_READ_PERMISSION,
+  CHAT_WRITE_PERMISSION,
+  TASK_READ_PERMISSION,
+  TASK_WRITE_PERMISSION,
+} from "@opencompany/core";
 import type { ChatSqlExecute } from "@opencompany/db/chat-repository";
 import { WorkOS } from "@workos-inc/node";
 import { sql } from "drizzle-orm";
@@ -204,7 +210,12 @@ async function resolveLocalActor(
     userId: identity.userId,
     workspaceId: row.workspaceId,
     role: row.role,
-    permissions: [CHAT_READ_PERMISSION, CHAT_WRITE_PERMISSION],
+    permissions: [
+      CHAT_READ_PERMISSION,
+      CHAT_WRITE_PERMISSION,
+      TASK_READ_PERMISSION,
+      TASK_WRITE_PERMISSION,
+    ],
     authenticationMethod: identity.method,
     ...(identity.sessionId ? { sessionId: identity.sessionId } : {}),
   };

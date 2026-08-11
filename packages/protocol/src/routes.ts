@@ -4,21 +4,27 @@ import {
   AttachmentUploadBodySchema,
   AttachmentUploadEnvelopeSchema,
   CancelRunEnvelopeSchema,
-  ChatReadModelSchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
   CreateMessageBodySchema,
   CreateMessageEnvelopeSchema,
+  CreateTaskBodySchema,
+  CreateTaskEnvelopeSchema,
   CursorSchema,
   ErrorEnvelopeSchema,
   MessagePageSchema,
   PresentationCursorSchema,
+  ReadModelSchema,
   ResolveApprovalBodySchema,
   ResolveApprovalEnvelopeSchema,
   ResourceIdSchema,
   RunEnvelopeSchema,
+  TaskEnvelopeSchema,
+  TaskPageSchema,
   UpdateConversationBodySchema,
   UpdateConversationEnvelopeSchema,
+  UpdateTaskBodySchema,
+  UpdateTaskEnvelopeSchema,
 } from "./schemas";
 import { OPENAPI_DOCUMENT_VERSION, PROTOCOL_VERSION } from "./version";
 
@@ -27,6 +33,78 @@ const errorResponse = {
   description: "A structured protocol error.",
   content: { "application/json": { schema: ErrorEnvelopeSchema } },
 } as const;
+
+export const listTasksRoute = createRoute({
+  method: "get",
+  path: "/v1/tasks",
+  tags: ["Tasks"],
+  security: actorSecurity,
+  request: {
+    query: z.object({
+      cursor: z.string().optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+      archived: z.enum(["true", "false"]).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Actor-visible Tasks.",
+      content: { "application/json": { schema: TaskPageSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createTaskRoute = createRoute({
+  method: "post",
+  path: "/v1/tasks",
+  tags: ["Tasks"],
+  security: actorSecurity,
+  request: {
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: { required: true, content: { "application/json": { schema: CreateTaskBodySchema } } },
+  },
+  responses: {
+    202: {
+      description: "Task accepted with its initial Message and queued Run.",
+      content: { "application/json": { schema: CreateTaskEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getTaskRoute = createRoute({
+  method: "get",
+  path: "/v1/tasks/{taskId}",
+  tags: ["Tasks"],
+  security: actorSecurity,
+  request: { params: z.object({ taskId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "A Task and its canonical Conversation link.",
+      content: { "application/json": { schema: TaskEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const updateTaskRoute = createRoute({
+  method: "patch",
+  path: "/v1/tasks/{taskId}",
+  tags: ["Tasks"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ taskId: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: UpdateTaskBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Updated Task and Electric transaction boundary.",
+      content: { "application/json": { schema: UpdateTaskEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
 
 export const listConversationsRoute = createRoute({
   method: "get",
@@ -227,7 +305,7 @@ export const streamReadModelRoute = createRoute({
   tags: ["Read models"],
   security: actorSecurity,
   request: {
-    params: z.object({ readModel: ChatReadModelSchema }),
+    params: z.object({ readModel: ReadModelSchema }),
     query: z.object({
       conversationId: ResourceIdSchema.optional(),
       offset: z.string().optional(),
@@ -249,6 +327,10 @@ export const streamReadModelRoute = createRoute({
 });
 
 export type V1RouteHandlers = {
+  listTasks: RouteHandler<typeof listTasksRoute>;
+  createTask: RouteHandler<typeof createTaskRoute>;
+  getTask: RouteHandler<typeof getTaskRoute>;
+  updateTask: RouteHandler<typeof updateTaskRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
   updateConversation: RouteHandler<typeof updateConversationRoute>;
@@ -272,6 +354,10 @@ export function createV1Router(
   const app = new OpenAPIHono(options.defaultHook ? { defaultHook: options.defaultHook } : {});
   options.beforeRoutes?.(app);
   return app
+    .openapi(listTasksRoute, handlers.listTasks)
+    .openapi(createTaskRoute, handlers.createTask)
+    .openapi(getTaskRoute, handlers.getTask)
+    .openapi(updateTaskRoute, handlers.updateTask)
     .openapi(listConversationsRoute, handlers.listConversations)
     .openapi(getConversationRoute, handlers.getConversation)
     .openapi(updateConversationRoute, handlers.updateConversation)
@@ -316,8 +402,44 @@ const placeholderConversation = {
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
 };
+const placeholderTask = {
+  id: "task_contract",
+  displayId: "TASK-1",
+  name: "Contract placeholder",
+  goal: "Complete the contract placeholder.",
+  conversationId: "conversation_task_contract",
+  status: "queued" as const,
+  source: "manual" as const,
+  engine: "opencompany" as const,
+  model: "provider/model",
+  workflowId: null,
+  scheduleId: null,
+  scheduledFor: null,
+  outcome: { result: null, error: null, reportedStatus: null, comment: null },
+  archivedAt: null,
+  createdAt: placeholderTime,
+  updatedAt: placeholderTime,
+};
 
 const contractDocumentHandlers: V1RouteHandlers = {
+  listTasks: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
+  createTask: (c) =>
+    c.json(
+      {
+        data: {
+          task: placeholderTask,
+          messageId: "message_task_contract",
+          assistantMessageId: "message_task_assistant_contract",
+          runId: "run_task_contract",
+          transactionId: "1",
+          replayed: false,
+        },
+        meta,
+      },
+      202,
+    ),
+  getTask: (c) => c.json({ data: placeholderTask, meta }, 200),
+  updateTask: (c) => c.json({ data: { task: placeholderTask, transactionId: "1" }, meta }, 200),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   getConversation: (c) => c.json({ data: placeholderConversation, meta }, 200),
   updateConversation: (c) =>

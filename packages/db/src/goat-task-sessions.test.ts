@@ -132,6 +132,9 @@ describe("Goat task sessions", () => {
     expect(query.sql).toContain("INSERT INTO goat.chat_messages");
     expect(query.sql).toContain("INSERT INTO goat.codex_chat_turns");
     expect(query.sql).toContain("active_turn.status IN ('queued', 'running')");
+    expect(query.sql).not.toContain("INSERT INTO goat.chat_sessions");
+    expect(query.sql).not.toContain("INSERT INTO goat.codex_chat_sessions");
+    expect(query.sql).not.toContain("SET session_id");
     expect(query.sql).not.toContain("goat.task_messages");
     expect(query.sql).not.toContain("goat.task_events");
   });

@@ -1422,6 +1422,13 @@
       "when": 1786401000000,
       "tag": "0201_goat_chat_read_models_v1",
       "breakpoints": true
+    },
+    {
+      "idx": 203,
+      "version": "7",
+      "when": 1786480000000,
+      "tag": "0202_goat_headless_task_foundation",
+      "breakpoints": true
     }
   ]
 }

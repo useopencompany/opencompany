@@ -11,6 +11,8 @@ export type Actor = {
 
 export const CHAT_READ_PERMISSION = "chat:read";
 export const CHAT_WRITE_PERMISSION = "chat:write";
+export const TASK_READ_PERMISSION = "task:read";
+export const TASK_WRITE_PERMISSION = "task:write";
 
 export function actorHasPermission(actor: Actor, permission: string): boolean {
   return actor.permissions.includes(permission);

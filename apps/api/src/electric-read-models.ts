@@ -1,9 +1,11 @@
 import type { Actor } from "@opencompany/core";
 import {
-  type ChatReadModel,
   ConversationReadModelSchema,
   MessageReadModelSchema,
+  type ReadModel,
   RunReadModelSchema,
+  TaskOutcomeSchema,
+  TaskReadModelSchema,
 } from "@opencompany/protocol";
 import { ApiError } from "./errors";
 
@@ -35,10 +37,10 @@ const ELECTRIC_RESPONSE_HEADERS = [
 // metadata prevents @electric-sql/client from parsing the already-decoded values a second time.
 const PREDECODED_READ_MODEL_FIELDS = new Set(["presentation", "attachments"]);
 
-export interface ChatReadModelService {
+export interface ReadModelService {
   stream(input: {
     actor: Actor;
-    readModel: ChatReadModel;
+    readModel: ReadModel;
     conversationId?: string;
     requestUrl: URL;
   }): Promise<Response>;
@@ -53,7 +55,7 @@ type ElectricReadModelProxyOptions = {
   fetch?: typeof globalThis.fetch;
 };
 
-export class ElectricChatReadModelProxy implements ChatReadModelService {
+export class ElectricReadModelProxy implements ReadModelService {
   private readonly fetchImpl: typeof globalThis.fetch;
 
   constructor(private readonly options: ElectricReadModelProxyOptions) {
@@ -65,7 +67,7 @@ export class ElectricChatReadModelProxy implements ChatReadModelService {
 
   async stream(input: {
     actor: Actor;
-    readModel: ChatReadModel;
+    readModel: ReadModel;
     conversationId?: string;
     requestUrl: URL;
   }) {
@@ -131,11 +133,7 @@ export class ElectricChatReadModelProxy implements ChatReadModelService {
   }
 }
 
-function readModelShape(input: {
-  actor: Actor;
-  readModel: ChatReadModel;
-  conversationId?: string;
-}) {
+function readModelShape(input: { actor: Actor; readModel: ReadModel; conversationId?: string }) {
   switch (input.readModel) {
     case "chat-conversations-v1":
       return {
@@ -180,8 +178,35 @@ function readModelShape(input: {
         "created_at",
         "updated_at",
       ]);
+    case "tasks-v1":
+      return {
+        table: "goat.task_read_model_v1",
+        columns: [
+          "id",
+          "display_id",
+          "name",
+          "goal",
+          "conversation_id",
+          "status",
+          "source",
+          "engine",
+          "model",
+          "workflow_id",
+          "schedule_id",
+          "scheduled_for",
+          "result",
+          "error",
+          "reported_status",
+          "outcome_comment",
+          "archived_at",
+          "created_at",
+          "updated_at",
+        ],
+        where: `("workspace_id" = $2 OR (` + `"workspace_id" IS NULL AND "actor_id" = $1))`,
+        params: [input.actor.userId, input.actor.workspaceId],
+      };
     default:
-      throw new ApiError(400, "invalid_request", "Unknown Chat read model.");
+      throw new ApiError(400, "invalid_request", "Unknown read model.");
   }
 }
 
@@ -197,13 +222,13 @@ function conversationShape(
     table,
     columns,
     where:
-      `"conversation_id" = $1 AND "actor_id" = $2 ` +
-      `AND ("workspace_id" = $3 OR "workspace_id" IS NULL)`,
+      `"conversation_id" = $1 ` +
+      `AND ("workspace_id" = $3 OR ("workspace_id" IS NULL AND "actor_id" = $2))`,
     params: [input.conversationId, input.actor.userId, input.actor.workspaceId],
   };
 }
 
-function projectElectricEntry(readModel: ChatReadModel, entry: unknown) {
+function projectElectricEntry(readModel: ReadModel, entry: unknown) {
   if (!isRecord(entry) || !isRecord(entry.value)) return entry;
   const operation = isRecord(entry.headers) ? entry.headers.operation : undefined;
   return {
@@ -214,20 +239,32 @@ function projectElectricEntry(readModel: ChatReadModel, entry: unknown) {
 }
 
 function projectReadModelValue(
-  readModel: ChatReadModel,
+  readModel: ReadModel,
   row: Record<string, unknown>,
   partial: boolean,
 ) {
   const columnNames = READ_MODEL_COLUMN_NAMES[
     readModel as keyof typeof READ_MODEL_COLUMN_NAMES
   ] as Record<string, string>;
-  const projected = Object.fromEntries(
+  const projected: Record<string, unknown> = Object.fromEntries(
     Object.entries(columnNames).flatMap(([physicalName, publicName]) =>
-      Object.hasOwn(row, physicalName)
+      publicName && Object.hasOwn(row, physicalName)
         ? [[publicName, readModelFieldValue(publicName, row[physicalName])]]
         : [],
     ),
   );
+  if (readModel === "tasks-v1") {
+    const outcome = Object.fromEntries(
+      Object.entries(TASK_OUTCOME_COLUMN_NAMES).flatMap(([physicalName, publicName]) =>
+        Object.hasOwn(row, physicalName) ? [[publicName, row[physicalName]]] : [],
+      ),
+    );
+    if (Object.keys(outcome).length > 0) projected.outcome = outcome;
+    const schema = partial
+      ? TaskReadModelSchema.partial().extend({ outcome: TaskOutcomeSchema.partial().optional() })
+      : TaskReadModelSchema;
+    return schema.parse(projected);
+  }
   switch (readModel) {
     case "chat-conversations-v1":
       return (partial ? ConversationReadModelSchema.partial() : ConversationReadModelSchema).parse(
@@ -285,7 +322,7 @@ function timestampValue(value: unknown) {
   return Number.isNaN(timestamp.getTime()) ? value : timestamp.toISOString();
 }
 
-function electricNoContentResponse(upstream: Response, readModel: ChatReadModel) {
+function electricNoContentResponse(upstream: Response, readModel: ReadModel) {
   const headers = safeElectricHeaders(upstream.headers, readModel);
   headers.delete("content-type");
   headers.set("Cache-Control", "private, no-store");
@@ -297,7 +334,7 @@ function electricNoContentResponse(upstream: Response, readModel: ChatReadModel)
   });
 }
 
-function electricRecoveryResponse(upstream: Response, readModel: ChatReadModel) {
+function electricRecoveryResponse(upstream: Response, readModel: ReadModel) {
   const headers = safeElectricHeaders(upstream.headers, readModel);
   headers.set("Content-Type", "application/json; charset=utf-8");
   headers.set("Cache-Control", "private, no-store");
@@ -309,7 +346,7 @@ function electricRecoveryResponse(upstream: Response, readModel: ChatReadModel) 
   });
 }
 
-function safeElectricHeaders(source: Headers, readModel: ChatReadModel) {
+function safeElectricHeaders(source: Headers, readModel: ReadModel) {
   const headers = new Headers();
   for (const name of ELECTRIC_RESPONSE_HEADERS) {
     const value = source.get(name);
@@ -391,6 +428,34 @@ const READ_MODEL_COLUMN_NAMES = {
     created_at: "createdAt",
     updated_at: "updatedAt",
   },
+  "tasks-v1": {
+    id: "id",
+    display_id: "displayId",
+    name: "name",
+    goal: "goal",
+    conversation_id: "conversationId",
+    status: "status",
+    source: "source",
+    engine: "engine",
+    model: "model",
+    workflow_id: "workflowId",
+    schedule_id: "scheduleId",
+    scheduled_for: "scheduledFor",
+    result: "",
+    error: "",
+    reported_status: "",
+    outcome_comment: "",
+    archived_at: "archivedAt",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+} as const;
+
+const TASK_OUTCOME_COLUMN_NAMES = {
+  result: "result",
+  error: "error",
+  reported_status: "reportedStatus",
+  outcome_comment: "comment",
 } as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,0 +1,894 @@
+import { createHash, randomUUID } from "node:crypto";
+import {
+  claudeCodeCliModelNameForModelId,
+  codexCliModelNameForModelId,
+  GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
+  getAgentModelDefinition,
+} from "@opencompany/agent-runtime";
+import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import {
+  type Actor,
+  CoreError,
+  type CreateTaskCommand,
+  type CreateTaskResult,
+  type Task,
+  type TaskPage,
+  type TaskRepository,
+  type TaskSource,
+  type TaskStatus,
+  type UpdateTaskResult,
+} from "@opencompany/core";
+import { type SQL, sql } from "drizzle-orm";
+import {
+  type ChatAttachmentResolver,
+  type ChatSqlExecute,
+  type ResolvedChatAttachments,
+  RUN_EVENT_NOTIFY_CHANNEL,
+} from "./chat-repository";
+import type { GoatHarnessSpec } from "./goat-schema";
+
+export type TaskRepositoryIdFactory = {
+  command(): string;
+  task(): string;
+  conversation(): string;
+  message(): string;
+  runtime(): string;
+  run(): string;
+  event(): string;
+};
+
+const defaultIds: TaskRepositoryIdFactory = {
+  command: () => `task_command_${randomUUID()}`,
+  task: () => `task_${randomUUID()}`,
+  conversation: () => `conversation_${randomUUID()}`,
+  message: () => `message_${randomUUID()}`,
+  runtime: () => `runtime_${randomUUID()}`,
+  run: () => `run_${randomUUID()}`,
+  event: () => `event_${randomUUID()}`,
+};
+
+type PostgresTaskRepositoryOptions = {
+  ids?: TaskRepositoryIdFactory;
+  resolveAttachments?: ChatAttachmentResolver;
+  resolveHarness?: (input: {
+    actor: Actor;
+    command: CreateTaskCommand & { model: AgentModelId };
+  }) => Promise<GoatHarnessSpec>;
+  now?: () => Date;
+};
+
+export class PostgresTaskRepository implements TaskRepository {
+  constructor(
+    private readonly execute: ChatSqlExecute,
+    private readonly options: PostgresTaskRepositoryOptions = {},
+  ) {}
+
+  async listTasks(input: {
+    actor: Actor;
+    cursor?: string;
+    limit: number;
+    archived: boolean;
+  }): Promise<TaskPage> {
+    const cursor = decodeTaskCursor(input.cursor);
+    const rows = await this.rows<TaskRow>(sql`
+      SELECT
+        task.id,
+        task.display_id AS "displayId",
+        task.name,
+        task.prompt AS goal,
+        task.session_id AS "conversationId",
+        task.status,
+        task.source,
+        conversation.engine,
+        task.model,
+        task.workflow_id AS "workflowId",
+        task.schedule_id AS "scheduleId",
+        task.scheduled_for AS "scheduledFor",
+        task.result,
+        task.error,
+        task.reported_outcome AS "reportedStatus",
+        task.outcome_comment AS "outcomeComment",
+        task.archived_at AS "archivedAt",
+        task.created_at AS "createdAt",
+        task.updated_at AS "updatedAt"
+      FROM goat.tasks AS task
+      JOIN goat.chat_sessions AS conversation
+        ON conversation.id = task.session_id
+       AND conversation.kind = 'task'
+      WHERE ${taskAccessPredicate(input.actor)}
+        AND CASE WHEN ${input.archived}::boolean
+          THEN task.archived_at IS NOT NULL
+          ELSE task.archived_at IS NULL
+        END
+        AND (
+          ${cursor?.updatedAt ?? null}::timestamptz IS NULL
+          OR (task.updated_at, task.id) < (
+            ${cursor?.updatedAt ?? null}::timestamptz,
+            ${cursor?.id ?? null}::text
+          )
+        )
+      ORDER BY task.updated_at DESC, task.id DESC
+      LIMIT ${input.limit + 1}
+    `);
+    const tasks = rows.slice(0, input.limit).map(mapTask);
+    const last = tasks.at(-1);
+    return {
+      tasks,
+      nextCursor:
+        rows.length > input.limit && last ? encodeTaskCursor(last.updatedAt, last.id) : null,
+    };
+  }
+
+  async getTask(input: { actor: Actor; taskId: string }): Promise<Task | null> {
+    const [row] = await this.rows<TaskRow>(sql`
+      ${taskSelect()}
+      WHERE (
+          task.id = ${input.taskId}
+          OR upper(task.display_id) = upper(${input.taskId})
+        )
+        AND ${taskAccessPredicate(input.actor)}
+      LIMIT 1
+    `);
+    return row ? mapTask(row) : null;
+  }
+
+  async getTaskByConversation(input: {
+    actor: Actor;
+    conversationId: string;
+  }): Promise<Task | null> {
+    const [row] = await this.rows<TaskRow>(sql`
+      ${taskSelect()}
+      WHERE task.session_id = ${input.conversationId}
+        AND ${taskAccessPredicate(input.actor)}
+      LIMIT 1
+    `);
+    return row ? mapTask(row) : null;
+  }
+
+  async createTaskAndRun(input: {
+    actor: Actor;
+    command: CreateTaskCommand;
+  }): Promise<CreateTaskResult> {
+    const requestHash = hashTaskCommand(input.command);
+    const [preflight] = await this.rows<TaskCreateRow>(sql`
+      WITH actor_scope AS MATERIALIZED (
+        SELECT "user".task_spawning_enabled AS "featureEnabled"
+        FROM goat.users AS "user"
+        JOIN goat.workspace_members AS member
+          ON member.user_workos_id = "user".workos_user_id
+         AND member.workspace_id = ${input.actor.workspaceId}
+        WHERE "user".workos_user_id = ${input.actor.userId}
+      )
+      SELECT
+        EXISTS (SELECT 1 FROM actor_scope) AS authorized,
+        COALESCE((SELECT "featureEnabled" FROM actor_scope), false) AS "featureEnabled",
+        reservation.command_id AS "commandId",
+        reservation.request_hash AS "requestHash",
+        reservation.task_id AS "taskId",
+        reservation.conversation_id AS "reservedConversationId",
+        reservation.message_id AS "messageId",
+        reservation.assistant_message_id AS "assistantMessageId",
+        reservation.run_id AS "runId",
+        reservation.transaction_id AS "transactionId",
+        true AS replayed,
+        EXISTS (
+          SELECT 1
+          FROM goat.tasks AS task
+          JOIN goat.codex_chat_turns AS run ON run.id = reservation.run_id
+          WHERE task.id = reservation.task_id
+            AND task.session_id = reservation.conversation_id
+            AND run.chat_session_id = reservation.conversation_id
+            AND run.user_message_id = reservation.message_id
+            AND run.assistant_message_id = reservation.assistant_message_id
+        ) AS materialized,
+        task.id,
+        task.display_id AS "displayId",
+        task.name,
+        task.prompt AS goal,
+        task.session_id AS "taskConversationId",
+        task.status,
+        task.source,
+        conversation.engine,
+        task.model,
+        task.workflow_id AS "workflowId",
+        task.schedule_id AS "scheduleId",
+        task.scheduled_for AS "scheduledFor",
+        task.result,
+        task.error,
+        task.reported_outcome AS "reportedStatus",
+        task.outcome_comment AS "outcomeComment",
+        task.archived_at AS "archivedAt",
+        task.created_at AS "createdAt",
+        task.updated_at AS "updatedAt"
+      FROM (SELECT 1) AS singleton
+      LEFT JOIN goat.task_command_idempotency AS reservation
+        ON reservation.user_workos_id = ${input.actor.userId}
+       AND reservation.workspace_id = ${input.actor.workspaceId}
+       AND reservation.idempotency_key = ${input.command.idempotencyKey}
+       AND EXISTS (SELECT 1 FROM actor_scope)
+      LEFT JOIN goat.tasks AS task ON task.id = reservation.task_id
+      LEFT JOIN goat.chat_sessions AS conversation ON conversation.id = task.session_id
+      LIMIT 1
+    `);
+    if (!preflight?.authorized) {
+      throw new CoreError("not_found", "Workspace membership not found.");
+    }
+    if (preflight.commandId) {
+      return taskCreateResult(preflight, requestHash);
+    }
+    if (!preflight.featureEnabled) {
+      throw new CoreError("forbidden", "Tasks & Workflows is disabled for this actor.");
+    }
+
+    const resolvedAttachments = await this.resolveAttachments(
+      input.actor,
+      input.command.attachmentIds ?? [],
+    );
+    const ids = this.options.ids ?? defaultIds;
+    const commandId = ids.command();
+    const taskId = ids.task();
+    const conversationId = ids.conversation();
+    const messageId = ids.message();
+    const assistantMessageId = ids.message();
+    const runtimeId = ids.runtime();
+    const runId = ids.run();
+    const eventId = ids.event();
+    const now = this.options.now?.() ?? new Date();
+    const assistantCreatedAt = new Date(now.getTime() + 1);
+    const runtimeModel = runtimeModelName(input.command.engine, input.command.model);
+    const model = getAgentModelDefinition(input.command.model)?.id;
+    if (!runtimeModel || !model) {
+      throw new CoreError("invalid_argument", `Unsupported ${input.command.engine} Task model.`);
+    }
+    const attachments = resolvedAttachments.attachments;
+    const attachmentTexts = resolvedAttachments.attachmentTexts;
+    const attachmentIds = input.command.attachmentIds ?? [];
+    const attachmentIdList = attachmentIds.length
+      ? sql.join(
+          attachmentIds.map((id) => sql`${id}`),
+          sql`, `,
+        )
+      : sql`NULL`;
+    const harness = this.options.resolveHarness
+      ? await this.options.resolveHarness({
+          actor: input.actor,
+          command: { ...input.command, model },
+        })
+      : defaultHarness({ ...input.command, model });
+    validateHarness(harness, input.command);
+    const assistantDebugTrace = {
+      schemaVersion:
+        input.command.engine === "opencompany"
+          ? "opencompany.chat.debug.v1"
+          : "goat.codex_chat.debug.v1",
+      model: runtimeModel,
+      uiMessageParts: [],
+    };
+
+    let rows: TaskCreateRow[];
+    try {
+      rows = await this.rows<TaskCreateRow>(sql`
+        WITH actor_scope AS MATERIALIZED (
+          SELECT
+            "user".workos_user_id,
+            "user".task_spawning_enabled AS feature_enabled
+          FROM goat.users AS "user"
+          JOIN goat.workspace_members AS member
+            ON member.user_workos_id = "user".workos_user_id
+           AND member.workspace_id = ${input.actor.workspaceId}
+          WHERE "user".workos_user_id = ${input.actor.userId}
+          FOR UPDATE OF "user"
+        ),
+        prior AS MATERIALIZED (
+          SELECT *
+          FROM goat.task_command_idempotency
+          WHERE user_workos_id = ${input.actor.userId}
+            AND workspace_id = ${input.actor.workspaceId}
+            AND idempotency_key = ${input.command.idempotencyKey}
+        ),
+        eligible_attachments AS MATERIALIZED (
+          SELECT upload.id
+          FROM goat.chat_attachment_uploads AS upload
+          WHERE upload.user_workos_id = ${input.actor.userId}
+            AND upload.workspace_id = ${input.actor.workspaceId}
+            AND upload.claimed_at IS NULL
+            AND upload.expires_at > ${now}
+            AND upload.id IN (${attachmentIdList})
+            AND EXISTS (SELECT 1 FROM actor_scope)
+          FOR UPDATE
+        ),
+        reservation AS MATERIALIZED (
+          INSERT INTO goat.task_command_idempotency (
+            command_id, user_workos_id, workspace_id, idempotency_key, request_hash,
+            task_id, conversation_id, message_id, assistant_message_id, runtime_id, run_id,
+            created_at, touched_at
+          )
+          SELECT
+            ${commandId}, ${input.actor.userId}, ${input.actor.workspaceId},
+            ${input.command.idempotencyKey}, ${requestHash}, ${taskId}, ${conversationId},
+            ${messageId}, ${assistantMessageId}, ${runtimeId}, ${runId}, ${now}, ${now}
+          FROM actor_scope
+          WHERE actor_scope.feature_enabled = true OR EXISTS (SELECT 1 FROM prior)
+          ON CONFLICT (user_workos_id, workspace_id, idempotency_key)
+          DO UPDATE SET touched_at = EXCLUDED.touched_at
+          RETURNING *
+        ),
+        winner AS MATERIALIZED (
+          SELECT * FROM reservation WHERE command_id = ${commandId}
+        ),
+        resolved_brain AS MATERIALIZED (
+          SELECT brain.id
+          FROM goat.brains AS brain
+          WHERE brain.workspace_id = ${input.actor.workspaceId}
+            AND EXISTS (SELECT 1 FROM winner)
+          ORDER BY
+            CASE WHEN brain.slug = 'general' THEN 0 ELSE 1 END,
+            brain.created_at ASC,
+            brain.id ASC
+          LIMIT 1
+        ),
+        created_conversation AS MATERIALIZED (
+          INSERT INTO goat.chat_sessions (
+            id, user_workos_id, title, model, engine, kind, created_at, updated_at
+          )
+          SELECT
+            winner.conversation_id, ${input.actor.userId}, ${input.command.name},
+            ${input.command.model}, ${input.command.engine}, 'task', ${now}, ${assistantCreatedAt}
+          FROM winner
+          RETURNING id
+        ),
+        created_task AS MATERIALIZED (
+          INSERT INTO goat.tasks (
+            id, name, user_workos_id, workspace_id, prompt, source, model, session_id,
+            schedule_id, scheduled_for, workflow_id, status, stage, next_run_at,
+            harness_spec, created_at, updated_at
+          )
+          SELECT
+            winner.task_id, ${input.command.name}, ${input.actor.userId},
+            ${input.actor.workspaceId}, ${input.command.goal}, ${input.command.source},
+            ${input.command.model}, conversation.id, ${input.command.scheduleId ?? null},
+            ${input.command.scheduledFor ?? null}, ${input.command.workflowId ?? null},
+            'queued', 'queued', ${now}, ${JSON.stringify(harness)}::jsonb, ${now}, ${now}
+          FROM winner
+          JOIN created_conversation AS conversation ON conversation.id = winner.conversation_id
+          RETURNING *
+        ),
+        selected_task AS MATERIALIZED (
+          SELECT created.*
+          FROM created_task AS created
+          UNION ALL
+          SELECT existing.*
+          FROM goat.tasks AS existing
+          JOIN reservation ON reservation.task_id = existing.id
+          WHERE NOT EXISTS (SELECT 1 FROM created_task)
+        ),
+        claimed_attachments AS MATERIALIZED (
+          UPDATE goat.chat_attachment_uploads AS upload
+          SET claimed_message_id = winner.message_id,
+              claimed_at = ${now}
+          FROM winner
+          WHERE upload.id IN (SELECT id FROM eligible_attachments)
+            AND upload.claimed_at IS NULL
+          RETURNING upload.id
+        ),
+        inserted_user_message AS MATERIALIZED (
+          INSERT INTO goat.chat_messages (
+            id, session_id, role, content, attachments, attachment_texts, created_at, updated_at
+          )
+          SELECT
+            winner.message_id, task.session_id, 'user', ${input.command.goal},
+            ${attachmentsJson(attachments)}::jsonb, ${attachmentTextsJson(attachmentTexts)}::jsonb,
+            ${now}, ${now}
+          FROM winner
+          JOIN created_task AS task ON task.id = winner.task_id
+          WHERE (SELECT COUNT(*) FROM claimed_attachments) = ${attachmentIds.length}
+          RETURNING id
+        ),
+        inserted_assistant_message AS MATERIALIZED (
+          INSERT INTO goat.chat_messages (
+            id, session_id, role, content, debug_trace, created_at, updated_at
+          )
+          SELECT
+            winner.assistant_message_id, task.session_id, 'assistant', '',
+            ${JSON.stringify(assistantDebugTrace)}::jsonb, ${assistantCreatedAt}, ${assistantCreatedAt}
+          FROM winner
+          JOIN created_task AS task ON task.id = winner.task_id
+          RETURNING id
+        ),
+        inserted_runtime AS MATERIALIZED (
+          INSERT INTO goat.codex_chat_sessions (
+            id, user_workos_id, chat_session_id, engine, model, brain_ref, workspace_id,
+            host_tool_contract_version, active_turn_id, status, created_at, updated_at
+          )
+          SELECT
+            winner.runtime_id, ${input.actor.userId}, task.session_id, ${input.command.engine},
+            ${runtimeModel}, (SELECT id FROM resolved_brain), ${input.actor.workspaceId},
+            ${
+              input.command.engine === "opencompany" ? null : GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION
+            },
+            winner.run_id, 'queued', ${now}, ${now}
+          FROM winner
+          JOIN created_task AS task ON task.id = winner.task_id
+          RETURNING id
+        ),
+        inserted_run AS MATERIALIZED (
+          INSERT INTO goat.codex_chat_turns (
+            id, user_workos_id, codex_chat_session_id, chat_session_id, user_message_id,
+            assistant_message_id, status, prompt, settings, event_sequence, created_at, updated_at
+          )
+          SELECT
+            winner.run_id, ${input.actor.userId}, runtime.id, task.session_id,
+            winner.message_id, winner.assistant_message_id, 'queued', ${input.command.goal},
+            ${JSON.stringify(turnSettingsFromHarness(harness))}::jsonb, 1, ${now}, ${now}
+          FROM winner
+          JOIN created_task AS task ON task.id = winner.task_id
+          JOIN inserted_runtime AS runtime ON true
+          JOIN inserted_user_message AS user_message ON user_message.id = winner.message_id
+          JOIN inserted_assistant_message AS assistant_message
+            ON assistant_message.id = winner.assistant_message_id
+          RETURNING id
+        ),
+        inserted_event AS MATERIALIZED (
+          INSERT INTO goat.run_events (
+            id, run_id, sequence, schema_version, type, payload, created_at
+          )
+          SELECT
+            ${eventId}, run.id, 1, 1, 'run.queued',
+            jsonb_build_object(
+              'conversationId', winner.conversation_id,
+              'triggerMessageId', winner.message_id,
+              'taskId', winner.task_id
+            ),
+            ${now}
+          FROM inserted_run AS run
+          JOIN winner ON winner.run_id = run.id
+          RETURNING run_id, sequence
+        ),
+        notified AS MATERIALIZED (
+          SELECT pg_notify(
+            ${RUN_EVENT_NOTIFY_CHANNEL},
+            jsonb_build_object('runId', run_id, 'sequence', sequence)::text
+          )
+          FROM inserted_event
+        )
+        SELECT
+          EXISTS (SELECT 1 FROM actor_scope) AS authorized,
+          COALESCE((SELECT feature_enabled FROM actor_scope), false) AS "featureEnabled",
+          reservation.command_id AS "commandId",
+          reservation.request_hash AS "requestHash",
+          reservation.task_id AS "taskId",
+          reservation.conversation_id AS "reservedConversationId",
+          reservation.message_id AS "messageId",
+          reservation.assistant_message_id AS "assistantMessageId",
+          reservation.run_id AS "runId",
+          reservation.transaction_id AS "transactionId",
+          reservation.command_id <> ${commandId} AS replayed,
+          CASE
+            WHEN reservation.command_id <> ${commandId} OR EXISTS (SELECT 1 FROM inserted_run)
+              THEN true
+            ELSE jsonb_array_length(jsonb_build_object('reason', 'unmaterialized')) = 0
+          END AS materialized,
+          task.id,
+          task.display_id AS "displayId",
+          task.name,
+          task.prompt AS goal,
+          task.session_id AS "taskConversationId",
+          task.status,
+          task.source,
+          ${input.command.engine}::text AS engine,
+          task.model,
+          task.workflow_id AS "workflowId",
+          task.schedule_id AS "scheduleId",
+          task.scheduled_for AS "scheduledFor",
+          task.result,
+          task.error,
+          task.reported_outcome AS "reportedStatus",
+          task.outcome_comment AS "outcomeComment",
+          task.archived_at AS "archivedAt",
+          task.created_at AS "createdAt",
+          task.updated_at AS "updatedAt",
+          (SELECT count(*) FROM notified) AS "notifyCount"
+        FROM actor_scope
+        LEFT JOIN reservation ON true
+        LEFT JOIN selected_task AS task ON task.id = reservation.task_id
+      `);
+    } catch (error) {
+      if (attachmentIds.length > 0 && isUnmaterializedGuardError(error)) {
+        throw new CoreError("invalid_argument", "An attachment is unavailable or has expired.");
+      }
+      throw error;
+    }
+
+    const [row] = rows;
+    if (!row?.authorized) throw new CoreError("not_found", "Workspace membership not found.");
+    if (!row.commandId) {
+      if (!row.featureEnabled) {
+        throw new CoreError("forbidden", "Tasks & Workflows is disabled for this actor.");
+      }
+      throw new Error("The Task command reservation was not materialized.");
+    }
+    if (row.replayed && !row.id) {
+      return this.createTaskAndRun(input);
+    }
+    return taskCreateResult(row, requestHash);
+  }
+
+  async updateTask(input: {
+    actor: Actor;
+    taskId: string;
+    command: { archived: boolean };
+  }): Promise<UpdateTaskResult | null> {
+    const now = this.options.now?.() ?? new Date();
+    const [row] = await this.rows<TaskUpdateRow>(sql`
+      WITH authorized AS MATERIALIZED (
+        SELECT task.id
+        FROM goat.tasks AS task
+        JOIN goat.chat_sessions AS conversation
+          ON conversation.id = task.session_id
+         AND conversation.kind = 'task'
+        WHERE (task.id = ${input.taskId} OR upper(task.display_id) = upper(${input.taskId}))
+          AND ${taskAccessPredicate(input.actor)}
+      ),
+      updated AS MATERIALIZED (
+        UPDATE goat.tasks AS task
+        SET archived_at = CASE
+              WHEN ${input.command.archived}::boolean THEN ${now}::timestamptz
+              ELSE NULL
+            END,
+            updated_at = ${now}::timestamptz
+        FROM authorized
+        WHERE task.id = authorized.id
+          AND task.status IN ('succeeded', 'failed', 'canceled')
+          AND (
+            (${input.command.archived}::boolean AND task.archived_at IS NULL)
+            OR (NOT ${input.command.archived}::boolean AND task.archived_at IS NOT NULL)
+          )
+        RETURNING task.*
+      ),
+      selected_task AS MATERIALIZED (
+        SELECT changed.*
+        FROM updated AS changed
+        UNION ALL
+        SELECT existing.*
+        FROM goat.tasks AS existing
+        JOIN authorized ON authorized.id = existing.id
+        WHERE NOT EXISTS (SELECT 1 FROM updated)
+      )
+      SELECT
+        EXISTS (SELECT 1 FROM authorized) AS authorized,
+        EXISTS (SELECT 1 FROM updated) AS changed,
+        task.id,
+        task.display_id AS "displayId",
+        task.name,
+        task.prompt AS goal,
+        task.session_id AS "conversationId",
+        task.status,
+        task.source,
+        conversation.engine,
+        task.model,
+        task.workflow_id AS "workflowId",
+        task.schedule_id AS "scheduleId",
+        task.scheduled_for AS "scheduledFor",
+        task.result,
+        task.error,
+        task.reported_outcome AS "reportedStatus",
+        task.outcome_comment AS "outcomeComment",
+        task.archived_at AS "archivedAt",
+        task.created_at AS "createdAt",
+        task.updated_at AS "updatedAt",
+        pg_current_xact_id()::text AS "transactionId"
+      FROM authorized
+      JOIN selected_task AS task ON task.id = authorized.id
+      JOIN goat.chat_sessions AS conversation ON conversation.id = task.session_id
+      LIMIT 1
+    `);
+    if (!row) return null;
+    if (
+      input.command.archived &&
+      !row.changed &&
+      row.archivedAt === null &&
+      !["succeeded", "failed", "canceled"].includes(row.status)
+    ) {
+      throw new CoreError("invalid_argument", "Only a terminal Task can be archived.");
+    }
+    const transactionId = validTransactionId(row.transactionId);
+    return { task: mapTask(row), transactionId };
+  }
+
+  private async resolveAttachments(
+    actor: Actor,
+    attachmentIds: readonly string[],
+  ): Promise<ResolvedChatAttachments> {
+    if (attachmentIds.length === 0) return { attachments: [], attachmentTexts: null };
+    if (!this.options.resolveAttachments) {
+      throw new CoreError("invalid_argument", "Attachment references are not available.");
+    }
+    return this.options.resolveAttachments({ actor, attachmentIds });
+  }
+
+  private async rows<Row>(query: SQL): Promise<Row[]> {
+    return rowsFromExecute<Row>(await this.execute(query));
+  }
+}
+
+type PhysicalTaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
+
+type TaskRow = {
+  id: string;
+  displayId: string;
+  name: string;
+  goal: string;
+  conversationId: string;
+  status: PhysicalTaskStatus;
+  source: TaskSource;
+  engine: Task["engine"];
+  model: string;
+  workflowId: string | null;
+  scheduleId: string | null;
+  scheduledFor: Date | string | null;
+  result: string | null;
+  error: string | null;
+  reportedStatus: Task["outcome"]["reportedStatus"];
+  outcomeComment: string | null;
+  archivedAt: Date | string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+};
+
+type TaskCreateRow = Omit<TaskRow, "conversationId"> & {
+  authorized: boolean;
+  featureEnabled: boolean;
+  commandId: string | null;
+  requestHash: string | null;
+  taskId: string | null;
+  reservedConversationId: string | null;
+  messageId: string | null;
+  assistantMessageId: string | null;
+  runId: string | null;
+  transactionId: number | string | null;
+  replayed: boolean;
+  materialized: boolean;
+  taskConversationId: string;
+};
+
+type TaskUpdateRow = TaskRow & {
+  authorized: boolean;
+  changed: boolean;
+  transactionId: number | string;
+};
+
+function taskSelect() {
+  return sql`
+    SELECT
+      task.id,
+      task.display_id AS "displayId",
+      task.name,
+      task.prompt AS goal,
+      task.session_id AS "conversationId",
+      task.status,
+      task.source,
+      conversation.engine,
+      task.model,
+      task.workflow_id AS "workflowId",
+      task.schedule_id AS "scheduleId",
+      task.scheduled_for AS "scheduledFor",
+      task.result,
+      task.error,
+      task.reported_outcome AS "reportedStatus",
+      task.outcome_comment AS "outcomeComment",
+      task.archived_at AS "archivedAt",
+      task.created_at AS "createdAt",
+      task.updated_at AS "updatedAt"
+    FROM goat.tasks AS task
+    JOIN goat.chat_sessions AS conversation
+      ON conversation.id = task.session_id
+     AND conversation.kind = 'task'
+  `;
+}
+
+function taskAccessPredicate(actor: Actor) {
+  return sql`(
+    (
+      task.workspace_id = ${actor.workspaceId}
+      AND EXISTS (
+        SELECT 1
+        FROM goat.workspace_members AS member
+        WHERE member.workspace_id = ${actor.workspaceId}
+          AND member.user_workos_id = ${actor.userId}
+      )
+    )
+    OR (
+      task.workspace_id IS NULL
+      AND task.user_workos_id = ${actor.userId}
+    )
+  )`;
+}
+
+function taskCreateResult(row: TaskCreateRow, requestHash: string): CreateTaskResult {
+  if (row.requestHash !== requestHash) {
+    throw new CoreError(
+      "idempotency_conflict",
+      "The Idempotency-Key was already used for another Task command.",
+    );
+  }
+  if (
+    !row.materialized ||
+    !row.taskId ||
+    !row.id ||
+    row.id !== row.taskId ||
+    !row.reservedConversationId ||
+    !row.taskConversationId ||
+    row.taskConversationId !== row.reservedConversationId ||
+    !row.messageId ||
+    !row.assistantMessageId ||
+    !row.runId
+  ) {
+    throw new Error("The durable Task, Message, and Run were not materialized.");
+  }
+  return {
+    task: mapTask({ ...row, conversationId: row.taskConversationId }),
+    messageId: row.messageId,
+    assistantMessageId: row.assistantMessageId,
+    runId: row.runId,
+    transactionId: validTransactionId(row.transactionId),
+    idempotentReplay: row.replayed,
+  };
+}
+
+function mapTask(row: TaskRow): Task {
+  const archivedAt = nullableDate(row.archivedAt);
+  return {
+    id: row.id,
+    displayId: row.displayId,
+    name: row.name,
+    goal: row.goal,
+    conversationId: row.conversationId,
+    status: canonicalTaskStatus(row.status, archivedAt),
+    source: row.source,
+    engine: row.engine,
+    model: row.model,
+    workflowId: row.workflowId,
+    scheduleId: row.scheduleId,
+    scheduledFor: nullableDate(row.scheduledFor),
+    outcome: {
+      result: row.result,
+      error: row.error,
+      reportedStatus: row.reportedStatus,
+      comment: row.outcomeComment,
+    },
+    archivedAt,
+    createdAt: asDate(row.createdAt),
+    updatedAt: asDate(row.updatedAt),
+  };
+}
+
+function canonicalTaskStatus(status: PhysicalTaskStatus, archivedAt: Date | null): TaskStatus {
+  return archivedAt ? "archived" : status;
+}
+
+function hashTaskCommand(command: CreateTaskCommand) {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        name: command.name ?? null,
+        goal: command.goal,
+        engine: command.engine,
+        model: command.model,
+        attachmentIds: command.attachmentIds ?? [],
+        source: command.source,
+        workflowId: command.workflowId ?? null,
+        scheduleId: command.scheduleId ?? null,
+        scheduledFor: command.scheduledFor?.toISOString() ?? null,
+      }),
+    )
+    .digest("hex");
+}
+
+function runtimeModelName(engine: CreateTaskCommand["engine"], model: string) {
+  if (engine === "codex") return codexCliModelNameForModelId(model);
+  if (engine === "claude_code") return claudeCodeCliModelNameForModelId(model);
+  return model;
+}
+
+function defaultHarness(command: CreateTaskCommand & { model: AgentModelId }): GoatHarnessSpec {
+  return {
+    schemaVersion: "goat.harness.v1",
+    engine: command.engine,
+    model: command.model,
+    systemPrompt: "",
+    initialUserMessage: command.goal,
+    tools: [],
+    skills: [],
+    maxModelSteps: 16,
+    resultMode: "assistant_final",
+  };
+}
+
+function validateHarness(harness: GoatHarnessSpec, command: CreateTaskCommand) {
+  if (
+    harness.schemaVersion !== "goat.harness.v1" ||
+    harness.engine !== command.engine ||
+    harness.model !== command.model ||
+    harness.initialUserMessage.trim() !== command.goal
+  ) {
+    throw new Error("The prepared Task execution does not match its canonical command.");
+  }
+}
+
+function turnSettingsFromHarness(harness: GoatHarnessSpec) {
+  return {
+    ...(harness.codex?.reasoningEffort ? { reasoningEffort: harness.codex.reasoningEffort } : {}),
+    ...(harness.codex?.goalMode ? { goalMode: harness.codex.goalMode } : {}),
+  };
+}
+
+function attachmentsJson(attachments: ResolvedChatAttachments["attachments"]) {
+  return attachments.length > 0 ? JSON.stringify(attachments) : null;
+}
+
+function attachmentTextsJson(attachmentTexts: ResolvedChatAttachments["attachmentTexts"]) {
+  return attachmentTexts && Object.keys(attachmentTexts).length > 0
+    ? JSON.stringify(attachmentTexts)
+    : null;
+}
+
+function encodeTaskCursor(updatedAt: Date, id: string) {
+  return Buffer.from(JSON.stringify({ updatedAt: updatedAt.toISOString(), id }), "utf8").toString(
+    "base64url",
+  );
+}
+
+function decodeTaskCursor(cursor?: string): { updatedAt: string; id: string } | null {
+  if (!cursor) return null;
+  try {
+    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown;
+    if (!value || typeof value !== "object") throw new Error("invalid");
+    const { updatedAt, id } = value as Record<string, unknown>;
+    if (
+      typeof updatedAt !== "string" ||
+      Number.isNaN(Date.parse(updatedAt)) ||
+      typeof id !== "string" ||
+      !id
+    ) {
+      throw new Error("invalid");
+    }
+    return { updatedAt, id };
+  } catch {
+    throw new CoreError("invalid_argument", "The Task cursor is invalid.");
+  }
+}
+
+function validTransactionId(value: number | string | null) {
+  const transactionId = String(value);
+  if (!/^[0-9]+$/u.test(transactionId)) {
+    throw new Error("Postgres returned an invalid transaction identifier.");
+  }
+  return transactionId;
+}
+
+function asDate(value: Date | string) {
+  return value instanceof Date ? value : new Date(value);
+}
+
+function nullableDate(value: Date | string | null) {
+  return value ? asDate(value) : null;
+}
+
+function rowsFromExecute<Row>(result: unknown): Row[] {
+  if (Array.isArray(result)) return result as Row[];
+  if (result && typeof result === "object" && "rows" in result) {
+    const rows = (result as { rows?: unknown }).rows;
+    if (Array.isArray(rows)) return rows as Row[];
+  }
+  return [];
+}
+
+function isUnmaterializedGuardError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { code?: unknown; message?: unknown };
+  return (
+    record.code === "22023" ||
+    (typeof record.message === "string" &&
+      record.message.includes("cannot get array length of a non-array"))
+  );
+}

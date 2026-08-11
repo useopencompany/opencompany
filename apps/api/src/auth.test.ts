@@ -29,7 +29,7 @@ describe("API authentication", () => {
         role: "admin",
         authenticationMethod: "oauth",
         sessionId: "session_1",
-        permissions: ["chat:read", "chat:write"],
+        permissions: ["chat:read", "chat:write", "task:read", "task:write"],
       },
     });
     expect(execute).toHaveBeenCalledOnce();

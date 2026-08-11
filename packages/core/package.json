@@ -11,6 +11,10 @@
     "./chat": {
       "types": "./src/chat.ts",
       "default": "./src/chat.ts"
+    },
+    "./tasks": {
+      "types": "./src/tasks.ts",
+      "default": "./src/tasks.ts"
     }
   },
   "scripts": {

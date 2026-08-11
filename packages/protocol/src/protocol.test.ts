@@ -5,6 +5,7 @@ import { createOpenApiDocument } from "./routes";
 import {
   ChatReadModelSchema,
   CreateMessageBodySchema,
+  CreateTaskBodySchema,
   MessageReadModelSchema,
   ResolveApprovalBodySchema,
 } from "./schemas";
@@ -13,6 +14,8 @@ describe("headless protocol", () => {
   it("publishes every canonical /v1 operation in OpenAPI", () => {
     const document = createOpenApiDocument();
     expect(Object.keys(document.paths ?? {})).toEqual([
+      "/v1/tasks",
+      "/v1/tasks/{taskId}",
       "/v1/conversations",
       "/v1/conversations/{conversationId}",
       "/v1/conversations/{conversationId}/messages",
@@ -37,6 +40,15 @@ describe("headless protocol", () => {
         sessionId: "goat_chat_1",
         turnId: "goat_codex_chat_turn_1",
         workosUserId: "user_1",
+      }).success,
+    ).toBe(false);
+    expect(
+      CreateTaskBodySchema.safeParse({
+        goal: "Research the market",
+        engine: "opencompany",
+        workspaceId: "workspace_1",
+        sessionId: "goat_chat_1",
+        harnessSpec: {},
       }).success,
     ).toBe(false);
   });
@@ -102,6 +114,9 @@ describe("headless protocol", () => {
   it("exposes an inferred Hono client rooted at the canonical version", () => {
     const client = createOpenCompanyClient("https://api.example.test");
     expect(client.v1.messages.$url().pathname).toBe("/v1/messages");
+    expect(client.v1.tasks[":taskId"].$url({ param: { taskId: "task_1" } }).pathname).toBe(
+      "/v1/tasks/task_1",
+    );
     expect(client.v1.runs[":runId"].events.$url({ param: { runId: "run_1" } }).pathname).toBe(
       "/v1/runs/run_1/events",
     );
