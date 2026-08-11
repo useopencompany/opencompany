@@ -2,10 +2,11 @@ import { ensureGoatMonthlyIncludedUsage } from "@opencompany/db/goat-billing";
 import { hasPositiveGoatCreditBalance } from "@opencompany/db/goat-credits";
 import type { GoatChatMessage, GoatChatMessageAttachment } from "@opencompany/db/goat-schema";
 import type { GoatStoredChatMessage } from "@opencompany/goat-agent/chat-ui";
-import type { LanguageModelUsage } from "ai";
+import type { LanguageModelUsage, ToolApprovalRequestOutput, ToolSet } from "ai";
 import { describe, expect, it, vi } from "vitest";
 import { GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
 import {
+  approvalDraftsFromProjection,
   consumeGoatOpenCompanyChatStream,
   goatOpenCompanyModelMessagesFromStored,
   hasGoatHostedTurnCredits,
@@ -14,6 +15,29 @@ import {
   GoatOpenCompanyChatInterruptedError,
   type GoatOpenCompanyChatProjection,
 } from "./goat-opencompany-chat-projector";
+
+// Contract-level guard: this fixture is typed against the AI SDK's own
+// ToolApprovalRequestOutput, so a real SDK shape change (e.g. flattening
+// toolCallId back onto the top level) fails `bun run typecheck` here instead
+// of only surfacing as a silent dropped approval in production.
+function toolApprovalRequestEvent(input: {
+  approvalId: string;
+  toolCallId: string;
+  toolName: string;
+  input: unknown;
+}): ToolApprovalRequestOutput<ToolSet> {
+  return {
+    type: "tool-approval-request",
+    approvalId: input.approvalId,
+    toolCall: {
+      type: "tool-call",
+      toolCallId: input.toolCallId,
+      toolName: input.toolName,
+      input: input.input,
+      dynamic: true,
+    },
+  };
+}
 
 vi.mock("@opencompany/db/goat-billing", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@opencompany/db/goat-billing")>()),
@@ -246,7 +270,7 @@ describe("consumeGoatOpenCompanyChatStream", () => {
     expect(present).not.toHaveBeenCalled();
   });
 
-  it("projects a native tool approval request as durable approval state", async () => {
+  it("projects the canonical nested AI SDK tool-approval-request as durable approval state", async () => {
     const project = vi.fn(async (_projection: GoatOpenCompanyChatProjection) => undefined);
     const result = await consumeGoatOpenCompanyChatStream({
       fullStream: streamParts(
@@ -254,13 +278,14 @@ describe("consumeGoatOpenCompanyChatStream", () => {
           type: "tool-call",
           toolCallId: "tool_approval_1",
           toolName: "use_action",
-          input: { action: "crm.update", params: { id: "customer_1" } },
+          input: { action: "gmail.send_email", params: { to: "customer@example.com" } },
         },
-        {
-          type: "tool-approval-request",
-          toolCallId: "tool_approval_1",
+        toolApprovalRequestEvent({
           approvalId: "approval_1",
-        },
+          toolCallId: "tool_approval_1",
+          toolName: "use_action",
+          input: { action: "gmail.send_email", params: { to: "customer@example.com" } },
+        }),
         { type: "finish", finishReason: "tool-calls" },
       ),
       sink: { project, recordStepUsage: vi.fn(async () => undefined) },
@@ -277,6 +302,122 @@ describe("consumeGoatOpenCompanyChatStream", () => {
       }),
     ]);
     expect(project.mock.calls.at(-1)?.[0]).toEqual(result);
+
+    // Pending approval persistence: exactly one draft is derived for the paused Run.
+    const drafts = approvalDraftsFromProjection(result);
+    expect(drafts).toEqual([
+      expect.objectContaining({
+        id: "approval_1",
+        toolCallId: "tool_approval_1",
+        kind: "use_action",
+        action: "gmail.send_email",
+      }),
+    ]);
+  });
+
+  it("does not duplicate a pending approval draft when the same approval is re-projected on reconnect", () => {
+    // A refresh/reconnect re-reads the same persisted projection; the durable
+    // approval must be derived exactly once even if the part appears twice.
+    const projection: GoatOpenCompanyChatProjection = {
+      parts: [
+        {
+          type: "tool-use_action",
+          toolCallId: "tool_approval_1",
+          state: "approval-requested",
+          input: { action: "gmail.send_email" },
+          approval: { id: "approval_1" },
+        },
+        {
+          type: "tool-use_action",
+          toolCallId: "tool_approval_1",
+          state: "approval-requested",
+          input: { action: "gmail.send_email" },
+          approval: { id: "approval_1" },
+        },
+      ],
+    };
+
+    expect(approvalDraftsFromProjection(projection)).toHaveLength(1);
+  });
+
+  it("continues an action with no approval requirement without any approval detour", async () => {
+    const project = vi.fn(async (_projection: GoatOpenCompanyChatProjection) => undefined);
+    const result = await consumeGoatOpenCompanyChatStream({
+      fullStream: streamParts(
+        {
+          type: "tool-call",
+          toolCallId: "tool_auto_1",
+          toolName: "use_action",
+          input: { action: "posthog.query", params: { insight: "signups" } },
+        },
+        {
+          type: "tool-result",
+          toolCallId: "tool_auto_1",
+          toolName: "use_action",
+          input: { action: "posthog.query", params: { insight: "signups" } },
+          output: { ok: true },
+        },
+        { type: "finish", finishReason: "tool-calls" },
+      ),
+      sink: { project, recordStepUsage: vi.fn(async () => undefined) },
+      signal: new AbortController().signal,
+      flushIntervalMs: 0,
+    });
+
+    expect(result.parts).toEqual([
+      expect.objectContaining({
+        type: "tool-use_action",
+        toolCallId: "tool_auto_1",
+        state: "output-available",
+      }),
+    ]);
+    expect(approvalDraftsFromProjection(result)).toEqual([]);
+  });
+
+  it("fails closed instead of completing when a tool-approval-request cannot be correlated to a tracked tool call", async () => {
+    const project = vi.fn(async (_projection: GoatOpenCompanyChatProjection) => undefined);
+
+    // No preceding "tool-call" ever registered tool_orphan_1: this simulates
+    // an approval event that arrives for a tool call the runner never saw,
+    // which must never be treated as a clean, completed turn.
+    await expect(
+      consumeGoatOpenCompanyChatStream({
+        fullStream: streamParts(
+          toolApprovalRequestEvent({
+            approvalId: "approval_orphan",
+            toolCallId: "tool_orphan_1",
+            toolName: "use_action",
+            input: { action: "gmail.send_email" },
+          }),
+        ),
+        sink: { project, recordStepUsage: vi.fn(async () => undefined) },
+        signal: new AbortController().signal,
+        flushIntervalMs: 0,
+      }),
+    ).rejects.toThrow(/could not be correlated/);
+  });
+
+  it("fails closed instead of completing when a tool-approval-request event is malformed", async () => {
+    const project = vi.fn(async (_projection: GoatOpenCompanyChatProjection) => undefined);
+
+    await expect(
+      consumeGoatOpenCompanyChatStream({
+        fullStream: streamParts(
+          {
+            type: "tool-call",
+            toolCallId: "tool_approval_2",
+            toolName: "use_action",
+            input: { action: "gmail.send_email" },
+          },
+          // Malformed: no nested `toolCall` at all, e.g. an incompatible or
+          // truncated event. Must not be silently ignored.
+          { type: "tool-approval-request", approvalId: "approval_malformed" },
+        ),
+        sink: { project, recordStepUsage: vi.fn(async () => undefined) },
+        signal: new AbortController().signal,
+        flushIntervalMs: 0,
+      }),
+    ).rejects.toThrow(/could not be correlated/);
   });
 
   it("force-flushes the newest throttled text when the user interrupts", async () => {
@@ -426,6 +567,48 @@ describe("goatOpenCompanyModelMessagesFromStored", () => {
 
     expect(serialized).toContain("crm.lookup");
     expect(serialized).toContain('"approved":true');
+    expect(serialized).not.toContain("Do not include this queued turn.");
+  });
+
+  it("replays a trusted denial response when a paused Run continues", async () => {
+    const messages = [
+      storedMessage({
+        id: "user_denial",
+        role: "user",
+        content: "Send the customer an email.",
+      }),
+      storedMessage({
+        id: "assistant_denial",
+        role: "assistant",
+        content: "",
+        debugTrace: {
+          schemaVersion: "opencompany.chat.debug.v1",
+          model: "anthropic/claude-sonnet-5",
+          uiMessageParts: [
+            {
+              type: "tool-use_action",
+              toolCallId: "tool_call_denial",
+              state: "approval-responded",
+              input: { action: "gmail.send_email", params: { to: "customer@example.com" } },
+              approval: { id: "approval_1", approved: false, reason: "Denied by user." },
+            },
+          ],
+        },
+      }),
+      storedMessage({
+        id: "user_later",
+        role: "user",
+        content: "Do not include this queued turn.",
+      }),
+    ];
+
+    const modelMessages = await goatOpenCompanyModelMessagesFromStored(messages, "user_denial", {
+      includeCurrentAssistantMessage: true,
+    });
+    const serialized = JSON.stringify(modelMessages);
+
+    expect(serialized).toContain("gmail.send_email");
+    expect(serialized).toContain('"approved":false');
     expect(serialized).not.toContain("Do not include this queued turn.");
   });
 
