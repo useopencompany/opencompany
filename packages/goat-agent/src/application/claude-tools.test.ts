@@ -6,14 +6,12 @@ import {
   GOAT_ACTION_TOOL_CONTRACT,
   type GoatActionGatewayRequest,
 } from "@opencompany/agent-runtime";
-import {
-  createInMemoryGoatActionTurnGovernance,
-  serveGoatActionRequest,
-} from "@opencompany/goat-agent/actions/service";
 import { describe, expect, it, vi } from "vitest";
-import { registerGoatClaudeActionTools } from "./claude-actions";
-import type { executeGoatActionGateway } from "./codex-actions";
-import type { requestGoatChatArtifactPublication } from "./task-runner";
+import { createInMemoryGoatActionTurnGovernance, serveGoatActionRequest } from "../actions/service";
+import {
+  type GoatClaudeActionToolDependencies,
+  registerGoatClaudeActionServiceTools,
+} from "./claude-tools";
 
 type RegisteredTool = {
   config: Record<string, unknown>;
@@ -28,8 +26,8 @@ type RegisteredTool = {
 };
 
 function registerTools(
-  executeAction: typeof executeGoatActionGateway,
-  publishArtifact = vi.fn<typeof requestGoatChatArtifactPublication>(),
+  executeAction: GoatClaudeActionToolDependencies["executeAction"],
+  publishArtifact = vi.fn<GoatClaudeActionToolDependencies["publishArtifact"]>(),
 ) {
   const tools = new Map<string, RegisteredTool>();
   const server = {
@@ -39,9 +37,9 @@ function registerTools(
       },
     ),
   } as unknown as McpServerType;
-  registerGoatClaudeActionTools(
+  registerGoatClaudeActionServiceTools(
     server,
-    { codexChatSessionId: "codex_session_1", codexChatTurnId: "codex_turn_1" },
+    { sessionId: "codex_session_1", runId: "codex_turn_1" },
     { executeAction, publishArtifact },
   );
   return tools;
@@ -53,9 +51,9 @@ function getTool(tools: Map<string, RegisteredTool>, name: string): RegisteredTo
   return tool;
 }
 
-describe("registerGoatClaudeActionTools", () => {
+describe("registerGoatClaudeActionServiceTools", () => {
   it("registers file publication and action tools", () => {
-    const tools = registerTools(vi.fn<typeof executeGoatActionGateway>());
+    const tools = registerTools(vi.fn<GoatClaudeActionToolDependencies["executeAction"]>());
     expect([...tools.keys()]).toEqual(["publish_artifact", "list_actions", "use_action"]);
     expect(getTool(tools, "list_actions").config.annotations).toEqual(
       GOAT_ACTION_TOOL_CONTRACT.list.annotations,
@@ -67,20 +65,25 @@ describe("registerGoatClaudeActionTools", () => {
   });
 
   it("publishes a sandbox file through the turn-scoped runner bridge", async () => {
-    const publishArtifact = vi.fn<typeof requestGoatChatArtifactPublication>(async () => ({
-      ok: true,
-      artifact: {
-        artifactId: "artifact_1",
-        artifactVersionId: "artifact_version_1",
-        version: 1,
-        title: "Plan",
-        filename: "plan.md",
-        mediaType: "text/markdown",
-        sizeBytes: 42,
-        state: "ready",
-      },
-    }));
-    const tools = registerTools(vi.fn<typeof executeGoatActionGateway>(), publishArtifact);
+    const publishArtifact = vi.fn<GoatClaudeActionToolDependencies["publishArtifact"]>(
+      async () => ({
+        ok: true,
+        artifact: {
+          artifactId: "artifact_1",
+          artifactVersionId: "artifact_version_1",
+          version: 1,
+          title: "Plan",
+          filename: "plan.md",
+          mediaType: "text/markdown",
+          sizeBytes: 42,
+          state: "ready",
+        },
+      }),
+    );
+    const tools = registerTools(
+      vi.fn<GoatClaudeActionToolDependencies["executeAction"]>(),
+      publishArtifact,
+    );
 
     const result = await getTool(tools, "publish_artifact").callback(
       {
@@ -91,8 +94,8 @@ describe("registerGoatClaudeActionTools", () => {
     );
 
     expect(publishArtifact).toHaveBeenCalledWith({
-      codexChatSessionId: "codex_session_1",
-      codexChatTurnId: "codex_turn_1",
+      sessionId: "codex_session_1",
+      runId: "codex_turn_1",
       toolCallId: "mcp:codex_turn_1:transport_1:request_1",
       arguments: {
         path: "/home/user/opencompany-goat/claude-chat/plan.md",
@@ -106,7 +109,7 @@ describe("registerGoatClaudeActionTools", () => {
   });
 
   it("translates a list_actions call into a gateway list request", async () => {
-    const executeAction = vi.fn<typeof executeGoatActionGateway>(async () => ({
+    const executeAction = vi.fn<GoatClaudeActionToolDependencies["executeAction"]>(async () => ({
       ok: true,
       sources: [{ id: "gmail", label: "Gmail", description: "Email" }],
     }));
@@ -130,7 +133,7 @@ describe("registerGoatClaudeActionTools", () => {
   });
 
   it("derives stable, distinct invocation ids from separate MCP requests", async () => {
-    const executeAction = vi.fn<typeof executeGoatActionGateway>(async () => ({
+    const executeAction = vi.fn<GoatClaudeActionToolDependencies["executeAction"]>(async () => ({
       ok: true,
       action: "gmail.list",
       result: [],
@@ -178,23 +181,24 @@ describe("registerGoatClaudeActionTools", () => {
 
   it("surfaces call_budget on call 17 from the shared service", async () => {
     const governance = createInMemoryGoatActionTurnGovernance();
-    const executeAction = vi.fn<typeof executeGoatActionGateway>(async ({ request }) =>
-      serveGoatActionRequest({
-        request,
-        catalog: {
-          sources: [{ id: "gmail", label: "Gmail", description: "Email" }],
-          actions: [
-            {
-              id: "gmail.search",
-              source: "gmail",
-              description: "Search email.",
-              params: { type: "object" },
-            },
-          ],
-        },
-        governance,
-        execute: async ({ action }) => ({ ok: true, action, result: [] }),
-      }),
+    const executeAction = vi.fn<GoatClaudeActionToolDependencies["executeAction"]>(
+      async ({ request }) =>
+        serveGoatActionRequest({
+          request,
+          catalog: {
+            sources: [{ id: "gmail", label: "Gmail", description: "Email" }],
+            actions: [
+              {
+                id: "gmail.search",
+                source: "gmail",
+                description: "Search email.",
+                params: { type: "object" },
+              },
+            ],
+          },
+          governance,
+          execute: async ({ action }) => ({ ok: true, action, result: [] }),
+        }),
     );
     const tools = registerTools(executeAction);
 
@@ -219,7 +223,7 @@ describe("registerGoatClaudeActionTools", () => {
   });
 
   it("marks the MCP result as an error when the gateway response is not ok", async () => {
-    const executeAction = vi.fn<typeof executeGoatActionGateway>(async () => ({
+    const executeAction = vi.fn<GoatClaudeActionToolDependencies["executeAction"]>(async () => ({
       ok: false,
       error: { code: "not_permitted", message: "nope" },
     }));
@@ -238,16 +242,17 @@ describe("registerGoatClaudeActionTools", () => {
   // wouldn't slip through.
   it("survives a real MCP client/server round-trip", async () => {
     const server = new McpServer({ name: "test", version: "0.1.0" });
-    registerGoatClaudeActionTools(
+    registerGoatClaudeActionServiceTools(
       server,
-      { codexChatSessionId: "codex_session_1", codexChatTurnId: "codex_turn_1" },
+      { sessionId: "codex_session_1", runId: "codex_turn_1" },
       {
-        executeAction: vi.fn<typeof executeGoatActionGateway>(async ({ request }) =>
-          request.operation === "list"
-            ? { ok: true, sources: [{ id: "gmail", label: "Gmail", description: "d" }] }
-            : { ok: true, action: request.action, result: { echoedParams: request.params } },
+        executeAction: vi.fn<GoatClaudeActionToolDependencies["executeAction"]>(
+          async ({ request }) =>
+            request.operation === "list"
+              ? { ok: true, sources: [{ id: "gmail", label: "Gmail", description: "d" }] }
+              : { ok: true, action: request.action, result: { echoedParams: request.params } },
         ),
-        publishArtifact: vi.fn<typeof requestGoatChatArtifactPublication>(),
+        publishArtifact: vi.fn<GoatClaudeActionToolDependencies["publishArtifact"]>(),
       },
     );
 

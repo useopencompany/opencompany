@@ -2,14 +2,15 @@ import {
   GOAT_ACTION_MAX_CALLS_PER_TURN,
   type GoatActionGatewayRequest,
 } from "@opencompany/agent-runtime";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   GOAT_ACTION_EFFECTS_METERED_READ,
   GOAT_ACTION_EFFECTS_READ,
   GOAT_ACTION_EFFECTS_WRITE,
-} from "@opencompany/goat-agent/actions/types";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { GoatResolvedActionCatalog, ResolvedGoatAction } from "@/lib/actions/types";
-import { executeGoatActionGateway, executeGoatActionHostGateway } from "@/lib/codex-actions";
+  type GoatResolvedActionCatalog,
+  type ResolvedGoatAction,
+} from "../actions/types";
+import { executeGoatActionGateway, executeGoatActionHostGateway } from "./persisted-action-gateway";
 
 function listRequest(source?: string): GoatActionGatewayRequest {
   return {

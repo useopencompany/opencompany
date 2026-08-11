@@ -379,16 +379,14 @@ account because coding agents can invoke read and write CLI commands directly.
 ### Codex execution
 
 The legacy-named `goat.codex_chat_turns` queue is the durable, per-session FIFO execution substrate
-for `codex`, `claude_code`, and the internal-only `opencompany` engine path. A claimed OpenCompany
+for `codex`, `claude_code`, and the canonical `opencompany` engine path. A claimed OpenCompany
 turn runs the shared AI SDK chat loop without a sandbox or engine thread, streams text, reasoning,
 and tool lifecycle parts into its pre-created assistant `goat.chat_messages` row, and reconstructs
 follow-up model history from those persisted UI message parts. Its headless tool catalog includes
 read-only Brain/web tools and the shared `headless` action projection: connected integration actions
-whose permission mode is `on`; managed capabilities and approval-gated actions are excluded. No
-product route selects this durable
-OpenCompany path yet. It is exercisable only through the bearer-authenticated
-`POST /api/internal/opencompany-chat/messages` endpoint, which accepts an explicit user, workspace,
-prompt, and optional Brain/session/model before enqueueing through the same durable queue.
+whose permission mode is `on`; managed capabilities and approval-gated actions are excluded.
+Authenticated `POST /v1/messages` derives the Actor/workspace in `apps/api`, persists the canonical
+Message/Run, and queues this path. There is no web-owned internal Message creation endpoint.
 
 Cloud Codex uses a persistent sandbox per Goat chat and resumes the same Codex app-server thread on
 follow-up turns. New turns remain `queued` until the runner claims them, then move through
@@ -451,9 +449,8 @@ effects. Provider credentials, the internal bearer, and database access never en
 `packages/goat-agent/src/actions/service.ts` is the common discovery/execution and governance
 service used by the AI SDK, Codex, and MCP adapters. Tool names, descriptions, input schemas,
 annotations, and structured gateway responses live once in the dependency-light
-`@opencompany/agent-runtime` contract. The runner composes the service in-process; the old
-`/api/internal/action-gateway` and `/api/internal/codex-actions` transports remain rollback adapters
-only until the final route-deletion change. Durable `goat.action_turns` rows atomically enforce the
+`@opencompany/agent-runtime` contract. The runner composes the service in-process; no web action
+gateway remains. Durable `goat.action_turns` rows atomically enforce the
 16-call budget and discovery-before-execution rule, suppress repeated invocation dispatch, and
 persist metered quote totals and async-run claims across process recovery and app instances.
 
@@ -777,8 +774,8 @@ Common changes and where they belong:
 - Change lightweight chat web access: `web_fetch`/`web_search` in
   `apps/web/lib/chat-agent.ts` and their Exa callbacks in `apps/web/app/api/chat/route.ts`.
 - Change managed chat capabilities: the endpoint allowlist and validators in
-  `apps/web/lib/capabilities/catalog.ts`, execution policy in
-  `apps/web/lib/capabilities/execute.ts`, and workspace controls in
+  `packages/goat-agent/src/capabilities/catalog.ts`, execution policy in
+  `packages/goat-agent/src/capabilities/execute.ts`, and workspace controls in
   `apps/web/app/(app)/settings/workspace/capabilities`.
 - Change chat streaming behavior: `apps/web/app/api/chat/route.ts` and
   `apps/web/components/GoatSurface.tsx`.
@@ -799,7 +796,8 @@ Common changes and where they belong:
 
 ## Current Constraints And Risks
 
-- Direct chat is not durable beyond persisted messages. It does not use runner leases.
+- The frozen `/api/chat` compatibility path is not durable beyond persisted messages. Canonical
+  Chat uses runner leases, Attempts, and durable Events.
 - Goat tasks are text-result only. They do not persist files or artifacts from task tools.
 - Gateway and Exa keys are used in the Goat route and runner process. Google credentials stay
   server-side.

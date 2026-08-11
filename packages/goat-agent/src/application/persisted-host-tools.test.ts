@@ -1,5 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
-import { executeHeadlessChatHostToolGateway } from "./headless-chat-host-tools";
+import type { GoatChatHostToolServiceDependencies } from "./host-tools";
+import { executePersistedGoatChatHostTool } from "./persisted-host-tools";
+
+function executeHostTool(input: {
+  request: Parameters<typeof executePersistedGoatChatHostTool>[0]["request"];
+  dependencies?: Partial<GoatChatHostToolServiceDependencies>;
+}) {
+  return executePersistedGoatChatHostTool({
+    request: input.request,
+    runtime: {
+      wakeTaskWorker: vi.fn(),
+      defer: vi.fn(),
+      planHarness: vi.fn(),
+    },
+    ...(input.dependencies ? { dependencies: input.dependencies } : {}),
+  });
+}
 
 describe("headless Chat host tools", () => {
   it("reattaches the matching authenticated browser profile after a worker recovery", async () => {
@@ -18,7 +34,7 @@ describe("headless Chat host tools", () => {
       startedAt: new Date("2026-08-11T00:00:00.000Z"),
     };
 
-    const response = await executeHeadlessChatHostToolGateway({
+    const response = await executeHostTool({
       request: {
         operation: "browser_use_profile",
         sessionId: "runtime_1",

@@ -1,11 +1,9 @@
-import type { GoatPublishArtifactToolResponse } from "@opencompany/agent-runtime";
 import type { GoatHarnessSpec } from "@opencompany/db/goat-schema";
 
 const CODEX_CHAT_WAKE_TIMEOUT_MS = 5_000;
 const CODEX_CHAT_SANDBOX_STATUS_TIMEOUT_MS = 5_000;
 const CODING_WORKSPACE_RUNTIME_ACCESS_TIMEOUT_MS = 10_000;
 const GOAT_DICTATION_ACCESS_TIMEOUT_MS = 10_000;
-const GOAT_CHAT_ARTIFACT_PUBLISH_TIMEOUT_MS = 120_000;
 
 export type GoatCodexSandboxStatus = "running" | "sleeping" | "deleted";
 export type GoatCodingWorkspaceRuntimeAccess = {
@@ -48,63 +46,6 @@ function runnerPublicBaseUrl() {
     return publicUrl;
   }
   return publicUrl;
-}
-
-export async function requestGoatChatArtifactPublication(input: {
-  codexChatSessionId: string;
-  codexChatTurnId: string;
-  attemptId?: string;
-  leaseId?: string;
-  toolCallId: string;
-  arguments: unknown;
-  signal?: AbortSignal;
-}): Promise<GoatPublishArtifactToolResponse> {
-  const baseUrl = runnerInternalBaseUrl();
-  const token = runnerToken();
-  if (!baseUrl || !token) return { ok: false, error: "The file publisher is not configured." };
-
-  const timeoutController = new AbortController();
-  const timeout = setTimeout(
-    () => timeoutController.abort(),
-    GOAT_CHAT_ARTIFACT_PUBLISH_TIMEOUT_MS,
-  );
-  const onAbort = () => timeoutController.abort();
-  input.signal?.addEventListener("abort", onAbort, { once: true });
-  try {
-    const response = await fetch(`${baseUrl}/internal/goat/chat-artifacts/publish`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        codexChatSessionId: input.codexChatSessionId,
-        codexChatTurnId: input.codexChatTurnId,
-        ...(input.attemptId ? { attemptId: input.attemptId, leaseId: input.leaseId } : {}),
-        toolCallId: input.toolCallId,
-        arguments: input.arguments,
-      }),
-      signal: timeoutController.signal,
-    });
-    const body = (await response
-      .json()
-      .catch(() => null)) as GoatPublishArtifactToolResponse | null;
-    if (!response.ok || !body || typeof body.ok !== "boolean") {
-      return { ok: false, error: "The file publisher is temporarily unavailable." };
-    }
-    return body;
-  } catch (error) {
-    return {
-      ok: false,
-      error:
-        error instanceof Error && error.name === "AbortError"
-          ? "The file publication was canceled or timed out."
-          : "The file publisher is temporarily unavailable.",
-    };
-  } finally {
-    clearTimeout(timeout);
-    input.signal?.removeEventListener("abort", onAbort);
-  }
 }
 
 export async function planGoatTaskHarness(input: {

@@ -34,9 +34,9 @@ browser ---- direct /v1 + shared session ----> apps/api (Hono /v1) ----> Electri
   Runner invokes shared application services in-process for actions and approvals, Brain capture,
   task/schedule/workflow/skill/wiki behavior, browser sessions, artifact publication, and terminal
   settlement. The queue claim establishes Attempt and lease authority; each application operation
-  re-derives its actor, workspace, membership, and Run/turn authority from persisted state. The old
-  bearer-protected web routes remain rollback adapters until the final route-deletion PR. Claude
-  Code reaches the runner's `/internal/goat/claude-actions` MCP endpoint with a signed v2
+  re-derives its actor, workspace, membership, and Run/turn authority from persisted state. No
+  canonical or coding-agent capability call is served by `apps/web`. Claude Code reaches the
+  runner's `/internal/goat/claude-actions` MCP endpoint with a signed v2
   session/Run/Attempt/lease capability; the runner rechecks persisted membership and live lease
   authority on every MCP request and tool operation. The sandbox never receives actor/workspace
   identifiers, provider credentials, or `RUNNER_INTERNAL_TOKEN`.
@@ -85,7 +85,7 @@ on a 500 ms cadence. Leaving it absent exercises the Postgres-only fallback.
   make repeated deltas idempotent, and the latest complete Message/Event precedes every terminal
   Run Event.
 - Model-visible host operations fail closed if the turn is no longer running, workspace membership
-  changed, the internal bearer is invalid, or the host contract is incompatible. The bounded
+  changed, Attempt/lease authority is stale, or the host contract is incompatible. The bounded
   browser-profile cleanup operation may re-derive the same host identity after terminal settlement
   so completion, failure, and cancellation cannot leak a profile session.
 
@@ -145,10 +145,12 @@ from disallowed or missing origins are rejected. A rollback disables
 `NEXT_PUBLIC_GOAT_HEADLESS_CHAT` and redeploys web; the API service and additive DNS record can stay
 online.
 
-During the phase-2 rollback window, the old Claude MCP and Auto model routes remain deployed in web.
-Reverting the runner restores v1 web-hosted Claude tickets. Reverting the canonical Auto cutover
-must deploy the prior web transport before (or together with) the prior API so no client sends the
-literal `auto` selector to an API that predates server-side resolution.
+The removed web execution routes are not a standby transport. Do not roll the runner back below the
+runner-hosted Claude/in-process capability cutovers while a canonical Run may execute. An emergency
+code rollback that needs those older transports must first redeploy the route-adapter revision of
+web, then roll back API/browser Auto routing together, and only then roll back runner. Normal
+rollback leaves the current API/runner deployed and disables `NEXT_PUBLIC_GOAT_HEADLESS_CHAT` for
+new browser requests; already queued canonical Runs continue without web.
 
 Record expected-SHA health output, the complete disabled/enabled smoke matrices, responsive-cadence
 samples, a Redis-degraded fallback probe, and the real-traffic soak result on issues #1165 and #1171.
