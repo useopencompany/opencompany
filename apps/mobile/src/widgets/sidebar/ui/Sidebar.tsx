@@ -1,18 +1,22 @@
-import { Host } from "@expo/ui";
-import { Button } from "@expo/ui/swift-ui";
-import {
-  buttonBorderShape,
-  buttonStyle,
-  controlSize,
-  labelStyle,
-} from "@expo/ui/swift-ui/modifiers";
+import { Image as ExpoImage } from "expo-image";
 import { Drawer, useDrawerProgress } from "expo-router/drawer";
 import type { SFSymbol } from "expo-symbols";
+import { useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import Reanimated, { interpolate, useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { withUniwind } from "uniwind";
 
+import wordmark from "@/assets/images/wordmark.png";
+import wordmarkDark from "@/assets/images/wordmark-dark.png";
 import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
+import {
+  OpenCompanySidebarHeader,
+  SIDEBAR_HEADER_INITIAL_HEIGHT,
+} from "../../../../modules/open-company-sidebar-header";
+
+const SIDEBAR_SCROLL_VIEW_TEST_ID = "sidebar-scroll-view";
+const StyledImage = withUniwind(ExpoImage);
 
 const NAV_ITEMS: { label: string; icon: SFSymbol }[] = [
   { label: "Images", icon: "photo" },
@@ -37,6 +41,7 @@ const RECENT_CHATS = [
 
 export function Sidebar() {
   const insets = useSafeAreaInsets();
+  const [headerHeight, setHeaderHeight] = useState(insets.top + SIDEBAR_HEADER_INITIAL_HEIGHT);
 
   // 0 while closed, 1 while fully open, tracking the gesture in between. Driven
   // by the same value that translates the screen content, so the sidebar eases
@@ -48,30 +53,15 @@ export function Sidebar() {
   }));
 
   return (
-    <Reanimated.View
-      className="flex-1 bg-sidebar"
-      style={[revealStyle, { paddingTop: insets.top }]}
-    >
-      {/* Sticky header */}
-      <View className="flex-row items-center justify-between px-5 py-3">
-        <Text className="text-[20px] font-bold text-sidebar-foreground">Open Company</Text>
-        <Host matchContents>
-          <Button
-            label="Search"
-            systemImage="magnifyingglass"
-            onPress={() => {}}
-            modifiers={[
-              buttonStyle("glass"),
-              labelStyle("iconOnly"),
-              controlSize("large"),
-              buttonBorderShape("circle"),
-            ]}
-          />
-        </Host>
-      </View>
-
+    <Reanimated.View className="flex-1 bg-sidebar" style={revealStyle}>
       <ScrollView
-        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+        testID={SIDEBAR_SCROLL_VIEW_TEST_ID}
+        className="flex-1"
+        contentContainerStyle={{
+          paddingTop: headerHeight,
+          paddingBottom: insets.bottom + 24,
+        }}
+        scrollIndicatorInsets={{ top: headerHeight }}
         showsVerticalScrollIndicator={false}
       >
         {NAV_ITEMS.map((item) => (
@@ -101,6 +91,30 @@ export function Sidebar() {
           </Pressable>
         ))}
       </ScrollView>
+
+      <OpenCompanySidebarHeader
+        className="absolute inset-x-0 top-0 z-10"
+        leading={
+          <View accessible accessibilityLabel="Open Company" className="h-6 w-[146px] -mt-2">
+            <StyledImage
+              accessible={false}
+              className="absolute inset-0 h-full w-full dark:opacity-0"
+              contentFit="contain"
+              source={wordmark}
+            />
+            <StyledImage
+              accessible={false}
+              className="absolute inset-0 h-full w-full opacity-0 dark:opacity-100"
+              contentFit="contain"
+              source={wordmarkDark}
+            />
+          </View>
+        }
+        onHeightChange={setHeaderHeight}
+        onSearchPress={() => {}}
+        scrollViewTestID={SIDEBAR_SCROLL_VIEW_TEST_ID}
+        topInset={insets.top}
+      />
     </Reanimated.View>
   );
 }

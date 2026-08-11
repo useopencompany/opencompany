@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "uniwind";
+@source "../modules";
 
 @utility screen-shadow-light {
   box-shadow: -4px 0 20px -2px rgba(0, 0, 0, 0.09);
