@@ -1,5 +1,6 @@
 import { AGENT_MODEL_CATALOG, modelSupportsAttachments } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import type { ChatPresentationPublisher } from "@opencompany/chat-presentation";
 import { ensureGoatMonthlyIncludedUsage } from "@opencompany/db/goat-billing";
 import { hasPositiveGoatCreditBalance } from "@opencompany/db/goat-credits";
 import { resolveGoatImessageDelivery } from "@opencompany/db/goat-imessage";
@@ -90,10 +91,8 @@ import {
   markGoatTaskTurnRunning,
 } from "./goat-task-turn";
 
-// Durable snapshots feed the live SSE overlay, so this cadence is also the user's visible token
-// cadence. Keep it responsive without matching the 50ms browser render throttle one-for-one and
-// multiplying database writes unnecessarily.
-const ASSISTANT_PARTS_FLUSH_INTERVAL_MS = 150;
+const ASSISTANT_PARTS_FLUSH_INTERVAL_MS = 500;
+const PRESENTATION_DELTA_FLUSH_INTERVAL_MS = 50;
 const INTERRUPT_POLL_INTERVAL_MS = 500;
 
 const logger = createLogger({
@@ -119,6 +118,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
   env: RunnerEnv;
   taskContext?: GoatTaskTurnContext | undefined;
   canonicalAttemptId?: string;
+  presentationPublisher?: ChatPresentationPublisher;
   shouldAbort?: () => Error | null;
 }): Promise<"settled" | "handed_off"> {
   const { turn, session, env } = input;
@@ -243,6 +243,23 @@ export async function runGoatOpenCompanyChatTurn(input: {
           await projector.project(nextProjection);
         },
         recordStepUsage: (usage) => projector.recordStepUsage(usage),
+        ...(input.presentationPublisher
+          ? {
+              present: (delta: { startOffset: number; endOffset: number; delta: string }) => {
+                input.presentationPublisher?.publish({
+                  runId: turn.id,
+                  attemptNumber: turn.attempts,
+                  schemaVersion: 1,
+                  occurredAt: new Date().toISOString(),
+                  type: "message.presentation_delta",
+                  payload: {
+                    messageId: turn.assistantMessageId,
+                    ...delta,
+                  },
+                });
+              },
+            }
+          : {}),
       },
       initialProjection: projection,
     });
@@ -342,8 +359,11 @@ export async function hasGoatHostedTurnCredits(workspaceId: string, db = getDb()
 export async function consumeGoatOpenCompanyChatStream(input: {
   fullStream: AsyncIterable<unknown>;
   signal: AbortSignal;
-  sink: Pick<GoatOpenCompanyChatProjector, "project" | "recordStepUsage">;
+  sink: Pick<GoatOpenCompanyChatProjector, "project" | "recordStepUsage"> & {
+    present?: (input: { startOffset: number; endOffset: number; delta: string }) => void;
+  };
   flushIntervalMs?: number;
+  presentationFlushIntervalMs?: number;
   now?: () => number;
   initialProjection?: GoatOpenCompanyChatProjection;
 }): Promise<GoatOpenCompanyChatProjection> {
@@ -353,8 +373,12 @@ export async function consumeGoatOpenCompanyChatStream(input: {
   const toolPartIndexes = new Map<string, number>();
   const toolInputBuffers = new Map<string, string>();
   const flushIntervalMs = input.flushIntervalMs ?? ASSISTANT_PARTS_FLUSH_INTERVAL_MS;
+  const presentationFlushIntervalMs =
+    input.presentationFlushIntervalMs ?? PRESENTATION_DELTA_FLUSH_INTERVAL_MS;
   const now = input.now ?? Date.now;
   let lastFlushAt = now() - flushIntervalMs;
+  let lastPresentationAt = now() - presentationFlushIntervalMs;
+  let presentedContent = projectionText(input.initialProjection ?? { parts: [] });
   let dirty = false;
   let latestUsage: LanguageModelUsage | undefined;
   let finishReason: string | undefined;
@@ -376,6 +400,23 @@ export async function consumeGoatOpenCompanyChatStream(input: {
     lastFlushAt = currentTime;
     dirty = false;
     await input.sink.project(projection());
+  };
+  const present = (force = false) => {
+    if (!input.sink.present) return;
+    const content = projectionText(projection());
+    if (content === presentedContent) return;
+    if (!content.startsWith(presentedContent)) {
+      presentedContent = content;
+      return;
+    }
+    const currentTime = now();
+    if (!force && currentTime - lastPresentationAt < presentationFlushIntervalMs) return;
+    const startOffset = presentedContent.length;
+    const delta = content.slice(startOffset);
+    if (!delta) return;
+    presentedContent = content;
+    lastPresentationAt = currentTime;
+    input.sink.present({ startOffset, endOffset: content.length, delta });
   };
   const appendPart = (part: GoatOpenCompanyChatUiPart) => {
     parts.push(part);
@@ -426,6 +467,7 @@ export async function consumeGoatOpenCompanyChatStream(input: {
             state: "streaming",
             ...providerMetadataFrom(part),
           });
+          present(false);
           await flush(false);
         }
       } else if (part.type === "text-end") {
@@ -436,6 +478,7 @@ export async function consumeGoatOpenCompanyChatStream(input: {
             state: "done",
             ...providerMetadataFrom(part),
           });
+          present(true);
         }
       } else if (part.type === "reasoning-start") {
         const id = readString(part.id);
@@ -619,6 +662,7 @@ export async function consumeGoatOpenCompanyChatStream(input: {
       const finalizedParts = finalizeStreamingParts(parts);
       parts.splice(0, parts.length, ...finalizedParts);
       dirty = true;
+      present(true);
       await flush(true);
     }
     throw error;
@@ -628,6 +672,7 @@ export async function consumeGoatOpenCompanyChatStream(input: {
   const finalizedParts = finalizeStreamingParts(parts);
   parts.splice(0, parts.length, ...finalizedParts);
   dirty = true;
+  present(true);
   await flush(true);
   return projection();
 }

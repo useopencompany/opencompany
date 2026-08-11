@@ -151,13 +151,14 @@ export function createGoatOpenCompanyChatProjector(input: {
   const appendProjectionEvents = async (
     projection: GoatOpenCompanyChatProjection,
     content: string,
+    complete = false,
   ) => {
     const events: RunEventDraft[] = [];
-    if (content !== lastProjectedContent) {
+    if (content !== lastProjectedContent || complete) {
       events.push({
         id: `run_event_${randomUUID()}`,
         type: "message.content_updated",
-        payload: { messageId: target.assistantMessageId, content, complete: false },
+        payload: { messageId: target.assistantMessageId, content, complete },
       });
       lastProjectedContent = content;
     }
@@ -259,7 +260,7 @@ export function createGoatOpenCompanyChatProjector(input: {
         throw new GoatCodexChatLeaseLostError();
       }
       const written = await writeAssistantMessage(projection);
-      await appendProjectionEvents(written.projection, written.content);
+      await appendProjectionEvents(written.projection, written.content, true);
       const persisted = await execution.pauseForApprovals({
         worker: { workerId: target.leaseOwner },
         runId: target.turnId,

@@ -22,6 +22,23 @@ function event(sequence: number, type: string, payload: Record<string, unknown>)
   };
 }
 
+function presentationEvent(presentationCursor: string, delta: string, startOffset: number) {
+  return {
+    runId: "run_1",
+    attemptNumber: 1,
+    presentationCursor,
+    schemaVersion: 1,
+    occurredAt,
+    type: "message.presentation_delta",
+    payload: {
+      messageId: "message_assistant_1",
+      startOffset,
+      endOffset: startOffset + delta.length,
+      delta,
+    },
+  };
+}
+
 function sse(events: unknown[]) {
   return new Response(events.map((value) => `data: ${JSON.stringify(value)}\n\n`).join(""), {
     headers: { "Content-Type": "text/event-stream" },
@@ -241,6 +258,77 @@ describe("canonical Chat transport", () => {
         expect.objectContaining({ type: "finish", finishReason: "tool-calls" }),
       ]),
     );
+  });
+
+  it("replays offset deltas without duplicating content across a reconnect", async () => {
+    let eventRequests = 0;
+    const replayQueries: Array<{ durable: string | null; presentation: string | null }> = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/v1/messages") {
+        return Response.json(
+          {
+            data: {
+              conversationId: "conversation_1",
+              messageId: "message_user_1",
+              assistantMessageId: "message_assistant_1",
+              runId: "run_1",
+              transactionId: "42",
+              replayed: false,
+            },
+            meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+          },
+          { status: 202 },
+        );
+      }
+      if (url.pathname.endsWith("/events")) {
+        eventRequests += 1;
+        replayQueries.push({
+          durable: url.searchParams.get("cursor"),
+          presentation: url.searchParams.get("presentationCursor"),
+        });
+        return eventRequests === 1
+          ? sse([presentationEvent("p1:1786449600000-0", "Hello", 0)])
+          : sse([
+              event(1, "message.content_updated", {
+                messageId: "message_assistant_1",
+                content: "Hel",
+                complete: false,
+              }),
+              presentationEvent("p1:1786449600050-0", " world", 5),
+              presentationEvent("p1:1786449600100-0", "Hello", 0),
+              event(2, "message.content_updated", {
+                messageId: "message_assistant_1",
+                content: "Hello world",
+                complete: true,
+              }),
+              event(3, "run.completed", { messageId: "message_assistant_1" }),
+            ]);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const transport = new HeadlessChatTransport<UIMessage>({
+      baseUrl: "https://app.example.test",
+      fetch: fetchMock as typeof fetch,
+    });
+    const chunks = await collect(
+      await transport.sendMessages({
+        trigger: "submit-message",
+        chatId: "conversation_1",
+        messageId: undefined,
+        messages: [{ id: "user_1", role: "user", parts: [{ type: "text", text: "Go" }] }],
+        abortSignal: undefined,
+      }),
+    );
+
+    expect(chunks.filter((chunk) => chunk.type === "text-delta")).toEqual([
+      { type: "text-delta", id: "text_message_assistant_1", delta: "Hello" },
+      { type: "text-delta", id: "text_message_assistant_1", delta: " world" },
+    ]);
+    expect(replayQueries).toEqual([
+      { durable: null, presentation: null },
+      { durable: null, presentation: "p1:1786449600000-0" },
+    ]);
   });
 
   it("resolves an approval on the same Run and reconnects from its durable cursor", async () => {

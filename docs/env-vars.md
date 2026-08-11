@@ -35,6 +35,11 @@ build flag `NEXT_PUBLIC_GOAT_HEADLESS_CHAT`. Both remain unset/false until the s
 `apps/api` production service and rollout smoke gate in
 [Headless Chat operations](./headless-chat-operations.md) are complete.
 
+`REDIS_URL` is optional for correctness. When configured for both `apps/api` and `apps/runner`, it
+enables the canonical Chat transient presentation lane; without it both services retain durable
+Postgres streaming and reconnect behavior. The value is server-only and must never be copied to a
+`NEXT_PUBLIC_*` variable.
+
 The Stripe endpoint secret is `GOAT_STRIPE_WEBHOOK_SECRET`; there is no second product webhook.
 Google OAuth uses the direct Goat callback URLs listed in `.env.example`.
 

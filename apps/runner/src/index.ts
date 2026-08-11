@@ -1,4 +1,5 @@
 import "./load-env";
+import { RedisChatPresentationStream } from "@opencompany/chat-presentation";
 import { flushLatitude } from "@opencompany/goat-observability/latitude";
 import {
   registerGoatNodeObservability,
@@ -55,6 +56,7 @@ registerGoatNodeObservability({ serviceName: "opencompany-runner-goat" });
 installProcessErrorBackstop();
 
 const env = loadEnv();
+const chatPresentation = createChatPresentationStream();
 assertRunnerDbConfig();
 // The LLM broker can be left holding unsettled tokens if a runner dies mid-delegation.
 // Sweep them every 60s; the partial-index scan is cheap and the settlement CAS makes it safe
@@ -83,6 +85,7 @@ const goatCodexChatWorker = env.goatTaskWorkerEnabled
         sweepTerminalGoatCodexChatSandboxes({
           idleTimeoutMs: env.goatCodexChatIdleTimeoutMs,
         }),
+      ...(chatPresentation ? { presentationPublisher: chatPresentation } : {}),
     })
   : null;
 const goatBrainIngestWorker = env.goatTaskWorkerEnabled ? startGoatBrainIngestWorker(env) : null;
@@ -163,6 +166,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       goatFathomPollWorker?.stop() ?? Promise.resolve(),
       goatGoogleDriveSyncWorker?.stop() ?? Promise.resolve(),
       server.close(),
+      chatPresentation?.close() ?? Promise.resolve(),
     ])
       .then(() => Promise.allSettled([closeDb()]))
       .then(() => {
@@ -184,6 +188,21 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 }
 
 await server.listen({ host: "0.0.0.0", port: env.port });
+
+function createChatPresentationStream() {
+  const url = process.env.REDIS_URL?.trim();
+  if (!url) return null;
+  return new RedisChatPresentationStream({
+    url,
+    onError: ({ operation, error }) => {
+      logger.warn("Runner transient Chat presentation degraded to Postgres", {
+        event: "opencompany.runner_chat_presentation_redis_degraded",
+        operation,
+        error_name: error instanceof Error ? error.name : typeof error,
+      });
+    },
+  });
+}
 
 // The runner is a single Bun process hosting every in-flight session on the instance, so a
 // stray unhandled rejection must not exit it. That is exactly how prod crashed on 2026-06-10:

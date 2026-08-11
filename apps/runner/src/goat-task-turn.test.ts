@@ -285,6 +285,40 @@ describe("session-backed task turns", () => {
       expect.stringContaining('"type":"message.content_updated"'),
     );
     expect(query.params).toContainEqual(expect.stringContaining('"type":"run.completed"'));
+    expect(canonicalEventTypes(query.params)).toEqual(["message.content_updated", "run.completed"]);
+  });
+
+  it.each([
+    { turnStatus: "failed" as const, terminalEvent: "run.failed", error: "Provider failed." },
+    { turnStatus: "interrupted" as const, terminalEvent: "run.canceled", error: null },
+  ])("orders the complete Message snapshot before $terminalEvent", async ({
+    turnStatus,
+    terminalEvent,
+    error,
+  }) => {
+    await settleGoatDurableTurn({
+      target: {
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        codexChatSessionId: "runtime_1",
+        chatSessionId: "goat_chat_1",
+        turnId: "turn_1",
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+      },
+      turnStatus,
+      sessionStatus: turnStatus === "interrupted" ? "interrupted" : "idle",
+      error,
+      completedAt: new Date("2026-07-30T09:30:00.000Z"),
+      canonicalRun: {
+        attemptId: "attempt_1",
+        assistantMessageId: "assistant_message_1",
+        content: "Latest response",
+      },
+    });
+
+    const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]);
+    expect(canonicalEventTypes(query.params)).toEqual(["message.content_updated", terminalEvent]);
   });
 
   it("settles the current lease, projects the task, queues the next workflow step in a fresh session, and dedupes notification", async () => {
@@ -359,6 +393,14 @@ describe("session-backed task turns", () => {
     );
   });
 });
+
+function canonicalEventTypes(params: unknown[]) {
+  const serialized = params.find(
+    (value) => typeof value === "string" && value.includes('"message.content_updated"'),
+  );
+  if (typeof serialized !== "string") throw new Error("Canonical Run Events were not serialized.");
+  return (JSON.parse(serialized) as Array<{ type: string }>).map((event) => event.type);
+}
 
 function durableTurn(): GoatCodexChatTurn {
   const now = new Date("2026-07-30T09:00:00.000Z");

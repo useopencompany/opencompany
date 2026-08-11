@@ -85,7 +85,8 @@
     "WORKOS_COOKIE_PASSWORD",
     "VERCEL_ENV",
     "VERCEL_GIT_COMMIT_SHA",
-    "RENDER_GIT_COMMIT"
+    "RENDER_GIT_COMMIT",
+    "REDIS_URL"
   ],
   "tasks": {
     "build": {

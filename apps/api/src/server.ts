@@ -1,4 +1,5 @@
 import { serve } from "@hono/node-server";
+import { RedisChatPresentationStream } from "@opencompany/chat-presentation";
 import { ChatApplicationService } from "@opencompany/core";
 import {
   PostgresChatAttachmentRepository,
@@ -28,12 +29,14 @@ const chat = new ChatApplicationService(
   }),
 );
 const notifier = new PostgresRunEventNotifier(database.pool);
+const presentation = createPresentationStream();
 const readModels = createElectricReadModels();
 const app = createApiApp({
   chat,
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),
   authenticate: createWorkOsApiAuthenticator(execute),
   notifier,
+  ...(presentation ? { presentation } : {}),
   ...(readModels ? { readModels } : {}),
 });
 const port = resolvePort();
@@ -47,6 +50,7 @@ async function close(signal: string) {
   logger.info("API server stopping", { event: "opencompany.api_stopping", signal });
   server.close();
   await notifier.close();
+  await presentation?.close();
   await database.close();
   await shutdownGoatNodeObservability();
 }
@@ -95,5 +99,20 @@ function createElectricReadModels() {
       ? { electricSecret: process.env.ELECTRIC_SECRET.trim() }
       : {}),
     ...(process.env.ELECTRIC_TOKEN?.trim() ? { token: process.env.ELECTRIC_TOKEN.trim() } : {}),
+  });
+}
+
+function createPresentationStream() {
+  const url = process.env.REDIS_URL?.trim();
+  if (!url) return null;
+  return new RedisChatPresentationStream({
+    url,
+    onError: ({ operation, error }) => {
+      logger.warn("API transient Chat presentation degraded to Postgres", {
+        event: "opencompany.api_chat_presentation_redis_degraded",
+        operation,
+        error_name: error instanceof Error ? error.name : typeof error,
+      });
+    },
   });
 }

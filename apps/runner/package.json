@@ -13,6 +13,7 @@
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/analytics": "workspace:*",
     "@opencompany/billing": "workspace:*",
+    "@opencompany/chat-presentation": "workspace:*",
     "@opencompany/core": "workspace:*",
     "@opencompany/crypto": "workspace:*",
     "@opencompany/db": "workspace:*",

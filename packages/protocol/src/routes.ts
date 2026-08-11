@@ -1,5 +1,5 @@
 import { createRoute, OpenAPIHono, type RouteHandler, z } from "@hono/zod-openapi";
-import { RunEventSchema } from "./events";
+import { RunStreamEventSchema } from "./events";
 import {
   AttachmentUploadBodySchema,
   AttachmentUploadEnvelopeSchema,
@@ -12,6 +12,7 @@ import {
   CursorSchema,
   ErrorEnvelopeSchema,
   MessagePageSchema,
+  PresentationCursorSchema,
   ResolveApprovalBodySchema,
   ResolveApprovalEnvelopeSchema,
   ResourceIdSchema,
@@ -165,12 +166,20 @@ export const streamRunEventsRoute = createRoute({
   request: {
     params: z.object({ runId: ResourceIdSchema }),
     headers: z.object({ "last-event-id": CursorSchema.optional() }),
-    query: z.object({ cursor: CursorSchema.optional() }),
+    query: z.object({
+      cursor: CursorSchema.optional(),
+      presentationCursor: PresentationCursorSchema.optional(),
+    }),
   },
   responses: {
     200: {
-      description: "Typed semantic events. Each SSE data field is a RunEvent JSON object.",
-      content: { "text/event-stream": { schema: RunEventSchema } },
+      description:
+        "Typed durable Run Events plus optional transient presentation deltas. Only durable events carry SSE IDs.",
+      content: {
+        "text/event-stream": {
+          schema: RunStreamEventSchema,
+        },
+      },
     },
     default: errorResponse,
   },

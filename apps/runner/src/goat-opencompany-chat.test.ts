@@ -48,25 +48,30 @@ describe("hosted turn credit gate", () => {
 });
 
 describe("consumeGoatOpenCompanyChatStream", () => {
-  it("uses a responsive default cadence for durable text projections", async () => {
+  it("separates a 50 ms presentation cadence from 500 ms durable projections", async () => {
     let clock = 0;
     const project = vi.fn(async (_projection: GoatOpenCompanyChatProjection) => undefined);
+    const present = vi.fn();
 
     await consumeGoatOpenCompanyChatStream({
       fullStream: streamParts(
         { type: "text-start", id: "text_1" },
         { type: "text-delta", id: "text_1", text: "A" },
         () => {
-          clock = 149;
+          clock = 49;
           return { type: "text-delta", id: "text_1", text: "B" };
         },
         () => {
-          clock = 150;
+          clock = 50;
           return { type: "text-delta", id: "text_1", text: "C" };
+        },
+        () => {
+          clock = 500;
+          return { type: "text-delta", id: "text_1", text: "D" };
         },
         { type: "text-end", id: "text_1" },
       ),
-      sink: { project, recordStepUsage: vi.fn(async () => undefined) },
+      sink: { project, present, recordStepUsage: vi.fn(async () => undefined) },
       signal: new AbortController().signal,
       now: () => clock,
     });
@@ -75,8 +80,13 @@ describe("consumeGoatOpenCompanyChatStream", () => {
       parts: [{ type: "text", text: "A", state: "streaming" }],
     });
     expect(project.mock.calls[1]?.[0]).toMatchObject({
-      parts: [{ type: "text", text: "ABC", state: "streaming" }],
+      parts: [{ type: "text", text: "ABCD", state: "streaming" }],
     });
+    expect(present.mock.calls).toEqual([
+      [{ startOffset: 0, endOffset: 1, delta: "A" }],
+      [{ startOffset: 1, endOffset: 3, delta: "BC" }],
+      [{ startOffset: 3, endOffset: 4, delta: "D" }],
+    ]);
   });
 
   it("accumulates throttled text, reasoning, and the complete tool lifecycle", async () => {
@@ -219,18 +229,21 @@ describe("consumeGoatOpenCompanyChatStream", () => {
     const leaseLost = new GoatCodexChatLeaseLostError();
     controller.abort(leaseLost);
     const project = vi.fn(async (_projection: GoatOpenCompanyChatProjection) => undefined);
+    const present = vi.fn();
 
     await expect(
       consumeGoatOpenCompanyChatStream({
         fullStream: streamParts({ type: "text-delta", id: "text_1", text: "stale" }),
         sink: {
           project,
+          present,
           recordStepUsage: vi.fn(async () => undefined),
         },
         signal: controller.signal,
       }),
     ).rejects.toBe(leaseLost);
     expect(project).not.toHaveBeenCalled();
+    expect(present).not.toHaveBeenCalled();
   });
 
   it("projects a native tool approval request as durable approval state", async () => {
@@ -270,6 +283,7 @@ describe("consumeGoatOpenCompanyChatStream", () => {
     const controller = new AbortController();
     const interrupted = new GoatOpenCompanyChatInterruptedError();
     const project = vi.fn(async (_projection: GoatOpenCompanyChatProjection) => undefined);
+    const present = vi.fn();
     async function* interruptedStream() {
       yield { type: "text-start", id: "text_1" };
       yield { type: "text-delta", id: "text_1", text: "Partial text" };
@@ -283,6 +297,7 @@ describe("consumeGoatOpenCompanyChatStream", () => {
         fullStream: interruptedStream(),
         sink: {
           project,
+          present,
           recordStepUsage: vi.fn(async () => undefined),
         },
         signal: controller.signal,
@@ -292,6 +307,11 @@ describe("consumeGoatOpenCompanyChatStream", () => {
 
     expect(project.mock.calls.at(-1)?.[0]).toMatchObject({
       parts: [{ type: "text", text: "Partial text plus newest delta", state: "done" }],
+    });
+    expect(present.mock.calls.at(-1)?.[0]).toEqual({
+      startOffset: "Partial text".length,
+      endOffset: "Partial text plus newest delta".length,
+      delta: " plus newest delta",
     });
   });
 });

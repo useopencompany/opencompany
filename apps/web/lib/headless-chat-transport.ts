@@ -19,6 +19,7 @@ type HeadlessRunState = {
   model: string;
   content?: string;
   cursor?: string;
+  presentationCursor?: string;
   status: "queued" | "running" | "paused" | "completed" | "failed" | "canceled";
 };
 
@@ -223,15 +224,31 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
             baseUrl,
             runId: state.runId,
             ...(state.cursor ? { cursor: state.cursor } : {}),
+            ...(state.presentationCursor ? { presentationCursor: state.presentationCursor } : {}),
             ...(signal ? { signal } : {}),
             fetch: fetchImpl,
             onCursor(cursor) {
               state.cursor = cursor;
               writeRunStateAliases(chatId, state);
             },
+            onPresentationCursor(cursor) {
+              state.presentationCursor = cursor;
+              writeRunStateAliases(chatId, state);
+            },
           })) {
-            state.status = statusFromEvent(event, state.status);
-            if (event.type === "message.content_updated") {
+            if (event.type === "message.presentation_delta") {
+              if (!textStarted) {
+                textStarted = true;
+                controller.enqueue({ type: "text-start", id: textId });
+              }
+              const { startOffset, endOffset, delta } = event.payload;
+              if (startOffset <= text.length && endOffset > text.length) {
+                const unseen = delta.slice(text.length - startOffset);
+                text += unseen;
+                state.content = text;
+                if (unseen) controller.enqueue({ type: "text-delta", id: textId, delta: unseen });
+              }
+            } else if (event.type === "message.content_updated") {
               if (!textStarted) {
                 textStarted = true;
                 controller.enqueue({ type: "text-start", id: textId });
@@ -241,8 +258,10 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
               // attempt; if a future projector revises prior text, Electric remains authoritative
               // and we avoid rendering a duplicated suffix in the transient overlay.
               const delta = next.startsWith(text) ? next.slice(text.length) : "";
-              text = next;
-              state.content = next;
+              if (next.startsWith(text)) {
+                text = next;
+                state.content = next;
+              }
               if (delta) controller.enqueue({ type: "text-delta", id: textId, delta });
               if (event.payload.complete) {
                 controller.enqueue({ type: "text-end", id: textId });
@@ -288,6 +307,9 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
               controller.enqueue({ type: "error", errorText: event.payload.message });
             } else if (event.type === "run.canceled") {
               controller.enqueue({ type: "abort", reason: "Canceled by the user." });
+            }
+            if (event.type !== "message.presentation_delta") {
+              state.status = statusFromEvent(event, state.status);
             }
             writeRunStateAliases(chatId, state);
           }

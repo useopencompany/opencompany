@@ -4,6 +4,7 @@ import {
   formatEventCursor,
   parseEventCursor,
   parseRunEvent,
+  parseRunStreamEvent,
 } from "./client";
 import { createOpenApiDocument } from "./routes";
 import { CreateMessageBodySchema, ErrorEnvelopeSchema } from "./schemas";
@@ -70,6 +71,32 @@ describe("v1 protocol contract", () => {
     expect(parseEventCursor("v1:42")).toBe(42);
     expect(parseEventCursor(undefined)).toBe(0);
     expect(() => parseEventCursor("42")).toThrow();
+  });
+
+  it("validates transient presentation deltas separately from durable cursors", () => {
+    const event = parseRunStreamEvent({
+      runId: "run_1",
+      attemptNumber: 2,
+      presentationCursor: "p1:1786449600000-3",
+      schemaVersion: 1,
+      occurredAt: "2026-08-11T10:00:00.000Z",
+      type: "message.presentation_delta",
+      payload: {
+        messageId: "message_2",
+        startOffset: 5,
+        endOffset: 11,
+        delta: " world",
+      },
+    });
+    expect(event.type).toBe("message.presentation_delta");
+    expect(event).not.toHaveProperty("cursor");
+    expect(event).not.toHaveProperty("id");
+    expect(() =>
+      parseRunStreamEvent({
+        ...event,
+        payload: { ...event.payload, endOffset: 12 },
+      }),
+    ).toThrow(/offsets/u);
   });
 
   it("generates OpenAPI from the same schemas and exposes the typed Hono client", () => {

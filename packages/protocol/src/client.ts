@@ -1,8 +1,18 @@
 import { hc } from "hono/client";
-import { decodeEventCursor, parseRunEvent, type RunEventDto } from "./events";
+import {
+  decodeEventCursor,
+  parseRunStreamEvent,
+  type RunEventDto,
+  type RunStreamEventDto,
+} from "./events";
 import type { V1AppType } from "./routes";
 
-export { formatEventCursor, parseEventCursor, parseRunEvent } from "./events";
+export {
+  formatEventCursor,
+  parseEventCursor,
+  parseRunEvent,
+  parseRunStreamEvent,
+} from "./events";
 
 export type OpenCompanyClientOptions = Parameters<typeof hc>[1];
 
@@ -23,9 +33,11 @@ export type RunEventStreamOptions = {
   baseUrl: string;
   runId: string;
   cursor?: string;
+  presentationCursor?: string;
   signal?: AbortSignal;
   fetch?: typeof globalThis.fetch;
   onCursor?: (cursor: string) => void;
+  onPresentationCursor?: (cursor: string) => void;
   reconnectDelayMs?: number;
   maxReconnectAttempts?: number;
 };
@@ -37,10 +49,11 @@ export type RunEventStreamOptions = {
  */
 export async function* streamRunEvents(
   options: RunEventStreamOptions,
-): AsyncGenerator<RunEventDto, void, void> {
+): AsyncGenerator<RunStreamEventDto, void, void> {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const maxReconnectAttempts = options.maxReconnectAttempts ?? 8;
   let cursor = options.cursor;
+  let presentationCursor = options.presentationCursor;
   let reconnectAttempts = 0;
 
   while (!options.signal?.aborted) {
@@ -49,6 +62,7 @@ export async function* streamRunEvents(
       normalizedBaseUrl(options.baseUrl),
     );
     if (cursor) url.searchParams.set("cursor", cursor);
+    if (presentationCursor) url.searchParams.set("presentationCursor", presentationCursor);
     const response = await fetchImpl(url, {
       method: "GET",
       headers: { Accept: "text/event-stream" },
@@ -62,9 +76,17 @@ export async function* streamRunEvents(
     let receivedEvent = false;
     let lastEventEndedStream = false;
     for await (const data of sseDataFields(response.body, options.signal)) {
-      const event = parseRunEvent(parseJson(data));
+      const event: RunStreamEventDto = parseRunStreamEvent(parseJson(data));
       if (event.runId !== options.runId) {
         throw new Error("The Run event stream returned an event for another Run.");
+      }
+      if (event.type === "message.presentation_delta") {
+        presentationCursor = event.presentationCursor;
+        receivedEvent = true;
+        reconnectAttempts = 0;
+        options.onPresentationCursor?.(event.presentationCursor);
+        yield event;
+        continue;
       }
       if (cursor && decodeEventCursor(event.cursor) <= decodeEventCursor(cursor)) continue;
       const eventCursor = event.cursor;

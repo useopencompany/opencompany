@@ -2,7 +2,7 @@ import { RUN_EVENT_NOTIFY_CHANNEL } from "@opencompany/db/chat-repository";
 import type { Pool, PoolClient } from "pg";
 
 export interface RunEventNotifier {
-  wait(input: { runId: string; signal: AbortSignal; timeoutMs: number }): Promise<void>;
+  wait(input: { runId: string; signal: AbortSignal; timeoutMs: number }): Promise<boolean>;
   close?(): Promise<void>;
 }
 
@@ -13,35 +13,36 @@ export class PostgresRunEventNotifier implements RunEventNotifier {
   private client: PoolClient | null = null;
   private connecting: Promise<void> | null = null;
   private closed = false;
-  private readonly waiters = new Map<string, Set<() => void>>();
+  private readonly waiters = new Map<string, Set<(notified: boolean) => void>>();
 
   constructor(private readonly pool: Pool) {}
 
   async wait(input: { runId: string; signal: AbortSignal; timeoutMs: number }) {
-    if (input.signal.aborted || this.closed) return;
+    if (input.signal.aborted || this.closed) return false;
     await this.ensureListener().catch(() => undefined);
-    await new Promise<void>((resolve) => {
-      const finish = () => {
+    return new Promise<boolean>((resolve) => {
+      const finish = (notified: boolean) => {
         clearTimeout(timer);
-        input.signal.removeEventListener("abort", finish);
+        input.signal.removeEventListener("abort", abort);
         const runWaiters = this.waiters.get(input.runId);
         runWaiters?.delete(finish);
         if (runWaiters?.size === 0) this.waiters.delete(input.runId);
-        resolve();
+        resolve(notified);
       };
-      const timer = setTimeout(finish, Math.max(50, input.timeoutMs));
+      const abort = () => finish(false);
+      const timer = setTimeout(() => finish(false), Math.max(10, input.timeoutMs));
       timer.unref?.();
-      const runWaiters = this.waiters.get(input.runId) ?? new Set<() => void>();
+      const runWaiters = this.waiters.get(input.runId) ?? new Set<(notified: boolean) => void>();
       runWaiters.add(finish);
       this.waiters.set(input.runId, runWaiters);
-      input.signal.addEventListener("abort", finish, { once: true });
+      input.signal.addEventListener("abort", abort, { once: true });
     });
   }
 
   async close() {
     this.closed = true;
     for (const waiters of this.waiters.values()) {
-      for (const wake of waiters) wake();
+      for (const wake of waiters) wake(false);
     }
     this.waiters.clear();
     const client = this.client;
@@ -67,7 +68,7 @@ export class PostgresRunEventNotifier implements RunEventNotifier {
           try {
             const payload = JSON.parse(notification.payload) as { runId?: unknown };
             if (typeof payload.runId !== "string") return;
-            for (const wake of this.waiters.get(payload.runId) ?? []) wake();
+            for (const wake of this.waiters.get(payload.runId) ?? []) wake(true);
           } catch {
             // A malformed hint is ignored; polling remains authoritative.
           }
@@ -91,16 +92,17 @@ export class PostgresRunEventNotifier implements RunEventNotifier {
 
 export class PollingRunEventNotifier implements RunEventNotifier {
   async wait(input: { signal: AbortSignal; timeoutMs: number }) {
-    if (input.signal.aborted) return;
+    if (input.signal.aborted) return false;
     await new Promise<void>((resolve) => {
       const finish = () => {
         clearTimeout(timer);
         input.signal.removeEventListener("abort", finish);
         resolve();
       };
-      const timer = setTimeout(finish, Math.max(50, input.timeoutMs));
+      const timer = setTimeout(finish, Math.max(10, input.timeoutMs));
       timer.unref?.();
       input.signal.addEventListener("abort", finish, { once: true });
     });
+    return false;
   }
 }
