@@ -29,8 +29,6 @@ services:
         sync: false
       - key: GOAT_API_OAUTH_AUDIENCE
         sync: false
-      - key: GOAT_MACOS_OAUTH_AUDIENCE
-        sync: false
       - key: GOAT_DEFAULT_CHAT_MODEL
         sync: false
       # Canonical Auto model classification. Kept server-side in prod `/api`.

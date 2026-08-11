@@ -2,9 +2,10 @@
 
 Ordinary web Chat uses the canonical Hono API under `/v1`, durable runner execution, semantic SSE,
 and authorized Electric read models. This document covers the web rollout approved for issue
-[#1165](https://github.com/useopencompany/opencompany-experimental/issues/1165). Expo/mobile and
-macOS-native implementation and test work are owned by a later project; the existing macOS
-compatibility route is intentionally unchanged.
+[#1165](https://github.com/useopencompany/opencompany-experimental/issues/1165). Native client
+implementation and test work belong to a later project. `/api/chat`
+(`apps/web/lib/legacy-chat-route.ts`) is the bounded browser rollback route for
+`NEXT_PUBLIC_GOAT_HEADLESS_CHAT` and is intentionally unchanged by this rollout.
 
 ## Service topology
 
@@ -164,10 +165,11 @@ queued canonical Runs continue safely in the runner. Additive tables, Events, At
 and projections remain and must not be dropped. Reverting runner/API code is optional only after
 canonical Runs have settled or a compatible runner remains available.
 
-The compatibility endpoint remains until the later native project migrates or separately proves
-all surviving clients no longer use it, and after the agreed web production soak shows no unexplained
-command, settlement, reconnect, recovery, or tenant-isolation regressions. Do not add new ordinary
-Chat orchestration to that endpoint.
+The compatibility endpoint remains only as the bounded browser rollback boundary while
+`NEXT_PUBLIC_GOAT_HEADLESS_CHAT` and the legacy implementation exist. It should be removed only
+after the agreed web production soak shows no unexplained command, settlement, reconnect, recovery,
+or tenant-isolation regressions and the rollback window is explicitly closed. Do not add new
+ordinary Chat orchestration to that endpoint.
 
 ## Observability and exit evidence
 

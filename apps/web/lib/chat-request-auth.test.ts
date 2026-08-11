@@ -1,24 +1,10 @@
-import { listAccessibleGoatBrains } from "@opencompany/db/goat-workspaces";
-import type { JWTPayload, jwtVerify } from "jose";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatUser } from "@/lib/auth";
-import {
-  resolveGoatChatRequestContext,
-  resolveGoatMacChatContext,
-  verifyGoatMacAccessToken,
-} from "@/lib/chat-request-auth";
+import { resolveGoatChatRequestContext } from "@/lib/chat-request-auth";
 
 vi.mock("@/lib/auth", () => ({
   currentGoatUser: vi.fn(),
 }));
-
-vi.mock("@opencompany/db/goat-workspaces", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@opencompany/db/goat-workspaces")>();
-  return {
-    ...actual,
-    listAccessibleGoatBrains: vi.fn(),
-  };
-});
 
 describe("resolveGoatChatRequestContext", () => {
   beforeEach(() => {
@@ -37,186 +23,34 @@ describe("resolveGoatChatRequestContext", () => {
     expect(currentGoatUser).toHaveBeenCalledWith({ optional: true });
   });
 
-  it("never falls back to cookies for a malformed authorization header", async () => {
+  it("rejects requests without a browser session", async () => {
+    vi.mocked(currentGoatUser).mockResolvedValue(null as never);
+
+    const result = await resolveGoatChatRequestContext(
+      new Request("https://goat.example/api/chat", { method: "POST" }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(401);
+  });
+
+  it("ignores an authorization header and still resolves the browser session", async () => {
+    const context = browserContext();
+    vi.mocked(currentGoatUser).mockResolvedValue(context as never);
+
     const result = await resolveGoatChatRequestContext(
       new Request("https://goat.example/api/chat", {
         method: "POST",
-        headers: { Authorization: "Basic credentials" },
+        headers: { Authorization: "Bearer some-token" },
       }),
     );
 
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.response.status).toBe(401);
-    expect(currentGoatUser).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: true, context });
+    expect(currentGoatUser).toHaveBeenCalledWith({ optional: true });
   });
 });
 
-describe("verifyGoatMacAccessToken", () => {
-  it("accepts a token issued for the configured Goat resource", async () => {
-    const verifyJwt = vi.fn(async () => ({
-      payload: {
-        sub: "user_1",
-        org_id: "org_1",
-        exp: 2_000_000_000,
-      },
-      protectedHeader: { alg: "RS256" },
-    }));
-
-    const result = await verifyGoatMacAccessToken("token", {
-      audience: "goat_api",
-      authKitDomain: "https://example.authkit.app",
-      verifyJwt: verifyJwt as unknown as typeof jwtVerify,
-    });
-
-    expect(result.ok).toBe(true);
-    expect(verifyJwt).toHaveBeenCalledWith(
-      "token",
-      expect.any(Function),
-      expect.objectContaining({
-        issuer: "https://example.authkit.app",
-        audience: "goat_api",
-      }),
-    );
-  });
-
-  it("rejects an MCP-audience token", async () => {
-    const result = await verifyGoatMacAccessToken("token", {
-      audience: "goat_api",
-      authKitDomain: "https://example.authkit.app",
-      verifyJwt: vi.fn(async () => {
-        throw new Error("unexpected audience");
-      }) as unknown as typeof jwtVerify,
-    });
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.response.status).toBe(401);
-  });
-
-  it.each([
-    "expired",
-    "wrong issuer",
-    "wrong audience",
-  ])("rejects tokens that fail JWT verification: %s", async () => {
-    const result = await verifyGoatMacAccessToken("token", {
-      audience: "goat_api",
-      authKitDomain: "https://example.authkit.app",
-      verifyJwt: vi.fn(async () => {
-        throw new Error("JWT verification failed");
-      }) as unknown as typeof jwtVerify,
-    });
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.response.status).toBe(401);
-  });
-
-  it("fails closed when the resource audience is missing", async () => {
-    const result = await verifyGoatMacAccessToken("token", {
-      audience: "",
-      authKitDomain: "https://example.authkit.app",
-      verifyJwt: vi.fn() as unknown as typeof jwtVerify,
-    });
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.response.status).toBe(503);
-  });
-});
-
-describe("resolveGoatMacChatContext", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.mocked(listAccessibleGoatBrains).mockResolvedValue([generalBrain(), restrictedBrain()]);
-  });
-
-  it("resolves the token organization and selects its General brain", async () => {
-    const result = await resolveGoatMacChatContext(validPayload(), mockDb({}));
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.context.user.workosUserId).toBe("user_1");
-    expect(result.context.workspace.id).toBe("workspace_1");
-    expect(result.context.role).toBe("admin");
-    expect(result.context.activeBrain?.id).toBe("brain_general");
-    expect(listAccessibleGoatBrains).toHaveBeenCalledWith(
-      { userWorkosId: "user_1", workspaceId: "workspace_1" },
-      expect.objectContaining({ db: expect.any(Object) }),
-    );
-  });
-
-  it("rejects missing user and organization claims", async () => {
-    const result = await resolveGoatMacChatContext({ sub: "user_1" }, mockDb({}));
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.response.status).toBe(401);
-  });
-
-  it("requires an existing onboarded Goat user", async () => {
-    const missing = await resolveGoatMacChatContext(validPayload(), mockDb({ user: null }));
-    expect(missing.ok).toBe(false);
-    if (!missing.ok) expect(missing.response.status).toBe(403);
-
-    const incomplete = await resolveGoatMacChatContext(
-      validPayload(),
-      mockDb({ user: goatUser({ onboardedAt: null }) }),
-    );
-    expect(incomplete.ok).toBe(false);
-    if (!incomplete.ok) await expect(incomplete.response.text()).resolves.toContain("onboarding");
-  });
-
-  it("rejects an organization without a matching workspace membership", async () => {
-    const result = await resolveGoatMacChatContext(validPayload(), mockDb({ membership: null }));
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.response.status).toBe(403);
-  });
-
-  it("requires an accessible brain", async () => {
-    vi.mocked(listAccessibleGoatBrains).mockResolvedValue([]);
-
-    const result = await resolveGoatMacChatContext(validPayload(), mockDb({}));
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.response.status).toBe(403);
-  });
-
-  it("falls back to the first accessible brain when General is unavailable", async () => {
-    vi.mocked(listAccessibleGoatBrains).mockResolvedValue([restrictedBrain()]);
-
-    const result = await resolveGoatMacChatContext(validPayload(), mockDb({}));
-
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.context.activeBrain?.id).toBe("brain_other");
-  });
-});
-
-function validPayload(): JWTPayload {
-  return {
-    sub: "user_1",
-    org_id: "org_1",
-    exp: 2_000_000_000,
-  };
-}
-
-function mockDb(input: {
-  user?: ReturnType<typeof goatUser> | null;
-  membership?: ReturnType<typeof workspaceMembership> | null;
-}) {
-  const rows = [
-    input.user === null ? [] : [input.user ?? goatUser()],
-    input.membership === null ? [] : [input.membership ?? workspaceMembership()],
-  ];
-  const select = vi.fn(() => {
-    const result = rows.shift() ?? [];
-    const chain: Record<string, unknown> = {};
-    chain.from = vi.fn(() => chain);
-    chain.innerJoin = vi.fn(() => chain);
-    chain.where = vi.fn(() => chain);
-    chain.limit = vi.fn(async () => result);
-    return chain;
-  });
-  return { select } as never;
-}
-
-function goatUser(overrides: { onboardedAt?: Date | null } = {}) {
+function goatUser() {
   return {
     workosUserId: "user_1",
     email: "user@example.com",
@@ -229,7 +63,7 @@ function goatUser(overrides: { onboardedAt?: Date | null } = {}) {
     chatCapabilitiesBetaEnabled: false,
     preferredMcpClient: null,
     mcpSetupCompletedAt: null,
-    onboardedAt: overrides.onboardedAt === undefined ? new Date() : overrides.onboardedAt,
+    onboardedAt: new Date(),
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -263,15 +97,6 @@ function generalBrain() {
     createdByWorkosId: "user_1",
     createdAt: new Date(),
     updatedAt: new Date(),
-  };
-}
-
-function restrictedBrain() {
-  return {
-    ...generalBrain(),
-    id: "brain_other",
-    name: "Other",
-    slug: "other",
   };
 }
 
