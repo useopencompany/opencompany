@@ -134,6 +134,7 @@ jobs:
         run: >-
           node --test
           scripts/lib/neon-branch-config.test.mjs
+          scripts/lib/release-production-workflow.test.mjs
           scripts/lib/release-scope.test.mjs
           scripts/lib/release-smoke.test.mjs
           scripts/lib/web-dev-env.test.mjs
