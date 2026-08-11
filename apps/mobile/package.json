@@ -3,7 +3,6 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "dependencies": {
-    "@opencompany/native-chat-composer": "workspace:*",
     "@expo/ui": "~57.0.9",
     "@legendapp/list": "3.3.3",
     "expo": "~57.0.11",

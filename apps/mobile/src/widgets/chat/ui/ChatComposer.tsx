@@ -1,9 +1,10 @@
 import { Host } from "@expo/ui";
-import { NativeChatComposerView } from "@opencompany/native-chat-composer";
 import { router } from "expo-router";
 import { useEffect, useRef } from "react";
 import { View } from "react-native";
 import { useCSSVariable } from "uniwind";
+
+import { NativeChatComposerView } from "../../../../modules/native-chat-composer";
 
 const COMPOSER_EXPANDED_VERTICAL_PADDING = 10;
 const COMPOSER_INPUT_LINE_HEIGHT = 22;
