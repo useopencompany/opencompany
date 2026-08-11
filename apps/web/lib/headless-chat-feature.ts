@@ -1,5 +1,5 @@
-// Canonical Chat remains a configuration cohort until apps/api has an authorized production
-// service and GOAT_API_ORIGIN. Enabling is code-free; removing/false is the immediate rollback.
+// Canonical Chat remains a configuration cohort while its separately deployed API is active.
+// Enabling is code-free; removing/false is the immediate rollback to legacy Chat.
 export function isHeadlessChatEnabled(value = process.env.NEXT_PUBLIC_GOAT_HEADLESS_CHAT) {
   return value === "true";
 }

@@ -240,11 +240,14 @@ real but explicit cohort path rather than silently reducing capabilities:
   service rollout gate pass. PR 4 moves Auto model selection behind an authenticated web preflight
   that resolves one concrete model before the canonical command. Coding-chat metadata writes remain
   on their existing engine-specific path and are not part of the migrated ordinary-Chat resource.
-- The browser calls same-origin `/v1`. Production uses an uncached Vercel external rewrite to the
-  server-only `GOAT_API_ORIGIN`; the App Router proxy remains the fail-closed/local fallback when
-  that origin is absent or invalid. Both preserve the existing session cookie, and configuration
-  rejects invalid, credential-bearing, or same-origin targets. Browser code never receives the API
-  origin or Electric credentials.
+- The browser calls `/v1` directly on the first-party `NEXT_PUBLIC_GOAT_API_ORIGIN`. Production uses
+  `https://api.opencompany.chat`, which terminates TLS on the separately deployed Render API and
+  removes Vercel from SSE and Electric long-poll response paths. Browser requests include the
+  secure WorkOS session cookie shared across `opencompany.chat`; the API permits credentialed CORS
+  only from the configured web origins and requires an allowed `Origin` on cookie-authenticated
+  mutations. The API hostname is not a security boundary: authentication, server-derived tenancy,
+  and repository predicates remain authoritative. When no public origin is configured (including
+  local development), the client retains same-origin `/v1` as a fallback.
 - Electric collection URLs select only the fixed `chat-*-v1` names. The API chooses physical
   tables, columns, and actor/workspace predicates; client `table` or `where` parameters are ignored.
 - `apps/web/app/api/chat/route.ts` is a thin compatibility boundary. Its foreground implementation
@@ -265,6 +268,16 @@ forbids changing production infrastructure or secrets without authorization. Sou
 continues to require `NEXT_PUBLIC_GOAT_HEADLESS_CHAT=true`; enabling after the API service is
 authorized is a configuration-only rollout, and removal/false is the immediate rollback. The
 operational steps are recorded in `docs/headless-chat-operations.md`.
+
+Production activation initially kept browser requests same-origin through a Next.js streaming
+relay and then a native Vercel external rewrite. Controlled direct API checks and two completed
+production Runs established that Render accepted the authenticated event streams while Vercel
+returned HTTP 502 for the corresponding browser-facing requests. Short proxied responses worked,
+but SSE and Electric long-poll responses did not. The direct first-party API origin above replaces
+that topology without changing the `/v1` wire contract, durable event cursors, transient
+presentation cursors, or Postgres recovery semantics. Disabling
+`NEXT_PUBLIC_GOAT_HEADLESS_CHAT` remains the immediate rollback to legacy Chat; DNS and the API
+service are additive and need not be removed during rollback.
 
 The compatibility adapter cannot be removed in this web-only phase because surviving native clients
 remain a later project. Removal requires that later project's migration/compatibility decision plus

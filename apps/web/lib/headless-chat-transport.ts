@@ -8,6 +8,11 @@ import {
 } from "@opencompany/protocol";
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
 import { AUTO_GOAT_MODEL_SELECTION } from "./chat-auto-model";
+import {
+  createHeadlessChatApiFetch,
+  headlessChatApiBaseUrl,
+  headlessChatWebBaseUrl,
+} from "./headless-chat-api";
 import { awaitHeadlessChatTransaction } from "./headless-chat-collections";
 
 const STORAGE_PREFIX = "opencompany:headless-chat:v1:";
@@ -52,9 +57,14 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
   implements ChatTransport<UI_MESSAGE>
 {
   private readonly fetchImpl: typeof globalThis.fetch;
+  private readonly apiFetchImpl: typeof globalThis.fetch;
 
   constructor(private readonly options: TransportOptions = {}) {
     this.fetchImpl = bindFetchToRuntime(options.fetch);
+    this.apiFetchImpl = createHeadlessChatApiFetch({
+      baseUrl: this.baseUrl(),
+      fetch: this.fetchImpl,
+    });
   }
 
   async sendMessages(input: Parameters<ChatTransport<UI_MESSAGE>["sendMessages"]>[0]) {
@@ -68,7 +78,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
     const metadata = messageMetadata(latest);
     const attachmentIds = metadata.attachments?.map((attachment) => attachment.id) ?? [];
     const model = await resolveHeadlessModel({
-      baseUrl: this.baseUrl(),
+      baseUrl: headlessChatWebBaseUrl() || this.baseUrl(),
       fetch: this.fetchImpl,
       clientMessageId: latest.id,
       ...(request.model ? { model: request.model } : {}),
@@ -94,7 +104,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
           }
         : {}),
     };
-    const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.fetchImpl });
+    const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.apiFetchImpl });
     const response = await client.v1.messages.$post(
       {
         header: { "idempotency-key": idempotencyKey(latest.id) },
@@ -131,7 +141,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
   async reconnectToStream(input: Parameters<ChatTransport<UI_MESSAGE>["reconnectToStream"]>[0]) {
     const state = readRunState(input.chatId);
     if (!state || isTerminal(state.status) || state.status === "paused") return null;
-    const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.fetchImpl });
+    const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.apiFetchImpl });
     const response = await client.v1.runs[":runId"].$get({ param: { runId: state.runId } });
     if (!response.ok) return null;
     const run = (await response.json()).data;
@@ -144,7 +154,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
   async cancel(chatId: string) {
     const state = readRunState(chatId);
     if (!state || isTerminal(state.status)) return false;
-    const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.fetchImpl });
+    const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.apiFetchImpl });
     const response = await client.v1.runs[":runId"].cancel.$post({
       param: { runId: state.runId },
     });
@@ -158,7 +168,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
     let state = readRunState(chatId);
     const metadata = messageMetadata(message);
     if (!state && metadata.runId && metadata.sessionId) {
-      const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.fetchImpl });
+      const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.apiFetchImpl });
       const response = await client.v1.runs[":runId"].$get({
         param: { runId: metadata.runId },
       });
@@ -178,7 +188,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
     if (!state) throw new Error("The durable Run for this approval is no longer available.");
     const approvals = approvalResponses(message);
     if (approvals.length === 0) throw new Error("An approval response is required.");
-    const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.fetchImpl });
+    const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.apiFetchImpl });
     for (const approval of approvals) {
       const response = await client.v1.runs[":runId"].approvals[":approvalId"].$post(
         {
@@ -201,7 +211,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
     continuation = false,
   ): ReadableStream<UIMessageChunk> {
     const state = { ...initialState };
-    const fetchImpl = this.fetchImpl;
+    const fetchImpl = this.apiFetchImpl;
     const baseUrl = this.baseUrl();
     return new ReadableStream<UIMessageChunk>({
       async start(controller) {
@@ -343,10 +353,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
 
   private baseUrl() {
     if (this.options.baseUrl) return this.options.baseUrl;
-    if (typeof window === "undefined") {
-      throw new Error("A fully qualified API base URL is required outside a browser.");
-    }
-    return window.location.origin;
+    return headlessChatApiBaseUrl();
   }
 }
 
@@ -361,18 +368,18 @@ export async function startHeadlessBackgroundChat(
   },
   options: { baseUrl?: string; fetch?: typeof globalThis.fetch } = {},
 ) {
-  const baseUrl = options.baseUrl ?? (typeof window === "undefined" ? "" : window.location.origin);
-  if (!baseUrl) throw new Error("The canonical Chat API base URL is unavailable.");
+  const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
   const fetchImpl = bindFetchToRuntime(options.fetch);
+  const apiFetchImpl = createHeadlessChatApiFetch({ baseUrl, fetch: fetchImpl });
   const model = await resolveHeadlessModel({
-    baseUrl,
+    baseUrl: headlessChatWebBaseUrl() || baseUrl,
     fetch: fetchImpl,
     clientMessageId: input.clientMessageId,
     model: input.model,
     prompt: input.content,
     attachmentIds: input.attachmentIds ?? [],
   });
-  const client = createOpenCompanyClient(baseUrl, { fetch: fetchImpl });
+  const client = createOpenCompanyClient(baseUrl, { fetch: apiFetchImpl });
   const response = await client.v1.messages.$post({
     header: { "idempotency-key": idempotencyKey(input.clientMessageId) },
     json: {
@@ -396,7 +403,7 @@ export async function startHeadlessBackgroundChat(
   for await (const event of streamRunEvents({
     baseUrl,
     runId: data.runId,
-    fetch: fetchImpl,
+    fetch: apiFetchImpl,
   })) {
     // Event projection and presentation are owned by Postgres/Electric; no transient UI overlay.
     void event;

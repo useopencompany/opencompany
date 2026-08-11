@@ -71,11 +71,11 @@ called out in the pull request.
 For canonical Chat, the immediate rollback is configuration-only: set
 `NEXT_PUBLIC_GOAT_HEADLESS_CHAT=false` and redeploy web. Existing canonical Runs continue to settle
 through the API and runner. The release must pull the updated Vercel production environment before
-building because this public flag is compiled into the browser bundle. The stable Render service URL
-is a valid server-only `GOAT_API_ORIGIN`; a custom API subdomain is optional and must preserve HTTPS
-plus the same origin contract. A production build with a valid separate origin installs an uncached
-Vercel external rewrite for `/v1`; the fail-closed App Router proxy remains available when the
-origin is absent or invalid.
+building because this public flag and `NEXT_PUBLIC_GOAT_API_ORIGIN` are compiled into the browser
+bundle. Production browser traffic connects directly to `https://api.opencompany.chat`; the web and
+API runtimes share `WORKOS_COOKIE_DOMAIN=opencompany.chat`, and the API allows credentialed CORS only
+from the production web origin. Server-only `GOAT_API_ORIGIN` retains the same-origin fallback route,
+but it is not the active production streaming path.
 
 ## Stripe production endpoint
 

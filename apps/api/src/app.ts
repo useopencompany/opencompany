@@ -25,6 +25,7 @@ import {
 } from "@opencompany/protocol";
 import type { Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { cors } from "hono/cors";
 import { requestId } from "hono/request-id";
 import { secureHeaders } from "hono/secure-headers";
 import { streamSSE } from "hono/streaming";
@@ -45,11 +46,23 @@ const HEARTBEAT_MS = 15_000;
 // run.paused event so clients can present approvals, then reconnect after resolving them.
 const TERMINAL_RUN_STATUSES = new Set(["paused", "completed", "failed", "canceled"]);
 const MULTIPART_ENVELOPE_BYTES = 64 * 1024;
+const SAFE_BROWSER_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const CORS_ALLOW_HEADERS = ["Accept", "Content-Type", "Idempotency-Key", "Last-Event-ID"];
+const CORS_EXPOSE_HEADERS = [
+  "Electric-Cursor",
+  "Electric-Handle",
+  "Electric-Offset",
+  "Electric-Schema",
+  "Retry-After",
+  "X-OpenCompany-Run-Status",
+  "X-Request-Id",
+];
 
 export type CreateApiAppInput = {
   chat: ChatApplicationService;
   attachments: AttachmentUploadService;
   authenticate: ApiAuthenticator;
+  browserOrigins?: readonly string[];
   notifier?: RunEventNotifier;
   presentation?: ChatPresentationReader;
   rateLimiter?: ApiRateLimiter;
@@ -62,6 +75,7 @@ export function createApiApp(input: CreateApiAppInput) {
   const notifier: RunEventNotifier = input.notifier ?? new PollingRunEventNotifier();
   const rateLimiter = input.rateLimiter ?? new InMemoryApiRateLimiter();
   const now = input.now ?? (() => new Date());
+  const browserOrigins = [...(input.browserOrigins ?? [])];
   const handlers: V1RouteHandlers = {
     listConversations: async (c) => {
       const actor = actorFrom(c);
@@ -346,6 +360,17 @@ export function createApiApp(input: CreateApiAppInput) {
 
   const app = createV1Router(handlers, {
     beforeRoutes(router) {
+      router.use(
+        "/v1/*",
+        cors({
+          origin: browserOrigins,
+          allowMethods: ["GET", "HEAD", "POST", "PATCH", "OPTIONS"],
+          allowHeaders: CORS_ALLOW_HEADERS,
+          exposeHeaders: CORS_EXPOSE_HEADERS,
+          credentials: true,
+          maxAge: 600,
+        }),
+      );
       router.use("/v1/*", secureHeaders());
       router.use(
         "/v1/*",
@@ -362,6 +387,7 @@ export function createApiApp(input: CreateApiAppInput) {
           { "goat.http_method": c.req.method, "goat.http_route": c.req.path },
           async (span) => {
             try {
+              enforceCookieMutationOrigin(c.req.raw, browserOrigins);
               const authentication = await input.authenticate(c.req.raw);
               setContextValue(c, "actor", authentication.actor);
               if (authentication.refreshedSessionCookie) {
@@ -430,6 +456,24 @@ export function createApiApp(input: CreateApiAppInput) {
   app.get("/openapi.json", (c) => c.json(createOpenApiDocument()));
   app.notFound((c) => apiErrorResponse(c, new ApiError(404, "not_found", "Route not found.")));
   return app;
+}
+
+function enforceCookieMutationOrigin(request: Request, browserOrigins: readonly string[]) {
+  if (
+    browserOrigins.length === 0 ||
+    SAFE_BROWSER_METHODS.has(request.method.toUpperCase()) ||
+    request.headers.has("authorization")
+  ) {
+    return;
+  }
+  const origin = request.headers.get("origin");
+  if (!origin || !browserOrigins.includes(origin)) {
+    throw new ApiError(
+      403,
+      "forbidden",
+      "Cookie-authenticated mutations require an allowed browser origin.",
+    );
+  }
 }
 
 async function enforceRateLimit(
