@@ -1,15 +1,18 @@
 "use client";
 
 import { createOpenCompanyClient } from "@opencompany/protocol";
+import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 
 export async function uploadHeadlessChatAttachment(
   input: { file: File },
   options: { baseUrl?: string; fetch?: typeof globalThis.fetch } = {},
 ) {
-  const baseUrl = options.baseUrl ?? (typeof window === "undefined" ? "" : window.location.origin);
-  if (!baseUrl) throw new Error("The canonical Chat API base URL is unavailable.");
+  const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
   const client = createOpenCompanyClient(baseUrl, {
-    ...(options.fetch ? { fetch: options.fetch } : {}),
+    fetch: createHeadlessChatApiFetch({
+      baseUrl,
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+    }),
   });
   const response = await client.v1.attachments.$post({ form: { file: input.file } });
   if (!response.ok) throw await headlessChatResponseError(response);

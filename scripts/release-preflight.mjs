@@ -13,6 +13,7 @@ const groups = {
       "WORKOS_CLIENT_ID",
       "WORKOS_API_KEY",
       "WORKOS_COOKIE_PASSWORD",
+      "WORKOS_COOKIE_DOMAIN",
       "GOAT_NEXT_PUBLIC_APP_URL",
       "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
       "GOAT_AUTHKIT_DOMAIN",
@@ -23,6 +24,7 @@ const groups = {
       "RUNNER_PUBLIC_URL",
       "RUNNER_INTERNAL_TOKEN",
       "GOAT_API_ORIGIN",
+      "NEXT_PUBLIC_GOAT_API_ORIGIN",
       "NEXT_PUBLIC_GOAT_HEADLESS_CHAT",
       "ELECTRIC_URL",
       "MONID_API_KEY",
@@ -83,6 +85,8 @@ const groups = {
       "WORKOS_CLIENT_ID",
       "WORKOS_API_KEY",
       "WORKOS_COOKIE_PASSWORD",
+      "WORKOS_COOKIE_DOMAIN",
+      "API_BROWSER_ORIGINS",
       "GOAT_AUTHKIT_DOMAIN",
       "GOAT_MACOS_OAUTH_AUDIENCE",
       "BLOB_READ_WRITE_TOKEN",
@@ -92,7 +96,6 @@ const groups = {
     optional: [
       "API_DB_POOL_MAX",
       "WORKOS_COOKIE_NAME",
-      "WORKOS_COOKIE_DOMAIN",
       "GOAT_API_OAUTH_AUDIENCE",
       "GOAT_DEFAULT_CHAT_MODEL",
       "ELECTRIC_SOURCE_ID",
@@ -287,6 +290,43 @@ if (
   );
 }
 
+if (selected.includes("web") && !isUnset(process.env.NEXT_PUBLIC_GOAT_API_ORIGIN)) {
+  const configuredApiOrigin = httpOrigin(process.env.NEXT_PUBLIC_GOAT_API_ORIGIN);
+  const expectedApiOrigin = httpOrigin(process.env.PRODUCTION_API_URL);
+  if (!configuredApiOrigin || (expectedApiOrigin && configuredApiOrigin !== expectedApiOrigin)) {
+    failed = true;
+    console.log("\nNEXT_PUBLIC_GOAT_API_ORIGIN must match the production API HTTPS origin.");
+  }
+}
+
+if (selected.includes("api") && !isUnset(process.env.API_BROWSER_ORIGINS)) {
+  const browserOrigins = process.env.API_BROWSER_ORIGINS.split(",").map((value) =>
+    httpOrigin(value),
+  );
+  const expectedWebOrigin = httpOrigin(process.env.PRODUCTION_GOAT_URL);
+  if (
+    browserOrigins.some((origin) => !origin) ||
+    (expectedWebOrigin && !browserOrigins.includes(expectedWebOrigin))
+  ) {
+    failed = true;
+    console.log("\nAPI_BROWSER_ORIGINS must contain the production web HTTPS origin.");
+  }
+}
+
+if (selected.some((name) => name === "web" || name === "api")) {
+  const cookieDomain = process.env.WORKOS_COOKIE_DOMAIN?.trim().replace(/^\./u, "");
+  const webHostname = hostname(process.env.PRODUCTION_GOAT_URL);
+  const apiHostname = hostname(process.env.PRODUCTION_API_URL);
+  if (
+    cookieDomain &&
+    ((webHostname && !hostnameUsesDomain(webHostname, cookieDomain)) ||
+      (apiHostname && !hostnameUsesDomain(apiHostname, cookieDomain)))
+  ) {
+    failed = true;
+    console.log("\nWORKOS_COOKIE_DOMAIN must cover the production web and API hostnames.");
+  }
+}
+
 if (failed) {
   console.log("\nRelease preflight failed.");
   process.exit(1);
@@ -318,4 +358,33 @@ function isPlaceholder(value) {
     normalized.endsWith("_placeholder") ||
     normalized === "postgresql://..."
   );
+}
+
+function httpOrigin(value) {
+  if (isUnset(value)) return null;
+  try {
+    const url = new URL(value.trim());
+    if (
+      url.protocol !== "https:" ||
+      url.username ||
+      url.password ||
+      url.pathname !== "/" ||
+      url.search ||
+      url.hash
+    ) {
+      return null;
+    }
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+function hostname(value) {
+  const origin = httpOrigin(value);
+  return origin ? new URL(origin).hostname : null;
+}
+
+function hostnameUsesDomain(hostnameValue, domain) {
+  return hostnameValue === domain || hostnameValue.endsWith(`.${domain}`);
 }

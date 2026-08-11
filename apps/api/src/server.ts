@@ -14,6 +14,7 @@ import { createLogger } from "@opencompany/observability";
 import { createApiApp } from "./app";
 import { createAttachmentUploadService } from "./attachments";
 import { createWorkOsApiAuthenticator } from "./auth";
+import { parseBrowserOrigins } from "./browser-origins";
 import { ElectricChatReadModelProxy } from "./electric-read-models";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
 
@@ -35,6 +36,7 @@ const app = createApiApp({
   chat,
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),
   authenticate: createWorkOsApiAuthenticator(execute),
+  browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),
   notifier,
   ...(presentation ? { presentation } : {}),
   ...(readModels ? { readModels } : {}),

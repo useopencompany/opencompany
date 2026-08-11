@@ -392,6 +392,7 @@ jobs:
             "WORKOS_CLIENT_ID",
             "WORKOS_API_KEY",
             "WORKOS_COOKIE_PASSWORD",
+            "WORKOS_COOKIE_DOMAIN",
             "GOAT_NEXT_PUBLIC_APP_URL",
             "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
             "GOAT_AUTHKIT_DOMAIN",
@@ -403,6 +404,7 @@ jobs:
             "RUNNER_PUBLIC_URL",
             "RUNNER_INTERNAL_TOKEN",
             "GOAT_API_ORIGIN",
+            "NEXT_PUBLIC_GOAT_API_ORIGIN",
             "NEXT_PUBLIC_GOAT_HEADLESS_CHAT",
             "ELECTRIC_URL",
             "GOAT_STRIPE_API_KEY",
@@ -514,6 +516,8 @@ jobs:
               ["GOAT_NEXT_PUBLIC_APP_URL", expectedWebOrigin],
               ["GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI", `${expectedWebOrigin}/auth/callback`],
               ["GOAT_API_ORIGIN", expectedApiOrigin],
+              ["NEXT_PUBLIC_GOAT_API_ORIGIN", expectedApiOrigin],
+              ["WORKOS_COOKIE_DOMAIN", "opencompany.chat"],
             ]);
             const configuredWebUrls = await Promise.all(
               Array.from(expectedValues.keys(), (key) =>

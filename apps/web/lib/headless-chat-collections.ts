@@ -11,13 +11,17 @@ import {
 } from "@opencompany/protocol";
 import { electricCollectionOptions } from "@tanstack/electric-db-collection";
 import { createCollection } from "@tanstack/react-db";
+import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 
 function readModelUrl(readModel: ChatReadModel) {
-  const origin =
-    typeof window === "undefined"
-      ? (process.env.GOAT_NEXT_PUBLIC_APP_URL?.replace(/\/+$/u, "") ?? "")
-      : window.location.origin;
-  return `${origin}/v1/read-models/${readModel}`;
+  return `${headlessChatApiBaseUrl()}/v1/read-models/${readModel}`;
+}
+
+function shapeOptions(readModel: ChatReadModel) {
+  return {
+    url: readModelUrl(readModel),
+    fetchClient: createHeadlessChatApiFetch(),
+  };
 }
 
 function createConversations() {
@@ -25,7 +29,7 @@ function createConversations() {
     electricCollectionOptions({
       id: "headless-chat:conversations:v1",
       schema: ConversationReadModelSchema,
-      shapeOptions: { url: readModelUrl("chat-conversations-v1") },
+      shapeOptions: shapeOptions("chat-conversations-v1"),
       getKey: (row) => row.id,
     }),
   );
@@ -37,7 +41,7 @@ function createMessages(conversationId: string) {
       id: `headless-chat:messages:v1:${conversationId}`,
       schema: MessageReadModelSchema,
       shapeOptions: {
-        url: readModelUrl("chat-messages-v1"),
+        ...shapeOptions("chat-messages-v1"),
         params: { conversationId },
       },
       getKey: (row) => row.id,
@@ -51,7 +55,7 @@ function createRuns(conversationId: string) {
       id: `headless-chat:runs:v1:${conversationId}`,
       schema: RunReadModelSchema,
       shapeOptions: {
-        url: readModelUrl("chat-runs-v1"),
+        ...shapeOptions("chat-runs-v1"),
         params: { conversationId },
       },
       getKey: (row) => row.id,

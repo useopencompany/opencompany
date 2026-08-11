@@ -74,6 +74,83 @@ describe("canonical Hono API", () => {
     });
   });
 
+  it("allows credentialed browser preflight only for configured origins", async () => {
+    const app = testApp(fakeRepository(), {
+      browserOrigins: ["https://my.opencompany.chat"],
+    });
+    const allowed = await app.request("/v1/messages", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://my.opencompany.chat",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type,idempotency-key",
+      },
+    });
+    expect(allowed.status).toBe(204);
+    expect(allowed.headers.get("access-control-allow-origin")).toBe("https://my.opencompany.chat");
+    expect(allowed.headers.get("access-control-allow-credentials")).toBe("true");
+    expect(allowed.headers.get("access-control-allow-headers")).toContain("Idempotency-Key");
+
+    const disallowed = await app.request("/v1/messages", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://attacker.example",
+        "Access-Control-Request-Method": "POST",
+      },
+    });
+    expect(disallowed.status).toBe(204);
+    expect(disallowed.headers.has("access-control-allow-origin")).toBe(false);
+  });
+
+  it("rejects cookie mutations without an allowed Origin while preserving bearer clients", async () => {
+    const repository = fakeRepository();
+    const app = testApp(repository, {
+      browserOrigins: ["https://my.opencompany.chat"],
+    });
+    const body = JSON.stringify({ content: "Hello", engine: "opencompany" });
+    const headers = { "Content-Type": "application/json", "Idempotency-Key": "send_1" };
+
+    for (const origin of [undefined, "https://attacker.example"]) {
+      const response = await app.request("/v1/messages", {
+        method: "POST",
+        headers: { ...headers, ...(origin ? { Origin: origin } : {}) },
+        body,
+      });
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: "forbidden" } });
+    }
+
+    const allowed = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { ...headers, Origin: "https://my.opencompany.chat" },
+      body,
+    });
+    expect(allowed.status).toBe(202);
+    expect(allowed.headers.get("access-control-allow-origin")).toBe("https://my.opencompany.chat");
+
+    const bearer = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { ...headers, Authorization: "Bearer native-token" },
+      body,
+    });
+    expect(bearer.status).toBe(202);
+  });
+
+  it("exposes durable cursor and Electric headers to the configured browser origin", async () => {
+    const app = testApp(fakeRepository(), {
+      browserOrigins: ["https://my.opencompany.chat"],
+    });
+    const response = await app.request("/v1/runs/run_1/events", {
+      headers: { Origin: "https://my.opencompany.chat" },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-expose-headers")).toContain(
+      "X-OpenCompany-Run-Status",
+    );
+    expect(response.headers.get("access-control-expose-headers")).toContain("Electric-Handle");
+    await response.body?.cancel();
+  });
+
   it("accepts an idempotent Message command and applies the server model default", async () => {
     const repository = fakeRepository();
     const app = testApp(repository);

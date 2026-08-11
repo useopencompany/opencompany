@@ -9,18 +9,16 @@ compatibility route is intentionally unchanged.
 ## Service topology
 
 ```text
-browser
-  | same-origin /v1 + session cookie
-  v
-apps/web ---------------> apps/api (Hono /v1)
-  ^                            |  | \
-  | internal host gateways    |  |  \ authorized read models
-  |                            |  |   v
-apps/runner <------------------+  | Electric
-  | direct fenced claims          |
-  +-------------------------------+---- Postgres (authority)
-  |                                    |
-  +---- presentation deltas ---- Redis hot stream ----> apps/api SSE
+browser ---- direct /v1 + shared session ----> apps/api (Hono /v1) ----> Electric
+  |
+  +---- pages, auth setup, model routing ----> apps/web <---- internal gateways ---- apps/runner
+                                                   |                                |
+                                                   +---- Postgres (authority) -------+
+                                                        ^                       |
+                                                        |                       |
+                                            apps/api ---+    Redis hot stream <--+
+                                                            | presentation deltas
+                                                            +----> apps/api SSE
 ```
 
 - `apps/api` authenticates, derives the Actor/workspace, validates commands, writes Messages/Runs,
@@ -28,10 +26,12 @@ apps/runner <------------------+  | Electric
 - `apps/runner` claims queued Runs directly from Postgres, creates Attempts, heartbeats fenced
   leases, runs the model loop, and transactionally projects Messages, semantic Events, approvals,
   billing usage, cancellation, partial results, and terminal state.
-- Browser code never receives the private API origin. In production, an uncached Vercel external
-  rewrite forwards same-origin `/v1` requests and the secure browser session to the server-only
-  `GOAT_API_ORIGIN`. The App Router proxy remains the fail-closed/local fallback when that origin is
-  absent or invalid. Runner calls back to existing bearer-protected web host
+- Browser code calls the first-party `NEXT_PUBLIC_GOAT_API_ORIGIN` directly. Production uses
+  `https://api.opencompany.chat`, with a secure WorkOS session cookie scoped to
+  `opencompany.chat`. The API allows credentialed CORS only from the configured web origin and
+  rejects cookie-authenticated mutations without an allowed `Origin`. This keeps Vercel out of SSE
+  and Electric long-poll response paths; same-origin `/v1` remains the local/unconfigured fallback.
+  Runner calls back to existing bearer-protected web host
   gateways for user-authorized actions, Brain capture, task/schedule/workflow/skill/wiki behavior,
   and browser sessions. These calls derive identity from the running durable turn; request bodies
   cannot select a user or workspace.
@@ -112,9 +112,11 @@ Before setting `NEXT_PUBLIC_GOAT_HEADLESS_CHAT=true`, the operator must:
    release SHA/health gate.
 2. Provide its server-only database, WorkOS, blob, Electric, Redis, and observability configuration
    through Infisical `prod` `/api`; configure the same `REDIS_URL` in `prod` `/runner`.
-3. Configure web-only `GOAT_API_ORIGIN` to the credential-free API origin. Keep the origin private
-   from browser variables. The production build installs an uncached Vercel external rewrite for
-   `/v1`; invalid or same-origin configuration leaves the fail-closed route handler active.
+3. Register `api.opencompany.chat` on the Render API service and point its DNS directly to Render.
+   Configure web `NEXT_PUBLIC_GOAT_API_ORIGIN=https://api.opencompany.chat`, configure the API's
+   exact credentialed browser-origin allowlist, and scope `WORKOS_COOKIE_DOMAIN` to
+   `opencompany.chat` in both web and API runtimes. Retain server-only `GOAT_API_ORIGIN` only for
+   the same-origin fallback and rollback diagnostics.
 4. Deploy migration, runner, API, then web while `NEXT_PUBLIC_GOAT_HEADLESS_CHAT` is absent or false.
 5. Smoke-test session auth and tenant isolation; create/upload/send; Auto routing; task creation;
    Brain read/text/attachment capture; integration and managed actions with approval; public and
@@ -122,6 +124,14 @@ Before setting `NEXT_PUBLIC_GOAT_HEADLESS_CHAT=true`, the operator must:
    reconnect; Electric reconciliation; archive/restore/pin/seen; and billing debit.
 6. Set `NEXT_PUBLIC_GOAT_HEADLESS_CHAT=true`, deploy web, and repeat the web smoke set while watching
    correlated request/Run/Attempt logs and queue/event lag.
+
+Direct-origin verification must show that `/healthz`, authenticated Run SSE, and Electric read
+models are served by Render without Vercel response headers. Verify a pre-existing browser session
+is migrated to the shared cookie before its first cross-origin request, sign-out clears that shared
+cookie, disallowed origins receive no credentialed CORS access, and cookie-authenticated mutations
+from disallowed or missing origins are rejected. A rollback disables
+`NEXT_PUBLIC_GOAT_HEADLESS_CHAT` and redeploys web; the API service and additive DNS record can stay
+online.
 
 Record expected-SHA health output, the complete disabled/enabled smoke matrices, responsive-cadence
 samples, a Redis-degraded fallback probe, and the real-traffic soak result on issues #1165 and #1171.
