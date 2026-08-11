@@ -64,6 +64,15 @@ describe("Electric Chat read models", () => {
         ],
         {
           headers: {
+            connection: "keep-alive",
+            "transfer-encoding": "chunked",
+            "content-encoding": "zstd",
+            "access-control-allow-origin": "*",
+            "electric-source-id": "source_1",
+            server: "upstream-edge",
+            "electric-handle": "shape_1",
+            "electric-offset": "0_42",
+            "electric-up-to-date": "",
             "electric-schema": JSON.stringify({
               id: { type: "text" },
               conversation_id: { type: "text" },
@@ -107,6 +116,15 @@ describe("Electric Chat read models", () => {
         updatedAt: { type: "timestamptz" },
       }),
     );
+    expect(response.headers.get("electric-handle")).toBe("shape_1");
+    expect(response.headers.get("electric-offset")).toBe("0_42");
+    expect(response.headers.has("electric-up-to-date")).toBe(true);
+    expect(response.headers.get("connection")).toBeNull();
+    expect(response.headers.get("transfer-encoding")).toBeNull();
+    expect(response.headers.get("content-encoding")).toBeNull();
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(response.headers.get("electric-source-id")).toBeNull();
+    expect(response.headers.get("server")).toBeNull();
     expect(await response.json()).toEqual([
       {
         headers: { operation: "insert" },
