@@ -1,9 +1,11 @@
 import ExpoModulesCore
 import UIKit
 
-final class OpenCompanySidebarHeaderView: ExpoView {
+final class OpenCompanySidebarHeaderView: ExpoView, UISearchControllerDelegate, UISearchResultsUpdating {
   let onHeaderHeightChange = EventDispatcher()
+  let onSearchActiveChange = EventDispatcher()
   let onSearchPress = EventDispatcher()
+  let onSearchValueChange = EventDispatcher()
 
   var scrollViewTestID = "" {
     didSet {
@@ -20,6 +22,8 @@ final class OpenCompanySidebarHeaderView: ExpoView {
   var searchAccessibilityLabel = "Search" {
     didSet {
       searchItem.accessibilityLabel = searchAccessibilityLabel
+      searchController.searchBar.accessibilityLabel = searchAccessibilityLabel
+      searchController.searchBar.placeholder = searchAccessibilityLabel
     }
   }
 
@@ -38,7 +42,19 @@ final class OpenCompanySidebarHeaderView: ExpoView {
   private let navigationItem = UINavigationItem()
   private let scrollEdgeInteraction = UIScrollEdgeElementContainerInteraction()
   private weak var connectedScrollView: UIScrollView?
+  private var isSearchActive = false
   private var lastReportedHeight: CGFloat?
+  private var searchValue = ""
+
+  private lazy var searchController: UISearchController = {
+    let searchController = UISearchController(searchResultsController: nil)
+    searchController.delegate = self
+    searchController.obscuresBackgroundDuringPresentation = false
+    searchController.searchResultsUpdater = self
+    searchController.searchBar.accessibilityLabel = searchAccessibilityLabel
+    searchController.searchBar.placeholder = searchAccessibilityLabel
+    return searchController
+  }()
 
   private lazy var searchItem = UIBarButtonItem(
     image: UIImage(systemName: "magnifyingglass"),
@@ -54,7 +70,12 @@ final class OpenCompanySidebarHeaderView: ExpoView {
     navigationBar.autoresizingMask = [.flexibleWidth, .flexibleHeight]
 
     searchItem.accessibilityLabel = searchAccessibilityLabel
-    navigationItem.rightBarButtonItem = searchItem
+    if #available(iOS 26.0, *) {
+      navigationItem.searchController = searchController
+      navigationItem.preferredSearchBarPlacement = .integratedButton
+    } else {
+      navigationItem.rightBarButtonItem = searchItem
+    }
     navigationBar.setItems([navigationItem], animated: false)
     addSubview(navigationBar)
 
@@ -101,6 +122,35 @@ final class OpenCompanySidebarHeaderView: ExpoView {
   @objc
   private func didPressSearch() {
     onSearchPress()
+  }
+
+  func willPresentSearchController(_ searchController: UISearchController) {
+    setSearchActive(true)
+    onSearchPress()
+  }
+
+  func willDismissSearchController(_ searchController: UISearchController) {
+    setSearchActive(false)
+  }
+
+  func updateSearchResults(for searchController: UISearchController) {
+    let value = searchController.searchBar.text ?? ""
+
+    guard searchValue != value else {
+      return
+    }
+
+    searchValue = value
+    onSearchValueChange(["value": value])
+  }
+
+  private func setSearchActive(_ active: Bool) {
+    guard isSearchActive != active else {
+      return
+    }
+
+    isSearchActive = active
+    onSearchActiveChange(["active": active])
   }
 
   private func measuredNavigationBarHeight() -> CGFloat {

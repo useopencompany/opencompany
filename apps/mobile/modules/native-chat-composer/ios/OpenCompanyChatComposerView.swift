@@ -30,6 +30,7 @@ final class OpenCompanyChatComposerViewProps: ExpoSwiftUI.ViewProps {
   let onSend = EventDispatcher()
   let onAttachmentPress = EventDispatcher()
   let onComposerHeightChange = EventDispatcher()
+  let onFocusChange = EventDispatcher()
 }
 
 private final class ComposerModel: ObservableObject {
@@ -71,6 +72,9 @@ struct OpenCompanyChatComposerView: ExpoSwiftUI.View {
       .frame(maxWidth: .infinity)
       .fixedSize(horizontal: false, vertical: true)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+      .onChange(of: isInputFocused) {
+        props.onFocusChange(["focused": isInputFocused])
+      }
       .onReceive(
         NotificationCenter.default.publisher(
           for: UIResponder.keyboardWillChangeFrameNotification

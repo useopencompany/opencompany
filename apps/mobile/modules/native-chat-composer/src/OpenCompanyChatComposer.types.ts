@@ -8,6 +8,10 @@ interface HeightEvent {
   height: number;
 }
 
+interface FocusEvent {
+  focused: boolean;
+}
+
 export interface NativeChatComposerViewProps extends ViewProps {
   accentColor: string;
   accentForegroundColor: string;
@@ -15,5 +19,6 @@ export interface NativeChatComposerViewProps extends ViewProps {
   disabled: boolean;
   onAttachmentPress?: () => void;
   onComposerHeightChange?: (event: NativeSyntheticEvent<HeightEvent>) => void;
+  onFocusChange?: (event: NativeSyntheticEvent<FocusEvent>) => void;
   onSend?: (event: NativeSyntheticEvent<ValueEvent>) => void;
 }

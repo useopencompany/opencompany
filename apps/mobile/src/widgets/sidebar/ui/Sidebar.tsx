@@ -8,7 +8,6 @@ import {
   labelStyle,
   scaleEffect,
 } from "@expo/ui/swift-ui/modifiers";
-import { Image as ExpoImage } from "expo-image";
 import { Href, Link } from "expo-router";
 import { useDrawerProgress } from "expo-router/drawer";
 import type { SFSymbol } from "expo-symbols";
@@ -16,9 +15,9 @@ import { useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import Reanimated, { interpolate, useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { withUniwind } from "uniwind";
 import wordmark from "@/assets/images/wordmark.png";
 import wordmarkDark from "@/assets/images/wordmark-dark.png";
+import { StyledImage } from "@/shared/ui/styled-image";
 import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
 import {
   OpenCompanySidebarHeader,
@@ -30,7 +29,6 @@ const SIDEBAR_SCROLL_VIEW_TEST_ID = "sidebar-scroll-view";
 // Scale the large visual treatment while preserving its full hit target.
 const SIDEBAR_ACTION_CONTROL_SCALE = 0.875;
 const SIDEBAR_ACTION_ICON_SCALE = 1.25;
-const StyledImage = withUniwind(ExpoImage);
 
 const NAV_ITEMS: { label: string; icon: SFSymbol; href: Href }[] = [
   { label: "Tasks", icon: "checklist", href: "/tasks" },

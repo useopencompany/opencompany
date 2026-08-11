@@ -61,6 +61,7 @@ export function StreamingChat() {
   const [isResponseActive, setIsResponseActive] = useState(false);
   const [anchorIndex, setAnchorIndex] = useState<number>();
   const [composerPillHeight, setComposerPillHeight] = useState(52);
+  const [isComposerFocused, setIsComposerFocused] = useState(false);
   const listRef = useRef<LegendListRef>(null);
   const markdownStyle = useChatMarkdownStyle();
   const anchoredEndSpace =
@@ -198,7 +199,7 @@ export function StreamingChat() {
           freeze={freeze}
           initialScrollAtEnd
           keyboardDismissMode="interactive"
-          keyboardLiftBehavior="whenAtEnd"
+          keyboardLiftBehavior={isComposerFocused ? "whenAtEnd" : "never"}
           keyboardOffset={insets.bottom}
           keyExtractor={(message) => message.id}
           maintainVisibleContentPosition
@@ -212,6 +213,7 @@ export function StreamingChat() {
 
       <StyledKeyboardStickyView
         className="absolute right-0 bottom-0 left-0"
+        enabled={isComposerFocused}
         offset={{ closed: 0, opened: insets.bottom }}
       >
         <StyledLinearGradient
@@ -223,6 +225,7 @@ export function StreamingChat() {
           bottomInset={insets.bottom}
           disabled={isResponseActive}
           onComposerHeightChange={onComposerHeightChange}
+          onFocusChange={setIsComposerFocused}
           onPillHeightChange={setComposerPillHeight}
           onSend={sendDraft}
         />

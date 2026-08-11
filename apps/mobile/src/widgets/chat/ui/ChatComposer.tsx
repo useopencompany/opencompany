@@ -23,12 +23,14 @@ export function ChatComposer({
   bottomInset,
   disabled,
   onComposerHeightChange,
+  onFocusChange,
   onPillHeightChange,
   onSend,
 }: {
   bottomInset: number;
   disabled: boolean;
   onComposerHeightChange: (height: number) => void;
+  onFocusChange: (focused: boolean) => void;
   onPillHeightChange: (height: number) => void;
   onSend: (value: string) => void;
 }) {
@@ -76,6 +78,7 @@ export function ChatComposer({
           nativeID="chat-composer"
           onAttachmentPress={() => router.push("/attachment-sheet")}
           onComposerHeightChange={(event) => handleComposerHeightChange(event.nativeEvent.height)}
+          onFocusChange={(event) => onFocusChange(event.nativeEvent.focused)}
           onSend={(event) => onSend(event.nativeEvent.value)}
           style={{ height: "100%", width: "100%" }}
         />

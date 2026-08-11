@@ -5,7 +5,12 @@ public class OpenCompanySidebarHeaderModule: Module {
     Name("OpenCompanySidebarHeader")
 
     View(OpenCompanySidebarHeaderView.self) {
-      Events("onHeaderHeightChange", "onSearchPress")
+      Events(
+        "onHeaderHeightChange",
+        "onSearchActiveChange",
+        "onSearchPress",
+        "onSearchValueChange"
+      )
 
       Prop("scrollViewTestID") { (view: OpenCompanySidebarHeaderView, testID: String) in
         view.scrollViewTestID = testID
