@@ -1,12 +1,10 @@
-// Wrapper shim: the catalog resolver moved to @opencompany/goat-agent (shared
-// with the runner). The app binds the managed-capability (Monid) resolver here,
-// which stays app-side because managed execution needs server-only modules.
+// Wrapper shim: the catalog and managed-capability resolver are shared with the runner.
 import {
   isGoatChatActionsKilled,
   resolveGoatActionCatalog as resolveGoatActionCatalogBase,
 } from "@opencompany/goat-agent/actions/catalog";
 import type { GoatResolvedActionCatalog } from "@opencompany/goat-agent/actions/types";
-import { resolveGoatManagedCapabilities } from "@/lib/capabilities/resolve";
+import { resolveGoatManagedCapabilities } from "@opencompany/goat-agent/capabilities/resolve";
 
 export { isGoatChatActionsKilled };
 

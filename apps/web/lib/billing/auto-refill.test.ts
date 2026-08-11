@@ -1,5 +1,6 @@
 import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { captureServerEvent } from "@opencompany/analytics/server";
+import { getGoatStripe } from "@opencompany/billing/stripe";
 import {
   claimGoatAutoRefill,
   releasePendingForWorkspace,
@@ -7,7 +8,6 @@ import {
 } from "@opencompany/db/goat-billing";
 import { recordGoatAutoRefillCredit } from "@opencompany/db/goat-credits";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getGoatStripe } from "@/lib/billing/stripe";
 import { runGoatAutoRefill } from "./auto-refill";
 
 vi.mock("@opencompany/analytics/goat/server", () => ({
@@ -32,7 +32,7 @@ vi.mock("@opencompany/db/goat-credits", () => ({
   recordGoatAutoRefillCredit: vi.fn(),
 }));
 
-vi.mock("@/lib/billing/stripe", () => ({
+vi.mock("@opencompany/billing/stripe", () => ({
   assertGoatCheckoutEnabled: vi.fn(),
   getGoatStripe: vi.fn(),
 }));

@@ -21,9 +21,9 @@ function listRequest(source?: string): GoatActionGatewayRequest {
 }
 
 const context = {
-  userWorkosId: "user_1",
+  actorId: "user_1",
   workspaceId: "workspace_1",
-  chatSessionId: "chat_1",
+  conversationId: "chat_1",
   userTimezone: "Europe/Paris",
 };
 
@@ -179,7 +179,7 @@ describe("executeGoatActionGateway", () => {
 
     expect(response).toEqual({ ok: true, needsApproval: true });
     expect(recordSourceDiscovery).toHaveBeenCalledWith({
-      turn: expect.objectContaining({ policy: "foregroundInteractive" }),
+      run: expect.objectContaining({ policy: "foregroundInteractive", runId: "turn_1" }),
       sourceId: "linkedin",
     });
     expect(evaluateApproval).toHaveBeenCalledWith(

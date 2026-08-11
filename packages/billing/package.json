@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./*": {
+      "types": "./src/*.ts",
+      "default": "./src/*.ts"
     }
   },
   "scripts": {
@@ -15,7 +19,10 @@
   },
   "dependencies": {
     "@opencompany/agent-runtime": "workspace:*",
-    "drizzle-orm": "^0.45.2"
+    "@opencompany/analytics": "workspace:*",
+    "@opencompany/db": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "stripe": "^22.1.1"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

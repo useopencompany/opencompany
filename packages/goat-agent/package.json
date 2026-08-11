@@ -23,16 +23,21 @@
   },
   "dependencies": {
     "@ai-sdk/mcp": "^1.0.44",
+    "@browserbasehq/sdk": "^2.16.0",
+    "@modelcontextprotocol/sdk": "1.26.0",
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/analytics": "workspace:*",
+    "@opencompany/billing": "workspace:*",
     "@opencompany/browser-tools": "workspace:*",
+    "@opencompany/crypto": "workspace:*",
     "@opencompany/db": "workspace:*",
     "@opencompany/goat-brain": "workspace:*",
     "@opencompany/goat-observability": "workspace:*",
     "@opencompany/goat-wiki": "workspace:*",
     "ai": "^6.0.189",
     "ajv": "8.20.0",
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "^0.45.2",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

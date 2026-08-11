@@ -22,55 +22,36 @@ import {
   goatWorkspaceMembers,
 } from "@opencompany/db/goat-schema";
 import {
-  type GoatActionCatalogPolicyName,
-  projectActionCatalog,
-} from "@opencompany/goat-agent/actions/policy";
-import { serveGoatActionRequest } from "@opencompany/goat-agent/actions/service";
+  executeGoatActionGatewayService,
+  executeGoatActionHostGatewayService,
+  type GoatActionGatewayServiceDependencies,
+  type GoatActionPrincipal,
+  type GoatActionServiceRequest,
+  type GoatActionServiceRunRef,
+} from "@opencompany/goat-agent/application/action-gateway";
+import { MANAGED_CAPABILITY_ACTIONS_BY_ID } from "@opencompany/goat-agent/capabilities/catalog";
+import { evaluateManagedCapabilityApproval } from "@opencompany/goat-agent/capabilities/execute";
 import { and, eq, inArray } from "drizzle-orm";
 import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
 import { executeGoatAction } from "@/lib/actions/execute";
-import type {
-  GoatCapabilityQuote,
-  GoatCapabilityTurnState,
-  GoatResolvedActionCatalog,
-} from "@/lib/actions/types";
-import { MANAGED_CAPABILITY_ACTIONS_BY_ID } from "@/lib/capabilities/catalog";
-import { evaluateManagedCapabilityApproval } from "@/lib/capabilities/execute";
+import type { GoatCapabilityQuote, GoatCapabilityTurnState } from "@/lib/actions/types";
 
-type GoatActionPrincipal = {
-  userWorkosId: string;
-  workspaceId: string;
-  chatSessionId: string;
-  userTimezone: string;
-  policy?: GoatActionCatalogPolicyName;
-};
-
-type GoatActionGatewayDependencies = {
-  loadContext: (request: GoatActionHostGatewayRequest) => Promise<GoatActionPrincipal | null>;
-  resolveCatalog: typeof resolveGoatActionCatalog;
-  executeAction: typeof executeGoatAction;
-  getCapabilityTurnState: (
-    request: GoatActionHostGatewayRequest,
-    context: GoatActionPrincipal,
-  ) => GoatCapabilityTurnState;
-  recordSourceDiscovery: typeof recordGoatActionSourceDiscovery;
-  claimInvocation: typeof claimGoatActionInvocation;
-  evaluateApproval: (input: {
-    request: Extract<GoatActionHostGatewayRequest, { operation: "approval" }>;
-    context: GoatActionPrincipal;
-    turnState: GoatCapabilityTurnState;
-    signal: AbortSignal;
-  }) => Promise<boolean>;
-  now: () => Date;
-};
-
-const defaultDependencies: GoatActionGatewayDependencies = {
+const defaultDependencies: GoatActionGatewayServiceDependencies = {
+  actionsKilled: isGoatChatActionsKilled,
   loadContext: loadGoatCodexActionContext,
-  resolveCatalog: resolveGoatActionCatalog,
-  executeAction: executeGoatAction,
+  resolveCatalog: ({ actorId, workspaceId }) =>
+    resolveGoatActionCatalog({ userWorkosId: actorId, workspaceId }),
+  executeAction: ({ actorId, conversationId, ...input }) =>
+    executeGoatAction({
+      ...input,
+      userWorkosId: actorId,
+      chatSessionId: conversationId,
+    }),
   getCapabilityTurnState: getGoatCodexActionCapabilityTurnState,
-  recordSourceDiscovery: recordGoatActionSourceDiscovery,
-  claimInvocation: claimGoatActionInvocation,
+  recordSourceDiscovery: ({ run, sourceId }) =>
+    recordGoatActionSourceDiscovery({ turn: actionTurnRef(run), sourceId }),
+  claimInvocation: ({ run, ...input }) =>
+    claimGoatActionInvocation({ turn: actionTurnRef(run), ...input }),
   evaluateApproval: evaluateGoatActionApproval,
   now: () => new Date(),
 };
@@ -78,110 +59,29 @@ const defaultDependencies: GoatActionGatewayDependencies = {
 export function executeGoatActionGateway(input: {
   request: GoatActionGatewayRequest;
   signal: AbortSignal;
-  dependencies?: Partial<GoatActionGatewayDependencies>;
+  dependencies?: Partial<GoatActionGatewayServiceDependencies>;
 }): Promise<GoatActionGatewayResponse> {
-  return executeGoatActionHostGateway(input);
+  return executeGoatActionGatewayService({
+    request: actionServiceRequest(input.request),
+    signal: input.signal,
+    dependencies: { ...defaultDependencies, ...input.dependencies },
+  });
 }
 
 export async function executeGoatActionHostGateway(input: {
   request: GoatActionHostGatewayRequest;
   signal: AbortSignal;
-  dependencies?: Partial<GoatActionGatewayDependencies>;
+  dependencies?: Partial<GoatActionGatewayServiceDependencies>;
 }): Promise<GoatActionGatewayResponse> {
-  const dependencies = { ...defaultDependencies, ...input.dependencies };
-  if (isGoatChatActionsKilled()) {
-    return gatewayError("disabled", "Actions are temporarily disabled.");
-  }
-
-  const context = await dependencies.loadContext(input.request);
-  if (!context) {
-    return gatewayError("not_permitted", "This turn can no longer access actions.");
-  }
-
-  let catalog: GoatResolvedActionCatalog;
-  try {
-    catalog = projectActionCatalog(
-      await dependencies.resolveCatalog({
-        userWorkosId: context.userWorkosId,
-        workspaceId: context.workspaceId,
-      }),
-      context.policy ?? "cloudReadOnly",
-    );
-  } catch {
-    return gatewayError("internal", "The action catalog could not be loaded.");
-  }
-
-  const turn = actionTurnRef(input.request, context);
-  try {
-    const serviceCatalog = {
-      sources: catalog.providers,
-      actions: catalog.actions.map((action) => ({
-        id: action.id,
-        source: action.provider,
-        description: action.description,
-        params: action.params,
-        permissionMode: action.permissionMode,
-      })),
-    };
-    if (input.request.operation === "catalog") {
-      return { ok: true, catalog: serviceCatalog };
-    }
-    if (input.request.operation === "approval") {
-      const approvalRequest = input.request;
-      const action = catalog.actions.find((candidate) => candidate.id === approvalRequest.action);
-      if (!action) {
-        return gatewayError(
-          "invalid_params",
-          `"${approvalRequest.action}" is not an available action.`,
-        );
-      }
-      if (action.permissionMode === "ask") return { ok: true, needsApproval: true };
-      await dependencies.recordSourceDiscovery({ turn, sourceId: action.provider });
-      return {
-        ok: true,
-        needsApproval: await dependencies.evaluateApproval({
-          request: approvalRequest,
-          context,
-          turnState: dependencies.getCapabilityTurnState(input.request, context),
-          signal: input.signal,
-        }),
-      };
-    }
-    return await serveGoatActionRequest({
-      request: input.request,
-      catalog: serviceCatalog,
-      governance: {
-        recordSourceDiscovery: (sourceId) => dependencies.recordSourceDiscovery({ turn, sourceId }),
-        claimInvocation: ({ sourceId, invocationId, maxCalls }) =>
-          dependencies.claimInvocation({
-            turn,
-            sourceId,
-            invocationId,
-            maxCalls,
-          }),
-      },
-      execute: ({ action, params, invocationId }) =>
-        dependencies.executeAction({
-          catalog,
-          actionId: action,
-          params,
-          userWorkosId: context.userWorkosId,
-          workspaceId: context.workspaceId,
-          chatSessionId: context.chatSessionId,
-          toolCallId: invocationId,
-          capabilityTurnState: dependencies.getCapabilityTurnState(input.request, context),
-          signal: input.signal,
-          currentDate: dependencies.now(),
-          userTimezone: context.userTimezone,
-        }),
-    });
-  } catch {
-    return gatewayError("internal", "The action request could not be completed.");
-  }
+  return executeGoatActionHostGatewayService({
+    request: actionServiceRequest(input.request),
+    signal: input.signal,
+    dependencies: { ...defaultDependencies, ...input.dependencies },
+  });
 }
 
 async function evaluateGoatActionApproval(input: {
-  request: Extract<GoatActionHostGatewayRequest, { operation: "approval" }>;
+  request: Extract<GoatActionServiceRequest, { operation: "approval" }>;
   context: GoatActionPrincipal;
   turnState: GoatCapabilityTurnState;
   signal: AbortSignal;
@@ -193,18 +93,24 @@ async function evaluateGoatActionApproval(input: {
     params: input.request.params,
     toolCallId: input.request.invocationId,
     workspaceId: input.context.workspaceId,
-    userWorkosId: input.context.userWorkosId,
-    chatSessionId: input.context.chatSessionId,
+    userWorkosId: input.context.actorId,
+    chatSessionId: input.context.conversationId,
     turnState: input.turnState,
     signal: input.signal,
   });
 }
 
 function getGoatCodexActionCapabilityTurnState(
-  request: GoatActionHostGatewayRequest,
+  request: GoatActionServiceRequest,
   context: GoatActionPrincipal,
 ): GoatCapabilityTurnState {
-  const turn = actionTurnRef(request, context);
+  const turn = actionTurnRef({
+    sessionId: request.sessionId,
+    runId: request.runId,
+    actorId: context.actorId,
+    workspaceId: context.workspaceId,
+    policy: context.policy ?? "cloudReadOnly",
+  });
   return {
     quotedTotalUsdMicros: 0,
     admittedToolCallIds: [],
@@ -249,7 +155,7 @@ function getGoatCodexActionCapabilityTurnState(
 }
 
 async function loadGoatCodexActionContext(
-  request: GoatActionHostGatewayRequest,
+  request: GoatActionServiceRequest,
 ): Promise<GoatActionPrincipal | null> {
   const [row] = await getDb()
     .select({
@@ -263,7 +169,7 @@ async function loadGoatCodexActionContext(
     .innerJoin(
       goatCodexChatTurns,
       and(
-        eq(goatCodexChatTurns.id, request.turnId),
+        eq(goatCodexChatTurns.id, request.runId),
         eq(goatCodexChatTurns.codexChatSessionId, goatCodexChatSessions.id),
         eq(goatCodexChatTurns.userWorkosId, goatCodexChatSessions.userWorkosId),
       ),
@@ -290,24 +196,29 @@ async function loadGoatCodexActionContext(
 
   if (!row?.workspaceId) return null;
   return {
-    userWorkosId: row.userWorkosId,
+    actorId: row.userWorkosId,
     workspaceId: row.workspaceId,
-    chatSessionId: row.chatSessionId,
+    conversationId: row.chatSessionId,
     userTimezone: row.userTimezone,
     policy: row.engine === "opencompany" ? "foregroundInteractive" : "cloudReadOnly",
   };
 }
 
-function gatewayError(code: string, message: string): GoatActionGatewayResponse {
-  return { ok: false, error: { code, message } };
+function actionTurnRef(run: GoatActionServiceRunRef) {
+  return {
+    sessionId: run.sessionId,
+    turnId: run.runId,
+    userWorkosId: run.actorId,
+    workspaceId: run.workspaceId,
+    policy: run.policy,
+  };
 }
 
-function actionTurnRef(request: GoatActionHostGatewayRequest, context: GoatActionPrincipal) {
-  return {
-    sessionId: request.sessionId,
-    turnId: request.turnId,
-    userWorkosId: context.userWorkosId,
-    workspaceId: context.workspaceId,
-    policy: context.policy ?? "cloudReadOnly",
-  };
+function actionServiceRequest(
+  request: GoatActionGatewayRequest,
+): Extract<GoatActionServiceRequest, { operation: "list" | "execute" }>;
+function actionServiceRequest(request: GoatActionHostGatewayRequest): GoatActionServiceRequest;
+function actionServiceRequest(request: GoatActionHostGatewayRequest): GoatActionServiceRequest {
+  const { turnId, ...input } = request;
+  return { ...input, runId: turnId } as GoatActionServiceRequest;
 }
