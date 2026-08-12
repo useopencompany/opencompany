@@ -63,6 +63,8 @@ export type GoatWorkflowTrigger = "manual" | "slack" | "linear" | "schedule";
 export type GoatAutomationCommandOperation = "workflow.create" | "task_schedule.create";
 export type GoatKnowledgeCommandOperation =
   | "brain_document.create"
+  | "brain_asset.create"
+  | "brain_asset.replace"
   | "wiki_page.create"
   | "wiki_timeline.create"
   | "skill.create";
@@ -4191,6 +4193,8 @@ export const goatKnowledgeCommandIdempotency = goat.table(
     requestHash: text("request_hash").notNull(),
     operation: text("operation").$type<GoatKnowledgeCommandOperation>().notNull(),
     resourceId: text("resource_id").notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    initialStateHash: text("initial_state_hash"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     touchedAt: timestamp("touched_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -4210,7 +4214,7 @@ export const goatKnowledgeCommandIdempotency = goat.table(
     ),
     operationCheck: check(
       "goat_knowledge_command_idempotency_operation_check",
-      sql`${table.operation} IN ('brain_document.create', 'wiki_page.create', 'wiki_timeline.create', 'skill.create')`,
+      sql`${table.operation} IN ('brain_document.create', 'brain_asset.create', 'brain_asset.replace', 'wiki_page.create', 'wiki_timeline.create', 'skill.create')`,
     ),
   }),
 );

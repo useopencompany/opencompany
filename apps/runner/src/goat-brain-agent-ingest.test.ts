@@ -9,6 +9,7 @@ import {
   normalizeHubspotObjectWindow,
   normalizeJamieMeetingCompletedWebhook,
   normalizeSlackConversationWindow,
+  normalizeUploadAsset,
 } from "@opencompany/goat-brain";
 import type {
   GoatBrainIngestTrace,
@@ -28,12 +29,14 @@ const agentRuntimeMock = vi.hoisted(() => ({
   executeExaSearchRequest: vi.fn(),
 }));
 const brainFilesMock = vi.hoisted(() => ({
+  getGoatBrainFile: vi.fn(),
   materializeGoatBrainFilesToRoot: vi.fn(async (_input?: { root: string }) => []),
   syncGoatBrainFilesFromRoot: vi.fn(async () => ({
     upserted: 3,
     deleted: 0,
     conflicts: [] as Array<{ path: string }>,
   })),
+  updateGoatBrainAssetExtraction: vi.fn(),
 }));
 const workspacesMock = vi.hoisted(() => ({
   getDefaultGoatBrainForUser: vi.fn(async () => ({ id: "gbrain_default" })),
@@ -64,8 +67,10 @@ vi.mock("@opencompany/agent-runtime", () => ({
 }));
 vi.mock("@opencompany/db/goat-brain-files", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
+  getGoatBrainFile: brainFilesMock.getGoatBrainFile,
   materializeGoatBrainFilesToRoot: brainFilesMock.materializeGoatBrainFilesToRoot,
   syncGoatBrainFilesFromRoot: brainFilesMock.syncGoatBrainFilesFromRoot,
+  updateGoatBrainAssetExtraction: brainFilesMock.updateGoatBrainAssetExtraction,
 }));
 vi.mock("@opencompany/db/goat-workspaces", () => ({
   getDefaultGoatBrainForUser: workspacesMock.getDefaultGoatBrainForUser,
@@ -150,6 +155,20 @@ function captureItem() {
     draftBrainId: "pricing-teardown-reference",
     draftFolder: "inbox",
     capturedAt: "2026-07-09T10:00:00.000Z",
+  });
+}
+
+function uploadAssetItem(contentSha256 = "a".repeat(64)) {
+  return normalizeUploadAsset({
+    documentId: "document_1",
+    brainId: "plan",
+    folderPath: "inbox",
+    format: "pdf",
+    mimeType: "application/pdf",
+    originalFileName: "plan.pdf",
+    sizeBytes: 100,
+    contentSha256,
+    uploadedAt: "2026-08-12T10:00:00.000Z",
   });
 }
 
@@ -513,6 +532,36 @@ describe("capture-first ingest profiles", () => {
   it("attributes the captured/uploaded content to the acting user", () => {
     expect(GOAT_CHAT_CAPTURE_INGEST_PROFILE.authorship).toBe("acting_user");
     expect(UPLOAD_ASSET_INGEST_PROFILE.authorship).toBe("acting_user");
+  });
+
+  it("skips a queued upload version after replacement supersedes its content hash", async () => {
+    brainFilesMock.getGoatBrainFile.mockResolvedValueOnce({
+      id: "document_1",
+      format: "pdf",
+      assetStorageKey: "https://blob.example/new",
+      assetContentHash: "b".repeat(64),
+    });
+
+    await expect(
+      UPLOAD_ASSET_INGEST_PROFILE.prepare({
+        input: {
+          userWorkosId: "user_123",
+          brainRef: "gbrain_123",
+          item: uploadAssetItem(),
+          env: { vercelAiGatewayApiKey: "gw_test" },
+        },
+        brainRef: "gbrain_123",
+        db: {} as never,
+        deps: {},
+      }),
+    ).resolves.toEqual({
+      earlyResult: {
+        skipped: true,
+        reason: "asset_superseded",
+        documentId: "document_1",
+      },
+    });
+    expect(brainFilesMock.updateGoatBrainAssetExtraction).not.toHaveBeenCalled();
   });
 });
 

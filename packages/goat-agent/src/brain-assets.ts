@@ -70,8 +70,8 @@ export type GoatBrainAssetUploadInput = {
   originalFileName: string;
   mimeType: string;
   sizeBytes: number;
-  // sha256 hex of the uploaded bytes, computed client-side; the ingestion
-  // worker recomputes it from the blob and stores the authoritative value.
+  // sha256 hex of the uploaded bytes. Canonical API callers compute this at
+  // the server boundary; the ingestion worker independently verifies it.
   contentSha256: string;
 };
 
@@ -80,6 +80,7 @@ export async function createGoatBrainAssetForUser(
     brainRef: string;
     userWorkosId: string;
   },
+  options: { db?: any; documentId?: string } = {},
 ): Promise<BrainMutationResult> {
   const validated = validateAssetUpload(input.brainRef, input);
   if (!validated.ok) return validated;
@@ -95,23 +96,29 @@ export async function createGoatBrainAssetForUser(
   const fileName = input.originalFileName.trim() || "upload";
   const title = fileName.replace(/\.[a-z0-9]+$/i, "").trim() || fileName;
   const baseId = normalizeGoatBrainId(title) || "upload";
-  const brainId = await nextAvailableGoatBrainId(input.brainRef, baseId);
-  const documentId = `goat_brain_doc_${randomUUID()}`;
-
-  const row = await createGoatBrainAssetDocument({
-    brainRef: input.brainRef,
-    userWorkosId: input.userWorkosId,
-    id: documentId,
-    brainId,
-    folderPath,
-    title,
-    format: validated.format,
-    mimeType: validated.mediaType,
-    originalFileName: fileName,
-    assetStorageKey: input.blobUrl,
-    assetSizeBytes: input.sizeBytes,
-    sourceRef: `upload:${documentId}`,
+  const brainId = await nextAvailableGoatBrainId(input.brainRef, baseId, {
+    ...(options.db ? { db: options.db } : {}),
   });
+  const documentId = options.documentId ?? `goat_brain_doc_${randomUUID()}`;
+
+  const row = await createGoatBrainAssetDocument(
+    {
+      brainRef: input.brainRef,
+      userWorkosId: input.userWorkosId,
+      id: documentId,
+      brainId,
+      folderPath,
+      title,
+      format: validated.format,
+      mimeType: validated.mediaType,
+      originalFileName: fileName,
+      assetStorageKey: input.blobUrl,
+      assetSizeBytes: input.sizeBytes,
+      assetContentHash: input.contentSha256,
+      sourceRef: `upload:${documentId}`,
+    },
+    options.db ? { db: options.db } : {},
+  );
 
   const ingest = await enqueueAssetIngest({
     brainRef: input.brainRef,
@@ -124,6 +131,7 @@ export async function createGoatBrainAssetForUser(
     originalFileName: fileName,
     sizeBytes: input.sizeBytes,
     contentSha256: input.contentSha256,
+    ...(options.db ? { db: options.db } : {}),
   });
 
   return {
@@ -139,7 +147,13 @@ export async function replaceGoatBrainAssetForUser(
     brainRef: string;
     userWorkosId: string;
     documentId: string;
+    expectedAssetContentHash?: string | null;
+    expectedAssetStorageKey?: string;
   },
+  options: {
+    db?: any;
+    cleanupReplacedBlob?: (storageKey: string) => Promise<void>;
+  } = {},
 ): Promise<BrainMutationResult> {
   const validated = validateAssetUpload(input.brainRef, input);
   if (!validated.ok) return validated;
@@ -147,15 +161,30 @@ export async function replaceGoatBrainAssetForUser(
   const fileName = input.originalFileName.trim() || "upload";
   let row: Awaited<ReturnType<typeof replaceGoatBrainAssetFile>>;
   try {
-    row = await replaceGoatBrainAssetFile({
-      brainRef: input.brainRef,
-      userWorkosId: input.userWorkosId,
-      fileId: input.documentId,
-      mimeType: validated.mediaType,
-      originalFileName: fileName,
-      assetStorageKey: input.blobUrl,
-      assetSizeBytes: input.sizeBytes,
-    });
+    row = await replaceGoatBrainAssetFile(
+      {
+        brainRef: input.brainRef,
+        userWorkosId: input.userWorkosId,
+        fileId: input.documentId,
+        mimeType: validated.mediaType,
+        originalFileName: fileName,
+        assetStorageKey: input.blobUrl,
+        assetSizeBytes: input.sizeBytes,
+        assetContentHash: input.contentSha256,
+        ...(input.expectedAssetContentHash !== undefined
+          ? { expectedAssetContentHash: input.expectedAssetContentHash }
+          : {}),
+        ...(input.expectedAssetStorageKey
+          ? { expectedAssetStorageKey: input.expectedAssetStorageKey }
+          : {}),
+      },
+      {
+        ...(options.db ? { db: options.db } : {}),
+        ...(options.cleanupReplacedBlob
+          ? { cleanupReplacedBlob: options.cleanupReplacedBlob }
+          : {}),
+      },
+    );
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "Replace failed." };
   }
@@ -171,6 +200,7 @@ export async function replaceGoatBrainAssetForUser(
     originalFileName: fileName,
     sizeBytes: input.sizeBytes,
     contentSha256: input.contentSha256,
+    ...(options.db ? { db: options.db } : {}),
   });
 
   return {
@@ -185,6 +215,31 @@ function validateAssetUpload(
   brainRef: string,
   input: GoatBrainAssetUploadInput,
 ): { ok: true; format: GoatBrainAssetFormat; mediaType: string } | { ok: false; message: string } {
+  const candidate = validateGoatBrainAssetFile({
+    originalFileName: input.originalFileName,
+    mimeType: input.mimeType,
+    sizeBytes: input.sizeBytes,
+  });
+  if (!candidate.ok) return candidate;
+  let pathname: string;
+  try {
+    pathname = new URL(input.blobUrl).pathname.replace(/^\/+/, "");
+  } catch {
+    return { ok: false, message: "Upload URL is invalid." };
+  }
+  // The upload route only mints tokens for this brain's prefix; re-checking
+  // here stops a crafted action call from attaching someone else's blob.
+  if (!pathname.startsWith(goatBrainAssetUploadPrefix(brainRef))) {
+    return { ok: false, message: "Upload does not belong to this brain." };
+  }
+  return candidate;
+}
+
+export function validateGoatBrainAssetFile(input: {
+  originalFileName: string;
+  mimeType: string;
+  sizeBytes: number;
+}): { ok: true; format: GoatBrainAssetFormat; mediaType: string } | { ok: false; message: string } {
   const mediaType = normalizedGoatChatAttachmentMediaType({
     mediaType: input.mimeType,
     filename: input.originalFileName,
@@ -212,18 +267,20 @@ function validateAssetUpload(
   if (format === "image" && input.sizeBytes > GOAT_BRAIN_ASSET_IMAGE_MAX_BYTES) {
     return { ok: false, message: "Images are limited to 5 MB." };
   }
-  let pathname: string;
-  try {
-    pathname = new URL(input.blobUrl).pathname.replace(/^\/+/, "");
-  } catch {
-    return { ok: false, message: "Upload URL is invalid." };
-  }
-  // The upload route only mints tokens for this brain's prefix; re-checking
-  // here stops a crafted action call from attaching someone else's blob.
-  if (!pathname.startsWith(goatBrainAssetUploadPrefix(brainRef))) {
-    return { ok: false, message: "Upload does not belong to this brain." };
-  }
   return { ok: true, format, mediaType };
+}
+
+export function validateGoatBrainAssetFolderPath(
+  value: string,
+): { ok: true; folderPath: string } | { ok: false; message: string } {
+  const folderPath = normalizeGoatBrainFolderForV1(value);
+  if (!isValidGoatBrainFolder(folderPath)) {
+    return { ok: false, message: "Folder paths must be lowercase slugs separated by /." };
+  }
+  if (isGoatBrainSkillFolder(folderPath)) {
+    return { ok: false, message: "Skills cannot contain file uploads." };
+  }
+  return { ok: true, folderPath };
 }
 
 async function enqueueAssetIngest(input: {
@@ -237,6 +294,7 @@ async function enqueueAssetIngest(input: {
   originalFileName: string;
   sizeBytes: number;
   contentSha256: string;
+  db?: any;
 }) {
   const item = normalizeUploadAsset({
     documentId: input.documentId,
@@ -256,6 +314,7 @@ async function enqueueAssetIngest(input: {
     rawPayload: item.contentHashInput,
     kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
     brainRefs: [input.brainRef],
+    ...(input.db ? { db: input.db } : {}),
   });
   captureGoatIngestionQuotaAnalytics(result.quotaUpdates);
   return result;

@@ -2168,24 +2168,48 @@ export const UPLOAD_ASSET_INGEST_PROFILE: GoatBrainIngestProfile<NormalizedUploa
       if (row.format === "markdown" || !row.assetStorageKey) {
         throw new Error(`Brain document ${asset.documentId} is not a binary asset.`);
       }
+      const expectedContentHash = asset.contentSha256 ?? row.assetContentHash;
+      if (expectedContentHash && row.assetContentHash !== expectedContentHash) {
+        return {
+          earlyResult: {
+            skipped: true,
+            reason: "asset_superseded",
+            documentId: asset.documentId,
+          },
+        };
+      }
 
       // Stage 1 (deterministic): fetch the bytes, extract text, record it on the
       // row so materialization inside the agent session includes the generated
       // extracted-text block and retrieval can index it. Images have no text to
       // extract — the bytes go to the (multimodal) agent as an image part instead.
       const bytes = await downloadGoatBrainAssetBytes(row.assetStorageKey, input.env);
+      const downloadedContentHash = createHash("sha256").update(bytes).digest("hex");
+      if (expectedContentHash && downloadedContentHash !== expectedContentHash) {
+        throw new Error(`Brain asset ${asset.documentId} bytes failed their content hash check.`);
+      }
       const extractedText = await extractAssetText(row.format, bytes);
-      await updateGoatBrainAssetExtraction(
+      const updated = await updateGoatBrainAssetExtraction(
         {
           brainRef,
           userWorkosId: input.userWorkosId,
           fileId: row.id,
           extractedText,
-          assetContentHash: createHash("sha256").update(bytes).digest("hex"),
+          assetContentHash: downloadedContentHash,
           assetSizeBytes: bytes.byteLength,
+          expectedAssetStorageKey: row.assetStorageKey,
         },
         { db },
       );
+      if (!updated) {
+        return {
+          earlyResult: {
+            skipped: true,
+            reason: "asset_superseded",
+            documentId: asset.documentId,
+          },
+        };
+      }
 
       const truncatedText = Buffer.byteLength(extractedText, "utf8") > PROMPT_ASSET_TEXT_BYTES;
       return {

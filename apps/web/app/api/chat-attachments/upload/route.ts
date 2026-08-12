@@ -10,9 +10,8 @@ export function goatChatAttachmentUploadPrefix(userWorkosId: string): string {
 }
 
 // Mints short-lived client-upload tokens so the browser uploads chat
-// attachments directly to the private Blob store. Mirrors
-// /api/brain-assets/upload: auth + pathname scope + content-type + size are
-// enforced here; the attachment metadata is persisted with the chat message
+// attachments directly to the private Blob store. Auth, pathname scope,
+// content-type, and size are enforced here; the attachment metadata is persisted with the chat message
 // when the user sends it (onUploadCompleted does not fire on localhost).
 export async function POST(request: Request): Promise<Response> {
   const context = await currentGoatUser({ optional: true });

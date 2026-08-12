@@ -16,7 +16,7 @@ export function sourceHrefForRef(ref: string): string | null {
     case "github":
       return githubHrefForSourceId(parsed.id);
     case "upload":
-      return parsed.id.trim() ? `/api/brain-assets/${encodeURIComponent(parsed.id)}` : null;
+      return parsed.id.trim() ? `/v1/brain-assets/${encodeURIComponent(parsed.id)}` : null;
     case "linear":
       return linearHrefForSourceId(parsed.id);
     case "gmail":

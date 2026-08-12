@@ -611,6 +611,19 @@ export const BrainDocumentEnvelopeSchema = z
   .object({ data: BrainDocumentSchema, meta: ProtocolMetadataSchema })
   .strict()
   .openapi("BrainDocumentEnvelope");
+export const BrainAssetMutationEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        document: BrainDocumentSchema,
+        quotaPaused: z.boolean(),
+        replayed: z.boolean(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrainAssetMutationEnvelope");
 export const BrainFolderEnvelopeSchema = z
   .object({ data: BrainFolderSchema, meta: ProtocolMetadataSchema })
   .strict()
@@ -623,6 +636,25 @@ export const CreateBrainDocumentBodySchema = z
   })
   .strict()
   .openapi("CreateBrainDocumentBody");
+export const BrainAssetUploadBodySchema = z
+  .object({
+    folderPath: z.string().min(1).max(512),
+    file: z
+      .file()
+      .max(20 * 1024 * 1024)
+      .openapi({ type: "string", format: "binary" }),
+  })
+  .strict()
+  .openapi("BrainAssetUploadBody");
+export const BrainAssetReplaceBodySchema = z
+  .object({
+    file: z
+      .file()
+      .max(20 * 1024 * 1024)
+      .openapi({ type: "string", format: "binary" }),
+  })
+  .strict()
+  .openapi("BrainAssetReplaceBody");
 export const UpdateBrainDocumentBodySchema = z
   .object({
     body: z.string().max(1_000_000),

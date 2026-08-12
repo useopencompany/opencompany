@@ -6,11 +6,10 @@ import {
   goatBrainAssetUploadPrefix,
 } from "@/lib/brain-assets";
 
-// Mints short-lived client-upload tokens so the browser uploads brain assets
-// directly to the private Blob store (bypasses the serverless body limit).
-// Auth + brain scope + content-type + size are enforced here; the document
-// row is written by uploadGoatBrainAssetAction after the upload completes
-// (onUploadCompleted does not fire on localhost, so we do not rely on it).
+// Temporary cached-client and rollback adapter. Current first-party clients send
+// multipart bytes to the canonical API, but already-loaded clients still use
+// this URL to mint a brain-scoped private Blob token before registration.
+// Remove only after the #1203 compatibility observation window closes.
 export async function POST(request: Request): Promise<Response> {
   const context = await currentGoatUser({ optional: true });
   if (!context) return new Response(null, { status: 401 });
@@ -33,8 +32,8 @@ export async function POST(request: Request): Promise<Response> {
         };
       },
       onUploadCompleted: async () => {
-        // Intentionally empty — persistence happens in the follow-up server
-        // action. Does not run locally.
+        // Legacy persistence happens in the cached client's follow-up action.
+        // This callback does not run locally and is not a durable command.
       },
     });
     return Response.json(jsonResponse);

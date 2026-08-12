@@ -736,8 +736,15 @@ actor forwarded server-side. After hydration, Brain and Wiki use fixed, authoriz
 read models (`brain-*-v1` and `wiki-*-v1`); the browser cannot choose physical tables, predicates,
 Workspace ids, or private asset locators. Editor writes use typed `/v1` commands, with Brain hash
 concurrency and durable create-command idempotency. The old `/api/skills` URL is a read-only
-compatibility adapter during the rollback window. Brain sources, assets, ingestion, imports, and
-external skill import remain on their existing paths until the next workspace-knowledge slice.
+compatibility adapter during the rollback window. Brain asset uploads and replacements copy bytes
+at the canonical API boundary, which computes the authoritative hash and persists only a private
+locator; authorized downloads stream through `/v1/brain-assets/{documentId}`. The old
+`/api/brain-assets/{documentId}` URL is a streaming compatibility adapter. The old
+`/api/brain-assets/upload` token route and its registration Server Actions have no current
+first-party caller but remain temporarily for already-loaded clients and rollback; remove them
+only after the #1203 compatibility observation window closes. Brain sources, ingestion controls,
+imports, and external skill import remain on their existing paths until the next
+workspace-knowledge slice.
 
 ## Company bootstrap imports
 

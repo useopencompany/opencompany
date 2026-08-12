@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { and, desc, eq, like, notInArray, or } from "drizzle-orm";
+import { and, desc, eq, isNull, like, notInArray, or } from "drizzle-orm";
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import {
   appendGoatBrainAssetTextBlock,
@@ -110,6 +110,9 @@ export type MaterializedGoatBrainFile = {
   path: string;
   folderPath: string;
   contentHash: string;
+  // Present on snapshots produced by current materialization. Binary bytes are
+  // part of the concurrency token even though they are not in the projection.
+  assetContentHash?: string | null;
   // Hash of the bytes actually written to disk when they differ from the
   // row's contentHash (binary-backed rows materialize content plus a
   // generated extracted-text block). Sync uses it to detect unchanged files;
@@ -539,6 +542,21 @@ export async function getGoatBrainFile(
   return rows[0] ?? null;
 }
 
+// Internal locator lookup for authorization gateways that receive only the opaque document id.
+// Callers must authorize the returned brainRef before exposing metadata or bytes.
+export async function getGoatBrainFileById(
+  input: { fileId: string },
+  options: { db?: DbClient } = {},
+): Promise<GoatBrainDocument | null> {
+  const db = options.db ?? getDb();
+  const rows = await db
+    .select()
+    .from(goatBrainDocuments)
+    .where(eq(goatBrainDocuments.id, input.fileId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function upsertGoatBrainFile(
   input: GoatBrainScope & {
     path: string;
@@ -857,9 +875,10 @@ export async function updateGoatBrainAssetExtraction(
     extractedText: string;
     assetContentHash: string;
     assetSizeBytes: number;
+    expectedAssetStorageKey: string;
   },
   options: { db?: DbClient } = {},
-): Promise<GoatBrainDocument> {
+): Promise<GoatBrainDocument | null> {
   const db = options.db ?? getDb();
   const extractedText = truncateUtf8(input.extractedText, MAX_GOAT_BRAIN_ASSET_TEXT_BYTES);
   const rows = await db
@@ -871,12 +890,15 @@ export async function updateGoatBrainAssetExtraction(
       updatedAt: new Date(),
     })
     .where(
-      and(eq(goatBrainDocuments.brainRef, input.brainRef), eq(goatBrainDocuments.id, input.fileId)),
+      and(
+        eq(goatBrainDocuments.brainRef, input.brainRef),
+        eq(goatBrainDocuments.id, input.fileId),
+        eq(goatBrainDocuments.assetStorageKey, input.expectedAssetStorageKey),
+      ),
     )
     .returning();
   const row = rows[0];
-  if (!row) throw new Error("Brain document not found.");
-  return row;
+  return row ?? null;
 }
 
 // Points an existing asset document at newly uploaded bytes (re-upload). The
@@ -890,8 +912,13 @@ export async function replaceGoatBrainAssetFile(
     assetStorageKey: string;
     assetSizeBytes: number;
     assetContentHash?: string | null;
+    expectedAssetContentHash?: string | null;
+    expectedAssetStorageKey?: string;
   },
-  options: { db?: DbClient } = {},
+  options: {
+    db?: DbClient;
+    cleanupReplacedBlob?: (storageKey: string) => Promise<void>;
+  } = {},
 ): Promise<GoatBrainDocument> {
   const db = options.db ?? getDb();
   const existing = await getDocumentById(db, input.brainRef, input.fileId);
@@ -912,13 +939,26 @@ export async function replaceGoatBrainAssetFile(
       updatedAt: new Date(),
     })
     .where(
-      and(eq(goatBrainDocuments.brainRef, input.brainRef), eq(goatBrainDocuments.id, input.fileId)),
+      and(
+        eq(goatBrainDocuments.brainRef, input.brainRef),
+        eq(goatBrainDocuments.id, input.fileId),
+        ...(input.expectedAssetContentHash === undefined
+          ? []
+          : [
+              input.expectedAssetContentHash === null
+                ? isNull(goatBrainDocuments.assetContentHash)
+                : eq(goatBrainDocuments.assetContentHash, input.expectedAssetContentHash),
+            ]),
+        ...(input.expectedAssetStorageKey
+          ? [eq(goatBrainDocuments.assetStorageKey, input.expectedAssetStorageKey)]
+          : []),
+      ),
     )
     .returning();
   const row = rows[0];
-  if (!row) throw new Error("Failed to replace Goat brain asset file.");
+  if (!row) throw new Error("Brain asset changed before its file could be replaced.");
   if (existing.assetStorageKey && existing.assetStorageKey !== input.assetStorageKey) {
-    await deleteGoatBrainAssetBlob(existing.assetStorageKey);
+    await (options.cleanupReplacedBlob ?? deleteGoatBrainAssetBlob)(existing.assetStorageKey);
   }
   return row;
 }
@@ -993,6 +1033,7 @@ export async function materializeGoatBrainFilesToRoot(input: {
       path,
       folderPath: row.folderPath,
       contentHash: row.contentHash,
+      ...(row.assetContentHash !== undefined ? { assetContentHash: row.assetContentHash } : {}),
       ...(materializedHash ? { materializedHash } : {}),
     };
   });
@@ -1087,7 +1128,7 @@ export async function syncGoatBrainFiles(input: {
     if (next.skip) continue;
     const current = currentByPath.get(pathName);
     const base = baseByPath.get(pathName);
-    if (current && base && current.contentHash !== base.contentHash) {
+    if (current && base && changedSinceMaterialize(current, base)) {
       conflicts.push({ path: pathName, reason: "changed_since_materialize" });
       handledConflictPaths.add(pathName);
     }
@@ -1100,7 +1141,7 @@ export async function syncGoatBrainFiles(input: {
     if (nextByPath.has(pathName)) continue;
     const current = currentByPath.get(pathName);
     const base = baseByPath.get(pathName);
-    if (current && base && current.contentHash !== base.contentHash) {
+    if (current && base && changedSinceMaterialize(current, base)) {
       conflicts.push({ path: pathName, reason: "changed_since_materialize" });
     }
   }
@@ -1193,6 +1234,13 @@ export async function syncGoatBrainFiles(input: {
     });
   }
   return { upserted, deleted: deleteIds.length, conflicts: [], pages };
+}
+
+function changedSinceMaterialize(current: GoatBrainDocument, base: MaterializedGoatBrainFile) {
+  return (
+    current.contentHash !== base.contentHash ||
+    ("assetContentHash" in base && current.assetContentHash !== base.assetContentHash)
+  );
 }
 
 export async function syncGoatBrainFilesFromRoot(input: {

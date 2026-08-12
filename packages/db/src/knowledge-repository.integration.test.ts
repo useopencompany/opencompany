@@ -6,11 +6,10 @@ import { drizzle } from "drizzle-orm/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PostgresKnowledgeRepository } from "./knowledge-repository";
 
-const migrationPath = path.resolve(
-  import.meta.dirname,
-  "../../..",
+const migrationPaths = [
   "drizzle/0208_goat_headless_knowledge_idempotency.sql",
-);
+  "drizzle/0209_goat_brain_asset_idempotency.sql",
+].map((migration) => path.resolve(import.meta.dirname, "../../..", migration));
 
 describe("Postgres Knowledge repository", () => {
   let database: PGlite;
@@ -19,9 +18,11 @@ describe("Postgres Knowledge repository", () => {
   beforeAll(async () => {
     database = new PGlite();
     await database.exec(BASE_SCHEMA);
-    const migration = await readFile(migrationPath, "utf8");
-    for (const statement of migration.split("--> statement-breakpoint")) {
-      if (statement.trim()) await database.exec(statement);
+    for (const migrationPath of migrationPaths) {
+      const migration = await readFile(migrationPath, "utf8");
+      for (const statement of migration.split("--> statement-breakpoint")) {
+        if (statement.trim()) await database.exec(statement);
+      }
     }
     repository = new PostgresKnowledgeRepository(drizzle(database));
   });

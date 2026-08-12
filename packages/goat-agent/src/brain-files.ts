@@ -78,9 +78,16 @@ export function documentViewFromFileRow(row: GoatBrainDocumentRow): GoatBrainDoc
   };
 }
 
-export async function nextAvailableGoatBrainId(brainRef: string, baseId: string): Promise<string> {
+export async function nextAvailableGoatBrainId(
+  brainRef: string,
+  baseId: string,
+  options: { db?: any } = {},
+): Promise<string> {
   const base = isValidGoatBrainId(baseId) ? baseId : "untitled";
-  const rows = await listGoatBrainFiles({ brainRef }, { includeInvalid: true });
+  const rows = await listGoatBrainFiles(
+    { brainRef },
+    { includeInvalid: true, ...(options.db ? { db: options.db } : {}) },
+  );
   const used = new Set(rows.map((row) => row.brainId));
   if (!used.has(base)) return base;
   for (let suffix = 2; suffix < 1000; suffix++) {

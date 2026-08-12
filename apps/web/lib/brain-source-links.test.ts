@@ -23,7 +23,7 @@ describe("sourceHrefForRef", () => {
       "https://example.com/docs/a?b=1",
     );
     expect(sourceHrefForRef("upload:goat_brain_doc_abc")).toBe(
-      "/api/brain-assets/goat_brain_doc_abc",
+      "/v1/brain-assets/goat_brain_doc_abc",
     );
   });
 
@@ -75,6 +75,6 @@ describe("isExternalHref", () => {
   it("distinguishes external http URLs from app paths", () => {
     expect(isExternalHref("https://github.com/acme/api")).toBe(true);
     expect(isExternalHref("http://example.com")).toBe(true);
-    expect(isExternalHref("/api/brain-assets/doc_1")).toBe(false);
+    expect(isExternalHref("/v1/brain-assets/doc_1")).toBe(false);
   });
 });

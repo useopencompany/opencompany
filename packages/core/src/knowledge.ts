@@ -244,6 +244,10 @@ export class KnowledgeApplicationService {
     await this.repository.assertBrainAccess({ actor, brainId: id });
   }
 
+  async authorizeBrainWrite(actor: Actor, brainId: string) {
+    return this.requireBrainWrite(actor, brainId);
+  }
+
   async getBrainOverview(actor: Actor, brainId: string) {
     requirePermission(actor, BRAIN_READ_PERMISSION, "Brain");
     const id = resourceId(brainId, "brainId");

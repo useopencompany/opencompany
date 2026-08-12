@@ -47,6 +47,14 @@ describe("KnowledgeApplicationService", () => {
     expect(assertBrainAccess).not.toHaveBeenCalled();
   });
 
+  it("exposes the same normalized Brain write gate to canonical asset services", async () => {
+    const assertBrainAccess = vi.fn(async () => undefined);
+    const service = new KnowledgeApplicationService(repository({ assertBrainAccess }));
+
+    await expect(service.authorizeBrainWrite(actor, " brain_1 ")).resolves.toBe("brain_1");
+    expect(assertBrainAccess).toHaveBeenCalledWith({ actor, brainId: "brain_1" });
+  });
+
   it("authorizes and bounds Brain source-item metadata lookups", async () => {
     const assertBrainAccess = vi.fn(async () => undefined);
     const listBrainSourceItems = vi.fn(async () => []);

@@ -233,6 +233,9 @@ export async function deleteGoatBrainFolderAction(input: {
   });
 }
 
+// Compatibility-only Server Actions for already-loaded clients from before
+// the canonical multipart cutover. Current first-party code has no caller.
+// Remove with /api/brain-assets/upload after the #1203 observation window.
 export async function uploadGoatBrainAssetAction(
   input: GoatBrainAssetUploadInput & { brainRef: string },
 ): Promise<BrainMutationResult> {

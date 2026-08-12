@@ -70,14 +70,14 @@ import { useGoatNavInset } from "@/components/GoatNavInset";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import { useHydrated } from "@/components/useHydrated";
 import type { GoatBrainDocumentView, GoatBrainFolderView } from "@/lib/brain";
-import { replaceGoatBrainAssetAction, uploadGoatBrainAssetAction } from "@/lib/brain-actions";
 import {
   buildGoatBrainDraftIngestStates,
   type GoatBrainDraftIngestState,
 } from "@/lib/brain-activity";
 import {
   BRAIN_ASSET_ACCEPT,
-  uploadBrainAssetBlob,
+  replaceHeadlessBrainAsset,
+  uploadHeadlessBrainAsset,
   validateBrainAssetFile,
 } from "@/lib/brain-asset-upload";
 import type { GoatBrainOverviewStats } from "@/lib/brain-overview";
@@ -860,20 +860,11 @@ function GoatBrainEditor({
     }
     setIsUploading(true);
     try {
-      const uploaded = await uploadBrainAssetBlob(brainRef, file);
-      const result = await uploadGoatBrainAssetAction({
-        brainRef,
+      const result = await uploadHeadlessBrainAsset({
+        brainId: brainRef,
         folderPath: activeFolder,
-        blobUrl: uploaded.blobUrl,
-        originalFileName: file.name,
-        mimeType: uploaded.mediaType,
-        sizeBytes: file.size,
-        contentSha256: uploaded.contentSha256,
+        file,
       });
-      if (!result.ok) {
-        toast.error(result.message);
-        return;
-      }
       if (result.quotaPaused) {
         toast.warning("Uploaded, but ingestion is paused by your plan.", {
           action: {
@@ -884,7 +875,7 @@ function GoatBrainEditor({
       } else {
         toast.success("Uploaded — filing into the brain");
       }
-      if (result.document) selectUploadedDocument(result.document);
+      selectUploadedDocument(brainDocumentToView(result.document));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Upload failed.");
     } finally {
@@ -901,21 +892,11 @@ function GoatBrainEditor({
     }
     setIsUploading(true);
     try {
-      const uploaded = await uploadBrainAssetBlob(brainRef, file);
-      const result = await replaceGoatBrainAssetAction({
-        brainRef,
+      const result = await replaceHeadlessBrainAsset({
+        brainId: brainRef,
         documentId: selectedDocument.id,
-        folderPath: selectedDocument.folderPath,
-        blobUrl: uploaded.blobUrl,
-        originalFileName: file.name,
-        mimeType: uploaded.mediaType,
-        sizeBytes: file.size,
-        contentSha256: uploaded.contentSha256,
+        file,
       });
-      if (!result.ok) {
-        toast.error(result.message);
-        return;
-      }
       if (result.quotaPaused) {
         toast.warning("File replaced, but ingestion is paused by your plan.", {
           action: {
@@ -1747,7 +1728,7 @@ function BrainAssetViewer({
             <span className="shrink-0">{formatFileSize(document.assetSizeBytes)}</span>
           ) : null}
           <a
-            href={`/api/brain-assets/${encodeURIComponent(document.id)}`}
+            href={`/v1/brain-assets/${encodeURIComponent(document.id)}`}
             download={document.originalFileName ?? undefined}
             className="shrink-0 text-ink-muted underline-offset-2 hover:text-ink hover:underline"
           >
@@ -1758,14 +1739,14 @@ function BrainAssetViewer({
       {document.format === "pdf" ? (
         <iframe
           title={document.title ?? document.brainId}
-          src={`/api/brain-assets/${encodeURIComponent(document.id)}`}
+          src={`/v1/brain-assets/${encodeURIComponent(document.id)}`}
           className="min-h-0 w-full flex-1 border-0 bg-surface-muted"
         />
       ) : document.format === "image" ? (
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-surface-muted p-6">
           {/* eslint-disable-next-line @next/next/no-img-element -- auth-scoped byte route; next/image can't optimize it. */}
           <img
-            src={`/api/brain-assets/${encodeURIComponent(document.id)}`}
+            src={`/v1/brain-assets/${encodeURIComponent(document.id)}`}
             alt={document.title ?? document.brainId}
             className="max-h-full max-w-full rounded-md object-contain"
           />
