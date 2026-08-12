@@ -357,6 +357,7 @@ describe("session-backed task turns", () => {
     expect(statement).toContain("event_sequence");
     expect(statement).toContain("next_queued_event AS");
     expect(statement).toContain("'run.queued'");
+    expect(statement).not.toMatch(/'triggerMessageId', next\.user_message_id,\s*'taskId'/u);
     expect(statement).toContain("notified_next_queued_event AS");
     expect(statement).toContain("UPDATE goat.codex_chat_sessions AS runtime");
     expect(statement).toContain("codex_thread_id = CASE");

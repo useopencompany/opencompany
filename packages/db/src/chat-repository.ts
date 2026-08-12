@@ -940,8 +940,7 @@ export class PostgresChatRepository implements ChatRepository {
           ${eventId}, inserted_run.id, 1, 1, 'run.queued',
           jsonb_build_object(
             'conversationId', reservation.conversation_id,
-            'triggerMessageId', reservation.message_id,
-            'taskId', target_chat.task_id
+            'triggerMessageId', reservation.message_id
           ),
           ${now}
         FROM inserted_run
@@ -1982,8 +1981,23 @@ function mapRunEvent(row: RunEventRow): RunEvent {
       row.attemptId ?? (row as unknown as { attempt_id?: string | null }).attempt_id ?? null,
     sequence: Number(row.sequence),
     type: row.type,
-    payload: row.payload,
+    payload: mapRunEventPayload(row.type, row.payload),
     createdAt: asDate(row.createdAt ?? (row as unknown as { created_at: string }).created_at),
+  };
+}
+
+function mapRunEventPayload(
+  type: RunEvent["type"],
+  payload: Record<string, unknown>,
+): Readonly<Record<string, unknown>> {
+  if (type !== "run.queued") return payload;
+
+  // The canonical Task cutover briefly persisted a Task association in this payload. A Task is
+  // metadata around the Run's Conversation, not part of the versioned Run Event contract. Project
+  // the canonical fields explicitly so those durable rows remain streamable without a backfill.
+  return {
+    conversationId: payload.conversationId,
+    triggerMessageId: payload.triggerMessageId,
   };
 }
 

@@ -764,12 +764,10 @@ export async function settleGoatDurableTurn(input: {
         ${nextRunEventId}, next.id, 1, 1, 'run.queued',
         jsonb_build_object(
           'conversationId', next.chat_session_id,
-          'triggerMessageId', next.user_message_id,
-          'taskId', task.id
+          'triggerMessageId', next.user_message_id
         ),
         ${new Date(input.completedAt.getTime() + 2)}
       FROM next_turn AS next
-      CROSS JOIN projected_task AS task
       RETURNING run_id, sequence
     ),
     notified_next_queued_event AS MATERIALIZED (
