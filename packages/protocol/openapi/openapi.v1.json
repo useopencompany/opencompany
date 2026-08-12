@@ -424,14 +424,366 @@
         "additionalProperties": false
       },
       "UpdateTaskBody": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "archived": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "archived"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "TaskSummaryEnvelope": {
         "type": "object",
         "properties": {
-          "archived": {
-            "type": "boolean"
+          "data": {
+            "$ref": "#/components/schemas/TaskSummary"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
           }
         },
         "required": [
-          "archived"
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "TaskSummary": {
+        "type": "object",
+        "properties": {
+          "cost": {
+            "type": "object",
+            "properties": {
+              "hasRecordedCosts": {
+                "type": "boolean"
+              },
+              "totalCostUsdMicros": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "hasRecordedCosts",
+              "totalCostUsdMicros"
+            ],
+            "additionalProperties": false
+          },
+          "durationMs": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 0
+          }
+        },
+        "required": [
+          "cost",
+          "durationMs"
+        ],
+        "additionalProperties": false
+      },
+      "LegacyTaskPage": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LegacyTask"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "LegacyTask": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "displayId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "goal": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "waiting",
+              "blocked",
+              "succeeded",
+              "failed",
+              "canceled",
+              "archived"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "workflow",
+              "schedule",
+              "agent"
+            ]
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "opencompany",
+              "codex",
+              "claude_code"
+            ]
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "workflowId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "scheduleId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "scheduledFor": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/TaskOutcome"
+          },
+          "archivedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "displayId",
+          "name",
+          "goal",
+          "status",
+          "source",
+          "engine",
+          "model",
+          "workflowId",
+          "scheduleId",
+          "scheduledFor",
+          "outcome",
+          "archivedAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "LegacyTaskHistoryEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "task": {
+                "$ref": "#/components/schemas/LegacyTask"
+              },
+              "messages": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/LegacyTaskHistoryMessage"
+                }
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/LegacyTaskHistoryEvent"
+                }
+              }
+            },
+            "required": [
+              "task",
+              "messages",
+              "events"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "LegacyTaskHistoryMessage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant",
+              "tool"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "created",
+              "running",
+              "completed",
+              "failed"
+            ]
+          },
+          "content": {
+            "type": "string"
+          },
+          "toolName": {
+            "type": "string",
+            "nullable": true
+          },
+          "toolCallId": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "status",
+          "content",
+          "toolName",
+          "toolCallId",
+          "createdAt",
+          "updatedAt",
+          "completedAt"
+        ],
+        "additionalProperties": false
+      },
+      "LegacyTaskHistoryEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "messageId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "task.status",
+              "harness.planned",
+              "artifact.created",
+              "assistant.delta",
+              "reasoning.completed",
+              "message.created",
+              "message.completed",
+              "message.failed",
+              "tool.started",
+              "tool.completed",
+              "tool.failed"
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "messageId",
+          "type",
+          "payload",
+          "createdAt"
         ],
         "additionalProperties": false
       },
@@ -2553,6 +2905,143 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UpdateTaskEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tasks/{taskId}/summary": {
+      "get": {
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usage cost and terminal duration for an actor-visible Task.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskSummaryEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/compatibility/tasks": {
+      "get": {
+        "tags": [
+          "Task compatibility"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only metadata for sessionless pre-cutover Tasks.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacyTaskPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/compatibility/tasks/{taskId}/history": {
+      "get": {
+        "tags": [
+          "Task compatibility"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only transcript and events for a sessionless pre-cutover Task.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacyTaskHistoryEnvelope"
                 }
               }
             }

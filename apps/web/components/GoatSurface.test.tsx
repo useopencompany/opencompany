@@ -33,8 +33,6 @@ import {
   clearAllOptimisticGoatChatSummaries,
   useOptimisticGoatChatSummaries,
 } from "@/lib/optimistic-chat-summaries";
-import { continueGoatTask } from "@/lib/task-client";
-import { cancelGoatTaskAction } from "@/lib/tasks";
 import { GoatSurface, type GoatTaskView } from "./GoatSurface";
 
 const chatMock = vi.hoisted(() => ({
@@ -66,6 +64,20 @@ const historyMock = vi.hoisted(() => ({
 
 const attachmentUploadMock = vi.hoisted(() => ({
   upload: vi.fn(),
+}));
+
+const taskCommandMocks = vi.hoisted(() => ({
+  archive: vi.fn(async () => ({})),
+  cancel: vi.fn(async () => ({})),
+  create: vi.fn(async (command: { goal: string }) => ({
+    task: {
+      id: "goat_task_created_1",
+      displayId: "TASK-7",
+      name: command.goal,
+      conversationId: "goat_chat_task_created_1",
+    },
+    transactionId: "1",
+  })),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -104,17 +116,10 @@ vi.mock("@/lib/headless-chat-feature", async (importOriginal) => ({
   HEADLESS_CHAT_ENABLED: false,
 }));
 
-vi.mock("@/lib/tasks", () => ({
-  archiveGoatTaskAction: vi.fn(async () => ({ ok: true, error: null })),
-  cancelGoatTaskAction: vi.fn(async () => ({ ok: true, error: null })),
-}));
-
-vi.mock("@/lib/task-client", () => ({
-  continueGoatTask: vi.fn(async (_taskId: string, _prompt: string, messageId: string) => ({
-    ok: true,
-    error: null,
-    messageId,
-  })),
+vi.mock("@/lib/headless-task-commands", () => ({
+  archiveHeadlessTask: taskCommandMocks.archive,
+  cancelHeadlessTaskRun: taskCommandMocks.cancel,
+  createHeadlessTask: taskCommandMocks.create,
 }));
 
 vi.mock("@/lib/task-schedules", () => ({
@@ -345,8 +350,10 @@ describe("GoatSurface chat streaming UI", () => {
     vi.spyOn(window.history, "replaceState").mockImplementation(historyMock.replaceState);
     vi.mocked(closeGoatChatSessionAction).mockClear();
     vi.mocked(markGoatChatSeen).mockClear();
-    vi.mocked(cancelGoatTaskAction).mockClear();
-    vi.mocked(continueGoatTask).mockClear();
+    taskCommandMocks.archive.mockClear();
+    taskCommandMocks.cancel.mockReset();
+    taskCommandMocks.cancel.mockResolvedValue({});
+    taskCommandMocks.create.mockClear();
     attachmentUploadMock.upload.mockReset();
     attachmentUploadMock.upload.mockResolvedValue({
       blobUrl: "https://blob.test/goat-chat/user_1/brief.pdf",
@@ -643,23 +650,6 @@ describe("GoatSurface chat streaming UI", () => {
   it("starts an ampersand ad-hoc task with Enter while the current chat is streaming", async () => {
     const user = userEvent.setup();
     chatMock.status = "streaming";
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url === "/api/tasks" && init?.method === "POST") {
-        return Response.json(
-          {
-            task: {
-              id: "task_streaming_1",
-              displayId: "TASK-7",
-              name: "Research competitors",
-            },
-          },
-          { status: 201 },
-        );
-      }
-      return Response.json({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <GoatSurface
@@ -692,19 +682,15 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.keyboard("{Enter}");
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/tasks",
-        expect.objectContaining({ method: "POST" }),
-      ),
+    await waitFor(() => expect(taskCommandMocks.create).toHaveBeenCalledTimes(1));
+    expect(taskCommandMocks.create).toHaveBeenCalledWith(
+      {
+        goal: "research competitors",
+        engine: "opencompany",
+        model: DEFAULT_GOAT_MODEL,
+      },
+      { scopeKey: "" },
     );
-    const [, request] = fetchMock.mock.calls.find(
-      ([url, init]) => String(url) === "/api/tasks" && init?.method === "POST",
-    )!;
-    expect(JSON.parse(String(request?.body))).toEqual({
-      description: "#task research competitors",
-      model: DEFAULT_GOAT_MODEL,
-    });
     expect(chatMock.stop).not.toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
@@ -883,14 +869,47 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
-      expect(continueGoatTask).toHaveBeenCalledWith(
-        "goat_task_1",
-        "Please check the afternoon too",
-        expect.stringMatching(/^goat_chat_msg_[0-9a-f-]{36}$/),
-      ),
+      expect(chatMock.sendMessage).toHaveBeenCalledWith({
+        text: "Please check the afternoon too",
+      }),
     );
-    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    expect(chatMock.lastResume).toBe(true);
     expect(screen.getByText("Please check the afternoon too")).toBeInTheDocument();
+  });
+
+  it("keeps pre-cutover Task history explicitly read-only", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_task_legacy_1",
+          title: "Legacy research",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "opencompany",
+          messages: [
+            {
+              id: "legacy_assistant_1",
+              role: "assistant",
+              parts: [{ type: "text", text: "Historical result" }],
+            },
+          ],
+        }}
+        taskConversation={{
+          taskId: "goat_task_legacy_1",
+          status: "succeeded",
+          startedAtMs: Date.now(),
+          sessionBacked: false,
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/pre-cutover task is available as read-only history/i)).toBeVisible();
+    expect(screen.getByPlaceholderText("Reply...")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Attach files" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start voice dictation" })).toBeDisabled();
+    expect(screen.getByLabelText("Model")).toBeDisabled();
   });
 
   it("offers Brain skill mentions when continuing a session-backed task", async () => {
@@ -939,35 +958,15 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
-      expect(continueGoatTask).toHaveBeenCalledWith(
-        "goat_task_1",
-        "@skill/product-work investigate the mention menu",
-        expect.stringMatching(/^goat_chat_msg_[0-9a-f-]{36}$/),
-        [{ kind: "skill", id: "product-work" }],
-      ),
+      expect(chatMock.sendMessage).toHaveBeenCalledWith({
+        text: "@skill/product-work investigate the mention menu",
+        metadata: { mentions: [{ kind: "skill", id: "product-work" }] },
+      }),
     );
-    expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
   it("starts an ampersand ad-hoc task from an active task conversation", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url === "/api/tasks" && init?.method === "POST") {
-        return Response.json(
-          {
-            task: {
-              id: "task_2",
-              displayId: "TASK-2",
-              name: "Research competitors",
-            },
-          },
-          { status: 201 },
-        );
-      }
-      return Response.json({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <GoatSurface
@@ -1006,21 +1005,17 @@ describe("GoatSurface chat streaming UI", () => {
     expect(submit).toBeEnabled();
     await user.click(submit);
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/tasks",
-        expect.objectContaining({ method: "POST" }),
-      ),
+    await waitFor(() => expect(taskCommandMocks.create).toHaveBeenCalledTimes(1));
+    expect(taskCommandMocks.create).toHaveBeenCalledWith(
+      {
+        goal: "research competitors",
+        engine: "opencompany",
+        model: DEFAULT_GOAT_MODEL,
+      },
+      { scopeKey: "" },
     );
-    const [, request] = fetchMock.mock.calls.find(
-      ([url, init]) => String(url) === "/api/tasks" && init?.method === "POST",
-    )!;
-    expect(JSON.parse(String(request?.body))).toEqual({
-      description: "#task research competitors",
-      model: DEFAULT_GOAT_MODEL,
-    });
-    expect(continueGoatTask).not.toHaveBeenCalled();
-    expect(cancelGoatTaskAction).not.toHaveBeenCalled();
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    expect(taskCommandMocks.cancel).not.toHaveBeenCalled();
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
   });
 
@@ -1053,6 +1048,8 @@ describe("GoatSurface chat streaming UI", () => {
           taskId: "goat_task_1",
           status: "running",
           startedAtMs: Date.now(),
+          sessionBacked: true,
+          activeRunId: "run_1",
         }}
       />,
     );
@@ -1060,8 +1057,8 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Stop response" }));
 
-    expect(cancelGoatTaskAction).toHaveBeenCalledWith("goat_task_1");
-    expect(chatMock.stop).not.toHaveBeenCalled();
+    expect(taskCommandMocks.cancel).toHaveBeenCalledWith("run_1");
+    await waitFor(() => expect(chatMock.stop).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("status", { name: "Stopping task…" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stopping task" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
@@ -1092,6 +1089,8 @@ describe("GoatSurface chat streaming UI", () => {
           taskId: "goat_task_1",
           status: "canceled",
           startedAtMs: Date.now(),
+          sessionBacked: true,
+          activeRunId: null,
         }}
       />,
     );
@@ -1104,10 +1103,7 @@ describe("GoatSurface chat streaming UI", () => {
 
   it("restores the task stop control when cancellation fails", async () => {
     const user = userEvent.setup();
-    vi.mocked(cancelGoatTaskAction).mockResolvedValueOnce({
-      ok: false,
-      error: "Could not stop task.",
-    });
+    taskCommandMocks.cancel.mockRejectedValueOnce(new Error("Could not stop task."));
 
     render(
       <GoatSurface
@@ -1124,6 +1120,8 @@ describe("GoatSurface chat streaming UI", () => {
           taskId: "goat_task_1",
           status: "running",
           startedAtMs: Date.now(),
+          sessionBacked: true,
+          activeRunId: "run_1",
         }}
       />,
     );
@@ -2800,18 +2798,7 @@ describe("GoatSurface chat streaming UI", () => {
       const url = String(input);
       if (url === "/api/skills") return Response.json({ skills: [] });
       if (url === "/api/workflows") return Response.json({ workflows: [] });
-      if (url === "/api/tasks" && init?.method === "POST") {
-        return Response.json(
-          {
-            task: {
-              id: "task_1",
-              displayId: "TASK-1",
-              name: "Research competitors",
-            },
-          },
-          { status: 201 },
-        );
-      }
+      void init;
       return Response.json({});
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -2840,19 +2827,15 @@ describe("GoatSurface chat streaming UI", () => {
     );
     await user.click(screen.getByRole("button", { name: "Start task" }));
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/tasks",
-        expect.objectContaining({ method: "POST" }),
-      ),
+    await waitFor(() => expect(taskCommandMocks.create).toHaveBeenCalledTimes(1));
+    expect(taskCommandMocks.create).toHaveBeenCalledWith(
+      {
+        goal: "research our three closest competitors",
+        engine: "opencompany",
+        model: DEFAULT_GOAT_MODEL,
+      },
+      { scopeKey: "" },
     );
-    const [, request] = fetchMock.mock.calls.find(
-      ([url, init]) => String(url) === "/api/tasks" && init?.method === "POST",
-    )!;
-    expect(JSON.parse(String(request?.body))).toEqual({
-      description: "#task research our three closest competitors",
-      model: DEFAULT_GOAT_MODEL,
-    });
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
@@ -3456,6 +3439,36 @@ describe("GoatSurface chat streaming UI", () => {
     expect(routerMock.prefetch).toHaveBeenCalledWith("/chat/chat_1");
     expect(routerMock.prefetch).toHaveBeenCalledWith("/chat/codex_chat_1");
     expect(routerMock.prefetch).toHaveBeenCalledWith("/tasks/TASK-1");
+  });
+
+  it("archives canonical results while keeping compatibility results read-only", async () => {
+    const user = userEvent.setup();
+    render(
+      <GoatSurface
+        taskSpawningEnabled
+        tasks={[
+          taskView({
+            id: "canonical_task",
+            displayId: "TASK-1",
+            name: "Canonical result",
+            sessionId: "canonical_conversation",
+          }),
+          taskView({
+            id: "legacy_task",
+            displayId: "TASK-2",
+            name: "Legacy result",
+            sessionId: null,
+          }),
+        ]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Archive Canonical result" }));
+
+    expect(taskCommandMocks.archive).toHaveBeenCalledWith("canonical_task", { scopeKey: "" });
+    expect(screen.queryByRole("button", { name: "Archive Legacy result" })).not.toBeInTheDocument();
   });
 
   it("hides home chats and results older than one day", () => {

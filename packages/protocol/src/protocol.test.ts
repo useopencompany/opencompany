@@ -16,6 +16,9 @@ describe("headless protocol", () => {
     expect(Object.keys(document.paths ?? {})).toEqual([
       "/v1/tasks",
       "/v1/tasks/{taskId}",
+      "/v1/tasks/{taskId}/summary",
+      "/v1/compatibility/tasks",
+      "/v1/compatibility/tasks/{taskId}/history",
       "/v1/conversations",
       "/v1/conversations/{conversationId}",
       "/v1/conversations/{conversationId}/messages",

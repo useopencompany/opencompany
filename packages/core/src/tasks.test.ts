@@ -81,7 +81,26 @@ describe("TaskApplicationService", () => {
       taskId: "task_1",
       command: { archived: true },
     });
+    await expect(
+      service.updateTask(actor(), "task_1", { archived: undefined } as never),
+    ).rejects.toThrow(/archive update is required/i);
     await expect(service.getTask(actor(), "missing")).rejects.toBeInstanceOf(CoreError);
+  });
+
+  it("normalizes Task names through the same actor-scoped mutation", async () => {
+    const repository = fakeRepository();
+    const service = new TaskApplicationService(repository);
+
+    await service.updateTask(actor(), "task_1", { name: "  Launch brief  " });
+
+    expect(repository.updateTask).toHaveBeenCalledWith({
+      actor: actor(),
+      taskId: "task_1",
+      command: { name: "Launch brief" },
+    });
+    await expect(service.updateTask(actor(), "task_1", { name: " " })).rejects.toThrow(
+      /name is invalid/i,
+    );
   });
 });
 
@@ -110,6 +129,7 @@ function command(overrides: Partial<CreateTaskCommand> = {}): CreateTaskCommand 
 function fakeRepository(): TaskRepository & {
   createTaskAndRun: ReturnType<typeof vi.fn>;
   getTaskByConversation: ReturnType<typeof vi.fn>;
+  getTaskSummary: ReturnType<typeof vi.fn>;
   listTasks: ReturnType<typeof vi.fn>;
   updateTask: ReturnType<typeof vi.fn>;
 } {
@@ -134,6 +154,12 @@ function fakeRepository(): TaskRepository & {
   return {
     listTasks: vi.fn(async () => ({ tasks: [task], nextCursor: null })),
     getTask: vi.fn(async ({ taskId }) => (taskId === task.id ? task : null)),
+    getTaskSummary: vi.fn(async () => ({
+      cost: { hasRecordedCosts: false, totalCostUsdMicros: 0 },
+      durationMs: null,
+    })),
+    listLegacyTasks: vi.fn(async () => []),
+    getLegacyTaskHistory: vi.fn(async () => null),
     getTaskByConversation: vi.fn(async () => task),
     createTaskAndRun: vi.fn(async () => ({
       task,

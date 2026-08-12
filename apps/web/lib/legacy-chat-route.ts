@@ -1155,6 +1155,7 @@ export async function POST(request: Request): Promise<Response> {
                 generateGoatWorkflowTaskTitle({
                   taskId: created.id,
                   userWorkosId: context.user.workosUserId,
+                  workspaceId: context.workspace.id,
                   workflowName: created.name,
                   description,
                   apiKey: gatewayApiKey,

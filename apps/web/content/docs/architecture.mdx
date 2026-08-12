@@ -11,7 +11,11 @@ Browser
     POST /api/chat
       persist user message
       stream foreground assistant response
-      optionally create a durable task session and first turn
+      optionally create a canonical Task, Conversation, Message, and Run
+
+  Task surface
+    typed /v1 Task and Message commands
+    authorized Task, Message, and Run read models
 
 Runner
   shared durable turn worker
@@ -23,7 +27,7 @@ Runner
 
 Goat UI
   read chat and task state
-  subscribe to updates through Electric-backed collections
+  subscribe to fixed, authorized API read models
 ```
 
 ## Foreground chat
@@ -40,11 +44,11 @@ The chat agent can answer directly or use the tools assembled in `packages/goat-
 
 ## Durable tasks
 
-Durable tasks start in `apps/web/lib/tasks.ts` and `packages/db/src/goat-task-sessions.ts`. Creation writes a task-kind chat session, a thin `goat.tasks` projection, native chat messages, engine runtime state, and the first `goat.codex_chat_turn` in one database statement.
+Durable tasks enter `TaskApplicationService` from manual, Workflow, schedule, and agent producers. Browser creation uses typed `POST /v1/tasks`; internal backend producers compose the same service directly. Creation writes a Task, its one task-kind Conversation, native Messages, engine runtime state, and the first canonical Run in one database statement.
 
 `apps/runner/src/goat-codex-chat-worker.ts` owns the queue. It preserves one active turn per session, heartbeats a fenced lease, reclaims expired work after a crash, and hands active turns off during deploys. Task turns load their projection through `apps/runner/src/goat-task-turn.ts` and execute through the normal OpenCompany or Codex chat adapter.
 
-Settlement updates the turn, runtime session, task projection, assistant message, workflow state, and origin-chat notification atomically. Legacy task rows without `session_id` remain readable but cannot be continued.
+Settlement updates the Run, runtime session, Task projection, assistant Message, Workflow state, and origin-chat notification atomically. Legacy Task rows without `session_id` remain available only through the actor-scoped, read-only compatibility API.
 
 ## Data boundaries
 

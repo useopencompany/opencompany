@@ -27,6 +27,7 @@ import {
 } from "@/components/GoatRoutes";
 import type { GoatTaskView } from "@/components/GoatSurface";
 import { formatUsdMicros } from "@/lib/cost-format";
+import { archiveHeadlessTask } from "@/lib/headless-task-commands";
 import { extractGitHubPullRequestUrl } from "@/lib/pull-request-link";
 import {
   formatGoatStartedAt,
@@ -42,7 +43,6 @@ import {
   goatWorkflowTaskDisplayStatus,
   toGoatTaskTitle,
 } from "@/lib/task-display";
-import { archiveGoatTaskAction } from "@/lib/tasks";
 import { useGoatTaskSummary } from "@/lib/use-task-summary";
 import { updateGoatTaskViewModeAction } from "@/lib/user-preferences";
 
@@ -549,12 +549,13 @@ function TaskBoardSheet({
   workflowNames: Record<string, string>;
   onClose: () => void;
 }) {
-  const { schedules } = useGoatAppData();
+  const { schedules, workspace } = useGoatAppData();
   const [isArchiving, startArchiveTransition] = useTransition();
   const schedule = task.scheduleId
     ? (schedules.find((candidate) => candidate.id === task.scheduleId) ?? null)
     : null;
   const terminal = TERMINAL_TASK_STATUSES.has(task.status);
+  const archivable = terminal && Boolean(task.sessionId);
   const { summary, error: summaryError } = useGoatTaskSummary(task.id, terminal);
   const durationLabel = !terminal
     ? null
@@ -574,14 +575,14 @@ function TaskBoardSheet({
     : null;
 
   const archiveTask = () => {
-    if (!terminal) return;
+    if (!archivable) return;
     startArchiveTransition(async () => {
-      const result = await archiveGoatTaskAction(task.id);
-      if (!result.ok) {
-        toast.error(result.error ?? `Could not archive "${task.name}".`);
-        return;
+      try {
+        await archiveHeadlessTask(task.id, { scopeKey: workspace.id });
+        onClose();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : `Could not archive "${task.name}".`);
       }
-      onClose();
     });
   };
 
@@ -736,19 +737,23 @@ function TaskBoardSheet({
         </div>
 
         <footer className="mt-auto flex items-center justify-between gap-3 border-t border-border px-5 py-4">
-          <button
-            type="button"
-            onClick={archiveTask}
-            disabled={!terminal || isArchiving}
-            className="inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-45"
-          >
-            {isArchiving ? (
-              <Loader2 size={13} strokeWidth={1.75} className="animate-spin" />
-            ) : (
-              <Archive size={13} strokeWidth={1.75} />
-            )}
-            Archive
-          </button>
+          {task.sessionId ? (
+            <button
+              type="button"
+              onClick={archiveTask}
+              disabled={!archivable || isArchiving}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {isArchiving ? (
+                <Loader2 size={13} strokeWidth={1.75} className="animate-spin" />
+              ) : (
+                <Archive size={13} strokeWidth={1.75} />
+              )}
+              Archive
+            </button>
+          ) : (
+            <span className="text-[12px] text-ink-subtle">Read-only history</span>
+          )}
           <Link
             href={`/tasks/${encodeURIComponent(task.displayId)}`}
             prefetch

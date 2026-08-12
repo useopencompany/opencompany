@@ -7,6 +7,7 @@ import { TaskDetailPanel } from "./TaskDetailPanel";
 
 const mocks = vi.hoisted(() => ({
   surfaceProps: null as Record<string, unknown> | null,
+  tasks: [] as Record<string, unknown>[],
 }));
 
 vi.mock("@/components/GoatAppDataProvider", () => ({
@@ -17,7 +18,7 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
       firstName: "Ada",
     },
     activeBrain: null,
-    tasks: [],
+    tasks: mocks.tasks,
     schedules: [],
     recentChats: [],
     archivedChats: [],
@@ -31,16 +32,6 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
   }),
 }));
 
-vi.mock("@/components/TaskRunPanel", () => ({
-  TaskRunLiveProvider: ({
-    initialRun,
-    children,
-  }: {
-    initialRun: unknown;
-    children: (run: unknown) => React.ReactNode;
-  }) => children(initialRun),
-}));
-
 vi.mock("@/components/GoatSurface", () => ({
   GoatSurface: (props: Record<string, unknown>) => {
     mocks.surfaceProps = props;
@@ -51,6 +42,7 @@ vi.mock("@/components/GoatSurface", () => ({
 
 beforeEach(() => {
   mocks.surfaceProps = null;
+  mocks.tasks = [];
 });
 
 describe("TaskDetailPanel", () => {
@@ -73,7 +65,7 @@ describe("TaskDetailPanel", () => {
 
     expect(screen.getByTestId("goat-surface")).toHaveTextContent("Morning workflow");
     const chat = mocks.surfaceProps?.initialChat as GoatChatSessionView;
-    expect(chat.messages.map((entry) => entry.role)).toEqual(["user", "assistant"]);
+    expect(chat.messages).toEqual([]);
     expect(mocks.surfaceProps?.taskConversation).toMatchObject({
       taskId: "goat_task_1",
       status: "succeeded",
@@ -111,6 +103,29 @@ describe("TaskDetailPanel", () => {
     expect(mocks.surfaceProps?.initialChat).toMatchObject({
       id: "goat_chat_task_1",
       title: "Acme interview follow-up",
+    });
+  });
+
+  it("adopts the live canonical Task status after its active Run completes", () => {
+    const initialTask = { ...task(), status: "running" as const, stage: "running" as const };
+    mocks.tasks = [
+      {
+        ...initialTask,
+        status: "succeeded",
+        stage: "completed",
+      },
+    ];
+
+    render(
+      <TaskDetailPanel
+        initialRun={buildGoatHarnessRun({ task: initialTask, messages: [], events: [] })}
+      />,
+    );
+
+    expect(mocks.surfaceProps?.taskConversation).toMatchObject({
+      taskId: "goat_task_1",
+      status: "succeeded",
+      sessionBacked: true,
     });
   });
 });

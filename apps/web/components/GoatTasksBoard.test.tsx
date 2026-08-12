@@ -7,6 +7,7 @@ import { GOAT_TASK_BOARD_COLUMN_CAP, GoatTasksBoardRoute } from "./GoatTasksBoar
 
 const appDataMock = vi.hoisted(() => ({
   featureFlags: { taskSpawning: true, autoModelRouting: false },
+  workspace: { id: "workspace_1" },
   taskRows: [] as GoatTaskRow[],
   tasksReady: true,
   schedules: [
@@ -54,8 +55,8 @@ vi.mock("@/components/GoatRoutes", () => ({
   TasksWorkflowsDisabledRoute: () => <div>Tasks &amp; Workflows is a beta feature</div>,
 }));
 
-vi.mock("@/lib/tasks", () => ({
-  archiveGoatTaskAction: archiveTaskMock,
+vi.mock("@/lib/headless-task-commands", () => ({
+  archiveHeadlessTask: archiveTaskMock,
 }));
 
 const updateTaskViewModeMock = vi.hoisted(() =>
@@ -191,7 +192,7 @@ describe("GoatTasksBoardRoute", () => {
 
     await user.click(within(sheet).getByRole("button", { name: "Archive" }));
 
-    expect(archiveTaskMock).toHaveBeenCalledWith("done");
+    expect(archiveTaskMock).toHaveBeenCalledWith("done", { scopeKey: "workspace_1" });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
@@ -213,6 +214,26 @@ describe("GoatTasksBoardRoute", () => {
     });
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("does not offer mutations for sessionless compatibility history", async () => {
+    const user = userEvent.setup();
+    appDataMock.taskRows = [
+      taskRow({
+        id: "legacy",
+        display_id: "TASK-OLD",
+        name: "Legacy research",
+        status: "succeeded",
+        session_id: null,
+      }),
+    ];
+
+    render(<GoatTasksBoardRoute workflowNames={{}} />);
+    await user.click(screen.getByRole("link", { name: "Open Legacy research" }));
+
+    const sheet = screen.getByRole("dialog");
+    expect(within(sheet).getByText("Read-only history")).toBeVisible();
+    expect(within(sheet).queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
   });
 
   it("keeps running tasks non-archivable", async () => {
@@ -401,7 +422,8 @@ function taskRow(
     workspace_id: overrides.workspace_id ?? "workspace_1",
     prompt: overrides.prompt ?? "Do the task.",
     model: "openai/gpt-5.2",
-    session_id: overrides.session_id ?? null,
+    session_id:
+      "session_id" in overrides ? (overrides.session_id ?? null) : `goat_chat_${overrides.id}`,
     schedule_id: overrides.schedule_id ?? null,
     scheduled_for: overrides.scheduled_for ?? null,
     workflow_id: overrides.workflow_id ?? null,

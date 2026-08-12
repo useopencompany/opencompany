@@ -4,6 +4,11 @@ import type {
   GoatRepoConfigView,
   GoatWorkspaceRepository,
 } from "@opencompany/db/goat-repo-configs";
+import type {
+  LegacyTaskHistoryDto,
+  LegacyTaskHistoryEventDto,
+  LegacyTaskHistoryMessageDto,
+} from "@opencompany/protocol";
 import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
@@ -57,6 +62,8 @@ import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import type { GoatBrainSnapshot } from "@/lib/brain";
 import type { GoatBrainOverviewStats } from "@/lib/brain-overview";
 import type { GoatChatSessionView } from "@/lib/chat-ui";
+import { legacyTaskDtoToRow, taskReadModelToRow } from "@/lib/headless-task-collections";
+import { getHeadlessTask, getLegacyTaskCompatibilityHistory } from "@/lib/headless-task-commands";
 import type { GoatIntegrationState } from "@/lib/integration-state";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import {
@@ -584,18 +591,52 @@ function useTaskRun(taskId: string) {
   useEffect(() => {
     if (!featureFlags.taskSpawning) return;
     const controller = new AbortController();
-    void fetch(`/api/tasks/${encodeURIComponent(taskId)}/run`, {
-      cache: "no-store",
-      credentials: "same-origin",
-      signal: controller.signal,
+    void getHeadlessTask(taskId, {
+      fetch: (input, init) => fetch(input, { ...init, signal: controller.signal }),
     })
-      .then(async (response) => {
-        if (response.status === 404) {
-          setServerState({ taskId, run: null, notFound: true });
-          return null;
+      .then((task) => {
+        if (task) {
+          return buildGoatHarnessRun({
+            task: taskReadModelToRow(task),
+            messages: [],
+            events: [],
+          });
         }
-        if (!response.ok) throw new Error("Could not load task run.");
-        return (await response.json()) as GoatHarnessRunViewModel;
+        return getLegacyTaskCompatibilityHistory(taskId, {
+          fetch: (input, init) => fetch(input, { ...init, signal: controller.signal }),
+        }).then((history: LegacyTaskHistoryDto | null) => {
+          if (!history) {
+            setServerState({ taskId, run: null, notFound: true });
+            return null;
+          }
+          return buildGoatHarnessRun({
+            task: legacyTaskDtoToRow(history.task),
+            messages: history.messages.map((message: LegacyTaskHistoryMessageDto) => ({
+              id: message.id,
+              task_id: history.task.id,
+              user_workos_id: "",
+              role: message.role,
+              status: message.status,
+              content: message.content,
+              model_message: null,
+              tool_name: message.toolName,
+              tool_call_id: message.toolCallId,
+              response_to_message_id: null,
+              created_at: message.createdAt,
+              updated_at: message.updatedAt,
+              completed_at: message.completedAt,
+            })),
+            events: history.events.map((event: LegacyTaskHistoryEventDto) => ({
+              id: event.id,
+              task_id: history.task.id,
+              user_workos_id: "",
+              message_id: event.messageId,
+              type: event.type,
+              payload: event.payload,
+              created_at: event.createdAt,
+            })),
+          });
+        });
       })
       .then((run) => {
         if (run) setServerState({ taskId, run, notFound: false });

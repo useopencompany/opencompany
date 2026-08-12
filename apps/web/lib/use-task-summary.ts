@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getHeadlessTaskSummary } from "@/lib/headless-task-commands";
 
 export type GoatTaskSummary = {
   cost: {
@@ -22,20 +23,11 @@ export function useGoatTaskSummary(taskId: string, terminal: boolean) {
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetch(`/api/tasks/${encodeURIComponent(taskId)}/summary`, {
-      cache: "no-store",
-      credentials: "same-origin",
-      signal: controller.signal,
+    void getHeadlessTaskSummary(taskId, {
+      fetch: (input, init) => fetch(input, { ...init, signal: controller.signal }),
     })
-      .then(async (response) => {
-        if (response.ok) return (await response.json()) as GoatTaskSummary;
-        const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
-        throw new Error(
-          typeof body?.error === "string" ? body.error : "Could not load task summary.",
-        );
-      })
       .then((summary) => {
-        setState({ requestKey, summary, error: null });
+        setState({ requestKey, summary: summary as GoatTaskSummary | null, error: null });
       })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;

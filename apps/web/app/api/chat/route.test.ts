@@ -610,6 +610,7 @@ describe("POST /api/chat", () => {
     expect(generateGoatWorkflowTaskTitle).toHaveBeenCalledWith({
       taskId: "goat_task_workflow_1",
       userWorkosId: "user_1",
+      workspaceId: "goat_ws_user_1",
       workflowName: "Customer interview synthesis",
       description: "Synthesize the Acme interview using the confirmed pricing concern.",
       apiKey: "test-key",
