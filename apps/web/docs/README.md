@@ -729,9 +729,14 @@ and Runs. Sessionless legacy rows are fetched once from the actor-scoped
 physical tables or predicates. Replies use the canonical Message command, cancellation targets the
 active Run, and archive uses `PATCH /v1/tasks/{taskId}`.
 
-Settings and Brain use the same pattern for `goat.integrations`, `goat.brain_folders`, and
-`goat.brain_documents`. Server props are initial render fallbacks; after hydration, live Electric
-rows are the source of truth for persisted Goat state.
+Brain, Wiki, and Skills are presentation clients over the canonical API boundary. Their RSC
+loaders call typed `/v1/brains/*`, `/v1/wiki/pages`, and `/v1/skills*` resources with the browser
+actor forwarded server-side. After hydration, Brain and Wiki use fixed, authorized, versioned
+read models (`brain-*-v1` and `wiki-*-v1`); the browser cannot choose physical tables, predicates,
+Workspace ids, or private asset locators. Editor writes use typed `/v1` commands, with Brain hash
+concurrency and durable create-command idempotency. The old `/api/skills` URL is a read-only
+compatibility adapter during the rollback window. Brain sources, assets, ingestion, imports, and
+external skill import remain on their existing paths until the next workspace-knowledge slice.
 
 ## Company bootstrap imports
 

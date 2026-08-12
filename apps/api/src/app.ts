@@ -5,16 +5,24 @@ import {
 } from "@opencompany/chat-presentation";
 import {
   type Actor,
+  type BrainDocument,
+  type BrainFolder,
+  type BrainOverview,
   CHAT_ATTACHMENT_MAX_BYTES,
   type ChatApplicationService,
   CoreError,
+  type KnowledgeApplicationService,
   type LegacyTask,
   type LegacyTaskHistory,
   type RunEvent,
+  type Skill,
+  type SkillListItem,
   type Task,
   type TaskApplicationService,
   type TaskSchedule,
   type TaskScheduleApplicationService,
+  type WikiPage,
+  type WikiTimelineEntry,
   type Workflow,
   type WorkflowApplicationService,
 } from "@opencompany/core";
@@ -77,6 +85,7 @@ export type CreateApiAppInput = {
   tasks: TaskApplicationService;
   workflows: WorkflowApplicationService;
   schedules: TaskScheduleApplicationService;
+  knowledge: KnowledgeApplicationService;
   attachments: AttachmentUploadService;
   authenticate: ApiAuthenticator;
   browserOrigins?: readonly string[];
@@ -387,6 +396,207 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: taskCreationDto(result), meta }, 202);
     },
+    getBrainSnapshot: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const snapshot = await input.knowledge.getBrainSnapshot(actor, c.req.valid("param").brainId);
+      return c.json(
+        {
+          data: {
+            folders: snapshot.folders.map(brainFolderDto),
+            documents: snapshot.documents.map(brainDocumentDto),
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    getBrainOverview: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const overview = await input.knowledge.getBrainOverview(actor, c.req.valid("param").brainId);
+      return c.json({ data: brainOverviewDto(overview), meta }, 200);
+    },
+    createBrainDocument: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const document = await input.knowledge.createBrainDocument(
+        actor,
+        c.req.valid("param").brainId,
+        {
+          idempotencyKey: c.req.valid("header")["idempotency-key"],
+          ...c.req.valid("json"),
+        },
+      );
+      return c.json({ data: brainDocumentDto(document), meta }, 201);
+    },
+    updateBrainDocument: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const document = await input.knowledge.updateBrainDocument(
+        actor,
+        params.brainId,
+        params.documentId,
+        c.req.valid("json"),
+      );
+      return c.json({ data: brainDocumentDto(document), meta }, 200);
+    },
+    renameBrainDocument: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const document = await input.knowledge.renameBrainDocument(
+        actor,
+        params.brainId,
+        params.documentId,
+        c.req.valid("json"),
+      );
+      return c.json({ data: brainDocumentDto(document), meta }, 200);
+    },
+    deleteBrainDocument: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      await input.knowledge.deleteBrainDocument(actor, params.brainId, params.documentId);
+      return c.json({ data: { documentId: params.documentId }, meta }, 200);
+    },
+    createBrainFolder: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const folder = await input.knowledge.createBrainFolder(
+        actor,
+        c.req.valid("param").brainId,
+        c.req.valid("json"),
+      );
+      return c.json({ data: brainFolderDto(folder), meta }, 201);
+    },
+    renameBrainFolder: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.knowledge.renameBrainFolder(
+        actor,
+        c.req.valid("param").brainId,
+        c.req.valid("json"),
+      );
+      return c.json({ data: result, meta }, 200);
+    },
+    deleteBrainFolder: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const body = c.req.valid("json");
+      await input.knowledge.deleteBrainFolder(actor, params.brainId, body);
+      return c.json({ data: { path: body.path }, meta }, 200);
+    },
+    listWikiPages: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const pages = await input.knowledge.listWikiPages(actor);
+      return c.json({ data: pages.map(wikiPageDto), meta }, 200);
+    },
+    createWikiPage: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.knowledge.createWikiPage(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...c.req.valid("json"),
+      });
+      return c.json(
+        {
+          data: { page: wikiPageDto(result.page), transactionIds: result.transactionIds },
+          meta,
+        },
+        201,
+      );
+    },
+    updateWikiPage: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.knowledge.updateWikiPage(
+        actor,
+        c.req.valid("param").slug,
+        c.req.valid("json"),
+      );
+      return c.json(
+        {
+          data: { page: wikiPageDto(result.page), transactionIds: result.transactionIds },
+          meta,
+        },
+        200,
+      );
+    },
+    deleteWikiPage: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.knowledge.deleteWikiPage(actor, {
+        slug: c.req.valid("param").slug,
+        ...c.req.valid("json"),
+      });
+      return c.json({ data: result, meta }, 200);
+    },
+    addWikiTimelineEntry: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.knowledge.addWikiTimelineEntry(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        slug: c.req.valid("param").slug,
+        ...c.req.valid("json"),
+      });
+      return c.json(
+        {
+          data: {
+            entry: wikiTimelineEntryDto(result.entry),
+            transactionId: result.transactionId,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    listSkills: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const skills = await input.knowledge.listSkills(actor);
+      return c.json({ data: skills.map(skillListItemDto), meta }, 200);
+    },
+    createSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const skill = await input.knowledge.createSkill(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...c.req.valid("json"),
+      });
+      return c.json({ data: skillDto(skill), meta }, 201);
+    },
+    listSkillCatalog: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json({ data: await input.knowledge.listSkillCatalog(actor), meta }, 200);
+    },
+    getSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const skill = await input.knowledge.getSkill(actor, c.req.valid("param").slug);
+      return c.json({ data: skillDto(skill), meta }, 200);
+    },
+    updateSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const skill = await input.knowledge.updateSkill(
+        actor,
+        c.req.valid("param").slug,
+        c.req.valid("json"),
+      );
+      return c.json({ data: skillDto(skill), meta }, 200);
+    },
+    archiveSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const slug = c.req.valid("param").slug;
+      await input.knowledge.archiveSkill(actor, slug);
+      return c.json({ data: { slug }, meta }, 200);
+    },
     listConversations: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -687,17 +897,35 @@ export function createApiApp(input: CreateApiAppInput) {
       }
       const params = c.req.valid("param");
       const query = c.req.valid("query");
-      if (params.readModel === "tasks-v1") {
-        if (query.conversationId) {
+      if (params.readModel.startsWith("brain-")) {
+        if (query.conversationId || !query.brainId) {
           throw new ApiError(
             400,
             "invalid_request",
-            "conversationId is not valid for this read model.",
+            "brainId is required and conversationId is not valid for this read model.",
+          );
+        }
+        await input.knowledge.authorizeBrainRead(actor, query.brainId);
+      } else if (params.readModel.startsWith("wiki-")) {
+        if (query.conversationId || query.brainId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "conversationId and brainId are not valid for this read model.",
+          );
+        }
+        input.knowledge.authorizeWikiRead(actor);
+      } else if (params.readModel === "tasks-v1") {
+        if (query.conversationId || query.brainId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "conversationId and brainId are not valid for this read model.",
           );
         }
         await input.tasks.listTasks(actor, { limit: 1 });
       } else if (params.readModel === "workflows-v1") {
-        if (query.conversationId) {
+        if (query.conversationId || query.brainId) {
           throw new ApiError(
             400,
             "invalid_request",
@@ -706,7 +934,7 @@ export function createApiApp(input: CreateApiAppInput) {
         }
         await input.workflows.listWorkflows(actor, { limit: 1 });
       } else if (params.readModel === "workflow-schedules-v1") {
-        if (query.conversationId) {
+        if (query.conversationId || query.brainId) {
           throw new ApiError(
             400,
             "invalid_request",
@@ -715,7 +943,7 @@ export function createApiApp(input: CreateApiAppInput) {
         }
         await input.workflows.listWorkflows(actor, { limit: 1 });
       } else if (params.readModel === "task-schedules-v1") {
-        if (query.conversationId) {
+        if (query.conversationId || query.brainId) {
           throw new ApiError(
             400,
             "invalid_request",
@@ -724,7 +952,7 @@ export function createApiApp(input: CreateApiAppInput) {
         }
         await input.schedules.listTaskSchedules(actor, { limit: 1 });
       } else if (params.readModel !== "chat-conversations-v1") {
-        if (!query.conversationId) {
+        if (!query.conversationId || query.brainId) {
           throw new ApiError(
             400,
             "invalid_request",
@@ -732,7 +960,7 @@ export function createApiApp(input: CreateApiAppInput) {
           );
         }
         await authorizeConversationRead(input, actor, query.conversationId);
-      } else if (query.conversationId) {
+      } else if (query.conversationId || query.brainId) {
         throw new ApiError(
           400,
           "invalid_request",
@@ -743,6 +971,7 @@ export function createApiApp(input: CreateApiAppInput) {
         actor,
         readModel: params.readModel,
         ...(query.conversationId ? { conversationId: query.conversationId } : {}),
+        ...(query.brainId ? { brainId: query.brainId } : {}),
         requestUrl: new URL(c.req.url),
       }) as never;
     },
@@ -1015,6 +1244,54 @@ function taskScheduleDto(schedule: TaskSchedule) {
     createdAt: schedule.createdAt.toISOString(),
     updatedAt: schedule.updatedAt.toISOString(),
   };
+}
+
+function brainFolderDto(folder: BrainFolder) {
+  return {
+    ...folder,
+    createdAt: folder.createdAt.toISOString(),
+    updatedAt: folder.updatedAt.toISOString(),
+  };
+}
+
+function brainDocumentDto(document: BrainDocument) {
+  return {
+    ...document,
+    createdAt: document.createdAt.toISOString(),
+    updatedAt: document.updatedAt.toISOString(),
+  };
+}
+
+function brainOverviewDto(overview: BrainOverview) {
+  return { ...overview, windowStartedAt: overview.windowStartedAt.toISOString() };
+}
+
+function wikiPageDto(page: WikiPage) {
+  return {
+    ...page,
+    createdAt: page.createdAt.toISOString(),
+    updatedAt: page.updatedAt.toISOString(),
+  };
+}
+
+function wikiTimelineEntryDto(entry: WikiTimelineEntry) {
+  return {
+    ...entry,
+    at: entry.at.toISOString(),
+    createdAt: entry.createdAt.toISOString(),
+  };
+}
+
+function skillDto(skill: Skill) {
+  return {
+    ...skill,
+    createdAt: skill.createdAt.toISOString(),
+    updatedAt: skill.updatedAt.toISOString(),
+  };
+}
+
+function skillListItemDto(skill: SkillListItem) {
+  return { ...skill, updatedAt: skill.updatedAt.toISOString() };
 }
 
 function legacyTaskDto(task: LegacyTask) {

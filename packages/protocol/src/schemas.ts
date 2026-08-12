@@ -240,12 +240,24 @@ export const TaskReadModelNameSchema = z.literal("tasks-v1");
 export const WorkflowReadModelNameSchema = z.literal("workflows-v1");
 export const WorkflowScheduleReadModelNameSchema = z.literal("workflow-schedules-v1");
 export const TaskScheduleReadModelNameSchema = z.literal("task-schedules-v1");
+export const BrainFolderReadModelNameSchema = z.literal("brain-folders-v1");
+export const BrainDocumentReadModelNameSchema = z.literal("brain-documents-v1");
+export const BrainTimelineReadModelNameSchema = z.literal("brain-timeline-v1");
+export const BrainEdgeReadModelNameSchema = z.literal("brain-edges-v1");
+export const WikiPageReadModelNameSchema = z.literal("wiki-pages-v1");
+export const WikiTimelineReadModelNameSchema = z.literal("wiki-timeline-v1");
 export const ReadModelSchema = z.enum([
   ...ChatReadModelSchema.options,
   TaskReadModelNameSchema.value,
   WorkflowReadModelNameSchema.value,
   WorkflowScheduleReadModelNameSchema.value,
   TaskScheduleReadModelNameSchema.value,
+  BrainFolderReadModelNameSchema.value,
+  BrainDocumentReadModelNameSchema.value,
+  BrainTimelineReadModelNameSchema.value,
+  BrainEdgeReadModelNameSchema.value,
+  WikiPageReadModelNameSchema.value,
+  WikiTimelineReadModelNameSchema.value,
 ]);
 
 export const ChatPresentationAttachmentSchema = z
@@ -309,6 +321,386 @@ export const RunReadModelSchema = z
 export const TaskReadModelSchema = TaskSchema.openapi("TaskReadModelV1");
 export const WorkflowReadModelSchema = WorkflowSchema.openapi("WorkflowReadModelV1");
 export const TaskScheduleReadModelSchema = TaskScheduleSchema.openapi("TaskScheduleReadModelV1");
+
+export const BrainTimelineEntrySchema = z
+  .object({
+    evidenceId: z.string().max(80),
+    at: TimestampSchema,
+    body: z.string(),
+  })
+  .strict()
+  .openapi("BrainTimelineEntry");
+
+export const BrainRelationSchema = z
+  .object({ type: z.string().min(1).max(64), to: z.string().min(1).max(80) })
+  .strict()
+  .openapi("BrainRelation");
+
+export const BrainSourceSchema = z
+  .object({
+    ref: z.string().min(1).max(256),
+    capturedAt: TimestampSchema.optional(),
+    title: z.string().max(512).optional(),
+  })
+  .strict()
+  .openapi("BrainSource");
+
+export const BrainFolderSchema = z
+  .object({
+    id: ResourceIdSchema,
+    path: z.string().min(1).max(512),
+    source: z.enum(["system", "custom"]),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("BrainFolder");
+
+export const BrainDocumentSchema = z
+  .object({
+    id: ResourceIdSchema,
+    brainId: z.string().min(1).max(80),
+    folderPath: z.string().min(1).max(512),
+    path: z.string().min(1).max(640),
+    title: z.string().max(160),
+    description: z.string().max(1_024).optional(),
+    content: z.string(),
+    body: z.string(),
+    timeline: z.array(BrainTimelineEntrySchema),
+    format: z.enum([
+      "markdown",
+      "pdf",
+      "docx",
+      "xlsx",
+      "srt",
+      "csv",
+      "tsv",
+      "json",
+      "text",
+      "image",
+    ]),
+    mimeType: z.string().min(1).max(255),
+    originalFileName: z.string().max(512).nullable(),
+    assetSizeBytes: z.number().int().min(0).nullable(),
+    relations: z.array(BrainRelationSchema),
+    sources: z.array(BrainSourceSchema),
+    kind: z.enum(["page", "evidence"]),
+    type: z.enum([
+      "person",
+      "company",
+      "project",
+      "meeting",
+      "concept",
+      "source",
+      "analysis",
+      "note",
+    ]),
+    status: z.enum(["draft", "active", "archived", "merged"]),
+    aliases: z.array(z.string().max(80)),
+    contentHash: z.string().regex(/^[0-9a-f]{64}$/u),
+    sizeBytes: z.number().int().min(0),
+    createdByActorId: ResourceIdSchema.nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("BrainDocument");
+
+export const BrainSnapshotSchema = z
+  .object({ folders: z.array(BrainFolderSchema), documents: z.array(BrainDocumentSchema) })
+  .strict()
+  .openapi("BrainSnapshot");
+
+export const BrainOverviewSchema = z
+  .object({
+    windowStartedAt: TimestampSchema,
+    itemsAddedLast7Days: z.number().int().min(0),
+    retrievalsLast7Days: z.number().int().min(0),
+    activeSources: z.number().int().min(0),
+  })
+  .strict()
+  .openapi("BrainOverview");
+
+export const BrainFolderReadModelSchema = BrainFolderSchema.openapi("BrainFolderReadModelV1");
+export const BrainDocumentReadModelSchema = BrainDocumentSchema.openapi("BrainDocumentReadModelV1");
+
+export const BrainTimelineReadModelSchema = z
+  .object({
+    id: z.number().int().min(1),
+    documentId: ResourceIdSchema,
+    brainId: z.string().min(1).max(80),
+    evidenceId: z.string().max(80),
+    at: TimestampSchema,
+    sourceRef: z.string().max(256),
+    sourceTitle: z.string().max(512).nullable(),
+    summary: z.string(),
+    detail: z.string(),
+    createdAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("BrainTimelineReadModelV1");
+
+export const BrainEdgeReadModelSchema = z
+  .object({
+    id: ResourceIdSchema,
+    documentId: ResourceIdSchema,
+    fromBrainId: z.string().min(1).max(80),
+    toBrainId: z.string().min(1).max(80),
+    relationType: z.string().min(1).max(64),
+    sourceKind: z.enum(["relation", "wiki_link"]),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("BrainEdgeReadModelV1");
+
+export const WikiKindSchema = z.enum([
+  "person",
+  "company",
+  "project",
+  "research",
+  "meeting",
+  "other",
+]);
+
+export const WikiPageSchema = z
+  .object({
+    id: ResourceIdSchema,
+    slug: z.string().min(1).max(80),
+    path: z.string().min(1).max(512),
+    title: z.string().max(160),
+    kind: WikiKindSchema,
+    body: z.string(),
+    contentHash: z.string().regex(/^[0-9a-f]{64}$/u),
+    sizeBytes: z.number().int().min(0),
+    format: z.string().min(1).max(32),
+    mimeType: z.string().max(255).nullable(),
+    originalFileName: z.string().max(512).nullable(),
+    assetSizeBytes: z.number().int().min(0).nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("WikiPage");
+
+export const WikiTimelineEntrySchema = z
+  .object({
+    id: ResourceIdSchema,
+    pageId: ResourceIdSchema,
+    at: TimestampSchema,
+    text: z.string(),
+    createdAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("WikiTimelineEntry");
+
+export const WikiPageReadModelSchema = WikiPageSchema.openapi("WikiPageReadModelV1");
+export const WikiTimelineReadModelSchema =
+  WikiTimelineEntrySchema.openapi("WikiTimelineReadModelV1");
+
+export const SkillSourceSchema = z
+  .object({
+    type: z.enum(["github", "skills.sh"]),
+    url: z.url(),
+    ref: z.string(),
+    path: z.string(),
+    resolvedCommit: z.string(),
+  })
+  .strict()
+  .openapi("SkillSource");
+
+export const SkillSchema = z
+  .object({
+    id: ResourceIdSchema,
+    slug: z.string().min(1).max(64),
+    name: z.string().min(1).max(64),
+    description: z.string().max(1_024),
+    instructions: z.string().max(256 * 1_024),
+    status: z.enum(["draft", "active"]),
+    source: SkillSourceSchema.nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("Skill");
+
+export const SkillListItemSchema = SkillSchema.omit({
+  instructions: true,
+  createdAt: true,
+}).openapi("SkillListItem");
+export const SkillCatalogItemSchema = z
+  .object({
+    id: z.string().min(1).max(64),
+    name: z.string().min(1).max(64),
+    description: z.string().max(1_024),
+  })
+  .strict()
+  .openapi("SkillCatalogItem");
+
+export const BrainSnapshotEnvelopeSchema = z
+  .object({ data: BrainSnapshotSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BrainSnapshotEnvelope");
+export const BrainOverviewEnvelopeSchema = z
+  .object({ data: BrainOverviewSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BrainOverviewEnvelope");
+export const BrainDocumentEnvelopeSchema = z
+  .object({ data: BrainDocumentSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BrainDocumentEnvelope");
+export const BrainFolderEnvelopeSchema = z
+  .object({ data: BrainFolderSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BrainFolderEnvelope");
+
+export const CreateBrainDocumentBodySchema = z
+  .object({
+    folderPath: z.string().min(1).max(512),
+    fileName: z.string().min(1).max(160),
+  })
+  .strict()
+  .openapi("CreateBrainDocumentBody");
+export const UpdateBrainDocumentBodySchema = z
+  .object({
+    body: z.string().max(1_000_000),
+    expectedContentHash: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/u)
+      .optional(),
+  })
+  .strict()
+  .openapi("UpdateBrainDocumentBody");
+export const RenameBrainDocumentBodySchema = z
+  .object({ title: z.string().min(1).max(160) })
+  .strict()
+  .openapi("RenameBrainDocumentBody");
+export const CreateBrainFolderBodySchema = z
+  .object({ path: z.string().min(1).max(512) })
+  .strict()
+  .openapi("CreateBrainFolderBody");
+export const RenameBrainFolderBodySchema = z
+  .object({ fromPath: z.string().min(1).max(512), toPath: z.string().min(1).max(512) })
+  .strict()
+  .openapi("RenameBrainFolderBody");
+export const DeleteBrainFolderBodySchema = z
+  .object({ path: z.string().min(1).max(512) })
+  .strict()
+  .openapi("DeleteBrainFolderBody");
+export const BrainDocumentDeleteEnvelopeSchema = z
+  .object({
+    data: z.object({ documentId: ResourceIdSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrainDocumentDeleteEnvelope");
+export const BrainFolderPathEnvelopeSchema = z
+  .object({
+    data: z.object({ path: z.string().min(1).max(512) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrainFolderPathEnvelope");
+
+export const WikiPageListEnvelopeSchema = z
+  .object({ data: z.array(WikiPageSchema), meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("WikiPageListEnvelope");
+export const WikiPageMutationEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        page: WikiPageSchema,
+        transactionIds: z.array(z.number().int().min(1)),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WikiPageMutationEnvelope");
+export const WikiPageDeleteEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        deletedPaths: z.array(z.string().min(1).max(512)),
+        transactionIds: z.array(z.number().int().min(1)),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WikiPageDeleteEnvelope");
+export const WikiTimelineMutationEnvelopeSchema = z
+  .object({
+    data: z
+      .object({ entry: WikiTimelineEntrySchema, transactionId: z.number().int().min(0) })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WikiTimelineMutationEnvelope");
+export const CreateWikiPageBodySchema = z
+  .object({
+    clientPageId: ResourceIdSchema.optional(),
+    parentPath: z.string().min(1).max(512).nullable(),
+    title: z.string().max(160),
+    slug: z.string().min(1).max(80).optional(),
+  })
+  .strict()
+  .openapi("CreateWikiPageBody");
+export const UpdateWikiPageBodySchema = z
+  .object({
+    body: z.string().max(1_000_000),
+    kind: WikiKindSchema.optional(),
+    title: z.string().max(160).optional(),
+  })
+  .strict()
+  .openapi("UpdateWikiPageBody");
+export const DeleteWikiPageBodySchema = z
+  .object({ recursive: z.boolean().optional() })
+  .strict()
+  .openapi("DeleteWikiPageBody");
+export const AddWikiTimelineEntryBodySchema = z
+  .object({
+    clientEntryId: ResourceIdSchema.optional(),
+    text: z.string().min(1).max(20_000),
+    at: TimestampSchema.optional(),
+  })
+  .strict()
+  .openapi("AddWikiTimelineEntryBody");
+
+export const SkillListEnvelopeSchema = z
+  .object({ data: z.array(SkillListItemSchema), meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("SkillListEnvelope");
+export const SkillCatalogEnvelopeSchema = z
+  .object({ data: z.array(SkillCatalogItemSchema), meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("SkillCatalogEnvelope");
+export const SkillEnvelopeSchema = z
+  .object({ data: SkillSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("SkillEnvelope");
+export const CreateSkillBodySchema = z
+  .object({ name: z.string().min(1).max(64), description: z.string().max(1_024).optional() })
+  .strict()
+  .openapi("CreateSkillBody");
+export const UpdateSkillBodySchema = z
+  .object({
+    name: z.string().min(1).max(64),
+    description: z.string().max(1_024),
+    instructions: z.string().max(256 * 1_024),
+    status: z.enum(["draft", "active"]),
+  })
+  .strict()
+  .openapi("UpdateSkillBody");
+export const SkillArchiveEnvelopeSchema = z
+  .object({
+    data: z.object({ slug: z.string().min(1).max(64) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("SkillArchiveEnvelope");
 
 export const ErrorCodeSchema = z.enum([
   "authentication_required",
@@ -832,6 +1224,32 @@ export type WorkflowReadModel = z.infer<typeof WorkflowReadModelSchema>;
 export type WorkflowScheduleReadModel = z.infer<typeof WorkflowScheduleReadModelSchema>;
 export type TaskScheduleDto = z.infer<typeof TaskScheduleSchema>;
 export type TaskScheduleReadModel = z.infer<typeof TaskScheduleReadModelSchema>;
+export type BrainSnapshotDto = z.infer<typeof BrainSnapshotSchema>;
+export type BrainOverviewDto = z.infer<typeof BrainOverviewSchema>;
+export type BrainDocumentDto = z.infer<typeof BrainDocumentSchema>;
+export type BrainFolderDto = z.infer<typeof BrainFolderSchema>;
+export type BrainDocumentReadModel = z.infer<typeof BrainDocumentReadModelSchema>;
+export type BrainFolderReadModel = z.infer<typeof BrainFolderReadModelSchema>;
+export type BrainTimelineReadModel = z.infer<typeof BrainTimelineReadModelSchema>;
+export type BrainEdgeReadModel = z.infer<typeof BrainEdgeReadModelSchema>;
+export type CreateBrainDocumentBody = z.infer<typeof CreateBrainDocumentBodySchema>;
+export type UpdateBrainDocumentBody = z.infer<typeof UpdateBrainDocumentBodySchema>;
+export type RenameBrainDocumentBody = z.infer<typeof RenameBrainDocumentBodySchema>;
+export type CreateBrainFolderBody = z.infer<typeof CreateBrainFolderBodySchema>;
+export type RenameBrainFolderBody = z.infer<typeof RenameBrainFolderBodySchema>;
+export type DeleteBrainFolderBody = z.infer<typeof DeleteBrainFolderBodySchema>;
+export type WikiPageDto = z.infer<typeof WikiPageSchema>;
+export type WikiPageReadModel = z.infer<typeof WikiPageReadModelSchema>;
+export type WikiTimelineReadModel = z.infer<typeof WikiTimelineReadModelSchema>;
+export type CreateWikiPageBody = z.infer<typeof CreateWikiPageBodySchema>;
+export type UpdateWikiPageBody = z.infer<typeof UpdateWikiPageBodySchema>;
+export type DeleteWikiPageBody = z.infer<typeof DeleteWikiPageBodySchema>;
+export type AddWikiTimelineEntryBody = z.infer<typeof AddWikiTimelineEntryBodySchema>;
+export type SkillDto = z.infer<typeof SkillSchema>;
+export type SkillListItemDto = z.infer<typeof SkillListItemSchema>;
+export type SkillCatalogItemDto = z.infer<typeof SkillCatalogItemSchema>;
+export type CreateSkillBody = z.infer<typeof CreateSkillBodySchema>;
+export type UpdateSkillBody = z.infer<typeof UpdateSkillBodySchema>;
 export type CreateWorkflowBody = z.infer<typeof CreateWorkflowBodySchema>;
 export type UpdateWorkflowBody = z.infer<typeof UpdateWorkflowBodySchema>;
 export type ArchiveVersionBody = z.infer<typeof ArchiveVersionBodySchema>;

@@ -72,7 +72,7 @@ There are five ways content gets into a brain.
 
 ### 1. The UI editor
 
-The Brain page (`/brain/...`) renders `GoatBrainView` with a Tiptap markdown editor that decorates inline links and supports cmd-click navigation. Edits autosave after 1.2s of idle through server actions in `apps/web/lib/brain-actions.ts` (`updateGoatBrainDocumentAction`, move, rename, delete). Updates carry an `expectedContentHash` so concurrent edits are detected rather than silently overwritten. The UI deliberately has no create affordance: new documents and folders enter through the brain CLI and ingestion agents only.
+The Brain page (`/brain/...`) renders `GoatBrainView` with a Tiptap markdown editor that decorates inline links and supports cmd-click navigation. Its initial snapshot and overview come from the typed `/v1/brains/*` resources; after hydration, fixed authorized `brain-*-v1` read models keep folders, documents, timeline entries, and graph edges live. Editor create, update, rename, and delete operations use typed `/v1` commands. Updates carry an `expectedContentHash` so concurrent edits are detected rather than silently overwritten, and create commands are durably idempotent per actor and workspace. Asset upload and replacement stay on their existing route until the asset/ingestion cutover slice.
 
 ### 2. Chat captures (`save_to_brain`)
 

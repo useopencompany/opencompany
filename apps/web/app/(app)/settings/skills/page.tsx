@@ -1,9 +1,9 @@
 import { GoatSkillsSettingsRoute } from "@/components/GoatRoutes";
 import { currentGoatUser } from "@/lib/auth";
-import { listGoatSkills } from "@/lib/skills";
+import { listHeadlessSkills } from "@/lib/headless-knowledge-server";
 
 export default async function SkillsSettingsPage() {
   const context = await currentGoatUser();
-  const skills = await listGoatSkills(context.workspace.id);
+  const skills = await listHeadlessSkills();
   return <GoatSkillsSettingsRoute skills={skills} canEdit={context.role === "admin"} />;
 }

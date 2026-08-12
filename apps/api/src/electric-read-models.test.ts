@@ -192,6 +192,121 @@ describe("Electric read models", () => {
     ).rejects.toMatchObject({ status: 400, code: "invalid_request" });
   });
 
+  it("fixes Brain shape identity server-side and projects only canonical document fields", async () => {
+    let upstreamUrl = "";
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        upstreamUrl = String(input);
+        return Response.json([
+          {
+            headers: { operation: "insert" },
+            key: '"document_1"',
+            value: {
+              id: "document_1",
+              brain_id: "project-alpha",
+              folder_path: "projects",
+              title: null,
+              content: "---\nid: project-alpha\n---\n# Alpha",
+              body: "# Alpha",
+              timeline: "[]",
+              format: "markdown",
+              mime_type: "text/markdown",
+              original_file_name: null,
+              asset_size_bytes: null,
+              relations: "[]",
+              sources: "[]",
+              kind: "page",
+              entity_type: "project",
+              status: "draft",
+              aliases: "[]",
+              content_hash: "a".repeat(64),
+              size_bytes: "7",
+              created_by_workos_id: "user_1",
+              created_at: "2026-08-12 08:00:00+00",
+              updated_at: "2026-08-12 08:01:00+00",
+              brain_ref: "must-not-cross",
+              asset_storage_key: "private/blob",
+            },
+          },
+        ]);
+      }) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "brain-documents-v1",
+      brainId: "brain_1",
+      requestUrl: new URL(
+        "https://api.example.test/v1/read-models/brain-documents-v1?brainId=brain_1&table=goat.users&where=true",
+      ),
+    });
+
+    const requestedUrl = new URL(upstreamUrl);
+    expect(requestedUrl.searchParams.get("table")).toBe("goat.brain_documents");
+    expect(requestedUrl.searchParams.get("where")).toBe('"brain_ref" = $1');
+    expect(requestedUrl.searchParams.get("params[1]")).toBe("brain_1");
+    expect(requestedUrl.searchParams.get("columns")).not.toContain("asset_storage_key");
+    const body = await response.json();
+    expect(body).toEqual([
+      {
+        headers: { operation: "insert" },
+        key: '"document_1"',
+        value: {
+          id: "document_1",
+          brainId: "project-alpha",
+          folderPath: "projects",
+          path: "projects/project-alpha.md",
+          title: "project-alpha",
+          content: "---\nid: project-alpha\n---\n# Alpha",
+          body: "# Alpha",
+          timeline: [],
+          format: "markdown",
+          mimeType: "text/markdown",
+          originalFileName: null,
+          assetSizeBytes: null,
+          relations: [],
+          sources: [],
+          kind: "page",
+          type: "project",
+          status: "draft",
+          aliases: [],
+          contentHash: "a".repeat(64),
+          sizeBytes: 7,
+          createdByActorId: "user_1",
+          createdAt: "2026-08-12T08:00:00.000Z",
+          updatedAt: "2026-08-12T08:01:00.000Z",
+        },
+      },
+    ]);
+    expect(JSON.stringify(body)).not.toMatch(/brain_ref|asset_storage_key|workspace_id/iu);
+  });
+
+  it("scopes Wiki shapes to the authenticated Workspace and ignores caller shape parameters", async () => {
+    let upstreamUrl = "";
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        upstreamUrl = String(input);
+        return Response.json([]);
+      }) as typeof fetch,
+    });
+
+    await proxy.stream({
+      actor,
+      readModel: "wiki-pages-v1",
+      requestUrl: new URL(
+        "https://api.example.test/v1/read-models/wiki-pages-v1?table=goat.users&where=true&params[1]=workspace_other",
+      ),
+    });
+
+    const requestedUrl = new URL(upstreamUrl);
+    expect(requestedUrl.searchParams.get("table")).toBe("goat.wiki_pages");
+    expect(requestedUrl.searchParams.get("where")).toBe('"workspace_id" = $1');
+    expect(requestedUrl.searchParams.get("params[1]")).toBe("workspace_1");
+    expect(requestedUrl.searchParams.get("columns")).not.toContain("created_by_workos_id");
+  });
+
   it("scopes the Task shape to the server-owned Workspace and nests canonical outcome fields", async () => {
     let upstreamUrl = "";
     const proxy = new ElectricReadModelProxy({

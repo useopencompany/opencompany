@@ -8,6 +8,7 @@ import type {
   LegacyTaskHistoryDto,
   LegacyTaskHistoryEventDto,
   LegacyTaskHistoryMessageDto,
+  SkillDto,
 } from "@opencompany/protocol";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
@@ -67,19 +68,18 @@ import type { GoatChatSessionView } from "@/lib/chat-ui";
 import { getHeadlessWorkflows } from "@/lib/headless-automation-collections";
 import { createHeadlessWorkflow } from "@/lib/headless-automation-commands";
 import type { GoatWorkflowListItem } from "@/lib/headless-automation-types";
+import {
+  archiveHeadlessSkill,
+  createHeadlessSkill,
+  updateHeadlessSkill,
+} from "@/lib/headless-knowledge-commands";
 import { legacyTaskDtoToRow, taskReadModelToRow } from "@/lib/headless-task-collections";
 import { getHeadlessTask, getLegacyTaskCompatibilityHistory } from "@/lib/headless-task-commands";
 import type { GoatIntegrationState } from "@/lib/integration-state";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
-import {
-  archiveGoatSkillAction,
-  createGoatSkillAction,
-  importGoatSkillAction,
-  previewGoatSkillImportAction,
-  updateGoatSkillAction,
-} from "@/lib/skill-actions";
+import { importGoatSkillAction, previewGoatSkillImportAction } from "@/lib/skill-actions";
 import type { GoatSkillImportCandidate } from "@/lib/skill-import";
-import type { GoatSkillListItem, GoatSkillSource, GoatWorkspaceSkill } from "@/lib/skills";
+import type { GoatSkillListItem, GoatSkillSource } from "@/lib/skills";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
 import {
   updateGoatAutoModelRoutingAction,
@@ -1027,7 +1027,7 @@ export function GoatSkillsSettingsRoute({
           namePlaceholder="Draft a customer reply"
           descriptionPlaceholder="What this skill does"
           submitLabel="Create skill"
-          create={createGoatSkillAction}
+          create={createSkill}
           onClose={() => setCreating(false)}
           onCreated={(slug) => router.push(`/settings/skills/${encodeURIComponent(slug)}`)}
         />
@@ -1077,7 +1077,7 @@ export function GoatSkillEditorRoute({
   canEdit,
   source,
 }: {
-  skill: GoatWorkspaceSkill;
+  skill: Pick<SkillDto, "slug" | "name" | "description" | "instructions">;
   initialStatus: "draft" | "active";
   canEdit: boolean;
   source: GoatSkillSource | null;
@@ -1104,38 +1104,32 @@ export function GoatSkillEditorRoute({
   const save = () => {
     setError(null);
     startSaving(async () => {
-      const result = await updateGoatSkillAction({
-        slug: skill.id,
-        name,
-        description,
-        instructions,
-        status,
-      });
-      if (result.ok) {
+      try {
+        await updateHeadlessSkill(skill.slug, { name, description, instructions, status });
         setSaved(true);
         router.refresh();
-        return;
+      } catch (cause) {
+        setError(errorMessage(cause));
       }
-      setError(result.message);
     });
   };
 
   const archive = () => {
     setError(null);
     startArchiving(async () => {
-      const result = await archiveGoatSkillAction({ slug: skill.id });
-      if (result.ok) {
+      try {
+        await archiveHeadlessSkill(skill.slug);
         router.push("/settings/skills");
-        return;
+      } catch (cause) {
+        setError(errorMessage(cause));
       }
-      setError(result.message);
     });
   };
 
   return (
     <GoatSettingsContent
       title={name.trim() || "Untitled skill"}
-      description={`Attach this skill with @skill/${skill.id} in chat.`}
+      description={`Attach this skill with @skill/${skill.slug} in chat.`}
       backLink={{ href: "/settings/skills", label: "Skills" }}
     >
       {isReadOnly ? (
@@ -1531,6 +1525,19 @@ function NewItemDialog({
       </div>
     </div>
   );
+}
+
+async function createSkill(input: { name: string; description?: string }) {
+  try {
+    const skill = await createHeadlessSkill(input);
+    return { ok: true as const, slug: skill.slug };
+  } catch (cause) {
+    return { ok: false as const, message: errorMessage(cause) };
+  }
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Something went wrong.";
 }
 
 type ImportPreviewState = {

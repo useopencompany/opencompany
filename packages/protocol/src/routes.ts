@@ -1,19 +1,32 @@
 import { createRoute, OpenAPIHono, type RouteHandler, z } from "@hono/zod-openapi";
 import { RunStreamEventSchema } from "./events";
 import {
+  AddWikiTimelineEntryBodySchema,
   ArchiveVersionBodySchema,
   AttachmentUploadBodySchema,
   AttachmentUploadEnvelopeSchema,
+  BrainDocumentDeleteEnvelopeSchema,
+  BrainDocumentEnvelopeSchema,
+  BrainFolderEnvelopeSchema,
+  BrainFolderPathEnvelopeSchema,
+  BrainOverviewEnvelopeSchema,
+  BrainSnapshotEnvelopeSchema,
   CancelRunEnvelopeSchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
+  CreateBrainDocumentBodySchema,
+  CreateBrainFolderBodySchema,
   CreateMessageBodySchema,
   CreateMessageEnvelopeSchema,
+  CreateSkillBodySchema,
   CreateTaskBodySchema,
   CreateTaskEnvelopeSchema,
   CreateTaskScheduleBodySchema,
+  CreateWikiPageBodySchema,
   CreateWorkflowBodySchema,
   CursorSchema,
+  DeleteBrainFolderBodySchema,
+  DeleteWikiPageBodySchema,
   ErrorEnvelopeSchema,
   InvokeWorkflowBodySchema,
   LegacyTaskHistoryEnvelopeSchema,
@@ -21,10 +34,16 @@ import {
   MessagePageSchema,
   PresentationCursorSchema,
   ReadModelSchema,
+  RenameBrainDocumentBodySchema,
+  RenameBrainFolderBodySchema,
   ResolveApprovalBodySchema,
   ResolveApprovalEnvelopeSchema,
   ResourceIdSchema,
   RunEnvelopeSchema,
+  SkillArchiveEnvelopeSchema,
+  SkillCatalogEnvelopeSchema,
+  SkillEnvelopeSchema,
+  SkillListEnvelopeSchema,
   TaskEnvelopeSchema,
   TaskPageSchema,
   TaskScheduleArchiveEnvelopeSchema,
@@ -33,12 +52,19 @@ import {
   TaskSchedulePageSchema,
   TaskScheduleUpdateEnvelopeSchema,
   TaskSummaryEnvelopeSchema,
+  UpdateBrainDocumentBodySchema,
   UpdateConversationBodySchema,
   UpdateConversationEnvelopeSchema,
+  UpdateSkillBodySchema,
   UpdateTaskBodySchema,
   UpdateTaskEnvelopeSchema,
   UpdateTaskScheduleCommandSchema,
+  UpdateWikiPageBodySchema,
   UpdateWorkflowBodySchema,
+  WikiPageDeleteEnvelopeSchema,
+  WikiPageListEnvelopeSchema,
+  WikiPageMutationEnvelopeSchema,
+  WikiTimelineMutationEnvelopeSchema,
   WorkflowArchiveEnvelopeSchema,
   WorkflowEnvelopeSchema,
   WorkflowMutationEnvelopeSchema,
@@ -408,6 +434,362 @@ export const runTaskScheduleNowRoute = createRoute({
   },
 });
 
+export const getBrainSnapshotRoute = createRoute({
+  method: "get",
+  path: "/v1/brains/{brainId}",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: { params: z.object({ brainId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "An authorized Brain document and folder snapshot.",
+      content: { "application/json": { schema: BrainSnapshotEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getBrainOverviewRoute = createRoute({
+  method: "get",
+  path: "/v1/brains/{brainId}/overview",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: { params: z.object({ brainId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Aggregate activity for an authorized Brain.",
+      content: { "application/json": { schema: BrainOverviewEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createBrainDocumentRoute = createRoute({
+  method: "post",
+  path: "/v1/brains/{brainId}/documents",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema }),
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: CreateBrainDocumentBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Brain document created or replayed.",
+      content: { "application/json": { schema: BrainDocumentEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const updateBrainDocumentRoute = createRoute({
+  method: "patch",
+  path: "/v1/brains/{brainId}/documents/{documentId}",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema, documentId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: UpdateBrainDocumentBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Brain document body updated with optional hash concurrency.",
+      content: { "application/json": { schema: BrainDocumentEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const renameBrainDocumentRoute = createRoute({
+  method: "post",
+  path: "/v1/brains/{brainId}/documents/{documentId}/rename",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema, documentId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: RenameBrainDocumentBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Brain document title updated.",
+      content: { "application/json": { schema: BrainDocumentEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deleteBrainDocumentRoute = createRoute({
+  method: "post",
+  path: "/v1/brains/{brainId}/documents/{documentId}/delete",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: { params: z.object({ brainId: ResourceIdSchema, documentId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Brain document deleted.",
+      content: { "application/json": { schema: BrainDocumentDeleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createBrainFolderRoute = createRoute({
+  method: "post",
+  path: "/v1/brains/{brainId}/folders",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: CreateBrainFolderBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Brain folder created.",
+      content: { "application/json": { schema: BrainFolderEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const renameBrainFolderRoute = createRoute({
+  method: "post",
+  path: "/v1/brains/{brainId}/folders/rename",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: RenameBrainFolderBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Brain folder and descendants renamed.",
+      content: { "application/json": { schema: BrainFolderPathEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deleteBrainFolderRoute = createRoute({
+  method: "post",
+  path: "/v1/brains/{brainId}/folders/delete",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: DeleteBrainFolderBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Empty custom Brain folder deleted.",
+      content: { "application/json": { schema: BrainFolderPathEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listWikiPagesRoute = createRoute({
+  method: "get",
+  path: "/v1/wiki/pages",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "All pages in the active workspace Wiki.",
+      content: { "application/json": { schema: WikiPageListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createWikiPageRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/pages",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: { required: true, content: { "application/json": { schema: CreateWikiPageBodySchema } } },
+  },
+  responses: {
+    201: {
+      description: "Wiki page created or replayed.",
+      content: { "application/json": { schema: WikiPageMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const updateWikiPageRoute = createRoute({
+  method: "patch",
+  path: "/v1/wiki/pages/{slug}",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ slug: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: UpdateWikiPageBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Wiki page body and metadata updated.",
+      content: { "application/json": { schema: WikiPageMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deleteWikiPageRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/pages/{slug}/delete",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ slug: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: DeleteWikiPageBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Wiki page or subtree deleted.",
+      content: { "application/json": { schema: WikiPageDeleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const addWikiTimelineEntryRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/pages/{slug}/timeline",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ slug: ResourceIdSchema }),
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: AddWikiTimelineEntryBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Wiki timeline entry added or replayed.",
+      content: { "application/json": { schema: WikiTimelineMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listSkillsRoute = createRoute({
+  method: "get",
+  path: "/v1/skills",
+  tags: ["Skills"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Workspace skill settings list.",
+      content: { "application/json": { schema: SkillListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createSkillRoute = createRoute({
+  method: "post",
+  path: "/v1/skills",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: {
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: { required: true, content: { "application/json": { schema: CreateSkillBodySchema } } },
+  },
+  responses: {
+    201: {
+      description: "Skill draft created or replayed.",
+      content: { "application/json": { schema: SkillEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listSkillCatalogRoute = createRoute({
+  method: "get",
+  path: "/v1/skills/catalog",
+  tags: ["Skills"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Active skills available for mentions.",
+      content: { "application/json": { schema: SkillCatalogEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getSkillRoute = createRoute({
+  method: "get",
+  path: "/v1/skills/{slug}",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: { params: z.object({ slug: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Skill detail.",
+      content: { "application/json": { schema: SkillEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const updateSkillRoute = createRoute({
+  method: "patch",
+  path: "/v1/skills/{slug}",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ slug: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: UpdateSkillBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Hand-authored skill updated.",
+      content: { "application/json": { schema: SkillEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const archiveSkillRoute = createRoute({
+  method: "post",
+  path: "/v1/skills/{slug}/archive",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: { params: z.object({ slug: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Skill archived.",
+      content: { "application/json": { schema: SkillArchiveEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const listConversationsRoute = createRoute({
   method: "get",
   path: "/v1/conversations",
@@ -610,6 +992,7 @@ export const streamReadModelRoute = createRoute({
     params: z.object({ readModel: ReadModelSchema }),
     query: z.object({
       conversationId: ResourceIdSchema.optional(),
+      brainId: ResourceIdSchema.optional(),
       offset: z.string().optional(),
       handle: z.string().optional(),
       live: z.string().optional(),
@@ -649,6 +1032,26 @@ export type V1RouteHandlers = {
   updateTaskSchedule: RouteHandler<typeof updateTaskScheduleRoute>;
   archiveTaskSchedule: RouteHandler<typeof archiveTaskScheduleRoute>;
   runTaskScheduleNow: RouteHandler<typeof runTaskScheduleNowRoute>;
+  getBrainSnapshot: RouteHandler<typeof getBrainSnapshotRoute>;
+  getBrainOverview: RouteHandler<typeof getBrainOverviewRoute>;
+  createBrainDocument: RouteHandler<typeof createBrainDocumentRoute>;
+  updateBrainDocument: RouteHandler<typeof updateBrainDocumentRoute>;
+  renameBrainDocument: RouteHandler<typeof renameBrainDocumentRoute>;
+  deleteBrainDocument: RouteHandler<typeof deleteBrainDocumentRoute>;
+  createBrainFolder: RouteHandler<typeof createBrainFolderRoute>;
+  renameBrainFolder: RouteHandler<typeof renameBrainFolderRoute>;
+  deleteBrainFolder: RouteHandler<typeof deleteBrainFolderRoute>;
+  listWikiPages: RouteHandler<typeof listWikiPagesRoute>;
+  createWikiPage: RouteHandler<typeof createWikiPageRoute>;
+  updateWikiPage: RouteHandler<typeof updateWikiPageRoute>;
+  deleteWikiPage: RouteHandler<typeof deleteWikiPageRoute>;
+  addWikiTimelineEntry: RouteHandler<typeof addWikiTimelineEntryRoute>;
+  listSkills: RouteHandler<typeof listSkillsRoute>;
+  createSkill: RouteHandler<typeof createSkillRoute>;
+  listSkillCatalog: RouteHandler<typeof listSkillCatalogRoute>;
+  getSkill: RouteHandler<typeof getSkillRoute>;
+  updateSkill: RouteHandler<typeof updateSkillRoute>;
+  archiveSkill: RouteHandler<typeof archiveSkillRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
   updateConversation: RouteHandler<typeof updateConversationRoute>;
@@ -692,6 +1095,26 @@ export function createV1Router(
     .openapi(updateTaskScheduleRoute, handlers.updateTaskSchedule)
     .openapi(archiveTaskScheduleRoute, handlers.archiveTaskSchedule)
     .openapi(runTaskScheduleNowRoute, handlers.runTaskScheduleNow)
+    .openapi(getBrainSnapshotRoute, handlers.getBrainSnapshot)
+    .openapi(getBrainOverviewRoute, handlers.getBrainOverview)
+    .openapi(createBrainDocumentRoute, handlers.createBrainDocument)
+    .openapi(updateBrainDocumentRoute, handlers.updateBrainDocument)
+    .openapi(renameBrainDocumentRoute, handlers.renameBrainDocument)
+    .openapi(deleteBrainDocumentRoute, handlers.deleteBrainDocument)
+    .openapi(createBrainFolderRoute, handlers.createBrainFolder)
+    .openapi(renameBrainFolderRoute, handlers.renameBrainFolder)
+    .openapi(deleteBrainFolderRoute, handlers.deleteBrainFolder)
+    .openapi(listWikiPagesRoute, handlers.listWikiPages)
+    .openapi(createWikiPageRoute, handlers.createWikiPage)
+    .openapi(updateWikiPageRoute, handlers.updateWikiPage)
+    .openapi(deleteWikiPageRoute, handlers.deleteWikiPage)
+    .openapi(addWikiTimelineEntryRoute, handlers.addWikiTimelineEntry)
+    .openapi(listSkillsRoute, handlers.listSkills)
+    .openapi(createSkillRoute, handlers.createSkill)
+    .openapi(listSkillCatalogRoute, handlers.listSkillCatalog)
+    .openapi(getSkillRoute, handlers.getSkill)
+    .openapi(updateSkillRoute, handlers.updateSkill)
+    .openapi(archiveSkillRoute, handlers.archiveSkill)
     .openapi(listConversationsRoute, handlers.listConversations)
     .openapi(getConversationRoute, handlers.getConversation)
     .openapi(updateConversationRoute, handlers.updateConversation)
@@ -805,6 +1228,65 @@ const placeholderTaskSchedule = {
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
 };
+const placeholderBrainFolder = {
+  id: "brain_folder_contract",
+  path: "inbox",
+  source: "system" as const,
+  createdAt: placeholderTime,
+  updatedAt: placeholderTime,
+};
+const placeholderBrainDocument = {
+  id: "brain_document_contract",
+  brainId: "contract-note",
+  folderPath: "inbox",
+  path: "inbox/contract-note.md",
+  title: "Contract note",
+  content: "# Contract note",
+  body: "Contract note",
+  timeline: [],
+  format: "markdown" as const,
+  mimeType: "text/markdown",
+  originalFileName: null,
+  assetSizeBytes: null,
+  relations: [],
+  sources: [],
+  kind: "page" as const,
+  type: "note" as const,
+  status: "draft" as const,
+  aliases: [],
+  contentHash: "0".repeat(64),
+  sizeBytes: 15,
+  createdByActorId: "actor_contract",
+  createdAt: placeholderTime,
+  updatedAt: placeholderTime,
+};
+const placeholderWikiPage = {
+  id: "wiki_page_contract",
+  slug: "contract-page",
+  path: "contract-page",
+  title: "Contract page",
+  kind: "other" as const,
+  body: "",
+  contentHash: "0".repeat(64),
+  sizeBytes: 0,
+  format: "markdown",
+  mimeType: null,
+  originalFileName: null,
+  assetSizeBytes: null,
+  createdAt: placeholderTime,
+  updatedAt: placeholderTime,
+};
+const placeholderSkill = {
+  id: "skill_contract",
+  slug: "contract-skill",
+  name: "Contract skill",
+  description: "A contract placeholder.",
+  instructions: "Complete the contract placeholder.",
+  status: "active" as const,
+  source: null,
+  createdAt: placeholderTime,
+  updatedAt: placeholderTime,
+};
 
 function placeholderAutomationTaskEnvelope() {
   return {
@@ -903,6 +1385,92 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   runTaskScheduleNow: (c) => c.json(placeholderAutomationTaskEnvelope(), 202),
+  getBrainSnapshot: (c) =>
+    c.json(
+      { data: { folders: [placeholderBrainFolder], documents: [placeholderBrainDocument] }, meta },
+      200,
+    ),
+  getBrainOverview: (c) =>
+    c.json(
+      {
+        data: {
+          windowStartedAt: placeholderTime,
+          itemsAddedLast7Days: 0,
+          retrievalsLast7Days: 0,
+          activeSources: 0,
+        },
+        meta,
+      },
+      200,
+    ),
+  createBrainDocument: (c) => c.json({ data: placeholderBrainDocument, meta }, 201),
+  updateBrainDocument: (c) => c.json({ data: placeholderBrainDocument, meta }, 200),
+  renameBrainDocument: (c) => c.json({ data: placeholderBrainDocument, meta }, 200),
+  deleteBrainDocument: (c) =>
+    c.json({ data: { documentId: placeholderBrainDocument.id }, meta }, 200),
+  createBrainFolder: (c) => c.json({ data: placeholderBrainFolder, meta }, 201),
+  renameBrainFolder: (c) => c.json({ data: { path: placeholderBrainFolder.path }, meta }, 200),
+  deleteBrainFolder: (c) => c.json({ data: { path: placeholderBrainFolder.path }, meta }, 200),
+  listWikiPages: (c) => c.json({ data: [placeholderWikiPage], meta }, 200),
+  createWikiPage: (c) =>
+    c.json({ data: { page: placeholderWikiPage, transactionIds: [1] }, meta }, 201),
+  updateWikiPage: (c) =>
+    c.json({ data: { page: placeholderWikiPage, transactionIds: [1] }, meta }, 200),
+  deleteWikiPage: (c) =>
+    c.json({ data: { deletedPaths: [placeholderWikiPage.path], transactionIds: [1] }, meta }, 200),
+  addWikiTimelineEntry: (c) =>
+    c.json(
+      {
+        data: {
+          entry: {
+            id: "wiki_timeline_contract",
+            pageId: placeholderWikiPage.id,
+            at: placeholderTime,
+            text: "Contract entry",
+            createdAt: placeholderTime,
+          },
+          transactionId: 1,
+        },
+        meta,
+      },
+      201,
+    ),
+  listSkills: (c) =>
+    c.json(
+      {
+        data: [
+          {
+            id: placeholderSkill.id,
+            slug: placeholderSkill.slug,
+            name: placeholderSkill.name,
+            description: placeholderSkill.description,
+            status: placeholderSkill.status,
+            source: placeholderSkill.source,
+            updatedAt: placeholderSkill.updatedAt,
+          },
+        ],
+        meta,
+      },
+      200,
+    ),
+  createSkill: (c) => c.json({ data: placeholderSkill, meta }, 201),
+  listSkillCatalog: (c) =>
+    c.json(
+      {
+        data: [
+          {
+            id: placeholderSkill.slug,
+            name: placeholderSkill.name,
+            description: placeholderSkill.description,
+          },
+        ],
+        meta,
+      },
+      200,
+    ),
+  getSkill: (c) => c.json({ data: placeholderSkill, meta }, 200),
+  updateSkill: (c) => c.json({ data: placeholderSkill, meta }, 200),
+  archiveSkill: (c) => c.json({ data: { slug: placeholderSkill.slug }, meta }, 200),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   getConversation: (c) => c.json({ data: placeholderConversation, meta }, 200),
   updateConversation: (c) =>

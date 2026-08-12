@@ -5,7 +5,14 @@ import { createWorkOsApiAuthenticator } from "./auth";
 describe("API authentication", () => {
   it("verifies bearer claims and resolves the local actor by WorkOS organization", async () => {
     const execute = vi.fn(async (_query: SQL) => ({
-      rows: [{ workspaceId: "workspace_1", role: "admin", taskSpawningEnabled: true }],
+      rows: [
+        {
+          workspaceId: "workspace_1",
+          role: "admin",
+          taskSpawningEnabled: true,
+          wikiEnabled: true,
+        },
+      ],
     }));
     const authenticate = createWorkOsApiAuthenticator(execute, {
       audience: "api_resource",
@@ -34,6 +41,12 @@ describe("API authentication", () => {
           "chat:write",
           "task:read",
           "task:write",
+          "brain:read",
+          "skill:read",
+          "brain:write",
+          "skill:write",
+          "wiki:read",
+          "wiki:write",
           "workflow:read",
           "workflow:write",
           "schedule:read",
@@ -46,7 +59,14 @@ describe("API authentication", () => {
 
   it("withholds Workflow and schedule permissions while Tasks & Workflows is disabled", async () => {
     const execute = vi.fn(async (_query: SQL) => ({
-      rows: [{ workspaceId: "workspace_1", role: "member", taskSpawningEnabled: false }],
+      rows: [
+        {
+          workspaceId: "workspace_1",
+          role: "member",
+          taskSpawningEnabled: false,
+          wikiEnabled: false,
+        },
+      ],
     }));
     const authenticate = createWorkOsApiAuthenticator(execute, {
       audience: "api_resource",
@@ -68,12 +88,21 @@ describe("API authentication", () => {
       "chat:write",
       "task:read",
       "task:write",
+      "brain:read",
+      "skill:read",
     ]);
   });
 
   it("refreshes an expired sealed browser session and returns the rotated cookie", async () => {
     const execute = vi.fn(async () => ({
-      rows: [{ workspaceId: "workspace_1", role: "member", taskSpawningEnabled: true }],
+      rows: [
+        {
+          workspaceId: "workspace_1",
+          role: "member",
+          taskSpawningEnabled: true,
+          wikiEnabled: false,
+        },
+      ],
     }));
     const authenticate = createWorkOsApiAuthenticator(execute, {
       cookieName: "wos-session",

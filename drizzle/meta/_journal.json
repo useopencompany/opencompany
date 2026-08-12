@@ -1457,6 +1457,13 @@
       "when": 1786518930583,
       "tag": "0207_goat_headless_workflow_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 208,
+      "version": "7",
+      "when": 1786531200000,
+      "tag": "0208_goat_headless_knowledge_idempotency",
+      "breakpoints": true
     }
   ]
 }

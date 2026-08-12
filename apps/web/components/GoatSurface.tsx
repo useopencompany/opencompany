@@ -190,6 +190,7 @@ import {
   hasChatAttachmentTransportMismatch,
 } from "@/lib/headless-chat-feature";
 import { HeadlessChatTransport, startHeadlessBackgroundChat } from "@/lib/headless-chat-transport";
+import { listHeadlessSkillCatalog } from "@/lib/headless-knowledge-commands";
 import { getHeadlessTasks, taskReadModelToRow } from "@/lib/headless-task-collections";
 import {
   archiveHeadlessTask,
@@ -5193,10 +5194,10 @@ function isGoatSkillCatalogItem(value: unknown): value is GoatSkillCatalogItem {
 }
 
 async function fetchGoatBrainSkillCatalog(signal?: AbortSignal) {
-  const response = await fetch("/api/skills", signal ? { signal } : {});
-  if (!response.ok) throw new Error(`Skill catalog request failed (${response.status})`);
-  const payload = (await response.json()) as { skills?: unknown };
-  return Array.isArray(payload.skills) ? payload.skills.filter(isGoatSkillCatalogItem) : [];
+  const skills = await listHeadlessSkillCatalog({
+    ...(signal ? { fetch: (input, init) => fetch(input, { ...init, signal }) } : {}),
+  });
+  return skills.filter(isGoatSkillCatalogItem);
 }
 
 async function fetchGoatBrainWorkflowCatalog(signal?: AbortSignal) {

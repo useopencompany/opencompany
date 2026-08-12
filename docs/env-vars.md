@@ -26,8 +26,8 @@ them.
 release variables. Important contracts include:
 
 - Web: database, WorkOS, canonical URL, shared cookie domain, Vercel AI Gateway, Blob, runner
-  token/URL, Electric, managed capabilities, Stripe, X OAuth, cron, Goat PostHog, server fallback
-  API origin, public first-party API origin, and canonical Chat flag values.
+  token/URL, Electric, managed capabilities, Stripe, X OAuth, cron, Goat PostHog, server and public
+  first-party API origins, and canonical Chat flag values.
 - API: direct database, WorkOS session/OAuth and shared cookie domain, the credentialed browser
   origin allowlist, Vercel AI Gateway for canonical Auto routing, Blob, Electric, and Redis values.
 - Runner: database, internal/stream tokens, Goat origin, allowed origins, integration encryption,
@@ -35,11 +35,13 @@ release variables. Important contracts include:
 - Release: production DB URL, Vercel/Render credentials and project/service IDs, Goat/API/runner
   URLs.
 
-The canonical web Chat cohort calls the non-secret `NEXT_PUBLIC_GOAT_API_ORIGIN` directly and uses
-server-only `GOAT_API_ORIGIN` only for same-origin fallback routing. Configure both origins, the
-shared `WORKOS_COOKIE_DOMAIN`, and API `API_BROWSER_ORIGINS` while the flag is `false`; pass the
-disabled smoke gate, then set `NEXT_PUBLIC_GOAT_HEADLESS_CHAT=true` and redeploy web as documented in
-[Headless Chat operations](./headless-chat-operations.md).
+Canonical browser clients call the non-secret `NEXT_PUBLIC_GOAT_API_ORIGIN` directly for commands
+and authorized read models. RSC loaders and compatibility routes use the server-only
+`GOAT_API_ORIGIN`. Configure both origins, the shared `WORKOS_COOKIE_DOMAIN`, and API
+`API_BROWSER_ORIGINS`. `NEXT_PUBLIC_GOAT_HEADLESS_CHAT` controls only the Chat presentation rollout;
+pass its disabled smoke gate, then enable it and redeploy web as documented in
+[Headless Chat operations](./headless-chat-operations.md). Workflow, schedule, Brain, Wiki, and Skill
+API clients are not controlled by that Chat flag.
 
 `REDIS_URL` is optional for correctness but required by the production activation preflight. When
 configured for both `apps/api` and `apps/runner`, it

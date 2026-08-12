@@ -1,10 +1,15 @@
 import { serve } from "@hono/node-server";
 import { RedisChatPresentationStream } from "@opencompany/chat-presentation";
-import { ChatApplicationService, TaskApplicationService } from "@opencompany/core";
+import {
+  ChatApplicationService,
+  KnowledgeApplicationService,
+  TaskApplicationService,
+} from "@opencompany/core";
 import {
   PostgresChatAttachmentRepository,
   PostgresChatRepository,
 } from "@opencompany/db/chat-repository";
+import { PostgresKnowledgeRepository } from "@opencompany/db/knowledge-repository";
 import { createPooledDb } from "@opencompany/db/pool";
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
 import { resolvePersistedAutoModelRouting } from "@opencompany/goat-agent/application/persisted-auto-model-routing";
@@ -56,6 +61,7 @@ const automations = createAutomationServices({
     ? { gatewayApiKey: process.env.VERCEL_AI_GATEWAY_API_KEY.trim() }
     : {}),
 });
+const knowledge = new KnowledgeApplicationService(new PostgresKnowledgeRepository(database.db));
 const notifier = new PostgresRunEventNotifier(database.pool);
 const presentation = createPresentationStream();
 const readModels = createElectricReadModels();
@@ -64,6 +70,7 @@ const app = createApiApp({
   tasks,
   workflows: automations.workflows,
   schedules: automations.schedules,
+  knowledge,
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),
   authenticate: createWorkOsApiAuthenticator(execute),
   browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),

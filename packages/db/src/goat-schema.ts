@@ -61,6 +61,11 @@ export type GoatTaskStatus = "queued" | "running" | "succeeded" | "failed" | "ca
 export type GoatWorkflowStatus = "draft" | "active";
 export type GoatWorkflowTrigger = "manual" | "slack" | "linear" | "schedule";
 export type GoatAutomationCommandOperation = "workflow.create" | "task_schedule.create";
+export type GoatKnowledgeCommandOperation =
+  | "brain_document.create"
+  | "wiki_page.create"
+  | "wiki_timeline.create"
+  | "skill.create";
 export type GoatWorkflowStep = {
   id: string;
   title: string;
@@ -4168,6 +4173,44 @@ export const goatAutomationCommandIdempotency = goat.table(
     operationCheck: check(
       "goat_automation_command_idempotency_operation_check",
       sql`${table.operation} IN ('workflow.create', 'task_schedule.create')`,
+    ),
+  }),
+);
+
+export const goatKnowledgeCommandIdempotency = goat.table(
+  "knowledge_command_idempotency",
+  {
+    commandId: text("command_id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    operation: text("operation").$type<GoatKnowledgeCommandOperation>().notNull(),
+    resourceId: text("resource_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    touchedAt: timestamp("touched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    actorKeyIdx: uniqueIndex("goat_knowledge_command_idempotency_actor_key_idx").on(
+      table.userWorkosId,
+      table.workspaceId,
+      table.idempotencyKey,
+    ),
+    requestHashCheck: check(
+      "goat_knowledge_command_idempotency_request_hash_check",
+      sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    keyLengthCheck: check(
+      "goat_knowledge_command_idempotency_key_length_check",
+      sql`length(${table.idempotencyKey}) BETWEEN 1 AND 200`,
+    ),
+    operationCheck: check(
+      "goat_knowledge_command_idempotency_operation_check",
+      sql`${table.operation} IN ('brain_document.create', 'wiki_page.create', 'wiki_timeline.create', 'skill.create')`,
     ),
   }),
 );
