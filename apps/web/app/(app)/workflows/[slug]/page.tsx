@@ -2,8 +2,8 @@ import Link from "next/link";
 import { TasksWorkflowsDisabledRoute } from "@/components/GoatRoutes";
 import { GoatWorkflowEditor } from "@/components/GoatWorkflowEditor";
 import { currentGoatUser } from "@/lib/auth";
+import { getHeadlessWorkflow } from "@/lib/headless-automation-server";
 import { listGoatSkillCatalog } from "@/lib/skills";
-import { getGoatWorkflow } from "@/lib/workflows";
 
 type WorkflowEditorPageProps = {
   params: Promise<{ slug: string }>;
@@ -17,7 +17,7 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
   }
 
   const [workflow, skillCatalog] = await Promise.all([
-    getGoatWorkflow(context.workspace.id, slug),
+    getHeadlessWorkflow(slug),
     listGoatSkillCatalog(context.workspace.id),
   ]);
 

@@ -63,6 +63,7 @@ const historyMock = vi.hoisted(() => ({
 }));
 
 const attachmentUploadMock = vi.hoisted(() => ({
+  canonicalUpload: vi.fn(),
   upload: vi.fn(),
 }));
 
@@ -78,6 +79,36 @@ const taskCommandMocks = vi.hoisted(() => ({
     },
     transactionId: "1",
   })),
+}));
+
+const automationCommandMocks = vi.hoisted(() => ({
+  archiveSchedule: vi.fn(async () => ({})),
+  invokeWorkflow: vi.fn(async () => ({
+    task: {
+      id: "goat_task_workflow_1",
+      displayId: "TASK-8",
+      name: "Workflow task",
+      conversationId: "goat_chat_workflow_1",
+    },
+    transactionId: "1",
+  })),
+  listWorkflowCatalog: vi.fn(async (options?: { fetch?: typeof globalThis.fetch }) => {
+    const response = await (options?.fetch ?? globalThis.fetch)("/api/workflows");
+    const payload = (await response.json()) as {
+      workflows?: Array<{ id: string; name: string; description: string }>;
+    };
+    return payload.workflows ?? [];
+  }),
+  runSchedule: vi.fn(async () => ({
+    task: {
+      id: "goat_task_1",
+      displayId: "TASK-1",
+      name: "Recurring Task",
+      conversationId: "goat_chat_task_1",
+    },
+    transactionId: "1",
+  })),
+  updateSchedule: vi.fn(async () => ({})),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -109,6 +140,10 @@ vi.mock("@/lib/chat-attachment-upload", () => ({
   uploadGoatChatAttachmentBlob: attachmentUploadMock.upload,
 }));
 
+vi.mock("@/lib/headless-chat-attachment-upload", () => ({
+  uploadHeadlessChatAttachment: attachmentUploadMock.canonicalUpload,
+}));
+
 // This suite characterizes the rollback adapter and shared UI behavior. Canonical transport and
 // Auto preflight have focused tests in the headless Chat modules.
 vi.mock("@/lib/headless-chat-feature", async (importOriginal) => ({
@@ -122,14 +157,12 @@ vi.mock("@/lib/headless-task-commands", () => ({
   createHeadlessTask: taskCommandMocks.create,
 }));
 
-vi.mock("@/lib/task-schedules", () => ({
-  deleteGoatTaskScheduleAction: vi.fn(async () => ({ ok: true })),
-  runGoatTaskScheduleNowAction: vi.fn(async () => ({
-    ok: true,
-    task: { id: "goat_task_1", displayId: "TASK-1" },
-  })),
-  setGoatTaskScheduleEnabledAction: vi.fn(async () => ({ ok: true })),
-  updateGoatTaskScheduleAction: vi.fn(async () => ({ ok: true })),
+vi.mock("@/lib/headless-automation-commands", () => ({
+  archiveHeadlessTaskSchedule: automationCommandMocks.archiveSchedule,
+  invokeHeadlessWorkflow: automationCommandMocks.invokeWorkflow,
+  listHeadlessWorkflowCatalog: automationCommandMocks.listWorkflowCatalog,
+  runHeadlessTaskScheduleNow: automationCommandMocks.runSchedule,
+  updateHeadlessTaskSchedule: automationCommandMocks.updateSchedule,
 }));
 
 vi.mock("@/lib/user-preferences", () => ({
@@ -354,6 +387,13 @@ describe("GoatSurface chat streaming UI", () => {
     taskCommandMocks.cancel.mockReset();
     taskCommandMocks.cancel.mockResolvedValue({});
     taskCommandMocks.create.mockClear();
+    automationCommandMocks.invokeWorkflow.mockClear();
+    automationCommandMocks.listWorkflowCatalog.mockClear();
+    automationCommandMocks.archiveSchedule.mockClear();
+    automationCommandMocks.runSchedule.mockClear();
+    automationCommandMocks.updateSchedule.mockClear();
+    attachmentUploadMock.canonicalUpload.mockReset();
+    attachmentUploadMock.canonicalUpload.mockResolvedValue({ id: "attachment_1" });
     attachmentUploadMock.upload.mockReset();
     attachmentUploadMock.upload.mockResolvedValue({
       blobUrl: "https://blob.test/goat-chat/user_1/brief.pdf",
@@ -626,20 +666,8 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.click(submit);
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/workflows",
-        expect.objectContaining({ method: "POST" }),
-      ),
-    );
-    const [, request] = fetchMock.mock.calls.find(
-      ([url, init]) => String(url) === "/api/workflows" && init?.method === "POST",
-    )!;
-    expect(JSON.parse(String(request?.body))).toEqual({
-      workflow: {
-        kind: "workflow",
-        id: "ship-feature",
-      },
+    await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
+    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith("ship-feature", {
       description: "#ship-feature fix the composer send button",
     });
     expect(chatMock.stop).not.toHaveBeenCalled();
@@ -2582,22 +2610,10 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(await screen.findByRole("option", { name: /Smooth shadow ring/i }));
     await user.type(textarea, "{Enter}");
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/workflows",
-        expect.objectContaining({ method: "POST" }),
-      ),
-    );
-    const [, request] = fetchMock.mock.calls.find(
-      ([url, init]) => String(url) === "/api/workflows" && init?.method === "POST",
-    )!;
-    expect(JSON.parse(String(request?.body))).toEqual({
-      workflow: {
-        kind: "workflow",
-        id: "morning-test",
-      },
+    await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
+    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith("morning-test", {
       description: "#morning-test run today's checks with @skill/smooth-shadow-ring",
-      mentions: [{ kind: "skill", id: "smooth-shadow-ring" }],
+      skillIds: ["smooth-shadow-ring"],
     });
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
@@ -2677,31 +2693,13 @@ describe("GoatSurface chat streaming UI", () => {
     await user.type(textarea, "summarize this report");
     await user.click(screen.getByRole("button", { name: "Start task" }));
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/workflows",
-        expect.objectContaining({ method: "POST" }),
-      ),
-    );
-    const [, request] = fetchMock.mock.calls.find(
-      ([url, init]) => String(url) === "/api/workflows" && init?.method === "POST",
-    )!;
-    expect(JSON.parse(String(request?.body))).toEqual({
-      workflow: {
-        kind: "workflow",
-        id: "morning-test",
-      },
+    await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
+    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith("morning-test", {
       description: "#morning-test summarize this report",
-      attachments: [
-        expect.objectContaining({
-          kind: "docx",
-          mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          filename: "report.docx",
-          blobUrl: "https://blob.test/goat-chat/user_1/report.docx",
-          blobPathname: "goat-chat/user_1/report.docx",
-        }),
-      ],
+      attachmentIds: ["attachment_1"],
     });
+    expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalled();
+    expect(attachmentUploadMock.upload).toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByText("report.docx")).toBeNull());
@@ -2768,20 +2766,8 @@ describe("GoatSurface chat streaming UI", () => {
     await user.type(textarea, "run today's checks");
     await user.click(screen.getByRole("button", { name: "Start task" }));
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/workflows",
-        expect.objectContaining({ method: "POST" }),
-      ),
-    );
-    const [, request] = fetchMock.mock.calls.find(
-      ([url, init]) => String(url) === "/api/workflows" && init?.method === "POST",
-    )!;
-    expect(JSON.parse(String(request?.body))).toEqual({
-      workflow: {
-        kind: "workflow",
-        id: "morning-test",
-      },
+    await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
+    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith("morning-test", {
       description: "#morning-test run today's checks",
     });
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/codex-chat/messages")).toBe(
@@ -3220,6 +3206,7 @@ describe("GoatSurface chat streaming UI", () => {
             timezone: "Europe/Berlin",
             prompt: "Prepare the weekly update",
             enabled: true,
+            version: 1,
             lastRunAt: null,
             nextRunAt: "2026-07-20T07:00:00.000Z",
             createdAt: currentTimestamp(),
@@ -3273,6 +3260,45 @@ describe("GoatSurface chat streaming UI", () => {
         .map((heading) => heading.textContent)
         .filter((heading) => ["Tasks", "Chats", "Routines"].includes(heading ?? "")),
     ).toEqual(["Tasks", "Chats", "Routines"]);
+  });
+
+  it("updates a recurring Task through the versioned schedule command", async () => {
+    const user = userEvent.setup();
+    render(
+      <GoatSurface
+        taskSpawningEnabled
+        workspaceId="workspace_1"
+        tasks={[]}
+        schedules={[
+          {
+            id: "schedule_1",
+            name: "Monday update",
+            sourceDescription: "Every Monday",
+            cron: "0 9 * * 1",
+            timezone: "Europe/Berlin",
+            prompt: "Prepare the weekly update",
+            enabled: true,
+            version: 4,
+            lastRunAt: null,
+            nextRunAt: "2026-07-20T07:00:00.000Z",
+            createdAt: currentTimestamp(),
+            updatedAt: currentTimestamp(),
+          },
+        ]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Pause Monday update" }));
+
+    await waitFor(() =>
+      expect(automationCommandMocks.updateSchedule).toHaveBeenCalledWith(
+        "schedule_1",
+        { expectedVersion: 4, enabled: false },
+        { scopeKey: "workspace_1" },
+      ),
+    );
   });
 
   it("shows Codex chats in Chats when background task spawning is disabled", () => {
@@ -3875,20 +3901,8 @@ describe("GoatSurface chat streaming UI", () => {
     await user.type(quickComposerInput, "run today's checks");
     await user.click(within(dialog).getByRole("button", { name: "Start task" }));
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/workflows",
-        expect.objectContaining({ method: "POST" }),
-      ),
-    );
-    const [, request] = fetchMock.mock.calls.find(
-      ([url, init]) => String(url) === "/api/workflows" && init?.method === "POST",
-    )!;
-    expect(JSON.parse(String(request?.body))).toEqual({
-      workflow: {
-        kind: "workflow",
-        id: "morning-test",
-      },
+    await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
+    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith("morning-test", {
       description: "#morning-test run today's checks",
     });
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/codex-chat/messages")).toBe(

@@ -7,12 +7,16 @@ export function isHeadlessChatEnabled(value = process.env.NEXT_PUBLIC_GOAT_HEADL
 export const HEADLESS_CHAT_ENABLED = isHeadlessChatEnabled();
 
 export function hasChatAttachmentTransportMismatch(
-  attachments: readonly { id?: string; blobUrl?: string; blobPathname?: string }[],
+  attachments: readonly {
+    id?: string;
+    blobUrl?: string;
+    blobPathname?: string;
+    canonical?: boolean;
+  }[],
   canonicalTarget: boolean,
 ) {
   return attachments.some((attachment) => {
-    const hasLegacyLocator = Boolean(attachment.blobUrl || attachment.blobPathname);
     const hasCompleteLegacyLocator = Boolean(attachment.blobUrl && attachment.blobPathname);
-    return canonicalTarget ? hasLegacyLocator : !hasCompleteLegacyLocator;
+    return canonicalTarget ? attachment.canonical !== true : !hasCompleteLegacyLocator;
   });
 }

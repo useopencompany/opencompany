@@ -6,6 +6,7 @@ import {
   ChatReadModelSchema,
   CreateMessageBodySchema,
   CreateTaskBodySchema,
+  InvokeWorkflowBodySchema,
   MessageReadModelSchema,
   ReadModelSchema,
   ResolveApprovalBodySchema,
@@ -118,6 +119,29 @@ describe("headless protocol", () => {
         ...command,
         workspaceId: "workspace_1",
         scheduleHarnessSpec: { secret: true },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts opaque skill references on Workflow invocation without persistence fields", () => {
+    expect(
+      InvokeWorkflowBodySchema.safeParse({
+        description: "Focus on competitors.",
+        attachmentIds: ["attachment_1"],
+        skillIds: ["market-research"],
+      }).success,
+    ).toBe(true);
+    expect(
+      InvokeWorkflowBodySchema.safeParse({
+        description: "Focus on competitors.",
+        skillIds: ["market-research"],
+        workspaceId: "workspace_1",
+      }).success,
+    ).toBe(false);
+    expect(
+      InvokeWorkflowBodySchema.safeParse({
+        description: "Focus on competitors.",
+        skillIds: Array.from({ length: 17 }, (_, index) => `skill-${index + 1}`),
       }).success,
     ).toBe(false);
   });

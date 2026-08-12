@@ -9,6 +9,7 @@ import {
   GoatPreferencesSettingsRoute,
   GoatSkillEditorRoute,
   GoatSkillsSettingsRoute,
+  GoatWorkflowsRoute,
 } from "./GoatRoutes";
 
 const routerMock = vi.hoisted(() => ({
@@ -41,9 +42,13 @@ const userPreferencesMock = vi.hoisted(() => ({
 }));
 
 const workflowActionsMock = vi.hoisted(() => ({
-  updateGoatWorkflowAction: vi.fn(async () => ({ ok: true, slug: "test-workflow" })),
-  archiveGoatWorkflowAction: vi.fn(async () => ({ ok: true, slug: "test-workflow" })),
-  createGoatWorkflowAction: vi.fn(async () => ({ ok: true, slug: "test-workflow" })),
+  createHeadlessWorkflow: vi.fn(async () => ({ slug: "test-workflow" })),
+}));
+
+const workflowLiveQueryMock = vi.hoisted(() => ({
+  data: undefined as unknown[] | undefined,
+  hydrated: true,
+  isLoading: true,
 }));
 
 const skillActionsMock = vi.hoisted(() => ({
@@ -75,6 +80,18 @@ const themeMock = vi.hoisted(() => ({
 
 vi.mock("next/navigation", () => ({
   useRouter: () => routerMock,
+}));
+
+vi.mock("@tanstack/react-db", () => ({
+  useLiveQuery: vi.fn(() => workflowLiveQueryMock),
+}));
+
+vi.mock("@/components/useHydrated", () => ({
+  useHydrated: () => workflowLiveQueryMock.hydrated,
+}));
+
+vi.mock("@/lib/headless-automation-collections", () => ({
+  getHeadlessWorkflows: vi.fn(() => ({})),
 }));
 
 vi.mock("@/components/GoatBrainView", () => ({
@@ -132,10 +149,8 @@ vi.mock("@/lib/user-preferences", () => ({
   updateGoatWikiEnabledAction: userPreferencesMock.updateGoatWikiEnabledAction,
 }));
 
-vi.mock("@/lib/workflow-actions", () => ({
-  updateGoatWorkflowAction: workflowActionsMock.updateGoatWorkflowAction,
-  archiveGoatWorkflowAction: workflowActionsMock.archiveGoatWorkflowAction,
-  createGoatWorkflowAction: workflowActionsMock.createGoatWorkflowAction,
+vi.mock("@/lib/headless-automation-commands", () => ({
+  createHeadlessWorkflow: workflowActionsMock.createHeadlessWorkflow,
 }));
 
 vi.mock("@/lib/skill-actions", () => ({
@@ -153,6 +168,57 @@ vi.mock("@/components/ThemeProvider", () => ({
     setTheme: themeMock.setTheme,
   }),
 }));
+
+describe("GoatWorkflowsRoute", () => {
+  beforeEach(() => {
+    workflowLiveQueryMock.data = undefined;
+    workflowLiveQueryMock.hydrated = true;
+    workflowLiveQueryMock.isLoading = true;
+    workflowActionsMock.createHeadlessWorkflow.mockClear();
+    routerMock.push.mockClear();
+  });
+
+  it("uses the server snapshot only while the canonical Workflow projection loads", () => {
+    workflowLiveQueryMock.hydrated = false;
+    workflowLiveQueryMock.isLoading = false;
+    const props = {
+      workflows: [workflowListItem()],
+      workspaceId: "workspace_1",
+      canEdit: true,
+    };
+    const view = render(<GoatWorkflowsRoute {...props} />);
+
+    expect(screen.getByText("Weekly research")).toBeInTheDocument();
+
+    workflowLiveQueryMock.hydrated = true;
+    workflowLiveQueryMock.data = [];
+    workflowLiveQueryMock.isLoading = false;
+    view.rerender(<GoatWorkflowsRoute {...props} />);
+
+    expect(screen.queryByText("Weekly research")).not.toBeInTheDocument();
+    expect(screen.getByText("No workflows yet")).toBeInTheDocument();
+  });
+
+  it("creates through the typed Workflow command", async () => {
+    workflowLiveQueryMock.data = [];
+    workflowLiveQueryMock.isLoading = false;
+    const user = userEvent.setup();
+    render(<GoatWorkflowsRoute workflows={[]} workspaceId="workspace_1" canEdit />);
+
+    await user.click(screen.getByRole("button", { name: "New workflow" }));
+    await user.type(screen.getByPlaceholderText("Weekly investor update"), "Test workflow");
+    await user.type(screen.getByPlaceholderText("What this workflow does"), "Run the test");
+    await user.click(screen.getByRole("button", { name: "Create workflow" }));
+
+    await waitFor(() =>
+      expect(workflowActionsMock.createHeadlessWorkflow).toHaveBeenCalledWith({
+        name: "Test workflow",
+        description: "Run the test",
+      }),
+    );
+    expect(routerMock.push).toHaveBeenCalledWith("/workflows/test-workflow");
+  });
+});
 
 describe("GoatSettingsRoute", () => {
   beforeEach(() => {
@@ -481,3 +547,19 @@ const brainSnapshot = {
     },
   ],
 };
+
+function workflowListItem() {
+  return {
+    id: "workflow_1",
+    slug: "weekly-research",
+    name: "Weekly research",
+    description: "Track changes",
+    steps: [],
+    status: "draft" as const,
+    trigger: { type: "manual" as const },
+    version: 1,
+    archivedAt: null,
+    createdAt: "2026-08-11T09:00:00.000Z",
+    updatedAt: "2026-08-11T09:00:00.000Z",
+  };
+}

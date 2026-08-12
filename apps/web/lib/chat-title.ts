@@ -1,16 +1,13 @@
-import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import { goatChatMessages, goatChatSessions } from "@opencompany/db/goat-schema";
 import {
-  createGoatGatewayAttribution,
-  goatGatewayProviderOptions,
-} from "@opencompany/goat-observability";
-import { createGateway, generateText } from "ai";
+  generateGoatChatTitle,
+  goatChatTitleFromPrompt,
+  sanitizeGoatChatTitle,
+} from "@opencompany/goat-agent/chat-title";
 import { and, asc, eq, isNull } from "drizzle-orm";
 
-const TITLE_MODEL = "openai/gpt-5.4-mini";
-const MAX_TITLE_LENGTH = 60;
-const MAX_PROMPT_CHARS = 4000;
+export { generateGoatChatTitle, sanitizeGoatChatTitle };
 
 type GoatTitleGenerationResult =
   | { ok: true; title: string }
@@ -44,7 +41,7 @@ export async function generateGoatChatTitleForMessage(input: {
     return { ok: false, skipped: "message_not_first_user_message" };
   }
 
-  const fallbackTitle = titleFromPrompt(firstUserMessage.content);
+  const fallbackTitle = goatChatTitleFromPrompt(firstUserMessage.content);
   let title: string;
   try {
     title = await generateGoatChatTitle({
@@ -66,60 +63,6 @@ export async function generateGoatChatTitleForMessage(input: {
 
   if (!updated) return { ok: false, skipped: "session_not_found" };
   return { ok: true, title };
-}
-
-export async function generateGoatChatTitle(input: {
-  content: string;
-  fallbackTitle: string;
-  apiKey: string;
-  userWorkosId?: string | null;
-  chatSessionId?: string | null;
-}) {
-  const gateway = createGateway({ apiKey: input.apiKey });
-  const attribution = createGoatGatewayAttribution({
-    userWorkosId: input.userWorkosId,
-    feature: "chat-title",
-    ...(input.chatSessionId ? { chatSessionId: input.chatSessionId } : {}),
-  });
-  const result = await generateText({
-    model: gateway(TITLE_MODEL),
-    system:
-      "You write compact chat titles. Return only the title, with no quotes and no punctuation at the end.",
-    prompt: `Write a very short, specific title for this first user message. Keep it under ${MAX_TITLE_LENGTH} characters.\n\nMessage:\n${input.content.slice(
-      0,
-      MAX_PROMPT_CHARS,
-    )}`,
-    maxOutputTokens: 20,
-    temperature: 0,
-    providerOptions: goatGatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
-  });
-
-  return sanitizeGoatChatTitle(result.text, input.fallbackTitle);
-}
-
-export function sanitizeGoatChatTitle(title: string, fallbackTitle: string) {
-  const normalized = title
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^["'`]+|["'`]+$/g, "")
-    .trim()
-    .replace(/[.!?;:,-]+$/g, "")
-    .trim();
-
-  return truncateTitle(normalized || fallbackTitle || "New chat");
-}
-
-function titleFromPrompt(content: string) {
-  const firstLine = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find(Boolean);
-  return truncateTitle(firstLine ?? "New chat");
-}
-
-function truncateTitle(title: string) {
-  if (title.length <= MAX_TITLE_LENGTH) return title;
-  return `${title.slice(0, MAX_TITLE_LENGTH - 3).trimEnd()}...`;
 }
 
 async function loadFirstGoatUserMessage(sessionId: string) {

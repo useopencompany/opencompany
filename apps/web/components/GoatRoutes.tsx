@@ -9,6 +9,7 @@ import type {
   LegacyTaskHistoryEventDto,
   LegacyTaskHistoryMessageDto,
 } from "@opencompany/protocol";
+import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
@@ -59,9 +60,13 @@ import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPane
 import { StripeIntegrationSetup } from "@/components/StripeIntegrationSetup";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
+import { useHydrated } from "@/components/useHydrated";
 import type { GoatBrainSnapshot } from "@/lib/brain";
 import type { GoatBrainOverviewStats } from "@/lib/brain-overview";
 import type { GoatChatSessionView } from "@/lib/chat-ui";
+import { getHeadlessWorkflows } from "@/lib/headless-automation-collections";
+import { createHeadlessWorkflow } from "@/lib/headless-automation-commands";
+import type { GoatWorkflowListItem } from "@/lib/headless-automation-types";
 import { legacyTaskDtoToRow, taskReadModelToRow } from "@/lib/headless-task-collections";
 import { getHeadlessTask, getLegacyTaskCompatibilityHistory } from "@/lib/headless-task-commands";
 import type { GoatIntegrationState } from "@/lib/integration-state";
@@ -82,8 +87,6 @@ import {
   updateGoatTaskSpawningAction,
   updateGoatWikiEnabledAction,
 } from "@/lib/user-preferences";
-import { createGoatWorkflowAction } from "@/lib/workflow-actions";
-import type { GoatWorkflowListItem } from "@/lib/workflows";
 
 export function GoatHomeRoute({
   chatId,
@@ -832,13 +835,31 @@ function getInitials(firstName: string | null, lastName: string | null, email: s
 
 export function GoatWorkflowsRoute({
   workflows,
+  workspaceId,
   canEdit,
 }: {
   workflows: GoatWorkflowListItem[];
+  workspaceId: string;
   canEdit: boolean;
 }) {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
+  const hydrated = useHydrated();
+  const workflowCollection = useMemo(
+    () => (hydrated ? getHeadlessWorkflows(workspaceId) : null),
+    [hydrated, workspaceId],
+  );
+  const { data: workflowRows, isLoading: workflowsLoading } = useLiveQuery(
+    (q) => (workflowCollection ? q.from({ workflow: workflowCollection }) : undefined),
+    [workflowCollection],
+  );
+  const visibleWorkflows = useMemo(
+    () =>
+      ((!hydrated || workflowsLoading ? workflows : (workflowRows ?? [])) as GoatWorkflowListItem[])
+        .filter((workflow) => !workflow.archivedAt)
+        .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+    [hydrated, workflowRows, workflows, workflowsLoading],
+  );
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
@@ -866,7 +887,7 @@ export function GoatWorkflowsRoute({
             ) : null}
           </header>
 
-          {workflows.length === 0 ? (
+          {visibleWorkflows.length === 0 ? (
             <GoatEmptyState
               icon={Workflow}
               title="No workflows yet"
@@ -878,7 +899,7 @@ export function GoatWorkflowsRoute({
             />
           ) : (
             <ul className="flex flex-col gap-2">
-              {workflows.map((workflow) => (
+              {visibleWorkflows.map((workflow) => (
                 <li key={workflow.slug}>
                   <WorkflowListRow workflow={workflow} />
                 </li>
@@ -894,7 +915,10 @@ export function GoatWorkflowsRoute({
           namePlaceholder="Weekly investor update"
           descriptionPlaceholder="What this workflow does"
           submitLabel="Create workflow"
-          create={createGoatWorkflowAction}
+          create={async (input) => {
+            const workflow = await createHeadlessWorkflow(input);
+            return { ok: true, slug: workflow.slug };
+          }}
           onClose={() => setCreating(false)}
           onCreated={(slug) => router.push(`/workflows/${encodeURIComponent(slug)}`)}
         />
@@ -1415,15 +1439,19 @@ function NewItemDialog({
     }
     setError(null);
     startTransition(async () => {
-      const result = await create({
-        name: trimmed,
-        ...(description.trim() ? { description: description.trim() } : {}),
-      });
-      if (result.ok) {
-        onCreated(result.slug);
-        return;
+      try {
+        const result = await create({
+          name: trimmed,
+          ...(description.trim() ? { description: description.trim() } : {}),
+        });
+        if (result.ok) {
+          onCreated(result.slug);
+          return;
+        }
+        setError(result.message);
+      } catch (error) {
+        setError(error instanceof Error ? error.message : "Could not create this item.");
       }
-      setError(result.message);
     });
   };
 

@@ -9,7 +9,15 @@ describe("headless Chat rollout boundary", () => {
   });
 
   it("requires re-upload when attachments cross the canonical/legacy transport switch", () => {
-    const canonical = [{ id: "attachment_1" }];
+    const canonical = [{ id: "attachment_1", canonical: true }];
+    const dual = [
+      {
+        id: "attachment_2",
+        canonical: true,
+        blobUrl: "https://blob.example.test/private/file.pdf",
+        blobPathname: "private/file.pdf",
+      },
+    ];
     const legacy = [
       {
         id: "local_1",
@@ -22,5 +30,7 @@ describe("headless Chat rollout boundary", () => {
     expect(hasChatAttachmentTransportMismatch(legacy, false)).toBe(false);
     expect(hasChatAttachmentTransportMismatch(canonical, false)).toBe(true);
     expect(hasChatAttachmentTransportMismatch(legacy, true)).toBe(true);
+    expect(hasChatAttachmentTransportMismatch(dual, true)).toBe(false);
+    expect(hasChatAttachmentTransportMismatch(dual, false)).toBe(false);
   });
 });

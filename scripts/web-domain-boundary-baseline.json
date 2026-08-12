@@ -113,7 +113,6 @@
     "apps/web/lib/tasks.ts",
     "apps/web/lib/user-preferences.ts",
     "apps/web/lib/wiki-actions.ts",
-    "apps/web/lib/workflow-actions.ts",
     "apps/web/lib/workflow-tasks.ts",
     "apps/web/lib/workos-organizations.ts",
     "apps/web/lib/workspace-actions.ts",
@@ -155,7 +154,6 @@
     "apps/web/lib/slack-bot-actions.ts",
     "apps/web/lib/slack-bot/answer.ts",
     "apps/web/lib/slack-bot/identity.ts",
-    "apps/web/lib/task-schedules.ts",
     "apps/web/lib/user-preferences.ts",
     "apps/web/lib/workspace-actions.ts"
   ]

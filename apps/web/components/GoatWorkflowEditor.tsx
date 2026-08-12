@@ -26,9 +26,13 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { Markdown } from "@/components/Markdown";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
+import {
+  archiveHeadlessWorkflow,
+  updateHeadlessWorkflow,
+} from "@/lib/headless-automation-commands";
+import type { GoatWorkflowDetail } from "@/lib/headless-automation-types";
 import type { GoatSkillCatalogItem } from "@/lib/skills";
 import { supportedTimezones, timezoneLabel } from "@/lib/timezones";
-import { archiveGoatWorkflowAction, updateGoatWorkflowAction } from "@/lib/workflow-actions";
 import {
   DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
   DEFAULT_GOAT_WORKFLOW_REASONING_EFFORT,
@@ -46,7 +50,6 @@ import {
   DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT,
   DEFAULT_GOAT_WORKFLOW_SCHEDULE_TIMEZONE,
 } from "@/lib/workflow-schedule-defaults";
-import type { GoatWorkflowDetail } from "@/lib/workflows";
 
 const AUTOSAVE_DELAY_MS = 1200;
 const MAX_WORKFLOW_STEPS = 20;
@@ -84,6 +87,8 @@ export function GoatWorkflowEditor({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isArchiving, startArchiving] = useTransition();
   const draftRef = useRef(draft);
+  const versionRef = useRef(workflow.version);
+  const triggerTypeRef = useRef(workflow.trigger.type);
   const mountedRef = useRef(true);
   const autosaveRef = useRef({
     savedValue: serializeWorkflowDraft(draft),
@@ -116,18 +121,28 @@ export function GoatWorkflowEditor({
       setSaveState("saving");
       setSaveError(null);
 
-      let result: Awaited<ReturnType<typeof updateGoatWorkflowAction>>;
+      let result: { ok: true } | { ok: false; message: string };
       try {
-        result = await updateGoatWorkflowAction({
-          slug: workflow.id,
-          name: snapshot.name,
-          description: snapshot.description,
-          steps: snapshot.steps,
-          status: snapshot.status,
-          trigger: snapshot.trigger,
-        });
-      } catch {
-        result = { ok: false, message: "The workflow could not be saved. Try again." };
+        const saved = await updateHeadlessWorkflow(
+          workflow.id,
+          {
+            expectedVersion: versionRef.current,
+            name: snapshot.name,
+            description: snapshot.description,
+            steps: snapshot.steps,
+            status: snapshot.status,
+            trigger: snapshot.trigger,
+          },
+          {
+            waitForWorkflowSchedule:
+              triggerTypeRef.current === "schedule" || snapshot.trigger.type === "schedule",
+          },
+        );
+        versionRef.current = saved.version;
+        triggerTypeRef.current = snapshot.trigger.type;
+        result = { ok: true };
+      } catch (error) {
+        result = { ok: false, message: workflowCommandError(error, "saved") };
       }
 
       if (!mountedRef.current || sequence !== autosave.sequence) return;
@@ -221,12 +236,16 @@ export function GoatWorkflowEditor({
     if (!canEdit) return;
     setSaveError(null);
     startArchiving(async () => {
-      const result = await archiveGoatWorkflowAction({ slug: workflow.id });
-      if (result.ok) {
+      try {
+        await archiveHeadlessWorkflow(
+          workflow.id,
+          { expectedVersion: versionRef.current },
+          { waitForWorkflowSchedule: triggerTypeRef.current === "schedule" },
+        );
         router.push("/workflows");
-        return;
+      } catch (error) {
+        setSaveError(workflowCommandError(error, "archived"));
       }
-      setSaveError(result.message);
     });
   };
 
@@ -243,7 +262,13 @@ export function GoatWorkflowEditor({
                 </span>
               ) : null}
               <SaveIndicator state={saveState} canEdit={canEdit} onRetry={saveLatest} />
-              {canEdit ? <EditorMoreMenu onArchive={archive} isArchiving={isArchiving} /> : null}
+              {canEdit ? (
+                <EditorMoreMenu
+                  onArchive={archive}
+                  isArchiving={isArchiving}
+                  saveInProgress={saveState === "saving"}
+                />
+              ) : null}
             </div>
           </div>
 
@@ -1167,9 +1192,11 @@ function SaveIndicator({
 function EditorMoreMenu({
   onArchive,
   isArchiving,
+  saveInProgress,
 }: {
   onArchive: () => void;
   isArchiving: boolean;
+  saveInProgress: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -1184,7 +1211,7 @@ function EditorMoreMenu({
       <PopoverContent align="end" sideOffset={6} className="w-[180px] bg-surface p-1 text-ink">
         <button
           type="button"
-          disabled={isArchiving}
+          disabled={isArchiving || saveInProgress}
           onClick={() => {
             setOpen(false);
             onArchive();
@@ -1247,4 +1274,10 @@ function serializeWorkflowDraft(draft: WorkflowDraft) {
 
 function newWorkflowStepId() {
   return `step-${globalThis.crypto.randomUUID()}`;
+}
+
+function workflowCommandError(error: unknown, operation: "saved" | "archived") {
+  return error instanceof Error
+    ? error.message
+    : `The workflow could not be ${operation}. Try again.`;
 }

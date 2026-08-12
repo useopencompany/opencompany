@@ -1,122 +1,164 @@
-import { after, NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
-import {
-  extractGoatChatAttachmentTexts,
-  parseGoatChatAttachmentsInput,
-} from "@/lib/chat-attachments";
-import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
-import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
-import { GoatSkillMentionError, readGoatSkillMentionRefs } from "@/lib/skills";
-import { createGoatTaskFromWorkflow, generateGoatWorkflowTaskTitle } from "@/lib/workflow-tasks";
-import {
-  GoatWorkflowMentionError,
-  listGoatWorkflowCatalog,
-  readGoatWorkflowMentionRef,
-} from "@/lib/workflows";
+import { isValidGoatBrainId } from "@opencompany/goat-brain";
+import { createOpenCompanyClient, type ErrorEnvelope } from "@opencompany/protocol";
 
-export async function GET() {
-  const context = await currentGoatUser({ optional: true });
-  if (!context) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!context.user.taskSpawningEnabled) {
-    return NextResponse.json({ error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE }, { status: 403 });
-  }
+// Temporary compatibility adapter for the pre-/v1 browser URL. The first-party web client no
+// longer calls this route; retain it through the Workflow cutover rollback window, then delete it.
+export async function GET(request: Request) {
+  const connection = compatibilityClient(request);
+  if (!connection) return unavailable();
 
-  const workflows = await listGoatWorkflowCatalog(context.workspace.id);
-  return NextResponse.json({ workflows });
+  const workflows: Array<{ id: string; name: string; description: string }> = [];
+  let cursor: string | undefined;
+  do {
+    const response = await connection.client.v1.workflows.$get({
+      query: { limit: "100", ...(cursor ? { cursor } : {}) },
+    });
+    if (!response.ok) {
+      return compatibilityError(
+        response,
+        "Workflow catalog request failed.",
+        connection.responseHeaders,
+      );
+    }
+    const page = await response.json();
+    for (const workflow of page.data) {
+      if (
+        workflow.status === "active" &&
+        workflow.steps.length > 0 &&
+        workflow.steps.every((step: { instructions: string }) => step.instructions.trim())
+      ) {
+        workflows.push({
+          id: workflow.slug,
+          name: workflow.name,
+          description: workflow.description,
+        });
+      }
+    }
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  return Response.json({ workflows }, { headers: connection.responseHeaders });
 }
 
 export async function POST(request: Request) {
-  const context = await currentGoatUser({ optional: true });
-  if (!context) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!context.user.taskSpawningEnabled) {
-    return NextResponse.json({ error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE }, { status: 403 });
-  }
-
+  const connection = compatibilityClient(request);
+  if (!connection) return unavailable();
   const body = await request.json().catch(() => null);
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return NextResponse.json({ error: "Invalid workflow task request." }, { status: 400 });
+  if (
+    !isRecord(body) ||
+    !isRecord(body.workflow) ||
+    typeof body.workflow.id !== "string" ||
+    !isValidGoatBrainId(body.workflow.id)
+  ) {
+    return Response.json({ error: "A workflow is required." }, { status: 400 });
   }
-  const input = body as Record<string, unknown>;
-  if (typeof input.description !== "string") {
-    return NextResponse.json(
-      { error: "A workflow task description is required." },
-      { status: 400 },
-    );
+  if (typeof body.description !== "string" || !body.description.trim()) {
+    return Response.json({ error: "A workflow task description is required." }, { status: 400 });
   }
-  const description = input.description.trim();
-  if (!description) {
-    return NextResponse.json(
-      { error: "A workflow task description is required." },
-      { status: 400 },
-    );
+  const mentions = Array.isArray(body.mentions) ? body.mentions : [];
+  if (
+    mentions.some(
+      (mention) =>
+        isRecord(mention) &&
+        mention.kind === "skill" &&
+        (typeof mention.id !== "string" || !isValidGoatBrainId(mention.id)),
+    )
+  ) {
+    return Response.json({ error: "Invalid skill mention." }, { status: 400 });
   }
-  if (description.length > GOAT_CHAT_PROMPT_MAX_LENGTH) {
-    return NextResponse.json(
-      {
-        error: `Workflow task descriptions can be at most ${GOAT_CHAT_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
-      },
-      { status: 400 },
-    );
-  }
-
-  const parsedMention = readGoatWorkflowMentionRef([input.workflow]);
-  if (!parsedMention.ok || !parsedMention.mention) {
-    return NextResponse.json(
-      { error: parsedMention.ok ? "A workflow is required." : parsedMention.error },
-      { status: 400 },
-    );
-  }
-  const parsedSkillMentions = readGoatSkillMentionRefs(input.mentions);
-  if (!parsedSkillMentions.ok) {
-    return NextResponse.json({ error: parsedSkillMentions.error }, { status: 400 });
-  }
-  const parsedAttachments = parseGoatChatAttachmentsInput(
-    input.attachments,
-    context.user.workosUserId,
+  const skillIds = mentions.flatMap((mention) =>
+    isRecord(mention) &&
+    mention.kind === "skill" &&
+    typeof mention.id === "string" &&
+    isValidGoatBrainId(mention.id)
+      ? [mention.id]
+      : [],
   );
-  if (!parsedAttachments.ok) {
-    return NextResponse.json({ error: parsedAttachments.error }, { status: 400 });
-  }
-  const attachmentTexts =
-    parsedAttachments.attachments.length > 0
-      ? await extractGoatChatAttachmentTexts(parsedAttachments.attachments)
-      : null;
-
-  try {
-    const task = await createGoatTaskFromWorkflow({
-      userWorkosId: context.user.workosUserId,
-      workspaceId: context.workspace.id,
-      mention: parsedMention.mention,
-      skillMentions: parsedSkillMentions.mentions,
-      description,
-      attachments: parsedAttachments.attachments,
-      attachmentTexts,
-    });
-    after(
-      generateGoatWorkflowTaskTitle({
-        taskId: task.id,
-        userWorkosId: context.user.workosUserId,
-        workspaceId: context.workspace.id,
-        workflowName: task.name,
-        description,
-        apiKey: process.env.VERCEL_AI_GATEWAY_API_KEY ?? null,
-      }).catch(() => undefined),
+  const attachmentIds = Array.isArray(body.attachments)
+    ? body.attachments.flatMap((attachment) =>
+        isRecord(attachment) && typeof attachment.id === "string" ? [attachment.id] : [],
+      )
+    : [];
+  const response = await connection.client.v1.workflows[":workflowId"].invoke.$post({
+    param: { workflowId: body.workflow.id },
+    header: { "idempotency-key": `web-workflow-compat:${crypto.randomUUID()}` },
+    json: {
+      description: body.description,
+      ...(skillIds.length ? { skillIds } : {}),
+      ...(attachmentIds.length ? { attachmentIds } : {}),
+    },
+  });
+  if (!response.ok) {
+    return compatibilityError(
+      response,
+      "Could not start that workflow task.",
+      connection.responseHeaders,
     );
-
-    return NextResponse.json(
-      {
-        task: {
-          id: task.id,
-          displayId: task.displayId,
-          name: task.name,
-        },
+  }
+  const result = (await response.json()).data;
+  return Response.json(
+    {
+      task: {
+        id: result.task.id,
+        displayId: result.task.displayId,
+        name: result.task.name,
       },
-      { status: 201 },
-    );
-  } catch (error) {
-    if (error instanceof GoatWorkflowMentionError || error instanceof GoatSkillMentionError) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    },
+    { status: 201, headers: connection.responseHeaders },
+  );
+}
+
+function compatibilityClient(request: Request) {
+  const origin = configuredApiOrigin(process.env.GOAT_API_ORIGIN);
+  if (!origin) return null;
+  const cookie = request.headers.get("cookie");
+  const authorization = request.headers.get("authorization");
+  const browserOrigin = request.headers.get("origin");
+  const responseHeaders = new Headers({ "Cache-Control": "private, no-store" });
+  const fetchWithActor: typeof globalThis.fetch = async (input, init) => {
+    const headers = new Headers(init?.headers);
+    if (cookie) headers.set("Cookie", cookie);
+    if (authorization) headers.set("Authorization", authorization);
+    if (browserOrigin) headers.set("Origin", browserOrigin);
+    const response = await globalThis.fetch(input, { ...init, headers, cache: "no-store" });
+    const refreshedCookie = response.headers.get("set-cookie");
+    if (refreshedCookie) responseHeaders.set("Set-Cookie", refreshedCookie);
+    return response;
+  };
+  return { client: createOpenCompanyClient(origin, { fetch: fetchWithActor }), responseHeaders };
+}
+
+function configuredApiOrigin(value: string | undefined) {
+  if (!value?.trim()) return null;
+  try {
+    const url = new URL(value);
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      url.username ||
+      url.password ||
+      url.pathname !== "/" ||
+      url.search ||
+      url.hash
+    ) {
+      return null;
     }
-    throw error;
+    return url.origin;
+  } catch {
+    return null;
   }
+}
+
+async function compatibilityError(response: Response, fallback: string, headers: Headers) {
+  const body = (await response.json().catch(() => null)) as ErrorEnvelope | null;
+  return Response.json(
+    { error: body?.error.message ?? fallback },
+    { status: response.status, headers },
+  );
+}
+
+function unavailable() {
+  return Response.json({ error: "The Workflow API is unavailable." }, { status: 503 });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

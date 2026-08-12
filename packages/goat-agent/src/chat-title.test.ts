@@ -1,6 +1,6 @@
 import { generateText } from "ai";
 import { describe, expect, it, vi } from "vitest";
-import { generateGoatChatTitle, sanitizeGoatChatTitle } from "@/lib/chat-title";
+import { generateGoatChatTitle, sanitizeGoatChatTitle } from "./chat-title";
 
 vi.mock("ai", () => ({
   createGateway: vi.fn(() => (model: string) => ({ model })),

@@ -14,6 +14,7 @@ export type PendingGoatChatAttachment = {
   previewUrl?: string;
   blobPathname?: string;
   blobUrl?: string;
+  canonical?: boolean;
   error?: string;
 };
 

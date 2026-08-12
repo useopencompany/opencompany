@@ -107,6 +107,7 @@ export interface AutomationExecutionPlanner {
     actor: Actor;
     workflow: Workflow;
     prompt: string;
+    skillIds?: readonly string[];
   }): Promise<AutomationExecutionPlan>;
   prepareTaskSchedule(input: { actor: Actor; prompt: string }): Promise<AutomationExecutionPlan>;
 }
@@ -296,6 +297,7 @@ const MAX_STEP_INSTRUCTIONS_LENGTH = 20_000;
 const MAX_PROMPT_LENGTH = 10_000;
 const MAX_SCHEDULE_NAME_LENGTH = 80;
 const MAX_SOURCE_DESCRIPTION_LENGTH = 1_024;
+const MAX_WORKFLOW_SKILLS = 16;
 
 export class WorkflowApplicationService {
   constructor(
@@ -450,13 +452,19 @@ export class WorkflowApplicationService {
       idempotencyKey: string;
       description: string;
       attachmentIds?: readonly string[];
+      skillIds?: readonly string[];
     },
   ): Promise<CreateTaskResult> {
     requirePermission(actor, WORKFLOW_WRITE_PERMISSION, "Workflows");
     const workflow = await this.runnableWorkflow(actor, workflowId);
     const goal = prompt(input.description, "A Workflow task description is required.");
     const execution = validatedExecution(
-      await this.options.planner.prepareWorkflow({ actor, workflow, prompt: goal }),
+      await this.options.planner.prepareWorkflow({
+        actor,
+        workflow,
+        prompt: goal,
+        ...(input.skillIds?.length ? { skillIds: workflowSkillIds(input.skillIds) } : {}),
+      }),
     );
     return this.options.taskCreator.create({
       actor,
@@ -903,6 +911,19 @@ function version(value: number) {
 
 function resourceId(value: string, field: string) {
   return bounded(value, MAX_RESOURCE_ID_LENGTH, field);
+}
+
+function workflowSkillIds(values: readonly string[]) {
+  const normalized = [
+    ...new Set(values.map((value, index) => resourceId(value, `skillIds[${index}]`))),
+  ];
+  if (normalized.length > MAX_WORKFLOW_SKILLS) {
+    throw new CoreError(
+      "invalid_argument",
+      `skillIds must contain at most ${MAX_WORKFLOW_SKILLS} values.`,
+    );
+  }
+  return normalized;
 }
 
 function bounded(value: string, max: number, field: string) {

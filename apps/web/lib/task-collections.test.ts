@@ -7,7 +7,6 @@ describe("createGoatCollections", () => {
     const second = createGoatCollections();
 
     expect(second).toBe(first);
-    expect(second.taskSchedules).toBe(first.taskSchedules);
     expect(second.chatSessions).toBe(first.chatSessions);
     expect(second.integrations).toBe(first.integrations);
   });

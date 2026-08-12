@@ -52,6 +52,9 @@ const tasks = new TaskApplicationService(
 const automations = createAutomationServices({
   execute,
   resolveAttachments: (input) => attachmentRepository.resolve(input),
+  ...(process.env.VERCEL_AI_GATEWAY_API_KEY?.trim()
+    ? { gatewayApiKey: process.env.VERCEL_AI_GATEWAY_API_KEY.trim() }
+    : {}),
 });
 const notifier = new PostgresRunEventNotifier(database.pool);
 const presentation = createPresentationStream();
