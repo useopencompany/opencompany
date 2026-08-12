@@ -288,6 +288,7 @@ export function createApiApp(input: CreateApiAppInput) {
         idempotencyKey: c.req.valid("header")["idempotency-key"],
         description: body.description,
         ...(body.attachmentIds ? { attachmentIds: body.attachmentIds } : {}),
+        ...(body.skillIds ? { skillIds: body.skillIds } : {}),
       });
       return c.json({ data: taskCreationDto(result), meta }, 202);
     },

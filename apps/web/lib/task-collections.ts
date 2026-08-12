@@ -51,23 +51,6 @@ export type GoatTaskRow = {
   updated_at: string;
 };
 
-export type GoatTaskScheduleRow = {
-  id: string;
-  user_workos_id: string;
-  name: string;
-  source_description: string;
-  cron: string;
-  timezone: string;
-  prompt: string;
-  planned_harness_spec: unknown;
-  enabled: boolean;
-  last_run_at: string | null;
-  next_run_at: string;
-  deleted_at: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
 export type GoatChatMessageRow = {
   id: string;
   session_id: string;
@@ -445,12 +428,6 @@ function getChatMessageCollection(sessionId: string) {
 }
 
 function buildGoatCollections() {
-  const taskSchedules = createGoatElectricCollection<GoatTaskScheduleRow>({
-    id: "goat:task_schedules",
-    table: "goat.task_schedules",
-    getKey: (row) => row.id,
-  });
-
   const chatSessions = createGoatElectricCollection<GoatChatSessionRow>({
     id: "goat:chat_sessions",
     table: "goat.chat_sessions",
@@ -488,7 +465,6 @@ function buildGoatCollections() {
   });
 
   return {
-    taskSchedules,
     chatSessions,
     chatMessages: getChatMessageCollection,
     codexChatSessions,

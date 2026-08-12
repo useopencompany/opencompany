@@ -463,6 +463,7 @@ export const InvokeWorkflowBodySchema = z
   .object({
     description: z.string().min(1).max(10_000),
     attachmentIds: z.array(ResourceIdSchema).max(5).optional(),
+    skillIds: z.array(ResourceIdSchema).max(16).optional(),
   })
   .strict()
   .openapi("InvokeWorkflowBody");
@@ -831,6 +832,13 @@ export type WorkflowReadModel = z.infer<typeof WorkflowReadModelSchema>;
 export type WorkflowScheduleReadModel = z.infer<typeof WorkflowScheduleReadModelSchema>;
 export type TaskScheduleDto = z.infer<typeof TaskScheduleSchema>;
 export type TaskScheduleReadModel = z.infer<typeof TaskScheduleReadModelSchema>;
+export type CreateWorkflowBody = z.infer<typeof CreateWorkflowBodySchema>;
+export type UpdateWorkflowBody = z.infer<typeof UpdateWorkflowBodySchema>;
+export type ArchiveVersionBody = z.infer<typeof ArchiveVersionBodySchema>;
+export type InvokeWorkflowBody = z.infer<typeof InvokeWorkflowBodySchema>;
+export type CreateTaskScheduleBody = z.infer<typeof CreateTaskScheduleBodySchema>;
+export type UpdateTaskScheduleBody = z.infer<typeof UpdateTaskScheduleBodySchema>;
+export type SetTaskScheduleEnabledBody = z.infer<typeof SetTaskScheduleEnabledBodySchema>;
 export type ConversationReadModel = z.infer<typeof ConversationReadModelSchema>;
 export type MessageReadModel = z.infer<typeof MessageReadModelSchema>;
 export type RunReadModel = z.infer<typeof RunReadModelSchema>;

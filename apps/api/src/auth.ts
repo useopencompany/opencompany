@@ -176,7 +176,8 @@ async function resolveLocalActor(
   const result = await execute(sql`
     SELECT
       member.workspace_id AS "workspaceId",
-      member.role
+      member.role,
+      actor_user.task_spawning_enabled AS "taskSpawningEnabled"
     FROM goat.users AS actor_user
     JOIN goat.workspace_members AS member
       ON member.user_workos_id = actor_user.workos_user_id
@@ -202,7 +203,11 @@ async function resolveLocalActor(
       member.workspace_id ASC
     LIMIT 1
   `);
-  const row = rowsFromExecute<{ workspaceId: string; role: string }>(result)[0];
+  const row = rowsFromExecute<{
+    workspaceId: string;
+    role: string;
+    taskSpawningEnabled: boolean;
+  }>(result)[0];
   if (!row) {
     throw new ApiError(
       403,
@@ -219,10 +224,14 @@ async function resolveLocalActor(
       CHAT_WRITE_PERMISSION,
       TASK_READ_PERMISSION,
       TASK_WRITE_PERMISSION,
-      WORKFLOW_READ_PERMISSION,
-      WORKFLOW_WRITE_PERMISSION,
-      SCHEDULE_READ_PERMISSION,
-      SCHEDULE_WRITE_PERMISSION,
+      ...(row.taskSpawningEnabled
+        ? [
+            WORKFLOW_READ_PERMISSION,
+            WORKFLOW_WRITE_PERMISSION,
+            SCHEDULE_READ_PERMISSION,
+            SCHEDULE_WRITE_PERMISSION,
+          ]
+        : []),
     ],
     authenticationMethod: identity.method,
     ...(identity.sessionId ? { sessionId: identity.sessionId } : {}),

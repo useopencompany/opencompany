@@ -32,6 +32,7 @@ import {
 import { projectActionCatalog } from "@opencompany/goat-agent/actions/policy";
 import { resolveGoatImessageProvider } from "@opencompany/goat-agent/imessage/provider";
 import { createGoatSendUserMessageRunner } from "@opencompany/goat-agent/imessage/send-user-message";
+import type { GoatTaskScheduleView } from "@opencompany/goat-agent/task-schedules";
 import {
   createGoatGatewayAttribution,
   GOAT_METRICS,
@@ -157,7 +158,6 @@ import {
 import {
   createGoatTaskScheduleForUser,
   deleteGoatTaskScheduleForUser,
-  type GoatTaskScheduleView,
   listGoatTaskSchedulesForUser,
   updateGoatTaskScheduleForUser,
 } from "@/lib/task-schedules";

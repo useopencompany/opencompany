@@ -169,12 +169,14 @@ describe("WorkflowApplicationService", () => {
     });
     const repository = fakeWorkflowRepository({ workflow: scheduled });
     const taskCreator = fakeTaskCreator();
-    const service = workflowService(repository, { taskCreator });
+    const planner = fakePlanner();
+    const service = workflowService(repository, { planner, taskCreator });
 
     await service.invokeWorkflow(actor(), "weekly-research", {
       idempotencyKey: "invoke-1",
       description: "  Focus on competitors.  ",
       attachmentIds: ["attachment_1"],
+      skillIds: [" market-research "],
     });
     await service.runWorkflowNow(actor(), "weekly-research", "run-now-1");
 
@@ -187,6 +189,12 @@ describe("WorkflowApplicationService", () => {
       source: "workflow",
       workflowId: "weekly-research",
       attachmentIds: ["attachment_1"],
+    });
+    expect(planner.prepareWorkflow).toHaveBeenNthCalledWith(1, {
+      actor: actor(),
+      workflow: scheduled,
+      prompt: "Focus on competitors.",
+      skillIds: ["market-research"],
     });
     expect(taskCreator.create).toHaveBeenNthCalledWith(2, {
       actor: actor(),
@@ -203,6 +211,21 @@ describe("WorkflowApplicationService", () => {
       taskId: "task_1",
       occurredAt: now,
     });
+  });
+
+  it("rejects more than sixteen distinct invocation skills before planning", async () => {
+    const repository = fakeWorkflowRepository();
+    const planner = fakePlanner();
+    const service = workflowService(repository, { planner });
+
+    await expect(
+      service.invokeWorkflow(actor(), "weekly-research", {
+        idempotencyKey: "invoke-too-many-skills",
+        description: "Research the market.",
+        skillIds: Array.from({ length: 17 }, (_, index) => `skill-${index + 1}`),
+      }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+    expect(planner.prepareWorkflow).not.toHaveBeenCalled();
   });
 });
 

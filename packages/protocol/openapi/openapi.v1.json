@@ -1255,6 +1255,16 @@
               "example": "run_019fed53"
             },
             "maxItems": 5
+          },
+          "skillIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "maxItems": 16
           }
         },
         "required": [

@@ -47,7 +47,7 @@ Browser
           compile the workflow and create its durable task session
           POST /internal/goat/codex-chat/wake
   GoatSurface #task / #workflow submit
-    POST /v1/tasks or /api/workflows
+    POST /v1/tasks or /v1/workflows/:workflowId/invoke
       call the canonical Task application service
       atomically create Task + Conversation + Message + Run
   GoatSurface cloud coding modes
@@ -64,7 +64,7 @@ Runner
     settle the turn, runtime session, and task projection atomically
 
 Goat UI
-  subscribes to API-owned Task, Conversation, Message, and Run read models
+  subscribes to API-owned Task, Workflow, schedule, Conversation, Message, and Run read models
   reads sessionless pre-cutover Task history through a bounded compatibility API
 ```
 
@@ -109,9 +109,10 @@ skills are plain text injected into the prompt, not files on disk the runner mou
 skills/integrations direction.
 
 Selecting a workflow with `#<id>` changes the composer action from **Send message** to **Start
-task**. Submission posts directly to `/api/workflows`, creates a task-flavored chat session and its
-first durable turn, and leaves the current Home or chat surface in place. It does not call the
-foreground chat model.
+task**. Submission posts through the typed `/v1/workflows/:workflowId/invoke` command, creates a
+canonical Task, Conversation, Message, and Run, waits for their authorized read models, and leaves
+the current Home or chat surface in place. It does not call the foreground chat model. The old
+`/api/workflows` route remains only as a rollback adapter for pre-cutover clients.
 Skills mentioned by the workflow, plus explicit skill mentions on the workflow invocation, are
 resolved and snapshotted when the task is created. Invocation skills apply to the first workflow
 step. OpenCompany task runs receive the applicable snapshots as workflow prompt blocks; Codex and
@@ -120,10 +121,11 @@ explicit skill mentions in their main chat surfaces.
 
 The reserved `#task` token provides the same direct composer handoff for one-off work without a
 saved workflow. The composer posts the normalized goal through typed `POST /v1/tasks`, waits for
-the Task and Conversation transaction boundary, and keeps the current surface in place. Saved
-workflow invocation still uses its existing Next route, but that route calls the same Task
-application service. Both entry points require the **Tasks & Workflows** preference and currently
-reject attachments.
+the Task and Conversation transaction boundary, and keeps the current surface in place. Both entry
+points require the **Tasks & Workflows** preference and pass uploaded files by canonical attachment
+ID. While legacy foreground Chat remains deployable for rollback, the browser also retains its
+legacy blob locator for the same pending attachment; the canonical command never receives that
+private storage metadata.
 
 Workflow runs and `#task` ad-hoc runs remain grouped under **Tasks**, but task detail renders the
 same `GoatSurface` as a normal chat. User-triggered Codex and Claude Code sessions remain ordinary

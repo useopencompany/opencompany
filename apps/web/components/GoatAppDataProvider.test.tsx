@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
     isLoading: true,
   };
   return {
+    getHeadlessTaskSchedules: vi.fn(() => ({})),
     getHeadlessTasks: vi.fn(() => ({})),
     listLegacyTaskCompatibility: vi.fn(async () => []),
     useLiveQuery: vi.fn(() => liveQueryResult),
@@ -30,11 +31,14 @@ vi.mock("@tanstack/react-db", () => ({
 vi.mock("@/lib/task-collections", () => ({
   createGoatCollections: () => ({
     tasks: {},
-    taskSchedules: {},
     chatSessions: {},
     codexChatSessions: {},
     integrations: {},
   }),
+}));
+
+vi.mock("@/lib/headless-automation-collections", () => ({
+  getHeadlessTaskSchedules: mocks.getHeadlessTaskSchedules,
 }));
 
 vi.mock("@/lib/headless-task-collections", () => ({
@@ -50,6 +54,7 @@ vi.mock("@/lib/headless-task-commands", () => ({
 describe("GoatAppDataProvider", () => {
   beforeEach(() => {
     mocks.getHeadlessTasks.mockClear();
+    mocks.getHeadlessTaskSchedules.mockClear();
     mocks.listLegacyTaskCompatibility.mockClear();
     mocks.useLiveQuery.mockClear();
   });
@@ -77,10 +82,12 @@ describe("GoatAppDataProvider", () => {
     );
 
     expect(mocks.useLiveQuery).toHaveBeenCalled();
+    expect(mocks.getHeadlessTaskSchedules).not.toHaveBeenCalled();
   });
 
   it("resubscribes Task reads when the active workspace changes", async () => {
     const first = initialData();
+    first.featureFlags.taskSpawning = true;
     const { rerender } = render(
       <GoatAppDataProvider initialData={first}>
         <DataProbe />
@@ -88,6 +95,7 @@ describe("GoatAppDataProvider", () => {
     );
 
     expect(mocks.getHeadlessTasks).toHaveBeenCalledWith("workspace_1");
+    expect(mocks.getHeadlessTaskSchedules).toHaveBeenCalledWith("workspace_1");
     await waitFor(() => expect(mocks.listLegacyTaskCompatibility).toHaveBeenCalledTimes(1));
 
     rerender(
@@ -102,6 +110,7 @@ describe("GoatAppDataProvider", () => {
     );
 
     expect(mocks.getHeadlessTasks).toHaveBeenCalledWith("workspace_2");
+    expect(mocks.getHeadlessTaskSchedules).toHaveBeenCalledWith("workspace_2");
     await waitFor(() => expect(mocks.listLegacyTaskCompatibility).toHaveBeenCalledTimes(2));
   });
 

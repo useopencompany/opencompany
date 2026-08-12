@@ -1,103 +1,87 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { GoatAuthContext } from "@/lib/auth";
-import { currentGoatUser } from "@/lib/auth";
-import { createGoatTaskFromWorkflow, generateGoatWorkflowTaskTitle } from "@/lib/workflow-tasks";
-import { POST } from "./route";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { GET, POST } from "./route";
 
-vi.mock("next/server", () => ({
-  after: vi.fn((work: Promise<unknown>) => work),
-  NextResponse: {
-    json: (body: unknown, init?: ResponseInit) =>
-      new Response(JSON.stringify(body), {
-        ...init,
-        headers: { "Content-Type": "application/json", ...init?.headers },
+const meta = { apiVersion: "v1", protocolVersion: "1.0.0" };
+
+describe("/api/workflows compatibility adapter", () => {
+  beforeEach(() => vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test"));
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("projects the canonical catalog into the legacy response shape", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        data: [workflow()],
+        nextCursor: null,
+        meta,
       }),
-  },
-}));
+    );
 
-vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
-}));
+    const response = await GET(request());
 
-vi.mock("@/lib/workflow-tasks", () => ({
-  createGoatTaskFromWorkflow: vi.fn(),
-  generateGoatWorkflowTaskTitle: vi.fn(async () => undefined),
-}));
-
-describe("POST /api/workflows", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.mocked(currentGoatUser).mockResolvedValue({
-      user: {
-        workosUserId: "user_1",
-        taskSpawningEnabled: true,
-      },
-      workspace: { id: "workspace_1" },
-    } as GoatAuthContext);
-    vi.mocked(createGoatTaskFromWorkflow).mockResolvedValue({
-      id: "goat_task_1",
-      displayId: "TASK-1",
-      name: "Morning Test",
-    } as never);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      workflows: [{ id: "morning-test", name: "Morning Test", description: "Review the morning." }],
+    });
+    const [input, init] = fetchMock.mock.calls[0] ?? [];
+    const upstream = input instanceof Request ? input : new Request(input!, init);
+    expect(new URL(upstream.url).pathname).toBe("/v1/workflows");
+    expect(upstream.headers.get("cookie")).toBe("wos-session=sealed");
   });
 
-  it("validates and forwards uploaded attachments into workflow task creation", async () => {
+  it("translates legacy invocation input into the typed canonical command", async () => {
+    let upstream: Request | null = null;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      upstream = input instanceof Request ? input : new Request(input, init);
+      return Response.json(
+        {
+          data: {
+            task: {
+              id: "goat_task_1",
+              displayId: "TASK-1",
+              name: "Morning Test",
+              conversationId: "conversation_1",
+            },
+            messageId: "message_1",
+            assistantMessageId: "message_2",
+            runId: "run_1",
+            transactionId: "42",
+            replayed: false,
+          },
+          meta,
+        },
+        { status: 202, headers: { "Set-Cookie": "wos-session=rotated; Path=/; HttpOnly" } },
+      );
+    });
+
     const response = await POST(
-      jsonRequest({
+      request({
         workflow: { kind: "workflow", id: "morning-test" },
         description: "#morning-test Review this screenshot with @skill/visual-review",
         mentions: [{ kind: "skill", id: "visual-review" }],
-        attachments: [
-          {
-            id: "client_attachment_1",
-            kind: "image",
-            mediaType: "image/png",
-            filename: "screen.png",
-            sizeBytes: 1024,
-            blobUrl: "https://blob.test/goat-chat/user_1/screen.png",
-          },
-        ],
+        attachments: [{ id: "attachment_1" }],
       }),
     );
 
     expect(response.status).toBe(201);
+    expect(response.headers.get("set-cookie")).toContain("wos-session=rotated");
     await expect(response.json()).resolves.toEqual({
-      task: {
-        id: "goat_task_1",
-        displayId: "TASK-1",
-        name: "Morning Test",
-      },
+      task: { id: "goat_task_1", displayId: "TASK-1", name: "Morning Test" },
     });
-    expect(createGoatTaskFromWorkflow).toHaveBeenCalledWith({
-      userWorkosId: "user_1",
-      workspaceId: "workspace_1",
-      mention: { id: "morning-test" },
-      skillMentions: [{ id: "visual-review" }],
+    const sent = upstream as unknown as Request;
+    expect(new URL(sent.url).pathname).toBe("/v1/workflows/morning-test/invoke");
+    expect(sent.headers.get("idempotency-key")).toMatch(/^web-workflow-compat:/u);
+    expect(sent.headers.get("origin")).toBe("http://localhost");
+    await expect(sent.json()).resolves.toEqual({
       description: "#morning-test Review this screenshot with @skill/visual-review",
-      attachments: [
-        expect.objectContaining({
-          id: expect.stringMatching(/^goat_chat_att_/),
-          kind: "image",
-          mediaType: "image/png",
-          filename: "screen.png",
-          sizeBytes: 1024,
-          blobPathname: "goat-chat/user_1/screen.png",
-          blobUrl: "https://blob.test/goat-chat/user_1/screen.png",
-        }),
-      ],
-      attachmentTexts: null,
+      skillIds: ["visual-review"],
+      attachmentIds: ["attachment_1"],
     });
-    expect(generateGoatWorkflowTaskTitle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskId: "goat_task_1",
-        userWorkosId: "user_1",
-      }),
-    );
   });
 
-  it("rejects malformed invocation skill mentions", async () => {
+  it("rejects malformed invocation skill mentions before proxying", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
     const response = await POST(
-      jsonRequest({
+      request({
         workflow: { kind: "workflow", id: "morning-test" },
         description: "#morning-test Review this screenshot",
         mentions: [{ kind: "skill", id: "../not-a-skill" }],
@@ -106,14 +90,34 @@ describe("POST /api/workflows", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "Invalid skill mention." });
-    expect(createGoatTaskFromWorkflow).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
-function jsonRequest(body: unknown) {
+function request(body?: unknown) {
   return new Request("http://localhost/api/workflows", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    method: body === undefined ? "GET" : "POST",
+    headers: {
+      Cookie: "wos-session=sealed",
+      Origin: "http://localhost",
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
+}
+
+function workflow() {
+  return {
+    id: "workflow_1",
+    slug: "morning-test",
+    name: "Morning Test",
+    description: "Review the morning.",
+    steps: [{ id: "step_1", title: "Review", model: "provider/model", instructions: "Review." }],
+    status: "active",
+    trigger: { type: "manual" },
+    version: 1,
+    archivedAt: null,
+    createdAt: "2026-08-12T08:00:00.000Z",
+    updatedAt: "2026-08-12T08:00:00.000Z",
+  };
 }

@@ -110,6 +110,7 @@ import {
 } from "@/lib/ad-hoc-task";
 import { closeGoatChatSessionAction, reopenGoatChatSessionAction } from "@/lib/chat-actions";
 import { GOAT_CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
+import { uploadGoatChatAttachmentBlob } from "@/lib/chat-attachment-upload";
 import {
   AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES,
   AUTO_GOAT_MODEL_SELECTION,
@@ -165,6 +166,17 @@ import {
   DEFAULT_CODEX_CHAT_REASONING_EFFORT,
   type GoatCodexComposerSettingsView,
 } from "@/lib/codex-chat-settings";
+import {
+  archiveHeadlessTaskSchedule,
+  invokeHeadlessWorkflow,
+  listHeadlessWorkflowCatalog,
+  runHeadlessTaskScheduleNow,
+  updateHeadlessTaskSchedule,
+} from "@/lib/headless-automation-commands";
+import type {
+  GoatTaskScheduleView,
+  GoatWorkflowCatalogItem,
+} from "@/lib/headless-automation-types";
 import { uploadHeadlessChatAttachment } from "@/lib/headless-chat-attachment-upload";
 import {
   getHeadlessChatMessages,
@@ -209,18 +221,10 @@ import {
 import { GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
 import type { GoatCodexSandboxStatus } from "@/lib/task-runner";
 import {
-  deleteGoatTaskScheduleAction,
-  type GoatTaskScheduleView,
-  runGoatTaskScheduleNowAction,
-  setGoatTaskScheduleEnabledAction,
-  updateGoatTaskScheduleAction,
-} from "@/lib/task-schedules";
-import {
   deriveGoatTaskWorkflowSteps,
   type GoatTaskWorkflowStepView,
 } from "@/lib/task-workflow-activity";
 import { updateGoatTimezoneAction } from "@/lib/user-preferences";
-import type { GoatWorkflowCatalogItem } from "@/lib/workflows";
 
 const TEXTAREA_MAX_HEIGHT_PX = 128;
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
@@ -909,8 +913,13 @@ export function GoatSurface({
         ? { capabilities: AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES }
         : {}),
     ...(headlessChatActive && !composerEngine
-      ? { upload: ({ file }: { file: File }) => uploadHeadlessChatAttachment({ file }) }
-      : {}),
+      ? { upload: uploadCanonicalAttachment }
+      : taskSpawningEnabled
+        ? {
+            upload: ({ file, mediaType }: { file: File; mediaType: string }) =>
+              uploadDualTransportAttachment({ userWorkosId, file, mediaType }),
+          }
+        : {}),
   });
   const applyDictatedInput = useCallback(
     (nextInput: string) => {
@@ -1610,7 +1619,9 @@ export function GoatSurface({
       ...(attachment.blobPathname ? { blobPathname: attachment.blobPathname } : {}),
       ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
     }));
-    const canonicalAttachmentTarget = headlessChatActive && !(backgroundEngine ?? activeEngine);
+    const canonicalAttachmentTarget =
+      Boolean(mentions.find(isWorkflowMention)) ||
+      (headlessChatActive && !(backgroundEngine ?? activeEngine));
     if (hasChatAttachmentTransportMismatch(readyAttachments, canonicalAttachmentTarget)) {
       toast.error("Reattach files after switching models or engines.");
       return;
@@ -2708,7 +2719,7 @@ export function GoatSurface({
                         <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
                           Routines
                         </h2>
-                        <ScheduleRows schedules={homeSchedules} />
+                        <ScheduleRows schedules={homeSchedules} workspaceId={workspaceId} />
                       </section>
                     ) : null}
                   </>
@@ -3404,8 +3415,13 @@ function QuickChatComposer({
         ? { capabilities: AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES }
         : {}),
     ...(headlessQuickChatActive
-      ? { upload: ({ file }: { file: File }) => uploadHeadlessChatAttachment({ file }) }
-      : {}),
+      ? { upload: uploadCanonicalAttachment }
+      : taskSpawningEnabled
+        ? {
+            upload: ({ file, mediaType }: { file: File; mediaType: string }) =>
+              uploadDualTransportAttachment({ userWorkosId, file, mediaType }),
+          }
+        : {}),
   });
 
   // The dialog stays mounted across opens; reset to a pristine draft each time it closes
@@ -3708,7 +3724,12 @@ function QuickChatComposer({
       ...(attachment.blobPathname ? { blobPathname: attachment.blobPathname } : {}),
       ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
     }));
-    if (hasChatAttachmentTransportMismatch(readyAttachments, headlessQuickChatActive)) {
+    if (
+      hasChatAttachmentTransportMismatch(
+        readyAttachments,
+        Boolean(mentions.find(isWorkflowMention)) || headlessQuickChatActive,
+      )
+    ) {
       toast.error("Reattach files after switching models or engines.");
       return;
     }
@@ -5179,13 +5200,9 @@ async function fetchGoatBrainSkillCatalog(signal?: AbortSignal) {
 }
 
 async function fetchGoatBrainWorkflowCatalog(signal?: AbortSignal) {
-  const response = await fetch("/api/workflows", signal ? { signal } : {});
-  if (!response.ok) throw new Error(`Workflow catalog request failed (${response.status})`);
-  const payload = (await response.json()) as { workflows?: unknown };
-  // Same wire shape as the skill catalog item.
-  return Array.isArray(payload.workflows)
-    ? (payload.workflows.filter(isGoatSkillCatalogItem) as GoatWorkflowCatalogItem[])
-    : [];
+  return listHeadlessWorkflowCatalog({
+    ...(signal ? { fetch: (input, init) => fetch(input, { ...init, signal }) } : {}),
+  });
 }
 
 async function startGoatAdHocTask(input: {
@@ -5217,27 +5234,13 @@ async function startGoatWorkflowTask(input: {
   mentions?: Extract<GoatChatMention, { kind: "skill" }>[];
   attachments?: GoatChatUiAttachment[];
 }) {
-  const response = await fetch("/api/workflows", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
+  const payload = await invokeHeadlessWorkflow(input.workflow.id, {
+    description: input.description,
+    ...(input.mentions?.length ? { skillIds: input.mentions.map((mention) => mention.id) } : {}),
+    ...(input.attachments?.length
+      ? { attachmentIds: input.attachments.map((attachment) => attachment.id) }
+      : {}),
   });
-  const payload = (await response.json().catch(() => null)) as {
-    error?: unknown;
-    task?: { id?: unknown; displayId?: unknown; name?: unknown };
-  } | null;
-  if (!response.ok) {
-    throw new Error(
-      typeof payload?.error === "string" ? payload.error : "Could not start that workflow task.",
-    );
-  }
-  if (
-    typeof payload?.task?.id !== "string" ||
-    typeof payload.task.displayId !== "string" ||
-    typeof payload.task.name !== "string"
-  ) {
-    throw new Error("The workflow task started, but its response was invalid.");
-  }
   return {
     task: {
       id: payload.task.id,
@@ -5245,6 +5248,26 @@ async function startGoatWorkflowTask(input: {
       name: payload.task.name,
     },
   };
+}
+
+function automationCommandError(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
+async function uploadCanonicalAttachment({ file }: { file: File }) {
+  return { ...(await uploadHeadlessChatAttachment({ file })), canonical: true };
+}
+
+async function uploadDualTransportAttachment(input: {
+  userWorkosId: string;
+  file: File;
+  mediaType: string;
+}) {
+  const [canonical, legacy] = await Promise.all([
+    uploadHeadlessChatAttachment({ file: input.file }),
+    uploadGoatChatAttachmentBlob(input.userWorkosId, input.file, input.mediaType),
+  ]);
+  return { ...legacy, ...canonical, canonical: true };
 }
 
 function escapeRegExp(value: string) {
@@ -6105,11 +6128,25 @@ function HomeChatStateIndicator({
   return <GoatChatStateIndicator state={state} surface="home" showSeen />;
 }
 
-function ScheduleRows({ schedules }: { schedules: readonly GoatTaskScheduleView[] }) {
-  return schedules.map((schedule) => <ScheduleRow key={schedule.id} schedule={schedule} />);
+function ScheduleRows({
+  schedules,
+  workspaceId,
+}: {
+  schedules: readonly GoatTaskScheduleView[];
+  workspaceId: string;
+}) {
+  return schedules.map((schedule) => (
+    <ScheduleRow key={schedule.id} schedule={schedule} workspaceId={workspaceId} />
+  ));
 }
 
-function ScheduleRow({ schedule }: { schedule: GoatTaskScheduleView }) {
+function ScheduleRow({
+  schedule,
+  workspaceId,
+}: {
+  schedule: GoatTaskScheduleView;
+  workspaceId: string;
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isEditing, setIsEditing] = useState(false);
@@ -6129,17 +6166,22 @@ function ScheduleRow({ schedule }: { schedule: GoatTaskScheduleView }) {
   const saveEdit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     startTransition(async () => {
-      const result = await updateGoatTaskScheduleAction(schedule.id, {
-        name: editName,
-        sourceDescription: `${editCron.trim()} - ${editTimezone.trim()}`,
-        cron: editCron,
-        timezone: editTimezone,
-        prompt: editPrompt,
-      });
-      if (result.ok) {
+      try {
+        await updateHeadlessTaskSchedule(
+          schedule.id,
+          {
+            expectedVersion: schedule.version,
+            name: editName,
+            sourceDescription: `${editCron.trim()} - ${editTimezone.trim()}`,
+            cron: editCron,
+            timezone: editTimezone,
+            prompt: editPrompt,
+          },
+          { scopeKey: workspaceId },
+        );
         setIsEditing(false);
-      } else {
-        toast.error(result.error);
+      } catch (error) {
+        toast.error(automationCommandError(error, "Recurring Task update failed."));
       }
     });
   };
@@ -6173,11 +6215,13 @@ function ScheduleRow({ schedule }: { schedule: GoatTaskScheduleView }) {
             disabled={isPending}
             onClick={() => {
               startTransition(async () => {
-                const result = await runGoatTaskScheduleNowAction(schedule.id);
-                if (result.ok) {
+                try {
+                  const result = await runHeadlessTaskScheduleNow(schedule.id, {
+                    scopeKey: workspaceId,
+                  });
                   router.push(`/tasks/${encodeURIComponent(result.task.displayId)}`);
-                } else {
-                  toast.error(result.error);
+                } catch (error) {
+                  toast.error(automationCommandError(error, "Recurring Task run failed."));
                 }
               });
             }}
@@ -6208,11 +6252,15 @@ function ScheduleRow({ schedule }: { schedule: GoatTaskScheduleView }) {
             disabled={isPending}
             onClick={() => {
               startTransition(async () => {
-                const result = await setGoatTaskScheduleEnabledAction(
-                  schedule.id,
-                  !schedule.enabled,
-                );
-                if (!result.ok) toast.error(result.error);
+                try {
+                  await updateHeadlessTaskSchedule(
+                    schedule.id,
+                    { expectedVersion: schedule.version, enabled: !schedule.enabled },
+                    { scopeKey: workspaceId },
+                  );
+                } catch (error) {
+                  toast.error(automationCommandError(error, "Recurring Task update failed."));
+                }
               });
             }}
             className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink disabled:opacity-60"
@@ -6230,8 +6278,15 @@ function ScheduleRow({ schedule }: { schedule: GoatTaskScheduleView }) {
             disabled={isPending}
             onClick={() => {
               startTransition(async () => {
-                const result = await deleteGoatTaskScheduleAction(schedule.id);
-                if (!result.ok) toast.error(result.error);
+                try {
+                  await archiveHeadlessTaskSchedule(
+                    schedule.id,
+                    { expectedVersion: schedule.version },
+                    { scopeKey: workspaceId },
+                  );
+                } catch (error) {
+                  toast.error(automationCommandError(error, "Recurring Task archive failed."));
+                }
               });
             }}
             className="flex h-7 w-7 items-center justify-center rounded-md text-danger transition-colors hover:bg-danger-bg disabled:opacity-60"

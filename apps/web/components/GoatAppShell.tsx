@@ -9,6 +9,7 @@ import { isGoatChatResumeEnabled } from "@/lib/chat-streams";
 import { loadCurrentGoatClaudeCodeAuthSettings } from "@/lib/claude-code-auth";
 import { loadCurrentGoatCodexAuthSettings } from "@/lib/codex-auth";
 import { goatFeatureFlagsFromUser } from "@/lib/feature-flags";
+import { listHeadlessTaskSchedules } from "@/lib/headless-automation-server";
 import { loadCurrentGoatInfisicalAuthSettings } from "@/lib/infisical-auth";
 import {
   type GoatClaudeCodeProviderState,
@@ -29,7 +30,6 @@ import { getGoatPostHogIntegrationState } from "@/lib/integrations/posthog-mcp";
 import { getGoatSlackIntegrationState } from "@/lib/integrations/slack";
 import { getGoatStripeIntegrationState } from "@/lib/integrations/stripe";
 import { getGoatXAccountIntegrationState } from "@/lib/integrations/x-account";
-import { listCurrentUserGoatTaskSchedules } from "@/lib/task-schedules";
 
 export async function GoatAppShell({ children }: { children: ReactNode }) {
   const { authUser, user, workspace, role, workspaces, brains, activeBrain } =
@@ -57,7 +57,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     personalAccounts,
     plan,
   ] = await Promise.all([
-    featureFlags.taskSpawning ? listCurrentUserGoatTaskSchedules() : Promise.resolve([]),
+    featureFlags.taskSpawning ? listHeadlessTaskSchedules() : Promise.resolve([]),
     listCurrentUserRecentGoatChats(),
     getGoatGoogleIntegrationState(user.workosUserId),
     getGoatLinearIntegrationState(user.workosUserId),

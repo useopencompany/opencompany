@@ -23,6 +23,11 @@ import {
 } from "@/lib/chat-ui";
 import type { GoatFeatureFlags } from "@/lib/feature-flags";
 import {
+  getHeadlessTaskSchedules,
+  type HeadlessTaskScheduleReadModel,
+} from "@/lib/headless-automation-collections";
+import type { GoatTaskScheduleView } from "@/lib/headless-automation-types";
+import {
   getHeadlessChatConversations,
   type HeadlessChatConversationReadModel,
 } from "@/lib/headless-chat-collections";
@@ -47,9 +52,7 @@ import {
   type GoatCodexChatSessionRow,
   type GoatIntegrationRow,
   type GoatTaskRow,
-  type GoatTaskScheduleRow,
 } from "@/lib/task-collections";
-import type { GoatTaskScheduleView } from "@/lib/task-schedules";
 import { deriveGoatTaskWorkflowSteps } from "@/lib/task-workflow-activity";
 
 // Durable background chats for every engine persist runtime in goat.codex_chat_sessions.
@@ -211,6 +214,13 @@ function GoatAppLiveDataSubscriptions({
     () => getHeadlessTasks(initialData.workspace.id),
     [initialData.workspace.id],
   );
+  const taskSchedulesCollection = useMemo(
+    () =>
+      initialData.featureFlags.taskSpawning
+        ? getHeadlessTaskSchedules(initialData.workspace.id)
+        : null,
+    [initialData.featureFlags.taskSpawning, initialData.workspace.id],
+  );
   // Keep Task metadata live even while the feature is disabled so every surface has current data
   // as soon as the user enables it. Authorization and shape identity stay in the API.
   const { data: taskRows, isLoading: tasksLoading } = useLiveQuery(
@@ -245,11 +255,8 @@ function GoatAppLiveDataSubscriptions({
     [legacyTaskRows, taskRows],
   );
   const { data: scheduleRows, isLoading: schedulesLoading } = useLiveQuery(
-    (q) =>
-      initialData.featureFlags.taskSpawning
-        ? q.from({ schedule: collections.taskSchedules })
-        : undefined,
-    [initialData.featureFlags.taskSpawning, collections],
+    (q) => (taskSchedulesCollection ? q.from({ schedule: taskSchedulesCollection }) : undefined),
+    [initialData.featureFlags.taskSpawning, taskSchedulesCollection],
   );
   const headlessConversations = useMemo(
     () => (HEADLESS_CHAT_ENABLED ? getHeadlessChatConversations() : null),
@@ -294,9 +301,8 @@ function GoatAppLiveDataSubscriptions({
   const schedules = useMemo(() => {
     if (!initialData.featureFlags.taskSpawning) return [];
     if (schedulesLoading && !scheduleRows?.length) return initialData.schedules;
-    return ((scheduleRows ?? []) as GoatTaskScheduleRow[])
-      .filter((row) => !row.deleted_at)
-      .map(taskScheduleRowToView)
+    return ((scheduleRows ?? []) as HeadlessTaskScheduleReadModel[])
+      .map(taskScheduleReadModelToView)
       .toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [
     initialData.featureFlags.taskSpawning,
@@ -614,18 +620,8 @@ export function taskRowToView(row: GoatTaskRow): GoatTaskView {
   };
 }
 
-function taskScheduleRowToView(row: GoatTaskScheduleRow): GoatTaskScheduleView {
-  return {
-    id: row.id,
-    name: row.name,
-    sourceDescription: row.source_description,
-    cron: row.cron,
-    timezone: row.timezone,
-    prompt: row.prompt,
-    enabled: row.enabled,
-    lastRunAt: row.last_run_at,
-    nextRunAt: row.next_run_at,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
+function taskScheduleReadModelToView(
+  schedule: HeadlessTaskScheduleReadModel,
+): GoatTaskScheduleView {
+  return schedule;
 }

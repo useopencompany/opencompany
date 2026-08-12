@@ -210,12 +210,18 @@ describe("canonical Hono API", () => {
     const invoked = await app.request("/v1/workflows/workflow_1/invoke", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": "workflow-invoke-1" },
-      body: JSON.stringify({ description: "Focus on competitors." }),
+      body: JSON.stringify({
+        description: "Focus on competitors.",
+        skillIds: ["market-research"],
+      }),
     });
     expect(invoked.status).toBe(202);
     await expect(invoked.json()).resolves.toMatchObject({
       data: { task: { id: "task_automation", source: "workflow" }, runId: "run_automation" },
     });
+    expect(automations.prepareWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({ skillIds: ["market-research"] }),
+    );
 
     const createdSchedule = await app.request("/v1/schedules", {
       method: "POST",
@@ -1027,6 +1033,11 @@ function populatedAutomationServices() {
         : null,
     recordRunNow: async () => undefined,
   };
+  const prepareWorkflow = vi.fn(async () => ({
+    engine: "opencompany" as const,
+    model: "provider/model",
+    payload: { engine: "opencompany", model: "provider/model" },
+  }));
   const options = {
     scheduleRules: {
       normalize: ({ cron, timezone }: { cron: string; timezone?: string | null }) => ({
@@ -1036,11 +1047,7 @@ function populatedAutomationServices() {
       }),
     },
     planner: {
-      prepareWorkflow: async () => ({
-        engine: "opencompany" as const,
-        model: "provider/model",
-        payload: { engine: "opencompany", model: "provider/model" },
-      }),
+      prepareWorkflow,
       prepareTaskSchedule: async () => ({
         engine: "opencompany" as const,
         model: "provider/model",
@@ -1065,6 +1072,7 @@ function populatedAutomationServices() {
   return {
     workflows: new WorkflowApplicationService(workflowRepository, options),
     schedules: new TaskScheduleApplicationService(scheduleRepository, options),
+    prepareWorkflow,
   };
 }
 

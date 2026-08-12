@@ -37,7 +37,7 @@ export function useGoatChatAttachments(opts: {
   upload?: (input: {
     file: File;
     mediaType: string;
-  }) => Promise<{ id?: string; blobUrl?: string; blobPathname?: string }>;
+  }) => Promise<{ id?: string; blobUrl?: string; blobPathname?: string; canonical?: boolean }>;
 }) {
   const { userWorkosId, modelName, enabled = true } = opts;
   const imagesOverride = opts.capabilities?.images;
