@@ -1,6 +1,7 @@
 import { createRoute, OpenAPIHono, type RouteHandler, z } from "@hono/zod-openapi";
 import { RunStreamEventSchema } from "./events";
 import {
+  ArchiveVersionBodySchema,
   AttachmentUploadBodySchema,
   AttachmentUploadEnvelopeSchema,
   CancelRunEnvelopeSchema,
@@ -10,8 +11,11 @@ import {
   CreateMessageEnvelopeSchema,
   CreateTaskBodySchema,
   CreateTaskEnvelopeSchema,
+  CreateTaskScheduleBodySchema,
+  CreateWorkflowBodySchema,
   CursorSchema,
   ErrorEnvelopeSchema,
+  InvokeWorkflowBodySchema,
   LegacyTaskHistoryEnvelopeSchema,
   LegacyTaskPageSchema,
   MessagePageSchema,
@@ -23,11 +27,23 @@ import {
   RunEnvelopeSchema,
   TaskEnvelopeSchema,
   TaskPageSchema,
+  TaskScheduleArchiveEnvelopeSchema,
+  TaskScheduleEnvelopeSchema,
+  TaskScheduleMutationEnvelopeSchema,
+  TaskSchedulePageSchema,
+  TaskScheduleUpdateEnvelopeSchema,
   TaskSummaryEnvelopeSchema,
   UpdateConversationBodySchema,
   UpdateConversationEnvelopeSchema,
   UpdateTaskBodySchema,
   UpdateTaskEnvelopeSchema,
+  UpdateTaskScheduleCommandSchema,
+  UpdateWorkflowBodySchema,
+  WorkflowArchiveEnvelopeSchema,
+  WorkflowEnvelopeSchema,
+  WorkflowMutationEnvelopeSchema,
+  WorkflowPageSchema,
+  WorkflowUpdateEnvelopeSchema,
 } from "./schemas";
 import { OPENAPI_DOCUMENT_VERSION, PROTOCOL_VERSION } from "./version";
 
@@ -148,6 +164,245 @@ export const getLegacyTaskHistoryRoute = createRoute({
     200: {
       description: "Read-only transcript and events for a sessionless pre-cutover Task.",
       content: { "application/json": { schema: LegacyTaskHistoryEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listWorkflowsRoute = createRoute({
+  method: "get",
+  path: "/v1/workflows",
+  tags: ["Workflows"],
+  security: actorSecurity,
+  request: {
+    query: z.object({
+      cursor: z.string().optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Actor-visible Workflow definitions.",
+      content: { "application/json": { schema: WorkflowPageSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createWorkflowRoute = createRoute({
+  method: "post",
+  path: "/v1/workflows",
+  tags: ["Workflows"],
+  security: actorSecurity,
+  request: {
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: { required: true, content: { "application/json": { schema: CreateWorkflowBodySchema } } },
+  },
+  responses: {
+    201: {
+      description: "Workflow definition created.",
+      content: { "application/json": { schema: WorkflowMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getWorkflowRoute = createRoute({
+  method: "get",
+  path: "/v1/workflows/{workflowId}",
+  tags: ["Workflows"],
+  security: actorSecurity,
+  request: { params: z.object({ workflowId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "A Workflow definition and trigger.",
+      content: { "application/json": { schema: WorkflowEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const updateWorkflowRoute = createRoute({
+  method: "patch",
+  path: "/v1/workflows/{workflowId}",
+  tags: ["Workflows"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ workflowId: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: UpdateWorkflowBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Workflow updated after an optimistic version check.",
+      content: { "application/json": { schema: WorkflowUpdateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const archiveWorkflowRoute = createRoute({
+  method: "post",
+  path: "/v1/workflows/{workflowId}/archive",
+  tags: ["Workflows"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ workflowId: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: ArchiveVersionBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Workflow archived after an optimistic version check.",
+      content: { "application/json": { schema: WorkflowArchiveEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const invokeWorkflowRoute = createRoute({
+  method: "post",
+  path: "/v1/workflows/{workflowId}/invoke",
+  tags: ["Workflows"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ workflowId: ResourceIdSchema }),
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: { required: true, content: { "application/json": { schema: InvokeWorkflowBodySchema } } },
+  },
+  responses: {
+    202: {
+      description: "Workflow invocation accepted as a canonical Task and Run.",
+      content: { "application/json": { schema: CreateTaskEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const runWorkflowNowRoute = createRoute({
+  method: "post",
+  path: "/v1/workflows/{workflowId}/run-now",
+  tags: ["Workflows"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ workflowId: ResourceIdSchema }),
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+  },
+  responses: {
+    202: {
+      description: "Scheduled Workflow run-now accepted as a canonical Task and Run.",
+      content: { "application/json": { schema: CreateTaskEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listTaskSchedulesRoute = createRoute({
+  method: "get",
+  path: "/v1/schedules",
+  tags: ["Schedules"],
+  security: actorSecurity,
+  request: {
+    query: z.object({
+      cursor: z.string().optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Actor-owned Recurring Task schedules.",
+      content: { "application/json": { schema: TaskSchedulePageSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createTaskScheduleRoute = createRoute({
+  method: "post",
+  path: "/v1/schedules",
+  tags: ["Schedules"],
+  security: actorSecurity,
+  request: {
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: CreateTaskScheduleBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Recurring Task schedule created.",
+      content: { "application/json": { schema: TaskScheduleMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getTaskScheduleRoute = createRoute({
+  method: "get",
+  path: "/v1/schedules/{scheduleId}",
+  tags: ["Schedules"],
+  security: actorSecurity,
+  request: { params: z.object({ scheduleId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "An actor-owned Recurring Task schedule.",
+      content: { "application/json": { schema: TaskScheduleEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const updateTaskScheduleRoute = createRoute({
+  method: "patch",
+  path: "/v1/schedules/{scheduleId}",
+  tags: ["Schedules"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ scheduleId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: UpdateTaskScheduleCommandSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Recurring Task schedule updated or paused after an optimistic version check.",
+      content: { "application/json": { schema: TaskScheduleUpdateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const archiveTaskScheduleRoute = createRoute({
+  method: "post",
+  path: "/v1/schedules/{scheduleId}/archive",
+  tags: ["Schedules"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ scheduleId: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: ArchiveVersionBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Recurring Task schedule archived after an optimistic version check.",
+      content: { "application/json": { schema: TaskScheduleArchiveEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const runTaskScheduleNowRoute = createRoute({
+  method: "post",
+  path: "/v1/schedules/{scheduleId}/run-now",
+  tags: ["Schedules"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ scheduleId: ResourceIdSchema }),
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+  },
+  responses: {
+    202: {
+      description: "Recurring Task run-now accepted as a canonical Task and Run.",
+      content: { "application/json": { schema: CreateTaskEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -381,6 +636,19 @@ export type V1RouteHandlers = {
   getTaskSummary: RouteHandler<typeof getTaskSummaryRoute>;
   listLegacyTasks: RouteHandler<typeof listLegacyTasksRoute>;
   getLegacyTaskHistory: RouteHandler<typeof getLegacyTaskHistoryRoute>;
+  listWorkflows: RouteHandler<typeof listWorkflowsRoute>;
+  createWorkflow: RouteHandler<typeof createWorkflowRoute>;
+  getWorkflow: RouteHandler<typeof getWorkflowRoute>;
+  updateWorkflow: RouteHandler<typeof updateWorkflowRoute>;
+  archiveWorkflow: RouteHandler<typeof archiveWorkflowRoute>;
+  invokeWorkflow: RouteHandler<typeof invokeWorkflowRoute>;
+  runWorkflowNow: RouteHandler<typeof runWorkflowNowRoute>;
+  listTaskSchedules: RouteHandler<typeof listTaskSchedulesRoute>;
+  createTaskSchedule: RouteHandler<typeof createTaskScheduleRoute>;
+  getTaskSchedule: RouteHandler<typeof getTaskScheduleRoute>;
+  updateTaskSchedule: RouteHandler<typeof updateTaskScheduleRoute>;
+  archiveTaskSchedule: RouteHandler<typeof archiveTaskScheduleRoute>;
+  runTaskScheduleNow: RouteHandler<typeof runTaskScheduleNowRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
   updateConversation: RouteHandler<typeof updateConversationRoute>;
@@ -411,6 +679,19 @@ export function createV1Router(
     .openapi(getTaskSummaryRoute, handlers.getTaskSummary)
     .openapi(listLegacyTasksRoute, handlers.listLegacyTasks)
     .openapi(getLegacyTaskHistoryRoute, handlers.getLegacyTaskHistory)
+    .openapi(listWorkflowsRoute, handlers.listWorkflows)
+    .openapi(createWorkflowRoute, handlers.createWorkflow)
+    .openapi(getWorkflowRoute, handlers.getWorkflow)
+    .openapi(updateWorkflowRoute, handlers.updateWorkflow)
+    .openapi(archiveWorkflowRoute, handlers.archiveWorkflow)
+    .openapi(invokeWorkflowRoute, handlers.invokeWorkflow)
+    .openapi(runWorkflowNowRoute, handlers.runWorkflowNow)
+    .openapi(listTaskSchedulesRoute, handlers.listTaskSchedules)
+    .openapi(createTaskScheduleRoute, handlers.createTaskSchedule)
+    .openapi(getTaskScheduleRoute, handlers.getTaskSchedule)
+    .openapi(updateTaskScheduleRoute, handlers.updateTaskSchedule)
+    .openapi(archiveTaskScheduleRoute, handlers.archiveTaskSchedule)
+    .openapi(runTaskScheduleNowRoute, handlers.runTaskScheduleNow)
     .openapi(listConversationsRoute, handlers.listConversations)
     .openapi(getConversationRoute, handlers.getConversation)
     .openapi(updateConversationRoute, handlers.updateConversation)
@@ -490,6 +771,54 @@ const placeholderLegacyTask = {
   createdAt: placeholderTask.createdAt,
   updatedAt: placeholderTask.updatedAt,
 };
+const placeholderWorkflow = {
+  id: "workflow_contract",
+  slug: "contract-workflow",
+  name: "Contract Workflow",
+  description: "A contract placeholder.",
+  steps: [
+    {
+      id: "step_contract",
+      title: "Execute",
+      model: "kimi-k2.6",
+      instructions: "Complete the contract placeholder.",
+    },
+  ],
+  status: "active" as const,
+  trigger: { type: "manual" as const },
+  version: 1,
+  archivedAt: null,
+  createdAt: placeholderTime,
+  updatedAt: placeholderTime,
+};
+const placeholderTaskSchedule = {
+  id: "schedule_contract",
+  name: "Contract schedule",
+  sourceDescription: "daily",
+  cron: "0 9 * * *",
+  timezone: "UTC",
+  prompt: "Complete the contract placeholder.",
+  enabled: true,
+  lastRunAt: null,
+  nextRunAt: placeholderTime,
+  version: 1,
+  createdAt: placeholderTime,
+  updatedAt: placeholderTime,
+};
+
+function placeholderAutomationTaskEnvelope() {
+  return {
+    data: {
+      task: placeholderTask,
+      messageId: "message_task_contract",
+      assistantMessageId: "message_task_assistant_contract",
+      runId: "run_task_contract",
+      transactionId: "1",
+      replayed: false,
+    },
+    meta,
+  };
+}
 
 const contractDocumentHandlers: V1RouteHandlers = {
   listTasks: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
@@ -534,6 +863,46 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  listWorkflows: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
+  createWorkflow: (c) =>
+    c.json(
+      {
+        data: { workflow: placeholderWorkflow, transactionId: "1", replayed: false },
+        meta,
+      },
+      201,
+    ),
+  getWorkflow: (c) => c.json({ data: placeholderWorkflow, meta }, 200),
+  updateWorkflow: (c) =>
+    c.json({ data: { workflow: placeholderWorkflow, transactionId: "1" }, meta }, 200),
+  archiveWorkflow: (c) =>
+    c.json(
+      { data: { workflowId: placeholderWorkflow.id, version: 2, transactionId: "1" }, meta },
+      200,
+    ),
+  invokeWorkflow: (c) => c.json(placeholderAutomationTaskEnvelope(), 202),
+  runWorkflowNow: (c) => c.json(placeholderAutomationTaskEnvelope(), 202),
+  listTaskSchedules: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
+  createTaskSchedule: (c) =>
+    c.json(
+      {
+        data: { schedule: placeholderTaskSchedule, transactionId: "1", replayed: false },
+        meta,
+      },
+      201,
+    ),
+  getTaskSchedule: (c) => c.json({ data: placeholderTaskSchedule, meta }, 200),
+  updateTaskSchedule: (c) =>
+    c.json({ data: { schedule: placeholderTaskSchedule, transactionId: "1" }, meta }, 200),
+  archiveTaskSchedule: (c) =>
+    c.json(
+      {
+        data: { scheduleId: placeholderTaskSchedule.id, version: 2, transactionId: "1" },
+        meta,
+      },
+      200,
+    ),
+  runTaskScheduleNow: (c) => c.json(placeholderAutomationTaskEnvelope(), 202),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   getConversation: (c) => c.json({ data: placeholderConversation, meta }, 200),
   updateConversation: (c) =>

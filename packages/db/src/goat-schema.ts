@@ -60,6 +60,7 @@ export type GoatTaskStatus = "queued" | "running" | "succeeded" | "failed" | "ca
 // attach (skills). Mirrors the frontmatter `status` the Brain docs carried.
 export type GoatWorkflowStatus = "draft" | "active";
 export type GoatWorkflowTrigger = "manual" | "slack" | "linear" | "schedule";
+export type GoatAutomationCommandOperation = "workflow.create" | "task_schedule.create";
 export type GoatWorkflowStep = {
   id: string;
   title: string;
@@ -2833,6 +2834,7 @@ export const goatTaskSchedules = goat.table(
     lastRunAt: timestamp("last_run_at", { withTimezone: true }),
     nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -2896,6 +2898,7 @@ export const goatWorkflows = goat.table(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
+    version: integer("version").notNull().default(1),
   },
   (table) => ({
     // Slug is the mention handle; unique per workspace among live rows so an
@@ -4128,6 +4131,47 @@ export const goatTaskCommandIdempotency = goat.table(
   }),
 );
 
+export const goatAutomationCommandIdempotency = goat.table(
+  "automation_command_idempotency",
+  {
+    commandId: text("command_id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    operation: text("operation").$type<GoatAutomationCommandOperation>().notNull(),
+    resourceId: text("resource_id").notNull(),
+    transactionId: bigint("transaction_id", { mode: "number" })
+      .notNull()
+      .default(sql`pg_current_xact_id()::xid::text::bigint`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    touchedAt: timestamp("touched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    actorKeyIdx: uniqueIndex("goat_automation_command_idempotency_actor_key_idx").on(
+      table.userWorkosId,
+      table.workspaceId,
+      table.idempotencyKey,
+    ),
+    requestHashCheck: check(
+      "goat_automation_command_idempotency_request_hash_check",
+      sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    keyLengthCheck: check(
+      "goat_automation_command_idempotency_key_length_check",
+      sql`length(${table.idempotencyKey}) BETWEEN 1 AND 200`,
+    ),
+    operationCheck: check(
+      "goat_automation_command_idempotency_operation_check",
+      sql`${table.operation} IN ('workflow.create', 'task_schedule.create')`,
+    ),
+  }),
+);
+
 export const goatRunAttempts = goat.table(
   "run_attempts",
   {
@@ -4361,6 +4405,95 @@ export const goatTaskReadModelV1 = goat.table(
     conversationIdx: uniqueIndex("goat_task_read_model_v1_conversation_idx").on(
       table.conversationId,
     ),
+  }),
+);
+
+export const goatWorkflowReadModelV1 = goat.table(
+  "workflow_read_model_v1",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    steps: jsonb("steps").$type<GoatWorkflowStep[]>().notNull(),
+    status: text("status").$type<GoatWorkflowStatus>().notNull(),
+    trigger: jsonb("trigger").$type<Record<string, unknown>>().notNull(),
+    scheduleCron: text("schedule_cron"),
+    scheduleTimezone: text("schedule_timezone").notNull(),
+    schedulePrompt: text("schedule_prompt").notNull(),
+    scheduleEnabled: boolean("schedule_enabled").notNull(),
+    scheduleLastRunAt: timestamp("schedule_last_run_at", { withTimezone: true }),
+    scheduleNextRunAt: timestamp("schedule_next_run_at", { withTimezone: true }),
+    version: integer("version").notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    workspaceUpdatedIdx: index("goat_workflow_read_model_v1_workspace_updated_idx").on(
+      table.workspaceId,
+      table.updatedAt,
+    ),
+    workspaceSlugIdx: uniqueIndex("goat_workflow_read_model_v1_workspace_slug_idx").on(
+      table.workspaceId,
+      table.slug,
+    ),
+  }),
+);
+
+export const goatWorkflowScheduleReadModelV1 = goat.table(
+  "workflow_schedule_read_model_v1",
+  {
+    id: text("id").primaryKey(),
+    workflowId: text("workflow_id").notNull(),
+    workspaceId: text("workspace_id").notNull(),
+    workflowSlug: text("workflow_slug").notNull(),
+    name: text("name").notNull(),
+    cron: text("cron").notNull(),
+    timezone: text("timezone").notNull(),
+    prompt: text("prompt").notNull(),
+    enabled: boolean("enabled").notNull(),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    version: integer("version").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    workspaceUpdatedIdx: index("goat_workflow_schedule_read_model_v1_workspace_updated_idx").on(
+      table.workspaceId,
+      table.updatedAt,
+    ),
+    workspaceSlugIdx: uniqueIndex("goat_workflow_schedule_read_model_v1_workspace_slug_idx").on(
+      table.workspaceId,
+      table.workflowSlug,
+    ),
+  }),
+);
+
+export const goatTaskScheduleReadModelV1 = goat.table(
+  "task_schedule_read_model_v1",
+  {
+    id: text("id").primaryKey(),
+    actorId: text("actor_id").notNull(),
+    workspaceId: text("workspace_id"),
+    name: text("name").notNull(),
+    sourceDescription: text("source_description").notNull(),
+    cron: text("cron").notNull(),
+    timezone: text("timezone").notNull(),
+    prompt: text("prompt").notNull(),
+    enabled: boolean("enabled").notNull(),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
+    version: integer("version").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    actorWorkspaceUpdatedIdx: index(
+      "goat_task_schedule_read_model_v1_actor_workspace_updated_idx",
+    ).on(table.actorId, table.workspaceId, table.updatedAt),
   }),
 );
 
@@ -5598,6 +5731,7 @@ export type GoatCodexCredential = typeof goatCodexCredentials.$inferSelect;
 export type GoatClaudeCodeCredential = typeof goatClaudeCodeCredentials.$inferSelect;
 export type GoatCodexDeviceAuthFlow = typeof goatCodexDeviceAuthFlows.$inferSelect;
 export type GoatTaskSchedule = typeof goatTaskSchedules.$inferSelect;
+export type GoatAutomationCommandIdempotency = typeof goatAutomationCommandIdempotency.$inferSelect;
 export type GoatTaskScheduleRun = typeof goatTaskScheduleRuns.$inferSelect;
 export type GoatWorkflowScheduleRun = typeof goatWorkflowScheduleRuns.$inferSelect;
 export type GoatTask = typeof goatTasks.$inferSelect;

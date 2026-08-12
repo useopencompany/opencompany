@@ -5,7 +5,16 @@ const actor = {
   userId: "user_1",
   workspaceId: "workspace_1",
   role: "member",
-  permissions: ["chat:read", "chat:write", "task:read", "task:write"],
+  permissions: [
+    "chat:read",
+    "chat:write",
+    "task:read",
+    "task:write",
+    "workflow:read",
+    "workflow:write",
+    "schedule:read",
+    "schedule:write",
+  ],
   authenticationMethod: "session" as const,
 };
 
@@ -262,6 +271,211 @@ describe("Electric read models", () => {
         },
       },
     ]);
+  });
+
+  it("projects Workflow and schedule shapes without leaking tenancy or physical trigger fields", async () => {
+    const requestedUrls: URL[] = [];
+    const rowsByTable: Record<string, Record<string, unknown>> = {
+      "goat.workflow_read_model_v1": {
+        id: "workflow_1",
+        slug: "weekly-research",
+        name: "Weekly research",
+        description: "Track material changes",
+        steps: JSON.stringify([
+          {
+            id: "step_1",
+            title: "Research",
+            model: "provider/model",
+            instructions: "Find changes.",
+          },
+        ]),
+        status: "active",
+        trigger: JSON.stringify({
+          type: "schedule",
+          cron: "0 9 * * 1",
+          timezone: "Europe/Berlin",
+          prompt: "Run this workflow.",
+          enabled: true,
+          lastRunAt: null,
+          nextRunAt: "2026-08-13T09:00:00.000Z",
+        }),
+        version: "2",
+        archived_at: null,
+        created_at: "2026-08-12 08:00:00+00",
+        updated_at: "2026-08-12 08:05:00+00",
+        workspace_id: "must-not-cross",
+      },
+      "goat.workflow_schedule_read_model_v1": {
+        id: "workflow_1",
+        workflow_id: "workflow_1",
+        workflow_slug: "weekly-research",
+        name: "Weekly research",
+        cron: "0 9 * * 1",
+        timezone: "Europe/Berlin",
+        prompt: "Run this workflow.",
+        enabled: true,
+        last_run_at: null,
+        next_run_at: "2026-08-13 09:00:00+00",
+        version: "2",
+        created_at: "2026-08-12 08:00:00+00",
+        updated_at: "2026-08-12 08:05:00+00",
+        workspace_id: "must-not-cross",
+      },
+      "goat.task_schedule_read_model_v1": {
+        id: "schedule_1",
+        name: "Daily research",
+        source_description: "Tasks page",
+        cron: "0 9 * * *",
+        timezone: "UTC",
+        prompt: "Research changes.",
+        enabled: false,
+        last_run_at: null,
+        next_run_at: "2026-08-13 09:00:00+00",
+        version: "3",
+        created_at: "2026-08-12 08:00:00+00",
+        updated_at: "2026-08-12 08:05:00+00",
+        actor_id: "must-not-cross",
+        workspace_id: "must-not-cross",
+      },
+    };
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        const requestedUrl = new URL(String(input));
+        requestedUrls.push(requestedUrl);
+        const table = requestedUrl.searchParams.get("table") ?? "";
+        return Response.json([
+          {
+            headers: { operation: "insert" },
+            key: JSON.stringify(rowsByTable[table]?.id),
+            value: rowsByTable[table],
+          },
+        ]);
+      }) as typeof fetch,
+    });
+
+    const [workflowResponse, workflowScheduleResponse, taskScheduleResponse] = await Promise.all([
+      proxy.stream({
+        actor,
+        readModel: "workflows-v1",
+        requestUrl: new URL("https://api.example.test/v1/read-models/workflows-v1"),
+      }),
+      proxy.stream({
+        actor,
+        readModel: "workflow-schedules-v1",
+        requestUrl: new URL("https://api.example.test/v1/read-models/workflow-schedules-v1"),
+      }),
+      proxy.stream({
+        actor,
+        readModel: "task-schedules-v1",
+        requestUrl: new URL("https://api.example.test/v1/read-models/task-schedules-v1"),
+      }),
+    ]);
+
+    expect(requestedUrls.map((url) => url.searchParams.get("table"))).toEqual([
+      "goat.workflow_read_model_v1",
+      "goat.workflow_schedule_read_model_v1",
+      "goat.task_schedule_read_model_v1",
+    ]);
+    expect(requestedUrls[0]?.searchParams.get("where")).toBe('"workspace_id" = $1');
+    expect(requestedUrls[2]?.searchParams.get("where")).toContain('"actor_id" = $1');
+    expect(requestedUrls[2]?.searchParams.get("where")).toContain('"workspace_id" IS NULL');
+    expect((await workflowResponse.json())[0]?.value).toEqual({
+      id: "workflow_1",
+      slug: "weekly-research",
+      name: "Weekly research",
+      description: "Track material changes",
+      steps: [
+        {
+          id: "step_1",
+          title: "Research",
+          model: "provider/model",
+          instructions: "Find changes.",
+        },
+      ],
+      status: "active",
+      trigger: {
+        type: "schedule",
+        cron: "0 9 * * 1",
+        timezone: "Europe/Berlin",
+        prompt: "Run this workflow.",
+        enabled: true,
+        lastRunAt: null,
+        nextRunAt: "2026-08-13T09:00:00.000Z",
+      },
+      version: 2,
+      archivedAt: null,
+      createdAt: "2026-08-12T08:00:00.000Z",
+      updatedAt: "2026-08-12T08:05:00.000Z",
+    });
+    expect((await workflowScheduleResponse.json())[0]?.value).toMatchObject({
+      id: "workflow_1",
+      workflowId: "workflow_1",
+      workflowSlug: "weekly-research",
+      version: 2,
+    });
+    expect((await taskScheduleResponse.json())[0]?.value).toEqual({
+      id: "schedule_1",
+      name: "Daily research",
+      sourceDescription: "Tasks page",
+      cron: "0 9 * * *",
+      timezone: "UTC",
+      prompt: "Research changes.",
+      enabled: false,
+      lastRunAt: null,
+      nextRunAt: "2026-08-13T09:00:00.000Z",
+      version: 3,
+      createdAt: "2026-08-12T08:00:00.000Z",
+      updatedAt: "2026-08-12T08:05:00.000Z",
+    });
+  });
+
+  it("projects a Workflow trigger update atomically from one JSON field", async () => {
+    let requestedUrl: URL | undefined;
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        requestedUrl = new URL(String(input));
+        return Response.json([
+          {
+            headers: { operation: "update" },
+            key: JSON.stringify("workflow_1"),
+            value: {
+              id: "workflow_1",
+              trigger: JSON.stringify({
+                type: "schedule",
+                cron: "0 10 * * 1",
+                timezone: "Europe/Berlin",
+                prompt: "Run the updated workflow.",
+                enabled: true,
+                lastRunAt: null,
+                nextRunAt: "2026-08-14T10:00:00.000Z",
+              }),
+            },
+          },
+        ]);
+      }) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "workflows-v1",
+      requestUrl: new URL("https://api.example.test/v1/read-models/workflows-v1"),
+    });
+
+    expect(requestedUrl?.searchParams.get("columns")).not.toContain("schedule_");
+    expect((await response.json())[0]?.value).toEqual({
+      id: "workflow_1",
+      trigger: {
+        type: "schedule",
+        cron: "0 10 * * 1",
+        timezone: "Europe/Berlin",
+        prompt: "Run the updated workflow.",
+        enabled: true,
+        lastRunAt: null,
+        nextRunAt: "2026-08-14T10:00:00.000Z",
+      },
+    });
   });
 
   it("does not expose upstream Electric diagnostics", async () => {

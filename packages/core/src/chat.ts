@@ -299,7 +299,12 @@ export interface ChatRepository {
 
 export class CoreError extends Error {
   constructor(
-    readonly code: "forbidden" | "invalid_argument" | "not_found" | "idempotency_conflict",
+    readonly code:
+      | "forbidden"
+      | "invalid_argument"
+      | "not_found"
+      | "conflict"
+      | "idempotency_conflict",
     message: string,
   ) {
     super(message);

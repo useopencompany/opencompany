@@ -17,6 +17,7 @@ import { createLogger } from "@opencompany/observability";
 import { createApiApp } from "./app";
 import { createAttachmentUploadService } from "./attachments";
 import { createWorkOsApiAuthenticator } from "./auth";
+import { createAutomationServices } from "./automations";
 import { parseBrowserOrigins } from "./browser-origins";
 import { ElectricReadModelProxy } from "./electric-read-models";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
@@ -48,12 +49,18 @@ const tasks = new TaskApplicationService(
     }),
   }),
 );
+const automations = createAutomationServices({
+  execute,
+  resolveAttachments: (input) => attachmentRepository.resolve(input),
+});
 const notifier = new PostgresRunEventNotifier(database.pool);
 const presentation = createPresentationStream();
 const readModels = createElectricReadModels();
 const app = createApiApp({
   chat,
   tasks,
+  workflows: automations.workflows,
+  schedules: automations.schedules,
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),
   authenticate: createWorkOsApiAuthenticator(execute),
   browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),

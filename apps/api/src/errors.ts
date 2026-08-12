@@ -45,6 +45,8 @@ function normalizeApiError(error: unknown): ApiError {
         return new ApiError(400, "invalid_request", error.message);
       case "not_found":
         return new ApiError(404, "not_found", error.message);
+      case "conflict":
+        return new ApiError(409, "conflict", error.message);
       case "idempotency_conflict":
         return new ApiError(409, "idempotency_conflict", error.message);
     }
@@ -53,10 +55,14 @@ function normalizeApiError(error: unknown): ApiError {
 }
 
 function isCoreError(error: unknown): error is Error & {
-  code: "forbidden" | "invalid_argument" | "not_found" | "idempotency_conflict";
+  code: "forbidden" | "invalid_argument" | "not_found" | "conflict" | "idempotency_conflict";
 } {
   if (!(error instanceof Error) || !("code" in error)) return false;
-  return ["forbidden", "invalid_argument", "not_found", "idempotency_conflict"].includes(
-    String(error.code),
-  );
+  return [
+    "forbidden",
+    "invalid_argument",
+    "not_found",
+    "conflict",
+    "idempotency_conflict",
+  ].includes(String(error.code));
 }

@@ -11,6 +11,12 @@ import {
   type Task,
   TaskApplicationService,
   type TaskRepository,
+  type TaskSchedule,
+  TaskScheduleApplicationService,
+  type TaskScheduleRepository,
+  type Workflow,
+  WorkflowApplicationService,
+  type WorkflowRepository,
 } from "@opencompany/core";
 import { describe, expect, it, vi } from "vitest";
 import { createApiApp } from "./app";
@@ -22,7 +28,16 @@ const actor: Actor = {
   userId: "user_1",
   workspaceId: "workspace_1",
   role: "admin",
-  permissions: ["chat:read", "chat:write", "task:read", "task:write"],
+  permissions: [
+    "chat:read",
+    "chat:write",
+    "task:read",
+    "task:write",
+    "workflow:read",
+    "workflow:write",
+    "schedule:read",
+    "schedule:write",
+  ],
   authenticationMethod: "session",
 };
 const createdAt = new Date("2026-08-10T20:00:00.000Z");
@@ -55,6 +70,7 @@ describe("canonical Hono API", () => {
     const unauthenticated = createApiApp({
       chat: new ChatApplicationService(repository),
       tasks: new TaskApplicationService(fakeTaskRepository()),
+      ...fakeAutomationServices(),
       attachments: fakeAttachments(),
       authenticate: async () => {
         throw new ApiError(401, "authentication_required", "Authentication required.");
@@ -142,6 +158,85 @@ describe("canonical Hono API", () => {
       },
       meta: { apiVersion: "v1", protocolVersion: expect.any(String) },
     });
+  });
+
+  it("serves canonical Workflow and Recurring Task contracts through Core services", async () => {
+    const automations = populatedAutomationServices();
+    const app = testApp(fakeRepository(), automations);
+
+    const createdWorkflow = await app.request("/v1/workflows", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "workflow-create-1" },
+      body: JSON.stringify({ name: "Weekly research", description: "Track changes" }),
+    });
+    expect(createdWorkflow.status).toBe(201);
+    await expect(createdWorkflow.json()).resolves.toMatchObject({
+      data: {
+        workflow: {
+          id: "workflow_1",
+          slug: "weekly-research",
+          trigger: { type: "manual" },
+          version: 1,
+        },
+        transactionId: "51",
+        replayed: false,
+      },
+    });
+
+    const updatedWorkflow = await app.request("/v1/workflows/workflow_1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expectedVersion: 1,
+        name: "Weekly research",
+        description: "Track changes",
+        steps: [
+          {
+            id: "step_1",
+            title: "Research",
+            model: "provider/model",
+            instructions: "Find material changes.",
+          },
+        ],
+        status: "active",
+        trigger: { type: "manual" },
+      }),
+    });
+    expect(updatedWorkflow.status).toBe(200);
+    await expect(updatedWorkflow.json()).resolves.toMatchObject({
+      data: { workflow: { version: 2 }, transactionId: "52" },
+    });
+
+    const invoked = await app.request("/v1/workflows/workflow_1/invoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "workflow-invoke-1" },
+      body: JSON.stringify({ description: "Focus on competitors." }),
+    });
+    expect(invoked.status).toBe(202);
+    await expect(invoked.json()).resolves.toMatchObject({
+      data: { task: { id: "task_automation", source: "workflow" }, runId: "run_automation" },
+    });
+
+    const createdSchedule = await app.request("/v1/schedules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "schedule-create-1" },
+      body: JSON.stringify({
+        name: "Daily research",
+        cron: "0 9 * * *",
+        timezone: "UTC",
+        prompt: "Research market changes.",
+      }),
+    });
+    expect(createdSchedule.status).toBe(201);
+    const scheduleBody = await createdSchedule.json();
+    expect(scheduleBody).toMatchObject({
+      data: {
+        schedule: { id: "schedule_1", name: "Daily research", version: 1 },
+        transactionId: "61",
+        replayed: false,
+      },
+    });
+    expect(JSON.stringify(scheduleBody)).not.toMatch(/workos|workspace_id|harness|goat_/iu);
   });
 
   it("serves sessionless history only through actor-scoped read-only compatibility resources", async () => {
@@ -715,6 +810,7 @@ function testApp(
   return createApiApp({
     chat: new ChatApplicationService(repository),
     tasks: new TaskApplicationService(fakeTaskRepository()),
+    ...fakeAutomationServices(),
     attachments: fakeAttachments(),
     authenticate: async () => ({ actor }),
     defaultModel: "provider/default",
@@ -757,6 +853,220 @@ function fakeAttachments(): AttachmentUploadService {
 type FakeRepository = ChatRepository & { lastCommand: CreateMessageCommand | null };
 
 type FakeTaskRepository = TaskRepository & { lastCommand: CreateTaskCommand | null };
+
+function fakeAutomationServices() {
+  const workflowRepository: WorkflowRepository = {
+    listWorkflows: async () => ({ workflows: [], nextCursor: null }),
+    getWorkflow: async () => null,
+    createWorkflow: async () => {
+      throw new Error("Unexpected Workflow creation.");
+    },
+    updateWorkflow: async () => ({ status: "not_found" }),
+    archiveWorkflow: async () => ({ status: "not_found" }),
+    recordRunNow: async () => undefined,
+  };
+  const scheduleRepository: TaskScheduleRepository = {
+    assertTaskScheduleWriteAllowed: async () => undefined,
+    replayTaskScheduleCreate: async () => null,
+    listTaskSchedules: async () => ({ schedules: [], nextCursor: null }),
+    getTaskSchedule: async () => null,
+    createTaskSchedule: async () => {
+      throw new Error("Unexpected Task schedule creation.");
+    },
+    updateTaskSchedule: async () => ({ status: "not_found" }),
+    setTaskScheduleEnabled: async () => ({ status: "not_found" }),
+    archiveTaskSchedule: async () => ({ status: "not_found" }),
+    loadTaskScheduleExecution: async () => null,
+    recordRunNow: async () => undefined,
+  };
+  const options = {
+    scheduleRules: {
+      normalize: ({
+        cron,
+        timezone,
+        now,
+      }: {
+        cron: string;
+        timezone?: string | null;
+        now: Date;
+      }) => ({
+        cron,
+        timezone: timezone ?? "UTC",
+        nextRunAt: now,
+      }),
+    },
+    planner: {
+      prepareWorkflow: async () => {
+        throw new Error("Unexpected Workflow planning.");
+      },
+      prepareTaskSchedule: async () => {
+        throw new Error("Unexpected Task schedule planning.");
+      },
+    },
+    taskCreator: {
+      create: async () => {
+        throw new Error("Unexpected automation Task creation.");
+      },
+    },
+  };
+  return {
+    workflows: new WorkflowApplicationService(workflowRepository, options),
+    schedules: new TaskScheduleApplicationService(scheduleRepository, options),
+  };
+}
+
+function populatedAutomationServices() {
+  let workflow: Workflow = {
+    id: "workflow_1",
+    slug: "weekly-research",
+    name: "Weekly research",
+    description: "Track changes",
+    steps: [
+      {
+        id: "step_1",
+        title: "Research",
+        model: "provider/model",
+        instructions: "Find material changes.",
+      },
+    ],
+    status: "active",
+    trigger: { type: "manual" },
+    version: 1,
+    archivedAt: null,
+    createdAt,
+    updatedAt: createdAt,
+  };
+  const schedule: TaskSchedule = {
+    id: "schedule_1",
+    name: "Daily research",
+    sourceDescription: "",
+    cron: "0 9 * * *",
+    timezone: "UTC",
+    prompt: "Research market changes.",
+    enabled: true,
+    lastRunAt: null,
+    nextRunAt: createdAt,
+    version: 1,
+    createdAt,
+    updatedAt: createdAt,
+  };
+  const workflowRepository: WorkflowRepository = {
+    listWorkflows: async () => ({ workflows: [workflow], nextCursor: null }),
+    getWorkflow: async ({ workflowId }) =>
+      workflowId === workflow.id || workflowId === workflow.slug ? workflow : null,
+    createWorkflow: async () => ({
+      workflow,
+      transactionId: "51",
+      idempotentReplay: false,
+    }),
+    updateWorkflow: async (input) => {
+      workflow = {
+        ...workflow,
+        name: input.name,
+        description: input.description,
+        steps: input.steps,
+        status: input.status,
+        trigger:
+          input.trigger.type === "manual"
+            ? { type: "manual" }
+            : {
+                type: "schedule",
+                cron: input.schedule?.definition.cron ?? input.trigger.cron,
+                timezone: input.schedule?.definition.timezone ?? input.trigger.timezone ?? "UTC",
+                prompt: input.trigger.prompt ?? "Run this workflow.",
+                enabled: input.trigger.enabled ?? true,
+                lastRunAt: null,
+                nextRunAt: input.schedule?.definition.nextRunAt ?? null,
+              },
+        version: 2,
+      };
+      return { status: "updated", value: workflow, transactionId: "52" };
+    },
+    archiveWorkflow: async () => ({
+      status: "updated",
+      value: { workflowId: workflow.id, version: workflow.version + 1 },
+      transactionId: "53",
+    }),
+    recordRunNow: async () => undefined,
+  };
+  const scheduleRepository: TaskScheduleRepository = {
+    assertTaskScheduleWriteAllowed: async () => undefined,
+    replayTaskScheduleCreate: async () => null,
+    listTaskSchedules: async () => ({ schedules: [schedule], nextCursor: null }),
+    getTaskSchedule: async ({ scheduleId }) => (scheduleId === schedule.id ? schedule : null),
+    createTaskSchedule: async () => ({
+      schedule,
+      transactionId: "61",
+      idempotentReplay: false,
+    }),
+    updateTaskSchedule: async () => ({
+      status: "updated",
+      value: { ...schedule, version: 2 },
+      transactionId: "62",
+    }),
+    setTaskScheduleEnabled: async ({ enabled }) => ({
+      status: "updated",
+      value: { ...schedule, enabled, version: 2 },
+      transactionId: "63",
+    }),
+    archiveTaskSchedule: async () => ({
+      status: "updated",
+      value: { scheduleId: schedule.id, version: 2 },
+      transactionId: "64",
+    }),
+    loadTaskScheduleExecution: async ({ scheduleId }) =>
+      scheduleId === schedule.id
+        ? {
+            schedule,
+            execution: {
+              engine: "opencompany",
+              model: "provider/model",
+              payload: { engine: "opencompany", model: "provider/model" },
+            },
+          }
+        : null,
+    recordRunNow: async () => undefined,
+  };
+  const options = {
+    scheduleRules: {
+      normalize: ({ cron, timezone }: { cron: string; timezone?: string | null }) => ({
+        cron: cron.trim(),
+        timezone: timezone?.trim() || "UTC",
+        nextRunAt: createdAt,
+      }),
+    },
+    planner: {
+      prepareWorkflow: async () => ({
+        engine: "opencompany" as const,
+        model: "provider/model",
+        payload: { engine: "opencompany", model: "provider/model" },
+      }),
+      prepareTaskSchedule: async () => ({
+        engine: "opencompany" as const,
+        model: "provider/model",
+        payload: { engine: "opencompany", model: "provider/model" },
+      }),
+    },
+    taskCreator: {
+      create: async ({ source }: { source: "workflow" | "schedule" }) => ({
+        task: fakeTask({
+          id: "task_automation",
+          source,
+          conversationId: "conversation_automation",
+        }),
+        messageId: "message_automation_user",
+        assistantMessageId: "message_automation_assistant",
+        runId: "run_automation",
+        transactionId: "71",
+        idempotentReplay: false,
+      }),
+    },
+  };
+  return {
+    workflows: new WorkflowApplicationService(workflowRepository, options),
+    schedules: new TaskScheduleApplicationService(scheduleRepository, options),
+  };
+}
 
 function fakeTaskRepository(): FakeTaskRepository {
   const repository: FakeTaskRepository = {

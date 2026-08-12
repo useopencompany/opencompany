@@ -107,6 +107,15 @@ describe("v1 protocol contract", () => {
       "/v1/tasks/{taskId}/summary",
       "/v1/compatibility/tasks",
       "/v1/compatibility/tasks/{taskId}/history",
+      "/v1/workflows",
+      "/v1/workflows/{workflowId}",
+      "/v1/workflows/{workflowId}/archive",
+      "/v1/workflows/{workflowId}/invoke",
+      "/v1/workflows/{workflowId}/run-now",
+      "/v1/schedules",
+      "/v1/schedules/{scheduleId}",
+      "/v1/schedules/{scheduleId}/archive",
+      "/v1/schedules/{scheduleId}/run-now",
       "/v1/conversations",
       "/v1/conversations/{conversationId}",
       "/v1/conversations/{conversationId}/messages",
@@ -124,5 +133,11 @@ describe("v1 protocol contract", () => {
     expect(
       client.v1.runs[":runId"].events.$url({ param: { runId: "run_1" }, query: {} }).pathname,
     ).toBe("/v1/runs/run_1/events");
+    expect(
+      client.v1.workflows[":workflowId"].$url({ param: { workflowId: "workflow_1" } }).pathname,
+    ).toBe("/v1/workflows/workflow_1");
+    expect(
+      client.v1.schedules[":scheduleId"].$url({ param: { scheduleId: "schedule_1" } }).pathname,
+    ).toBe("/v1/schedules/schedule_1");
   });
 });

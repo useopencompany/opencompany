@@ -7,7 +7,9 @@ import {
   CreateMessageBodySchema,
   CreateTaskBodySchema,
   MessageReadModelSchema,
+  ReadModelSchema,
   ResolveApprovalBodySchema,
+  UpdateWorkflowBodySchema,
 } from "./schemas";
 
 describe("headless protocol", () => {
@@ -19,6 +21,15 @@ describe("headless protocol", () => {
       "/v1/tasks/{taskId}/summary",
       "/v1/compatibility/tasks",
       "/v1/compatibility/tasks/{taskId}/history",
+      "/v1/workflows",
+      "/v1/workflows/{workflowId}",
+      "/v1/workflows/{workflowId}/archive",
+      "/v1/workflows/{workflowId}/invoke",
+      "/v1/workflows/{workflowId}/run-now",
+      "/v1/schedules",
+      "/v1/schedules/{scheduleId}",
+      "/v1/schedules/{scheduleId}/archive",
+      "/v1/schedules/{scheduleId}/run-now",
       "/v1/conversations",
       "/v1/conversations/{conversationId}",
       "/v1/conversations/{conversationId}/messages",
@@ -77,6 +88,36 @@ describe("headless protocol", () => {
         createdAt: "2026-08-10T00:00:00.000Z",
         updatedAt: "2026-08-10T00:00:00.000Z",
         actor_id: "must-not-cross",
+      }).success,
+    ).toBe(false);
+    expect(ReadModelSchema.safeParse("workflows-v1").success).toBe(true);
+    expect(ReadModelSchema.safeParse("workflow-schedules-v1").success).toBe(true);
+    expect(ReadModelSchema.safeParse("task-schedules-v1").success).toBe(true);
+    expect(ReadModelSchema.safeParse("goat.workflow_read_model_v1").success).toBe(false);
+  });
+
+  it("requires optimistic versions without accepting tenancy or planner state", () => {
+    const command = {
+      expectedVersion: 2,
+      name: "Weekly research",
+      description: "Track changes",
+      steps: [
+        {
+          id: "step_1",
+          title: "Research",
+          model: "provider/model",
+          instructions: "Find material changes.",
+        },
+      ],
+      status: "active",
+      trigger: { type: "manual" },
+    };
+    expect(UpdateWorkflowBodySchema.safeParse(command).success).toBe(true);
+    expect(
+      UpdateWorkflowBodySchema.safeParse({
+        ...command,
+        workspaceId: "workspace_1",
+        scheduleHarnessSpec: { secret: true },
       }).success,
     ).toBe(false);
   });

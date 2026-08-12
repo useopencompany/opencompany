@@ -127,6 +127,107 @@ export const TaskSchema = z
   .strict()
   .openapi("Task");
 
+export const WorkflowStatusSchema = z.enum(["draft", "active"]);
+export const WorkflowStepSchema = z
+  .object({
+    id: ResourceIdSchema,
+    title: z.string().max(120),
+    model: z.string().max(256),
+    runtimeModel: z.string().min(1).max(256).optional(),
+    reasoningEffort: z.string().min(1).max(64).optional(),
+    instructions: z.string().max(20_000),
+  })
+  .strict()
+  .openapi("WorkflowStep");
+
+export const WorkflowTriggerSchema = z
+  .discriminatedUnion("type", [
+    z.object({ type: z.literal("manual") }).strict(),
+    z
+      .object({
+        type: z.literal("schedule"),
+        cron: z.string().min(1).max(128),
+        timezone: z.string().min(1).max(128),
+        prompt: z.string().min(1).max(10_000),
+        enabled: z.boolean(),
+        lastRunAt: TimestampSchema.nullable(),
+        nextRunAt: TimestampSchema.nullable(),
+      })
+      .strict(),
+  ])
+  .openapi("WorkflowTrigger");
+
+export const WorkflowTriggerInputSchema = z
+  .discriminatedUnion("type", [
+    z.object({ type: z.literal("manual") }).strict(),
+    z
+      .object({
+        type: z.literal("schedule"),
+        cron: z.string().min(1).max(128),
+        timezone: z.string().min(1).max(128).optional(),
+        prompt: z.string().max(10_000).optional(),
+        enabled: z.boolean().optional(),
+      })
+      .strict(),
+  ])
+  .openapi("WorkflowTriggerInput");
+
+export const WorkflowSchema = z
+  .object({
+    id: ResourceIdSchema,
+    slug: z.string().min(1).max(80),
+    name: z.string().min(1).max(64),
+    description: z.string().max(1_024),
+    // Historical drafts can be empty. Mutations still require at least one step, and the Core
+    // refuses to invoke an incomplete definition.
+    steps: z.array(WorkflowStepSchema).max(20),
+    status: WorkflowStatusSchema,
+    trigger: WorkflowTriggerSchema,
+    version: z.number().int().min(1),
+    archivedAt: TimestampSchema.nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("Workflow");
+
+export const TaskScheduleSchema = z
+  .object({
+    id: ResourceIdSchema,
+    name: z.string().min(1).max(80),
+    sourceDescription: z.string().max(1_024),
+    cron: z.string().min(1).max(128),
+    timezone: z.string().min(1).max(128),
+    prompt: z.string().min(1).max(10_000),
+    enabled: z.boolean(),
+    lastRunAt: TimestampSchema.nullable(),
+    nextRunAt: TimestampSchema,
+    version: z.number().int().min(1),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("TaskSchedule");
+
+export const WorkflowScheduleReadModelSchema = z
+  .object({
+    id: ResourceIdSchema,
+    workflowId: ResourceIdSchema,
+    workflowSlug: z.string().min(1).max(80),
+    name: z.string().min(1).max(64),
+    cron: z.string().min(1).max(128),
+    timezone: z.string().min(1).max(128),
+    prompt: z.string().min(1).max(10_000),
+    enabled: z.boolean(),
+    lastRunAt: TimestampSchema.nullable(),
+    nextRunAt: TimestampSchema.nullable(),
+    version: z.number().int().min(1),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("WorkflowScheduleReadModelV1");
+
 // Electric read models are versioned protocol resources. Their implementation may project from
 // existing physical tables, but clients only select one of these fixed names and receive canonical
 // field names through the shared collection adapter.
@@ -136,9 +237,15 @@ export const ChatReadModelSchema = z.enum([
   "chat-runs-v1",
 ]);
 export const TaskReadModelNameSchema = z.literal("tasks-v1");
+export const WorkflowReadModelNameSchema = z.literal("workflows-v1");
+export const WorkflowScheduleReadModelNameSchema = z.literal("workflow-schedules-v1");
+export const TaskScheduleReadModelNameSchema = z.literal("task-schedules-v1");
 export const ReadModelSchema = z.enum([
   ...ChatReadModelSchema.options,
   TaskReadModelNameSchema.value,
+  WorkflowReadModelNameSchema.value,
+  WorkflowScheduleReadModelNameSchema.value,
+  TaskScheduleReadModelNameSchema.value,
 ]);
 
 export const ChatPresentationAttachmentSchema = z
@@ -200,6 +307,8 @@ export const RunReadModelSchema = z
   .openapi("RunReadModelV1");
 
 export const TaskReadModelSchema = TaskSchema.openapi("TaskReadModelV1");
+export const WorkflowReadModelSchema = WorkflowSchema.openapi("WorkflowReadModelV1");
+export const TaskScheduleReadModelSchema = TaskScheduleSchema.openapi("TaskScheduleReadModelV1");
 
 export const ErrorCodeSchema = z.enum([
   "authentication_required",
@@ -269,6 +378,184 @@ export const TaskSummaryEnvelopeSchema = z
   .object({ data: TaskSummarySchema, meta: ProtocolMetadataSchema })
   .strict()
   .openapi("TaskSummaryEnvelope");
+
+export const WorkflowPageSchema = z
+  .object({
+    data: z.array(WorkflowSchema),
+    nextCursor: z.string().nullable(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WorkflowPage");
+
+export const WorkflowEnvelopeSchema = z
+  .object({ data: WorkflowSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("WorkflowEnvelope");
+
+export const CreateWorkflowBodySchema = z
+  .object({
+    name: z.string().min(1).max(64),
+    description: z.string().max(1_024).optional(),
+  })
+  .strict()
+  .openapi("CreateWorkflowBody");
+
+export const UpdateWorkflowBodySchema = z
+  .object({
+    expectedVersion: z.number().int().min(1),
+    name: z.string().min(1).max(64),
+    description: z.string().max(1_024),
+    steps: z.array(WorkflowStepSchema).min(1).max(20),
+    status: WorkflowStatusSchema,
+    trigger: WorkflowTriggerInputSchema,
+  })
+  .strict()
+  .openapi("UpdateWorkflowBody");
+
+export const ArchiveVersionBodySchema = z
+  .object({ expectedVersion: z.number().int().min(1) })
+  .strict()
+  .openapi("ArchiveVersionBody");
+
+export const WorkflowMutationEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        workflow: WorkflowSchema,
+        transactionId: z.string().regex(/^[0-9]+$/u),
+        replayed: z.boolean(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WorkflowMutationEnvelope");
+
+export const WorkflowUpdateEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        workflow: WorkflowSchema,
+        transactionId: z.string().regex(/^[0-9]+$/u),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WorkflowUpdateEnvelope");
+
+export const WorkflowArchiveEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        workflowId: ResourceIdSchema,
+        version: z.number().int().min(1),
+        transactionId: z.string().regex(/^[0-9]+$/u),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WorkflowArchiveEnvelope");
+
+export const InvokeWorkflowBodySchema = z
+  .object({
+    description: z.string().min(1).max(10_000),
+    attachmentIds: z.array(ResourceIdSchema).max(5).optional(),
+  })
+  .strict()
+  .openapi("InvokeWorkflowBody");
+
+export const TaskSchedulePageSchema = z
+  .object({
+    data: z.array(TaskScheduleSchema),
+    nextCursor: z.string().nullable(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("TaskSchedulePage");
+
+export const TaskScheduleEnvelopeSchema = z
+  .object({ data: TaskScheduleSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("TaskScheduleEnvelope");
+
+export const CreateTaskScheduleBodySchema = z
+  .object({
+    name: z.string().max(80).optional(),
+    sourceDescription: z.string().max(1_024).optional(),
+    cron: z.string().min(1).max(128),
+    timezone: z.string().min(1).max(128).optional(),
+    prompt: z.string().min(1).max(10_000),
+  })
+  .strict()
+  .openapi("CreateTaskScheduleBody");
+
+export const UpdateTaskScheduleBodySchema = z
+  .object({
+    expectedVersion: z.number().int().min(1),
+    name: z.string().min(1).max(80),
+    sourceDescription: z.string().max(1_024).optional(),
+    cron: z.string().min(1).max(128),
+    timezone: z.string().min(1).max(128).optional(),
+    prompt: z.string().min(1).max(10_000),
+  })
+  .strict()
+  .openapi("UpdateTaskScheduleBody");
+
+export const SetTaskScheduleEnabledBodySchema = z
+  .object({
+    expectedVersion: z.number().int().min(1),
+    enabled: z.boolean(),
+  })
+  .strict()
+  .openapi("SetTaskScheduleEnabledBody");
+
+export const UpdateTaskScheduleCommandSchema = z
+  .union([UpdateTaskScheduleBodySchema, SetTaskScheduleEnabledBodySchema])
+  .openapi("UpdateTaskScheduleCommand");
+
+export const TaskScheduleMutationEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        schedule: TaskScheduleSchema,
+        transactionId: z.string().regex(/^[0-9]+$/u),
+        replayed: z.boolean(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("TaskScheduleMutationEnvelope");
+
+export const TaskScheduleUpdateEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        schedule: TaskScheduleSchema,
+        transactionId: z.string().regex(/^[0-9]+$/u),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("TaskScheduleUpdateEnvelope");
+
+export const TaskScheduleArchiveEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        scheduleId: ResourceIdSchema,
+        version: z.number().int().min(1),
+        transactionId: z.string().regex(/^[0-9]+$/u),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("TaskScheduleArchiveEnvelope");
 
 export const LegacyTaskSchema = TaskSchema.omit({ conversationId: true }).openapi("LegacyTask");
 
@@ -539,6 +826,11 @@ export type LegacyTaskHistoryMessageDto = z.infer<typeof LegacyTaskHistoryMessag
 export type LegacyTaskHistoryEventDto = z.infer<typeof LegacyTaskHistoryEventSchema>;
 export type LegacyTaskHistoryDto = z.infer<typeof LegacyTaskHistoryEnvelopeSchema>["data"];
 export type TaskReadModel = z.infer<typeof TaskReadModelSchema>;
+export type WorkflowDto = z.infer<typeof WorkflowSchema>;
+export type WorkflowReadModel = z.infer<typeof WorkflowReadModelSchema>;
+export type WorkflowScheduleReadModel = z.infer<typeof WorkflowScheduleReadModelSchema>;
+export type TaskScheduleDto = z.infer<typeof TaskScheduleSchema>;
+export type TaskScheduleReadModel = z.infer<typeof TaskScheduleReadModelSchema>;
 export type ConversationReadModel = z.infer<typeof ConversationReadModelSchema>;
 export type MessageReadModel = z.infer<typeof MessageReadModelSchema>;
 export type RunReadModel = z.infer<typeof RunReadModelSchema>;
