@@ -7,11 +7,7 @@ import {
   goatCodexChatSessions,
   goatTasks,
 } from "@opencompany/db/goat-schema";
-import {
-  GOAT_METRICS,
-  recordGoatCounter,
-  recordGoatHistogram,
-} from "@opencompany/goat-observability";
+import { GOAT_METRICS, recordGoatHistogram } from "@opencompany/goat-observability";
 import { captureException, createLogger } from "@opencompany/observability";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "./db";
@@ -204,12 +200,6 @@ export async function runClaimedTurn(
     .select({
       session: goatCodexChatSessions,
       task: goatTasks,
-      canonicalQueued: sql<boolean>`EXISTS (
-        SELECT 1
-        FROM goat.run_events AS event
-        WHERE event.run_id = ${turn.id}
-          AND event.type = 'run.queued'
-      )`,
     })
     .from(goatCodexChatSessions)
     .leftJoin(
@@ -229,19 +219,7 @@ export async function runClaimedTurn(
   if (!claimedSession) {
     throw new Error(`Codex chat session ${turn.codexChatSessionId} not found.`);
   }
-  const { session, task, canonicalQueued } = claimedSession;
-  if (task && !canonicalQueued) {
-    recordGoatCounter(GOAT_METRICS.legacyTaskRunsTotal, 1, {
-      "goat.engine": session.engine,
-      "goat.source": task.source,
-    });
-    logger.warn("Claimed a Task from the bounded legacy execution compatibility path.", {
-      event: "opencompany.legacy_task_run_claimed",
-      task_id: task.id,
-      turn_id: turn.id,
-      codex_chat_session_id: session.id,
-    });
-  }
+  const { session, task } = claimedSession;
   const taskContext = task ? { task, harnessSpec: task.harnessSpec } : null;
   const execution = new PostgresRunExecutionRepository((query) => getDb().execute(query));
   const requestedAttemptId = `run_attempt_${randomUUID()}`;

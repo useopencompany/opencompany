@@ -17,7 +17,6 @@ type DueScheduleRow = {
   id: string;
   userWorkosId: string;
   workspaceId: string;
-  usedLegacyWorkspaceFallback: boolean;
   name: string;
   cron: string;
   timezone: string;
@@ -138,8 +137,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
         SELECT
           schedule.id,
           schedule.user_workos_id AS "userWorkosId",
-          member.workspace_id AS "workspaceId",
-          schedule.workspace_id IS NULL AS "usedLegacyWorkspaceFallback",
+          schedule.workspace_id AS "workspaceId",
           schedule.name,
           schedule.cron,
           schedule.timezone,
@@ -149,22 +147,12 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
         FROM goat.task_schedules AS schedule
         INNER JOIN goat.users AS "user"
           ON "user".workos_user_id = schedule.user_workos_id
-        INNER JOIN LATERAL (
-          SELECT membership.workspace_id
-          FROM goat.workspace_members AS membership
-          WHERE membership.user_workos_id = schedule.user_workos_id
-            AND (
-              schedule.workspace_id IS NULL
-              OR membership.workspace_id = schedule.workspace_id
-            )
-          ORDER BY
-            CASE WHEN membership.workspace_id = schedule.workspace_id THEN 0 ELSE 1 END,
-            membership.created_at ASC,
-            membership.workspace_id ASC
-          LIMIT 1
-        ) AS member ON true
+        INNER JOIN goat.workspace_members AS member
+          ON member.user_workos_id = schedule.user_workos_id
+         AND member.workspace_id = schedule.workspace_id
         WHERE schedule.enabled = true
           AND schedule.deleted_at IS NULL
+          AND schedule.workspace_id IS NOT NULL
           AND schedule.next_run_at <= ${now}
           AND "user".task_spawning_enabled = true
         ORDER BY schedule.next_run_at ASC, schedule.created_at ASC
@@ -353,14 +341,6 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
       scheduledFor,
       now,
     });
-    if (schedule.usedLegacyWorkspaceFallback) {
-      console.warn("A pre-cutover recurring Task schedule used its bounded workspace fallback.", {
-        event: "opencompany.legacy_task_schedule_workspace_fallback",
-        schedule_id: schedule.id,
-        workspace_id: schedule.workspaceId,
-      });
-    }
-
     await tx.execute(sql`
       UPDATE goat.task_schedule_runs
       SET status = 'created',

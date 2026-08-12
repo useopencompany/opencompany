@@ -132,6 +132,7 @@ describe("sweepDueGoatTaskSchedules", () => {
           INSERT INTO goat.task_schedules (
             id,
             user_workos_id,
+            workspace_id,
             name,
             cron,
             timezone,
@@ -144,6 +145,7 @@ describe("sweepDueGoatTaskSchedules", () => {
           VALUES (
             'goat_task_schedule_1',
             'user_1',
+            'workspace_1',
             'Daily briefing',
             '0 9 * * *',
             'UTC',
@@ -214,7 +216,6 @@ describe("sweepDueGoatTaskSchedules", () => {
           id: "goat_task_schedule_1",
           userWorkosId: "user_1",
           workspaceId: "workspace_1",
-          usedLegacyWorkspaceFallback: false,
           name: "Daily briefing",
           cron: "0 9 * * *",
           timezone: "UTC",
@@ -262,6 +263,10 @@ describe("sweepDueGoatTaskSchedules", () => {
       }),
     );
     expect(sqlTextFromExecuteCall(execute, 0)).toContain("task_spawning_enabled");
+    expect(sqlTextFromExecuteCall(execute, 0)).toContain("schedule.workspace_id IS NOT NULL");
+    expect(sqlTextFromExecuteCall(execute, 0)).toContain(
+      "member.workspace_id = schedule.workspace_id",
+    );
     expect(sqlTextFromExecuteCall(execute, 3)).toContain("INSERT INTO goat.chat_sessions");
     expect(sqlTextFromExecuteCall(execute, 3)).toContain("INSERT INTO goat.codex_chat_turns");
     expect(sqlTextFromExecuteCall(execute, 3)).toContain("'run.queued'");
@@ -275,7 +280,6 @@ describe("sweepDueGoatTaskSchedules", () => {
           id: "goat_task_schedule_1",
           userWorkosId: "user_1",
           workspaceId: "workspace_1",
-          usedLegacyWorkspaceFallback: false,
           name: "Daily briefing",
           cron: "0 9 * * *",
           timezone: "UTC",

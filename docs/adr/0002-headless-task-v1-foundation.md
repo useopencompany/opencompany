@@ -130,8 +130,9 @@ The compatibility period is explicitly bounded to the four merged PRs required b
 3. Web Task cutover moves writes to typed `/v1` commands and reads to API resources/fixed shapes.
    Direct web Task mutation stops; legacy history remains readable.
 4. Compatibility migration and deletion records drain/backfill and production evidence, removes
-   the duplicate execution path, and retains only historical read compatibility that real rows
-   require.
+   the duplicate Task-session writer and nullable-schedule fallback, projects prior multi-step
+   history through the canonical read models, and retains only historical read compatibility that
+   real rows require.
 
 This is not a permanent dual-write design. A creator uses either the old constructor before its
 cutover or the canonical application service after it; no Task is written to two execution
@@ -141,16 +142,16 @@ deployed SHA.
 PR 2 establishes that cutover boundary: manual, Workflow, schedule, and agent producers all invoke
 `TaskApplicationService`; Task follow-ups and cancellation invoke `ChatApplicationService`; and
 Workflow/scheduled internal handoffs append a canonical Run to the Task's original Conversation.
-The retained legacy constructor has no production caller. The shared worker emits
-`opencompany.legacy_task_run_claimed` and increments `goat.legacy_task_runs_total` only when it
-claims a Task Run without the canonical `run.queued` event. That signal is the bounded drain metric
-for PR 4, not a routing flag.
+The bounded drain branch identified a claimed Task Run without the canonical `run.queued` event.
+PR 4 removed that branch and the unused Task-session constructor after the exact-release production
+audit found no active non-canonical Runs and no drain log events during the available 72-hour log
+window. Historical terminal Runs remain untouched even when they predate `run.queued` Events.
 
 Migration `0203_goat_task_schedule_workspace.sql` binds every new recurring schedule to the
-workspace in which it was created and revalidates that membership when it fires. Pre-cutover
-user-scoped schedules retain a nullable workspace only during the compatibility window; their
-deterministic fallback emits `opencompany.legacy_task_schedule_workspace_fallback` and must be
-resolved before PR 4 removes that branch.
+workspace in which it was created and revalidates that membership when it fires. PR 4 removed the
+deterministic nullable-workspace fallback after production contained no nullable schedules and no
+fallback log events during the same window. The nullable physical column remains solely to keep
+application rollback reversible; the runner requires a persisted workspace.
 
 PR 3 establishes the client boundary. Browser creation, archive, follow-up, and cancellation use
 the generated `/v1` client; follow-up targets the Task Conversation's Message command and
@@ -163,9 +164,17 @@ removed. The web process retains only internal producer adapters that invoke
 Sessionless rows stay outside `tasks-v1`. During the bounded window, the API exposes only their
 actor-scoped metadata, transcript, and historical events through `/v1/compatibility/tasks*`.
 Clients cannot continue, cancel, archive, or request live physical shapes for those rows. The Task
-surface labels this history read-only. PR 4 may delete this adapter only after production inventory
-proves no historical rows require it; otherwise it remains with an explicit follow-up deletion
-condition.
+surface labels this history read-only. The production inventory found 35 terminal sessionless Tasks
+with 421 Messages, 1,444 Events, and usage history, so the adapter and its physical history tables
+remain. Deletion requires an approved retention migration, zero compatibility-endpoint use for an
+agreed observation window, and a separate data rollback plan.
+
+The history audit also found eight terminal pre-cutover Workflow Tasks with 22 Messages and 11 Runs
+in prior task-kind Conversations. Migration
+`0204_goat_task_conversation_history_projection.sql` remaps those owner- and workspace-matched,
+Task-linked rows only in the additive canonical Message/Run projections. This preserves one public
+`conversationId` and leaves physical Conversations, Messages, Runs, and runtimes unchanged for
+rollback. Normal Chat Task cards are not remapped.
 
 The frozen `/api/chat` and legacy Chat adapter are unaffected. Workflow invocation moves in this
 phase, but Workflow editor/catalog CRUD does not. Expo/mobile, macOS, broad web DB cleanup, runner
@@ -182,9 +191,11 @@ legacy creator adapter only for new work. Already queued canonical Runs continue
 runner; they must not be moved to the legacy queue. After PR 3, rollback restores the previous web
 bundle and its bounded adapters while the API and runner stay capable of completing canonical work.
 Existing canonical Tasks must never be moved to the legacy queue; the additive API resources and
-read models may remain deployed. PR 4
-deletion begins only after the evidence gate; any retained historical compatibility data is not
-dropped as part of a code rollback.
+read models may remain deployed. PR 4 rollback restores the prior application release, including
+the constructor and schedule fallback, while already queued canonical Runs keep draining through
+the shared worker. Migration `0204` may remain because it changes only rebuildable read projections;
+all source rows and nullable schedule storage are untouched. Retained historical compatibility data
+is never dropped as part of a code rollback.
 
 Production verification uses only the designated test actor/workspace. Stateful smoke evidence
 records anonymized durable identifiers and exact release SHAs on #1190; absence of operator access

@@ -534,9 +534,9 @@ All manual, workflow, schedule, and agent entry points call `TaskApplicationServ
 Callers validate product permissions, compile or seed the harness, then wake the shared durable chat
 worker. Follow-ups and cancellation use the canonical Message/Run service. Workflow steps and
 scheduled wakeups append Runs to the same Conversation and runtime; an engine change clears the
-provider thread before the next Attempt. The retained `goat-task-sessions` constructor/continuation
-has no production caller and exists only for the bounded rollback/drain window in issue #1190.
-Historical rows without `session_id` remain read-only.
+provider thread before the next Attempt. The legacy Task-session constructor/continuation writer
+was deleted after the issue #1190 production drain audit. Historical rows without `session_id`
+remain read-only.
 
 Available OpenCompany task tools are resolved from the same user-specific Brain, web, browser, and
 connected-action catalog as foreground chat. Codex task configuration still comes from the task
@@ -705,8 +705,9 @@ Important tables:
   passed directly to the CLI and are never stored in these rows.
 - `goat.tasks`: thin task projection linked to a chat through `session_id`, with status, stage,
   result/outcome, workflow/schedule metadata, board fields, and the current compiled harness.
-- `goat.task_messages` and `goat.task_events`: legacy compatibility history. New tasks never write
-  them.
+- `goat.task_messages` and `goat.task_events`: legacy compatibility history for real sessionless
+  production Tasks. New Tasks never write them; their deletion requires a separate retention and
+  rollback migration.
 - `goat.integrations`: connected Gmail, Google Calendar, and Linear accounts.
 - `goat.integration_credentials`: encrypted OAuth token payloads.
 
