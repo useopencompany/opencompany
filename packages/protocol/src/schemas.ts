@@ -244,6 +244,7 @@ export const BrainFolderReadModelNameSchema = z.literal("brain-folders-v1");
 export const BrainDocumentReadModelNameSchema = z.literal("brain-documents-v1");
 export const BrainTimelineReadModelNameSchema = z.literal("brain-timeline-v1");
 export const BrainEdgeReadModelNameSchema = z.literal("brain-edges-v1");
+export const BrainIngestJobReadModelNameSchema = z.literal("brain-ingest-jobs-v1");
 export const WikiPageReadModelNameSchema = z.literal("wiki-pages-v1");
 export const WikiTimelineReadModelNameSchema = z.literal("wiki-timeline-v1");
 export const ReadModelSchema = z.enum([
@@ -256,6 +257,7 @@ export const ReadModelSchema = z.enum([
   BrainDocumentReadModelNameSchema.value,
   BrainTimelineReadModelNameSchema.value,
   BrainEdgeReadModelNameSchema.value,
+  BrainIngestJobReadModelNameSchema.value,
   WikiPageReadModelNameSchema.value,
   WikiTimelineReadModelNameSchema.value,
 ]);
@@ -453,6 +455,66 @@ export const BrainEdgeReadModelSchema = z
   })
   .strict()
   .openapi("BrainEdgeReadModelV1");
+
+export const BrainIngestJobResultPageSchema = z
+  .object({
+    brainId: z.string().min(1).max(80),
+    folderPath: z.string().min(1).max(512),
+    title: z.string().max(160),
+    action: z.enum(["created", "updated", "conflict_created"]),
+  })
+  .strict()
+  .openapi("BrainIngestJobResultPage");
+
+export const BrainIngestJobResultSchema = z
+  .object({
+    summary: z.string().max(2_000).optional(),
+    draftBrainId: z.string().min(1).max(80).optional(),
+    meetingBrainId: z.string().min(1).max(80).optional(),
+    pages: z.array(BrainIngestJobResultPageSchema).max(20).optional(),
+    skipped: z.boolean().optional(),
+    durationMs: z.number().finite().min(0).optional(),
+    // The API normalizes this bounded diagnostic trace before it crosses the read-model boundary.
+    trace: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict()
+  .openapi("BrainIngestJobResult");
+
+export const BrainIngestJobReadModelSchema = z
+  .object({
+    id: ResourceIdSchema,
+    sourceItemId: ResourceIdSchema,
+    sourceProvider: z.string().min(1).max(64),
+    kind: z.string().min(1).max(64),
+    status: z.enum(["queued", "running", "succeeded", "failed", "skipped"]),
+    planPaused: z.boolean(),
+    attempts: z.number().int().min(0),
+    lastError: z.string().max(2_000).nullable(),
+    result: BrainIngestJobResultSchema,
+    completedAt: TimestampSchema.nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("BrainIngestJobReadModelV1");
+
+export const BrainSourceItemSchema = z
+  .object({
+    id: ResourceIdSchema,
+    sourceProvider: z.string().min(1).max(64),
+    sourceType: z.string().min(1).max(64),
+    externalId: z.string().max(4_096),
+    title: z.string().max(512).nullable(),
+    lastIngestError: z.string().max(2_000).nullable(),
+    createdAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("BrainSourceItem");
+
+export const BrainSourceItemListEnvelopeSchema = z
+  .object({ data: z.array(BrainSourceItemSchema), meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BrainSourceItemListEnvelope");
 
 export const WikiKindSchema = z.enum([
   "person",
@@ -1232,6 +1294,8 @@ export type BrainDocumentReadModel = z.infer<typeof BrainDocumentReadModelSchema
 export type BrainFolderReadModel = z.infer<typeof BrainFolderReadModelSchema>;
 export type BrainTimelineReadModel = z.infer<typeof BrainTimelineReadModelSchema>;
 export type BrainEdgeReadModel = z.infer<typeof BrainEdgeReadModelSchema>;
+export type BrainIngestJobReadModel = z.infer<typeof BrainIngestJobReadModelSchema>;
+export type BrainSourceItemDto = z.infer<typeof BrainSourceItemSchema>;
 export type CreateBrainDocumentBody = z.infer<typeof CreateBrainDocumentBodySchema>;
 export type UpdateBrainDocumentBody = z.infer<typeof UpdateBrainDocumentBodySchema>;
 export type RenameBrainDocumentBody = z.infer<typeof RenameBrainDocumentBodySchema>;

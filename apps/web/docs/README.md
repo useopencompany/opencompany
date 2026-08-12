@@ -64,7 +64,7 @@ Runner
     settle the turn, runtime session, and task projection atomically
 
 Goat UI
-  subscribes to API-owned Task, Workflow, schedule, Conversation, Message, and Run read models
+  subscribes to API-owned Task, Workflow, schedule, Brain, Wiki, Skill, Conversation, Message, and Run read models
   reads sessionless pre-cutover Task history through a bounded compatibility API
 ```
 
@@ -162,8 +162,9 @@ navigation; the server persists that exact id. The stream attaches `sessionId` i
 the client can confirm ownership and start the authorized message subscription. Persisted chat
 sessions and messages then arrive through TanStack DB collections backed by Electric shapes. Task
 metadata uses the API-owned `tasks-v1` projection, and Task content/runtime uses the canonical
-Message and Run projections. Other persisted OpenCompany web state such as integrations and Brain
-documents continues to use its existing authorized live-data path.
+Message and Run projections. Brain, Wiki, and Skill surfaces also use fixed API-owned read models;
+Brain activity resolves bounded public source metadata through the typed `/v1` client. Unmigrated
+product state such as integrations retains its existing authorized live-data path.
 
 Stopping generation calls `stop()`, which aborts the HTTP request. Closing chat clears local state,
 optionally stops the active stream, and marks the chat session closed through

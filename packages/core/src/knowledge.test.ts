@@ -47,6 +47,39 @@ describe("KnowledgeApplicationService", () => {
     expect(assertBrainAccess).not.toHaveBeenCalled();
   });
 
+  it("authorizes and bounds Brain source-item metadata lookups", async () => {
+    const assertBrainAccess = vi.fn(async () => undefined);
+    const listBrainSourceItems = vi.fn(async () => []);
+    const service = new KnowledgeApplicationService(
+      repository({ assertBrainAccess, listBrainSourceItems }),
+    );
+
+    await expect(
+      service.listBrainSourceItems(actor, " brain_1 ", [" item_1 ", "item_1", "item_2"]),
+    ).resolves.toEqual([]);
+    expect(assertBrainAccess).toHaveBeenCalledWith({ actor, brainId: "brain_1" });
+    expect(listBrainSourceItems).toHaveBeenCalledWith({
+      actor,
+      brainId: "brain_1",
+      ids: ["item_1", "item_2"],
+    });
+
+    await expect(service.listBrainSourceItems(actor, "brain_1", [])).rejects.toMatchObject({
+      code: "invalid_argument",
+    });
+    await expect(
+      service.listBrainSourceItems(
+        actor,
+        "brain_1",
+        Array.from({ length: 101 }, (_, index) => `item_${index}`),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+
+    await expect(
+      service.listBrainSourceItems({ ...actor, permissions: [] }, "brain_1", ["item_1"]),
+    ).rejects.toMatchObject({ code: "forbidden" });
+  });
+
   it("uses the route slug for Wiki updates and preserves empty titles", async () => {
     const updateWikiPage = vi.fn(async () => {
       throw new Error("stop after capture");

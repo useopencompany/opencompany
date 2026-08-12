@@ -8,6 +8,7 @@ import {
   BrainEdgeReadModelSchema,
   type BrainFolderReadModel,
   BrainFolderReadModelSchema,
+  BrainIngestJobReadModelSchema,
   type BrainTimelineReadModel,
   BrainTimelineReadModelSchema,
   type WikiPageReadModel,
@@ -68,6 +69,14 @@ function createBrainCollections(brainId: string) {
         id: `headless-brain-edges:v1:${scope}`,
         schema: BrainEdgeReadModelSchema,
         shapeOptions: shapeOptions("brain-edges-v1", brainId),
+        getKey: (row) => row.id,
+      }),
+    ),
+    ingestJobs: createCollection(
+      electricCollectionOptions({
+        id: `headless-brain-ingest-jobs:v1:${scope}`,
+        schema: BrainIngestJobReadModelSchema,
+        shapeOptions: shapeOptions("brain-ingest-jobs-v1", brainId),
         getKey: (row) => row.id,
       }),
     ),
@@ -208,7 +217,6 @@ export function getHeadlessWikiCollections(scopeKey = "active") {
 }
 
 export type HeadlessWikiCollections = ReturnType<typeof createWikiCollections>;
-
 export async function awaitHeadlessWikiTransactions(
   transactionIds: number[],
   options: { scopeKey?: string; target?: "pages" | "timeline"; timeoutMs?: number } = {},

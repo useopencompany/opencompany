@@ -10,7 +10,6 @@ import {
   listGoatBrainFiles,
   upsertGoatBrainFile,
 } from "@opencompany/db/goat-brain-files";
-import { normalizeGoatBrainIngestTrace } from "@opencompany/db/goat-brain-ingest-trace";
 import { recordGoatCreditDebit } from "@opencompany/db/goat-credits";
 import {
   type GoatBrainIngestJob,
@@ -38,6 +37,7 @@ import {
   type NormalizedGoatBrainPointerSourceItem,
   type NormalizedJamieMeetingSourceItem,
 } from "@opencompany/goat-brain";
+import { normalizeGoatBrainIngestTrace } from "@opencompany/goat-brain/ingest-trace";
 import {
   GOAT_SPANS,
   type GoatAttributes,

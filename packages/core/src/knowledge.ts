@@ -80,6 +80,16 @@ export type BrainOverview = {
   activeSources: number;
 };
 
+export type BrainSourceItem = {
+  id: string;
+  sourceProvider: string;
+  sourceType: string;
+  externalId: string;
+  title: string | null;
+  lastIngestError: string | null;
+  createdAt: Date;
+};
+
 export type WikiPage = {
   id: string;
   slug: string;
@@ -132,6 +142,11 @@ export interface KnowledgeRepository {
   assertBrainAccess(input: { actor: Actor; brainId: string }): Promise<void>;
   getBrainSnapshot(input: { actor: Actor; brainId: string }): Promise<BrainSnapshot>;
   getBrainOverview(input: { actor: Actor; brainId: string; now: Date }): Promise<BrainOverview>;
+  listBrainSourceItems(input: {
+    actor: Actor;
+    brainId: string;
+    ids: string[];
+  }): Promise<BrainSourceItem[]>;
   createBrainDocument(input: {
     actor: Actor;
     brainId: string;
@@ -234,6 +249,21 @@ export class KnowledgeApplicationService {
     const id = resourceId(brainId, "brainId");
     await this.repository.assertBrainAccess({ actor, brainId: id });
     return this.repository.getBrainOverview({ actor, brainId: id, now: this.now() });
+  }
+
+  async listBrainSourceItems(actor: Actor, brainId: string, ids: string[]) {
+    requirePermission(actor, BRAIN_READ_PERMISSION, "Brain");
+    const authorizedBrainId = resourceId(brainId, "brainId");
+    await this.repository.assertBrainAccess({ actor, brainId: authorizedBrainId });
+    const sourceItemIds = Array.from(new Set(ids.map((id) => resourceId(id, "sourceItemId"))));
+    if (sourceItemIds.length === 0 || sourceItemIds.length > 100) {
+      throw new CoreError("invalid_argument", "Between 1 and 100 source item ids are required.");
+    }
+    return this.repository.listBrainSourceItems({
+      actor,
+      brainId: authorizedBrainId,
+      ids: sourceItemIds,
+    });
   }
 
   async createBrainDocument(

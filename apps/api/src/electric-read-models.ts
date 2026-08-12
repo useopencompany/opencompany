@@ -1,8 +1,10 @@
 import type { Actor } from "@opencompany/core";
+import { normalizeGoatBrainIngestTrace } from "@opencompany/db/goat-brain-ingest-trace";
 import {
   BrainDocumentReadModelSchema,
   BrainEdgeReadModelSchema,
   BrainFolderReadModelSchema,
+  BrainIngestJobReadModelSchema,
   BrainTimelineReadModelSchema,
   ConversationReadModelSchema,
   MessageReadModelSchema,
@@ -51,6 +53,7 @@ const PREDECODED_READ_MODEL_FIELDS = new Set([
   "trigger",
   "timeline",
   "relations",
+  "result",
   "sources",
   "aliases",
 ]);
@@ -347,6 +350,21 @@ function readModelShape(input: {
         "created_at",
         "updated_at",
       ]);
+    case "brain-ingest-jobs-v1":
+      return brainShape(input, "goat.brain_ingest_jobs", [
+        "id",
+        "source_item_id",
+        "source_provider",
+        "kind",
+        "status",
+        "plan_paused",
+        "attempts",
+        "last_error",
+        "result",
+        "completed_at",
+        "created_at",
+        "updated_at",
+      ]);
     case "wiki-pages-v1":
       return {
         table: "goat.wiki_pages",
@@ -455,6 +473,12 @@ function projectReadModelValue(
     const schema = partial ? WorkflowReadModelSchema.partial() : WorkflowReadModelSchema;
     return schema.parse(projected);
   }
+  if (readModel === "brain-ingest-jobs-v1" && Object.hasOwn(projected, "result")) {
+    projected.result = publicBrainIngestJobResult(projected.result);
+  }
+  if (readModel === "brain-ingest-jobs-v1" && Object.hasOwn(projected, "lastError")) {
+    projected.lastError = boundedNullableString(projected.lastError, 2_000);
+  }
   switch (readModel) {
     case "chat-conversations-v1":
       return (partial ? ConversationReadModelSchema.partial() : ConversationReadModelSchema).parse(
@@ -488,6 +512,10 @@ function projectReadModelValue(
       return (partial ? BrainEdgeReadModelSchema.partial() : BrainEdgeReadModelSchema).parse(
         projected,
       );
+    case "brain-ingest-jobs-v1":
+      return (
+        partial ? BrainIngestJobReadModelSchema.partial() : BrainIngestJobReadModelSchema
+      ).parse(projected);
     case "wiki-pages-v1":
       return (partial ? WikiPageReadModelSchema.partial() : WikiPageReadModelSchema).parse(
         projected,
@@ -504,6 +532,7 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
   if (
     name === "attemptCount" ||
     name === "version" ||
+    name === "attempts" ||
     name === "sizeBytes" ||
     name === "assetSizeBytes" ||
     (readModel === "brain-timeline-v1" && name === "id")
@@ -517,7 +546,8 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
     name === "timeline" ||
     name === "relations" ||
     name === "sources" ||
-    name === "aliases"
+    name === "aliases" ||
+    name === "result"
   ) {
     return jsonValue(value);
   }
@@ -537,6 +567,56 @@ function publicAttachment(value: unknown) {
     sizeBytes: numberValue(value.sizeBytes),
     kind: value.kind,
   };
+}
+
+function publicBrainIngestJobResult(value: unknown) {
+  const result = jsonValue(value);
+  if (!isRecord(result)) return {};
+
+  const pages = Array.isArray(result.pages)
+    ? result.pages.slice(0, 20).flatMap((page) => {
+        if (!isRecord(page)) return [];
+        const brainId = limitedString(page.brainId, 80);
+        const folderPath = limitedString(page.folderPath, 512);
+        const title = limitedString(page.title, 160);
+        const action = page.action;
+        if (
+          !brainId ||
+          !folderPath ||
+          (action !== "created" && action !== "updated" && action !== "conflict_created")
+        ) {
+          return [];
+        }
+        return [{ brainId, folderPath, title, action }];
+      })
+    : undefined;
+  const trace = normalizeGoatBrainIngestTrace(result.trace);
+  const durationMs = typeof result.durationMs === "number" ? result.durationMs : null;
+
+  return {
+    ...(typeof result.summary === "string" ? { summary: result.summary.slice(0, 2_000) } : {}),
+    ...(limitedString(result.draftBrainId, 80)
+      ? { draftBrainId: limitedString(result.draftBrainId, 80) }
+      : {}),
+    ...(limitedString(result.meetingBrainId, 80)
+      ? { meetingBrainId: limitedString(result.meetingBrainId, 80) }
+      : {}),
+    ...(pages ? { pages } : {}),
+    ...(typeof result.skipped === "boolean" ? { skipped: result.skipped } : {}),
+    ...(durationMs !== null && Number.isFinite(durationMs) && durationMs >= 0
+      ? { durationMs }
+      : {}),
+    ...(trace ? { trace } : {}),
+  };
+}
+
+function limitedString(value: unknown, limit: number) {
+  return typeof value === "string" && value.length <= limit ? value : "";
+}
+
+function boundedNullableString(value: unknown, limit: number) {
+  if (value === null) return null;
+  return typeof value === "string" ? value.slice(0, limit) : value;
 }
 
 function numberValue(value: unknown) {
@@ -781,6 +861,20 @@ const READ_MODEL_COLUMN_NAMES = {
     to_brain_id: "toBrainId",
     relation_type: "relationType",
     source_kind: "sourceKind",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "brain-ingest-jobs-v1": {
+    id: "id",
+    source_item_id: "sourceItemId",
+    source_provider: "sourceProvider",
+    kind: "kind",
+    status: "status",
+    plan_paused: "planPaused",
+    attempts: "attempts",
+    last_error: "lastError",
+    result: "result",
+    completed_at: "completedAt",
     created_at: "createdAt",
     updated_at: "updatedAt",
   },

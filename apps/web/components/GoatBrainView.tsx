@@ -14,6 +14,7 @@ import {
 } from "@opencompany/goat-brain/inline-links";
 import { isGoatBrainSkillFolder } from "@opencompany/goat-brain/skills";
 import { isGoatBrainWorkflowFolder } from "@opencompany/goat-brain/workflows";
+import type { BrainIngestJobReadModel, BrainSourceItemDto } from "@opencompany/protocol";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
@@ -93,16 +94,12 @@ import {
   createHeadlessBrainFolder,
   deleteHeadlessBrainDocument,
   deleteHeadlessBrainFolder,
+  listHeadlessBrainSourceItems,
   renameHeadlessBrainDocument,
   renameHeadlessBrainFolder,
   updateHeadlessBrainDocument,
 } from "@/lib/headless-knowledge-commands";
 import { brainDocumentToView } from "@/lib/headless-knowledge-types";
-import {
-  createGoatCollections,
-  type GoatBrainIngestJobRow,
-  type GoatBrainSourceItemRow,
-} from "@/lib/task-collections";
 
 type Props = {
   brainRef: string | null;
@@ -223,11 +220,6 @@ function LiveGoatBrainView({
   overviewStats = null,
   initialDataLoaded = true,
 }: Props) {
-  const legacyCollections = useMemo(() => createGoatCollections(), []);
-  const legacyBrainCollections = useMemo(
-    () => legacyCollections.brainCollections(brainRef ?? "__no-brain__"),
-    [brainRef, legacyCollections],
-  );
   const brainCollections = useMemo(
     () => getHeadlessBrainCollections(brainRef ?? "__no-brain__"),
     [brainRef],
@@ -249,13 +241,69 @@ function LiveGoatBrainView({
     [brainCollections],
   );
   const { data: ingestJobRows } = useLiveQuery(
-    (q) => q.from({ job: legacyBrainCollections.ingestJobs }),
-    [legacyBrainCollections],
+    (q) => q.from({ job: brainCollections.ingestJobs }),
+    [brainCollections],
   );
-  const { data: captureSourceItemRows } = useLiveQuery(
-    (q) => q.from({ item: legacyCollections.pendingBrainCaptureSourceItems }),
-    [legacyCollections],
+  const [captureSourceItemState, setCaptureSourceItemState] = useState<{
+    requestKey: string;
+    items: BrainSourceItemDto[];
+  }>({ requestKey: "", items: [] });
+  const pendingCaptureSourceItemIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          ((ingestJobRows ?? []) as BrainIngestJobReadModel[])
+            .filter(
+              (job) =>
+                job.sourceProvider === "goat-chat" &&
+                job.kind === "brain_agent_ingest" &&
+                job.status !== "succeeded" &&
+                job.status !== "skipped",
+            )
+            .map((job) => job.sourceItemId),
+        ),
+      ),
+    [ingestJobRows],
   );
+  const pendingCaptureSourceItemIdsKey = pendingCaptureSourceItemIds.join(",");
+  const captureSourceItemRequestKey =
+    brainRef && pendingCaptureSourceItemIdsKey
+      ? `${brainRef}:${pendingCaptureSourceItemIdsKey}`
+      : "";
+  const captureSourceItems = useMemo(
+    () =>
+      captureSourceItemState.requestKey === captureSourceItemRequestKey
+        ? captureSourceItemState.items
+        : [],
+    [captureSourceItemRequestKey, captureSourceItemState],
+  );
+  useEffect(() => {
+    if (!brainRef || !captureSourceItemRequestKey) return;
+    let canceled = false;
+    void (async () => {
+      try {
+        const items: BrainSourceItemDto[] = [];
+        for (let index = 0; index < pendingCaptureSourceItemIds.length; index += 100) {
+          if (canceled) return;
+          items.push(
+            ...(await listHeadlessBrainSourceItems(
+              brainRef,
+              pendingCaptureSourceItemIds.slice(index, index + 100),
+            )),
+          );
+        }
+        if (!canceled)
+          setCaptureSourceItemState({ requestKey: captureSourceItemRequestKey, items });
+      } catch {
+        if (!canceled) {
+          setCaptureSourceItemState({ requestKey: captureSourceItemRequestKey, items: [] });
+        }
+      }
+    })();
+    return () => {
+      canceled = true;
+    };
+  }, [brainRef, captureSourceItemRequestKey, pendingCaptureSourceItemIds]);
   const documents = useMemo(() => {
     if (filesLoading && !fileRows?.length) return initialDocuments.filter(isKnowledgeDocument);
     const timelinesByDocument = groupTimelineRows(
@@ -281,10 +329,10 @@ function LiveGoatBrainView({
   const draftIngestStatesByBrainId = useMemo(
     () =>
       buildGoatBrainDraftIngestStates(
-        (ingestJobRows ?? []) as GoatBrainIngestJobRow[],
-        (captureSourceItemRows ?? []) as GoatBrainSourceItemRow[],
+        (ingestJobRows ?? []) as BrainIngestJobReadModel[],
+        captureSourceItems,
       ),
-    [captureSourceItemRows, ingestJobRows],
+    [captureSourceItems, ingestJobRows],
   );
   const brainDataLoading = !initialDataLoaded && filesLoading && !fileRows?.length;
 

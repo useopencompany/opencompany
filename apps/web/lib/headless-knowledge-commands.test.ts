@@ -4,6 +4,7 @@ import {
   addHeadlessWikiTimelineEntry,
   createHeadlessBrainDocument,
   createHeadlessSkill,
+  listHeadlessBrainSourceItems,
   updateHeadlessSkill,
 } from "./headless-knowledge-commands";
 
@@ -87,6 +88,30 @@ describe("headless knowledge commands", () => {
       scopeKey: "workspace_1",
       target: "timeline",
     });
+  });
+
+  it("loads bounded source metadata through the selected Brain resource", async () => {
+    let upstream: Request | null = null;
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      upstream = input instanceof Request ? input : new Request(input, init);
+      return Response.json({ data: [], meta });
+    });
+
+    await listHeadlessBrainSourceItems("brain_alpha", ["source_1", "source_2"], {
+      baseUrl: "https://api.example.test",
+      fetch: fetchMock as typeof fetch,
+    });
+
+    const url = new URL((upstream as unknown as Request).url);
+    expect(url.pathname).toBe("/v1/brains/brain_alpha/source-items");
+    expect(url.searchParams.get("ids")).toBe("source_1,source_2");
+
+    await expect(
+      listHeadlessBrainSourceItems(
+        "brain_alpha",
+        Array.from({ length: 101 }, (_, i) => `s_${i}`),
+      ),
+    ).rejects.toThrow("limited to 100 ids");
   });
 
   it("uses canonical Skill create and update resources", async () => {

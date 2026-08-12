@@ -1,54 +1,41 @@
+import type { BrainIngestJobReadModel, BrainSourceItemDto } from "@opencompany/protocol";
 import { describe, expect, it } from "vitest";
 import {
   buildGoatBrainActivityEvents,
   buildGoatBrainDraftIngestStates,
 } from "@/lib/brain-activity";
-import type { GoatBrainIngestJobRow, GoatBrainSourceItemRow } from "@/lib/task-collections";
 
-function job(overrides: Partial<GoatBrainIngestJobRow> = {}): GoatBrainIngestJobRow {
+function job(overrides: Partial<BrainIngestJobReadModel> = {}): BrainIngestJobReadModel {
   return {
     id: "gbjob_1",
-    source_item_id: "gbsrc_1",
-    user_workos_id: "user_1",
-    source_provider: "goat-chat",
-    source_connection_id: "session_1",
-    integration_id: null,
-    brain_ref: "gbrain_1",
+    sourceItemId: "gbsrc_1",
+    sourceProvider: "goat-chat",
     kind: "brain_agent_ingest",
-    content_hash: "hash",
     status: "queued",
-    plan_paused: false,
+    planPaused: false,
     attempts: 0,
-    next_run_at: "2026-07-09T10:00:00.000Z",
-    lease_id: null,
-    lease_owner: null,
-    lease_expires_at: null,
-    last_error: null,
+    lastError: null,
     result: {},
-    completed_at: null,
-    created_at: "2026-07-09T10:00:00.000Z",
-    updated_at: "2026-07-09T10:00:00.000Z",
+    completedAt: null,
+    createdAt: "2026-07-09T10:00:00.000Z",
+    updatedAt: "2026-07-09T10:00:00.000Z",
     ...overrides,
   };
 }
 
-function item(overrides: Partial<GoatBrainSourceItemRow> = {}): GoatBrainSourceItemRow {
+function item(overrides: Partial<BrainSourceItemDto> = {}): BrainSourceItemDto {
   return {
     id: "gbsrc_1",
-    user_workos_id: "user_1",
-    source_provider: "goat-chat",
-    source_type: "capture",
-    external_id: "pricing-reference",
+    sourceProvider: "goat-chat",
+    sourceType: "capture",
+    externalId: "pricing-reference",
     title: "Pricing teardown reference",
-    occurred_at: "2026-07-09T10:00:00.000Z",
-    captured_at: "2026-07-09T10:00:00.000Z",
-    content_hash: "hash",
-    last_ingest_job_id: "gbjob_1",
-    last_ingest_status: "pending",
-    last_ingest_error: null,
-    last_ingested_at: null,
-    created_at: "2026-07-09T10:00:00.000Z",
-    updated_at: "2026-07-09T10:00:00.000Z",
+    occurredAt: "2026-07-09T10:00:00.000Z",
+    capturedAt: "2026-07-09T10:00:00.000Z",
+    lastIngestStatus: "pending",
+    lastIngestError: null,
+    createdAt: "2026-07-09T10:00:00.000Z",
+    updatedAt: "2026-07-09T10:00:00.000Z",
     ...overrides,
   };
 }
@@ -68,7 +55,7 @@ describe("buildGoatBrainActivityEvents", () => {
   });
 
   it("shows queued work held by a quota reservation as paused by plan", () => {
-    const events = buildGoatBrainActivityEvents([job({ plan_paused: true })], [item()]);
+    const events = buildGoatBrainActivityEvents([job({ planPaused: true })], [item()]);
 
     expect(events.find((event) => event.kind === "paused")).toMatchObject({
       kind: "paused",
@@ -78,8 +65,8 @@ describe("buildGoatBrainActivityEvents", () => {
 
   it("labels meeting sources and adds a filing event while running", () => {
     const events = buildGoatBrainActivityEvents(
-      [job({ status: "running", updated_at: "2026-07-09T10:00:30.000Z" })],
-      [item({ source_provider: "jamie", source_type: "meeting", title: "Roadmap review" })],
+      [job({ status: "running", updatedAt: "2026-07-09T10:00:30.000Z" })],
+      [item({ sourceProvider: "jamie", sourceType: "meeting", title: "Roadmap review" })],
     );
 
     expect(events.map((event) => event.kind)).toEqual(["filing", "captured"]);
@@ -92,7 +79,7 @@ describe("buildGoatBrainActivityEvents", () => {
       [
         job({
           status: "succeeded",
-          completed_at: "2026-07-09T10:01:20.000Z",
+          completedAt: "2026-07-09T10:01:20.000Z",
           result: {
             summary: "Promoted the capture into concepts.\n\nDetails follow.",
             draftBrainId: "pricing-teardown-reference",
@@ -165,7 +152,7 @@ describe("buildGoatBrainActivityEvents", () => {
         job({
           id: "gbjob_traced",
           status: "succeeded",
-          completed_at: "2026-07-09T10:01:20.000Z",
+          completedAt: "2026-07-09T10:01:20.000Z",
           result: {
             skipped: true,
             summary: "No durable brain material.",
@@ -176,7 +163,7 @@ describe("buildGoatBrainActivityEvents", () => {
         job({
           id: "gbjob_legacy",
           status: "succeeded",
-          completed_at: "2026-07-09T10:01:10.000Z",
+          completedAt: "2026-07-09T10:01:10.000Z",
           result: {
             summary: "Filed.",
             trace: { schemaVersion: "old" },
@@ -205,8 +192,8 @@ describe("buildGoatBrainActivityEvents", () => {
       [
         job({
           status: "skipped",
-          completed_at: "2026-07-09T10:01:20.000Z",
-          last_error: "routine_linear_status_change",
+          completedAt: "2026-07-09T10:01:20.000Z",
+          lastError: "routine_linear_status_change",
           result: {
             skipped: true,
             reason: "routine_linear_status_change",
@@ -214,7 +201,7 @@ describe("buildGoatBrainActivityEvents", () => {
           },
         }),
       ],
-      [item({ source_provider: "linear", source_type: "issue", title: "G-51 add github" })],
+      [item({ sourceProvider: "linear", sourceType: "issue", title: "G-51 add github" })],
     );
 
     expect(events.find((event) => event.kind === "skipped")).toMatchObject({
@@ -226,7 +213,7 @@ describe("buildGoatBrainActivityEvents", () => {
 
   it("reports failures and retries with the last error", () => {
     const failed = buildGoatBrainActivityEvents(
-      [job({ status: "failed", attempts: 5, last_error: "Gateway timed out." })],
+      [job({ status: "failed", attempts: 5, lastError: "Gateway timed out." })],
       [item()],
     );
     expect(failed.find((event) => event.kind === "failed")).toMatchObject({
@@ -235,7 +222,7 @@ describe("buildGoatBrainActivityEvents", () => {
     });
 
     const retrying = buildGoatBrainActivityEvents(
-      [job({ status: "queued", attempts: 2, last_error: "Brain changed while running." })],
+      [job({ status: "queued", attempts: 2, lastError: "Brain changed while running." })],
       [item()],
     );
     expect(retrying.find((event) => event.kind === "retrying")).toMatchObject({
@@ -249,10 +236,10 @@ describe("buildGoatBrainActivityEvents", () => {
       [
         job({
           id: "gbjob_old",
-          source_item_id: "gbsrc_missing",
-          created_at: "2026-07-09T09:00:00.000Z",
+          sourceItemId: "gbsrc_missing",
+          createdAt: "2026-07-09T09:00:00.000Z",
         }),
-        job({ id: "gbjob_new", created_at: "2026-07-09T11:00:00.000Z" }),
+        job({ id: "gbjob_new", createdAt: "2026-07-09T11:00:00.000Z" }),
       ],
       [item()],
     );
@@ -313,7 +300,7 @@ describe("buildGoatBrainDraftIngestStates", () => {
     expect(running.get("pricing-reference")).toMatchObject({ kind: "running", attempts: 1 });
 
     const retrying = buildGoatBrainDraftIngestStates(
-      [job({ status: "queued", attempts: 2, last_error: "Brain changed while running." })],
+      [job({ status: "queued", attempts: 2, lastError: "Brain changed while running." })],
       [item()],
     );
     expect(retrying.get("pricing-reference")).toMatchObject({
@@ -322,8 +309,8 @@ describe("buildGoatBrainDraftIngestStates", () => {
     });
 
     const failed = buildGoatBrainDraftIngestStates(
-      [job({ status: "failed", attempts: 5, last_error: "Gateway timed out." })],
-      [item({ last_ingest_status: "failed" })],
+      [job({ status: "failed", attempts: 5, lastError: "Gateway timed out." })],
+      [item({ lastIngestStatus: "failed" })],
     );
     expect(failed.get("pricing-reference")).toMatchObject({
       kind: "failed",
@@ -335,8 +322,8 @@ describe("buildGoatBrainDraftIngestStates", () => {
     expect(buildGoatBrainDraftIngestStates([job({ status: "succeeded" })], [item()]).size).toBe(0);
     expect(
       buildGoatBrainDraftIngestStates(
-        [job({ source_provider: "jamie" })],
-        [item({ source_provider: "jamie", source_type: "meeting" })],
+        [job({ sourceProvider: "jamie" })],
+        [item({ sourceProvider: "jamie", sourceType: "meeting" })],
       ).size,
     ).toBe(0);
   });
