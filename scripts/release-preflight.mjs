@@ -91,6 +91,7 @@ const groups = {
       "BLOB_READ_WRITE_TOKEN",
       "ELECTRIC_URL",
       "REDIS_URL",
+      "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
     ],
     optional: [
       "API_DB_POOL_MAX",
