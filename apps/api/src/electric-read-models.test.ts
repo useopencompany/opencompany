@@ -194,6 +194,7 @@ describe("Electric read models", () => {
 
   it("fixes Brain shape identity server-side and projects only canonical document fields", async () => {
     let upstreamUrl = "";
+    const historicalAlias = "a".repeat(113);
     const proxy = new ElectricReadModelProxy({
       electricUrl: "https://electric.example.test",
       fetch: vi.fn(async (input: URL | RequestInfo) => {
@@ -219,7 +220,7 @@ describe("Electric read models", () => {
               kind: "page",
               entity_type: "project",
               status: "draft",
-              aliases: "[]",
+              aliases: JSON.stringify([historicalAlias]),
               content_hash: "a".repeat(64),
               size_bytes: "7",
               created_by_workos_id: "user_1",
@@ -270,7 +271,7 @@ describe("Electric read models", () => {
           kind: "page",
           type: "project",
           status: "draft",
-          aliases: [],
+          aliases: [historicalAlias],
           contentHash: "a".repeat(64),
           sizeBytes: 7,
           createdByActorId: "user_1",
@@ -442,7 +443,7 @@ describe("Electric read models", () => {
               model: "provider/model",
               workflow_id: null,
               schedule_id: null,
-              scheduled_for: null,
+              scheduled_for: "2026-08-12 08:30:00+00",
               result: "Ready",
               error: null,
               reported_status: "done",
@@ -486,7 +487,7 @@ describe("Electric read models", () => {
           model: "provider/model",
           workflowId: null,
           scheduleId: null,
-          scheduledFor: null,
+          scheduledFor: "2026-08-12T08:30:00.000Z",
           outcome: {
             result: "Ready",
             error: null,

@@ -398,7 +398,7 @@ export const BrainDocumentSchema = z
       "note",
     ]),
     status: z.enum(["draft", "active", "archived", "merged"]),
-    aliases: z.array(z.string().max(80)),
+    aliases: z.array(z.string().max(512)),
     contentHash: z.string().regex(/^[0-9a-f]{64}$/u),
     sizeBytes: z.number().int().min(0),
     createdByActorId: ResourceIdSchema.nullable(),
