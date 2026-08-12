@@ -55,7 +55,7 @@ const skillActionsMock = vi.hoisted(() => ({
   updateHeadlessSkill: vi.fn(async () => ({ slug: "test-skill" })),
   archiveHeadlessSkill: vi.fn(async () => ({ slug: "test-skill" })),
   createHeadlessSkill: vi.fn(async () => ({ slug: "test-skill" })),
-  previewGoatSkillImportAction: vi.fn(async () => ({
+  previewHeadlessSkillImport: vi.fn(async () => ({
     status: "resolved" as const,
     proposedSlug: "imported-skill",
     name: "Imported skill",
@@ -65,9 +65,9 @@ const skillActionsMock = vi.hoisted(() => ({
     resolvedCommit: "a".repeat(40),
     integrity: `sha256:${"b".repeat(64)}`,
   })),
-  importGoatSkillAction: vi.fn(async () => ({
-    status: "imported" as const,
-    slug: "imported-skill",
+  importHeadlessSkill: vi.fn(async () => ({
+    skill: { slug: "imported-skill" },
+    replayed: false,
   })),
 }));
 
@@ -157,11 +157,8 @@ vi.mock("@/lib/headless-knowledge-commands", () => ({
   updateHeadlessSkill: skillActionsMock.updateHeadlessSkill,
   archiveHeadlessSkill: skillActionsMock.archiveHeadlessSkill,
   createHeadlessSkill: skillActionsMock.createHeadlessSkill,
-}));
-
-vi.mock("@/lib/skill-actions", () => ({
-  previewGoatSkillImportAction: skillActionsMock.previewGoatSkillImportAction,
-  importGoatSkillAction: skillActionsMock.importGoatSkillAction,
+  previewHeadlessSkillImport: skillActionsMock.previewHeadlessSkillImport,
+  importHeadlessSkill: skillActionsMock.importHeadlessSkill,
 }));
 
 vi.mock("@/components/ThemeProvider", () => ({
@@ -463,8 +460,8 @@ describe("GoatSkillEditorRoute", () => {
 
 describe("GoatSkillsSettingsRoute", () => {
   beforeEach(() => {
-    skillActionsMock.previewGoatSkillImportAction.mockClear();
-    skillActionsMock.importGoatSkillAction.mockClear();
+    skillActionsMock.previewHeadlessSkillImport.mockClear();
+    skillActionsMock.importHeadlessSkill.mockClear();
     routerMock.push.mockReset();
   });
 
@@ -476,7 +473,7 @@ describe("GoatSkillsSettingsRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: "Preview" }));
 
     expect(await screen.findByText("Use this when imported.")).toBeInTheDocument();
-    expect(skillActionsMock.previewGoatSkillImportAction).toHaveBeenCalledWith({
+    expect(skillActionsMock.previewHeadlessSkillImport).toHaveBeenCalledWith({
       url: "github.com/o/r",
     });
 
@@ -485,7 +482,7 @@ describe("GoatSkillsSettingsRoute", () => {
     await userEvent.click(importButton);
 
     await waitFor(() =>
-      expect(skillActionsMock.importGoatSkillAction).toHaveBeenCalledWith({
+      expect(skillActionsMock.importHeadlessSkill).toHaveBeenCalledWith({
         url: "github.com/o/r",
         expectedResolvedCommit: "a".repeat(40),
         expectedIntegrity: `sha256:${"b".repeat(64)}`,

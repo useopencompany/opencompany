@@ -49,13 +49,21 @@ function normalizeApiError(error: unknown): ApiError {
         return new ApiError(409, "conflict", error.message);
       case "idempotency_conflict":
         return new ApiError(409, "idempotency_conflict", error.message);
+      case "unavailable":
+        return new ApiError(503, "unavailable", error.message, true);
     }
   }
   return new ApiError(500, "internal_error", "An internal error occurred.", true);
 }
 
 function isCoreError(error: unknown): error is Error & {
-  code: "forbidden" | "invalid_argument" | "not_found" | "conflict" | "idempotency_conflict";
+  code:
+    | "forbidden"
+    | "invalid_argument"
+    | "not_found"
+    | "conflict"
+    | "idempotency_conflict"
+    | "unavailable";
 } {
   if (!(error instanceof Error) || !("code" in error)) return false;
   return [
@@ -64,5 +72,6 @@ function isCoreError(error: unknown): error is Error & {
     "not_found",
     "conflict",
     "idempotency_conflict",
+    "unavailable",
   ].includes(String(error.code));
 }

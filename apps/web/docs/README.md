@@ -99,10 +99,13 @@ skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores
 in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original version.
 
 Besides hand-authoring, `/settings/skills` lets an admin import a skill from a public GitHub or
-skills.sh URL (`apps/web/lib/skill-import.ts`, using the shared public-skill resolver). An imported
-row carries `source_type`/`source_url`/`source_ref`/`source_path` on
-`goat.skills`, lands `active` immediately, and is read-only — `updateGoatSkill` rejects edits to
-any row with a non-null `source_type`. Import is instructions-only in this iteration: bundled
+skills.sh URL. The browser previews and confirms through `/v1/skills/imports`; the API uses
+`packages/goat-agent/src/skill-import.ts` and the shared allowlisted public-skill resolver. The
+confirm command re-resolves the source and binds persistence to the previewed commit and integrity
+hash. An imported row carries `source_type`/`source_url`/`source_ref`/`source_path` on
+`goat.skills`, lands `active` immediately, and is read-only — the canonical Skill update command
+rejects edits to any row with a non-null `source_type`. Import is instructions-only in this
+iteration: bundled
 `scripts/`/`references/` files in the source repo are reported but not materialized, since Goat
 skills are plain text injected into the prompt, not files on disk the runner mounts. See
 `docs/future-concepts/goat-plugins-alignment-proposal.md` for where this fits into the broader

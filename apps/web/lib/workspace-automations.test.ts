@@ -1,11 +1,7 @@
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
-import {
-  listGoatSkillCatalog,
-  resolveGoatSkillMentions,
-  validateGoatSkillFields,
-} from "@/lib/skills";
+import { listGoatSkillCatalog, resolveGoatSkillMentions } from "@/lib/skills";
 import {
   GoatWorkflowMentionError,
   listGoatWorkflowCatalog,
@@ -116,17 +112,6 @@ describe("workspace automation lifecycle", () => {
 
     expect(renderQuery(catalogBuilder.whereValue).params).toContain("active");
     expect(renderQuery(resolveBuilder.whereValue).params).toContain("active");
-  });
-
-  it("requires instructions before a skill can become active", () => {
-    expect(
-      validateGoatSkillFields({
-        name: "Legal review",
-        description: "",
-        instructions: "",
-        status: "active",
-      }),
-    ).toMatch(/instructions/);
   });
 });
 

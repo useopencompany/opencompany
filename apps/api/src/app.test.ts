@@ -6,10 +6,15 @@ import {
   type Actor,
   ChatApplicationService,
   type ChatRepository,
+  CoreError,
   type CreateMessageCommand,
   type CreateTaskCommand,
   KnowledgeApplicationService,
   type KnowledgeRepository,
+  type Skill,
+  SkillImportApplicationService,
+  type SkillImportRepository,
+  type SkillImportResolver,
   type Task,
   TaskApplicationService,
   type TaskRepository,
@@ -81,6 +86,7 @@ describe("canonical Hono API", () => {
       tasks: new TaskApplicationService(fakeTaskRepository()),
       ...fakeAutomationServices(),
       knowledge: fakeKnowledgeService(),
+      skillImports: fakeSkillImportService(),
       brainAssets: fakeBrainAssets(),
       attachments: fakeAttachments(),
       authenticate: async () => {
@@ -384,6 +390,111 @@ describe("canonical Hono API", () => {
       data: [{ id: "research", name: "Research" }],
     });
     expect(listSkillCatalog).toHaveBeenCalledWith({ actor });
+  });
+
+  it("previews and idempotently imports an external Skill through the API boundary", async () => {
+    const resolvedCommit = "a".repeat(40);
+    const integrity = `sha256:${"b".repeat(64)}`;
+    const source = {
+      type: "github" as const,
+      url: "https://github.com/o/r",
+      ref: "main",
+      path: "",
+    };
+    const resolve = vi.fn(async () => ({
+      status: "resolved" as const,
+      proposedSlug: "imported-skill",
+      name: "Imported skill",
+      description: "Imported instructions.",
+      instructions: "Use this when imported.",
+      source,
+      resolvedCommit,
+      integrity,
+      extraFiles: ["references/notes.md"],
+    }));
+    const importSkill = vi.fn(async () => ({
+      skill: fakeSkill({
+        id: "skill_imported",
+        slug: "imported-skill",
+        name: "Imported skill",
+        description: "Imported instructions.",
+        instructions: "Use this when imported.",
+        status: "active" as const,
+        source: { ...source, resolvedCommit },
+      }),
+      idempotentReplay: false,
+    }));
+    const app = testApp(fakeRepository(), {
+      skillImports: fakeSkillImportService({ importSkill }, { resolve }),
+    });
+
+    const preview = await app.request("/v1/skills/imports/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "github.com/o/r" }),
+    });
+    expect(preview.status).toBe(200);
+    await expect(preview.json()).resolves.toMatchObject({
+      data: {
+        status: "resolved",
+        proposedSlug: "imported-skill",
+        instructions: "Use this when imported.",
+        resolvedCommit,
+        integrity,
+      },
+      meta: { apiVersion: "v1" },
+    });
+
+    const imported = await app.request("/v1/skills/imports", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": "skill-import-1",
+      },
+      body: JSON.stringify({
+        url: "github.com/o/r",
+        expectedResolvedCommit: resolvedCommit,
+        expectedIntegrity: integrity,
+      }),
+    });
+    expect(imported.status).toBe(201);
+    await expect(imported.json()).resolves.toMatchObject({
+      data: { skill: { slug: "imported-skill" }, replayed: false },
+    });
+    expect(importSkill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor,
+        idempotencyKey: "skill-import-1",
+        source,
+        resolvedCommit,
+        integrity,
+      }),
+    );
+  });
+
+  it("returns a retryable typed error when external Skill resolution is unavailable", async () => {
+    const app = testApp(fakeRepository(), {
+      skillImports: fakeSkillImportService(
+        {},
+        {
+          resolve: async () => {
+            throw new CoreError("unavailable", "Couldn't read that skill right now.");
+          },
+        },
+      ),
+    });
+
+    const response = await app.request("/v1/skills/imports/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "github.com/o/r" }),
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "unavailable", retryable: true },
+      meta: { apiVersion: "v1" },
+    });
   });
 
   it("serves sessionless history only through actor-scoped read-only compatibility resources", async () => {
@@ -1082,6 +1193,7 @@ function testApp(
     tasks: new TaskApplicationService(fakeTaskRepository()),
     ...fakeAutomationServices(),
     knowledge: fakeKnowledgeService(),
+    skillImports: fakeSkillImportService(),
     brainAssets: fakeBrainAssets(),
     attachments: fakeAttachments(),
     authenticate: async () => ({ actor }),
@@ -1142,6 +1254,25 @@ function brainAssetService(overrides: Partial<BrainAssetService>): BrainAssetSer
 
 function fakeKnowledgeService() {
   return knowledgeService({});
+}
+
+function fakeSkillImportService(
+  repositoryOverrides: Partial<SkillImportRepository> = {},
+  resolverOverrides: Partial<SkillImportResolver> = {},
+) {
+  const repository: SkillImportRepository = {
+    importSkill: async () => {
+      throw new Error("Unexpected Skill import.");
+    },
+    ...repositoryOverrides,
+  };
+  const resolver: SkillImportResolver = {
+    resolve: async () => {
+      throw new Error("Unexpected Skill import preview.");
+    },
+    ...resolverOverrides,
+  };
+  return new SkillImportApplicationService(repository, resolver);
 }
 
 function knowledgeService(overrides: Partial<KnowledgeRepository>) {
@@ -1207,7 +1338,11 @@ function baseWikiPage() {
   };
 }
 
-function fakeSkill() {
+function fakeSkill(overrides: Partial<Skill> = {}): Skill {
+  return { ...baseSkill(), ...overrides };
+}
+
+function baseSkill(): Skill {
   return {
     id: "skill_1",
     slug: "research",

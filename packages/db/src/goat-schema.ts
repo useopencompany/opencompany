@@ -67,7 +67,8 @@ export type GoatKnowledgeCommandOperation =
   | "brain_asset.replace"
   | "wiki_page.create"
   | "wiki_timeline.create"
-  | "skill.create";
+  | "skill.create"
+  | "skill.import";
 export type GoatWorkflowStep = {
   id: string;
   title: string;
@@ -2952,7 +2953,7 @@ export const goatSkills = goat.table(
     }),
     // Source provenance for imported skills. NULL sourceType = hand-authored in Goat (the
     // original, still-supported path). Non-NULL means the row was resolved from an external
-    // SKILL.md and is read-only — see updateGoatSkill in apps/goat/lib/skills.ts.
+    // SKILL.md and is read-only — enforced by PostgresKnowledgeRepository.updateSkill.
     sourceType: text("source_type").$type<GoatSkillSourceType>(),
     sourceUrl: text("source_url"),
     sourceRef: text("source_ref"),
@@ -2972,8 +2973,8 @@ export const goatSkills = goat.table(
       table.archivedAt,
       table.updatedAt,
     ),
-    // Prevents importing the same skill twice into one workspace; importGoatSkillAction looks
-    // this up first and reuses the existing row instead of relying on this to reject.
+    // Prevents importing the same skill twice into one workspace. The canonical repository
+    // returns the existing row for a matching resolved source.
     workspaceSourceIdx: uniqueIndex("goat_skills_workspace_source_idx")
       .on(table.workspaceId, table.sourceUrl, table.sourceRef, table.sourcePath)
       .where(sql`${table.sourceType} IS NOT NULL AND ${table.archivedAt} IS NULL`),
@@ -4214,7 +4215,7 @@ export const goatKnowledgeCommandIdempotency = goat.table(
     ),
     operationCheck: check(
       "goat_knowledge_command_idempotency_operation_check",
-      sql`${table.operation} IN ('brain_document.create', 'brain_asset.create', 'brain_asset.replace', 'wiki_page.create', 'wiki_timeline.create', 'skill.create')`,
+      sql`${table.operation} IN ('brain_document.create', 'brain_asset.create', 'brain_asset.replace', 'wiki_page.create', 'wiki_timeline.create', 'skill.create', 'skill.import')`,
     ),
   }),
 );

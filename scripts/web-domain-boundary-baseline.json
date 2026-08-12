@@ -94,7 +94,6 @@
     "apps/web/lib/mcp-setup.ts",
     "apps/web/lib/onboarding-actions.ts",
     "apps/web/lib/repo-config-actions.ts",
-    "apps/web/lib/skill-import.ts",
     "apps/web/lib/slack-bot-actions.ts",
     "apps/web/lib/slack-bot/answer.ts",
     "apps/web/lib/slack-bot/identity.ts",

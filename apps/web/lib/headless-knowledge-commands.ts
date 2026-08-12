@@ -13,8 +13,10 @@ import {
   type CreateSkillBody,
   createOpenCompanyClient,
   type DeleteBrainFolderBody,
+  type ImportSkillBody,
   type RenameBrainDocumentBody,
   type RenameBrainFolderBody,
+  type SkillImportPreviewBody,
   type UpdateBrainDocumentBody,
   type UpdateSkillBody,
 } from "@opencompany/protocol";
@@ -179,6 +181,24 @@ export async function createHeadlessSkill(command: CreateSkillBody, options: Cli
     json: command,
   });
   return responseData(response, "Skill creation failed");
+}
+
+export async function previewHeadlessSkillImport(
+  command: SkillImportPreviewBody,
+  options: ClientOptions = {},
+) {
+  const response = await knowledgeClient(options).v1.skills.imports.preview.$post({
+    json: command,
+  });
+  return responseData(response, "Skill import preview failed");
+}
+
+export async function importHeadlessSkill(command: ImportSkillBody, options: ClientOptions = {}) {
+  const response = await knowledgeClient(options).v1.skills.imports.$post({
+    header: { "idempotency-key": `web-skill-import:${crypto.randomUUID()}` },
+    json: command,
+  });
+  return responseData(response, "Skill import failed");
 }
 
 export async function updateHeadlessSkill(

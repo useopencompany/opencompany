@@ -2800,6 +2800,205 @@
         ],
         "additionalProperties": false
       },
+      "SkillImportPreviewEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SkillImportPreview"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SkillImportPreview": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "resolved"
+                ]
+              },
+              "proposedSlug": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "instructions": {
+                "type": "string",
+                "maxLength": 262144
+              },
+              "extraFiles": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                "maxItems": 31
+              },
+              "resolvedCommit": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$/iu"
+              },
+              "integrity": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$/iu"
+              }
+            },
+            "required": [
+              "status",
+              "proposedSlug",
+              "name",
+              "description",
+              "instructions",
+              "extraFiles",
+              "resolvedCommit",
+              "integrity"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ambiguous"
+                ]
+              },
+              "candidates": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SkillImportCandidate"
+                },
+                "minItems": 1,
+                "maxItems": 25
+              }
+            },
+            "required": [
+              "status",
+              "candidates"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "SkillImportCandidate": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "path",
+          "name",
+          "description"
+        ],
+        "additionalProperties": false
+      },
+      "SkillImportPreviewBody": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "selectedPath": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "SkillImportEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "skill": {
+                "$ref": "#/components/schemas/Skill"
+              },
+              "replayed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "skill",
+              "replayed"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ImportSkillBody": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "selectedPath": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "expectedResolvedCommit": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$/iu"
+          },
+          "expectedIntegrity": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$/iu"
+          }
+        },
+        "required": [
+          "url",
+          "expectedResolvedCommit",
+          "expectedIntegrity"
+        ],
+        "additionalProperties": false
+      },
       "SkillCatalogEnvelope": {
         "type": "object",
         "properties": {
@@ -7105,6 +7304,112 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SkillEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/skills/imports/preview": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillImportPreviewBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "External Skill metadata and instructions resolved for confirmation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillImportPreviewEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/skills/imports": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportSkillBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "External Skill imported or replayed after confirmation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillImportEnvelope"
                 }
               }
             }

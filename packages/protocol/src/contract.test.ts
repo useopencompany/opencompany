@@ -139,6 +139,8 @@ describe("v1 protocol contract", () => {
       "/v1/wiki/pages/{slug}/delete",
       "/v1/wiki/pages/{slug}/timeline",
       "/v1/skills",
+      "/v1/skills/imports/preview",
+      "/v1/skills/imports",
       "/v1/skills/catalog",
       "/v1/skills/{slug}",
       "/v1/skills/{slug}/archive",

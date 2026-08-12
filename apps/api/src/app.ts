@@ -17,6 +17,7 @@ import {
   type LegacyTaskHistory,
   type RunEvent,
   type Skill,
+  type SkillImportApplicationService,
   type SkillListItem,
   type Task,
   type TaskApplicationService,
@@ -89,6 +90,7 @@ export type CreateApiAppInput = {
   workflows: WorkflowApplicationService;
   schedules: TaskScheduleApplicationService;
   knowledge: KnowledgeApplicationService;
+  skillImports: SkillImportApplicationService;
   brainAssets: BrainAssetService;
   attachments: AttachmentUploadService;
   authenticate: ApiAuthenticator;
@@ -648,6 +650,48 @@ export function createApiApp(input: CreateApiAppInput) {
         ...c.req.valid("json"),
       });
       return c.json({ data: skillDto(skill), meta }, 201);
+    },
+    previewSkillImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const preview = await input.skillImports.preview(actor, c.req.valid("json"));
+      return c.json(
+        {
+          data:
+            preview.status === "resolved"
+              ? {
+                  status: preview.status,
+                  proposedSlug: preview.proposedSlug,
+                  name: preview.name,
+                  description: preview.description,
+                  instructions: preview.instructions,
+                  extraFiles: preview.extraFiles,
+                  resolvedCommit: preview.resolvedCommit,
+                  integrity: preview.integrity,
+                }
+              : {
+                  status: preview.status,
+                  candidates: preview.candidates,
+                },
+          meta,
+        },
+        200,
+      );
+    },
+    importSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const result = await input.skillImports.import(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...c.req.valid("json"),
+      });
+      return c.json(
+        {
+          data: { skill: skillDto(result.skill), replayed: result.idempotentReplay },
+          meta,
+        },
+        201,
+      );
     },
     listSkillCatalog: async (c) => {
       const actor = actorFrom(c);

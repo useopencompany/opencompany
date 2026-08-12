@@ -304,7 +304,8 @@ export class CoreError extends Error {
       | "invalid_argument"
       | "not_found"
       | "conflict"
-      | "idempotency_conflict",
+      | "idempotency_conflict"
+      | "unavailable",
     message: string,
   ) {
     super(message);

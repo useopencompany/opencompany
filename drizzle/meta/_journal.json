@@ -1471,6 +1471,13 @@
       "when": 1786543200000,
       "tag": "0209_goat_brain_asset_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 210,
+      "version": "7",
+      "when": 1786546800000,
+      "tag": "0210_goat_skill_import_idempotency",
+      "breakpoints": true
     }
   ]
 }

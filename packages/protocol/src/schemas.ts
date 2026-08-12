@@ -599,6 +599,38 @@ export const SkillCatalogItemSchema = z
   .strict()
   .openapi("SkillCatalogItem");
 
+export const SkillImportCandidateSchema = z
+  .object({
+    path: z.string().max(512),
+    name: z.string().min(1).max(64),
+    description: z.string().max(1_024),
+  })
+  .strict()
+  .openapi("SkillImportCandidate");
+
+export const SkillImportPreviewSchema = z
+  .discriminatedUnion("status", [
+    z
+      .object({
+        status: z.literal("resolved"),
+        proposedSlug: z.string().min(1).max(64),
+        name: z.string().min(1).max(64),
+        description: z.string().max(1_024),
+        instructions: z.string().max(256 * 1_024),
+        extraFiles: z.array(z.string().max(512)).max(31),
+        resolvedCommit: z.string().regex(/^[0-9a-f]{40}$/iu),
+        integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/iu),
+      })
+      .strict(),
+    z
+      .object({
+        status: z.literal("ambiguous"),
+        candidates: z.array(SkillImportCandidateSchema).min(1).max(25),
+      })
+      .strict(),
+  ])
+  .openapi("SkillImportPreview");
+
 export const BrainSnapshotEnvelopeSchema = z
   .object({ data: BrainSnapshotSchema, meta: ProtocolMetadataSchema })
   .strict()
@@ -775,6 +807,30 @@ export const SkillEnvelopeSchema = z
   .object({ data: SkillSchema, meta: ProtocolMetadataSchema })
   .strict()
   .openapi("SkillEnvelope");
+export const SkillImportPreviewBodySchema = z
+  .object({
+    url: z.string().min(1).max(2_048),
+    selectedPath: z.string().max(512).optional(),
+  })
+  .strict()
+  .openapi("SkillImportPreviewBody");
+export const SkillImportPreviewEnvelopeSchema = z
+  .object({ data: SkillImportPreviewSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("SkillImportPreviewEnvelope");
+export const ImportSkillBodySchema = SkillImportPreviewBodySchema.extend({
+  expectedResolvedCommit: z.string().regex(/^[0-9a-f]{40}$/iu),
+  expectedIntegrity: z.string().regex(/^sha256:[0-9a-f]{64}$/iu),
+})
+  .strict()
+  .openapi("ImportSkillBody");
+export const SkillImportEnvelopeSchema = z
+  .object({
+    data: z.object({ skill: SkillSchema, replayed: z.boolean() }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("SkillImportEnvelope");
 export const CreateSkillBodySchema = z
   .object({ name: z.string().min(1).max(64), description: z.string().max(1_024).optional() })
   .strict()
@@ -1346,6 +1402,10 @@ export type SkillListItemDto = z.infer<typeof SkillListItemSchema>;
 export type SkillCatalogItemDto = z.infer<typeof SkillCatalogItemSchema>;
 export type CreateSkillBody = z.infer<typeof CreateSkillBodySchema>;
 export type UpdateSkillBody = z.infer<typeof UpdateSkillBodySchema>;
+export type SkillImportCandidateDto = z.infer<typeof SkillImportCandidateSchema>;
+export type SkillImportPreviewDto = z.infer<typeof SkillImportPreviewSchema>;
+export type SkillImportPreviewBody = z.infer<typeof SkillImportPreviewBodySchema>;
+export type ImportSkillBody = z.infer<typeof ImportSkillBodySchema>;
 export type CreateWorkflowBody = z.infer<typeof CreateWorkflowBodySchema>;
 export type UpdateWorkflowBody = z.infer<typeof UpdateWorkflowBodySchema>;
 export type ArchiveVersionBody = z.infer<typeof ArchiveVersionBodySchema>;
