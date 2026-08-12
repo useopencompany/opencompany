@@ -17,4 +17,5 @@ export * from "./knowledge-repository";
 export * from "./legacy-billing-schema";
 export * from "./llm-broker-schema";
 export * from "./task-repository";
+export * from "./worker-admission";
 export * from "./workflow-repository";

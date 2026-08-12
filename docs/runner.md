@@ -25,6 +25,20 @@ also rechecks persisted session/Run/Attempt/lease and membership authority for e
 `RUNNER_GOAT_TASK_WORKER_ENABLED` controls the durable task worker. Worker concurrency, DB pool,
 lease, and sandbox timeouts are documented beside their values in `.env.example` and `render.yaml`.
 
+## Brain worker admission
+
+Brain import, Brain ingestion, and Google Drive sync are admitted by commits to their existing
+durable rows. Database triggers publish a versioned Postgres notification containing only the
+worker kind; the runner keeps one dedicated listener connection and maps that hint to the existing
+worker's in-process `notify()` callback. Notifications are a latency optimization, not a queue or a
+claim. Each worker's polling loop remains active and authoritative for retry timing, fenced leases,
+per-Brain serialization, Drive cursor ordering, and crash recovery. A dropped notification or
+listener outage therefore delays work only until the normal poll, and the listener reconnects
+without changing execution semantics.
+
+The private Brain import/ingest and Drive wake routes remain authenticated rollback adapters during
+the #1203 observation window. Production `apps/web` callers do not use them.
+
 ## Sandboxes and broker
 
 E2B sandboxes receive task files, current managed skills, and scoped provider credentials. They do
@@ -34,7 +48,7 @@ upstreams. See [LLM token broker](./llm-token-broker.md).
 
 ## Verification
 
-Run runner unit tests and typecheck, then exercise the real product path that wakes the touched
-worker. For deployment changes, verify `/healthz` reports the expected release and Claude MCP
-capability version, then create a representative durable turn through the web app rather than
-calling worker internals alone.
+Run runner unit tests and typecheck, then exercise the real product path that durably admits the
+touched worker. For deployment changes, verify `/healthz` reports the expected release and Brain
+worker admission capability version, then create representative work through the web or provider
+path rather than calling worker internals alone.

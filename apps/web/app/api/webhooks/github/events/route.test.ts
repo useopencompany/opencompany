@@ -7,7 +7,6 @@ import {
 } from "@opencompany/db/goat-github";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { verifyGoatGitHubWebhookSignature } from "@/lib/integrations/github-signature";
-import { triggerGoatBrainIngestWake } from "@/lib/task-runner";
 import { POST } from "./route";
 
 vi.mock("@opencompany/analytics/goat", () => ({
@@ -26,10 +25,6 @@ vi.mock("@opencompany/db/goat-github", async (importOriginal) => ({
 vi.mock("@/lib/integrations/github-signature", () => ({
   verifyGoatGitHubWebhookSignature: vi.fn(),
 }));
-vi.mock("@/lib/task-runner", () => ({
-  triggerGoatBrainIngestWake: vi.fn(),
-}));
-
 describe("POST /api/webhooks/github/events", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -62,7 +57,6 @@ describe("POST /api/webhooks/github/events", () => {
       enqueued: true,
       skipped: false,
     });
-    vi.mocked(triggerGoatBrainIngestWake).mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -116,7 +110,6 @@ describe("POST /api/webhooks/github/events", () => {
         brainRefs: ["gbrain_1"],
       }),
     );
-    expect(triggerGoatBrainIngestWake).toHaveBeenCalledOnce();
   });
 
   it("returns a retryable response when pull-request buffering fails", async () => {

@@ -11,9 +11,6 @@ vi.mock("@/lib/brain-assets", () => ({
 }));
 vi.mock("@/lib/brain-capture", () => ({ GOAT_BRAIN_CAPTURE_FOLDER: "inbox" }));
 vi.mock("@/lib/chat-attachments", () => ({ downloadGoatChatAttachment: vi.fn() }));
-vi.mock("@/lib/task-runner", () => ({
-  triggerGoatBrainIngestWake: vi.fn().mockResolvedValue(undefined),
-}));
 
 describe("saveChatAttachmentsToGoatBrain", () => {
   beforeEach(() => {

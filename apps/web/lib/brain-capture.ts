@@ -4,7 +4,6 @@ import {
   type GoatBrainCaptureSource,
 } from "@opencompany/goat-agent/brain-capture";
 import { nextAvailableGoatBrainId } from "@/lib/brain";
-import { triggerGoatBrainIngestWake } from "@/lib/task-runner";
 
 export * from "@opencompany/goat-agent/brain-capture";
 
@@ -24,7 +23,6 @@ export function captureToGoatBrainInbox(input: {
     { ...command, actorId: userWorkosId },
     {
       nextAvailableBrainId: nextAvailableGoatBrainId,
-      wakeIngest: triggerGoatBrainIngestWake,
     },
   );
 }

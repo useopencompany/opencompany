@@ -1478,6 +1478,13 @@
       "when": 1786546800000,
       "tag": "0210_goat_skill_import_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 211,
+      "version": "7",
+      "when": 1786552200000,
+      "tag": "0211_goat_brain_worker_admission",
+      "breakpoints": true
     }
   ]
 }

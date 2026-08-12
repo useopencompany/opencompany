@@ -22,7 +22,6 @@ import {
   GOAT_JAMIE_WEBHOOK_EVENT_HEADER,
   GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
 } from "@/lib/integrations/jamie-constants";
-import { triggerGoatBrainIngestWake } from "@/lib/task-runner";
 
 export async function handleGoatJamieWebhookDelivery(input: {
   request: Request;
@@ -108,14 +107,6 @@ export async function handleGoatJamieWebhookDelivery(input: {
     userWorkosId: webhookContext.userWorkosId,
     now: receivedAt,
   });
-
-  if (result.enqueued) {
-    triggerGoatBrainIngestWake().catch((error) => {
-      console.warn("[goat-jamie] Failed to wake Goat Brain ingest worker", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
-  }
 
   return NextResponse.json({
     ok: true,

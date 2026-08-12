@@ -3,7 +3,6 @@ import {
   loadGoatGoogleDriveWatchChannel,
   requestGoatGoogleDriveCursorWake,
 } from "@opencompany/db/goat-google-drive";
-import { triggerGoatGoogleDriveSyncWake } from "@/lib/task-runner";
 
 export async function POST(request: Request) {
   const channelId = request.headers.get("x-goog-channel-id")?.trim();
@@ -29,12 +28,6 @@ export async function POST(request: Request) {
   // it here is safe even while resource_id is not populated yet.
   if (resourceState === "sync" || resourceState === "change") {
     await requestGoatGoogleDriveCursorWake(channel.cursorId);
-    triggerGoatGoogleDriveSyncWake().catch((error) => {
-      console.warn("Google Drive webhook could not wake the sync worker.", {
-        event: "goat.google_drive_webhook_wake_failed",
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
   }
   return new Response(null, { status: 204 });
 }

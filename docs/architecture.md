@@ -46,6 +46,13 @@ heartbeat while executing, persist messages/events/artifacts/usage, and settle t
 atomically. Current engine adapters support OpenCompany, Codex, and Claude Code. E2B provides
 persistent coding sandboxes; Vercel Sandbox supports browser-capable foreground work.
 
+Brain import, Brain ingestion, and Google Drive sync use the same durable admission principle.
+Transactions write their existing import, ingest-job, source, and cursor rows, then publish a
+versioned Postgres notification as a latency hint. The runner listens directly to Postgres and
+wakes the existing internal workers; polling and fenced claims remain the recovery and correctness
+authority. This does not create a second queue, and the runner does not call the public API for
+execution or persistence.
+
 ## Integrations and security
 
 WorkOS sessions authenticate the web app. OAuth state and integration credentials are signed/encrypted at

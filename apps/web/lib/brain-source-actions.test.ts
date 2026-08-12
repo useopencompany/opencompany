@@ -5,9 +5,6 @@ import { setGoatBrainSourceEnabledAction } from "./brain-source-actions";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/headers", () => ({ headers: vi.fn() }));
-vi.mock("@/lib/task-runner", () => ({
-  triggerGoatGoogleDriveSyncWake: vi.fn(async () => undefined),
-}));
 
 describe("Brain source API actions", () => {
   beforeEach(() => {

@@ -749,9 +749,13 @@ only after the #1203 compatibility observation window closes. Brain source reads
 commands, provider-specific configuration, and selectable-resource discovery now cross typed
 `/v1/brains/*/sources*` and `/v1/integrations/*/brain-source-options` resources; the API owns their
 authorization and database/provider access. Existing OAuth callbacks, webhooks, and provider URLs
-are unchanged. Company imports, ingestion admission controls, and the temporary Google Drive worker
-wake remain on their existing paths until the next workspace-knowledge slice. External Skill
-preview and import already use typed `/v1/skills/imports*` commands.
+are unchanged. Brain import, ingestion, and Google Drive sync admission is durable: commits to the
+existing work/cursor rows publish Postgres hints to the runner, while the workers' polling, claims,
+leases, retry timing, cursor ordering, and idempotency remain authoritative. Production web paths
+no longer call private runner wake routes for those workers; the routes remain temporarily as
+rollback adapters. Company import commands and reads remain on their existing web/physical-table
+path until the next workspace-knowledge slice. External Skill preview and import already use typed
+`/v1/skills/imports*` commands.
 
 ## Company bootstrap imports
 

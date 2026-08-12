@@ -14,11 +14,12 @@ import {
 } from "@opencompany/observability";
 import { flushBraintrust } from "@opencompany/observability/braintrust";
 import * as Sentry from "@sentry/bun";
-import { assertRunnerDbConfig, closeDb } from "./db";
+import { assertRunnerDbConfig, closeDb, getDbPool } from "./db";
 import { loadEnv } from "./env";
 import { startGoatAttioFlushWorker } from "./goat-attio-flush-worker";
 import { setGoatBrainImportWakeup, startGoatBrainImportWorker } from "./goat-brain-import-worker";
 import { setGoatBrainIngestWakeup, startGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
+import { startGoatBrainWorkerAdmissionListener } from "./goat-brain-worker-admission";
 import {
   setGoatCodexChatWakeup,
   startGoatCodexChatWorker,
@@ -126,6 +127,16 @@ setGoatBrainImportWakeup(() => {
 setGoatCodexChatWakeup(() => {
   goatCodexChatWorker?.notify();
 });
+const goatBrainWorkerAdmissionListener = env.goatTaskWorkerEnabled
+  ? startGoatBrainWorkerAdmissionListener({
+      pool: getDbPool(),
+      callbacks: {
+        brain_import: () => goatBrainImportWorker?.notify(),
+        brain_ingest: () => goatBrainIngestWorker?.notify(),
+        google_drive_sync: () => goatGoogleDriveSyncWorker?.notify(),
+      },
+    })
+  : null;
 const server = createServer(env);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
@@ -165,6 +176,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       goatGranolaPollWorker?.stop() ?? Promise.resolve(),
       goatFathomPollWorker?.stop() ?? Promise.resolve(),
       goatGoogleDriveSyncWorker?.stop() ?? Promise.resolve(),
+      goatBrainWorkerAdmissionListener?.stop() ?? Promise.resolve(),
       server.close(),
       chatPresentation?.close() ?? Promise.resolve(),
     ])

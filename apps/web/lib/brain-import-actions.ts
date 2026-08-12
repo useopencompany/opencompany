@@ -16,7 +16,6 @@ import {
   getGoatBrainSourcesAction,
   listGoatGitHubRepositoriesAction,
 } from "./brain-source-actions";
-import { triggerGoatBrainImportWake, triggerGoatBrainIngestWake } from "./task-runner";
 
 const IMPORT_INTEGRATION_PROVIDERS = [
   "github",
@@ -52,7 +51,6 @@ export async function startGoatBrainImportDiscoveryAction(input: {
       ...(input.focus?.trim() ? { focus: input.focus } : {}),
       sourceSelection,
     });
-    await wakeImportWorkers([triggerGoatBrainImportWake()]);
     return { ok: true, importRunId: run.id };
   } catch (error) {
     return failure(error);
@@ -72,7 +70,6 @@ export async function confirmGoatBrainImportAction(input: {
       enabledProviders: sanitizeEnabledProviders(input.enabledProviders),
       actingUserWorkosId: context.user.workosUserId,
     });
-    await wakeImportWorkers([triggerGoatBrainIngestWake(), triggerGoatBrainImportWake()]);
     return { ok: true, importRunId: input.importRunId };
   } catch (error) {
     return failure(error);
@@ -86,7 +83,6 @@ export async function cancelGoatBrainImportAction(input: {
   try {
     await requireAdminBrain(input.brainRef);
     await cancelGoatBrainImport(input);
-    await wakeImportWorkers([triggerGoatBrainImportWake()]);
     return { ok: true, importRunId: input.importRunId };
   } catch (error) {
     return failure(error);
@@ -100,7 +96,6 @@ export async function retryGoatBrainImportDiscoveryAction(input: {
   try {
     await requireAdminBrain(input.brainRef);
     await retryGoatBrainImportDiscovery(input);
-    await wakeImportWorkers([triggerGoatBrainImportWake()]);
     return { ok: true, importRunId: input.importRunId };
   } catch (error) {
     return failure(error);
@@ -120,17 +115,6 @@ function failure(error: unknown): GoatBrainImportActionResult {
     ok: false,
     message: error instanceof Error ? error.message : "The company-context import failed.",
   };
-}
-
-async function wakeImportWorkers(wakes: Promise<unknown>[]) {
-  const results = await Promise.allSettled(wakes);
-  for (const result of results) {
-    if (result.status === "rejected") {
-      console.warn("A Goat Brain import worker wake-up failed; polling will recover it.", {
-        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
-      });
-    }
-  }
 }
 
 async function validateImportSourceSelection(

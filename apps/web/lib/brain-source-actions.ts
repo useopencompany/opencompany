@@ -9,7 +9,6 @@ import type {
 import { createOpenCompanyClient } from "@opencompany/protocol";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
-import { triggerGoatGoogleDriveSyncWake } from "@/lib/task-runner";
 import type { GoatWorkspaceActionResult } from "@/lib/workspace-actions";
 
 export type GoatBrainSourceView = ServiceBrainSourcesDetails["sources"][number];
@@ -149,21 +148,11 @@ export async function setGoatBrainGoogleDriveSourceAction(
   },
 ): Promise<GoatWorkspaceActionResult> {
   const { brainRef, integrationId, ...configuration } = input;
-  const result = await setSource(brainRef, integrationId, {
+  return setSource(brainRef, integrationId, {
     operation: "configure",
     provider: "google_drive",
     ...configuration,
   });
-  if (result.ok && configuration.enabled) {
-    // Temporary until PR 3d3 makes ingest admission durable and API-owned.
-    triggerGoatGoogleDriveSyncWake().catch((error) => {
-      console.warn("Could not wake Goat Google Drive sync worker.", {
-        event: "goat.google_drive_source_wake_failed",
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
-  }
-  return result;
 }
 
 export type GoatSlackConversationListResult =

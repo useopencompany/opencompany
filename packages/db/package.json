@@ -179,6 +179,10 @@
     "./pool": {
       "types": "./src/pool.ts",
       "default": "./src/pool.ts"
+    },
+    "./worker-admission": {
+      "types": "./src/worker-admission.ts",
+      "default": "./src/worker-admission.ts"
     }
   },
   "scripts": {
