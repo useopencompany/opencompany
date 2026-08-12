@@ -1,32 +1,11 @@
 "use server";
 
 import {
-  cancelGoatBrainImport,
-  confirmGoatBrainImport,
-  createGoatBrainImportRun,
-  retryGoatBrainImportDiscovery,
-} from "@opencompany/db/goat-brain-import";
-import type {
-  GoatBrainImportProvider,
-  GoatBrainImportSourceSelection,
-} from "@opencompany/db/goat-schema";
-import { GITHUB_ACTIVITY_EVENT_TYPES } from "@opencompany/goat-brain";
-import { currentGoatBrainByRef } from "@/lib/auth";
-import {
-  getGoatBrainSourcesAction,
-  listGoatGitHubRepositoriesAction,
-} from "./brain-source-actions";
-
-const IMPORT_INTEGRATION_PROVIDERS = [
-  "github",
-  "jamie",
-  "granola",
-  "fathom",
-  "gmail",
-  "slack",
-  "linear",
-] as const;
-const IMPORT_PROVIDERS = ["public_web", ...IMPORT_INTEGRATION_PROVIDERS] as const;
+  type BrainImportProvider,
+  createOpenCompanyClient,
+  type StartBrainImportBody,
+} from "@opencompany/protocol";
+import { headers } from "next/headers";
 
 export type GoatBrainImportActionResult =
   | { ok: true; importRunId: string }
@@ -36,193 +15,158 @@ export async function startGoatBrainImportDiscoveryAction(input: {
   brainRef: string;
   companyUrl: string;
   focus?: string;
-  sourceSelection: GoatBrainImportSourceSelection;
+  sourceSelection: Record<
+    string,
+    { enabled: boolean; integrationId?: string; config?: Record<string, unknown> }
+  >;
 }): Promise<GoatBrainImportActionResult> {
-  try {
-    const context = await requireAdminBrain(input.brainRef);
-    const sourceSelection = await validateImportSourceSelection(
-      input.brainRef,
-      input.sourceSelection,
-    );
-    const run = await createGoatBrainImportRun({
-      brainRef: input.brainRef,
-      userWorkosId: context.user.workosUserId,
-      companyUrl: input.companyUrl,
-      ...(input.focus?.trim() ? { focus: input.focus } : {}),
-      sourceSelection,
+  return importCommand(async () => {
+    const response = await (await serverImportClient()).v1.brains[":brainId"].imports.$post({
+      param: { brainId: input.brainRef },
+      header: { "idempotency-key": `web-brain-import:${crypto.randomUUID()}` },
+      json: {
+        companyUrl: input.companyUrl,
+        ...(input.focus?.trim() ? { focus: input.focus } : {}),
+        sourceSelection: protocolSourceSelection(input.sourceSelection),
+      },
     });
-    return { ok: true, importRunId: run.id };
-  } catch (error) {
-    return failure(error);
+    return response;
+  }, "The company-context import failed.");
+}
+
+// The API only honors the requested GitHub repository scope; every other provider reuses its
+// stored source configuration server-side, so the command sends only the fields the strict
+// protocol schema defines.
+function protocolSourceSelection(
+  selection: Record<
+    string,
+    { enabled: boolean; integrationId?: string; config?: Record<string, unknown> }
+  >,
+): StartBrainImportBody["sourceSelection"] {
+  const next: StartBrainImportBody["sourceSelection"] = {};
+  for (const [provider, entry] of Object.entries(selection)) {
+    const repos = Array.isArray(entry.config?.repos)
+      ? entry.config.repos
+          .flatMap((repo) => {
+            if (!repo || typeof repo !== "object") return [];
+            const { id, fullName } = repo as { id?: unknown; fullName?: unknown };
+            const ref = {
+              ...(typeof id === "string" && id ? { id } : {}),
+              ...(typeof fullName === "string" && fullName ? { fullName } : {}),
+            };
+            return Object.keys(ref).length > 0 ? [ref] : [];
+          })
+          .slice(0, 20)
+      : [];
+    next[provider] = {
+      enabled: entry.enabled,
+      ...(entry.integrationId ? { integrationId: entry.integrationId } : {}),
+      ...(repos.length > 0 ? { config: { repos } } : {}),
+    };
   }
+  return next;
 }
 
 export async function confirmGoatBrainImportAction(input: {
   brainRef: string;
   importRunId: string;
-  enabledProviders: GoatBrainImportProvider[];
+  enabledProviders: BrainImportProvider[];
 }): Promise<GoatBrainImportActionResult> {
-  try {
-    const context = await requireAdminBrain(input.brainRef);
-    await confirmGoatBrainImport({
-      importRunId: input.importRunId,
-      brainRef: input.brainRef,
-      enabledProviders: sanitizeEnabledProviders(input.enabledProviders),
-      actingUserWorkosId: context.user.workosUserId,
-    });
-    return { ok: true, importRunId: input.importRunId };
-  } catch (error) {
-    return failure(error);
-  }
+  return importCommand(
+    async () =>
+      (await serverImportClient()).v1.brains[":brainId"].imports[":importRunId"].confirm.$post({
+        param: { brainId: input.brainRef, importRunId: input.importRunId },
+        json: { enabledProviders: input.enabledProviders },
+      }),
+    "The company-context import failed.",
+  );
 }
 
 export async function cancelGoatBrainImportAction(input: {
   brainRef: string;
   importRunId: string;
 }): Promise<GoatBrainImportActionResult> {
-  try {
-    await requireAdminBrain(input.brainRef);
-    await cancelGoatBrainImport(input);
-    return { ok: true, importRunId: input.importRunId };
-  } catch (error) {
-    return failure(error);
-  }
+  return importCommand(
+    async () =>
+      (await serverImportClient()).v1.brains[":brainId"].imports[":importRunId"].cancel.$post({
+        param: { brainId: input.brainRef, importRunId: input.importRunId },
+      }),
+    "The company-context import failed.",
+  );
 }
 
 export async function retryGoatBrainImportDiscoveryAction(input: {
   brainRef: string;
   importRunId: string;
 }): Promise<GoatBrainImportActionResult> {
-  try {
-    await requireAdminBrain(input.brainRef);
-    await retryGoatBrainImportDiscovery(input);
-    return { ok: true, importRunId: input.importRunId };
-  } catch (error) {
-    return failure(error);
-  }
-}
-
-async function requireAdminBrain(brainRef: string) {
-  const resolved = await currentGoatBrainByRef(brainRef);
-  if (resolved.context.role !== "admin") {
-    throw new Error("Only workspace admins can import company context.");
-  }
-  return resolved.context;
-}
-
-function failure(error: unknown): GoatBrainImportActionResult {
-  return {
-    ok: false,
-    message: error instanceof Error ? error.message : "The company-context import failed.",
-  };
-}
-
-async function validateImportSourceSelection(
-  brainRef: string,
-  selection: GoatBrainImportSourceSelection,
-): Promise<GoatBrainImportSourceSelection> {
-  const details = await getGoatBrainSourcesAction(brainRef);
-  if (!details) throw new Error("Only workspace admins can import company context.");
-
-  const next: GoatBrainImportSourceSelection = {
-    public_web: { enabled: selection.public_web?.enabled !== false },
-  };
-  for (const provider of IMPORT_INTEGRATION_PROVIDERS) {
-    const requested = selection[provider];
-    if (!requested?.enabled) {
-      next[provider] = { enabled: false };
-      continue;
-    }
-
-    const manageableSource = details.sources.find(
-      (source) =>
-        source.provider === provider &&
-        source.integrationId === requested.integrationId &&
-        source.canConfigure,
-    );
-    const connectedIntegrationId = integrationIdFor(details, provider);
-    if (
-      !requested.integrationId ||
-      (!manageableSource && requested.integrationId !== connectedIntegrationId)
-    ) {
-      throw new Error(`Connect ${providerLabel(provider)} in your settings first.`);
-    }
-
-    let config = manageableSource?.config ?? {};
-    if (provider === "github" && !manageableSource) {
-      const repositories = await listGoatGitHubRepositoriesAction(requested.integrationId);
-      if (!repositories.ok) throw new Error(repositories.error);
-      const requestedRepos = Array.isArray(requested.config?.repos) ? requested.config.repos : [];
-      const requestedKeys = new Set(
-        requestedRepos.flatMap((repo) => {
-          if (!repo || typeof repo !== "object") return [];
-          const value = repo as { id?: unknown; fullName?: unknown };
-          return [value.id, value.fullName].filter(
-            (key): key is string => typeof key === "string" && key.length > 0,
-          );
-        }),
-      );
-      const repos = repositories.repos
-        .filter((repo) => requestedKeys.has(repo.id) || requestedKeys.has(repo.fullName))
-        .slice(0, 5)
-        .map(({ id, fullName }) => ({ id, fullName }));
-      config = { repos, events: [...GITHUB_ACTIVITY_EVENT_TYPES] };
-    }
-    if (provider === "gmail") {
-      const existingEvents = Array.isArray(config.events) ? config.events : [];
-      if (existingEvents.length === 0) {
-        config = {
-          ...config,
-          events: [{ id: "email_received" }, { id: "email_sent" }],
-        };
-      }
-    }
-    if (provider === "github" && !hasConfiguredEntries(config.repos)) {
-      throw new Error("Select at least one GitHub repository.");
-    }
-    if (
-      provider === "slack" &&
-      !hasConfiguredEntries(config.channels) &&
-      !hasConfiguredEntries(config.dms)
-    ) {
-      throw new Error("Select at least one Slack channel or DM in Brain Settings first.");
-    }
-    if (provider === "linear" && !hasConfiguredEntries(config.teams)) {
-      throw new Error("Select at least one Linear team in Brain Settings first.");
-    }
-    next[provider] = {
-      enabled: true,
-      integrationId: requested.integrationId,
-      config,
-    };
-  }
-  return next;
-}
-
-function integrationIdFor(
-  details: NonNullable<Awaited<ReturnType<typeof getGoatBrainSourcesAction>>>,
-  provider: (typeof IMPORT_INTEGRATION_PROVIDERS)[number],
-) {
-  return details[provider].integration.integrationId ?? null;
-}
-
-function providerLabel(provider: (typeof IMPORT_INTEGRATION_PROVIDERS)[number]) {
-  return provider === "github" ? "GitHub" : provider[0]!.toUpperCase() + provider.slice(1);
-}
-
-function hasConfiguredEntries(value: unknown) {
-  return Array.isArray(value) && value.length > 0;
-}
-
-function sanitizeEnabledProviders(value: unknown): GoatBrainImportProvider[] {
-  if (!Array.isArray(value)) throw new Error("Choose the sources to import.");
-  const allowed = new Set<string>(IMPORT_PROVIDERS);
-  return Array.from(
-    new Set(
-      value.filter(
-        (provider): provider is GoatBrainImportProvider =>
-          typeof provider === "string" && allowed.has(provider),
-      ),
-    ),
+  return importCommand(
+    async () =>
+      (await serverImportClient()).v1.brains[":brainId"].imports[":importRunId"].retry.$post({
+        param: { brainId: input.brainRef, importRunId: input.importRunId },
+      }),
+    "The company-context import failed.",
   );
+}
+
+async function importCommand(
+  request: () => Promise<Response>,
+  fallback: string,
+): Promise<GoatBrainImportActionResult> {
+  try {
+    const response = await request();
+    if (!response.ok) {
+      return { ok: false, message: (await responseError(response, fallback)).message };
+    }
+    const body = (await response.json()) as { data: { importRunId: string } };
+    return { ok: true, importRunId: body.data.importRunId };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : fallback };
+  }
+}
+
+async function serverImportClient() {
+  const incoming = await headers();
+  const cookie = incoming.get("cookie");
+  const authorization = incoming.get("authorization");
+  const browserOrigin = incoming.get("origin");
+  const fetchWithActor: typeof globalThis.fetch = async (input, init) => {
+    const forwarded = new Headers(init?.headers);
+    if (cookie) forwarded.set("Cookie", cookie);
+    if (authorization) forwarded.set("Authorization", authorization);
+    if (browserOrigin) forwarded.set("Origin", browserOrigin);
+    return globalThis.fetch(input, { ...init, headers: forwarded, cache: "no-store" });
+  };
+  return createOpenCompanyClient(apiOrigin(process.env.GOAT_API_ORIGIN), {
+    fetch: fetchWithActor,
+  });
+}
+
+function apiOrigin(value: string | undefined) {
+  if (!value?.trim()) throw new Error("The canonical API origin is unavailable.");
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("The canonical API origin is invalid.");
+  }
+  if (
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error("The canonical API origin is invalid.");
+  }
+  return url.origin;
+}
+
+async function responseError(response: Response, fallback: string) {
+  const body = (await response.json().catch(() => null)) as {
+    error?: { message?: unknown; requestId?: unknown };
+  } | null;
+  const message = typeof body?.error?.message === "string" ? body.error.message : fallback;
+  const requestId = typeof body?.error?.requestId === "string" ? body.error.requestId : null;
+  return new Error(`${message}${requestId ? ` (request ${requestId})` : ""}`);
 }

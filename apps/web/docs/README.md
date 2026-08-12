@@ -780,9 +780,12 @@ Brain bootstrap imports deliberately separate discovery from model ingestion:
 
 Cancellation before confirmation does no model work. During ingestion it skips queued children,
 lets a running child finish safely, and prevents finalization. Import candidates are intentionally
-not exposed through Electric; only the aggregate `brain_import_runs` row is brain-scoped for live
-progress. Provenance is recorded now so a later undo flow can identify affected versions without
-reconstructing history.
+not exposed through Electric; browsers observe only the fixed, Brain-authorized
+`brain-import-runs-v1` read model, which projects aggregate progress without leases, actors,
+integration identifiers, or provider configuration. Import commands (start discovery, confirm,
+cancel, retry) are versioned `/v1` Brain resources owned by the canonical API; discovery starts
+are durably idempotent. Provenance is recorded now so a later undo flow can identify affected
+versions without reconstructing history.
 
 ## Retired Legacy Runtime Boundary
 

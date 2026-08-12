@@ -4,6 +4,7 @@ import {
   BrainDocumentReadModelSchema,
   BrainEdgeReadModelSchema,
   BrainFolderReadModelSchema,
+  BrainImportRunReadModelSchema,
   BrainIngestJobReadModelSchema,
   BrainTimelineReadModelSchema,
   ConversationReadModelSchema,
@@ -365,6 +366,21 @@ function readModelShape(input: {
         "created_at",
         "updated_at",
       ]);
+    case "brain-import-runs-v1":
+      return brainShape(input, "goat.brain_import_runs", [
+        "id",
+        "status",
+        "company_url",
+        "company_name",
+        "focus",
+        "source_selection",
+        "discovery_summary",
+        "last_error",
+        "confirmed_at",
+        "completed_at",
+        "created_at",
+        "updated_at",
+      ]);
     case "wiki-pages-v1":
       return {
         table: "goat.wiki_pages",
@@ -479,6 +495,26 @@ function projectReadModelValue(
   if (readModel === "brain-ingest-jobs-v1" && Object.hasOwn(projected, "lastError")) {
     projected.lastError = boundedNullableString(projected.lastError, 2_000);
   }
+  if (readModel === "brain-import-runs-v1") {
+    if (Object.hasOwn(projected, "sourceSelection")) {
+      projected.sourceSelection = publicBrainImportSourceSelection(projected.sourceSelection);
+    }
+    if (Object.hasOwn(projected, "discoverySummary")) {
+      projected.discoverySummary = publicBrainImportDiscoverySummary(projected.discoverySummary);
+    }
+    if (Object.hasOwn(projected, "lastError")) {
+      projected.lastError = boundedNullableString(projected.lastError, 2_000);
+    }
+    if (Object.hasOwn(projected, "companyUrl")) {
+      projected.companyUrl = boundedNullableString(projected.companyUrl, 2_048);
+    }
+    if (Object.hasOwn(projected, "companyName")) {
+      projected.companyName = boundedNullableString(projected.companyName, 512);
+    }
+    if (Object.hasOwn(projected, "focus")) {
+      projected.focus = boundedNullableString(projected.focus, 2_000);
+    }
+  }
   switch (readModel) {
     case "chat-conversations-v1":
       return (partial ? ConversationReadModelSchema.partial() : ConversationReadModelSchema).parse(
@@ -516,6 +552,10 @@ function projectReadModelValue(
       return (
         partial ? BrainIngestJobReadModelSchema.partial() : BrainIngestJobReadModelSchema
       ).parse(projected);
+    case "brain-import-runs-v1":
+      return (
+        partial ? BrainImportRunReadModelSchema.partial() : BrainImportRunReadModelSchema
+      ).parse(projected);
     case "wiki-pages-v1":
       return (partial ? WikiPageReadModelSchema.partial() : WikiPageReadModelSchema).parse(
         projected,
@@ -549,7 +589,9 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
     name === "relations" ||
     name === "sources" ||
     name === "aliases" ||
-    name === "result"
+    name === "result" ||
+    name === "sourceSelection" ||
+    name === "discoverySummary"
   ) {
     return jsonValue(value);
   }
@@ -569,6 +611,61 @@ function publicAttachment(value: unknown) {
     sizeBytes: numberValue(value.sizeBytes),
     kind: value.kind,
   };
+}
+
+const BRAIN_IMPORT_PROVIDERS = new Set([
+  "public_web",
+  "github",
+  "jamie",
+  "granola",
+  "fathom",
+  "gmail",
+  "slack",
+  "linear",
+]);
+const BRAIN_IMPORT_SUMMARY_STATUSES = new Set(["pending", "ready", "failed", "unavailable"]);
+
+// Import-run source selection stores integration IDs and provider configuration. Only the
+// per-provider enabled flag is a public field; everything else stays behind the API boundary.
+function publicBrainImportSourceSelection(value: unknown) {
+  const record = jsonValue(value);
+  if (!isRecord(record)) return {};
+  const selection: Record<string, { enabled: boolean }> = {};
+  for (const [provider, entry] of Object.entries(record)) {
+    if (!BRAIN_IMPORT_PROVIDERS.has(provider) || !isRecord(entry)) continue;
+    selection[provider] = { enabled: entry.enabled === true };
+  }
+  return selection;
+}
+
+function publicBrainImportDiscoverySummary(value: unknown) {
+  const record = jsonValue(value);
+  if (!isRecord(record)) return {};
+  const summary: Record<string, unknown> = {};
+  for (const [provider, entry] of Object.entries(record)) {
+    if (!BRAIN_IMPORT_PROVIDERS.has(provider) || !isRecord(entry)) continue;
+    const status =
+      typeof entry.status === "string" && BRAIN_IMPORT_SUMMARY_STATUSES.has(entry.status)
+        ? entry.status
+        : "pending";
+    summary[provider] = {
+      status,
+      discoveredEntries: boundedCount(entry.discoveredEntries),
+      eligibleEntries: boundedCount(entry.eligibleEntries),
+      alreadyKnownEntries: boundedCount(entry.alreadyKnownEntries),
+      selectedEntries: boundedCount(entry.selectedEntries),
+      plannedRuns: boundedCount(entry.plannedRuns),
+      ...(typeof entry.error === "string" && entry.error
+        ? { error: entry.error.slice(0, 2_000) }
+        : {}),
+    };
+  }
+  return summary;
+}
+
+function boundedCount(value: unknown) {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : 0;
 }
 
 function publicBrainIngestJobResult(value: unknown) {
@@ -876,6 +973,20 @@ const READ_MODEL_COLUMN_NAMES = {
     attempts: "attempts",
     last_error: "lastError",
     result: "result",
+    completed_at: "completedAt",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "brain-import-runs-v1": {
+    id: "id",
+    status: "status",
+    company_url: "companyUrl",
+    company_name: "companyName",
+    focus: "focus",
+    source_selection: "sourceSelection",
+    discovery_summary: "discoverySummary",
+    last_error: "lastError",
+    confirmed_at: "confirmedAt",
     completed_at: "completedAt",
     created_at: "createdAt",
     updated_at: "updatedAt",

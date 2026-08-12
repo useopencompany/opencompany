@@ -396,6 +396,114 @@ describe("Electric read models", () => {
     expect(JSON.stringify(body)).not.toMatch(/workerLease|attemptErrors|providerResponse/iu);
   });
 
+  it("projects import runs without leases, actors, integration IDs, or provider payloads", async () => {
+    let upstreamUrl = "";
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        upstreamUrl = String(input);
+        return Response.json([
+          {
+            headers: { operation: "insert" },
+            key: '"gbimp_1"',
+            value: {
+              id: "gbimp_1",
+              status: "awaiting_confirmation",
+              company_url: "https://acme.com",
+              company_name: "Acme",
+              focus: "x".repeat(2_100),
+              source_selection: JSON.stringify({
+                public_web: { enabled: true },
+                github: {
+                  enabled: true,
+                  integrationId: "must-not-cross",
+                  config: { repos: [{ id: "must-not-cross" }] },
+                },
+                unknown_provider: { enabled: true },
+              }),
+              discovery_summary: JSON.stringify({
+                github: {
+                  status: "ready",
+                  discoveredEntries: 12,
+                  eligibleEntries: 5,
+                  alreadyKnownEntries: 7,
+                  selectedEntries: 3,
+                  plannedRuns: 3,
+                  searchCount: 4,
+                  internalDiagnostics: "must-not-cross",
+                  error: "y".repeat(2_100),
+                },
+              }),
+              last_error: null,
+              confirmed_at: null,
+              completed_at: null,
+              created_at: "2026-08-12 08:00:00+00",
+              updated_at: "2026-08-12 08:01:00+00",
+              brain_ref: "must-not-cross",
+              user_workos_id: "must-not-cross",
+              lease_id: "must-not-cross",
+              lease_owner: "must-not-cross",
+              result: "must-not-cross",
+            },
+          },
+        ]);
+      }) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "brain-import-runs-v1",
+      brainId: "brain_1",
+      requestUrl: new URL(
+        "https://api.example.test/v1/read-models/brain-import-runs-v1?brainId=brain_1&table=goat.users&where=true",
+      ),
+    });
+
+    const requestedUrl = new URL(upstreamUrl);
+    expect(requestedUrl.searchParams.get("table")).toBe("goat.brain_import_runs");
+    expect(requestedUrl.searchParams.get("where")).toBe('"brain_ref" = $1');
+    expect(requestedUrl.searchParams.get("columns")).not.toMatch(
+      /lease|user_workos|result|history/iu,
+    );
+    const body = await response.json();
+    expect(body).toEqual([
+      {
+        headers: { operation: "insert" },
+        key: '"gbimp_1"',
+        value: {
+          id: "gbimp_1",
+          status: "awaiting_confirmation",
+          companyUrl: "https://acme.com",
+          companyName: "Acme",
+          focus: "x".repeat(2_000),
+          sourceSelection: {
+            public_web: { enabled: true },
+            github: { enabled: true },
+          },
+          discoverySummary: {
+            github: {
+              status: "ready",
+              discoveredEntries: 12,
+              eligibleEntries: 5,
+              alreadyKnownEntries: 7,
+              selectedEntries: 3,
+              plannedRuns: 3,
+              error: "y".repeat(2_000),
+            },
+          },
+          lastError: null,
+          confirmedAt: null,
+          completedAt: null,
+          createdAt: "2026-08-12T08:00:00.000Z",
+          updatedAt: "2026-08-12T08:01:00.000Z",
+        },
+      },
+    ]);
+    expect(JSON.stringify(body)).not.toMatch(
+      /must-not-cross|integrationId|unknown_provider|searchCount|internalDiagnostics/iu,
+    );
+  });
+
   it("scopes Wiki shapes to the authenticated Workspace and ignores caller shape parameters", async () => {
     let upstreamUrl = "";
     const proxy = new ElectricReadModelProxy({

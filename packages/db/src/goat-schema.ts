@@ -68,7 +68,8 @@ export type GoatKnowledgeCommandOperation =
   | "wiki_page.create"
   | "wiki_timeline.create"
   | "skill.create"
-  | "skill.import";
+  | "skill.import"
+  | "brain_import.start";
 export type GoatWorkflowStep = {
   id: string;
   title: string;
