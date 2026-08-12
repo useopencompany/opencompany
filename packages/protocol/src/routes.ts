@@ -14,7 +14,12 @@ import {
   BrainFolderPathEnvelopeSchema,
   BrainOverviewEnvelopeSchema,
   BrainSnapshotEnvelopeSchema,
+  BrainSourceDeleteEnvelopeSchema,
+  BrainSourceDetailsEnvelopeSchema,
   BrainSourceItemListEnvelopeSchema,
+  BrainSourceMutationEnvelopeSchema,
+  BrainSourceOptionsBodySchema,
+  BrainSourceOptionsEnvelopeSchema,
   CancelRunEnvelopeSchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
@@ -45,6 +50,7 @@ import {
   ResolveApprovalEnvelopeSchema,
   ResourceIdSchema,
   RunEnvelopeSchema,
+  SetBrainSourceBodySchema,
   SkillArchiveEnvelopeSchema,
   SkillCatalogEnvelopeSchema,
   SkillEnvelopeSchema,
@@ -501,6 +507,80 @@ export const listBrainSourceItemsRoute = createRoute({
     200: {
       description: "Bounded public metadata for source items referenced by an authorized Brain.",
       content: { "application/json": { schema: BrainSourceItemListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listBrainSourcesRoute = createRoute({
+  method: "get",
+  path: "/v1/brains/{brainId}/sources",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: { params: z.object({ brainId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Source configuration and connection state for an authorized Brain.",
+      content: { "application/json": { schema: BrainSourceDetailsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setBrainSourceRoute = createRoute({
+  method: "put",
+  path: "/v1/brains/{brainId}/sources/{integrationId}",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema, integrationId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetBrainSourceBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Brain source configured or enabled state updated.",
+      content: { "application/json": { schema: BrainSourceMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deleteBrainSourceRoute = createRoute({
+  method: "delete",
+  path: "/v1/brains/{brainId}/sources/{integrationId}",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema, integrationId: ResourceIdSchema }),
+  },
+  responses: {
+    200: {
+      description: "Brain source removed, including an idempotent replay.",
+      content: { "application/json": { schema: BrainSourceDeleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listBrainSourceOptionsRoute = createRoute({
+  method: "post",
+  path: "/v1/integrations/{integrationId}/brain-source-options",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ integrationId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: BrainSourceOptionsBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Provider resources the acting user may select for a Brain source.",
+      content: { "application/json": { schema: BrainSourceOptionsEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -1178,6 +1258,10 @@ export type V1RouteHandlers = {
   getBrainSnapshot: RouteHandler<typeof getBrainSnapshotRoute>;
   getBrainOverview: RouteHandler<typeof getBrainOverviewRoute>;
   listBrainSourceItems: RouteHandler<typeof listBrainSourceItemsRoute>;
+  listBrainSources: RouteHandler<typeof listBrainSourcesRoute>;
+  setBrainSource: RouteHandler<typeof setBrainSourceRoute>;
+  deleteBrainSource: RouteHandler<typeof deleteBrainSourceRoute>;
+  listBrainSourceOptions: RouteHandler<typeof listBrainSourceOptionsRoute>;
   createBrainDocument: RouteHandler<typeof createBrainDocumentRoute>;
   uploadBrainAsset: RouteHandler<typeof uploadBrainAssetRoute>;
   replaceBrainAsset: RouteHandler<typeof replaceBrainAssetRoute>;
@@ -1247,6 +1331,10 @@ export function createV1Router(
     .openapi(getBrainSnapshotRoute, handlers.getBrainSnapshot)
     .openapi(getBrainOverviewRoute, handlers.getBrainOverview)
     .openapi(listBrainSourceItemsRoute, handlers.listBrainSourceItems)
+    .openapi(listBrainSourcesRoute, handlers.listBrainSources)
+    .openapi(setBrainSourceRoute, handlers.setBrainSource)
+    .openapi(deleteBrainSourceRoute, handlers.deleteBrainSource)
+    .openapi(listBrainSourceOptionsRoute, handlers.listBrainSourceOptions)
     .openapi(createBrainDocumentRoute, handlers.createBrainDocument)
     .openapi(uploadBrainAssetRoute, handlers.uploadBrainAsset)
     .openapi(replaceBrainAssetRoute, handlers.replaceBrainAsset)
@@ -1559,6 +1647,162 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   listBrainSourceItems: (c) => c.json({ data: [], meta }, 200),
+  listBrainSources: (c) =>
+    c.json(
+      {
+        data: {
+          viewer: { actorId: "user_contract", isAdmin: true },
+          sources: [],
+          ownAccounts: {
+            slack: [],
+            linear: [],
+            gmail: [],
+            google_drive: [],
+            hubspot: [],
+            granola: [],
+            fathom: [],
+            attio: [],
+          },
+          jamie: {
+            integration: {
+              provider: "jamie",
+              connected: false,
+              status: "not_connected",
+              integrationId: null,
+              accountName: null,
+              statusReason: null,
+              webhookUrl: null,
+              apiKeyConfigured: false,
+            },
+            legacyDefaultDelivery: false,
+            isDefaultBrain: false,
+          },
+          slack: {
+            integration: {
+              provider: "slack",
+              connected: false,
+              status: "not_connected",
+              integrationId: null,
+              accountName: null,
+              teamName: null,
+              statusReason: null,
+            },
+          },
+          linear: {
+            integration: {
+              provider: "linear",
+              connected: false,
+              status: "not_connected",
+              integrationId: null,
+              accountName: null,
+              organizationName: null,
+              statusReason: null,
+            },
+          },
+          github: {
+            integration: {
+              provider: "github",
+              connected: false,
+              status: "not_connected",
+              integrationId: null,
+              accountName: null,
+              statusReason: null,
+            },
+          },
+          gmail: {
+            integration: {
+              provider: "gmail",
+              connected: false,
+              status: "not_connected",
+              integrationId: null,
+              accountEmail: null,
+              statusReason: null,
+            },
+          },
+          googleDrive: {
+            integration: {
+              provider: "google_drive",
+              connected: false,
+              status: "not_connected",
+              integrationId: null,
+              accountEmail: null,
+              statusReason: null,
+            },
+          },
+          hubspot: {
+            integration: {
+              provider: "hubspot",
+              connected: false,
+              status: "not_connected",
+              integrationId: null,
+              accountEmail: null,
+              hubDomain: null,
+              statusReason: null,
+            },
+          },
+          granola: {
+            integration: {
+              provider: "granola",
+              connected: false,
+              status: "not_connected",
+              integrationId: null,
+              accountEmail: null,
+              accountName: null,
+              statusReason: null,
+            },
+          },
+          fathom: {
+            integration: {
+              provider: "fathom",
+              connected: false,
+              status: "not_connected",
+              integrationId: null,
+              accountEmail: null,
+              accountName: null,
+              statusReason: null,
+            },
+          },
+          attio: {
+            integration: {
+              provider: "attio",
+              connected: false,
+              status: "not_connected",
+              integrationId: null,
+              workspaceName: null,
+              statusReason: null,
+            },
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  setBrainSource: (c) =>
+    c.json(
+      {
+        data: {
+          brainId: "brain_contract",
+          integrationId: "integration_contract",
+          provider: "slack",
+          enabled: true,
+        },
+        meta,
+      },
+      200,
+    ),
+  deleteBrainSource: (c) =>
+    c.json(
+      {
+        data: {
+          brainId: "brain_contract",
+          integrationId: "integration_contract",
+          deleted: true as const,
+        },
+        meta,
+      },
+      200,
+    ),
+  listBrainSourceOptions: (c) => c.json({ data: { provider: "github", repos: [] }, meta }, 200),
   createBrainDocument: (c) => c.json({ data: placeholderBrainDocument, meta }, 201),
   uploadBrainAsset: (c) =>
     c.json(

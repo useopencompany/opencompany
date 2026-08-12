@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  listGoatSlackConversationOptions,
-  type SlackApiRequester,
-} from "@/lib/integrations/slack-conversations";
+import { listGoatSlackConversationOptions, type SlackApiRequester } from "./slack-conversations";
 
 describe("listGoatSlackConversationOptions", () => {
   it("keeps Slack Connect channels and one-to-one DMs visible", async () => {

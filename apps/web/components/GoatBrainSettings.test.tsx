@@ -394,7 +394,7 @@ describe("GoatBrainSourceCards", () => {
         brainRef="goat_brain_1"
         provider={provider}
         details={brainSourceDetails({
-          viewer: { workosUserId: "user_member_2", isAdmin: false },
+          viewer: { actorId: "user_member_2", isAdmin: false },
           sources: [
             gmailSource({
               sourceId: "gbscfg_member",
@@ -529,7 +529,7 @@ function brainSourceDetails(
   overrides: Partial<GoatBrainSourcesDetails> & { sources?: GoatBrainSourceView[] } = {},
 ): GoatBrainSourcesDetails {
   return {
-    viewer: { workosUserId: "user_admin_1", isAdmin: true },
+    viewer: { actorId: "user_admin_1", isAdmin: true },
     sources: [],
     ownAccounts: {
       slack: [],

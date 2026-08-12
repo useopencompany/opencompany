@@ -745,9 +745,13 @@ locator; authorized downloads stream through `/v1/brain-assets/{documentId}`. Th
 `/api/brain-assets/{documentId}` URL is a streaming compatibility adapter. The old
 `/api/brain-assets/upload` token route and its registration Server Actions have no current
 first-party caller but remain temporarily for already-loaded clients and rollback; remove them
-only after the #1203 compatibility observation window closes. Brain sources, ingestion controls,
-imports, and external skill import remain on their existing paths until the next
-workspace-knowledge slice.
+only after the #1203 compatibility observation window closes. Brain source reads, enable/remove
+commands, provider-specific configuration, and selectable-resource discovery now cross typed
+`/v1/brains/*/sources*` and `/v1/integrations/*/brain-source-options` resources; the API owns their
+authorization and database/provider access. Existing OAuth callbacks, webhooks, and provider URLs
+are unchanged. Company imports, ingestion admission controls, and the temporary Google Drive worker
+wake remain on their existing paths until the next workspace-knowledge slice. External Skill
+preview and import already use typed `/v1/skills/imports*` commands.
 
 ## Company bootstrap imports
 

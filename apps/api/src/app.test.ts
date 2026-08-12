@@ -86,6 +86,7 @@ describe("canonical Hono API", () => {
       tasks: new TaskApplicationService(fakeTaskRepository()),
       ...fakeAutomationServices(),
       knowledge: fakeKnowledgeService(),
+      brainSources: fakeBrainSources(),
       skillImports: fakeSkillImportService(),
       brainAssets: fakeBrainAssets(),
       attachments: fakeAttachments(),
@@ -472,6 +473,111 @@ describe("canonical Hono API", () => {
     );
   });
 
+  it("serves and mutates Brain sources through the authenticated provider boundary", async () => {
+    const list = vi.fn(async () => brainSourceDetails());
+    const set = vi.fn(async () => undefined);
+    const remove = vi.fn(async () => undefined);
+    const listOptions = vi.fn(async () => ({
+      provider: "github" as const,
+      repos: [{ id: "repo_1", fullName: "acme/api", private: true }],
+    }));
+    const app = testApp(fakeRepository(), {
+      brainSources: brainSourceService({ list, set, remove, listOptions }),
+    });
+
+    const listed = await app.request("/v1/brains/brain_1/sources");
+    expect(listed.status).toBe(200);
+    const listedBody = await listed.json();
+    expect(listedBody).toMatchObject({
+      data: { viewer: { actorId: actor.userId, isAdmin: true }, sources: [] },
+    });
+    expect(JSON.stringify(listedBody)).not.toMatch(/workos|workspace_id|credential|access_token/iu);
+    expect(list).toHaveBeenCalledWith(actor, "brain_1");
+
+    const updated = await app.request("/v1/brains/brain_1/sources/integration_1", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operation: "configure",
+        provider: "github",
+        enabled: true,
+        repos: [{ id: "repo_1", fullName: "acme/api" }],
+        events: ["pull_request_merged"],
+      }),
+    });
+    expect(updated.status).toBe(200);
+    expect(set).toHaveBeenCalledWith(
+      actor,
+      "brain_1",
+      "integration_1",
+      expect.objectContaining({ provider: "github", enabled: true }),
+    );
+
+    const options = await app.request("/v1/integrations/integration_1/brain-source-options", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "github" }),
+    });
+    expect(options.status).toBe(200);
+    await expect(options.json()).resolves.toMatchObject({
+      data: { provider: "github", repos: [{ fullName: "acme/api", private: true }] },
+    });
+    expect(listOptions).toHaveBeenCalledWith(actor, "integration_1", { provider: "github" });
+
+    const removed = await app.request("/v1/brains/brain_1/sources/integration_1", {
+      method: "DELETE",
+    });
+    expect(removed.status).toBe(200);
+    expect(remove).toHaveBeenCalledWith(actor, "brain_1", "integration_1");
+  });
+
+  it("rejects invalid source configuration before invoking provider logic", async () => {
+    const set = vi.fn(async () => undefined);
+    const listOptions = vi.fn(async () => ({ provider: "github" as const, repos: [] }));
+    const app = testApp(fakeRepository(), {
+      brainSources: brainSourceService({ set, listOptions }),
+    });
+
+    const invalidMutation = await app.request("/v1/brains/brain_1/sources/integration_1", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operation: "configure",
+        provider: "google_drive",
+        enabled: true,
+        resourceIds: Array.from({ length: 101 }, (_, index) => `file_${index}`),
+      }),
+    });
+    expect(invalidMutation.status).toBe(400);
+    expect(set).not.toHaveBeenCalled();
+
+    const invalidOptions = await app.request(
+      "/v1/integrations/integration_1/brain-source-options",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "google_drive", query: "x".repeat(201) }),
+      },
+    );
+    expect(invalidOptions.status).toBe(400);
+    expect(listOptions).not.toHaveBeenCalled();
+  });
+
+  it("maps Brain source capability denial to a typed forbidden response", async () => {
+    const app = testApp(fakeRepository(), {
+      brainSources: brainSourceService({
+        remove: async () => {
+          throw new CoreError("forbidden", "Only the source owner may remove this source.");
+        },
+      }),
+    });
+    const response = await app.request("/v1/brains/brain_1/sources/integration_1", {
+      method: "DELETE",
+    });
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "forbidden" } });
+  });
+
   it("returns a retryable typed error when external Skill resolution is unavailable", async () => {
     const app = testApp(fakeRepository(), {
       skillImports: fakeSkillImportService(
@@ -574,6 +680,8 @@ describe("canonical Hono API", () => {
     expect(allowed.headers.get("access-control-allow-origin")).toBe("https://my.opencompany.chat");
     expect(allowed.headers.get("access-control-allow-credentials")).toBe("true");
     expect(allowed.headers.get("access-control-allow-headers")).toContain("Idempotency-Key");
+    expect(allowed.headers.get("access-control-allow-methods")).toContain("PUT");
+    expect(allowed.headers.get("access-control-allow-methods")).toContain("DELETE");
 
     const disallowed = await app.request("/v1/messages", {
       method: "OPTIONS",
@@ -1193,6 +1301,7 @@ function testApp(
     tasks: new TaskApplicationService(fakeTaskRepository()),
     ...fakeAutomationServices(),
     knowledge: fakeKnowledgeService(),
+    brainSources: fakeBrainSources(),
     skillImports: fakeSkillImportService(),
     brainAssets: fakeBrainAssets(),
     attachments: fakeAttachments(),
@@ -1244,6 +1353,123 @@ function fakeBrainAssets(): BrainAssetService {
     },
     download: async () => {
       throw new Error("Unexpected Brain asset download.");
+    },
+  };
+}
+
+function fakeBrainSources(): Parameters<typeof createApiApp>[0]["brainSources"] {
+  return {
+    list: async () => {
+      throw new Error("Unexpected Brain source list.");
+    },
+    set: async () => {
+      throw new Error("Unexpected Brain source mutation.");
+    },
+    remove: async () => {
+      throw new Error("Unexpected Brain source removal.");
+    },
+    listOptions: async () => {
+      throw new Error("Unexpected Brain source option list.");
+    },
+  };
+}
+
+function brainSourceService(
+  overrides: Partial<Parameters<typeof createApiApp>[0]["brainSources"]>,
+): Parameters<typeof createApiApp>[0]["brainSources"] {
+  return { ...fakeBrainSources(), ...overrides };
+}
+
+function brainSourceDetails() {
+  const unavailableBase = {
+    connected: false,
+    status: "not_connected" as const,
+    integrationId: null,
+    statusReason: null,
+  };
+  return {
+    viewer: { actorId: actor.userId, isAdmin: true },
+    sources: [],
+    ownAccounts: {
+      slack: [],
+      linear: [],
+      gmail: [],
+      google_drive: [],
+      hubspot: [],
+      granola: [],
+      fathom: [],
+      attio: [],
+    },
+    jamie: {
+      integration: {
+        ...unavailableBase,
+        provider: "jamie" as const,
+        accountName: null,
+        webhookUrl: null,
+        apiKeyConfigured: false,
+      },
+      legacyDefaultDelivery: false,
+      isDefaultBrain: false,
+    },
+    slack: {
+      integration: {
+        ...unavailableBase,
+        provider: "slack" as const,
+        accountName: null,
+        teamName: null,
+      },
+    },
+    linear: {
+      integration: {
+        ...unavailableBase,
+        provider: "linear" as const,
+        accountName: null,
+        organizationName: null,
+      },
+    },
+    github: {
+      integration: { ...unavailableBase, provider: "github" as const, accountName: null },
+    },
+    gmail: {
+      integration: { ...unavailableBase, provider: "gmail" as const, accountEmail: null },
+    },
+    googleDrive: {
+      integration: {
+        ...unavailableBase,
+        provider: "google_drive" as const,
+        accountEmail: null,
+      },
+    },
+    hubspot: {
+      integration: {
+        ...unavailableBase,
+        provider: "hubspot" as const,
+        accountEmail: null,
+        hubDomain: null,
+      },
+    },
+    granola: {
+      integration: {
+        ...unavailableBase,
+        provider: "granola" as const,
+        accountEmail: null,
+        accountName: null,
+      },
+    },
+    fathom: {
+      integration: {
+        ...unavailableBase,
+        provider: "fathom" as const,
+        accountEmail: null,
+        accountName: null,
+      },
+    },
+    attio: {
+      integration: {
+        ...unavailableBase,
+        provider: "attio" as const,
+        workspaceName: null,
+      },
     },
   };
 }
