@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-08-12
+
+### Fixed
+- Approving a tool call, like a browser action, no longer occasionally gets silently dropped and marks the task as finished before it actually is (#1193) — @opencompany-bot.
+
+### Removed
+- Goat Quick, the macOS menu bar prototype (#876, #877), is no longer available (#1195) — @opencompany-bot.
+
 ## [1.12.0] - 2026-08-11
 
 ### Changed
