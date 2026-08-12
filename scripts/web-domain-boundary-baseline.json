@@ -5,7 +5,6 @@
     "apps/web/app/(app)/settings/workspace/capabilities/page.tsx",
     "apps/web/app/(app)/settings/workspace/slack/page.tsx",
     "apps/web/app/(app)/settings/workspace/usage/page.tsx",
-    "apps/web/app/(app)/wiki/[[...path]]/page.tsx",
     "apps/web/app/api/billing/balance/route.ts",
     "apps/web/app/api/billing/reconcile/route.ts",
     "apps/web/app/api/brain-activity/source-items/route.ts",

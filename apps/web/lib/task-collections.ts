@@ -1,5 +1,4 @@
 import type {
-  GoatBrainFolderSource,
   GoatBrainImportDiscoverySummary,
   GoatBrainImportSourceSelection,
   GoatBrainImportStatus,
@@ -85,16 +84,6 @@ export type GoatCodexChatSessionRow = {
   active_turn_id: string | null;
   status: "queued" | "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";
   error: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type GoatBrainFolderRow = {
-  id: string;
-  user_workos_id: string;
-  brain_ref: string;
-  path: string;
-  source: GoatBrainFolderSource;
   created_at: string;
   updated_at: string;
 };
@@ -216,72 +205,6 @@ export type GoatIntegrationRow = {
   updated_at: string;
 };
 
-export type GoatBrainDocumentRow = {
-  id: string;
-  user_workos_id: string;
-  created_by_workos_id: string | null;
-  brain_ref: string;
-  brain_id: string;
-  folder_path: string;
-  title: string | null;
-  content: string;
-  body: string;
-  timeline: Array<{
-    evidenceId?: string;
-    evidence_id?: string;
-    at: string;
-    body: string;
-  }>;
-  format: string;
-  mime_type: string | null;
-  original_file_name: string | null;
-  asset_storage_key: string | null;
-  asset_size_bytes: number | null;
-  relations: Array<{ type: string; to: string }>;
-  sources: Array<{
-    ref: string;
-    capturedAt?: string;
-    captured_at?: string;
-    title?: string;
-  }>;
-  content_hash: string;
-  size_bytes: number;
-  kind: string;
-  entity_type: string;
-  status: string;
-  aliases: string[];
-  created_at: string;
-  updated_at: string;
-};
-
-export type GoatBrainTimelineEntryRow = {
-  id: number;
-  document_id: string;
-  user_workos_id: string;
-  brain_ref: string;
-  brain_id: string;
-  evidence_id: string;
-  at: string;
-  source_ref: string;
-  source_title: string | null;
-  summary: string;
-  detail: string;
-  created_at: string;
-};
-
-export type GoatBrainEdgeRow = {
-  id: string;
-  user_workos_id: string;
-  brain_ref: string;
-  document_id: string;
-  from_brain_id: string;
-  to_brain_id: string;
-  relation_type: string;
-  source_kind: "relation" | "wiki_link";
-  created_at: string;
-  updated_at: string;
-};
-
 export type GoatBrainIngestJobRow = {
   id: string;
   source_item_id: string;
@@ -355,30 +278,6 @@ export type GoatBrainSourceItemRow = {
 // user before forwarding, so each brain gets its own shape subscription.
 function createBrainCollections(brainRef: string) {
   return {
-    folders: createGoatElectricCollection<GoatBrainFolderRow>({
-      id: `goat:brain_folders:${brainRef}`,
-      table: "goat.brain_folders",
-      params: { brain_ref: brainRef },
-      getKey: (row) => row.id,
-    }),
-    documents: createGoatElectricCollection<GoatBrainDocumentRow>({
-      id: `goat:brain_documents:${brainRef}`,
-      table: "goat.brain_documents",
-      params: { brain_ref: brainRef },
-      getKey: (row) => row.id,
-    }),
-    timelineEntries: createGoatElectricCollection<GoatBrainTimelineEntryRow>({
-      id: `goat:brain_timeline_entries:${brainRef}`,
-      table: "goat.brain_timeline_entries",
-      params: { brain_ref: brainRef },
-      getKey: (row) => row.id,
-    }),
-    edges: createGoatElectricCollection<GoatBrainEdgeRow>({
-      id: `goat:brain_edges:${brainRef}`,
-      table: "goat.brain_edges",
-      params: { brain_ref: brainRef },
-      getKey: (row) => row.id,
-    }),
     ingestJobs: createGoatElectricCollection<GoatBrainIngestJobRow>({
       id: `goat:brain_ingest_jobs:${brainRef}`,
       table: "goat.brain_ingest_jobs",

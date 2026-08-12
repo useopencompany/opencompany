@@ -12,6 +12,10 @@
       "types": "./src/chat.ts",
       "default": "./src/chat.ts"
     },
+    "./knowledge": {
+      "types": "./src/knowledge.ts",
+      "default": "./src/knowledge.ts"
+    },
     "./tasks": {
       "types": "./src/tasks.ts",
       "default": "./src/tasks.ts"

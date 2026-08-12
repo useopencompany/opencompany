@@ -52,9 +52,9 @@ const workflowLiveQueryMock = vi.hoisted(() => ({
 }));
 
 const skillActionsMock = vi.hoisted(() => ({
-  updateGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
-  archiveGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
-  createGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
+  updateHeadlessSkill: vi.fn(async () => ({ slug: "test-skill" })),
+  archiveHeadlessSkill: vi.fn(async () => ({ slug: "test-skill" })),
+  createHeadlessSkill: vi.fn(async () => ({ slug: "test-skill" })),
   previewGoatSkillImportAction: vi.fn(async () => ({
     status: "resolved" as const,
     proposedSlug: "imported-skill",
@@ -153,10 +153,13 @@ vi.mock("@/lib/headless-automation-commands", () => ({
   createHeadlessWorkflow: workflowActionsMock.createHeadlessWorkflow,
 }));
 
+vi.mock("@/lib/headless-knowledge-commands", () => ({
+  updateHeadlessSkill: skillActionsMock.updateHeadlessSkill,
+  archiveHeadlessSkill: skillActionsMock.archiveHeadlessSkill,
+  createHeadlessSkill: skillActionsMock.createHeadlessSkill,
+}));
+
 vi.mock("@/lib/skill-actions", () => ({
-  updateGoatSkillAction: skillActionsMock.updateGoatSkillAction,
-  archiveGoatSkillAction: skillActionsMock.archiveGoatSkillAction,
-  createGoatSkillAction: skillActionsMock.createGoatSkillAction,
   previewGoatSkillImportAction: skillActionsMock.previewGoatSkillImportAction,
   importGoatSkillAction: skillActionsMock.importGoatSkillAction,
 }));
@@ -395,13 +398,14 @@ describe("GoatBrainRoute", () => {
 
 describe("GoatSkillEditorRoute", () => {
   beforeEach(() => {
-    skillActionsMock.updateGoatSkillAction.mockClear();
+    skillActionsMock.updateHeadlessSkill.mockClear();
     routerMock.refresh.mockReset();
   });
 
   it("edits instructions with a rich text editor instead of a plain textarea", async () => {
     const skill = {
-      id: "test-skill",
+      id: "goat_skill_opaque_id",
+      slug: "test-skill",
       name: "Test skill",
       description: "Does a thing",
       instructions: "Use this when asked.",
@@ -413,13 +417,14 @@ describe("GoatSkillEditorRoute", () => {
 
     expect(container.querySelector("textarea")).toBeNull();
     expect(await screen.findByText("Use this when asked.")).toBeInTheDocument();
+    expect(screen.getByText(/@skill\/test-skill/)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
-      expect(skillActionsMock.updateGoatSkillAction).toHaveBeenCalledWith(
+      expect(skillActionsMock.updateHeadlessSkill).toHaveBeenCalledWith(
+        "test-skill",
         expect.objectContaining({
-          slug: "test-skill",
           instructions: "Use this when asked.",
         }),
       ),
@@ -428,7 +433,7 @@ describe("GoatSkillEditorRoute", () => {
 
   it("renders an imported skill read-only, with no Save button", async () => {
     const skill = {
-      id: "imported-skill",
+      slug: "imported-skill",
       name: "Imported skill",
       description: "Does an imported thing",
       instructions: "Use this when imported.",

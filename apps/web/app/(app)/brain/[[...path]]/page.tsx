@@ -1,7 +1,10 @@
 import { GoatBrainRoute } from "@/components/GoatRoutes";
 import { currentGoatUser } from "@/lib/auth";
-import { listGoatBrainForBrain } from "@/lib/brain";
-import { getGoatBrainOverviewStats } from "@/lib/brain-overview";
+import {
+  getHeadlessBrainOverview,
+  getHeadlessBrainSnapshot,
+} from "@/lib/headless-knowledge-server";
+import { brainDocumentToView, brainFolderToView } from "@/lib/headless-knowledge-types";
 
 type PageProps = {
   params: Promise<{ path?: string[] }>;
@@ -23,10 +26,13 @@ export default async function GoatBrainPage({ params }: PageProps) {
   // live collection fills the file tree after the route is visible.
   const [brain, overviewStats] = await Promise.all([
     selectedBrain && !isSettingsRoute && !isOverviewRoute
-      ? listGoatBrainForBrain(selectedBrain.id)
+      ? getHeadlessBrainSnapshot(selectedBrain.id).then((snapshot) => ({
+          folders: snapshot.folders.map(brainFolderToView),
+          documents: snapshot.documents.map(brainDocumentToView),
+        }))
       : Promise.resolve(null),
     selectedBrain && !isSettingsRoute
-      ? getGoatBrainOverviewStats(selectedBrain.id)
+      ? getHeadlessBrainOverview(selectedBrain.id)
       : Promise.resolve(null),
   ]);
 

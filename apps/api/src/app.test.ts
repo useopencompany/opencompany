@@ -8,6 +8,8 @@ import {
   type ChatRepository,
   type CreateMessageCommand,
   type CreateTaskCommand,
+  KnowledgeApplicationService,
+  type KnowledgeRepository,
   type Task,
   TaskApplicationService,
   type TaskRepository,
@@ -37,6 +39,12 @@ const actor: Actor = {
     "workflow:write",
     "schedule:read",
     "schedule:write",
+    "brain:read",
+    "brain:write",
+    "wiki:read",
+    "wiki:write",
+    "skill:read",
+    "skill:write",
   ],
   authenticationMethod: "session",
 };
@@ -71,6 +79,7 @@ describe("canonical Hono API", () => {
       chat: new ChatApplicationService(repository),
       tasks: new TaskApplicationService(fakeTaskRepository()),
       ...fakeAutomationServices(),
+      knowledge: fakeKnowledgeService(),
       attachments: fakeAttachments(),
       authenticate: async () => {
         throw new ApiError(401, "authentication_required", "Authentication required.");
@@ -243,6 +252,92 @@ describe("canonical Hono API", () => {
       },
     });
     expect(JSON.stringify(scheduleBody)).not.toMatch(/workos|workspace_id|harness|goat_/iu);
+  });
+
+  it("serves Brain, Wiki, and Skill resources through the typed Knowledge boundary", async () => {
+    const assertBrainAccess = vi.fn(async () => undefined);
+    const updateWikiPage = vi.fn(async ({ slug }: { slug: string }) => ({
+      page: fakeWikiPage({ slug, path: `projects/${slug}` }),
+      transactionIds: [71],
+    }));
+    const createSkill = vi.fn(async () => fakeSkill());
+    const listSkillCatalog = vi.fn(async () => [
+      { id: "research", name: "Research", description: "Find primary sources." },
+    ]);
+    const knowledge = knowledgeService({
+      assertBrainAccess,
+      getBrainSnapshot: async () => ({
+        folders: [
+          {
+            id: "folder_1",
+            path: "projects",
+            source: "custom",
+            createdAt,
+            updatedAt: createdAt,
+          },
+        ],
+        documents: [fakeBrainDocument()],
+      }),
+      updateWikiPage,
+      createSkill,
+      listSkillCatalog,
+    });
+    const app = testApp(fakeRepository(), { knowledge });
+
+    const brain = await app.request("/v1/brains/brain_1");
+    expect(brain.status).toBe(200);
+    const brainBody = await brain.json();
+    expect(brainBody).toMatchObject({
+      data: {
+        documents: [
+          {
+            id: "document_1",
+            brainId: "project-alpha",
+            path: "projects/project-alpha.md",
+            body: "# Alpha",
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(brainBody)).not.toMatch(/brain_ref|workspace_id|asset_storage/iu);
+    expect(assertBrainAccess).toHaveBeenCalledWith({ actor, brainId: "brain_1" });
+
+    const wiki = await app.request("/v1/wiki/pages/project-alpha", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: "# Updated", kind: "project", title: "Alpha" }),
+    });
+    expect(wiki.status).toBe(200);
+    await expect(wiki.json()).resolves.toMatchObject({
+      data: { page: { slug: "project-alpha", body: "" }, transactionIds: [71] },
+    });
+    expect(updateWikiPage).toHaveBeenCalledWith(
+      expect.objectContaining({ actor, slug: "project-alpha", body: "# Updated" }),
+    );
+
+    const skill = await app.request("/v1/skills", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "skill-create-1" },
+      body: JSON.stringify({ name: "Research", description: "Find primary sources." }),
+    });
+    expect(skill.status).toBe(201);
+    await expect(skill.json()).resolves.toMatchObject({
+      data: { slug: "research", status: "draft", source: null },
+    });
+    expect(createSkill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor,
+        idempotencyKey: "skill-create-1",
+        name: "Research",
+      }),
+    );
+
+    const catalog = await app.request("/v1/skills/catalog");
+    expect(catalog.status).toBe(200);
+    await expect(catalog.json()).resolves.toMatchObject({
+      data: [{ id: "research", name: "Research" }],
+    });
+    expect(listSkillCatalog).toHaveBeenCalledWith({ actor });
   });
 
   it("serves sessionless history only through actor-scoped read-only compatibility resources", async () => {
@@ -736,6 +831,29 @@ describe("canonical Hono API", () => {
     );
   });
 
+  it("authorizes Brain read models before forwarding the fixed Brain scope", async () => {
+    const assertBrainAccess = vi.fn(async () => undefined);
+    const stream = vi.fn(async () => Response.json([]));
+    const app = testApp(fakeRepository(), {
+      knowledge: knowledgeService({ assertBrainAccess }),
+      readModels: { stream },
+    });
+
+    const response = await app.request(
+      "/v1/read-models/brain-documents-v1?brainId=brain_1&table=goat.users&where=true",
+    );
+
+    expect(response.status).toBe(200);
+    expect(assertBrainAccess).toHaveBeenCalledWith({ actor, brainId: "brain_1" });
+    expect(stream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor,
+        readModel: "brain-documents-v1",
+        brainId: "brain_1",
+      }),
+    );
+  });
+
   it("uploads a private attachment through the typed multipart operation", async () => {
     const uploaded: File[] = [];
     const attachments: AttachmentUploadService = {
@@ -817,6 +935,7 @@ function testApp(
     chat: new ChatApplicationService(repository),
     tasks: new TaskApplicationService(fakeTaskRepository()),
     ...fakeAutomationServices(),
+    knowledge: fakeKnowledgeService(),
     attachments: fakeAttachments(),
     authenticate: async () => ({ actor }),
     defaultModel: "provider/default",
@@ -853,6 +972,87 @@ function fakeAttachments(): AttachmentUploadService {
     upload: async () => {
       throw new Error("Unexpected attachment upload.");
     },
+  };
+}
+
+function fakeKnowledgeService() {
+  return knowledgeService({});
+}
+
+function knowledgeService(overrides: Partial<KnowledgeRepository>) {
+  const repository = new Proxy(overrides, {
+    get(target, operation) {
+      if (operation in target) return target[operation as keyof typeof target];
+      return async () => {
+        throw new Error(`Unexpected knowledge operation: ${String(operation)}.`);
+      };
+    },
+  }) as KnowledgeRepository;
+  return new KnowledgeApplicationService(repository);
+}
+
+function fakeBrainDocument() {
+  return {
+    id: "document_1",
+    brainId: "project-alpha",
+    folderPath: "projects",
+    path: "projects/project-alpha.md",
+    title: "Alpha",
+    content: "---\nid: project-alpha\n---\n# Alpha",
+    body: "# Alpha",
+    timeline: [],
+    format: "markdown" as const,
+    mimeType: "text/markdown",
+    originalFileName: null,
+    assetSizeBytes: null,
+    relations: [],
+    sources: [],
+    kind: "page" as const,
+    type: "project" as const,
+    status: "draft" as const,
+    aliases: [],
+    contentHash: "a".repeat(64),
+    sizeBytes: 8,
+    createdByActorId: "user_1",
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
+function fakeWikiPage(overrides: Partial<ReturnType<typeof baseWikiPage>> = {}) {
+  return { ...baseWikiPage(), ...overrides };
+}
+
+function baseWikiPage() {
+  return {
+    id: "wiki_page_1",
+    slug: "project-alpha",
+    path: "projects/project-alpha",
+    title: "Alpha",
+    kind: "project" as const,
+    body: "",
+    contentHash: "b".repeat(64),
+    sizeBytes: 0,
+    format: "markdown",
+    mimeType: "text/markdown",
+    originalFileName: null,
+    assetSizeBytes: null,
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
+function fakeSkill() {
+  return {
+    id: "skill_1",
+    slug: "research",
+    name: "Research",
+    description: "Find primary sources.",
+    instructions: "",
+    status: "draft" as const,
+    source: null,
+    createdAt,
+    updatedAt: createdAt,
   };
 }
 

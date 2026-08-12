@@ -111,6 +111,17 @@ const automationCommandMocks = vi.hoisted(() => ({
   updateSchedule: vi.fn(async () => ({})),
 }));
 
+const knowledgeCommandMocks = vi.hoisted(() => ({
+  listSkillCatalog: vi.fn(async () => {
+    const response = await globalThis.fetch("/api/skills");
+    if (!response.ok) throw new Error(`Skill catalog loading failed with HTTP ${response.status}.`);
+    const payload = (await response.json()) as {
+      skills?: Array<{ id: string; name: string; description: string }>;
+    };
+    return payload.skills ?? [];
+  }),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => routerMock,
   usePathname: () => pathnameMock.value,
@@ -163,6 +174,10 @@ vi.mock("@/lib/headless-automation-commands", () => ({
   listHeadlessWorkflowCatalog: automationCommandMocks.listWorkflowCatalog,
   runHeadlessTaskScheduleNow: automationCommandMocks.runSchedule,
   updateHeadlessTaskSchedule: automationCommandMocks.updateSchedule,
+}));
+
+vi.mock("@/lib/headless-knowledge-commands", () => ({
+  listHeadlessSkillCatalog: knowledgeCommandMocks.listSkillCatalog,
 }));
 
 vi.mock("@/lib/user-preferences", () => ({
@@ -392,6 +407,7 @@ describe("GoatSurface chat streaming UI", () => {
     automationCommandMocks.archiveSchedule.mockClear();
     automationCommandMocks.runSchedule.mockClear();
     automationCommandMocks.updateSchedule.mockClear();
+    knowledgeCommandMocks.listSkillCatalog.mockClear();
     attachmentUploadMock.canonicalUpload.mockReset();
     attachmentUploadMock.canonicalUpload.mockResolvedValue({ id: "attachment_1" });
     attachmentUploadMock.upload.mockReset();

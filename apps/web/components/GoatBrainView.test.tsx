@@ -1,18 +1,17 @@
 import "@testing-library/jest-dom/vitest";
+import type { BrainDocumentDto } from "@opencompany/protocol";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GoatBrainDocumentView, GoatBrainFolderView } from "@/lib/brain";
 import {
-  createGoatBrainDocumentAction,
-  createGoatBrainFolderAction,
-  createGoatBrainSkillAction,
-  deleteGoatBrainFolderAction,
-  renameGoatBrainDocumentAction,
-  renameGoatBrainFolderAction,
-  updateGoatBrainDocumentAction,
-  updateGoatBrainSkillAction,
-} from "@/lib/brain-actions";
+  createHeadlessBrainDocument,
+  createHeadlessBrainFolder,
+  deleteHeadlessBrainFolder,
+  renameHeadlessBrainDocument,
+  renameHeadlessBrainFolder,
+  updateHeadlessBrainDocument,
+} from "@/lib/headless-knowledge-commands";
 import { GoatBrainView } from "./GoatBrainView";
 
 const routerMock = vi.hoisted(() => ({
@@ -39,8 +38,18 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
       description: null,
       visibility: "workspace",
     },
-    workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: workspaceRoleMock.value },
-    workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: workspaceRoleMock.value }],
+    workspace: {
+      id: "goat_ws_1",
+      name: "Ada's Workspace",
+      role: workspaceRoleMock.value,
+    },
+    workspaces: [
+      {
+        id: "goat_ws_1",
+        name: "Ada's Workspace",
+        role: workspaceRoleMock.value,
+      },
+    ],
     workspaceMembers: [],
   }),
 }));
@@ -101,16 +110,18 @@ vi.mock("@/components/MarkdownGoatBrainEditor", () => ({
 }));
 
 vi.mock("@/lib/brain-actions", () => ({
-  createGoatBrainDocumentAction: vi.fn(),
-  createGoatBrainFolderAction: vi.fn(),
-  createGoatBrainSkillAction: vi.fn(),
-  deleteGoatBrainDocumentAction: vi.fn(),
-  deleteGoatBrainFolderAction: vi.fn(),
-  moveGoatBrainDocumentAction: vi.fn(),
-  renameGoatBrainDocumentAction: vi.fn(),
-  renameGoatBrainFolderAction: vi.fn(),
-  updateGoatBrainDocumentAction: vi.fn(),
-  updateGoatBrainSkillAction: vi.fn(),
+  replaceGoatBrainAssetAction: vi.fn(),
+  uploadGoatBrainAssetAction: vi.fn(),
+}));
+
+vi.mock("@/lib/headless-knowledge-commands", () => ({
+  createHeadlessBrainDocument: vi.fn(),
+  createHeadlessBrainFolder: vi.fn(),
+  deleteHeadlessBrainDocument: vi.fn(),
+  deleteHeadlessBrainFolder: vi.fn(),
+  renameHeadlessBrainDocument: vi.fn(),
+  renameHeadlessBrainFolder: vi.fn(),
+  updateHeadlessBrainDocument: vi.fn(),
 }));
 
 afterEach(() => {
@@ -208,7 +219,9 @@ describe("GoatBrainView", () => {
     expect(backlinksSection).not.toBeNull();
     expect(within(backlinksSection as HTMLElement).getByText("1")).toBeInTheDocument();
     expect(
-      within(backlinksSection as HTMLElement).getByRole("link", { name: /Roadmap.*wiki_link/ }),
+      within(backlinksSection as HTMLElement).getByRole("link", {
+        name: /Roadmap.*wiki_link/,
+      }),
     ).toHaveAttribute("href", "/brain/projects/roadmap");
     expect(
       within(backlinksSection as HTMLElement).queryByRole("link", {
@@ -440,7 +453,6 @@ describe("GoatBrainView", () => {
       "decisions",
       "concepts",
       "partners",
-      "skills",
       "people",
       "companies",
       "evidence",
@@ -480,15 +492,18 @@ describe("GoatBrainView", () => {
 
     expect(screen.getByRole("button", { name: "Toggle timeline" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete document" })).not.toBeInTheDocument();
-    expect(updateGoatBrainDocumentAction).not.toHaveBeenCalled();
-    expect(renameGoatBrainDocumentAction).not.toHaveBeenCalled();
+    expect(updateHeadlessBrainDocument).not.toHaveBeenCalled();
+    expect(renameHeadlessBrainDocument).not.toHaveBeenCalled();
   });
 
   it("creates a nested folder from the sidebar context menu", async () => {
     const user = userEvent.setup();
-    vi.mocked(createGoatBrainFolderAction).mockResolvedValueOnce({
-      ok: true,
+    vi.mocked(createHeadlessBrainFolder).mockResolvedValueOnce({
+      id: "folder_projects_partners",
       path: "projects/partners",
+      source: "custom",
+      createdAt: "2026-07-06T12:00:00.000Z",
+      updatedAt: "2026-07-06T12:00:00.000Z",
     });
 
     render(
@@ -508,9 +523,8 @@ describe("GoatBrainView", () => {
     await user.click(screen.getByRole("button", { name: "Create" }));
 
     await waitFor(() => {
-      expect(createGoatBrainFolderAction).toHaveBeenCalledWith({
-        brainRef: "goat_brain_1",
-        folderPath: "projects/partners",
+      expect(createHeadlessBrainFolder).toHaveBeenCalledWith("goat_brain_1", {
+        path: "projects/partners",
       });
     });
     expect(routerMock.replace).not.toHaveBeenCalled();
@@ -518,10 +532,8 @@ describe("GoatBrainView", () => {
 
   it("creates a Markdown file in the context-clicked folder", async () => {
     const user = userEvent.setup();
-    vi.mocked(createGoatBrainDocumentAction).mockResolvedValueOnce({
-      ok: true,
-      path: "projects/roadmap.md",
-      document: {
+    vi.mocked(createHeadlessBrainDocument).mockResolvedValueOnce(
+      brainDocumentDto({
         ...documentLinkingToAda,
         id: "doc_roadmap_new",
         brainId: "roadmap",
@@ -530,8 +542,8 @@ describe("GoatBrainView", () => {
         title: "Roadmap",
         body: "",
         content: "",
-      },
-    });
+      }),
+    );
 
     render(
       <GoatBrainView
@@ -550,8 +562,7 @@ describe("GoatBrainView", () => {
     await user.click(screen.getByRole("button", { name: "Create" }));
 
     await waitFor(() => {
-      expect(createGoatBrainDocumentAction).toHaveBeenCalledWith({
-        brainRef: "goat_brain_1",
+      expect(createHeadlessBrainDocument).toHaveBeenCalledWith("goat_brain_1", {
         folderPath: "projects",
         fileName: "Roadmap.md",
       });
@@ -559,93 +570,42 @@ describe("GoatBrainView", () => {
     expect(window.location.pathname).toBe("/brain/projects/roadmap");
   });
 
-  it("creates a formal skill with only a name from the skills folder", async () => {
-    const user = userEvent.setup();
-    vi.mocked(createGoatBrainSkillAction).mockResolvedValueOnce({
-      ok: true,
-      path: "skills/coding-work.md",
-      document: { ...codingWorkSkill, description: "" },
-    });
+  it("keeps extracted skills and workflows out of the Brain surface", () => {
     render(
       <GoatBrainView
         brainRef="goat_brain_1"
         brain={defaultBrain}
-        folders={orderedFolders}
-        documents={[]}
-        initialFolderPath="skills"
+        folders={[...orderedFolders, folder("workflows", "system")]}
+        documents={[
+          codingWorkSkill,
+          {
+            ...codingWorkSkill,
+            id: "doc_release_workflow",
+            brainId: "release-workflow",
+            folderPath: "workflows",
+            path: "workflows/release-workflow.md",
+            title: "Release workflow",
+          },
+        ]}
+        initialFolderPath="inbox"
         initialBrainId={null}
       />,
     );
 
-    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /skills/i }));
-    await user.click(screen.getByRole("menuitem", { name: "New skill" }));
-    await user.type(screen.getByLabelText("Name"), "Coding work");
-    await user.click(screen.getByRole("button", { name: "Create" }));
-
-    await waitFor(() => {
-      expect(createGoatBrainSkillAction).toHaveBeenCalledWith({
-        brainRef: "goat_brain_1",
-        folderPath: "skills",
-        name: "Coding work",
-        description: "",
-      });
-    });
-    expect(screen.queryByRole("dialog", { name: "New skill" })).not.toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Page title" })).toHaveValue("Coding work");
-    expect(screen.getByRole("textbox", { name: "Description (optional)" })).toHaveValue("");
-    expect(window.location.pathname).toBe("/brain/skills/coding-work");
-  });
-
-  it("edits skill description and instructions without timeline controls", async () => {
-    const user = userEvent.setup();
-    vi.mocked(updateGoatBrainSkillAction).mockResolvedValueOnce({
-      ok: true,
-      path: codingWorkSkill.path,
-      document: { ...codingWorkSkill, contentHash: "skill-hash-next" },
-    });
-    render(
-      <GoatBrainView
-        brainRef="goat_brain_1"
-        brain={defaultBrain}
-        folders={orderedFolders}
-        documents={[codingWorkSkill]}
-        initialFolderPath="skills"
-        initialBrainId="coding-work"
-      />,
-    );
-
-    expect(screen.queryByRole("button", { name: "Toggle timeline" })).not.toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Description (optional)" })).toHaveValue(
-      "How coding work should happen.",
-    );
-    await user.clear(screen.getByRole("textbox", { name: "Description (optional)" }));
-    await user.type(
-      screen.getByRole("textbox", { name: "Description (optional)" }),
-      "Coding workflow.",
-    );
-    await user.clear(screen.getByRole("textbox", { name: "Brain body" }));
-    await user.type(screen.getByRole("textbox", { name: "Brain body" }), "Inspect and verify.");
-
-    await waitFor(
-      () => {
-        expect(updateGoatBrainSkillAction).toHaveBeenCalledWith({
-          brainRef: "goat_brain_1",
-          documentId: "doc_coding_work",
-          name: "Coding work",
-          description: "Coding workflow.",
-          instructions: "Inspect and verify.",
-          expectedContentHash: "skill-hash",
-        });
-      },
-      { timeout: 4000 },
-    );
+    expect(screen.queryByRole("treeitem", { name: /skills/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("treeitem", { name: /workflows/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("Coding work")).not.toBeInTheDocument();
+    expect(screen.queryByText("Release workflow")).not.toBeInTheDocument();
   });
 
   it("renames only adjustable folders", async () => {
     const user = userEvent.setup();
-    vi.mocked(renameGoatBrainFolderAction).mockResolvedValueOnce({
-      ok: true,
+    vi.mocked(renameHeadlessBrainFolder).mockResolvedValueOnce({
+      id: "folder_projects",
       path: "initiatives",
+      source: "custom",
+      createdAt: "2026-07-06T12:00:00.000Z",
+      updatedAt: "2026-07-06T12:00:00.000Z",
     });
 
     render(
@@ -668,8 +628,7 @@ describe("GoatBrainView", () => {
     await user.click(screen.getByRole("button", { name: "Rename" }));
 
     await waitFor(() => {
-      expect(renameGoatBrainFolderAction).toHaveBeenCalledWith({
-        brainRef: "goat_brain_1",
+      expect(renameHeadlessBrainFolder).toHaveBeenCalledWith("goat_brain_1", {
         fromPath: "projects",
         toPath: "initiatives",
       });
@@ -679,7 +638,9 @@ describe("GoatBrainView", () => {
   it("deletes only adjustable folders after confirmation", async () => {
     const user = userEvent.setup();
     const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(true);
-    vi.mocked(deleteGoatBrainFolderAction).mockResolvedValueOnce({ ok: true });
+    vi.mocked(deleteHeadlessBrainFolder).mockResolvedValueOnce({
+      deleted: true,
+    });
 
     render(
       <GoatBrainView
@@ -697,9 +658,8 @@ describe("GoatBrainView", () => {
 
     await user.click(screen.getByRole("button", { name: "Delete folder" }));
     await waitFor(() => {
-      expect(deleteGoatBrainFolderAction).toHaveBeenCalledWith({
-        brainRef: "goat_brain_1",
-        folderPath: "projects",
+      expect(deleteHeadlessBrainFolder).toHaveBeenCalledWith("goat_brain_1", {
+        path: "projects",
       });
     });
     confirm.mockRestore();
@@ -796,11 +756,9 @@ describe("GoatBrainView", () => {
 
   it("renames a document from the page title", async () => {
     const user = userEvent.setup();
-    vi.mocked(renameGoatBrainDocumentAction).mockResolvedValueOnce({
-      ok: true,
-      path: "people/ada-lovelace.md",
-      document: { ...documentWithTimeline, title: "Ada King" },
-    });
+    vi.mocked(renameHeadlessBrainDocument).mockResolvedValueOnce(
+      brainDocumentDto({ ...documentWithTimeline, title: "Ada King" }),
+    );
 
     render(
       <GoatBrainView
@@ -818,9 +776,7 @@ describe("GoatBrainView", () => {
     await user.type(title, "Ada King{Enter}");
 
     await waitFor(() => {
-      expect(renameGoatBrainDocumentAction).toHaveBeenCalledWith({
-        brainRef: "goat_brain_1",
-        documentId: "doc_ada",
+      expect(renameHeadlessBrainDocument).toHaveBeenCalledWith("goat_brain_1", "doc_ada", {
         title: "Ada King",
       });
     });
@@ -828,11 +784,13 @@ describe("GoatBrainView", () => {
 
   it("autosaves the body with the selected content hash after typing pauses", async () => {
     const user = userEvent.setup();
-    vi.mocked(updateGoatBrainDocumentAction).mockResolvedValueOnce({
-      ok: true,
-      path: "people/ada-lovelace.md",
-      document: { ...documentWithTimeline, body: "Updated truth.", contentHash: "hash-next" },
-    });
+    vi.mocked(updateHeadlessBrainDocument).mockResolvedValueOnce(
+      brainDocumentDto({
+        ...documentWithTimeline,
+        body: "Updated truth.",
+        contentHash: "hash-next",
+      }),
+    );
 
     render(
       <GoatBrainView
@@ -853,29 +811,25 @@ describe("GoatBrainView", () => {
 
     await waitFor(
       () => {
-        expect(updateGoatBrainDocumentAction).toHaveBeenCalledWith({
-          brainRef: "goat_brain_1",
-          documentId: "doc_ada",
+        expect(updateHeadlessBrainDocument).toHaveBeenCalledWith("goat_brain_1", "doc_ada", {
           body: "Updated truth.",
           expectedContentHash: "hash",
         });
       },
       { timeout: 4000 },
     );
-    expect(updateGoatBrainDocumentAction).toHaveBeenCalledTimes(1);
+    expect(updateHeadlessBrainDocument).toHaveBeenCalledTimes(1);
   });
 
   it("renders nested legacy frontmatter as body text and autosaves the normalized value", async () => {
     const user = userEvent.setup();
-    vi.mocked(updateGoatBrainDocumentAction).mockResolvedValueOnce({
-      ok: true,
-      path: "people/ada-lovelace.md",
-      document: {
+    vi.mocked(updateHeadlessBrainDocument).mockResolvedValueOnce(
+      brainDocumentDto({
         ...documentWithTimeline,
         body: "Nested truth. Updated.",
         contentHash: "hash-next",
-      },
-    });
+      }),
+    );
 
     render(
       <GoatBrainView
@@ -901,9 +855,7 @@ describe("GoatBrainView", () => {
 
     await waitFor(
       () => {
-        expect(updateGoatBrainDocumentAction).toHaveBeenCalledWith({
-          brainRef: "goat_brain_1",
-          documentId: "doc_ada",
+        expect(updateHeadlessBrainDocument).toHaveBeenCalledWith("goat_brain_1", "doc_ada", {
           body: "Nested truth. Updated.",
           expectedContentHash: "polluted-hash",
         });
@@ -1114,5 +1066,13 @@ function folder(folderPath: string, source: GoatBrainFolderView["source"]): Goat
     source,
     createdAt: "2026-07-06T12:00:00.000Z",
     updatedAt: "2026-07-06T12:00:00.000Z",
+  };
+}
+
+function brainDocumentDto(document: GoatBrainDocumentView): BrainDocumentDto {
+  return {
+    ...document,
+    assetSizeBytes: null,
+    createdByActorId: null,
   };
 }

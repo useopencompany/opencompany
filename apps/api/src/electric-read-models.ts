@@ -1,5 +1,9 @@
 import type { Actor } from "@opencompany/core";
 import {
+  BrainDocumentReadModelSchema,
+  BrainEdgeReadModelSchema,
+  BrainFolderReadModelSchema,
+  BrainTimelineReadModelSchema,
   ConversationReadModelSchema,
   MessageReadModelSchema,
   type ReadModel,
@@ -7,6 +11,8 @@ import {
   TaskOutcomeSchema,
   TaskReadModelSchema,
   TaskScheduleReadModelSchema,
+  WikiPageReadModelSchema,
+  WikiTimelineReadModelSchema,
   WorkflowReadModelSchema,
   WorkflowScheduleReadModelSchema,
 } from "@opencompany/protocol";
@@ -38,13 +44,23 @@ const ELECTRIC_RESPONSE_HEADERS = [
 
 // These columns cross the API boundary as decoded JSON values. Omitting their upstream JSONB
 // metadata prevents @electric-sql/client from parsing the already-decoded values a second time.
-const PREDECODED_READ_MODEL_FIELDS = new Set(["presentation", "attachments", "steps", "trigger"]);
+const PREDECODED_READ_MODEL_FIELDS = new Set([
+  "presentation",
+  "attachments",
+  "steps",
+  "trigger",
+  "timeline",
+  "relations",
+  "sources",
+  "aliases",
+]);
 
 export interface ReadModelService {
   stream(input: {
     actor: Actor;
     readModel: ReadModel;
     conversationId?: string;
+    brainId?: string;
     requestUrl: URL;
   }): Promise<Response>;
 }
@@ -72,6 +88,7 @@ export class ElectricReadModelProxy implements ReadModelService {
     actor: Actor;
     readModel: ReadModel;
     conversationId?: string;
+    brainId?: string;
     requestUrl: URL;
   }) {
     const shape = readModelShape(input);
@@ -136,7 +153,12 @@ export class ElectricReadModelProxy implements ReadModelService {
   }
 }
 
-function readModelShape(input: { actor: Actor; readModel: ReadModel; conversationId?: string }) {
+function readModelShape(input: {
+  actor: Actor;
+  readModel: ReadModel;
+  conversationId?: string;
+  brainId?: string;
+}) {
   switch (input.readModel) {
     case "chat-conversations-v1":
       return {
@@ -268,9 +290,102 @@ function readModelShape(input: { actor: Actor; readModel: ReadModel; conversatio
         where: `"actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
         params: [input.actor.userId, input.actor.workspaceId],
       };
+    case "brain-folders-v1":
+      return brainShape(input, "goat.brain_folders", [
+        "id",
+        "path",
+        "source",
+        "created_at",
+        "updated_at",
+      ]);
+    case "brain-documents-v1":
+      return brainShape(input, "goat.brain_documents", [
+        "id",
+        "brain_id",
+        "folder_path",
+        "title",
+        "content",
+        "body",
+        "timeline",
+        "format",
+        "mime_type",
+        "original_file_name",
+        "asset_size_bytes",
+        "relations",
+        "sources",
+        "kind",
+        "entity_type",
+        "status",
+        "aliases",
+        "content_hash",
+        "size_bytes",
+        "created_by_workos_id",
+        "created_at",
+        "updated_at",
+      ]);
+    case "brain-timeline-v1":
+      return brainShape(input, "goat.brain_timeline_entries", [
+        "id",
+        "document_id",
+        "brain_id",
+        "evidence_id",
+        "at",
+        "source_ref",
+        "source_title",
+        "summary",
+        "detail",
+        "created_at",
+      ]);
+    case "brain-edges-v1":
+      return brainShape(input, "goat.brain_edges", [
+        "id",
+        "document_id",
+        "from_brain_id",
+        "to_brain_id",
+        "relation_type",
+        "source_kind",
+        "created_at",
+        "updated_at",
+      ]);
+    case "wiki-pages-v1":
+      return {
+        table: "goat.wiki_pages",
+        columns: [
+          "id",
+          "slug",
+          "path",
+          "title",
+          "kind",
+          "content",
+          "content_hash",
+          "size_bytes",
+          "format",
+          "mime_type",
+          "original_file_name",
+          "asset_size_bytes",
+          "created_at",
+          "updated_at",
+        ],
+        where: `"workspace_id" = $1`,
+        params: [input.actor.workspaceId],
+      };
+    case "wiki-timeline-v1":
+      return {
+        table: "goat.wiki_timeline_entries",
+        columns: ["id", "page_id", "at", "text", "created_at"],
+        where: `"workspace_id" = $1`,
+        params: [input.actor.workspaceId],
+      };
     default:
       throw new ApiError(400, "invalid_request", "Unknown read model.");
   }
+}
+
+function brainShape(input: { brainId?: string }, table: string, columns: string[]) {
+  if (!input.brainId) {
+    throw new ApiError(400, "invalid_request", "brainId is required for this read model.");
+  }
+  return { table, columns, where: `"brain_ref" = $1`, params: [input.brainId] };
 }
 
 function conversationShape(
@@ -312,10 +427,18 @@ function projectReadModelValue(
   const projected: Record<string, unknown> = Object.fromEntries(
     Object.entries(columnNames).flatMap(([physicalName, publicName]) =>
       publicName && Object.hasOwn(row, physicalName)
-        ? [[publicName, readModelFieldValue(publicName, row[physicalName])]]
+        ? [[publicName, readModelFieldValue(readModel, publicName, row[physicalName])]]
         : [],
     ),
   );
+  if (readModel === "brain-documents-v1") {
+    if (typeof projected.folderPath === "string" && typeof projected.brainId === "string") {
+      projected.path = `${projected.folderPath}/${projected.brainId}.md`;
+    }
+    if (projected.title === null && typeof projected.brainId === "string") {
+      projected.title = projected.brainId;
+    }
+  }
   if (readModel === "tasks-v1") {
     const outcome = Object.fromEntries(
       Object.entries(TASK_OUTCOME_COLUMN_NAMES).flatMap(([physicalName, publicName]) =>
@@ -349,13 +472,53 @@ function projectReadModelValue(
       return (partial ? TaskScheduleReadModelSchema.partial() : TaskScheduleReadModelSchema).parse(
         projected,
       );
+    case "brain-folders-v1":
+      return (partial ? BrainFolderReadModelSchema.partial() : BrainFolderReadModelSchema).parse(
+        projected,
+      );
+    case "brain-documents-v1":
+      return (
+        partial ? BrainDocumentReadModelSchema.partial() : BrainDocumentReadModelSchema
+      ).parse(projected);
+    case "brain-timeline-v1":
+      return (
+        partial ? BrainTimelineReadModelSchema.partial() : BrainTimelineReadModelSchema
+      ).parse(projected);
+    case "brain-edges-v1":
+      return (partial ? BrainEdgeReadModelSchema.partial() : BrainEdgeReadModelSchema).parse(
+        projected,
+      );
+    case "wiki-pages-v1":
+      return (partial ? WikiPageReadModelSchema.partial() : WikiPageReadModelSchema).parse(
+        projected,
+      );
+    case "wiki-timeline-v1":
+      return (partial ? WikiTimelineReadModelSchema.partial() : WikiTimelineReadModelSchema).parse(
+        projected,
+      );
   }
 }
 
-function readModelFieldValue(name: string, value: unknown) {
-  if (name.endsWith("At")) return timestampValue(value);
-  if (name === "attemptCount" || name === "version") return numberValue(value);
-  if (name === "presentation" || name === "steps" || name === "trigger") {
+function readModelFieldValue(readModel: ReadModel, name: string, value: unknown) {
+  if (name.endsWith("At") || name === "at") return timestampValue(value);
+  if (
+    name === "attemptCount" ||
+    name === "version" ||
+    name === "sizeBytes" ||
+    name === "assetSizeBytes" ||
+    (readModel === "brain-timeline-v1" && name === "id")
+  ) {
+    return value === null ? null : numberValue(value);
+  }
+  if (
+    name === "presentation" ||
+    name === "steps" ||
+    name === "trigger" ||
+    name === "timeline" ||
+    name === "relations" ||
+    name === "sources" ||
+    name === "aliases"
+  ) {
     return jsonValue(value);
   }
   if (name === "attachments") {
@@ -567,6 +730,82 @@ const READ_MODEL_COLUMN_NAMES = {
     version: "version",
     created_at: "createdAt",
     updated_at: "updatedAt",
+  },
+  "brain-folders-v1": {
+    id: "id",
+    path: "path",
+    source: "source",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "brain-documents-v1": {
+    id: "id",
+    brain_id: "brainId",
+    folder_path: "folderPath",
+    title: "title",
+    content: "content",
+    body: "body",
+    timeline: "timeline",
+    format: "format",
+    mime_type: "mimeType",
+    original_file_name: "originalFileName",
+    asset_size_bytes: "assetSizeBytes",
+    relations: "relations",
+    sources: "sources",
+    kind: "kind",
+    entity_type: "type",
+    status: "status",
+    aliases: "aliases",
+    content_hash: "contentHash",
+    size_bytes: "sizeBytes",
+    created_by_workos_id: "createdByActorId",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "brain-timeline-v1": {
+    id: "id",
+    document_id: "documentId",
+    brain_id: "brainId",
+    evidence_id: "evidenceId",
+    at: "at",
+    source_ref: "sourceRef",
+    source_title: "sourceTitle",
+    summary: "summary",
+    detail: "detail",
+    created_at: "createdAt",
+  },
+  "brain-edges-v1": {
+    id: "id",
+    document_id: "documentId",
+    from_brain_id: "fromBrainId",
+    to_brain_id: "toBrainId",
+    relation_type: "relationType",
+    source_kind: "sourceKind",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "wiki-pages-v1": {
+    id: "id",
+    slug: "slug",
+    path: "path",
+    title: "title",
+    kind: "kind",
+    content: "body",
+    content_hash: "contentHash",
+    size_bytes: "sizeBytes",
+    format: "format",
+    mime_type: "mimeType",
+    original_file_name: "originalFileName",
+    asset_size_bytes: "assetSizeBytes",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "wiki-timeline-v1": {
+    id: "id",
+    page_id: "pageId",
+    at: "at",
+    text: "text",
+    created_at: "createdAt",
   },
 } as const;
 

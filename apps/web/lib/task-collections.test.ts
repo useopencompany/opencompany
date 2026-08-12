@@ -19,9 +19,8 @@ describe("createGoatCollections", () => {
     const other = collections.brainCollections("goat_brain_2");
 
     expect(second).toBe(first);
-    expect(second.documents).toBe(first.documents);
-    expect(second.timelineEntries).toBe(first.timelineEntries);
-    expect(second.edges).toBe(first.edges);
-    expect(other.documents).not.toBe(first.documents);
+    expect(second.ingestJobs).toBe(first.ingestJobs);
+    expect(second.importRuns).toBe(first.importRuns);
+    expect(other.ingestJobs).not.toBe(first.ingestJobs);
   });
 });
