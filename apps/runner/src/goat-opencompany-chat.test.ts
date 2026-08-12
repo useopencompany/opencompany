@@ -2,6 +2,7 @@ import { ensureGoatMonthlyIncludedUsage } from "@opencompany/db/goat-billing";
 import { hasPositiveGoatCreditBalance } from "@opencompany/db/goat-credits";
 import type { GoatChatMessage, GoatChatMessageAttachment } from "@opencompany/db/goat-schema";
 import type { GoatStoredChatMessage } from "@opencompany/goat-agent/chat-ui";
+import { createGoatGatewayAttribution } from "@opencompany/goat-observability";
 import type { LanguageModelUsage, ToolApprovalRequestOutput, ToolSet } from "ai";
 import { describe, expect, it, vi } from "vitest";
 import { GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
@@ -10,6 +11,7 @@ import {
   consumeGoatOpenCompanyChatStream,
   goatOpenCompanyModelMessagesFromStored,
   hasGoatHostedTurnCredits,
+  openCompanyChatGatewayProviderOptions,
 } from "./goat-opencompany-chat";
 import {
   GoatOpenCompanyChatInterruptedError,
@@ -48,6 +50,25 @@ vi.mock("@opencompany/db/goat-credits", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@opencompany/db/goat-credits")>()),
   hasPositiveGoatCreditBalance: vi.fn(),
 }));
+
+describe("OpenCompany chat Gateway options", () => {
+  it("enables automatic prompt caching while preserving attribution", () => {
+    const attribution = createGoatGatewayAttribution({
+      userWorkosId: "user_123",
+      feature: "chat",
+      env: "test",
+      chatSessionId: "chat_session_123",
+    });
+
+    expect(openCompanyChatGatewayProviderOptions(attribution)).toEqual({
+      gateway: {
+        caching: "auto",
+        user: attribution.user,
+        tags: ["app:goat", "env:test", "feature:chat", "chat:chat_session_123"],
+      },
+    });
+  });
+});
 
 describe("hosted turn credit gate", () => {
   it("refreshes the calendar-month allowance before reading the balance", async () => {

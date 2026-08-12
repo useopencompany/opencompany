@@ -1,4 +1,8 @@
-import { AGENT_MODEL_CATALOG, modelSupportsAttachments } from "@opencompany/agent-runtime";
+import {
+  AGENT_MODEL_CATALOG,
+  GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
+  modelSupportsAttachments,
+} from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { ChatPresentationPublisher } from "@opencompany/chat-presentation";
 import { ensureGoatMonthlyIncludedUsage } from "@opencompany/db/goat-billing";
@@ -47,6 +51,7 @@ import { createGoatSendUserMessageRunner } from "@opencompany/goat-agent/imessag
 import { createOpenCompanyChatSystemPrompt } from "@opencompany/goat-agent/prompts";
 import {
   createGoatGatewayAttribution,
+  type GoatGatewayAttribution,
   goatGatewayProviderOptions,
 } from "@opencompany/goat-observability";
 import { flushLatitude } from "@opencompany/goat-observability/latitude";
@@ -99,6 +104,10 @@ const logger = createLogger({
   service: "opencompany-runner",
   runtime: "goat-opencompany-chat",
 });
+
+export function openCompanyChatGatewayProviderOptions(attribution: GoatGatewayAttribution) {
+  return goatGatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS);
+}
 
 function isTextExtractableAttachment(attachment: Pick<GoatChatMessageAttachment, "kind">) {
   return (
@@ -231,7 +240,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
         ? { experimental_repairToolCall: runtime.toolContext.repairToolCall }
         : {}),
       abortSignal: generationController.signal,
-      providerOptions: goatGatewayProviderOptions(attribution),
+      providerOptions: openCompanyChatGatewayProviderOptions(attribution),
     });
 
     projection = await consumeGoatOpenCompanyChatStream({
