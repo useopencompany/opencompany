@@ -516,6 +516,406 @@ export const BrainSourceItemListEnvelopeSchema = z
   .strict()
   .openapi("BrainSourceItemListEnvelope");
 
+export const BrainSourceConfigProviderSchema = z.enum([
+  "jamie",
+  "gmail",
+  "google_drive",
+  "github",
+  "slack",
+  "linear",
+  "slack_bot",
+  "hubspot",
+  "granola",
+  "fathom",
+  "attio",
+]);
+export const BrainSourceIntegrationStatusSchema = z.enum([
+  "connected",
+  "needs_reauth",
+  "sync_failed",
+  "disconnected",
+]);
+const BrainSourceProviderStatusSchema = z.enum([
+  "connected",
+  "needs_reauth",
+  "sync_failed",
+  "disconnected",
+  "not_connected",
+]);
+const NullableLabelSchema = z.string().max(512).nullable();
+const BrainSourceProviderBaseShape = {
+  connected: z.boolean(),
+  status: BrainSourceProviderStatusSchema,
+  integrationId: ResourceIdSchema.nullable(),
+  statusReason: z.string().max(2_000).nullable(),
+};
+
+export const BrainSourceViewSchema = z
+  .object({
+    sourceId: ResourceIdSchema,
+    provider: BrainSourceConfigProviderSchema,
+    integrationId: ResourceIdSchema,
+    enabled: z.boolean(),
+    connectedByName: z.string().max(512),
+    ownerEmail: z.string().max(512).nullable(),
+    ownerAvatarUrl: z.string().max(4_096).nullable(),
+    accountEmail: z.string().max(512).nullable(),
+    accountName: NullableLabelSchema,
+    connectionLabel: NullableLabelSchema,
+    ownerKind: z.enum(["workspace", "user"]),
+    isOwn: z.boolean(),
+    canConfigure: z.boolean(),
+    canToggle: z.boolean(),
+    canRemove: z.boolean(),
+    integrationStatus: BrainSourceIntegrationStatusSchema,
+    config: z.record(z.string(), z.unknown()),
+  })
+  .strict()
+  .openapi("BrainSourceView");
+
+export const BrainSourceAccountSchema = z
+  .object({
+    integrationId: ResourceIdSchema,
+    status: BrainSourceIntegrationStatusSchema,
+    accountEmail: z.string().max(512).nullable(),
+    accountName: NullableLabelSchema,
+    connectionLabel: NullableLabelSchema,
+  })
+  .strict()
+  .openapi("BrainSourceAccount");
+
+const JamieSourceProviderStateSchema = z
+  .object({
+    provider: z.literal("jamie"),
+    ...BrainSourceProviderBaseShape,
+    accountName: NullableLabelSchema,
+    webhookUrl: z.url().max(4_096).nullable(),
+    apiKeyConfigured: z.boolean(),
+  })
+  .strict();
+const SlackSourceProviderStateSchema = z
+  .object({
+    provider: z.literal("slack"),
+    ...BrainSourceProviderBaseShape,
+    accountName: NullableLabelSchema,
+    teamName: NullableLabelSchema,
+  })
+  .strict();
+const LinearSourceProviderStateSchema = z
+  .object({
+    provider: z.literal("linear"),
+    ...BrainSourceProviderBaseShape,
+    accountName: NullableLabelSchema,
+    organizationName: NullableLabelSchema,
+  })
+  .strict();
+const GitHubSourceProviderStateSchema = z
+  .object({
+    provider: z.literal("github"),
+    ...BrainSourceProviderBaseShape,
+    accountName: NullableLabelSchema,
+  })
+  .strict();
+const GmailSourceProviderStateSchema = z
+  .object({
+    provider: z.literal("gmail"),
+    ...BrainSourceProviderBaseShape,
+    accountEmail: z.string().max(512).nullable(),
+  })
+  .strict();
+const GoogleDriveSourceProviderStateSchema = z
+  .object({
+    provider: z.literal("google_drive"),
+    ...BrainSourceProviderBaseShape,
+    accountEmail: z.string().max(512).nullable(),
+  })
+  .strict();
+const HubspotSourceProviderStateSchema = z
+  .object({
+    provider: z.literal("hubspot"),
+    ...BrainSourceProviderBaseShape,
+    accountEmail: z.string().max(512).nullable(),
+    hubDomain: NullableLabelSchema,
+  })
+  .strict();
+const GranolaSourceProviderStateSchema = z
+  .object({
+    provider: z.literal("granola"),
+    ...BrainSourceProviderBaseShape,
+    accountEmail: z.string().max(512).nullable(),
+    accountName: NullableLabelSchema,
+  })
+  .strict();
+const FathomSourceProviderStateSchema = z
+  .object({
+    provider: z.literal("fathom"),
+    ...BrainSourceProviderBaseShape,
+    accountEmail: z.string().max(512).nullable(),
+    accountName: NullableLabelSchema,
+  })
+  .strict();
+const AttioSourceProviderStateSchema = z
+  .object({
+    provider: z.literal("attio"),
+    ...BrainSourceProviderBaseShape,
+    workspaceName: NullableLabelSchema,
+  })
+  .strict();
+
+export const BrainSourceDetailsSchema = z
+  .object({
+    viewer: z.object({ actorId: ResourceIdSchema, isAdmin: z.boolean() }).strict(),
+    sources: z.array(BrainSourceViewSchema),
+    ownAccounts: z
+      .object({
+        slack: z.array(BrainSourceAccountSchema),
+        linear: z.array(BrainSourceAccountSchema),
+        gmail: z.array(BrainSourceAccountSchema),
+        google_drive: z.array(BrainSourceAccountSchema),
+        hubspot: z.array(BrainSourceAccountSchema),
+        granola: z.array(BrainSourceAccountSchema),
+        fathom: z.array(BrainSourceAccountSchema),
+        attio: z.array(BrainSourceAccountSchema),
+      })
+      .strict(),
+    jamie: z
+      .object({
+        integration: JamieSourceProviderStateSchema,
+        legacyDefaultDelivery: z.boolean(),
+        isDefaultBrain: z.boolean(),
+      })
+      .strict(),
+    slack: z.object({ integration: SlackSourceProviderStateSchema }).strict(),
+    linear: z.object({ integration: LinearSourceProviderStateSchema }).strict(),
+    github: z.object({ integration: GitHubSourceProviderStateSchema }).strict(),
+    gmail: z.object({ integration: GmailSourceProviderStateSchema }).strict(),
+    googleDrive: z.object({ integration: GoogleDriveSourceProviderStateSchema }).strict(),
+    hubspot: z.object({ integration: HubspotSourceProviderStateSchema }).strict(),
+    granola: z.object({ integration: GranolaSourceProviderStateSchema }).strict(),
+    fathom: z.object({ integration: FathomSourceProviderStateSchema }).strict(),
+    attio: z.object({ integration: AttioSourceProviderStateSchema }).strict(),
+  })
+  .strict()
+  .openapi("BrainSourceDetails");
+
+export const BrainSourceDetailsEnvelopeSchema = z
+  .object({ data: BrainSourceDetailsSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BrainSourceDetailsEnvelope");
+
+const NamedSourceRefSchema = z
+  .object({ id: z.string().min(1).max(512), name: z.string().min(1).max(512) })
+  .strict();
+const LinearTeamRefSchema = NamedSourceRefSchema.extend({
+  key: z.string().max(128).optional(),
+}).strict();
+const GmailEventRefSchema = z.object({ id: z.enum(["email_received", "email_sent"]) }).strict();
+const LinearEventRefSchema = z
+  .object({
+    id: z.enum([
+      "issue_created",
+      "issue_updated",
+      "issue_status_changed",
+      "issue_removed",
+      "comment_created",
+      "comment_updated",
+      "comment_removed",
+    ]),
+  })
+  .strict();
+const HubspotObjectTypeRefSchema = z
+  .object({ id: z.enum(["contact", "company", "deal"]) })
+  .strict();
+const HubspotEventRefSchema = z
+  .object({ id: z.enum(["object_created", "object_updated", "object_stage_changed"]) })
+  .strict();
+const AttioObjectTypeRefSchema = z.object({ id: z.enum(["person", "company", "deal"]) }).strict();
+const AttioEventRefSchema = z
+  .object({ id: z.enum(["object_created", "object_updated", "note_added"]) })
+  .strict();
+const GitHubActivityEventSchema = z.enum([
+  "pull_request_opened",
+  "pull_request_merged",
+  "pull_request_commented",
+  "issue_opened",
+  "issue_commented",
+]);
+const GitHubRepositoryRefSchema = z
+  .object({ id: z.string().min(1).max(512), fullName: z.string().min(1).max(512) })
+  .strict();
+
+export const SetBrainSourceBodySchema = z
+  .union([
+    z
+      .object({
+        operation: z.literal("set_enabled"),
+        provider: BrainSourceConfigProviderSchema,
+        enabled: z.boolean(),
+      })
+      .strict(),
+    z
+      .object({
+        operation: z.literal("configure"),
+        provider: z.literal("slack"),
+        enabled: z.boolean(),
+        channels: z.array(NamedSourceRefSchema).max(500),
+        dms: z.array(NamedSourceRefSchema).max(500),
+      })
+      .strict(),
+    z
+      .object({
+        operation: z.literal("configure"),
+        provider: z.literal("linear"),
+        enabled: z.boolean(),
+        teams: z.array(LinearTeamRefSchema).max(500),
+        events: z.array(LinearEventRefSchema).max(50),
+      })
+      .strict(),
+    z
+      .object({
+        operation: z.literal("configure"),
+        provider: z.literal("hubspot"),
+        enabled: z.boolean(),
+        objectTypes: z.array(HubspotObjectTypeRefSchema).max(50),
+        events: z.array(HubspotEventRefSchema).max(50),
+      })
+      .strict(),
+    z
+      .object({
+        operation: z.literal("configure"),
+        provider: z.literal("attio"),
+        enabled: z.boolean(),
+        objectTypes: z.array(AttioObjectTypeRefSchema).max(50),
+        events: z.array(AttioEventRefSchema).max(50),
+      })
+      .strict(),
+    z
+      .object({
+        operation: z.literal("configure"),
+        provider: z.literal("github"),
+        enabled: z.boolean(),
+        repos: z.array(GitHubRepositoryRefSchema).max(500),
+        events: z.array(GitHubActivityEventSchema).max(50),
+      })
+      .strict(),
+    z
+      .object({
+        operation: z.literal("configure"),
+        provider: z.literal("gmail"),
+        enabled: z.boolean(),
+        events: z.array(GmailEventRefSchema).max(50),
+        instructions: z.string().max(2_000),
+      })
+      .strict(),
+    z
+      .object({
+        operation: z.literal("configure"),
+        provider: z.literal("google_drive"),
+        enabled: z.boolean(),
+        allFiles: z.boolean().optional(),
+        resourceIds: z.array(z.string().min(1).max(512)).max(100),
+      })
+      .strict(),
+  ])
+  .openapi("SetBrainSourceBody");
+
+export const BrainSourceMutationEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        brainId: ResourceIdSchema,
+        integrationId: ResourceIdSchema,
+        provider: BrainSourceConfigProviderSchema,
+        enabled: z.boolean(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrainSourceMutationEnvelope");
+
+export const BrainSourceDeleteEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        brainId: ResourceIdSchema,
+        integrationId: ResourceIdSchema,
+        deleted: z.literal(true),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrainSourceDeleteEnvelope");
+
+export const BrainSourceOptionsBodySchema = z.discriminatedUnion("provider", [
+  z.object({ provider: z.literal("slack") }).strict(),
+  z.object({ provider: z.literal("linear") }).strict(),
+  z.object({ provider: z.literal("github") }).strict(),
+  z
+    .object({
+      provider: z.literal("google_drive"),
+      parentId: z.string().min(1).max(512).optional(),
+      query: z.string().min(1).max(200).optional(),
+      pageToken: z.string().min(1).max(4_096).optional(),
+    })
+    .strict(),
+]);
+
+const SlackChannelOptionSchema = NamedSourceRefSchema.extend({
+  isPrivate: z.boolean(),
+  isSlackConnect: z.boolean(),
+}).strict();
+const SlackDmOptionSchema = NamedSourceRefSchema.extend({ isSlackConnect: z.boolean() }).strict();
+const GoogleDriveOptionSchema = z
+  .object({
+    id: z.string().min(1).max(512),
+    name: z.string().min(1).max(512),
+    kind: z.enum(["file", "folder"]),
+    mimeType: z.string().min(1).max(512),
+    driveId: z.string().max(512).nullable(),
+    webViewLink: z.url().max(4_096).nullable(),
+  })
+  .strict();
+
+export const BrainSourceOptionsSchema = z
+  .discriminatedUnion("provider", [
+    z
+      .object({
+        provider: z.literal("slack"),
+        channels: z.array(SlackChannelOptionSchema),
+        dms: z.array(SlackDmOptionSchema),
+        partial: z.boolean(),
+      })
+      .strict(),
+    z
+      .object({
+        provider: z.literal("linear"),
+        teams: z.array(LinearTeamRefSchema),
+        partial: z.boolean(),
+      })
+      .strict(),
+    z
+      .object({
+        provider: z.literal("github"),
+        repos: z.array(GitHubRepositoryRefSchema.extend({ private: z.boolean() }).strict()),
+      })
+      .strict(),
+    z
+      .object({
+        provider: z.literal("google_drive"),
+        files: z.array(GoogleDriveOptionSchema),
+        nextPageToken: z.string().max(4_096).nullable(),
+      })
+      .strict(),
+  ])
+  .openapi("BrainSourceOptions");
+
+export const BrainSourceOptionsEnvelopeSchema = z
+  .object({ data: BrainSourceOptionsSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BrainSourceOptionsEnvelope");
+
 export const WikiKindSchema = z.enum([
   "person",
   "company",
@@ -1384,6 +1784,10 @@ export type BrainTimelineReadModel = z.infer<typeof BrainTimelineReadModelSchema
 export type BrainEdgeReadModel = z.infer<typeof BrainEdgeReadModelSchema>;
 export type BrainIngestJobReadModel = z.infer<typeof BrainIngestJobReadModelSchema>;
 export type BrainSourceItemDto = z.infer<typeof BrainSourceItemSchema>;
+export type BrainSourceDetailsDto = z.infer<typeof BrainSourceDetailsSchema>;
+export type SetBrainSourceBody = z.infer<typeof SetBrainSourceBodySchema>;
+export type BrainSourceOptionsBody = z.infer<typeof BrainSourceOptionsBodySchema>;
+export type BrainSourceOptionsDto = z.infer<typeof BrainSourceOptionsSchema>;
 export type CreateBrainDocumentBody = z.infer<typeof CreateBrainDocumentBodySchema>;
 export type UpdateBrainDocumentBody = z.infer<typeof UpdateBrainDocumentBodySchema>;
 export type RenameBrainDocumentBody = z.infer<typeof RenameBrainDocumentBodySchema>;

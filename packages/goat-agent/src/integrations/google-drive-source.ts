@@ -1,4 +1,3 @@
-import { getDb } from "@opencompany/db/client";
 import {
   loadGoatIntegrationCredential,
   markGoatIntegrationStatus,
@@ -9,7 +8,6 @@ import { and, eq } from "drizzle-orm";
 
 const DRIVE_BASE = "https://www.googleapis.com/drive/v3";
 const REFRESH_SKEW_MS = 60_000;
-export const GOOGLE_DRIVE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 
 export type GoatGoogleDriveFile = {
   id: string;
@@ -35,6 +33,7 @@ type GoogleDriveAccount = {
   integrationId: string;
   userWorkosId: string;
   accountEmail: string | null;
+  db: any;
 };
 
 type StoredTokens = {
@@ -54,11 +53,19 @@ export class GoatGoogleDriveRequestError extends Error {
   }
 }
 
+export class GoatGoogleDriveReconnectRequiredError extends Error {
+  constructor() {
+    super("Reconnect Google Drive in Settings.");
+    this.name = "GoatGoogleDriveReconnectRequiredError";
+  }
+}
+
 export async function loadOwnGoatGoogleDriveAccount(
   userWorkosId: string,
   integrationId: string,
+  db: any,
 ): Promise<GoogleDriveAccount | null> {
-  const [row] = await getDb()
+  const [row] = await db
     .select({
       integrationId: goatIntegrations.id,
       userWorkosId: goatIntegrations.userWorkosId,
@@ -80,6 +87,7 @@ export async function loadOwnGoatGoogleDriveAccount(
     integrationId: row.integrationId,
     userWorkosId: row.userWorkosId,
     accountEmail: row.accountEmail,
+    db,
   };
 }
 
@@ -225,9 +233,9 @@ async function getGoatGoogleDriveAccessToken(
     integrationId: account.integrationId,
     provider: "google_drive",
     kind: "oauth_token",
-    db: getDb(),
+    db: account.db,
   });
-  if (!credential) throw new Error("Reconnect Google Drive in Settings.");
+  if (!credential) throw new GoatGoogleDriveReconnectRequiredError();
   const tokens = credential.payload as StoredTokens;
   const expired = credential.expiresAt
     ? credential.expiresAt.getTime() - REFRESH_SKEW_MS <= Date.now()
@@ -235,7 +243,7 @@ async function getGoatGoogleDriveAccessToken(
   if (!forceRefresh && !expired && tokens.access_token) return tokens.access_token;
   if (!tokens.refresh_token) {
     await markNeedsReauth(account, "Stored Google Drive credentials have no refresh token.");
-    throw new Error("Reconnect Google Drive in Settings.");
+    throw new GoatGoogleDriveReconnectRequiredError();
   }
 
   const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim();
@@ -256,7 +264,7 @@ async function getGoatGoogleDriveAccessToken(
     const detail = await response.text();
     if (response.status === 400 && detail.includes("invalid_grant")) {
       await markNeedsReauth(account, "Google refused the refresh token.");
-      throw new Error("Reconnect Google Drive in Settings.");
+      throw new GoatGoogleDriveReconnectRequiredError();
     }
     throw new Error(`Google token refresh failed with ${response.status}.`);
   }
@@ -280,7 +288,7 @@ async function getGoatGoogleDriveAccessToken(
       typeof result.expires_in === "number"
         ? new Date(Date.now() + result.expires_in * 1000)
         : null,
-    db: getDb(),
+    db: account.db,
   });
   return result.access_token;
 }
@@ -292,7 +300,7 @@ async function markNeedsReauth(account: GoogleDriveAccount, reason: string) {
     provider: "google_drive",
     status: "needs_reauth",
     statusReason: reason,
-    db: getDb(),
+    db: account.db,
   });
 }
 

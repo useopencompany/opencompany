@@ -32,6 +32,7 @@ import {
   AutoModelRoutingError,
   type AutoModelRoutingResolution,
 } from "@opencompany/goat-agent/application/auto-model-routing";
+import type { GoatBrainSourceApplicationService } from "@opencompany/goat-agent/brain-sources";
 import { GOAT_SPANS, withGoatSpan } from "@opencompany/goat-observability";
 import { captureException, createLogger } from "@opencompany/observability";
 import {
@@ -90,6 +91,7 @@ export type CreateApiAppInput = {
   workflows: WorkflowApplicationService;
   schedules: TaskScheduleApplicationService;
   knowledge: KnowledgeApplicationService;
+  brainSources: Pick<GoatBrainSourceApplicationService, "list" | "set" | "remove" | "listOptions">;
   skillImports: SkillImportApplicationService;
   brainAssets: BrainAssetService;
   attachments: AttachmentUploadService;
@@ -432,6 +434,54 @@ export function createApiApp(input: CreateApiAppInput) {
         c.req.valid("query").ids,
       );
       return c.json({ data: sourceItems.map(brainSourceItemDto), meta }, 200);
+    },
+    listBrainSources: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const details = await input.brainSources.list(actor, c.req.valid("param").brainId);
+      return c.json({ data: details, meta }, 200);
+    },
+    setBrainSource: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const command = c.req.valid("json");
+      await input.brainSources.set(actor, params.brainId, params.integrationId, command);
+      return c.json(
+        {
+          data: {
+            brainId: params.brainId,
+            integrationId: params.integrationId,
+            provider: command.provider,
+            enabled: command.enabled,
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    deleteBrainSource: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      await input.brainSources.remove(actor, params.brainId, params.integrationId);
+      return c.json(
+        {
+          data: { brainId: params.brainId, integrationId: params.integrationId, deleted: true },
+          meta,
+        },
+        200,
+      );
+    },
+    listBrainSourceOptions: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 120);
+      const options = await input.brainSources.listOptions(
+        actor,
+        c.req.valid("param").integrationId,
+        c.req.valid("json"),
+      );
+      return c.json({ data: options, meta }, 200);
     },
     createBrainDocument: async (c) => {
       const actor = actorFrom(c);
@@ -1107,7 +1157,7 @@ export function createApiApp(input: CreateApiAppInput) {
         "/v1/*",
         cors({
           origin: browserOrigins,
-          allowMethods: ["GET", "HEAD", "POST", "PATCH", "OPTIONS"],
+          allowMethods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
           allowHeaders: CORS_ALLOW_HEADERS,
           exposeHeaders: CORS_EXPOSE_HEADERS,
           credentials: true,

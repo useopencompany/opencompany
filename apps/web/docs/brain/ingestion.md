@@ -69,11 +69,14 @@ Current providers/types:
 
 ## Google Drive documents
 
-Google Drive is a personal, ingestion-only Brain source. A workspace admin may attach only their
-own Drive connection to brains they administer. Each source selects explicit files or recursive
-folders from My Drive or Shared Drives; source configuration stores a server-controlled
-`selectedAt`, and the initial Drive page token is persisted before the selection is saved. Existing
-content is therefore not backfilled.
+Google Drive is a personal, ingestion-only Brain source. A connection owner may attach their Drive
+account to a Brain they can access. A workspace admin may pause or remove another member's source,
+but cannot inspect or change that member's selection. Typed `/v1` resources authorize source
+configuration and list selectable Drive resources; the existing OAuth callback and public webhook
+URL remain unchanged. Each source selects explicit files or recursive folders from My Drive or
+Shared Drives; source configuration stores a server-controlled `selectedAt`, and the initial Drive
+page token is persisted before the selection is saved. Existing content is therefore not
+backfilled.
 
 The runner maintains one durable change cursor for the user corpus and one for every selected
 Shared Drive. Valid Drive notifications only wake these cursors—the notification body is never

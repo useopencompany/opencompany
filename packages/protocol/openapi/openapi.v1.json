@@ -2014,6 +2014,1786 @@
         ],
         "additionalProperties": false
       },
+      "BrainSourceDetailsEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BrainSourceDetails"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "BrainSourceDetails": {
+        "type": "object",
+        "properties": {
+          "viewer": {
+            "type": "object",
+            "properties": {
+              "actorId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "isAdmin": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "actorId",
+              "isAdmin"
+            ],
+            "additionalProperties": false
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BrainSourceView"
+            }
+          },
+          "ownAccounts": {
+            "type": "object",
+            "properties": {
+              "slack": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BrainSourceAccount"
+                }
+              },
+              "linear": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BrainSourceAccount"
+                }
+              },
+              "gmail": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BrainSourceAccount"
+                }
+              },
+              "google_drive": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BrainSourceAccount"
+                }
+              },
+              "hubspot": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BrainSourceAccount"
+                }
+              },
+              "granola": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BrainSourceAccount"
+                }
+              },
+              "fathom": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BrainSourceAccount"
+                }
+              },
+              "attio": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BrainSourceAccount"
+                }
+              }
+            },
+            "required": [
+              "slack",
+              "linear",
+              "gmail",
+              "google_drive",
+              "hubspot",
+              "granola",
+              "fathom",
+              "attio"
+            ],
+            "additionalProperties": false
+          },
+          "jamie": {
+            "type": "object",
+            "properties": {
+              "integration": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "jamie"
+                    ]
+                  },
+                  "connected": {
+                    "type": "boolean"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "connected",
+                      "needs_reauth",
+                      "sync_failed",
+                      "disconnected",
+                      "not_connected"
+                    ]
+                  },
+                  "integrationId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "example": "run_019fed53"
+                  },
+                  "statusReason": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 2000
+                  },
+                  "accountName": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 512
+                  },
+                  "webhookUrl": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 4096,
+                    "format": "uri"
+                  },
+                  "apiKeyConfigured": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "connected",
+                  "status",
+                  "integrationId",
+                  "statusReason",
+                  "accountName",
+                  "webhookUrl",
+                  "apiKeyConfigured"
+                ],
+                "additionalProperties": false
+              },
+              "legacyDefaultDelivery": {
+                "type": "boolean"
+              },
+              "isDefaultBrain": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "integration",
+              "legacyDefaultDelivery",
+              "isDefaultBrain"
+            ],
+            "additionalProperties": false
+          },
+          "slack": {
+            "type": "object",
+            "properties": {
+              "integration": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "slack"
+                    ]
+                  },
+                  "connected": {
+                    "type": "boolean"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "connected",
+                      "needs_reauth",
+                      "sync_failed",
+                      "disconnected",
+                      "not_connected"
+                    ]
+                  },
+                  "integrationId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "example": "run_019fed53"
+                  },
+                  "statusReason": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 2000
+                  },
+                  "accountName": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 512
+                  },
+                  "teamName": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "provider",
+                  "connected",
+                  "status",
+                  "integrationId",
+                  "statusReason",
+                  "accountName",
+                  "teamName"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "integration"
+            ],
+            "additionalProperties": false
+          },
+          "linear": {
+            "type": "object",
+            "properties": {
+              "integration": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "linear"
+                    ]
+                  },
+                  "connected": {
+                    "type": "boolean"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "connected",
+                      "needs_reauth",
+                      "sync_failed",
+                      "disconnected",
+                      "not_connected"
+                    ]
+                  },
+                  "integrationId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "example": "run_019fed53"
+                  },
+                  "statusReason": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 2000
+                  },
+                  "accountName": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 512
+                  },
+                  "organizationName": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "provider",
+                  "connected",
+                  "status",
+                  "integrationId",
+                  "statusReason",
+                  "accountName",
+                  "organizationName"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "integration"
+            ],
+            "additionalProperties": false
+          },
+          "github": {
+            "type": "object",
+            "properties": {
+              "integration": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "github"
+                    ]
+                  },
+                  "connected": {
+                    "type": "boolean"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "connected",
+                      "needs_reauth",
+                      "sync_failed",
+                      "disconnected",
+                      "not_connected"
+                    ]
+                  },
+                  "integrationId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "example": "run_019fed53"
+                  },
+                  "statusReason": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 2000
+                  },
+                  "accountName": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "provider",
+                  "connected",
+                  "status",
+                  "integrationId",
+                  "statusReason",
+                  "accountName"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "integration"
+            ],
+            "additionalProperties": false
+          },
+          "gmail": {
+            "type": "object",
+            "properties": {
+              "integration": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "gmail"
+                    ]
+                  },
+                  "connected": {
+                    "type": "boolean"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "connected",
+                      "needs_reauth",
+                      "sync_failed",
+                      "disconnected",
+                      "not_connected"
+                    ]
+                  },
+                  "integrationId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "example": "run_019fed53"
+                  },
+                  "statusReason": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 2000
+                  },
+                  "accountEmail": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "provider",
+                  "connected",
+                  "status",
+                  "integrationId",
+                  "statusReason",
+                  "accountEmail"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "integration"
+            ],
+            "additionalProperties": false
+          },
+          "googleDrive": {
+            "type": "object",
+            "properties": {
+              "integration": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "google_drive"
+                    ]
+                  },
+                  "connected": {
+                    "type": "boolean"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "connected",
+                      "needs_reauth",
+                      "sync_failed",
+                      "disconnected",
+                      "not_connected"
+                    ]
+                  },
+                  "integrationId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "example": "run_019fed53"
+                  },
+                  "statusReason": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 2000
+                  },
+                  "accountEmail": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "provider",
+                  "connected",
+                  "status",
+                  "integrationId",
+                  "statusReason",
+                  "accountEmail"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "integration"
+            ],
+            "additionalProperties": false
+          },
+          "hubspot": {
+            "type": "object",
+            "properties": {
+              "integration": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "hubspot"
+                    ]
+                  },
+                  "connected": {
+                    "type": "boolean"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "connected",
+                      "needs_reauth",
+                      "sync_failed",
+                      "disconnected",
+                      "not_connected"
+                    ]
+                  },
+                  "integrationId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "example": "run_019fed53"
+                  },
+                  "statusReason": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 2000
+                  },
+                  "accountEmail": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 512
+                  },
+                  "hubDomain": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "provider",
+                  "connected",
+                  "status",
+                  "integrationId",
+                  "statusReason",
+                  "accountEmail",
+                  "hubDomain"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "integration"
+            ],
+            "additionalProperties": false
+          },
+          "granola": {
+            "type": "object",
+            "properties": {
+              "integration": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "granola"
+                    ]
+                  },
+                  "connected": {
+                    "type": "boolean"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "connected",
+                      "needs_reauth",
+                      "sync_failed",
+                      "disconnected",
+                      "not_connected"
+                    ]
+                  },
+                  "integrationId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "example": "run_019fed53"
+                  },
+                  "statusReason": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 2000
+                  },
+                  "accountEmail": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 512
+                  },
+                  "accountName": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "provider",
+                  "connected",
+                  "status",
+                  "integrationId",
+                  "statusReason",
+                  "accountEmail",
+                  "accountName"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "integration"
+            ],
+            "additionalProperties": false
+          },
+          "fathom": {
+            "type": "object",
+            "properties": {
+              "integration": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "fathom"
+                    ]
+                  },
+                  "connected": {
+                    "type": "boolean"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "connected",
+                      "needs_reauth",
+                      "sync_failed",
+                      "disconnected",
+                      "not_connected"
+                    ]
+                  },
+                  "integrationId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "example": "run_019fed53"
+                  },
+                  "statusReason": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 2000
+                  },
+                  "accountEmail": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 512
+                  },
+                  "accountName": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "provider",
+                  "connected",
+                  "status",
+                  "integrationId",
+                  "statusReason",
+                  "accountEmail",
+                  "accountName"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "integration"
+            ],
+            "additionalProperties": false
+          },
+          "attio": {
+            "type": "object",
+            "properties": {
+              "integration": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "attio"
+                    ]
+                  },
+                  "connected": {
+                    "type": "boolean"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "connected",
+                      "needs_reauth",
+                      "sync_failed",
+                      "disconnected",
+                      "not_connected"
+                    ]
+                  },
+                  "integrationId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "example": "run_019fed53"
+                  },
+                  "statusReason": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 2000
+                  },
+                  "workspaceName": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "provider",
+                  "connected",
+                  "status",
+                  "integrationId",
+                  "statusReason",
+                  "workspaceName"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "integration"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "viewer",
+          "sources",
+          "ownAccounts",
+          "jamie",
+          "slack",
+          "linear",
+          "github",
+          "gmail",
+          "googleDrive",
+          "hubspot",
+          "granola",
+          "fathom",
+          "attio"
+        ],
+        "additionalProperties": false
+      },
+      "BrainSourceView": {
+        "type": "object",
+        "properties": {
+          "sourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "jamie",
+              "gmail",
+              "google_drive",
+              "github",
+              "slack",
+              "linear",
+              "slack_bot",
+              "hubspot",
+              "granola",
+              "fathom",
+              "attio"
+            ]
+          },
+          "integrationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "connectedByName": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "ownerEmail": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 512
+          },
+          "ownerAvatarUrl": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 4096
+          },
+          "accountEmail": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 512
+          },
+          "accountName": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 512
+          },
+          "connectionLabel": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 512
+          },
+          "ownerKind": {
+            "type": "string",
+            "enum": [
+              "workspace",
+              "user"
+            ]
+          },
+          "isOwn": {
+            "type": "boolean"
+          },
+          "canConfigure": {
+            "type": "boolean"
+          },
+          "canToggle": {
+            "type": "boolean"
+          },
+          "canRemove": {
+            "type": "boolean"
+          },
+          "integrationStatus": {
+            "type": "string",
+            "enum": [
+              "connected",
+              "needs_reauth",
+              "sync_failed",
+              "disconnected"
+            ]
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
+          }
+        },
+        "required": [
+          "sourceId",
+          "provider",
+          "integrationId",
+          "enabled",
+          "connectedByName",
+          "ownerEmail",
+          "ownerAvatarUrl",
+          "accountEmail",
+          "accountName",
+          "connectionLabel",
+          "ownerKind",
+          "isOwn",
+          "canConfigure",
+          "canToggle",
+          "canRemove",
+          "integrationStatus",
+          "config"
+        ],
+        "additionalProperties": false
+      },
+      "BrainSourceAccount": {
+        "type": "object",
+        "properties": {
+          "integrationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "connected",
+              "needs_reauth",
+              "sync_failed",
+              "disconnected"
+            ]
+          },
+          "accountEmail": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 512
+          },
+          "accountName": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 512
+          },
+          "connectionLabel": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "integrationId",
+          "status",
+          "accountEmail",
+          "accountName",
+          "connectionLabel"
+        ],
+        "additionalProperties": false
+      },
+      "BrainSourceMutationEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "brainId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "integrationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "jamie",
+                  "gmail",
+                  "google_drive",
+                  "github",
+                  "slack",
+                  "linear",
+                  "slack_bot",
+                  "hubspot",
+                  "granola",
+                  "fathom",
+                  "attio"
+                ]
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "brainId",
+              "integrationId",
+              "provider",
+              "enabled"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SetBrainSourceBody": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "set_enabled"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "jamie",
+                  "gmail",
+                  "google_drive",
+                  "github",
+                  "slack",
+                  "linear",
+                  "slack_bot",
+                  "hubspot",
+                  "granola",
+                  "fathom",
+                  "attio"
+                ]
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "operation",
+              "provider",
+              "enabled"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "configure"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "slack"
+                ]
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "channels": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 500
+              },
+              "dms": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 500
+              }
+            },
+            "required": [
+              "operation",
+              "provider",
+              "enabled",
+              "channels",
+              "dms"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "configure"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "linear"
+                ]
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "teams": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "key": {
+                      "type": "string",
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 500
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "enum": [
+                        "issue_created",
+                        "issue_updated",
+                        "issue_status_changed",
+                        "issue_removed",
+                        "comment_created",
+                        "comment_updated",
+                        "comment_removed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 50
+              }
+            },
+            "required": [
+              "operation",
+              "provider",
+              "enabled",
+              "teams",
+              "events"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "configure"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "hubspot"
+                ]
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "objectTypes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "enum": [
+                        "contact",
+                        "company",
+                        "deal"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 50
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "enum": [
+                        "object_created",
+                        "object_updated",
+                        "object_stage_changed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 50
+              }
+            },
+            "required": [
+              "operation",
+              "provider",
+              "enabled",
+              "objectTypes",
+              "events"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "configure"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "attio"
+                ]
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "objectTypes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "enum": [
+                        "person",
+                        "company",
+                        "deal"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 50
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "enum": [
+                        "object_created",
+                        "object_updated",
+                        "note_added"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 50
+              }
+            },
+            "required": [
+              "operation",
+              "provider",
+              "enabled",
+              "objectTypes",
+              "events"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "configure"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "github"
+                ]
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "repos": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "fullName": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "fullName"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 500
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "pull_request_opened",
+                    "pull_request_merged",
+                    "pull_request_commented",
+                    "issue_opened",
+                    "issue_commented"
+                  ]
+                },
+                "maxItems": 50
+              }
+            },
+            "required": [
+              "operation",
+              "provider",
+              "enabled",
+              "repos",
+              "events"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "configure"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "gmail"
+                ]
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "enum": [
+                        "email_received",
+                        "email_sent"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 50
+              },
+              "instructions": {
+                "type": "string",
+                "maxLength": 2000
+              }
+            },
+            "required": [
+              "operation",
+              "provider",
+              "enabled",
+              "events",
+              "instructions"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "configure"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "google_drive"
+                ]
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "allFiles": {
+                "type": "boolean"
+              },
+              "resourceIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "maxItems": 100
+              }
+            },
+            "required": [
+              "operation",
+              "provider",
+              "enabled",
+              "resourceIds"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "BrainSourceDeleteEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "brainId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "integrationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "deleted": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "brainId",
+              "integrationId",
+              "deleted"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "BrainSourceOptionsEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BrainSourceOptions"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "BrainSourceOptions": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "slack"
+                ]
+              },
+              "channels": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "isPrivate": {
+                      "type": "boolean"
+                    },
+                    "isSlackConnect": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "isPrivate",
+                    "isSlackConnect"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "dms": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "isSlackConnect": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "isSlackConnect"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "partial": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "provider",
+              "channels",
+              "dms",
+              "partial"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "linear"
+                ]
+              },
+              "teams": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "key": {
+                      "type": "string",
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "partial": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "provider",
+              "teams",
+              "partial"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "github"
+                ]
+              },
+              "repos": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "fullName": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "private": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "fullName",
+                    "private"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "provider",
+              "repos"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "google_drive"
+                ]
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "file",
+                        "folder"
+                      ]
+                    },
+                    "mimeType": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "driveId": {
+                      "type": "string",
+                      "nullable": true,
+                      "maxLength": 512
+                    },
+                    "webViewLink": {
+                      "type": "string",
+                      "nullable": true,
+                      "maxLength": 4096,
+                      "format": "uri"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "kind",
+                    "mimeType",
+                    "driveId",
+                    "webViewLink"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "nextPageToken": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 4096
+              }
+            },
+            "required": [
+              "provider",
+              "files",
+              "nextPageToken"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "BrainDocumentEnvelope": {
         "type": "object",
         "properties": {
@@ -6271,6 +8051,322 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BrainSourceItemListEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/brains/{brainId}/sources": {
+      "get": {
+        "tags": [
+          "Brain"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "brainId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Source configuration and connection state for an authorized Brain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainSourceDetailsEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/brains/{brainId}/sources/{integrationId}": {
+      "put": {
+        "tags": [
+          "Brain"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "brainId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "integrationId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetBrainSourceBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Brain source configured or enabled state updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainSourceMutationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Brain"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "brainId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "integrationId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Brain source removed, including an idempotent replay.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainSourceDeleteEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integrations/{integrationId}/brain-source-options": {
+      "post": {
+        "tags": [
+          "Brain"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "integrationId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "slack"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "provider"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "linear"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "provider"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "github"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "provider"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "google_drive"
+                        ]
+                      },
+                      "parentId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512
+                      },
+                      "query": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "pageToken": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      }
+                    },
+                    "required": [
+                      "provider"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider resources the acting user may select for a Brain source.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainSourceOptionsEnvelope"
                 }
               }
             }

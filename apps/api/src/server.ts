@@ -14,6 +14,7 @@ import { PostgresKnowledgeRepository } from "@opencompany/db/knowledge-repositor
 import { createPooledDb } from "@opencompany/db/pool";
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
 import { resolvePersistedAutoModelRouting } from "@opencompany/goat-agent/application/persisted-auto-model-routing";
+import { GoatBrainSourceApplicationService } from "@opencompany/goat-agent/brain-sources";
 import { getGoatAvailableHarnessTools } from "@opencompany/goat-agent/integrations/google-data";
 import { createGoatSkillImportResolver } from "@opencompany/goat-agent/skill-import";
 import {
@@ -66,6 +67,7 @@ const automations = createAutomationServices({
 });
 const knowledgeRepository = new PostgresKnowledgeRepository(database.db);
 const knowledge = new KnowledgeApplicationService(knowledgeRepository);
+const brainSources = new GoatBrainSourceApplicationService(database.db);
 const skillImports = new SkillImportApplicationService(
   knowledgeRepository,
   createGoatSkillImportResolver(),
@@ -79,6 +81,7 @@ const app = createApiApp({
   workflows: automations.workflows,
   schedules: automations.schedules,
   knowledge,
+  brainSources,
   skillImports,
   brainAssets: createBrainAssetService({ db: database.db, knowledge }),
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),

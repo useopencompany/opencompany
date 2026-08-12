@@ -1,5 +1,5 @@
 import type { GoatSlackConversationRef } from "@opencompany/db/goat-slack";
-import { slackApiRequest } from "@/lib/integrations/slack";
+import { slackApiRequest } from "./slack";
 
 export type GoatSlackChannelOption = GoatSlackConversationRef & {
   isPrivate: boolean;
