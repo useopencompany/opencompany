@@ -47,7 +47,7 @@ export type GoatBrainCaptureSource =
 
 export type GoatBrainCaptureDependencies = {
   nextAvailableBrainId: (brainRef: string, baseId: string) => Promise<string>;
-  wakeIngest: () => Promise<unknown>;
+  wakeIngest?: () => Promise<unknown>;
 };
 
 // Explicit saves from Goat chat or MCP are capture-first: persist a draft page
@@ -220,7 +220,7 @@ export async function captureToGoatBrainInbox(
   });
   captureGoatIngestionQuotaAnalytics(result.quotaUpdates);
 
-  if (result.enqueued) {
+  if (result.enqueued && dependencies.wakeIngest) {
     dependencies.wakeIngest().catch((error) => {
       console.warn("Goat Brain capture failed to wake the ingest worker.", {
         event: "goat.brain_capture_wake_failed",

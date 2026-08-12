@@ -81,7 +81,9 @@ describe("runner server CORS", () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers["access-control-allow-origin"]).toBe("https://app.example.com");
     expect(response.headers.vary).toBe("Origin");
-    expect(response.json()).toMatchObject({ capabilities: { claudeActionsMcp: "v2" } });
+    expect(response.json()).toMatchObject({
+      capabilities: { claudeActionsMcp: "v2", brainWorkerAdmission: "postgres-v1" },
+    });
   });
 
   it("does not set CORS headers for unexpected origins", async () => {

@@ -20,7 +20,6 @@ import {
 } from "@opencompany/goat-brain";
 import { NextResponse } from "next/server";
 import { verifyGoatGitHubWebhookSignature } from "@/lib/integrations/github-signature";
-import { triggerGoatBrainIngestWake } from "@/lib/task-runner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -194,13 +193,6 @@ async function handleActivityEvent(
     enqueued += result.jobIds.length;
   }
 
-  if (enqueued > 0) {
-    triggerGoatBrainIngestWake().catch((error) => {
-      console.warn("[goat-github] Failed to wake Goat Brain ingest worker", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
-  }
   return { ok: true, enqueued };
 }
 

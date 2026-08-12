@@ -55,6 +55,6 @@ Settlement updates the Run, runtime session, Task projection, assistant Message,
 Goat owns the surviving execution model:
 
 - Current chat and task rows live under the Goat schema.
-- The runner owns durable turns, coding sandboxes, Brain ingestion, integration workers, and runtime access.
+- The runner owns durable turns, coding sandboxes, Brain ingestion, integration workers, and runtime access. Brain import, ingestion, and Google Drive sync commits publish Postgres wake hints; polling and fenced claims remain authoritative, so this is not a second queue.
 - Shared schema changes belong in `packages/db` and require a Drizzle migration.
 - The retired first-generation `.agent` session engine is not a Goat dependency.

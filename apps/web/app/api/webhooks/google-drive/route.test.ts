@@ -4,16 +4,11 @@ import {
   requestGoatGoogleDriveCursorWake,
 } from "@opencompany/db/goat-google-drive";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { triggerGoatGoogleDriveSyncWake } from "@/lib/task-runner";
 import { POST } from "./route";
 
 vi.mock("@opencompany/db/goat-google-drive", () => ({
   loadGoatGoogleDriveWatchChannel: vi.fn(),
   requestGoatGoogleDriveCursorWake: vi.fn(),
-}));
-
-vi.mock("@/lib/task-runner", () => ({
-  triggerGoatGoogleDriveSyncWake: vi.fn(async () => {}),
 }));
 
 describe("POST /api/webhooks/google-drive", () => {
@@ -33,7 +28,6 @@ describe("POST /api/webhooks/google-drive", () => {
 
     expect(response.status).toBe(204);
     expect(requestGoatGoogleDriveCursorWake).toHaveBeenCalledWith("cursor_1");
-    expect(triggerGoatGoogleDriveSyncWake).toHaveBeenCalledTimes(1);
   });
 
   it("rejects an invalid channel token without waking", async () => {

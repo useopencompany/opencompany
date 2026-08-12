@@ -6,14 +6,12 @@ import { copyGoatChatAttachmentToBrain } from "@opencompany/goat-agent/chat-atta
 import { createGoatBrainAssetForUser } from "@/lib/brain-assets";
 import { downloadGoatChatAttachment } from "@/lib/chat-attachments";
 import type { GoatStoredChatMessage, SaveToBrainToolOutput } from "@/lib/chat-ui";
-import { triggerGoatBrainIngestWake } from "@/lib/task-runner";
 
 const dependencies: GoatChatAttachmentCaptureDependencies = {
   downloadAttachment: downloadGoatChatAttachment,
   copyToBrain: copyGoatChatAttachmentToBrain,
   createBrainAsset: ({ actorId, ...input }) =>
     createGoatBrainAssetForUser({ ...input, userWorkosId: actorId }),
-  wakeIngest: triggerGoatBrainIngestWake,
 };
 
 export function saveChatAttachmentsToGoatBrain(input: {

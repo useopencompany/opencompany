@@ -15,16 +15,24 @@ const importPatterns = {
   drizzleImports:
     /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)["']drizzle-orm(?:\/[^"']*)?["']/u,
 };
+const forbiddenPatterns = {
+  brainWorkerControl:
+    /\btriggerGoat(?:BrainIngestWake|BrainImportWake|GoogleDriveSyncWake)\b|\/internal\/goat\/(?:brain-ingest\/wake|brain-import\/wake|google-drive\/sync)/u,
+};
 
 const baseline = JSON.parse(await readFile(baselinePath, "utf8"));
 const sourceFiles = await listSourceFiles(webRoot);
 const actual = { dbImports: [], drizzleImports: [] };
+const forbidden = { brainWorkerControl: [] };
 
 for (const absolutePath of sourceFiles) {
   const source = await readFile(absolutePath, "utf8");
   const relativePath = path.relative(repositoryRoot, absolutePath).split(path.sep).join("/");
   for (const [boundary, pattern] of Object.entries(importPatterns)) {
     if (pattern.test(source)) actual[boundary].push(relativePath);
+  }
+  for (const [boundary, pattern] of Object.entries(forbiddenPatterns)) {
+    if (pattern.test(source)) forbidden[boundary].push(relativePath);
   }
 }
 
@@ -41,6 +49,12 @@ for (const boundary of Object.keys(importPatterns)) {
     for (const file of stale) console.error(`  - ${file}`);
   }
 }
+for (const [boundary, files] of Object.entries(forbidden)) {
+  if (files.length === 0) continue;
+  failed = true;
+  console.error(`Web domain boundary contains forbidden ${boundary} callers:`);
+  for (const file of files) console.error(`  + ${file}`);
+}
 
 if (failed) {
   console.error(
@@ -51,6 +65,7 @@ if (failed) {
   console.log(
     `Web domain boundary unchanged (${actual.dbImports.length} @opencompany/db files, ${actual.drizzleImports.length} drizzle-orm files).`,
   );
+  console.log("Web Brain import, ingestion, and Google Drive worker-control callers: 0.");
 }
 
 async function listSourceFiles(directory) {

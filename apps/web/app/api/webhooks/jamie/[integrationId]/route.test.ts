@@ -10,17 +10,12 @@ import {
   markGoatJamieWebhookConnected,
   verifyGoatJamieWebhookApiKey,
 } from "@/lib/integrations/jamie";
-import { triggerGoatBrainIngestWake } from "@/lib/task-runner";
 import { POST } from "./route";
 
 vi.mock("@/lib/integrations/jamie", () => ({
   loadGoatJamieWebhookContext: vi.fn(),
   markGoatJamieWebhookConnected: vi.fn(),
   verifyGoatJamieWebhookApiKey: vi.fn(),
-}));
-
-vi.mock("@/lib/task-runner", () => ({
-  triggerGoatBrainIngestWake: vi.fn(async () => undefined),
 }));
 
 vi.mock("@opencompany/db/goat-brain-ingest", () => ({
@@ -96,7 +91,7 @@ describe("POST /api/webhooks/jamie/[integrationId]", () => {
     expect(upsertGoatBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
   });
 
-  it("normalizes, enqueues, marks connected, and wakes the runner", async () => {
+  it("normalizes, durably enqueues, and marks connected", async () => {
     const response = await POST(jamieRequest(jamiePayload()), routeContext());
     const body = (await response.json()) as { ok?: boolean; enqueued?: boolean };
 
@@ -123,7 +118,6 @@ describe("POST /api/webhooks/jamie/[integrationId]", () => {
         userWorkosId: "user_123",
       }),
     );
-    expect(triggerGoatBrainIngestWake).toHaveBeenCalledTimes(1);
   });
 
   it("fans out to every enabled brain source and skips the default-brain lookup", async () => {
@@ -170,7 +164,6 @@ describe("POST /api/webhooks/jamie/[integrationId]", () => {
     expect(upsertGoatBrainSourceItemAndEnqueue).toHaveBeenCalledWith(
       expect.objectContaining({ brainRefs: [] }),
     );
-    expect(triggerGoatBrainIngestWake).not.toHaveBeenCalled();
   });
 });
 
