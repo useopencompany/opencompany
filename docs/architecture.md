@@ -1,15 +1,15 @@
 # Architecture
 
-OpenCompany has one product application. Ordinary Chat is the first headless vertical slice: `web`
-is its Next.js client, `api` is its public HTTP composition root, and `runner` owns durable
-execution. Unmigrated product domains continue to use the existing web/runner boundaries.
+OpenCompany has one product application. Chat and Task are the headless execution slice: `web` is
+the Next.js client, `api` is the public HTTP composition root, and `runner` owns durable execution.
+Unmigrated product domains continue to use the existing web/runner boundaries.
 
 ## Runtime boundaries
 
 - `apps/web` owns the Next.js UI, authenticated server actions for unmigrated domains, public
   integration callbacks/webhooks, and the same-origin `/v1` proxy. Its ordinary-Chat compatibility
   route is rollback-only; it owns no canonical or coding-agent capability transport.
-- `apps/api` owns the versioned Hono `/v1` Chat API, WorkOS session/bearer authentication,
+- `apps/api` owns the versioned Hono `/v1` Chat and Task API, WorkOS session/bearer authentication,
   authorization, canonical Auto model resolution, OpenAPI, semantic SSE, and authorized Electric
   read-model proxying.
 - `apps/runner` owns durable chat/task turns, cloud coding sandboxes, in-process execution

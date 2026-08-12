@@ -26,6 +26,7 @@ export type GoatTaskRow = {
   workspace_id: string | null;
   prompt: string;
   model: string;
+  engine?: "opencompany" | "codex" | "claude_code";
   session_id: string | null;
   schedule_id: string | null;
   scheduled_for: string | null;
@@ -367,41 +368,6 @@ export type GoatBrainSourceItemRow = {
   updated_at: string;
 };
 
-function createTaskRunCollections(taskId: string) {
-  return {
-    messages: createGoatElectricCollection<GoatTaskMessageRow>({
-      id: `goat:task_messages:${taskId}`,
-      table: "goat.task_messages",
-      params: { task_id: taskId },
-      getKey: (row) => row.id,
-    }),
-    events: createGoatElectricCollection<GoatTaskEventRow>({
-      id: `goat:task_events:${taskId}`,
-      table: "goat.task_events",
-      params: { task_id: taskId },
-      getKey: (row) => row.id,
-    }),
-    modelUsage: createGoatElectricCollection<GoatTaskModelUsageRow>({
-      id: `goat:task_model_usage:${taskId}`,
-      table: "goat.task_model_usage",
-      params: { task_id: taskId },
-      getKey: (row) => row.id,
-    }),
-    toolUsage: createGoatElectricCollection<GoatTaskToolUsageRow>({
-      id: `goat:task_tool_usage:${taskId}`,
-      table: "goat.task_tool_usage",
-      params: { task_id: taskId },
-      getKey: (row) => row.id,
-    }),
-    sandboxUsage: createGoatElectricCollection<GoatTaskSandboxUsageRow>({
-      id: `goat:task_sandbox_usage:${taskId}`,
-      table: "goat.task_sandbox_usage",
-      params: { task_id: taskId },
-      getKey: (row) => row.id,
-    }),
-  };
-}
-
 // The Electric shape proxy authorizes the brain_ref param against the current
 // user before forwarding, so each brain gets its own shape subscription.
 function createBrainCollections(brainRef: string) {
@@ -454,21 +420,11 @@ function createChatMessageCollection(sessionId: string) {
   });
 }
 
-const taskRunCollectionsByTaskId = new Map<string, ReturnType<typeof createTaskRunCollections>>();
 const chatMessageCollectionsBySessionId = new Map<
   string,
   ReturnType<typeof createChatMessageCollection>
 >();
 const brainCollectionsByBrainRef = new Map<string, ReturnType<typeof createBrainCollections>>();
-
-function getTaskRunCollections(taskId: string) {
-  const cached = taskRunCollectionsByTaskId.get(taskId);
-  if (cached) return cached;
-
-  const collections = createTaskRunCollections(taskId);
-  taskRunCollectionsByTaskId.set(taskId, collections);
-  return collections;
-}
 
 function getBrainCollections(brainRef: string) {
   const cached = brainCollectionsByBrainRef.get(brainRef);
@@ -489,12 +445,6 @@ function getChatMessageCollection(sessionId: string) {
 }
 
 function buildGoatCollections() {
-  const tasks = createGoatElectricCollection<GoatTaskRow>({
-    id: "goat:tasks",
-    table: "goat.tasks",
-    getKey: (row) => row.id,
-  });
-
   const taskSchedules = createGoatElectricCollection<GoatTaskScheduleRow>({
     id: "goat:task_schedules",
     table: "goat.task_schedules",
@@ -538,10 +488,8 @@ function buildGoatCollections() {
   });
 
   return {
-    tasks,
     taskSchedules,
     chatSessions,
-    taskRunCollections: getTaskRunCollections,
     chatMessages: getChatMessageCollection,
     codexChatSessions,
     integrations,

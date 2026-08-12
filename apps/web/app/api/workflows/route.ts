@@ -96,6 +96,7 @@ export async function POST(request: Request) {
       generateGoatWorkflowTaskTitle({
         taskId: task.id,
         userWorkosId: context.user.workosUserId,
+        workspaceId: context.workspace.id,
         workflowName: task.name,
         description,
         apiKey: process.env.VERCEL_AI_GATEWAY_API_KEY ?? null,

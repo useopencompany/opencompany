@@ -83,7 +83,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
         : {}),
       clientMessageId: latest.id,
       content: textFromMessage(latest),
-      engine: "opencompany",
+      engine: request.engine,
       ...(model ? { model } : {}),
       ...(attachmentIds.length ? { attachmentIds } : {}),
       ...(metadata.mentions?.length
@@ -337,7 +337,12 @@ function requestContext(body: object | undefined) {
     sessionId: stringValue(value.sessionId),
     newSessionId: stringValue(value.newSessionId),
     model: stringValue(value.model),
+    engine: chatEngine(value.engine),
   };
+}
+
+function chatEngine(value: unknown): "opencompany" | "codex" | "claude_code" {
+  return value === "codex" || value === "claude_code" ? value : "opencompany";
 }
 
 function messageMetadata(message: UIMessage): MessageMetadata {

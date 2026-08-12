@@ -68,6 +68,25 @@ member when they fire. A pre-cutover schedule with no workspace uses a determini
 fallback and logs `opencompany.legacy_task_schedule_workspace_fallback`; inventory and resolve
 those rows before removing the fallback in PR 4.
 
+### Web Task cutover and rollback
+
+The Task board and detail route read `tasks-v1` and the canonical Conversation Message/Run models.
+Manual Task creation and archive use `/v1/tasks`; replies use `/v1/messages`; stop targets
+`/v1/runs/{runId}/cancel`. Electric only acknowledges API-owned transaction IDs and is never a
+write path. The removed Next.js `/api/tasks` routes and physical `goat.tasks`,
+`goat.task_messages`, `goat.task_events`, and Task-usage shapes must return 404 or be rejected.
+
+Sessionless pre-cutover rows are a bounded exception: `/v1/compatibility/tasks` and
+`/v1/compatibility/tasks/{taskId}/history` serve actor-scoped, read-only snapshots. The UI must not
+offer reply, cancellation, or archive mutations for them. Before PR 4, inventory this adapter's
+production row count using the designated test workspace or approved read-only production query;
+do not create or alter arbitrary rows for evidence.
+
+PR 3 rollback redeploys the prior web release only. Keep the API, runner, canonical queue, and
+additive projections available so already-created Tasks finish through their Runs. Never reroute a
+canonical Task into the legacy Task-session queue. Record the web/API/runner release SHAs and the
+Task list/detail/create/follow-up/cancel/archive matrix on #1190.
+
 ## Local web slice
 
 After the normal `bun run setup`, start all four local pieces with the workspace's Infisical dev

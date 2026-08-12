@@ -173,6 +173,51 @@ describe("Postgres Task repository", () => {
     });
   });
 
+  it("serves preserved legacy history only through the authorized compatibility boundary", async () => {
+    await database.exec(`
+      INSERT INTO goat.tasks (
+        id, name, user_workos_id, workspace_id, prompt, model, session_id, status, stage
+      ) VALUES (
+        'legacy_task_1', 'Legacy research', 'user_1', 'workspace_1',
+        'Preserve this history', 'moonshotai/kimi-k3', NULL, 'succeeded', 'completed'
+      );
+      INSERT INTO goat.task_messages (
+        id, task_id, user_workos_id, role, status, content, created_at, completed_at
+      ) VALUES (
+        'legacy_message_1', 'legacy_task_1', 'user_1', 'assistant', 'completed',
+        'Historical result', '2026-08-10T09:00:00.000Z', '2026-08-10T10:00:00.000Z'
+      );
+      INSERT INTO goat.task_events (
+        task_id, user_workos_id, message_id, type, payload
+      ) VALUES (
+        'legacy_task_1', 'user_1', 'legacy_message_1', 'message.completed',
+        '{"messageId":"legacy_message_1"}'::jsonb
+      );
+      INSERT INTO goat.task_model_usage (
+        task_id, user_workos_id, total_cost_usd_micros
+      ) VALUES ('legacy_task_1', 'user_1', 1200);
+    `);
+
+    await expect(service.listLegacyTasks(actor())).resolves.toMatchObject([
+      { id: "legacy_task_1", name: "Legacy research" },
+    ]);
+    await expect(service.getLegacyTaskHistory(actor(), "legacy_task_1")).resolves.toMatchObject({
+      task: { id: "legacy_task_1" },
+      messages: [{ id: "legacy_message_1", content: "Historical result" }],
+      events: [{ id: 1, type: "message.completed" }],
+    });
+    await expect(service.getTaskSummary(actor(), "legacy_task_1")).resolves.toEqual({
+      cost: { hasRecordedCosts: true, totalCostUsdMicros: 1200 },
+      durationMs: 3_600_000,
+    });
+    await expect(
+      service.getLegacyTaskHistory(
+        actor({ userId: "user_2", workspaceId: "workspace_2" }),
+        "legacy_task_1",
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+  });
+
   it("atomically creates and idempotently replays one Task, Conversation, Message, and Run", async () => {
     const command = {
       idempotencyKey: "task-create-1",
@@ -496,6 +541,31 @@ describe("Postgres Task repository", () => {
       ).rows,
     ).toEqual([{ status: "archived" }]);
   });
+
+  it("renames Task metadata and its one canonical Conversation together", async () => {
+    const created = await service.createTask(actor(), {
+      idempotencyKey: "task-rename",
+      goal: "Draft the brief",
+      engine: "opencompany",
+      model: "moonshotai/kimi-k3",
+      source: "workflow",
+    });
+
+    await expect(
+      service.updateTask(actor(), created.task.id, { name: "Launch brief" }),
+    ).resolves.toMatchObject({ task: { name: "Launch brief" } });
+    await expect(
+      database.query<{ task_name: string; conversation_title: string }>(
+        `SELECT task.name AS task_name, conversation.title AS conversation_title
+         FROM goat.tasks AS task
+         JOIN goat.chat_sessions AS conversation ON conversation.id = task.session_id
+         WHERE task.id = $1`,
+        [created.task.id],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ task_name: "Launch brief", conversation_title: "Launch brief" }],
+    });
+  });
 });
 
 function actor(overrides: Partial<Actor> = {}): Actor {
@@ -589,6 +659,46 @@ const BASE_SCHEMA = `
     updated_at timestamptz NOT NULL DEFAULT now()
   );
   CREATE UNIQUE INDEX goat_tasks_session_idx ON goat.tasks(session_id) WHERE session_id IS NOT NULL;
+  CREATE TABLE goat.task_messages (
+    id text PRIMARY KEY,
+    task_id text NOT NULL REFERENCES goat.tasks(id),
+    user_workos_id text NOT NULL REFERENCES goat.users(workos_user_id),
+    role text NOT NULL,
+    status text NOT NULL,
+    content text NOT NULL DEFAULT '',
+    tool_name text,
+    tool_call_id text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    completed_at timestamptz
+  );
+  CREATE TABLE goat.task_events (
+    id serial PRIMARY KEY,
+    task_id text NOT NULL REFERENCES goat.tasks(id),
+    user_workos_id text NOT NULL REFERENCES goat.users(workos_user_id),
+    message_id text REFERENCES goat.task_messages(id),
+    type text NOT NULL,
+    payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE TABLE goat.task_model_usage (
+    id serial PRIMARY KEY,
+    task_id text NOT NULL REFERENCES goat.tasks(id),
+    user_workos_id text NOT NULL REFERENCES goat.users(workos_user_id),
+    total_cost_usd_micros bigint NOT NULL DEFAULT 0
+  );
+  CREATE TABLE goat.task_tool_usage (
+    id serial PRIMARY KEY,
+    task_id text NOT NULL REFERENCES goat.tasks(id),
+    user_workos_id text NOT NULL REFERENCES goat.users(workos_user_id),
+    total_cost_usd_micros bigint NOT NULL DEFAULT 0
+  );
+  CREATE TABLE goat.task_sandbox_usage (
+    id serial PRIMARY KEY,
+    task_id text NOT NULL REFERENCES goat.tasks(id),
+    user_workos_id text NOT NULL REFERENCES goat.users(workos_user_id),
+    total_cost_usd_micros bigint NOT NULL DEFAULT 0
+  );
   CREATE TABLE goat.chat_messages (
     id text PRIMARY KEY,
     session_id text NOT NULL REFERENCES goat.chat_sessions(id),
@@ -600,6 +710,12 @@ const BASE_SCHEMA = `
     attachment_texts jsonb,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE TABLE goat.credit_ledger (
+    id serial PRIMARY KEY,
+    user_workos_id text NOT NULL REFERENCES goat.users(workos_user_id),
+    chat_session_id text REFERENCES goat.chat_sessions(id),
+    amount_usd_micros bigint NOT NULL
   );
   CREATE TABLE goat.codex_chat_sessions (
     id text PRIMARY KEY,

@@ -24,6 +24,7 @@ export type GoatTaskRunTaskInput =
       name: string;
       prompt: string;
       model: string;
+      engine?: GoatHarnessEngine;
       sessionId?: string | null;
       status: GoatTaskStatus;
       stage: GoatTaskStage;
@@ -42,6 +43,7 @@ export type GoatTaskRunTaskInput =
       name: string;
       prompt: string;
       model: string;
+      engine?: GoatHarnessEngine;
       session_id?: string | null;
       status: GoatTaskStatus;
       stage: GoatTaskStage;
@@ -731,7 +733,7 @@ function readTaskHarnessSpec(task: GoatTaskRunTaskInput): unknown {
 }
 
 function normalizeTask(task: GoatTaskRunTaskInput): GoatHarnessRunViewModel["task"] {
-  const engine = readHarnessEngine(readTaskHarnessSpec(task));
+  const engine = task.engine ?? readHarnessEngine(readTaskHarnessSpec(task));
   if ("displayId" in task) {
     return {
       id: task.id,

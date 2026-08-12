@@ -8,6 +8,8 @@ import {
   CHAT_ATTACHMENT_MAX_BYTES,
   type ChatApplicationService,
   CoreError,
+  type LegacyTask,
+  type LegacyTaskHistory,
   type RunEvent,
   type Task,
   type TaskApplicationService,
@@ -187,6 +189,24 @@ export function createApiApp(input: CreateApiAppInput) {
         { data: { task: taskDto(result.task), transactionId: result.transactionId }, meta },
         200,
       );
+    },
+    getTaskSummary: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const summary = await input.tasks.getTaskSummary(actor, c.req.valid("param").taskId);
+      return c.json({ data: summary, meta }, 200);
+    },
+    listLegacyTasks: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const tasks = await input.tasks.listLegacyTasks(actor);
+      return c.json({ data: tasks.map(legacyTaskDto), meta }, 200);
+    },
+    getLegacyTaskHistory: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const history = await input.tasks.getLegacyTaskHistory(actor, c.req.valid("param").taskId);
+      return c.json({ data: legacyTaskHistoryDto(history), meta }, 200);
     },
     listConversations: async (c) => {
       const actor = actorFrom(c);
@@ -743,6 +763,32 @@ function taskDto(task: Task) {
     archivedAt: task.archivedAt?.toISOString() ?? null,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
+  };
+}
+
+function legacyTaskDto(task: LegacyTask) {
+  return {
+    ...task,
+    scheduledFor: task.scheduledFor?.toISOString() ?? null,
+    archivedAt: task.archivedAt?.toISOString() ?? null,
+    createdAt: task.createdAt.toISOString(),
+    updatedAt: task.updatedAt.toISOString(),
+  };
+}
+
+function legacyTaskHistoryDto(history: LegacyTaskHistory) {
+  return {
+    task: legacyTaskDto(history.task),
+    messages: history.messages.map((message) => ({
+      ...message,
+      createdAt: message.createdAt.toISOString(),
+      updatedAt: message.updatedAt.toISOString(),
+      completedAt: message.completedAt?.toISOString() ?? null,
+    })),
+    events: history.events.map((event) => ({
+      ...event,
+      createdAt: event.createdAt.toISOString(),
+    })),
   };
 }
 

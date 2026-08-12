@@ -53,6 +53,42 @@ export type TaskPage = {
   nextCursor: string | null;
 };
 
+export type TaskSummary = {
+  cost: {
+    hasRecordedCosts: boolean;
+    totalCostUsdMicros: number;
+  };
+  durationMs: number | null;
+};
+
+export type LegacyTask = Omit<Task, "conversationId">;
+
+export type LegacyTaskHistoryMessage = {
+  id: string;
+  role: "user" | "assistant" | "tool";
+  status: "created" | "running" | "completed" | "failed";
+  content: string;
+  toolName: string | null;
+  toolCallId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  completedAt: Date | null;
+};
+
+export type LegacyTaskHistoryEvent = {
+  id: number;
+  messageId: string | null;
+  type: string;
+  payload: Record<string, unknown>;
+  createdAt: Date;
+};
+
+export type LegacyTaskHistory = {
+  task: LegacyTask;
+  messages: LegacyTaskHistoryMessage[];
+  events: LegacyTaskHistoryEvent[];
+};
+
 export type CreateTaskCommand = {
   idempotencyKey: string;
   name?: string;
@@ -75,9 +111,7 @@ export type CreateTaskResult = {
   idempotentReplay: boolean;
 };
 
-export type UpdateTaskCommand = {
-  archived: boolean;
-};
+export type UpdateTaskCommand = { archived: boolean } | { name: string };
 
 export type UpdateTaskResult = {
   task: Task;
@@ -92,6 +126,9 @@ export interface TaskRepository {
     archived: boolean;
   }): Promise<TaskPage>;
   getTask(input: { actor: Actor; taskId: string }): Promise<Task | null>;
+  getTaskSummary(input: { actor: Actor; taskId: string }): Promise<TaskSummary | null>;
+  listLegacyTasks(input: { actor: Actor; limit: number }): Promise<LegacyTask[]>;
+  getLegacyTaskHistory(input: { actor: Actor; taskId: string }): Promise<LegacyTaskHistory | null>;
   getTaskByConversation(input: { actor: Actor; conversationId: string }): Promise<Task | null>;
   createTaskAndRun(input: { actor: Actor; command: CreateTaskCommand }): Promise<CreateTaskResult>;
   updateTask(input: {
@@ -131,6 +168,34 @@ export class TaskApplicationService {
     });
     if (!task) throw new CoreError("not_found", "Task not found.");
     return task;
+  }
+
+  async getTaskSummary(actor: Actor, taskId: string): Promise<TaskSummary> {
+    requireTaskPermission(actor, TASK_READ_PERMISSION);
+    const summary = await this.repository.getTaskSummary({
+      actor,
+      taskId: resourceId(taskId, "taskId"),
+    });
+    if (!summary) throw new CoreError("not_found", "Task not found.");
+    return summary;
+  }
+
+  listLegacyTasks(actor: Actor, input: { limit?: number } = {}): Promise<LegacyTask[]> {
+    requireTaskPermission(actor, TASK_READ_PERMISSION);
+    return this.repository.listLegacyTasks({
+      actor,
+      limit: Math.max(1, Math.min(input.limit ?? 100, 100)),
+    });
+  }
+
+  async getLegacyTaskHistory(actor: Actor, taskId: string): Promise<LegacyTaskHistory> {
+    requireTaskPermission(actor, TASK_READ_PERMISSION);
+    const history = await this.repository.getLegacyTaskHistory({
+      actor,
+      taskId: resourceId(taskId, "taskId"),
+    });
+    if (!history) throw new CoreError("not_found", "Legacy Task history not found.");
+    return history;
   }
 
   async getTaskByConversation(actor: Actor, conversationId: string): Promise<Task> {
@@ -216,13 +281,19 @@ export class TaskApplicationService {
     command: UpdateTaskCommand,
   ): Promise<UpdateTaskResult> {
     requireTaskPermission(actor, TASK_WRITE_PERMISSION);
-    if (typeof command.archived !== "boolean") {
-      throw new CoreError("invalid_argument", "A Task archive update is required.");
+    let normalizedCommand: UpdateTaskCommand;
+    if ("archived" in command) {
+      if (typeof command.archived !== "boolean") {
+        throw new CoreError("invalid_argument", "A Task archive update is required.");
+      }
+      normalizedCommand = { archived: command.archived };
+    } else {
+      normalizedCommand = { name: boundedTaskName(command.name) };
     }
     const result = await this.repository.updateTask({
       actor,
       taskId: resourceId(taskId, "taskId"),
-      command: { archived: command.archived },
+      command: normalizedCommand,
     });
     if (!result) throw new CoreError("not_found", "Task not found.");
     return result;
@@ -245,6 +316,14 @@ function resourceId(value: string, field: string) {
 
 function boundedValue(value: string, field: string) {
   return resourceId(value, field);
+}
+
+function boundedTaskName(value: string) {
+  const normalized = value.trim();
+  if (!normalized || normalized.length > MAX_NAME_LENGTH) {
+    throw new CoreError("invalid_argument", "name is invalid.");
+  }
+  return normalized;
 }
 
 export function taskNameFromGoal(goal: string) {
