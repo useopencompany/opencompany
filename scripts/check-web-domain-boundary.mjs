@@ -1,0 +1,72 @@
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const webRoot = path.join(repositoryRoot, "apps/web");
+const baselinePath = path.join(repositoryRoot, "scripts/web-domain-boundary-baseline.json");
+const sourceExtensions = new Set([".ts", ".tsx"]);
+const excludedDirectories = new Set([".next", "node_modules", "__tests__"]);
+const excludedFilePattern = /\.(?:test|spec)\.[^.]+$/u;
+const importPatterns = {
+  dbImports:
+    /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)["']@opencompany\/db(?:\/[^"']*)?["']/u,
+  drizzleImports:
+    /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)["']drizzle-orm(?:\/[^"']*)?["']/u,
+};
+
+const baseline = JSON.parse(await readFile(baselinePath, "utf8"));
+const sourceFiles = await listSourceFiles(webRoot);
+const actual = { dbImports: [], drizzleImports: [] };
+
+for (const absolutePath of sourceFiles) {
+  const source = await readFile(absolutePath, "utf8");
+  const relativePath = path.relative(repositoryRoot, absolutePath).split(path.sep).join("/");
+  for (const [boundary, pattern] of Object.entries(importPatterns)) {
+    if (pattern.test(source)) actual[boundary].push(relativePath);
+  }
+}
+
+let failed = false;
+for (const boundary of Object.keys(importPatterns)) {
+  actual[boundary].sort();
+  const expected = [...(baseline[boundary] ?? [])].sort();
+  const additions = actual[boundary].filter((file) => !expected.includes(file));
+  const stale = expected.filter((file) => !actual[boundary].includes(file));
+  if (additions.length || stale.length) {
+    failed = true;
+    console.error(`Web domain boundary changed for ${boundary}:`);
+    for (const file of additions) console.error(`  + ${file}`);
+    for (const file of stale) console.error(`  - ${file}`);
+  }
+}
+
+if (failed) {
+  console.error(
+    "Move new data access behind the canonical API, or update the baseline only when a cutover removes legacy imports.",
+  );
+  process.exitCode = 1;
+} else {
+  console.log(
+    `Web domain boundary unchanged (${actual.dbImports.length} @opencompany/db files, ${actual.drizzleImports.length} drizzle-orm files).`,
+  );
+}
+
+async function listSourceFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      if (excludedDirectories.has(entry.name) || entry.name.startsWith(".")) continue;
+      files.push(...(await listSourceFiles(path.join(directory, entry.name))));
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    if (!sourceExtensions.has(path.extname(entry.name)) || excludedFilePattern.test(entry.name)) {
+      continue;
+    }
+    files.push(path.join(directory, entry.name));
+  }
+  return files;
+}

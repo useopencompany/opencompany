@@ -1450,6 +1450,13 @@
       "when": 1786515042068,
       "tag": "0205_goat_task_history_projection_repair",
       "breakpoints": true
+    },
+    {
+      "idx": 207,
+      "version": "7",
+      "when": 1786518930583,
+      "tag": "0207_goat_headless_workflow_foundation",
+      "breakpoints": true
     }
   ]
 }

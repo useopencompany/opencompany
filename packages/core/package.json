@@ -15,6 +15,10 @@
     "./tasks": {
       "types": "./src/tasks.ts",
       "default": "./src/tasks.ts"
+    },
+    "./workflows": {
+      "types": "./src/workflows.ts",
+      "default": "./src/workflows.ts"
     }
   },
   "scripts": {

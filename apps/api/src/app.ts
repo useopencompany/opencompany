@@ -13,6 +13,10 @@ import {
   type RunEvent,
   type Task,
   type TaskApplicationService,
+  type TaskSchedule,
+  type TaskScheduleApplicationService,
+  type Workflow,
+  type WorkflowApplicationService,
 } from "@opencompany/core";
 import {
   AutoModelRoutingError,
@@ -71,6 +75,8 @@ const CORS_EXPOSE_HEADERS = [
 export type CreateApiAppInput = {
   chat: ChatApplicationService;
   tasks: TaskApplicationService;
+  workflows: WorkflowApplicationService;
+  schedules: TaskScheduleApplicationService;
   attachments: AttachmentUploadService;
   authenticate: ApiAuthenticator;
   browserOrigins?: readonly string[];
@@ -207,6 +213,178 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceRateLimit(rateLimiter, actor, "read", 300);
       const history = await input.tasks.getLegacyTaskHistory(actor, c.req.valid("param").taskId);
       return c.json({ data: legacyTaskHistoryDto(history), meta }, 200);
+    },
+    listWorkflows: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const query = c.req.valid("query");
+      const page = await input.workflows.listWorkflows(actor, {
+        ...(query.cursor ? { cursor: query.cursor } : {}),
+        ...(query.limit ? { limit: query.limit } : {}),
+      });
+      return c.json(
+        { data: page.workflows.map(workflowDto), nextCursor: page.nextCursor, meta },
+        200,
+      );
+    },
+    createWorkflow: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const body = c.req.valid("json");
+      const result = await input.workflows.createWorkflow(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        name: body.name,
+        ...(body.description !== undefined ? { description: body.description } : {}),
+      });
+      return c.json(
+        {
+          data: {
+            workflow: workflowDto(result.workflow),
+            transactionId: result.transactionId,
+            replayed: result.idempotentReplay,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    getWorkflow: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const workflow = await input.workflows.getWorkflow(actor, c.req.valid("param").workflowId);
+      return c.json({ data: workflowDto(workflow), meta }, 200);
+    },
+    updateWorkflow: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.workflows.updateWorkflow(
+        actor,
+        c.req.valid("param").workflowId,
+        c.req.valid("json"),
+      );
+      return c.json(
+        {
+          data: { workflow: workflowDto(result.workflow), transactionId: result.transactionId },
+          meta,
+        },
+        200,
+      );
+    },
+    archiveWorkflow: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.workflows.archiveWorkflow(
+        actor,
+        c.req.valid("param").workflowId,
+        c.req.valid("json").expectedVersion,
+      );
+      return c.json({ data: result, meta }, 200);
+    },
+    invokeWorkflow: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "message", 30);
+      const body = c.req.valid("json");
+      const result = await input.workflows.invokeWorkflow(actor, c.req.valid("param").workflowId, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        description: body.description,
+        ...(body.attachmentIds ? { attachmentIds: body.attachmentIds } : {}),
+      });
+      return c.json({ data: taskCreationDto(result), meta }, 202);
+    },
+    runWorkflowNow: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "message", 30);
+      const result = await input.workflows.runWorkflowNow(
+        actor,
+        c.req.valid("param").workflowId,
+        c.req.valid("header")["idempotency-key"],
+      );
+      return c.json({ data: taskCreationDto(result), meta }, 202);
+    },
+    listTaskSchedules: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const query = c.req.valid("query");
+      const page = await input.schedules.listTaskSchedules(actor, {
+        ...(query.cursor ? { cursor: query.cursor } : {}),
+        ...(query.limit ? { limit: query.limit } : {}),
+      });
+      return c.json(
+        { data: page.schedules.map(taskScheduleDto), nextCursor: page.nextCursor, meta },
+        200,
+      );
+    },
+    createTaskSchedule: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const body = c.req.valid("json");
+      const result = await input.schedules.createTaskSchedule(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.sourceDescription !== undefined
+          ? { sourceDescription: body.sourceDescription }
+          : {}),
+        cron: body.cron,
+        ...(body.timezone !== undefined ? { timezone: body.timezone } : {}),
+        prompt: body.prompt,
+      });
+      return c.json(
+        {
+          data: {
+            schedule: taskScheduleDto(result.schedule),
+            transactionId: result.transactionId,
+            replayed: result.idempotentReplay,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    getTaskSchedule: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const schedule = await input.schedules.getTaskSchedule(
+        actor,
+        c.req.valid("param").scheduleId,
+      );
+      return c.json({ data: taskScheduleDto(schedule), meta }, 200);
+    },
+    updateTaskSchedule: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const body = c.req.valid("json");
+      const scheduleId = c.req.valid("param").scheduleId;
+      const result =
+        "enabled" in body
+          ? await input.schedules.setTaskScheduleEnabled(actor, scheduleId, body)
+          : await input.schedules.updateTaskSchedule(actor, scheduleId, body);
+      return c.json(
+        {
+          data: { schedule: taskScheduleDto(result.schedule), transactionId: result.transactionId },
+          meta,
+        },
+        200,
+      );
+    },
+    archiveTaskSchedule: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.schedules.archiveTaskSchedule(
+        actor,
+        c.req.valid("param").scheduleId,
+        c.req.valid("json").expectedVersion,
+      );
+      return c.json({ data: result, meta }, 200);
+    },
+    runTaskScheduleNow: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "message", 30);
+      const result = await input.schedules.runTaskScheduleNow(
+        actor,
+        c.req.valid("param").scheduleId,
+        c.req.valid("header")["idempotency-key"],
+      );
+      return c.json({ data: taskCreationDto(result), meta }, 202);
     },
     listConversations: async (c) => {
       const actor = actorFrom(c);
@@ -517,6 +695,33 @@ export function createApiApp(input: CreateApiAppInput) {
           );
         }
         await input.tasks.listTasks(actor, { limit: 1 });
+      } else if (params.readModel === "workflows-v1") {
+        if (query.conversationId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "conversationId is not valid for this read model.",
+          );
+        }
+        await input.workflows.listWorkflows(actor, { limit: 1 });
+      } else if (params.readModel === "workflow-schedules-v1") {
+        if (query.conversationId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "conversationId is not valid for this read model.",
+          );
+        }
+        await input.workflows.listWorkflows(actor, { limit: 1 });
+      } else if (params.readModel === "task-schedules-v1") {
+        if (query.conversationId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "conversationId is not valid for this read model.",
+          );
+        }
+        await input.schedules.listTaskSchedules(actor, { limit: 1 });
       } else if (params.readModel !== "chat-conversations-v1") {
         if (!query.conversationId) {
           throw new ApiError(
@@ -763,6 +968,51 @@ function taskDto(task: Task) {
     archivedAt: task.archivedAt?.toISOString() ?? null,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
+  };
+}
+
+function taskCreationDto(result: {
+  task: Task;
+  messageId: string;
+  assistantMessageId: string;
+  runId: string;
+  transactionId: string;
+  idempotentReplay: boolean;
+}) {
+  return {
+    task: taskDto(result.task),
+    messageId: result.messageId,
+    assistantMessageId: result.assistantMessageId,
+    runId: result.runId,
+    transactionId: result.transactionId,
+    replayed: result.idempotentReplay,
+  };
+}
+
+function workflowDto(workflow: Workflow) {
+  return {
+    ...workflow,
+    trigger:
+      workflow.trigger.type === "manual"
+        ? workflow.trigger
+        : {
+            ...workflow.trigger,
+            lastRunAt: workflow.trigger.lastRunAt?.toISOString() ?? null,
+            nextRunAt: workflow.trigger.nextRunAt?.toISOString() ?? null,
+          },
+    archivedAt: workflow.archivedAt?.toISOString() ?? null,
+    createdAt: workflow.createdAt.toISOString(),
+    updatedAt: workflow.updatedAt.toISOString(),
+  };
+}
+
+function taskScheduleDto(schedule: TaskSchedule) {
+  return {
+    ...schedule,
+    lastRunAt: schedule.lastRunAt?.toISOString() ?? null,
+    nextRunAt: schedule.nextRunAt.toISOString(),
+    createdAt: schedule.createdAt.toISOString(),
+    updatedAt: schedule.updatedAt.toISOString(),
   };
 }
 

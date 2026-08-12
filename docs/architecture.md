@@ -9,7 +9,7 @@ Unmigrated product domains continue to use the existing web/runner boundaries.
 - `apps/web` owns the Next.js UI, authenticated server actions for unmigrated domains, public
   integration callbacks/webhooks, and the same-origin `/v1` proxy. Its ordinary-Chat compatibility
   route is rollback-only; it owns no canonical or coding-agent capability transport.
-- `apps/api` owns the versioned Hono `/v1` Chat and Task API, WorkOS session/bearer authentication,
+- `apps/api` owns the versioned Hono `/v1` Chat, Task, Workflow, and schedule API, WorkOS session/bearer authentication,
   authorization, canonical Auto model resolution, OpenAPI, semantic SSE, and authorized Electric
   read-model proxying.
 - `apps/runner` owns durable chat/task turns, cloud coding sandboxes, in-process execution
@@ -33,6 +33,10 @@ two narrow public-schema compatibility modules:
 Those modules model existing tables; they are not a license to expand the retired product. Checked-in
 migration history remains authoritative and is never rewritten. Web collections consume authorized
 Electric shapes through its same-origin proxy.
+
+Production code in `apps/web` may not add direct `@opencompany/db` or `drizzle-orm` imports. The
+checked-in boundary baseline is a temporary migration ratchet: each domain cutover removes entries,
+and completion requires zero. API and runner composition roots continue to use shared repositories.
 
 ## Durable execution
 

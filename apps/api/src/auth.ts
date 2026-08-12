@@ -2,8 +2,12 @@ import {
   type Actor,
   CHAT_READ_PERMISSION,
   CHAT_WRITE_PERMISSION,
+  SCHEDULE_READ_PERMISSION,
+  SCHEDULE_WRITE_PERMISSION,
   TASK_READ_PERMISSION,
   TASK_WRITE_PERMISSION,
+  WORKFLOW_READ_PERMISSION,
+  WORKFLOW_WRITE_PERMISSION,
 } from "@opencompany/core";
 import type { ChatSqlExecute } from "@opencompany/db/chat-repository";
 import { WorkOS } from "@workos-inc/node";
@@ -215,6 +219,10 @@ async function resolveLocalActor(
       CHAT_WRITE_PERMISSION,
       TASK_READ_PERMISSION,
       TASK_WRITE_PERMISSION,
+      WORKFLOW_READ_PERMISSION,
+      WORKFLOW_WRITE_PERMISSION,
+      SCHEDULE_READ_PERMISSION,
+      SCHEDULE_WRITE_PERMISSION,
     ],
     authenticationMethod: identity.method,
     ...(identity.sessionId ? { sessionId: identity.sessionId } : {}),

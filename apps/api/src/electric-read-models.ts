@@ -6,6 +6,9 @@ import {
   RunReadModelSchema,
   TaskOutcomeSchema,
   TaskReadModelSchema,
+  TaskScheduleReadModelSchema,
+  WorkflowReadModelSchema,
+  WorkflowScheduleReadModelSchema,
 } from "@opencompany/protocol";
 import { ApiError } from "./errors";
 
@@ -35,7 +38,7 @@ const ELECTRIC_RESPONSE_HEADERS = [
 
 // These columns cross the API boundary as decoded JSON values. Omitting their upstream JSONB
 // metadata prevents @electric-sql/client from parsing the already-decoded values a second time.
-const PREDECODED_READ_MODEL_FIELDS = new Set(["presentation", "attachments"]);
+const PREDECODED_READ_MODEL_FIELDS = new Set(["presentation", "attachments", "steps", "trigger"]);
 
 export interface ReadModelService {
   stream(input: {
@@ -205,6 +208,66 @@ function readModelShape(input: { actor: Actor; readModel: ReadModel; conversatio
         where: `("workspace_id" = $2 OR (` + `"workspace_id" IS NULL AND "actor_id" = $1))`,
         params: [input.actor.userId, input.actor.workspaceId],
       };
+    case "workflows-v1":
+      return {
+        table: "goat.workflow_read_model_v1",
+        columns: [
+          "id",
+          "slug",
+          "name",
+          "description",
+          "steps",
+          "status",
+          "trigger",
+          "version",
+          "archived_at",
+          "created_at",
+          "updated_at",
+        ],
+        where: `"workspace_id" = $1`,
+        params: [input.actor.workspaceId],
+      };
+    case "workflow-schedules-v1":
+      return {
+        table: "goat.workflow_schedule_read_model_v1",
+        columns: [
+          "id",
+          "workflow_id",
+          "workflow_slug",
+          "name",
+          "cron",
+          "timezone",
+          "prompt",
+          "enabled",
+          "last_run_at",
+          "next_run_at",
+          "version",
+          "created_at",
+          "updated_at",
+        ],
+        where: `"workspace_id" = $1`,
+        params: [input.actor.workspaceId],
+      };
+    case "task-schedules-v1":
+      return {
+        table: "goat.task_schedule_read_model_v1",
+        columns: [
+          "id",
+          "name",
+          "source_description",
+          "cron",
+          "timezone",
+          "prompt",
+          "enabled",
+          "last_run_at",
+          "next_run_at",
+          "version",
+          "created_at",
+          "updated_at",
+        ],
+        where: `"actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
+        params: [input.actor.userId, input.actor.workspaceId],
+      };
     default:
       throw new ApiError(400, "invalid_request", "Unknown read model.");
   }
@@ -265,6 +328,10 @@ function projectReadModelValue(
       : TaskReadModelSchema;
     return schema.parse(projected);
   }
+  if (readModel === "workflows-v1") {
+    const schema = partial ? WorkflowReadModelSchema.partial() : WorkflowReadModelSchema;
+    return schema.parse(projected);
+  }
   switch (readModel) {
     case "chat-conversations-v1":
       return (partial ? ConversationReadModelSchema.partial() : ConversationReadModelSchema).parse(
@@ -274,13 +341,23 @@ function projectReadModelValue(
       return (partial ? MessageReadModelSchema.partial() : MessageReadModelSchema).parse(projected);
     case "chat-runs-v1":
       return (partial ? RunReadModelSchema.partial() : RunReadModelSchema).parse(projected);
+    case "workflow-schedules-v1":
+      return (
+        partial ? WorkflowScheduleReadModelSchema.partial() : WorkflowScheduleReadModelSchema
+      ).parse(projected);
+    case "task-schedules-v1":
+      return (partial ? TaskScheduleReadModelSchema.partial() : TaskScheduleReadModelSchema).parse(
+        projected,
+      );
   }
 }
 
 function readModelFieldValue(name: string, value: unknown) {
   if (name.endsWith("At")) return timestampValue(value);
-  if (name === "attemptCount") return numberValue(value);
-  if (name === "presentation") return jsonValue(value);
+  if (name === "attemptCount" || name === "version") return numberValue(value);
+  if (name === "presentation" || name === "steps" || name === "trigger") {
+    return jsonValue(value);
+  }
   if (name === "attachments") {
     const attachments = jsonValue(value);
     return Array.isArray(attachments) ? attachments.map(publicAttachment) : attachments;
@@ -446,6 +523,48 @@ const READ_MODEL_COLUMN_NAMES = {
     reported_status: "",
     outcome_comment: "",
     archived_at: "archivedAt",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "workflows-v1": {
+    id: "id",
+    slug: "slug",
+    name: "name",
+    description: "description",
+    steps: "steps",
+    status: "status",
+    trigger: "trigger",
+    version: "version",
+    archived_at: "archivedAt",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "workflow-schedules-v1": {
+    id: "id",
+    workflow_id: "workflowId",
+    workflow_slug: "workflowSlug",
+    name: "name",
+    cron: "cron",
+    timezone: "timezone",
+    prompt: "prompt",
+    enabled: "enabled",
+    last_run_at: "lastRunAt",
+    next_run_at: "nextRunAt",
+    version: "version",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "task-schedules-v1": {
+    id: "id",
+    name: "name",
+    source_description: "sourceDescription",
+    cron: "cron",
+    timezone: "timezone",
+    prompt: "prompt",
+    enabled: "enabled",
+    last_run_at: "lastRunAt",
+    next_run_at: "nextRunAt",
+    version: "version",
     created_at: "createdAt",
     updated_at: "updatedAt",
   },
