@@ -1784,7 +1784,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "maxLength": 80
+              "maxLength": 512
             }
           },
           "contentHash": {

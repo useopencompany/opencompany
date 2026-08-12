@@ -7,7 +7,7 @@ import {
   parseRunStreamEvent,
 } from "./client";
 import { createOpenApiDocument } from "./routes";
-import { CreateMessageBodySchema, ErrorEnvelopeSchema } from "./schemas";
+import { BrainDocumentSchema, CreateMessageBodySchema, ErrorEnvelopeSchema } from "./schemas";
 
 describe("v1 protocol contract", () => {
   it("validates canonical Message commands without accepting legacy physical vocabulary", () => {
@@ -42,6 +42,11 @@ describe("v1 protocol contract", () => {
         meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
       }),
     ).toMatchObject({ error: { code: "idempotency_conflict" } });
+  });
+
+  it("preserves bounded historical Brain aliases", () => {
+    expect(BrainDocumentSchema.shape.aliases.parse(["a".repeat(113)])).toEqual(["a".repeat(113)]);
+    expect(() => BrainDocumentSchema.shape.aliases.parse(["a".repeat(513)])).toThrow();
   });
 
   it("parses typed semantic events and rejects provider or lease payload leakage", () => {

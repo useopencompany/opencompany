@@ -528,7 +528,9 @@ function projectReadModelValue(
 }
 
 function readModelFieldValue(readModel: ReadModel, name: string, value: unknown) {
-  if (name.endsWith("At") || name === "at") return timestampValue(value);
+  if (name.endsWith("At") || name === "at" || name === "scheduledFor") {
+    return timestampValue(value);
+  }
   if (
     name === "attemptCount" ||
     name === "version" ||
