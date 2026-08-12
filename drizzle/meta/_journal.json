@@ -1443,6 +1443,13 @@
       "when": 1786490800000,
       "tag": "0204_goat_task_conversation_history_projection",
       "breakpoints": true
+    },
+    {
+      "idx": 206,
+      "version": "7",
+      "when": 1786515042068,
+      "tag": "0205_goat_task_history_projection_repair",
+      "breakpoints": true
     }
   ]
 }

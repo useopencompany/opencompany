@@ -84,7 +84,9 @@ Pre-cutover multi-step Workflows may also have terminal Messages and Runs physic
 prior task-kind Conversations. Migration `0204_goat_task_conversation_history_projection` maps only
 owner- and workspace-matched, Task-linked rows into the Task's canonical Conversation in the
 additive Message/Run read projections. It does not update or delete the physical history, and it
-does not remap Task cards in normal Chat Conversations.
+does not remap Task cards in normal Chat Conversations. Migration
+`0205_goat_task_history_projection_repair` idempotently upserts that same bounded projection set when
+an older source row has no projection to update; it also leaves all physical history untouched.
 
 The issue #1190 production audit found 35 sessionless Tasks, all terminal, backed by 421 legacy
 Messages, 1,444 Events, and retained usage rows. It also found eight terminal Tasks with 22 Messages
