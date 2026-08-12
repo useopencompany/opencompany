@@ -1,10 +1,8 @@
-import { getDb } from "@opencompany/db/client";
 import type { GoatChatMessageAttachment, GoatTask } from "@opencompany/db/goat-schema";
-import { goatChatSessions, goatTasks } from "@opencompany/db/goat-schema";
+import { updateGoatTaskForActor } from "@opencompany/goat-agent/application/task-creation";
 import type { GoatSkillMentionRef } from "@opencompany/goat-agent/skills";
 import { createGoatTaskFromWorkflow as createSharedGoatTaskFromWorkflow } from "@opencompany/goat-agent/workflow-tasks";
 import type { GoatWorkflowMentionRef } from "@opencompany/goat-agent/workflows";
-import { and, eq } from "drizzle-orm";
 import { generateGoatChatTitle } from "@/lib/chat-title";
 import { isGoatClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
@@ -46,6 +44,7 @@ export function createGoatTaskFromWorkflow(input: {
 export async function generateGoatWorkflowTaskTitle(input: {
   taskId: string;
   userWorkosId: string;
+  workspaceId: string;
   workflowName: string;
   description: string;
   apiKey?: string | null;
@@ -60,24 +59,12 @@ export async function generateGoatWorkflowTaskTitle(input: {
       userWorkosId: input.userWorkosId,
     });
     if (!title || title === input.workflowName) return;
-    const now = new Date();
-    const db = getDb();
-    const [task] = await db
-      .update(goatTasks)
-      .set({ name: title, updatedAt: now })
-      .where(and(eq(goatTasks.id, input.taskId), eq(goatTasks.userWorkosId, input.userWorkosId)))
-      .returning({ sessionId: goatTasks.sessionId });
-    if (!task?.sessionId) return;
-    await db
-      .update(goatChatSessions)
-      .set({ title, updatedAt: now })
-      .where(
-        and(
-          eq(goatChatSessions.id, task.sessionId),
-          eq(goatChatSessions.userWorkosId, input.userWorkosId),
-          eq(goatChatSessions.kind, "task"),
-        ),
-      );
+    await updateGoatTaskForActor({
+      actorId: input.userWorkosId,
+      workspaceId: input.workspaceId,
+      taskId: input.taskId,
+      name: title,
+    });
   } catch {
     // Keep the workflow-name fallback; a missing pretty title is not worth failing anything.
   }

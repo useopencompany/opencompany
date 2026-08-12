@@ -1,6 +1,5 @@
 import { GoatAnalyticsProvider } from "@opencompany/analytics/goat/client";
 import { getGoatWorkspacePlan } from "@opencompany/db/goat-billing";
-import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
 import { listGoatWorkspaceMembers } from "@opencompany/db/goat-workspaces";
 import type { ReactNode } from "react";
 import { GoatAppDataProvider, type GoatAppInitialData } from "@/components/GoatAppDataProvider";
@@ -31,14 +30,12 @@ import { getGoatSlackIntegrationState } from "@/lib/integrations/slack";
 import { getGoatStripeIntegrationState } from "@/lib/integrations/stripe";
 import { getGoatXAccountIntegrationState } from "@/lib/integrations/x-account";
 import { listCurrentUserGoatTaskSchedules } from "@/lib/task-schedules";
-import { listCurrentUserGoatTasks } from "@/lib/tasks";
 
 export async function GoatAppShell({ children }: { children: ReactNode }) {
   const { authUser, user, workspace, role, workspaces, brains, activeBrain } =
     await currentGoatUser();
   const featureFlags = goatFeatureFlagsFromUser(user);
   const [
-    tasks,
     schedules,
     recentChats,
     googleIntegrations,
@@ -60,7 +57,6 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     personalAccounts,
     plan,
   ] = await Promise.all([
-    listCurrentUserGoatTasks(),
     featureFlags.taskSpawning ? listCurrentUserGoatTaskSchedules() : Promise.resolve([]),
     listCurrentUserRecentGoatChats(),
     getGoatGoogleIntegrationState(user.workosUserId),
@@ -111,26 +107,9 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     })),
     brains: brains.map(brainSummaryView),
     activeBrain: activeBrain ? brainSummaryView(activeBrain) : null,
-    tasks: tasks.map((task) => ({
-      id: task.id,
-      displayId: task.displayId,
-      name: task.name,
-      prompt: task.prompt,
-      model: task.model,
-      sessionId: task.sessionId,
-      scheduleId: task.scheduleId,
-      scheduledFor: task.scheduledFor?.toISOString() ?? null,
-      workflowId: task.workflowId,
-      status: task.status as GoatTaskStatus,
-      stage: task.stage as GoatTaskStage,
-      result: task.result,
-      error: task.error,
-      reportedOutcome: task.reportedOutcome,
-      outcomeComment: task.outcomeComment,
-      archivedAt: task.archivedAt?.toISOString() ?? null,
-      createdAt: task.createdAt.toISOString(),
-      updatedAt: task.updatedAt.toISOString(),
-    })),
+    // Task metadata hydrates from the API-owned Electric read model. Keeping the server snapshot
+    // empty prevents the Next.js composition root from regaining a direct Task database reader.
+    tasks: [],
     schedules,
     recentChats,
     integrations: buildIntegrationState({

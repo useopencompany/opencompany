@@ -252,6 +252,83 @@ export const TaskEnvelopeSchema = z
   .strict()
   .openapi("TaskEnvelope");
 
+export const TaskSummarySchema = z
+  .object({
+    cost: z
+      .object({
+        hasRecordedCosts: z.boolean(),
+        totalCostUsdMicros: z.number().int().min(0),
+      })
+      .strict(),
+    durationMs: z.number().int().min(0).nullable(),
+  })
+  .strict()
+  .openapi("TaskSummary");
+
+export const TaskSummaryEnvelopeSchema = z
+  .object({ data: TaskSummarySchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("TaskSummaryEnvelope");
+
+export const LegacyTaskSchema = TaskSchema.omit({ conversationId: true }).openapi("LegacyTask");
+
+export const LegacyTaskHistoryMessageSchema = z
+  .object({
+    id: ResourceIdSchema,
+    role: z.enum(["user", "assistant", "tool"]),
+    status: z.enum(["created", "running", "completed", "failed"]),
+    content: z.string(),
+    toolName: z.string().nullable(),
+    toolCallId: z.string().nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+    completedAt: TimestampSchema.nullable(),
+  })
+  .strict()
+  .openapi("LegacyTaskHistoryMessage");
+
+export const LegacyTaskHistoryEventSchema = z
+  .object({
+    id: z.number().int().min(1),
+    messageId: ResourceIdSchema.nullable(),
+    type: z.enum([
+      "task.status",
+      "harness.planned",
+      "artifact.created",
+      "assistant.delta",
+      "reasoning.completed",
+      "message.created",
+      "message.completed",
+      "message.failed",
+      "tool.started",
+      "tool.completed",
+      "tool.failed",
+    ]),
+    payload: z.record(z.string(), z.unknown()),
+    createdAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("LegacyTaskHistoryEvent");
+
+export const LegacyTaskPageSchema = z
+  .object({ data: z.array(LegacyTaskSchema), meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("LegacyTaskPage");
+
+export const LegacyTaskHistoryEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        task: LegacyTaskSchema,
+        messages: z.array(LegacyTaskHistoryMessageSchema),
+        events: z.array(LegacyTaskHistoryEventSchema),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("LegacyTaskHistoryEnvelope");
+
 export const CreateTaskBodySchema = z
   .object({
     name: z.string().min(1).max(160).optional(),
@@ -281,8 +358,10 @@ export const CreateTaskEnvelopeSchema = z
   .openapi("CreateTaskEnvelope");
 
 export const UpdateTaskBodySchema = z
-  .object({ archived: z.boolean() })
-  .strict()
+  .union([
+    z.object({ archived: z.boolean() }).strict(),
+    z.object({ name: z.string().min(1).max(160) }).strict(),
+  ])
   .openapi("UpdateTaskBody");
 
 export const UpdateTaskEnvelopeSchema = z
@@ -454,6 +533,11 @@ export type RunDto = z.infer<typeof RunSchema>;
 export type ChatReadModel = z.infer<typeof ChatReadModelSchema>;
 export type ReadModel = z.infer<typeof ReadModelSchema>;
 export type TaskDto = z.infer<typeof TaskSchema>;
+export type TaskSummaryDto = z.infer<typeof TaskSummarySchema>;
+export type LegacyTaskDto = z.infer<typeof LegacyTaskSchema>;
+export type LegacyTaskHistoryMessageDto = z.infer<typeof LegacyTaskHistoryMessageSchema>;
+export type LegacyTaskHistoryEventDto = z.infer<typeof LegacyTaskHistoryEventSchema>;
+export type LegacyTaskHistoryDto = z.infer<typeof LegacyTaskHistoryEnvelopeSchema>["data"];
 export type TaskReadModel = z.infer<typeof TaskReadModelSchema>;
 export type ConversationReadModel = z.infer<typeof ConversationReadModelSchema>;
 export type MessageReadModel = z.infer<typeof MessageReadModelSchema>;

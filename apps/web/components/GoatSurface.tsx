@@ -9,6 +9,7 @@ import {
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import type {
   GoatChatEngine,
+  GoatHarnessEngine,
   GoatTaskReportedOutcome,
   GoatTaskStage,
   GoatTaskStatus,
@@ -177,6 +178,12 @@ import {
   hasChatAttachmentTransportMismatch,
 } from "@/lib/headless-chat-feature";
 import { HeadlessChatTransport, startHeadlessBackgroundChat } from "@/lib/headless-chat-transport";
+import { getHeadlessTasks, taskReadModelToRow } from "@/lib/headless-task-collections";
+import {
+  archiveHeadlessTask,
+  cancelHeadlessTaskRun,
+  createHeadlessTask,
+} from "@/lib/headless-task-commands";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { alwaysAllowGoatChatActionAction } from "@/lib/integration-account-actions";
 import {
@@ -193,7 +200,6 @@ import {
   removeOptimisticGoatChatSummary,
 } from "@/lib/optimistic-chat-summaries";
 import type { GoatSkillCatalogItem } from "@/lib/skills";
-import { continueGoatTask } from "@/lib/task-client";
 import {
   createGoatCollections,
   type GoatChatMessageRow,
@@ -213,7 +219,6 @@ import {
   deriveGoatTaskWorkflowSteps,
   type GoatTaskWorkflowStepView,
 } from "@/lib/task-workflow-activity";
-import { archiveGoatTaskAction, cancelGoatTaskAction } from "@/lib/tasks";
 import { updateGoatTimezoneAction } from "@/lib/user-preferences";
 import type { GoatWorkflowCatalogItem } from "@/lib/workflows";
 
@@ -357,6 +362,7 @@ export type GoatTaskView = {
   name: string;
   prompt: string;
   model: string;
+  engine?: GoatHarnessEngine;
   sessionId?: string | null;
   scheduleId?: string | null;
   scheduledFor?: string | null;
@@ -378,6 +384,7 @@ export type GoatTaskConversation = {
   status: GoatTaskStatus;
   startedAtMs: number;
   sessionBacked?: boolean;
+  activeRunId?: string | null;
 };
 
 export function GoatSurface({
@@ -541,7 +548,6 @@ export function GoatSurface({
   );
   const [engineSubmitting, setEngineSubmitting] = useState(false);
   const [backgroundTaskSubmitting, setBackgroundTaskSubmitting] = useState(false);
-  const [taskMessageSubmitting, setTaskMessageSubmitting] = useState(false);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
   const [commandPaletteView, setCommandPaletteView] = useState<"search" | "compose">("search");
@@ -602,7 +608,11 @@ export function GoatSurface({
       activeSelectedMentions.find((mention) => mention.kind === "engine"),
     ) ?? baseChatModel;
   const isAutoChatModel = chatModel === AUTO_GOAT_MODEL_SELECTION;
-  const headlessChatActive = HEADLESS_CHAT_ENABLED;
+  const headlessChatActive =
+    HEADLESS_CHAT_ENABLED || Boolean(activeTaskConversation?.sessionBacked);
+  const legacyTaskReadOnly = Boolean(
+    activeTaskConversation && !activeTaskConversation.sessionBacked,
+  );
   const activeTaskId = activeTaskConversation?.taskId ?? null;
   const activeTaskStatus = activeTaskConversation?.status ?? null;
   const isTaskConversationStopping = Boolean(
@@ -723,11 +733,14 @@ export function GoatSurface({
       const requestNewSessionId =
         typeof body?.newSessionId === "string" ? body.newSessionId : undefined;
       const requestModel = typeof body?.model === "string" ? body.model : undefined;
+      const requestEngine =
+        body?.engine === "codex" || body?.engine === "claude_code" ? body.engine : undefined;
       return {
         body: {
           sessionId: requestSessionId,
           ...(requestNewSessionId ? { newSessionId: requestNewSessionId } : {}),
           ...(requestModel ? { model: requestModel } : {}),
+          ...(requestEngine ? { engine: requestEngine } : {}),
           message,
           ...(mentions.length ? { mentions } : {}),
         },
@@ -768,9 +781,8 @@ export function GoatSurface({
     // comes from the Electric-synced liveChat state and is merged below.
     resume:
       (headlessChatActive || chatResumeEnabled) &&
-      !taskConversation &&
       Boolean(initialChat) &&
-      (initialChat?.engine ?? "opencompany") === "opencompany",
+      ((initialChat?.engine ?? "opencompany") === "opencompany" || Boolean(taskConversation)),
     // Batch stream chunks into ~20fps UI updates instead of rendering the
     // whole thread on every token.
     experimental_throttle: 50,
@@ -813,7 +825,7 @@ export function GoatSurface({
   });
   const isGenerating = status === "submitted" || status === "streaming";
   const activeInitialChatEngine =
-    initialChat && mode === "chat" && chatSessionId === initialChat.id
+    initialChat && !activeTaskConversation && mode === "chat" && chatSessionId === initialChat.id
       ? engineChatKindFromChat(initialChat)
       : null;
   const activeEngineChat = useMemo(() => {
@@ -991,11 +1003,9 @@ export function GoatSurface({
   const hasMessages = chatMessages.length > 0;
   const isEngineWorking = isEngineChat && (engineRunning || engineSubmitting);
   const isTaskConversationWorking = Boolean(
-    activeTaskConversation &&
+    activeTaskConversation?.sessionBacked &&
       !isTaskConversationStopping &&
-      (activeTaskConversation.status === "queued" ||
-        activeTaskConversation.status === "running" ||
-        taskMessageSubmitting),
+      (activeTaskConversation.status === "queued" || activeTaskConversation.status === "running"),
   );
   const isAgentWorking = isGenerating || isEngineWorking || isTaskConversationWorking;
   const isInteractionPending = isAgentWorking || isTaskConversationStopping;
@@ -1430,9 +1440,11 @@ export function GoatSurface({
   const archiveTask = (task: GoatTaskView) => {
     setOptimisticallyArchivedIds((current) => new Set(current).add(task.id));
     startArchiveTransition(async () => {
-      const result = await archiveGoatTaskAction(task.id);
-      if (result.ok) {
+      try {
+        await archiveHeadlessTask(task.id, { scopeKey: workspaceId });
         return;
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not archive task.");
       }
 
       setOptimisticallyArchivedIds((current) => {
@@ -1440,7 +1452,6 @@ export function GoatSurface({
         next.delete(task.id);
         return next;
       });
-      toast.error(result.error ?? "Could not archive task.");
     });
   };
 
@@ -1581,63 +1592,6 @@ export function GoatSurface({
       return;
     }
 
-    if (activeTaskConversation && !backgroundChat) {
-      const taskSkillMentions = activeSelectedMentions
-        .filter(isSkillMention)
-        .filter((mention) => goatChatMentionIsVisible(prompt, mention));
-      const messageId = activeTaskConversation.sessionBacked
-        ? `goat_chat_msg_${crypto.randomUUID()}`
-        : `goat_task_msg_${crypto.randomUUID()}`;
-      const optimisticMessage = {
-        id: messageId,
-        role: "user",
-        ...(taskSkillMentions.length > 0
-          ? { metadata: { mentions: taskSkillMentions } satisfies GoatChatMessageMetadata }
-          : {}),
-        parts: [{ type: "text", text: prompt }],
-      } as GoatChatUiMessage;
-
-      clearComposerDraft(chatSessionId);
-      clearError();
-      setInput("");
-      setMentionToken(null);
-      setSelectedMentions([]);
-      setTaskMessageSubmitting(true);
-      beginActiveTurn();
-      setMessages((current) => [...current, optimisticMessage]);
-      const continueTask =
-        taskSkillMentions.length > 0
-          ? continueGoatTask(activeTaskConversation.taskId, prompt, messageId, taskSkillMentions)
-          : continueGoatTask(activeTaskConversation.taskId, prompt, messageId);
-      void continueTask
-        .then((result) => {
-          if (!mountedRef.current) return;
-          if (!result.ok) {
-            setMessages((current) => current.filter((message) => message.id !== messageId));
-            setInput(prompt);
-            setSelectedMentions(taskSkillMentions);
-            clearLocalActiveTurnState(null);
-            clearActiveTurn();
-            toast.error(result.error ?? "Could not continue that task.");
-            return;
-          }
-          router.refresh();
-        })
-        .catch(() => {
-          if (!mountedRef.current) return;
-          setMessages((current) => current.filter((message) => message.id !== messageId));
-          setInput(prompt);
-          setSelectedMentions(taskSkillMentions);
-          clearLocalActiveTurnState(null);
-          clearActiveTurn();
-          toast.error("Could not continue that task.");
-        })
-        .finally(() => {
-          if (mountedRef.current) setTaskMessageSubmitting(false);
-        });
-      return;
-    }
-
     const messagePrompt = backgroundChat?.prompt ?? prompt;
     if (!messagePrompt && readyAttachments.length === 0) return;
 
@@ -1701,6 +1655,7 @@ export function GoatSurface({
         void startGoatAdHocTask({
           description: messagePrompt,
           model: String(chatModel),
+          workspaceId,
           ...(backgroundEngine === "codex" ||
           mentions.some((mention) => mention.kind === "engine" && mention.id === "codex")
             ? { engine: "codex" }
@@ -1909,6 +1864,7 @@ export function GoatSurface({
       void startGoatAdHocTask({
         description: prompt,
         model: String(chatModel),
+        workspaceId,
         ...(mentions.some((mention) => mention.kind === "engine" && mention.id === "codex")
           ? { engine: "codex" }
           : {}),
@@ -2132,7 +2088,12 @@ export function GoatSurface({
     // Clear without revoking previews: the optimistic bubble still shows them.
     composerAttachments.setAttachments([]);
     void sendMessage(message, {
-      body: { sessionId: requestSessionId, newSessionId, model },
+      body: {
+        sessionId: requestSessionId,
+        newSessionId,
+        model,
+        ...(activeTaskConversation && initialChat ? { engine: initialChat.engine } : {}),
+      },
     }).catch((error) => {
       if (newSessionId) removeOptimisticGoatChatSummary(newSessionId);
       const requestChatSessionId = requestSessionId ?? newSessionId;
@@ -2302,20 +2263,19 @@ export function GoatSurface({
     if (activeTaskConversation) {
       if (isTaskConversationStopping) return;
       const taskId = activeTaskConversation.taskId;
-      setTaskMessageSubmitting(false);
+      const runId = activeTaskConversation.activeRunId;
+      if (!runId) {
+        toast.error("The active Task Run is not available yet.");
+        return;
+      }
       setStoppingTaskId(taskId);
-      void cancelGoatTaskAction(taskId)
-        .then((result) => {
-          if (result.ok) {
-            router.refresh();
-            return;
-          }
-          setStoppingTaskId((current) => (current === taskId ? null : current));
-          toast.error(result.error ?? "Could not stop that task.");
+      void cancelHeadlessTaskRun(runId)
+        .then(() => {
+          void stop();
         })
-        .catch(() => {
+        .catch((error) => {
           setStoppingTaskId((current) => (current === taskId ? null : current));
-          toast.error("Could not stop that task.");
+          toast.error(error instanceof Error ? error.message : "Could not stop that task.");
         });
       return;
     }
@@ -2363,7 +2323,6 @@ export function GoatSurface({
     headlessTransport,
     headlessChatActive,
     messages,
-    router,
     stop,
   ]);
 
@@ -2885,7 +2844,7 @@ export function GoatSurface({
           persistedChatSessionId === chatSessionId ? (
             <LiveChatMessages
               sessionId={chatSessionId}
-              headless={headlessChatActive && !activeEngineChat && !activeTaskConversation}
+              headless={headlessChatActive && !activeEngineChat}
               onChange={setLiveChat}
             />
           ) : null}
@@ -2908,7 +2867,15 @@ export function GoatSurface({
             className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center bg-gradient-to-t from-canvas via-canvas to-transparent px-6 pb-6 pt-8"
           >
             <div className="pointer-events-auto relative flex w-full max-w-[720px] flex-col gap-2">
-              {chatSendBlocked ? (
+              {legacyTaskReadOnly ? (
+                <p
+                  className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+                  role="status"
+                >
+                  This pre-cutover task is available as read-only history. Start a new task to
+                  continue the work.
+                </p>
+              ) : chatSendBlocked ? (
                 <p
                   className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-4 text-ink shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
                   role="alert"
@@ -3098,7 +3065,7 @@ export function GoatSurface({
                           event.currentTarget.selectionStart,
                         )
                       }
-                      disabled={backgroundTaskSubmitting}
+                      disabled={backgroundTaskSubmitting || legacyTaskReadOnly}
                       readOnly={voiceDictation.isActive}
                       className={cn(
                         "relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle",
@@ -3137,6 +3104,7 @@ export function GoatSurface({
                       (!isBackgroundSubmit && engineRunning) ||
                       backgroundTaskSubmitting ||
                       voiceDictation.isActive ||
+                      legacyTaskReadOnly ||
                       chatSendBlocked
                     }
                     isGenerating={
@@ -3165,7 +3133,12 @@ export function GoatSurface({
                       <button
                         type="button"
                         aria-label="Attach files"
-                        disabled={isGenerating || engineSubmitting || voiceDictation.isActive}
+                        disabled={
+                          isGenerating ||
+                          engineSubmitting ||
+                          legacyTaskReadOnly ||
+                          voiceDictation.isActive
+                        }
                         onClick={() => attachmentFileInputRef.current?.click()}
                         className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
                       >
@@ -3181,6 +3154,7 @@ export function GoatSurface({
                       engineSubmitting ||
                       engineRunning ||
                       backgroundTaskSubmitting ||
+                      legacyTaskReadOnly ||
                       voiceDictation.isActive ||
                       newChatCommandOpen
                     }
@@ -3212,7 +3186,12 @@ export function GoatSurface({
                         setCodexGoalTokenBudget("");
                       }
                     }}
-                    disabled={isGenerating || Boolean(chatSessionId) || voiceDictation.isActive}
+                    disabled={
+                      isGenerating ||
+                      Boolean(chatSessionId) ||
+                      voiceDictation.isActive ||
+                      legacyTaskReadOnly
+                    }
                     codexConnected={codexConnected}
                     claudeCodeConnected={claudeCodeConnected}
                     autoModelRoutingEnabled={autoModelRoutingEnabled}
@@ -3242,9 +3221,12 @@ export function GoatSurface({
                       goalModeEnabled={codexGoalModeEnabled}
                       goalObjective={codexGoalObjective}
                       goalTokenBudget={codexGoalTokenBudget}
-                      disabled={engineSubmitting || voiceDictation.isActive}
+                      disabled={engineSubmitting || legacyTaskReadOnly || voiceDictation.isActive}
                       modelDisabled={
-                        engineSubmitting || Boolean(activeEngineChat) || voiceDictation.isActive
+                        engineSubmitting ||
+                        Boolean(activeEngineChat) ||
+                        legacyTaskReadOnly ||
+                        voiceDictation.isActive
                       }
                       onReasoningEffortChange={setCodexReasoningEffort}
                       onPlanModeEnabledChange={setCodexPlanModeEnabled}
@@ -3754,6 +3736,7 @@ function QuickChatComposer({
       void startGoatAdHocTask({
         description: prompt,
         model: String(chatModel),
+        workspaceId,
         ...(backgroundEngine === "codex" ||
         mentions.some((mention) => mention.kind === "engine" && mention.id === "codex")
           ? { engine: "codex" }
@@ -5205,33 +5188,25 @@ async function fetchGoatBrainWorkflowCatalog(signal?: AbortSignal) {
     : [];
 }
 
-async function startGoatAdHocTask(input: { description: string; model: string; engine?: "codex" }) {
-  const response = await fetch("/api/tasks", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  const payload = (await response.json().catch(() => null)) as {
-    error?: unknown;
-    task?: { id?: unknown; displayId?: unknown; name?: unknown };
-  } | null;
-  if (!response.ok) {
-    throw new Error(
-      typeof payload?.error === "string" ? payload.error : "Could not start that background task.",
-    );
-  }
-  if (
-    typeof payload?.task?.id !== "string" ||
-    typeof payload.task.displayId !== "string" ||
-    typeof payload.task.name !== "string"
-  ) {
-    throw new Error("The background task started, but its response was invalid.");
-  }
+async function startGoatAdHocTask(input: {
+  description: string;
+  model: string;
+  engine?: "codex";
+  workspaceId: string;
+}) {
+  const data = await createHeadlessTask(
+    {
+      goal: descriptionFromGoatAdHocTaskPrompt(input.description),
+      engine: input.engine ?? "opencompany",
+      model: input.model,
+    },
+    { scopeKey: input.workspaceId },
+  );
   return {
     task: {
-      id: payload.task.id,
-      displayId: payload.task.displayId,
-      name: payload.task.name,
+      id: data.task.id,
+      displayId: data.task.displayId,
+      name: data.task.name,
     },
   };
 }
@@ -6044,9 +6019,9 @@ function LiveChatTaskSubscriber({
 }: {
   setTasks: Dispatch<SetStateAction<readonly GoatTaskView[] | null>>;
 }) {
-  const collections = useMemo(() => createGoatCollections(), []);
-  const { data: rows } = useLiveQuery((q) => q.from({ task: collections.tasks }));
-  const liveTasks = useMemo(() => (rows ?? []).map(taskRowToView), [rows]);
+  const tasks = useMemo(() => getHeadlessTasks(), []);
+  const { data: rows } = useLiveQuery((q) => q.from({ task: tasks }));
+  const liveTasks = useMemo(() => (rows ?? []).map(taskReadModelToRow).map(taskRowToView), [rows]);
 
   useEffect(() => {
     setTasks(liveTasks);
@@ -6351,6 +6326,7 @@ function taskRowToView(row: GoatTaskRow): GoatTaskView {
     name: row.name,
     prompt: row.prompt,
     model: row.model,
+    ...(row.engine ? { engine: row.engine } : {}),
     sessionId: row.session_id,
     scheduleId: row.schedule_id,
     scheduledFor: row.scheduled_for,
@@ -6438,7 +6414,8 @@ function ResultRow({
   const href = `/tasks/${encodeURIComponent(task.displayId)}`;
   const prefetchTask = () => router.prefetch(href);
   const canArchive =
-    task.status === "succeeded" || task.status === "failed" || task.status === "canceled";
+    Boolean(task.sessionId) &&
+    (task.status === "succeeded" || task.status === "failed" || task.status === "canceled");
   return (
     <div className="group/result relative flex items-center rounded-lg px-2 py-1 transition-colors duration-150 hover:bg-surface-hover focus-within:bg-surface-hover">
       <Link

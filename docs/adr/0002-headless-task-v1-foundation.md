@@ -49,7 +49,10 @@ The minimum Task surface is:
 | `GET` | `/v1/tasks` | List actor-visible active or archived Tasks with an opaque cursor. |
 | `POST` | `/v1/tasks` | Atomically create a Task, Conversation, initial Message, and queued Run. |
 | `GET` | `/v1/tasks/{taskId}` | Read Task metadata and its one `conversationId`. |
-| `PATCH` | `/v1/tasks/{taskId}` | Archive or restore a terminal Task. |
+| `PATCH` | `/v1/tasks/{taskId}` | Rename a Task and its Conversation, or archive/restore a terminal Task. |
+| `GET` | `/v1/tasks/{taskId}/summary` | Read API-owned canonical or compatibility usage and duration totals. |
+| `GET` | `/v1/compatibility/tasks` | List bounded, sessionless pre-cutover Task metadata. |
+| `GET` | `/v1/compatibility/tasks/{taskId}/history` | Read a sessionless Task's immutable legacy transcript and events. |
 
 `POST /v1/tasks` requires `Idempotency-Key`. The normalized command hash includes the Task name,
 goal, engine, concrete model, ordered attachment IDs, source, and optional Workflow/schedule
@@ -149,6 +152,21 @@ user-scoped schedules retain a nullable workspace only during the compatibility 
 deterministic fallback emits `opencompany.legacy_task_schedule_workspace_fallback` and must be
 resolved before PR 4 removes that branch.
 
+PR 3 establishes the client boundary. Browser creation, archive, follow-up, and cancellation use
+the generated `/v1` client; follow-up targets the Task Conversation's Message command and
+cancellation targets its active Run. Task list/detail state comes from `tasks-v1` plus the canonical
+Message and Run read models. The Next.js `/api/tasks` facade, Task continuation protocol, direct
+Task archive action, server-side Task list/detail loaders, and physical Task Electric shapes are
+removed. The web process retains only internal producer adapters that invoke
+`TaskApplicationService`; it does not authorize, validate, or persist Task state itself.
+
+Sessionless rows stay outside `tasks-v1`. During the bounded window, the API exposes only their
+actor-scoped metadata, transcript, and historical events through `/v1/compatibility/tasks*`.
+Clients cannot continue, cancel, archive, or request live physical shapes for those rows. The Task
+surface labels this history read-only. PR 4 may delete this adapter only after production inventory
+proves no historical rows require it; otherwise it remains with an explicit follow-up deletion
+condition.
+
 The frozen `/api/chat` and legacy Chat adapter are unaffected. Workflow invocation moves in this
 phase, but Workflow editor/catalog CRUD does not. Expo/mobile, macOS, broad web DB cleanup, runner
 renaming, and new infrastructure remain out of scope.
@@ -162,7 +180,9 @@ read-model rows may remain safely deployed and must not be destructively rolled 
 After PR 2, rollback first disables canonical creation at its caller boundary and restores the
 legacy creator adapter only for new work. Already queued canonical Runs continue on the shared
 runner; they must not be moved to the legacy queue. After PR 3, rollback restores the previous web
-read/write adapter while the API and runner stay capable of completing canonical work. PR 4
+bundle and its bounded adapters while the API and runner stay capable of completing canonical work.
+Existing canonical Tasks must never be moved to the legacy queue; the additive API resources and
+read models may remain deployed. PR 4
 deletion begins only after the evidence gate; any retained historical compatibility data is not
 dropped as part of a code rollback.
 

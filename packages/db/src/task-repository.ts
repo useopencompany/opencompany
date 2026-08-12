@@ -11,11 +11,15 @@ import {
   CoreError,
   type CreateTaskCommand,
   type CreateTaskResult,
+  type LegacyTask,
+  type LegacyTaskHistory,
   type Task,
   type TaskPage,
   type TaskRepository,
   type TaskSource,
   type TaskStatus,
+  type TaskSummary,
+  type UpdateTaskCommand,
   type UpdateTaskResult,
 } from "@opencompany/core";
 import { type SQL, sql } from "drizzle-orm";
@@ -136,6 +140,192 @@ export class PostgresTaskRepository implements TaskRepository {
       LIMIT 1
     `);
     return row ? mapTask(row) : null;
+  }
+
+  async getTaskSummary(input: { actor: Actor; taskId: string }): Promise<TaskSummary | null> {
+    const [row] = await this.rows<TaskSummaryRow>(sql`
+      WITH selected_task AS MATERIALIZED (
+        SELECT
+          task.id,
+          task.user_workos_id,
+          task.session_id,
+          task.status,
+          task.archived_at
+        FROM goat.tasks AS task
+        WHERE (
+            task.id = ${input.taskId}
+            OR upper(task.display_id) = upper(${input.taskId})
+          )
+          AND ${taskAccessPredicate(input.actor)}
+        LIMIT 1
+      ),
+      task_conversations AS MATERIALIZED (
+        SELECT task.session_id AS conversation_id
+        FROM selected_task AS task
+        WHERE task.session_id IS NOT NULL
+        UNION
+        SELECT DISTINCT message.session_id
+        FROM goat.chat_messages AS message
+        JOIN selected_task AS task ON message.task_id = task.id
+      )
+      SELECT
+        task.status,
+        task.archived_at AS "archivedAt",
+        CASE WHEN task.session_id IS NOT NULL THEN (
+          SELECT SUM(
+            CASE
+              WHEN jsonb_typeof(message.debug_trace->'durationMs') = 'number'
+                THEN (message.debug_trace->>'durationMs')::bigint
+              ELSE NULL
+            END
+          )
+          FROM goat.chat_messages AS message
+          WHERE message.session_id IN (SELECT conversation_id FROM task_conversations)
+            AND message.role = 'assistant'
+        ) ELSE NULL END AS "runDurationMs",
+        CASE WHEN task.session_id IS NULL THEN (
+          SELECT MIN(message.created_at)
+          FROM goat.task_messages AS message
+          WHERE message.task_id = task.id
+            AND message.user_workos_id = task.user_workos_id
+            AND message.role <> 'user'
+        ) ELSE NULL END AS "runStartedAt",
+        CASE WHEN task.session_id IS NULL THEN (
+          SELECT MAX(message.completed_at)
+          FROM goat.task_messages AS message
+          WHERE message.task_id = task.id
+            AND message.user_workos_id = task.user_workos_id
+        ) ELSE NULL END AS "runCompletedAt",
+        CASE WHEN task.session_id IS NOT NULL THEN (
+          SELECT COUNT(*)
+          FROM goat.credit_ledger AS ledger
+          WHERE ledger.chat_session_id IN (SELECT conversation_id FROM task_conversations)
+            AND ledger.user_workos_id = task.user_workos_id
+            AND ledger.amount_usd_micros < 0
+        ) ELSE (
+          (SELECT COUNT(*) FROM goat.task_model_usage AS usage
+            WHERE usage.task_id = task.id AND usage.user_workos_id = task.user_workos_id)
+          + (SELECT COUNT(*) FROM goat.task_tool_usage AS usage
+            WHERE usage.task_id = task.id AND usage.user_workos_id = task.user_workos_id)
+          + (SELECT COUNT(*) FROM goat.task_sandbox_usage AS usage
+            WHERE usage.task_id = task.id AND usage.user_workos_id = task.user_workos_id)
+        ) END AS "usageRowCount",
+        CASE WHEN task.session_id IS NOT NULL THEN (
+          SELECT COALESCE(SUM(-ledger.amount_usd_micros), 0)
+          FROM goat.credit_ledger AS ledger
+          WHERE ledger.chat_session_id IN (SELECT conversation_id FROM task_conversations)
+            AND ledger.user_workos_id = task.user_workos_id
+            AND ledger.amount_usd_micros < 0
+        ) ELSE (
+          (SELECT COALESCE(SUM(usage.total_cost_usd_micros), 0)
+            FROM goat.task_model_usage AS usage
+            WHERE usage.task_id = task.id AND usage.user_workos_id = task.user_workos_id)
+          + (SELECT COALESCE(SUM(usage.total_cost_usd_micros), 0)
+            FROM goat.task_tool_usage AS usage
+            WHERE usage.task_id = task.id AND usage.user_workos_id = task.user_workos_id)
+          + (SELECT COALESCE(SUM(usage.total_cost_usd_micros), 0)
+            FROM goat.task_sandbox_usage AS usage
+            WHERE usage.task_id = task.id AND usage.user_workos_id = task.user_workos_id)
+        ) END AS "totalCostUsdMicros"
+      FROM selected_task AS task
+    `);
+    if (!row) return null;
+
+    const terminal =
+      row.archivedAt !== null || ["succeeded", "failed", "canceled"].includes(row.status);
+    const recordedDurationMs = nullableNumber(row.runDurationMs);
+    const startedAt = nullableTimestamp(row.runStartedAt);
+    const completedAt = nullableTimestamp(row.runCompletedAt);
+    const durationMs = !terminal
+      ? null
+      : recordedDurationMs !== null
+        ? Math.max(0, recordedDurationMs)
+        : startedAt !== null && completedAt !== null
+          ? Math.max(0, completedAt - startedAt)
+          : null;
+    const usageRowCount = Number(row.usageRowCount);
+    const totalCostUsdMicros = Number(row.totalCostUsdMicros);
+    return {
+      cost: {
+        hasRecordedCosts: Number.isFinite(usageRowCount) && usageRowCount > 0,
+        totalCostUsdMicros: Number.isFinite(totalCostUsdMicros)
+          ? Math.max(0, totalCostUsdMicros)
+          : 0,
+      },
+      durationMs,
+    };
+  }
+
+  async listLegacyTasks(input: { actor: Actor; limit: number }): Promise<LegacyTask[]> {
+    const rows = await this.rows<LegacyTaskRow>(sql`
+      ${legacyTaskSelect()}
+      WHERE task.session_id IS NULL
+        AND ${taskAccessPredicate(input.actor)}
+      ORDER BY task.updated_at DESC, task.id DESC
+      LIMIT ${input.limit}
+    `);
+    return rows.map(mapLegacyTask);
+  }
+
+  async getLegacyTaskHistory(input: {
+    actor: Actor;
+    taskId: string;
+  }): Promise<LegacyTaskHistory | null> {
+    const [taskRow] = await this.rows<LegacyTaskRow>(sql`
+      ${legacyTaskSelect()}
+      WHERE task.session_id IS NULL
+        AND (
+          task.id = ${input.taskId}
+          OR upper(task.display_id) = upper(${input.taskId})
+        )
+        AND ${taskAccessPredicate(input.actor)}
+      LIMIT 1
+    `);
+    if (!taskRow) return null;
+
+    const [messages, events] = await Promise.all([
+      this.rows<LegacyTaskMessageRow>(sql`
+        SELECT
+          message.id,
+          message.role,
+          message.status,
+          message.content,
+          message.tool_name AS "toolName",
+          message.tool_call_id AS "toolCallId",
+          message.created_at AS "createdAt",
+          message.updated_at AS "updatedAt",
+          message.completed_at AS "completedAt"
+        FROM goat.task_messages AS message
+        WHERE message.task_id = ${taskRow.id}
+          AND message.user_workos_id = ${taskRow.actorId}
+        ORDER BY message.created_at ASC, message.id ASC
+      `),
+      this.rows<LegacyTaskEventRow>(sql`
+        SELECT
+          event.id,
+          event.message_id AS "messageId",
+          event.type,
+          event.payload,
+          event.created_at AS "createdAt"
+        FROM goat.task_events AS event
+        WHERE event.task_id = ${taskRow.id}
+          AND event.user_workos_id = ${taskRow.actorId}
+        ORDER BY event.id ASC
+      `),
+    ]);
+    return {
+      task: mapLegacyTask(taskRow),
+      messages: messages.map((message) => ({
+        ...message,
+        createdAt: asDate(message.createdAt),
+        updatedAt: asDate(message.updatedAt),
+        completedAt: nullableDate(message.completedAt),
+      })),
+      events: events.map((event) => ({
+        ...event,
+        createdAt: asDate(event.createdAt),
+      })),
+    };
   }
 
   async getTaskByConversation(input: {
@@ -534,9 +724,11 @@ export class PostgresTaskRepository implements TaskRepository {
   async updateTask(input: {
     actor: Actor;
     taskId: string;
-    command: { archived: boolean };
+    command: UpdateTaskCommand;
   }): Promise<UpdateTaskResult | null> {
     const now = this.options.now?.() ?? new Date();
+    const archived = "archived" in input.command ? input.command.archived : null;
+    const name = "name" in input.command ? input.command.name : null;
     const [row] = await this.rows<TaskUpdateRow>(sql`
       WITH authorized AS MATERIALIZED (
         SELECT task.id
@@ -549,19 +741,37 @@ export class PostgresTaskRepository implements TaskRepository {
       ),
       updated AS MATERIALIZED (
         UPDATE goat.tasks AS task
-        SET archived_at = CASE
-              WHEN ${input.command.archived}::boolean THEN ${now}::timestamptz
+        SET name = COALESCE(${name}::text, task.name),
+            archived_at = CASE
+              WHEN ${archived}::boolean IS NULL THEN task.archived_at
+              WHEN ${archived}::boolean THEN ${now}::timestamptz
               ELSE NULL
             END,
             updated_at = ${now}::timestamptz
         FROM authorized
         WHERE task.id = authorized.id
-          AND task.status IN ('succeeded', 'failed', 'canceled')
           AND (
-            (${input.command.archived}::boolean AND task.archived_at IS NULL)
-            OR (NOT ${input.command.archived}::boolean AND task.archived_at IS NOT NULL)
+            (${name}::text IS NOT NULL AND task.name IS DISTINCT FROM ${name}::text)
+            OR (
+              ${archived}::boolean IS NOT NULL
+              AND task.status IN ('succeeded', 'failed', 'canceled')
+              AND (
+                (${archived}::boolean AND task.archived_at IS NULL)
+                OR (NOT ${archived}::boolean AND task.archived_at IS NOT NULL)
+              )
+            )
           )
         RETURNING task.*
+      ),
+      updated_conversation AS (
+        UPDATE goat.chat_sessions AS conversation
+        SET title = updated.name,
+            updated_at = ${now}::timestamptz
+        FROM updated
+        WHERE ${name}::text IS NOT NULL
+          AND conversation.id = updated.session_id
+          AND conversation.kind = 'task'
+        RETURNING conversation.id
       ),
       selected_task AS MATERIALIZED (
         SELECT changed.*
@@ -602,6 +812,7 @@ export class PostgresTaskRepository implements TaskRepository {
     `);
     if (!row) return null;
     if (
+      "archived" in input.command &&
       input.command.archived &&
       !row.changed &&
       row.archivedAt === null &&
@@ -675,6 +886,28 @@ type TaskUpdateRow = TaskRow & {
   transactionId: number | string;
 };
 
+type TaskSummaryRow = {
+  status: PhysicalTaskStatus;
+  archivedAt: Date | string | null;
+  runDurationMs: number | string | null;
+  runStartedAt: Date | string | null;
+  runCompletedAt: Date | string | null;
+  usageRowCount: number | string;
+  totalCostUsdMicros: number | string;
+};
+
+type LegacyTaskRow = Omit<TaskRow, "conversationId"> & { actorId: string };
+
+type LegacyTaskMessageRow = LegacyTaskHistory["messages"][number] & {
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  completedAt: Date | string | null;
+};
+
+type LegacyTaskEventRow = LegacyTaskHistory["events"][number] & {
+  createdAt: Date | string;
+};
+
 function taskSelect() {
   return sql`
     SELECT
@@ -701,6 +934,36 @@ function taskSelect() {
     JOIN goat.chat_sessions AS conversation
       ON conversation.id = task.session_id
      AND conversation.kind = 'task'
+  `;
+}
+
+function legacyTaskSelect() {
+  return sql`
+    SELECT
+      task.id,
+      task.user_workos_id AS "actorId",
+      task.display_id AS "displayId",
+      task.name,
+      task.prompt AS goal,
+      task.status,
+      task.source,
+      CASE
+        WHEN task.harness_spec->>'engine' IN ('codex', 'claude_code')
+          THEN task.harness_spec->>'engine'
+        ELSE 'opencompany'
+      END AS engine,
+      task.model,
+      task.workflow_id AS "workflowId",
+      task.schedule_id AS "scheduleId",
+      task.scheduled_for AS "scheduledFor",
+      task.result,
+      task.error,
+      task.reported_outcome AS "reportedStatus",
+      task.outcome_comment AS "outcomeComment",
+      task.archived_at AS "archivedAt",
+      task.created_at AS "createdAt",
+      task.updated_at AS "updatedAt"
+    FROM goat.tasks AS task
   `;
 }
 
@@ -761,6 +1024,32 @@ function mapTask(row: TaskRow): Task {
     name: row.name,
     goal: row.goal,
     conversationId: row.conversationId,
+    status: canonicalTaskStatus(row.status, archivedAt),
+    source: row.source,
+    engine: row.engine,
+    model: row.model,
+    workflowId: row.workflowId,
+    scheduleId: row.scheduleId,
+    scheduledFor: nullableDate(row.scheduledFor),
+    outcome: {
+      result: row.result,
+      error: row.error,
+      reportedStatus: row.reportedStatus,
+      comment: row.outcomeComment,
+    },
+    archivedAt,
+    createdAt: asDate(row.createdAt),
+    updatedAt: asDate(row.updatedAt),
+  };
+}
+
+function mapLegacyTask(row: LegacyTaskRow): LegacyTask {
+  const archivedAt = nullableDate(row.archivedAt);
+  return {
+    id: row.id,
+    displayId: row.displayId,
+    name: row.name,
+    goal: row.goal,
     status: canonicalTaskStatus(row.status, archivedAt),
     source: row.source,
     engine: row.engine,
@@ -894,6 +1183,18 @@ function asDate(value: Date | string) {
 
 function nullableDate(value: Date | string | null) {
   return value ? asDate(value) : null;
+}
+
+function nullableNumber(value: number | string | null) {
+  if (value === null) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function nullableTimestamp(value: Date | string | null) {
+  if (value === null) return null;
+  const timestamp = asDate(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 function rowsFromExecute<Row>(result: unknown): Row[] {

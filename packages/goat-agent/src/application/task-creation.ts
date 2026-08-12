@@ -44,6 +44,13 @@ export type GoatTaskCreationDependencies = {
   defer: (work: Promise<unknown>) => void;
 };
 
+export type GoatTaskUpdateCommand = {
+  actorId: string;
+  workspaceId: string;
+  taskId: string;
+  name: string;
+};
+
 export async function createGoatTaskForActor(
   input: GoatTaskCreationCommand,
   dependencies: GoatTaskCreationDependencies,
@@ -116,6 +123,19 @@ export async function createGoatTaskForActor(
     });
   });
   return task;
+}
+
+export async function updateGoatTaskForActor(input: GoatTaskUpdateCommand) {
+  const actor: Actor = {
+    userId: input.actorId,
+    workspaceId: input.workspaceId,
+    role: "member",
+    permissions: [TASK_WRITE_PERMISSION],
+    authenticationMethod: "service",
+  };
+  return new TaskApplicationService(
+    new PostgresTaskRepository((query) => getDb().execute(query)),
+  ).updateTask(actor, input.taskId, { name: input.name });
 }
 
 function captureTaskSpawned(task: GoatTask, workspaceId: string) {

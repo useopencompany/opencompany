@@ -1,0 +1,116 @@
+"use client";
+
+import {
+  type CreateTaskBody,
+  createOpenCompanyClient,
+  type LegacyTaskDto,
+  type LegacyTaskHistoryDto,
+  type TaskDto,
+  type TaskSummaryDto,
+} from "@opencompany/protocol";
+import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
+import { awaitHeadlessChatTransaction } from "./headless-chat-collections";
+import { awaitHeadlessTaskTransaction } from "./headless-task-collections";
+
+type ClientOptions = { baseUrl?: string; fetch?: typeof globalThis.fetch; scopeKey?: string };
+
+export async function createHeadlessTask(command: CreateTaskBody, options: ClientOptions = {}) {
+  const client = taskClient(options);
+  const response = await client.v1.tasks.$post({
+    header: { "idempotency-key": `web-task:${crypto.randomUUID()}` },
+    json: command,
+  });
+  if (!response.ok) throw await taskResponseError(response, "Task creation failed");
+  const data = (await response.json()).data;
+  await Promise.all([
+    awaitHeadlessTaskTransaction(
+      data.transactionId,
+      options.scopeKey ? { scopeKey: options.scopeKey } : {},
+    ),
+    awaitHeadlessChatTransaction({
+      conversationId: data.task.conversationId,
+      transactionId: data.transactionId,
+    }),
+  ]);
+  return data;
+}
+
+export async function getHeadlessTask(taskId: string, options: ClientOptions = {}) {
+  const response = await taskClient(options).v1.tasks[":taskId"].$get({ param: { taskId } });
+  if (response.status === 404) return null;
+  if (!response.ok) throw await taskResponseError(response, "Task loading failed");
+  return (await response.json()).data as TaskDto;
+}
+
+export async function getHeadlessTaskSummary(
+  taskId: string,
+  options: ClientOptions = {},
+): Promise<TaskSummaryDto | null> {
+  const response = await taskClient(options).v1.tasks[":taskId"].summary.$get({
+    param: { taskId },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw await taskResponseError(response, "Task summary loading failed");
+  return (await response.json()).data;
+}
+
+export async function listLegacyTaskCompatibility(
+  options: ClientOptions = {},
+): Promise<LegacyTaskDto[]> {
+  const response = await taskClient(options).v1.compatibility.tasks.$get();
+  if (!response.ok) throw await taskResponseError(response, "Legacy Task history loading failed");
+  return (await response.json()).data;
+}
+
+export async function getLegacyTaskCompatibilityHistory(
+  taskId: string,
+  options: ClientOptions = {},
+): Promise<LegacyTaskHistoryDto | null> {
+  const response = await taskClient(options).v1.compatibility.tasks[":taskId"].history.$get({
+    param: { taskId },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw await taskResponseError(response, "Legacy Task history loading failed");
+  return (await response.json()).data;
+}
+
+export async function archiveHeadlessTask(taskId: string, options: ClientOptions = {}) {
+  const response = await taskClient(options).v1.tasks[":taskId"].$patch({
+    param: { taskId },
+    json: { archived: true },
+  });
+  if (!response.ok) throw await taskResponseError(response, "Task archive failed");
+  const data = (await response.json()).data;
+  await awaitHeadlessTaskTransaction(
+    data.transactionId,
+    options.scopeKey ? { scopeKey: options.scopeKey } : {},
+  );
+  return data.task;
+}
+
+export async function cancelHeadlessTaskRun(runId: string, options: ClientOptions = {}) {
+  const response = await taskClient(options).v1.runs[":runId"].cancel.$post({ param: { runId } });
+  if (!response.ok) throw await taskResponseError(response, "Task cancellation failed");
+  return (await response.json()).data;
+}
+
+function taskClient(options: ClientOptions) {
+  const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
+  return createOpenCompanyClient(baseUrl, {
+    fetch: createHeadlessChatApiFetch({
+      baseUrl,
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+    }),
+  });
+}
+
+async function taskResponseError(response: Response, fallback: string) {
+  const body = (await response.json().catch(() => null)) as {
+    error?: { message?: unknown; requestId?: unknown };
+  } | null;
+  const message = typeof body?.error?.message === "string" ? body.error.message : null;
+  const requestId = typeof body?.error?.requestId === "string" ? body.error.requestId : null;
+  return new Error(
+    `${message ?? `${fallback} with HTTP ${response.status}.`}${requestId ? ` (request ${requestId})` : ""}`,
+  );
+}

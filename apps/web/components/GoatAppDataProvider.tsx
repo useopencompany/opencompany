@@ -8,6 +8,7 @@ import {
   type ReactNode,
   useCallback,
   useContext,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useState,
@@ -26,6 +27,13 @@ import {
   type HeadlessChatConversationReadModel,
 } from "@/lib/headless-chat-collections";
 import { HEADLESS_CHAT_ENABLED } from "@/lib/headless-chat-feature";
+import {
+  getHeadlessTasks,
+  type HeadlessTaskReadModel,
+  legacyTaskDtoToRow,
+  taskReadModelToRow,
+} from "@/lib/headless-task-collections";
+import { listLegacyTaskCompatibility } from "@/lib/headless-task-commands";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
 import {
@@ -199,11 +207,42 @@ function GoatAppLiveDataSubscriptions({
   onData: (value: GoatAppData) => void;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
-  // Keep task rows live even while the feature is disabled so every surface has
-  // current data as soon as the user enables it. The UI gates on the feature flag.
+  const tasksCollection = useMemo(
+    () => getHeadlessTasks(initialData.workspace.id),
+    [initialData.workspace.id],
+  );
+  // Keep Task metadata live even while the feature is disabled so every surface has current data
+  // as soon as the user enables it. Authorization and shape identity stay in the API.
   const { data: taskRows, isLoading: tasksLoading } = useLiveQuery(
-    (q) => q.from({ task: collections.tasks }),
-    [collections],
+    (q) => q.from({ task: tasksCollection }),
+    [tasksCollection],
+  );
+  const [legacyTaskSnapshot, setLegacyTaskSnapshot] = useState<{
+    workspaceId: string;
+    rows: GoatTaskRow[];
+  } | null>(null);
+  const legacyTaskRows =
+    legacyTaskSnapshot?.workspaceId === initialData.workspace.id ? legacyTaskSnapshot.rows : null;
+  useEffect(() => {
+    const controller = new AbortController();
+    const workspaceId = initialData.workspace.id;
+    void listLegacyTaskCompatibility({
+      fetch: (input, init) => fetch(input, { ...init, signal: controller.signal }),
+    })
+      .then((tasks) => setLegacyTaskSnapshot({ workspaceId, rows: tasks.map(legacyTaskDtoToRow) }))
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        console.warn("Legacy Task compatibility history could not be loaded.", error);
+        setLegacyTaskSnapshot({ workspaceId, rows: [] });
+      });
+    return () => controller.abort();
+  }, [initialData.workspace.id]);
+  const currentTaskRows = useMemo(
+    () => [
+      ...((taskRows ?? []) as HeadlessTaskReadModel[]).map(taskReadModelToRow),
+      ...(legacyTaskRows ?? []),
+    ],
+    [legacyTaskRows, taskRows],
   );
   const { data: scheduleRows, isLoading: schedulesLoading } = useLiveQuery(
     (q) =>
@@ -240,7 +279,7 @@ function GoatAppLiveDataSubscriptions({
 
   const tasks = useMemo(() => {
     if (tasksLoading && !taskRows?.length) return initialData.tasks;
-    return ((taskRows ?? []) as GoatTaskRow[])
+    return currentTaskRows
       .map(taskRowToView)
       .filter(
         (task) =>
@@ -250,7 +289,7 @@ function GoatAppLiveDataSubscriptions({
             isRecentGoatHomeActivity(task.createdAt)),
       )
       .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  }, [initialData.tasks, taskRows, tasksLoading]);
+  }, [currentTaskRows, initialData.tasks, taskRows?.length, tasksLoading]);
 
   const schedules = useMemo(() => {
     if (!initialData.featureFlags.taskSpawning) return [];
@@ -500,8 +539,8 @@ function GoatAppLiveDataSubscriptions({
       recentChats,
       archivedChats,
       integrations,
-      taskRows: (taskRows ?? []) as GoatTaskRow[],
-      tasksReady: !tasksLoading || (taskRows?.length ?? 0) > 0,
+      taskRows: currentTaskRows,
+      tasksReady: legacyTaskRows !== null && (!tasksLoading || (taskRows?.length ?? 0) > 0),
     }),
     [
       archivedChats,
@@ -512,6 +551,8 @@ function GoatAppLiveDataSubscriptions({
       taskRows,
       tasks,
       tasksLoading,
+      currentTaskRows,
+      legacyTaskRows,
     ],
   );
 
@@ -552,6 +593,7 @@ export function taskRowToView(row: GoatTaskRow): GoatTaskView {
     name: row.name,
     prompt: row.prompt,
     model: row.model,
+    ...(row.engine ? { engine: row.engine } : {}),
     sessionId: row.session_id,
     scheduleId: row.schedule_id,
     scheduledFor: row.scheduled_for,

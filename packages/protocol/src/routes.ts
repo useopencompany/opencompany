@@ -12,6 +12,8 @@ import {
   CreateTaskEnvelopeSchema,
   CursorSchema,
   ErrorEnvelopeSchema,
+  LegacyTaskHistoryEnvelopeSchema,
+  LegacyTaskPageSchema,
   MessagePageSchema,
   PresentationCursorSchema,
   ReadModelSchema,
@@ -21,6 +23,7 @@ import {
   RunEnvelopeSchema,
   TaskEnvelopeSchema,
   TaskPageSchema,
+  TaskSummaryEnvelopeSchema,
   UpdateConversationBodySchema,
   UpdateConversationEnvelopeSchema,
   UpdateTaskBodySchema,
@@ -101,6 +104,50 @@ export const updateTaskRoute = createRoute({
     200: {
       description: "Updated Task and Electric transaction boundary.",
       content: { "application/json": { schema: UpdateTaskEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getTaskSummaryRoute = createRoute({
+  method: "get",
+  path: "/v1/tasks/{taskId}/summary",
+  tags: ["Tasks"],
+  security: actorSecurity,
+  request: { params: z.object({ taskId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Usage cost and terminal duration for an actor-visible Task.",
+      content: { "application/json": { schema: TaskSummaryEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listLegacyTasksRoute = createRoute({
+  method: "get",
+  path: "/v1/compatibility/tasks",
+  tags: ["Task compatibility"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Read-only metadata for sessionless pre-cutover Tasks.",
+      content: { "application/json": { schema: LegacyTaskPageSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getLegacyTaskHistoryRoute = createRoute({
+  method: "get",
+  path: "/v1/compatibility/tasks/{taskId}/history",
+  tags: ["Task compatibility"],
+  security: actorSecurity,
+  request: { params: z.object({ taskId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Read-only transcript and events for a sessionless pre-cutover Task.",
+      content: { "application/json": { schema: LegacyTaskHistoryEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -331,6 +378,9 @@ export type V1RouteHandlers = {
   createTask: RouteHandler<typeof createTaskRoute>;
   getTask: RouteHandler<typeof getTaskRoute>;
   updateTask: RouteHandler<typeof updateTaskRoute>;
+  getTaskSummary: RouteHandler<typeof getTaskSummaryRoute>;
+  listLegacyTasks: RouteHandler<typeof listLegacyTasksRoute>;
+  getLegacyTaskHistory: RouteHandler<typeof getLegacyTaskHistoryRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
   updateConversation: RouteHandler<typeof updateConversationRoute>;
@@ -358,6 +408,9 @@ export function createV1Router(
     .openapi(createTaskRoute, handlers.createTask)
     .openapi(getTaskRoute, handlers.getTask)
     .openapi(updateTaskRoute, handlers.updateTask)
+    .openapi(getTaskSummaryRoute, handlers.getTaskSummary)
+    .openapi(listLegacyTasksRoute, handlers.listLegacyTasks)
+    .openapi(getLegacyTaskHistoryRoute, handlers.getLegacyTaskHistory)
     .openapi(listConversationsRoute, handlers.listConversations)
     .openapi(getConversationRoute, handlers.getConversation)
     .openapi(updateConversationRoute, handlers.updateConversation)
@@ -420,6 +473,23 @@ const placeholderTask = {
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
 };
+const placeholderLegacyTask = {
+  id: placeholderTask.id,
+  displayId: placeholderTask.displayId,
+  name: placeholderTask.name,
+  goal: placeholderTask.goal,
+  status: placeholderTask.status,
+  source: placeholderTask.source,
+  engine: placeholderTask.engine,
+  model: placeholderTask.model,
+  workflowId: placeholderTask.workflowId,
+  scheduleId: placeholderTask.scheduleId,
+  scheduledFor: placeholderTask.scheduledFor,
+  outcome: placeholderTask.outcome,
+  archivedAt: placeholderTask.archivedAt,
+  createdAt: placeholderTask.createdAt,
+  updatedAt: placeholderTask.updatedAt,
+};
 
 const contractDocumentHandlers: V1RouteHandlers = {
   listTasks: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
@@ -440,6 +510,30 @@ const contractDocumentHandlers: V1RouteHandlers = {
     ),
   getTask: (c) => c.json({ data: placeholderTask, meta }, 200),
   updateTask: (c) => c.json({ data: { task: placeholderTask, transactionId: "1" }, meta }, 200),
+  getTaskSummary: (c) =>
+    c.json(
+      {
+        data: {
+          cost: { hasRecordedCosts: false, totalCostUsdMicros: 0 },
+          durationMs: null,
+        },
+        meta,
+      },
+      200,
+    ),
+  listLegacyTasks: (c) => c.json({ data: [], meta }, 200),
+  getLegacyTaskHistory: (c) =>
+    c.json(
+      {
+        data: {
+          task: placeholderLegacyTask,
+          messages: [],
+          events: [],
+        },
+        meta,
+      },
+      200,
+    ),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   getConversation: (c) => c.json({ data: placeholderConversation, meta }, 200),
   updateConversation: (c) =>

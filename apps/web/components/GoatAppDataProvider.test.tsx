@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => {
     isLoading: true,
   };
   return {
+    getHeadlessTasks: vi.fn(() => ({})),
+    listLegacyTaskCompatibility: vi.fn(async () => []),
     useLiveQuery: vi.fn(() => liveQueryResult),
   };
 });
@@ -35,8 +37,20 @@ vi.mock("@/lib/task-collections", () => ({
   }),
 }));
 
+vi.mock("@/lib/headless-task-collections", () => ({
+  getHeadlessTasks: mocks.getHeadlessTasks,
+  legacyTaskDtoToRow: vi.fn((task) => task),
+  taskReadModelToRow: vi.fn((task) => task),
+}));
+
+vi.mock("@/lib/headless-task-commands", () => ({
+  listLegacyTaskCompatibility: mocks.listLegacyTaskCompatibility,
+}));
+
 describe("GoatAppDataProvider", () => {
   beforeEach(() => {
+    mocks.getHeadlessTasks.mockClear();
+    mocks.listLegacyTaskCompatibility.mockClear();
     mocks.useLiveQuery.mockClear();
   });
 
@@ -63,6 +77,32 @@ describe("GoatAppDataProvider", () => {
     );
 
     expect(mocks.useLiveQuery).toHaveBeenCalled();
+  });
+
+  it("resubscribes Task reads when the active workspace changes", async () => {
+    const first = initialData();
+    const { rerender } = render(
+      <GoatAppDataProvider initialData={first}>
+        <DataProbe />
+      </GoatAppDataProvider>,
+    );
+
+    expect(mocks.getHeadlessTasks).toHaveBeenCalledWith("workspace_1");
+    await waitFor(() => expect(mocks.listLegacyTaskCompatibility).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <GoatAppDataProvider
+        initialData={{
+          ...first,
+          workspace: { id: "workspace_2", name: "Beta", role: "member" },
+        }}
+      >
+        <DataProbe />
+      </GoatAppDataProvider>,
+    );
+
+    expect(mocks.getHeadlessTasks).toHaveBeenCalledWith("workspace_2");
+    await waitFor(() => expect(mocks.listLegacyTaskCompatibility).toHaveBeenCalledTimes(2));
   });
 
   it("publishes a newly submitted background chat before its persisted row arrives", () => {

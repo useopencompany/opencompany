@@ -7,7 +7,7 @@ describe("createGoatCollections", () => {
     const second = createGoatCollections();
 
     expect(second).toBe(first);
-    expect(second.tasks).toBe(first.tasks);
+    expect(second.taskSchedules).toBe(first.taskSchedules);
     expect(second.chatSessions).toBe(first.chatSessions);
     expect(second.integrations).toBe(first.integrations);
   });
@@ -24,19 +24,5 @@ describe("createGoatCollections", () => {
     expect(second.timelineEntries).toBe(first.timelineEntries);
     expect(second.edges).toBe(first.edges);
     expect(other.documents).not.toBe(first.documents);
-  });
-
-  it("reuses task-scoped Electric collections for the same task id", () => {
-    const collections = createGoatCollections();
-
-    const first = collections.taskRunCollections("goat_task_1");
-    const second = collections.taskRunCollections("goat_task_1");
-    const other = collections.taskRunCollections("goat_task_2");
-
-    expect(second).toBe(first);
-    expect(second.messages).toBe(first.messages);
-    expect(second.events).toBe(first.events);
-    expect(other).not.toBe(first);
-    expect(other.messages).not.toBe(first.messages);
   });
 });

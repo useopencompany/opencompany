@@ -47,8 +47,9 @@ Browser
           compile the workflow and create its durable task session
           POST /internal/goat/codex-chat/wake
   GoatSurface #task / #workflow submit
-    POST /api/tasks or /api/workflows
-      create durable task session and first turn
+    POST /v1/tasks or /api/workflows
+      call the canonical Task application service
+      atomically create Task + Conversation + Message + Run
   GoatSurface cloud coding modes
     POST /api/codex-chat/messages or /api/claude-chat/messages
       persist the message and attachment metadata
@@ -63,7 +64,8 @@ Runner
     settle the turn, runtime session, and task projection atomically
 
 Goat UI
-  subscribes to Electric task, chat, and cloud coding shapes
+  subscribes to API-owned Task, Conversation, Message, and Run read models
+  reads sessionless pre-cutover Task history through a bounded compatibility API
 ```
 
 ## Foreground Chat Loop
@@ -77,8 +79,8 @@ Entry points:
 - `apps/web/lib/chat-agent.ts`
 - `apps/web/lib/chat-ui.ts`
 
-`GoatHomePage` loads two things server-side: the current user's unarchived tasks and the most
-recent open chat session. It passes those into `GoatSurface`.
+`GoatHomePage` loads the current user's recent open chat session. Task state hydrates from the
+authorized `tasks-v1` read model; Next.js does not query Task persistence for initial props.
 
 `GoatSurface` owns the browser chat loop with `useChat` from `@ai-sdk/react`. Its
 `DefaultChatTransport` posts to `/api/chat` and sends:
@@ -117,10 +119,11 @@ Claude Code task runs materialize them under `.agents/skills` and invoke them na
 explicit skill mentions in their main chat surfaces.
 
 The reserved `#task` token provides the same direct composer handoff for one-off work without a
-saved workflow. The composer posts the request to `/api/tasks`, removes the directive from the
-runner prompt, creates a task chat session with the selected model, and keeps the current surface
-in place. Both `#task` and saved workflow mentions require the **Tasks & Workflows** preference and
-currently reject attachments.
+saved workflow. The composer posts the normalized goal through typed `POST /v1/tasks`, waits for
+the Task and Conversation transaction boundary, and keeps the current surface in place. Saved
+workflow invocation still uses its existing Next route, but that route calls the same Task
+application service. Both entry points require the **Tasks & Workflows** preference and currently
+reject attachments.
 
 Workflow runs and `#task` ad-hoc runs remain grouped under **Tasks**, but task detail renders the
 same `GoatSurface` as a normal chat. User-triggered Codex and Claude Code sessions remain ordinary
@@ -155,9 +158,10 @@ When a new chat is submitted, the client reserves its final `goat_chat_<uuid>` i
 matching `/chat/<id>` URL immediately with the native History API, without starting a server
 navigation; the server persists that exact id. The stream attaches `sessionId` in message metadata so
 the client can confirm ownership and start the authorized message subscription. Persisted chat
-sessions and messages then arrive through TanStack DB collections backed by Electric shapes. Other
-persisted OpenCompany web app state such as tasks, task run events, integrations, and Brain documents uses the
-same live-data path.
+sessions and messages then arrive through TanStack DB collections backed by Electric shapes. Task
+metadata uses the API-owned `tasks-v1` projection, and Task content/runtime uses the canonical
+Message and Run projections. Other persisted OpenCompany web state such as integrations and Brain
+documents continues to use its existing authorized live-data path.
 
 Stopping generation calls `stop()`, which aborts the HTTP request. Closing chat clears local state,
 optionally stops the active stream, and marks the chat session closed through
@@ -510,7 +514,9 @@ from `#task`, workflow, or schedule entry points. Selecting a coding chat still 
 
 Entry points:
 
-- `apps/web/lib/tasks.ts`
+- `apps/api/src/app.ts`
+- `apps/web/lib/headless-task-commands.ts`
+- `apps/web/lib/tasks.ts` (internal producer adapter only)
 - `apps/web/lib/workflow-tasks.ts`
 - `apps/runner/src/goat-scheduler.ts`
 - `packages/goat-agent/src/application/task-creation.ts`
@@ -713,13 +719,12 @@ queued -> running/planning -> running/running
 terminal task + user reply -> queued
 ```
 
-The UI maps this projection to Tasks rows while task detail renders the linked chat session
-natively. Goat task pages subscribe to `goat.tasks` plus the standard session messages and runtime
-state. Legacy rows without a session still subscribe to `goat.task_messages` and `goat.task_events`
-for read compatibility. Origin chats subscribe to `goat.chat_messages`, so task completion
-notifications appear without a manual refresh. Replies use
-`POST /api/tasks/[taskId]/continue` instead of a Server Action so an open task remains replyable
-when production deploys a newer build in the background.
+The UI adapts the authorized `tasks-v1` projection to its existing Tasks presentation rows while
+task detail renders the linked Conversation natively. Task pages subscribe to canonical Messages
+and Runs. Sessionless legacy rows are fetched once from the actor-scoped
+`/v1/compatibility/tasks*` resources and are labeled read-only; the browser cannot request their
+physical tables or predicates. Replies use the canonical Message command, cancellation targets the
+active Run, and archive uses `PATCH /v1/tasks/{taskId}`.
 
 Settings and Brain use the same pattern for `goat.integrations`, `goat.brain_folders`, and
 `goat.brain_documents`. Server props are initial render fallbacks; after hydration, live Electric

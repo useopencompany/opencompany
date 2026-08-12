@@ -132,6 +132,77 @@ describe("canonical Hono API", () => {
     await expect(archived.json()).resolves.toMatchObject({
       data: { task: { id: "task_1", status: "archived" }, transactionId: "44" },
     });
+
+    const summary = await app.request("/v1/tasks/task_1/summary");
+    expect(summary.status).toBe(200);
+    await expect(summary.json()).resolves.toEqual({
+      data: {
+        cost: { hasRecordedCosts: true, totalCostUsdMicros: 12_300 },
+        durationMs: 45_000,
+      },
+      meta: { apiVersion: "v1", protocolVersion: expect.any(String) },
+    });
+  });
+
+  it("serves sessionless history only through actor-scoped read-only compatibility resources", async () => {
+    const tasks = fakeTaskRepository();
+    const { conversationId: _, ...legacyTask } = fakeTask({
+      id: "task_legacy",
+      displayId: "TASK-OLD",
+    });
+    tasks.listLegacyTasks = vi.fn(async () => [legacyTask]);
+    tasks.getLegacyTaskHistory = vi.fn(async ({ taskId }) =>
+      taskId === "task_legacy"
+        ? {
+            task: legacyTask,
+            messages: [
+              {
+                id: "legacy_message_1",
+                role: "assistant" as const,
+                status: "completed" as const,
+                content: "Legacy result",
+                toolName: null,
+                toolCallId: null,
+                createdAt,
+                updatedAt: createdAt,
+                completedAt: createdAt,
+              },
+            ],
+            events: [
+              {
+                id: 1,
+                messageId: "legacy_message_1",
+                type: "message.completed",
+                payload: { status: "completed" },
+                createdAt,
+              },
+            ],
+          }
+        : null,
+    );
+    const app = testApp(fakeRepository(), { tasks: new TaskApplicationService(tasks) });
+
+    const listed = await app.request("/v1/compatibility/tasks");
+    expect(listed.status).toBe(200);
+    await expect(listed.json()).resolves.toMatchObject({
+      data: [{ id: "task_legacy", displayId: "TASK-OLD" }],
+    });
+    expect(tasks.listLegacyTasks).toHaveBeenCalledWith({ actor, limit: 100 });
+
+    const history = await app.request("/v1/compatibility/tasks/task_legacy/history");
+    expect(history.status).toBe(200);
+    await expect(history.json()).resolves.toMatchObject({
+      data: {
+        task: { id: "task_legacy" },
+        messages: [{ content: "Legacy result" }],
+        events: [{ type: "message.completed" }],
+      },
+    });
+    expect(tasks.getLegacyTaskHistory).toHaveBeenCalledWith({ actor, taskId: "task_legacy" });
+
+    const missing = await app.request("/v1/compatibility/tasks/another_actor_task/history");
+    expect(missing.status).toBe(404);
+    await expect(missing.json()).resolves.toMatchObject({ error: { code: "not_found" } });
   });
 
   it("allows credentialed browser preflight only for configured origins", async () => {
@@ -692,6 +763,15 @@ function fakeTaskRepository(): FakeTaskRepository {
     lastCommand: null,
     listTasks: async () => ({ tasks: [fakeTask()], nextCursor: null }),
     getTask: async ({ taskId }) => (taskId === "task_1" ? fakeTask() : null),
+    getTaskSummary: async ({ taskId }) =>
+      taskId === "task_1"
+        ? {
+            cost: { hasRecordedCosts: true, totalCostUsdMicros: 12_300 },
+            durationMs: 45_000,
+          }
+        : null,
+    listLegacyTasks: async () => [],
+    getLegacyTaskHistory: async () => null,
     getTaskByConversation: async ({ conversationId }) =>
       conversationId === "conversation_task_1" ? fakeTask() : null,
     createTaskAndRun: async ({ command }) => {

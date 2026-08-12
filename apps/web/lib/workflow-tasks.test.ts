@@ -1,9 +1,4 @@
-import { getDb } from "@opencompany/db/client";
-import {
-  type GoatChatMessageAttachment,
-  goatChatSessions,
-  goatTasks,
-} from "@opencompany/db/goat-schema";
+import type { GoatChatMessageAttachment } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { generateGoatChatTitle } from "@/lib/chat-title";
 
@@ -14,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getGoatAvailableHarnessTools: vi.fn(),
   resolveGoatSkillMentions: vi.fn(),
   resolveGoatWorkflowMention: vi.fn(),
+  updateGoatTaskForActor: vi.fn(),
 }));
 
 vi.mock("@/lib/tasks", () => ({ createGoatTaskForUser: mocks.createGoatTaskForUser }));
@@ -32,7 +28,9 @@ vi.mock("@/lib/workflows", () => ({
   resolveGoatWorkflowMention: mocks.resolveGoatWorkflowMention,
   GoatWorkflowMentionError: class GoatWorkflowMentionError extends Error {},
 }));
-vi.mock("@opencompany/db/client", () => ({ getDb: vi.fn() }));
+vi.mock("@opencompany/goat-agent/application/task-creation", () => ({
+  updateGoatTaskForActor: mocks.updateGoatTaskForActor,
+}));
 
 const {
   compileGoatWorkflowHarnessSpec,
@@ -468,14 +466,11 @@ describe("createGoatTaskFromWorkflow", () => {
 describe("generateGoatWorkflowTaskTitle", () => {
   it("keeps the task chat session title in sync with the generated task title", async () => {
     vi.mocked(generateGoatChatTitle).mockResolvedValue("Acme interview follow-up");
-    const updateTask = updateBuilder([{ sessionId: "goat_chat_task_1" }]);
-    const updateChat = updateBuilder([]);
-    const update = vi.fn().mockReturnValueOnce(updateTask).mockReturnValueOnce(updateChat);
-    vi.mocked(getDb).mockReturnValue({ update } as never);
 
     await generateGoatWorkflowTaskTitle({
       taskId: "goat_task_1",
       userWorkosId: "user_1",
+      workspaceId: "ws_1",
       workflowName: "Customer interview synthesis",
       description: "Synthesize the Acme interview using the confirmed pricing concern.",
       apiKey: "test-key",
@@ -487,42 +482,29 @@ describe("generateGoatWorkflowTaskTitle", () => {
       apiKey: "test-key",
       userWorkosId: "user_1",
     });
-    expect(update).toHaveBeenNthCalledWith(1, goatTasks);
-    expect(updateTask.set).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Acme interview follow-up" }),
-    );
-    expect(update).toHaveBeenNthCalledWith(2, goatChatSessions);
-    expect(updateChat.set).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "Acme interview follow-up" }),
-    );
+    expect(mocks.updateGoatTaskForActor).toHaveBeenCalledWith({
+      actorId: "user_1",
+      workspaceId: "ws_1",
+      taskId: "goat_task_1",
+      name: "Acme interview follow-up",
+    });
   });
 
-  it("skips the task chat session update when the task has no backing session", async () => {
-    vi.mocked(generateGoatChatTitle).mockResolvedValue("Acme interview follow-up");
-    const updateTask = updateBuilder([{ sessionId: null }]);
-    const update = vi.fn().mockReturnValueOnce(updateTask);
-    vi.mocked(getDb).mockReturnValue({ update } as never);
+  it("keeps the workflow fallback without issuing a Task update", async () => {
+    vi.mocked(generateGoatChatTitle).mockResolvedValue("Customer interview synthesis");
 
     await generateGoatWorkflowTaskTitle({
       taskId: "goat_task_1",
       userWorkosId: "user_1",
+      workspaceId: "ws_1",
       workflowName: "Customer interview synthesis",
       description: "Synthesize the Acme interview using the confirmed pricing concern.",
       apiKey: "test-key",
     });
 
-    expect(update).toHaveBeenCalledOnce();
+    expect(mocks.updateGoatTaskForActor).not.toHaveBeenCalled();
   });
 });
-
-function updateBuilder<T>(result: T) {
-  const builder = {
-    set: vi.fn(() => builder),
-    where: vi.fn(() => builder),
-    returning: vi.fn(async () => result),
-  };
-  return builder;
-}
 
 const attachment: GoatChatMessageAttachment = {
   id: "goat_chat_att_1",
