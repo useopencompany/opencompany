@@ -32,6 +32,7 @@ import {
   AutoModelRoutingError,
   type AutoModelRoutingResolution,
 } from "@opencompany/goat-agent/application/auto-model-routing";
+import type { GoatBrainImportApplicationService } from "@opencompany/goat-agent/brain-imports";
 import type { GoatBrainSourceApplicationService } from "@opencompany/goat-agent/brain-sources";
 import { GOAT_SPANS, withGoatSpan } from "@opencompany/goat-observability";
 import { captureException, createLogger } from "@opencompany/observability";
@@ -92,6 +93,7 @@ export type CreateApiAppInput = {
   schedules: TaskScheduleApplicationService;
   knowledge: KnowledgeApplicationService;
   brainSources: Pick<GoatBrainSourceApplicationService, "list" | "set" | "remove" | "listOptions">;
+  brainImports: Pick<GoatBrainImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
   skillImports: SkillImportApplicationService;
   brainAssets: BrainAssetService;
   attachments: AttachmentUploadService;
@@ -482,6 +484,81 @@ export function createApiApp(input: CreateApiAppInput) {
         c.req.valid("json"),
       );
       return c.json({ data: options, meta }, 200);
+    },
+    startBrainImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const result = await input.brainImports.start(actor, c.req.valid("param").brainId, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...c.req.valid("json"),
+      });
+      return c.json(
+        {
+          data: {
+            importRunId: result.importRunId,
+            status: result.status,
+            replayed: result.replayed,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    confirmBrainImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const result = await input.brainImports.confirm(
+        actor,
+        params.brainId,
+        params.importRunId,
+        c.req.valid("json").enabledProviders,
+      );
+      return c.json(
+        {
+          data: {
+            importRunId: result.importRunId,
+            status: result.status,
+            replayed: result.replayed,
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    cancelBrainImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const result = await input.brainImports.cancel(actor, params.brainId, params.importRunId);
+      return c.json(
+        {
+          data: {
+            importRunId: result.importRunId,
+            status: result.status,
+            replayed: result.replayed,
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    retryBrainImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const result = await input.brainImports.retry(actor, params.brainId, params.importRunId);
+      return c.json(
+        {
+          data: {
+            importRunId: result.importRunId,
+            status: result.status,
+            replayed: result.replayed,
+          },
+          meta,
+        },
+        200,
+      );
     },
     createBrainDocument: async (c) => {
       const actor = actorFrom(c);

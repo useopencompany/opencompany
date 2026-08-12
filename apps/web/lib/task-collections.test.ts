@@ -11,15 +11,9 @@ describe("createGoatCollections", () => {
     expect(second.integrations).toBe(first.integrations);
   });
 
-  it("reuses brain-scoped Electric collections for the same brain ref", () => {
+  it("no longer exposes physical brain-scoped collections", () => {
     const collections = createGoatCollections();
 
-    const first = collections.brainCollections("goat_brain_1");
-    const second = collections.brainCollections("goat_brain_1");
-    const other = collections.brainCollections("goat_brain_2");
-
-    expect(second).toBe(first);
-    expect(second.importRuns).toBe(first.importRuns);
-    expect(other.importRuns).not.toBe(first.importRuns);
+    expect("brainCollections" in collections).toBe(false);
   });
 });

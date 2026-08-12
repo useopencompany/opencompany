@@ -21,8 +21,6 @@ const BRAIN_SHAPE_TABLES = new Set([
   "goat.brain_edges",
   "brain_ingest_jobs",
   "goat.brain_ingest_jobs",
-  "brain_import_runs",
-  "goat.brain_import_runs",
 ]);
 
 const WIKI_SHAPE_TABLES = new Set([
@@ -222,14 +220,6 @@ const SHAPE_SCOPES = {
   },
   "goat.brain_ingest_jobs": {
     table: "goat.brain_ingest_jobs",
-    where: scopedBrainWhere,
-  },
-  brain_import_runs: {
-    table: "goat.brain_import_runs",
-    where: scopedBrainWhere,
-  },
-  "goat.brain_import_runs": {
-    table: "goat.brain_import_runs",
     where: scopedBrainWhere,
   },
   brain_source_items: {

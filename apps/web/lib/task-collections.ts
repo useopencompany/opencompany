@@ -1,7 +1,4 @@
 import type {
-  GoatBrainImportDiscoverySummary,
-  GoatBrainImportSourceSelection,
-  GoatBrainImportStatus,
   GoatChatMessageAttachment,
   GoatIntegrationProvider,
   GoatIntegrationStatus,
@@ -205,44 +202,6 @@ export type GoatIntegrationRow = {
   updated_at: string;
 };
 
-export type GoatBrainImportRunRow = {
-  id: string;
-  brain_ref: string;
-  user_workos_id: string;
-  company_url: string;
-  company_domain: string;
-  company_name: string | null;
-  focus: string | null;
-  history_start_at: string;
-  history_end_at: string;
-  source_selection: GoatBrainImportSourceSelection;
-  discovery_summary: GoatBrainImportDiscoverySummary;
-  result: Record<string, unknown>;
-  status: GoatBrainImportStatus;
-  next_run_at: string;
-  lease_id: string | null;
-  lease_owner: string | null;
-  lease_expires_at: string | null;
-  last_error: string | null;
-  confirmed_at: string | null;
-  completed_at: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-// The Electric shape proxy authorizes the brain_ref param against the current
-// user before forwarding, so each brain gets its own shape subscription.
-function createBrainCollections(brainRef: string) {
-  return {
-    importRuns: createGoatElectricCollection<GoatBrainImportRunRow>({
-      id: `goat:brain_import_runs:${brainRef}`,
-      table: "goat.brain_import_runs",
-      params: { brain_ref: brainRef },
-      getKey: (row) => row.id,
-    }),
-  };
-}
-
 function createChatMessageCollection(sessionId: string) {
   return createGoatElectricCollection<GoatChatMessageRow>({
     id: `goat:chat_messages:${sessionId}`,
@@ -256,17 +215,6 @@ const chatMessageCollectionsBySessionId = new Map<
   string,
   ReturnType<typeof createChatMessageCollection>
 >();
-const brainCollectionsByBrainRef = new Map<string, ReturnType<typeof createBrainCollections>>();
-
-function getBrainCollections(brainRef: string) {
-  const cached = brainCollectionsByBrainRef.get(brainRef);
-  if (cached) return cached;
-
-  const collections = createBrainCollections(brainRef);
-  brainCollectionsByBrainRef.set(brainRef, collections);
-  return collections;
-}
-
 function getChatMessageCollection(sessionId: string) {
   const cached = chatMessageCollectionsBySessionId.get(sessionId);
   if (cached) return cached;
@@ -300,7 +248,6 @@ function buildGoatCollections() {
     chatMessages: getChatMessageCollection,
     codexChatSessions,
     integrations,
-    brainCollections: getBrainCollections,
   };
 }
 

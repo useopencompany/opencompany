@@ -8,6 +8,9 @@ import {
   BrainEdgeReadModelSchema,
   type BrainFolderReadModel,
   BrainFolderReadModelSchema,
+  type BrainImportProviderSummary,
+  BrainImportRunReadModelSchema,
+  type BrainImportRunStatus,
   BrainIngestJobReadModelSchema,
   type BrainTimelineReadModel,
   BrainTimelineReadModelSchema,
@@ -77,6 +80,14 @@ function createBrainCollections(brainId: string) {
         id: `headless-brain-ingest-jobs:v1:${scope}`,
         schema: BrainIngestJobReadModelSchema,
         shapeOptions: shapeOptions("brain-ingest-jobs-v1", brainId),
+        getKey: (row) => row.id,
+      }),
+    ),
+    importRuns: createCollection(
+      electricCollectionOptions({
+        id: `headless-brain-import-runs:v1:${scope}`,
+        schema: BrainImportRunReadModelSchema,
+        shapeOptions: shapeOptions("brain-import-runs-v1", brainId),
         getKey: (row) => row.id,
       }),
     ),
@@ -235,5 +246,21 @@ export type HeadlessBrainFolderReadModel = BrainFolderReadModel;
 export type HeadlessBrainDocumentReadModel = BrainDocumentReadModel;
 export type HeadlessBrainTimelineReadModel = BrainTimelineReadModel;
 export type HeadlessBrainEdgeReadModel = BrainEdgeReadModel;
+// Spelled out instead of z.infer because the protocol's OpenAPI-wrapped record schemas lose
+// their value types when inferred across the package boundary in this app's TS setup.
+export type HeadlessBrainImportRunReadModel = {
+  id: string;
+  status: BrainImportRunStatus;
+  companyUrl: string;
+  companyName: string | null;
+  focus: string | null;
+  sourceSelection: Record<string, { enabled: boolean }>;
+  discoverySummary: Record<string, BrainImportProviderSummary>;
+  lastError: string | null;
+  confirmedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
 export type HeadlessWikiPageReadModel = WikiPageReadModel;
 export type HeadlessWikiTimelineReadModel = WikiTimelineReadModel;

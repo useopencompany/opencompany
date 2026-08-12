@@ -12,6 +12,7 @@ import {
   BrainDocumentEnvelopeSchema,
   BrainFolderEnvelopeSchema,
   BrainFolderPathEnvelopeSchema,
+  BrainImportRunCommandEnvelopeSchema,
   BrainOverviewEnvelopeSchema,
   BrainSnapshotEnvelopeSchema,
   BrainSourceDeleteEnvelopeSchema,
@@ -21,6 +22,7 @@ import {
   BrainSourceOptionsBodySchema,
   BrainSourceOptionsEnvelopeSchema,
   CancelRunEnvelopeSchema,
+  ConfirmBrainImportBodySchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
   CreateBrainDocumentBodySchema,
@@ -58,6 +60,7 @@ import {
   SkillImportPreviewBodySchema,
   SkillImportPreviewEnvelopeSchema,
   SkillListEnvelopeSchema,
+  StartBrainImportBodySchema,
   TaskEnvelopeSchema,
   TaskPageSchema,
   TaskScheduleArchiveEnvelopeSchema,
@@ -581,6 +584,83 @@ export const listBrainSourceOptionsRoute = createRoute({
     200: {
       description: "Provider resources the acting user may select for a Brain source.",
       content: { "application/json": { schema: BrainSourceOptionsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const startBrainImportRoute = createRoute({
+  method: "post",
+  path: "/v1/brains/{brainId}/imports",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema }),
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: StartBrainImportBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Company-context import discovery started or replayed.",
+      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const confirmBrainImportRoute = createRoute({
+  method: "post",
+  path: "/v1/brains/{brainId}/imports/{importRunId}/confirm",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema, importRunId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: ConfirmBrainImportBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Discovered import confirmed; ingestion begins for the enabled providers.",
+      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const cancelBrainImportRoute = createRoute({
+  method: "post",
+  path: "/v1/brains/{brainId}/imports/{importRunId}/cancel",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema, importRunId: ResourceIdSchema }),
+  },
+  responses: {
+    200: {
+      description: "Active import canceled; queued ingestion jobs are skipped.",
+      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const retryBrainImportRoute = createRoute({
+  method: "post",
+  path: "/v1/brains/{brainId}/imports/{importRunId}/retry",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema, importRunId: ResourceIdSchema }),
+  },
+  responses: {
+    200: {
+      description: "Failed pre-confirmation discovery reset and started again.",
+      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -1262,6 +1342,10 @@ export type V1RouteHandlers = {
   setBrainSource: RouteHandler<typeof setBrainSourceRoute>;
   deleteBrainSource: RouteHandler<typeof deleteBrainSourceRoute>;
   listBrainSourceOptions: RouteHandler<typeof listBrainSourceOptionsRoute>;
+  startBrainImport: RouteHandler<typeof startBrainImportRoute>;
+  confirmBrainImport: RouteHandler<typeof confirmBrainImportRoute>;
+  cancelBrainImport: RouteHandler<typeof cancelBrainImportRoute>;
+  retryBrainImport: RouteHandler<typeof retryBrainImportRoute>;
   createBrainDocument: RouteHandler<typeof createBrainDocumentRoute>;
   uploadBrainAsset: RouteHandler<typeof uploadBrainAssetRoute>;
   replaceBrainAsset: RouteHandler<typeof replaceBrainAssetRoute>;
@@ -1335,6 +1419,10 @@ export function createV1Router(
     .openapi(setBrainSourceRoute, handlers.setBrainSource)
     .openapi(deleteBrainSourceRoute, handlers.deleteBrainSource)
     .openapi(listBrainSourceOptionsRoute, handlers.listBrainSourceOptions)
+    .openapi(startBrainImportRoute, handlers.startBrainImport)
+    .openapi(confirmBrainImportRoute, handlers.confirmBrainImport)
+    .openapi(cancelBrainImportRoute, handlers.cancelBrainImport)
+    .openapi(retryBrainImportRoute, handlers.retryBrainImport)
     .openapi(createBrainDocumentRoute, handlers.createBrainDocument)
     .openapi(uploadBrainAssetRoute, handlers.uploadBrainAsset)
     .openapi(replaceBrainAssetRoute, handlers.replaceBrainAsset)
@@ -1803,6 +1891,42 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   listBrainSourceOptions: (c) => c.json({ data: { provider: "github", repos: [] }, meta }, 200),
+  startBrainImport: (c) =>
+    c.json(
+      {
+        data: {
+          importRunId: "gbimp_contract",
+          status: "discovering" as const,
+          replayed: false,
+        },
+        meta,
+      },
+      201,
+    ),
+  confirmBrainImport: (c) =>
+    c.json(
+      {
+        data: { importRunId: "gbimp_contract", status: "ingesting" as const, replayed: false },
+        meta,
+      },
+      200,
+    ),
+  cancelBrainImport: (c) =>
+    c.json(
+      {
+        data: { importRunId: "gbimp_contract", status: "canceled" as const, replayed: false },
+        meta,
+      },
+      200,
+    ),
+  retryBrainImport: (c) =>
+    c.json(
+      {
+        data: { importRunId: "gbimp_contract", status: "discovering" as const, replayed: false },
+        meta,
+      },
+      200,
+    ),
   createBrainDocument: (c) => c.json({ data: placeholderBrainDocument, meta }, 201),
   uploadBrainAsset: (c) =>
     c.json(

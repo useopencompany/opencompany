@@ -245,6 +245,7 @@ export const BrainDocumentReadModelNameSchema = z.literal("brain-documents-v1");
 export const BrainTimelineReadModelNameSchema = z.literal("brain-timeline-v1");
 export const BrainEdgeReadModelNameSchema = z.literal("brain-edges-v1");
 export const BrainIngestJobReadModelNameSchema = z.literal("brain-ingest-jobs-v1");
+export const BrainImportRunReadModelNameSchema = z.literal("brain-import-runs-v1");
 export const WikiPageReadModelNameSchema = z.literal("wiki-pages-v1");
 export const WikiTimelineReadModelNameSchema = z.literal("wiki-timeline-v1");
 export const ReadModelSchema = z.enum([
@@ -258,6 +259,7 @@ export const ReadModelSchema = z.enum([
   BrainTimelineReadModelNameSchema.value,
   BrainEdgeReadModelNameSchema.value,
   BrainIngestJobReadModelNameSchema.value,
+  BrainImportRunReadModelNameSchema.value,
   WikiPageReadModelNameSchema.value,
   WikiTimelineReadModelNameSchema.value,
 ]);
@@ -915,6 +917,107 @@ export const BrainSourceOptionsEnvelopeSchema = z
   .object({ data: BrainSourceOptionsSchema, meta: ProtocolMetadataSchema })
   .strict()
   .openapi("BrainSourceOptionsEnvelope");
+
+export const BrainImportProviderSchema = z.enum([
+  "public_web",
+  "github",
+  "jamie",
+  "granola",
+  "fathom",
+  "gmail",
+  "slack",
+  "linear",
+]);
+
+export const BrainImportRunStatusSchema = z.enum([
+  "discovering",
+  "awaiting_confirmation",
+  "ingesting",
+  "finalizing",
+  "succeeded",
+  "partial",
+  "failed",
+  "canceled",
+]);
+
+// GitHub is the only provider whose import scope may be chosen at start time before a
+// configured Brain source exists. Every other provider reuses its stored source configuration.
+const BrainImportGitHubRepositoryRefSchema = z
+  .object({
+    id: z.string().min(1).max(200).optional(),
+    fullName: z.string().min(1).max(200).optional(),
+  })
+  .strict();
+
+const BrainImportSourceSelectionEntrySchema = z
+  .object({
+    enabled: z.boolean(),
+    integrationId: ResourceIdSchema.optional(),
+    config: z
+      .object({ repos: z.array(BrainImportGitHubRepositoryRefSchema).max(20).optional() })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+export const StartBrainImportBodySchema = z
+  .object({
+    companyUrl: z.string().min(1).max(2_048),
+    focus: z.string().max(2_000).optional(),
+    sourceSelection: z.record(z.string().max(32), BrainImportSourceSelectionEntrySchema),
+  })
+  .strict()
+  .openapi("StartBrainImportBody");
+
+export const ConfirmBrainImportBodySchema = z
+  .object({ enabledProviders: z.array(BrainImportProviderSchema).max(8) })
+  .strict()
+  .openapi("ConfirmBrainImportBody");
+
+export const BrainImportRunCommandEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        importRunId: ResourceIdSchema,
+        status: BrainImportRunStatusSchema,
+        replayed: z.boolean(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrainImportRunCommandEnvelope");
+
+export const BrainImportProviderSummarySchema = z
+  .object({
+    status: z.enum(["pending", "ready", "failed", "unavailable"]),
+    discoveredEntries: z.number().int().min(0),
+    eligibleEntries: z.number().int().min(0),
+    alreadyKnownEntries: z.number().int().min(0),
+    selectedEntries: z.number().int().min(0),
+    plannedRuns: z.number().int().min(0),
+    error: z.string().max(2_000).optional(),
+  })
+  .strict()
+  .openapi("BrainImportProviderSummaryV1");
+
+export const BrainImportRunReadModelSchema = z
+  .object({
+    id: ResourceIdSchema,
+    status: BrainImportRunStatusSchema,
+    companyUrl: z.string().max(2_048),
+    companyName: z.string().max(512).nullable(),
+    focus: z.string().max(2_000).nullable(),
+    sourceSelection: z.record(z.string().max(32), z.object({ enabled: z.boolean() }).strict()),
+    discoverySummary: z.record(z.string().max(32), BrainImportProviderSummarySchema),
+    lastError: z.string().max(2_000).nullable(),
+    confirmedAt: TimestampSchema.nullable(),
+    completedAt: TimestampSchema.nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("BrainImportRunReadModelV1");
 
 export const WikiKindSchema = z.enum([
   "person",
@@ -1784,6 +1887,13 @@ export type BrainTimelineReadModel = z.infer<typeof BrainTimelineReadModelSchema
 export type BrainEdgeReadModel = z.infer<typeof BrainEdgeReadModelSchema>;
 export type BrainIngestJobReadModel = z.infer<typeof BrainIngestJobReadModelSchema>;
 export type BrainSourceItemDto = z.infer<typeof BrainSourceItemSchema>;
+export type BrainImportProvider = z.infer<typeof BrainImportProviderSchema>;
+export type BrainImportRunStatus = z.infer<typeof BrainImportRunStatusSchema>;
+export type StartBrainImportBody = z.infer<typeof StartBrainImportBodySchema>;
+export type ConfirmBrainImportBody = z.infer<typeof ConfirmBrainImportBodySchema>;
+export type BrainImportRunCommandDto = z.infer<typeof BrainImportRunCommandEnvelopeSchema>["data"];
+export type BrainImportProviderSummary = z.infer<typeof BrainImportProviderSummarySchema>;
+export type BrainImportRunReadModel = z.infer<typeof BrainImportRunReadModelSchema>;
 export type BrainSourceDetailsDto = z.infer<typeof BrainSourceDetailsSchema>;
 export type SetBrainSourceBody = z.infer<typeof SetBrainSourceBodySchema>;
 export type BrainSourceOptionsBody = z.infer<typeof BrainSourceOptionsBodySchema>;

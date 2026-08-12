@@ -87,6 +87,7 @@ describe("canonical Hono API", () => {
       ...fakeAutomationServices(),
       knowledge: fakeKnowledgeService(),
       brainSources: fakeBrainSources(),
+      brainImports: fakeBrainImports(),
       skillImports: fakeSkillImportService(),
       brainAssets: fakeBrainAssets(),
       attachments: fakeAttachments(),
@@ -576,6 +577,140 @@ describe("canonical Hono API", () => {
     });
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({ error: { code: "forbidden" } });
+  });
+
+  it("drives the company-context import lifecycle through typed commands", async () => {
+    const start = vi.fn(async () => ({
+      importRunId: "gbimp_1",
+      status: "discovering" as const,
+      replayed: false,
+    }));
+    const confirm = vi.fn(async () => ({
+      importRunId: "gbimp_1",
+      status: "ingesting" as const,
+      replayed: false,
+    }));
+    const cancel = vi.fn(async () => ({
+      importRunId: "gbimp_1",
+      status: "canceled" as const,
+      replayed: false,
+    }));
+    const retry = vi.fn(async () => ({
+      importRunId: "gbimp_1",
+      status: "discovering" as const,
+      replayed: false,
+    }));
+    const app = testApp(fakeRepository(), {
+      brainImports: brainImportService({ start, confirm, cancel, retry }),
+    });
+
+    const started = await app.request("/v1/brains/brain_1/imports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "import-key-1" },
+      body: JSON.stringify({
+        companyUrl: "acme.com",
+        focus: "Product architecture",
+        sourceSelection: {
+          public_web: { enabled: true },
+          github: {
+            enabled: true,
+            integrationId: "integration_1",
+            config: { repos: [{ id: "repo_1", fullName: "acme/api" }] },
+          },
+        },
+      }),
+    });
+    expect(started.status).toBe(201);
+    await expect(started.json()).resolves.toMatchObject({
+      data: { importRunId: "gbimp_1", status: "discovering", replayed: false },
+    });
+    expect(start).toHaveBeenCalledWith(actor, "brain_1", {
+      idempotencyKey: "import-key-1",
+      companyUrl: "acme.com",
+      focus: "Product architecture",
+      sourceSelection: {
+        public_web: { enabled: true },
+        github: {
+          enabled: true,
+          integrationId: "integration_1",
+          config: { repos: [{ id: "repo_1", fullName: "acme/api" }] },
+        },
+      },
+    });
+
+    const confirmed = await app.request("/v1/brains/brain_1/imports/gbimp_1/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabledProviders: ["public_web", "github"] }),
+    });
+    expect(confirmed.status).toBe(200);
+    await expect(confirmed.json()).resolves.toMatchObject({
+      data: { importRunId: "gbimp_1", status: "ingesting" },
+    });
+    expect(confirm).toHaveBeenCalledWith(actor, "brain_1", "gbimp_1", ["public_web", "github"]);
+
+    const canceled = await app.request("/v1/brains/brain_1/imports/gbimp_1/cancel", {
+      method: "POST",
+    });
+    expect(canceled.status).toBe(200);
+    expect(cancel).toHaveBeenCalledWith(actor, "brain_1", "gbimp_1");
+
+    const retried = await app.request("/v1/brains/brain_1/imports/gbimp_1/retry", {
+      method: "POST",
+    });
+    expect(retried.status).toBe(200);
+    expect(retry).toHaveBeenCalledWith(actor, "brain_1", "gbimp_1");
+  });
+
+  it("requires an Idempotency-Key and a valid selection to start an import", async () => {
+    const start = vi.fn(async () => ({
+      importRunId: "gbimp_1",
+      status: "discovering" as const,
+      replayed: false,
+    }));
+    const app = testApp(fakeRepository(), {
+      brainImports: brainImportService({ start }),
+    });
+
+    const missingKey = await app.request("/v1/brains/brain_1/imports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ companyUrl: "acme.com", sourceSelection: {} }),
+    });
+    expect(missingKey.status).toBe(400);
+
+    const unknownConfig = await app.request("/v1/brains/brain_1/imports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "import-key-2" },
+      body: JSON.stringify({
+        companyUrl: "acme.com",
+        sourceSelection: {
+          slack: { enabled: true, integrationId: "integration_2", config: { channels: [] } },
+        },
+      }),
+    });
+    expect(unknownConfig.status).toBe(400);
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("maps import state conflicts to typed conflict responses", async () => {
+    const app = testApp(fakeRepository(), {
+      brainImports: brainImportService({
+        confirm: async () => {
+          throw new CoreError(
+            "conflict",
+            "This company-context scan is no longer awaiting confirmation.",
+          );
+        },
+      }),
+    });
+    const response = await app.request("/v1/brains/brain_1/imports/gbimp_1/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabledProviders: [] }),
+    });
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "conflict" } });
   });
 
   it("returns a retryable typed error when external Skill resolution is unavailable", async () => {
@@ -1302,6 +1437,7 @@ function testApp(
     ...fakeAutomationServices(),
     knowledge: fakeKnowledgeService(),
     brainSources: fakeBrainSources(),
+    brainImports: fakeBrainImports(),
     skillImports: fakeSkillImportService(),
     brainAssets: fakeBrainAssets(),
     attachments: fakeAttachments(),
@@ -1355,6 +1491,29 @@ function fakeBrainAssets(): BrainAssetService {
       throw new Error("Unexpected Brain asset download.");
     },
   };
+}
+
+function fakeBrainImports(): Parameters<typeof createApiApp>[0]["brainImports"] {
+  return {
+    start: async () => {
+      throw new Error("Unexpected Brain import start.");
+    },
+    confirm: async () => {
+      throw new Error("Unexpected Brain import confirmation.");
+    },
+    cancel: async () => {
+      throw new Error("Unexpected Brain import cancellation.");
+    },
+    retry: async () => {
+      throw new Error("Unexpected Brain import retry.");
+    },
+  };
+}
+
+function brainImportService(
+  overrides: Partial<Parameters<typeof createApiApp>[0]["brainImports"]>,
+): Parameters<typeof createApiApp>[0]["brainImports"] {
+  return { ...fakeBrainImports(), ...overrides };
 }
 
 function fakeBrainSources(): Parameters<typeof createApiApp>[0]["brainSources"] {
