@@ -455,8 +455,7 @@ export class PostgresTaskRepository implements TaskRepository {
             ${eventId}, run.id, 1, 1, 'run.queued',
             jsonb_build_object(
               'conversationId', winner.conversation_id,
-              'triggerMessageId', winner.message_id,
-              'taskId', winner.task_id
+              'triggerMessageId', winner.message_id
             ),
             ${now}
           FROM inserted_run AS run

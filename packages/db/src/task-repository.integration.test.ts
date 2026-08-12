@@ -220,11 +220,24 @@ describe("Postgres Task repository", () => {
     ).toEqual([{ tasks: 1, conversations: 1, messages: 2, runs: 1 }]);
     expect(
       (
-        await database.query<{ type: string; sequence: number }>(`
-          SELECT type, sequence FROM goat.run_events ORDER BY sequence
+        await database.query<{
+          type: string;
+          sequence: number;
+          payload: Record<string, unknown>;
+        }>(`
+          SELECT type, sequence, payload FROM goat.run_events ORDER BY sequence
         `)
       ).rows,
-    ).toEqual([{ type: "run.queued", sequence: 1 }]);
+    ).toEqual([
+      {
+        type: "run.queued",
+        sequence: 1,
+        payload: {
+          conversationId: first.task.conversationId,
+          triggerMessageId: first.messageId,
+        },
+      },
+    ]);
     expect(
       (
         await database.query<{ harness_spec: { tools: string[] } }>(`
@@ -434,13 +447,13 @@ describe("Postgres Task repository", () => {
         brain_ref: string;
         workflow_brain_ref: string;
         attachment_id: string;
-        task_id: string;
+        has_task_id: boolean;
       }>(
         `SELECT
            runtime.brain_ref,
            task.workflow_brain_ref,
            message.attachments->0->>'id' AS attachment_id,
-           event.payload->>'taskId' AS task_id
+           event.payload ? 'taskId' AS has_task_id
          FROM goat.tasks AS task
          JOIN goat.codex_chat_sessions AS runtime ON runtime.chat_session_id = task.session_id
          JOIN goat.chat_messages AS message
@@ -456,7 +469,7 @@ describe("Postgres Task repository", () => {
           brain_ref: "brain_1",
           workflow_brain_ref: "workflow_brain_1",
           attachment_id: "legacy_attachment_1",
-          task_id: created.task.id,
+          has_task_id: false,
         },
       ],
     });

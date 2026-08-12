@@ -149,10 +149,37 @@ describe("Postgres Chat repositories", () => {
       rows: [{ host_tool_contract_version: GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION }],
     });
     expect(
-      await database.query<{ sequence: number; type: string }>(`
-        SELECT sequence, type FROM goat.run_events ORDER BY sequence
-      `),
-    ).toMatchObject({ rows: [{ sequence: 1, type: "run.queued" }] });
+      (
+        await database.query<{
+          sequence: number;
+          type: string;
+          payload: Record<string, unknown>;
+        }>(`
+        SELECT sequence, type, payload FROM goat.run_events ORDER BY sequence
+      `)
+      ).rows,
+    ).toEqual([
+      {
+        sequence: 1,
+        type: "run.queued",
+        payload: {
+          conversationId: first.conversationId,
+          triggerMessageId: first.messageId,
+        },
+      },
+    ]);
+    await database.query(
+      `UPDATE goat.run_events
+       SET payload = payload || '{"taskId": null}'::jsonb
+       WHERE run_id = $1 AND type = 'run.queued'`,
+      [first.runId],
+    );
+    const historicalEvents = await service.listRunEvents(actor(), { runId: first.runId });
+    expect(historicalEvents.events).toHaveLength(1);
+    expect(historicalEvents.events[0]?.payload).toEqual({
+      conversationId: first.conversationId,
+      triggerMessageId: first.messageId,
+    });
     expect(
       await database.query<{ status: string; conversation_id: string }>(`
         SELECT status, conversation_id FROM goat.run_read_model_v1
@@ -935,12 +962,22 @@ describe("Postgres Chat repositories", () => {
       ),
     ).toMatchObject({ rows: [{ task_id: "task_1" }, { task_id: "task_1" }] });
     expect(
-      await database.query<{ type: string; task_id: string | null }>(
-        `SELECT type, payload->>'taskId' AS task_id
+      (
+        await database.query<{ type: string; payload: Record<string, unknown> }>(
+          `SELECT type, payload
          FROM goat.run_events WHERE run_id = $1 ORDER BY sequence`,
-        [created.runId],
-      ),
-    ).toMatchObject({ rows: [{ type: "run.queued", task_id: "task_1" }] });
+          [created.runId],
+        )
+      ).rows,
+    ).toEqual([
+      {
+        type: "run.queued",
+        payload: {
+          conversationId: "task_conversation_1",
+          triggerMessageId: created.messageId,
+        },
+      },
+    ]);
     expect(
       await database.query<{ skill_id: string; activated_message_id: string }>(`
         SELECT skill_id, activated_message_id
