@@ -57,16 +57,14 @@ and cancellation use the canonical Message/Run commands. Multi-step Workflows an
 wakeups keep the Task's original Conversation and runtime; retries create Attempts and never change
 Task or Conversation identity.
 
-The legacy Task-session constructor is retained only during issue #1190's rollback/drain window and
-has no production caller. A worker claim for a Task Run missing `run.queued` logs
-`opencompany.legacy_task_run_claimed` and increments `goat.legacy_task_runs_total`, labeled by
-engine and Task source. Before PR 4 deletion, verify that metric is zero for the issue's observation
-window on the exact deployed SHA. Do not manufacture evidence by mutating production rows.
+The legacy Task-session constructor and continuation writer were deleted after issue #1190's
+caller, queue, and production drain audits found no active legacy work. The shared Run worker is the
+only claim and settlement loop.
 
-New recurring schedules persist their owning workspace and require the scheduling actor to remain a
-member when they fire. A pre-cutover schedule with no workspace uses a deterministic membership
-fallback and logs `opencompany.legacy_task_schedule_workspace_fallback`; inventory and resolve
-those rows before removing the fallback in PR 4.
+Recurring schedules persist their owning workspace and require the scheduling actor to remain a
+member when they fire. The runner no longer selects a membership for a nullable schedule: only a
+schedule with an explicit, still-authorized workspace can fire. The physical column remains nullable
+so PR 4 can be rolled back without a data migration, but new producers require a workspace.
 
 ### Web Task cutover and rollback
 
@@ -78,9 +76,22 @@ write path. The removed Next.js `/api/tasks` routes and physical `goat.tasks`,
 
 Sessionless pre-cutover rows are a bounded exception: `/v1/compatibility/tasks` and
 `/v1/compatibility/tasks/{taskId}/history` serve actor-scoped, read-only snapshots. The UI must not
-offer reply, cancellation, or archive mutations for them. Before PR 4, inventory this adapter's
-production row count using the designated test workspace or approved read-only production query;
-do not create or alter arbitrary rows for evidence.
+offer reply, cancellation, or archive mutations for them. PR 4 inventoried this adapter through an
+approved read-only production query. Repeat that inventory before any later history retention or
+deletion migration; do not create or alter arbitrary rows for evidence.
+
+Pre-cutover multi-step Workflows may also have terminal Messages and Runs physically stored in
+prior task-kind Conversations. Migration `0204_goat_task_conversation_history_projection` maps only
+owner- and workspace-matched, Task-linked rows into the Task's canonical Conversation in the
+additive Message/Run read projections. It does not update or delete the physical history, and it
+does not remap Task cards in normal Chat Conversations.
+
+The issue #1190 production audit found 35 sessionless Tasks, all terminal, backed by 421 legacy
+Messages, 1,444 Events, and retained usage rows. It also found eight terminal Tasks with 22 Messages
+and 11 Runs in prior task-kind Conversations. Keep the read-only compatibility endpoints and the
+legacy Task message/event/usage tables until an approved retention migration has preserved those 35
+Task histories and endpoint telemetry is zero for the agreed observation window. That later
+deletion must include a separate data rollback plan; it is not part of the runtime cutover.
 
 PR 3 rollback redeploys the prior web release only. Keep the API, runner, canonical queue, and
 additive projections available so already-created Tasks finish through their Runs. Never reroute a

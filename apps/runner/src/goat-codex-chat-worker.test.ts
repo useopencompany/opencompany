@@ -24,7 +24,6 @@ import {
 const sessionRows = vi.hoisted(() => [] as GoatCodexChatSession[]);
 const claimedTaskContext = vi.hoisted(() => ({
   task: null as GoatTask | null,
-  canonicalQueued: true,
 }));
 
 const dbMock = vi.hoisted(() => {
@@ -38,7 +37,6 @@ const dbMock = vi.hoisted(() => {
       sessionRows.map((session) => ({
         session,
         task: claimedTaskContext.task,
-        canonicalQueued: claimedTaskContext.canonicalQueued,
       })),
     ),
   };
@@ -267,7 +265,6 @@ describe("Goat Codex chat worker shutdown", () => {
     sessionRows.length = 0;
     sessionRows.push(session());
     claimedTaskContext.task = null;
-    claimedTaskContext.canonicalQueued = true;
     let releaseSilentTurn: (() => void) | undefined;
     chatMocks.runGoatCodexChatTurn
       .mockImplementationOnce(
@@ -536,32 +533,6 @@ describe("runClaimedTurn", () => {
         "goat.attempt": 1,
       },
     );
-  });
-
-  it("records bounded compatibility usage only for pre-cutover Task Runs", async () => {
-    claimedTaskContext.task = {
-      id: "task_legacy_1",
-      source: "manual",
-      harnessSpec: {
-        schemaVersion: "goat.harness.v1",
-        engine: "codex",
-        model: "openai/gpt-5.5",
-        systemPrompt: "",
-        initialUserMessage: "Fix the bug.",
-        tools: [],
-        skills: [],
-        maxModelSteps: 16,
-        resultMode: "assistant_final",
-      },
-    } as unknown as GoatTask;
-    claimedTaskContext.canonicalQueued = false;
-
-    await runClaimedTurn(turn(), env());
-
-    expect(telemetry.recordGoatCounter).toHaveBeenCalledWith("goat.legacy_task_runs_total", 1, {
-      "goat.engine": "codex",
-      "goat.source": "manual",
-    });
   });
 
   it("does not count a scheduled delay as queue wait", async () => {

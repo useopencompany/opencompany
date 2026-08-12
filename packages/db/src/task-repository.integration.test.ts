@@ -21,6 +21,7 @@ const migrationPaths = [
   "0200_goat_chat_run_pausing.sql",
   "0201_goat_chat_read_models_v1.sql",
   "0202_goat_headless_task_foundation.sql",
+  "0204_goat_task_conversation_history_projection.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -33,6 +34,11 @@ describe("Postgres Task repository", () => {
     legacyTaskProjected: boolean;
     canonicalTaskProjected: boolean;
     canonicalMessageProjected: boolean;
+    historicalMessagesProjected: number;
+    historicalRunsProjected: number;
+    physicalHistoryUntouched: boolean;
+    normalChatTaskCardUntouched: boolean;
+    crossWorkspaceLinkRejected: boolean;
   };
 
   beforeEach(async () => {
@@ -41,12 +47,25 @@ describe("Postgres Task repository", () => {
     await database.exec(`
       INSERT INTO goat.users (workos_user_id, task_spawning_enabled)
       VALUES ('migration_user', true);
-      INSERT INTO goat.workspaces (id) VALUES ('migration_workspace');
+      INSERT INTO goat.workspaces (id) VALUES ('migration_workspace'), ('migration_other_workspace');
       INSERT INTO goat.chat_sessions (id, user_workos_id, title, model, engine, kind)
-      VALUES (
-        'migration_task_conversation', 'migration_user', 'Existing Task',
-        'moonshotai/kimi-k3', 'opencompany', 'task'
-      );
+      VALUES
+        (
+          'migration_task_conversation', 'migration_user', 'Existing Task',
+          'moonshotai/kimi-k3', 'opencompany', 'task'
+        ),
+        (
+          'migration_prior_task_conversation', 'migration_user', 'Prior workflow step',
+          'moonshotai/kimi-k3', 'opencompany', 'task'
+        ),
+        (
+          'migration_normal_chat', 'migration_user', 'Normal chat',
+          'moonshotai/kimi-k3', 'opencompany', 'chat'
+        ),
+        (
+          'migration_other_workspace_task_conversation', 'migration_user',
+          'Malformed cross-workspace Task history', 'moonshotai/kimi-k3', 'opencompany', 'task'
+        );
       INSERT INTO goat.tasks (
         id, name, user_workos_id, workspace_id, prompt, model, session_id, status, stage
       ) VALUES
@@ -59,15 +78,55 @@ describe("Postgres Task repository", () => {
           'migration_workspace', 'Keep canonical history', 'moonshotai/kimi-k3',
           'migration_task_conversation', 'succeeded', 'completed'
         );
-      INSERT INTO goat.chat_messages (id, session_id, role, content)
+      INSERT INTO goat.chat_messages (id, session_id, role, content, task_id)
       VALUES
-        ('migration_task_message', 'migration_task_conversation', 'user', 'Keep this message'),
-        ('migration_task_assistant', 'migration_task_conversation', 'assistant', 'Kept');
+        (
+          'migration_task_message', 'migration_task_conversation', 'user',
+          'Keep this message', 'migration_canonical_task'
+        ),
+        (
+          'migration_task_assistant', 'migration_task_conversation', 'assistant',
+          'Kept', 'migration_canonical_task'
+        ),
+        (
+          'migration_prior_task_message', 'migration_prior_task_conversation', 'user',
+          'Prior workflow step', 'migration_canonical_task'
+        ),
+        (
+          'migration_prior_task_assistant', 'migration_prior_task_conversation', 'assistant',
+          'Prior step result', 'migration_canonical_task'
+        ),
+        (
+          'migration_task_card', 'migration_normal_chat', 'assistant',
+          'Task card', 'migration_canonical_task'
+        ),
+        (
+          'migration_cross_workspace_message', 'migration_other_workspace_task_conversation',
+          'assistant', 'Must stay isolated', 'migration_canonical_task'
+        );
       INSERT INTO goat.codex_chat_sessions (
         id, user_workos_id, chat_session_id, engine, model, workspace_id
+      ) VALUES
+        (
+          'migration_task_runtime', 'migration_user', 'migration_task_conversation',
+          'opencompany', 'moonshotai/kimi-k3', 'migration_workspace'
+        ),
+        (
+          'migration_prior_task_runtime', 'migration_user', 'migration_prior_task_conversation',
+          'opencompany', 'moonshotai/kimi-k3', 'migration_workspace'
+        ),
+        (
+          'migration_other_workspace_runtime', 'migration_user',
+          'migration_other_workspace_task_conversation', 'opencompany',
+          'moonshotai/kimi-k3', 'migration_other_workspace'
+        );
+      INSERT INTO goat.codex_chat_turns (
+        id, user_workos_id, codex_chat_session_id, chat_session_id, user_message_id,
+        assistant_message_id, status, prompt
       ) VALUES (
-        'migration_task_runtime', 'migration_user', 'migration_task_conversation',
-        'opencompany', 'moonshotai/kimi-k3', 'migration_workspace'
+        'migration_prior_task_run', 'migration_user', 'migration_prior_task_runtime',
+        'migration_prior_task_conversation', 'migration_prior_task_message',
+        'migration_prior_task_assistant', 'completed', 'Prior workflow step'
       );
     `);
     for (const migrationPath of migrationPaths) {
@@ -81,6 +140,11 @@ describe("Postgres Task repository", () => {
       legacy_projected: boolean;
       canonical_projected: boolean;
       message_projected: boolean;
+      historical_messages_projected: number;
+      historical_runs_projected: number;
+      physical_history_untouched: boolean;
+      normal_chat_task_card_untouched: boolean;
+      cross_workspace_link_rejected: boolean;
     }>(`
       SELECT
         EXISTS (
@@ -98,7 +162,38 @@ describe("Postgres Task repository", () => {
           SELECT 1 FROM goat.message_read_model_v1
           WHERE id = 'migration_task_message'
             AND workspace_id = 'migration_workspace'
-        ) AS message_projected
+        ) AS message_projected,
+        (
+          SELECT COUNT(*)::int
+          FROM goat.message_read_model_v1
+          WHERE conversation_id = 'migration_task_conversation'
+            AND id IN ('migration_prior_task_message', 'migration_prior_task_assistant')
+        ) AS historical_messages_projected,
+        (
+          SELECT COUNT(*)::int
+          FROM goat.run_read_model_v1
+          WHERE conversation_id = 'migration_task_conversation'
+            AND id = 'migration_prior_task_run'
+        ) AS historical_runs_projected,
+        EXISTS (
+          SELECT 1
+          FROM goat.chat_messages
+          WHERE id = 'migration_prior_task_message'
+            AND session_id = 'migration_prior_task_conversation'
+        ) AS physical_history_untouched,
+        EXISTS (
+          SELECT 1
+          FROM goat.message_read_model_v1
+          WHERE id = 'migration_task_card'
+            AND conversation_id = 'migration_normal_chat'
+        ) AS normal_chat_task_card_untouched,
+        EXISTS (
+          SELECT 1
+          FROM goat.message_read_model_v1
+          WHERE id = 'migration_cross_workspace_message'
+            AND conversation_id = 'migration_other_workspace_task_conversation'
+            AND workspace_id = 'migration_other_workspace'
+        ) AS cross_workspace_link_rejected
     `);
     const migrationRow = migrationRows.rows[0];
     migrationEvidence = {
@@ -106,6 +201,11 @@ describe("Postgres Task repository", () => {
       legacyTaskProjected: migrationRow?.legacy_projected ?? true,
       canonicalTaskProjected: migrationRow?.canonical_projected ?? false,
       canonicalMessageProjected: migrationRow?.message_projected ?? false,
+      historicalMessagesProjected: migrationRow?.historical_messages_projected ?? 0,
+      historicalRunsProjected: migrationRow?.historical_runs_projected ?? 0,
+      physicalHistoryUntouched: migrationRow?.physical_history_untouched ?? false,
+      normalChatTaskCardUntouched: migrationRow?.normal_chat_task_card_untouched ?? false,
+      crossWorkspaceLinkRejected: migrationRow?.cross_workspace_link_rejected ?? false,
     };
 
     await database.exec(`
@@ -164,12 +264,17 @@ describe("Postgres Task repository", () => {
     await database.close();
   });
 
-  it("preserves legacy history and projects only Tasks with one canonical Conversation", () => {
+  it("preserves legacy history through the Task's one canonical Conversation projection", () => {
     expect(migrationEvidence).toEqual({
       legacyTaskExists: true,
       legacyTaskProjected: false,
       canonicalTaskProjected: true,
       canonicalMessageProjected: true,
+      historicalMessagesProjected: 2,
+      historicalRunsProjected: 1,
+      physicalHistoryUntouched: true,
+      normalChatTaskCardUntouched: true,
+      crossWorkspaceLinkRejected: true,
     });
   });
 

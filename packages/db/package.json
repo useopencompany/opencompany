@@ -92,10 +92,6 @@
       "types": "./src/goat-harness.ts",
       "default": "./src/goat-harness.ts"
     },
-    "./goat-task-sessions": {
-      "types": "./src/goat-task-sessions.ts",
-      "default": "./src/goat-task-sessions.ts"
-    },
     "./goat-schema": {
       "types": "./src/goat-schema.ts",
       "default": "./src/goat-schema.ts"

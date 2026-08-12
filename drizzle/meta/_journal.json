@@ -1436,6 +1436,13 @@
       "when": 1786483600000,
       "tag": "0203_goat_task_schedule_workspace",
       "breakpoints": true
+    },
+    {
+      "idx": 205,
+      "version": "7",
+      "when": 1786490800000,
+      "tag": "0204_goat_task_conversation_history_projection",
+      "breakpoints": true
     }
   ]
 }

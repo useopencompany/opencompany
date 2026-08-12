@@ -55,7 +55,6 @@ export const GOAT_METRICS = {
   taskDispatchesTotal: "goat.task_dispatches_total",
   taskDispatchDurationMs: "goat.task_dispatch_duration_ms",
   taskRunsTotal: "goat.task_runs_total",
-  legacyTaskRunsTotal: "goat.legacy_task_runs_total",
   taskRunDurationMs: "goat.task_run_duration_ms",
   taskStageDurationMs: "goat.task_stage_duration_ms",
   brainIngestRunsTotal: "goat.brain_ingest_runs_total",
