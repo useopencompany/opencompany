@@ -8,6 +8,7 @@ Run the CI-equivalent gates before opening a pull request:
 
 ```bash
 bun run format:check
+bun run boundary:check
 bun run lint
 bun run typecheck
 bun run build
@@ -17,6 +18,8 @@ bun run secrets:check
 ```
 
 TruffleHog must be installed for the local secret scan. CI runs the same scan on pull requests.
+`boundary:check` prevents new production `apps/web` imports of the database or Drizzle while the
+headless-core migration removes the audited legacy imports; `lint` runs the same ratchet.
 For focused checks, use Turborepo filters such as `bun run test --filter @opencompany/web` and
 `bun run test --filter @opencompany/runner`.
 

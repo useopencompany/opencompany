@@ -39,10 +39,11 @@ analysis.
 
 ## Canonical execution projections
 
-Canonical Chat and Task repositories map the public `Conversation`, `Message`, `Run`, `Attempt`,
-`Event`, and `Task` vocabulary onto retained physical Goat tables. Keep that mapping inside
-`packages/db/src/chat-repository.ts` and `packages/db/src/task-repository.ts`; API and client code
-must not depend on physical table or lease names.
+Canonical Chat, Task, and automation repositories map the public `Conversation`, `Message`, `Run`,
+`Attempt`, `Event`, `Task`, `Workflow`, and `TaskSchedule` vocabulary onto retained physical Goat
+tables. Keep that mapping inside `packages/db/src/chat-repository.ts`,
+`packages/db/src/task-repository.ts`, and `packages/db/src/workflow-repository.ts`; API and client
+code must not depend on physical table, planner payload, or lease names.
 
 The `*_read_model_v1` tables are derived, API-owned Electric projections. Postgres source rows stay
 authoritative, and every Electric shape must use a fixed server-owned table, columns, predicate,
@@ -50,3 +51,8 @@ Actor, and Workspace. Adding or changing a projection requires an additive migra
 and authorization tests. Historical sessionless Tasks are intentionally excluded from the
 canonical Task projection until the bounded compatibility migration in issue #1190; do not delete
 their legacy history while that adapter exists.
+
+Migration `0207_goat_headless_workflow_foundation.sql` adds optimistic versions, automation-create
+idempotency reservations, and the `workflow_read_model_v1`, `workflow_schedule_read_model_v1`, and
+`task_schedule_read_model_v1` projections. It backfills and maintains those projections with
+triggers without renaming or deleting existing Workflow, Recurring Task, or run-history rows.
