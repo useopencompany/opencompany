@@ -32,6 +32,7 @@ import {
   DeleteBrainFolderBodySchema,
   DeleteWikiPageBodySchema,
   ErrorEnvelopeSchema,
+  ImportSkillBodySchema,
   InvokeWorkflowBodySchema,
   LegacyTaskHistoryEnvelopeSchema,
   LegacyTaskPageSchema,
@@ -47,6 +48,9 @@ import {
   SkillArchiveEnvelopeSchema,
   SkillCatalogEnvelopeSchema,
   SkillEnvelopeSchema,
+  SkillImportEnvelopeSchema,
+  SkillImportPreviewBodySchema,
+  SkillImportPreviewEnvelopeSchema,
   SkillListEnvelopeSchema,
   TaskEnvelopeSchema,
   TaskPageSchema,
@@ -829,6 +833,44 @@ export const createSkillRoute = createRoute({
   },
 });
 
+export const previewSkillImportRoute = createRoute({
+  method: "post",
+  path: "/v1/skills/imports/preview",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: SkillImportPreviewBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "External Skill metadata and instructions resolved for confirmation.",
+      content: { "application/json": { schema: SkillImportPreviewEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const importSkillRoute = createRoute({
+  method: "post",
+  path: "/v1/skills/imports",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: {
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: { required: true, content: { "application/json": { schema: ImportSkillBodySchema } } },
+  },
+  responses: {
+    201: {
+      description: "External Skill imported or replayed after confirmation.",
+      content: { "application/json": { schema: SkillImportEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const listSkillCatalogRoute = createRoute({
   method: "get",
   path: "/v1/skills/catalog",
@@ -1153,6 +1195,8 @@ export type V1RouteHandlers = {
   addWikiTimelineEntry: RouteHandler<typeof addWikiTimelineEntryRoute>;
   listSkills: RouteHandler<typeof listSkillsRoute>;
   createSkill: RouteHandler<typeof createSkillRoute>;
+  previewSkillImport: RouteHandler<typeof previewSkillImportRoute>;
+  importSkill: RouteHandler<typeof importSkillRoute>;
   listSkillCatalog: RouteHandler<typeof listSkillCatalogRoute>;
   getSkill: RouteHandler<typeof getSkillRoute>;
   updateSkill: RouteHandler<typeof updateSkillRoute>;
@@ -1220,6 +1264,8 @@ export function createV1Router(
     .openapi(addWikiTimelineEntryRoute, handlers.addWikiTimelineEntry)
     .openapi(listSkillsRoute, handlers.listSkills)
     .openapi(createSkillRoute, handlers.createSkill)
+    .openapi(previewSkillImportRoute, handlers.previewSkillImport)
+    .openapi(importSkillRoute, handlers.importSkill)
     .openapi(listSkillCatalogRoute, handlers.listSkillCatalog)
     .openapi(getSkillRoute, handlers.getSkill)
     .openapi(updateSkillRoute, handlers.updateSkill)
@@ -1582,6 +1628,24 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   createSkill: (c) => c.json({ data: placeholderSkill, meta }, 201),
+  previewSkillImport: (c) =>
+    c.json(
+      {
+        data: {
+          status: "resolved",
+          proposedSlug: placeholderSkill.slug,
+          name: placeholderSkill.name,
+          description: placeholderSkill.description,
+          instructions: placeholderSkill.instructions,
+          extraFiles: [],
+          resolvedCommit: "a".repeat(40),
+          integrity: `sha256:${"b".repeat(64)}`,
+        },
+        meta,
+      },
+      200,
+    ),
+  importSkill: (c) => c.json({ data: { skill: placeholderSkill, replayed: false }, meta }, 201),
   listSkillCatalog: (c) =>
     c.json(
       {

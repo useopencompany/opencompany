@@ -9,6 +9,7 @@ import type {
   LegacyTaskHistoryEventDto,
   LegacyTaskHistoryMessageDto,
   SkillDto,
+  SkillImportCandidateDto,
 } from "@opencompany/protocol";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
@@ -71,14 +72,14 @@ import type { GoatWorkflowListItem } from "@/lib/headless-automation-types";
 import {
   archiveHeadlessSkill,
   createHeadlessSkill,
+  importHeadlessSkill,
+  previewHeadlessSkillImport,
   updateHeadlessSkill,
 } from "@/lib/headless-knowledge-commands";
 import { legacyTaskDtoToRow, taskReadModelToRow } from "@/lib/headless-task-collections";
 import { getHeadlessTask, getLegacyTaskCompatibilityHistory } from "@/lib/headless-task-commands";
 import type { GoatIntegrationState } from "@/lib/integration-state";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
-import { importGoatSkillAction, previewGoatSkillImportAction } from "@/lib/skill-actions";
-import type { GoatSkillImportCandidate } from "@/lib/skill-import";
 import type { GoatSkillListItem, GoatSkillSource } from "@/lib/skills";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
 import {
@@ -1558,7 +1559,7 @@ function ImportSkillDialog({
 }) {
   const [url, setUrl] = useState("");
   const [selectedPath, setSelectedPath] = useState<string | undefined>(undefined);
-  const [candidates, setCandidates] = useState<GoatSkillImportCandidate[] | null>(null);
+  const [candidates, setCandidates] = useState<SkillImportCandidateDto[] | null>(null);
   const [preview, setPreview] = useState<ImportPreviewState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isResolving, startResolving] = useTransition();
@@ -1580,30 +1581,30 @@ function ImportSkillDialog({
     }
     setError(null);
     startResolving(async () => {
-      const result = await previewGoatSkillImportAction({
-        url: trimmed,
-        ...(path !== undefined ? { selectedPath: path } : {}),
-      });
-      if (result.status === "error") {
-        setError(result.message);
+      try {
+        const result = await previewHeadlessSkillImport({
+          url: trimmed,
+          ...(path !== undefined ? { selectedPath: path } : {}),
+        });
+        if (result.status === "ambiguous") {
+          setCandidates(result.candidates);
+          setPreview(null);
+          return;
+        }
+        setCandidates(null);
+        setPreview({
+          name: result.name,
+          description: result.description,
+          instructions: result.instructions,
+          extraFiles: result.extraFiles,
+          resolvedCommit: result.resolvedCommit,
+          integrity: result.integrity,
+        });
+      } catch (cause) {
+        setError(errorMessage(cause));
         setCandidates(null);
         setPreview(null);
-        return;
       }
-      if (result.status === "ambiguous") {
-        setCandidates(result.candidates);
-        setPreview(null);
-        return;
-      }
-      setCandidates(null);
-      setPreview({
-        name: result.name,
-        description: result.description,
-        instructions: result.instructions,
-        extraFiles: result.extraFiles,
-        resolvedCommit: result.resolvedCommit,
-        integrity: result.integrity,
-      });
     });
   };
 
@@ -1613,22 +1614,17 @@ function ImportSkillDialog({
     const confirmedPreview = preview;
     setError(null);
     startImporting(async () => {
-      const result = await importGoatSkillAction({
-        url: trimmed,
-        ...(selectedPath !== undefined ? { selectedPath } : {}),
-        expectedResolvedCommit: confirmedPreview.resolvedCommit,
-        expectedIntegrity: confirmedPreview.integrity,
-      });
-      if (result.status === "imported") {
-        onImported(result.slug);
-        return;
+      try {
+        const result = await importHeadlessSkill({
+          url: trimmed,
+          ...(selectedPath !== undefined ? { selectedPath } : {}),
+          expectedResolvedCommit: confirmedPreview.resolvedCommit,
+          expectedIntegrity: confirmedPreview.integrity,
+        });
+        onImported(result.skill.slug);
+      } catch (cause) {
+        setError(errorMessage(cause));
       }
-      if (result.status === "ambiguous") {
-        setCandidates(result.candidates);
-        setPreview(null);
-        return;
-      }
-      setError(result.message);
     });
   };
 

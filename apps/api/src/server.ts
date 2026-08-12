@@ -3,6 +3,7 @@ import { RedisChatPresentationStream } from "@opencompany/chat-presentation";
 import {
   ChatApplicationService,
   KnowledgeApplicationService,
+  SkillImportApplicationService,
   TaskApplicationService,
 } from "@opencompany/core";
 import {
@@ -14,6 +15,7 @@ import { createPooledDb } from "@opencompany/db/pool";
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
 import { resolvePersistedAutoModelRouting } from "@opencompany/goat-agent/application/persisted-auto-model-routing";
 import { getGoatAvailableHarnessTools } from "@opencompany/goat-agent/integrations/google-data";
+import { createGoatSkillImportResolver } from "@opencompany/goat-agent/skill-import";
 import {
   registerGoatNodeObservability,
   shutdownGoatNodeObservability,
@@ -62,7 +64,12 @@ const automations = createAutomationServices({
     ? { gatewayApiKey: process.env.VERCEL_AI_GATEWAY_API_KEY.trim() }
     : {}),
 });
-const knowledge = new KnowledgeApplicationService(new PostgresKnowledgeRepository(database.db));
+const knowledgeRepository = new PostgresKnowledgeRepository(database.db);
+const knowledge = new KnowledgeApplicationService(knowledgeRepository);
+const skillImports = new SkillImportApplicationService(
+  knowledgeRepository,
+  createGoatSkillImportResolver(),
+);
 const notifier = new PostgresRunEventNotifier(database.pool);
 const presentation = createPresentationStream();
 const readModels = createElectricReadModels();
@@ -72,6 +79,7 @@ const app = createApiApp({
   workflows: automations.workflows,
   schedules: automations.schedules,
   knowledge,
+  skillImports,
   brainAssets: createBrainAssetService({ db: database.db, knowledge }),
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),
   authenticate: createWorkOsApiAuthenticator(execute),

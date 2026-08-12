@@ -10,6 +10,7 @@ import {
   type KnowledgeRepository,
   type Skill,
   type SkillCatalogItem,
+  type SkillImportSource,
   type SkillListItem,
   type WikiPage,
   type WikiTimelineEntry,
@@ -681,6 +682,107 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     return skillRow(row);
   }
 
+  async importSkill(input: {
+    actor: Actor;
+    idempotencyKey: string;
+    name: string;
+    description: string;
+    instructions: string;
+    source: SkillImportSource;
+    resolvedCommit: string;
+    integrity: string;
+  }) {
+    validateSkill({ ...input, status: "active" });
+    const operation = "skill.import" as const;
+    const command = {
+      source: input.source,
+      resolvedCommit: input.resolvedCommit,
+      integrity: input.integrity,
+    };
+    const requestHash = commandHash(operation, command);
+    const proposedResourceId = deterministicResourceId("goat_skill", input, input.idempotencyKey);
+    const [reservation] = await this.db
+      .insert(goatKnowledgeCommandIdempotency)
+      .values({
+        commandId: deterministicResourceId("goat_knowledge_command", input, input.idempotencyKey),
+        userWorkosId: input.actor.userId,
+        workspaceId: input.actor.workspaceId,
+        idempotencyKey: input.idempotencyKey,
+        requestHash,
+        operation,
+        resourceId: proposedResourceId,
+      })
+      .onConflictDoUpdate({
+        target: [
+          goatKnowledgeCommandIdempotency.userWorkosId,
+          goatKnowledgeCommandIdempotency.workspaceId,
+          goatKnowledgeCommandIdempotency.idempotencyKey,
+        ],
+        set: { touchedAt: new Date() },
+      })
+      .returning({
+        requestHash: goatKnowledgeCommandIdempotency.requestHash,
+        operation: goatKnowledgeCommandIdempotency.operation,
+        resourceId: goatKnowledgeCommandIdempotency.resourceId,
+      });
+    if (!reservation) throw new CoreError("conflict", "Could not reserve the Skill import.");
+    if (reservation.operation !== operation || reservation.requestHash !== requestHash) {
+      throw new CoreError(
+        "idempotency_conflict",
+        "The Idempotency-Key was already used for another command.",
+      );
+    }
+
+    const replay = await this.findSkillById(input.actor.workspaceId, reservation.resourceId);
+    if (replay) {
+      await this.completeImportCommand(input, replay.id);
+      return { skill: skillRow(replay), idempotentReplay: true };
+    }
+    const existing = await this.findImportedSkill(input.actor.workspaceId, input.source);
+    if (existing) {
+      await this.completeImportCommand(input, existing.id);
+      return { skill: skillRow(existing), idempotentReplay: true };
+    }
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const slug = await this.uniqueSkillSlug(input.actor.workspaceId, input.name);
+      try {
+        const [created] = await this.db
+          .insert(goatSkills)
+          .values({
+            id: proposedResourceId,
+            workspaceId: input.actor.workspaceId,
+            slug,
+            name: input.name.trim(),
+            description: input.description.trim(),
+            instructions: input.instructions,
+            status: "active",
+            createdByWorkosId: input.actor.userId,
+            sourceType: input.source.type,
+            sourceUrl: input.source.url,
+            sourceRef: input.source.ref,
+            sourcePath: input.source.path,
+            resolvedCommit: input.resolvedCommit,
+            integrity: input.integrity,
+          })
+          .returning();
+        if (!created) throw new CoreError("conflict", "Could not import the Skill.");
+        await this.completeImportCommand(input, created.id);
+        return { skill: skillRow(created), idempotentReplay: false };
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
+        const winner =
+          (await this.findSkillById(input.actor.workspaceId, proposedResourceId)) ??
+          (await this.findImportedSkill(input.actor.workspaceId, input.source));
+        if (winner) {
+          await this.completeImportCommand(input, winner.id);
+          return { skill: skillRow(winner), idempotentReplay: true };
+        }
+      }
+    }
+    throw new CoreError("conflict", "Could not allocate a unique Skill slug.");
+  }
+
   async updateSkill(input: {
     actor: Actor;
     slug: string;
@@ -776,6 +878,52 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
         ),
       )
       .orderBy(desc(goatSkills.updatedAt));
+  }
+
+  private async findSkillById(workspaceId: string, id: string): Promise<GoatSkill | null> {
+    const [row] = await this.db
+      .select()
+      .from(goatSkills)
+      .where(and(eq(goatSkills.workspaceId, workspaceId), eq(goatSkills.id, id)))
+      .limit(1);
+    return row ?? null;
+  }
+
+  private async findImportedSkill(
+    workspaceId: string,
+    source: SkillImportSource,
+  ): Promise<GoatSkill | null> {
+    const [row] = await this.db
+      .select()
+      .from(goatSkills)
+      .where(
+        and(
+          eq(goatSkills.workspaceId, workspaceId),
+          eq(goatSkills.sourceUrl, source.url),
+          eq(goatSkills.sourceRef, source.ref),
+          eq(goatSkills.sourcePath, source.path),
+          isNull(goatSkills.archivedAt),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  private async completeImportCommand(
+    input: { actor: Actor; idempotencyKey: string },
+    resourceId: string,
+  ) {
+    await this.db
+      .update(goatKnowledgeCommandIdempotency)
+      .set({ resourceId, completedAt: new Date(), touchedAt: new Date() })
+      .where(
+        and(
+          eq(goatKnowledgeCommandIdempotency.userWorkosId, input.actor.userId),
+          eq(goatKnowledgeCommandIdempotency.workspaceId, input.actor.workspaceId),
+          eq(goatKnowledgeCommandIdempotency.idempotencyKey, input.idempotencyKey),
+          eq(goatKnowledgeCommandIdempotency.operation, "skill.import"),
+        ),
+      );
   }
 
   private async uniqueSkillSlug(workspaceId: string, name: string) {

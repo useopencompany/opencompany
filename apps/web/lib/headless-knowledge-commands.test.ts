@@ -4,7 +4,9 @@ import {
   addHeadlessWikiTimelineEntry,
   createHeadlessBrainDocument,
   createHeadlessSkill,
+  importHeadlessSkill,
   listHeadlessBrainSourceItems,
+  previewHeadlessSkillImport,
   updateHeadlessSkill,
 } from "./headless-knowledge-commands";
 
@@ -138,6 +140,47 @@ describe("headless knowledge commands", () => {
       ["POST /v1/skills", "PATCH /v1/skills/visual-review"],
     );
     expect(requests[0]?.headers.get("idempotency-key")).toMatch(/^web-skill:/u);
+  });
+
+  it("previews and imports external Skills through the typed resources", async () => {
+    const requests: Request[] = [];
+    const resolvedCommit = "a".repeat(40);
+    const integrity = `sha256:${"b".repeat(64)}`;
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      return new URL(request.url).pathname.endsWith("/preview")
+        ? Response.json({
+            data: {
+              status: "resolved",
+              proposedSlug: skill.slug,
+              name: skill.name,
+              description: skill.description,
+              instructions: skill.instructions,
+              extraFiles: [],
+              resolvedCommit,
+              integrity,
+            },
+            meta,
+          })
+        : Response.json({ data: { skill, replayed: false }, meta }, { status: 201 });
+    });
+    const options = { baseUrl: "https://api.example.test", fetch: fetchMock as typeof fetch };
+
+    await previewHeadlessSkillImport({ url: "github.com/o/r" }, options);
+    await importHeadlessSkill(
+      {
+        url: "github.com/o/r",
+        expectedResolvedCommit: resolvedCommit,
+        expectedIntegrity: integrity,
+      },
+      options,
+    );
+
+    expect(requests.map((request) => `${request.method} ${new URL(request.url).pathname}`)).toEqual(
+      ["POST /v1/skills/imports/preview", "POST /v1/skills/imports"],
+    );
+    expect(requests[1]?.headers.get("idempotency-key")).toMatch(/^web-skill-import:/u);
   });
 
   it("surfaces canonical errors with the request id", async () => {
