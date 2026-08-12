@@ -8,6 +8,7 @@ import {
   type BrainDocument,
   type BrainFolder,
   type BrainOverview,
+  type BrainSourceItem,
   CHAT_ATTACHMENT_MAX_BYTES,
   type ChatApplicationService,
   CoreError,
@@ -416,6 +417,16 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceRateLimit(rateLimiter, actor, "read", 300);
       const overview = await input.knowledge.getBrainOverview(actor, c.req.valid("param").brainId);
       return c.json({ data: brainOverviewDto(overview), meta }, 200);
+    },
+    listBrainSourceItems: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const sourceItems = await input.knowledge.listBrainSourceItems(
+        actor,
+        c.req.valid("param").brainId,
+        c.req.valid("query").ids,
+      );
+      return c.json({ data: sourceItems.map(brainSourceItemDto), meta }, 200);
     },
     createBrainDocument: async (c) => {
       const actor = actorFrom(c);
@@ -1264,6 +1275,18 @@ function brainDocumentDto(document: BrainDocument) {
 
 function brainOverviewDto(overview: BrainOverview) {
   return { ...overview, windowStartedAt: overview.windowStartedAt.toISOString() };
+}
+
+function brainSourceItemDto(item: BrainSourceItem) {
+  return {
+    id: item.id,
+    sourceProvider: item.sourceProvider,
+    sourceType: item.sourceType,
+    externalId: item.externalId.slice(0, 4_096),
+    title: item.title?.slice(0, 512) ?? null,
+    lastIngestError: item.lastIngestError?.slice(0, 2_000) ?? null,
+    createdAt: item.createdAt.toISOString(),
+  };
 }
 
 function wikiPageDto(page: WikiPage) {

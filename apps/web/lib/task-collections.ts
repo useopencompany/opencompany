@@ -205,31 +205,6 @@ export type GoatIntegrationRow = {
   updated_at: string;
 };
 
-export type GoatBrainIngestJobRow = {
-  id: string;
-  source_item_id: string;
-  user_workos_id: string;
-  source_provider: string;
-  source_connection_id: string;
-  integration_id: string | null;
-  import_run_id?: string | null;
-  brain_ref: string | null;
-  kind: string;
-  content_hash: string;
-  status: "queued" | "running" | "succeeded" | "failed" | "skipped";
-  plan_paused: boolean;
-  attempts: number;
-  next_run_at: string;
-  lease_id: string | null;
-  lease_owner: string | null;
-  lease_expires_at: string | null;
-  last_error: string | null;
-  result: Record<string, unknown>;
-  completed_at: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
 export type GoatBrainImportRunRow = {
   id: string;
   brain_ref: string;
@@ -255,35 +230,10 @@ export type GoatBrainImportRunRow = {
   updated_at: string;
 };
 
-// Slim projection: the shape proxy strips the raw/normalized payload columns.
-export type GoatBrainSourceItemRow = {
-  id: string;
-  user_workos_id: string;
-  source_provider: string;
-  source_type: string;
-  external_id: string;
-  title: string | null;
-  occurred_at: string;
-  captured_at: string;
-  content_hash: string;
-  last_ingest_job_id: string | null;
-  last_ingest_status: string | null;
-  last_ingest_error: string | null;
-  last_ingested_at: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
 // The Electric shape proxy authorizes the brain_ref param against the current
 // user before forwarding, so each brain gets its own shape subscription.
 function createBrainCollections(brainRef: string) {
   return {
-    ingestJobs: createGoatElectricCollection<GoatBrainIngestJobRow>({
-      id: `goat:brain_ingest_jobs:${brainRef}`,
-      table: "goat.brain_ingest_jobs",
-      params: { brain_ref: brainRef },
-      getKey: (row) => row.id,
-    }),
     importRuns: createGoatElectricCollection<GoatBrainImportRunRow>({
       id: `goat:brain_import_runs:${brainRef}`,
       table: "goat.brain_import_runs",
@@ -345,32 +295,12 @@ function buildGoatCollections() {
     getKey: (row) => row.id,
   });
 
-  // User-scoped (not per-brain): jobs join to these by source_item_id.
-  const brainSourceItems = createGoatElectricCollection<GoatBrainSourceItemRow>({
-    id: "goat:brain_source_items",
-    table: "goat.brain_source_items",
-    getKey: (row) => row.id,
-  });
-
-  const pendingBrainCaptureSourceItems = createGoatElectricCollection<GoatBrainSourceItemRow>({
-    id: "goat:brain_source_items:goat-chat:capture:pending-failed",
-    table: "goat.brain_source_items",
-    params: {
-      source_provider: "goat-chat",
-      source_type: "capture",
-      last_ingest_status: "pending,failed",
-    },
-    getKey: (row) => row.id,
-  });
-
   return {
     chatSessions,
     chatMessages: getChatMessageCollection,
     codexChatSessions,
     integrations,
     brainCollections: getBrainCollections,
-    brainSourceItems,
-    pendingBrainCaptureSourceItems,
   };
 }
 

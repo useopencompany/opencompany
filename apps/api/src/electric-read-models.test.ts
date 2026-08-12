@@ -282,6 +282,119 @@ describe("Electric read models", () => {
     expect(JSON.stringify(body)).not.toMatch(/brain_ref|asset_storage_key|workspace_id/iu);
   });
 
+  it("projects Brain ingestion activity without worker leases or actor identifiers", async () => {
+    let upstreamUrl = "";
+    const longError = "x".repeat(2_001);
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        upstreamUrl = String(input);
+        return Response.json([
+          {
+            headers: { operation: "insert" },
+            key: '"job_1"',
+            value: {
+              id: "job_1",
+              source_item_id: "source_item_1",
+              source_provider: "goat-chat",
+              kind: "brain_agent_ingest",
+              status: "running",
+              plan_paused: false,
+              attempts: "1",
+              last_error: longError,
+              result: JSON.stringify({
+                summary: "Filing",
+                draftBrainId: "project-alpha",
+                workerLease: "must-not-cross",
+                attemptErrors: ["must-not-cross"],
+                trace: {
+                  schemaVersion: "goat.brain_ingest_trace.v1",
+                  model: "claude-sonnet-4.5",
+                  steps: 1,
+                  toolCallCount: 0,
+                  mutations: 0,
+                  usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+                  finalText: "Filed",
+                  toolCalls: [],
+                  truncatedToolCalls: 0,
+                  createdAt: "2026-08-12T08:01:00.000Z",
+                  providerResponse: "must-not-cross",
+                },
+              }),
+              completed_at: null,
+              created_at: "2026-08-12 08:00:00+00",
+              updated_at: "2026-08-12 08:01:00+00",
+              brain_ref: "must-not-cross",
+              user_workos_id: "must-not-cross",
+              integration_id: "must-not-cross",
+              lease_id: "must-not-cross",
+              lease_owner: "must-not-cross",
+            },
+          },
+        ]);
+      }) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "brain-ingest-jobs-v1",
+      brainId: "brain_1",
+      requestUrl: new URL(
+        "https://api.example.test/v1/read-models/brain-ingest-jobs-v1?brainId=brain_1&table=goat.users&where=true",
+      ),
+    });
+
+    const requestedUrl = new URL(upstreamUrl);
+    expect(requestedUrl.searchParams.get("table")).toBe("goat.brain_ingest_jobs");
+    expect(requestedUrl.searchParams.get("where")).toBe('"brain_ref" = $1');
+    expect(requestedUrl.searchParams.get("columns")).not.toMatch(/lease|user_workos|integration/iu);
+    const body = await response.json();
+    expect(body).toEqual([
+      {
+        headers: { operation: "insert" },
+        key: '"job_1"',
+        value: {
+          id: "job_1",
+          sourceItemId: "source_item_1",
+          sourceProvider: "goat-chat",
+          kind: "brain_agent_ingest",
+          status: "running",
+          planPaused: false,
+          attempts: 1,
+          lastError: longError.slice(0, 2_000),
+          result: {
+            summary: "Filing",
+            draftBrainId: "project-alpha",
+            trace: {
+              schemaVersion: "goat.brain_ingest_trace.v1",
+              model: "claude-sonnet-4.5",
+              steps: 1,
+              toolCallCount: 0,
+              mutations: 0,
+              usage: {
+                inputTokens: 10,
+                outputTokens: 2,
+                totalTokens: 12,
+                cacheReadInputTokens: null,
+                cacheWriteInputTokens: null,
+              },
+              finalText: "Filed",
+              toolCalls: [],
+              truncatedToolCalls: 0,
+              webSearchCount: 0,
+              webSearchCostUsdMicros: 0,
+              createdAt: "2026-08-12T08:01:00.000Z",
+            },
+          },
+          completedAt: null,
+          createdAt: "2026-08-12T08:00:00.000Z",
+          updatedAt: "2026-08-12T08:01:00.000Z",
+        },
+      },
+    ]);
+    expect(JSON.stringify(body)).not.toMatch(/workerLease|attemptErrors|providerResponse/iu);
+  });
+
   it("scopes Wiki shapes to the authenticated Workspace and ignores caller shape parameters", async () => {
     let upstreamUrl = "";
     const proxy = new ElectricReadModelProxy({

@@ -11,6 +11,7 @@ import {
   BrainFolderPathEnvelopeSchema,
   BrainOverviewEnvelopeSchema,
   BrainSnapshotEnvelopeSchema,
+  BrainSourceItemListEnvelopeSchema,
   CancelRunEnvelopeSchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
@@ -459,6 +460,40 @@ export const getBrainOverviewRoute = createRoute({
     200: {
       description: "Aggregate activity for an authorized Brain.",
       content: { "application/json": { schema: BrainOverviewEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listBrainSourceItemsRoute = createRoute({
+  method: "get",
+  path: "/v1/brains/{brainId}/source-items",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema }),
+    query: z.object({
+      ids: z
+        .string()
+        .min(1)
+        .max(25_699)
+        .transform((value: string) =>
+          Array.from(
+            new Set(
+              value
+                .split(",")
+                .map((item: string) => item.trim())
+                .filter(Boolean),
+            ),
+          ),
+        )
+        .pipe(z.array(ResourceIdSchema).min(1).max(100)),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Bounded public metadata for source items referenced by an authorized Brain.",
+      content: { "application/json": { schema: BrainSourceItemListEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -1034,6 +1069,7 @@ export type V1RouteHandlers = {
   runTaskScheduleNow: RouteHandler<typeof runTaskScheduleNowRoute>;
   getBrainSnapshot: RouteHandler<typeof getBrainSnapshotRoute>;
   getBrainOverview: RouteHandler<typeof getBrainOverviewRoute>;
+  listBrainSourceItems: RouteHandler<typeof listBrainSourceItemsRoute>;
   createBrainDocument: RouteHandler<typeof createBrainDocumentRoute>;
   updateBrainDocument: RouteHandler<typeof updateBrainDocumentRoute>;
   renameBrainDocument: RouteHandler<typeof renameBrainDocumentRoute>;
@@ -1097,6 +1133,7 @@ export function createV1Router(
     .openapi(runTaskScheduleNowRoute, handlers.runTaskScheduleNow)
     .openapi(getBrainSnapshotRoute, handlers.getBrainSnapshot)
     .openapi(getBrainOverviewRoute, handlers.getBrainOverview)
+    .openapi(listBrainSourceItemsRoute, handlers.listBrainSourceItems)
     .openapi(createBrainDocumentRoute, handlers.createBrainDocument)
     .openapi(updateBrainDocumentRoute, handlers.updateBrainDocument)
     .openapi(renameBrainDocumentRoute, handlers.renameBrainDocument)
@@ -1403,6 +1440,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  listBrainSourceItems: (c) => c.json({ data: [], meta }, 200),
   createBrainDocument: (c) => c.json({ data: placeholderBrainDocument, meta }, 201),
   updateBrainDocument: (c) => c.json({ data: placeholderBrainDocument, meta }, 200),
   renameBrainDocument: (c) => c.json({ data: placeholderBrainDocument, meta }, 200),

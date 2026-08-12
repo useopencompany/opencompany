@@ -7,6 +7,7 @@ import type {
   UpdateWikiPageBody,
 } from "@opencompany/protocol";
 import {
+  type BrainSourceItemDto,
   type CreateBrainDocumentBody,
   type CreateBrainFolderBody,
   type CreateSkillBody,
@@ -43,6 +44,20 @@ export async function createHeadlessBrainDocument(
     json: command,
   });
   return responseData(response, "Brain document creation failed");
+}
+
+export async function listHeadlessBrainSourceItems(
+  brainId: string,
+  ids: string[],
+  options: ClientOptions = {},
+): Promise<BrainSourceItemDto[]> {
+  if (ids.length === 0) return [];
+  if (ids.length > 100) throw new Error("Brain source-item lookups are limited to 100 ids.");
+  const response = await knowledgeClient(options).v1.brains[":brainId"]["source-items"].$get({
+    param: { brainId },
+    query: { ids: ids.join(",") },
+  });
+  return responseData(response, "Brain activity metadata loading failed");
 }
 
 export async function updateHeadlessBrainDocument(

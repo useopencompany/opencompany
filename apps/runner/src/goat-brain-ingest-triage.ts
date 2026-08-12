@@ -1,17 +1,17 @@
 import { calculateModelUsageCost } from "@opencompany/billing";
 import {
-  GOAT_BRAIN_INGEST_TRIAGE_ENTITY_HINT_LENGTH,
-  GOAT_BRAIN_INGEST_TRIAGE_MAX_ENTITY_HINTS,
-  GOAT_BRAIN_INGEST_TRIAGE_REASON_LENGTH,
-  type GoatBrainIngestTraceUsage,
-  type GoatBrainIngestTriageTrace,
-} from "@opencompany/db/goat-brain-ingest-trace";
-import {
   type NormalizedAttioObjectSourceItem,
   type NormalizedGitHubActivitySourceItem,
   type NormalizedGmailThreadSourceItem,
   type NormalizedSlackConversationSourceItem,
 } from "@opencompany/goat-brain";
+import {
+  GOAT_BRAIN_INGEST_TRIAGE_ENTITY_HINT_LENGTH,
+  GOAT_BRAIN_INGEST_TRIAGE_MAX_ENTITY_HINTS,
+  GOAT_BRAIN_INGEST_TRIAGE_REASON_LENGTH,
+  type GoatBrainIngestTraceUsage,
+  type GoatBrainIngestTriageTrace,
+} from "@opencompany/goat-brain/ingest-trace";
 import {
   createGoatGatewayAttribution,
   goatGatewayProviderOptions,

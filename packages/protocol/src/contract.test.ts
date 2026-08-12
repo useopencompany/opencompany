@@ -118,6 +118,7 @@ describe("v1 protocol contract", () => {
       "/v1/schedules/{scheduleId}/run-now",
       "/v1/brains/{brainId}",
       "/v1/brains/{brainId}/overview",
+      "/v1/brains/{brainId}/source-items",
       "/v1/brains/{brainId}/documents",
       "/v1/brains/{brainId}/documents/{documentId}",
       "/v1/brains/{brainId}/documents/{documentId}/rename",

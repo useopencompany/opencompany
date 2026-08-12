@@ -17,20 +17,6 @@ import {
   syncGoatBrainFilesFromRoot,
   updateGoatBrainAssetExtraction,
 } from "@opencompany/db/goat-brain-files";
-import {
-  GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH,
-  GOAT_BRAIN_INGEST_TRACE_MAX_TOOL_CALLS,
-  GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
-  GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
-  GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH,
-  type GoatBrainIngestBudget,
-  type GoatBrainIngestTrace,
-  type GoatBrainIngestTraceToolCall,
-  type GoatBrainIngestTraceUsage,
-  type GoatBrainIngestTriageTrace,
-  goatBrainIngestTracePreview,
-  sanitizeGoatBrainIngestTraceArgs,
-} from "@opencompany/db/goat-brain-ingest-trace";
 import { getGoatGmailBrainSourceInstructions } from "@opencompany/db/goat-gmail";
 import type { GoatBrainIntelligence } from "@opencompany/db/goat-schema";
 import {
@@ -67,6 +53,20 @@ import {
   slackTsToIso,
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
+import {
+  GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH,
+  GOAT_BRAIN_INGEST_TRACE_MAX_TOOL_CALLS,
+  GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
+  GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
+  GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH,
+  type GoatBrainIngestBudget,
+  type GoatBrainIngestTrace,
+  type GoatBrainIngestTraceToolCall,
+  type GoatBrainIngestTraceUsage,
+  type GoatBrainIngestTriageTrace,
+  goatBrainIngestTracePreview,
+  sanitizeGoatBrainIngestTraceArgs,
+} from "@opencompany/goat-brain/ingest-trace";
 import {
   createGoatGatewayAttribution,
   goatGatewayProviderOptions,

@@ -3,7 +3,7 @@
 import type {
   GoatBrainIngestTrace,
   GoatBrainIngestTraceToolCall,
-} from "@opencompany/db/goat-brain-ingest-trace";
+} from "@opencompany/goat-brain/ingest-trace";
 import {
   Dialog,
   DialogContent,

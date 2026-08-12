@@ -1,9 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type {
-  GoatBrainIngestTrace,
-  GoatBrainIngestTriageTrace,
-} from "@opencompany/db/goat-brain-ingest-trace";
 import {
   normalizeAttioObjectWindow,
   normalizeGitHubActivityWebhook,
@@ -14,6 +10,10 @@ import {
   normalizeJamieMeetingCompletedWebhook,
   normalizeSlackConversationWindow,
 } from "@opencompany/goat-brain";
+import type {
+  GoatBrainIngestTrace,
+  GoatBrainIngestTriageTrace,
+} from "@opencompany/goat-brain/ingest-trace";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const aiMock = vi.hoisted(() => ({

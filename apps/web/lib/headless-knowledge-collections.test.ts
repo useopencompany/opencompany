@@ -61,7 +61,7 @@ describe("headless knowledge collections", () => {
     const second = getHeadlessBrainCollections("brain_alpha");
 
     expect(first).toBe(second);
-    expect(createCollection).toHaveBeenCalledTimes(4);
+    expect(createCollection).toHaveBeenCalledTimes(5);
     expect((first.documents as unknown as TestCollection).options).toMatchObject({
       id: "headless-brain-documents:v1:brain_alpha",
       shapeOptions: {
@@ -70,6 +70,9 @@ describe("headless knowledge collections", () => {
     });
     expect((first.edges as unknown as TestCollection).options.shapeOptions.url).toBe(
       "https://api.example.test/v1/read-models/brain-edges-v1?brainId=brain_alpha",
+    );
+    expect((first.ingestJobs as unknown as TestCollection).options.shapeOptions.url).toBe(
+      "https://api.example.test/v1/read-models/brain-ingest-jobs-v1?brainId=brain_alpha",
     );
   });
 

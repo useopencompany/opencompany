@@ -9,6 +9,7 @@ const queryRows = vi.hoisted(() => ({
   jobs: [] as unknown[],
   items: [] as unknown[],
 }));
+const listSourceItems = vi.hoisted(() => vi.fn());
 
 vi.mock("@opencompany/ui/components/popover", () => ({
   Popover: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -24,31 +25,22 @@ vi.mock("@opencompany/ui/components/popover", () => ({
 }));
 
 vi.mock("@tanstack/react-db", () => ({
-  useLiveQuery: vi.fn((query: unknown) => {
-    const source = String(query);
-    return {
-      data: source.includes("ingestJobs") ? queryRows.jobs : queryRows.items,
-      isLoading: false,
-    };
-  }),
+  useLiveQuery: vi.fn(() => ({ data: queryRows.jobs, isLoading: false })),
 }));
 
-vi.mock("@/lib/task-collections", () => ({
-  createGoatCollections: () => {
-    const collections = {
-      brainSourceItems: "brainSourceItems",
-      brainCollections: () => ({
-        ingestJobs: "ingestJobs",
-      }),
-    };
-    return collections;
-  },
+vi.mock("@/lib/headless-knowledge-collections", () => ({
+  getHeadlessBrainCollections: () => ({ ingestJobs: "ingestJobs" }),
+}));
+
+vi.mock("@/lib/headless-knowledge-commands", () => ({
+  listHeadlessBrainSourceItems: listSourceItems,
 }));
 
 describe("GoatBrainActivity", () => {
   beforeEach(() => {
     queryRows.jobs = [];
     queryRows.items = [];
+    listSourceItems.mockImplementation(async () => queryRows.items);
   });
 
   afterEach(() => {
@@ -59,7 +51,7 @@ describe("GoatBrainActivity", () => {
     queryRows.jobs = [
       job({
         status: "succeeded",
-        completed_at: "2026-07-09T10:01:00.000Z",
+        completedAt: "2026-07-09T10:01:00.000Z",
         result: {
           summary: "Filed two pages.",
           pages: [
@@ -93,20 +85,20 @@ describe("GoatBrainActivity", () => {
     );
   });
 
-  it("shows only successful filings in the overview by default", () => {
+  it("shows only successful filings in the overview by default", async () => {
     queryRows.jobs = [
       job({
         id: "gbjob_filed",
-        source_item_id: "gbsrc_filed",
+        sourceItemId: "gbsrc_filed",
         status: "succeeded",
-        completed_at: "2026-07-09T10:01:00.000Z",
+        completedAt: "2026-07-09T10:01:00.000Z",
         result: { summary: "Filed one page." },
       }),
       job({
         id: "gbjob_skipped",
-        source_item_id: "gbsrc_skipped",
+        sourceItemId: "gbsrc_skipped",
         status: "skipped",
-        completed_at: "2026-07-09T10:02:00.000Z",
+        completedAt: "2026-07-09T10:02:00.000Z",
         result: { skipped: true, summary: "No durable knowledge." },
       }),
     ];
@@ -118,19 +110,19 @@ describe("GoatBrainActivity", () => {
     render(<GoatBrainRecentActivity brainRef="goat_brain_1" />);
 
     expect(screen.getByText("Filed into brain")).toBeInTheDocument();
-    expect(screen.getByText("Useful customer signal")).toBeInTheDocument();
+    expect(await screen.findByText("Useful customer signal")).toBeInTheDocument();
     expect(screen.queryByText("Received")).not.toBeInTheDocument();
     expect(screen.queryByText("Skipped filing")).not.toBeInTheDocument();
     expect(screen.queryByText("Routine notification")).not.toBeInTheDocument();
   });
 
-  it("filters overview activity before applying its row limit", () => {
+  it("filters overview activity before applying its row limit", async () => {
     const skippedJobs = Array.from({ length: 30 }, (_, index) =>
       job({
         id: `gbjob_skipped_${index}`,
-        source_item_id: `gbsrc_skipped_${index}`,
+        sourceItemId: `gbsrc_skipped_${index}`,
         status: "skipped",
-        completed_at: `2026-07-09T10:${String(index + 2).padStart(2, "0")}:00.000Z`,
+        completedAt: `2026-07-09T10:${String(index + 2).padStart(2, "0")}:00.000Z`,
         result: { skipped: true },
       }),
     );
@@ -138,29 +130,29 @@ describe("GoatBrainActivity", () => {
       ...skippedJobs,
       job({
         id: "gbjob_filed",
-        source_item_id: "gbsrc_filed",
+        sourceItemId: "gbsrc_filed",
         status: "succeeded",
-        completed_at: "2026-07-09T10:01:00.000Z",
+        completedAt: "2026-07-09T10:01:00.000Z",
         result: { summary: "Filed one page." },
       }),
     ];
     queryRows.items = [
       ...skippedJobs.map((skippedJob, index) =>
-        item({ id: skippedJob.source_item_id, title: `Routine notification ${index}` }),
+        item({ id: skippedJob.sourceItemId, title: `Routine notification ${index}` }),
       ),
       item({ id: "gbsrc_filed", title: "Older useful signal" }),
     ];
 
     render(<GoatBrainRecentActivity brainRef="goat_brain_1" limit={1} />);
 
-    expect(screen.getByText("Older useful signal")).toBeInTheDocument();
+    expect(await screen.findByText("Older useful signal")).toBeInTheDocument();
   });
 
   it("can show received and skipped overview activity", () => {
     queryRows.jobs = [
       job({
         status: "skipped",
-        completed_at: "2026-07-09T10:01:00.000Z",
+        completedAt: "2026-07-09T10:01:00.000Z",
         result: { skipped: true },
       }),
     ];
@@ -206,7 +198,7 @@ describe("GoatBrainActivity", () => {
     queryRows.jobs = [
       job({
         status: "running",
-        updated_at: "2026-07-09T10:00:30.000Z",
+        updatedAt: "2026-07-09T10:00:30.000Z",
       }),
     ];
     queryRows.items = [item()];
@@ -218,43 +210,28 @@ describe("GoatBrainActivity", () => {
     expect(screen.getAllByText("gbjob_1")).toHaveLength(2);
   });
 
-  it("loads brain-scoped source metadata when the user-scoped source item is absent", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          sourceItems: [
-            item({
-              source_provider: "linear",
-              source_type: "issue",
-              title: "G-57 pricing model follow-up",
-            }),
-          ],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
+  it("loads source metadata through the typed Brain resource", async () => {
+    queryRows.items = [
+      item({
+        sourceProvider: "linear",
+        sourceType: "issue",
+        title: "G-57 pricing model follow-up",
+      }),
+    ];
     queryRows.jobs = [
       job({
-        source_provider: "linear",
+        sourceProvider: "linear",
         status: "succeeded",
-        completed_at: "2026-07-09T10:01:00.000Z",
+        completedAt: "2026-07-09T10:01:00.000Z",
         result: {
           summary: "Filed one page.",
         },
       }),
     ];
-    queryRows.items = [];
-
     render(<GoatBrainActivity brainRef="goat_brain_1" />);
 
     expect(await screen.findAllByText("G-57 pricing model follow-up")).toHaveLength(2);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
-    expect(url.pathname).toBe("/api/brain-activity/source-items");
-    expect(url.searchParams.get("brain_ref")).toBe("goat_brain_1");
-    expect(url.searchParams.get("source_item_ids")).toBe("gbsrc_1");
-
-    fetchMock.mockRestore();
+    expect(listSourceItems).toHaveBeenCalledWith("goat_brain_1", ["gbsrc_1"]);
   });
 
   it("opens a completed agent trace with collapsed details and raw JSON", async () => {
@@ -262,7 +239,7 @@ describe("GoatBrainActivity", () => {
     queryRows.jobs = [
       job({
         status: "succeeded",
-        completed_at: "2026-07-09T10:01:00.000Z",
+        completedAt: "2026-07-09T10:01:00.000Z",
         result: {
           summary: "Filed one page.",
           durationMs: 80_000,
@@ -306,25 +283,17 @@ describe("GoatBrainActivity", () => {
 function job(overrides: Record<string, unknown> = {}) {
   return {
     id: "gbjob_1",
-    source_item_id: "gbsrc_1",
-    user_workos_id: "user_1",
-    source_provider: "goat-chat",
-    source_connection_id: "session_1",
-    integration_id: null,
-    brain_ref: "goat_brain_1",
+    sourceItemId: "gbsrc_1",
+    sourceProvider: "goat-chat",
     kind: "brain_agent_ingest",
-    content_hash: "hash",
     status: "queued",
+    planPaused: false,
     attempts: 0,
-    next_run_at: "2026-07-09T10:00:00.000Z",
-    lease_id: null,
-    lease_owner: null,
-    lease_expires_at: null,
-    last_error: null,
+    lastError: null,
     result: {},
-    completed_at: null,
-    created_at: "2026-07-09T10:00:00.000Z",
-    updated_at: "2026-07-09T10:00:00.000Z",
+    completedAt: null,
+    createdAt: "2026-07-09T10:00:00.000Z",
+    updatedAt: "2026-07-09T10:00:00.000Z",
     ...overrides,
   };
 }
@@ -332,20 +301,16 @@ function job(overrides: Record<string, unknown> = {}) {
 function item(overrides: Record<string, unknown> = {}) {
   return {
     id: "gbsrc_1",
-    user_workos_id: "user_1",
-    source_provider: "goat-chat",
-    source_type: "capture",
-    external_id: "pricing-reference",
+    sourceProvider: "goat-chat",
+    sourceType: "capture",
+    externalId: "pricing-reference",
     title: "Pricing teardown reference",
-    occurred_at: "2026-07-09T10:00:00.000Z",
-    captured_at: "2026-07-09T10:00:00.000Z",
-    content_hash: "hash",
-    last_ingest_job_id: "gbjob_1",
-    last_ingest_status: "pending",
-    last_ingest_error: null,
-    last_ingested_at: null,
-    created_at: "2026-07-09T10:00:00.000Z",
-    updated_at: "2026-07-09T10:00:00.000Z",
+    occurredAt: "2026-07-09T10:00:00.000Z",
+    capturedAt: "2026-07-09T10:00:00.000Z",
+    lastIngestStatus: "pending",
+    lastIngestError: null,
+    createdAt: "2026-07-09T10:00:00.000Z",
+    updatedAt: "2026-07-09T10:00:00.000Z",
     ...overrides,
   };
 }

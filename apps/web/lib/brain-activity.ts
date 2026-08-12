@@ -1,8 +1,8 @@
 import {
   type GoatBrainIngestTrace,
   normalizeGoatBrainIngestTrace,
-} from "@opencompany/db/goat-brain-ingest-trace";
-import type { GoatBrainIngestJobRow, GoatBrainSourceItemRow } from "@/lib/task-collections";
+} from "@opencompany/goat-brain/ingest-trace";
+import type { BrainIngestJobReadModel, BrainSourceItemDto } from "@opencompany/protocol";
 
 export type GoatBrainActivityKind =
   | "captured"
@@ -58,24 +58,24 @@ const MAX_DETAIL_LENGTH = 180;
 // Flattens the ingest pipeline into a human activity feed: one event for the
 // capture landing, plus one for the current state of its curation job.
 export function buildGoatBrainActivityEvents(
-  jobs: readonly GoatBrainIngestJobRow[],
-  sourceItems: readonly GoatBrainSourceItemRow[],
+  jobs: readonly BrainIngestJobReadModel[],
+  sourceItems: readonly BrainSourceItemDto[],
   options: GoatBrainActivityEventOptions = {},
 ): GoatBrainActivityEvent[] {
   const itemsById = new Map(sourceItems.map((item) => [item.id, item]));
   const events: GoatBrainActivityEvent[] = [];
 
   for (const job of jobs) {
-    const item = itemsById.get(job.source_item_id) ?? null;
+    const item = itemsById.get(job.sourceItemId) ?? null;
     const sourceTitle = item?.title?.trim() || "Untitled";
-    const provider = item?.source_provider ?? job.source_provider;
+    const provider = item?.sourceProvider ?? job.sourceProvider;
     const brainId = jobResultBrainId(job);
 
     events.push({
       id: `${job.id}:captured`,
       traceId: job.id,
       kind: "captured",
-      at: item?.created_at ?? job.created_at,
+      at: item?.createdAt ?? job.createdAt,
       title: capturedTitle(provider),
       detail: null,
       sourceTitle,
@@ -90,7 +90,7 @@ export function buildGoatBrainActivityEvents(
         id: `${job.id}:filing`,
         traceId: job.id,
         kind: "filing",
-        at: job.updated_at,
+        at: job.updatedAt,
         title: "Filing into brain…",
         detail: null,
         sourceTitle,
@@ -105,9 +105,9 @@ export function buildGoatBrainActivityEvents(
         id: skipped ? `${job.id}:skipped` : `${job.id}:filed`,
         traceId: job.id,
         kind: skipped ? "skipped" : "filed",
-        at: job.completed_at ?? job.updated_at,
+        at: job.completedAt ?? job.updatedAt,
         title: skipped ? "Skipped filing" : "Filed into brain",
-        detail: truncateDetail(firstLine(jobResultSummary(job) ?? job.last_error)),
+        detail: truncateDetail(firstLine(jobResultSummary(job) ?? job.lastError)),
         sourceTitle,
         brainId,
         pages: jobResultPages(job),
@@ -119,21 +119,21 @@ export function buildGoatBrainActivityEvents(
         id: `${job.id}:failed`,
         traceId: job.id,
         kind: "failed",
-        at: job.completed_at ?? job.updated_at,
+        at: job.completedAt ?? job.updatedAt,
         title: `Filing failed after ${job.attempts} ${job.attempts === 1 ? "attempt" : "attempts"}`,
-        detail: truncateDetail(job.last_error),
+        detail: truncateDetail(job.lastError),
         sourceTitle,
         brainId: null,
         pages: [],
         trace: null,
         durationMs: jobRunDurationMs(job),
       });
-    } else if (job.status === "queued" && job.plan_paused) {
+    } else if (job.status === "queued" && job.planPaused) {
       events.push({
         id: `${job.id}:paused`,
         traceId: job.id,
         kind: "paused",
-        at: job.updated_at,
+        at: job.updatedAt,
         title: "Paused by plan",
         detail: "This ingestion will resume automatically when allowance becomes available.",
         sourceTitle,
@@ -147,9 +147,9 @@ export function buildGoatBrainActivityEvents(
         id: `${job.id}:retrying`,
         traceId: job.id,
         kind: "retrying",
-        at: job.updated_at,
+        at: job.updatedAt,
         title: "Filing failed — will retry",
-        detail: truncateDetail(job.last_error),
+        detail: truncateDetail(job.lastError),
         sourceTitle,
         brainId: null,
         pages: [],
@@ -167,23 +167,23 @@ export function buildGoatBrainActivityEvents(
 }
 
 export function buildGoatBrainDraftIngestStates(
-  jobs: readonly GoatBrainIngestJobRow[],
-  sourceItems: readonly GoatBrainSourceItemRow[],
+  jobs: readonly BrainIngestJobReadModel[],
+  sourceItems: readonly BrainSourceItemDto[],
 ): ReadonlyMap<string, GoatBrainDraftIngestState> {
   const captureItemsById = new Map(
     sourceItems
-      .filter((item) => item.source_provider === "goat-chat" && item.source_type === "capture")
+      .filter((item) => item.sourceProvider === "goat-chat" && item.sourceType === "capture")
       .map((item) => [item.id, item]),
   );
   const states = new Map<string, GoatBrainDraftIngestState>();
 
   for (const job of jobs) {
-    if (job.kind !== "brain_agent_ingest" || job.source_provider !== "goat-chat") continue;
+    if (job.kind !== "brain_agent_ingest" || job.sourceProvider !== "goat-chat") continue;
     if (job.status === "succeeded" || job.status === "skipped") continue;
 
-    const item = captureItemsById.get(job.source_item_id);
+    const item = captureItemsById.get(job.sourceItemId);
     if (!item) continue;
-    const draftBrainId = item.external_id.trim();
+    const draftBrainId = item.externalId.trim();
     if (!draftBrainId) continue;
 
     const state = draftIngestStateForJob(job, item);
@@ -203,8 +203,8 @@ function capturedTitle(provider: string) {
 }
 
 function draftIngestStateForJob(
-  job: GoatBrainIngestJobRow,
-  item: GoatBrainSourceItemRow,
+  job: BrainIngestJobReadModel,
+  item: BrainSourceItemDto,
 ): GoatBrainDraftIngestState {
   const title = item.title?.trim() || "Untitled";
   if (job.status === "failed") {
@@ -212,8 +212,8 @@ function draftIngestStateForJob(
       kind: "failed",
       jobId: job.id,
       title,
-      detail: truncateDetail(job.last_error ?? item.last_ingest_error),
-      updatedAt: job.completed_at ?? job.updated_at,
+      detail: truncateDetail(job.lastError ?? item.lastIngestError),
+      updatedAt: job.completedAt ?? job.updatedAt,
       attempts: job.attempts,
     };
   }
@@ -223,17 +223,17 @@ function draftIngestStateForJob(
       jobId: job.id,
       title,
       detail: null,
-      updatedAt: job.updated_at,
+      updatedAt: job.updatedAt,
       attempts: job.attempts,
     };
   }
-  if (job.plan_paused) {
+  if (job.planPaused) {
     return {
       kind: "paused",
       jobId: job.id,
       title,
       detail: "Paused by plan",
-      updatedAt: job.updated_at,
+      updatedAt: job.updatedAt,
       attempts: job.attempts,
     };
   }
@@ -241,45 +241,45 @@ function draftIngestStateForJob(
     kind: job.attempts > 0 ? "retrying" : "queued",
     jobId: job.id,
     title,
-    detail: job.attempts > 0 ? truncateDetail(job.last_error ?? item.last_ingest_error) : null,
-    updatedAt: job.updated_at,
+    detail: job.attempts > 0 ? truncateDetail(job.lastError ?? item.lastIngestError) : null,
+    updatedAt: job.updatedAt,
     attempts: job.attempts,
   };
 }
 
-function jobResultSummary(job: GoatBrainIngestJobRow): string | null {
+function jobResultSummary(job: BrainIngestJobReadModel): string | null {
   const summary = job.result?.summary;
   return typeof summary === "string" && summary.trim() ? summary : null;
 }
 
-function jobResultBrainId(job: GoatBrainIngestJobRow): string | null {
+function jobResultBrainId(job: BrainIngestJobReadModel): string | null {
   // Capture jobs report draftBrainId; meeting jobs report meetingBrainId.
   const value = job.result?.draftBrainId ?? job.result?.meetingBrainId;
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-function jobResultSkipped(job: GoatBrainIngestJobRow): boolean {
+function jobResultSkipped(job: BrainIngestJobReadModel): boolean {
   return job.status === "skipped" || job.result?.skipped === true;
 }
 
-function jobResultTrace(job: GoatBrainIngestJobRow): GoatBrainIngestTrace | null {
+function jobResultTrace(job: BrainIngestJobReadModel): GoatBrainIngestTrace | null {
   return normalizeGoatBrainIngestTrace(job.result?.trace);
 }
 
-function jobRunDurationMs(job: GoatBrainIngestJobRow): number | null {
+function jobRunDurationMs(job: BrainIngestJobReadModel): number | null {
   const durationMs = finiteNonNegativeNumber(job.result?.durationMs);
   if (durationMs !== null) return Math.round(durationMs);
 
-  if (!job.completed_at) return null;
-  const startedAt = new Date(job.created_at).getTime();
-  const completedAt = new Date(job.completed_at).getTime();
+  if (!job.completedAt) return null;
+  const startedAt = new Date(job.createdAt).getTime();
+  const completedAt = new Date(job.completedAt).getTime();
   if (!Number.isFinite(startedAt) || !Number.isFinite(completedAt) || completedAt < startedAt) {
     return null;
   }
   return Math.round(completedAt - startedAt);
 }
 
-function jobResultPages(job: GoatBrainIngestJobRow): GoatBrainActivityPage[] {
+function jobResultPages(job: BrainIngestJobReadModel): GoatBrainActivityPage[] {
   const value = job.result?.pages;
   if (!Array.isArray(value)) return [];
 

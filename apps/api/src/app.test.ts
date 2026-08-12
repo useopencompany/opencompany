@@ -264,6 +264,17 @@ describe("canonical Hono API", () => {
     const listSkillCatalog = vi.fn(async () => [
       { id: "research", name: "Research", description: "Find primary sources." },
     ]);
+    const listBrainSourceItems = vi.fn(async () => [
+      {
+        id: "source_item_1",
+        sourceProvider: "goat-chat",
+        sourceType: "capture",
+        externalId: "project-alpha",
+        title: "Alpha",
+        lastIngestError: "x".repeat(2_001),
+        createdAt,
+      },
+    ]);
     const knowledge = knowledgeService({
       assertBrainAccess,
       getBrainSnapshot: async () => ({
@@ -281,6 +292,7 @@ describe("canonical Hono API", () => {
       updateWikiPage,
       createSkill,
       listSkillCatalog,
+      listBrainSourceItems,
     });
     const app = testApp(fakeRepository(), { knowledge });
 
@@ -301,6 +313,38 @@ describe("canonical Hono API", () => {
     });
     expect(JSON.stringify(brainBody)).not.toMatch(/brain_ref|workspace_id|asset_storage/iu);
     expect(assertBrainAccess).toHaveBeenCalledWith({ actor, brainId: "brain_1" });
+
+    const sourceItems = await app.request(
+      "/v1/brains/brain_1/source-items?ids=source_item_1,source_item_1",
+    );
+    expect(sourceItems.status).toBe(200);
+    const sourceItemsBody = await sourceItems.json();
+    expect(sourceItemsBody).toMatchObject({
+      data: [
+        {
+          id: "source_item_1",
+          sourceProvider: "goat-chat",
+          externalId: "project-alpha",
+        },
+      ],
+    });
+    expect(sourceItemsBody.data[0].lastIngestError).toHaveLength(2_000);
+    expect(listBrainSourceItems).toHaveBeenCalledWith({
+      actor,
+      brainId: "brain_1",
+      ids: ["source_item_1"],
+    });
+    expect(JSON.stringify(sourceItemsBody)).not.toMatch(
+      /userWorkosId|brainRef|rawPayload|normalizedPayload|occurredAt|capturedAt|updatedAt/iu,
+    );
+    const tooManySourceItems = await app.request(
+      `/v1/brains/brain_1/source-items?ids=${Array.from(
+        { length: 101 },
+        (_, index) => `source_item_${index}`,
+      ).join(",")}`,
+    );
+    expect(tooManySourceItems.status).toBe(400);
+    expect(listBrainSourceItems).toHaveBeenCalledTimes(1);
 
     const wiki = await app.request("/v1/wiki/pages/project-alpha", {
       method: "PATCH",
@@ -840,7 +884,7 @@ describe("canonical Hono API", () => {
     });
 
     const response = await app.request(
-      "/v1/read-models/brain-documents-v1?brainId=brain_1&table=goat.users&where=true",
+      "/v1/read-models/brain-ingest-jobs-v1?brainId=brain_1&table=goat.users&where=true",
     );
 
     expect(response.status).toBe(200);
@@ -848,7 +892,7 @@ describe("canonical Hono API", () => {
     expect(stream).toHaveBeenCalledWith(
       expect.objectContaining({
         actor,
-        readModel: "brain-documents-v1",
+        readModel: "brain-ingest-jobs-v1",
         brainId: "brain_1",
       }),
     );

@@ -27,6 +27,10 @@
       "types": "./src/inline-links.ts",
       "default": "./src/inline-links.ts"
     },
+    "./ingest-trace": {
+      "types": "./src/ingest-trace.ts",
+      "default": "./src/ingest-trace.ts"
+    },
     "./schema": {
       "types": "./src/schema.ts",
       "default": "./src/schema.ts"

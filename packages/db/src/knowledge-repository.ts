@@ -5,6 +5,7 @@ import {
   type BrainFolder,
   type BrainOverview,
   type BrainSnapshot,
+  type BrainSourceItem,
   CoreError,
   type KnowledgeRepository,
   type Skill,
@@ -50,6 +51,8 @@ import type {
 } from "./goat-schema";
 import {
   goatBrainDocuments,
+  goatBrainIngestJobs,
+  goatBrainSourceItems,
   goatBrainSources,
   goatBrainToolRuns,
   goatKnowledgeCommandIdempotency,
@@ -138,6 +141,33 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
       retrievalsLast7Days: numberValue(retrievals?.value),
       activeSources: numberValue(sources?.value),
     };
+  }
+
+  async listBrainSourceItems(input: {
+    actor: Actor;
+    brainId: string;
+    ids: string[];
+  }): Promise<BrainSourceItem[]> {
+    const rows = await this.db
+      .select({
+        id: goatBrainSourceItems.id,
+        sourceProvider: goatBrainSourceItems.sourceProvider,
+        sourceType: goatBrainSourceItems.sourceType,
+        externalId: goatBrainSourceItems.externalId,
+        title: goatBrainSourceItems.title,
+        lastIngestError: goatBrainSourceItems.lastIngestError,
+        createdAt: goatBrainSourceItems.createdAt,
+      })
+      .from(goatBrainSourceItems)
+      .innerJoin(goatBrainIngestJobs, eq(goatBrainIngestJobs.sourceItemId, goatBrainSourceItems.id))
+      .where(
+        and(
+          eq(goatBrainIngestJobs.brainRef, input.brainId),
+          inArray(goatBrainSourceItems.id, input.ids),
+        ),
+      );
+    const sourceItems = rows as BrainSourceItem[];
+    return Array.from(new Map(sourceItems.map((row) => [row.id, row])).values());
   }
 
   async createBrainDocument(input: {
