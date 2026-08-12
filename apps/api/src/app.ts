@@ -53,6 +53,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { stream as streamResponse } from "hono/streaming";
 import type { AttachmentUploadService } from "./attachments";
 import type { ApiAuthenticator } from "./auth";
+import type { BrainAssetService } from "./brain-assets";
 import type { ReadModelService } from "./electric-read-models";
 import { ApiError, errorResponse } from "./errors";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
@@ -71,6 +72,7 @@ const MULTIPART_ENVELOPE_BYTES = 64 * 1024;
 const SAFE_BROWSER_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const CORS_ALLOW_HEADERS = ["Accept", "Content-Type", "Idempotency-Key", "Last-Event-ID"];
 const CORS_EXPOSE_HEADERS = [
+  "Content-Disposition",
   "Electric-Cursor",
   "Electric-Handle",
   "Electric-Offset",
@@ -87,6 +89,7 @@ export type CreateApiAppInput = {
   workflows: WorkflowApplicationService;
   schedules: TaskScheduleApplicationService;
   knowledge: KnowledgeApplicationService;
+  brainAssets: BrainAssetService;
   attachments: AttachmentUploadService;
   authenticate: ApiAuthenticator;
   browserOrigins?: readonly string[];
@@ -440,6 +443,72 @@ export function createApiApp(input: CreateApiAppInput) {
         },
       );
       return c.json({ data: brainDocumentDto(document), meta }, 201);
+    },
+    uploadBrainAsset: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      const params = c.req.valid("param");
+      const form = c.req.valid("form");
+      const result = await input.brainAssets.upload({
+        actor,
+        brainId: params.brainId,
+        folderPath: form.folderPath,
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        file: form.file,
+      });
+      return c.json(
+        {
+          data: {
+            document: brainDocumentDto(result.document),
+            quotaPaused: result.quotaPaused,
+            replayed: result.replayed,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    replaceBrainAsset: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      const params = c.req.valid("param");
+      const result = await input.brainAssets.replace({
+        actor,
+        brainId: params.brainId,
+        documentId: params.documentId,
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        file: c.req.valid("form").file,
+      });
+      return c.json(
+        {
+          data: {
+            document: brainDocumentDto(result.document),
+            quotaPaused: result.quotaPaused,
+            replayed: result.replayed,
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    downloadBrainAsset: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const asset = await input.brainAssets.download({
+        actor,
+        documentId: c.req.valid("param").documentId,
+      });
+      const headers = new Headers({
+        "Content-Type": asset.mediaType,
+        "Content-Disposition": contentDisposition(asset.filename),
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+      });
+      if (asset.sizeBytes !== null) headers.set("Content-Length", String(asset.sizeBytes));
+      return new Response(asset.stream, {
+        status: 200,
+        headers,
+      }) as never;
     },
     updateBrainDocument: async (c) => {
       const actor = actorFrom(c);
@@ -1053,6 +1122,28 @@ export function createApiApp(input: CreateApiAppInput) {
             ),
         }),
       );
+      router.use(
+        "/v1/brains/:brainId/assets",
+        bodyLimit({
+          maxSize: 20 * 1024 * 1024 + MULTIPART_ENVELOPE_BYTES,
+          onError: (c) =>
+            apiErrorResponse(
+              c,
+              new ApiError(413, "invalid_request", "The Brain asset upload is too large."),
+            ),
+        }),
+      );
+      router.use(
+        "/v1/brains/:brainId/assets/:documentId/replace",
+        bodyLimit({
+          maxSize: 20 * 1024 * 1024 + MULTIPART_ENVELOPE_BYTES,
+          onError: (c) =>
+            apiErrorResponse(
+              c,
+              new ApiError(413, "invalid_request", "The Brain asset upload is too large."),
+            ),
+        }),
+      );
     },
     defaultHook(result, c) {
       if (result.success) return;
@@ -1178,6 +1269,16 @@ function getContextValue(c: Context, key: string) {
 
 function requestIdFrom(c: Context) {
   return (getContextValue(c, "requestId") as string | undefined) ?? `request_${randomUUID()}`;
+}
+
+function contentDisposition(value: string) {
+  const filename = value.replace(/[\r\n"\\]/gu, "_").trim() || "file";
+  const fallback = filename.replace(/[^\x20-\x7e]/gu, "_");
+  const encoded = encodeURIComponent(filename).replace(
+    /[!'()*]/gu,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `inline; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
 function apiErrorResponse(c: Context, error: unknown) {

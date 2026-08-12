@@ -588,6 +588,53 @@ describe("goat brain file sync", () => {
     expect(result.deleted).toBe(0);
   });
 
+  it("treats replaced asset bytes as a concurrent change to a deleted projection", async () => {
+    const content = createGoatBrainMarkdownContent({
+      id: "plan",
+      folderPath: "inbox",
+      title: "Plan",
+      type: "source",
+      status: "draft",
+      compiledTruth: "Uploaded plan.",
+    });
+    const db = syncSelectOnlyDb([
+      {
+        id: "document_1",
+        userWorkosId: "user_1",
+        brainRef: "goat_brain_user_1",
+        brainId: "plan",
+        folderPath: "inbox",
+        content,
+        contentHash: hashGoatBrainContent(content),
+        assetContentHash: "b".repeat(64),
+      },
+    ]);
+
+    const result = await syncGoatBrainFiles({
+      brainRef: "goat_brain_user_1",
+      userWorkosId: "user_1",
+      files: [],
+      baseSnapshot: [
+        {
+          id: "document_1",
+          brainId: "plan",
+          folderPath: "inbox",
+          path: "inbox/plan.md",
+          contentHash: hashGoatBrainContent(content),
+          assetContentHash: "a".repeat(64),
+        },
+      ],
+      db,
+    });
+
+    expect(result).toEqual({
+      upserted: 0,
+      deleted: 0,
+      conflicts: [{ path: "inbox/plan.md", reason: "changed_since_materialize" }],
+      pages: [],
+    });
+  });
+
   it("materializes invalid stored markdown as a raw file that can be deleted", async () => {
     const content = "---\n---\n";
     const db = materializeSelectDb([

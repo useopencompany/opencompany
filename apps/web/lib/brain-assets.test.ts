@@ -63,7 +63,9 @@ describe("Goat Brain asset uploads", () => {
         format: "srt",
         mimeType: "application/x-subrip",
         originalFileName: "captions.srt",
+        assetContentHash: "a".repeat(64),
       }),
+      {},
     );
   });
 
@@ -116,7 +118,9 @@ describe("Goat Brain asset uploads", () => {
         format: "csv",
         mimeType: "text/csv",
         originalFileName: "customers.csv",
+        assetContentHash: "a".repeat(64),
       }),
+      {},
     );
   });
 

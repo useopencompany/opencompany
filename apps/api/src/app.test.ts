@@ -23,6 +23,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { createApiApp } from "./app";
 import type { AttachmentUploadService } from "./attachments";
+import type { BrainAssetService } from "./brain-assets";
 import { ApiError } from "./errors";
 import type { ApiRateLimiter } from "./rate-limit";
 
@@ -80,6 +81,7 @@ describe("canonical Hono API", () => {
       tasks: new TaskApplicationService(fakeTaskRepository()),
       ...fakeAutomationServices(),
       knowledge: fakeKnowledgeService(),
+      brainAssets: fakeBrainAssets(),
       attachments: fakeAttachments(),
       authenticate: async () => {
         throw new ApiError(401, "authentication_required", "Authentication required.");
@@ -932,6 +934,87 @@ describe("canonical Hono API", () => {
     expect(JSON.stringify(json)).not.toMatch(/blob|pathname|url/iu);
   });
 
+  it("uploads and replaces private Brain assets through typed multipart operations", async () => {
+    const upload = vi.fn(async () => ({
+      document: fakeBrainDocument(),
+      quotaPaused: true,
+      replayed: false,
+    }));
+    const replace = vi.fn(async () => ({
+      document: fakeBrainDocument(),
+      quotaPaused: false,
+      replayed: true,
+    }));
+    const app = testApp(fakeRepository(), {
+      brainAssets: brainAssetService({ upload, replace }),
+    });
+    const file = new File(["private bytes"], "plan.pdf", { type: "application/pdf" });
+    const createForm = new FormData();
+    createForm.set("folderPath", "projects");
+    createForm.set("file", file);
+
+    const created = await app.request("/v1/brains/brain_1/assets", {
+      method: "POST",
+      headers: { "Idempotency-Key": "asset-create-1" },
+      body: createForm,
+    });
+
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toMatchObject({
+      data: { document: { id: "document_1" }, quotaPaused: true, replayed: false },
+    });
+    expect(upload).toHaveBeenCalledWith({
+      actor,
+      brainId: "brain_1",
+      folderPath: "projects",
+      idempotencyKey: "asset-create-1",
+      file,
+    });
+
+    const replaceForm = new FormData();
+    replaceForm.set("file", file);
+    const replaced = await app.request("/v1/brains/brain_1/assets/document_1/replace", {
+      method: "POST",
+      headers: { "Idempotency-Key": "asset-replace-1" },
+      body: replaceForm,
+    });
+
+    expect(replaced.status).toBe(200);
+    await expect(replaced.json()).resolves.toMatchObject({
+      data: { document: { id: "document_1" }, quotaPaused: false, replayed: true },
+    });
+    expect(replace).toHaveBeenCalledWith({
+      actor,
+      brainId: "brain_1",
+      documentId: "document_1",
+      idempotencyKey: "asset-replace-1",
+      file,
+    });
+  });
+
+  it("streams authorized Brain asset bytes without exposing a storage locator", async () => {
+    const download = vi.fn(async () => ({
+      stream: new Response("private bytes").body as ReadableStream<Uint8Array>,
+      mediaType: "application/pdf",
+      filename: 'plan "final".pdf',
+      sizeBytes: 13,
+    }));
+    const app = testApp(fakeRepository(), {
+      brainAssets: brainAssetService({ download }),
+    });
+
+    const response = await app.request("/v1/brain-assets/document_1");
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("private bytes");
+    expect(response.headers.get("content-type")).toBe("application/pdf");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("content-disposition")).toBe(
+      `inline; filename="plan _final_.pdf"; filename*=UTF-8''plan%20_final_.pdf`,
+    );
+    expect(download).toHaveBeenCalledWith({ actor, documentId: "document_1" });
+  });
+
   it("rejects oversized multipart bodies before buffering the upload", async () => {
     let uploadCalled = false;
     const app = testApp(fakeRepository(), {
@@ -960,6 +1043,25 @@ describe("canonical Hono API", () => {
     expect(uploadCalled).toBe(false);
   });
 
+  it("rejects oversized Brain assets before the canonical service buffers them", async () => {
+    const upload = vi.fn();
+    const app = testApp(fakeRepository(), {
+      brainAssets: brainAssetService({ upload }),
+    });
+    const response = await app.request("/v1/brains/brain_1/assets", {
+      method: "POST",
+      headers: {
+        "Content-Length": String(21 * 1024 * 1024),
+        "Content-Type": "multipart/form-data; boundary=test",
+        "Idempotency-Key": "oversized-asset-1",
+      },
+      body: "--test--\r\n",
+    });
+
+    expect(response.status).toBe(413);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
   it("enforces rate limits without making them a durability dependency", async () => {
     const limiter: ApiRateLimiter = {
       consume: () => ({ allowed: false, retryAfterSeconds: 7 }),
@@ -980,6 +1082,7 @@ function testApp(
     tasks: new TaskApplicationService(fakeTaskRepository()),
     ...fakeAutomationServices(),
     knowledge: fakeKnowledgeService(),
+    brainAssets: fakeBrainAssets(),
     attachments: fakeAttachments(),
     authenticate: async () => ({ actor }),
     defaultModel: "provider/default",
@@ -1017,6 +1120,24 @@ function fakeAttachments(): AttachmentUploadService {
       throw new Error("Unexpected attachment upload.");
     },
   };
+}
+
+function fakeBrainAssets(): BrainAssetService {
+  return {
+    upload: async () => {
+      throw new Error("Unexpected Brain asset upload.");
+    },
+    replace: async () => {
+      throw new Error("Unexpected Brain asset replacement.");
+    },
+    download: async () => {
+      throw new Error("Unexpected Brain asset download.");
+    },
+  };
+}
+
+function brainAssetService(overrides: Partial<BrainAssetService>): BrainAssetService {
+  return { ...fakeBrainAssets(), ...overrides };
 }
 
 function fakeKnowledgeService() {

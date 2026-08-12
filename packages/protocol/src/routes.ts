@@ -5,6 +5,9 @@ import {
   ArchiveVersionBodySchema,
   AttachmentUploadBodySchema,
   AttachmentUploadEnvelopeSchema,
+  BrainAssetMutationEnvelopeSchema,
+  BrainAssetReplaceBodySchema,
+  BrainAssetUploadBodySchema,
   BrainDocumentDeleteEnvelopeSchema,
   BrainDocumentEnvelopeSchema,
   BrainFolderEnvelopeSchema,
@@ -516,6 +519,69 @@ export const createBrainDocumentRoute = createRoute({
     201: {
       description: "Brain document created or replayed.",
       content: { "application/json": { schema: BrainDocumentEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const uploadBrainAssetRoute = createRoute({
+  method: "post",
+  path: "/v1/brains/{brainId}/assets",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema }),
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: {
+      required: true,
+      content: { "multipart/form-data": { schema: BrainAssetUploadBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Private Brain asset uploaded and registered, or replayed.",
+      content: { "application/json": { schema: BrainAssetMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const replaceBrainAssetRoute = createRoute({
+  method: "post",
+  path: "/v1/brains/{brainId}/assets/{documentId}/replace",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema, documentId: ResourceIdSchema }),
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: {
+      required: true,
+      content: { "multipart/form-data": { schema: BrainAssetReplaceBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Private Brain asset bytes replaced, or replayed.",
+      content: { "application/json": { schema: BrainAssetMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const downloadBrainAssetRoute = createRoute({
+  method: "get",
+  path: "/v1/brain-assets/{documentId}",
+  tags: ["Brain"],
+  security: actorSecurity,
+  request: { params: z.object({ documentId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Authorized private Brain asset bytes.",
+      content: {
+        "application/octet-stream": {
+          schema: z.string().openapi({ type: "string", format: "binary" }),
+        },
+      },
     },
     default: errorResponse,
   },
@@ -1071,6 +1137,9 @@ export type V1RouteHandlers = {
   getBrainOverview: RouteHandler<typeof getBrainOverviewRoute>;
   listBrainSourceItems: RouteHandler<typeof listBrainSourceItemsRoute>;
   createBrainDocument: RouteHandler<typeof createBrainDocumentRoute>;
+  uploadBrainAsset: RouteHandler<typeof uploadBrainAssetRoute>;
+  replaceBrainAsset: RouteHandler<typeof replaceBrainAssetRoute>;
+  downloadBrainAsset: RouteHandler<typeof downloadBrainAssetRoute>;
   updateBrainDocument: RouteHandler<typeof updateBrainDocumentRoute>;
   renameBrainDocument: RouteHandler<typeof renameBrainDocumentRoute>;
   deleteBrainDocument: RouteHandler<typeof deleteBrainDocumentRoute>;
@@ -1135,6 +1204,9 @@ export function createV1Router(
     .openapi(getBrainOverviewRoute, handlers.getBrainOverview)
     .openapi(listBrainSourceItemsRoute, handlers.listBrainSourceItems)
     .openapi(createBrainDocumentRoute, handlers.createBrainDocument)
+    .openapi(uploadBrainAssetRoute, handlers.uploadBrainAsset)
+    .openapi(replaceBrainAssetRoute, handlers.replaceBrainAsset)
+    .openapi(downloadBrainAssetRoute, handlers.downloadBrainAsset)
     .openapi(updateBrainDocumentRoute, handlers.updateBrainDocument)
     .openapi(renameBrainDocumentRoute, handlers.renameBrainDocument)
     .openapi(deleteBrainDocumentRoute, handlers.deleteBrainDocument)
@@ -1442,6 +1514,24 @@ const contractDocumentHandlers: V1RouteHandlers = {
     ),
   listBrainSourceItems: (c) => c.json({ data: [], meta }, 200),
   createBrainDocument: (c) => c.json({ data: placeholderBrainDocument, meta }, 201),
+  uploadBrainAsset: (c) =>
+    c.json(
+      {
+        data: { document: placeholderBrainDocument, quotaPaused: false, replayed: false },
+        meta,
+      },
+      201,
+    ),
+  replaceBrainAsset: (c) =>
+    c.json(
+      {
+        data: { document: placeholderBrainDocument, quotaPaused: false, replayed: false },
+        meta,
+      },
+      200,
+    ),
+  downloadBrainAsset: (c) =>
+    c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
   updateBrainDocument: (c) => c.json({ data: placeholderBrainDocument, meta }, 200),
   renameBrainDocument: (c) => c.json({ data: placeholderBrainDocument, meta }, 200),
   deleteBrainDocument: (c) =>

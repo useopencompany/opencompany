@@ -514,6 +514,7 @@ describe("normalizeUploadAsset", () => {
     expect(item.sourceRef).toBe("upload:goat_brain_doc_abc");
     expect(item.title).toBe("Q3 Board Deck.pdf");
     expect(item.content.asset.brainId).toBe("q3-board-deck");
+    expect(item.content.asset.contentSha256).toBe("a".repeat(64));
     expect(isNormalizedUploadAssetSourceItem(item)).toBe(true);
     // Same bytes dedupe; different bytes re-enqueue.
     expect(normalizeUploadAsset(input).contentHash).toBe(item.contentHash);
@@ -529,6 +530,9 @@ describe("normalizeUploadAsset", () => {
   });
 
   it("guards against other item shapes", () => {
+    const legacy = normalizeUploadAsset(input);
+    delete legacy.content.asset.contentSha256;
+    expect(isNormalizedUploadAssetSourceItem(legacy)).toBe(true);
     expect(isNormalizedUploadAssetSourceItem({ sourceProvider: "upload" })).toBe(false);
     expect(isNormalizedUploadAssetSourceItem(null)).toBe(false);
   });

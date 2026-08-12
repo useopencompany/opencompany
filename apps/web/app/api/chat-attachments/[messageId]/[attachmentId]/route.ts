@@ -5,7 +5,7 @@ import { currentGoatUser } from "@/lib/auth";
 import { goatChatAttachmentResponse } from "@/lib/chat-attachment-response";
 
 // Serves a chat attachment's bytes from the PRIVATE Vercel Blob store.
-// Mirrors /api/brain-assets/[documentId]: auth-scoped raw byte endpoint; the
+// Auth-scoped raw byte endpoint; the
 // blob URL never leaves the server — the client only holds message id +
 // attachment id and fetches through here.
 export async function GET(

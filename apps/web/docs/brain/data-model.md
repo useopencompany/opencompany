@@ -162,7 +162,8 @@ an existing conversation.
 
 - The bytes live in the private Vercel Blob store behind `asset_storage_key`;
   `original_file_name`, `mime_type`, `asset_size_bytes`, and `asset_content_hash` (sha256 of the
-  bytes) describe them. The UI serves them through `/api/brain-assets/[documentId]` and renders
+  bytes) describe them. The canonical API serves them through
+  `/v1/brain-assets/[documentId]` after Brain authorization and renders
   the file first-class, with metadata and the agent's summary in the details sidebar.
 - The `content` column still holds a normal markdown projection (frontmatter + compiled truth +
   timeline), so metadata, relations, wiki links, versioning, and sync work identically to
@@ -172,9 +173,11 @@ an existing conversation.
   block between `ASSET-TEXT:BEGIN/END` sentinels; the document parser strips that block, so the
   CLI and sync ignore it and edits inside it are discarded. Retrieval indexes it as the
   low-boost `assetText` field.
-- Uploads enter via drag-drop / the upload button in the brain tree
-  (`uploadGoatBrainAssetAction`), which creates the draft row and enqueues a
-  `brain_agent_ingest` job (provider `upload`, type `asset`). The runner extracts the text, then
+- Uploads enter via drag-drop / the upload button in the brain tree. The browser sends multipart
+  bytes to `POST /v1/brains/[brainId]/assets`; the canonical API authorizes the actor, computes the
+  authoritative hash, stores the private blob, creates the draft row, and enqueues a
+  `brain_agent_ingest` job (provider `upload`, type `asset`). Durable command idempotency prevents
+  create or replacement retries from duplicating or rolling back an asset. The runner extracts the text, then
   the standard ingestion agent rewrites the page's compiled truth and wires backlinks. Deleting
   the document best-effort deletes the blob; version rows keep the page, not the bytes.
 

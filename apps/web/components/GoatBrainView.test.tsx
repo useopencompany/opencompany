@@ -109,11 +109,6 @@ vi.mock("@/components/MarkdownGoatBrainEditor", () => ({
   },
 }));
 
-vi.mock("@/lib/brain-actions", () => ({
-  replaceGoatBrainAssetAction: vi.fn(),
-  uploadGoatBrainAssetAction: vi.fn(),
-}));
-
 vi.mock("@/lib/headless-knowledge-commands", () => ({
   createHeadlessBrainDocument: vi.fn(),
   createHeadlessBrainFolder: vi.fn(),

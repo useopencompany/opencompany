@@ -71,10 +71,12 @@ Ship this as its own PR — it is pure hardening and unblocks everything else.
 
 ## Step 2 — Upload path (UI → blob → row → job)
 
-- **Upload route** `apps/web/app/api/brain-assets/upload/route.ts` (`handleUpload`
-  from `@vercel/blob/client`, private store): auth = brain access for the current
-  user; allowlist `application/pdf` only in v1; size cap 20MB.
-- **On upload complete** (server action):
+- **Upload route** `POST /v1/brains/{brainId}/assets` on the canonical API:
+  authorize Brain write access, accept multipart bytes, compute the authoritative
+  sha256, copy into the private Blob store, and persist through one idempotent command.
+  The former `/api/brain-assets/upload` token route remains only for cached clients
+  and rollback until the #1203 compatibility observation window closes.
+- **Within the canonical upload command**:
   - slug the filename → `brainId` (existing id pattern, collision-suffix);
   - `folderPath` = the folder the user dropped into; `kind` derived from the
     folder per the existing zone rule (evidence/ → evidence);
@@ -88,7 +90,7 @@ Ship this as its own PR — it is pure hardening and unblocks everything else.
 - **UI entry points** in `GoatBrainView`: drag-and-drop onto the folder pane +
   an "Upload file" affordance in the new-document menu. Reuse the existing
   ingest indicators for the pending state.
-- **Serving route** `apps/web/app/api/brain-assets/[docId]/route.ts`: resolve doc → check brain
+- **Serving route** `GET /v1/brain-assets/{docId}`: resolve doc → check brain
   access → private blob `get` → stream with stored `mimeType` and
   `Content-Disposition: inline`.
 
@@ -140,7 +142,7 @@ In `apps/web/components/GoatBrainView.tsx`:
 
 - `format === "markdown"` → existing `MarkdownGoatBrainEditor`, unchanged.
 - `format === "pdf"` → new `PdfDocumentView`:
-  - inline `<iframe>`/`<embed>` of `/api/brain-assets/<docId>` (native
+  - inline `<iframe>`/`<embed>` of `/v1/brain-assets/<docId>` (native
     browser PDF rendering; no pdf.js dependency in v1), full-height;
   - metadata side panel (or collapsible header strip): type, status, folder,
     aliases, relations chips (existing chip renderer), backlinks, the agent's
