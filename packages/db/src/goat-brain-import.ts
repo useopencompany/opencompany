@@ -557,7 +557,6 @@ export async function getGoatBrainImportJobProgress(
   };
 }
 
-
 function isUnsafeHostname(hostname: string) {
   if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
     return true;
