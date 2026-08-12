@@ -46,42 +46,6 @@ export function normalizeGoatCompanyUrl(value: string): {
   return { url: `${parsed.protocol}//${domain}${port}`, domain };
 }
 
-export async function createGoatBrainImportRun(input: {
-  brainRef: string;
-  userWorkosId: string;
-  companyUrl: string;
-  companyName?: string | null;
-  focus?: string | null;
-  sourceSelection: GoatBrainImportSourceSelection;
-  now?: Date;
-  db?: DbLike;
-}): Promise<GoatBrainImportRun> {
-  const db = input.db ?? getDb();
-  const now = input.now ?? new Date();
-  const company = normalizeGoatCompanyUrl(input.companyUrl);
-  const historyStartAt = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const [run] = await db
-    .insert(goatBrainImportRuns)
-    .values({
-      id: newGoatBrainImportRunId(),
-      brainRef: input.brainRef,
-      userWorkosId: input.userWorkosId,
-      companyUrl: company.url,
-      companyDomain: company.domain,
-      companyName: input.companyName?.trim() || null,
-      focus: input.focus?.trim() || null,
-      historyStartAt,
-      historyEndAt: now,
-      sourceSelection: input.sourceSelection,
-      status: "discovering",
-      nextRunAt: now,
-      updatedAt: now,
-    })
-    .returning();
-  if (!run) throw new Error("Could not start the company-context scan.");
-  return run;
-}
-
 // Durable start command for the canonical API. The reservation makes retries return the original
 // run, and the existing single-active-import unique index remains the arbiter for concurrent
 // first requests. Neon's HTTP driver has no transactions, so a crash between the reservation and
@@ -222,19 +186,6 @@ function isGoatImportUniqueViolation(error: unknown) {
     if ((current as { code?: string }).code === "23505") return true;
   }
   return false;
-}
-
-export async function getLatestGoatBrainImportRun(
-  brainRef: string,
-  db: DbLike = getDb(),
-): Promise<GoatBrainImportRun | null> {
-  const [run] = await db
-    .select()
-    .from(goatBrainImportRuns)
-    .where(eq(goatBrainImportRuns.brainRef, brainRef))
-    .orderBy(desc(goatBrainImportRuns.createdAt))
-    .limit(1);
-  return run ?? null;
 }
 
 export async function addGoatBrainImportCandidate(input: {
@@ -606,9 +557,6 @@ export async function getGoatBrainImportJobProgress(
   };
 }
 
-export function newGoatBrainImportRunId() {
-  return `gbimp_${randomUUID().replace(/-/g, "")}`;
-}
 
 function isUnsafeHostname(hostname: string) {
   if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
