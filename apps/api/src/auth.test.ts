@@ -1,8 +1,35 @@
 import type { SQL } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
-import { createWorkOsApiAuthenticator } from "./auth";
+import { createWorkOsApiAuthenticator, createWorkOsApiIdentityVerifier } from "./auth";
 
 describe("API authentication", () => {
+  it("accepts a verified pre-organization bearer identity for onboarding and identity sync", async () => {
+    const identify = createWorkOsApiIdentityVerifier({
+      audience: "api_resource",
+      authKitDomain: "https://example.authkit.app",
+      verifyJwt: vi.fn(async () => ({
+        payload: { sub: "user_1", sid: "session_1" },
+        protectedHeader: { alg: "RS256" },
+      })) as never,
+    });
+
+    await expect(
+      identify(
+        new Request("https://api.example.test/v1/identity/sync", {
+          headers: {
+            Authorization: "Bearer token",
+            Cookie: "goat-active-workspace=workspace_1; goat-active-brain=brain_1",
+          },
+        }),
+      ),
+    ).resolves.toMatchObject({
+      userId: "user_1",
+      organizationId: null,
+      activeWorkspaceId: "workspace_1",
+      activeBrainId: "brain_1",
+    });
+  });
+
   it("verifies bearer claims and resolves the local actor by WorkOS organization", async () => {
     const execute = vi.fn(async (_query: SQL) => ({
       rows: [
@@ -55,6 +82,31 @@ describe("API authentication", () => {
       },
     });
     expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("rejects pre-organization bearer identities on ordinary product routes", async () => {
+    const execute = vi.fn();
+    const authenticate = createWorkOsApiAuthenticator(execute, {
+      audience: "api_resource",
+      authKitDomain: "https://example.authkit.app",
+      verifyJwt: vi.fn(async () => ({
+        payload: { sub: "user_1", sid: "session_1" },
+        protectedHeader: { alg: "RS256" },
+      })) as never,
+    });
+
+    await expect(
+      authenticate(
+        new Request("https://api.example.test/v1/conversations", {
+          headers: { Authorization: "Bearer token" },
+        }),
+      ),
+    ).rejects.toMatchObject({
+      status: 401,
+      code: "authentication_required",
+      message: "Invalid bearer token claims.",
+    });
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("withholds Workflow and schedule permissions while Tasks & Workflows is disabled", async () => {

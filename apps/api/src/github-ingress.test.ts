@@ -76,6 +76,7 @@ function ingress(overrides: { role?: string; noWorkspaces?: boolean; authError?:
         organizationId: null,
         method: "session",
         activeWorkspaceId: null,
+        activeBrainId: null,
       };
     },
   });

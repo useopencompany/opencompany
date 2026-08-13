@@ -47,6 +47,7 @@ import { createFeedbackService } from "./feedback";
 import { createGitHubIngress } from "./github-ingress";
 import { createGoogleIngress } from "./google-ingress";
 import { createHubspotIngress } from "./hubspot-ingress";
+import { createIdentityService } from "./identity";
 import { createIntegrationAccountService } from "./integration-accounts";
 import { createJamieIngress } from "./jamie-ingress";
 import { createLinearIngress } from "./linear-ingress";
@@ -175,6 +176,7 @@ const app = createApiApp({
   engineSessions: createEngineSessionService({ db: database.db, runner: runnerClient }),
   workspaceCapabilities: createWorkspaceCapabilityService({ db: database.db }),
   workspaceControl: createWorkspaceControlService({ db: database.db, workos }),
+  identity: createIdentityService({ db: database.db, workos, stripe }),
   onboarding: createOnboardingService({ db: database.db, workos }),
   onboardingEmails: createOnboardingEmailService({ db: database.db }),
   authenticate,

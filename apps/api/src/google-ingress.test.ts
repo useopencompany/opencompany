@@ -52,6 +52,7 @@ function ingress(overrides: { noWorkspaces?: boolean; authError?: ApiError } = {
         organizationId: null,
         method: "session",
         activeWorkspaceId: null,
+        activeBrainId: null,
       };
     },
   });

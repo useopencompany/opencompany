@@ -2,7 +2,6 @@
   "dbImports": [
     "apps/web/app/(app)/settings/workspace/slack/page.tsx",
     "apps/web/components/GoatAppShell.tsx",
-    "apps/web/lib/auth.ts",
     "apps/web/lib/brain-cli.ts",
     "apps/web/lib/brain-overview.ts",
     "apps/web/lib/brain-source-analytics.ts",
@@ -15,7 +14,6 @@
   ],
   "drizzleImports": [
     "apps/web/app/(app)/settings/workspace/slack/page.tsx",
-    "apps/web/lib/auth.ts",
     "apps/web/lib/brain-cli.ts",
     "apps/web/lib/brain-overview.ts",
     "apps/web/lib/integrations/personal-accounts.ts",

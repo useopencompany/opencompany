@@ -48,6 +48,7 @@ const identity: ApiIdentity = {
   userId: "user_1",
   organizationId: null,
   activeWorkspaceId: null,
+  activeBrainId: null,
   method: "session",
 };
 

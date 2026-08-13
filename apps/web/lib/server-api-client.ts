@@ -6,10 +6,10 @@ import { headers } from "next/headers";
 // Server-side typed /v1 client for Server Actions and Server Components.
 // Forwards the caller's Cookie/Authorization credentials and browser Origin so
 // the canonical API can enforce its cookie-mutation origin check.
-export async function serverApiClient() {
+export async function serverApiClient(options: { authorization?: string } = {}) {
   const incoming = await headers();
   const cookie = incoming.get("cookie");
-  const authorization = incoming.get("authorization");
+  const authorization = options.authorization ?? incoming.get("authorization");
   const browserOrigin = incoming.get("origin");
   const fetchWithActor: typeof globalThis.fetch = async (input, init) => {
     const forwarded = new Headers(init?.headers);

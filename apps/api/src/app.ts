@@ -80,6 +80,7 @@ import type { FeedbackService } from "./feedback";
 import type { GitHubIngressService } from "./github-ingress";
 import type { GoogleIngressService } from "./google-ingress";
 import type { HubspotIngressService } from "./hubspot-ingress";
+import type { IdentityService } from "./identity";
 import type { IntegrationAccountService } from "./integration-accounts";
 import type { JamieIngressService } from "./jamie-ingress";
 import type { LinearIngressService } from "./linear-ingress";
@@ -121,6 +122,7 @@ const CORS_EXPOSE_HEADERS = [
   "X-Request-Id",
 ];
 const ONBOARDING_IDENTITY_PATH = "/v1/onboarding";
+const IDENTITY_PATH = "/v1/identity";
 
 export type CreateApiAppInput = {
   chat: ChatApplicationService;
@@ -169,6 +171,7 @@ export type CreateApiAppInput = {
   billing: GoatBillingApplicationService;
   workspaceCapabilities: WorkspaceCapabilityService;
   workspaceControl: WorkspaceControlService;
+  identity: IdentityService;
   onboarding: OnboardingService;
   onboardingEmails: OnboardingEmailService;
   authenticate: ApiAuthenticator;
@@ -720,6 +723,16 @@ export function createApiApp(input: CreateApiAppInput) {
       const { intelligence } = c.req.valid("json");
       await input.brainControl.setIntelligence(actor, brainId, intelligence);
       return c.json({ data: { intelligence }, meta }, 200);
+    },
+    getIdentity: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "identity-read", 300);
+      return c.json({ data: await input.identity.get(identity), meta }, 200);
+    },
+    syncIdentity: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "identity-sync", 30);
+      return c.json({ data: await input.identity.sync(identity), meta }, 200);
     },
     getWorkspaceSettings: async (c) => {
       const actor = actorFrom(c);
@@ -2402,7 +2415,12 @@ function enforceCookieMutationOrigin(request: Request, browserOrigins: readonly 
 }
 
 function isIdentityTierPath(path: string) {
-  return path === ONBOARDING_IDENTITY_PATH || path.startsWith(`${ONBOARDING_IDENTITY_PATH}/`);
+  return (
+    path === IDENTITY_PATH ||
+    path.startsWith(`${IDENTITY_PATH}/`) ||
+    path === ONBOARDING_IDENTITY_PATH ||
+    path.startsWith(`${ONBOARDING_IDENTITY_PATH}/`)
+  );
 }
 
 function authorizeEmailLifecycleInternalRequest(request: Request, configuredSecret?: string) {

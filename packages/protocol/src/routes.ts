@@ -82,6 +82,7 @@ import {
   GenerateConversationTitleBodySchema,
   GenerateConversationTitleEnvelopeSchema,
   GranolaAccountStateEnvelopeSchema,
+  IdentityEnvelopeSchema,
   ImessageAccountStateEnvelopeSchema,
   ImessagePairingStartedEnvelopeSchema,
   ImportSkillBodySchema,
@@ -1947,6 +1948,36 @@ export const setBrainIntelligenceRoute = createRoute({
   },
 });
 
+export const getIdentityRoute = createRoute({
+  method: "get",
+  path: "/v1/identity",
+  tags: ["Identity"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description:
+        "Authenticated identity, accessible workspaces, and the selected workspace Brain list.",
+      content: { "application/json": { schema: IdentityEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const syncIdentityRoute = createRoute({
+  method: "post",
+  path: "/v1/identity/sync",
+  tags: ["Identity"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description:
+        "Authenticated identity profile and accepted organization memberships synchronized, then resolved.",
+      content: { "application/json": { schema: IdentityEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const getWorkspaceSettingsRoute = createRoute({
   method: "get",
   path: "/v1/workspace",
@@ -2916,6 +2947,8 @@ export type V1RouteHandlers = {
   setBrainEnrichment: RouteHandler<typeof setBrainEnrichmentRoute>;
   getBrainIntelligence: RouteHandler<typeof getBrainIntelligenceRoute>;
   setBrainIntelligence: RouteHandler<typeof setBrainIntelligenceRoute>;
+  getIdentity: RouteHandler<typeof getIdentityRoute>;
+  syncIdentity: RouteHandler<typeof syncIdentityRoute>;
   getWorkspaceSettings: RouteHandler<typeof getWorkspaceSettingsRoute>;
   renameWorkspace: RouteHandler<typeof renameWorkspaceRoute>;
   inviteWorkspaceMember: RouteHandler<typeof inviteWorkspaceMemberRoute>;
@@ -3081,6 +3114,8 @@ export function createV1Router(
       .openapi(setBrainEnrichmentRoute, handlers.setBrainEnrichment)
       .openapi(getBrainIntelligenceRoute, handlers.getBrainIntelligence)
       .openapi(setBrainIntelligenceRoute, handlers.setBrainIntelligence)
+      .openapi(getIdentityRoute, handlers.getIdentity)
+      .openapi(syncIdentityRoute, handlers.syncIdentity)
       .openapi(getWorkspaceSettingsRoute, handlers.getWorkspaceSettings)
       .openapi(renameWorkspaceRoute, handlers.renameWorkspace)
       .openapi(inviteWorkspaceMemberRoute, handlers.inviteWorkspaceMember)
@@ -3734,6 +3769,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
   setBrainEnrichment: (c) => c.json({ data: { enabled: true }, meta }, 200),
   getBrainIntelligence: (c) => c.json({ data: { intelligence: "basic" as const }, meta }, 200),
   setBrainIntelligence: (c) => c.json({ data: { intelligence: "basic" as const }, meta }, 200),
+  getIdentity: (c) => c.json({ data: contractIdentity(), meta }, 200),
+  syncIdentity: (c) => c.json({ data: contractIdentity(), meta }, 200),
   getWorkspaceSettings: (c) =>
     c.json(
       {
@@ -4493,3 +4530,49 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.json({ data: { redirectUrl: "https://billing.stripe.com/session" }, meta }, 201),
   updateBillingAutoRefill: (c) => c.json({ data: { updated: true as const }, meta }, 200),
 };
+
+function contractIdentity() {
+  return {
+    user: {
+      id: "user_contract",
+      email: "owner@example.com",
+      firstName: "Contract",
+      lastName: "Owner",
+      avatarUrl: null,
+      timezone: "UTC",
+      taskSpawningEnabled: true,
+      autoModelRoutingEnabled: false,
+      chatCapabilitiesBetaEnabled: false,
+      imessageEnabled: false,
+      wikiEnabled: true,
+      taskViewMode: "board" as const,
+      preferredMcpClient: null,
+      mcpSetupCompletedAt: null,
+      onboardedAt: placeholderTime,
+      createdAt: placeholderTime,
+      updatedAt: placeholderTime,
+    },
+    workspaces: [
+      {
+        id: "goat_ws_contract",
+        name: "Contract Workspace",
+        slug: "contract-workspace",
+        role: "admin" as const,
+      },
+    ],
+    activeWorkspaceId: "goat_ws_contract",
+    brains: [
+      {
+        id: "brain_contract",
+        workspaceId: "goat_ws_contract",
+        name: "General",
+        slug: "general",
+        description: null,
+        visibility: "workspace" as const,
+        enrichmentEnabled: true,
+        intelligence: "basic" as const,
+      },
+    ],
+    activeBrainId: "brain_contract",
+  };
+}
