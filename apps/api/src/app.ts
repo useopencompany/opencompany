@@ -85,6 +85,7 @@ import type { SlackBotIngressService } from "./slack-bot-ingress";
 import type { SlackIngressService } from "./slack-ingress";
 import type { UserSettingsService } from "./user-settings";
 import type { CapabilityApprovalView, WorkspaceCapabilityService } from "./workspace-capabilities";
+import type { WorkspaceControlService } from "./workspace-control";
 import type { XAccountIngressService } from "./x-account-ingress";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "hono" });
@@ -138,6 +139,7 @@ export type CreateApiAppInput = {
   integrationAccounts: IntegrationAccountService;
   engineAuth: EngineAuthService;
   workspaceCapabilities: WorkspaceCapabilityService;
+  workspaceControl: WorkspaceControlService;
   authenticate: ApiAuthenticator;
   browserOrigins?: readonly string[];
   githubIngress?: GitHubIngressService;
@@ -683,6 +685,51 @@ export function createApiApp(input: CreateApiAppInput) {
       const { intelligence } = c.req.valid("json");
       await input.brainControl.setIntelligence(actor, brainId, intelligence);
       return c.json({ data: { intelligence }, meta }, 200);
+    },
+    getWorkspaceSettings: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const settings = await input.workspaceControl.getSettings(actor);
+      return c.json({ data: settings, meta }, 200);
+    },
+    renameWorkspace: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const workspace = await input.workspaceControl.rename(actor, c.req.valid("json").name);
+      return c.json({ data: workspace, meta }, 200);
+    },
+    inviteWorkspaceMember: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "workspace-invitation", 20);
+      await input.workspaceControl.invite(actor, c.req.valid("json").email);
+      return c.json({ data: { completed: true as const }, meta }, 201);
+    },
+    revokeWorkspaceInvitation: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.workspaceControl.revokeInvitation(actor, c.req.valid("param").invitationId);
+      return c.json({ data: { completed: true as const }, meta }, 200);
+    },
+    removeWorkspaceMember: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.workspaceControl.removeMember(actor, c.req.valid("param").userId);
+      return c.json({ data: { completed: true as const }, meta }, 200);
+    },
+    createWorkspace: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "workspace-create", 5);
+      const activation = await input.workspaceControl.create(actor, c.req.valid("json"));
+      return c.json({ data: activation, meta }, 201);
+    },
+    switchWorkspace: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const activation = await input.workspaceControl.switch(
+        actor,
+        c.req.valid("param").workspaceId,
+      );
+      return c.json({ data: activation, meta }, 200);
     },
     startBrainImport: async (c) => {
       const actor = actorFrom(c);

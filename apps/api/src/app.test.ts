@@ -99,6 +99,7 @@ describe("canonical Hono API", () => {
       integrationAccounts: fakeIntegrationAccounts(),
       engineAuth: fakeEngineAuth(),
       workspaceCapabilities: fakeWorkspaceCapabilities(),
+      workspaceControl: fakeWorkspaceControl(),
       authenticate: async () => {
         throw new ApiError(401, "authentication_required", "Authentication required.");
       },
@@ -2380,6 +2381,82 @@ describe("canonical Hono API", () => {
     expect(access.status).toBe(200);
     expect(getAccess).toHaveBeenCalledWith(actor, "brain_new");
   });
+
+  it("routes workspace settings, membership, provisioning, and switch commands", async () => {
+    const getSettings = vi.fn(async () => ({
+      workspace: { id: "goat_ws_current", name: "Current Organization" },
+      role: "admin" as const,
+      plan: "pro" as const,
+      memberCap: 10,
+      members: [],
+      invitations: [],
+    }));
+    const invite = vi.fn(async () => undefined);
+    const removeMember = vi.fn(async () => undefined);
+    const rename = vi.fn(async () => ({ id: "goat_ws_current", name: "Renamed" }));
+    const create = vi.fn(async () => ({
+      workspaceId: "goat_ws_new",
+      organizationId: "org_new",
+      brainId: "brain_new",
+    }));
+    const switchWorkspace = vi.fn(async () => ({
+      workspaceId: "goat_ws_next",
+      organizationId: "org_next",
+      brainId: null,
+    }));
+    const app = testApp(fakeRepository(), {
+      workspaceControl: {
+        ...fakeWorkspaceControl(),
+        getSettings,
+        invite,
+        removeMember,
+        rename,
+        create,
+        switch: switchWorkspace,
+      },
+    });
+
+    const settings = await app.request("/v1/workspace");
+    expect(settings.status).toBe(200);
+    await expect(settings.json()).resolves.toMatchObject({
+      data: { workspace: { id: "goat_ws_current" }, plan: "pro" },
+    });
+
+    const invited = await app.request("/v1/workspace/invitations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "teammate@example.com" }),
+    });
+    expect(invited.status).toBe(201);
+    expect(invite).toHaveBeenCalledWith(actor, "teammate@example.com");
+
+    const removed = await app.request("/v1/workspace/members/user_2", { method: "DELETE" });
+    expect(removed.status).toBe(200);
+    expect(removeMember).toHaveBeenCalledWith(actor, "user_2");
+
+    const renamed = await app.request("/v1/workspace", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Renamed" }),
+    });
+    expect(renamed.status).toBe(200);
+    expect(rename).toHaveBeenCalledWith(actor, "Renamed");
+
+    const created = await app.request("/v1/workspaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId: "goat_ws_new", name: "New Workspace" }),
+    });
+    expect(created.status).toBe(201);
+    expect(create).toHaveBeenCalledWith(actor, {
+      workspaceId: "goat_ws_new",
+      name: "New Workspace",
+    });
+
+    const switched = await app.request("/v1/workspaces/goat_ws_next/switch", { method: "POST" });
+    expect(switched.status).toBe(200);
+    expect(switchWorkspace).toHaveBeenCalledWith(actor, "goat_ws_next");
+  });
 });
 
 function testApp(
@@ -2404,6 +2481,7 @@ function testApp(
     integrationAccounts: fakeIntegrationAccounts(),
     engineAuth: fakeEngineAuth(),
     workspaceCapabilities: fakeWorkspaceCapabilities(),
+    workspaceControl: fakeWorkspaceControl(),
     authenticate: async () => ({ actor }),
     defaultModel: "provider/default",
     ...overrides,
@@ -2501,6 +2579,32 @@ function fakeWorkspaceCapabilities(): Parameters<typeof createApiApp>[0]["worksp
     },
     getApprovalByToolCall: async () => {
       throw new Error("Unexpected tool-call capability approval read.");
+    },
+  };
+}
+
+function fakeWorkspaceControl(): Parameters<typeof createApiApp>[0]["workspaceControl"] {
+  return {
+    getSettings: async () => {
+      throw new Error("Unexpected workspace settings read.");
+    },
+    invite: async () => {
+      throw new Error("Unexpected workspace invitation.");
+    },
+    revokeInvitation: async () => {
+      throw new Error("Unexpected workspace invitation revoke.");
+    },
+    removeMember: async () => {
+      throw new Error("Unexpected workspace member removal.");
+    },
+    rename: async () => {
+      throw new Error("Unexpected workspace rename.");
+    },
+    create: async () => {
+      throw new Error("Unexpected workspace creation.");
+    },
+    switch: async () => {
+      throw new Error("Unexpected workspace switch.");
     },
   };
 }

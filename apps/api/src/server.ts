@@ -24,6 +24,7 @@ import {
   shutdownGoatNodeObservability,
 } from "@opencompany/goat-observability/node";
 import { createLogger } from "@opencompany/observability";
+import { WorkOS } from "@workos-inc/node";
 import { createApiApp } from "./app";
 import { createAttachmentUploadService } from "./attachments";
 import { createAttioIngress } from "./attio-ingress";
@@ -49,6 +50,7 @@ import { createSlackBotIngress } from "./slack-bot-ingress";
 import { createSlackIngress } from "./slack-ingress";
 import { createUserSettingsService } from "./user-settings";
 import { createWorkspaceCapabilityService } from "./workspace-capabilities";
+import { createWorkspaceControlService } from "./workspace-control";
 import { createXAccountIngress } from "./x-account-ingress";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "server" });
@@ -99,6 +101,7 @@ const presentation = createPresentationStream();
 const readModels = createElectricReadModels();
 const authenticate = createWorkOsApiAuthenticator(execute);
 const identityVerifier = createWorkOsApiIdentityVerifier();
+const workos = createWorkOSClient();
 const app = createApiApp({
   chat,
   tasks,
@@ -121,6 +124,7 @@ const app = createApiApp({
   // and RUNNER_INTERNAL_TOKEN per call.
   engineAuth: createEngineAuthService({ db: database.db, runner: createRunnerClient() }),
   workspaceCapabilities: createWorkspaceCapabilityService({ db: database.db }),
+  workspaceControl: createWorkspaceControlService({ db: database.db, workos }),
   authenticate,
   browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),
   githubIngress: createGitHubIngress({ db: database.db, identify: identityVerifier }),
@@ -178,6 +182,13 @@ function resolvePoolMax() {
     throw new Error("API_DB_POOL_MAX must be a positive integer.");
   }
   return value;
+}
+
+function createWorkOSClient() {
+  const apiKey = process.env.WORKOS_API_KEY?.trim();
+  const clientId = process.env.WORKOS_CLIENT_ID?.trim();
+  if (!apiKey || !clientId) throw new Error("WORKOS_API_KEY and WORKOS_CLIENT_ID are required.");
+  return new WorkOS(apiKey, { clientId });
 }
 
 function resolvePort() {
