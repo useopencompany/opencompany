@@ -56,6 +56,7 @@ import {
   CreateTaskScheduleBodySchema,
   CreateWikiPageBodySchema,
   CreateWorkflowBodySchema,
+  CreateWorkspaceBodySchema,
   CursorSchema,
   DeleteBrainFolderBodySchema,
   DeleteWikiPageBodySchema,
@@ -75,6 +76,7 @@ import {
   IntegrationAccountUsageEnvelopeSchema,
   IntegrationApiKeyBodySchema,
   IntegrationCapabilityModeEnvelopeSchema,
+  InviteWorkspaceMemberBodySchema,
   InvokeWorkflowBodySchema,
   JamieWebhookSetupEnvelopeSchema,
   LegacyTaskHistoryEnvelopeSchema,
@@ -86,6 +88,7 @@ import {
   ReadModelSchema,
   RenameBrainDocumentBodySchema,
   RenameBrainFolderBodySchema,
+  RenameWorkspaceBodySchema,
   RepoConfigDeleteEnvelopeSchema,
   RepoConfigListEnvelopeSchema,
   RepoConfigMutationEnvelopeSchema,
@@ -146,8 +149,12 @@ import {
   WorkflowMutationEnvelopeSchema,
   WorkflowPageSchema,
   WorkflowUpdateEnvelopeSchema,
+  WorkspaceActivationEnvelopeSchema,
   WorkspaceCapabilityMutationEnvelopeSchema,
   WorkspaceCapabilitySettingsEnvelopeSchema,
+  WorkspaceCommandEnvelopeSchema,
+  WorkspaceRenameEnvelopeSchema,
+  WorkspaceSettingsEnvelopeSchema,
 } from "./schemas";
 import { OPENAPI_DOCUMENT_VERSION, PROTOCOL_VERSION } from "./version";
 
@@ -1700,6 +1707,126 @@ export const setBrainIntelligenceRoute = createRoute({
   },
 });
 
+export const getWorkspaceSettingsRoute = createRoute({
+  method: "get",
+  path: "/v1/workspace",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Active workspace settings, members, plan, and pending invitations.",
+      content: { "application/json": { schema: WorkspaceSettingsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const renameWorkspaceRoute = createRoute({
+  method: "patch",
+  path: "/v1/workspace",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: RenameWorkspaceBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Active workspace and its identity organization renamed. Admin only.",
+      content: { "application/json": { schema: WorkspaceRenameEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const inviteWorkspaceMemberRoute = createRoute({
+  method: "post",
+  path: "/v1/workspace/invitations",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: InviteWorkspaceMemberBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Invitation sent within the active workspace member cap. Admin only.",
+      content: { "application/json": { schema: WorkspaceCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const revokeWorkspaceInvitationRoute = createRoute({
+  method: "delete",
+  path: "/v1/workspace/invitations/{invitationId}",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  request: { params: z.object({ invitationId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Pending invitation in the active identity organization revoked. Admin only.",
+      content: { "application/json": { schema: WorkspaceCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const removeWorkspaceMemberRoute = createRoute({
+  method: "delete",
+  path: "/v1/workspace/members/{userId}",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  request: { params: z.object({ userId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description:
+        "Member removed from the active workspace and identity organization. Admin only.",
+      content: { "application/json": { schema: WorkspaceCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createWorkspaceRoute = createRoute({
+  method: "post",
+  path: "/v1/workspaces",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: CreateWorkspaceBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Workspace provisioned idempotently by workspace id.",
+      content: { "application/json": { schema: WorkspaceActivationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const switchWorkspaceRoute = createRoute({
+  method: "post",
+  path: "/v1/workspaces/{workspaceId}/switch",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  request: { params: z.object({ workspaceId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Workspace membership authorized and browser activation resources returned.",
+      content: { "application/json": { schema: WorkspaceActivationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const updateUserPreferencesRoute = createRoute({
   method: "patch",
   path: "/v1/me/preferences",
@@ -2323,6 +2450,13 @@ export type V1RouteHandlers = {
   setBrainEnrichment: RouteHandler<typeof setBrainEnrichmentRoute>;
   getBrainIntelligence: RouteHandler<typeof getBrainIntelligenceRoute>;
   setBrainIntelligence: RouteHandler<typeof setBrainIntelligenceRoute>;
+  getWorkspaceSettings: RouteHandler<typeof getWorkspaceSettingsRoute>;
+  renameWorkspace: RouteHandler<typeof renameWorkspaceRoute>;
+  inviteWorkspaceMember: RouteHandler<typeof inviteWorkspaceMemberRoute>;
+  revokeWorkspaceInvitation: RouteHandler<typeof revokeWorkspaceInvitationRoute>;
+  removeWorkspaceMember: RouteHandler<typeof removeWorkspaceMemberRoute>;
+  createWorkspace: RouteHandler<typeof createWorkspaceRoute>;
+  switchWorkspace: RouteHandler<typeof switchWorkspaceRoute>;
   listBrainSourceOptions: RouteHandler<typeof listBrainSourceOptionsRoute>;
   startBrainImport: RouteHandler<typeof startBrainImportRoute>;
   confirmBrainImport: RouteHandler<typeof confirmBrainImportRoute>;
@@ -2454,6 +2588,13 @@ export function createV1Router(
       .openapi(setBrainEnrichmentRoute, handlers.setBrainEnrichment)
       .openapi(getBrainIntelligenceRoute, handlers.getBrainIntelligence)
       .openapi(setBrainIntelligenceRoute, handlers.setBrainIntelligence)
+      .openapi(getWorkspaceSettingsRoute, handlers.getWorkspaceSettings)
+      .openapi(renameWorkspaceRoute, handlers.renameWorkspace)
+      .openapi(inviteWorkspaceMemberRoute, handlers.inviteWorkspaceMember)
+      .openapi(revokeWorkspaceInvitationRoute, handlers.revokeWorkspaceInvitation)
+      .openapi(removeWorkspaceMemberRoute, handlers.removeWorkspaceMember)
+      .openapi(createWorkspaceRoute, handlers.createWorkspace)
+      .openapi(switchWorkspaceRoute, handlers.switchWorkspace)
       .openapi(listBrainSourceOptionsRoute, handlers.listBrainSourceOptions)
       .openapi(startBrainImportRoute, handlers.startBrainImport)
       .openapi(confirmBrainImportRoute, handlers.confirmBrainImport)
@@ -3073,6 +3214,50 @@ const contractDocumentHandlers: V1RouteHandlers = {
   setBrainEnrichment: (c) => c.json({ data: { enabled: true }, meta }, 200),
   getBrainIntelligence: (c) => c.json({ data: { intelligence: "basic" as const }, meta }, 200),
   setBrainIntelligence: (c) => c.json({ data: { intelligence: "basic" as const }, meta }, 200),
+  getWorkspaceSettings: (c) =>
+    c.json(
+      {
+        data: {
+          workspace: { id: "goat_ws_contract", name: "Contract Workspace" },
+          role: "admin" as const,
+          plan: "hobby" as const,
+          memberCap: 1,
+          members: [],
+          invitations: [],
+        },
+        meta,
+      },
+      200,
+    ),
+  renameWorkspace: (c) =>
+    c.json({ data: { id: "goat_ws_contract", name: "Contract Workspace" }, meta }, 200),
+  inviteWorkspaceMember: (c) => c.json({ data: { completed: true as const }, meta }, 201),
+  revokeWorkspaceInvitation: (c) => c.json({ data: { completed: true as const }, meta }, 200),
+  removeWorkspaceMember: (c) => c.json({ data: { completed: true as const }, meta }, 200),
+  createWorkspace: (c) =>
+    c.json(
+      {
+        data: {
+          workspaceId: "goat_ws_contract",
+          organizationId: "org_contract",
+          brainId: "brain_contract",
+        },
+        meta,
+      },
+      201,
+    ),
+  switchWorkspace: (c) =>
+    c.json(
+      {
+        data: {
+          workspaceId: "goat_ws_contract",
+          organizationId: "org_contract",
+          brainId: "brain_contract",
+        },
+        meta,
+      },
+      200,
+    ),
   startBrainImport: (c) =>
     c.json(
       {

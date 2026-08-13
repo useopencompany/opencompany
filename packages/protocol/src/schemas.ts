@@ -2111,6 +2111,85 @@ export const SetBrainIntelligenceBodySchema = z
   .strict()
   .openapi("SetBrainIntelligenceBody");
 
+// Active workspace administration and WorkOS-backed provisioning (#1203
+// 5a4d-5a4e). AuthKit session activation remains a web responsibility.
+export const WorkspaceInvitationSchema = z
+  .object({
+    id: ResourceIdSchema,
+    email: z.email().max(320),
+    state: z.string().min(1).max(64),
+    expiresAt: TimestampSchema.nullable(),
+  })
+  .strict()
+  .openapi("WorkspaceInvitation");
+
+export const WorkspaceSettingsSchema = z
+  .object({
+    workspace: z.object({ id: ResourceIdSchema, name: z.string().min(1).max(80) }).strict(),
+    role: z.enum(["admin", "member"]),
+    plan: z.enum(["hobby", "pro"]),
+    memberCap: z.number().int().min(1),
+    members: z.array(WorkspaceMemberSchema).max(1_000),
+    invitations: z.array(WorkspaceInvitationSchema).max(1_000),
+  })
+  .strict()
+  .openapi("WorkspaceSettings");
+
+export const WorkspaceSettingsEnvelopeSchema = z
+  .object({ data: WorkspaceSettingsSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("WorkspaceSettingsEnvelope");
+
+export const InviteWorkspaceMemberBodySchema = z
+  .object({ email: z.email().max(320) })
+  .strict()
+  .openapi("InviteWorkspaceMemberBody");
+
+export const RenameWorkspaceBodySchema = z
+  .object({ name: z.string().trim().min(1).max(80) })
+  .strict()
+  .openapi("RenameWorkspaceBody");
+
+export const WorkspaceRenameEnvelopeSchema = z
+  .object({
+    data: z.object({ id: ResourceIdSchema, name: z.string().min(1).max(80) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WorkspaceRenameEnvelope");
+
+export const WorkspaceCommandEnvelopeSchema = z
+  .object({
+    data: z.object({ completed: z.literal(true) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WorkspaceCommandEnvelope");
+
+export const CreateWorkspaceBodySchema = z
+  .object({
+    workspaceId: ResourceIdSchema.refine((value: string) => value.startsWith("goat_ws_"), {
+      message: "workspaceId must be a Goat workspace id.",
+    }),
+    name: z.string().trim().min(1).max(80),
+  })
+  .strict()
+  .openapi("CreateWorkspaceBody");
+
+export const WorkspaceActivationSchema = z
+  .object({
+    workspaceId: ResourceIdSchema,
+    organizationId: ResourceIdSchema,
+    brainId: ResourceIdSchema.nullable(),
+  })
+  .strict()
+  .openapi("WorkspaceActivation");
+
+export const WorkspaceActivationEnvelopeSchema = z
+  .object({ data: WorkspaceActivationSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("WorkspaceActivationEnvelope");
+
 export const TaskViewModeSchema = z.enum(["board", "list"]);
 export const McpClientSchema = z.enum(["claude", "chatgpt", "cursor"]);
 
@@ -2690,6 +2769,9 @@ export type BrainVisibility = z.infer<typeof BrainVisibilitySchema>;
 export type BrainIntelligence = z.infer<typeof BrainIntelligenceSchema>;
 export type WorkspaceMemberDto = z.infer<typeof WorkspaceMemberSchema>;
 export type BrainAccessDto = z.infer<typeof BrainAccessSchema>;
+export type WorkspaceInvitationDto = z.infer<typeof WorkspaceInvitationSchema>;
+export type WorkspaceSettingsDto = z.infer<typeof WorkspaceSettingsSchema>;
+export type WorkspaceActivationDto = z.infer<typeof WorkspaceActivationSchema>;
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelopeSchema>;
 export type TaskViewMode = z.infer<typeof TaskViewModeSchema>;
 export type McpClient = z.infer<typeof McpClientSchema>;
