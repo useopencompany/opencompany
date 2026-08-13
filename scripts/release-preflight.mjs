@@ -126,6 +126,13 @@ const groups = {
       },
     ],
     optional: [
+      // HubSpot OAuth/webhook ingress (#1203 4c) is code-complete but the
+      // HubSpot app is unprovisioned in production; Attio and Jamie verify
+      // against per-integration credentials and need no env. Promote these to
+      // required when the HubSpot app is set up.
+      "GOAT_HUBSPOT_CLIENT_ID",
+      "GOAT_HUBSPOT_CLIENT_SECRET",
+      "GOAT_HUBSPOT_STATE_SECRET",
       "API_DB_POOL_MAX",
       "WORKOS_COOKIE_NAME",
       "GOAT_DEFAULT_CHAT_MODEL",

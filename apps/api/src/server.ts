@@ -26,6 +26,7 @@ import {
 import { createLogger } from "@opencompany/observability";
 import { createApiApp } from "./app";
 import { createAttachmentUploadService } from "./attachments";
+import { createAttioIngress } from "./attio-ingress";
 import { createWorkOsApiAuthenticator, createWorkOsApiIdentityVerifier } from "./auth";
 import { createAutomationServices } from "./automations";
 import { createBrainAssetService } from "./brain-assets";
@@ -33,6 +34,8 @@ import { parseBrowserOrigins } from "./browser-origins";
 import { ElectricReadModelProxy } from "./electric-read-models";
 import { createGitHubIngress } from "./github-ingress";
 import { createGoogleIngress } from "./google-ingress";
+import { createHubspotIngress } from "./hubspot-ingress";
+import { createJamieIngress } from "./jamie-ingress";
 import { createLinearIngress } from "./linear-ingress";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
 import { createSlackIngress } from "./slack-ingress";
@@ -103,6 +106,9 @@ const app = createApiApp({
   googleIngress: createGoogleIngress({ db: database.db, identify: identityVerifier }),
   slackIngress: createSlackIngress({ db: database.db, identify: identityVerifier }),
   linearIngress: createLinearIngress({ db: database.db, identify: identityVerifier }),
+  hubspotIngress: createHubspotIngress({ db: database.db, identify: identityVerifier }),
+  attioIngress: createAttioIngress({ db: database.db }),
+  jamieIngress: createJamieIngress({ db: database.db }),
   notifier,
   resolveAutoModel: (input) =>
     resolvePersistedAutoModelRouting({

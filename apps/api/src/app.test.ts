@@ -967,6 +967,18 @@ describe("canonical Hono API", () => {
         callback: record("linear.callback", calls),
         webhook: record("linear.webhook", calls),
       },
+      hubspotIngress: {
+        start: record("hubspot.start", calls),
+        callback: record("hubspot.callback", calls),
+        webhook: record("hubspot.webhook", calls),
+      },
+      attioIngress: {
+        webhook: record("attio.webhook", calls),
+      },
+      jamieIngress: {
+        webhook: record("jamie.webhook", calls),
+        webhookForIntegration: record("jamie.webhookForIntegration", calls),
+      },
     });
 
     const routes: Array<[string, string, string]> = [
@@ -986,6 +998,12 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/linear-ingest/start", "linear.start"],
       ["GET", "/integrations/linear-ingest/callback", "linear.callback"],
       ["POST", "/webhooks/linear/events", "linear.webhook"],
+      ["GET", "/integrations/hubspot/start", "hubspot.start"],
+      ["GET", "/integrations/hubspot/callback", "hubspot.callback"],
+      ["POST", "/webhooks/hubspot/events", "hubspot.webhook"],
+      ["POST", "/webhooks/attio/events", "attio.webhook"],
+      ["POST", "/webhooks/jamie", "jamie.webhook"],
+      ["POST", "/webhooks/jamie/gint_1", "jamie.webhookForIntegration"],
     ];
     for (const [method, path, service] of routes) {
       const response = await app.request(path, { method, body: method === "POST" ? "{}" : null });

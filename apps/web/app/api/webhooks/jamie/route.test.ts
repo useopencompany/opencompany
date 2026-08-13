@@ -1,67 +1,57 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { loadGoatJamieWebhookContextForApiKey } from "@/lib/integrations/jamie";
-import { handleGoatJamieWebhookDelivery } from "@/lib/integrations/jamie-webhook";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
-vi.mock("@/lib/integrations/jamie", () => ({
-  loadGoatJamieWebhookContextForApiKey: vi.fn(),
-}));
-
-vi.mock("@/lib/integrations/jamie-webhook", () => ({
-  handleGoatJamieWebhookDelivery: vi.fn(async () => Response.json({ ok: true })),
-}));
-
-describe("POST /api/webhooks/jamie", () => {
+describe("POST /api/webhooks/jamie relay", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
   });
 
-  it("loads the Jamie integration from the default API key header", async () => {
-    const context = {
-      integrationId: "gint_123",
-      userWorkosId: "user_123",
-      apiKeyHash: "hash",
-      legacySecretHash: null,
-    };
-    vi.mocked(loadGoatJamieWebhookContextForApiKey).mockResolvedValue(context);
-
-    const request = jamieRequest();
-    const response = await POST(request);
-
-    expect(response.status).toBe(200);
-    expect(loadGoatJamieWebhookContextForApiKey).toHaveBeenCalledWith(jamieApiKey());
-    expect(handleGoatJamieWebhookDelivery).toHaveBeenCalledWith({
-      request,
-      webhookContext: context,
-      missingContextStatus: 401,
-    });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
-  it("passes a null context through as an authentication failure", async () => {
-    vi.mocked(loadGoatJamieWebhookContextForApiKey).mockResolvedValue(null);
-
-    await POST(jamieRequest());
-
-    expect(handleGoatJamieWebhookDelivery).toHaveBeenCalledWith(
-      expect.objectContaining({
-        webhookContext: null,
-        missingContextStatus: 401,
+  it("streams the keyed delivery to the canonical API ingress path unchanged", async () => {
+    let upstream: Request | null = null;
+    let upstreamBody: string | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+        upstream = input instanceof Request ? input : new Request(input, init);
+        upstreamBody = await upstream.text();
+        return Response.json({ ok: true, enqueued: true });
       }),
     );
+
+    const rawBody = JSON.stringify({ metadata: { event: "meeting.completed" } });
+    const response = await POST(
+      new Request("https://my.opencompany.chat/api/webhooks/jamie", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "jamie-event": "meeting.completed",
+          "x-jamie-api-key": "sk_test",
+        },
+        body: rawBody,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const request = upstream as unknown as Request;
+    expect(new URL(request.url).href).toBe("https://api.example.test/webhooks/jamie");
+    expect(request.headers.get("x-jamie-api-key")).toBe("sk_test");
+    expect(request.headers.get("jamie-event")).toBe("meeting.completed");
+    expect(upstreamBody).toBe(rawBody);
+  });
+
+  it("fails closed when the API origin is unset", async () => {
+    vi.stubEnv("GOAT_API_ORIGIN", "");
+    const response = await POST(
+      new Request("https://my.opencompany.chat/api/webhooks/jamie", {
+        method: "POST",
+        body: "{}",
+      }),
+    );
+    expect(response.status).toBe(503);
   });
 });
-
-function jamieRequest() {
-  return new Request("https://goat.test/api/webhooks/jamie", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-jamie-api-key": jamieApiKey(),
-    },
-    body: "{}",
-  });
-}
-
-function jamieApiKey() {
-  return "sk_0000000000000000000000000000000000000000000000000000000000000000";
-}
