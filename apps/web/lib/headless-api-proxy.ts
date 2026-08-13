@@ -16,9 +16,9 @@ const HOP_BY_HOP_HEADERS = [
 export async function proxyHeadlessApiRequest(
   request: Request,
   path: readonly string[],
-  options: { apiOrigin?: string; fetch?: typeof globalThis.fetch } = {},
+  options: { apiOrigin?: string; fetch?: typeof globalThis.fetch; basePath?: string } = {},
 ) {
-  const target = headlessApiTarget(request.url, path, options.apiOrigin);
+  const target = headlessApiTarget(request.url, path, options.apiOrigin, options.basePath);
   if (!target) return unavailableResponse(request);
   const headers = new Headers(request.headers);
   for (const header of HOP_BY_HOP_HEADERS) headers.delete(header);
@@ -53,6 +53,9 @@ export function headlessApiTarget(
   requestUrl: string,
   path: readonly string[],
   configuredOrigin = process.env.GOAT_API_ORIGIN,
+  // Client resources live under /v1; purpose-specific provider ingress (OAuth
+  // callbacks, webhooks) relays to top-level API paths instead.
+  basePath = "v1",
 ) {
   const value = configuredOrigin?.trim();
   if (!value) return null;
@@ -67,7 +70,11 @@ export function headlessApiTarget(
   }
   const incoming = new URL(requestUrl);
   if (origin.origin === incoming.origin) return null;
-  const target = new URL(`/v1/${path.map(encodeURIComponent).join("/")}`, `${origin.origin}/`);
+  const segments = path.map(encodeURIComponent).join("/");
+  const target = new URL(
+    basePath ? `/${basePath}/${segments}` : `/${segments}`,
+    `${origin.origin}/`,
+  );
   target.search = incoming.search;
   return target;
 }

@@ -22,7 +22,6 @@
     "apps/web/app/api/stripe/webhook/route.ts",
     "apps/web/app/api/usage/ingestions/route.ts",
     "apps/web/app/api/webhooks/attio/events/route.ts",
-    "apps/web/app/api/webhooks/github/events/route.ts",
     "apps/web/app/api/webhooks/google-drive/route.ts",
     "apps/web/app/api/webhooks/hubspot/events/route.ts",
     "apps/web/app/api/webhooks/linear/events/route.ts",

@@ -60,6 +60,7 @@ import type { ApiAuthenticator } from "./auth";
 import type { BrainAssetService } from "./brain-assets";
 import type { ReadModelService } from "./electric-read-models";
 import { ApiError, errorResponse } from "./errors";
+import type { GitHubIngressService } from "./github-ingress";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
 import { PollingRunEventNotifier, type RunEventNotifier } from "./run-event-notifier";
 
@@ -109,6 +110,7 @@ export type CreateApiAppInput = {
   attachments: AttachmentUploadService;
   authenticate: ApiAuthenticator;
   browserOrigins?: readonly string[];
+  githubIngress?: GitHubIngressService;
   notifier?: RunEventNotifier;
   presentation?: ChatPresentationReader;
   rateLimiter?: ApiRateLimiter;
@@ -1407,6 +1409,28 @@ export function createApiApp(input: CreateApiAppInput) {
     }),
   );
   app.get("/openapi.json", (c) => c.json(createOpenApiDocument()));
+  if (input.githubIngress) {
+    // Purpose-specific provider ingress: registered outside /v1 so the /v1
+    // browser middleware (CORS, cookie-mutation Origin checks, actor context)
+    // does not apply. Each handler owns its authentication and verification.
+    const ingress = input.githubIngress;
+    app.get("/integrations/github/start", (c) => ingress.start(c.req.raw));
+    app.get("/integrations/github/callback", (c) => ingress.callback(c.req.raw));
+    // GitHub caps webhook payloads at 25 MB; unlike the retired Vercel route,
+    // Render enforces no platform body limit, so cap it here.
+    app.use(
+      "/webhooks/github/events",
+      bodyLimit({
+        maxSize: 25 * 1024 * 1024,
+        onError: (c) =>
+          apiErrorResponse(
+            c,
+            new ApiError(413, "invalid_request", "The webhook payload is too large."),
+          ),
+      }),
+    );
+    app.post("/webhooks/github/events", (c) => ingress.webhook(c.req.raw));
+  }
   app.notFound((c) => apiErrorResponse(c, new ApiError(404, "not_found", "Route not found.")));
   return app;
 }

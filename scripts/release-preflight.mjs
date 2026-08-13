@@ -92,6 +92,16 @@ const groups = {
       "ELECTRIC_URL",
       "REDIS_URL",
       "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
+      // GitHub App OAuth + webhook ingress (#1203 4a1). The API redirects back
+      // to the web origin, so it also needs the canonical app URL.
+      "GOAT_NEXT_PUBLIC_APP_URL",
+      "GITHUB_INTEGRATION_APP_ID",
+      "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
+      "GITHUB_INTEGRATION_APP_SLUG",
+      "GITHUB_INTEGRATION_APP_CLIENT_ID",
+      "GITHUB_INTEGRATION_APP_CLIENT_SECRET",
+      "GITHUB_INTEGRATION_STATE_SECRET",
+      "GITHUB_INTEGRATION_APP_WEBHOOK_SECRET",
     ],
     // Browser profiles are feature-flag gated: the Browserbase credentials are
     // required only when GOAT_BROWSER_PROFILES_ENABLED is "true" in this env.
@@ -123,6 +133,8 @@ const groups = {
       "GOAT_OBSERVABILITY_ENABLED",
       "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
       "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
+      "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
+      "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
     ],
   },
   runner: {

@@ -12,11 +12,13 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.19.11",
+    "@opencompany/analytics": "workspace:*",
     "@opencompany/chat-presentation": "workspace:*",
     "@opencompany/core": "workspace:*",
     "@opencompany/db": "workspace:*",
     "@opencompany/file-extract": "workspace:*",
     "@opencompany/goat-agent": "workspace:*",
+    "@opencompany/goat-brain": "workspace:*",
     "@opencompany/goat-observability": "workspace:*",
     "@opencompany/observability": "workspace:*",
     "@opencompany/protocol": "workspace:*",

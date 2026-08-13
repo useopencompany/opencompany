@@ -38,6 +38,30 @@ services:
       # Canonical Auto model classification. Kept server-side in prod `/api`.
       - key: VERCEL_AI_GATEWAY_API_KEY
         sync: false
+      # GitHub App OAuth + webhook ingress moved to the API in the #1203 4a1
+      # cutover. Redirects and install/callback URLs stay on the web origin,
+      # which is why the API also needs the canonical app URL.
+      - key: GOAT_NEXT_PUBLIC_APP_URL
+        sync: false
+      - key: GITHUB_INTEGRATION_APP_ID
+        sync: false
+      - key: GITHUB_INTEGRATION_APP_PRIVATE_KEY
+        sync: false
+      - key: GITHUB_INTEGRATION_APP_SLUG
+        sync: false
+      - key: GITHUB_INTEGRATION_APP_CLIENT_ID
+        sync: false
+      - key: GITHUB_INTEGRATION_APP_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_INTEGRATION_STATE_SECRET
+        sync: false
+      - key: GITHUB_INTEGRATION_APP_WEBHOOK_SECRET
+        sync: false
+      # Server-side integration analytics (fire-and-forget; safe when unset).
+      - key: NEXT_PUBLIC_GOAT_POSTHOG_TOKEN
+        sync: false
+      - key: NEXT_PUBLIC_GOAT_POSTHOG_HOST
+        sync: false
       # Browser profiles moved behind /v1 in the #1203 3e cutover. The feature is
       # flag-gated; the Browserbase credentials are only exercised when
       # GOAT_BROWSER_PROFILES_ENABLED is "true".
