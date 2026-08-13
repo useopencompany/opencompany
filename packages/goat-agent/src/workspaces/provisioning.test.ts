@@ -1,23 +1,34 @@
-import { createGoatWorkspaceForUser, newGoatWorkspaceId } from "@opencompany/db/goat-workspaces";
+import {
+  createGoatWorkspaceForUser,
+  listAccessibleGoatBrains,
+  listGoatWorkspacesForUser,
+  newGoatWorkspaceId,
+} from "@opencompany/db/goat-workspaces";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GoatWorkspaceProvisioningError, provisionGoatWorkspace } from "./provisioning";
 import type { WorkOSClientLike } from "./workos";
 
 vi.mock("@opencompany/db/goat-workspaces", () => ({
   createGoatWorkspaceForUser: vi.fn(),
+  DEFAULT_GOAT_BRAIN_SLUG: "general",
+  listAccessibleGoatBrains: vi.fn(),
+  listGoatWorkspacesForUser: vi.fn(),
   newGoatWorkspaceId: vi.fn(),
 }));
 
 const createGoatWorkspaceForUserMock = vi.mocked(createGoatWorkspaceForUser);
+const listAccessibleGoatBrainsMock = vi.mocked(listAccessibleGoatBrains);
+const listGoatWorkspacesForUserMock = vi.mocked(listGoatWorkspacesForUser);
 const newGoatWorkspaceIdMock = vi.mocked(newGoatWorkspaceId);
 
 const createOrganization = vi.fn();
 const createOrganizationMembership = vi.fn();
 const deleteOrganization = vi.fn();
+const listOrganizationMemberships = vi.fn();
 
 const workos = {
   organizations: { createOrganization, deleteOrganization },
-  userManagement: { createOrganizationMembership },
+  userManagement: { createOrganizationMembership, listOrganizationMemberships },
 } as unknown as WorkOSClientLike;
 const db = {};
 
@@ -28,6 +39,9 @@ describe("provisionGoatWorkspace", () => {
     createOrganization.mockResolvedValue({ id: "org_new", name: "Analytical Co" });
     createOrganizationMembership.mockResolvedValue({});
     deleteOrganization.mockResolvedValue(undefined);
+    listOrganizationMemberships.mockResolvedValue({ data: [] });
+    listGoatWorkspacesForUserMock.mockResolvedValue([]);
+    listAccessibleGoatBrainsMock.mockResolvedValue([]);
     createGoatWorkspaceForUserMock.mockResolvedValue({
       workspace: {
         id: "goat_ws_new",
@@ -81,6 +95,56 @@ describe("provisionGoatWorkspace", () => {
       { db },
     );
     expect(deleteOrganization).not.toHaveBeenCalled();
+  });
+
+  it("replays a completed workspace by its caller-provided id", async () => {
+    listGoatWorkspacesForUserMock.mockResolvedValue([
+      {
+        workspace: {
+          id: "goat_ws_replay",
+          name: "Analytical Co",
+          workosOrganizationId: "org_existing",
+        },
+        role: "admin",
+      },
+    ] as never);
+    listAccessibleGoatBrainsMock.mockResolvedValue([
+      { id: "brain_general", slug: "general" },
+    ] as never);
+
+    await expect(
+      provisionGoatWorkspace(
+        {
+          authUserId: "user_123",
+          userWorkosId: "user_123",
+          workspaceId: "goat_ws_replay",
+          name: "Analytical Co",
+        },
+        { workos, db },
+      ),
+    ).resolves.toMatchObject({
+      workspace: { id: "goat_ws_replay", workosOrganizationId: "org_existing" },
+      brain: { id: "brain_general" },
+    });
+    expect(createOrganization).not.toHaveBeenCalled();
+    expect(createGoatWorkspaceForUserMock).not.toHaveBeenCalled();
+  });
+
+  it("does not duplicate an existing active WorkOS membership", async () => {
+    listOrganizationMemberships.mockResolvedValueOnce({
+      data: [{ id: "om_existing", status: "active", role: { slug: "admin" } }],
+    });
+
+    await provisionGoatWorkspace(
+      {
+        authUserId: "user_123",
+        userWorkosId: "user_123",
+        name: "Analytical Co",
+      },
+      { workos, db },
+    );
+
+    expect(createOrganizationMembership).not.toHaveBeenCalled();
   });
 
   it("compensates the external organization when local persistence fails", async () => {

@@ -20,14 +20,15 @@ bun run dev:web
 
 `bun run setup` pulls development values from Infisical, creates or reuses a Neon branch tied to
 the current Git branch, runs migrations, and writes local app env files. `bun run dev` and
-`bun run dev:web` both start the OpenCompany web app, the runner, Stripe CLI webhook forwarding, Electric, and the
-local HTTPS/tunnel support needed by integrations.
+`bun run dev:web` both start the OpenCompany web app, canonical API, runner, Stripe CLI webhook
+forwarding, Electric, and the local HTTPS/tunnel support needed by integrations.
 
 See [Getting started](./docs/getting-started.md) for prerequisites and troubleshooting.
 
 ## Repository layout
 
-- `apps/web` — the OpenCompany Next.js client, composition root, and HTTP integration/webhook surface.
+- `apps/web` — the OpenCompany Next.js presentation client and stable public relay surface.
+- `apps/api` — the canonical typed API, application services, and provider ingress handlers.
 - `apps/runner` — Goat background workers, durable turns, Brain ingestion, and cloud coding.
 - `apps/stripe-webhooks` — local Stripe CLI forwarding for Goat billing.
 - `apps/marketing` — the public marketing site.

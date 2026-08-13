@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
+import type { GoatBillingApplicationService } from "@opencompany/billing/application-service";
 import {
   CHAT_PRESENTATION_READ_LIMIT,
   type ChatPresentationReader,
@@ -64,8 +65,10 @@ import { secureHeaders } from "hono/secure-headers";
 import { stream as streamResponse } from "hono/streaming";
 import type { AttachmentUploadService } from "./attachments";
 import type { AttioIngressService } from "./attio-ingress";
-import type { ApiAuthenticator } from "./auth";
+import type { ApiAuthenticator, ApiIdentity, ApiIdentityVerifier } from "./auth";
+import type { BillingReconcileService } from "./billing-reconcile";
 import type { BrainAssetService } from "./brain-assets";
+import type { BrainControlService } from "./brain-control";
 import type { ChatResourceDownload, ChatResourceService } from "./chat-resources";
 import type { ChatTitleService } from "./chat-title";
 import type { ReadModelService } from "./electric-read-models";
@@ -81,12 +84,17 @@ import type { IntegrationAccountService } from "./integration-accounts";
 import type { JamieIngressService } from "./jamie-ingress";
 import type { LinearIngressService } from "./linear-ingress";
 import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
+import type { OnboardingService } from "./onboarding";
+import type { OnboardingEmailService } from "./onboarding-emails";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
 import type { RepoConfigService } from "./repo-configs";
 import { PollingRunEventNotifier, type RunEventNotifier } from "./run-event-notifier";
 import type { SlackBotIngressService } from "./slack-bot-ingress";
 import type { SlackIngressService } from "./slack-ingress";
+import type { StripeIngressService } from "./stripe-ingress";
 import type { UserSettingsService } from "./user-settings";
+import type { CapabilityApprovalView, WorkspaceCapabilityService } from "./workspace-capabilities";
+import type { WorkspaceControlService } from "./workspace-control";
 import type { XAccountIngressService } from "./x-account-ingress";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "hono" });
@@ -112,6 +120,7 @@ const CORS_EXPOSE_HEADERS = [
   "X-OpenCompany-Run-Status",
   "X-Request-Id",
 ];
+const ONBOARDING_IDENTITY_PATH = "/v1/onboarding";
 
 export type CreateApiAppInput = {
   chat: ChatApplicationService;
@@ -149,6 +158,7 @@ export type CreateApiAppInput = {
       durationMs: number;
     };
   }) => Promise<unknown> | unknown;
+  brainControl: BrainControlService;
   attachments: AttachmentUploadService;
   userSettings: UserSettingsService;
   feedback: FeedbackService;
@@ -156,7 +166,14 @@ export type CreateApiAppInput = {
   integrationAccounts: IntegrationAccountService;
   engineAuth: EngineAuthService;
   engineSessions: EngineSessionService;
+  billing: GoatBillingApplicationService;
+  workspaceCapabilities: WorkspaceCapabilityService;
+  workspaceControl: WorkspaceControlService;
+  onboarding: OnboardingService;
+  onboardingEmails: OnboardingEmailService;
   authenticate: ApiAuthenticator;
+  identify: ApiIdentityVerifier;
+  emailLifecycleInternalSecret?: string;
   browserOrigins?: readonly string[];
   githubIngress?: GitHubIngressService;
   googleIngress?: GoogleIngressService;
@@ -168,6 +185,8 @@ export type CreateApiAppInput = {
   mcpOAuthIngress?: McpOAuthIngressService;
   xAccountIngress?: XAccountIngressService;
   slackBotIngress?: SlackBotIngressService;
+  stripeIngress?: StripeIngressService;
+  billingReconcile?: BillingReconcileService;
   notifier?: RunEventNotifier;
   presentation?: ChatPresentationReader;
   rateLimiter?: ApiRateLimiter;
@@ -604,6 +623,178 @@ export function createApiApp(input: CreateApiAppInput) {
       const { sessionId } = c.req.valid("query");
       const url = await input.browserProfiles.resolveLiveViewUrl(actor, profileId, sessionId);
       return c.json({ data: { url }, meta }, 200);
+    },
+    getWorkspaceCapabilities: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const settings = await input.workspaceCapabilities.getSettings(actor);
+      return c.json({ data: settings, meta }, 200);
+    },
+    setCapabilitySessionBudget: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const sessionBudgetUsdMicros = await input.workspaceCapabilities.setSessionBudget(
+        actor,
+        c.req.valid("json").budgetUsd,
+      );
+      return c.json({ data: { sessionBudgetUsdMicros }, meta }, 200);
+    },
+    setWorkspaceCapability: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const capability = await input.workspaceCapabilities.setCapability(
+        actor,
+        c.req.valid("param").source,
+        c.req.valid("json").enabled,
+      );
+      return c.json({ data: capability, meta }, 200);
+    },
+    getCapabilityApprovalByToolCall: async (c) => {
+      const actor = actorFrom(c);
+      // Chat polls this resource while an approval card is visible, so it gets
+      // a dedicated read bucket instead of competing with ordinary RSC reads.
+      await enforceRateLimit(rateLimiter, actor, "capability-approval-read", 300);
+      const approval = await input.workspaceCapabilities.getApprovalByToolCall(
+        actor,
+        c.req.valid("param").toolCallId,
+      );
+      return c.json({ data: capabilityApprovalDto(approval), meta }, 200);
+    },
+    getCapabilityApproval: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "capability-approval-read", 300);
+      const approval = await input.workspaceCapabilities.getApproval(
+        actor,
+        c.req.valid("param").runId,
+      );
+      return c.json({ data: capabilityApprovalDto(approval), meta }, 200);
+    },
+    createBrain: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.brainControl.createBrain(actor, c.req.valid("json"));
+      return c.json({ data: result, meta }, 201);
+    },
+    switchBrain: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.brainControl.switchBrain(actor, c.req.valid("param").brainId);
+      return c.json({ data: result, meta }, 200);
+    },
+    getBrainAccess: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const access = await input.brainControl.getAccess(actor, c.req.valid("param").brainId);
+      return c.json({ data: access, meta }, 200);
+    },
+    setBrainAccess: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.brainControl.setAccess(actor, c.req.valid("param").brainId, c.req.valid("json"));
+      return c.json({ data: { updated: true as const }, meta }, 200);
+    },
+    getBrainEnrichment: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const setting = await input.brainControl.getEnrichment(actor, c.req.valid("param").brainId);
+      return c.json({ data: setting, meta }, 200);
+    },
+    setBrainEnrichment: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const { brainId } = c.req.valid("param");
+      const { enabled } = c.req.valid("json");
+      await input.brainControl.setEnrichment(actor, brainId, enabled);
+      return c.json({ data: { enabled }, meta }, 200);
+    },
+    getBrainIntelligence: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const setting = await input.brainControl.getIntelligence(actor, c.req.valid("param").brainId);
+      return c.json({ data: setting, meta }, 200);
+    },
+    setBrainIntelligence: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const { brainId } = c.req.valid("param");
+      const { intelligence } = c.req.valid("json");
+      await input.brainControl.setIntelligence(actor, brainId, intelligence);
+      return c.json({ data: { intelligence }, meta }, 200);
+    },
+    getWorkspaceSettings: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const settings = await input.workspaceControl.getSettings(actor);
+      return c.json({ data: settings, meta }, 200);
+    },
+    renameWorkspace: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const workspace = await input.workspaceControl.rename(actor, c.req.valid("json").name);
+      return c.json({ data: workspace, meta }, 200);
+    },
+    inviteWorkspaceMember: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "workspace-invitation", 20);
+      await input.workspaceControl.invite(actor, c.req.valid("json").email);
+      return c.json({ data: { completed: true as const }, meta }, 201);
+    },
+    revokeWorkspaceInvitation: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.workspaceControl.revokeInvitation(actor, c.req.valid("param").invitationId);
+      return c.json({ data: { completed: true as const }, meta }, 200);
+    },
+    removeWorkspaceMember: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.workspaceControl.removeMember(actor, c.req.valid("param").userId);
+      return c.json({ data: { completed: true as const }, meta }, 200);
+    },
+    createWorkspace: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "workspace-create", 5);
+      const activation = await input.workspaceControl.create(actor, c.req.valid("json"));
+      return c.json({ data: activation, meta }, 201);
+    },
+    switchWorkspace: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const activation = await input.workspaceControl.switch(
+        actor,
+        c.req.valid("param").workspaceId,
+      );
+      return c.json({ data: activation, meta }, 200);
+    },
+    getOnboardingState: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-read", 300);
+      const state = await input.onboarding.getState(identity);
+      return c.json({ data: state, meta }, 200);
+    },
+    checkOnboardingWorkspaceSlug: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-slug", 120);
+      const result = await input.onboarding.checkSlug(identity, c.req.valid("json").slug);
+      return c.json({ data: result, meta }, 200);
+    },
+    saveOnboardingProfile: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-write", 30);
+      await input.onboarding.saveProfile(identity, c.req.valid("json"));
+      return c.json({ data: { completed: true as const }, meta }, 200);
+    },
+    saveOnboardingWorkspace: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-workspace", 10);
+      const workspace = await input.onboarding.saveWorkspace(identity, c.req.valid("json"));
+      return c.json({ data: workspace, meta }, 200);
+    },
+    finishOnboarding: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-write", 30);
+      await input.onboarding.finish(identity, c.req.valid("json").referralSource);
+      return c.json({ data: { completed: true as const }, meta }, 200);
     },
     startBrainImport: async (c) => {
       const actor = actorFrom(c);
@@ -1786,6 +1977,58 @@ export function createApiApp(input: CreateApiAppInput) {
       await input.engineAuth.disconnectInfisical(actor);
       return c.json({ data: { deleted: true as const }, meta }, 200);
     },
+    getBillingOverview: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-read", 300);
+      c.header("Cache-Control", "private, no-store");
+      return c.json({ data: await input.billing.getOverview(actor), meta }, 200);
+    },
+    getBillingUsage: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-read", 300);
+      c.header("Cache-Control", "private, no-store");
+      return c.json({ data: await input.billing.getUsage(actor), meta }, 200);
+    },
+    getBillingBalance: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-read", 300);
+      c.header("Cache-Control", "private, no-store");
+      return c.json({ data: await input.billing.getBalance(actor), meta }, 200);
+    },
+    createBillingTopUp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-command", 10);
+      const result = await input.billing.createCreditTopUp(actor, {
+        ...c.req.valid("json"),
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+      });
+      return c.json({ data: result, meta }, 201);
+    },
+    createBillingSubscriptionCheckout: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-command", 10);
+      const result = await input.billing.createProCheckout(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+      });
+      return c.json({ data: result, meta }, 201);
+    },
+    createBillingPortalSession: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-command", 10);
+      const result = await input.billing.createBillingPortal(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+      });
+      return c.json({ data: result, meta }, 201);
+    },
+    updateBillingAutoRefill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-command", 10);
+      const result = await input.billing.updateAutoRefill(actor, {
+        ...c.req.valid("json"),
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+      });
+      return c.json({ data: result, meta }, 200);
+    },
   };
 
   const app = createV1Router(handlers, {
@@ -1827,10 +2070,18 @@ export function createApiApp(input: CreateApiAppInput) {
           async (span) => {
             try {
               enforceCookieMutationOrigin(c.req.raw, browserOrigins);
-              const authentication = await input.authenticate(c.req.raw);
-              setContextValue(c, "actor", authentication.actor);
-              if (authentication.refreshedSessionCookie) {
-                c.header("Set-Cookie", authentication.refreshedSessionCookie);
+              if (isIdentityTierPath(c.req.path)) {
+                const identity = await input.identify(c.req.raw);
+                setContextValue(c, "identity", identity);
+                if (identity.refreshedSessionCookie) {
+                  c.header("Set-Cookie", identity.refreshedSessionCookie);
+                }
+              } else {
+                const authentication = await input.authenticate(c.req.raw);
+                setContextValue(c, "actor", authentication.actor);
+                if (authentication.refreshedSessionCookie) {
+                  c.header("Set-Cookie", authentication.refreshedSessionCookie);
+                }
               }
               await next();
               span.setAttributes({ "goat.http_status_code": c.res.status });
@@ -1915,6 +2166,67 @@ export function createApiApp(input: CreateApiAppInput) {
     }),
   );
   app.get("/openapi.json", (c) => c.json(createOpenApiDocument()));
+  app.post("/internal/onboarding-emails/enroll", async (c) => {
+    authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
+    const body = await internalJsonBody(c.req.raw);
+    const workosUserId = boundedString(body.workosUserId, 128);
+    if (!workosUserId) {
+      throw new ApiError(400, "invalid_request", "A valid user id is required.");
+    }
+    await input.onboardingEmails.enroll(workosUserId);
+    return c.json({ data: { completed: true as const }, meta }, 200);
+  });
+  app.post("/internal/onboarding-emails/claim", async (c) => {
+    authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
+    const body = await internalJsonBody(c.req.raw);
+    const limit = body.limit;
+    if (!Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 100) {
+      throw new ApiError(400, "invalid_request", "A claim limit from 1 to 100 is required.");
+    }
+    const workosUserId =
+      body.workosUserId === undefined ? undefined : boundedString(body.workosUserId, 128);
+    if (body.workosUserId !== undefined && !workosUserId) {
+      throw new ApiError(400, "invalid_request", "A valid user id is required.");
+    }
+    const emails = workosUserId
+      ? await input.onboardingEmails.claimDue(Number(limit), workosUserId)
+      : await input.onboardingEmails.claimDue(Number(limit));
+    return c.json({ data: { emails }, meta }, 200);
+  });
+  app.post("/internal/onboarding-emails/settle", async (c) => {
+    authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
+    const body = await internalJsonBody(c.req.raw);
+    const id = boundedString(body.id, 128);
+    const outcome = body.outcome;
+    if (!id || !["sent", "failed", "rescheduled"].includes(String(outcome))) {
+      throw new ApiError(400, "invalid_request", "A valid email settlement is required.");
+    }
+    const error = body.error === undefined ? undefined : boundedString(body.error, 2_000);
+    const nextRunAt = body.nextRunAt === undefined ? undefined : validDate(String(body.nextRunAt));
+    if (outcome !== "sent" && !error) {
+      throw new ApiError(400, "invalid_request", "A delivery error is required.");
+    }
+    if (outcome === "rescheduled" && !nextRunAt) {
+      throw new ApiError(400, "invalid_request", "A retry schedule is required.");
+    }
+    await input.onboardingEmails.settle({
+      id,
+      outcome: outcome as "sent" | "failed" | "rescheduled",
+      ...(error ? { error } : {}),
+      ...(nextRunAt ? { nextRunAt } : {}),
+    });
+    return c.json({ data: { completed: true as const }, meta }, 200);
+  });
+  app.post("/internal/onboarding-emails/unsubscribe", async (c) => {
+    authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
+    const body = await internalJsonBody(c.req.raw);
+    const email = boundedString(body.email, 320)?.toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)) {
+      throw new ApiError(400, "invalid_request", "A valid email is required.");
+    }
+    const skipped = await input.onboardingEmails.unsubscribe(email);
+    return c.json({ data: { skipped }, meta }, 200);
+  });
   if (input.githubIngress) {
     // Purpose-specific provider ingress: registered outside /v1 so the /v1
     // browser middleware (CORS, cookie-mutation Origin checks, actor context)
@@ -2002,6 +2314,13 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/slack-bot/start", (c) => ingress.start(c.req.raw));
     app.get("/integrations/slack-bot/callback", (c) => ingress.callback(c.req.raw));
   }
+  if (input.stripeIngress) {
+    app.use("/webhooks/stripe", ingressBodyLimit(1024 * 1024));
+    app.post("/webhooks/stripe", (c) => input.stripeIngress!.webhook(c.req.raw));
+  }
+  if (input.billingReconcile) {
+    app.get("/billing/reconcile", (c) => input.billingReconcile!.reconcile(c.req.raw));
+  }
   app.notFound((c) => apiErrorResponse(c, new ApiError(404, "not_found", "Route not found.")));
   return app;
 }
@@ -2074,6 +2393,46 @@ function enforceCookieMutationOrigin(request: Request, browserOrigins: readonly 
   }
 }
 
+function isIdentityTierPath(path: string) {
+  return path === ONBOARDING_IDENTITY_PATH || path.startsWith(`${ONBOARDING_IDENTITY_PATH}/`);
+}
+
+function authorizeEmailLifecycleInternalRequest(request: Request, configuredSecret?: string) {
+  const secret = configuredSecret?.trim();
+  if (!secret) {
+    throw new ApiError(503, "unavailable", "Email lifecycle persistence is unavailable.", true);
+  }
+  const authorization = request.headers.get("authorization");
+  const supplied = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
+  const expectedBuffer = Buffer.from(secret);
+  const suppliedBuffer = Buffer.from(supplied);
+  if (
+    suppliedBuffer.length !== expectedBuffer.length ||
+    !timingSafeEqual(suppliedBuffer, expectedBuffer)
+  ) {
+    throw new ApiError(401, "authentication_required", "Authentication required.");
+  }
+}
+
+async function internalJsonBody(request: Request): Promise<Record<string, unknown>> {
+  const body = await request.json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new ApiError(400, "invalid_request", "A JSON object is required.");
+  }
+  return body as Record<string, unknown>;
+}
+
+function boundedString(value: unknown, maxLength: number) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed && trimmed.length <= maxLength ? trimmed : null;
+}
+
+function validDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 async function enforceRateLimit(
   limiter: ApiRateLimiter,
   actor: Actor,
@@ -2095,12 +2454,31 @@ async function enforceRateLimit(
 
 async function enforcePublicRateLimit(
   limiter: ApiRateLimiter,
-  capabilityId: string,
+  publicKey: string,
   bucket: string,
   limit: number,
 ) {
   const decision = await limiter.consume({
-    key: capabilityId,
+    key: publicKey,
+    bucket,
+    limit,
+    windowMs: 60_000,
+  });
+  if (!decision.allowed) {
+    throw new ApiError(429, "rate_limited", "Too many requests.", true, {
+      "Retry-After": String(decision.retryAfterSeconds),
+    });
+  }
+}
+
+async function enforceIdentityRateLimit(
+  limiter: ApiRateLimiter,
+  identity: ApiIdentity,
+  bucket: string,
+  limit: number,
+) {
+  const decision = await limiter.consume({
+    key: identity.userId,
     bucket,
     limit,
     windowMs: 60_000,
@@ -2116,6 +2494,12 @@ function actorFrom(c: Context): Actor {
   const actor = getContextValue(c, "actor");
   if (!actor) throw new ApiError(401, "authentication_required", "Authentication required.");
   return actor as Actor;
+}
+
+function identityFrom(c: Context): ApiIdentity {
+  const identity = getContextValue(c, "identity");
+  if (!identity) throw new ApiError(401, "authentication_required", "Authentication required.");
+  return identity as ApiIdentity;
 }
 
 function setContextValue(c: Context, key: string, value: unknown) {
@@ -2378,6 +2762,13 @@ function runDto(run: {
   updatedAt: Date;
 }) {
   return { ...run, createdAt: run.createdAt.toISOString(), updatedAt: run.updatedAt.toISOString() };
+}
+
+function capabilityApprovalDto(approval: CapabilityApprovalView) {
+  return {
+    ...approval,
+    expiresAt: approval.expiresAt?.toISOString() ?? null,
+  };
 }
 
 function mcpSetupDto(status: {

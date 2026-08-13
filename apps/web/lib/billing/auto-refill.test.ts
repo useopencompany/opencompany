@@ -90,10 +90,17 @@ describe("runGoatAutoRefill", () => {
         amount_cents: 2_000,
       },
     );
-    expect(settleGoatAutoRefillMock).toHaveBeenCalledWith({
-      workspaceId: "workspace_123",
-    });
-    expect(releasePendingForWorkspaceMock).toHaveBeenCalledWith("workspace_123");
+    expect(settleGoatAutoRefillMock).toHaveBeenCalledWith(
+      {
+        workspaceId: "workspace_123",
+      },
+      { db: undefined },
+    );
+    expect(releasePendingForWorkspaceMock).toHaveBeenCalledWith(
+      "workspace_123",
+      expect.any(Date),
+      undefined,
+    );
   });
 
   it("does not double-capture when the webhook already credited the PaymentIntent", async () => {

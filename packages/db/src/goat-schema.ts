@@ -70,6 +70,11 @@ export type GoatKnowledgeCommandOperation =
   | "skill.create"
   | "skill.import"
   | "brain_import.start";
+export type GoatBillingCommandOperation =
+  | "credit_topup.create"
+  | "subscription_checkout.create"
+  | "billing_portal.create"
+  | "auto_refill.update";
 export type GoatWorkflowStep = {
   id: string;
   title: string;
@@ -4221,6 +4226,49 @@ export const goatKnowledgeCommandIdempotency = goat.table(
   }),
 );
 
+// Billing commands cross an external Stripe boundary, so their client key,
+// request fingerprint, and narrow response are durable. An incomplete row is
+// safe to retry: Stripe receives a deterministic idempotency key and local
+// mutations are themselves idempotent.
+export const goatBillingCommandIdempotency = goat.table(
+  "billing_command_idempotency",
+  {
+    commandId: text("command_id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    operation: text("operation").$type<GoatBillingCommandOperation>().notNull(),
+    response: jsonb("response").$type<Record<string, unknown>>(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    touchedAt: timestamp("touched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    actorKeyIdx: uniqueIndex("goat_billing_command_idempotency_actor_key_idx").on(
+      table.userWorkosId,
+      table.workspaceId,
+      table.idempotencyKey,
+    ),
+    requestHashCheck: check(
+      "goat_billing_command_idempotency_request_hash_check",
+      sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    keyLengthCheck: check(
+      "goat_billing_command_idempotency_key_length_check",
+      sql`length(${table.idempotencyKey}) BETWEEN 1 AND 200`,
+    ),
+    operationCheck: check(
+      "goat_billing_command_idempotency_operation_check",
+      sql`${table.operation} IN ('credit_topup.create', 'subscription_checkout.create', 'billing_portal.create', 'auto_refill.update')`,
+    ),
+  }),
+);
+
 export const goatRunAttempts = goat.table(
   "run_attempts",
   {
@@ -5781,6 +5829,7 @@ export type GoatClaudeCodeCredential = typeof goatClaudeCodeCredentials.$inferSe
 export type GoatCodexDeviceAuthFlow = typeof goatCodexDeviceAuthFlows.$inferSelect;
 export type GoatTaskSchedule = typeof goatTaskSchedules.$inferSelect;
 export type GoatAutomationCommandIdempotency = typeof goatAutomationCommandIdempotency.$inferSelect;
+export type GoatBillingCommandIdempotency = typeof goatBillingCommandIdempotency.$inferSelect;
 export type GoatTaskScheduleRun = typeof goatTaskScheduleRuns.$inferSelect;
 export type GoatWorkflowScheduleRun = typeof goatWorkflowScheduleRuns.$inferSelect;
 export type GoatTask = typeof goatTasks.$inferSelect;

@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { skipPendingGoatOnboardingEmailsForEmail } from "@opencompany/db/goat-onboarding-emails";
 import { getGoatAppUrl } from "@/lib/app-url";
 import { trimmed } from "@/lib/email/client";
+import { emailLifecycleApiRequest, serverApiError } from "@/lib/server-api-client";
 
 // Signed one-click unsubscribe support.
 // The token is an HMAC over {email, type} using RESEND_API_KEY as the signing
@@ -104,6 +104,14 @@ export function createGoatEmailUnsubscribeUrl(input: {
 
 export async function unsubscribeGoatOnboardingEmails(input: { token: string }) {
   const payload = verifyGoatEmailUnsubscribeToken(input.token);
-  const skipped = await skipPendingGoatOnboardingEmailsForEmail(payload.email);
+  const response = await emailLifecycleApiRequest("unsubscribe", { email: payload.email });
+  if (!response.ok) {
+    throw await serverApiError(response, "Could not unsubscribe from onboarding emails.");
+  }
+  const body = (await response.json()) as { data?: { skipped?: unknown } };
+  if (!Number.isInteger(body.data?.skipped) || Number(body.data?.skipped) < 0) {
+    throw new Error("The onboarding email unsubscribe response was invalid.");
+  }
+  const skipped = Number(body.data?.skipped);
   return { status: "unsubscribed" as const, email: payload.email, skipped };
 }

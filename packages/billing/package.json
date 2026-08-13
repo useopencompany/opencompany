@@ -20,6 +20,7 @@
   "dependencies": {
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/analytics": "workspace:*",
+    "@opencompany/core": "workspace:*",
     "@opencompany/db": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "stripe": "^22.1.1"

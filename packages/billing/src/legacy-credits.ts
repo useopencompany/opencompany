@@ -4,7 +4,6 @@
 // auto-refill events. Ported verbatim from the retired billing service;
 // these write to the legacy (public-schema) billing tables, not goat.*.
 
-import { USD_MICROS_PER_CENT } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import {
   autoRefillAttempts,
@@ -13,6 +12,7 @@ import {
 } from "@opencompany/db/legacy-billing-schema";
 import { and, eq, sql } from "drizzle-orm";
 import type Stripe from "stripe";
+import { USD_MICROS_PER_CENT } from "./index";
 
 type ExecuteResultRow = Record<string, unknown>;
 
@@ -36,7 +36,7 @@ function readMicros(value: number | string | null | undefined) {
 
 export async function fulfillCheckoutSession(
   session: Stripe.Checkout.Session,
-  options: { eventId?: string } = {},
+  options: { eventId?: string; db?: ReturnType<typeof getDb> } = {},
 ) {
   if (session.payment_status !== "paid") {
     return { ok: false as const, reason: "not_paid" };
@@ -51,7 +51,7 @@ export async function fulfillCheckoutSession(
     return { ok: false as const, reason: "missing_metadata" };
   }
 
-  const db = getDb();
+  const db = options.db ?? getDb();
   const result = await db.execute(sql`
     WITH fulfilled_session AS (
       UPDATE stripe_checkout_sessions

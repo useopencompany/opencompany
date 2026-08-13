@@ -2,11 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createGoatEmailUnsubscribeToken,
   createGoatEmailUnsubscribeUrl,
+  unsubscribeGoatOnboardingEmails,
   verifyGoatEmailUnsubscribeToken,
 } from "@/lib/email/unsubscribe";
+import { emailLifecycleApiRequest } from "@/lib/server-api-client";
 
-vi.mock("@opencompany/db/goat-onboarding-emails", () => ({
-  skipPendingGoatOnboardingEmailsForEmail: vi.fn(),
+vi.mock("@/lib/server-api-client", () => ({
+  emailLifecycleApiRequest: vi.fn(),
+  serverApiError: vi.fn(),
 }));
 
 vi.mock("@/lib/app-url", () => ({
@@ -48,5 +51,20 @@ describe("goat onboarding unsubscribe tokens", () => {
     expect(verifyGoatEmailUnsubscribeToken(url.searchParams.get("token") ?? "").email).toBe(
       "ada@example.com",
     );
+  });
+
+  it("keeps token verification in web and sends only the verified email to the API", async () => {
+    vi.mocked(emailLifecycleApiRequest).mockResolvedValueOnce(
+      Response.json({ data: { skipped: 2 } }),
+    );
+    const token = createGoatEmailUnsubscribeToken({ email: "Ada@Example.com" });
+    await expect(unsubscribeGoatOnboardingEmails({ token })).resolves.toEqual({
+      status: "unsubscribed",
+      email: "ada@example.com",
+      skipped: 2,
+    });
+    expect(emailLifecycleApiRequest).toHaveBeenCalledWith("unsubscribe", {
+      email: "ada@example.com",
+    });
   });
 });
