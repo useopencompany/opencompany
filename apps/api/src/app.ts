@@ -66,6 +66,7 @@ import type { AttachmentUploadService } from "./attachments";
 import type { AttioIngressService } from "./attio-ingress";
 import type { ApiAuthenticator } from "./auth";
 import type { BrainAssetService } from "./brain-assets";
+import type { BrainControlService } from "./brain-control";
 import type { ReadModelService } from "./electric-read-models";
 import type { EngineAuthService } from "./engine-auth";
 import { ApiError, errorResponse } from "./errors";
@@ -83,6 +84,7 @@ import { PollingRunEventNotifier, type RunEventNotifier } from "./run-event-noti
 import type { SlackBotIngressService } from "./slack-bot-ingress";
 import type { SlackIngressService } from "./slack-ingress";
 import type { UserSettingsService } from "./user-settings";
+import type { CapabilityApprovalView, WorkspaceCapabilityService } from "./workspace-capabilities";
 import type { XAccountIngressService } from "./x-account-ingress";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "hono" });
@@ -128,12 +130,14 @@ export type CreateApiAppInput = {
   >;
   skillImports: SkillImportApplicationService;
   brainAssets: BrainAssetService;
+  brainControl: BrainControlService;
   attachments: AttachmentUploadService;
   userSettings: UserSettingsService;
   feedback: FeedbackService;
   repoConfigs: RepoConfigService;
   integrationAccounts: IntegrationAccountService;
   engineAuth: EngineAuthService;
+  workspaceCapabilities: WorkspaceCapabilityService;
   authenticate: ApiAuthenticator;
   browserOrigins?: readonly string[];
   githubIngress?: GitHubIngressService;
@@ -582,6 +586,103 @@ export function createApiApp(input: CreateApiAppInput) {
       const { sessionId } = c.req.valid("query");
       const url = await input.browserProfiles.resolveLiveViewUrl(actor, profileId, sessionId);
       return c.json({ data: { url }, meta }, 200);
+    },
+    getWorkspaceCapabilities: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const settings = await input.workspaceCapabilities.getSettings(actor);
+      return c.json({ data: settings, meta }, 200);
+    },
+    setCapabilitySessionBudget: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const sessionBudgetUsdMicros = await input.workspaceCapabilities.setSessionBudget(
+        actor,
+        c.req.valid("json").budgetUsd,
+      );
+      return c.json({ data: { sessionBudgetUsdMicros }, meta }, 200);
+    },
+    setWorkspaceCapability: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const capability = await input.workspaceCapabilities.setCapability(
+        actor,
+        c.req.valid("param").source,
+        c.req.valid("json").enabled,
+      );
+      return c.json({ data: capability, meta }, 200);
+    },
+    getCapabilityApprovalByToolCall: async (c) => {
+      const actor = actorFrom(c);
+      // Chat polls this resource while an approval card is visible, so it gets
+      // a dedicated read bucket instead of competing with ordinary RSC reads.
+      await enforceRateLimit(rateLimiter, actor, "capability-approval-read", 300);
+      const approval = await input.workspaceCapabilities.getApprovalByToolCall(
+        actor,
+        c.req.valid("param").toolCallId,
+      );
+      return c.json({ data: capabilityApprovalDto(approval), meta }, 200);
+    },
+    getCapabilityApproval: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "capability-approval-read", 300);
+      const approval = await input.workspaceCapabilities.getApproval(
+        actor,
+        c.req.valid("param").runId,
+      );
+      return c.json({ data: capabilityApprovalDto(approval), meta }, 200);
+    },
+    createBrain: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.brainControl.createBrain(actor, c.req.valid("json"));
+      return c.json({ data: result, meta }, 201);
+    },
+    switchBrain: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.brainControl.switchBrain(actor, c.req.valid("param").brainId);
+      return c.json({ data: result, meta }, 200);
+    },
+    getBrainAccess: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const access = await input.brainControl.getAccess(actor, c.req.valid("param").brainId);
+      return c.json({ data: access, meta }, 200);
+    },
+    setBrainAccess: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.brainControl.setAccess(actor, c.req.valid("param").brainId, c.req.valid("json"));
+      return c.json({ data: { updated: true as const }, meta }, 200);
+    },
+    getBrainEnrichment: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const setting = await input.brainControl.getEnrichment(actor, c.req.valid("param").brainId);
+      return c.json({ data: setting, meta }, 200);
+    },
+    setBrainEnrichment: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const { brainId } = c.req.valid("param");
+      const { enabled } = c.req.valid("json");
+      await input.brainControl.setEnrichment(actor, brainId, enabled);
+      return c.json({ data: { enabled }, meta }, 200);
+    },
+    getBrainIntelligence: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const setting = await input.brainControl.getIntelligence(actor, c.req.valid("param").brainId);
+      return c.json({ data: setting, meta }, 200);
+    },
+    setBrainIntelligence: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const { brainId } = c.req.valid("param");
+      const { intelligence } = c.req.valid("json");
+      await input.brainControl.setIntelligence(actor, brainId, intelligence);
+      return c.json({ data: { intelligence }, meta }, 200);
     },
     startBrainImport: async (c) => {
       const actor = actorFrom(c);
@@ -2125,6 +2226,13 @@ function runDto(run: {
   updatedAt: Date;
 }) {
   return { ...run, createdAt: run.createdAt.toISOString(), updatedAt: run.updatedAt.toISOString() };
+}
+
+function capabilityApprovalDto(approval: CapabilityApprovalView) {
+  return {
+    ...approval,
+    expiresAt: approval.expiresAt?.toISOString() ?? null,
+  };
 }
 
 function mcpSetupDto(status: {

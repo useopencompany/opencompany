@@ -6,14 +6,19 @@ import {
   AttachmentUploadBodySchema,
   AttachmentUploadEnvelopeSchema,
   AttioAccountStateEnvelopeSchema,
+  BrainAccessEnvelopeSchema,
+  BrainAccessMutationEnvelopeSchema,
   BrainAssetMutationEnvelopeSchema,
   BrainAssetReplaceBodySchema,
   BrainAssetUploadBodySchema,
+  BrainControlMutationEnvelopeSchema,
   BrainDocumentDeleteEnvelopeSchema,
   BrainDocumentEnvelopeSchema,
+  BrainEnrichmentEnvelopeSchema,
   BrainFolderEnvelopeSchema,
   BrainFolderPathEnvelopeSchema,
   BrainImportRunCommandEnvelopeSchema,
+  BrainIntelligenceEnvelopeSchema,
   BrainOverviewEnvelopeSchema,
   BrainSnapshotEnvelopeSchema,
   BrainSourceDeleteEnvelopeSchema,
@@ -29,6 +34,8 @@ import {
   BrowserProfileLoginCompleteEnvelopeSchema,
   BrowserProfileLoginSessionEnvelopeSchema,
   CancelRunEnvelopeSchema,
+  CapabilityApprovalEnvelopeSchema,
+  CapabilitySessionBudgetEnvelopeSchema,
   ClaudeCodeAuthStatusEnvelopeSchema,
   CodexAuthStatusEnvelopeSchema,
   CodexDeviceAuthFlowEnvelopeSchema,
@@ -37,6 +44,7 @@ import {
   ConfirmImessagePairingBodySchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
+  CreateBrainBodySchema,
   CreateBrainDocumentBodySchema,
   CreateBrainFolderBodySchema,
   CreateBrowserProfileBodySchema,
@@ -71,6 +79,7 @@ import {
   JamieWebhookSetupEnvelopeSchema,
   LegacyTaskHistoryEnvelopeSchema,
   LegacyTaskPageSchema,
+  ManagedCapabilitySourceSchema,
   McpSetupEnvelopeSchema,
   MessagePageSchema,
   PresentationCursorSchema,
@@ -86,10 +95,15 @@ import {
   ResourceIdSchema,
   RunEnvelopeSchema,
   SaveClaudeCodeTokenBodySchema,
+  SetBrainAccessBodySchema,
+  SetBrainEnrichmentBodySchema,
+  SetBrainIntelligenceBodySchema,
   SetBrainSourceBodySchema,
+  SetCapabilitySessionBudgetBodySchema,
   SetIntegrationCapabilityModeBodySchema,
   SetRepoConfigEnvBodySchema,
   SetRepoConfigSetupBodySchema,
+  SetWorkspaceCapabilityBodySchema,
   SkillArchiveEnvelopeSchema,
   SkillCatalogEnvelopeSchema,
   SkillEnvelopeSchema,
@@ -132,6 +146,8 @@ import {
   WorkflowMutationEnvelopeSchema,
   WorkflowPageSchema,
   WorkflowUpdateEnvelopeSchema,
+  WorkspaceCapabilityMutationEnvelopeSchema,
+  WorkspaceCapabilitySettingsEnvelopeSchema,
 } from "./schemas";
 import { OPENAPI_DOCUMENT_VERSION, PROTOCOL_VERSION } from "./version";
 
@@ -1461,6 +1477,229 @@ export const getBrowserProfileLiveViewRoute = createRoute({
   },
 });
 
+export const getWorkspaceCapabilitiesRoute = createRoute({
+  method: "get",
+  path: "/v1/capabilities",
+  tags: ["Capabilities"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Workspace managed-capability settings and the per-chat spending budget.",
+      content: { "application/json": { schema: WorkspaceCapabilitySettingsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setCapabilitySessionBudgetRoute = createRoute({
+  method: "put",
+  path: "/v1/capabilities/session-budget",
+  tags: ["Capabilities"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetCapabilitySessionBudgetBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Workspace per-chat capability spending budget updated. Admin only.",
+      content: { "application/json": { schema: CapabilitySessionBudgetEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setWorkspaceCapabilityRoute = createRoute({
+  method: "put",
+  path: "/v1/capabilities/{source}",
+  tags: ["Capabilities"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ source: ManagedCapabilitySourceSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetWorkspaceCapabilityBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Workspace managed capability updated. Admin only.",
+      content: { "application/json": { schema: WorkspaceCapabilityMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getCapabilityApprovalByToolCallRoute = createRoute({
+  method: "get",
+  path: "/v1/capability-approvals/by-tool-call/{toolCallId}",
+  tags: ["Capabilities"],
+  security: actorSecurity,
+  request: { params: z.object({ toolCallId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description:
+        "Latest approval visible to the actor for a tool call, including session budget.",
+      content: { "application/json": { schema: CapabilityApprovalEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getCapabilityApprovalRoute = createRoute({
+  method: "get",
+  path: "/v1/capability-approvals/{runId}",
+  tags: ["Capabilities"],
+  security: actorSecurity,
+  request: { params: z.object({ runId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Capability approval visible to the acting user in the active workspace.",
+      content: { "application/json": { schema: CapabilityApprovalEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createBrainRoute = createRoute({
+  method: "post",
+  path: "/v1/brains",
+  tags: ["Brains"],
+  security: actorSecurity,
+  request: {
+    body: { required: true, content: { "application/json": { schema: CreateBrainBodySchema } } },
+  },
+  responses: {
+    201: {
+      description: "Brain created in the active workspace. Admin only.",
+      content: { "application/json": { schema: BrainControlMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const switchBrainRoute = createRoute({
+  method: "post",
+  path: "/v1/brains/{brainId}/switch",
+  tags: ["Brains"],
+  security: actorSecurity,
+  request: { params: z.object({ brainId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Brain access authorized for the active workspace; clients may activate it.",
+      content: { "application/json": { schema: BrainControlMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getBrainAccessRoute = createRoute({
+  method: "get",
+  path: "/v1/brains/{brainId}/access",
+  tags: ["Brains"],
+  security: actorSecurity,
+  request: { params: z.object({ brainId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Brain visibility, selected members, and workspace member choices. Admin only.",
+      content: { "application/json": { schema: BrainAccessEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setBrainAccessRoute = createRoute({
+  method: "put",
+  path: "/v1/brains/{brainId}/access",
+  tags: ["Brains"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: SetBrainAccessBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Brain visibility and restricted member set updated. Admin only.",
+      content: { "application/json": { schema: BrainAccessMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getBrainEnrichmentRoute = createRoute({
+  method: "get",
+  path: "/v1/brains/{brainId}/enrichment",
+  tags: ["Brains"],
+  security: actorSecurity,
+  request: { params: z.object({ brainId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Brain enrichment setting. Admin only.",
+      content: { "application/json": { schema: BrainEnrichmentEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setBrainEnrichmentRoute = createRoute({
+  method: "put",
+  path: "/v1/brains/{brainId}/enrichment",
+  tags: ["Brains"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetBrainEnrichmentBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Brain enrichment setting updated. Admin only.",
+      content: { "application/json": { schema: BrainEnrichmentEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getBrainIntelligenceRoute = createRoute({
+  method: "get",
+  path: "/v1/brains/{brainId}/intelligence",
+  tags: ["Brains"],
+  security: actorSecurity,
+  request: { params: z.object({ brainId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Brain intelligence tier. Admin only.",
+      content: { "application/json": { schema: BrainIntelligenceEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setBrainIntelligenceRoute = createRoute({
+  method: "put",
+  path: "/v1/brains/{brainId}/intelligence",
+  tags: ["Brains"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetBrainIntelligenceBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Brain intelligence tier updated. Admin only.",
+      content: { "application/json": { schema: BrainIntelligenceEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const updateUserPreferencesRoute = createRoute({
   method: "patch",
   path: "/v1/me/preferences",
@@ -2071,6 +2310,19 @@ export type V1RouteHandlers = {
   createBrowserProfileLoginSession: RouteHandler<typeof createBrowserProfileLoginSessionRoute>;
   completeBrowserProfileLogin: RouteHandler<typeof completeBrowserProfileLoginRoute>;
   getBrowserProfileLiveView: RouteHandler<typeof getBrowserProfileLiveViewRoute>;
+  getWorkspaceCapabilities: RouteHandler<typeof getWorkspaceCapabilitiesRoute>;
+  setCapabilitySessionBudget: RouteHandler<typeof setCapabilitySessionBudgetRoute>;
+  setWorkspaceCapability: RouteHandler<typeof setWorkspaceCapabilityRoute>;
+  getCapabilityApprovalByToolCall: RouteHandler<typeof getCapabilityApprovalByToolCallRoute>;
+  getCapabilityApproval: RouteHandler<typeof getCapabilityApprovalRoute>;
+  createBrain: RouteHandler<typeof createBrainRoute>;
+  switchBrain: RouteHandler<typeof switchBrainRoute>;
+  getBrainAccess: RouteHandler<typeof getBrainAccessRoute>;
+  setBrainAccess: RouteHandler<typeof setBrainAccessRoute>;
+  getBrainEnrichment: RouteHandler<typeof getBrainEnrichmentRoute>;
+  setBrainEnrichment: RouteHandler<typeof setBrainEnrichmentRoute>;
+  getBrainIntelligence: RouteHandler<typeof getBrainIntelligenceRoute>;
+  setBrainIntelligence: RouteHandler<typeof setBrainIntelligenceRoute>;
   listBrainSourceOptions: RouteHandler<typeof listBrainSourceOptionsRoute>;
   startBrainImport: RouteHandler<typeof startBrainImportRoute>;
   confirmBrainImport: RouteHandler<typeof confirmBrainImportRoute>;
@@ -2187,6 +2439,21 @@ export function createV1Router(
       .openapi(createBrowserProfileLoginSessionRoute, handlers.createBrowserProfileLoginSession)
       .openapi(completeBrowserProfileLoginRoute, handlers.completeBrowserProfileLogin)
       .openapi(getBrowserProfileLiveViewRoute, handlers.getBrowserProfileLiveView)
+      .openapi(getWorkspaceCapabilitiesRoute, handlers.getWorkspaceCapabilities)
+      // Static segments register before the generic capability-source and
+      // approval-id paths so route matching cannot capture them as ids.
+      .openapi(setCapabilitySessionBudgetRoute, handlers.setCapabilitySessionBudget)
+      .openapi(setWorkspaceCapabilityRoute, handlers.setWorkspaceCapability)
+      .openapi(getCapabilityApprovalByToolCallRoute, handlers.getCapabilityApprovalByToolCall)
+      .openapi(getCapabilityApprovalRoute, handlers.getCapabilityApproval)
+      .openapi(createBrainRoute, handlers.createBrain)
+      .openapi(switchBrainRoute, handlers.switchBrain)
+      .openapi(getBrainAccessRoute, handlers.getBrainAccess)
+      .openapi(setBrainAccessRoute, handlers.setBrainAccess)
+      .openapi(getBrainEnrichmentRoute, handlers.getBrainEnrichment)
+      .openapi(setBrainEnrichmentRoute, handlers.setBrainEnrichment)
+      .openapi(getBrainIntelligenceRoute, handlers.getBrainIntelligence)
+      .openapi(setBrainIntelligenceRoute, handlers.setBrainIntelligence)
       .openapi(listBrainSourceOptionsRoute, handlers.listBrainSourceOptions)
       .openapi(startBrainImportRoute, handlers.startBrainImport)
       .openapi(confirmBrainImportRoute, handlers.confirmBrainImport)
@@ -2739,6 +3006,73 @@ const contractDocumentHandlers: V1RouteHandlers = {
     ),
   getBrowserProfileLiveView: (c) =>
     c.json({ data: { url: "https://live.example.com/session" }, meta }, 200),
+  getWorkspaceCapabilities: (c) =>
+    c.json(
+      {
+        data: {
+          capabilities: [{ source: "x" as const, enabled: true }],
+          sessionBudgetUsdMicros: 5_000_000,
+        },
+        meta,
+      },
+      200,
+    ),
+  setCapabilitySessionBudget: (c) =>
+    c.json({ data: { sessionBudgetUsdMicros: 5_000_000 }, meta }, 200),
+  setWorkspaceCapability: (c) =>
+    c.json({ data: { source: "x" as const, enabled: true }, meta }, 200),
+  getCapabilityApprovalByToolCall: (c) =>
+    c.json(
+      {
+        data: {
+          runId: "gcr_contract",
+          source: "x" as const,
+          action: "search",
+          status: "awaiting_approval" as const,
+          maxCostUsdMicros: 10_000,
+          expiresAt: placeholderTime,
+          settledCostUsdMicros: null,
+          sessionBudgetUsdMicros: 5_000_000,
+        },
+        meta,
+      },
+      200,
+    ),
+  getCapabilityApproval: (c) =>
+    c.json(
+      {
+        data: {
+          runId: "gcr_contract",
+          source: "x" as const,
+          action: "search",
+          status: "awaiting_approval" as const,
+          maxCostUsdMicros: 10_000,
+          expiresAt: placeholderTime,
+          settledCostUsdMicros: null,
+        },
+        meta,
+      },
+      200,
+    ),
+  createBrain: (c) => c.json({ data: { brainId: "brain_contract" }, meta }, 201),
+  switchBrain: (c) => c.json({ data: { brainId: "brain_contract" }, meta }, 200),
+  getBrainAccess: (c) =>
+    c.json(
+      {
+        data: {
+          visibility: "workspace" as const,
+          memberIds: [],
+          workspaceMembers: [],
+        },
+        meta,
+      },
+      200,
+    ),
+  setBrainAccess: (c) => c.json({ data: { updated: true as const }, meta }, 200),
+  getBrainEnrichment: (c) => c.json({ data: { enabled: true }, meta }, 200),
+  setBrainEnrichment: (c) => c.json({ data: { enabled: true }, meta }, 200),
+  getBrainIntelligence: (c) => c.json({ data: { intelligence: "basic" as const }, meta }, 200),
+  setBrainIntelligence: (c) => c.json({ data: { intelligence: "basic" as const }, meta }, 200),
   startBrainImport: (c) =>
     c.json(
       {

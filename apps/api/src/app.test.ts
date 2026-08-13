@@ -91,12 +91,14 @@ describe("canonical Hono API", () => {
       browserProfiles: fakeBrowserProfiles(),
       skillImports: fakeSkillImportService(),
       brainAssets: fakeBrainAssets(),
+      brainControl: fakeBrainControl(),
       attachments: fakeAttachments(),
       userSettings: fakeUserSettings(),
       feedback: fakeFeedback(),
       repoConfigs: fakeRepoConfigs(),
       integrationAccounts: fakeIntegrationAccounts(),
       engineAuth: fakeEngineAuth(),
+      workspaceCapabilities: fakeWorkspaceCapabilities(),
       authenticate: async () => {
         throw new ApiError(401, "authentication_required", "Authentication required.");
       },
@@ -2311,6 +2313,73 @@ describe("canonical Hono API", () => {
     });
     expect(completeInfisicalAuth).toHaveBeenCalledTimes(1);
   });
+
+  it("routes capabilities and Brain controls through their authorized services", async () => {
+    const getSettings = vi.fn(async () => ({
+      capabilities: [{ source: "x" as const, enabled: true }],
+      sessionBudgetUsdMicros: 5_000_000,
+    }));
+    const setCapability = vi.fn(async () => ({ source: "x" as const, enabled: false }));
+    const getApproval = vi.fn(async () => ({
+      runId: "gcr_1",
+      source: "lead" as const,
+      action: "lead.find_person_email",
+      status: "awaiting_approval" as const,
+      maxCostUsdMicros: 360_000,
+      expiresAt: new Date("2026-08-13T16:00:00.000Z"),
+      settledCostUsdMicros: null,
+    }));
+    const createBrain = vi.fn(async () => ({ brainId: "brain_new" }));
+    const getAccess = vi.fn(async () => ({
+      visibility: "restricted" as const,
+      memberIds: ["user_1"],
+      workspaceMembers: [],
+    }));
+    const app = testApp(fakeRepository(), {
+      workspaceCapabilities: {
+        ...fakeWorkspaceCapabilities(),
+        getSettings,
+        setCapability,
+        getApproval,
+      },
+      brainControl: { ...fakeBrainControl(), createBrain, getAccess },
+    });
+
+    const settings = await app.request("/v1/capabilities");
+    expect(settings.status).toBe(200);
+    await expect(settings.json()).resolves.toMatchObject({
+      data: { capabilities: [{ source: "x", enabled: true }] },
+    });
+
+    const toggled = await app.request("/v1/capabilities/x", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(toggled.status).toBe(200);
+    expect(setCapability).toHaveBeenCalledWith(actor, "x", false);
+
+    const approval = await app.request("/v1/capability-approvals/gcr_1");
+    expect(approval.status).toBe(200);
+    await expect(approval.json()).resolves.toMatchObject({
+      data: { expiresAt: "2026-08-13T16:00:00.000Z" },
+    });
+
+    const created = await app.request("/v1/brains", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Research", visibility: "workspace" }),
+    });
+    expect(created.status).toBe(201);
+    expect(createBrain).toHaveBeenCalledWith(actor, {
+      name: "Research",
+      visibility: "workspace",
+    });
+
+    const access = await app.request("/v1/brains/brain_new/access");
+    expect(access.status).toBe(200);
+    expect(getAccess).toHaveBeenCalledWith(actor, "brain_new");
+  });
 });
 
 function testApp(
@@ -2327,12 +2396,14 @@ function testApp(
     browserProfiles: fakeBrowserProfiles(),
     skillImports: fakeSkillImportService(),
     brainAssets: fakeBrainAssets(),
+    brainControl: fakeBrainControl(),
     attachments: fakeAttachments(),
     userSettings: fakeUserSettings(),
     feedback: fakeFeedback(),
     repoConfigs: fakeRepoConfigs(),
     integrationAccounts: fakeIntegrationAccounts(),
     engineAuth: fakeEngineAuth(),
+    workspaceCapabilities: fakeWorkspaceCapabilities(),
     authenticate: async () => ({ actor }),
     defaultModel: "provider/default",
     ...overrides,
@@ -2381,6 +2452,55 @@ function fakeBrainAssets(): BrainAssetService {
     },
     download: async () => {
       throw new Error("Unexpected Brain asset download.");
+    },
+  };
+}
+
+function fakeBrainControl(): Parameters<typeof createApiApp>[0]["brainControl"] {
+  return {
+    switchBrain: async () => {
+      throw new Error("Unexpected Brain switch.");
+    },
+    createBrain: async () => {
+      throw new Error("Unexpected Brain creation.");
+    },
+    getAccess: async () => {
+      throw new Error("Unexpected Brain access read.");
+    },
+    setAccess: async () => {
+      throw new Error("Unexpected Brain access mutation.");
+    },
+    getEnrichment: async () => {
+      throw new Error("Unexpected Brain enrichment read.");
+    },
+    setEnrichment: async () => {
+      throw new Error("Unexpected Brain enrichment mutation.");
+    },
+    getIntelligence: async () => {
+      throw new Error("Unexpected Brain intelligence read.");
+    },
+    setIntelligence: async () => {
+      throw new Error("Unexpected Brain intelligence mutation.");
+    },
+  };
+}
+
+function fakeWorkspaceCapabilities(): Parameters<typeof createApiApp>[0]["workspaceCapabilities"] {
+  return {
+    getSettings: async () => {
+      throw new Error("Unexpected workspace capability settings read.");
+    },
+    setCapability: async () => {
+      throw new Error("Unexpected workspace capability mutation.");
+    },
+    setSessionBudget: async () => {
+      throw new Error("Unexpected workspace capability budget mutation.");
+    },
+    getApproval: async () => {
+      throw new Error("Unexpected capability approval read.");
+    },
+    getApprovalByToolCall: async () => {
+      throw new Error("Unexpected tool-call capability approval read.");
     },
   };
 }

@@ -1936,6 +1936,181 @@ export const BrowserProfileLiveViewEnvelopeSchema = z
   .strict()
   .openapi("BrowserProfileLiveViewEnvelope");
 
+// Workspace capabilities and their browser-polled approval reads (#1203
+// 5a4b). Approval mutations remain on the universal-Chat boundary.
+export const ManagedCapabilitySourceSchema = z.enum([
+  "x",
+  "linkedin",
+  "youtube",
+  "instagram",
+  "tiktok",
+  "lead",
+  "seo",
+]);
+
+export const WorkspaceCapabilitySchema = z
+  .object({ source: ManagedCapabilitySourceSchema, enabled: z.boolean() })
+  .strict()
+  .openapi("WorkspaceCapability");
+
+export const WorkspaceCapabilitySettingsEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        capabilities: z.array(WorkspaceCapabilitySchema),
+        sessionBudgetUsdMicros: z.number().int().min(1),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WorkspaceCapabilitySettingsEnvelope");
+
+export const SetWorkspaceCapabilityBodySchema = z
+  .object({ enabled: z.boolean() })
+  .strict()
+  .openapi("SetWorkspaceCapabilityBody");
+
+export const WorkspaceCapabilityMutationEnvelopeSchema = z
+  .object({ data: WorkspaceCapabilitySchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("WorkspaceCapabilityMutationEnvelope");
+
+export const SetCapabilitySessionBudgetBodySchema = z
+  .object({ budgetUsd: z.number().nullable() })
+  .strict()
+  .openapi("SetCapabilitySessionBudgetBody");
+
+export const CapabilitySessionBudgetEnvelopeSchema = z
+  .object({
+    data: z.object({ sessionBudgetUsdMicros: z.number().int().min(1) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("CapabilitySessionBudgetEnvelope");
+
+export const CapabilityApprovalStatusSchema = z.enum([
+  "awaiting_approval",
+  "approved",
+  "canceled",
+  "expired",
+  "executing",
+  "running",
+  "stopping",
+  "succeeded",
+  "failed",
+  "stopped",
+  "timed_out",
+]);
+
+export const CapabilityApprovalSchema = z
+  .object({
+    runId: ResourceIdSchema,
+    source: ManagedCapabilitySourceSchema,
+    action: z.string().min(1).max(256),
+    status: CapabilityApprovalStatusSchema,
+    maxCostUsdMicros: z.number().int().min(0),
+    expiresAt: TimestampSchema.nullable(),
+    settledCostUsdMicros: z.number().int().min(0).nullable(),
+    sessionBudgetUsdMicros: z.number().int().min(1).optional(),
+  })
+  .strict()
+  .openapi("CapabilityApproval");
+
+export const CapabilityApprovalEnvelopeSchema = z
+  .object({ data: CapabilityApprovalSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("CapabilityApprovalEnvelope");
+
+// Brain admin/switch control plane (#1203 5a4c). The active-Brain cookie is
+// intentionally absent: the web adapter owns that browser preference.
+export const BrainVisibilitySchema = z.enum(["workspace", "restricted"]);
+export const BrainIntelligenceSchema = z.enum(["basic", "frontier"]);
+
+export const CreateBrainBodySchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    visibility: BrainVisibilitySchema,
+    description: z.string().trim().max(1_024).optional(),
+  })
+  .strict()
+  .openapi("CreateBrainBody");
+
+export const BrainControlMutationEnvelopeSchema = z
+  .object({
+    data: z.object({ brainId: ResourceIdSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrainControlMutationEnvelope");
+
+export const WorkspaceMemberSchema = z
+  .object({
+    id: ResourceIdSchema,
+    email: z.email().max(320),
+    name: z.string().min(1).max(512),
+    avatarUrl: z.string().max(4_096).nullable(),
+    role: z.enum(["admin", "member"]),
+  })
+  .strict()
+  .openapi("WorkspaceMember");
+
+export const BrainAccessSchema = z
+  .object({
+    visibility: BrainVisibilitySchema,
+    memberIds: z.array(ResourceIdSchema).max(1_000),
+    workspaceMembers: z.array(WorkspaceMemberSchema).max(1_000),
+  })
+  .strict()
+  .openapi("BrainAccess");
+
+export const BrainAccessEnvelopeSchema = z
+  .object({ data: BrainAccessSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BrainAccessEnvelope");
+
+export const SetBrainAccessBodySchema = z
+  .object({
+    visibility: BrainVisibilitySchema,
+    memberIds: z.array(ResourceIdSchema).max(1_000),
+  })
+  .strict()
+  .openapi("SetBrainAccessBody");
+
+export const BrainAccessMutationEnvelopeSchema = z
+  .object({
+    data: z.object({ updated: z.literal(true) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrainAccessMutationEnvelope");
+
+export const BrainEnrichmentEnvelopeSchema = z
+  .object({
+    data: z.object({ enabled: z.boolean() }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrainEnrichmentEnvelope");
+
+export const SetBrainEnrichmentBodySchema = z
+  .object({ enabled: z.boolean() })
+  .strict()
+  .openapi("SetBrainEnrichmentBody");
+
+export const BrainIntelligenceEnvelopeSchema = z
+  .object({
+    data: z.object({ intelligence: BrainIntelligenceSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrainIntelligenceEnvelope");
+
+export const SetBrainIntelligenceBodySchema = z
+  .object({ intelligence: BrainIntelligenceSchema })
+  .strict()
+  .openapi("SetBrainIntelligenceBody");
+
 export const TaskViewModeSchema = z.enum(["board", "list"]);
 export const McpClientSchema = z.enum(["claude", "chatgpt", "cursor"]);
 
@@ -2505,6 +2680,16 @@ export type UpdateTaskBody = z.infer<typeof UpdateTaskBodySchema>;
 export type BrowserProfileDto = z.infer<typeof BrowserProfileSchema>;
 export type CreateBrowserProfileBody = z.infer<typeof CreateBrowserProfileBodySchema>;
 export type BrowserProfileLoginSessionDto = z.infer<typeof BrowserProfileLoginSessionSchema>;
+export type ManagedCapabilitySource = z.infer<typeof ManagedCapabilitySourceSchema>;
+export type WorkspaceCapabilityDto = z.infer<typeof WorkspaceCapabilitySchema>;
+export type WorkspaceCapabilitySettingsDto = z.infer<
+  typeof WorkspaceCapabilitySettingsEnvelopeSchema
+>["data"];
+export type CapabilityApprovalDto = z.infer<typeof CapabilityApprovalSchema>;
+export type BrainVisibility = z.infer<typeof BrainVisibilitySchema>;
+export type BrainIntelligence = z.infer<typeof BrainIntelligenceSchema>;
+export type WorkspaceMemberDto = z.infer<typeof WorkspaceMemberSchema>;
+export type BrainAccessDto = z.infer<typeof BrainAccessSchema>;
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelopeSchema>;
 export type TaskViewMode = z.infer<typeof TaskViewModeSchema>;
 export type McpClient = z.infer<typeof McpClientSchema>;
