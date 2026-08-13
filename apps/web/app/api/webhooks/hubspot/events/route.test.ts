@@ -1,91 +1,59 @@
-import {
-  insertGoatHubspotObjectEvents,
-  listEnabledGoatHubspotBrainSourceRoutes,
-  listGoatHubspotIntegrationsForPortal,
-} from "@opencompany/db/goat-hubspot";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { verifyGoatHubspotWebhookSignature } from "@/lib/integrations/hubspot-signature";
 import { POST } from "./route";
 
-vi.mock("@opencompany/db/goat-hubspot", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  insertGoatHubspotObjectEvents: vi.fn(),
-  listEnabledGoatHubspotBrainSourceRoutes: vi.fn(),
-  listGoatHubspotIntegrationsForPortal: vi.fn(),
-}));
-vi.mock("@/lib/integrations/hubspot-signature", () => ({
-  verifyGoatHubspotWebhookSignature: vi.fn(),
-}));
-vi.mock("@/lib/workos", () => ({
-  getGoatAppUrl: () => "https://goat.example.com",
-}));
-
-describe("POST /api/webhooks/hubspot/events", () => {
+describe("POST /api/webhooks/hubspot/events relay", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.mocked(verifyGoatHubspotWebhookSignature).mockReturnValue(true);
-    vi.mocked(listGoatHubspotIntegrationsForPortal).mockResolvedValue([
-      { id: "gint_hubspot_1", userWorkosId: "user_1", status: "connected" },
-    ]);
-    vi.mocked(listEnabledGoatHubspotBrainSourceRoutes).mockResolvedValue([
-      {
-        integrationId: "gint_hubspot_1",
-        brainRef: "gbrain_1",
-        config: {
-          objectTypes: [{ id: "deal" }],
-          events: [{ id: "object_stage_changed" }],
-        },
-      },
-    ]);
-    vi.mocked(insertGoatHubspotObjectEvents).mockResolvedValue(1);
+    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
-  it("returns a retryable response when buffering fails", async () => {
-    vi.mocked(insertGoatHubspotObjectEvents).mockRejectedValueOnce(
-      new Error("database unavailable"),
+  it("streams the signed delivery to the canonical API ingress path unchanged", async () => {
+    let upstream: Request | null = null;
+    let upstreamBody: string | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+        upstream = input instanceof Request ? input : new Request(input, init);
+        upstreamBody = await upstream.text();
+        return Response.json({ ok: true, buffered: 1 });
+      }),
     );
 
-    const response = await POST(hubspotRequest());
-
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({ error: "Unable to buffer HubSpot events." });
-    expect(console.error).toHaveBeenCalledWith(
-      "[goat-hubspot] Failed to process HubSpot events",
-      expect.objectContaining({ eventCount: 1, error: "database unavailable" }),
+    const rawBody = JSON.stringify([
+      { eventId: 123, portalId: 62515, subscriptionType: "deal.propertyChange", objectId: 9876 },
+    ]);
+    const response = await POST(
+      new Request("https://my.opencompany.chat/api/webhooks/hubspot/events", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-hubspot-signature-v3": "signature",
+          "x-hubspot-request-timestamp": "1700000000000",
+        },
+        body: rawBody,
+      }),
     );
-  });
-
-  it("keeps successful buffering responses unchanged", async () => {
-    const response = await POST(hubspotRequest());
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true, buffered: 1 });
+    const request = upstream as unknown as Request;
+    expect(new URL(request.url).href).toBe("https://api.example.test/webhooks/hubspot/events");
+    expect(request.headers.get("x-hubspot-signature-v3")).toBe("signature");
+    expect(request.headers.get("x-hubspot-request-timestamp")).toBe("1700000000000");
+    expect(upstreamBody).toBe(rawBody);
+  });
+
+  it("fails closed when the API origin is unset", async () => {
+    vi.stubEnv("GOAT_API_ORIGIN", "");
+    const response = await POST(
+      new Request("https://my.opencompany.chat/api/webhooks/hubspot/events", {
+        method: "POST",
+        body: "[]",
+      }),
+    );
+    expect(response.status).toBe(503);
   });
 });
-
-function hubspotRequest() {
-  return new Request("https://goat.example.com/api/webhooks/hubspot/events", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-hubspot-signature-v3": "valid-signature",
-      "x-hubspot-request-timestamp": String(Date.now()),
-    },
-    body: JSON.stringify([
-      {
-        eventId: 123,
-        portalId: 62515,
-        occurredAt: Date.now(),
-        subscriptionType: "deal.propertyChange",
-        objectId: 9876,
-        propertyName: "dealstage",
-        propertyValue: "closedwon",
-      },
-    ]),
-  });
-}

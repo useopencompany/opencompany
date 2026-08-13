@@ -2,8 +2,10 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
 import { goatIntegrations } from "@opencompany/db/goat-schema";
 import { and, desc, eq } from "drizzle-orm";
-import type { GoatHubspotSourceProviderState } from "@/lib/integration-state";
-import { getGoatAppUrl } from "@/lib/workos";
+import { getGoatAppUrl } from "../app-url";
+import type { GoatHubspotSourceProviderState } from "../integration-state";
+
+type DbLike = any;
 
 export type GoatHubspotIngestStatePayload = {
   userWorkosId: string;
@@ -53,8 +55,9 @@ export function isGoatHubspotIngestConfigured() {
 // updated portal connection).
 export async function getGoatHubspotSourceIntegrationState(
   userWorkosId: string,
+  db: DbLike = getDb(),
 ): Promise<GoatHubspotSourceProviderState> {
-  const [row] = await getDb()
+  const [row] = await db
     .select({
       id: goatIntegrations.id,
       status: goatIntegrations.status,

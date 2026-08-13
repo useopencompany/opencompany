@@ -56,12 +56,15 @@ import { requestId } from "hono/request-id";
 import { secureHeaders } from "hono/secure-headers";
 import { stream as streamResponse } from "hono/streaming";
 import type { AttachmentUploadService } from "./attachments";
+import type { AttioIngressService } from "./attio-ingress";
 import type { ApiAuthenticator } from "./auth";
 import type { BrainAssetService } from "./brain-assets";
 import type { ReadModelService } from "./electric-read-models";
 import { ApiError, errorResponse } from "./errors";
 import type { GitHubIngressService } from "./github-ingress";
 import type { GoogleIngressService } from "./google-ingress";
+import type { HubspotIngressService } from "./hubspot-ingress";
+import type { JamieIngressService } from "./jamie-ingress";
 import type { LinearIngressService } from "./linear-ingress";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
 import { PollingRunEventNotifier, type RunEventNotifier } from "./run-event-notifier";
@@ -117,6 +120,9 @@ export type CreateApiAppInput = {
   googleIngress?: GoogleIngressService;
   slackIngress?: SlackIngressService;
   linearIngress?: LinearIngressService;
+  hubspotIngress?: HubspotIngressService;
+  attioIngress?: AttioIngressService;
+  jamieIngress?: JamieIngressService;
   notifier?: RunEventNotifier;
   presentation?: ChatPresentationReader;
   rateLimiter?: ApiRateLimiter;
@@ -1458,6 +1464,27 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/linear-ingest/callback", (c) => ingress.callback(c.req.raw));
     app.use("/webhooks/linear/events", ingressBodyLimit(5 * 1024 * 1024));
     app.post("/webhooks/linear/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.hubspotIngress) {
+    const ingress = input.hubspotIngress;
+    app.get("/integrations/hubspot/start", (c) => ingress.start(c.req.raw));
+    app.get("/integrations/hubspot/callback", (c) => ingress.callback(c.req.raw));
+    app.use("/webhooks/hubspot/events", ingressBodyLimit(5 * 1024 * 1024));
+    app.post("/webhooks/hubspot/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.attioIngress) {
+    const ingress = input.attioIngress;
+    app.use("/webhooks/attio/events", ingressBodyLimit(5 * 1024 * 1024));
+    app.post("/webhooks/attio/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.jamieIngress) {
+    const ingress = input.jamieIngress;
+    app.use("/webhooks/jamie", ingressBodyLimit(5 * 1024 * 1024));
+    app.post("/webhooks/jamie", (c) => ingress.webhook(c.req.raw));
+    app.use("/webhooks/jamie/:integrationId", ingressBodyLimit(5 * 1024 * 1024));
+    app.post("/webhooks/jamie/:integrationId", (c) =>
+      ingress.webhookForIntegration(c.req.param("integrationId"), c.req.raw),
+    );
   }
   app.notFound((c) => apiErrorResponse(c, new ApiError(404, "not_found", "Route not found.")));
   return app;

@@ -1,18 +1,13 @@
-import { loadGoatJamieWebhookContext } from "@/lib/integrations/jamie";
-import { handleGoatJamieWebhookDelivery } from "@/lib/integrations/jamie-webhook";
+import { proxyHeadlessApiRequest } from "@/lib/headless-api-proxy";
 
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
+// URL-continuity relay: the pre-key per-integration Jamie webhook URL shape. The canonical API owns integration lookup, API-key verification, and the meeting ingest; this route streams the request through unmodified.
 export async function POST(
   request: Request,
   context: { params: Promise<{ integrationId: string }> },
 ) {
   const { integrationId } = await context.params;
-  const webhookContext = await loadGoatJamieWebhookContext(integrationId);
-  return handleGoatJamieWebhookDelivery({
-    request,
-    webhookContext,
-    missingContextStatus: 404,
-  });
+  return proxyHeadlessApiRequest(request, ["webhooks", "jamie", integrationId], { basePath: "" });
 }

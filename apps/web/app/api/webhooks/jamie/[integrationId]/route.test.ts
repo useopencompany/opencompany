@@ -1,207 +1,58 @@
-import { upsertGoatBrainSourceItemAndEnqueue } from "@opencompany/db/goat-brain-ingest";
-import {
-  hasAnyBrainSourceForIntegration,
-  listEnabledBrainRefsForIntegration,
-} from "@opencompany/db/goat-brain-sources";
-import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  loadGoatJamieWebhookContext,
-  markGoatJamieWebhookConnected,
-  verifyGoatJamieWebhookApiKey,
-} from "@/lib/integrations/jamie";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
-vi.mock("@/lib/integrations/jamie", () => ({
-  loadGoatJamieWebhookContext: vi.fn(),
-  markGoatJamieWebhookConnected: vi.fn(),
-  verifyGoatJamieWebhookApiKey: vi.fn(),
-}));
-
-vi.mock("@opencompany/db/goat-brain-ingest", () => ({
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND: "brain_agent_ingest",
-  upsertGoatBrainSourceItemAndEnqueue: vi.fn(),
-}));
-
-vi.mock("@opencompany/db/goat-brain-sources", () => ({
-  hasAnyBrainSourceForIntegration: vi.fn(),
-  listEnabledBrainRefsForIntegration: vi.fn(),
-}));
-
-vi.mock("@opencompany/db/goat-workspaces", () => ({
-  getDefaultGoatBrainForUser: vi.fn(),
-}));
-
-describe("POST /api/webhooks/jamie/[integrationId]", () => {
+describe("POST /api/webhooks/jamie/[integrationId] relay", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    vi.mocked(loadGoatJamieWebhookContext).mockResolvedValue({
-      integrationId: "gint_123",
-      userWorkosId: "user_123",
-      apiKeyHash: "hash",
-      legacySecretHash: null,
-    });
-    vi.mocked(verifyGoatJamieWebhookApiKey).mockReturnValue({
-      valid: true,
-      apiKey: jamieApiKey(),
-    });
-    vi.mocked(upsertGoatBrainSourceItemAndEnqueue).mockResolvedValue({
-      sourceItemId: "gbsrc_123",
-      jobId: "gbjob_123",
-      jobIds: ["gbjob_123"],
-      enqueued: true,
-      skipped: false,
-    });
-    vi.mocked(listEnabledBrainRefsForIntegration).mockResolvedValue([]);
-    vi.mocked(hasAnyBrainSourceForIntegration).mockResolvedValue(false);
-    vi.mocked(getDefaultGoatBrainForUser).mockResolvedValue({
-      id: "gbrain_123",
-    } as Awaited<ReturnType<typeof getDefaultGoatBrainForUser>>);
-    vi.mocked(markGoatJamieWebhookConnected).mockResolvedValue(undefined);
+    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
   });
 
-  it("returns 404 for an unknown Jamie integration", async () => {
-    vi.mocked(loadGoatJamieWebhookContext).mockResolvedValue(null);
-
-    const response = await POST(jamieRequest(jamiePayload()), routeContext());
-
-    expect(response.status).toBe(404);
-    expect(upsertGoatBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
-  it("returns 401 for a missing or wrong Jamie API key", async () => {
-    vi.mocked(verifyGoatJamieWebhookApiKey).mockReturnValue({
-      valid: false,
-      apiKey: null,
-    });
+  it("streams the delivery to the per-integration API ingress path unchanged", async () => {
+    let upstream: Request | null = null;
+    let upstreamBody: string | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+        upstream = input instanceof Request ? input : new Request(input, init);
+        upstreamBody = await upstream.text();
+        return Response.json({ ok: true, enqueued: true });
+      }),
+    );
 
-    const response = await POST(jamieRequest(jamiePayload()), routeContext());
-
-    expect(response.status).toBe(401);
-    expect(upsertGoatBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
-  });
-
-  it("returns 400 for unsupported Jamie events", async () => {
+    const rawBody = JSON.stringify({ metadata: { event: "meeting.completed" } });
     const response = await POST(
-      jamieRequest(jamiePayload(), { event: "meeting.started" }),
-      routeContext(),
+      new Request("https://my.opencompany.chat/api/webhooks/jamie/gint_123", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "jamie-event": "meeting.completed",
+          "x-jamie-api-key": "sk_test",
+        },
+        body: rawBody,
+      }),
+      { params: Promise.resolve({ integrationId: "gint_123" }) },
     );
-
-    expect(response.status).toBe(400);
-    expect(upsertGoatBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
-  });
-
-  it("normalizes, durably enqueues, and marks connected", async () => {
-    const response = await POST(jamieRequest(jamiePayload()), routeContext());
-    const body = (await response.json()) as { ok?: boolean; enqueued?: boolean };
 
     expect(response.status).toBe(200);
-    expect(body).toMatchObject({ ok: true, enqueued: true });
-    expect(upsertGoatBrainSourceItemAndEnqueue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userWorkosId: "user_123",
-        sourceConnectionId: "gint_123",
-        integrationId: "gint_123",
-        rawPayload: jamiePayload(),
-        kind: "brain_agent_ingest",
-        brainRefs: ["gbrain_123"],
-        item: expect.objectContaining({
-          sourceProvider: "jamie",
-          sourceType: "meeting",
-          externalId: "calendar_event_123",
-        }),
-      }),
-    );
-    expect(markGoatJamieWebhookConnected).toHaveBeenCalledWith(
-      expect.objectContaining({
-        integrationId: "gint_123",
-        userWorkosId: "user_123",
-      }),
-    );
+    const request = upstream as unknown as Request;
+    expect(new URL(request.url).href).toBe("https://api.example.test/webhooks/jamie/gint_123");
+    expect(request.headers.get("x-jamie-api-key")).toBe("sk_test");
+    expect(upstreamBody).toBe(rawBody);
   });
 
-  it("fans out to every enabled brain source and skips the default-brain lookup", async () => {
-    vi.mocked(listEnabledBrainRefsForIntegration).mockResolvedValue([
-      "goat_brain_a",
-      "goat_brain_b",
-    ]);
-    vi.mocked(upsertGoatBrainSourceItemAndEnqueue).mockResolvedValue({
-      sourceItemId: "gbsrc_123",
-      jobId: "gbjob_b",
-      jobIds: ["gbjob_a", "gbjob_b"],
-      enqueued: true,
-      skipped: false,
-    });
-
-    const response = await POST(jamieRequest(jamiePayload()), routeContext());
-
-    expect(response.status).toBe(200);
-    expect(getDefaultGoatBrainForUser).not.toHaveBeenCalled();
-    expect(upsertGoatBrainSourceItemAndEnqueue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        brainRefs: ["goat_brain_a", "goat_brain_b"],
+  it("fails closed when the API origin is unset", async () => {
+    vi.stubEnv("GOAT_API_ORIGIN", "");
+    const response = await POST(
+      new Request("https://my.opencompany.chat/api/webhooks/jamie/gint_123", {
+        method: "POST",
+        body: "{}",
       }),
+      { params: Promise.resolve({ integrationId: "gint_123" }) },
     );
-  });
-
-  it("persists the item but enqueues nothing when all brain sources are disabled", async () => {
-    vi.mocked(listEnabledBrainRefsForIntegration).mockResolvedValue([]);
-    vi.mocked(hasAnyBrainSourceForIntegration).mockResolvedValue(true);
-    vi.mocked(upsertGoatBrainSourceItemAndEnqueue).mockResolvedValue({
-      sourceItemId: "gbsrc_123",
-      jobId: null,
-      jobIds: [],
-      enqueued: false,
-      skipped: false,
-    });
-
-    const response = await POST(jamieRequest(jamiePayload()), routeContext());
-    const body = (await response.json()) as { ok?: boolean; enqueued?: boolean };
-
-    expect(response.status).toBe(200);
-    expect(body).toMatchObject({ ok: true, enqueued: false });
-    expect(getDefaultGoatBrainForUser).not.toHaveBeenCalled();
-    expect(upsertGoatBrainSourceItemAndEnqueue).toHaveBeenCalledWith(
-      expect.objectContaining({ brainRefs: [] }),
-    );
+    expect(response.status).toBe(503);
   });
 });
-
-function routeContext() {
-  return { params: Promise.resolve({ integrationId: "gint_123" }) };
-}
-
-function jamieRequest(payload: unknown, options: { event?: string; secret?: string } = {}) {
-  return new Request("https://goat.test/api/webhooks/jamie/gint_123", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "jamie-event": options.event ?? "meeting.completed",
-      "x-jamie-api-key": options.secret ?? jamieApiKey(),
-    },
-    body: JSON.stringify(payload),
-  });
-}
-
-function jamieApiKey() {
-  return "sk_0000000000000000000000000000000000000000000000000000000000000000";
-}
-
-function jamiePayload() {
-  return {
-    metadata: {
-      event: "meeting.completed",
-      created: "2026-01-01T11:00:00.000Z",
-    },
-    data: {
-      user: { id: "user_123" },
-      event: {
-        externalId: "calendar_event_123",
-        title: "Product Review",
-        startTime: "2026-01-01T10:00:00.000Z",
-        summary: "We reviewed the product plan.",
-        transcript: [{ speakerName: "Jamie", text: "Let's review the product plan." }],
-      },
-    },
-  };
-}

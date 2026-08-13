@@ -84,6 +84,15 @@ services:
         sync: false
       - key: GOAT_LINEAR_STATE_SECRET
         sync: false
+      # HubSpot OAuth + webhook ingress moved to the API in the #1203 4c
+      # cutover. Attio and Jamie webhooks moved too but verify against
+      # per-integration credentials, so they need no env.
+      - key: GOAT_HUBSPOT_CLIENT_ID
+        sync: false
+      - key: GOAT_HUBSPOT_CLIENT_SECRET
+        sync: false
+      - key: GOAT_HUBSPOT_STATE_SECRET
+        sync: false
       # Server-side integration analytics (fire-and-forget; safe when unset).
       - key: NEXT_PUBLIC_GOAT_POSTHOG_TOKEN
         sync: false
