@@ -66,9 +66,12 @@ import type { GoogleIngressService } from "./google-ingress";
 import type { HubspotIngressService } from "./hubspot-ingress";
 import type { JamieIngressService } from "./jamie-ingress";
 import type { LinearIngressService } from "./linear-ingress";
+import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
 import { PollingRunEventNotifier, type RunEventNotifier } from "./run-event-notifier";
+import type { SlackBotIngressService } from "./slack-bot-ingress";
 import type { SlackIngressService } from "./slack-ingress";
+import type { XAccountIngressService } from "./x-account-ingress";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "hono" });
 const meta = { apiVersion: "v1", protocolVersion: PROTOCOL_VERSION } as const;
@@ -123,6 +126,9 @@ export type CreateApiAppInput = {
   hubspotIngress?: HubspotIngressService;
   attioIngress?: AttioIngressService;
   jamieIngress?: JamieIngressService;
+  mcpOAuthIngress?: McpOAuthIngressService;
+  xAccountIngress?: XAccountIngressService;
+  slackBotIngress?: SlackBotIngressService;
   notifier?: RunEventNotifier;
   presentation?: ChatPresentationReader;
   rateLimiter?: ApiRateLimiter;
@@ -1485,6 +1491,28 @@ export function createApiApp(input: CreateApiAppInput) {
     app.post("/webhooks/jamie/:integrationId", (c) =>
       ingress.webhookForIntegration(c.req.param("integrationId"), c.req.raw),
     );
+  }
+  if (input.mcpOAuthIngress) {
+    const ingress = input.mcpOAuthIngress;
+    app.get("/integrations/linear/start", (c) => ingress.start("linear", c.req.raw));
+    app.get("/integrations/linear/callback", (c) => ingress.callback("linear", c.req.raw));
+    app.get("/integrations/posthog/start", (c) => ingress.start("posthog", c.req.raw));
+    app.get("/integrations/posthog/callback", (c) => ingress.callback("posthog", c.req.raw));
+    app.get("/integrations/neon/start", (c) => ingress.start("neon", c.req.raw));
+    app.get("/integrations/neon/callback", (c) => ingress.callback("neon", c.req.raw));
+    app.get("/integrations/latitude/start", (c) => ingress.start("latitude", c.req.raw));
+    app.get("/integrations/latitude/callback", (c) => ingress.callback("latitude", c.req.raw));
+  }
+  if (input.xAccountIngress) {
+    const ingress = input.xAccountIngress;
+    app.get("/integrations/x-account/start", (c) => ingress.start(c.req.raw));
+    app.get("/integrations/x-account/callback", (c) => ingress.callback(c.req.raw));
+  }
+  if (input.slackBotIngress) {
+    // Only the Slack bot OAuth flow moved; the bot events webhook stays in web.
+    const ingress = input.slackBotIngress;
+    app.get("/integrations/slack-bot/start", (c) => ingress.start(c.req.raw));
+    app.get("/integrations/slack-bot/callback", (c) => ingress.callback(c.req.raw));
   }
   app.notFound((c) => apiErrorResponse(c, new ApiError(404, "not_found", "Route not found.")));
   return app;

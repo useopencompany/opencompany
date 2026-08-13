@@ -945,6 +945,13 @@ describe("canonical Hono API", () => {
         calls.push(`${name}:${args.length}`);
         return Response.json({ ok: true, service: name });
       };
+    // The remote-MCP ingress dispatches on a provider key; echo it back so the
+    // route table below proves each path binds its own provider.
+    const recordMcp =
+      (name: string, calls: string[]) => async (provider: string, _request: Request) => {
+        calls.push(`${name}:${provider}`);
+        return Response.json({ ok: true, service: `${name}.${provider}` });
+      };
     const calls: string[] = [];
     const app = testApp(fakeRepository(), {
       githubIngress: {
@@ -979,6 +986,18 @@ describe("canonical Hono API", () => {
         webhook: record("jamie.webhook", calls),
         webhookForIntegration: record("jamie.webhookForIntegration", calls),
       },
+      mcpOAuthIngress: {
+        start: recordMcp("mcp.start", calls),
+        callback: recordMcp("mcp.callback", calls),
+      },
+      xAccountIngress: {
+        start: record("x-account.start", calls),
+        callback: record("x-account.callback", calls),
+      },
+      slackBotIngress: {
+        start: record("slack-bot.start", calls),
+        callback: record("slack-bot.callback", calls),
+      },
     });
 
     const routes: Array<[string, string, string]> = [
@@ -1004,6 +1023,18 @@ describe("canonical Hono API", () => {
       ["POST", "/webhooks/attio/events", "attio.webhook"],
       ["POST", "/webhooks/jamie", "jamie.webhook"],
       ["POST", "/webhooks/jamie/gint_1", "jamie.webhookForIntegration"],
+      ["GET", "/integrations/linear/start", "mcp.start.linear"],
+      ["GET", "/integrations/linear/callback", "mcp.callback.linear"],
+      ["GET", "/integrations/posthog/start", "mcp.start.posthog"],
+      ["GET", "/integrations/posthog/callback", "mcp.callback.posthog"],
+      ["GET", "/integrations/neon/start", "mcp.start.neon"],
+      ["GET", "/integrations/neon/callback", "mcp.callback.neon"],
+      ["GET", "/integrations/latitude/start", "mcp.start.latitude"],
+      ["GET", "/integrations/latitude/callback", "mcp.callback.latitude"],
+      ["GET", "/integrations/x-account/start", "x-account.start"],
+      ["GET", "/integrations/x-account/callback", "x-account.callback"],
+      ["GET", "/integrations/slack-bot/start", "slack-bot.start"],
+      ["GET", "/integrations/slack-bot/callback", "slack-bot.callback"],
     ];
     for (const [method, path, service] of routes) {
       const response = await app.request(path, { method, body: method === "POST" ? "{}" : null });

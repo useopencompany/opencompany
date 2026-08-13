@@ -374,7 +374,7 @@ export async function connectGoatSlackBotIntegration(input: {
   botUserId: string;
   accessToken: string;
   scopes: string[];
-  db?: GoatIntegrationBatchDb;
+  db?: GoatIntegrationRefreshDb;
   now?: Date;
 }) {
   const db = input.db ?? getDb();
@@ -419,60 +419,89 @@ export async function connectGoatSlackBotIntegration(input: {
     now,
   );
 
-  const [integrations, credentials] = await db.batch([
-    db
-      .insert(goatIntegrations)
-      .values({
-        id: integrationId,
-        userWorkosId: integrationUserWorkosId,
-        workspaceId: input.workspaceId,
-        provider: "slack_bot",
-        // The Slack team id is the routing key for inbound bot events.
-        externalId: input.teamId,
-        connectionLabel,
-        accountName: input.teamName,
-        accountEmail: null,
-        accountType: "slack_bot",
-        status: "connected",
-        statusReason: null,
-        scopes: input.scopes,
-        lastSyncedAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [goatIntegrations.workspaceId, goatIntegrations.provider],
-        targetWhere: sql`${goatIntegrations.workspaceId} IS NOT NULL AND ${goatIntegrations.provider} = 'slack_bot'`,
-        // On reconnect (possibly by a different admin) user_workos_id stays as
-        // the original connector: credential AAD and brain_sources FKs use it.
-        set: {
-          externalId: input.teamId,
-          connectionLabel,
-          accountName: input.teamName,
-          accountType: "slack_bot",
-          status: "connected",
-          statusReason: null,
-          scopes: input.scopes,
-          lastSyncedAt: now,
-          updatedAt: now,
-        },
-      })
-      .returning({ id: goatIntegrations.id }),
-    db
-      .insert(goatIntegrationCredentials)
-      .values(credentialWrite.values)
-      .onConflictDoUpdate({
-        target: [goatIntegrationCredentials.integrationId, goatIntegrationCredentials.kind],
-        set: credentialWrite.conflictSet,
-      })
-      .returning(GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING),
-  ] as const);
+  const integrationValues = {
+    id: integrationId,
+    userWorkosId: integrationUserWorkosId,
+    workspaceId: input.workspaceId,
+    provider: "slack_bot",
+    // The Slack team id is the routing key for inbound bot events.
+    externalId: input.teamId,
+    connectionLabel,
+    accountName: input.teamName,
+    accountEmail: null,
+    accountType: "slack_bot",
+    status: "connected",
+    statusReason: null,
+    scopes: input.scopes,
+    lastSyncedAt: now,
+    updatedAt: now,
+  } as const;
+  const integrationConflict = {
+    target: [goatIntegrations.workspaceId, goatIntegrations.provider],
+    targetWhere: sql`${goatIntegrations.workspaceId} IS NOT NULL AND ${goatIntegrations.provider} = 'slack_bot'`,
+    // On reconnect (possibly by a different admin) user_workos_id stays as
+    // the original connector: credential AAD and brain_sources FKs use it.
+    set: {
+      externalId: input.teamId,
+      connectionLabel,
+      accountName: input.teamName,
+      accountType: "slack_bot" as const,
+      status: "connected" as const,
+      statusReason: null,
+      scopes: input.scopes,
+      lastSyncedAt: now,
+      updatedAt: now,
+    },
+  };
+  const credentialConflict = {
+    target: [goatIntegrationCredentials.integrationId, goatIntegrationCredentials.kind],
+    set: credentialWrite.conflictSet,
+  };
 
-  const integration = integrations[0];
-  if (!integration || !credentials[0]) {
-    throw new Error("Could not persist Goat Slack bot integration and credential.");
+  // neon-http cannot open an interactive transaction, but its batch API sends
+  // all queries through Neon's transactional HTTP endpoint. The canonical
+  // API's node-postgres pool has no batch API and keeps the two writes atomic
+  // through a regular interactive transaction instead.
+  if ("batch" in db) {
+    const [integrations, credentials] = await db.batch([
+      db
+        .insert(goatIntegrations)
+        .values(integrationValues)
+        .onConflictDoUpdate(integrationConflict)
+        .returning({ id: goatIntegrations.id }),
+      db
+        .insert(goatIntegrationCredentials)
+        .values(credentialWrite.values)
+        .onConflictDoUpdate(credentialConflict)
+        .returning(GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING),
+    ] as const);
+
+    const integration = integrations[0];
+    if (!integration || !credentials[0]) {
+      throw new Error("Could not persist Goat Slack bot integration and credential.");
+    }
+
+    return { integrationId: integration.id };
   }
 
-  return { integrationId: integration.id };
+  return db.transaction(async (tx) => {
+    const [integration] = await tx
+      .insert(goatIntegrations)
+      .values(integrationValues)
+      .onConflictDoUpdate(integrationConflict)
+      .returning({ id: goatIntegrations.id });
+    const [credential] = await tx
+      .insert(goatIntegrationCredentials)
+      .values(credentialWrite.values)
+      .onConflictDoUpdate(credentialConflict)
+      .returning(GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING);
+
+    if (!integration || !credential) {
+      throw new Error("Could not persist Goat Slack bot integration and credential.");
+    }
+
+    return { integrationId: integration.id };
+  });
 }
 
 export type GoatLinearOAuthCredentialPayload = {

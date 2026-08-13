@@ -93,6 +93,26 @@ services:
         sync: false
       - key: GOAT_HUBSPOT_STATE_SECRET
         sync: false
+      # #1203 4d1 cutover: remote-MCP (Linear/PostHog/Neon/Latitude), X account,
+      # and Slack answer-bot OAuth ingress moved to the API. The Slack bot
+      # events webhook stays web-owned, but its signing secret is part of the
+      # shared isGoatSlackBotConfigured gate, so the API needs it too.
+      - key: MCP_OAUTH_STATE_SECRET
+        sync: false
+      - key: GOAT_X_CLIENT_ID
+        sync: false
+      - key: GOAT_X_CLIENT_SECRET
+        sync: false
+      - key: GOAT_X_STATE_SECRET
+        sync: false
+      - key: GOAT_SLACK_BOT_CLIENT_ID
+        sync: false
+      - key: GOAT_SLACK_BOT_CLIENT_SECRET
+        sync: false
+      - key: GOAT_SLACK_BOT_SIGNING_SECRET
+        sync: false
+      - key: GOAT_SLACK_BOT_STATE_SECRET
+        sync: false
       # Server-side integration analytics (fire-and-forget; safe when unset).
       - key: NEXT_PUBLIC_GOAT_POSTHOG_TOKEN
         sync: false

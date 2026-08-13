@@ -1,34 +1,12 @@
-import { NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
-import {
-  appendGoatSlackBotSetupStatus,
-  buildGoatSlackBotAuthorizationUrl,
-  createGoatSlackBotState,
-  isGoatSlackBotConfigured,
-} from "@/lib/integrations/slack-bot";
+import { proxyHeadlessApiRequest } from "@/lib/headless-api-proxy";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+// URL-continuity relay: the canonical API owns the Slack answer-bot OAuth
+// flow. The bot events webhook stays web-owned.
 export async function GET(request: Request) {
-  const context = await currentGoatUser();
-  const url = new URL(request.url);
-  const returnTo = url.searchParams.get("returnTo") ?? "/settings/workspace/slack";
-
-  if (context.role !== "admin") {
-    return NextResponse.redirect(
-      new URL(appendGoatSlackBotSetupStatus(returnTo, "error", "admin_required"), url),
-    );
-  }
-
-  if (!isGoatSlackBotConfigured()) {
-    return NextResponse.redirect(
-      new URL(appendGoatSlackBotSetupStatus(returnTo, "error", "not_configured"), url),
-    );
-  }
-
-  const state = createGoatSlackBotState({
-    userWorkosId: context.user.workosUserId,
-    workspaceId: context.workspace.id,
-    returnTo,
+  return proxyHeadlessApiRequest(request, ["integrations", "slack-bot", "start"], {
+    basePath: "",
   });
-
-  return NextResponse.redirect(buildGoatSlackBotAuthorizationUrl(state));
 }

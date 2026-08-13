@@ -37,8 +37,11 @@ import { createGoogleIngress } from "./google-ingress";
 import { createHubspotIngress } from "./hubspot-ingress";
 import { createJamieIngress } from "./jamie-ingress";
 import { createLinearIngress } from "./linear-ingress";
+import { createMcpOAuthIngress } from "./mcp-oauth-ingress";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
+import { createSlackBotIngress } from "./slack-bot-ingress";
 import { createSlackIngress } from "./slack-ingress";
+import { createXAccountIngress } from "./x-account-ingress";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "server" });
 registerGoatNodeObservability({ serviceName: "opencompany-api" });
@@ -109,6 +112,9 @@ const app = createApiApp({
   hubspotIngress: createHubspotIngress({ db: database.db, identify: identityVerifier }),
   attioIngress: createAttioIngress({ db: database.db }),
   jamieIngress: createJamieIngress({ db: database.db }),
+  mcpOAuthIngress: createMcpOAuthIngress({ db: database.db, identify: identityVerifier }),
+  xAccountIngress: createXAccountIngress({ db: database.db, identify: identityVerifier }),
+  slackBotIngress: createSlackBotIngress({ db: database.db, identify: identityVerifier }),
   notifier,
   resolveAutoModel: (input) =>
     resolvePersistedAutoModelRouting({

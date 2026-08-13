@@ -115,6 +115,17 @@ const groups = {
       "GOAT_LINEAR_CLIENT_SECRET",
       "GOAT_LINEAR_WEBHOOK_SECRET",
       "GOAT_LINEAR_STATE_SECRET",
+      // #1203 4d1: remote-MCP, X account, and Slack bot OAuth ingress. The
+      // Slack bot signing secret stays web-owned for the events webhook but is
+      // part of the shared isGoatSlackBotConfigured gate.
+      "MCP_OAUTH_STATE_SECRET",
+      "GOAT_X_CLIENT_ID",
+      "GOAT_X_CLIENT_SECRET",
+      "GOAT_X_STATE_SECRET",
+      "GOAT_SLACK_BOT_CLIENT_ID",
+      "GOAT_SLACK_BOT_CLIENT_SECRET",
+      "GOAT_SLACK_BOT_SIGNING_SECRET",
+      "GOAT_SLACK_BOT_STATE_SECRET",
     ],
     // Browser profiles are feature-flag gated: the Browserbase credentials are
     // required only when GOAT_BROWSER_PROFILES_ENABLED is "true" in this env.
