@@ -33,7 +33,9 @@ import { parseBrowserOrigins } from "./browser-origins";
 import { ElectricReadModelProxy } from "./electric-read-models";
 import { createGitHubIngress } from "./github-ingress";
 import { createGoogleIngress } from "./google-ingress";
+import { createLinearIngress } from "./linear-ingress";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
+import { createSlackIngress } from "./slack-ingress";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "server" });
 registerGoatNodeObservability({ serviceName: "opencompany-api" });
@@ -99,6 +101,8 @@ const app = createApiApp({
   browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),
   githubIngress: createGitHubIngress({ db: database.db, identify: identityVerifier }),
   googleIngress: createGoogleIngress({ db: database.db, identify: identityVerifier }),
+  slackIngress: createSlackIngress({ db: database.db, identify: identityVerifier }),
+  linearIngress: createLinearIngress({ db: database.db, identify: identityVerifier }),
   notifier,
   resolveAutoModel: (input) =>
     resolvePersistedAutoModelRouting({

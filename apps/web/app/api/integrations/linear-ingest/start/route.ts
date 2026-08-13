@@ -1,29 +1,11 @@
-import { NextResponse } from "next/server";
-import { getGoatAppUrl } from "@/lib/app-url";
-import { currentGoatUser } from "@/lib/auth";
-import {
-  appendGoatLinearIngestStatus,
-  buildGoatLinearAuthorizationUrl,
-  createGoatLinearIngestState,
-  isGoatLinearIngestConfigured,
-} from "@/lib/integrations/linear-ingest";
+import { proxyHeadlessApiRequest } from "@/lib/headless-api-proxy";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+// URL-continuity relay: the canonical API owns the Linear ingest OAuth flow.
 export async function GET(request: Request) {
-  const { user } = await currentGoatUser();
-  const url = new URL(request.url);
-  const appUrl = getGoatAppUrl();
-  const returnTo = url.searchParams.get("returnTo") ?? "/settings";
-
-  if (!isGoatLinearIngestConfigured()) {
-    return NextResponse.redirect(
-      new URL(appendGoatLinearIngestStatus(returnTo, "error", "not_configured"), appUrl),
-    );
-  }
-
-  const state = createGoatLinearIngestState({
-    userWorkosId: user.workosUserId,
-    returnTo,
+  return proxyHeadlessApiRequest(request, ["integrations", "linear-ingest", "start"], {
+    basePath: "",
   });
-
-  return NextResponse.redirect(buildGoatLinearAuthorizationUrl(state));
 }

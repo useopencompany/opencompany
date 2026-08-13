@@ -1,27 +1,9 @@
-import { NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
-import {
-  appendGoatSlackIntegrationStatus,
-  buildGoatSlackAuthorizationUrl,
-  createGoatSlackIntegrationState,
-  isGoatSlackIntegrationConfigured,
-} from "@/lib/integrations/slack";
+import { proxyHeadlessApiRequest } from "@/lib/headless-api-proxy";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+// URL-continuity relay: the canonical API owns the Slack ingestion OAuth flow.
 export async function GET(request: Request) {
-  const { user } = await currentGoatUser();
-  const url = new URL(request.url);
-  const returnTo = url.searchParams.get("returnTo") ?? "/settings";
-
-  if (!isGoatSlackIntegrationConfigured()) {
-    return NextResponse.redirect(
-      new URL(appendGoatSlackIntegrationStatus(returnTo, "error", "not_configured"), url),
-    );
-  }
-
-  const state = createGoatSlackIntegrationState({
-    userWorkosId: user.workosUserId,
-    returnTo,
-  });
-
-  return NextResponse.redirect(buildGoatSlackAuthorizationUrl(state));
+  return proxyHeadlessApiRequest(request, ["integrations", "slack", "start"], { basePath: "" });
 }

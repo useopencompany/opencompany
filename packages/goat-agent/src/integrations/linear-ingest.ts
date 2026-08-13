@@ -3,8 +3,8 @@ import { getDb } from "@opencompany/db/client";
 import { GOAT_LINEAR_MCP_EXTERNAL_ID } from "@opencompany/db/goat-linear";
 import { goatIntegrations } from "@opencompany/db/goat-schema";
 import { and, desc, eq, ne } from "drizzle-orm";
-import type { GoatLinearSourceProviderState } from "@/lib/integration-state";
-import { getGoatAppUrl } from "@/lib/workos";
+import { getGoatAppUrl } from "../app-url";
+import type { GoatLinearSourceProviderState } from "../integration-state";
 
 export type GoatLinearIngestStatePayload = {
   userWorkosId: string;

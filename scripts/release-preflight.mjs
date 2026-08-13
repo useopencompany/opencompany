@@ -106,6 +106,15 @@ const groups = {
       "GOOGLE_OAUTH_CLIENT_ID",
       "GOOGLE_OAUTH_CLIENT_SECRET",
       "GOOGLE_INTEGRATION_STATE_SECRET",
+      // Slack ingestion + Linear ingest OAuth/webhook ingress (#1203 4b1).
+      "GOAT_SLACK_CLIENT_ID",
+      "GOAT_SLACK_CLIENT_SECRET",
+      "GOAT_SLACK_SIGNING_SECRET",
+      "GOAT_SLACK_STATE_SECRET",
+      "GOAT_LINEAR_CLIENT_ID",
+      "GOAT_LINEAR_CLIENT_SECRET",
+      "GOAT_LINEAR_WEBHOOK_SECRET",
+      "GOAT_LINEAR_STATE_SECRET",
     ],
     // Browser profiles are feature-flag gated: the Browserbase credentials are
     // required only when GOAT_BROWSER_PROFILES_ENABLED is "true" in this env.

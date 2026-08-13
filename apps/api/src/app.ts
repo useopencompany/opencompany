@@ -62,8 +62,10 @@ import type { ReadModelService } from "./electric-read-models";
 import { ApiError, errorResponse } from "./errors";
 import type { GitHubIngressService } from "./github-ingress";
 import type { GoogleIngressService } from "./google-ingress";
+import type { LinearIngressService } from "./linear-ingress";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
 import { PollingRunEventNotifier, type RunEventNotifier } from "./run-event-notifier";
+import type { SlackIngressService } from "./slack-ingress";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "hono" });
 const meta = { apiVersion: "v1", protocolVersion: PROTOCOL_VERSION } as const;
@@ -113,6 +115,8 @@ export type CreateApiAppInput = {
   browserOrigins?: readonly string[];
   githubIngress?: GitHubIngressService;
   googleIngress?: GoogleIngressService;
+  slackIngress?: SlackIngressService;
+  linearIngress?: LinearIngressService;
   notifier?: RunEventNotifier;
   presentation?: ChatPresentationReader;
   rateLimiter?: ApiRateLimiter;
@@ -1420,17 +1424,7 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/github/callback", (c) => ingress.callback(c.req.raw));
     // GitHub caps webhook payloads at 25 MB; unlike the retired Vercel route,
     // Render enforces no platform body limit, so cap it here.
-    app.use(
-      "/webhooks/github/events",
-      bodyLimit({
-        maxSize: 25 * 1024 * 1024,
-        onError: (c) =>
-          apiErrorResponse(
-            c,
-            new ApiError(413, "invalid_request", "The webhook payload is too large."),
-          ),
-      }),
-    );
+    app.use("/webhooks/github/events", ingressBodyLimit(25 * 1024 * 1024));
     app.post("/webhooks/github/events", (c) => ingress.webhook(c.req.raw));
   }
   if (input.googleIngress) {
@@ -1449,8 +1443,37 @@ export function createApiApp(input: CreateApiAppInput) {
     );
     app.post("/webhooks/google-drive", (c) => ingress.driveWebhook(c.req.raw));
   }
+  if (input.slackIngress) {
+    const ingress = input.slackIngress;
+    app.get("/integrations/slack/start", (c) => ingress.start(c.req.raw));
+    app.get("/integrations/slack/callback", (c) => ingress.callback(c.req.raw));
+    // Slack event payloads are small; Render enforces no platform body cap, so
+    // bound the unauthenticated raw-body read here.
+    app.use("/webhooks/slack/events", ingressBodyLimit(5 * 1024 * 1024));
+    app.post("/webhooks/slack/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.linearIngress) {
+    const ingress = input.linearIngress;
+    app.get("/integrations/linear-ingest/start", (c) => ingress.start(c.req.raw));
+    app.get("/integrations/linear-ingest/callback", (c) => ingress.callback(c.req.raw));
+    app.use("/webhooks/linear/events", ingressBodyLimit(5 * 1024 * 1024));
+    app.post("/webhooks/linear/events", (c) => ingress.webhook(c.req.raw));
+  }
   app.notFound((c) => apiErrorResponse(c, new ApiError(404, "not_found", "Route not found.")));
   return app;
+}
+
+// Ingress webhooks read the raw body before signature verification can reject
+// anything; Render has no platform request cap, so each route sets one.
+function ingressBodyLimit(maxSize: number) {
+  return bodyLimit({
+    maxSize,
+    onError: (c) =>
+      apiErrorResponse(
+        c,
+        new ApiError(413, "invalid_request", "The webhook payload is too large."),
+      ),
+  });
 }
 
 function autoRoutingApiError(error: unknown) {
