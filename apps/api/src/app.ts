@@ -61,6 +61,7 @@ import type { BrainAssetService } from "./brain-assets";
 import type { ReadModelService } from "./electric-read-models";
 import { ApiError, errorResponse } from "./errors";
 import type { GitHubIngressService } from "./github-ingress";
+import type { GoogleIngressService } from "./google-ingress";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
 import { PollingRunEventNotifier, type RunEventNotifier } from "./run-event-notifier";
 
@@ -111,6 +112,7 @@ export type CreateApiAppInput = {
   authenticate: ApiAuthenticator;
   browserOrigins?: readonly string[];
   githubIngress?: GitHubIngressService;
+  googleIngress?: GoogleIngressService;
   notifier?: RunEventNotifier;
   presentation?: ChatPresentationReader;
   rateLimiter?: ApiRateLimiter;
@@ -1430,6 +1432,22 @@ export function createApiApp(input: CreateApiAppInput) {
       }),
     );
     app.post("/webhooks/github/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.googleIngress) {
+    const ingress = input.googleIngress;
+    app.get("/integrations/gmail/start", (c) => ingress.start("gmail", c.req.raw));
+    app.get("/integrations/gmail/callback", (c) => ingress.callback("gmail", c.req.raw));
+    app.get("/integrations/google-calendar/start", (c) =>
+      ingress.start("google_calendar", c.req.raw),
+    );
+    app.get("/integrations/google-calendar/callback", (c) =>
+      ingress.callback("google_calendar", c.req.raw),
+    );
+    app.get("/integrations/google-drive/start", (c) => ingress.start("google_drive", c.req.raw));
+    app.get("/integrations/google-drive/callback", (c) =>
+      ingress.callback("google_drive", c.req.raw),
+    );
+    app.post("/webhooks/google-drive", (c) => ingress.driveWebhook(c.req.raw));
   }
   app.notFound((c) => apiErrorResponse(c, new ApiError(404, "not_found", "Route not found.")));
   return app;

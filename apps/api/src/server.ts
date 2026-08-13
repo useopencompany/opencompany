@@ -32,6 +32,7 @@ import { createBrainAssetService } from "./brain-assets";
 import { parseBrowserOrigins } from "./browser-origins";
 import { ElectricReadModelProxy } from "./electric-read-models";
 import { createGitHubIngress } from "./github-ingress";
+import { createGoogleIngress } from "./google-ingress";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "server" });
@@ -81,6 +82,7 @@ const notifier = new PostgresRunEventNotifier(database.pool);
 const presentation = createPresentationStream();
 const readModels = createElectricReadModels();
 const authenticate = createWorkOsApiAuthenticator(execute);
+const identityVerifier = createWorkOsApiIdentityVerifier();
 const app = createApiApp({
   chat,
   tasks,
@@ -95,10 +97,8 @@ const app = createApiApp({
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),
   authenticate,
   browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),
-  githubIngress: createGitHubIngress({
-    db: database.db,
-    identify: createWorkOsApiIdentityVerifier(),
-  }),
+  githubIngress: createGitHubIngress({ db: database.db, identify: identityVerifier }),
+  googleIngress: createGoogleIngress({ db: database.db, identify: identityVerifier }),
   notifier,
   resolveAutoModel: (input) =>
     resolvePersistedAutoModelRouting({
