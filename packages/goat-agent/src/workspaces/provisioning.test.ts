@@ -1,24 +1,25 @@
 import { createGoatWorkspaceForUser, newGoatWorkspaceId } from "@opencompany/db/goat-workspaces";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getWorkOSClient } from "@/lib/workos-client";
-import { GoatWorkspaceProvisioningError, provisionGoatWorkspace } from "./workspace-provisioning";
+import { GoatWorkspaceProvisioningError, provisionGoatWorkspace } from "./provisioning";
+import type { WorkOSClientLike } from "./workos";
 
 vi.mock("@opencompany/db/goat-workspaces", () => ({
   createGoatWorkspaceForUser: vi.fn(),
   newGoatWorkspaceId: vi.fn(),
 }));
 
-vi.mock("@/lib/workos-client", () => ({
-  getWorkOSClient: vi.fn(),
-}));
-
 const createGoatWorkspaceForUserMock = vi.mocked(createGoatWorkspaceForUser);
-const getWorkOSClientMock = vi.mocked(getWorkOSClient);
 const newGoatWorkspaceIdMock = vi.mocked(newGoatWorkspaceId);
 
 const createOrganization = vi.fn();
 const createOrganizationMembership = vi.fn();
 const deleteOrganization = vi.fn();
+
+const workos = {
+  organizations: { createOrganization, deleteOrganization },
+  userManagement: { createOrganizationMembership },
+} as unknown as WorkOSClientLike;
+const db = {};
 
 describe("provisionGoatWorkspace", () => {
   beforeEach(() => {
@@ -27,10 +28,6 @@ describe("provisionGoatWorkspace", () => {
     createOrganization.mockResolvedValue({ id: "org_new", name: "Analytical Co" });
     createOrganizationMembership.mockResolvedValue({});
     deleteOrganization.mockResolvedValue(undefined);
-    getWorkOSClientMock.mockReturnValue({
-      organizations: { createOrganization, deleteOrganization },
-      userManagement: { createOrganizationMembership },
-    } as never);
     createGoatWorkspaceForUserMock.mockResolvedValue({
       workspace: {
         id: "goat_ws_new",
@@ -43,12 +40,15 @@ describe("provisionGoatWorkspace", () => {
 
   it("provisions the WorkOS organization before the complete local workspace", async () => {
     await expect(
-      provisionGoatWorkspace({
-        authUserId: "user_123",
-        userWorkosId: "user_123",
-        name: "Analytical Co",
-        slug: "analytical-co",
-      }),
+      provisionGoatWorkspace(
+        {
+          authUserId: "user_123",
+          userWorkosId: "user_123",
+          name: "Analytical Co",
+          slug: "analytical-co",
+        },
+        { workos, db },
+      ),
     ).resolves.toMatchObject({
       workspace: {
         id: "goat_ws_new",
@@ -70,13 +70,16 @@ describe("provisionGoatWorkspace", () => {
       userId: "user_123",
       roleSlug: "admin",
     });
-    expect(createGoatWorkspaceForUserMock).toHaveBeenCalledWith({
-      workspaceId: "goat_ws_new",
-      workosOrganizationId: "org_new",
-      userWorkosId: "user_123",
-      name: "Analytical Co",
-      slug: "analytical-co",
-    });
+    expect(createGoatWorkspaceForUserMock).toHaveBeenCalledWith(
+      {
+        workspaceId: "goat_ws_new",
+        workosOrganizationId: "org_new",
+        userWorkosId: "user_123",
+        name: "Analytical Co",
+        slug: "analytical-co",
+      },
+      { db },
+    );
     expect(deleteOrganization).not.toHaveBeenCalled();
   });
 
@@ -84,11 +87,14 @@ describe("provisionGoatWorkspace", () => {
     const persistenceError = new Error("database unavailable");
     createGoatWorkspaceForUserMock.mockRejectedValue(persistenceError);
 
-    const result = provisionGoatWorkspace({
-      authUserId: "user_123",
-      userWorkosId: "user_123",
-      name: "Analytical Co",
-    });
+    const result = provisionGoatWorkspace(
+      {
+        authUserId: "user_123",
+        userWorkosId: "user_123",
+        name: "Analytical Co",
+      },
+      { workos, db },
+    );
 
     await expect(result).rejects.toMatchObject({
       name: "GoatWorkspaceProvisioningError",
@@ -107,11 +113,14 @@ describe("provisionGoatWorkspace", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(
-      provisionGoatWorkspace({
-        authUserId: "user_123",
-        userWorkosId: "user_123",
-        name: "Analytical Co",
-      }),
+      provisionGoatWorkspace(
+        {
+          authUserId: "user_123",
+          userWorkosId: "user_123",
+          name: "Analytical Co",
+        },
+        { workos, db },
+      ),
     ).rejects.toMatchObject({
       cause: membershipError,
       workosOrganizationId: "org_new",

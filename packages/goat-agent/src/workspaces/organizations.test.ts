@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ensureGoatWorkspaceOrganization } from "@/lib/workos-organizations";
+import { ensureGoatWorkspaceOrganization } from "./organizations";
+import type { WorkOSClientLike } from "./workos";
 
 const mocks = vi.hoisted(() => {
   const workos = {
@@ -21,14 +22,13 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/lib/workos-client", () => ({
-  getWorkOSClient: () => mocks.workos,
-}));
-
 vi.mock("@opencompany/db/goat-workspaces", () => ({
   listGoatWorkspaceMembers: mocks.listGoatWorkspaceMembers,
   setGoatWorkspaceOrganizationId: mocks.setGoatWorkspaceOrganizationId,
 }));
+
+const workos = mocks.workos as unknown as WorkOSClientLike;
+const db = {};
 
 describe("ensureGoatWorkspaceOrganization", () => {
   beforeEach(() => {
@@ -43,7 +43,9 @@ describe("ensureGoatWorkspaceOrganization", () => {
     mocks.workos.organizations.getOrganizationByExternalId.mockRejectedValueOnce({ status: 404 });
     mocks.workos.organizations.createOrganization.mockResolvedValueOnce({ id: "org_new" });
 
-    await expect(ensureGoatWorkspaceOrganization(workspace())).resolves.toBe("org_new");
+    await expect(ensureGoatWorkspaceOrganization(workspace(), { workos, db })).resolves.toBe(
+      "org_new",
+    );
 
     expect(mocks.workos.organizations.createOrganization).toHaveBeenCalledWith(
       {
@@ -60,10 +62,13 @@ describe("ensureGoatWorkspaceOrganization", () => {
       userId: "user_1",
       roleSlug: "admin",
     });
-    expect(mocks.setGoatWorkspaceOrganizationId).toHaveBeenCalledWith({
-      workspaceId: "goat_ws_1",
-      workosOrganizationId: "org_new",
-    });
+    expect(mocks.setGoatWorkspaceOrganizationId).toHaveBeenCalledWith(
+      {
+        workspaceId: "goat_ws_1",
+        workosOrganizationId: "org_new",
+      },
+      { db },
+    );
   });
 
   it("links an existing WorkOS organization found by externalId", async () => {
@@ -80,16 +85,21 @@ describe("ensureGoatWorkspaceOrganization", () => {
       ],
     });
 
-    await expect(ensureGoatWorkspaceOrganization(workspace())).resolves.toBe("org_existing");
+    await expect(ensureGoatWorkspaceOrganization(workspace(), { workos, db })).resolves.toBe(
+      "org_existing",
+    );
 
     expect(mocks.workos.organizations.createOrganization).not.toHaveBeenCalled();
     expect(mocks.workos.userManagement.updateOrganizationMembership).toHaveBeenCalledWith("om_1", {
       roleSlug: "admin",
     });
-    expect(mocks.setGoatWorkspaceOrganizationId).toHaveBeenCalledWith({
-      workspaceId: "goat_ws_1",
-      workosOrganizationId: "org_existing",
-    });
+    expect(mocks.setGoatWorkspaceOrganizationId).toHaveBeenCalledWith(
+      {
+        workspaceId: "goat_ws_1",
+        workosOrganizationId: "org_existing",
+      },
+      { db },
+    );
   });
 });
 

@@ -4,8 +4,8 @@ import {
   reconcileGoatStripeSeatQuantity,
 } from "@opencompany/db/goat-billing";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getGoatStripe } from "@/lib/billing/stripe";
 import { reconcileGoatStripeSeatQuantities, syncGoatStripeSeatQuantityForWorkspace } from "./seats";
+import { getGoatStripe } from "./stripe";
 
 vi.mock("@opencompany/db/goat-billing", () => ({
   listGoatStripeSeatReconciliationCandidates: vi.fn(),
@@ -13,13 +13,14 @@ vi.mock("@opencompany/db/goat-billing", () => ({
   reconcileGoatStripeSeatQuantity: vi.fn(),
 }));
 
-vi.mock("@/lib/billing/stripe", () => ({
+vi.mock("./stripe", () => ({
   getGoatStripe: vi.fn(),
 }));
 
 describe("Goat Stripe seat reconciliation", () => {
   const retrieve = vi.fn();
   const update = vi.fn();
+  const db = {};
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -46,7 +47,7 @@ describe("Goat Stripe seat reconciliation", () => {
     retrieve.mockResolvedValue({ quantity: 1 });
     update.mockResolvedValue({ quantity: 2 });
 
-    await expect(syncGoatStripeSeatQuantityForWorkspace("goat_ws_1")).resolves.toEqual({
+    await expect(syncGoatStripeSeatQuantityForWorkspace("goat_ws_1", { db })).resolves.toEqual({
       ok: true,
       changed: true,
       quantity: 2,
@@ -56,10 +57,13 @@ describe("Goat Stripe seat reconciliation", () => {
       proration_behavior: "create_prorations",
     });
     expect(update).toHaveBeenCalledBefore(vi.mocked(reconcileGoatStripeSeatQuantity));
-    expect(reconcileGoatStripeSeatQuantity).toHaveBeenCalledWith({
-      workspaceId: "goat_ws_1",
-      seatQuantity: 2,
-    });
+    expect(reconcileGoatStripeSeatQuantity).toHaveBeenCalledWith(
+      {
+        workspaceId: "goat_ws_1",
+        seatQuantity: 2,
+      },
+      { db },
+    );
   });
 
   it("repairs the local projection even when Stripe already has the right quantity", async () => {
@@ -74,16 +78,21 @@ describe("Goat Stripe seat reconciliation", () => {
     } as never);
     retrieve.mockResolvedValue({ quantity: 2 });
 
-    await expect(syncGoatStripeSeatQuantityForWorkspace("goat_ws_1")).resolves.toMatchObject({
+    await expect(
+      syncGoatStripeSeatQuantityForWorkspace("goat_ws_1", { db }),
+    ).resolves.toMatchObject({
       ok: true,
       changed: false,
       quantity: 2,
     });
     expect(update).not.toHaveBeenCalled();
-    expect(reconcileGoatStripeSeatQuantity).toHaveBeenCalledWith({
-      workspaceId: "goat_ws_1",
-      seatQuantity: 2,
-    });
+    expect(reconcileGoatStripeSeatQuantity).toHaveBeenCalledWith(
+      {
+        workspaceId: "goat_ws_1",
+        seatQuantity: 2,
+      },
+      { db },
+    );
   });
 
   it("skips Stripe for Hobby", async () => {
@@ -96,7 +105,7 @@ describe("Goat Stripe seat reconciliation", () => {
       memberCount: 1,
     } as never);
 
-    await expect(syncGoatStripeSeatQuantityForWorkspace("goat_ws_1")).resolves.toEqual({
+    await expect(syncGoatStripeSeatQuantityForWorkspace("goat_ws_1", { db })).resolves.toEqual({
       ok: false,
       reason: "no_active_subscription",
     });
@@ -122,13 +131,13 @@ describe("Goat Stripe seat reconciliation", () => {
     retrieve.mockResolvedValue({ quantity: 1 });
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    await expect(reconcileGoatStripeSeatQuantities(25)).resolves.toEqual({
+    await expect(reconcileGoatStripeSeatQuantities(25, { db })).resolves.toEqual({
       candidates: 2,
       reconciled: 1,
       changed: 0,
       failed: 1,
     });
-    expect(listGoatStripeSeatReconciliationCandidates).toHaveBeenCalledWith({ limit: 25 });
+    expect(listGoatStripeSeatReconciliationCandidates).toHaveBeenCalledWith({ limit: 25, db });
     consoleError.mockRestore();
   });
 });
