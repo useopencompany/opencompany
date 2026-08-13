@@ -3,12 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
 import { reopenGoatChatSessionForUser, setGoatChatSessionPinnedForUser } from "@/lib/chat";
-import {
-  ensureGoatChatShareForUser,
-  findGoatChatShareForUser,
-  revokeGoatChatShareForUser,
-} from "@/lib/chat-sharing";
 import { archiveGoatChatSessionForUser } from "@/lib/codex-chat";
+import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
 export type CloseGoatChatResult = {
   ok: boolean;
@@ -31,13 +27,17 @@ export async function getGoatChatShareAction(
   const trimmed = sessionId?.trim();
   if (!trimmed) return { ok: false, error: "Could not load sharing settings." };
 
-  const { user, workspace } = await currentGoatUser();
-  const share = await findGoatChatShareForUser({
-    userWorkosId: user.workosUserId,
-    workspaceId: workspace.id,
-    chatSessionId: trimmed,
+  const client = await serverApiClient();
+  const response = await client.v1.conversations[":conversationId"].share.$get({
+    param: { conversationId: trimmed },
   });
-  return { ok: true, shareId: share?.id ?? null };
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: await serverApiErrorMessage(response, "Could not load sharing settings."),
+    };
+  }
+  return { ok: true, shareId: (await response.json()).data.shareId };
 }
 
 export async function createGoatChatShareAction(
@@ -46,15 +46,17 @@ export async function createGoatChatShareAction(
   const trimmed = sessionId?.trim();
   if (!trimmed) return { ok: false, error: "Could not share that chat." };
 
-  const { user, workspace } = await currentGoatUser();
-  const share = await ensureGoatChatShareForUser({
-    userWorkosId: user.workosUserId,
-    workspaceId: workspace.id,
-    chatSessionId: trimmed,
+  const client = await serverApiClient();
+  const response = await client.v1.conversations[":conversationId"].share.$put({
+    param: { conversationId: trimmed },
   });
-  if (!share) return { ok: false, error: "Could not share that chat." };
-
-  return { ok: true, shareId: share.id };
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: await serverApiErrorMessage(response, "Could not share that chat."),
+    };
+  }
+  return { ok: true, shareId: (await response.json()).data.shareId };
 }
 
 export async function revokeGoatChatShareAction(
@@ -63,13 +65,16 @@ export async function revokeGoatChatShareAction(
   const trimmed = sessionId?.trim();
   if (!trimmed) return { ok: false, error: "Could not stop sharing that chat." };
 
-  const { user, workspace } = await currentGoatUser();
-  const revoked = await revokeGoatChatShareForUser({
-    userWorkosId: user.workosUserId,
-    workspaceId: workspace.id,
-    chatSessionId: trimmed,
+  const client = await serverApiClient();
+  const response = await client.v1.conversations[":conversationId"].share.$delete({
+    param: { conversationId: trimmed },
   });
-  if (!revoked) return { ok: false, error: "Could not stop sharing that chat." };
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: await serverApiErrorMessage(response, "Could not stop sharing that chat."),
+    };
+  }
 
   return { ok: true };
 }

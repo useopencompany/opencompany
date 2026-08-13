@@ -1,4 +1,4 @@
-import type { GoatChatMessageAttachment } from "@opencompany/db/goat-schema";
+import type { GoatChatMessageAttachment } from "@opencompany/goat-agent/chat-attachment-formats";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   extractGoatChatAttachmentTexts,

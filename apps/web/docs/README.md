@@ -156,9 +156,11 @@ Codex and Claude Code can explicitly publish finished sandbox outputs back into 
 host-provided `publish_artifact` tool. Publication copies an allowlisted file (maximum 20 MB, five
 per turn) into private blob storage and creates a stable `chat_artifacts` identity plus an immutable
 `chat_artifact_versions` row. The assistant message stores only safe file metadata and the exact
-version reference; sandbox paths and blob locators never reach the browser. Owner and opaque
-chat-share routes authorize every open/download request. Deleting a file archives the logical
+version reference; sandbox paths and blob locators never reach the browser. `apps/api` owns the
+authenticated `/v1/chat-artifacts`, `/v1/chat-attachments`, and `/v1/chat-screenshots` byte
+resources, including explicit Actor/workspace authorization. Deleting a file archives the logical
 artifact, tombstones its message cards, revokes byte routes, and best-effort purges all versions.
+The old web byte paths are streaming relays only for already-issued URLs.
 
 When a new chat is submitted, the client reserves its final `goat_chat_<uuid>` id and moves to the
 matching `/chat/<id>` URL immediately with the native History API, without starting a server
@@ -176,16 +178,15 @@ optionally stops the active stream, and marks the chat session closed through
 
 ### Public read-only chat links
 
-The link button in a persisted chat header opens sharing controls. The owner can create or reuse
-one opaque `goat.chat_session_shares` token for their session, copy `/share/<token>`, or stop
-sharing. Stopping sharing deletes the token so the public transcript and its attachment routes stop
-resolving immediately. Sharing again creates a new token; a revoked URL never becomes valid again.
-Shared routes sit outside the authenticated OpenCompany web app shell, render the existing transcript UI
-without a composer or mutation controls, and can serve that session's attachments through a
-token-scoped byte route. The link reads the current session on each request, so later messages are
-included; the copy confirmation says this explicitly. Normal `/chat/<id>` routes remain
-authenticated. Share pages are excluded from search indexing, and the token never grants access to
-any other session data.
+The link button in a persisted chat header opens sharing controls. Typed, authenticated
+`/v1/conversations/:conversationId/share` commands create, read, and revoke one opaque share
+capability. The stable `/share/<token>` web page remains a presentation URL, but its transcript,
+metadata, attachments, and artifacts come from API-owned public capability resources. Public byte
+URLs stay unchanged and relay their streams to the API. Revocation therefore stops the transcript
+and every related byte read immediately; sharing again creates a new token. The API projection
+removes session ids, context-token counts, Blob locators, and engine credentials before data reaches
+the public page. Share pages remain excluded from search indexing, and the token grants no access to
+any other Conversation data.
 
 ## `/api/chat`
 
@@ -398,7 +399,8 @@ follow-up model history from those persisted UI message parts. Its headless tool
 read-only Brain/web tools and the shared `headless` action projection: connected integration actions
 whose permission mode is `on`; managed capabilities and approval-gated actions are excluded.
 Authenticated `POST /v1/messages` derives the Actor/workspace in `apps/api`, persists the canonical
-Message/Run, and queues this path. There is no web-owned internal Message creation endpoint.
+Message/Run, queues this path, captures the Message analytics event, and schedules first-Message
+title generation. There is no web-owned internal Message creation or title mutation endpoint.
 
 Cloud Codex uses a persistent sandbox per Goat chat and resumes the same Codex app-server thread on
 follow-up turns. New turns remain `queued` until the runner claims them, then move through

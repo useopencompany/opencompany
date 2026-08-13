@@ -1,4 +1,4 @@
-import type { GoatHarnessSpec } from "@opencompany/db/goat-schema";
+import type { GoatHarnessSpec } from "@opencompany/goat-agent/task-runtime-types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createGoatTaskScheduleForUser } from "@/lib/task-schedules";
 

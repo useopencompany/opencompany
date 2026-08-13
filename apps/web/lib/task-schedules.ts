@@ -1,6 +1,6 @@
 "use server";
 
-import type { GoatHarnessSpec } from "@opencompany/db/goat-schema";
+import type { GoatHarnessSpec } from "@opencompany/goat-agent/task-runtime-types";
 import {
   createGoatTaskScheduleForUser as createSharedGoatTaskScheduleForUser,
   deleteGoatTaskScheduleForUser as deleteSharedGoatTaskScheduleForUser,

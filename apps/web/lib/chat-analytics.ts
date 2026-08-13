@@ -1,5 +1,5 @@
 import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
-import type { GoatChatEngine } from "@opencompany/db/goat-schema";
+import type { ChatEngine as GoatChatEngine } from "@opencompany/core";
 
 type GoatChatAnalyticsUser = {
   workosUserId: string;

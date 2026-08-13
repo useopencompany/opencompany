@@ -29,6 +29,8 @@ import {
   BrowserProfileLoginCompleteEnvelopeSchema,
   BrowserProfileLoginSessionEnvelopeSchema,
   CancelRunEnvelopeSchema,
+  ChatArtifactDeleteEnvelopeSchema,
+  ChatShareIdSchema,
   ClaudeCodeAuthStatusEnvelopeSchema,
   CodexAuthStatusEnvelopeSchema,
   CodexDeviceAuthFlowEnvelopeSchema,
@@ -37,6 +39,7 @@ import {
   ConfirmImessagePairingBodySchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
+  ConversationShareEnvelopeSchema,
   CreateBrainDocumentBodySchema,
   CreateBrainFolderBodySchema,
   CreateBrowserProfileBodySchema,
@@ -58,6 +61,8 @@ import {
   ErrorEnvelopeSchema,
   FathomAccountStateEnvelopeSchema,
   FeedbackSubmissionEnvelopeSchema,
+  GenerateConversationTitleBodySchema,
+  GenerateConversationTitleEnvelopeSchema,
   GranolaAccountStateEnvelopeSchema,
   ImessageAccountStateEnvelopeSchema,
   ImessagePairingStartedEnvelopeSchema,
@@ -76,6 +81,8 @@ import {
   McpSetupEnvelopeSchema,
   MessagePageSchema,
   PresentationCursorSchema,
+  PublicChatShareEnvelopeSchema,
+  PublicChatShareMetadataEnvelopeSchema,
   ReadModelSchema,
   RenameBrainDocumentBodySchema,
   RenameBrainFolderBodySchema,
@@ -1196,6 +1203,72 @@ export const updateConversationRoute = createRoute({
   },
 });
 
+export const getConversationShareRoute = createRoute({
+  method: "get",
+  path: "/v1/conversations/{conversationId}/share",
+  tags: ["Chat"],
+  security: actorSecurity,
+  request: { params: z.object({ conversationId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Current public share capability for an authorized Conversation.",
+      content: { "application/json": { schema: ConversationShareEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createConversationShareRoute = createRoute({
+  method: "put",
+  path: "/v1/conversations/{conversationId}/share",
+  tags: ["Chat"],
+  security: actorSecurity,
+  request: { params: z.object({ conversationId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Idempotently create or return a Conversation public share capability.",
+      content: { "application/json": { schema: ConversationShareEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deleteConversationShareRoute = createRoute({
+  method: "delete",
+  path: "/v1/conversations/{conversationId}/share",
+  tags: ["Chat"],
+  security: actorSecurity,
+  request: { params: z.object({ conversationId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Idempotently revoke a Conversation public share capability.",
+      content: { "application/json": { schema: ConversationShareEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const generateConversationTitleRoute = createRoute({
+  method: "post",
+  path: "/v1/conversations/{conversationId}/title",
+  tags: ["Chat"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ conversationId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: GenerateConversationTitleBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Generate a title when the Message is the Conversation's first user Message.",
+      content: { "application/json": { schema: GenerateConversationTitleEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const listMessagesRoute = createRoute({
   method: "get",
   path: "/v1/conversations/{conversationId}/messages",
@@ -1253,6 +1326,125 @@ export const uploadAttachmentRoute = createRoute({
     },
     default: errorResponse,
   },
+});
+
+const binaryResponse = {
+  description: "Authorized private bytes.",
+  content: {
+    "application/octet-stream": {
+      schema: z.string().openapi({ type: "string", format: "binary" }),
+    },
+  },
+} as const;
+
+export const deleteChatArtifactRoute = createRoute({
+  method: "delete",
+  path: "/v1/chat-artifacts/{artifactId}",
+  tags: ["Chat"],
+  security: actorSecurity,
+  request: { params: z.object({ artifactId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Generated Chat artifact tombstoned and its private blobs removed.",
+      content: { "application/json": { schema: ChatArtifactDeleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const downloadChatArtifactRoute = createRoute({
+  method: "get",
+  path: "/v1/chat-artifacts/{artifactId}/versions/{versionId}",
+  tags: ["Chat"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ artifactId: ResourceIdSchema, versionId: ResourceIdSchema }),
+    query: z.object({ download: z.enum(["0", "1"]).optional() }),
+  },
+  responses: { 200: binaryResponse, default: errorResponse },
+});
+
+export const downloadChatAttachmentRoute = createRoute({
+  method: "get",
+  path: "/v1/chat-attachments/{messageId}/{attachmentId}",
+  tags: ["Chat"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ messageId: ResourceIdSchema, attachmentId: ResourceIdSchema }),
+  },
+  responses: { 200: binaryResponse, default: errorResponse },
+});
+
+export const downloadChatScreenshotRoute = createRoute({
+  method: "get",
+  path: "/v1/chat-screenshots/{conversationId}/{filename}",
+  tags: ["Chat"],
+  security: actorSecurity,
+  request: {
+    params: z.object({
+      conversationId: ResourceIdSchema,
+      filename: z.string().min(1).max(512),
+    }),
+  },
+  responses: { 200: binaryResponse, default: errorResponse },
+});
+
+export const getPublicChatShareRoute = createRoute({
+  method: "get",
+  path: "/public/chat-shares/{shareId}",
+  tags: ["Public Chat shares"],
+  request: { params: z.object({ shareId: ChatShareIdSchema }) },
+  responses: {
+    200: {
+      description:
+        "Read-only public presentation transcript addressed by an unguessable share capability.",
+      content: { "application/json": { schema: PublicChatShareEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getPublicChatShareMetadataRoute = createRoute({
+  method: "get",
+  path: "/public/chat-shares/{shareId}/metadata",
+  tags: ["Public Chat shares"],
+  request: { params: z.object({ shareId: ChatShareIdSchema }) },
+  responses: {
+    200: {
+      description: "Public metadata for share page and Open Graph presentation.",
+      content: { "application/json": { schema: PublicChatShareMetadataEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const downloadPublicChatAttachmentRoute = createRoute({
+  method: "get",
+  path: "/public/chat-shares/{shareId}/attachments/{messageId}/{attachmentId}",
+  tags: ["Public Chat shares"],
+  request: {
+    params: z.object({
+      shareId: ChatShareIdSchema,
+      messageId: ResourceIdSchema,
+      attachmentId: ResourceIdSchema,
+    }),
+  },
+  responses: { 200: binaryResponse, default: errorResponse },
+});
+
+export const downloadPublicChatArtifactRoute = createRoute({
+  method: "get",
+  path: "/public/chat-shares/{shareId}/artifacts/{artifactId}/versions/{versionId}",
+  tags: ["Public Chat shares"],
+  request: {
+    params: z.object({
+      shareId: ChatShareIdSchema,
+      artifactId: ResourceIdSchema,
+      versionId: ResourceIdSchema,
+    }),
+    query: z.object({ download: z.enum(["0", "1"]).optional() }),
+  },
+  responses: { 200: binaryResponse, default: errorResponse },
 });
 
 export const getEngineRuntimeStatusRoute = createRoute({
@@ -2134,9 +2326,21 @@ export type V1RouteHandlers = {
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
   updateConversation: RouteHandler<typeof updateConversationRoute>;
+  getConversationShare: RouteHandler<typeof getConversationShareRoute>;
+  createConversationShare: RouteHandler<typeof createConversationShareRoute>;
+  deleteConversationShare: RouteHandler<typeof deleteConversationShareRoute>;
+  generateConversationTitle: RouteHandler<typeof generateConversationTitleRoute>;
   listMessages: RouteHandler<typeof listMessagesRoute>;
   createMessage: RouteHandler<typeof createMessageRoute>;
   uploadAttachment: RouteHandler<typeof uploadAttachmentRoute>;
+  deleteChatArtifact: RouteHandler<typeof deleteChatArtifactRoute>;
+  downloadChatArtifact: RouteHandler<typeof downloadChatArtifactRoute>;
+  downloadChatAttachment: RouteHandler<typeof downloadChatAttachmentRoute>;
+  downloadChatScreenshot: RouteHandler<typeof downloadChatScreenshotRoute>;
+  getPublicChatShare: RouteHandler<typeof getPublicChatShareRoute>;
+  getPublicChatShareMetadata: RouteHandler<typeof getPublicChatShareMetadataRoute>;
+  downloadPublicChatAttachment: RouteHandler<typeof downloadPublicChatAttachmentRoute>;
+  downloadPublicChatArtifact: RouteHandler<typeof downloadPublicChatArtifactRoute>;
   getEngineRuntimeStatus: RouteHandler<typeof getEngineRuntimeStatusRoute>;
   createEngineRuntimeAccess: RouteHandler<typeof createEngineRuntimeAccessRoute>;
   getRun: RouteHandler<typeof getRunRoute>;
@@ -2252,9 +2456,21 @@ export function createV1Router(
       .openapi(listConversationsRoute, handlers.listConversations)
       .openapi(getConversationRoute, handlers.getConversation)
       .openapi(updateConversationRoute, handlers.updateConversation)
+      .openapi(getConversationShareRoute, handlers.getConversationShare)
+      .openapi(createConversationShareRoute, handlers.createConversationShare)
+      .openapi(deleteConversationShareRoute, handlers.deleteConversationShare)
+      .openapi(generateConversationTitleRoute, handlers.generateConversationTitle)
       .openapi(listMessagesRoute, handlers.listMessages)
       .openapi(createMessageRoute, handlers.createMessage)
       .openapi(uploadAttachmentRoute, handlers.uploadAttachment)
+      .openapi(deleteChatArtifactRoute, handlers.deleteChatArtifact)
+      .openapi(downloadChatArtifactRoute, handlers.downloadChatArtifact)
+      .openapi(downloadChatAttachmentRoute, handlers.downloadChatAttachment)
+      .openapi(downloadChatScreenshotRoute, handlers.downloadChatScreenshot)
+      .openapi(getPublicChatShareRoute, handlers.getPublicChatShare)
+      .openapi(getPublicChatShareMetadataRoute, handlers.getPublicChatShareMetadata)
+      .openapi(downloadPublicChatAttachmentRoute, handlers.downloadPublicChatAttachment)
+      .openapi(downloadPublicChatArtifactRoute, handlers.downloadPublicChatArtifact)
       .openapi(getEngineRuntimeStatusRoute, handlers.getEngineRuntimeStatus)
       .openapi(createEngineRuntimeAccessRoute, handlers.createEngineRuntimeAccess)
       .openapi(getRunRoute, handlers.getRun)
@@ -2919,6 +3135,29 @@ const contractDocumentHandlers: V1RouteHandlers = {
   getConversation: (c) => c.json({ data: placeholderConversation, meta }, 200),
   updateConversation: (c) =>
     c.json({ data: { conversationId: "conversation_contract", transactionId: "1" }, meta }, 200),
+  getConversationShare: (c) =>
+    c.json({ data: { conversationId: "conversation_contract", shareId: null }, meta }, 200),
+  createConversationShare: (c) =>
+    c.json(
+      {
+        data: {
+          conversationId: "conversation_contract",
+          shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+        },
+        meta,
+      },
+      200,
+    ),
+  deleteConversationShare: (c) =>
+    c.json({ data: { conversationId: "conversation_contract", shareId: null }, meta }, 200),
+  generateConversationTitle: (c) =>
+    c.json(
+      {
+        data: { conversationId: "conversation_contract", title: "Contract title", generated: true },
+        meta,
+      },
+      200,
+    ),
   listMessages: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   createMessage: (c) =>
     c.json(
@@ -2952,6 +3191,45 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       201,
     ),
+  deleteChatArtifact: (c) =>
+    c.json({ data: { artifactId: "artifact_contract", state: "deleted" as const }, meta }, 200),
+  downloadChatArtifact: (c) =>
+    c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
+  downloadChatAttachment: (c) =>
+    c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
+  downloadChatScreenshot: (c) =>
+    c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
+  getPublicChatShare: (c) =>
+    c.json(
+      {
+        data: {
+          shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+          title: "Shared conversation",
+          kind: "chat" as const,
+          engine: "opencompany" as const,
+          messages: [],
+        },
+        meta,
+      },
+      200,
+    ),
+  getPublicChatShareMetadata: (c) =>
+    c.json(
+      {
+        data: {
+          shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+          title: "Shared conversation",
+          kind: "chat" as const,
+          engine: "opencompany" as const,
+        },
+        meta,
+      },
+      200,
+    ),
+  downloadPublicChatAttachment: (c) =>
+    c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
+  downloadPublicChatArtifact: (c) =>
+    c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
   getEngineRuntimeStatus: (c) =>
     c.json(
       { data: { conversationId: "conversation_contract", status: "running" as const }, meta },

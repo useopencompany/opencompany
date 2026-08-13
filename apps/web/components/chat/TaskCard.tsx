@@ -1,6 +1,6 @@
 "use client";
 
-import type { GoatTaskStatus } from "@opencompany/db/goat-schema";
+import type { GoatTaskStatus } from "@opencompany/goat-agent/task-runtime-types";
 import { AlertCircle, CheckCircle2, CircleDotDashed, Clock, FileText, X } from "lucide-react";
 import Link from "next/link";
 import { GOAT_STATUS_COPY } from "@/lib/task-display";

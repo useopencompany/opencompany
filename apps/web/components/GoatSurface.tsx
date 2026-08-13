@@ -7,13 +7,13 @@ import {
   claudeCodeModelSupportsReasoningEffort,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import type { ChatEngine as GoatChatEngine } from "@opencompany/core";
 import type {
-  GoatChatEngine,
   GoatHarnessEngine,
   GoatTaskReportedOutcome,
   GoatTaskStage,
   GoatTaskStatus,
-} from "@opencompany/db/goat-schema";
+} from "@opencompany/goat-agent/task-runtime-types";
 import type { EngineRuntimeStatus, MessageEngine } from "@opencompany/protocol";
 import {
   Command,

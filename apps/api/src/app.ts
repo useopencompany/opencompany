@@ -66,6 +66,8 @@ import type { AttachmentUploadService } from "./attachments";
 import type { AttioIngressService } from "./attio-ingress";
 import type { ApiAuthenticator } from "./auth";
 import type { BrainAssetService } from "./brain-assets";
+import type { ChatResourceDownload, ChatResourceService } from "./chat-resources";
+import type { ChatTitleService } from "./chat-title";
 import type { ReadModelService } from "./electric-read-models";
 import type { EngineAuthService } from "./engine-auth";
 import { admitEngineMessage } from "./engine-messages";
@@ -130,6 +132,23 @@ export type CreateApiAppInput = {
   >;
   skillImports: SkillImportApplicationService;
   brainAssets: BrainAssetService;
+  chatResources?: ChatResourceService;
+  chatTitles?: ChatTitleService;
+  captureChatMessage?: (input: {
+    actor: Actor;
+    conversationId: string;
+    firstMessage: boolean;
+    engine: "opencompany" | "codex" | "claude_code";
+    model: string;
+    messageLength: number;
+    selectionMode: "manual" | "auto";
+    routing?: {
+      tier: "standard" | "frontier";
+      reason: string;
+      outcome: string;
+      durationMs: number;
+    };
+  }) => Promise<unknown> | unknown;
   attachments: AttachmentUploadService;
   userSettings: UserSettingsService;
   feedback: FeedbackService;
@@ -982,6 +1001,42 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: result, meta }, 200);
     },
+    getConversationShare: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const conversationId = c.req.valid("param").conversationId;
+      await authorizeConversationRead(input, actor, conversationId);
+      const shareId = await chatResourcesFrom(input).findShare(actor, conversationId);
+      return c.json({ data: { conversationId, shareId }, meta }, 200);
+    },
+    createConversationShare: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "share", 30);
+      const conversationId = c.req.valid("param").conversationId;
+      await authorizeConversationRead(input, actor, conversationId);
+      const shareId = await chatResourcesFrom(input).ensureShare(actor, conversationId);
+      return c.json({ data: { conversationId, shareId }, meta }, 200);
+    },
+    deleteConversationShare: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "share", 30);
+      const conversationId = c.req.valid("param").conversationId;
+      await authorizeConversationRead(input, actor, conversationId);
+      await chatResourcesFrom(input).revokeShare(actor, conversationId);
+      return c.json({ data: { conversationId, shareId: null }, meta }, 200);
+    },
+    generateConversationTitle: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "title", 30);
+      const conversationId = c.req.valid("param").conversationId;
+      await authorizeConversationRead(input, actor, conversationId);
+      const result = await chatTitlesFrom(input).generate(
+        actor,
+        conversationId,
+        c.req.valid("json").messageId,
+      );
+      return c.json({ data: result, meta }, 200);
+    },
     listMessages: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -1068,6 +1123,46 @@ export function createApiApp(input: CreateApiAppInput) {
         runtimeModel: admitted.runtimeModel,
         ...(admitted.settings ? { settings: admitted.settings } : {}),
       });
+      if (!result.idempotentReplay && !existingConversation && input.chatTitles) {
+        void input.chatTitles
+          .generate(actor, result.conversationId, result.messageId)
+          .catch((error) =>
+            logger.warn("Canonical Chat title generation failed", {
+              event: "opencompany.chat_title_generation_failed",
+              conversation_id: result.conversationId,
+              error_name: error instanceof Error ? error.name : typeof error,
+            }),
+          );
+      }
+      if (!result.idempotentReplay && input.captureChatMessage) {
+        void Promise.resolve(
+          input.captureChatMessage({
+            actor,
+            conversationId: result.conversationId,
+            firstMessage: !existingConversation,
+            engine: admitted.engine,
+            model: admitted.model,
+            messageLength: body.content.length,
+            selectionMode: requestedModel === "auto" ? "auto" : "manual",
+            ...(autoResolution?.routing
+              ? {
+                  routing: {
+                    tier: autoResolution.routing.tier === "frontier" ? "frontier" : "standard",
+                    reason: autoResolution.routing.reason,
+                    outcome: autoResolution.routing.classifier.outcome,
+                    durationMs: autoResolution.routing.classifier.durationMs,
+                  },
+                }
+              : {}),
+          }),
+        ).catch((error) =>
+          logger.warn("Canonical Chat analytics capture failed", {
+            event: "opencompany.chat_analytics_capture_failed",
+            conversation_id: result.conversationId,
+            error_name: error instanceof Error ? error.name : typeof error,
+          }),
+        );
+      }
       return c.json(
         {
           data: {
@@ -1108,6 +1203,70 @@ export function createApiApp(input: CreateApiAppInput) {
         },
         201,
       );
+    },
+    deleteChatArtifact: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const artifactId = c.req.valid("param").artifactId;
+      await chatResourcesFrom(input).deleteArtifact(actor, artifactId);
+      return c.json({ data: { artifactId, state: "deleted" as const }, meta }, 200);
+    },
+    downloadChatArtifact: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const params = c.req.valid("param");
+      const download = c.req.valid("query").download === "1";
+      const asset = await chatResourcesFrom(input).downloadArtifact({ actor, ...params, download });
+      return chatResourceResponse(asset) as never;
+    },
+    downloadChatAttachment: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const asset = await chatResourcesFrom(input).downloadAttachment({
+        actor,
+        ...c.req.valid("param"),
+      });
+      return chatResourceResponse(asset) as never;
+    },
+    downloadChatScreenshot: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const asset = await chatResourcesFrom(input).downloadScreenshot({
+        actor,
+        ...c.req.valid("param"),
+      });
+      return chatResourceResponse(asset) as never;
+    },
+    getPublicChatShare: async (c) => {
+      const shareId = c.req.valid("param").shareId;
+      await enforcePublicRateLimit(rateLimiter, shareId, "public-share-read", 300);
+      const share = await chatResourcesFrom(input).loadPublicShare(shareId);
+      c.header("Cache-Control", "private, no-store");
+      c.header("X-Robots-Tag", "noindex, nofollow, noarchive");
+      return c.json({ data: share, meta }, 200);
+    },
+    getPublicChatShareMetadata: async (c) => {
+      const shareId = c.req.valid("param").shareId;
+      await enforcePublicRateLimit(rateLimiter, shareId, "public-share-read", 300);
+      const share = await chatResourcesFrom(input).loadPublicShareMetadata(shareId);
+      c.header("Cache-Control", "private, no-store");
+      c.header("X-Robots-Tag", "noindex, nofollow, noarchive");
+      return c.json({ data: share, meta }, 200);
+    },
+    downloadPublicChatAttachment: async (c) => {
+      const params = c.req.valid("param");
+      await enforcePublicRateLimit(rateLimiter, params.shareId, "public-share-bytes", 600);
+      const asset = await chatResourcesFrom(input).downloadPublicAttachment(params);
+      return chatResourceResponse(asset) as never;
+    },
+    downloadPublicChatArtifact: async (c) => {
+      const params = c.req.valid("param");
+      await enforcePublicRateLimit(rateLimiter, params.shareId, "public-share-bytes", 600);
+      const asset = await chatResourcesFrom(input).downloadPublicArtifact({
+        ...params,
+        download: c.req.valid("query").download === "1",
+      });
+      return chatResourceResponse(asset) as never;
     },
     getEngineRuntimeStatus: async (c) => {
       const actor = actorFrom(c);
@@ -1631,6 +1790,15 @@ export function createApiApp(input: CreateApiAppInput) {
 
   const app = createV1Router(handlers, {
     beforeRoutes(router) {
+      router.use("/public/*", secureHeaders());
+      router.use(
+        "/public/*",
+        requestId({
+          headerName: "X-Request-Id",
+          limitLength: 128,
+          generator: () => `request_${randomUUID()}`,
+        }),
+      );
       router.use(
         "/v1/*",
         cors({
@@ -1925,6 +2093,25 @@ async function enforceRateLimit(
   }
 }
 
+async function enforcePublicRateLimit(
+  limiter: ApiRateLimiter,
+  capabilityId: string,
+  bucket: string,
+  limit: number,
+) {
+  const decision = await limiter.consume({
+    key: capabilityId,
+    bucket,
+    limit,
+    windowMs: 60_000,
+  });
+  if (!decision.allowed) {
+    throw new ApiError(429, "rate_limited", "Too many requests.", true, {
+      "Retry-After": String(decision.retryAfterSeconds),
+    });
+  }
+}
+
 function actorFrom(c: Context): Actor {
   const actor = getContextValue(c, "actor");
   if (!actor) throw new ApiError(401, "authentication_required", "Authentication required.");
@@ -1943,14 +2130,41 @@ function requestIdFrom(c: Context) {
   return (getContextValue(c, "requestId") as string | undefined) ?? `request_${randomUUID()}`;
 }
 
-function contentDisposition(value: string) {
-  const filename = value.replace(/[\r\n"\\]/gu, "_").trim() || "file";
-  const fallback = filename.replace(/[^\x20-\x7e]/gu, "_");
+function contentDisposition(value: string, inline = true) {
+  const filename = value.replace(/[\u0000-\u001f\u007f"\\]/gu, "_").trim() || "file";
+  const fallback = filename.replace(/[^\x20-\x7e]/gu, "_") || "file";
   const encoded = encodeURIComponent(filename).replace(
     /[!'()*]/gu,
     (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
   );
-  return `inline; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+  return `${inline ? "inline" : "attachment"}; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
+function chatResourcesFrom(input: CreateApiAppInput) {
+  if (!input.chatResources) {
+    throw new ApiError(503, "unavailable", "Chat resources are not configured.", true);
+  }
+  return input.chatResources;
+}
+
+function chatTitlesFrom(input: CreateApiAppInput) {
+  if (!input.chatTitles) {
+    throw new ApiError(503, "unavailable", "Chat title generation is not configured.", true);
+  }
+  return input.chatTitles;
+}
+
+function chatResourceResponse(asset: ChatResourceDownload) {
+  const headers = new Headers({
+    "Content-Type": asset.mediaType,
+    "Content-Disposition": contentDisposition(asset.filename, asset.inline),
+    "Cache-Control": asset.cacheControl,
+    "X-Content-Type-Options": "nosniff",
+    "X-Robots-Tag": "noindex, nofollow, noarchive",
+    ...(asset.sandbox ? { "Content-Security-Policy": "sandbox" } : {}),
+  });
+  if (asset.sizeBytes !== null) headers.set("Content-Length", String(asset.sizeBytes));
+  return new Response(asset.stream, { status: 200, headers });
 }
 
 function apiErrorResponse(c: Context, error: unknown) {

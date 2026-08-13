@@ -1,7 +1,5 @@
+import type { GoatChatMessageAttachment } from "@opencompany/goat-agent/chat-attachment-formats";
 import type {
-  GoatChatMessageAttachment,
-  GoatIntegrationProvider,
-  GoatIntegrationStatus,
   GoatTaskEventType,
   GoatTaskMessageRole,
   GoatTaskMessageStatus,
@@ -9,10 +7,31 @@ import type {
   GoatTaskStage,
   GoatTaskStatus,
   GoatTaskToolName,
-} from "@opencompany/db/goat-schema";
+} from "@opencompany/goat-agent/task-runtime-types";
 import { createGoatElectricCollection } from "@/lib/electric-collection";
 
 type ElectricNumber = number | string;
+
+type GoatIntegrationProvider =
+  | "gmail"
+  | "google_calendar"
+  | "google_drive"
+  | "linear"
+  | "github"
+  | "jamie"
+  | "slack"
+  | "slack_bot"
+  | "hubspot"
+  | "granola"
+  | "fathom"
+  | "attio"
+  | "stripe"
+  | "latitude"
+  | "posthog"
+  | "neon"
+  | "imessage"
+  | "x_account";
+type GoatIntegrationStatus = "connected" | "needs_reauth" | "sync_failed" | "disconnected";
 
 export type GoatTaskRow = {
   id: string;

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { modelSupportsAttachments } from "@opencompany/agent-runtime";
-import type { GoatChatMessageAttachment } from "@opencompany/db/goat-schema";
 import { extractDocxText, extractUtf8Text, extractXlsxText } from "@opencompany/file-extract";
+import type { GoatChatMessageAttachment } from "@opencompany/goat-agent/chat-attachment-formats";
 import { downloadGoatChatAttachment } from "@opencompany/goat-agent/chat-attachment-storage";
 import {
   GOAT_CHAT_ATTACHMENT_MAX_PER_MESSAGE,
