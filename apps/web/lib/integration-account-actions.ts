@@ -1,10 +1,6 @@
 "use server";
 
-import { getDb } from "@opencompany/db/client";
-import { applyGoatIntegrationCapabilityMode } from "@opencompany/db/goat-integrations";
 import { revalidatePath } from "next/cache";
-import { resolveGoatActionCatalog } from "@/lib/actions/catalog";
-import { currentGoatUser } from "@/lib/auth";
 import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
 export type GoatIntegrationAccountUsage = {
@@ -98,37 +94,24 @@ export async function setGoatIntegrationCapabilityModeAction(
   }
 }
 
-// Chat "Always allow": flips the asked capability to "on" for every ask-mode
-// connection behind the action, so the next call runs without a confirmation.
-// The catalog is re-resolved server-side — the client only names the action.
-//
-// TEMPORARY web-owned adapter (#1203 5a2): the action catalog resolvers reach
-// the db through getDb() internally, so re-resolving the catalog inside the
-// canonical API would violate its injectable-db boundary. This one command
-// stays here until the catalog resolvers take an injected handle; the
-// capability write itself already goes through the shared db-package helper.
+// Chat "Always allow": the execution owner re-resolves the action catalog and
+// flips every ask-mode connection behind the action to "on". The browser only
+// sends the opaque action id from the approval card.
 export async function alwaysAllowGoatChatActionAction(
   actionId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const context = await currentGoatUser();
   try {
-    const catalog = await resolveGoatActionCatalog({
-      userWorkosId: context.user.workosUserId,
-      workspaceId: context.workspace.id,
+    const response = await (await serverApiClient()).v1.actions[":actionId"].permissions[
+      "always-allow"
+    ].$post({
+      param: { actionId },
     });
-    const action = catalog.actions.find((entry) => entry.id === actionId);
-    const permission = action?.permission;
-    if (!permission || permission.integrationIds.length === 0) {
-      // Nothing to flip (already on, or the action disappeared) — not an error
-      // worth surfacing over the one-off approval that is about to run.
-      return { ok: true };
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not update the permission."),
+      };
     }
-    await applyGoatIntegrationCapabilityMode({
-      integrationIds: permission.integrationIds,
-      capabilityId: permission.capabilityId,
-      mode: "on",
-      db: getDb(),
-    });
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {

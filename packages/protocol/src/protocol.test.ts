@@ -127,6 +127,7 @@ describe("headless protocol", () => {
       "/v1/integration-accounts/jamie/api-key",
       "/v1/integration-accounts/{integrationId}/usage",
       "/v1/integration-accounts/{integrationId}/capability-modes/{capabilityId}",
+      "/v1/actions/{actionId}/permissions/always-allow",
       "/v1/integration-accounts/{integrationId}",
       "/v1/engine-auth/claude-code",
       "/v1/engine-auth/codex",

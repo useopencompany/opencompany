@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  alwaysAllowGoatChatActionAction,
   disconnectGoatIntegrationAccountAction,
   getGoatIntegrationAccountUsageAction,
   setGoatIntegrationCapabilityModeAction,
@@ -9,15 +10,6 @@ import {
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/headers", () => ({ headers: vi.fn() }));
-// The always-allow command stays web-owned (catalog resolvers are getDb-bound);
-// its dependencies are mocked so importing this module never touches AuthKit
-// or a database in tests.
-vi.mock("@/lib/auth", () => ({ currentGoatUser: vi.fn() }));
-vi.mock("@/lib/actions/catalog", () => ({ resolveGoatActionCatalog: vi.fn() }));
-vi.mock("@opencompany/db/client", () => ({ getDb: vi.fn() }));
-vi.mock("@opencompany/db/goat-integrations", () => ({
-  applyGoatIntegrationCapabilityMode: vi.fn(),
-}));
 
 function stubApi(response: () => Response) {
   const requests: Request[] = [];
@@ -138,5 +130,21 @@ describe("integration account adapters", () => {
     await expect(
       setGoatIntegrationCapabilityModeAction("gint_abc", "write", "sometimes"),
     ).resolves.toEqual({ ok: false, error: "Unknown permission mode." });
+  });
+
+  it("persists standing action permission through the typed command", async () => {
+    const requests = stubApi(() =>
+      Response.json({ data: { actionId: "gmail.send_email", state: "allowed" }, meta }),
+    );
+
+    await expect(alwaysAllowGoatChatActionAction("gmail.send_email")).resolves.toEqual({
+      ok: true,
+    });
+    const request = requests[0] as Request;
+    expect(request.method).toBe("POST");
+    expect(new URL(request.url).pathname).toBe(
+      "/v1/actions/gmail.send_email/permissions/always-allow",
+    );
+    expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
   });
 });

@@ -2,8 +2,8 @@ import { getDb } from "@opencompany/db/client";
 import type { GoatWorkspaceRole } from "@opencompany/db/goat-schema";
 import { goatUsers } from "@opencompany/db/goat-schema";
 import { getGoatWorkspaceRole } from "@opencompany/db/goat-workspaces";
+import { slackApiRequest } from "@opencompany/goat-agent/integrations/slack";
 import { eq, sql } from "drizzle-orm";
-import { slackApiRequest } from "@/lib/integrations/slack";
 
 export type GoatSlackMappedMember = {
   workosUserId: string;

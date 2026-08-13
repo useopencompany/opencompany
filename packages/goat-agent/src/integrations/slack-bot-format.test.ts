@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-// Import from ./format (not ./answer): the answer module's runtime import
-// chain reaches authkit, which does not resolve under vitest's node runner.
 import {
   collectSlackMentionUserIds,
   mentionsOtherHuman,
@@ -9,7 +7,7 @@ import {
   stripSlackBotMention,
   toSlackMrkdwn,
   truncateForSlack,
-} from "./format";
+} from "./slack-bot-format";
 
 describe("stripSlackBotMention", () => {
   it("strips a leading mention of the bot", () => {

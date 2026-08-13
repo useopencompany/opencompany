@@ -373,7 +373,7 @@ export class PostgresChatRepository implements ChatRepository {
           )
         RETURNING run.id, run.assistant_message_id, run.status, run.event_sequence
       ),
-      canceled_approvals AS (
+      canceled_approvals AS MATERIALIZED (
         UPDATE goat.run_approvals AS approval
         SET status = 'canceled',
             resolution = 'canceled',
@@ -382,7 +382,20 @@ export class PostgresChatRepository implements ChatRepository {
             updated_at = ${now}
         WHERE approval.run_id IN (SELECT id FROM changed_turns)
           AND approval.status = 'pending'
-        RETURNING approval.id
+        RETURNING approval.id, approval.run_id, approval.tool_call_id
+      ),
+      canceled_capabilities AS MATERIALIZED (
+        UPDATE goat.capability_runs AS capability
+        SET status = 'canceled',
+            updated_at = ${now}
+        FROM canceled_approvals AS approval
+        JOIN goat.codex_chat_turns AS run ON run.id = approval.run_id
+        WHERE capability.tool_call_id = approval.tool_call_id
+          AND capability.chat_session_id = run.chat_session_id
+          AND capability.user_workos_id = run.user_workos_id
+          AND capability.workspace_id = ${input.actor.workspaceId}
+          AND capability.status IN ('awaiting_approval', 'approved')
+        RETURNING capability.id
       ),
       inserted_events AS (
         INSERT INTO goat.run_events (
@@ -435,7 +448,8 @@ export class PostgresChatRepository implements ChatRepository {
       SELECT
         updated_chat.id AS "conversationId",
         pg_current_xact_id()::text AS "transactionId",
-        (SELECT count(*) FROM notified) AS "notifyCount"
+        (SELECT count(*) FROM notified) AS "notifyCount",
+        (SELECT count(*) FROM canceled_capabilities) AS "capabilityCancelCount"
       FROM updated_chat
     `);
     return row ? { conversationId: row.conversationId, transactionId: row.transactionId } : null;
@@ -751,7 +765,20 @@ export class PostgresChatRepository implements ChatRepository {
           AND paused.chat_session_id = chat.id
           AND paused.user_workos_id = chat.owner_user_workos_id
           AND paused.status = 'paused'
-        RETURNING approval.id, approval.run_id
+        RETURNING approval.id, approval.run_id, approval.tool_call_id
+      ),
+      dismissed_capabilities AS MATERIALIZED (
+        UPDATE goat.capability_runs AS capability
+        SET status = 'canceled',
+            updated_at = ${now}
+        FROM dismissed_approvals AS approval
+        JOIN goat.codex_chat_turns AS paused ON paused.id = approval.run_id
+        WHERE capability.tool_call_id = approval.tool_call_id
+          AND capability.chat_session_id = paused.chat_session_id
+          AND capability.user_workos_id = paused.user_workos_id
+          AND capability.workspace_id = ${input.actor.workspaceId}
+          AND capability.status IN ('awaiting_approval', 'approved')
+        RETURNING capability.id
       ),
       dismissed_approval_messages AS MATERIALIZED (
         UPDATE goat.chat_messages AS message
@@ -1003,7 +1030,8 @@ export class PostgresChatRepository implements ChatRepository {
             THEN true
           ELSE jsonb_array_length(jsonb_build_object('reason', 'unmaterialized')) = 0
         END AS materialized,
-        (SELECT count(*) FROM notified) AS "notifyCount"
+        (SELECT count(*) FROM notified) AS "notifyCount",
+        (SELECT count(*) FROM dismissed_capabilities) AS "capabilityCancelCount"
       FROM reservation
       `);
     } catch (error) {
@@ -1145,6 +1173,30 @@ export class PostgresChatRepository implements ChatRepository {
           )
         RETURNING run.id, run.status, run.event_sequence
       ),
+      canceled_approvals AS MATERIALIZED (
+        UPDATE goat.run_approvals AS approval
+        SET status = 'canceled',
+            resolution = 'canceled',
+            response = jsonb_build_object('resolution', 'canceled'),
+            resolved_at = ${now},
+            updated_at = ${now}
+        WHERE approval.run_id IN (SELECT id FROM changed WHERE status = 'interrupted')
+          AND approval.status = 'pending'
+        RETURNING approval.id, approval.run_id, approval.tool_call_id
+      ),
+      canceled_capabilities AS MATERIALIZED (
+        UPDATE goat.capability_runs AS capability
+        SET status = 'canceled',
+            updated_at = ${now}
+        FROM canceled_approvals AS approval
+        JOIN goat.codex_chat_turns AS run ON run.id = approval.run_id
+        WHERE capability.tool_call_id = approval.tool_call_id
+          AND capability.chat_session_id = run.chat_session_id
+          AND capability.user_workos_id = run.user_workos_id
+          AND capability.workspace_id = ${input.actor.workspaceId}
+          AND capability.status IN ('awaiting_approval', 'approved')
+        RETURNING capability.id
+      ),
       inserted_event AS (
         INSERT INTO goat.run_events (
           id, run_id, sequence, schema_version, type, payload, created_at
@@ -1216,7 +1268,8 @@ export class PostgresChatRepository implements ChatRepository {
       SELECT
         COALESCE((SELECT changed.status FROM changed), run.status) AS status,
         NOT EXISTS (SELECT 1 FROM changed) AS replayed,
-        (SELECT count(*) FROM notified) AS "notifyCount"
+        (SELECT count(*) FROM notified) AS "notifyCount",
+        (SELECT count(*) FROM canceled_capabilities) AS "capabilityCancelCount"
       FROM goat.codex_chat_turns AS run
       JOIN authorized ON authorized.id = run.id
     `);
@@ -1293,7 +1346,40 @@ export class PostgresChatRepository implements ChatRepository {
             updated_at = ${now}
         WHERE approval.id IN (SELECT id FROM authorized)
           AND approval.status = 'pending'
-        RETURNING approval.id, approval.run_id
+        RETURNING approval.id, approval.run_id, approval.tool_call_id
+      ),
+      transitioned_capability AS MATERIALIZED (
+        UPDATE goat.capability_runs AS capability
+        SET status = CASE
+              WHEN ${input.command.resolution === "approved"}::boolean THEN 'approved'
+              ELSE 'canceled'
+            END,
+            approved_at = CASE
+              WHEN ${input.command.resolution === "approved"}::boolean THEN ${now}
+              ELSE capability.approved_at
+            END,
+            updated_at = ${now}
+        FROM changed
+        JOIN goat.codex_chat_turns AS approved_run ON approved_run.id = changed.run_id
+        WHERE capability.tool_call_id = changed.tool_call_id
+          AND capability.chat_session_id = approved_run.chat_session_id
+          AND capability.user_workos_id = approved_run.user_workos_id
+          AND capability.workspace_id = ${input.actor.workspaceId}
+          AND ${
+            input.command.resolution === "approved" ||
+            input.command.resolution === "denied" ||
+            input.command.resolution === "canceled"
+          }::boolean
+          AND (
+            (${input.command.resolution === "approved"}::boolean
+              AND capability.status = 'awaiting_approval'
+              AND capability.approval_expires_at > ${now})
+            OR
+            (${input.command.resolution !== "approved"}::boolean
+              AND capability.status IN ('awaiting_approval', 'approved')
+              AND capability.approval_expires_at > ${now})
+          )
+        RETURNING capability.id
       ),
       rewritten_assistant AS MATERIALIZED (
         UPDATE goat.chat_messages AS message
@@ -1405,7 +1491,8 @@ export class PostgresChatRepository implements ChatRepository {
         approval.run_id AS "runId",
         approval.response,
         NOT EXISTS (SELECT 1 FROM changed) AS replayed,
-        (SELECT count(*) FROM notified) AS "notifyCount"
+        (SELECT count(*) FROM notified) AS "notifyCount",
+        (SELECT count(*) FROM transitioned_capability) AS "capabilityTransitionCount"
       FROM goat.run_approvals AS approval
       JOIN authorized ON authorized.id = approval.id
     `);

@@ -1,5 +1,8 @@
-import { slackApiRequest } from "@/lib/integrations/slack";
-import { stripSlackBotMention, truncateForSlack } from "@/lib/slack-bot/format";
+import { slackApiRequest } from "@opencompany/goat-agent/integrations/slack";
+import {
+  stripSlackBotMention,
+  truncateForSlack,
+} from "@opencompany/goat-agent/integrations/slack-bot-format";
 
 // Role-typed conversation reconstruction: the bot's own replies come back as
 // assistant turns, everything else as user turns prefixed with the speaker, so

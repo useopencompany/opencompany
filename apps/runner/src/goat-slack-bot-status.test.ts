@@ -1,8 +1,8 @@
+import { slackApiRequest } from "@opencompany/goat-agent/integrations/slack";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { slackApiRequest } from "@/lib/integrations/slack";
-import { createGoatSlackBotStatusReporter } from "./status";
+import { createGoatSlackBotStatusReporter } from "./goat-slack-bot-status";
 
-vi.mock("@/lib/integrations/slack", () => ({
+vi.mock("@opencompany/goat-agent/integrations/slack", () => ({
   slackApiRequest: vi.fn(async () => ({ ok: true, ts: "111.222" })),
 }));
 

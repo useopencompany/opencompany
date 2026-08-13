@@ -35,8 +35,7 @@ type DbLike = any;
 // OAuth connect flow and the Events API webhook that buffers channel/DM
 // messages for the runner's flush worker. Public URLs stay on the web origin
 // as relays, so no Slack app configuration changes. The separate Slack answer
-// bot keeps its web-owned webhook until the universal-Chat slice extracts the
-// shared execution services.
+// bot has its own API-owned ingress and runner-owned answer pipeline.
 export type SlackIngressService = {
   start(request: Request): Promise<Response>;
   callback(request: Request): Promise<Response>;

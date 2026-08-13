@@ -1024,6 +1024,7 @@ describe("canonical Hono API", () => {
       slackBotIngress: {
         start: record("slack-bot.start", calls),
         callback: record("slack-bot.callback", calls),
+        webhook: record("slack-bot.webhook", calls),
       },
     });
 
@@ -1062,6 +1063,7 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/x-account/callback", "x-account.callback"],
       ["GET", "/integrations/slack-bot/start", "slack-bot.start"],
       ["GET", "/integrations/slack-bot/callback", "slack-bot.callback"],
+      ["POST", "/webhooks/slack-bot/events", "slack-bot.webhook"],
     ];
     for (const [method, path, service] of routes) {
       const response = await app.request(path, { method, body: method === "POST" ? "{}" : null });
@@ -2271,6 +2273,24 @@ describe("canonical Hono API", () => {
     expect(disconnect).toHaveBeenCalledWith(actor, "gint_abc123");
   });
 
+  it("forwards standing action permissions through the authenticated command", async () => {
+    const alwaysAllowAction = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), {
+      integrationAccounts: integrationAccountService({ alwaysAllowAction }),
+    });
+
+    const response = await app.request("/v1/actions/gmail.send_email/permissions/always-allow", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: { actionId: "gmail.send_email", state: "allowed" },
+      meta: { apiVersion: "v1" },
+    });
+    expect(alwaysAllowAction).toHaveBeenCalledWith(actor, "gmail.send_email");
+  });
+
   it("routes provider connect commands and never echoes the submitted key", async () => {
     const secretKey = "rk_test_supersecretstripekey000";
     const connectStripe = vi.fn(async () => ({
@@ -3333,6 +3353,9 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     },
     setCapabilityMode: async () => {
       throw new Error("Unexpected capability mode mutation.");
+    },
+    alwaysAllowAction: async () => {
+      throw new Error("Unexpected standing permission mutation.");
     },
     connectAttio: async () => {
       throw new Error("Unexpected Attio connect.");

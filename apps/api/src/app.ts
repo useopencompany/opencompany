@@ -1895,6 +1895,13 @@ export function createApiApp(input: CreateApiAppInput) {
         200,
       );
     },
+    alwaysAllowAction: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const actionId = c.req.valid("param").actionId;
+      await input.integrationAccounts.alwaysAllowAction(actor, actionId);
+      return c.json({ data: { actionId, state: "allowed" as const }, meta }, 200);
+    },
     deleteIntegrationAccount: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
@@ -2309,10 +2316,11 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/x-account/callback", (c) => ingress.callback(c.req.raw));
   }
   if (input.slackBotIngress) {
-    // Only the Slack bot OAuth flow moved; the bot events webhook stays in web.
     const ingress = input.slackBotIngress;
     app.get("/integrations/slack-bot/start", (c) => ingress.start(c.req.raw));
     app.get("/integrations/slack-bot/callback", (c) => ingress.callback(c.req.raw));
+    app.use("/webhooks/slack-bot/events", ingressBodyLimit(1024 * 1024));
+    app.post("/webhooks/slack-bot/events", (c) => ingress.webhook(c.req.raw));
   }
   if (input.stripeIngress) {
     app.use("/webhooks/stripe", ingressBodyLimit(1024 * 1024));

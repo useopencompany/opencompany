@@ -162,7 +162,7 @@ const app = createApiApp({
   userSettings: createUserSettingsService({ db: database.db }),
   feedback: createFeedbackService({ db: database.db }),
   repoConfigs: createRepoConfigService({ db: database.db }),
-  integrationAccounts: createIntegrationAccountService({ db: database.db }),
+  integrationAccounts: createIntegrationAccountService({ db: database.db, runner: runnerClient }),
   billing: createGoatBillingApplicationService({
     db: database.db,
     stripe,
@@ -190,7 +190,11 @@ const app = createApiApp({
   jamieIngress: createJamieIngress({ db: database.db }),
   mcpOAuthIngress: createMcpOAuthIngress({ db: database.db, identify: identityVerifier }),
   xAccountIngress: createXAccountIngress({ db: database.db, identify: identityVerifier }),
-  slackBotIngress: createSlackBotIngress({ db: database.db, identify: identityVerifier }),
+  slackBotIngress: createSlackBotIngress({
+    db: database.db,
+    identify: identityVerifier,
+    runner: runnerClient,
+  }),
   stripeIngress: createStripeIngress({
     db: database.db,
     stripe,

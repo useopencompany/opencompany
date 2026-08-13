@@ -1,6 +1,7 @@
 import { createRoute, OpenAPIHono, type RouteHandler, z } from "@hono/zod-openapi";
 import { RunStreamEventSchema } from "./events";
 import {
+  ActionPermissionEnvelopeSchema,
   AddWikiTimelineEntryBodySchema,
   ArchiveVersionBodySchema,
   AttachmentUploadBodySchema,
@@ -2537,6 +2538,22 @@ export const setIntegrationCapabilityModeRoute = createRoute({
   },
 });
 
+export const alwaysAllowActionRoute = createRoute({
+  method: "post",
+  path: "/v1/actions/{actionId}/permissions/always-allow",
+  tags: ["Approvals"],
+  security: actorSecurity,
+  request: { params: z.object({ actionId: z.string().min(1).max(255) }) },
+  responses: {
+    200: {
+      description:
+        "Persist the standing permission represented by an action approval. The action catalog is re-resolved for the authenticated actor and workspace.",
+      content: { "application/json": { schema: ActionPermissionEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const deleteIntegrationAccountRoute = createRoute({
   method: "delete",
   path: "/v1/integration-accounts/{integrationId}",
@@ -2984,6 +3001,7 @@ export type V1RouteHandlers = {
   saveJamieApiKey: RouteHandler<typeof saveJamieApiKeyRoute>;
   getIntegrationAccountUsage: RouteHandler<typeof getIntegrationAccountUsageRoute>;
   setIntegrationCapabilityMode: RouteHandler<typeof setIntegrationCapabilityModeRoute>;
+  alwaysAllowAction: RouteHandler<typeof alwaysAllowActionRoute>;
   deleteIntegrationAccount: RouteHandler<typeof deleteIntegrationAccountRoute>;
   getClaudeCodeAuth: RouteHandler<typeof getClaudeCodeAuthRoute>;
   saveClaudeCodeToken: RouteHandler<typeof saveClaudeCodeTokenRoute>;
@@ -3151,6 +3169,7 @@ export function createV1Router(
       .openapi(saveJamieApiKeyRoute, handlers.saveJamieApiKey)
       .openapi(getIntegrationAccountUsageRoute, handlers.getIntegrationAccountUsage)
       .openapi(setIntegrationCapabilityModeRoute, handlers.setIntegrationCapabilityMode)
+      .openapi(alwaysAllowActionRoute, handlers.alwaysAllowAction)
       .openapi(deleteIntegrationAccountRoute, handlers.deleteIntegrationAccount)
       .openapi(getClaudeCodeAuthRoute, handlers.getClaudeCodeAuth)
       .openapi(saveClaudeCodeTokenRoute, handlers.saveClaudeCodeToken)
@@ -4273,6 +4292,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  alwaysAllowAction: (c) =>
+    c.json({ data: { actionId: "gmail.send_email", state: "allowed" as const }, meta }, 200),
   deleteIntegrationAccount: (c) =>
     c.json({ data: { integrationId: "gint_contract", deleted: true as const }, meta }, 200),
   getClaudeCodeAuth: (c) =>

@@ -2855,6 +2855,19 @@ export const IntegrationCapabilityModeEnvelopeSchema = z
   .strict()
   .openapi("IntegrationCapabilityModeEnvelope");
 
+export const ActionPermissionEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        actionId: z.string().min(1).max(255),
+        state: z.literal("allowed"),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("ActionPermissionEnvelope");
+
 // Provider API keys arrive in request bodies over TLS, exactly as the retired
 // Server Actions received them. They never appear in any response.
 export const IntegrationApiKeyBodySchema = z
