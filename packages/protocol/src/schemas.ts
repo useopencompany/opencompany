@@ -1859,6 +1859,83 @@ export const ResolveApprovalEnvelopeSchema = z
   .strict()
   .openapi("ResolveApprovalEnvelope");
 
+export const BrowserProfileSchema = z
+  .object({
+    id: ResourceIdSchema,
+    name: z.string().min(1).max(80),
+    siteHost: z.string().min(1).max(255),
+    allowedHosts: z.array(z.string().min(1).max(255)).max(50),
+    status: z.enum(["pending_login", "connected", "needs_reauth", "disconnected"]),
+    active: z.boolean(),
+    lastUsedAt: TimestampSchema.nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("BrowserProfile");
+
+export const BrowserProfileListEnvelopeSchema = z
+  .object({ data: z.array(BrowserProfileSchema), meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BrowserProfileListEnvelope");
+
+export const BrowserProfileEnvelopeSchema = z
+  .object({ data: BrowserProfileSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BrowserProfileEnvelope");
+
+export const CreateBrowserProfileBodySchema = z
+  .object({
+    name: z.string().min(1).max(80),
+    url: z.string().min(1).max(2_048),
+  })
+  .strict()
+  .openapi("CreateBrowserProfileBody");
+
+export const BrowserProfileDeleteEnvelopeSchema = z
+  .object({
+    data: z.object({ profileId: ResourceIdSchema, deleted: z.literal(true) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrowserProfileDeleteEnvelope");
+
+export const BrowserProfileLoginSessionSchema = z
+  .object({
+    profileId: ResourceIdSchema,
+    sessionId: z.string().min(1).max(256),
+    liveViewUrl: z.url().max(4_096),
+  })
+  .strict()
+  .openapi("BrowserProfileLoginSession");
+
+export const BrowserProfileLoginSessionEnvelopeSchema = z
+  .object({ data: BrowserProfileLoginSessionSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BrowserProfileLoginSessionEnvelope");
+
+export const BrowserProfileLoginCompleteEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        profileId: ResourceIdSchema,
+        sessionId: z.string().min(1).max(256),
+        completed: z.literal(true),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrowserProfileLoginCompleteEnvelope");
+
+export const BrowserProfileLiveViewEnvelopeSchema = z
+  .object({
+    data: z.object({ url: z.url().max(4_096) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrowserProfileLiveViewEnvelope");
+
 export type ConversationDto = z.infer<typeof ConversationSchema>;
 export type UpdateConversationBody = z.infer<typeof UpdateConversationBodySchema>;
 export type MessageDto = z.infer<typeof MessageSchema>;
@@ -1934,4 +2011,7 @@ export type AttachmentUploadEnvelope = z.infer<typeof AttachmentUploadEnvelopeSc
 export type CreateMessageBody = z.infer<typeof CreateMessageBodySchema>;
 export type CreateTaskBody = z.infer<typeof CreateTaskBodySchema>;
 export type UpdateTaskBody = z.infer<typeof UpdateTaskBodySchema>;
+export type BrowserProfileDto = z.infer<typeof BrowserProfileSchema>;
+export type CreateBrowserProfileBody = z.infer<typeof CreateBrowserProfileBodySchema>;
+export type BrowserProfileLoginSessionDto = z.infer<typeof BrowserProfileLoginSessionSchema>;
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelopeSchema>;

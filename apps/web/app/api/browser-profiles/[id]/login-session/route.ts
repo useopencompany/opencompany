@@ -1,23 +1,11 @@
-import { currentGoatUser } from "@/lib/auth";
-import { createLoginSession } from "@/lib/browser-profiles";
+import { legacyCreateBrowserProfileLoginSession } from "@/lib/browser-profile-route-adapter";
 
-export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const context = await currentGoatUser({ optional: true });
-  if (!context) return new Response(null, { status: 401 });
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-  try {
-    const { id } = await params;
-    const session = await createLoginSession({
-      userWorkosId: context.user.workosUserId,
-      profileId: id,
-    });
-    return Response.json(session);
-  } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "Could not create login session.",
-      },
-      { status: 400 },
-    );
-  }
+// Temporary rollback/cached-client bridge; the canonical API owns browser
+// profiles. Removal signal: the #1203 compatibility observation-window closure.
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  return legacyCreateBrowserProfileLoginSession(request, id);
 }

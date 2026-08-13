@@ -38,6 +38,17 @@ services:
       # Canonical Auto model classification. Kept server-side in prod `/api`.
       - key: VERCEL_AI_GATEWAY_API_KEY
         sync: false
+      # Browser profiles moved behind /v1 in the #1203 3e cutover. The feature is
+      # flag-gated; the Browserbase credentials are only exercised when
+      # GOAT_BROWSER_PROFILES_ENABLED is "true".
+      - key: GOAT_BROWSER_PROFILES_ENABLED
+        sync: false
+      - key: GOAT_BROWSER_PROFILES_KILL_SWITCH
+        sync: false
+      - key: BROWSERBASE_API_KEY
+        sync: false
+      - key: BROWSERBASE_PROJECT_ID
+        sync: false
       - key: BLOB_READ_WRITE_TOKEN
         sync: false
       - key: ELECTRIC_URL
