@@ -35,6 +35,13 @@ import {
 import type { GoatBrainImportApplicationService } from "@opencompany/goat-agent/brain-imports";
 import type { GoatBrainSourceApplicationService } from "@opencompany/goat-agent/brain-sources";
 import type { GoatBrowserProfileApplicationService } from "@opencompany/goat-agent/browser-profiles/service";
+import type {
+  GoatAttioProviderState,
+  GoatFathomProviderState,
+  GoatGranolaProviderState,
+  GoatImessageProviderState,
+  GoatStripeProviderState,
+} from "@opencompany/goat-agent/integration-state";
 import { GOAT_SPANS, withGoatSpan } from "@opencompany/goat-observability";
 import { captureException, createLogger } from "@opencompany/observability";
 import {
@@ -65,6 +72,7 @@ import type { FeedbackService } from "./feedback";
 import type { GitHubIngressService } from "./github-ingress";
 import type { GoogleIngressService } from "./google-ingress";
 import type { HubspotIngressService } from "./hubspot-ingress";
+import type { IntegrationAccountService } from "./integration-accounts";
 import type { JamieIngressService } from "./jamie-ingress";
 import type { LinearIngressService } from "./linear-ingress";
 import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
@@ -123,6 +131,7 @@ export type CreateApiAppInput = {
   userSettings: UserSettingsService;
   feedback: FeedbackService;
   repoConfigs: RepoConfigService;
+  integrationAccounts: IntegrationAccountService;
   authenticate: ApiAuthenticator;
   browserOrigins?: readonly string[];
   githubIngress?: GitHubIngressService;
@@ -1384,6 +1393,124 @@ export function createApiApp(input: CreateApiAppInput) {
       await input.repoConfigs.remove(actor, repositoryExternalId);
       return c.json({ data: { repositoryExternalId, deleted: true as const }, meta }, 200);
     },
+    connectAttioAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.connectAttio(actor, c.req.valid("json").apiKey);
+      return c.json({ data: { state: attioStateDto(state) }, meta }, 200);
+    },
+    disconnectAttioAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const integrationId = c.req.valid("param").integrationId;
+      await input.integrationAccounts.disconnectAttio(actor, integrationId);
+      return c.json({ data: { integrationId, deleted: true as const }, meta }, 200);
+    },
+    connectFathomAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.connectFathom(
+        actor,
+        c.req.valid("json").apiKey,
+      );
+      return c.json({ data: { state: fathomStateDto(state) }, meta }, 200);
+    },
+    connectGranolaAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.connectGranola(
+        actor,
+        c.req.valid("json").apiKey,
+      );
+      return c.json({ data: { state: granolaStateDto(state) }, meta }, 200);
+    },
+    startImessagePairing: async (c) => {
+      const actor = actorFrom(c);
+      // Pairing sends a real text message, so it gets its own small bucket
+      // instead of sharing the general write counter.
+      await enforceRateLimit(rateLimiter, actor, "imessage-pairing", 5);
+      await input.integrationAccounts.startImessagePairing(actor, c.req.valid("json").phone);
+      return c.json({ data: { started: true as const }, meta }, 200);
+    },
+    confirmImessagePairing: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.confirmImessagePairing(
+        actor,
+        c.req.valid("json").code,
+      );
+      return c.json({ data: { state: imessageStateDto(state) }, meta }, 200);
+    },
+    connectStripeAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.connectStripe(
+        actor,
+        c.req.valid("json").apiKey,
+      );
+      return c.json({ data: { state: stripeStateDto(state) }, meta }, 200);
+    },
+    disconnectStripeAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.integrationAccounts.disconnectStripe(actor);
+      return c.json({ data: { deleted: true as const }, meta }, 200);
+    },
+    createJamieWebhookEndpoint: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const setup = await input.integrationAccounts.createOrResetJamieWebhookEndpoint(actor);
+      return c.json({ data: { setup }, meta }, 200);
+    },
+    saveJamieApiKey: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const setup = await input.integrationAccounts.saveJamieWebhookApiKey(
+        actor,
+        c.req.valid("json").apiKey,
+      );
+      return c.json({ data: { setup }, meta }, 200);
+    },
+    getIntegrationAccountUsage: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const usage = await input.integrationAccounts.getUsage(
+        actor,
+        c.req.valid("param").integrationId,
+      );
+      return c.json({ data: usage, meta }, 200);
+    },
+    setIntegrationCapabilityMode: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const mode = c.req.valid("json").mode;
+      await input.integrationAccounts.setCapabilityMode(
+        actor,
+        params.integrationId,
+        params.capabilityId,
+        mode,
+      );
+      return c.json(
+        {
+          data: {
+            integrationId: params.integrationId,
+            capabilityId: params.capabilityId,
+            // The service rejects anything outside the mode vocabulary.
+            mode: mode as "on" | "ask" | "off",
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    deleteIntegrationAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const integrationId = c.req.valid("param").integrationId;
+      await input.integrationAccounts.disconnect(actor, integrationId);
+      return c.json({ data: { integrationId, deleted: true as const }, meta }, 200);
+    },
   };
 
   const app = createV1Router(handlers, {
@@ -1950,6 +2077,73 @@ function repoConfigDto(config: {
     envKeys: config.envKeys,
     setupInstructions: config.setupInstructions,
     updatedAt: config.updatedAt.toISOString(),
+  };
+}
+
+// The shared provider-state types include "disconnected", but state loaders
+// filter those rows out; the protocol contract therefore omits it and any
+// straggler collapses to "not_connected".
+function integrationAccountStatusDto(
+  status: GoatAttioProviderState["status"],
+): "not_connected" | "connected" | "needs_reauth" | "sync_failed" {
+  return status === "disconnected" ? "not_connected" : status;
+}
+
+function attioStateDto(state: GoatAttioProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    workspaceName: state.workspaceName,
+    statusReason: state.statusReason,
+  };
+}
+
+function fathomStateDto(state: GoatFathomProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    accountEmail: state.accountEmail,
+    accountName: state.accountName,
+    statusReason: state.statusReason,
+  };
+}
+
+function granolaStateDto(state: GoatGranolaProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    accountEmail: state.accountEmail,
+    accountName: state.accountName,
+    statusReason: state.statusReason,
+  };
+}
+
+function imessageStateDto(state: GoatImessageProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    phoneE164: state.phoneE164,
+    statusReason: state.statusReason,
+  };
+}
+
+function stripeStateDto(state: GoatStripeProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    accountName: state.accountName,
+    livemode: state.livemode,
+    statusReason: state.statusReason,
   };
 }
 

@@ -1,15 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
 import type { GoatStripeProviderState } from "@/lib/integration-state";
-import {
-  connectGoatStripeIntegration,
-  disconnectGoatStripeIntegration,
-  getGoatStripeIntegrationState,
-  isValidGoatStripeRestrictedApiKey,
-  validateGoatStripeRestrictedApiKey,
-} from "@/lib/integrations/stripe";
+import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
 export type StripeConnectActionResult =
   | { ok: true; state: GoatStripeProviderState }
@@ -18,37 +11,25 @@ export type StripeConnectActionResult =
 export async function saveStripeRestrictedApiKeyAction(
   apiKey: string,
 ): Promise<StripeConnectActionResult> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can manage the Stripe integration." };
-  }
-
-  if (typeof apiKey !== "string") {
+  if (typeof apiKey !== "string" || !apiKey.trim()) {
     return { ok: false, error: "Enter a restricted Stripe API key." };
   }
-  const trimmed = apiKey.trim();
-  if (!isValidGoatStripeRestrictedApiKey(trimmed)) {
-    return {
-      ok: false,
-      error:
-        "Use a restricted Stripe key beginning with rk_test_ or rk_live_. Unrestricted sk_ keys are not accepted.",
-    };
-  }
-
   try {
-    const validation = await validateGoatStripeRestrictedApiKey(trimmed);
-    if (!validation.ok) return validation;
-    await connectGoatStripeIntegration({
-      userWorkosId: context.user.workosUserId,
-      workspaceId: context.workspace.id,
-      apiKey: trimmed,
-      identity: validation.identity,
+    const response = await (await serverApiClient()).v1["integration-accounts"].stripe.$put({
+      json: { apiKey },
     });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(
+          response,
+          "Could not connect Stripe. Check the restricted key and try again.",
+        ),
+      };
+    }
+    const data = (await response.json()).data as { state: GoatStripeProviderState };
     revalidatePath("/", "layout");
-    return {
-      ok: true,
-      state: await getGoatStripeIntegrationState(context.workspace.id),
-    };
+    return { ok: true, state: data.state };
   } catch (error) {
     console.error("[goat-stripe] Failed to save Stripe restricted key", {
       error: error instanceof Error ? error.message : String(error),
@@ -63,13 +44,14 @@ export async function saveStripeRestrictedApiKeyAction(
 export async function disconnectStripeIntegrationAction(): Promise<
   { ok: true } | { ok: false; error: string }
 > {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can manage the Stripe integration." };
-  }
   try {
-    const disconnected = await disconnectGoatStripeIntegration(context.workspace.id);
-    if (!disconnected) return { ok: false, error: "Stripe is not connected." };
+    const response = await (await serverApiClient()).v1["integration-accounts"].stripe.$delete();
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not disconnect Stripe."),
+      };
+    }
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {

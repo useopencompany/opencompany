@@ -1,0 +1,162 @@
+import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { saveAttioApiKeyAction } from "./attio-actions";
+import { confirmImessagePairingAction, startImessagePairingAction } from "./imessage-actions";
+import {
+  createOrResetJamieWebhookEndpointAction,
+  saveJamieWebhookApiKeyAction,
+} from "./jamie-actions";
+import {
+  disconnectStripeIntegrationAction,
+  saveStripeRestrictedApiKeyAction,
+} from "./stripe-actions";
+
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/headers", () => ({ headers: vi.fn() }));
+
+const meta = { apiVersion: "v1", protocolVersion: "1.0.0" };
+
+function stubApi(response: () => Response) {
+  const requests: Request[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      requests.push(input instanceof Request ? input : new Request(input, init));
+      return response();
+    }),
+  );
+  return requests;
+}
+
+function errorEnvelope(message: string, status: number) {
+  return Response.json(
+    {
+      error: { code: "invalid_request", message, requestId: "request_1", retryable: false },
+      meta,
+    },
+    { status },
+  ) as Response;
+}
+
+describe("provider account command adapters", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
+    vi.mocked(headers).mockResolvedValue(
+      new Headers({ Cookie: "wos-session=sealed", Origin: "https://app.example.test" }) as never,
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("connects Attio through PUT and returns the refreshed state", async () => {
+    const state = {
+      provider: "attio",
+      connected: true,
+      status: "connected",
+      integrationId: "gint_attio",
+      workspaceName: "Acme",
+      statusReason: null,
+    };
+    const requests = stubApi(() => Response.json({ data: { state }, meta }));
+
+    await expect(saveAttioApiKeyAction("attio-key-1234567890")).resolves.toEqual({
+      ok: true,
+      state,
+    });
+    const request = requests[0] as Request;
+    expect(request.method).toBe("PUT");
+    expect(new URL(request.url).pathname).toBe("/v1/integration-accounts/attio");
+    await expect(request.json()).resolves.toEqual({ apiKey: "attio-key-1234567890" });
+    expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
+  });
+
+  it("surfaces API validation copy for rejected keys without revalidating", async () => {
+    stubApi(() => errorEnvelope("Attio rejected this API key. Check it and try again.", 400));
+
+    await expect(saveAttioApiKeyAction("attio-key-1234567890")).resolves.toEqual({
+      ok: false,
+      error: "Attio rejected this API key. Check it and try again.",
+    });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("starts iMessage pairing without revalidating and confirms with state", async () => {
+    const requests = stubApi(() => Response.json({ data: { started: true }, meta }));
+    await expect(startImessagePairingAction("+14155551234")).resolves.toEqual({ ok: true });
+    expect(new URL((requests[0] as Request).url).pathname).toBe(
+      "/v1/integration-accounts/imessage/pairing",
+    );
+    expect(revalidatePath).not.toHaveBeenCalled();
+
+    const state = {
+      provider: "imessage",
+      connected: true,
+      status: "connected",
+      integrationId: "gint_imsg",
+      phoneE164: "+14155551234",
+      statusReason: null,
+    };
+    const confirmRequests = stubApi(() => Response.json({ data: { state }, meta }));
+    await expect(confirmImessagePairingAction("123456")).resolves.toEqual({ ok: true, state });
+    expect(new URL((confirmRequests[0] as Request).url).pathname).toBe(
+      "/v1/integration-accounts/imessage/pairing/confirm",
+    );
+    expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
+  });
+
+  it("keeps the retired admin-only Stripe copy from the API envelope", async () => {
+    stubApi(() =>
+      Response.json(
+        {
+          error: {
+            code: "forbidden",
+            message: "Only workspace admins can manage the Stripe integration.",
+            requestId: "request_1",
+            retryable: false,
+          },
+          meta,
+        },
+        { status: 403 },
+      ),
+    );
+
+    await expect(saveStripeRestrictedApiKeyAction("rk_test_abcdefabcdefabcdef")).resolves.toEqual({
+      ok: false,
+      error: "Only workspace admins can manage the Stripe integration.",
+    });
+  });
+
+  it("disconnects Stripe through the static provider path", async () => {
+    const requests = stubApi(() => Response.json({ data: { deleted: true }, meta }));
+    await expect(disconnectStripeIntegrationAction()).resolves.toEqual({ ok: true });
+    const request = requests[0] as Request;
+    expect(request.method).toBe("DELETE");
+    expect(new URL(request.url).pathname).toBe("/v1/integration-accounts/stripe");
+    expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
+  });
+
+  it("returns the Jamie webhook setup exactly as the API delivers it", async () => {
+    const setup = {
+      integrationId: "gint_jamie",
+      webhookUrl: "https://app.example.test/api/webhooks/jamie",
+      headerName: "x-api-key",
+      apiKeyConfigured: false,
+    };
+    const requests = stubApi(() => Response.json({ data: { setup }, meta }));
+    await expect(createOrResetJamieWebhookEndpointAction()).resolves.toEqual({ ok: true, setup });
+    expect(new URL((requests[0] as Request).url).pathname).toBe(
+      "/v1/integration-accounts/jamie/webhook-endpoint",
+    );
+
+    stubApi(() => errorEnvelope("Create a Jamie webhook endpoint before saving the API key.", 400));
+    await expect(saveJamieWebhookApiKeyAction("sk_x")).resolves.toEqual({
+      ok: false,
+      error: "Create a Jamie webhook endpoint before saving the API key.",
+    });
+  });
+});

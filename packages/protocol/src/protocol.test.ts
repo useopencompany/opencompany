@@ -83,6 +83,18 @@ describe("headless protocol", () => {
       "/v1/repo-configs/{repositoryExternalId}/env",
       "/v1/repo-configs/{repositoryExternalId}/setup",
       "/v1/repo-configs/{repositoryExternalId}",
+      "/v1/integration-accounts/attio",
+      "/v1/integration-accounts/attio/{integrationId}",
+      "/v1/integration-accounts/fathom",
+      "/v1/integration-accounts/granola",
+      "/v1/integration-accounts/imessage/pairing",
+      "/v1/integration-accounts/imessage/pairing/confirm",
+      "/v1/integration-accounts/stripe",
+      "/v1/integration-accounts/jamie/webhook-endpoint",
+      "/v1/integration-accounts/jamie/api-key",
+      "/v1/integration-accounts/{integrationId}/usage",
+      "/v1/integration-accounts/{integrationId}/capability-modes/{capabilityId}",
+      "/v1/integration-accounts/{integrationId}",
     ]);
     expect(document.components?.securitySchemes).toHaveProperty("bearerAuth");
   });

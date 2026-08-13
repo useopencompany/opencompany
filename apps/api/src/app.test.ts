@@ -95,6 +95,7 @@ describe("canonical Hono API", () => {
       userSettings: fakeUserSettings(),
       feedback: fakeFeedback(),
       repoConfigs: fakeRepoConfigs(),
+      integrationAccounts: fakeIntegrationAccounts(),
       authenticate: async () => {
         throw new ApiError(401, "authentication_required", "Authentication required.");
       },
@@ -1910,6 +1911,156 @@ describe("canonical Hono API", () => {
       },
     });
   });
+
+  it("serves the integration account control plane through typed commands", async () => {
+    const getUsage = vi.fn(async () => ({ affectedBrainSourceCount: 3 }));
+    const disconnect = vi.fn(async () => undefined);
+    const setCapabilityMode = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), {
+      integrationAccounts: integrationAccountService({
+        getUsage,
+        disconnect,
+        setCapabilityMode,
+      }),
+    });
+
+    const usage = await app.request("/v1/integration-accounts/gint_abc123/usage");
+    expect(usage.status).toBe(200);
+    await expect(usage.json()).resolves.toMatchObject({
+      data: { affectedBrainSourceCount: 3 },
+      meta: { apiVersion: "v1" },
+    });
+    expect(getUsage).toHaveBeenCalledWith(actor, "gint_abc123");
+
+    const mode = await app.request("/v1/integration-accounts/gint_abc123/capability-modes/write", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "ask" }),
+    });
+    expect(mode.status).toBe(200);
+    await expect(mode.json()).resolves.toMatchObject({
+      data: { integrationId: "gint_abc123", capabilityId: "write", mode: "ask" },
+    });
+    expect(setCapabilityMode).toHaveBeenCalledWith(actor, "gint_abc123", "write", "ask");
+
+    const removed = await app.request("/v1/integration-accounts/gint_abc123", {
+      method: "DELETE",
+    });
+    expect(removed.status).toBe(200);
+    await expect(removed.json()).resolves.toMatchObject({
+      data: { integrationId: "gint_abc123", deleted: true },
+    });
+    expect(disconnect).toHaveBeenCalledWith(actor, "gint_abc123");
+  });
+
+  it("routes provider connect commands and never echoes the submitted key", async () => {
+    const secretKey = "rk_test_supersecretstripekey000";
+    const connectStripe = vi.fn(async () => ({
+      provider: "stripe" as const,
+      connected: true,
+      status: "connected" as const,
+      integrationId: "gint_stripe",
+      accountName: "Acme",
+      livemode: false,
+      statusReason: null,
+    }));
+    const disconnectStripe = vi.fn(async () => undefined);
+    const connectAttio = vi.fn(async () => ({
+      provider: "attio" as const,
+      connected: true,
+      status: "connected" as const,
+      integrationId: "gint_attio",
+      workspaceName: "Acme CRM",
+      statusReason: null,
+    }));
+    const app = testApp(fakeRepository(), {
+      integrationAccounts: integrationAccountService({
+        connectStripe,
+        disconnectStripe,
+        connectAttio,
+      }),
+    });
+
+    const stripe = await app.request("/v1/integration-accounts/stripe", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: secretKey }),
+    });
+    expect(stripe.status).toBe(200);
+    const stripeBody = await stripe.json();
+    expect(JSON.stringify(stripeBody)).not.toContain(secretKey);
+    expect(stripeBody).toMatchObject({
+      data: { state: { provider: "stripe", connected: true, livemode: false } },
+    });
+    expect(connectStripe).toHaveBeenCalledWith(actor, secretKey);
+
+    // The static provider path must win over DELETE /{integrationId}.
+    const stripeRemoved = await app.request("/v1/integration-accounts/stripe", {
+      method: "DELETE",
+    });
+    expect(stripeRemoved.status).toBe(200);
+    await expect(stripeRemoved.json()).resolves.toMatchObject({ data: { deleted: true } });
+    expect(disconnectStripe).toHaveBeenCalledWith(actor);
+
+    const attio = await app.request("/v1/integration-accounts/attio", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: "attio-api-key-1234567890" }),
+    });
+    expect(attio.status).toBe(200);
+    await expect(attio.json()).resolves.toMatchObject({
+      data: { state: { provider: "attio", workspaceName: "Acme CRM" } },
+    });
+  });
+
+  it("gives iMessage pairing starts their own small rate bucket", async () => {
+    const startImessagePairing = vi.fn(async () => undefined);
+    const buckets: string[] = [];
+    const rateLimiter: ApiRateLimiter = {
+      consume: async ({ bucket, limit }) => {
+        buckets.push(`${bucket}:${limit}`);
+        return { allowed: true };
+      },
+    };
+    const app = testApp(fakeRepository(), {
+      integrationAccounts: integrationAccountService({ startImessagePairing }),
+      rateLimiter,
+    });
+
+    const started = await app.request("/v1/integration-accounts/imessage/pairing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: "+14155551234" }),
+    });
+    expect(started.status).toBe(200);
+    await expect(started.json()).resolves.toMatchObject({ data: { started: true } });
+    expect(startImessagePairing).toHaveBeenCalledWith(actor, "+14155551234");
+    expect(buckets).toEqual(["imessage-pairing:5"]);
+  });
+
+  it("surfaces integration account service errors as protocol envelopes", async () => {
+    const app = testApp(fakeRepository(), {
+      integrationAccounts: integrationAccountService({
+        disconnect: async () => {
+          throw new ApiError(
+            404,
+            "not_found",
+            "Only the connection owner can manage this account.",
+          );
+        },
+      }),
+    });
+    const response = await app.request("/v1/integration-accounts/gint_other", {
+      method: "DELETE",
+    });
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "not_found",
+        message: "Only the connection owner can manage this account.",
+      },
+    });
+  });
 });
 
 function testApp(
@@ -1930,6 +2081,7 @@ function testApp(
     userSettings: fakeUserSettings(),
     feedback: fakeFeedback(),
     repoConfigs: fakeRepoConfigs(),
+    integrationAccounts: fakeIntegrationAccounts(),
     authenticate: async () => ({ actor }),
     defaultModel: "provider/default",
     ...overrides,
@@ -2042,6 +2194,56 @@ function fakeRepoConfigs(): Parameters<typeof createApiApp>[0]["repoConfigs"] {
       throw new Error("Unexpected repository config removal.");
     },
   };
+}
+
+function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrationAccounts"] {
+  return {
+    getUsage: async () => {
+      throw new Error("Unexpected integration account usage read.");
+    },
+    disconnect: async () => {
+      throw new Error("Unexpected integration account disconnect.");
+    },
+    setCapabilityMode: async () => {
+      throw new Error("Unexpected capability mode mutation.");
+    },
+    connectAttio: async () => {
+      throw new Error("Unexpected Attio connect.");
+    },
+    disconnectAttio: async () => {
+      throw new Error("Unexpected Attio disconnect.");
+    },
+    connectFathom: async () => {
+      throw new Error("Unexpected Fathom connect.");
+    },
+    connectGranola: async () => {
+      throw new Error("Unexpected Granola connect.");
+    },
+    startImessagePairing: async () => {
+      throw new Error("Unexpected iMessage pairing start.");
+    },
+    confirmImessagePairing: async () => {
+      throw new Error("Unexpected iMessage pairing confirm.");
+    },
+    connectStripe: async () => {
+      throw new Error("Unexpected Stripe connect.");
+    },
+    disconnectStripe: async () => {
+      throw new Error("Unexpected Stripe disconnect.");
+    },
+    createOrResetJamieWebhookEndpoint: async () => {
+      throw new Error("Unexpected Jamie webhook endpoint mutation.");
+    },
+    saveJamieWebhookApiKey: async () => {
+      throw new Error("Unexpected Jamie API key mutation.");
+    },
+  };
+}
+
+function integrationAccountService(
+  overrides: Partial<Parameters<typeof createApiApp>[0]["integrationAccounts"]>,
+): Parameters<typeof createApiApp>[0]["integrationAccounts"] {
+  return { ...fakeIntegrationAccounts(), ...overrides };
 }
 
 function fakeBrainSources(): Parameters<typeof createApiApp>[0]["brainSources"] {

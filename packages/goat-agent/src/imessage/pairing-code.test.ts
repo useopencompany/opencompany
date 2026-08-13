@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  hashGoatImessagePairingCode,
-  verifyGoatImessagePairingCode,
-} from "@/lib/integrations/imessage-pairing-code";
+import { hashGoatImessagePairingCode, verifyGoatImessagePairingCode } from "./pairing-code";
 
 const secret = "test-secret-with-enough-entropy-for-hmac";
 

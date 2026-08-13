@@ -5,6 +5,7 @@ import {
   ArchiveVersionBodySchema,
   AttachmentUploadBodySchema,
   AttachmentUploadEnvelopeSchema,
+  AttioAccountStateEnvelopeSchema,
   BrainAssetMutationEnvelopeSchema,
   BrainAssetReplaceBodySchema,
   BrainAssetUploadBodySchema,
@@ -29,6 +30,7 @@ import {
   BrowserProfileLoginSessionEnvelopeSchema,
   CancelRunEnvelopeSchema,
   ConfirmBrainImportBodySchema,
+  ConfirmImessagePairingBodySchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
   CreateBrainDocumentBodySchema,
@@ -46,9 +48,19 @@ import {
   DeleteBrainFolderBodySchema,
   DeleteWikiPageBodySchema,
   ErrorEnvelopeSchema,
+  FathomAccountStateEnvelopeSchema,
   FeedbackSubmissionEnvelopeSchema,
+  GranolaAccountStateEnvelopeSchema,
+  ImessageAccountStateEnvelopeSchema,
+  ImessagePairingStartedEnvelopeSchema,
   ImportSkillBodySchema,
+  IntegrationAccountDeleteEnvelopeSchema,
+  IntegrationAccountIdSchema,
+  IntegrationAccountUsageEnvelopeSchema,
+  IntegrationApiKeyBodySchema,
+  IntegrationCapabilityModeEnvelopeSchema,
   InvokeWorkflowBodySchema,
+  JamieWebhookSetupEnvelopeSchema,
   LegacyTaskHistoryEnvelopeSchema,
   LegacyTaskPageSchema,
   McpSetupEnvelopeSchema,
@@ -66,6 +78,7 @@ import {
   ResourceIdSchema,
   RunEnvelopeSchema,
   SetBrainSourceBodySchema,
+  SetIntegrationCapabilityModeBodySchema,
   SetRepoConfigEnvBodySchema,
   SetRepoConfigSetupBodySchema,
   SkillArchiveEnvelopeSchema,
@@ -76,6 +89,9 @@ import {
   SkillImportPreviewEnvelopeSchema,
   SkillListEnvelopeSchema,
   StartBrainImportBodySchema,
+  StartImessagePairingBodySchema,
+  StripeAccountDeleteEnvelopeSchema,
+  StripeAccountStateEnvelopeSchema,
   SubmitFeedbackBodySchema,
   TaskEnvelopeSchema,
   TaskPageSchema,
@@ -1581,6 +1597,253 @@ export const deleteRepoConfigRoute = createRoute({
   },
 });
 
+// Provider account commands (#1203 5a2). Static provider paths are registered
+// before the generic {integrationId} routes so they always win route matching.
+
+export const connectAttioAccountRoute = createRoute({
+  method: "put",
+  path: "/v1/integration-accounts/attio",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: IntegrationApiKeyBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        "Attio connected (or reconnected) for the acting user, including the Attio-side webhook registration. The key never appears in the response.",
+      content: { "application/json": { schema: AttioAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const disconnectAttioAccountRoute = createRoute({
+  method: "delete",
+  path: "/v1/integration-accounts/attio/{integrationId}",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: { params: z.object({ integrationId: IntegrationAccountIdSchema }) },
+  responses: {
+    200: {
+      description:
+        "Attio connection removed. The Attio-side webhook is deleted best-effort before the account disconnect.",
+      content: { "application/json": { schema: IntegrationAccountDeleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const connectFathomAccountRoute = createRoute({
+  method: "put",
+  path: "/v1/integration-accounts/fathom",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: IntegrationApiKeyBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Fathom connected for the acting user.",
+      content: { "application/json": { schema: FathomAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const connectGranolaAccountRoute = createRoute({
+  method: "put",
+  path: "/v1/integration-accounts/granola",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: IntegrationApiKeyBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Granola connected for the acting user.",
+      content: { "application/json": { schema: GranolaAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const startImessagePairingRoute = createRoute({
+  method: "post",
+  path: "/v1/integration-accounts/imessage/pairing",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: StartImessagePairingBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "A verification code was sent to the provided phone number.",
+      content: { "application/json": { schema: ImessagePairingStartedEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const confirmImessagePairingRoute = createRoute({
+  method: "post",
+  path: "/v1/integration-accounts/imessage/pairing/confirm",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: ConfirmImessagePairingBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Pairing confirmed; the iMessage connection is active.",
+      content: { "application/json": { schema: ImessageAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const connectStripeAccountRoute = createRoute({
+  method: "put",
+  path: "/v1/integration-accounts/stripe",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: IntegrationApiKeyBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        "Workspace Stripe connection saved from a restricted key. Admin only; the key never appears in the response.",
+      content: { "application/json": { schema: StripeAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const disconnectStripeAccountRoute = createRoute({
+  method: "delete",
+  path: "/v1/integration-accounts/stripe",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Workspace Stripe connection removed. Admin only.",
+      content: { "application/json": { schema: StripeAccountDeleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createJamieWebhookEndpointRoute = createRoute({
+  method: "post",
+  path: "/v1/integration-accounts/jamie/webhook-endpoint",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description:
+        "Jamie webhook endpoint created or reset for the workspace. Admin only. Any previously saved API key binding is cleared.",
+      content: { "application/json": { schema: JamieWebhookSetupEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const saveJamieApiKeyRoute = createRoute({
+  method: "put",
+  path: "/v1/integration-accounts/jamie/api-key",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: IntegrationApiKeyBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        "Jamie webhook API key bound to the workspace endpoint. Admin only; only a hash is stored and the key never appears in the response.",
+      content: { "application/json": { schema: JamieWebhookSetupEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getIntegrationAccountUsageRoute = createRoute({
+  method: "get",
+  path: "/v1/integration-accounts/{integrationId}/usage",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: { params: z.object({ integrationId: IntegrationAccountIdSchema }) },
+  responses: {
+    200: {
+      description:
+        "Pre-disconnect usage so the UI can warn before removing an account that still feeds brains. Owner only.",
+      content: { "application/json": { schema: IntegrationAccountUsageEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setIntegrationCapabilityModeRoute = createRoute({
+  method: "put",
+  path: "/v1/integration-accounts/{integrationId}/capability-modes/{capabilityId}",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    params: z.object({
+      integrationId: IntegrationAccountIdSchema,
+      capabilityId: z.string().min(1).max(64),
+    }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetIntegrationCapabilityModeBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Capability mode override saved for the connection. Owner only.",
+      content: { "application/json": { schema: IntegrationCapabilityModeEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deleteIntegrationAccountRoute = createRoute({
+  method: "delete",
+  path: "/v1/integration-accounts/{integrationId}",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: { params: z.object({ integrationId: IntegrationAccountIdSchema }) },
+  responses: {
+    200: {
+      description:
+        "Personal integration account hard-deleted. Owner only. Credentials, synced resources, brain sources, and buffered events cascade away; already-ingested brain content stays.",
+      content: { "application/json": { schema: IntegrationAccountDeleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export type V1RouteHandlers = {
   listTasks: RouteHandler<typeof listTasksRoute>;
   createTask: RouteHandler<typeof createTaskRoute>;
@@ -1661,6 +1924,19 @@ export type V1RouteHandlers = {
   setRepoConfigEnv: RouteHandler<typeof setRepoConfigEnvRoute>;
   setRepoConfigSetup: RouteHandler<typeof setRepoConfigSetupRoute>;
   deleteRepoConfig: RouteHandler<typeof deleteRepoConfigRoute>;
+  connectAttioAccount: RouteHandler<typeof connectAttioAccountRoute>;
+  disconnectAttioAccount: RouteHandler<typeof disconnectAttioAccountRoute>;
+  connectFathomAccount: RouteHandler<typeof connectFathomAccountRoute>;
+  connectGranolaAccount: RouteHandler<typeof connectGranolaAccountRoute>;
+  startImessagePairing: RouteHandler<typeof startImessagePairingRoute>;
+  confirmImessagePairing: RouteHandler<typeof confirmImessagePairingRoute>;
+  connectStripeAccount: RouteHandler<typeof connectStripeAccountRoute>;
+  disconnectStripeAccount: RouteHandler<typeof disconnectStripeAccountRoute>;
+  createJamieWebhookEndpoint: RouteHandler<typeof createJamieWebhookEndpointRoute>;
+  saveJamieApiKey: RouteHandler<typeof saveJamieApiKeyRoute>;
+  getIntegrationAccountUsage: RouteHandler<typeof getIntegrationAccountUsageRoute>;
+  setIntegrationCapabilityMode: RouteHandler<typeof setIntegrationCapabilityModeRoute>;
+  deleteIntegrationAccount: RouteHandler<typeof deleteIntegrationAccountRoute>;
 };
 
 export function createV1Router(
@@ -1672,86 +1948,104 @@ export function createV1Router(
 ) {
   const app = new OpenAPIHono(options.defaultHook ? { defaultHook: options.defaultHook } : {});
   options.beforeRoutes?.(app);
-  return app
-    .openapi(listTasksRoute, handlers.listTasks)
-    .openapi(createTaskRoute, handlers.createTask)
-    .openapi(getTaskRoute, handlers.getTask)
-    .openapi(updateTaskRoute, handlers.updateTask)
-    .openapi(getTaskSummaryRoute, handlers.getTaskSummary)
-    .openapi(listLegacyTasksRoute, handlers.listLegacyTasks)
-    .openapi(getLegacyTaskHistoryRoute, handlers.getLegacyTaskHistory)
-    .openapi(listWorkflowsRoute, handlers.listWorkflows)
-    .openapi(createWorkflowRoute, handlers.createWorkflow)
-    .openapi(getWorkflowRoute, handlers.getWorkflow)
-    .openapi(updateWorkflowRoute, handlers.updateWorkflow)
-    .openapi(archiveWorkflowRoute, handlers.archiveWorkflow)
-    .openapi(invokeWorkflowRoute, handlers.invokeWorkflow)
-    .openapi(runWorkflowNowRoute, handlers.runWorkflowNow)
-    .openapi(listTaskSchedulesRoute, handlers.listTaskSchedules)
-    .openapi(createTaskScheduleRoute, handlers.createTaskSchedule)
-    .openapi(getTaskScheduleRoute, handlers.getTaskSchedule)
-    .openapi(updateTaskScheduleRoute, handlers.updateTaskSchedule)
-    .openapi(archiveTaskScheduleRoute, handlers.archiveTaskSchedule)
-    .openapi(runTaskScheduleNowRoute, handlers.runTaskScheduleNow)
-    .openapi(getBrainSnapshotRoute, handlers.getBrainSnapshot)
-    .openapi(getBrainOverviewRoute, handlers.getBrainOverview)
-    .openapi(listBrainSourceItemsRoute, handlers.listBrainSourceItems)
-    .openapi(listBrainSourcesRoute, handlers.listBrainSources)
-    .openapi(setBrainSourceRoute, handlers.setBrainSource)
-    .openapi(deleteBrainSourceRoute, handlers.deleteBrainSource)
-    .openapi(listBrowserProfilesRoute, handlers.listBrowserProfiles)
-    .openapi(createBrowserProfileRoute, handlers.createBrowserProfile)
-    .openapi(deleteBrowserProfileRoute, handlers.deleteBrowserProfile)
-    .openapi(createBrowserProfileLoginSessionRoute, handlers.createBrowserProfileLoginSession)
-    .openapi(completeBrowserProfileLoginRoute, handlers.completeBrowserProfileLogin)
-    .openapi(getBrowserProfileLiveViewRoute, handlers.getBrowserProfileLiveView)
-    .openapi(listBrainSourceOptionsRoute, handlers.listBrainSourceOptions)
-    .openapi(startBrainImportRoute, handlers.startBrainImport)
-    .openapi(confirmBrainImportRoute, handlers.confirmBrainImport)
-    .openapi(cancelBrainImportRoute, handlers.cancelBrainImport)
-    .openapi(retryBrainImportRoute, handlers.retryBrainImport)
-    .openapi(createBrainDocumentRoute, handlers.createBrainDocument)
-    .openapi(uploadBrainAssetRoute, handlers.uploadBrainAsset)
-    .openapi(replaceBrainAssetRoute, handlers.replaceBrainAsset)
-    .openapi(downloadBrainAssetRoute, handlers.downloadBrainAsset)
-    .openapi(updateBrainDocumentRoute, handlers.updateBrainDocument)
-    .openapi(renameBrainDocumentRoute, handlers.renameBrainDocument)
-    .openapi(deleteBrainDocumentRoute, handlers.deleteBrainDocument)
-    .openapi(createBrainFolderRoute, handlers.createBrainFolder)
-    .openapi(renameBrainFolderRoute, handlers.renameBrainFolder)
-    .openapi(deleteBrainFolderRoute, handlers.deleteBrainFolder)
-    .openapi(listWikiPagesRoute, handlers.listWikiPages)
-    .openapi(createWikiPageRoute, handlers.createWikiPage)
-    .openapi(updateWikiPageRoute, handlers.updateWikiPage)
-    .openapi(deleteWikiPageRoute, handlers.deleteWikiPage)
-    .openapi(addWikiTimelineEntryRoute, handlers.addWikiTimelineEntry)
-    .openapi(listSkillsRoute, handlers.listSkills)
-    .openapi(createSkillRoute, handlers.createSkill)
-    .openapi(previewSkillImportRoute, handlers.previewSkillImport)
-    .openapi(importSkillRoute, handlers.importSkill)
-    .openapi(listSkillCatalogRoute, handlers.listSkillCatalog)
-    .openapi(getSkillRoute, handlers.getSkill)
-    .openapi(updateSkillRoute, handlers.updateSkill)
-    .openapi(archiveSkillRoute, handlers.archiveSkill)
-    .openapi(listConversationsRoute, handlers.listConversations)
-    .openapi(getConversationRoute, handlers.getConversation)
-    .openapi(updateConversationRoute, handlers.updateConversation)
-    .openapi(listMessagesRoute, handlers.listMessages)
-    .openapi(createMessageRoute, handlers.createMessage)
-    .openapi(uploadAttachmentRoute, handlers.uploadAttachment)
-    .openapi(getRunRoute, handlers.getRun)
-    .openapi(streamRunEventsRoute, handlers.streamRunEvents)
-    .openapi(cancelRunRoute, handlers.cancelRun)
-    .openapi(resolveApprovalRoute, handlers.resolveApproval)
-    .openapi(streamReadModelRoute, handlers.streamReadModel)
-    .openapi(updateUserPreferencesRoute, handlers.updateUserPreferences)
-    .openapi(getMcpSetupRoute, handlers.getMcpSetup)
-    .openapi(updateMcpSetupRoute, handlers.updateMcpSetup)
-    .openapi(submitFeedbackRoute, handlers.submitFeedback)
-    .openapi(listRepoConfigsRoute, handlers.listRepoConfigs)
-    .openapi(setRepoConfigEnvRoute, handlers.setRepoConfigEnv)
-    .openapi(setRepoConfigSetupRoute, handlers.setRepoConfigSetup)
-    .openapi(deleteRepoConfigRoute, handlers.deleteRepoConfig);
+  return (
+    app
+      .openapi(listTasksRoute, handlers.listTasks)
+      .openapi(createTaskRoute, handlers.createTask)
+      .openapi(getTaskRoute, handlers.getTask)
+      .openapi(updateTaskRoute, handlers.updateTask)
+      .openapi(getTaskSummaryRoute, handlers.getTaskSummary)
+      .openapi(listLegacyTasksRoute, handlers.listLegacyTasks)
+      .openapi(getLegacyTaskHistoryRoute, handlers.getLegacyTaskHistory)
+      .openapi(listWorkflowsRoute, handlers.listWorkflows)
+      .openapi(createWorkflowRoute, handlers.createWorkflow)
+      .openapi(getWorkflowRoute, handlers.getWorkflow)
+      .openapi(updateWorkflowRoute, handlers.updateWorkflow)
+      .openapi(archiveWorkflowRoute, handlers.archiveWorkflow)
+      .openapi(invokeWorkflowRoute, handlers.invokeWorkflow)
+      .openapi(runWorkflowNowRoute, handlers.runWorkflowNow)
+      .openapi(listTaskSchedulesRoute, handlers.listTaskSchedules)
+      .openapi(createTaskScheduleRoute, handlers.createTaskSchedule)
+      .openapi(getTaskScheduleRoute, handlers.getTaskSchedule)
+      .openapi(updateTaskScheduleRoute, handlers.updateTaskSchedule)
+      .openapi(archiveTaskScheduleRoute, handlers.archiveTaskSchedule)
+      .openapi(runTaskScheduleNowRoute, handlers.runTaskScheduleNow)
+      .openapi(getBrainSnapshotRoute, handlers.getBrainSnapshot)
+      .openapi(getBrainOverviewRoute, handlers.getBrainOverview)
+      .openapi(listBrainSourceItemsRoute, handlers.listBrainSourceItems)
+      .openapi(listBrainSourcesRoute, handlers.listBrainSources)
+      .openapi(setBrainSourceRoute, handlers.setBrainSource)
+      .openapi(deleteBrainSourceRoute, handlers.deleteBrainSource)
+      .openapi(listBrowserProfilesRoute, handlers.listBrowserProfiles)
+      .openapi(createBrowserProfileRoute, handlers.createBrowserProfile)
+      .openapi(deleteBrowserProfileRoute, handlers.deleteBrowserProfile)
+      .openapi(createBrowserProfileLoginSessionRoute, handlers.createBrowserProfileLoginSession)
+      .openapi(completeBrowserProfileLoginRoute, handlers.completeBrowserProfileLogin)
+      .openapi(getBrowserProfileLiveViewRoute, handlers.getBrowserProfileLiveView)
+      .openapi(listBrainSourceOptionsRoute, handlers.listBrainSourceOptions)
+      .openapi(startBrainImportRoute, handlers.startBrainImport)
+      .openapi(confirmBrainImportRoute, handlers.confirmBrainImport)
+      .openapi(cancelBrainImportRoute, handlers.cancelBrainImport)
+      .openapi(retryBrainImportRoute, handlers.retryBrainImport)
+      .openapi(createBrainDocumentRoute, handlers.createBrainDocument)
+      .openapi(uploadBrainAssetRoute, handlers.uploadBrainAsset)
+      .openapi(replaceBrainAssetRoute, handlers.replaceBrainAsset)
+      .openapi(downloadBrainAssetRoute, handlers.downloadBrainAsset)
+      .openapi(updateBrainDocumentRoute, handlers.updateBrainDocument)
+      .openapi(renameBrainDocumentRoute, handlers.renameBrainDocument)
+      .openapi(deleteBrainDocumentRoute, handlers.deleteBrainDocument)
+      .openapi(createBrainFolderRoute, handlers.createBrainFolder)
+      .openapi(renameBrainFolderRoute, handlers.renameBrainFolder)
+      .openapi(deleteBrainFolderRoute, handlers.deleteBrainFolder)
+      .openapi(listWikiPagesRoute, handlers.listWikiPages)
+      .openapi(createWikiPageRoute, handlers.createWikiPage)
+      .openapi(updateWikiPageRoute, handlers.updateWikiPage)
+      .openapi(deleteWikiPageRoute, handlers.deleteWikiPage)
+      .openapi(addWikiTimelineEntryRoute, handlers.addWikiTimelineEntry)
+      .openapi(listSkillsRoute, handlers.listSkills)
+      .openapi(createSkillRoute, handlers.createSkill)
+      .openapi(previewSkillImportRoute, handlers.previewSkillImport)
+      .openapi(importSkillRoute, handlers.importSkill)
+      .openapi(listSkillCatalogRoute, handlers.listSkillCatalog)
+      .openapi(getSkillRoute, handlers.getSkill)
+      .openapi(updateSkillRoute, handlers.updateSkill)
+      .openapi(archiveSkillRoute, handlers.archiveSkill)
+      .openapi(listConversationsRoute, handlers.listConversations)
+      .openapi(getConversationRoute, handlers.getConversation)
+      .openapi(updateConversationRoute, handlers.updateConversation)
+      .openapi(listMessagesRoute, handlers.listMessages)
+      .openapi(createMessageRoute, handlers.createMessage)
+      .openapi(uploadAttachmentRoute, handlers.uploadAttachment)
+      .openapi(getRunRoute, handlers.getRun)
+      .openapi(streamRunEventsRoute, handlers.streamRunEvents)
+      .openapi(cancelRunRoute, handlers.cancelRun)
+      .openapi(resolveApprovalRoute, handlers.resolveApproval)
+      .openapi(streamReadModelRoute, handlers.streamReadModel)
+      .openapi(updateUserPreferencesRoute, handlers.updateUserPreferences)
+      .openapi(getMcpSetupRoute, handlers.getMcpSetup)
+      .openapi(updateMcpSetupRoute, handlers.updateMcpSetup)
+      .openapi(submitFeedbackRoute, handlers.submitFeedback)
+      .openapi(listRepoConfigsRoute, handlers.listRepoConfigs)
+      .openapi(setRepoConfigEnvRoute, handlers.setRepoConfigEnv)
+      .openapi(setRepoConfigSetupRoute, handlers.setRepoConfigSetup)
+      .openapi(deleteRepoConfigRoute, handlers.deleteRepoConfig)
+      // Static provider paths must register before the generic {integrationId}
+      // routes so e.g. DELETE /v1/integration-accounts/stripe never captures
+      // "stripe" as an integration id.
+      .openapi(connectAttioAccountRoute, handlers.connectAttioAccount)
+      .openapi(disconnectAttioAccountRoute, handlers.disconnectAttioAccount)
+      .openapi(connectFathomAccountRoute, handlers.connectFathomAccount)
+      .openapi(connectGranolaAccountRoute, handlers.connectGranolaAccount)
+      .openapi(startImessagePairingRoute, handlers.startImessagePairing)
+      .openapi(confirmImessagePairingRoute, handlers.confirmImessagePairing)
+      .openapi(connectStripeAccountRoute, handlers.connectStripeAccount)
+      .openapi(disconnectStripeAccountRoute, handlers.disconnectStripeAccount)
+      .openapi(createJamieWebhookEndpointRoute, handlers.createJamieWebhookEndpoint)
+      .openapi(saveJamieApiKeyRoute, handlers.saveJamieApiKey)
+      .openapi(getIntegrationAccountUsageRoute, handlers.getIntegrationAccountUsage)
+      .openapi(setIntegrationCapabilityModeRoute, handlers.setIntegrationCapabilityMode)
+      .openapi(deleteIntegrationAccountRoute, handlers.deleteIntegrationAccount)
+  );
 }
 
 export type V1AppType = ReturnType<typeof createV1Router>;
@@ -2496,4 +2790,141 @@ const contractDocumentHandlers: V1RouteHandlers = {
     ),
   deleteRepoConfig: (c) =>
     c.json({ data: { repositoryExternalId: "123456789", deleted: true as const }, meta }, 200),
+  connectAttioAccount: (c) =>
+    c.json(
+      {
+        data: {
+          state: {
+            provider: "attio" as const,
+            connected: true,
+            status: "connected" as const,
+            integrationId: "gint_contract",
+            workspaceName: "Contract",
+            statusReason: null,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  disconnectAttioAccount: (c) =>
+    c.json({ data: { integrationId: "gint_contract", deleted: true as const }, meta }, 200),
+  connectFathomAccount: (c) =>
+    c.json(
+      {
+        data: {
+          state: {
+            provider: "fathom" as const,
+            connected: true,
+            status: "connected" as const,
+            integrationId: "gint_contract",
+            accountEmail: null,
+            accountName: null,
+            statusReason: null,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  connectGranolaAccount: (c) =>
+    c.json(
+      {
+        data: {
+          state: {
+            provider: "granola" as const,
+            connected: true,
+            status: "connected" as const,
+            integrationId: "gint_contract",
+            accountEmail: null,
+            accountName: null,
+            statusReason: null,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  startImessagePairing: (c) => c.json({ data: { started: true as const }, meta }, 200),
+  confirmImessagePairing: (c) =>
+    c.json(
+      {
+        data: {
+          state: {
+            provider: "imessage" as const,
+            connected: true,
+            status: "connected" as const,
+            integrationId: "gint_contract",
+            phoneE164: "+14155551234",
+            statusReason: null,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  connectStripeAccount: (c) =>
+    c.json(
+      {
+        data: {
+          state: {
+            provider: "stripe" as const,
+            connected: true,
+            status: "connected" as const,
+            integrationId: "gint_contract",
+            accountName: "Contract",
+            livemode: false,
+            statusReason: null,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  disconnectStripeAccount: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
+  createJamieWebhookEndpoint: (c) =>
+    c.json(
+      {
+        data: {
+          setup: {
+            integrationId: "gint_contract",
+            webhookUrl: "https://app.example.com/api/webhooks/jamie",
+            headerName: "x-api-key",
+            apiKeyConfigured: false,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  saveJamieApiKey: (c) =>
+    c.json(
+      {
+        data: {
+          setup: {
+            integrationId: "gint_contract",
+            webhookUrl: "https://app.example.com/api/webhooks/jamie",
+            headerName: "x-api-key",
+            apiKeyConfigured: true,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  getIntegrationAccountUsage: (c) => c.json({ data: { affectedBrainSourceCount: 0 }, meta }, 200),
+  setIntegrationCapabilityMode: (c) =>
+    c.json(
+      {
+        data: {
+          integrationId: "gint_contract",
+          capabilityId: "write",
+          mode: "on" as const,
+        },
+        meta,
+      },
+      200,
+    ),
+  deleteIntegrationAccount: (c) =>
+    c.json({ data: { integrationId: "gint_contract", deleted: true as const }, meta }, 200),
 };

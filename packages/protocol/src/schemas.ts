@@ -2079,6 +2079,226 @@ export const RepoConfigDeleteEnvelopeSchema = z
   .strict()
   .openapi("RepoConfigDeleteEnvelope");
 
+export const IntegrationAccountIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .openapi({ example: "gint_0f8e7d6c5b4a", description: "Integration connection id." });
+
+// A connection's lifecycle status as surfaced to settings UIs. "disconnected"
+// rows are filtered out server-side, so responses never carry it.
+export const IntegrationAccountStatusSchema = z.enum([
+  "not_connected",
+  "connected",
+  "needs_reauth",
+  "sync_failed",
+]);
+
+export const IntegrationAccountUsageEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        // brain_sources rows fed by this connection (across all brains).
+        affectedBrainSourceCount: z.number().int().min(0),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("IntegrationAccountUsageEnvelope");
+
+export const IntegrationAccountDeleteEnvelopeSchema = z
+  .object({
+    data: z
+      .object({ integrationId: IntegrationAccountIdSchema, deleted: z.literal(true) })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("IntegrationAccountDeleteEnvelope");
+
+// The mode and capability vocabularies live in the shared capability registry;
+// the API validates them there so unknown values keep their human-readable
+// error copy instead of a generic validation failure.
+export const SetIntegrationCapabilityModeBodySchema = z
+  .object({ mode: z.string().min(1).max(16) })
+  .strict()
+  .openapi("SetIntegrationCapabilityModeBody");
+
+export const IntegrationCapabilityModeEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        integrationId: IntegrationAccountIdSchema,
+        capabilityId: z.string().min(1).max(64),
+        mode: z.enum(["on", "ask", "off"]),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("IntegrationCapabilityModeEnvelope");
+
+// Provider API keys arrive in request bodies over TLS, exactly as the retired
+// Server Actions received them. They never appear in any response.
+export const IntegrationApiKeyBodySchema = z
+  .object({ apiKey: z.string().min(1).max(4_000) })
+  .strict()
+  .openapi("IntegrationApiKeyBody");
+
+export const AttioAccountStateSchema = z
+  .object({
+    provider: z.literal("attio"),
+    connected: z.boolean(),
+    status: IntegrationAccountStatusSchema,
+    integrationId: IntegrationAccountIdSchema.nullable(),
+    workspaceName: z.string().nullable(),
+    statusReason: z.string().nullable(),
+  })
+  .strict()
+  .openapi("AttioAccountState");
+
+export const AttioAccountStateEnvelopeSchema = z
+  .object({
+    data: z.object({ state: AttioAccountStateSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("AttioAccountStateEnvelope");
+
+export const FathomAccountStateSchema = z
+  .object({
+    provider: z.literal("fathom"),
+    connected: z.boolean(),
+    status: IntegrationAccountStatusSchema,
+    integrationId: IntegrationAccountIdSchema.nullable(),
+    accountEmail: z.string().nullable(),
+    accountName: z.string().nullable(),
+    statusReason: z.string().nullable(),
+  })
+  .strict()
+  .openapi("FathomAccountState");
+
+export const FathomAccountStateEnvelopeSchema = z
+  .object({
+    data: z.object({ state: FathomAccountStateSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("FathomAccountStateEnvelope");
+
+export const GranolaAccountStateSchema = z
+  .object({
+    provider: z.literal("granola"),
+    connected: z.boolean(),
+    status: IntegrationAccountStatusSchema,
+    integrationId: IntegrationAccountIdSchema.nullable(),
+    accountEmail: z.string().nullable(),
+    accountName: z.string().nullable(),
+    statusReason: z.string().nullable(),
+  })
+  .strict()
+  .openapi("GranolaAccountState");
+
+export const GranolaAccountStateEnvelopeSchema = z
+  .object({
+    data: z.object({ state: GranolaAccountStateSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("GranolaAccountStateEnvelope");
+
+export const ImessageAccountStateSchema = z
+  .object({
+    provider: z.literal("imessage"),
+    connected: z.boolean(),
+    status: IntegrationAccountStatusSchema,
+    integrationId: IntegrationAccountIdSchema.nullable(),
+    phoneE164: z.string().nullable(),
+    statusReason: z.string().nullable(),
+  })
+  .strict()
+  .openapi("ImessageAccountState");
+
+export const ImessageAccountStateEnvelopeSchema = z
+  .object({
+    data: z.object({ state: ImessageAccountStateSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("ImessageAccountStateEnvelope");
+
+export const StartImessagePairingBodySchema = z
+  .object({
+    // E.164 normalization happens server-side so typos keep the retired
+    // action's human-readable error copy.
+    phone: z.string().min(1).max(64),
+  })
+  .strict()
+  .openapi("StartImessagePairingBody");
+
+export const ImessagePairingStartedEnvelopeSchema = z
+  .object({
+    data: z.object({ started: z.literal(true) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("ImessagePairingStartedEnvelope");
+
+export const ConfirmImessagePairingBodySchema = z
+  .object({ code: z.string().min(1).max(16) })
+  .strict()
+  .openapi("ConfirmImessagePairingBody");
+
+export const StripeAccountStateSchema = z
+  .object({
+    provider: z.literal("stripe"),
+    connected: z.boolean(),
+    status: IntegrationAccountStatusSchema,
+    integrationId: IntegrationAccountIdSchema.nullable(),
+    accountName: z.string().nullable(),
+    livemode: z.boolean().nullable(),
+    statusReason: z.string().nullable(),
+  })
+  .strict()
+  .openapi("StripeAccountState");
+
+export const StripeAccountStateEnvelopeSchema = z
+  .object({
+    data: z.object({ state: StripeAccountStateSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("StripeAccountStateEnvelope");
+
+export const StripeAccountDeleteEnvelopeSchema = z
+  .object({
+    data: z.object({ deleted: z.literal(true) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("StripeAccountDeleteEnvelope");
+
+// The webhook URL and header name are connection instructions, not secrets;
+// the Jamie-issued API key itself is write-only and never returned.
+export const JamieWebhookSetupSchema = z
+  .object({
+    integrationId: IntegrationAccountIdSchema,
+    webhookUrl: z.string().min(1),
+    headerName: z.string().min(1),
+    apiKeyConfigured: z.boolean(),
+  })
+  .strict()
+  .openapi("JamieWebhookSetup");
+
+export const JamieWebhookSetupEnvelopeSchema = z
+  .object({
+    data: z.object({ setup: JamieWebhookSetupSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("JamieWebhookSetupEnvelope");
+
 export type ConversationDto = z.infer<typeof ConversationSchema>;
 export type UpdateConversationBody = z.infer<typeof UpdateConversationBodySchema>;
 export type MessageDto = z.infer<typeof MessageSchema>;
@@ -2170,3 +2390,10 @@ export type WorkspaceRepositoryDto = z.infer<typeof WorkspaceRepositorySchema>;
 export type RepoConfigDto = z.infer<typeof RepoConfigSchema>;
 export type SetRepoConfigEnvBody = z.infer<typeof SetRepoConfigEnvBodySchema>;
 export type SetRepoConfigSetupBody = z.infer<typeof SetRepoConfigSetupBodySchema>;
+export type IntegrationAccountStatus = z.infer<typeof IntegrationAccountStatusSchema>;
+export type AttioAccountStateDto = z.infer<typeof AttioAccountStateSchema>;
+export type FathomAccountStateDto = z.infer<typeof FathomAccountStateSchema>;
+export type GranolaAccountStateDto = z.infer<typeof GranolaAccountStateSchema>;
+export type ImessageAccountStateDto = z.infer<typeof ImessageAccountStateSchema>;
+export type StripeAccountStateDto = z.infer<typeof StripeAccountStateSchema>;
+export type JamieWebhookSetupDto = z.infer<typeof JamieWebhookSetupSchema>;

@@ -1,90 +1,61 @@
 "use server";
 
-import {
-  GOAT_ATTIO_CREDENTIAL_KIND,
-  GOAT_ATTIO_PROVIDER,
-  type GoatAttioApiKeyCredentialPayload,
-} from "@opencompany/db/goat-attio";
-import { loadGoatIntegrationCredential } from "@opencompany/db/goat-integrations";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
-import { disconnectGoatIntegrationAccountAction } from "@/lib/integration-account-actions";
 import type { GoatAttioProviderState } from "@/lib/integration-state";
-import {
-  connectGoatAttioIntegration,
-  deleteGoatAttioWebhook,
-  getGoatAttioIntegrationState,
-  hasGoatAttioCommentWriteScopes,
-  hasGoatAttioListConfigurationWriteScope,
-  hasGoatAttioListReadScopes,
-  hasGoatAttioListWriteScopes,
-  hasGoatAttioRecordWriteScopes,
-  isValidAttioApiKey,
-  validateGoatAttioApiKey,
-} from "@/lib/integrations/attio";
+import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
+
+const ATTIO_CONNECT_FALLBACK =
+  "Could not connect Attio. Make sure the key has object_configuration:read, record_permission:read-write, list_configuration:read-write, list_entry:read-write, comment:read-write, note:read-write, and webhook:read-write, then try again.";
 
 export type AttioConnectActionResult =
   | { ok: true; state: GoatAttioProviderState }
   | { ok: false; error: string };
 
 export async function saveAttioApiKeyAction(apiKey: string): Promise<AttioConnectActionResult> {
-  const { user } = await currentGoatUser();
-  const trimmed = apiKey.trim();
-  if (!isValidAttioApiKey(trimmed)) {
+  if (typeof apiKey !== "string" || !apiKey.trim()) {
     return {
       ok: false,
       error: "This does not look like an Attio API key. Check it and try again.",
     };
   }
   try {
-    const validation = await validateGoatAttioApiKey(trimmed);
-    if (!validation.ok) return { ok: false, error: validation.error };
-    if (
-      !hasGoatAttioListReadScopes(validation.identity.scopes) ||
-      !hasGoatAttioListConfigurationWriteScope(validation.identity.scopes) ||
-      !hasGoatAttioRecordWriteScopes(validation.identity.scopes) ||
-      !hasGoatAttioListWriteScopes(validation.identity.scopes) ||
-      !hasGoatAttioCommentWriteScopes(validation.identity.scopes)
-    ) {
-      return {
-        ok: false,
-        error:
-          "This Attio API key needs object_configuration:read, record_permission:read-write, list_configuration:read-write, list_entry:read-write, and comment:read-write so Chat can read and operate CRM records, lists, pipeline fields, and comments.",
-      };
-    }
-    await connectGoatAttioIntegration({
-      userWorkosId: user.workosUserId,
-      apiKey: trimmed,
-      identity: validation.identity,
+    const response = await (await serverApiClient()).v1["integration-accounts"].attio.$put({
+      json: { apiKey },
     });
+    if (!response.ok) {
+      return { ok: false, error: await serverApiErrorMessage(response, ATTIO_CONNECT_FALLBACK) };
+    }
+    const data = (await response.json()).data as { state: GoatAttioProviderState };
     revalidatePath("/", "layout");
-    return { ok: true, state: await getGoatAttioIntegrationState(user.workosUserId) };
+    return { ok: true, state: data.state };
   } catch (error) {
     console.error("[goat-attio] Failed to save Attio API key", error);
-    return {
-      ok: false,
-      error:
-        "Could not connect Attio. Make sure the key has object_configuration:read, record_permission:read-write, list_configuration:read-write, list_entry:read-write, comment:read-write, note:read-write, and webhook:read-write, then try again.",
-    };
+    return { ok: false, error: ATTIO_CONNECT_FALLBACK };
   }
 }
 
 // Attio disconnect removes the webhook Attio-side first (best effort — the
 // key may already be revoked), then hard-deletes the integration like every
-// other personal account.
+// other personal account. Both steps run inside the canonical API.
 export async function disconnectAttioIntegrationAction(
   integrationId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { user } = await currentGoatUser();
-  const credential = await loadGoatIntegrationCredential({
-    userWorkosId: user.workosUserId,
-    integrationId,
-    provider: GOAT_ATTIO_PROVIDER,
-    kind: GOAT_ATTIO_CREDENTIAL_KIND,
-  }).catch(() => null);
-  const payload = credential?.payload as GoatAttioApiKeyCredentialPayload | undefined;
-  if (payload?.apiKey && payload.webhookId) {
-    await deleteGoatAttioWebhook({ apiKey: payload.apiKey, webhookId: payload.webhookId });
+  try {
+    const response = await (await serverApiClient()).v1["integration-accounts"].attio[
+      ":integrationId"
+    ].$delete({ param: { integrationId } });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not disconnect this account."),
+      };
+    }
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not disconnect this account.",
+    };
   }
-  return await disconnectGoatIntegrationAccountAction(integrationId);
 }
