@@ -40,6 +40,13 @@ import {
   startGoatCodexDeviceAuth,
 } from "@/lib/codex-auth";
 import {
+  completeHeadlessBrowserProfileLogin,
+  createHeadlessBrowserProfile,
+  createHeadlessBrowserProfileLoginSession,
+  deleteHeadlessBrowserProfile,
+  listHeadlessBrowserProfiles,
+} from "@/lib/headless-browser-profile-api";
+import {
   completeGoatInfisicalAuth,
   disconnectGoatInfisicalAuth,
   type GoatInfisicalAuthFlow,
@@ -517,14 +524,16 @@ function BrowserProfilesCard() {
   const [isPending, startTransition] = useTransition();
 
   const refresh = async () => {
-    const response = await fetch("/api/browser-profiles", {
-      cache: "no-store",
-    });
-    if (!response.ok) throw new Error("Could not load browser profiles.");
-    const payload = (await response.json()) as {
-      profiles?: BrowserProfileView[];
-    };
-    setProfiles(payload.profiles ?? []);
+    const loaded = await listHeadlessBrowserProfiles();
+    setProfiles(
+      loaded.map((profile) => ({
+        id: profile.id,
+        name: profile.name,
+        siteHost: profile.siteHost,
+        status: profile.status,
+        active: profile.active,
+      })),
+    );
   };
 
   useEffect(() => {
@@ -536,21 +545,10 @@ function BrowserProfilesCard() {
     setError(null);
     startTransition(async () => {
       try {
-        const created = await fetch("/api/browser-profiles", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, url }),
-        });
-        const createdPayload = (await created.json()) as {
-          profile?: BrowserProfileView;
-          error?: string;
-        };
-        if (!created.ok || !createdPayload.profile) {
-          throw new Error(createdPayload.error ?? "Could not create browser profile.");
-        }
+        const created = await createHeadlessBrowserProfile({ name, url });
         setName("");
         setUrl("");
-        await startLogin(createdPayload.profile.id);
+        await startLogin(created.id);
         await refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not connect browser profile.");
@@ -559,21 +557,11 @@ function BrowserProfilesCard() {
   };
 
   const startLogin = async (profileId: string) => {
-    const response = await fetch(`/api/browser-profiles/${profileId}/login-session`, {
-      method: "POST",
-    });
-    const payload = (await response.json()) as {
-      sessionId?: string;
-      liveViewUrl?: string;
-      error?: string;
-    };
-    if (!response.ok || !payload.sessionId || !payload.liveViewUrl) {
-      throw new Error(payload.error ?? "Could not start login session.");
-    }
+    const session = await createHeadlessBrowserProfileLoginSession(profileId);
     setLoginSession({
       profileId,
-      sessionId: payload.sessionId,
-      liveViewUrl: payload.liveViewUrl,
+      sessionId: session.sessionId,
+      liveViewUrl: session.liveViewUrl,
     });
   };
 
@@ -582,18 +570,7 @@ function BrowserProfilesCard() {
     setError(null);
     startTransition(async () => {
       try {
-        const response = await fetch(
-          `/api/browser-profiles/${loginSession.profileId}/complete-login`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sessionId: loginSession.sessionId }),
-          },
-        );
-        if (!response.ok) {
-          const payload = (await response.json()) as { error?: string };
-          throw new Error(payload.error ?? "Could not complete login.");
-        }
+        await completeHeadlessBrowserProfileLogin(loginSession.profileId, loginSession.sessionId);
         setLoginSession(null);
         await refresh();
       } catch (err) {
@@ -606,13 +583,7 @@ function BrowserProfilesCard() {
     setError(null);
     startTransition(async () => {
       try {
-        const response = await fetch(`/api/browser-profiles/${profileId}`, {
-          method: "DELETE",
-        });
-        if (!response.ok) {
-          const payload = (await response.json()) as { error?: string };
-          throw new Error(payload.error ?? "Could not delete browser profile.");
-        }
+        await deleteHeadlessBrowserProfile(profileId);
         await refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not delete browser profile.");

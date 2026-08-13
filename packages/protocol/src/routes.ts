@@ -21,12 +21,19 @@ import {
   BrainSourceMutationEnvelopeSchema,
   BrainSourceOptionsBodySchema,
   BrainSourceOptionsEnvelopeSchema,
+  BrowserProfileDeleteEnvelopeSchema,
+  BrowserProfileEnvelopeSchema,
+  BrowserProfileListEnvelopeSchema,
+  BrowserProfileLiveViewEnvelopeSchema,
+  BrowserProfileLoginCompleteEnvelopeSchema,
+  BrowserProfileLoginSessionEnvelopeSchema,
   CancelRunEnvelopeSchema,
   ConfirmBrainImportBodySchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
   CreateBrainDocumentBodySchema,
   CreateBrainFolderBodySchema,
+  CreateBrowserProfileBodySchema,
   CreateMessageBodySchema,
   CreateMessageEnvelopeSchema,
   CreateSkillBodySchema,
@@ -1314,6 +1321,108 @@ export const streamReadModelRoute = createRoute({
   },
 });
 
+export const listBrowserProfilesRoute = createRoute({
+  method: "get",
+  path: "/v1/browser-profiles",
+  tags: ["BrowserProfiles"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Browser profiles owned by the acting user.",
+      content: { "application/json": { schema: BrowserProfileListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createBrowserProfileRoute = createRoute({
+  method: "post",
+  path: "/v1/browser-profiles",
+  tags: ["BrowserProfiles"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: CreateBrowserProfileBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Browser profile created for the acting user.",
+      content: { "application/json": { schema: BrowserProfileEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deleteBrowserProfileRoute = createRoute({
+  method: "delete",
+  path: "/v1/browser-profiles/{profileId}",
+  tags: ["BrowserProfiles"],
+  security: actorSecurity,
+  request: { params: z.object({ profileId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Browser profile and its remote browser context deleted.",
+      content: { "application/json": { schema: BrowserProfileDeleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createBrowserProfileLoginSessionRoute = createRoute({
+  method: "post",
+  path: "/v1/browser-profiles/{profileId}/login-sessions",
+  tags: ["BrowserProfiles"],
+  security: actorSecurity,
+  request: { params: z.object({ profileId: ResourceIdSchema }) },
+  responses: {
+    201: {
+      description: "Interactive login session started for an owned browser profile.",
+      content: { "application/json": { schema: BrowserProfileLoginSessionEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const completeBrowserProfileLoginRoute = createRoute({
+  method: "post",
+  path: "/v1/browser-profiles/{profileId}/login-sessions/{sessionId}/complete",
+  tags: ["BrowserProfiles"],
+  security: actorSecurity,
+  request: {
+    params: z.object({
+      profileId: ResourceIdSchema,
+      sessionId: z.string().min(1).max(256),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Login session completed; the browser profile is connected.",
+      content: { "application/json": { schema: BrowserProfileLoginCompleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getBrowserProfileLiveViewRoute = createRoute({
+  method: "get",
+  path: "/v1/browser-profiles/{profileId}/live-view",
+  tags: ["BrowserProfiles"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ profileId: ResourceIdSchema }),
+    query: z.object({ sessionId: z.string().min(1).max(256) }),
+  },
+  responses: {
+    200: {
+      description: "Live-view URL for an active session of an owned browser profile.",
+      content: { "application/json": { schema: BrowserProfileLiveViewEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export type V1RouteHandlers = {
   listTasks: RouteHandler<typeof listTasksRoute>;
   createTask: RouteHandler<typeof createTaskRoute>;
@@ -1341,6 +1450,12 @@ export type V1RouteHandlers = {
   listBrainSources: RouteHandler<typeof listBrainSourcesRoute>;
   setBrainSource: RouteHandler<typeof setBrainSourceRoute>;
   deleteBrainSource: RouteHandler<typeof deleteBrainSourceRoute>;
+  listBrowserProfiles: RouteHandler<typeof listBrowserProfilesRoute>;
+  createBrowserProfile: RouteHandler<typeof createBrowserProfileRoute>;
+  deleteBrowserProfile: RouteHandler<typeof deleteBrowserProfileRoute>;
+  createBrowserProfileLoginSession: RouteHandler<typeof createBrowserProfileLoginSessionRoute>;
+  completeBrowserProfileLogin: RouteHandler<typeof completeBrowserProfileLoginRoute>;
+  getBrowserProfileLiveView: RouteHandler<typeof getBrowserProfileLiveViewRoute>;
   listBrainSourceOptions: RouteHandler<typeof listBrainSourceOptionsRoute>;
   startBrainImport: RouteHandler<typeof startBrainImportRoute>;
   confirmBrainImport: RouteHandler<typeof confirmBrainImportRoute>;
@@ -1418,6 +1533,12 @@ export function createV1Router(
     .openapi(listBrainSourcesRoute, handlers.listBrainSources)
     .openapi(setBrainSourceRoute, handlers.setBrainSource)
     .openapi(deleteBrainSourceRoute, handlers.deleteBrainSource)
+    .openapi(listBrowserProfilesRoute, handlers.listBrowserProfiles)
+    .openapi(createBrowserProfileRoute, handlers.createBrowserProfile)
+    .openapi(deleteBrowserProfileRoute, handlers.deleteBrowserProfile)
+    .openapi(createBrowserProfileLoginSessionRoute, handlers.createBrowserProfileLoginSession)
+    .openapi(completeBrowserProfileLoginRoute, handlers.completeBrowserProfileLogin)
+    .openapi(getBrowserProfileLiveViewRoute, handlers.getBrowserProfileLiveView)
     .openapi(listBrainSourceOptionsRoute, handlers.listBrainSourceOptions)
     .openapi(startBrainImportRoute, handlers.startBrainImport)
     .openapi(confirmBrainImportRoute, handlers.confirmBrainImport)
@@ -1556,6 +1677,17 @@ const placeholderTaskSchedule = {
   lastRunAt: null,
   nextRunAt: placeholderTime,
   version: 1,
+  createdAt: placeholderTime,
+  updatedAt: placeholderTime,
+};
+const placeholderBrowserProfile = {
+  id: "profile_contract",
+  name: "Contract profile",
+  siteHost: "example.com",
+  allowedHosts: ["example.com"],
+  status: "pending_login" as const,
+  active: false,
+  lastUsedAt: null,
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
 };
@@ -1891,6 +2023,36 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   listBrainSourceOptions: (c) => c.json({ data: { provider: "github", repos: [] }, meta }, 200),
+  listBrowserProfiles: (c) => c.json({ data: [], meta }, 200),
+  createBrowserProfile: (c) => c.json({ data: placeholderBrowserProfile, meta }, 201),
+  deleteBrowserProfile: (c) =>
+    c.json({ data: { profileId: "profile_contract", deleted: true as const }, meta }, 200),
+  createBrowserProfileLoginSession: (c) =>
+    c.json(
+      {
+        data: {
+          profileId: "profile_contract",
+          sessionId: "session_contract",
+          liveViewUrl: "https://live.example.com/session",
+        },
+        meta,
+      },
+      201,
+    ),
+  completeBrowserProfileLogin: (c) =>
+    c.json(
+      {
+        data: {
+          profileId: "profile_contract",
+          sessionId: "session_contract",
+          completed: true as const,
+        },
+        meta,
+      },
+      200,
+    ),
+  getBrowserProfileLiveView: (c) =>
+    c.json({ data: { url: "https://live.example.com/session" }, meta }, 200),
   startBrainImport: (c) =>
     c.json(
       {

@@ -34,6 +34,7 @@ import {
 } from "@opencompany/goat-agent/application/auto-model-routing";
 import type { GoatBrainImportApplicationService } from "@opencompany/goat-agent/brain-imports";
 import type { GoatBrainSourceApplicationService } from "@opencompany/goat-agent/brain-sources";
+import type { GoatBrowserProfileApplicationService } from "@opencompany/goat-agent/browser-profiles/service";
 import { GOAT_SPANS, withGoatSpan } from "@opencompany/goat-observability";
 import { captureException, createLogger } from "@opencompany/observability";
 import {
@@ -94,6 +95,15 @@ export type CreateApiAppInput = {
   knowledge: KnowledgeApplicationService;
   brainSources: Pick<GoatBrainSourceApplicationService, "list" | "set" | "remove" | "listOptions">;
   brainImports: Pick<GoatBrainImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
+  browserProfiles: Pick<
+    GoatBrowserProfileApplicationService,
+    | "list"
+    | "create"
+    | "remove"
+    | "createLoginSession"
+    | "completeLoginSession"
+    | "resolveLiveViewUrl"
+  >;
   skillImports: SkillImportApplicationService;
   brainAssets: BrainAssetService;
   attachments: AttachmentUploadService;
@@ -484,6 +494,57 @@ export function createApiApp(input: CreateApiAppInput) {
         c.req.valid("json"),
       );
       return c.json({ data: options, meta }, 200);
+    },
+    listBrowserProfiles: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const profiles = await input.browserProfiles.list(actor);
+      return c.json({ data: profiles, meta }, 200);
+    },
+    createBrowserProfile: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 20);
+      const profile = await input.browserProfiles.create(actor, c.req.valid("json"));
+      return c.json({ data: profile, meta }, 201);
+    },
+    deleteBrowserProfile: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const { profileId } = c.req.valid("param");
+      await input.browserProfiles.remove(actor, profileId);
+      return c.json({ data: { profileId, deleted: true as const }, meta }, 200);
+    },
+    createBrowserProfileLoginSession: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      const { profileId } = c.req.valid("param");
+      const session = await input.browserProfiles.createLoginSession(actor, profileId);
+      return c.json(
+        {
+          data: {
+            profileId,
+            sessionId: session.sessionId,
+            liveViewUrl: session.liveViewUrl,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    completeBrowserProfileLogin: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const { profileId, sessionId } = c.req.valid("param");
+      await input.browserProfiles.completeLoginSession(actor, profileId, sessionId);
+      return c.json({ data: { profileId, sessionId, completed: true as const }, meta }, 200);
+    },
+    getBrowserProfileLiveView: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 120);
+      const { profileId } = c.req.valid("param");
+      const { sessionId } = c.req.valid("query");
+      const url = await input.browserProfiles.resolveLiveViewUrl(actor, profileId, sessionId);
+      return c.json({ data: { url }, meta }, 200);
     },
     startBrainImport: async (c) => {
       const actor = actorFrom(c);

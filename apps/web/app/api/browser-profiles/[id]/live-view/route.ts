@@ -1,21 +1,13 @@
-import { currentGoatUser } from "@/lib/auth";
-import { resolveLiveViewUrl } from "@/lib/browser-profiles";
+import { legacyBrowserProfileLiveView } from "@/lib/browser-profile-route-adapter";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+// Live-view links embedded in existing Chat transcripts resolve through this
+// web-origin path; it must keep working after the API cutover. The canonical
+// API authorizes the session and resolves the target; this route only issues
+// the redirect.
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const context = await currentGoatUser({ optional: true });
-  if (!context) return new Response(null, { status: 401 });
-
-  try {
-    const { id } = await params;
-    const url = new URL(request.url);
-    const sessionId = url.searchParams.get("sessionId") ?? "";
-    const liveViewUrl = await resolveLiveViewUrl({
-      userWorkosId: context.user.workosUserId,
-      profileId: id,
-      sessionId,
-    });
-    return Response.redirect(liveViewUrl, 302);
-  } catch {
-    return new Response(null, { status: 404 });
-  }
+  const { id } = await params;
+  return legacyBrowserProfileLiveView(request, id);
 }

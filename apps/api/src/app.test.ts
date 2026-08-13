@@ -88,6 +88,7 @@ describe("canonical Hono API", () => {
       knowledge: fakeKnowledgeService(),
       brainSources: fakeBrainSources(),
       brainImports: fakeBrainImports(),
+      browserProfiles: fakeBrowserProfiles(),
       skillImports: fakeSkillImportService(),
       brainAssets: fakeBrainAssets(),
       attachments: fakeAttachments(),
@@ -736,6 +737,144 @@ describe("canonical Hono API", () => {
       error: { code: "unavailable", retryable: true },
       meta: { apiVersion: "v1" },
     });
+  });
+
+  it("serves and mutates browser profiles through the authenticated owner boundary", async () => {
+    const profile = {
+      id: "3e4f8f0a-1af5-4a5e-9d68-0a4a3f6f8a01",
+      name: "Notion",
+      siteHost: "notion.so",
+      allowedHosts: ["notion.so"],
+      status: "pending_login" as const,
+      active: false,
+      lastUsedAt: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    const list = vi.fn(async () => [profile]);
+    const create = vi.fn(async () => profile);
+    const remove = vi.fn(async () => undefined);
+    const createLoginSession = vi.fn(async () => ({
+      sessionId: "bb_session_1",
+      liveViewUrl: "https://live.browserbase.com/session/bb_session_1",
+    }));
+    const completeLoginSession = vi.fn(async () => undefined);
+    const resolveLiveViewUrl = vi.fn(
+      async () => "https://live.browserbase.com/session/bb_session_1",
+    );
+    const app = testApp(fakeRepository(), {
+      browserProfiles: browserProfileService({
+        list,
+        create,
+        remove,
+        createLoginSession,
+        completeLoginSession,
+        resolveLiveViewUrl,
+      }),
+    });
+
+    const listed = await app.request("/v1/browser-profiles");
+    expect(listed.status).toBe(200);
+    const listedBody = await listed.json();
+    expect(listedBody).toMatchObject({ data: [{ id: profile.id, status: "pending_login" }] });
+    expect(JSON.stringify(listedBody)).not.toMatch(
+      /workos|credential|context_id|browserbasecontextid/iu,
+    );
+    expect(list).toHaveBeenCalledWith(actor);
+
+    const created = await app.request("/v1/browser-profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Notion", url: "https://notion.so" }),
+    });
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toMatchObject({ data: { id: profile.id } });
+    expect(create).toHaveBeenCalledWith(actor, { name: "Notion", url: "https://notion.so" });
+
+    const login = await app.request(`/v1/browser-profiles/${profile.id}/login-sessions`, {
+      method: "POST",
+    });
+    expect(login.status).toBe(201);
+    await expect(login.json()).resolves.toMatchObject({
+      data: {
+        profileId: profile.id,
+        sessionId: "bb_session_1",
+        liveViewUrl: "https://live.browserbase.com/session/bb_session_1",
+      },
+    });
+    expect(createLoginSession).toHaveBeenCalledWith(actor, profile.id);
+
+    const completed = await app.request(
+      `/v1/browser-profiles/${profile.id}/login-sessions/bb_session_1/complete`,
+      { method: "POST" },
+    );
+    expect(completed.status).toBe(200);
+    await expect(completed.json()).resolves.toMatchObject({
+      data: { profileId: profile.id, sessionId: "bb_session_1", completed: true },
+    });
+    expect(completeLoginSession).toHaveBeenCalledWith(actor, profile.id, "bb_session_1");
+
+    const liveView = await app.request(
+      `/v1/browser-profiles/${profile.id}/live-view?sessionId=bb_session_1`,
+    );
+    expect(liveView.status).toBe(200);
+    await expect(liveView.json()).resolves.toMatchObject({
+      data: { url: "https://live.browserbase.com/session/bb_session_1" },
+    });
+    expect(resolveLiveViewUrl).toHaveBeenCalledWith(actor, profile.id, "bb_session_1");
+
+    const removed = await app.request(`/v1/browser-profiles/${profile.id}`, {
+      method: "DELETE",
+    });
+    expect(removed.status).toBe(200);
+    await expect(removed.json()).resolves.toMatchObject({
+      data: { profileId: profile.id, deleted: true },
+    });
+    expect(remove).toHaveBeenCalledWith(actor, profile.id);
+  });
+
+  it("maps browser profile domain failures to typed protocol errors", async () => {
+    const app = testApp(fakeRepository(), {
+      browserProfiles: browserProfileService({
+        create: async () => {
+          throw new CoreError("unavailable", "Browser profiles are not enabled.");
+        },
+        createLoginSession: async () => {
+          throw new CoreError("conflict", "This browser profile already has an active session.");
+        },
+        resolveLiveViewUrl: async () => {
+          throw new CoreError("not_found", "This browser session is not active.");
+        },
+      }),
+    });
+
+    const unavailable = await app.request("/v1/browser-profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Notion", url: "https://notion.so" }),
+    });
+    expect(unavailable.status).toBe(503);
+    await expect(unavailable.json()).resolves.toMatchObject({
+      error: { code: "unavailable", retryable: true },
+    });
+
+    const conflicted = await app.request("/v1/browser-profiles/profile_1/login-sessions", {
+      method: "POST",
+    });
+    expect(conflicted.status).toBe(409);
+    await expect(conflicted.json()).resolves.toMatchObject({ error: { code: "conflict" } });
+
+    const missing = await app.request("/v1/browser-profiles/profile_1/live-view?sessionId=s1");
+    expect(missing.status).toBe(404);
+    await expect(missing.json()).resolves.toMatchObject({ error: { code: "not_found" } });
+
+    const invalid = await app.request("/v1/browser-profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "", url: "" }),
+    });
+    expect(invalid.status).toBe(400);
+    await expect(invalid.json()).resolves.toMatchObject({ error: { code: "invalid_request" } });
   });
 
   it("serves sessionless history only through actor-scoped read-only compatibility resources", async () => {
@@ -1438,6 +1577,7 @@ function testApp(
     knowledge: fakeKnowledgeService(),
     brainSources: fakeBrainSources(),
     brainImports: fakeBrainImports(),
+    browserProfiles: fakeBrowserProfiles(),
     skillImports: fakeSkillImportService(),
     brainAssets: fakeBrainAssets(),
     attachments: fakeAttachments(),
@@ -1537,6 +1677,35 @@ function brainSourceService(
   overrides: Partial<Parameters<typeof createApiApp>[0]["brainSources"]>,
 ): Parameters<typeof createApiApp>[0]["brainSources"] {
   return { ...fakeBrainSources(), ...overrides };
+}
+
+function fakeBrowserProfiles(): Parameters<typeof createApiApp>[0]["browserProfiles"] {
+  return {
+    list: async () => {
+      throw new Error("Unexpected browser profile list.");
+    },
+    create: async () => {
+      throw new Error("Unexpected browser profile creation.");
+    },
+    remove: async () => {
+      throw new Error("Unexpected browser profile removal.");
+    },
+    createLoginSession: async () => {
+      throw new Error("Unexpected browser profile login session.");
+    },
+    completeLoginSession: async () => {
+      throw new Error("Unexpected browser profile login completion.");
+    },
+    resolveLiveViewUrl: async () => {
+      throw new Error("Unexpected browser profile live view.");
+    },
+  };
+}
+
+function browserProfileService(
+  overrides: Partial<Parameters<typeof createApiApp>[0]["browserProfiles"]>,
+): Parameters<typeof createApiApp>[0]["browserProfiles"] {
+  return { ...fakeBrowserProfiles(), ...overrides };
 }
 
 function brainSourceDetails() {

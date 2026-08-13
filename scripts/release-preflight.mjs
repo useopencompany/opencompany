@@ -93,10 +93,23 @@ const groups = {
       "REDIS_URL",
       "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
     ],
+    // Browser profiles are feature-flag gated: the Browserbase credentials are
+    // required only when GOAT_BROWSER_PROFILES_ENABLED is "true" in this env.
+    conditional: [
+      {
+        when: "GOAT_BROWSER_PROFILES_ENABLED",
+        equals: "true",
+        require: ["BROWSERBASE_API_KEY"],
+      },
+    ],
     optional: [
       "API_DB_POOL_MAX",
       "WORKOS_COOKIE_NAME",
       "GOAT_DEFAULT_CHAT_MODEL",
+      "GOAT_BROWSER_PROFILES_ENABLED",
+      "GOAT_BROWSER_PROFILES_KILL_SWITCH",
+      "BROWSERBASE_API_KEY",
+      "BROWSERBASE_PROJECT_ID",
       "ELECTRIC_SOURCE_ID",
       "ELECTRIC_SOURCE_SECRET",
       "ELECTRIC_SECRET",
@@ -114,6 +127,15 @@ const groups = {
   },
   runner: {
     label: "Render runner",
+    // The runner drives in-process browser profile agent sessions; the same
+    // feature gate applies as in the API group.
+    conditional: [
+      {
+        when: "GOAT_BROWSER_PROFILES_ENABLED",
+        equals: "true",
+        require: ["BROWSERBASE_API_KEY"],
+      },
+    ],
     required: [
       "DATABASE_URL",
       "RUNNER_INTERNAL_TOKEN",
@@ -229,6 +251,11 @@ for (const name of selected) {
   }
   const placeholders = group.required.filter((key) => isPlaceholder(process.env[key]));
   const optionalMissing = group.optional.filter((key) => isUnset(process.env[key]));
+  const conditionalMissing = (group.conditional ?? []).flatMap((rule) =>
+    (process.env[rule.when]?.trim() ?? "") === rule.equals
+      ? rule.require.filter((key) => isUnset(process.env[key]))
+      : [],
+  );
 
   console.log(`\n${group.label}`);
   console.log(`  required: ${group.required.length - missing.length}/${group.required.length} set`);
@@ -247,6 +274,13 @@ for (const name of selected) {
   if (placeholders.length > 0) {
     failed = true;
     console.log(`  placeholders: ${placeholders.join(", ")}`);
+  }
+
+  if (conditionalMissing.length > 0) {
+    failed = true;
+    console.log(
+      `  missing while the gating feature flag is enabled: ${conditionalMissing.join(", ")}`,
+    );
   }
 
   if (optionalMissing.length > 0) {
