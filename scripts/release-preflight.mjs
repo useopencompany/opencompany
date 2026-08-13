@@ -102,6 +102,10 @@ const groups = {
       "GITHUB_INTEGRATION_APP_CLIENT_SECRET",
       "GITHUB_INTEGRATION_STATE_SECRET",
       "GITHUB_INTEGRATION_APP_WEBHOOK_SECRET",
+      // Google-family OAuth ingress (#1203 4a2).
+      "GOOGLE_OAUTH_CLIENT_ID",
+      "GOOGLE_OAUTH_CLIENT_SECRET",
+      "GOOGLE_INTEGRATION_STATE_SECRET",
     ],
     // Browser profiles are feature-flag gated: the Browserbase credentials are
     // required only when GOAT_BROWSER_PROFILES_ENABLED is "true" in this env.

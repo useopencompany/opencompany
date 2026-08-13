@@ -13,7 +13,6 @@ import {
   listGoatGitHubIntegrationsForInstallation,
 } from "@opencompany/db/goat-github";
 import { markGoatIntegrationStatus } from "@opencompany/db/goat-integrations";
-import { listGoatWorkspacesForUser } from "@opencompany/db/goat-workspaces";
 import { getGoatAppUrl } from "@opencompany/goat-agent/app-url";
 import { captureGoatIntegrationAddedAnalytics } from "@opencompany/goat-agent/integrations/analytics";
 import {
@@ -37,7 +36,7 @@ import {
 } from "@opencompany/goat-brain";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
-import { ApiError } from "./errors";
+import { type IngressSession, resolveIngressSession, sessionRedirect } from "./ingress-session";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "github-ingress" });
 
@@ -64,65 +63,6 @@ export function createGitHubIngress(input: {
 }
 
 type IngressInput = { db: DbLike; identify: ApiIdentityVerifier };
-
-type IngressWorkspace = {
-  workspace: { id: string; workosOrganizationId: string | null };
-  role: string;
-};
-
-type IngressSession =
-  | {
-      kind: "actor";
-      userId: string;
-      workspaceId: string;
-      role: string;
-      workspaces: IngressWorkspace[];
-      refreshedSessionCookie?: string;
-    }
-  | { kind: "redirect"; response: Response };
-
-// The retired web routes resolved the hosted session with currentGoatUser():
-// anonymous browsers redirect to /signin, users without a visible workspace to
-// /onboarding, and the active workspace resolves org-match -> workspace cookie
-// -> first visible workspace over the billing-filtered membership list. There
-// is deliberately no onboarding gate: the onboarding wizard connects GitHub
-// before onboarded_at is set.
-async function resolveIngressSession(
-  input: IngressInput,
-  request: Request,
-): Promise<IngressSession> {
-  let identity: Awaited<ReturnType<ApiIdentityVerifier>>;
-  try {
-    identity = await input.identify(request);
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 401) {
-      return { kind: "redirect", response: webRedirect("/signin") };
-    }
-    throw error;
-  }
-  const workspaces: IngressWorkspace[] = await listGoatWorkspacesForUser(identity.userId, {
-    db: input.db,
-  });
-  const first = workspaces[0];
-  if (!first) return { kind: "redirect", response: webRedirect("/onboarding") };
-  const active =
-    workspaces.find(
-      (entry) =>
-        identity.organizationId && entry.workspace.workosOrganizationId === identity.organizationId,
-    ) ??
-    workspaces.find((entry) => entry.workspace.id === identity.activeWorkspaceId) ??
-    first;
-  return {
-    kind: "actor",
-    userId: identity.userId,
-    workspaceId: active.workspace.id,
-    role: active.role,
-    workspaces,
-    ...(identity.refreshedSessionCookie
-      ? { refreshedSessionCookie: identity.refreshedSessionCookie }
-      : {}),
-  };
-}
 
 async function handleStart(input: IngressInput, request: Request): Promise<Response> {
   const session = await resolveIngressSession(input, request);
@@ -423,21 +363,6 @@ function statusRedirect(
     session,
     new URL(appendGoatGitHubIntegrationStatus(returnTo, status, reason), getGoatAppUrl()),
   );
-}
-
-function webRedirect(path: string) {
-  return Response.redirect(new URL(path, getGoatAppUrl()), 302);
-}
-
-function sessionRedirect(
-  session: Extract<IngressSession, { kind: "actor" }>,
-  target: URL | string,
-) {
-  const response = Response.redirect(target instanceof URL ? target : new URL(target), 302);
-  if (!session.refreshedSessionCookie) return response;
-  const withCookie = new Response(response.body, response);
-  withCookie.headers.append("Set-Cookie", session.refreshedSessionCookie);
-  return withCookie;
 }
 
 function readInstallationId(payload: Record<string, unknown>): string | null {
