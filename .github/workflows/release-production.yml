@@ -561,6 +561,11 @@ jobs:
         env:
           OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
           NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
+          # The typed /v1 client's inferred router type grew Next's type-check
+          # memory past Node's ~2GB default heap on the release runner; PR CI
+          # and local builds pass with larger effective limits. The runner has
+          # 16GB, so give the build real headroom.
+          NODE_OPTIONS: --max-old-space-size=6144
         run: VERCEL_PROJECT_ID="$GOAT_VERCEL_PROJECT_ID" bunx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$GOAT_VERCEL_PROJECT_ID"
 
       - name: Deploy web
