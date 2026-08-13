@@ -30,6 +30,7 @@ import { createAttioIngress } from "./attio-ingress";
 import { createWorkOsApiAuthenticator, createWorkOsApiIdentityVerifier } from "./auth";
 import { createAutomationServices } from "./automations";
 import { createBrainAssetService } from "./brain-assets";
+import { createBrainControlService } from "./brain-control";
 import { parseBrowserOrigins } from "./browser-origins";
 import { ElectricReadModelProxy } from "./electric-read-models";
 import { createEngineAuthService } from "./engine-auth";
@@ -47,6 +48,7 @@ import { createRunnerClient } from "./runner-client";
 import { createSlackBotIngress } from "./slack-bot-ingress";
 import { createSlackIngress } from "./slack-ingress";
 import { createUserSettingsService } from "./user-settings";
+import { createWorkspaceCapabilityService } from "./workspace-capabilities";
 import { createXAccountIngress } from "./x-account-ingress";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "server" });
@@ -108,6 +110,7 @@ const app = createApiApp({
   browserProfiles,
   skillImports,
   brainAssets: createBrainAssetService({ db: database.db, knowledge }),
+  brainControl: createBrainControlService({ db: database.db }),
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),
   userSettings: createUserSettingsService({ db: database.db }),
   feedback: createFeedbackService({ db: database.db }),
@@ -117,6 +120,7 @@ const app = createApiApp({
   // control routes; the client resolves RUNNER_INTERNAL_URL/RUNNER_PUBLIC_URL
   // and RUNNER_INTERNAL_TOKEN per call.
   engineAuth: createEngineAuthService({ db: database.db, runner: createRunnerClient() }),
+  workspaceCapabilities: createWorkspaceCapabilityService({ db: database.db }),
   authenticate,
   browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),
   githubIngress: createGitHubIngress({ db: database.db, identify: identityVerifier }),

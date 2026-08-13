@@ -2,25 +2,14 @@
 
 import { getDb } from "@opencompany/db/client";
 import { getGoatWorkspacePlan, goatWorkspaceMemberCap } from "@opencompany/db/goat-billing";
+import { goatWorkspaces } from "@opencompany/db/goat-schema";
 import {
-  type GoatBrainIntelligence,
-  type GoatBrainVisibility,
-  goatWorkspaces,
-} from "@opencompany/db/goat-schema";
-import {
-  createGoatBrain,
   DEFAULT_GOAT_BRAIN_SLUG,
-  getGoatBrainAccess,
   hasOwnedGoatHobbyWorkspace,
   listAccessibleGoatBrains,
-  listGoatBrainMemberIds,
   listGoatWorkspaceMembers,
   listGoatWorkspacesForUser,
   removeGoatWorkspaceMember,
-  replaceGoatBrainMembers,
-  updateGoatBrainEnrichmentEnabled,
-  updateGoatBrainIntelligence,
-  updateGoatBrainVisibility,
   updateGoatWorkspaceName,
 } from "@opencompany/db/goat-workspaces";
 import { eq } from "drizzle-orm";
@@ -29,6 +18,7 @@ import { cookies } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
 import { currentGoatUser } from "@/lib/auth";
 import { syncGoatStripeSeatQuantityForWorkspace } from "@/lib/billing/seats";
+import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureGoatWorkspaceOrganization } from "@/lib/workos-organizations";
 import {
@@ -73,6 +63,9 @@ export type GoatWorkspaceInvitationView = {
   expiresAt: string | null;
 };
 
+export type GoatBrainVisibility = "workspace" | "restricted";
+export type GoatBrainIntelligence = "basic" | "frontier";
+
 function errorResult(error: unknown, fallback: string): { ok: false; error: string } {
   return { ok: false, error: error instanceof Error ? error.message : fallback };
 }
@@ -90,12 +83,19 @@ function validateWorkspaceName(name: unknown) {
 }
 
 export async function switchGoatBrainAction(brainRef: string): Promise<GoatWorkspaceActionResult> {
-  const { user } = await currentGoatUser();
-  const access = await getGoatBrainAccess({ userWorkosId: user.workosUserId, brainRef });
-  if (!access) return { ok: false, error: "You do not have access to that brain." };
+  const response = await (await serverApiClient()).v1.brains[":brainId"].switch.$post({
+    param: { brainId: brainRef },
+  });
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: await serverApiErrorMessage(response, "You do not have access to that brain."),
+    };
+  }
+  const { brainId } = (await response.json()).data;
 
   const cookieStore = await cookies();
-  cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, access.brain.id, {
+  cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, brainId, {
     path: "/",
     sameSite: "lax",
     maxAge: 60 * 60 * 24 * 365,
@@ -208,26 +208,29 @@ export async function createGoatBrainAction(input: {
   visibility: GoatBrainVisibility;
   description?: string;
 }): Promise<GoatWorkspaceActionResult & { brainRef?: string }> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can create brains." };
-  }
   try {
-    const brain = await createGoatBrain({
-      workspaceId: context.workspace.id,
-      name: input.name,
-      visibility: input.visibility,
-      description: input.description ?? null,
-      createdByWorkosId: context.user.workosUserId,
+    const response = await (await serverApiClient()).v1.brains.$post({
+      json: {
+        name: input.name,
+        visibility: input.visibility,
+        ...(input.description !== undefined ? { description: input.description } : {}),
+      },
     });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not create the brain."),
+      };
+    }
+    const { brainId } = (await response.json()).data;
     const cookieStore = await cookies();
-    cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, brain.id, {
+    cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, brainId, {
       path: "/",
       sameSite: "lax",
       maxAge: 60 * 60 * 24 * 365,
     });
     revalidatePath("/", "layout");
-    return { ok: true, brainRef: brain.id };
+    return { ok: true, brainRef: brainId };
   } catch (error) {
     return errorResult(error, "Could not create the brain.");
   }
@@ -238,33 +241,16 @@ export async function setGoatBrainAccessAction(input: {
   visibility: GoatBrainVisibility;
   memberWorkosIds: string[];
 }): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can change brain access." };
-  }
-  const access = await getGoatBrainAccess({
-    userWorkosId: context.user.workosUserId,
-    brainRef: input.brainRef,
-  });
-  if (!access || access.brain.workspaceId !== context.workspace.id) {
-    return { ok: false, error: "Brain not found in this workspace." };
-  }
-
   try {
-    await updateGoatBrainVisibility({
-      brainRef: input.brainRef,
-      visibility: input.visibility,
-      actingUserWorkosId: context.user.workosUserId,
+    const response = await (await serverApiClient()).v1.brains[":brainId"].access.$put({
+      param: { brainId: input.brainRef },
+      json: { visibility: input.visibility, memberIds: input.memberWorkosIds },
     });
-    if (input.visibility === "restricted") {
-      const memberIds = new Set(input.memberWorkosIds);
-      // The acting admin always keeps access so the brain cannot be orphaned.
-      memberIds.add(context.user.workosUserId);
-      await replaceGoatBrainMembers({
-        brainRef: input.brainRef,
-        userWorkosIds: [...memberIds],
-        addedByWorkosId: context.user.workosUserId,
-      });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not update brain access."),
+      };
     }
     revalidatePath("/", "layout");
     return { ok: true };
@@ -278,58 +264,57 @@ export async function getGoatBrainAccessDetailsAction(brainRef: string): Promise
   memberWorkosIds: string[];
   workspaceMembers: GoatWorkspaceMemberView[];
 } | null> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") return null;
-  const access = await getGoatBrainAccess({
-    userWorkosId: context.user.workosUserId,
-    brainRef,
+  const response = await (await serverApiClient()).v1.brains[":brainId"].access.$get({
+    param: { brainId: brainRef },
   });
-  if (!access || access.brain.workspaceId !== context.workspace.id) return null;
-
-  const [memberWorkosIds, workspaceMembers] = await Promise.all([
-    listGoatBrainMemberIds(brainRef),
-    listGoatWorkspaceMembersAction(),
-  ]);
+  if (!response.ok) return null;
+  const data = (await response.json()).data;
   return {
-    visibility: access.brain.visibility,
-    memberWorkosIds,
-    workspaceMembers,
+    visibility: data.visibility,
+    memberWorkosIds: data.memberIds,
+    workspaceMembers: data.workspaceMembers.map(
+      (member: {
+        id: string;
+        email: string;
+        name: string;
+        avatarUrl: string | null;
+        role: "admin" | "member";
+      }) => ({
+        userWorkosId: member.id,
+        email: member.email,
+        name: member.name,
+        avatarUrl: member.avatarUrl,
+        role: member.role,
+      }),
+    ),
   };
 }
 
 export async function getGoatBrainEnrichmentEnabledAction(
   brainRef: string,
 ): Promise<{ enabled: boolean } | null> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") return null;
-  const access = await getGoatBrainAccess({
-    userWorkosId: context.user.workosUserId,
-    brainRef,
+  const response = await (await serverApiClient()).v1.brains[":brainId"].enrichment.$get({
+    param: { brainId: brainRef },
   });
-  if (!access || access.brain.workspaceId !== context.workspace.id) return null;
-  return { enabled: access.brain.enrichmentEnabled };
+  if (!response.ok) return null;
+  return (await response.json()).data;
 }
 
 export async function setGoatBrainEnrichmentAction(input: {
   brainRef: string;
   enabled: boolean;
 }): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can change enrichment." };
-  }
-  const access = await getGoatBrainAccess({
-    userWorkosId: context.user.workosUserId,
-    brainRef: input.brainRef,
-  });
-  if (!access || access.brain.workspaceId !== context.workspace.id) {
-    return { ok: false, error: "Brain not found in this workspace." };
-  }
   try {
-    await updateGoatBrainEnrichmentEnabled({
-      brainRef: input.brainRef,
-      enabled: input.enabled,
+    const response = await (await serverApiClient()).v1.brains[":brainId"].enrichment.$put({
+      param: { brainId: input.brainRef },
+      json: { enabled: input.enabled },
     });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not update enrichment."),
+      };
+    }
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
@@ -340,39 +325,31 @@ export async function setGoatBrainEnrichmentAction(input: {
 export async function getGoatBrainIntelligenceAction(
   brainRef: string,
 ): Promise<{ intelligence: GoatBrainIntelligence } | null> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") return null;
-  const access = await getGoatBrainAccess({
-    userWorkosId: context.user.workosUserId,
-    brainRef,
+  const response = await (await serverApiClient()).v1.brains[":brainId"].intelligence.$get({
+    param: { brainId: brainRef },
   });
-  if (!access || access.brain.workspaceId !== context.workspace.id) return null;
-  return { intelligence: access.brain.intelligence };
+  if (!response.ok) return null;
+  return (await response.json()).data;
 }
 
 export async function setGoatBrainIntelligenceAction(input: {
   brainRef: string;
   intelligence: GoatBrainIntelligence;
 }): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can change intelligence." };
-  }
   if (input.intelligence !== "basic" && input.intelligence !== "frontier") {
     return { ok: false, error: "Unknown intelligence tier." };
   }
-  const access = await getGoatBrainAccess({
-    userWorkosId: context.user.workosUserId,
-    brainRef: input.brainRef,
-  });
-  if (!access || access.brain.workspaceId !== context.workspace.id) {
-    return { ok: false, error: "Brain not found in this workspace." };
-  }
   try {
-    await updateGoatBrainIntelligence({
-      brainRef: input.brainRef,
-      intelligence: input.intelligence,
+    const response = await (await serverApiClient()).v1.brains[":brainId"].intelligence.$put({
+      param: { brainId: input.brainRef },
+      json: { intelligence: input.intelligence },
     });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not update intelligence."),
+      };
+    }
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
