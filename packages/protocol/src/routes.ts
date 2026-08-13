@@ -46,20 +46,28 @@ import {
   DeleteBrainFolderBodySchema,
   DeleteWikiPageBodySchema,
   ErrorEnvelopeSchema,
+  FeedbackSubmissionEnvelopeSchema,
   ImportSkillBodySchema,
   InvokeWorkflowBodySchema,
   LegacyTaskHistoryEnvelopeSchema,
   LegacyTaskPageSchema,
+  McpSetupEnvelopeSchema,
   MessagePageSchema,
   PresentationCursorSchema,
   ReadModelSchema,
   RenameBrainDocumentBodySchema,
   RenameBrainFolderBodySchema,
+  RepoConfigDeleteEnvelopeSchema,
+  RepoConfigListEnvelopeSchema,
+  RepoConfigMutationEnvelopeSchema,
+  RepositoryExternalIdSchema,
   ResolveApprovalBodySchema,
   ResolveApprovalEnvelopeSchema,
   ResourceIdSchema,
   RunEnvelopeSchema,
   SetBrainSourceBodySchema,
+  SetRepoConfigEnvBodySchema,
+  SetRepoConfigSetupBodySchema,
   SkillArchiveEnvelopeSchema,
   SkillCatalogEnvelopeSchema,
   SkillEnvelopeSchema,
@@ -68,6 +76,7 @@ import {
   SkillImportPreviewEnvelopeSchema,
   SkillListEnvelopeSchema,
   StartBrainImportBodySchema,
+  SubmitFeedbackBodySchema,
   TaskEnvelopeSchema,
   TaskPageSchema,
   TaskScheduleArchiveEnvelopeSchema,
@@ -79,12 +88,15 @@ import {
   UpdateBrainDocumentBodySchema,
   UpdateConversationBodySchema,
   UpdateConversationEnvelopeSchema,
+  UpdateMcpSetupBodySchema,
   UpdateSkillBodySchema,
   UpdateTaskBodySchema,
   UpdateTaskEnvelopeSchema,
   UpdateTaskScheduleCommandSchema,
+  UpdateUserPreferencesBodySchema,
   UpdateWikiPageBodySchema,
   UpdateWorkflowBodySchema,
+  UserPreferencesEnvelopeSchema,
   WikiPageDeleteEnvelopeSchema,
   WikiPageListEnvelopeSchema,
   WikiPageMutationEnvelopeSchema,
@@ -1423,6 +1435,152 @@ export const getBrowserProfileLiveViewRoute = createRoute({
   },
 });
 
+export const updateUserPreferencesRoute = createRoute({
+  method: "patch",
+  path: "/v1/me/preferences",
+  tags: ["Settings"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: UpdateUserPreferencesBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "The acting user's preference set after applying the partial update.",
+      content: { "application/json": { schema: UserPreferencesEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getMcpSetupRoute = createRoute({
+  method: "get",
+  path: "/v1/me/mcp-setup",
+  tags: ["Settings"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "The acting user's MCP client preference and setup completion state.",
+      content: { "application/json": { schema: McpSetupEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const updateMcpSetupRoute = createRoute({
+  method: "patch",
+  path: "/v1/me/mcp-setup",
+  tags: ["Settings"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: UpdateMcpSetupBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "MCP client preference saved.",
+      content: { "application/json": { schema: McpSetupEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const submitFeedbackRoute = createRoute({
+  method: "post",
+  path: "/v1/feedback",
+  tags: ["Feedback"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: SubmitFeedbackBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Feedback delivered to the product team.",
+      content: { "application/json": { schema: FeedbackSubmissionEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listRepoConfigsRoute = createRoute({
+  method: "get",
+  path: "/v1/repo-configs",
+  tags: ["Settings"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description:
+        "Workspace GitHub repositories and their saved configurations. Env values are never returned; only key names.",
+      content: { "application/json": { schema: RepoConfigListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setRepoConfigEnvRoute = createRoute({
+  method: "put",
+  path: "/v1/repo-configs/{repositoryExternalId}/env",
+  tags: ["Settings"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ repositoryExternalId: RepositoryExternalIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetRepoConfigEnvBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Repository env file replaced or cleared. Admin only.",
+      content: { "application/json": { schema: RepoConfigMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setRepoConfigSetupRoute = createRoute({
+  method: "put",
+  path: "/v1/repo-configs/{repositoryExternalId}/setup",
+  tags: ["Settings"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ repositoryExternalId: RepositoryExternalIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetRepoConfigSetupBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Repository setup instructions saved. Admin only.",
+      content: { "application/json": { schema: RepoConfigMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deleteRepoConfigRoute = createRoute({
+  method: "delete",
+  path: "/v1/repo-configs/{repositoryExternalId}",
+  tags: ["Settings"],
+  security: actorSecurity,
+  request: { params: z.object({ repositoryExternalId: RepositoryExternalIdSchema }) },
+  responses: {
+    200: {
+      description: "Repository configuration removed. Admin only.",
+      content: { "application/json": { schema: RepoConfigDeleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export type V1RouteHandlers = {
   listTasks: RouteHandler<typeof listTasksRoute>;
   createTask: RouteHandler<typeof createTaskRoute>;
@@ -1495,6 +1653,14 @@ export type V1RouteHandlers = {
   cancelRun: RouteHandler<typeof cancelRunRoute>;
   resolveApproval: RouteHandler<typeof resolveApprovalRoute>;
   streamReadModel: RouteHandler<typeof streamReadModelRoute>;
+  updateUserPreferences: RouteHandler<typeof updateUserPreferencesRoute>;
+  getMcpSetup: RouteHandler<typeof getMcpSetupRoute>;
+  updateMcpSetup: RouteHandler<typeof updateMcpSetupRoute>;
+  submitFeedback: RouteHandler<typeof submitFeedbackRoute>;
+  listRepoConfigs: RouteHandler<typeof listRepoConfigsRoute>;
+  setRepoConfigEnv: RouteHandler<typeof setRepoConfigEnvRoute>;
+  setRepoConfigSetup: RouteHandler<typeof setRepoConfigSetupRoute>;
+  deleteRepoConfig: RouteHandler<typeof deleteRepoConfigRoute>;
 };
 
 export function createV1Router(
@@ -1577,7 +1743,15 @@ export function createV1Router(
     .openapi(streamRunEventsRoute, handlers.streamRunEvents)
     .openapi(cancelRunRoute, handlers.cancelRun)
     .openapi(resolveApprovalRoute, handlers.resolveApproval)
-    .openapi(streamReadModelRoute, handlers.streamReadModel);
+    .openapi(streamReadModelRoute, handlers.streamReadModel)
+    .openapi(updateUserPreferencesRoute, handlers.updateUserPreferences)
+    .openapi(getMcpSetupRoute, handlers.getMcpSetup)
+    .openapi(updateMcpSetupRoute, handlers.updateMcpSetup)
+    .openapi(submitFeedbackRoute, handlers.submitFeedback)
+    .openapi(listRepoConfigsRoute, handlers.listRepoConfigs)
+    .openapi(setRepoConfigEnvRoute, handlers.setRepoConfigEnv)
+    .openapi(setRepoConfigSetupRoute, handlers.setRepoConfigSetup)
+    .openapi(deleteRepoConfigRoute, handlers.deleteRepoConfig);
 }
 
 export type V1AppType = ReturnType<typeof createV1Router>;
@@ -2265,4 +2439,61 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   streamReadModel: (c) => c.json([], 200),
+  updateUserPreferences: (c) =>
+    c.json(
+      {
+        data: {
+          timezone: "UTC",
+          taskSpawningEnabled: false,
+          wikiEnabled: false,
+          taskViewMode: "board" as const,
+          imessageEnabled: false,
+          autoModelRoutingEnabled: false,
+        },
+        meta,
+      },
+      200,
+    ),
+  getMcpSetup: (c) =>
+    c.json({ data: { preferredClient: null, complete: false, completedAt: null }, meta }, 200),
+  updateMcpSetup: (c) =>
+    c.json(
+      {
+        data: { preferredClient: "claude" as const, complete: false, completedAt: null },
+        meta,
+      },
+      200,
+    ),
+  submitFeedback: (c) => c.json({ data: { submitted: true as const }, meta }, 200),
+  listRepoConfigs: (c) => c.json({ data: { repositories: [], configs: [] }, meta }, 200),
+  setRepoConfigEnv: (c) =>
+    c.json(
+      {
+        data: {
+          repositoryExternalId: "123456789",
+          repositoryFullName: "opencompany/contract",
+          envKeys: ["API_KEY"],
+          setupInstructions: "",
+          updatedAt: placeholderTime,
+        },
+        meta,
+      },
+      200,
+    ),
+  setRepoConfigSetup: (c) =>
+    c.json(
+      {
+        data: {
+          repositoryExternalId: "123456789",
+          repositoryFullName: "opencompany/contract",
+          envKeys: [],
+          setupInstructions: "Run bun install.",
+          updatedAt: placeholderTime,
+        },
+        meta,
+      },
+      200,
+    ),
+  deleteRepoConfig: (c) =>
+    c.json({ data: { repositoryExternalId: "123456789", deleted: true as const }, meta }, 200),
 };

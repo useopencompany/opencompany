@@ -32,15 +32,18 @@ import { createAutomationServices } from "./automations";
 import { createBrainAssetService } from "./brain-assets";
 import { parseBrowserOrigins } from "./browser-origins";
 import { ElectricReadModelProxy } from "./electric-read-models";
+import { createFeedbackService } from "./feedback";
 import { createGitHubIngress } from "./github-ingress";
 import { createGoogleIngress } from "./google-ingress";
 import { createHubspotIngress } from "./hubspot-ingress";
 import { createJamieIngress } from "./jamie-ingress";
 import { createLinearIngress } from "./linear-ingress";
 import { createMcpOAuthIngress } from "./mcp-oauth-ingress";
+import { createRepoConfigService } from "./repo-configs";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
 import { createSlackBotIngress } from "./slack-bot-ingress";
 import { createSlackIngress } from "./slack-ingress";
+import { createUserSettingsService } from "./user-settings";
 import { createXAccountIngress } from "./x-account-ingress";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "server" });
@@ -103,6 +106,9 @@ const app = createApiApp({
   skillImports,
   brainAssets: createBrainAssetService({ db: database.db, knowledge }),
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),
+  userSettings: createUserSettingsService({ db: database.db }),
+  feedback: createFeedbackService({ db: database.db }),
+  repoConfigs: createRepoConfigService({ db: database.db }),
   authenticate,
   browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),
   githubIngress: createGitHubIngress({ db: database.db, identify: identityVerifier }),

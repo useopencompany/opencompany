@@ -1,45 +1,8 @@
+import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { currentGoatUser } from "@/lib/auth";
 import { submitGoatFeedback } from "./actions";
 
-vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
-}));
-
-const currentGoatUserMock = vi.mocked(currentGoatUser);
-
-function authContext() {
-  return {
-    authUser: { email: "ana@acme.com", firstName: "Ana", lastName: "Ng" },
-    workspace: { id: "gws_1", name: "Acme" },
-  } as unknown as Awaited<ReturnType<typeof currentGoatUser>>;
-}
-
-function linearOk<T>(data: T) {
-  return { ok: true, json: async () => ({ data }) } as unknown as Response;
-}
-
-// The action fires up to three requests: team states (triage lookup), team
-// labels, then issueCreate. Route each mocked response by the operation name.
-function routeLinear(overrides: { issue?: unknown } = {}) {
-  return vi.fn(async (_url: string, init: RequestInit) => {
-    const body = JSON.parse(String(init.body)) as { query: string };
-    if (body.query.includes("GoatFeedbackTriageState")) {
-      return linearOk({ team: { states: { nodes: [{ id: "st_triage", type: "triage" }] } } });
-    }
-    if (body.query.includes("GoatFeedbackLabels")) {
-      return linearOk({ team: { labels: { nodes: [] } } });
-    }
-    if (body.query.includes("GoatFeedbackCreateLabel")) {
-      return linearOk({ issueLabelCreate: { success: false, issueLabel: null } });
-    }
-    return linearOk(
-      overrides.issue ?? {
-        issueCreate: { success: true, issue: { id: "iss_1", identifier: "GOAT-1" } },
-      },
-    );
-  });
-}
+vi.mock("next/headers", () => ({ headers: vi.fn() }));
 
 function form(fields: Record<string, string>) {
   const data = new FormData();
@@ -47,78 +10,102 @@ function form(fields: Record<string, string>) {
   return data;
 }
 
+function stubApi(response: () => Response) {
+  const requests: Request[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      requests.push(input instanceof Request ? input : new Request(input, init));
+      return response();
+    }),
+  );
+  return requests;
+}
+
 describe("submitGoatFeedback", () => {
   beforeEach(() => {
-    currentGoatUserMock.mockResolvedValue(authContext());
-    process.env.LINEAR_API_KEY = "lin_api_test";
-    process.env.GOAT_FEEDBACK_LINEAR_TEAM_ID = "team_1";
+    vi.clearAllMocks();
+    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
+    vi.mocked(headers).mockResolvedValue(
+      new Headers({
+        Cookie: "wos-session=sealed",
+        Origin: "https://my.opencompany.chat",
+      }) as never,
+    );
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
-    delete process.env.LINEAR_API_KEY;
-    delete process.env.GOAT_FEEDBACK_LINEAR_TEAM_ID;
   });
 
-  it("rejects an empty message", async () => {
-    const result = await submitGoatFeedback(null, form({ kind: "bug", message: "  " }));
-    expect(result).toEqual({ ok: false, error: "Enter a bit more detail." });
-  });
-
-  it("rejects an overly long message", async () => {
-    const result = await submitGoatFeedback(
-      null,
-      form({ kind: "feedback", message: "x".repeat(4001) }),
-    );
-    expect(result).toEqual({ ok: false, error: "Keep feedback under 4,000 characters." });
-  });
-
-  it("creates a triage issue with source + kind labels", async () => {
-    const fetchMock = routeLinear();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const result = await submitGoatFeedback(
-      null,
-      form({ kind: "bug", message: "Search returns stale results" }),
+  it("posts the trimmed report to the feedback command with actor credentials", async () => {
+    const requests = stubApi(() =>
+      Response.json({
+        data: { submitted: true },
+        meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+      }),
     );
 
-    expect(result).toEqual({ ok: true });
+    await expect(
+      submitGoatFeedback(null, form({ kind: "bug", message: "  The board drops columns.  " })),
+    ).resolves.toEqual({ ok: true });
 
-    const issueCall = fetchMock.mock.calls.find(([, init]) =>
-      String((init as RequestInit).body).includes("GoatFeedbackCreateIssue"),
-    );
-    expect(issueCall).toBeDefined();
-    const input = JSON.parse(String((issueCall?.[1] as RequestInit).body)).variables.input;
-    expect(input.teamId).toBe("team_1");
-    expect(input.title).toBe("[Bug] Search returns stale results");
-    expect(input.stateId).toBe("st_triage");
-    expect(input.description).toContain("Submitted from: Goat app");
-    expect(input.description).toContain("Ana Ng <ana@acme.com>");
-    expect(input.description).toContain("Workspace: Acme (gws_1)");
+    const request = requests[0] as Request;
+    expect(request.method).toBe("POST");
+    expect(new URL(request.url).pathname).toBe("/v1/feedback");
+    await expect(request.json()).resolves.toEqual({
+      kind: "bug",
+      message: "The board drops columns.",
+    });
+    expect(request.headers.get("cookie")).toBe("wos-session=sealed");
+    expect(request.headers.get("origin")).toBe("https://my.opencompany.chat");
   });
 
-  it("defaults an unknown kind to feedback", async () => {
-    vi.stubGlobal("fetch", routeLinear());
-    const result = await submitGoatFeedback(null, form({ kind: "nonsense", message: "Nice tool" }));
-    expect(result).toEqual({ ok: true });
+  it("defaults unknown kinds to feedback", async () => {
+    const requests = stubApi(() =>
+      Response.json({
+        data: { submitted: true },
+        meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+      }),
+    );
+
+    await submitGoatFeedback(null, form({ kind: "rant", message: "Needs dark mode charts." }));
+    await expect((requests[0] as Request).json()).resolves.toMatchObject({ kind: "feedback" });
   });
 
-  it("surfaces a missing API key as an error", async () => {
-    delete process.env.LINEAR_API_KEY;
-    const result = await submitGoatFeedback(null, form({ kind: "idea", message: "Add dark mode" }));
-    expect(result).toEqual({ ok: false, error: "Missing LINEAR_API_KEY." });
+  it("validates message length locally with the original copy", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await expect(submitGoatFeedback(null, form({ kind: "bug", message: "no" }))).resolves.toEqual({
+      ok: false,
+      error: "Enter a bit more detail.",
+    });
+    await expect(
+      submitGoatFeedback(null, form({ kind: "bug", message: "x".repeat(4_001) })),
+    ).resolves.toEqual({ ok: false, error: "Keep feedback under 4,000 characters." });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("returns an error when Linear reports failure", async () => {
-    vi.stubGlobal(
-      "fetch",
-      routeLinear({ issue: { issueCreate: { success: false, issue: null } } }),
+  it("surfaces the API's delivery error message", async () => {
+    stubApi(() =>
+      Response.json(
+        {
+          error: {
+            code: "unavailable",
+            message: "Linear did not create an issue.",
+            requestId: "request_1",
+            retryable: true,
+          },
+          meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+        },
+        { status: 503 },
+      ),
     );
-    const result = await submitGoatFeedback(
-      null,
-      form({ kind: "feedback", message: "Something broke" }),
-    );
-    expect(result).toEqual({ ok: false, error: "Linear did not create an issue." });
+
+    await expect(
+      submitGoatFeedback(null, form({ kind: "idea", message: "Add a weekly digest." })),
+    ).resolves.toEqual({ ok: false, error: "Linear did not create an issue." });
   });
 });

@@ -1,6 +1,5 @@
 {
   "dbImports": [
-    "apps/web/app/(app)/settings/repositories/page.tsx",
     "apps/web/app/(app)/settings/workspace/billing/page.tsx",
     "apps/web/app/(app)/settings/workspace/capabilities/page.tsx",
     "apps/web/app/(app)/settings/workspace/slack/page.tsx",
@@ -24,11 +23,7 @@
     "apps/web/components/GoatAppShell.tsx",
     "apps/web/components/GoatCapabilitiesPanel.tsx",
     "apps/web/components/GoatIngestionUsagePanel.tsx",
-    "apps/web/components/GoatRoutes.tsx",
     "apps/web/components/GoatSurface.tsx",
-    "apps/web/components/GoatTasksBoard.tsx",
-    "apps/web/components/McpSetupGuide.tsx",
-    "apps/web/components/RepositorySettings.tsx",
     "apps/web/components/chat/ChatComposerAttachments.tsx",
     "apps/web/components/chat/TaskCard.tsx",
     "apps/web/components/chat/assistant-items.ts",
@@ -69,10 +64,7 @@
     "apps/web/lib/integrations/personal-accounts.ts",
     "apps/web/lib/legacy-chat-route.ts",
     "apps/web/lib/mcp-server.ts",
-    "apps/web/lib/mcp-setup-actions.ts",
-    "apps/web/lib/mcp-setup.ts",
     "apps/web/lib/onboarding-actions.ts",
-    "apps/web/lib/repo-config-actions.ts",
     "apps/web/lib/slack-bot-actions.ts",
     "apps/web/lib/slack-bot/answer.ts",
     "apps/web/lib/slack-bot/identity.ts",
@@ -83,7 +75,6 @@
     "apps/web/lib/task-steps.ts",
     "apps/web/lib/task-workflow-activity.ts",
     "apps/web/lib/tasks.ts",
-    "apps/web/lib/user-preferences.ts",
     "apps/web/lib/wiki-actions.ts",
     "apps/web/lib/workflow-tasks.ts",
     "apps/web/lib/workos-organizations.ts",
@@ -115,11 +106,9 @@
     "apps/web/lib/integrations/granola.ts",
     "apps/web/lib/integrations/imessage.ts",
     "apps/web/lib/integrations/personal-accounts.ts",
-    "apps/web/lib/mcp-setup-actions.ts",
     "apps/web/lib/slack-bot-actions.ts",
     "apps/web/lib/slack-bot/answer.ts",
     "apps/web/lib/slack-bot/identity.ts",
-    "apps/web/lib/user-preferences.ts",
     "apps/web/lib/workspace-actions.ts"
   ]
 }

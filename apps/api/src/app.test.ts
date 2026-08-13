@@ -92,6 +92,9 @@ describe("canonical Hono API", () => {
       skillImports: fakeSkillImportService(),
       brainAssets: fakeBrainAssets(),
       attachments: fakeAttachments(),
+      userSettings: fakeUserSettings(),
+      feedback: fakeFeedback(),
+      repoConfigs: fakeRepoConfigs(),
       authenticate: async () => {
         throw new ApiError(401, "authentication_required", "Authentication required.");
       },
@@ -1669,6 +1672,244 @@ describe("canonical Hono API", () => {
     expect(response.status).toBe(429);
     expect(response.headers.get("retry-after")).toBe("7");
   });
+
+  it("updates user preferences through the typed settings command", async () => {
+    const updatePreferences = vi.fn(async () => ({
+      timezone: "Europe/Berlin",
+      taskSpawningEnabled: true,
+      wikiEnabled: false,
+      taskViewMode: "list" as const,
+      imessageEnabled: false,
+      autoModelRoutingEnabled: true,
+    }));
+    const app = testApp(fakeRepository(), {
+      userSettings: { ...fakeUserSettings(), updatePreferences },
+    });
+
+    const updated = await app.request("/v1/me/preferences", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ timezone: "Europe/Berlin", taskSpawningEnabled: true }),
+    });
+    expect(updated.status).toBe(200);
+    await expect(updated.json()).resolves.toMatchObject({
+      data: { timezone: "Europe/Berlin", taskViewMode: "list", autoModelRoutingEnabled: true },
+      meta: { apiVersion: "v1" },
+    });
+    expect(updatePreferences).toHaveBeenCalledWith(actor, {
+      timezone: "Europe/Berlin",
+      taskSpawningEnabled: true,
+    });
+
+    const empty = await app.request("/v1/me/preferences", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(empty.status).toBe(400);
+
+    const invalidMode = await app.request("/v1/me/preferences", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskViewMode: "kanban" }),
+    });
+    expect(invalidMode.status).toBe(400);
+  });
+
+  it("requires authentication for the settings surfaces", async () => {
+    const app = testApp(fakeRepository(), {
+      authenticate: async () => {
+        throw new ApiError(401, "authentication_required", "Authentication required.");
+      },
+    });
+    for (const [path, method] of [
+      ["/v1/me/preferences", "PATCH"],
+      ["/v1/me/mcp-setup", "GET"],
+      ["/v1/feedback", "POST"],
+      ["/v1/repo-configs", "GET"],
+    ] as const) {
+      const response = await app.request(path, {
+        method,
+        ...(method === "GET"
+          ? {}
+          : {
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({}),
+            }),
+      });
+      expect(response.status).toBe(401);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "authentication_required" },
+      });
+    }
+  });
+
+  it("serves MCP setup status and saves the preferred client", async () => {
+    const completedAt = new Date("2026-08-11T09:30:00.000Z");
+    const getMcpSetup = vi.fn(async () => ({
+      preferredClient: null,
+      complete: true,
+      completedAt,
+    }));
+    const setPreferredMcpClient = vi.fn(async () => ({
+      preferredClient: "cursor" as const,
+      complete: false,
+      completedAt: null,
+    }));
+    const app = testApp(fakeRepository(), {
+      userSettings: { ...fakeUserSettings(), getMcpSetup, setPreferredMcpClient },
+    });
+
+    const status = await app.request("/v1/me/mcp-setup");
+    expect(status.status).toBe(200);
+    await expect(status.json()).resolves.toMatchObject({
+      data: { preferredClient: null, complete: true, completedAt: completedAt.toISOString() },
+    });
+
+    const saved = await app.request("/v1/me/mcp-setup", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ preferredClient: "cursor" }),
+    });
+    expect(saved.status).toBe(200);
+    await expect(saved.json()).resolves.toMatchObject({
+      data: { preferredClient: "cursor", complete: false, completedAt: null },
+    });
+    expect(setPreferredMcpClient).toHaveBeenCalledWith(actor, "cursor");
+
+    const invalid = await app.request("/v1/me/mcp-setup", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ preferredClient: "vscode" }),
+    });
+    expect(invalid.status).toBe(400);
+  });
+
+  it("dispatches feedback through the injected delivery service", async () => {
+    const submit = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), { feedback: { submit } });
+
+    const sent = await app.request("/v1/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "bug", message: "The board drops my column order." }),
+    });
+    expect(sent.status).toBe(200);
+    await expect(sent.json()).resolves.toMatchObject({ data: { submitted: true } });
+    expect(submit).toHaveBeenCalledWith(actor, {
+      kind: "bug",
+      message: "The board drops my column order.",
+    });
+
+    const tooShort = await app.request("/v1/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "bug", message: "no" }),
+    });
+    expect(tooShort.status).toBe(400);
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("serves repository configs without ever echoing stored env values", async () => {
+    const updatedAt = new Date("2026-08-12T10:00:00.000Z");
+    const configView = {
+      repositoryExternalId: "123456789",
+      repositoryFullName: "opencompany/app",
+      envKeys: ["DATABASE_URL", "API_TOKEN"],
+      setupInstructions: "Run bun install.",
+      updatedAt,
+    };
+    const setEnv = vi.fn(async () => configView);
+    const remove = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), {
+      repoConfigs: {
+        ...fakeRepoConfigs(),
+        list: async () => ({
+          repositories: [
+            {
+              repositoryExternalId: "123456789",
+              repositoryFullName: "opencompany/app",
+              private: true,
+            },
+          ],
+          configs: [configView],
+        }),
+        setEnv,
+        remove,
+      },
+    });
+
+    const listed = await app.request("/v1/repo-configs");
+    expect(listed.status).toBe(200);
+    const listedBody = await listed.json();
+    expect(listedBody).toMatchObject({
+      data: {
+        repositories: [{ repositoryExternalId: "123456789", private: true }],
+        configs: [{ envKeys: ["DATABASE_URL", "API_TOKEN"], updatedAt: updatedAt.toISOString() }],
+      },
+    });
+
+    const secretValue = ["postgres:/", "user:hunter2@db.example.test/app"].join("/");
+    const saved = await app.request("/v1/repo-configs/123456789/env", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: `DATABASE_URL=${secretValue}` }),
+    });
+    expect(saved.status).toBe(200);
+    const savedBody = await saved.json();
+    expect(JSON.stringify(savedBody)).not.toContain(secretValue);
+    expect(savedBody).toMatchObject({ data: { envKeys: ["DATABASE_URL", "API_TOKEN"] } });
+    expect(setEnv).toHaveBeenCalledWith(actor, "123456789", `DATABASE_URL=${secretValue}`);
+
+    const cleared = await app.request("/v1/repo-configs/123456789/env", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: null }),
+    });
+    expect(cleared.status).toBe(200);
+    expect(setEnv).toHaveBeenLastCalledWith(actor, "123456789", null);
+
+    const invalidId = await app.request("/v1/repo-configs/not-a-repo-id/env", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "KEY=value" }),
+    });
+    expect(invalidId.status).toBe(400);
+
+    const removed = await app.request("/v1/repo-configs/123456789", { method: "DELETE" });
+    expect(removed.status).toBe(200);
+    await expect(removed.json()).resolves.toMatchObject({
+      data: { repositoryExternalId: "123456789", deleted: true },
+    });
+    expect(remove).toHaveBeenCalledWith(actor, "123456789");
+  });
+
+  it("maps repository admin gating to a structured forbidden error", async () => {
+    const app = testApp(fakeRepository(), {
+      repoConfigs: {
+        ...fakeRepoConfigs(),
+        setSetupInstructions: async () => {
+          throw new ApiError(
+            403,
+            "forbidden",
+            "Only workspace admins can configure repository environments.",
+          );
+        },
+      },
+    });
+    const response = await app.request("/v1/repo-configs/123456789/setup", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ setupInstructions: "Run bun install." }),
+    });
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "forbidden",
+        message: "Only workspace admins can configure repository environments.",
+      },
+    });
+  });
 });
 
 function testApp(
@@ -1686,6 +1927,9 @@ function testApp(
     skillImports: fakeSkillImportService(),
     brainAssets: fakeBrainAssets(),
     attachments: fakeAttachments(),
+    userSettings: fakeUserSettings(),
+    feedback: fakeFeedback(),
+    repoConfigs: fakeRepoConfigs(),
     authenticate: async () => ({ actor }),
     defaultModel: "provider/default",
     ...overrides,
@@ -1759,6 +2003,45 @@ function brainImportService(
   overrides: Partial<Parameters<typeof createApiApp>[0]["brainImports"]>,
 ): Parameters<typeof createApiApp>[0]["brainImports"] {
   return { ...fakeBrainImports(), ...overrides };
+}
+
+function fakeUserSettings(): Parameters<typeof createApiApp>[0]["userSettings"] {
+  return {
+    updatePreferences: async () => {
+      throw new Error("Unexpected preference update.");
+    },
+    getMcpSetup: async () => {
+      throw new Error("Unexpected MCP setup read.");
+    },
+    setPreferredMcpClient: async () => {
+      throw new Error("Unexpected MCP client mutation.");
+    },
+  };
+}
+
+function fakeFeedback(): Parameters<typeof createApiApp>[0]["feedback"] {
+  return {
+    submit: async () => {
+      throw new Error("Unexpected feedback submission.");
+    },
+  };
+}
+
+function fakeRepoConfigs(): Parameters<typeof createApiApp>[0]["repoConfigs"] {
+  return {
+    list: async () => {
+      throw new Error("Unexpected repository config list.");
+    },
+    setEnv: async () => {
+      throw new Error("Unexpected repository env mutation.");
+    },
+    setSetupInstructions: async () => {
+      throw new Error("Unexpected repository setup mutation.");
+    },
+    remove: async () => {
+      throw new Error("Unexpected repository config removal.");
+    },
+  };
 }
 
 function fakeBrainSources(): Parameters<typeof createApiApp>[0]["brainSources"] {

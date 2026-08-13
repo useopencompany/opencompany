@@ -76,6 +76,13 @@ describe("headless protocol", () => {
       "/v1/runs/{runId}/cancel",
       "/v1/runs/{runId}/approvals/{approvalId}",
       "/v1/read-models/{readModel}",
+      "/v1/me/preferences",
+      "/v1/me/mcp-setup",
+      "/v1/feedback",
+      "/v1/repo-configs",
+      "/v1/repo-configs/{repositoryExternalId}/env",
+      "/v1/repo-configs/{repositoryExternalId}/setup",
+      "/v1/repo-configs/{repositoryExternalId}",
     ]);
     expect(document.components?.securitySchemes).toHaveProperty("bearerAuth");
   });

@@ -6,9 +6,8 @@ import type {
   GoatBrainSourceOptionsCommand,
   GoatBrainSourcesDetails as ServiceBrainSourcesDetails,
 } from "@opencompany/goat-agent/brain-sources";
-import { createOpenCompanyClient } from "@opencompany/protocol";
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
+import { serverApiClient } from "@/lib/server-api-client";
 import type { GoatWorkspaceActionResult } from "@/lib/workspace-actions";
 
 export type GoatBrainSourceView = ServiceBrainSourcesDetails["sources"][number];
@@ -23,7 +22,7 @@ type ConfigureBody<TProvider extends GoatBrainSourceCommand["provider"]> = Extra
 export async function getGoatBrainSourcesAction(
   brainRef: string,
 ): Promise<GoatBrainSourcesDetails | null> {
-  const response = await (await serverSourceClient()).v1.brains[":brainId"].sources.$get({
+  const response = await (await serverApiClient()).v1.brains[":brainId"].sources.$get({
     param: { brainId: brainRef },
   });
   if (response.status === 401 || response.status === 403 || response.status === 404) return null;
@@ -37,7 +36,7 @@ export async function removeGoatBrainSourceAction(input: {
 }): Promise<GoatWorkspaceActionResult> {
   return mutateSource(
     async () =>
-      (await serverSourceClient()).v1.brains[":brainId"].sources[":integrationId"].$delete({
+      (await serverApiClient()).v1.brains[":brainId"].sources[":integrationId"].$delete({
         param: { brainId: input.brainRef, integrationId: input.integrationId },
       }),
     "Could not remove the brain source.",
@@ -239,7 +238,7 @@ async function setSource(
 ): Promise<GoatWorkspaceActionResult> {
   return mutateSource(
     async () =>
-      (await serverSourceClient()).v1.brains[":brainId"].sources[":integrationId"].$put({
+      (await serverApiClient()).v1.brains[":brainId"].sources[":integrationId"].$put({
         param: { brainId, integrationId },
         json: body,
       }),
@@ -267,7 +266,7 @@ async function listSourceOptions(
   body: GoatBrainSourceOptionsCommand,
 ): Promise<{ ok: true; data: GoatBrainSourceOptions } | { ok: false; error: string }> {
   try {
-    const response = await (await serverSourceClient()).v1.integrations[":integrationId"][
+    const response = await (await serverApiClient()).v1.integrations[":integrationId"][
       "brain-source-options"
     ].$post({ param: { integrationId }, json: body });
     if (!response.ok) {
@@ -283,44 +282,6 @@ async function listSourceOptions(
       error: error instanceof Error ? error.message : "Source options could not be loaded.",
     };
   }
-}
-
-async function serverSourceClient() {
-  const incoming = await headers();
-  const cookie = incoming.get("cookie");
-  const authorization = incoming.get("authorization");
-  const browserOrigin = incoming.get("origin");
-  const fetchWithActor: typeof globalThis.fetch = async (input, init) => {
-    const forwarded = new Headers(init?.headers);
-    if (cookie) forwarded.set("Cookie", cookie);
-    if (authorization) forwarded.set("Authorization", authorization);
-    if (browserOrigin) forwarded.set("Origin", browserOrigin);
-    return globalThis.fetch(input, { ...init, headers: forwarded, cache: "no-store" });
-  };
-  return createOpenCompanyClient(apiOrigin(process.env.GOAT_API_ORIGIN), {
-    fetch: fetchWithActor,
-  });
-}
-
-function apiOrigin(value: string | undefined) {
-  if (!value?.trim()) throw new Error("The canonical API origin is unavailable.");
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new Error("The canonical API origin is invalid.");
-  }
-  if (
-    !["http:", "https:"].includes(url.protocol) ||
-    url.username ||
-    url.password ||
-    url.pathname !== "/" ||
-    url.search ||
-    url.hash
-  ) {
-    throw new Error("The canonical API origin is invalid.");
-  }
-  return url.origin;
 }
 
 async function responseError(response: Response, fallback: string) {

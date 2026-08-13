@@ -113,6 +113,18 @@ services:
         sync: false
       - key: GOAT_SLACK_BOT_STATE_SECRET
         sync: false
+      # Feedback submission moved behind POST /v1/feedback in the #1203 5a1
+      # cutover: the API dispatches sidebar feedback to Linear. Optional — when
+      # unset, feedback submission fails with a clear error and nothing else
+      # degrades.
+      - key: LINEAR_API_KEY
+        sync: false
+      - key: GOAT_FEEDBACK_LINEAR_TEAM_ID
+        sync: false
+      - key: GOAT_FEEDBACK_LINEAR_LABELS
+        sync: false
+      - key: GOAT_FEEDBACK_LINEAR_PROJECT_ID
+        sync: false
       # Server-side integration analytics (fire-and-forget; safe when unset).
       - key: NEXT_PUBLIC_GOAT_POSTHOG_TOKEN
         sync: false

@@ -30,6 +30,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@hono/node-server": "^1.19.11",
+        "@opencompany/agent-runtime": "workspace:*",
         "@opencompany/analytics": "workspace:*",
         "@opencompany/chat-presentation": "workspace:*",
         "@opencompany/core": "workspace:*",

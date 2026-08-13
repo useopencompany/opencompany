@@ -4,10 +4,13 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GoatRepoConfigDb } from "./goat-repo-configs";
 import {
+  GOAT_REPO_ENV_MAX_BYTES,
   isValidGitHubRepositoryExternalId,
   isValidGitHubRepositoryFullName,
   listDecryptedGoatRepoConfigs,
+  normalizeGoatRepoSetupInstructions,
   upsertGoatRepoConfig,
+  validateGoatRepoEnv,
 } from "./goat-repo-configs";
 
 describe("Goat repository configs", () => {
@@ -210,6 +213,46 @@ describe("Goat repository configs", () => {
     expect(isValidGitHubRepositoryFullName("../app")).toBe(false);
     expect(isValidGitHubRepositoryFullName("opencompany/..")).toBe(false);
     expect(isValidGitHubRepositoryFullName("opencompany/app/extra")).toBe(false);
+  });
+
+  it("accepts dotenv files with comments, quotes, multiline values, and equals signs", () => {
+    const result = validateGoatRepoEnv(`# local setup
+DATABASE_URL="database.example.test/db?sslmode=require"
+TOKEN='abc=def'
+export API_URL=https://example.test/api
+PRIVATE_KEY="-----BEGIN KEY-----
+line=inside-the-value
+-----END KEY-----"
+EMPTY=
+`);
+
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("rejects empty and oversized env files without returning any values", () => {
+    expect(validateGoatRepoEnv("# comments only")).toEqual({
+      ok: false,
+      message: "No environment variables were found.",
+    });
+    expect(validateGoatRepoEnv(`KEY=${"x".repeat(GOAT_REPO_ENV_MAX_BYTES)}`)).toEqual({
+      ok: false,
+      message: "Environment files must be 256 KB or smaller.",
+    });
+    expect(validateGoatRepoEnv(`${"K".repeat(257)}=value`)).toEqual({
+      ok: false,
+      message: "Environment variable names must be 256 characters or fewer.",
+    });
+  });
+
+  it("trims setup instructions and bounds their length", () => {
+    expect(normalizeGoatRepoSetupInstructions("  run bun install  ")).toEqual({
+      ok: true,
+      instructions: "run bun install",
+    });
+    expect(normalizeGoatRepoSetupInstructions("x".repeat(4_001))).toEqual({
+      ok: false,
+      message: "Setup instructions must be 4,000 characters or fewer.",
+    });
   });
 });
 

@@ -1936,6 +1936,149 @@ export const BrowserProfileLiveViewEnvelopeSchema = z
   .strict()
   .openapi("BrowserProfileLiveViewEnvelope");
 
+export const TaskViewModeSchema = z.enum(["board", "list"]);
+export const McpClientSchema = z.enum(["claude", "chatgpt", "cursor"]);
+
+export const UserPreferencesSchema = z
+  .object({
+    timezone: z.string().min(1).max(100),
+    taskSpawningEnabled: z.boolean(),
+    wikiEnabled: z.boolean(),
+    taskViewMode: TaskViewModeSchema,
+    imessageEnabled: z.boolean(),
+    autoModelRoutingEnabled: z.boolean(),
+  })
+  .strict()
+  .openapi("UserPreferences");
+
+export const UpdateUserPreferencesBodySchema = z
+  .object({
+    timezone: z.string().min(1).max(100).optional(),
+    taskSpawningEnabled: z.boolean().optional(),
+    wikiEnabled: z.boolean().optional(),
+    taskViewMode: TaskViewModeSchema.optional(),
+    imessageEnabled: z.boolean().optional(),
+    autoModelRoutingEnabled: z.boolean().optional(),
+  })
+  .strict()
+  .refine((body: Record<string, unknown>) => Object.keys(body).length > 0, {
+    message: "At least one preference field is required.",
+  })
+  .openapi("UpdateUserPreferencesBody");
+
+export const UserPreferencesEnvelopeSchema = z
+  .object({ data: UserPreferencesSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("UserPreferencesEnvelope");
+
+export const McpSetupSchema = z
+  .object({
+    preferredClient: McpClientSchema.nullable(),
+    complete: z.boolean(),
+    completedAt: TimestampSchema.nullable(),
+  })
+  .strict()
+  .openapi("McpSetup");
+
+export const UpdateMcpSetupBodySchema = z
+  .object({ preferredClient: McpClientSchema })
+  .strict()
+  .openapi("UpdateMcpSetupBody");
+
+export const McpSetupEnvelopeSchema = z
+  .object({ data: McpSetupSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("McpSetupEnvelope");
+
+export const FeedbackKindSchema = z.enum(["bug", "feedback", "idea"]);
+
+export const SubmitFeedbackBodySchema = z
+  .object({
+    kind: FeedbackKindSchema,
+    message: z.string().trim().min(3).max(4_000),
+  })
+  .strict()
+  .openapi("SubmitFeedbackBody");
+
+export const FeedbackSubmissionEnvelopeSchema = z
+  .object({
+    data: z.object({ submitted: z.literal(true) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("FeedbackSubmissionEnvelope");
+
+// GitHub repository ids are numeric strings; using them as the path key keeps
+// repository full names (which contain "/") out of URL segments.
+export const RepositoryExternalIdSchema = z
+  .string()
+  .regex(/^[1-9]\d{0,63}$/u)
+  .openapi({ example: "123456789", description: "Numeric GitHub repository id." });
+
+export const WorkspaceRepositorySchema = z
+  .object({
+    repositoryExternalId: RepositoryExternalIdSchema,
+    repositoryFullName: z.string().min(1).max(512),
+    private: z.boolean(),
+  })
+  .strict()
+  .openapi("WorkspaceRepository");
+
+// Stored env values are secret-bearing and must never appear in responses;
+// only the saved key names are exposed.
+export const RepoConfigSchema = z
+  .object({
+    repositoryExternalId: RepositoryExternalIdSchema,
+    repositoryFullName: z.string().min(1).max(512),
+    envKeys: z.array(z.string().min(1).max(256)).max(512),
+    setupInstructions: z.string().max(4_000),
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("RepoConfig");
+
+export const RepoConfigListEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        repositories: z.array(WorkspaceRepositorySchema),
+        configs: z.array(RepoConfigSchema),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("RepoConfigListEnvelope");
+
+export const SetRepoConfigEnvBodySchema = z
+  .object({
+    // A string replaces the stored env file; null clears it. Detailed content
+    // validation happens server-side so limits produce human-readable errors.
+    content: z.string().max(300_000).nullable(),
+  })
+  .strict()
+  .openapi("SetRepoConfigEnvBody");
+
+export const SetRepoConfigSetupBodySchema = z
+  .object({ setupInstructions: z.string().max(100_000) })
+  .strict()
+  .openapi("SetRepoConfigSetupBody");
+
+export const RepoConfigMutationEnvelopeSchema = z
+  .object({ data: RepoConfigSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("RepoConfigMutationEnvelope");
+
+export const RepoConfigDeleteEnvelopeSchema = z
+  .object({
+    data: z
+      .object({ repositoryExternalId: RepositoryExternalIdSchema, deleted: z.literal(true) })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("RepoConfigDeleteEnvelope");
+
 export type ConversationDto = z.infer<typeof ConversationSchema>;
 export type UpdateConversationBody = z.infer<typeof UpdateConversationBodySchema>;
 export type MessageDto = z.infer<typeof MessageSchema>;
@@ -2015,3 +2158,15 @@ export type BrowserProfileDto = z.infer<typeof BrowserProfileSchema>;
 export type CreateBrowserProfileBody = z.infer<typeof CreateBrowserProfileBodySchema>;
 export type BrowserProfileLoginSessionDto = z.infer<typeof BrowserProfileLoginSessionSchema>;
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelopeSchema>;
+export type TaskViewMode = z.infer<typeof TaskViewModeSchema>;
+export type McpClient = z.infer<typeof McpClientSchema>;
+export type UserPreferencesDto = z.infer<typeof UserPreferencesSchema>;
+export type UpdateUserPreferencesBody = z.infer<typeof UpdateUserPreferencesBodySchema>;
+export type McpSetupDto = z.infer<typeof McpSetupSchema>;
+export type UpdateMcpSetupBody = z.infer<typeof UpdateMcpSetupBodySchema>;
+export type FeedbackKind = z.infer<typeof FeedbackKindSchema>;
+export type SubmitFeedbackBody = z.infer<typeof SubmitFeedbackBodySchema>;
+export type WorkspaceRepositoryDto = z.infer<typeof WorkspaceRepositorySchema>;
+export type RepoConfigDto = z.infer<typeof RepoConfigSchema>;
+export type SetRepoConfigEnvBody = z.infer<typeof SetRepoConfigEnvBodySchema>;
+export type SetRepoConfigSetupBody = z.infer<typeof SetRepoConfigSetupBodySchema>;
