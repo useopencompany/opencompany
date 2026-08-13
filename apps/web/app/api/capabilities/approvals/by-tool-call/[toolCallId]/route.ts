@@ -1,8 +1,4 @@
-import {
-  getGoatCapabilityApprovalByToolCall,
-  getGoatCapabilitySessionBudgetUsdMicros,
-} from "@opencompany/db/goat-capabilities";
-import { currentGoatUser } from "@/lib/auth";
+import { serverApiClient } from "@/lib/server-api-client";
 
 export const runtime = "nodejs";
 
@@ -10,26 +6,17 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ toolCallId: string }> },
 ) {
-  const context = await currentGoatUser({ optional: true });
-  if (!context) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const { toolCallId } = await params;
-  const [row, sessionBudgetUsdMicros] = await Promise.all([
-    getGoatCapabilityApprovalByToolCall({
-      toolCallId,
-      userWorkosId: context.user.workosUserId,
-      workspaceId: context.workspace.id,
-    }),
-    getGoatCapabilitySessionBudgetUsdMicros(context.workspace.id),
-  ]);
-  if (!row) return Response.json({ error: "Approval not found" }, { status: 404 });
-  return Response.json({
-    runId: row.id,
-    source: row.source,
-    action: row.action,
-    status: row.status,
-    maxCostUsdMicros: row.quoteTotalCostUsdMicros,
-    expiresAt: row.approvalExpiresAt?.toISOString() ?? null,
-    settledCostUsdMicros: row.totalCostUsdMicros ?? null,
-    sessionBudgetUsdMicros,
-  });
+  const response = await (await serverApiClient()).v1["capability-approvals"]["by-tool-call"][
+    ":toolCallId"
+  ].$get({ param: { toolCallId } });
+  if (!response.ok) return legacyApprovalError(response);
+  return Response.json((await response.json()).data);
+}
+
+async function legacyApprovalError(response: Response) {
+  return Response.json(
+    { error: response.status === 401 ? "Unauthorized" : "Approval not found" },
+    { status: response.status === 401 ? 401 : 404 },
+  );
 }

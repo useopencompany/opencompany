@@ -1,43 +1,12 @@
 "use server";
 
-import { getDb } from "@opencompany/db/client";
-import { getGoatWorkspacePlan, goatWorkspaceMemberCap } from "@opencompany/db/goat-billing";
-import {
-  type GoatBrainIntelligence,
-  type GoatBrainVisibility,
-  goatWorkspaces,
-} from "@opencompany/db/goat-schema";
-import {
-  createGoatBrain,
-  DEFAULT_GOAT_BRAIN_SLUG,
-  getGoatBrainAccess,
-  hasOwnedGoatHobbyWorkspace,
-  listAccessibleGoatBrains,
-  listGoatBrainMemberIds,
-  listGoatWorkspaceMembers,
-  listGoatWorkspacesForUser,
-  removeGoatWorkspaceMember,
-  replaceGoatBrainMembers,
-  updateGoatBrainEnrichmentEnabled,
-  updateGoatBrainIntelligence,
-  updateGoatBrainVisibility,
-  updateGoatWorkspaceName,
-} from "@opencompany/db/goat-workspaces";
-import { eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
-import { currentGoatUser } from "@/lib/auth";
-import { syncGoatStripeSeatQuantityForWorkspace } from "@/lib/billing/seats";
-import { getWorkOSClient } from "@/lib/workos-client";
-import { ensureGoatWorkspaceOrganization } from "@/lib/workos-organizations";
-import {
-  GoatWorkspaceProvisioningError,
-  provisionGoatWorkspace,
-} from "@/lib/workspace-provisioning";
+import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 import { activateGoatWorkspace, GOAT_ACTIVE_BRAIN_COOKIE } from "@/lib/workspace-session";
 
-const MEMBER_ROLE = "member";
 const WORKSPACE_NAME_MAX_LENGTH = 80;
 const CREATE_WORKSPACE_ERROR_MESSAGE = "Could not create the organization. Please try again.";
 const ACTIVATE_WORKSPACE_ERROR_MESSAGE = "Could not switch organizations. Please try again.";
@@ -73,6 +42,9 @@ export type GoatWorkspaceInvitationView = {
   expiresAt: string | null;
 };
 
+export type GoatBrainVisibility = "workspace" | "restricted";
+export type GoatBrainIntelligence = "basic" | "frontier";
+
 function errorResult(error: unknown, fallback: string): { ok: false; error: string } {
   return { ok: false, error: error instanceof Error ? error.message : fallback };
 }
@@ -90,12 +62,19 @@ function validateWorkspaceName(name: unknown) {
 }
 
 export async function switchGoatBrainAction(brainRef: string): Promise<GoatWorkspaceActionResult> {
-  const { user } = await currentGoatUser();
-  const access = await getGoatBrainAccess({ userWorkosId: user.workosUserId, brainRef });
-  if (!access) return { ok: false, error: "You do not have access to that brain." };
+  const response = await (await serverApiClient()).v1.brains[":brainId"].switch.$post({
+    param: { brainId: brainRef },
+  });
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: await serverApiErrorMessage(response, "You do not have access to that brain."),
+    };
+  }
+  const { brainId } = (await response.json()).data;
 
   const cookieStore = await cookies();
-  cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, access.brain.id, {
+  cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, brainId, {
     path: "/",
     sameSite: "lax",
     maxAge: 60 * 60 * 24 * 365,
@@ -107,26 +86,35 @@ export async function switchGoatBrainAction(brainRef: string): Promise<GoatWorks
 export async function switchGoatWorkspaceAction(
   workspaceId: string,
 ): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
-  const workspaces = await listGoatWorkspacesForUser(context.user.workosUserId);
-  const target = workspaces.find((entry) => entry.workspace.id === workspaceId);
-  if (!target) return { ok: false, error: "You do not have access to that workspace." };
-  if (!target.workspace.workosOrganizationId) {
-    return { ok: false, error: "That workspace is not linked to a WorkOS organization." };
+  let activation: {
+    workspaceId: string;
+    organizationId: string;
+    brainId: string | null;
+  };
+  try {
+    const response = await (await serverApiClient()).v1.workspaces[":workspaceId"].switch.$post({
+      param: { workspaceId },
+    });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "You do not have access to that workspace."),
+      };
+    }
+    activation = (await response.json()).data;
+  } catch (error) {
+    console.error("[goat] Failed to resolve workspace activation", {
+      workspaceId,
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+    return { ok: false, error: ACTIVATE_WORKSPACE_ERROR_MESSAGE };
   }
-
-  const brains = await listAccessibleGoatBrains({
-    userWorkosId: context.user.workosUserId,
-    workspaceId: target.workspace.id,
-  });
-  const activeBrain =
-    brains.find((brain) => brain.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
 
   try {
     await activateGoatWorkspace({
-      workspaceId: target.workspace.id,
-      workosOrganizationId: target.workspace.workosOrganizationId,
-      brainId: activeBrain?.id ?? null,
+      workspaceId: activation.workspaceId,
+      workosOrganizationId: activation.organizationId,
+      brainId: activation.brainId,
     });
   } catch (error) {
     // AuthKit uses redirects for organization-specific SSO and MFA. Preserve
@@ -134,8 +122,8 @@ export async function switchGoatWorkspaceAction(
     // into the server action's inline-error contract.
     unstable_rethrow(error);
     console.error("[goat] Failed to activate workspace organization", {
-      workspaceId: target.workspace.id,
-      workosOrganizationId: target.workspace.workosOrganizationId,
+      workspaceId: activation.workspaceId,
+      workosOrganizationId: activation.organizationId,
       error,
     });
     return { ok: false, error: ACTIVATE_WORKSPACE_ERROR_MESSAGE };
@@ -149,48 +137,45 @@ export async function createGoatWorkspaceAction(name: unknown): Promise<GoatWork
   const validation = validateWorkspaceName(name);
   if (!validation.ok) return validation;
 
-  const context = await currentGoatUser();
+  const workspaceId = `goat_ws_${randomUUID()}`;
+  let activation: {
+    workspaceId: string;
+    organizationId: string;
+    brainId: string | null;
+  };
   try {
-    if (await hasOwnedGoatHobbyWorkspace(context.user.workosUserId)) {
+    const response = await (await serverApiClient()).v1.workspaces.$post({
+      json: {
+        workspaceId,
+        name: validation.name,
+      },
+    });
+    if (!response.ok) {
       return {
         ok: false,
-        error:
-          "Hobby includes one workspace. Upgrade your Hobby workspace to Pro to create another.",
+        error: await serverApiErrorMessage(response, CREATE_WORKSPACE_ERROR_MESSAGE),
       };
     }
+    activation = (await response.json()).data;
   } catch (error) {
-    console.error("[goat] Failed to verify Hobby workspace ownership", error);
-    return { ok: false, error: CREATE_WORKSPACE_ERROR_MESSAGE };
-  }
-  let created: Awaited<ReturnType<typeof provisionGoatWorkspace>>;
-  try {
-    created = await provisionGoatWorkspace({
-      authUserId: context.authUser.id,
-      userWorkosId: context.user.workosUserId,
-      name: validation.name,
-    });
-  } catch (error) {
-    const provisioning = error instanceof GoatWorkspaceProvisioningError ? error : null;
-    console.error("[goat] Failed to create workspace organization", {
-      workspaceId: provisioning?.workspaceId,
-      workosOrganizationId: provisioning?.workosOrganizationId,
-      localWorkspacePersisted: provisioning?.localWorkspacePersisted,
-      error,
+    console.error("[goat] Failed to create workspace through the canonical API", {
+      workspaceId,
+      errorName: error instanceof Error ? error.name : typeof error,
     });
     return { ok: false, error: CREATE_WORKSPACE_ERROR_MESSAGE };
   }
 
   try {
     await activateGoatWorkspace({
-      workspaceId: created.workspace.id,
-      workosOrganizationId: created.workspace.workosOrganizationId,
-      brainId: created.brain.id,
+      workspaceId: activation.workspaceId,
+      workosOrganizationId: activation.organizationId,
+      brainId: activation.brainId,
     });
   } catch (error) {
     unstable_rethrow(error);
     console.error("[goat] Failed to activate newly created workspace organization", {
-      workspaceId: created.workspace.id,
-      workosOrganizationId: created.workspace.workosOrganizationId,
+      workspaceId: activation.workspaceId,
+      workosOrganizationId: activation.organizationId,
       error,
     });
     // The WorkOS organization and local workspace are durable at this point.
@@ -200,7 +185,7 @@ export async function createGoatWorkspaceAction(name: unknown): Promise<GoatWork
     return { ok: false, error: ACTIVATE_CREATED_WORKSPACE_ERROR_MESSAGE };
   }
   revalidatePath("/", "layout");
-  return { ok: true, workspaceId: created.workspace.id };
+  return { ok: true, workspaceId: activation.workspaceId };
 }
 
 export async function createGoatBrainAction(input: {
@@ -208,26 +193,29 @@ export async function createGoatBrainAction(input: {
   visibility: GoatBrainVisibility;
   description?: string;
 }): Promise<GoatWorkspaceActionResult & { brainRef?: string }> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can create brains." };
-  }
   try {
-    const brain = await createGoatBrain({
-      workspaceId: context.workspace.id,
-      name: input.name,
-      visibility: input.visibility,
-      description: input.description ?? null,
-      createdByWorkosId: context.user.workosUserId,
+    const response = await (await serverApiClient()).v1.brains.$post({
+      json: {
+        name: input.name,
+        visibility: input.visibility,
+        ...(input.description !== undefined ? { description: input.description } : {}),
+      },
     });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not create the brain."),
+      };
+    }
+    const { brainId } = (await response.json()).data;
     const cookieStore = await cookies();
-    cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, brain.id, {
+    cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, brainId, {
       path: "/",
       sameSite: "lax",
       maxAge: 60 * 60 * 24 * 365,
     });
     revalidatePath("/", "layout");
-    return { ok: true, brainRef: brain.id };
+    return { ok: true, brainRef: brainId };
   } catch (error) {
     return errorResult(error, "Could not create the brain.");
   }
@@ -238,33 +226,16 @@ export async function setGoatBrainAccessAction(input: {
   visibility: GoatBrainVisibility;
   memberWorkosIds: string[];
 }): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can change brain access." };
-  }
-  const access = await getGoatBrainAccess({
-    userWorkosId: context.user.workosUserId,
-    brainRef: input.brainRef,
-  });
-  if (!access || access.brain.workspaceId !== context.workspace.id) {
-    return { ok: false, error: "Brain not found in this workspace." };
-  }
-
   try {
-    await updateGoatBrainVisibility({
-      brainRef: input.brainRef,
-      visibility: input.visibility,
-      actingUserWorkosId: context.user.workosUserId,
+    const response = await (await serverApiClient()).v1.brains[":brainId"].access.$put({
+      param: { brainId: input.brainRef },
+      json: { visibility: input.visibility, memberIds: input.memberWorkosIds },
     });
-    if (input.visibility === "restricted") {
-      const memberIds = new Set(input.memberWorkosIds);
-      // The acting admin always keeps access so the brain cannot be orphaned.
-      memberIds.add(context.user.workosUserId);
-      await replaceGoatBrainMembers({
-        brainRef: input.brainRef,
-        userWorkosIds: [...memberIds],
-        addedByWorkosId: context.user.workosUserId,
-      });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not update brain access."),
+      };
     }
     revalidatePath("/", "layout");
     return { ok: true };
@@ -278,58 +249,57 @@ export async function getGoatBrainAccessDetailsAction(brainRef: string): Promise
   memberWorkosIds: string[];
   workspaceMembers: GoatWorkspaceMemberView[];
 } | null> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") return null;
-  const access = await getGoatBrainAccess({
-    userWorkosId: context.user.workosUserId,
-    brainRef,
+  const response = await (await serverApiClient()).v1.brains[":brainId"].access.$get({
+    param: { brainId: brainRef },
   });
-  if (!access || access.brain.workspaceId !== context.workspace.id) return null;
-
-  const [memberWorkosIds, workspaceMembers] = await Promise.all([
-    listGoatBrainMemberIds(brainRef),
-    listGoatWorkspaceMembersAction(),
-  ]);
+  if (!response.ok) return null;
+  const data = (await response.json()).data;
   return {
-    visibility: access.brain.visibility,
-    memberWorkosIds,
-    workspaceMembers,
+    visibility: data.visibility,
+    memberWorkosIds: data.memberIds,
+    workspaceMembers: data.workspaceMembers.map(
+      (member: {
+        id: string;
+        email: string;
+        name: string;
+        avatarUrl: string | null;
+        role: "admin" | "member";
+      }) => ({
+        userWorkosId: member.id,
+        email: member.email,
+        name: member.name,
+        avatarUrl: member.avatarUrl,
+        role: member.role,
+      }),
+    ),
   };
 }
 
 export async function getGoatBrainEnrichmentEnabledAction(
   brainRef: string,
 ): Promise<{ enabled: boolean } | null> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") return null;
-  const access = await getGoatBrainAccess({
-    userWorkosId: context.user.workosUserId,
-    brainRef,
+  const response = await (await serverApiClient()).v1.brains[":brainId"].enrichment.$get({
+    param: { brainId: brainRef },
   });
-  if (!access || access.brain.workspaceId !== context.workspace.id) return null;
-  return { enabled: access.brain.enrichmentEnabled };
+  if (!response.ok) return null;
+  return (await response.json()).data;
 }
 
 export async function setGoatBrainEnrichmentAction(input: {
   brainRef: string;
   enabled: boolean;
 }): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can change enrichment." };
-  }
-  const access = await getGoatBrainAccess({
-    userWorkosId: context.user.workosUserId,
-    brainRef: input.brainRef,
-  });
-  if (!access || access.brain.workspaceId !== context.workspace.id) {
-    return { ok: false, error: "Brain not found in this workspace." };
-  }
   try {
-    await updateGoatBrainEnrichmentEnabled({
-      brainRef: input.brainRef,
-      enabled: input.enabled,
+    const response = await (await serverApiClient()).v1.brains[":brainId"].enrichment.$put({
+      param: { brainId: input.brainRef },
+      json: { enabled: input.enabled },
     });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not update enrichment."),
+      };
+    }
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
@@ -340,39 +310,31 @@ export async function setGoatBrainEnrichmentAction(input: {
 export async function getGoatBrainIntelligenceAction(
   brainRef: string,
 ): Promise<{ intelligence: GoatBrainIntelligence } | null> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") return null;
-  const access = await getGoatBrainAccess({
-    userWorkosId: context.user.workosUserId,
-    brainRef,
+  const response = await (await serverApiClient()).v1.brains[":brainId"].intelligence.$get({
+    param: { brainId: brainRef },
   });
-  if (!access || access.brain.workspaceId !== context.workspace.id) return null;
-  return { intelligence: access.brain.intelligence };
+  if (!response.ok) return null;
+  return (await response.json()).data;
 }
 
 export async function setGoatBrainIntelligenceAction(input: {
   brainRef: string;
   intelligence: GoatBrainIntelligence;
 }): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can change intelligence." };
-  }
   if (input.intelligence !== "basic" && input.intelligence !== "frontier") {
     return { ok: false, error: "Unknown intelligence tier." };
   }
-  const access = await getGoatBrainAccess({
-    userWorkosId: context.user.workosUserId,
-    brainRef: input.brainRef,
-  });
-  if (!access || access.brain.workspaceId !== context.workspace.id) {
-    return { ok: false, error: "Brain not found in this workspace." };
-  }
   try {
-    await updateGoatBrainIntelligence({
-      brainRef: input.brainRef,
-      intelligence: input.intelligence,
+    const response = await (await serverApiClient()).v1.brains[":brainId"].intelligence.$put({
+      param: { brainId: input.brainRef },
+      json: { intelligence: input.intelligence },
     });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not update intelligence."),
+      };
+    }
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
@@ -381,58 +343,28 @@ export async function setGoatBrainIntelligenceAction(input: {
 }
 
 export async function listGoatWorkspaceMembersAction(): Promise<GoatWorkspaceMemberView[]> {
-  const context = await currentGoatUser();
-  const members = await listGoatWorkspaceMembers(context.workspace.id);
-  return members.map((entry) => ({
-    userWorkosId: entry.user.workosUserId,
-    email: entry.user.email,
-    name:
-      [entry.user.firstName, entry.user.lastName].filter(Boolean).join(" ").trim() ||
-      entry.user.email,
-    avatarUrl: entry.user.avatarUrl,
-    role: entry.member.role,
-  }));
+  const settings = await getGoatWorkspaceSettingsAction();
+  return settings.members;
 }
 
 export async function inviteToGoatWorkspaceAction(
   email: string,
 ): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can invite members." };
-  }
   const trimmed = email.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
     return { ok: false, error: "Enter a valid email address." };
   }
 
   try {
-    // Members plus pending invites must stay under the plan limit. Acceptance
-    // races can still overshoot by one or two
-    // — the adoption path deliberately never blocks a sign-in — so this check
-    // plus the members-panel over-cap banner is the enforcement.
-    const [members, invitations, plan] = await Promise.all([
-      listGoatWorkspaceMembers(context.workspace.id),
-      listGoatWorkspaceInvitationsAction(),
-      getGoatWorkspacePlan(context.workspace.id),
-    ]);
-    const memberCap = goatWorkspaceMemberCap(plan);
-    if (members.length + invitations.length >= memberCap) {
+    const response = await (await serverApiClient()).v1.workspace.invitations.$post({
+      json: { email: trimmed },
+    });
+    if (!response.ok) {
       return {
         ok: false,
-        error:
-          memberCap === 1
-            ? "Hobby includes one member. Upgrade to Pro to invite teammates."
-            : `Workspaces allow up to ${memberCap} members (including pending invites). Remove a member or revoke an invite first.`,
+        error: await serverApiErrorMessage(response, "Could not send the invitation."),
       };
     }
-    const organizationId = await ensureGoatWorkspaceOrganization(context.workspace);
-    await getWorkOSClient().userManagement.sendInvitation({
-      email: trimmed,
-      organizationId,
-      inviterUserId: context.authUser.id,
-      roleSlug: MEMBER_ROLE,
-    });
     revalidatePath("/settings/workspace");
     return { ok: true };
   } catch (error) {
@@ -442,21 +374,9 @@ export async function inviteToGoatWorkspaceAction(
 }
 
 export async function listGoatWorkspaceInvitationsAction(): Promise<GoatWorkspaceInvitationView[]> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin" || !context.workspace.workosOrganizationId) return [];
-
   try {
-    const invitations = await getWorkOSClient().userManagement.listInvitations({
-      organizationId: context.workspace.workosOrganizationId,
-    });
-    return invitations.data
-      .filter((invitation) => invitation.state === "pending")
-      .map((invitation) => ({
-        id: invitation.id,
-        email: invitation.email,
-        state: invitation.state,
-        expiresAt: invitation.expiresAt ?? null,
-      }));
+    const settings = await getGoatWorkspaceSettingsAction();
+    return settings.invitations;
   } catch (error) {
     console.error("[goat] Failed to list workspace invitations", error);
     return [];
@@ -466,12 +386,16 @@ export async function listGoatWorkspaceInvitationsAction(): Promise<GoatWorkspac
 export async function revokeGoatWorkspaceInvitationAction(
   invitationId: string,
 ): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can revoke invitations." };
-  }
   try {
-    await getWorkOSClient().userManagement.revokeInvitation(invitationId);
+    const response = await (await serverApiClient()).v1.workspace.invitations[
+      ":invitationId"
+    ].$delete({ param: { invitationId } });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not revoke the invitation."),
+      };
+    }
     revalidatePath("/settings/workspace");
     return { ok: true };
   } catch (error) {
@@ -482,32 +406,16 @@ export async function revokeGoatWorkspaceInvitationAction(
 export async function removeGoatWorkspaceMemberAction(
   userWorkosId: string,
 ): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can remove members." };
-  }
-  if (userWorkosId === context.user.workosUserId) {
-    return { ok: false, error: "You cannot remove yourself from the workspace." };
-  }
-
   try {
-    if (context.workspace.workosOrganizationId) {
-      const workos = getWorkOSClient();
-      const memberships = await workos.userManagement.listOrganizationMemberships({
-        userId: userWorkosId,
-        organizationId: context.workspace.workosOrganizationId,
-      });
-      for (const membership of memberships.data) {
-        await workos.userManagement.deleteOrganizationMembership(membership.id);
-      }
+    const response = await (await serverApiClient()).v1.workspace.members[":userId"].$delete({
+      param: { userId: userWorkosId },
+    });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not remove the member."),
+      };
     }
-    await removeGoatWorkspaceMember({
-      workspaceId: context.workspace.id,
-      userWorkosId,
-    });
-    await syncGoatStripeSeatQuantityForWorkspace(context.workspace.id).catch((error) => {
-      console.error("[goat] Failed to sync Stripe seat quantity after member removal", error);
-    });
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
@@ -518,22 +426,20 @@ export async function removeGoatWorkspaceMemberAction(
 export async function updateGoatWorkspaceNameAction(
   name: string,
 ): Promise<GoatWorkspaceActionResult> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can rename the workspace." };
-  }
   const trimmed = name.trim();
   if (!trimmed) return { ok: false, error: "Name cannot be empty." };
   if (trimmed.length > 80) return { ok: false, error: "Name is too long (max 80 chars)." };
 
   try {
-    if (context.workspace.workosOrganizationId) {
-      await getWorkOSClient().organizations.updateOrganization({
-        organization: context.workspace.workosOrganizationId,
-        name: trimmed,
-      });
+    const response = await (await serverApiClient()).v1.workspace.$patch({
+      json: { name: trimmed },
+    });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not rename the workspace."),
+      };
     }
-    await updateGoatWorkspaceName({ workspaceId: context.workspace.id, name: trimmed });
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
@@ -549,27 +455,31 @@ export async function getGoatWorkspaceSettingsAction(): Promise<{
   members: GoatWorkspaceMemberView[];
   invitations: GoatWorkspaceInvitationView[];
 }> {
-  const context = await currentGoatUser();
-  const db = getDb();
-  const [workspaceRow] = await db
-    .select()
-    .from(goatWorkspaces)
-    .where(eq(goatWorkspaces.id, context.workspace.id))
-    .limit(1);
-  const [members, invitations, plan] = await Promise.all([
-    listGoatWorkspaceMembersAction(),
-    listGoatWorkspaceInvitationsAction(),
-    getGoatWorkspacePlan(context.workspace.id),
-  ]);
+  const response = await (await serverApiClient()).v1.workspace.$get();
+  if (!response.ok) {
+    throw new Error(await serverApiErrorMessage(response, "Could not load workspace settings."));
+  }
+  const settings = (await response.json()).data;
   return {
-    workspace: {
-      id: context.workspace.id,
-      name: workspaceRow?.name ?? context.workspace.name,
-    },
-    role: context.role,
-    plan,
-    memberCap: goatWorkspaceMemberCap(plan),
-    members,
-    invitations,
+    workspace: settings.workspace,
+    role: settings.role,
+    plan: settings.plan,
+    memberCap: settings.memberCap,
+    members: settings.members.map(
+      (member: {
+        id: string;
+        email: string;
+        name: string;
+        avatarUrl: string | null;
+        role: "admin" | "member";
+      }) => ({
+        userWorkosId: member.id,
+        email: member.email,
+        name: member.name,
+        avatarUrl: member.avatarUrl,
+        role: member.role,
+      }),
+    ),
+    invitations: settings.invitations,
   };
 }

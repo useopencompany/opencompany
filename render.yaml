@@ -25,6 +25,14 @@ services:
         sync: false
       - key: WORKOS_COOKIE_DOMAIN
         sync: false
+      # Workspace membership removal runs the per-event Stripe seat sync in
+      # the canonical API (#1203 5a4d).
+      - key: GOAT_STRIPE_API_KEY
+        sync: false
+      # Shared with the web cron/unsubscribe relays. It authenticates only the
+      # API's internal onboarding-email persistence endpoints.
+      - key: CRON_SECRET
+        sync: false
       - key: GOAT_AUTHKIT_DOMAIN
         sync: false
       - key: GOAT_API_OAUTH_AUDIENCE
