@@ -61,6 +61,7 @@ import type { ApiAuthenticator } from "./auth";
 import type { BrainAssetService } from "./brain-assets";
 import type { ReadModelService } from "./electric-read-models";
 import { ApiError, errorResponse } from "./errors";
+import type { FeedbackService } from "./feedback";
 import type { GitHubIngressService } from "./github-ingress";
 import type { GoogleIngressService } from "./google-ingress";
 import type { HubspotIngressService } from "./hubspot-ingress";
@@ -68,9 +69,11 @@ import type { JamieIngressService } from "./jamie-ingress";
 import type { LinearIngressService } from "./linear-ingress";
 import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
+import type { RepoConfigService } from "./repo-configs";
 import { PollingRunEventNotifier, type RunEventNotifier } from "./run-event-notifier";
 import type { SlackBotIngressService } from "./slack-bot-ingress";
 import type { SlackIngressService } from "./slack-ingress";
+import type { UserSettingsService } from "./user-settings";
 import type { XAccountIngressService } from "./x-account-ingress";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "hono" });
@@ -117,6 +120,9 @@ export type CreateApiAppInput = {
   skillImports: SkillImportApplicationService;
   brainAssets: BrainAssetService;
   attachments: AttachmentUploadService;
+  userSettings: UserSettingsService;
+  feedback: FeedbackService;
+  repoConfigs: RepoConfigService;
   authenticate: ApiAuthenticator;
   browserOrigins?: readonly string[];
   githubIngress?: GitHubIngressService;
@@ -1307,6 +1313,77 @@ export function createApiApp(input: CreateApiAppInput) {
         requestUrl: new URL(c.req.url),
       }) as never;
     },
+    updateUserPreferences: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const preferences = await input.userSettings.updatePreferences(actor, c.req.valid("json"));
+      return c.json({ data: preferences, meta }, 200);
+    },
+    getMcpSetup: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const status = await input.userSettings.getMcpSetup(actor);
+      return c.json({ data: mcpSetupDto(status), meta }, 200);
+    },
+    updateMcpSetup: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const status = await input.userSettings.setPreferredMcpClient(
+        actor,
+        c.req.valid("json").preferredClient,
+      );
+      return c.json({ data: mcpSetupDto(status), meta }, 200);
+    },
+    submitFeedback: async (c) => {
+      const actor = actorFrom(c);
+      // Feedback gets its own bucket: sharing the write counter would let
+      // ordinary settings churn 429 the always-available feedback widget.
+      await enforceRateLimit(rateLimiter, actor, "feedback", 10);
+      await input.feedback.submit(actor, c.req.valid("json"));
+      return c.json({ data: { submitted: true as const }, meta }, 200);
+    },
+    listRepoConfigs: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const result = await input.repoConfigs.list(actor);
+      return c.json(
+        {
+          data: {
+            repositories: result.repositories,
+            configs: result.configs.map(repoConfigDto),
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    setRepoConfigEnv: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const config = await input.repoConfigs.setEnv(
+        actor,
+        c.req.valid("param").repositoryExternalId,
+        c.req.valid("json").content,
+      );
+      return c.json({ data: repoConfigDto(config), meta }, 200);
+    },
+    setRepoConfigSetup: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const config = await input.repoConfigs.setSetupInstructions(
+        actor,
+        c.req.valid("param").repositoryExternalId,
+        c.req.valid("json").setupInstructions,
+      );
+      return c.json({ data: repoConfigDto(config), meta }, 200);
+    },
+    deleteRepoConfig: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const repositoryExternalId = c.req.valid("param").repositoryExternalId;
+      await input.repoConfigs.remove(actor, repositoryExternalId);
+      return c.json({ data: { repositoryExternalId, deleted: true as const }, meta }, 200);
+    },
   };
 
   const app = createV1Router(handlers, {
@@ -1844,6 +1921,36 @@ function runDto(run: {
   updatedAt: Date;
 }) {
   return { ...run, createdAt: run.createdAt.toISOString(), updatedAt: run.updatedAt.toISOString() };
+}
+
+function mcpSetupDto(status: {
+  preferredClient: "claude" | "chatgpt" | "cursor" | null;
+  complete: boolean;
+  completedAt: Date | null;
+}) {
+  return {
+    preferredClient: status.preferredClient,
+    complete: status.complete,
+    completedAt: status.completedAt?.toISOString() ?? null,
+  };
+}
+
+// Env values are secret-bearing and intentionally absent from the view type;
+// this DTO only ever carries key names.
+function repoConfigDto(config: {
+  repositoryExternalId: string;
+  repositoryFullName: string;
+  envKeys: string[];
+  setupInstructions: string;
+  updatedAt: Date;
+}) {
+  return {
+    repositoryExternalId: config.repositoryExternalId,
+    repositoryFullName: config.repositoryFullName,
+    envKeys: config.envKeys,
+    setupInstructions: config.setupInstructions,
+    updatedAt: config.updatedAt.toISOString(),
+  };
 }
 
 function runEventDto(event: RunEvent) {

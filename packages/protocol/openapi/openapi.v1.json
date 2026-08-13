@@ -7184,6 +7184,382 @@
           "resolution"
         ],
         "additionalProperties": false
+      },
+      "UserPreferencesEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/UserPreferences"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "UserPreferences": {
+        "type": "object",
+        "properties": {
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "taskSpawningEnabled": {
+            "type": "boolean"
+          },
+          "wikiEnabled": {
+            "type": "boolean"
+          },
+          "taskViewMode": {
+            "type": "string",
+            "enum": [
+              "board",
+              "list"
+            ]
+          },
+          "imessageEnabled": {
+            "type": "boolean"
+          },
+          "autoModelRoutingEnabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "timezone",
+          "taskSpawningEnabled",
+          "wikiEnabled",
+          "taskViewMode",
+          "imessageEnabled",
+          "autoModelRoutingEnabled"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateUserPreferencesBody": {
+        "type": "object",
+        "properties": {
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "taskSpawningEnabled": {
+            "type": "boolean"
+          },
+          "wikiEnabled": {
+            "type": "boolean"
+          },
+          "taskViewMode": {
+            "type": "string",
+            "enum": [
+              "board",
+              "list"
+            ]
+          },
+          "imessageEnabled": {
+            "type": "boolean"
+          },
+          "autoModelRoutingEnabled": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "McpSetupEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/McpSetup"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "McpSetup": {
+        "type": "object",
+        "properties": {
+          "preferredClient": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "claude",
+              "chatgpt",
+              "cursor",
+              null
+            ]
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "completedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "preferredClient",
+          "complete",
+          "completedAt"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateMcpSetupBody": {
+        "type": "object",
+        "properties": {
+          "preferredClient": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "chatgpt",
+              "cursor"
+            ]
+          }
+        },
+        "required": [
+          "preferredClient"
+        ],
+        "additionalProperties": false
+      },
+      "FeedbackSubmissionEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "submitted": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "submitted"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SubmitFeedbackBody": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "bug",
+              "feedback",
+              "idea"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "kind",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "RepoConfigListEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "repositories": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WorkspaceRepository"
+                }
+              },
+              "configs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RepoConfig"
+                }
+              }
+            },
+            "required": [
+              "repositories",
+              "configs"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceRepository": {
+        "type": "object",
+        "properties": {
+          "repositoryExternalId": {
+            "type": "string",
+            "pattern": "^[1-9]\\d{0,63}$/u",
+            "example": "123456789",
+            "description": "Numeric GitHub repository id."
+          },
+          "repositoryFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "private": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repositoryExternalId",
+          "repositoryFullName",
+          "private"
+        ],
+        "additionalProperties": false
+      },
+      "RepoConfig": {
+        "type": "object",
+        "properties": {
+          "repositoryExternalId": {
+            "type": "string",
+            "pattern": "^[1-9]\\d{0,63}$/u",
+            "example": "123456789",
+            "description": "Numeric GitHub repository id."
+          },
+          "repositoryFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "envKeys": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "maxItems": 512
+          },
+          "setupInstructions": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "repositoryExternalId",
+          "repositoryFullName",
+          "envKeys",
+          "setupInstructions",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "RepoConfigMutationEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RepoConfig"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SetRepoConfigEnvBody": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 300000
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "SetRepoConfigSetupBody": {
+        "type": "object",
+        "properties": {
+          "setupInstructions": {
+            "type": "string",
+            "maxLength": 100000
+          }
+        },
+        "required": [
+          "setupInstructions"
+        ],
+        "additionalProperties": false
+      },
+      "RepoConfigDeleteEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "repositoryExternalId": {
+                "type": "string",
+                "pattern": "^[1-9]\\d{0,63}$/u",
+                "example": "123456789",
+                "description": "Numeric GitHub repository id."
+              },
+              "deleted": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "repositoryExternalId",
+              "deleted"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
       }
     },
     "parameters": {}
@@ -11410,6 +11786,392 @@
               "application/json": {
                 "schema": {
                   "nullable": true
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/preferences": {
+      "patch": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserPreferencesBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The acting user's preference set after applying the partial update.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPreferencesEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/mcp-setup": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The acting user's MCP client preference and setup completion state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpSetupEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMcpSetupBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "MCP client preference saved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpSetupEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/feedback": {
+      "post": {
+        "tags": [
+          "Feedback"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitFeedbackBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Feedback delivered to the product team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackSubmissionEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/repo-configs": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspace GitHub repositories and their saved configurations. Env values are never returned; only key names.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepoConfigListEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/repo-configs/{repositoryExternalId}/env": {
+      "put": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9]\\d{0,63}$/u",
+              "example": "123456789",
+              "description": "Numeric GitHub repository id."
+            },
+            "required": true,
+            "description": "Numeric GitHub repository id.",
+            "name": "repositoryExternalId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRepoConfigEnvBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Repository env file replaced or cleared. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepoConfigMutationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/repo-configs/{repositoryExternalId}/setup": {
+      "put": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9]\\d{0,63}$/u",
+              "example": "123456789",
+              "description": "Numeric GitHub repository id."
+            },
+            "required": true,
+            "description": "Numeric GitHub repository id.",
+            "name": "repositoryExternalId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRepoConfigSetupBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Repository setup instructions saved. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepoConfigMutationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/repo-configs/{repositoryExternalId}": {
+      "delete": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9]\\d{0,63}$/u",
+              "example": "123456789",
+              "description": "Numeric GitHub repository id."
+            },
+            "required": true,
+            "description": "Numeric GitHub repository id.",
+            "name": "repositoryExternalId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Repository configuration removed. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepoConfigDeleteEnvelope"
                 }
               }
             }

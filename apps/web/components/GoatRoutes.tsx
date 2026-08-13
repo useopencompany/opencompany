@@ -1,10 +1,6 @@
 "use client";
 
 import type {
-  GoatRepoConfigView,
-  GoatWorkspaceRepository,
-} from "@opencompany/db/goat-repo-configs";
-import type {
   LegacyTaskHistoryDto,
   LegacyTaskHistoryEventDto,
   LegacyTaskHistoryMessageDto,
@@ -80,6 +76,7 @@ import { legacyTaskDtoToRow, taskReadModelToRow } from "@/lib/headless-task-coll
 import { getHeadlessTask, getLegacyTaskCompatibilityHistory } from "@/lib/headless-task-commands";
 import type { GoatIntegrationState } from "@/lib/integration-state";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import type { GoatRepoConfigView, GoatWorkspaceRepository } from "@/lib/repo-config-actions";
 import type { GoatSkillListItem, GoatSkillSource } from "@/lib/skills";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
 import {

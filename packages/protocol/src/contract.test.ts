@@ -166,6 +166,13 @@ describe("v1 protocol contract", () => {
       "/v1/runs/{runId}/cancel",
       "/v1/runs/{runId}/approvals/{approvalId}",
       "/v1/read-models/{readModel}",
+      "/v1/me/preferences",
+      "/v1/me/mcp-setup",
+      "/v1/feedback",
+      "/v1/repo-configs",
+      "/v1/repo-configs/{repositoryExternalId}/env",
+      "/v1/repo-configs/{repositoryExternalId}/setup",
+      "/v1/repo-configs/{repositoryExternalId}",
     ]);
     expect(JSON.stringify(document)).not.toMatch(/workos|codex_chat_turn|lease_owner/iu);
 

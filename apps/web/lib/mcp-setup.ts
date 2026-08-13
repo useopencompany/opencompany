@@ -1,15 +1,13 @@
-import type { GoatMcpClient } from "@opencompany/db/goat-schema";
-
 // One connector per user: this endpoint spans every brain the signed-in user
 // can access. Kept here (client-safe) and reused by lib/mcp-oauth.ts.
 export const GOAT_USER_MCP_ENDPOINT_PATH = "/mcp";
 export const OPENCOMPANY_MCP_SERVER_NAME = "opencompany";
 
-export const GOAT_MCP_CLIENTS = [
-  "claude",
-  "chatgpt",
-  "cursor",
-] as const satisfies readonly GoatMcpClient[];
+// Mirrors the protocol's McpClient enum with a concrete web-side union: the
+// generated z.infer types collapse to `any` under this app's tsconfig.
+export const GOAT_MCP_CLIENTS = ["claude", "chatgpt", "cursor"] as const;
+
+export type GoatMcpClient = (typeof GOAT_MCP_CLIENTS)[number];
 
 export function isGoatMcpClient(value: unknown): value is GoatMcpClient {
   return typeof value === "string" && GOAT_MCP_CLIENTS.some((client) => client === value);

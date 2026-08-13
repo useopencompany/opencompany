@@ -1,6 +1,5 @@
 "use client";
 
-import type { GoatTaskViewMode } from "@opencompany/db/goat-schema";
 import {
   Dialog,
   DialogContent,
@@ -44,7 +43,7 @@ import {
   toGoatTaskTitle,
 } from "@/lib/task-display";
 import { useGoatTaskSummary } from "@/lib/use-task-summary";
-import { updateGoatTaskViewModeAction } from "@/lib/user-preferences";
+import { type GoatTaskViewMode, updateGoatTaskViewModeAction } from "@/lib/user-preferences";
 
 const TERMINAL_TASK_STATUSES = new Set<GoatTaskView["status"]>(["succeeded", "failed", "canceled"]);
 const CAPPED_TASK_BOARD_COLUMNS = new Set<GoatTaskBoardColumn>(["done", "canceled"]);

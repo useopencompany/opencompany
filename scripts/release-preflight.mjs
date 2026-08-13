@@ -166,6 +166,13 @@ const groups = {
       "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
       "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
       "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
+      // Sidebar feedback dispatch (#1203 5a1) moved to POST /v1/feedback.
+      // Optional (mirrors the retired web behavior): without these, feedback
+      // submission fails with a clear error and nothing else degrades.
+      "LINEAR_API_KEY",
+      "GOAT_FEEDBACK_LINEAR_TEAM_ID",
+      "GOAT_FEEDBACK_LINEAR_LABELS",
+      "GOAT_FEEDBACK_LINEAR_PROJECT_ID",
     ],
   },
   runner: {

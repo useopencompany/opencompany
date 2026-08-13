@@ -1,15 +1,13 @@
 "use client";
 
-import type {
-  GoatRepoConfigView,
-  GoatWorkspaceRepository,
-} from "@opencompany/db/goat-repo-configs";
 import { Check, KeyRound, Loader2, LockKeyhole, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import {
   clearGoatRepoEnvAction,
   deleteGoatRepoConfigAction,
+  type GoatRepoConfigView,
+  type GoatWorkspaceRepository,
   saveGoatRepoEnvAction,
   saveGoatRepoSetupInstructionsAction,
 } from "@/lib/repo-config-actions";

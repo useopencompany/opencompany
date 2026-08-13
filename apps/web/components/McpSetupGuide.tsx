@@ -1,6 +1,5 @@
 "use client";
 
-import type { GoatMcpClient } from "@opencompany/db/goat-schema";
 import { toast } from "@opencompany/ui/components/sonner";
 import { AnthropicIcon, type LucideIcon as IconComponent, OpenAIIcon } from "@opencompany/ui/icons";
 import { Check, CheckCircle2, Code2, Copy, ExternalLink, Loader2 } from "lucide-react";
@@ -12,6 +11,7 @@ import {
   buildCursorMcpDeeplink,
   buildGoatMcpFirstPrompt,
   GOAT_USER_MCP_ENDPOINT_PATH,
+  type GoatMcpClient,
   OPENCOMPANY_MCP_SERVER_NAME,
 } from "@/lib/mcp-setup";
 import {
