@@ -1,4 +1,5 @@
 import { serve } from "@hono/node-server";
+import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { createGoatBillingApplicationService } from "@opencompany/billing/application-service";
 import { getGoatStripe, getGoatStripeWebhookSecret } from "@opencompany/billing/stripe";
 import { RedisChatPresentationStream } from "@opencompany/chat-presentation";
@@ -37,6 +38,8 @@ import { createBillingReconcileService } from "./billing-reconcile";
 import { createBrainAssetService } from "./brain-assets";
 import { createBrainControlService } from "./brain-control";
 import { parseBrowserOrigins } from "./browser-origins";
+import { createChatResourceService } from "./chat-resources";
+import { createChatTitleService } from "./chat-title";
 import { ElectricReadModelProxy } from "./electric-read-models";
 import { createEngineAuthService } from "./engine-auth";
 import { createEngineSessionService } from "./engine-sessions";
@@ -123,6 +126,37 @@ const app = createApiApp({
   browserProfiles,
   skillImports,
   brainAssets: createBrainAssetService({ db: database.db, knowledge }),
+  chatResources: createChatResourceService({ db: database.db }),
+  chatTitles: createChatTitleService({
+    db: database.db,
+    ...(process.env.VERCEL_AI_GATEWAY_API_KEY
+      ? { apiKey: process.env.VERCEL_AI_GATEWAY_API_KEY }
+      : {}),
+  }),
+  captureChatMessage: (event) =>
+    captureGoatServerEvent(
+      "chat_message_sent",
+      event.actor.userId,
+      {
+        workspace_id: event.actor.workspaceId,
+        session_id: event.conversationId,
+        is_first_message: event.firstMessage,
+        engine: event.engine,
+        usage_source: event.engine === "opencompany" ? "owned_platform" : "external_harness",
+        model: event.model,
+        message_length: event.messageLength,
+        selection_mode: event.selectionMode,
+        ...(event.routing
+          ? {
+              routing_tier: event.routing.tier,
+              routing_reason: event.routing.reason,
+              routing_outcome: event.routing.outcome,
+              routing_duration_ms: event.routing.durationMs,
+            }
+          : {}),
+      },
+      { workspaceId: event.actor.workspaceId },
+    ),
   brainControl: createBrainControlService({ db: database.db }),
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),
   userSettings: createUserSettingsService({ db: database.db }),

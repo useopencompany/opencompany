@@ -1001,7 +1001,10 @@ export function SubagentRow({
 
 function browserScreenshotUrl(value: unknown) {
   if (!isRecord(value) || typeof value.screenshotUrl !== "string") return null;
-  return value.screenshotUrl.startsWith("/api/chat-screenshots/") ? value.screenshotUrl : null;
+  return value.screenshotUrl.startsWith("/v1/chat-screenshots/") ||
+    value.screenshotUrl.startsWith("/api/chat-screenshots/")
+    ? value.screenshotUrl
+    : null;
 }
 
 function BrainToolCallRow({ tool }: { tool: ToolCallView }) {

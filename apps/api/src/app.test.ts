@@ -29,6 +29,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createApiApp } from "./app";
 import type { AttachmentUploadService } from "./attachments";
 import type { BrainAssetService } from "./brain-assets";
+import type { ChatResourceService } from "./chat-resources";
 import { ApiError } from "./errors";
 import type { ApiRateLimiter } from "./rate-limit";
 
@@ -1664,6 +1665,186 @@ describe("canonical Hono API", () => {
       },
     });
     expect(JSON.stringify(json)).not.toMatch(/blob|pathname|url/iu);
+  });
+
+  it("owns authenticated Conversation shares behind the canonical resource", async () => {
+    const findShare = vi.fn(async () => null);
+    const ensureShare = vi.fn(async () => "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd");
+    const revokeShare = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), {
+      chatResources: chatResourceService({ findShare, ensureShare, revokeShare }),
+    });
+
+    const current = await app.request("/v1/conversations/conversation_1/share");
+    expect(current.status).toBe(200);
+    await expect(current.json()).resolves.toMatchObject({
+      data: { conversationId: "conversation_1", shareId: null },
+    });
+    expect(findShare).toHaveBeenCalledWith(actor, "conversation_1");
+
+    const created = await app.request("/v1/conversations/conversation_1/share", {
+      method: "PUT",
+    });
+    expect(created.status).toBe(200);
+    await expect(created.json()).resolves.toMatchObject({
+      data: {
+        conversationId: "conversation_1",
+        shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+      },
+    });
+    expect(ensureShare).toHaveBeenCalledWith(actor, "conversation_1");
+
+    const revoked = await app.request("/v1/conversations/conversation_1/share", {
+      method: "DELETE",
+    });
+    expect(revoked.status).toBe(200);
+    await expect(revoked.json()).resolves.toMatchObject({
+      data: { conversationId: "conversation_1", shareId: null },
+    });
+    expect(revokeShare).toHaveBeenCalledWith(actor, "conversation_1");
+  });
+
+  it("owns Conversation title generation and Message analytics in the API runtime", async () => {
+    const generate = vi.fn(async () => ({
+      conversationId: "conversation_1",
+      title: "Launch plan",
+      generated: true,
+    }));
+    const captureChatMessage = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), {
+      chatTitles: { generate },
+      captureChatMessage,
+    });
+
+    const title = await app.request("/v1/conversations/conversation_1/title", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId: "message_user_1" }),
+    });
+    expect(title.status).toBe(200);
+    await expect(title.json()).resolves.toMatchObject({
+      data: { conversationId: "conversation_1", title: "Launch plan", generated: true },
+    });
+    expect(generate).toHaveBeenCalledWith(actor, "conversation_1", "message_user_1");
+
+    const message = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "message-title-1" },
+      body: JSON.stringify({
+        content: "Prepare a launch plan",
+        engine: { type: "opencompany", schemaVersion: 1 },
+      }),
+    });
+    expect(message.status).toBe(202);
+    await vi.waitFor(() => {
+      expect(generate).toHaveBeenCalledWith(actor, "conversation_1", "message_user_1");
+      expect(captureChatMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actor,
+          conversationId: "conversation_1",
+          firstMessage: true,
+          engine: "opencompany",
+          messageLength: 21,
+          selectionMode: "manual",
+        }),
+      );
+    });
+  });
+
+  it("does not repeat title or analytics side effects for an idempotent Message replay", async () => {
+    const repository = fakeRepository();
+    repository.createMessageAndRun = async ({ command }) => {
+      repository.lastCommand = command;
+      return {
+        conversationId: "conversation_1",
+        messageId: "message_user_1",
+        assistantMessageId: "message_assistant_1",
+        runId: "run_1",
+        transactionId: "42",
+        idempotentReplay: true,
+      };
+    };
+    const generate = vi.fn(async () => ({
+      conversationId: "conversation_1",
+      title: "Launch plan",
+      generated: true,
+    }));
+    const captureChatMessage = vi.fn(async () => undefined);
+    const app = testApp(repository, {
+      chatTitles: { generate },
+      captureChatMessage,
+    });
+
+    const response = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "message-replay-1" },
+      body: JSON.stringify({
+        content: "Prepare a launch plan",
+        engine: { type: "opencompany", schemaVersion: 1 },
+      }),
+    });
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({ data: { replayed: true } });
+    expect(generate).not.toHaveBeenCalled();
+    expect(captureChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("serves public Chat presentation without actor authentication or private metadata", async () => {
+    const loadPublicShare = vi.fn(async () => ({
+      shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+      title: "Shared Chat",
+      kind: "chat" as const,
+      engine: "codex" as const,
+      messages: [{ id: "message_1", role: "assistant" as const, parts: [] }],
+    }));
+    const app = testApp(fakeRepository(), {
+      chatResources: chatResourceService({ loadPublicShare }),
+      authenticate: async () => {
+        throw new Error("Public resources must not authenticate an actor.");
+      },
+    });
+
+    const response = await app.request(
+      "/public/chat-shares/goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("x-robots-tag")).toContain("noindex");
+    const body = await response.json();
+    expect(body).toMatchObject({
+      data: { title: "Shared Chat", engine: "codex", messages: [{ id: "message_1" }] },
+    });
+    expect(JSON.stringify(body)).not.toMatch(/sessionId|contextTokens|blob|lease|token/iu);
+  });
+
+  it("streams authorized Chat resource bytes with defensive headers", async () => {
+    const downloadAttachment = vi.fn(async () => ({
+      stream: new Response("private attachment").body as ReadableStream<Uint8Array>,
+      mediaType: "image/png",
+      filename: 'diagram\u0000 "final".png',
+      sizeBytes: 18,
+      inline: true,
+      cacheControl: "private, max-age=86400, immutable",
+      sandbox: false,
+    }));
+    const app = testApp(fakeRepository(), {
+      chatResources: chatResourceService({ downloadAttachment }),
+    });
+
+    const response = await app.request("/v1/chat-attachments/message_1/attachment_1");
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("private attachment");
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(response.headers.get("cache-control")).toContain("private");
+    expect(response.headers.get("content-disposition")).toContain("diagram_ _final_.png");
+    expect(downloadAttachment).toHaveBeenCalledWith({
+      actor,
+      messageId: "message_1",
+      attachmentId: "attachment_1",
+    });
   });
 
   it("uploads and replaces private Brain assets through typed multipart operations", async () => {
@@ -3401,6 +3582,26 @@ function brainSourceDetails() {
 
 function brainAssetService(overrides: Partial<BrainAssetService>): BrainAssetService {
   return { ...fakeBrainAssets(), ...overrides };
+}
+
+function chatResourceService(overrides: Partial<ChatResourceService>): ChatResourceService {
+  const unexpected = async (): Promise<never> => {
+    throw new Error("Unexpected Chat resource operation.");
+  };
+  return {
+    findShare: unexpected,
+    ensureShare: unexpected,
+    revokeShare: unexpected,
+    loadPublicShare: unexpected,
+    loadPublicShareMetadata: unexpected,
+    deleteArtifact: unexpected,
+    downloadArtifact: unexpected,
+    downloadAttachment: unexpected,
+    downloadScreenshot: unexpected,
+    downloadPublicAttachment: unexpected,
+    downloadPublicArtifact: unexpected,
+    ...overrides,
+  };
 }
 
 function fakeKnowledgeService() {

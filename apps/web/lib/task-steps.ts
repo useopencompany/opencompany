@@ -1,9 +1,14 @@
-import type { GoatTask } from "@opencompany/db/goat-schema";
+import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/goat-agent/task-runtime-types";
 
-export type GoatTaskStepInput = Pick<
-  GoatTask,
-  "status" | "stage" | "result" | "error" | "harnessSpec" | "debugTrace" | "sandboxId"
->;
+export type GoatTaskStepInput = {
+  status: GoatTaskStatus;
+  stage: GoatTaskStage;
+  result: string | null;
+  error: string | null;
+  harnessSpec: unknown;
+  debugTrace: unknown;
+  sandboxId: string | null;
+};
 
 const MAX_STEPS = 6;
 const MAX_STEP_LENGTH = 160;

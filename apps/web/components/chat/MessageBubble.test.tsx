@@ -70,11 +70,11 @@ describe("MessageBubble generated files", () => {
     expect(screen.getByText("launch-plan.md · 2.0 KB · v1")).toBeVisible();
     expect(screen.getByRole("link", { name: "Open Launch plan" })).toHaveAttribute(
       "href",
-      "/api/chat-artifacts/artifact_1/versions/version_1",
+      "/v1/chat-artifacts/artifact_1/versions/version_1",
     );
     expect(screen.getByRole("link", { name: "Download Launch plan" })).toHaveAttribute(
       "href",
-      "/api/chat-artifacts/artifact_1/versions/version_1?download=1",
+      "/v1/chat-artifacts/artifact_1/versions/version_1?download=1",
     );
   });
 
@@ -90,7 +90,7 @@ describe("MessageBubble generated files", () => {
     await user.click(screen.getByRole("button", { name: "Delete Launch plan" }));
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/chat-artifacts/artifact_1", {
+      expect(fetchMock).toHaveBeenCalledWith("/v1/chat-artifacts/artifact_1", {
         method: "DELETE",
       }),
     );
@@ -349,7 +349,7 @@ describe("MessageBubble assistant errors", () => {
           output: {
             ok: true,
             command: "browser_screenshot",
-            screenshotUrl: "/api/chat-screenshots/goat_chat_1/1234-aabb.png",
+            screenshotUrl: "/v1/chat-screenshots/goat_chat_1/1234-aabb.png",
           },
         },
       ],
@@ -361,7 +361,7 @@ describe("MessageBubble assistant errors", () => {
     expect(screen.getByText("Full page")).toBeInTheDocument();
     expect(
       screen.getByRole("img", { name: "Screenshot captured by Goat's browser" }),
-    ).toHaveAttribute("src", "/api/chat-screenshots/goat_chat_1/1234-aabb.png");
+    ).toHaveAttribute("src", "/v1/chat-screenshots/goat_chat_1/1234-aabb.png");
   });
 
   it("renders shared transcripts without approval requests or task navigation", () => {

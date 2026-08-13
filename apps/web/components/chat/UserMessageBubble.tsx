@@ -64,5 +64,5 @@ function attachmentThumbnailSrc(
 ): string | undefined {
   if (attachment.kind !== "image") return undefined;
   if (attachment.previewUrl) return attachment.previewUrl;
-  return `/api/chat-attachments/${encodeURIComponent(messageId)}/${encodeURIComponent(attachment.id)}`;
+  return `/v1/chat-attachments/${encodeURIComponent(messageId)}/${encodeURIComponent(attachment.id)}`;
 }

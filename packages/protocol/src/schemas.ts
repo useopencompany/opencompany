@@ -109,6 +109,50 @@ export const ConversationSchema = z
   .strict()
   .openapi("Conversation");
 
+export const ChatShareIdSchema = z
+  .string()
+  .regex(/^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu)
+  .openapi({
+    example: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+    description: "Unguessable public Chat share capability.",
+  });
+
+export const ConversationShareSchema = z
+  .object({
+    conversationId: ResourceIdSchema,
+    shareId: ChatShareIdSchema.nullable(),
+  })
+  .strict()
+  .openapi("ConversationShareV1");
+
+// Public transcripts are a presentation read model rather than a second Message
+// protocol. Parts remain extensible because their discriminated tool/data variants
+// evolve with the canonical presentation mapper.
+export const PublicChatMessageSchema = z
+  .object({
+    id: ResourceIdSchema,
+    role: z.enum(["user", "assistant"]),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    parts: z.array(z.record(z.string(), z.unknown())),
+  })
+  .strict()
+  .openapi("PublicChatMessageV1");
+
+export const PublicChatShareSchema = z
+  .object({
+    shareId: ChatShareIdSchema,
+    title: z.string(),
+    kind: z.enum(["chat", "task"]),
+    engine: ChatEngineSchema,
+    messages: z.array(PublicChatMessageSchema),
+  })
+  .strict()
+  .openapi("PublicChatShareV1");
+
+export const PublicChatShareMetadataSchema = PublicChatShareSchema.omit({ messages: true })
+  .strict()
+  .openapi("PublicChatShareMetadataV1");
+
 export const MessageSchema = z
   .object({
     id: ResourceIdSchema,
@@ -1958,6 +2002,48 @@ export const UpdateConversationEnvelopeSchema = z
   .strict()
   .openapi("UpdateConversationEnvelope");
 
+export const ConversationShareEnvelopeSchema = z
+  .object({ data: ConversationShareSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("ConversationShareEnvelopeV1");
+
+export const GenerateConversationTitleBodySchema = z
+  .object({ messageId: ResourceIdSchema })
+  .strict()
+  .openapi("GenerateConversationTitleBodyV1");
+
+export const GenerateConversationTitleEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        conversationId: ResourceIdSchema,
+        title: z.string().nullable(),
+        generated: z.boolean(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("GenerateConversationTitleEnvelopeV1");
+
+export const PublicChatShareEnvelopeSchema = z
+  .object({ data: PublicChatShareSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("PublicChatShareEnvelopeV1");
+
+export const PublicChatShareMetadataEnvelopeSchema = z
+  .object({ data: PublicChatShareMetadataSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("PublicChatShareMetadataEnvelopeV1");
+
+export const ChatArtifactDeleteEnvelopeSchema = z
+  .object({
+    data: z.object({ artifactId: ResourceIdSchema, state: z.literal("deleted") }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("ChatArtifactDeleteEnvelopeV1");
+
 export const MessagePageSchema = z
   .object({
     data: z.array(MessageSchema),
@@ -3058,6 +3144,10 @@ export const InfisicalAuthFlowEnvelopeSchema = z
   .openapi("InfisicalAuthFlowEnvelope");
 
 export type ConversationDto = z.infer<typeof ConversationSchema>;
+export type ConversationShareDto = z.infer<typeof ConversationShareSchema>;
+export type PublicChatMessageDto = z.infer<typeof PublicChatMessageSchema>;
+export type PublicChatShareDto = z.infer<typeof PublicChatShareSchema>;
+export type PublicChatShareMetadataDto = z.infer<typeof PublicChatShareMetadataSchema>;
 export type UpdateConversationBody = z.infer<typeof UpdateConversationBodySchema>;
 export type MessageDto = z.infer<typeof MessageSchema>;
 export type RunDto = z.infer<typeof RunSchema>;

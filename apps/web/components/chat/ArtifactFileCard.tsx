@@ -26,7 +26,7 @@ export function ArtifactFileCard({
     setError(null);
     try {
       const response = await fetch(
-        `/api/chat-artifacts/${encodeURIComponent(artifact.artifactId)}`,
+        `/v1/chat-artifacts/${encodeURIComponent(artifact.artifactId)}`,
         { method: "DELETE" },
       );
       if (!response.ok) throw new Error("File deletion failed.");

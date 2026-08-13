@@ -1,4 +1,23 @@
-import type { GoatChatAttachmentKind } from "@opencompany/db/goat-schema";
+export type GoatChatAttachmentKind =
+  | "image"
+  | "pdf"
+  | "docx"
+  | "xlsx"
+  | "srt"
+  | "csv"
+  | "tsv"
+  | "json"
+  | "text";
+
+export type GoatChatMessageAttachment = {
+  id: string;
+  kind: GoatChatAttachmentKind;
+  mediaType: string;
+  filename: string;
+  sizeBytes: number;
+  blobPathname: string;
+  blobUrl: string;
+};
 
 // Isomorphic (client + server) constants for Goat chat attachments. The core
 // set matches what the brain asset pipeline can ingest: pdf, docx, xlsx, SRT,
