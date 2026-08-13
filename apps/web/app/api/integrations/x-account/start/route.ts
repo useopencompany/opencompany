@@ -1,31 +1,12 @@
-import { NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
-import {
-  appendGoatXAccountIntegrationStatus,
-  buildGoatXAccountAuthorizationUrl,
-  createGoatXAccountIntegrationState,
-  createGoatXAccountPkce,
-  isGoatXAccountIntegrationConfigured,
-} from "@/lib/integrations/x-account";
-import { setGoatXAccountPkceCookie } from "@/lib/integrations/x-account-pkce";
+import { proxyHeadlessApiRequest } from "@/lib/headless-api-proxy";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+// URL-continuity relay: the canonical API owns the X account OAuth flow,
+// including minting the PKCE verifier cookie that this relay streams back.
 export async function GET(request: Request) {
-  const { user } = await currentGoatUser();
-  const url = new URL(request.url);
-  const returnTo = url.searchParams.get("returnTo") ?? "/settings";
-
-  if (!isGoatXAccountIntegrationConfigured()) {
-    return NextResponse.redirect(
-      new URL(appendGoatXAccountIntegrationStatus(returnTo, "error", "not_configured"), url),
-    );
-  }
-
-  const state = createGoatXAccountIntegrationState({
-    userWorkosId: user.workosUserId,
-    returnTo,
+  return proxyHeadlessApiRequest(request, ["integrations", "x-account", "start"], {
+    basePath: "",
   });
-  const { codeVerifier, codeChallenge } = createGoatXAccountPkce();
-  await setGoatXAccountPkceCookie(codeVerifier);
-
-  return NextResponse.redirect(buildGoatXAccountAuthorizationUrl(state, codeChallenge));
 }
