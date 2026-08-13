@@ -60,6 +60,12 @@ const app = createApiApp({
       authenticationMethod: "session",
     },
   }),
+  identify: async () => ({
+    userId: "measure-user",
+    organizationId: "measure-organization",
+    activeWorkspaceId: "measure-workspace",
+    method: "session" as const,
+  }),
   presentation: reader,
 });
 

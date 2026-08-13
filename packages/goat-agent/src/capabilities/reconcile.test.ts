@@ -16,10 +16,10 @@ vi.mock("@opencompany/goat-observability", () => ({
   GOAT_METRICS: { capabilityWalletBalanceUsdMicros: "goat.capability.wallet_balance" },
   recordGoatHistogram: vi.fn(),
 }));
-vi.mock("@/lib/capabilities/execute", () => ({
+vi.mock("./execute", () => ({
   settleManagedCapabilityRun: mocks.settleRun,
 }));
-vi.mock("@/lib/capabilities/monid", () => ({
+vi.mock("./monid", () => ({
   isTerminalMonidRun: (status: string) =>
     ["COMPLETED", "FAILED", "BLOCKED", "STOPPED", "TIMED_OUT"].includes(status),
   MonidClient: class {
@@ -28,7 +28,7 @@ vi.mock("@/lib/capabilities/monid", () => ({
   },
 }));
 
-import { reconcileGoatCapabilities } from "@/lib/capabilities/reconcile";
+import { reconcileGoatCapabilities } from "./reconcile";
 
 describe("reconcileGoatCapabilities", () => {
   beforeEach(() => {

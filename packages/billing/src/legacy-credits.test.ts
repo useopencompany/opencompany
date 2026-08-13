@@ -16,7 +16,7 @@ function mockDb(rows: unknown[]) {
   return db;
 }
 
-describe("legacy Stripe credit compatibility", () => {
+describe("shared legacy Stripe credit compatibility", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

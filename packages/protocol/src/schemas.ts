@@ -1512,6 +1512,142 @@ export const ErrorEnvelopeSchema = z
   .strict()
   .openapi("ErrorEnvelope");
 
+export const BillingOverviewSchema = z
+  .object({
+    creditBalanceUsdMicros: z.number().int(),
+    includedBalanceUsdMicros: z.number().int().min(0),
+    topUpBalanceUsdMicros: z.number().int().min(0),
+    plan: z.enum(["hobby", "pro"]),
+    subscriptionStatus: z.string().max(64).nullable(),
+    seatQuantity: z.number().int().min(0),
+    includedUsagePeriodEnd: TimestampSchema.nullable(),
+    cancelAtPeriodEnd: z.boolean(),
+    currentPeriodEnd: TimestampSchema.nullable(),
+    paymentNeedsAttention: z.boolean(),
+    proMonthlyPriceCents: z.number().int().min(0),
+    hobbyIncludedUsageCents: z.number().int().min(0),
+    memberCount: z.number().int().min(0),
+    memberCap: z.number().int().min(0),
+    spendThisMonthUsdMicros: z.number().int().min(0),
+    spendThisMonthByCategory: z
+      .object({
+        chat: z.number().int().min(0),
+        ingestion: z.number().int().min(0),
+        capabilities: z.number().int().min(0),
+      })
+      .strict(),
+    recentActivity: z.array(
+      z
+        .object({
+          activityId: ResourceIdSchema,
+          source: z.string().min(1).max(128),
+          amountUsdMicros: z.number().int(),
+          providerCostUsdMicros: z.number().int().min(0),
+          platformFeeUsdMicros: z.number().int().min(0),
+          capabilityAction: z.string().max(256).nullable(),
+          isAutoRefill: z.boolean(),
+          createdAt: TimestampSchema,
+        })
+        .strict(),
+    ),
+    lowBalanceWarnUsdMicros: z.number().int().min(0),
+    includedUsagePerSeatCents: z.number().int().min(0),
+    topUpAmountsCents: z.array(z.number().int().min(1)).max(20),
+    defaultTopUpCents: z.number().int().min(1),
+    minTopUpCents: z.number().int().min(1),
+    maxTopUpCents: z.number().int().min(1),
+    autoRefillMonthlyMaxCents: z.number().int().min(1),
+    autoRefill: z
+      .object({
+        enabled: z.boolean(),
+        amountCents: z.number().int().min(0),
+        hasPaymentMethod: z.boolean(),
+        lastError: z.string().max(1_000).nullable(),
+      })
+      .strict(),
+    isAdmin: z.boolean(),
+  })
+  .strict()
+  .openapi("BillingOverview");
+
+export const BillingUsageSchema = z
+  .object({
+    breakdown: z.array(
+      z
+        .object({
+          day: z.string().min(1).max(32),
+          category: z.enum(["chat", "ingestion", "capabilities", "other"]),
+          spendUsdMicros: z.number().int().min(0),
+          providerCostUsdMicros: z.number().int().min(0),
+          platformFeeUsdMicros: z.number().int().min(0),
+        })
+        .strict(),
+    ),
+    ingestedThisMonth: z.number().int().min(0),
+    pending: z.number().int().min(0),
+    creditBalanceUsdMicros: z.number().int(),
+    providers: z.array(
+      z.object({ provider: z.string().min(1).max(128), count: z.number().int().min(0) }).strict(),
+    ),
+    recent: z.array(
+      z
+        .object({
+          activityId: ResourceIdSchema,
+          provider: z.string().min(1).max(128),
+          rawEventCount: z.number().int().min(0),
+          status: z.enum(["pending", "consumed"]),
+          createdAt: TimestampSchema,
+        })
+        .strict(),
+    ),
+  })
+  .strict()
+  .openapi("BillingUsage");
+
+export const BillingBalanceSchema = z
+  .object({
+    balanceUsdMicros: z.number().int(),
+    lowBalanceWarnUsdMicros: z.number().int().min(0),
+    enforcementEnabled: z.boolean(),
+  })
+  .strict()
+  .openapi("BillingBalance");
+
+export const CreateBillingTopUpBodySchema = z
+  .object({ amountCents: z.number().int().min(1) })
+  .strict()
+  .openapi("CreateBillingTopUpBody");
+export const UpdateBillingAutoRefillBodySchema = z
+  .object({ enabled: z.boolean(), amountCents: z.number().int().min(1) })
+  .strict()
+  .openapi("UpdateBillingAutoRefillBody");
+export const BillingOverviewEnvelopeSchema = z
+  .object({ data: BillingOverviewSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BillingOverviewEnvelope");
+export const BillingUsageEnvelopeSchema = z
+  .object({ data: BillingUsageSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BillingUsageEnvelope");
+export const BillingBalanceEnvelopeSchema = z
+  .object({ data: BillingBalanceSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BillingBalanceEnvelope");
+export const BillingRedirectEnvelopeSchema = z
+  .object({
+    data: z.object({ redirectUrl: z.url() }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BillingRedirectEnvelope");
+export const BillingAutoRefillEnvelopeSchema = z
+  .object({
+    data: z.object({ updated: z.literal(true) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BillingAutoRefillEnvelope");
+
 export const ConversationPageSchema = z
   .object({
     data: z.array(ConversationSchema),
@@ -2135,6 +2271,387 @@ export const BrowserProfileLiveViewEnvelopeSchema = z
   .strict()
   .openapi("BrowserProfileLiveViewEnvelope");
 
+// Workspace capabilities and their browser-polled approval reads (#1203
+// 5a4b). Approval mutations remain on the universal-Chat boundary.
+export const ManagedCapabilitySourceSchema = z.enum([
+  "x",
+  "linkedin",
+  "youtube",
+  "instagram",
+  "tiktok",
+  "lead",
+  "seo",
+]);
+
+export const WorkspaceCapabilitySchema = z
+  .object({ source: ManagedCapabilitySourceSchema, enabled: z.boolean() })
+  .strict()
+  .openapi("WorkspaceCapability");
+
+export const WorkspaceCapabilitySettingsEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        capabilities: z.array(WorkspaceCapabilitySchema),
+        sessionBudgetUsdMicros: z.number().int().min(1),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WorkspaceCapabilitySettingsEnvelope");
+
+export const SetWorkspaceCapabilityBodySchema = z
+  .object({ enabled: z.boolean() })
+  .strict()
+  .openapi("SetWorkspaceCapabilityBody");
+
+export const WorkspaceCapabilityMutationEnvelopeSchema = z
+  .object({ data: WorkspaceCapabilitySchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("WorkspaceCapabilityMutationEnvelope");
+
+export const SetCapabilitySessionBudgetBodySchema = z
+  .object({ budgetUsd: z.number().nullable() })
+  .strict()
+  .openapi("SetCapabilitySessionBudgetBody");
+
+export const CapabilitySessionBudgetEnvelopeSchema = z
+  .object({
+    data: z.object({ sessionBudgetUsdMicros: z.number().int().min(1) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("CapabilitySessionBudgetEnvelope");
+
+export const CapabilityApprovalStatusSchema = z.enum([
+  "awaiting_approval",
+  "approved",
+  "canceled",
+  "expired",
+  "executing",
+  "running",
+  "stopping",
+  "succeeded",
+  "failed",
+  "stopped",
+  "timed_out",
+]);
+
+export const CapabilityApprovalSchema = z
+  .object({
+    runId: ResourceIdSchema,
+    source: ManagedCapabilitySourceSchema,
+    action: z.string().min(1).max(256),
+    status: CapabilityApprovalStatusSchema,
+    maxCostUsdMicros: z.number().int().min(0),
+    expiresAt: TimestampSchema.nullable(),
+    settledCostUsdMicros: z.number().int().min(0).nullable(),
+    sessionBudgetUsdMicros: z.number().int().min(1).optional(),
+  })
+  .strict()
+  .openapi("CapabilityApproval");
+
+export const CapabilityApprovalEnvelopeSchema = z
+  .object({ data: CapabilityApprovalSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("CapabilityApprovalEnvelope");
+
+// Brain admin/switch control plane (#1203 5a4c). The active-Brain cookie is
+// intentionally absent: the web adapter owns that browser preference.
+export const BrainVisibilitySchema = z.enum(["workspace", "restricted"]);
+export const BrainIntelligenceSchema = z.enum(["basic", "frontier"]);
+
+export const CreateBrainBodySchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    visibility: BrainVisibilitySchema,
+    description: z.string().trim().max(1_024).optional(),
+  })
+  .strict()
+  .openapi("CreateBrainBody");
+
+export const BrainControlMutationEnvelopeSchema = z
+  .object({
+    data: z.object({ brainId: ResourceIdSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrainControlMutationEnvelope");
+
+export const WorkspaceMemberSchema = z
+  .object({
+    id: ResourceIdSchema,
+    email: z.email().max(320),
+    name: z.string().min(1).max(512),
+    avatarUrl: z.string().max(4_096).nullable(),
+    role: z.enum(["admin", "member"]),
+  })
+  .strict()
+  .openapi("WorkspaceMember");
+
+export const BrainAccessSchema = z
+  .object({
+    visibility: BrainVisibilitySchema,
+    memberIds: z.array(ResourceIdSchema).max(1_000),
+    workspaceMembers: z.array(WorkspaceMemberSchema).max(1_000),
+  })
+  .strict()
+  .openapi("BrainAccess");
+
+export const BrainAccessEnvelopeSchema = z
+  .object({ data: BrainAccessSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BrainAccessEnvelope");
+
+export const SetBrainAccessBodySchema = z
+  .object({
+    visibility: BrainVisibilitySchema,
+    memberIds: z.array(ResourceIdSchema).max(1_000),
+  })
+  .strict()
+  .openapi("SetBrainAccessBody");
+
+export const BrainAccessMutationEnvelopeSchema = z
+  .object({
+    data: z.object({ updated: z.literal(true) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrainAccessMutationEnvelope");
+
+export const BrainEnrichmentEnvelopeSchema = z
+  .object({
+    data: z.object({ enabled: z.boolean() }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrainEnrichmentEnvelope");
+
+export const SetBrainEnrichmentBodySchema = z
+  .object({ enabled: z.boolean() })
+  .strict()
+  .openapi("SetBrainEnrichmentBody");
+
+export const BrainIntelligenceEnvelopeSchema = z
+  .object({
+    data: z.object({ intelligence: BrainIntelligenceSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrainIntelligenceEnvelope");
+
+export const SetBrainIntelligenceBodySchema = z
+  .object({ intelligence: BrainIntelligenceSchema })
+  .strict()
+  .openapi("SetBrainIntelligenceBody");
+
+// Active workspace administration and WorkOS-backed provisioning (#1203
+// 5a4d-5a4e). AuthKit session activation remains a web responsibility.
+export const WorkspaceInvitationSchema = z
+  .object({
+    id: ResourceIdSchema,
+    email: z.email().max(320),
+    state: z.string().min(1).max(64),
+    expiresAt: TimestampSchema.nullable(),
+  })
+  .strict()
+  .openapi("WorkspaceInvitation");
+
+export const WorkspaceSettingsSchema = z
+  .object({
+    workspace: z.object({ id: ResourceIdSchema, name: z.string().min(1).max(80) }).strict(),
+    role: z.enum(["admin", "member"]),
+    plan: z.enum(["hobby", "pro"]),
+    memberCap: z.number().int().min(1),
+    members: z.array(WorkspaceMemberSchema).max(1_000),
+    invitations: z.array(WorkspaceInvitationSchema).max(1_000),
+  })
+  .strict()
+  .openapi("WorkspaceSettings");
+
+export const WorkspaceSettingsEnvelopeSchema = z
+  .object({ data: WorkspaceSettingsSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("WorkspaceSettingsEnvelope");
+
+export const InviteWorkspaceMemberBodySchema = z
+  .object({ email: z.email().max(320) })
+  .strict()
+  .openapi("InviteWorkspaceMemberBody");
+
+export const RenameWorkspaceBodySchema = z
+  .object({ name: z.string().trim().min(1).max(80) })
+  .strict()
+  .openapi("RenameWorkspaceBody");
+
+export const WorkspaceRenameEnvelopeSchema = z
+  .object({
+    data: z.object({ id: ResourceIdSchema, name: z.string().min(1).max(80) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WorkspaceRenameEnvelope");
+
+export const WorkspaceCommandEnvelopeSchema = z
+  .object({
+    data: z.object({ completed: z.literal(true) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WorkspaceCommandEnvelope");
+
+export const CreateWorkspaceBodySchema = z
+  .object({
+    workspaceId: ResourceIdSchema.refine((value: string) => value.startsWith("goat_ws_"), {
+      message: "workspaceId must be a Goat workspace id.",
+    }),
+    name: z.string().trim().min(1).max(80),
+  })
+  .strict()
+  .openapi("CreateWorkspaceBody");
+
+export const WorkspaceActivationSchema = z
+  .object({
+    workspaceId: ResourceIdSchema,
+    organizationId: ResourceIdSchema,
+    brainId: ResourceIdSchema.nullable(),
+  })
+  .strict()
+  .openapi("WorkspaceActivation");
+
+export const WorkspaceActivationEnvelopeSchema = z
+  .object({ data: WorkspaceActivationSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("WorkspaceActivationEnvelope");
+
+export const OnboardingRoleSchema = z.enum([
+  "founder",
+  "product",
+  "sales",
+  "marketing",
+  "operations",
+  "investing",
+  "consulting",
+  "research",
+]);
+
+export const OnboardingStateSchema = z
+  .object({
+    onboarding: z
+      .object({
+        role: z.string().nullable(),
+        companyDomain: z.string().nullable(),
+        contextUrls: z.array(z.url()).max(20).nullable(),
+        referralSource: z.string().nullable(),
+      })
+      .strict()
+      .nullable(),
+    workspace: z
+      .object({
+        id: ResourceIdSchema,
+        name: z.string().min(1).max(80),
+        slug: z.string().max(40).nullable(),
+        createdByCaller: z.boolean(),
+      })
+      .strict()
+      .nullable(),
+    activeBrainId: ResourceIdSchema.nullable(),
+  })
+  .strict()
+  .openapi("OnboardingState");
+
+export const OnboardingStateEnvelopeSchema = z
+  .object({ data: OnboardingStateSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("OnboardingStateEnvelope");
+
+export const CheckOnboardingWorkspaceSlugBodySchema = z
+  .object({ slug: z.string().max(256) })
+  .strict()
+  .openapi("CheckOnboardingWorkspaceSlugBody");
+
+export const OnboardingWorkspaceSlugEnvelopeSchema = z
+  .object({
+    data: z.object({ slug: z.string().max(40), available: z.boolean() }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("OnboardingWorkspaceSlugEnvelope");
+
+export const SaveOnboardingProfileBodySchema = z
+  .object({ role: OnboardingRoleSchema, companyUrl: z.url().max(2_048) })
+  .strict()
+  .openapi("SaveOnboardingProfileBody");
+
+export const SaveOnboardingWorkspaceBodySchema = z
+  .object({
+    workspaceId: ResourceIdSchema.refine((value: string) => value.startsWith("goat_ws_"), {
+      message: "workspaceId must be a Goat workspace id.",
+    }),
+    name: z.string().trim().min(1).max(80),
+    slug: z
+      .string()
+      .min(1)
+      .max(40)
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u),
+  })
+  .strict()
+  .openapi("SaveOnboardingWorkspaceBody");
+
+export const OnboardingWorkspaceEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        workspaceId: ResourceIdSchema,
+        organizationId: ResourceIdSchema,
+        brainId: ResourceIdSchema,
+        createdByCaller: z.boolean(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("OnboardingWorkspaceEnvelope");
+
+export const FinishOnboardingBodySchema = z
+  .object({ referralSource: z.string().trim().max(200).nullable() })
+  .strict()
+  .openapi("FinishOnboardingBody");
+
+export const OnboardingCommandEnvelopeSchema = z
+  .object({
+    data: z.object({ completed: z.literal(true) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("OnboardingCommandEnvelope");
+
+export const OnboardingEmailStepSchema = z
+  .enum(["welcome", "checkin", "feedback_call"])
+  .openapi("OnboardingEmailStep");
+
+export const OnboardingEmailClaimSchema = z
+  .object({
+    id: ResourceIdSchema,
+    workosUserId: ResourceIdSchema,
+    step: OnboardingEmailStepSchema,
+    attempts: z.number().int().positive(),
+    email: z.email().max(320),
+    firstName: z.string().max(128).nullable(),
+    terminalOnFailure: z.boolean(),
+  })
+  .strict()
+  .openapi("OnboardingEmailClaim");
+
+export const OnboardingEmailClaimEnvelopeSchema = z
+  .object({
+    data: z.object({ emails: z.array(OnboardingEmailClaimSchema).max(100) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("OnboardingEmailClaimEnvelope");
+
 export const TaskViewModeSchema = z.enum(["board", "list"]);
 export const McpClientSchema = z.enum(["claude", "chatgpt", "cursor"]);
 
@@ -2725,6 +3242,31 @@ export type UpdateTaskBody = z.infer<typeof UpdateTaskBodySchema>;
 export type BrowserProfileDto = z.infer<typeof BrowserProfileSchema>;
 export type CreateBrowserProfileBody = z.infer<typeof CreateBrowserProfileBodySchema>;
 export type BrowserProfileLoginSessionDto = z.infer<typeof BrowserProfileLoginSessionSchema>;
+export type ManagedCapabilitySource = z.infer<typeof ManagedCapabilitySourceSchema>;
+export type WorkspaceCapabilityDto = z.infer<typeof WorkspaceCapabilitySchema>;
+export type WorkspaceCapabilitySettingsDto = z.infer<
+  typeof WorkspaceCapabilitySettingsEnvelopeSchema
+>["data"];
+export type CapabilityApprovalDto = z.infer<typeof CapabilityApprovalSchema>;
+export type BrainVisibility = z.infer<typeof BrainVisibilitySchema>;
+export type BrainIntelligence = z.infer<typeof BrainIntelligenceSchema>;
+export type WorkspaceMemberDto = z.infer<typeof WorkspaceMemberSchema>;
+export type BrainAccessDto = z.infer<typeof BrainAccessSchema>;
+export type WorkspaceInvitationDto = z.infer<typeof WorkspaceInvitationSchema>;
+export type WorkspaceSettingsDto = z.infer<typeof WorkspaceSettingsSchema>;
+export type WorkspaceActivationDto = z.infer<typeof WorkspaceActivationSchema>;
+export type OnboardingRole = z.infer<typeof OnboardingRoleSchema>;
+export type OnboardingStateDto = z.infer<typeof OnboardingStateSchema>;
+export type OnboardingEmailStep = "welcome" | "checkin" | "feedback_call";
+export type OnboardingEmailClaimDto = {
+  id: string;
+  workosUserId: string;
+  step: OnboardingEmailStep;
+  attempts: number;
+  email: string;
+  firstName: string | null;
+  terminalOnFailure: boolean;
+};
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelopeSchema>;
 export type TaskViewMode = z.infer<typeof TaskViewModeSchema>;
 export type McpClient = z.infer<typeof McpClientSchema>;
@@ -2734,6 +3276,75 @@ export type McpSetupDto = z.infer<typeof McpSetupSchema>;
 export type UpdateMcpSetupBody = z.infer<typeof UpdateMcpSetupBodySchema>;
 export type FeedbackKind = z.infer<typeof FeedbackKindSchema>;
 export type SubmitFeedbackBody = z.infer<typeof SubmitFeedbackBodySchema>;
+export type BillingOverviewDto = {
+  creditBalanceUsdMicros: number;
+  includedBalanceUsdMicros: number;
+  topUpBalanceUsdMicros: number;
+  plan: "hobby" | "pro";
+  subscriptionStatus: string | null;
+  seatQuantity: number;
+  includedUsagePeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  currentPeriodEnd: string | null;
+  paymentNeedsAttention: boolean;
+  proMonthlyPriceCents: number;
+  hobbyIncludedUsageCents: number;
+  memberCount: number;
+  memberCap: number;
+  spendThisMonthUsdMicros: number;
+  spendThisMonthByCategory: { chat: number; ingestion: number; capabilities: number };
+  recentActivity: Array<{
+    activityId: string;
+    source: string;
+    amountUsdMicros: number;
+    providerCostUsdMicros: number;
+    platformFeeUsdMicros: number;
+    capabilityAction: string | null;
+    isAutoRefill: boolean;
+    createdAt: string;
+  }>;
+  lowBalanceWarnUsdMicros: number;
+  includedUsagePerSeatCents: number;
+  topUpAmountsCents: number[];
+  defaultTopUpCents: number;
+  minTopUpCents: number;
+  maxTopUpCents: number;
+  autoRefillMonthlyMaxCents: number;
+  autoRefill: {
+    enabled: boolean;
+    amountCents: number;
+    hasPaymentMethod: boolean;
+    lastError: string | null;
+  };
+  isAdmin: boolean;
+};
+export type BillingUsageDto = {
+  breakdown: Array<{
+    day: string;
+    category: "chat" | "ingestion" | "capabilities" | "other";
+    spendUsdMicros: number;
+    providerCostUsdMicros: number;
+    platformFeeUsdMicros: number;
+  }>;
+  ingestedThisMonth: number;
+  pending: number;
+  creditBalanceUsdMicros: number;
+  providers: Array<{ provider: string; count: number }>;
+  recent: Array<{
+    activityId: string;
+    provider: string;
+    rawEventCount: number;
+    status: "pending" | "consumed";
+    createdAt: string;
+  }>;
+};
+export type BillingBalanceDto = {
+  balanceUsdMicros: number;
+  lowBalanceWarnUsdMicros: number;
+  enforcementEnabled: boolean;
+};
+export type CreateBillingTopUpBody = z.infer<typeof CreateBillingTopUpBodySchema>;
+export type UpdateBillingAutoRefillBody = z.infer<typeof UpdateBillingAutoRefillBodySchema>;
 export type WorkspaceRepositoryDto = z.infer<typeof WorkspaceRepositorySchema>;
 export type RepoConfigDto = z.infer<typeof RepoConfigSchema>;
 export type SetRepoConfigEnvBody = z.infer<typeof SetRepoConfigEnvBodySchema>;

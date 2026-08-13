@@ -1,5 +1,7 @@
 import { serve } from "@hono/node-server";
 import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
+import { createGoatBillingApplicationService } from "@opencompany/billing/application-service";
+import { getGoatStripe, getGoatStripeWebhookSecret } from "@opencompany/billing/stripe";
 import { RedisChatPresentationStream } from "@opencompany/chat-presentation";
 import {
   ChatApplicationService,
@@ -14,6 +16,7 @@ import {
 import { PostgresKnowledgeRepository } from "@opencompany/db/knowledge-repository";
 import { createPooledDb } from "@opencompany/db/pool";
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
+import { getGoatAppUrl } from "@opencompany/goat-agent/app-url";
 import { resolvePersistedAutoModelRouting } from "@opencompany/goat-agent/application/persisted-auto-model-routing";
 import { GoatBrainImportApplicationService } from "@opencompany/goat-agent/brain-imports";
 import { GoatBrainSourceApplicationService } from "@opencompany/goat-agent/brain-sources";
@@ -25,12 +28,15 @@ import {
   shutdownGoatNodeObservability,
 } from "@opencompany/goat-observability/node";
 import { createLogger } from "@opencompany/observability";
+import { WorkOS } from "@workos-inc/node";
 import { createApiApp } from "./app";
 import { createAttachmentUploadService } from "./attachments";
 import { createAttioIngress } from "./attio-ingress";
 import { createWorkOsApiAuthenticator, createWorkOsApiIdentityVerifier } from "./auth";
 import { createAutomationServices } from "./automations";
+import { createBillingReconcileService } from "./billing-reconcile";
 import { createBrainAssetService } from "./brain-assets";
+import { createBrainControlService } from "./brain-control";
 import { parseBrowserOrigins } from "./browser-origins";
 import { createChatResourceService } from "./chat-resources";
 import { createChatTitleService } from "./chat-title";
@@ -45,12 +51,17 @@ import { createIntegrationAccountService } from "./integration-accounts";
 import { createJamieIngress } from "./jamie-ingress";
 import { createLinearIngress } from "./linear-ingress";
 import { createMcpOAuthIngress } from "./mcp-oauth-ingress";
+import { createOnboardingService } from "./onboarding";
+import { createOnboardingEmailService } from "./onboarding-emails";
 import { createRepoConfigService } from "./repo-configs";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
 import { createRunnerClient } from "./runner-client";
 import { createSlackBotIngress } from "./slack-bot-ingress";
 import { createSlackIngress } from "./slack-ingress";
+import { createStripeIngress } from "./stripe-ingress";
 import { createUserSettingsService } from "./user-settings";
+import { createWorkspaceCapabilityService } from "./workspace-capabilities";
+import { createWorkspaceControlService } from "./workspace-control";
 import { createXAccountIngress } from "./x-account-ingress";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "server" });
@@ -102,6 +113,8 @@ const readModels = createElectricReadModels();
 const authenticate = createWorkOsApiAuthenticator(execute);
 const identityVerifier = createWorkOsApiIdentityVerifier();
 const runnerClient = createRunnerClient();
+const stripe = getGoatStripe();
+const workos = createWorkOSClient();
 const app = createApiApp({
   chat,
   tasks,
@@ -144,17 +157,29 @@ const app = createApiApp({
       },
       { workspaceId: event.actor.workspaceId },
     ),
+  brainControl: createBrainControlService({ db: database.db }),
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),
   userSettings: createUserSettingsService({ db: database.db }),
   feedback: createFeedbackService({ db: database.db }),
   repoConfigs: createRepoConfigService({ db: database.db }),
   integrationAccounts: createIntegrationAccountService({ db: database.db, runner: runnerClient }),
+  billing: createGoatBillingApplicationService({
+    db: database.db,
+    stripe,
+    appUrl: getGoatAppUrl(),
+  }),
   // The engine-auth device/browser flows run through the runner's internal
   // control routes; the client resolves RUNNER_INTERNAL_URL/RUNNER_PUBLIC_URL
   // and RUNNER_INTERNAL_TOKEN per call.
   engineAuth: createEngineAuthService({ db: database.db, runner: runnerClient }),
   engineSessions: createEngineSessionService({ db: database.db, runner: runnerClient }),
+  workspaceCapabilities: createWorkspaceCapabilityService({ db: database.db }),
+  workspaceControl: createWorkspaceControlService({ db: database.db, workos }),
+  onboarding: createOnboardingService({ db: database.db, workos }),
+  onboardingEmails: createOnboardingEmailService({ db: database.db }),
   authenticate,
+  identify: identityVerifier,
+  ...(process.env.CRON_SECRET ? { emailLifecycleInternalSecret: process.env.CRON_SECRET } : {}),
   browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),
   githubIngress: createGitHubIngress({ db: database.db, identify: identityVerifier }),
   googleIngress: createGoogleIngress({ db: database.db, identify: identityVerifier }),
@@ -169,6 +194,16 @@ const app = createApiApp({
     db: database.db,
     identify: identityVerifier,
     runner: runnerClient,
+  }),
+  stripeIngress: createStripeIngress({
+    db: database.db,
+    stripe,
+    webhookSecret: getGoatStripeWebhookSecret(),
+  }),
+  billingReconcile: createBillingReconcileService({
+    db: database.db,
+    stripe,
+    secret: process.env.CRON_SECRET?.trim() ?? "",
   }),
   notifier,
   resolveAutoModel: (input) =>
@@ -215,6 +250,13 @@ function resolvePoolMax() {
     throw new Error("API_DB_POOL_MAX must be a positive integer.");
   }
   return value;
+}
+
+function createWorkOSClient() {
+  const apiKey = process.env.WORKOS_API_KEY?.trim();
+  const clientId = process.env.WORKOS_CLIENT_ID?.trim();
+  if (!apiKey || !clientId) throw new Error("WORKOS_API_KEY and WORKOS_CLIENT_ID are required.");
+  return new WorkOS(apiKey, { clientId });
 }
 
 function resolvePort() {

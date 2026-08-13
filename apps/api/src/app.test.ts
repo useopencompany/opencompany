@@ -92,6 +92,7 @@ describe("canonical Hono API", () => {
       browserProfiles: fakeBrowserProfiles(),
       skillImports: fakeSkillImportService(),
       brainAssets: fakeBrainAssets(),
+      brainControl: fakeBrainControl(),
       attachments: fakeAttachments(),
       userSettings: fakeUserSettings(),
       feedback: fakeFeedback(),
@@ -99,7 +100,15 @@ describe("canonical Hono API", () => {
       integrationAccounts: fakeIntegrationAccounts(),
       engineAuth: fakeEngineAuth(),
       engineSessions: fakeEngineSessions(),
+      billing: fakeBilling(),
+      workspaceCapabilities: fakeWorkspaceCapabilities(),
+      workspaceControl: fakeWorkspaceControl(),
+      onboarding: fakeOnboarding(),
+      onboardingEmails: fakeOnboardingEmails(),
       authenticate: async () => {
+        throw new ApiError(401, "authentication_required", "Authentication required.");
+      },
+      identify: async () => {
         throw new ApiError(401, "authentication_required", "Authentication required.");
       },
     });
@@ -109,6 +118,14 @@ describe("canonical Hono API", () => {
     expect(unauthorized.status).toBe(401);
     await expect(unauthorized.json()).resolves.toMatchObject({
       error: { code: "authentication_required", requestId: "request_test" },
+      meta: { apiVersion: "v1" },
+    });
+    const onboardingUnauthorized = await unauthenticated.request("/v1/onboarding", {
+      headers: { "X-Request-Id": "request_onboarding_test" },
+    });
+    expect(onboardingUnauthorized.status).toBe(401);
+    await expect(onboardingUnauthorized.json()).resolves.toMatchObject({
+      error: { code: "authentication_required", requestId: "request_onboarding_test" },
       meta: { apiVersion: "v1" },
     });
 
@@ -2659,6 +2676,386 @@ describe("canonical Hono API", () => {
     });
     expect(completeInfisicalAuth).toHaveBeenCalledTimes(1);
   });
+
+  it("serves authorized billing read models without internal ledger or Stripe objects", async () => {
+    const getOverview = vi.fn(async () => ({
+      creditBalanceUsdMicros: 3_000_000,
+      includedBalanceUsdMicros: 1_000_000,
+      topUpBalanceUsdMicros: 2_000_000,
+      plan: "pro" as const,
+      subscriptionStatus: "active",
+      seatQuantity: 2,
+      includedUsagePeriodEnd: "2026-09-01T00:00:00.000Z",
+      cancelAtPeriodEnd: false,
+      currentPeriodEnd: "2026-09-01T00:00:00.000Z",
+      paymentNeedsAttention: false,
+      proMonthlyPriceCents: 2_000,
+      hobbyIncludedUsageCents: 100,
+      memberCount: 2,
+      memberCap: 10,
+      spendThisMonthUsdMicros: 500_000,
+      spendThisMonthByCategory: { chat: 500_000, ingestion: 0, capabilities: 0 },
+      recentActivity: [
+        {
+          activityId: "billing_activity_safe",
+          source: "chat_model_usage",
+          amountUsdMicros: -500_000,
+          providerCostUsdMicros: 500_000,
+          platformFeeUsdMicros: 0,
+          capabilityAction: null,
+          isAutoRefill: false,
+          createdAt: "2026-08-13T12:00:00.000Z",
+        },
+      ],
+      lowBalanceWarnUsdMicros: 1_000_000,
+      includedUsagePerSeatCents: 2_000,
+      topUpAmountsCents: [1_000],
+      defaultTopUpCents: 1_000,
+      minTopUpCents: 500,
+      maxTopUpCents: 50_000,
+      autoRefillMonthlyMaxCents: 50_000,
+      autoRefill: {
+        enabled: true,
+        amountCents: 1_000,
+        hasPaymentMethod: true,
+        lastError: null,
+      },
+      isAdmin: true,
+    }));
+    const app = testApp(fakeRepository(), {
+      billing: { ...fakeBilling(), getOverview },
+    });
+
+    const response = await app.request("/v1/billing");
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(body.data).toMatchObject({
+      plan: "pro",
+      creditBalanceUsdMicros: 3_000_000,
+      recentActivity: [{ activityId: "billing_activity_safe" }],
+    });
+    expect(JSON.stringify(body)).not.toMatch(/stripeCustomerId|paymentMethodId|ledgerId/u);
+    expect(getOverview).toHaveBeenCalledWith(actor);
+  });
+
+  it("forwards the required idempotency key to billing commands", async () => {
+    const createCreditTopUp = vi.fn(async () => ({
+      redirectUrl: "https://checkout.stripe.test/session",
+    }));
+    const app = testApp(fakeRepository(), {
+      billing: { ...fakeBilling(), createCreditTopUp },
+    });
+    const response = await app.request("/v1/billing/top-ups", {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "billing-command-1" },
+      body: JSON.stringify({ amountCents: 1_000 }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(createCreditTopUp).toHaveBeenCalledWith(actor, {
+      amountCents: 1_000,
+      idempotencyKey: "billing-command-1",
+    });
+    const missingKey = await app.request("/v1/billing/top-ups", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ amountCents: 1_000 }),
+    });
+    expect(missingKey.status).toBe(400);
+    expect(createCreditTopUp).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes capabilities and Brain controls through their authorized services", async () => {
+    const getSettings = vi.fn(async () => ({
+      capabilities: [{ source: "x" as const, enabled: true }],
+      sessionBudgetUsdMicros: 5_000_000,
+    }));
+    const setCapability = vi.fn(async () => ({ source: "x" as const, enabled: false }));
+    const getApproval = vi.fn(async () => ({
+      runId: "gcr_1",
+      source: "lead" as const,
+      action: "lead.find_person_email",
+      status: "awaiting_approval" as const,
+      maxCostUsdMicros: 360_000,
+      expiresAt: new Date("2026-08-13T16:00:00.000Z"),
+      settledCostUsdMicros: null,
+    }));
+    const createBrain = vi.fn(async () => ({ brainId: "brain_new" }));
+    const getAccess = vi.fn(async () => ({
+      visibility: "restricted" as const,
+      memberIds: ["user_1"],
+      workspaceMembers: [],
+    }));
+    const app = testApp(fakeRepository(), {
+      workspaceCapabilities: {
+        ...fakeWorkspaceCapabilities(),
+        getSettings,
+        setCapability,
+        getApproval,
+      },
+      brainControl: { ...fakeBrainControl(), createBrain, getAccess },
+    });
+
+    const settings = await app.request("/v1/capabilities");
+    expect(settings.status).toBe(200);
+    await expect(settings.json()).resolves.toMatchObject({
+      data: { capabilities: [{ source: "x", enabled: true }] },
+    });
+
+    const toggled = await app.request("/v1/capabilities/x", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(toggled.status).toBe(200);
+    expect(setCapability).toHaveBeenCalledWith(actor, "x", false);
+
+    const approval = await app.request("/v1/capability-approvals/gcr_1");
+    expect(approval.status).toBe(200);
+    await expect(approval.json()).resolves.toMatchObject({
+      data: { expiresAt: "2026-08-13T16:00:00.000Z" },
+    });
+
+    const created = await app.request("/v1/brains", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Research", visibility: "workspace" }),
+    });
+    expect(created.status).toBe(201);
+    expect(createBrain).toHaveBeenCalledWith(actor, {
+      name: "Research",
+      visibility: "workspace",
+    });
+
+    const access = await app.request("/v1/brains/brain_new/access");
+    expect(access.status).toBe(200);
+    expect(getAccess).toHaveBeenCalledWith(actor, "brain_new");
+  });
+
+  it("routes workspace settings, membership, provisioning, and switch commands", async () => {
+    const getSettings = vi.fn(async () => ({
+      workspace: { id: "goat_ws_current", name: "Current Organization" },
+      role: "admin" as const,
+      plan: "pro" as const,
+      memberCap: 10,
+      members: [],
+      invitations: [],
+    }));
+    const invite = vi.fn(async () => undefined);
+    const removeMember = vi.fn(async () => undefined);
+    const rename = vi.fn(async () => ({ id: "goat_ws_current", name: "Renamed" }));
+    const create = vi.fn(async () => ({
+      workspaceId: "goat_ws_new",
+      organizationId: "org_new",
+      brainId: "brain_new",
+    }));
+    const switchWorkspace = vi.fn(async () => ({
+      workspaceId: "goat_ws_next",
+      organizationId: "org_next",
+      brainId: null,
+    }));
+    const app = testApp(fakeRepository(), {
+      workspaceControl: {
+        ...fakeWorkspaceControl(),
+        getSettings,
+        invite,
+        removeMember,
+        rename,
+        create,
+        switch: switchWorkspace,
+      },
+    });
+
+    const settings = await app.request("/v1/workspace");
+    expect(settings.status).toBe(200);
+    await expect(settings.json()).resolves.toMatchObject({
+      data: { workspace: { id: "goat_ws_current" }, plan: "pro" },
+    });
+
+    const invited = await app.request("/v1/workspace/invitations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "teammate@example.com" }),
+    });
+    expect(invited.status).toBe(201);
+    expect(invite).toHaveBeenCalledWith(actor, "teammate@example.com");
+
+    const removed = await app.request("/v1/workspace/members/user_2", { method: "DELETE" });
+    expect(removed.status).toBe(200);
+    expect(removeMember).toHaveBeenCalledWith(actor, "user_2");
+
+    const renamed = await app.request("/v1/workspace", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Renamed" }),
+    });
+    expect(renamed.status).toBe(200);
+    expect(rename).toHaveBeenCalledWith(actor, "Renamed");
+
+    const created = await app.request("/v1/workspaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId: "goat_ws_new", name: "New Workspace" }),
+    });
+    expect(created.status).toBe(201);
+    expect(create).toHaveBeenCalledWith(actor, {
+      workspaceId: "goat_ws_new",
+      name: "New Workspace",
+    });
+
+    const switched = await app.request("/v1/workspaces/goat_ws_next/switch", { method: "POST" });
+    expect(switched.status).toBe(200);
+    expect(switchWorkspace).toHaveBeenCalledWith(actor, "goat_ws_next");
+  });
+
+  it("routes onboarding through verified identity without the onboarded actor gate", async () => {
+    const identity = {
+      userId: "user_mid_onboarding",
+      organizationId: null,
+      activeWorkspaceId: null,
+      method: "session" as const,
+      refreshedSessionCookie: "wos-session=refreshed; Path=/; HttpOnly",
+    };
+    const authenticate = vi.fn(async () => {
+      throw new Error("The actor tier must not run for onboarding.");
+    });
+    const identify = vi.fn(async () => identity);
+    const getState = vi.fn(async () => ({
+      onboarding: null,
+      workspace: null,
+      activeBrainId: null,
+    }));
+    const checkSlug = vi.fn(async () => ({ slug: "analytical-co", available: true }));
+    const saveProfile = vi.fn(async () => undefined);
+    const saveWorkspace = vi.fn(async () => ({
+      workspaceId: "goat_ws_new",
+      organizationId: "org_new",
+      brainId: "brain_general",
+      createdByCaller: true,
+    }));
+    const finish = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), {
+      authenticate,
+      identify,
+      onboarding: { getState, checkSlug, saveProfile, saveWorkspace, finish },
+    });
+
+    const state = await app.request("/v1/onboarding");
+    expect(state.status).toBe(200);
+    expect(state.headers.get("set-cookie")).toContain("wos-session=refreshed");
+    expect(getState).toHaveBeenCalledWith(identity);
+
+    const checked = await app.request("/v1/onboarding/workspace-slug/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slug: "analytical-co" }),
+    });
+    expect(checked.status).toBe(200);
+    expect(checkSlug).toHaveBeenCalledWith(identity, "analytical-co");
+
+    const profile = await app.request("/v1/onboarding/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: "founder", companyUrl: "https://opencompany.ai/" }),
+    });
+    expect(profile.status).toBe(200);
+    expect(saveProfile).toHaveBeenCalledWith(identity, {
+      role: "founder",
+      companyUrl: "https://opencompany.ai/",
+    });
+
+    const workspace = await app.request("/v1/onboarding/workspace", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: "goat_ws_00000000-0000-4000-8000-000000000123",
+        name: "Analytical Co",
+        slug: "analytical-co",
+      }),
+    });
+    expect(workspace.status).toBe(200);
+    expect(saveWorkspace).toHaveBeenCalledWith(identity, {
+      workspaceId: "goat_ws_00000000-0000-4000-8000-000000000123",
+      name: "Analytical Co",
+      slug: "analytical-co",
+    });
+
+    const completed = await app.request("/v1/onboarding/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ referralSource: "friend" }),
+    });
+    expect(completed.status).toBe(200);
+    expect(finish).toHaveBeenCalledWith(identity, "friend");
+    expect(identify).toHaveBeenCalledTimes(5);
+    expect(authenticate).not.toHaveBeenCalled();
+  });
+
+  it("protects internal onboarding-email persistence with the shared cron secret", async () => {
+    const enroll = vi.fn(async () => undefined);
+    const claimDue = vi.fn(async () => [
+      {
+        id: "goem_1",
+        workosUserId: "user_1",
+        step: "welcome" as const,
+        attempts: 1,
+        email: "owner@example.com",
+        firstName: "Owner",
+        terminalOnFailure: false,
+      },
+    ]);
+    const settle = vi.fn(async () => undefined);
+    const unsubscribe = vi.fn(async () => 2);
+    const app = testApp(fakeRepository(), {
+      onboardingEmails: { enroll, claimDue, settle, unsubscribe },
+      emailLifecycleInternalSecret: "cron-secret",
+    });
+
+    const unauthorized = await app.request("/internal/onboarding-emails/claim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 4 }),
+    });
+    expect(unauthorized.status).toBe(401);
+    expect(claimDue).not.toHaveBeenCalled();
+
+    const headers = {
+      Authorization: "Bearer cron-secret",
+      "Content-Type": "application/json",
+    };
+    const enrolled = await app.request("/internal/onboarding-emails/enroll", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ workosUserId: "user_1" }),
+    });
+    expect(enrolled.status).toBe(200);
+    expect(enroll).toHaveBeenCalledWith("user_1");
+
+    const claimed = await app.request("/internal/onboarding-emails/claim", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ limit: 4, workosUserId: "user_1" }),
+    });
+    expect(claimed.status).toBe(200);
+    expect(claimDue).toHaveBeenCalledWith(4, "user_1");
+
+    const settled = await app.request("/internal/onboarding-emails/settle", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ id: "goem_1", outcome: "sent" }),
+    });
+    expect(settled.status).toBe(200);
+    expect(settle).toHaveBeenCalledWith({ id: "goem_1", outcome: "sent" });
+
+    const unsubscribed = await app.request("/internal/onboarding-emails/unsubscribe", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ email: "OWNER@EXAMPLE.COM" }),
+    });
+    expect(unsubscribed.status).toBe(200);
+    expect(unsubscribe).toHaveBeenCalledWith("owner@example.com");
+  });
 });
 
 function testApp(
@@ -2675,6 +3072,7 @@ function testApp(
     browserProfiles: fakeBrowserProfiles(),
     skillImports: fakeSkillImportService(),
     brainAssets: fakeBrainAssets(),
+    brainControl: fakeBrainControl(),
     attachments: fakeAttachments(),
     userSettings: fakeUserSettings(),
     feedback: fakeFeedback(),
@@ -2682,7 +3080,18 @@ function testApp(
     integrationAccounts: fakeIntegrationAccounts(),
     engineAuth: fakeEngineAuth(),
     engineSessions: fakeEngineSessions(),
+    billing: fakeBilling(),
+    workspaceCapabilities: fakeWorkspaceCapabilities(),
+    workspaceControl: fakeWorkspaceControl(),
+    onboarding: fakeOnboarding(),
+    onboardingEmails: fakeOnboardingEmails(),
     authenticate: async () => ({ actor }),
+    identify: async () => ({
+      userId: actor.userId,
+      organizationId: null,
+      activeWorkspaceId: actor.workspaceId,
+      method: actor.authenticationMethod,
+    }),
     defaultModel: "provider/default",
     ...overrides,
   });
@@ -2734,6 +3143,118 @@ function fakeBrainAssets(): BrainAssetService {
   };
 }
 
+function fakeBrainControl(): Parameters<typeof createApiApp>[0]["brainControl"] {
+  return {
+    switchBrain: async () => {
+      throw new Error("Unexpected Brain switch.");
+    },
+    createBrain: async () => {
+      throw new Error("Unexpected Brain creation.");
+    },
+    getAccess: async () => {
+      throw new Error("Unexpected Brain access read.");
+    },
+    setAccess: async () => {
+      throw new Error("Unexpected Brain access mutation.");
+    },
+    getEnrichment: async () => {
+      throw new Error("Unexpected Brain enrichment read.");
+    },
+    setEnrichment: async () => {
+      throw new Error("Unexpected Brain enrichment mutation.");
+    },
+    getIntelligence: async () => {
+      throw new Error("Unexpected Brain intelligence read.");
+    },
+    setIntelligence: async () => {
+      throw new Error("Unexpected Brain intelligence mutation.");
+    },
+  };
+}
+
+function fakeWorkspaceCapabilities(): Parameters<typeof createApiApp>[0]["workspaceCapabilities"] {
+  return {
+    getSettings: async () => {
+      throw new Error("Unexpected workspace capability settings read.");
+    },
+    setCapability: async () => {
+      throw new Error("Unexpected workspace capability mutation.");
+    },
+    setSessionBudget: async () => {
+      throw new Error("Unexpected workspace capability budget mutation.");
+    },
+    getApproval: async () => {
+      throw new Error("Unexpected capability approval read.");
+    },
+    getApprovalByToolCall: async () => {
+      throw new Error("Unexpected tool-call capability approval read.");
+    },
+  };
+}
+
+function fakeWorkspaceControl(): Parameters<typeof createApiApp>[0]["workspaceControl"] {
+  return {
+    getSettings: async () => {
+      throw new Error("Unexpected workspace settings read.");
+    },
+    invite: async () => {
+      throw new Error("Unexpected workspace invitation.");
+    },
+    revokeInvitation: async () => {
+      throw new Error("Unexpected workspace invitation revoke.");
+    },
+    removeMember: async () => {
+      throw new Error("Unexpected workspace member removal.");
+    },
+    rename: async () => {
+      throw new Error("Unexpected workspace rename.");
+    },
+    create: async () => {
+      throw new Error("Unexpected workspace creation.");
+    },
+    switch: async () => {
+      throw new Error("Unexpected workspace switch.");
+    },
+  };
+}
+
+function fakeOnboarding(): Parameters<typeof createApiApp>[0]["onboarding"] {
+  return {
+    getState: async () => {
+      throw new Error("Unexpected onboarding state read.");
+    },
+    checkSlug: async () => {
+      throw new Error("Unexpected onboarding slug check.");
+    },
+    saveProfile: async () => {
+      throw new Error("Unexpected onboarding profile mutation.");
+    },
+    saveWorkspace: async () => {
+      throw new Error("Unexpected onboarding workspace mutation.");
+    },
+    finish: async () => {
+      throw new Error("Unexpected onboarding completion.");
+    },
+  };
+}
+
+function fakeOnboardingEmails(): Parameters<typeof createApiApp>[0]["onboardingEmails"] {
+  return {
+    enroll: async () => {
+      throw new Error("Unexpected onboarding email enrollment.");
+    },
+    claimDue: async () => {
+      throw new Error("Unexpected onboarding email claim.");
+    },
+    settle: async () => {
+      throw new Error("Unexpected onboarding email settlement.");
+    },
+    unsubscribe: async () => {
+      throw new Error("Unexpected onboarding email unsubscribe.");
+    },
+  };
+}
+
 function fakeBrainImports(): Parameters<typeof createApiApp>[0]["brainImports"] {
   return {
     start: async () => {
@@ -2775,6 +3296,32 @@ function fakeFeedback(): Parameters<typeof createApiApp>[0]["feedback"] {
   return {
     submit: async () => {
       throw new Error("Unexpected feedback submission.");
+    },
+  };
+}
+
+function fakeBilling(): Parameters<typeof createApiApp>[0]["billing"] {
+  return {
+    getOverview: async () => {
+      throw new Error("Unexpected billing overview read.");
+    },
+    getUsage: async () => {
+      throw new Error("Unexpected billing usage read.");
+    },
+    getBalance: async () => {
+      throw new Error("Unexpected billing balance read.");
+    },
+    createCreditTopUp: async () => {
+      throw new Error("Unexpected billing top-up.");
+    },
+    createProCheckout: async () => {
+      throw new Error("Unexpected billing subscription checkout.");
+    },
+    createBillingPortal: async () => {
+      throw new Error("Unexpected billing portal session.");
+    },
+    updateAutoRefill: async () => {
+      throw new Error("Unexpected billing auto-refill update.");
     },
   };
 }

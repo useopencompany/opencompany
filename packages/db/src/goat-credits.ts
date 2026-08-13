@@ -385,19 +385,22 @@ export async function createGoatPendingCheckoutRecord(input: {
   db?: DbLike;
 }) {
   const db = input.db ?? getDb();
-  await db.insert(goatStripeCheckoutSessions).values({
-    id: input.id,
-    workspaceId: input.workspaceId,
-    userWorkosId: input.userWorkosId,
-    amountCents: input.amountCents,
-    status: "pending",
-    metadata: {
-      goatWorkspaceId: input.workspaceId,
+  await db
+    .insert(goatStripeCheckoutSessions)
+    .values({
+      id: input.id,
+      workspaceId: input.workspaceId,
       userWorkosId: input.userWorkosId,
-      amountCents: String(input.amountCents),
-      checkoutRecordId: input.id,
-    },
-  });
+      amountCents: input.amountCents,
+      status: "pending",
+      metadata: {
+        goatWorkspaceId: input.workspaceId,
+        userWorkosId: input.userWorkosId,
+        amountCents: String(input.amountCents),
+        checkoutRecordId: input.id,
+      },
+    })
+    .onConflictDoNothing({ target: goatStripeCheckoutSessions.id });
 }
 
 export async function markGoatCheckoutRecordOpen(input: {

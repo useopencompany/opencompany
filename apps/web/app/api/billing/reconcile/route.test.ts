@@ -1,96 +1,31 @@
-import {
-  refreshGoatMonthlyIncludedUsage,
-  releasePendingGoatIngestionReservations,
-} from "@opencompany/db/goat-billing";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { sweepGoatAutoRefills } from "@/lib/billing/auto-refill";
-import { reconcileGoatStripeSeatQuantities } from "@/lib/billing/seats";
-import { reconcileGoatCapabilities } from "@/lib/capabilities/reconcile";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "./route";
 
-vi.mock("@opencompany/db/goat-billing", () => ({
-  refreshGoatMonthlyIncludedUsage: vi.fn(),
-  releasePendingGoatIngestionReservations: vi.fn(),
-}));
-
-vi.mock("@/lib/billing/auto-refill", () => ({
-  sweepGoatAutoRefills: vi.fn(),
-}));
-
-vi.mock("@/lib/billing/seats", () => ({
-  reconcileGoatStripeSeatQuantities: vi.fn(),
-}));
-
-vi.mock("@/lib/capabilities/reconcile", () => ({
-  reconcileGoatCapabilities: vi.fn(),
-}));
-
-describe("GET /api/billing/reconcile", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.stubEnv("CRON_SECRET", "cron-secret");
+describe("GET /api/billing/reconcile relay", () => {
+  beforeEach(() => vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test"));
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
-  it("rejects requests without the cron bearer secret", async () => {
-    const response = await GET(new Request("https://goat.test/api/billing/reconcile"));
-    expect(response.status).toBe(401);
-    expect(releasePendingGoatIngestionReservations).not.toHaveBeenCalled();
-    expect(refreshGoatMonthlyIncludedUsage).not.toHaveBeenCalled();
-    expect(reconcileGoatStripeSeatQuantities).not.toHaveBeenCalled();
-    expect(sweepGoatAutoRefills).not.toHaveBeenCalled();
-    expect(reconcileGoatCapabilities).not.toHaveBeenCalled();
-  });
-
-  it("reconciles capabilities and ingestion before sweeping auto-refills", async () => {
-    vi.mocked(sweepGoatAutoRefills).mockImplementation(async () => {
-      return { candidates: 2, charged: 1 };
-    });
-    vi.mocked(releasePendingGoatIngestionReservations).mockImplementation(async () => {
-      return { released: 4, failed: 1 };
-    });
-    vi.mocked(refreshGoatMonthlyIncludedUsage).mockResolvedValue({
-      candidates: 10,
-      refreshed: 3,
-      failed: 0,
-    });
-    vi.mocked(reconcileGoatStripeSeatQuantities).mockResolvedValue({
-      candidates: 2,
-      reconciled: 2,
-      changed: 1,
-      failed: 0,
-    });
-    vi.mocked(reconcileGoatCapabilities).mockResolvedValue({
-      expiredApprovals: 1,
-      candidates: 3,
-      settled: 2,
-      pending: 1,
-      failed: 0,
-      wallet: null,
-    });
+  it("preserves the cron bearer secret and response", async () => {
+    let upstream: Request | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (requestInput: URL | RequestInfo, init?: RequestInit) => {
+        upstream = requestInput instanceof Request ? requestInput : new Request(requestInput, init);
+        return Response.json({ released: 4, failed: 0 });
+      }),
+    );
     const response = await GET(
-      new Request("https://goat.test/api/billing/reconcile", {
+      new Request("https://my.opencompany.chat/api/billing/reconcile", {
         headers: { authorization: "Bearer cron-secret" },
       }),
     );
+
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      released: 4,
-      failed: 1,
-      autoRefills: { candidates: 2, charged: 1 },
-      includedUsage: { candidates: 10, refreshed: 3, failed: 0 },
-      seats: { candidates: 2, reconciled: 2, changed: 1, failed: 0 },
-      capabilities: {
-        expiredApprovals: 1,
-        candidates: 3,
-        settled: 2,
-        pending: 1,
-        failed: 0,
-        wallet: null,
-      },
-    });
-    expect(reconcileGoatCapabilities).toHaveBeenCalledWith(100);
-    expect(refreshGoatMonthlyIncludedUsage).toHaveBeenCalledWith({ limit: 500 });
-    expect(reconcileGoatStripeSeatQuantities).toHaveBeenCalledWith(100);
-    expect(sweepGoatAutoRefills).toHaveBeenCalledWith(25);
+    const request = upstream as unknown as Request;
+    expect(request.url).toBe("https://api.example.test/billing/reconcile");
+    expect(request.headers.get("authorization")).toBe("Bearer cron-secret");
   });
 });

@@ -1,9 +1,9 @@
-import { getGoatOnboarding } from "@opencompany/db/goat-workspaces";
 import { cookies } from "next/headers";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
 import { currentGoatIdentity, currentGoatUser } from "@/lib/auth";
 import { getGoatBrainSourcesAction } from "@/lib/brain-source-actions";
+import { getGoatOnboardingState } from "@/lib/onboarding-actions";
 import type { GoatOnboardingConnectionResult } from "@/lib/onboarding-integrations";
 
 export const dynamic = "force-dynamic";
@@ -19,21 +19,21 @@ export default async function OnboardingPage({
   }>;
 }) {
   const identity = await currentGoatIdentity();
-  const userWorkosId = identity.user.workosUserId;
   const name =
     [identity.user.firstName, identity.user.lastName].filter(Boolean).join(" ").trim() ||
     "Teammate";
 
-  const [context, params, onboarding, cookieStore] = await Promise.all([
+  const [context, params, state, cookieStore] = await Promise.all([
     currentGoatUser({ optional: true }),
     searchParams,
-    getGoatOnboarding(userWorkosId),
+    getGoatOnboardingState(),
     cookies(),
   ]);
+  const onboarding = state.onboarding;
 
   // Real signal for "came from an invite": the active workspace was created by
   // someone else, so this user joined it rather than starting it.
-  const joinedByInvite = context !== null && context.workspace.createdByWorkosId !== userWorkosId;
+  const joinedByInvite = state.workspace !== null && !state.workspace.createdByCaller;
   const override = params.variant;
   const variant: "owner" | "member" =
     context && override === "member"
