@@ -4570,6 +4570,293 @@
         ],
         "additionalProperties": false
       },
+      "OnboardingStateEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OnboardingState"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingState": {
+        "type": "object",
+        "properties": {
+          "onboarding": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "role": {
+                "type": "string",
+                "nullable": true
+              },
+              "companyDomain": {
+                "type": "string",
+                "nullable": true
+              },
+              "contextUrls": {
+                "type": "array",
+                "nullable": true,
+                "items": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "maxItems": 20
+              },
+              "referralSource": {
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "required": [
+              "role",
+              "companyDomain",
+              "contextUrls",
+              "referralSource"
+            ],
+            "additionalProperties": false
+          },
+          "workspace": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "slug": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 40
+              },
+              "createdByCaller": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "slug",
+              "createdByCaller"
+            ],
+            "additionalProperties": false
+          },
+          "activeBrainId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          }
+        },
+        "required": [
+          "onboarding",
+          "workspace",
+          "activeBrainId"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingWorkspaceSlugEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "slug": {
+                "type": "string",
+                "maxLength": 40
+              },
+              "available": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "slug",
+              "available"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CheckOnboardingWorkspaceSlugBody": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "slug"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingCommandEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "completed": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "completed"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SaveOnboardingProfileBody": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "founder",
+              "product",
+              "sales",
+              "marketing",
+              "operations",
+              "investing",
+              "consulting",
+              "research"
+            ]
+          },
+          "companyUrl": {
+            "type": "string",
+            "maxLength": 2048,
+            "format": "uri"
+          }
+        },
+        "required": [
+          "role",
+          "companyUrl"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingWorkspaceEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "workspaceId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "organizationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "brainId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "createdByCaller": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "workspaceId",
+              "organizationId",
+              "brainId",
+              "createdByCaller"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SaveOnboardingWorkspaceBody": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$/u"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "name",
+          "slug"
+        ],
+        "additionalProperties": false
+      },
+      "FinishOnboardingBody": {
+        "type": "object",
+        "properties": {
+          "referralSource": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "referralSource"
+        ],
+        "additionalProperties": false
+      },
       "BrainSourceOptionsEnvelope": {
         "type": "object",
         "properties": {
@@ -12099,6 +12386,231 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WorkspaceActivationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/onboarding": {
+      "get": {
+        "tags": [
+          "Onboarding"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authenticated onboarding state without requiring onboarding completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingStateEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/onboarding/workspace-slug/check": {
+      "post": {
+        "tags": [
+          "Onboarding"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckOnboardingWorkspaceSlugBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Normalized workspace slug availability for the authenticated identity.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingWorkspaceSlugEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/onboarding/profile": {
+      "put": {
+        "tags": [
+          "Onboarding"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveOnboardingProfileBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated identity onboarding profile saved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingCommandEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/onboarding/workspace": {
+      "put": {
+        "tags": [
+          "Onboarding"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveOnboardingWorkspaceBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Onboarding workspace saved or provisioned for the authenticated identity.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingWorkspaceEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/onboarding/complete": {
+      "post": {
+        "tags": [
+          "Onboarding"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinishOnboardingBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Onboarding completed for an identity with an accessible workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingCommandEnvelope"
                 }
               }
             }

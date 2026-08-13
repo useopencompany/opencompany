@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
   CHAT_PRESENTATION_READ_LIMIT,
   type ChatPresentationReader,
@@ -64,7 +64,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { stream as streamResponse } from "hono/streaming";
 import type { AttachmentUploadService } from "./attachments";
 import type { AttioIngressService } from "./attio-ingress";
-import type { ApiAuthenticator } from "./auth";
+import type { ApiAuthenticator, ApiIdentity, ApiIdentityVerifier } from "./auth";
 import type { BrainAssetService } from "./brain-assets";
 import type { BrainControlService } from "./brain-control";
 import type { ReadModelService } from "./electric-read-models";
@@ -78,6 +78,8 @@ import type { IntegrationAccountService } from "./integration-accounts";
 import type { JamieIngressService } from "./jamie-ingress";
 import type { LinearIngressService } from "./linear-ingress";
 import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
+import type { OnboardingService } from "./onboarding";
+import type { OnboardingEmailService } from "./onboarding-emails";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
 import type { RepoConfigService } from "./repo-configs";
 import { PollingRunEventNotifier, type RunEventNotifier } from "./run-event-notifier";
@@ -111,6 +113,7 @@ const CORS_EXPOSE_HEADERS = [
   "X-OpenCompany-Run-Status",
   "X-Request-Id",
 ];
+const ONBOARDING_IDENTITY_PATH = "/v1/onboarding";
 
 export type CreateApiAppInput = {
   chat: ChatApplicationService;
@@ -140,7 +143,11 @@ export type CreateApiAppInput = {
   engineAuth: EngineAuthService;
   workspaceCapabilities: WorkspaceCapabilityService;
   workspaceControl: WorkspaceControlService;
+  onboarding: OnboardingService;
+  onboardingEmails: OnboardingEmailService;
   authenticate: ApiAuthenticator;
+  identify: ApiIdentityVerifier;
+  emailLifecycleInternalSecret?: string;
   browserOrigins?: readonly string[];
   githubIngress?: GitHubIngressService;
   googleIngress?: GoogleIngressService;
@@ -730,6 +737,36 @@ export function createApiApp(input: CreateApiAppInput) {
         c.req.valid("param").workspaceId,
       );
       return c.json({ data: activation, meta }, 200);
+    },
+    getOnboardingState: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-read", 300);
+      const state = await input.onboarding.getState(identity);
+      return c.json({ data: state, meta }, 200);
+    },
+    checkOnboardingWorkspaceSlug: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-slug", 120);
+      const result = await input.onboarding.checkSlug(identity, c.req.valid("json").slug);
+      return c.json({ data: result, meta }, 200);
+    },
+    saveOnboardingProfile: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-write", 30);
+      await input.onboarding.saveProfile(identity, c.req.valid("json"));
+      return c.json({ data: { completed: true as const }, meta }, 200);
+    },
+    saveOnboardingWorkspace: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-workspace", 10);
+      const workspace = await input.onboarding.saveWorkspace(identity, c.req.valid("json"));
+      return c.json({ data: workspace, meta }, 200);
+    },
+    finishOnboarding: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-write", 30);
+      await input.onboarding.finish(identity, c.req.valid("json").referralSource);
+      return c.json({ data: { completed: true as const }, meta }, 200);
     },
     startBrainImport: async (c) => {
       const actor = actorFrom(c);
@@ -1768,10 +1805,18 @@ export function createApiApp(input: CreateApiAppInput) {
           async (span) => {
             try {
               enforceCookieMutationOrigin(c.req.raw, browserOrigins);
-              const authentication = await input.authenticate(c.req.raw);
-              setContextValue(c, "actor", authentication.actor);
-              if (authentication.refreshedSessionCookie) {
-                c.header("Set-Cookie", authentication.refreshedSessionCookie);
+              if (isIdentityTierPath(c.req.path)) {
+                const identity = await input.identify(c.req.raw);
+                setContextValue(c, "identity", identity);
+                if (identity.refreshedSessionCookie) {
+                  c.header("Set-Cookie", identity.refreshedSessionCookie);
+                }
+              } else {
+                const authentication = await input.authenticate(c.req.raw);
+                setContextValue(c, "actor", authentication.actor);
+                if (authentication.refreshedSessionCookie) {
+                  c.header("Set-Cookie", authentication.refreshedSessionCookie);
+                }
               }
               await next();
               span.setAttributes({ "goat.http_status_code": c.res.status });
@@ -1856,6 +1901,67 @@ export function createApiApp(input: CreateApiAppInput) {
     }),
   );
   app.get("/openapi.json", (c) => c.json(createOpenApiDocument()));
+  app.post("/internal/onboarding-emails/enroll", async (c) => {
+    authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
+    const body = await internalJsonBody(c.req.raw);
+    const workosUserId = boundedString(body.workosUserId, 128);
+    if (!workosUserId) {
+      throw new ApiError(400, "invalid_request", "A valid user id is required.");
+    }
+    await input.onboardingEmails.enroll(workosUserId);
+    return c.json({ data: { completed: true as const }, meta }, 200);
+  });
+  app.post("/internal/onboarding-emails/claim", async (c) => {
+    authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
+    const body = await internalJsonBody(c.req.raw);
+    const limit = body.limit;
+    if (!Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 100) {
+      throw new ApiError(400, "invalid_request", "A claim limit from 1 to 100 is required.");
+    }
+    const workosUserId =
+      body.workosUserId === undefined ? undefined : boundedString(body.workosUserId, 128);
+    if (body.workosUserId !== undefined && !workosUserId) {
+      throw new ApiError(400, "invalid_request", "A valid user id is required.");
+    }
+    const emails = workosUserId
+      ? await input.onboardingEmails.claimDue(Number(limit), workosUserId)
+      : await input.onboardingEmails.claimDue(Number(limit));
+    return c.json({ data: { emails }, meta }, 200);
+  });
+  app.post("/internal/onboarding-emails/settle", async (c) => {
+    authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
+    const body = await internalJsonBody(c.req.raw);
+    const id = boundedString(body.id, 128);
+    const outcome = body.outcome;
+    if (!id || !["sent", "failed", "rescheduled"].includes(String(outcome))) {
+      throw new ApiError(400, "invalid_request", "A valid email settlement is required.");
+    }
+    const error = body.error === undefined ? undefined : boundedString(body.error, 2_000);
+    const nextRunAt = body.nextRunAt === undefined ? undefined : validDate(String(body.nextRunAt));
+    if (outcome !== "sent" && !error) {
+      throw new ApiError(400, "invalid_request", "A delivery error is required.");
+    }
+    if (outcome === "rescheduled" && !nextRunAt) {
+      throw new ApiError(400, "invalid_request", "A retry schedule is required.");
+    }
+    await input.onboardingEmails.settle({
+      id,
+      outcome: outcome as "sent" | "failed" | "rescheduled",
+      ...(error ? { error } : {}),
+      ...(nextRunAt ? { nextRunAt } : {}),
+    });
+    return c.json({ data: { completed: true as const }, meta }, 200);
+  });
+  app.post("/internal/onboarding-emails/unsubscribe", async (c) => {
+    authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
+    const body = await internalJsonBody(c.req.raw);
+    const email = boundedString(body.email, 320)?.toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)) {
+      throw new ApiError(400, "invalid_request", "A valid email is required.");
+    }
+    const skipped = await input.onboardingEmails.unsubscribe(email);
+    return c.json({ data: { skipped }, meta }, 200);
+  });
   if (input.githubIngress) {
     // Purpose-specific provider ingress: registered outside /v1 so the /v1
     // browser middleware (CORS, cookie-mutation Origin checks, actor context)
@@ -2015,6 +2121,46 @@ function enforceCookieMutationOrigin(request: Request, browserOrigins: readonly 
   }
 }
 
+function isIdentityTierPath(path: string) {
+  return path === ONBOARDING_IDENTITY_PATH || path.startsWith(`${ONBOARDING_IDENTITY_PATH}/`);
+}
+
+function authorizeEmailLifecycleInternalRequest(request: Request, configuredSecret?: string) {
+  const secret = configuredSecret?.trim();
+  if (!secret) {
+    throw new ApiError(503, "unavailable", "Email lifecycle persistence is unavailable.", true);
+  }
+  const authorization = request.headers.get("authorization");
+  const supplied = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
+  const expectedBuffer = Buffer.from(secret);
+  const suppliedBuffer = Buffer.from(supplied);
+  if (
+    suppliedBuffer.length !== expectedBuffer.length ||
+    !timingSafeEqual(suppliedBuffer, expectedBuffer)
+  ) {
+    throw new ApiError(401, "authentication_required", "Authentication required.");
+  }
+}
+
+async function internalJsonBody(request: Request): Promise<Record<string, unknown>> {
+  const body = await request.json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new ApiError(400, "invalid_request", "A JSON object is required.");
+  }
+  return body as Record<string, unknown>;
+}
+
+function boundedString(value: unknown, maxLength: number) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed && trimmed.length <= maxLength ? trimmed : null;
+}
+
+function validDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 async function enforceRateLimit(
   limiter: ApiRateLimiter,
   actor: Actor,
@@ -2034,10 +2180,35 @@ async function enforceRateLimit(
   }
 }
 
+async function enforceIdentityRateLimit(
+  limiter: ApiRateLimiter,
+  identity: ApiIdentity,
+  bucket: string,
+  limit: number,
+) {
+  const decision = await limiter.consume({
+    key: identity.userId,
+    bucket,
+    limit,
+    windowMs: 60_000,
+  });
+  if (!decision.allowed) {
+    throw new ApiError(429, "rate_limited", "Too many requests.", true, {
+      "Retry-After": String(decision.retryAfterSeconds),
+    });
+  }
+}
+
 function actorFrom(c: Context): Actor {
   const actor = getContextValue(c, "actor");
   if (!actor) throw new ApiError(401, "authentication_required", "Authentication required.");
   return actor as Actor;
+}
+
+function identityFrom(c: Context): ApiIdentity {
+  const identity = getContextValue(c, "identity");
+  if (!identity) throw new ApiError(401, "authentication_required", "Authentication required.");
+  return identity as ApiIdentity;
 }
 
 function setContextValue(c: Context, key: string, value: unknown) {

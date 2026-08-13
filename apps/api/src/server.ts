@@ -43,6 +43,8 @@ import { createIntegrationAccountService } from "./integration-accounts";
 import { createJamieIngress } from "./jamie-ingress";
 import { createLinearIngress } from "./linear-ingress";
 import { createMcpOAuthIngress } from "./mcp-oauth-ingress";
+import { createOnboardingService } from "./onboarding";
+import { createOnboardingEmailService } from "./onboarding-emails";
 import { createRepoConfigService } from "./repo-configs";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
 import { createRunnerClient } from "./runner-client";
@@ -125,7 +127,11 @@ const app = createApiApp({
   engineAuth: createEngineAuthService({ db: database.db, runner: createRunnerClient() }),
   workspaceCapabilities: createWorkspaceCapabilityService({ db: database.db }),
   workspaceControl: createWorkspaceControlService({ db: database.db, workos }),
+  onboarding: createOnboardingService({ db: database.db, workos }),
+  onboardingEmails: createOnboardingEmailService({ db: database.db }),
   authenticate,
+  identify: identityVerifier,
+  ...(process.env.CRON_SECRET ? { emailLifecycleInternalSecret: process.env.CRON_SECRET } : {}),
   browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),
   githubIngress: createGitHubIngress({ db: database.db, identify: identityVerifier }),
   googleIngress: createGoogleIngress({ db: database.db, identify: identityVerifier }),
