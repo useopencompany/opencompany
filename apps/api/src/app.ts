@@ -1,4 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import type { GoatBillingApplicationService } from "@opencompany/billing/application-service";
 import {
   CHAT_PRESENTATION_READ_LIMIT,
   type ChatPresentationReader,
@@ -65,6 +66,7 @@ import { stream as streamResponse } from "hono/streaming";
 import type { AttachmentUploadService } from "./attachments";
 import type { AttioIngressService } from "./attio-ingress";
 import type { ApiAuthenticator, ApiIdentity, ApiIdentityVerifier } from "./auth";
+import type { BillingReconcileService } from "./billing-reconcile";
 import type { BrainAssetService } from "./brain-assets";
 import type { BrainControlService } from "./brain-control";
 import type { ReadModelService } from "./electric-read-models";
@@ -85,6 +87,7 @@ import type { RepoConfigService } from "./repo-configs";
 import { PollingRunEventNotifier, type RunEventNotifier } from "./run-event-notifier";
 import type { SlackBotIngressService } from "./slack-bot-ingress";
 import type { SlackIngressService } from "./slack-ingress";
+import type { StripeIngressService } from "./stripe-ingress";
 import type { UserSettingsService } from "./user-settings";
 import type { CapabilityApprovalView, WorkspaceCapabilityService } from "./workspace-capabilities";
 import type { WorkspaceControlService } from "./workspace-control";
@@ -141,6 +144,7 @@ export type CreateApiAppInput = {
   repoConfigs: RepoConfigService;
   integrationAccounts: IntegrationAccountService;
   engineAuth: EngineAuthService;
+  billing: GoatBillingApplicationService;
   workspaceCapabilities: WorkspaceCapabilityService;
   workspaceControl: WorkspaceControlService;
   onboarding: OnboardingService;
@@ -159,6 +163,8 @@ export type CreateApiAppInput = {
   mcpOAuthIngress?: McpOAuthIngressService;
   xAccountIngress?: XAccountIngressService;
   slackBotIngress?: SlackBotIngressService;
+  stripeIngress?: StripeIngressService;
+  billingReconcile?: BillingReconcileService;
   notifier?: RunEventNotifier;
   presentation?: ChatPresentationReader;
   rateLimiter?: ApiRateLimiter;
@@ -1773,6 +1779,58 @@ export function createApiApp(input: CreateApiAppInput) {
       await input.engineAuth.disconnectInfisical(actor);
       return c.json({ data: { deleted: true as const }, meta }, 200);
     },
+    getBillingOverview: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-read", 300);
+      c.header("Cache-Control", "private, no-store");
+      return c.json({ data: await input.billing.getOverview(actor), meta }, 200);
+    },
+    getBillingUsage: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-read", 300);
+      c.header("Cache-Control", "private, no-store");
+      return c.json({ data: await input.billing.getUsage(actor), meta }, 200);
+    },
+    getBillingBalance: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-read", 300);
+      c.header("Cache-Control", "private, no-store");
+      return c.json({ data: await input.billing.getBalance(actor), meta }, 200);
+    },
+    createBillingTopUp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-command", 10);
+      const result = await input.billing.createCreditTopUp(actor, {
+        ...c.req.valid("json"),
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+      });
+      return c.json({ data: result, meta }, 201);
+    },
+    createBillingSubscriptionCheckout: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-command", 10);
+      const result = await input.billing.createProCheckout(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+      });
+      return c.json({ data: result, meta }, 201);
+    },
+    createBillingPortalSession: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-command", 10);
+      const result = await input.billing.createBillingPortal(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+      });
+      return c.json({ data: result, meta }, 201);
+    },
+    updateBillingAutoRefill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-command", 10);
+      const result = await input.billing.updateAutoRefill(actor, {
+        ...c.req.valid("json"),
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+      });
+      return c.json({ data: result, meta }, 200);
+    },
   };
 
   const app = createV1Router(handlers, {
@@ -2048,6 +2106,13 @@ export function createApiApp(input: CreateApiAppInput) {
     const ingress = input.slackBotIngress;
     app.get("/integrations/slack-bot/start", (c) => ingress.start(c.req.raw));
     app.get("/integrations/slack-bot/callback", (c) => ingress.callback(c.req.raw));
+  }
+  if (input.stripeIngress) {
+    app.use("/webhooks/stripe", ingressBodyLimit(1024 * 1024));
+    app.post("/webhooks/stripe", (c) => input.stripeIngress!.webhook(c.req.raw));
+  }
+  if (input.billingReconcile) {
+    app.get("/billing/reconcile", (c) => input.billingReconcile!.reconcile(c.req.raw));
   }
   app.notFound((c) => apiErrorResponse(c, new ApiError(404, "not_found", "Route not found.")));
   return app;

@@ -9634,6 +9634,525 @@
           "browserToken"
         ],
         "additionalProperties": false
+      },
+      "BillingOverviewEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BillingOverview"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "BillingOverview": {
+        "type": "object",
+        "properties": {
+          "creditBalanceUsdMicros": {
+            "type": "integer"
+          },
+          "includedBalanceUsdMicros": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "topUpBalanceUsdMicros": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "plan": {
+            "type": "string",
+            "enum": [
+              "hobby",
+              "pro"
+            ]
+          },
+          "subscriptionStatus": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 64
+          },
+          "seatQuantity": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includedUsagePeriodEnd": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "cancelAtPeriodEnd": {
+            "type": "boolean"
+          },
+          "currentPeriodEnd": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "paymentNeedsAttention": {
+            "type": "boolean"
+          },
+          "proMonthlyPriceCents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "hobbyIncludedUsageCents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "memberCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "memberCap": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "spendThisMonthUsdMicros": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "spendThisMonthByCategory": {
+            "type": "object",
+            "properties": {
+              "chat": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "ingestion": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "capabilities": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "chat",
+              "ingestion",
+              "capabilities"
+            ],
+            "additionalProperties": false
+          },
+          "recentActivity": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "activityId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "example": "run_019fed53"
+                },
+                "source": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "amountUsdMicros": {
+                  "type": "integer"
+                },
+                "providerCostUsdMicros": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "platformFeeUsdMicros": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "capabilityAction": {
+                  "type": "string",
+                  "nullable": true,
+                  "maxLength": 256
+                },
+                "isAutoRefill": {
+                  "type": "boolean"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "activityId",
+                "source",
+                "amountUsdMicros",
+                "providerCostUsdMicros",
+                "platformFeeUsdMicros",
+                "capabilityAction",
+                "isAutoRefill",
+                "createdAt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "lowBalanceWarnUsdMicros": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includedUsagePerSeatCents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "topUpAmountsCents": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxItems": 20
+          },
+          "defaultTopUpCents": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minTopUpCents": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxTopUpCents": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "autoRefillMonthlyMaxCents": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "autoRefill": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "amountCents": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "hasPaymentMethod": {
+                "type": "boolean"
+              },
+              "lastError": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 1000
+              }
+            },
+            "required": [
+              "enabled",
+              "amountCents",
+              "hasPaymentMethod",
+              "lastError"
+            ],
+            "additionalProperties": false
+          },
+          "isAdmin": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "creditBalanceUsdMicros",
+          "includedBalanceUsdMicros",
+          "topUpBalanceUsdMicros",
+          "plan",
+          "subscriptionStatus",
+          "seatQuantity",
+          "includedUsagePeriodEnd",
+          "cancelAtPeriodEnd",
+          "currentPeriodEnd",
+          "paymentNeedsAttention",
+          "proMonthlyPriceCents",
+          "hobbyIncludedUsageCents",
+          "memberCount",
+          "memberCap",
+          "spendThisMonthUsdMicros",
+          "spendThisMonthByCategory",
+          "recentActivity",
+          "lowBalanceWarnUsdMicros",
+          "includedUsagePerSeatCents",
+          "topUpAmountsCents",
+          "defaultTopUpCents",
+          "minTopUpCents",
+          "maxTopUpCents",
+          "autoRefillMonthlyMaxCents",
+          "autoRefill",
+          "isAdmin"
+        ],
+        "additionalProperties": false
+      },
+      "BillingUsageEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BillingUsage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "BillingUsage": {
+        "type": "object",
+        "properties": {
+          "breakdown": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "day": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32
+                },
+                "category": {
+                  "type": "string",
+                  "enum": [
+                    "chat",
+                    "ingestion",
+                    "capabilities",
+                    "other"
+                  ]
+                },
+                "spendUsdMicros": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "providerCostUsdMicros": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "platformFeeUsdMicros": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "day",
+                "category",
+                "spendUsdMicros",
+                "providerCostUsdMicros",
+                "platformFeeUsdMicros"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "ingestedThisMonth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pending": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "creditBalanceUsdMicros": {
+            "type": "integer"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "provider",
+                "count"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "recent": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "activityId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "example": "run_019fed53"
+                },
+                "provider": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "rawEventCount": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "consumed"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "activityId",
+                "provider",
+                "rawEventCount",
+                "status",
+                "createdAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "breakdown",
+          "ingestedThisMonth",
+          "pending",
+          "creditBalanceUsdMicros",
+          "providers",
+          "recent"
+        ],
+        "additionalProperties": false
+      },
+      "BillingBalanceEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BillingBalance"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "BillingBalance": {
+        "type": "object",
+        "properties": {
+          "balanceUsdMicros": {
+            "type": "integer"
+          },
+          "lowBalanceWarnUsdMicros": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "enforcementEnabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "balanceUsdMicros",
+          "lowBalanceWarnUsdMicros",
+          "enforcementEnabled"
+        ],
+        "additionalProperties": false
+      },
+      "BillingRedirectEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "redirectUrl": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "required": [
+              "redirectUrl"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CreateBillingTopUpBody": {
+        "type": "object",
+        "properties": {
+          "amountCents": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "amountCents"
+        ],
+        "additionalProperties": false
+      },
+      "BillingAutoRefillEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "updated": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "updated"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateBillingAutoRefillBody": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "amountCents": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "enabled",
+          "amountCents"
+        ],
+        "additionalProperties": false
       }
     },
     "parameters": {}
@@ -16556,6 +17075,333 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/InfisicalAuthFlowEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing": {
+      "get": {
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized workspace billing overview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingOverviewEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/usage": {
+      "get": {
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized workspace usage read model.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingUsageEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/balance": {
+      "get": {
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized workspace credit balance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingBalanceEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/top-ups": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBillingTopUpBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Idempotent Stripe credit top-up Checkout session created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingRedirectEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/subscription-checkouts": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Idempotent Stripe Pro subscription Checkout session created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingRedirectEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/portal-sessions": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Idempotent Stripe billing portal session created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingRedirectEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/auto-refill": {
+      "put": {
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBillingAutoRefillBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workspace auto-refill configuration updated idempotently.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingAutoRefillEnvelope"
                 }
               }
             }

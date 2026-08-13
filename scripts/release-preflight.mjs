@@ -27,7 +27,6 @@ const groups = {
       "ELECTRIC_URL",
       "MONID_API_KEY",
       "GOAT_STRIPE_API_KEY",
-      "GOAT_STRIPE_WEBHOOK_SECRET",
       "GOAT_STRIPE_CHECKOUT_ENABLED",
       "GOAT_X_CLIENT_ID",
       "GOAT_X_CLIENT_SECRET",
@@ -134,6 +133,12 @@ const groups = {
       // optional override.
       "RUNNER_PUBLIC_URL",
       "RUNNER_INTERNAL_TOKEN",
+      // Billing/usage and Stripe ingress (#1203 5b1).
+      "GOAT_STRIPE_API_KEY",
+      "GOAT_STRIPE_WEBHOOK_SECRET",
+      "GOAT_STRIPE_CHECKOUT_ENABLED",
+      "CRON_SECRET",
+      "MONID_API_KEY",
     ],
     // Browser profiles are feature-flag gated: the Browserbase credentials are
     // required only when GOAT_BROWSER_PROFILES_ENABLED is "true" in this env.

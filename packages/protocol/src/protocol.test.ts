@@ -123,6 +123,13 @@ describe("headless protocol", () => {
       "/v1/engine-auth/infisical",
       "/v1/engine-auth/infisical/start",
       "/v1/engine-auth/infisical/{flowId}/complete",
+      "/v1/billing",
+      "/v1/billing/usage",
+      "/v1/billing/balance",
+      "/v1/billing/top-ups",
+      "/v1/billing/subscription-checkouts",
+      "/v1/billing/portal-sessions",
+      "/v1/billing/auto-refill",
     ]);
     expect(document.components?.securitySchemes).toHaveProperty("bearerAuth");
   });

@@ -1383,6 +1383,142 @@ export const ErrorEnvelopeSchema = z
   .strict()
   .openapi("ErrorEnvelope");
 
+export const BillingOverviewSchema = z
+  .object({
+    creditBalanceUsdMicros: z.number().int(),
+    includedBalanceUsdMicros: z.number().int().min(0),
+    topUpBalanceUsdMicros: z.number().int().min(0),
+    plan: z.enum(["hobby", "pro"]),
+    subscriptionStatus: z.string().max(64).nullable(),
+    seatQuantity: z.number().int().min(0),
+    includedUsagePeriodEnd: TimestampSchema.nullable(),
+    cancelAtPeriodEnd: z.boolean(),
+    currentPeriodEnd: TimestampSchema.nullable(),
+    paymentNeedsAttention: z.boolean(),
+    proMonthlyPriceCents: z.number().int().min(0),
+    hobbyIncludedUsageCents: z.number().int().min(0),
+    memberCount: z.number().int().min(0),
+    memberCap: z.number().int().min(0),
+    spendThisMonthUsdMicros: z.number().int().min(0),
+    spendThisMonthByCategory: z
+      .object({
+        chat: z.number().int().min(0),
+        ingestion: z.number().int().min(0),
+        capabilities: z.number().int().min(0),
+      })
+      .strict(),
+    recentActivity: z.array(
+      z
+        .object({
+          activityId: ResourceIdSchema,
+          source: z.string().min(1).max(128),
+          amountUsdMicros: z.number().int(),
+          providerCostUsdMicros: z.number().int().min(0),
+          platformFeeUsdMicros: z.number().int().min(0),
+          capabilityAction: z.string().max(256).nullable(),
+          isAutoRefill: z.boolean(),
+          createdAt: TimestampSchema,
+        })
+        .strict(),
+    ),
+    lowBalanceWarnUsdMicros: z.number().int().min(0),
+    includedUsagePerSeatCents: z.number().int().min(0),
+    topUpAmountsCents: z.array(z.number().int().min(1)).max(20),
+    defaultTopUpCents: z.number().int().min(1),
+    minTopUpCents: z.number().int().min(1),
+    maxTopUpCents: z.number().int().min(1),
+    autoRefillMonthlyMaxCents: z.number().int().min(1),
+    autoRefill: z
+      .object({
+        enabled: z.boolean(),
+        amountCents: z.number().int().min(0),
+        hasPaymentMethod: z.boolean(),
+        lastError: z.string().max(1_000).nullable(),
+      })
+      .strict(),
+    isAdmin: z.boolean(),
+  })
+  .strict()
+  .openapi("BillingOverview");
+
+export const BillingUsageSchema = z
+  .object({
+    breakdown: z.array(
+      z
+        .object({
+          day: z.string().min(1).max(32),
+          category: z.enum(["chat", "ingestion", "capabilities", "other"]),
+          spendUsdMicros: z.number().int().min(0),
+          providerCostUsdMicros: z.number().int().min(0),
+          platformFeeUsdMicros: z.number().int().min(0),
+        })
+        .strict(),
+    ),
+    ingestedThisMonth: z.number().int().min(0),
+    pending: z.number().int().min(0),
+    creditBalanceUsdMicros: z.number().int(),
+    providers: z.array(
+      z.object({ provider: z.string().min(1).max(128), count: z.number().int().min(0) }).strict(),
+    ),
+    recent: z.array(
+      z
+        .object({
+          activityId: ResourceIdSchema,
+          provider: z.string().min(1).max(128),
+          rawEventCount: z.number().int().min(0),
+          status: z.enum(["pending", "consumed"]),
+          createdAt: TimestampSchema,
+        })
+        .strict(),
+    ),
+  })
+  .strict()
+  .openapi("BillingUsage");
+
+export const BillingBalanceSchema = z
+  .object({
+    balanceUsdMicros: z.number().int(),
+    lowBalanceWarnUsdMicros: z.number().int().min(0),
+    enforcementEnabled: z.boolean(),
+  })
+  .strict()
+  .openapi("BillingBalance");
+
+export const CreateBillingTopUpBodySchema = z
+  .object({ amountCents: z.number().int().min(1) })
+  .strict()
+  .openapi("CreateBillingTopUpBody");
+export const UpdateBillingAutoRefillBodySchema = z
+  .object({ enabled: z.boolean(), amountCents: z.number().int().min(1) })
+  .strict()
+  .openapi("UpdateBillingAutoRefillBody");
+export const BillingOverviewEnvelopeSchema = z
+  .object({ data: BillingOverviewSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BillingOverviewEnvelope");
+export const BillingUsageEnvelopeSchema = z
+  .object({ data: BillingUsageSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BillingUsageEnvelope");
+export const BillingBalanceEnvelopeSchema = z
+  .object({ data: BillingBalanceSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BillingBalanceEnvelope");
+export const BillingRedirectEnvelopeSchema = z
+  .object({
+    data: z.object({ redirectUrl: z.url() }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BillingRedirectEnvelope");
+export const BillingAutoRefillEnvelopeSchema = z
+  .object({
+    data: z.object({ updated: z.literal(true) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BillingAutoRefillEnvelope");
+
 export const ConversationPageSchema = z
   .object({
     data: z.array(ConversationSchema),
@@ -2920,6 +3056,75 @@ export type McpSetupDto = z.infer<typeof McpSetupSchema>;
 export type UpdateMcpSetupBody = z.infer<typeof UpdateMcpSetupBodySchema>;
 export type FeedbackKind = z.infer<typeof FeedbackKindSchema>;
 export type SubmitFeedbackBody = z.infer<typeof SubmitFeedbackBodySchema>;
+export type BillingOverviewDto = {
+  creditBalanceUsdMicros: number;
+  includedBalanceUsdMicros: number;
+  topUpBalanceUsdMicros: number;
+  plan: "hobby" | "pro";
+  subscriptionStatus: string | null;
+  seatQuantity: number;
+  includedUsagePeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  currentPeriodEnd: string | null;
+  paymentNeedsAttention: boolean;
+  proMonthlyPriceCents: number;
+  hobbyIncludedUsageCents: number;
+  memberCount: number;
+  memberCap: number;
+  spendThisMonthUsdMicros: number;
+  spendThisMonthByCategory: { chat: number; ingestion: number; capabilities: number };
+  recentActivity: Array<{
+    activityId: string;
+    source: string;
+    amountUsdMicros: number;
+    providerCostUsdMicros: number;
+    platformFeeUsdMicros: number;
+    capabilityAction: string | null;
+    isAutoRefill: boolean;
+    createdAt: string;
+  }>;
+  lowBalanceWarnUsdMicros: number;
+  includedUsagePerSeatCents: number;
+  topUpAmountsCents: number[];
+  defaultTopUpCents: number;
+  minTopUpCents: number;
+  maxTopUpCents: number;
+  autoRefillMonthlyMaxCents: number;
+  autoRefill: {
+    enabled: boolean;
+    amountCents: number;
+    hasPaymentMethod: boolean;
+    lastError: string | null;
+  };
+  isAdmin: boolean;
+};
+export type BillingUsageDto = {
+  breakdown: Array<{
+    day: string;
+    category: "chat" | "ingestion" | "capabilities" | "other";
+    spendUsdMicros: number;
+    providerCostUsdMicros: number;
+    platformFeeUsdMicros: number;
+  }>;
+  ingestedThisMonth: number;
+  pending: number;
+  creditBalanceUsdMicros: number;
+  providers: Array<{ provider: string; count: number }>;
+  recent: Array<{
+    activityId: string;
+    provider: string;
+    rawEventCount: number;
+    status: "pending" | "consumed";
+    createdAt: string;
+  }>;
+};
+export type BillingBalanceDto = {
+  balanceUsdMicros: number;
+  lowBalanceWarnUsdMicros: number;
+  enforcementEnabled: boolean;
+};
+export type CreateBillingTopUpBody = z.infer<typeof CreateBillingTopUpBodySchema>;
+export type UpdateBillingAutoRefillBody = z.infer<typeof UpdateBillingAutoRefillBodySchema>;
 export type WorkspaceRepositoryDto = z.infer<typeof WorkspaceRepositorySchema>;
 export type RepoConfigDto = z.infer<typeof RepoConfigSchema>;
 export type SetRepoConfigEnvBody = z.infer<typeof SetRepoConfigEnvBodySchema>;

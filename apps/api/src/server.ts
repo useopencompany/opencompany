@@ -1,4 +1,6 @@
 import { serve } from "@hono/node-server";
+import { createGoatBillingApplicationService } from "@opencompany/billing/application-service";
+import { getGoatStripe, getGoatStripeWebhookSecret } from "@opencompany/billing/stripe";
 import { RedisChatPresentationStream } from "@opencompany/chat-presentation";
 import {
   ChatApplicationService,
@@ -13,6 +15,7 @@ import {
 import { PostgresKnowledgeRepository } from "@opencompany/db/knowledge-repository";
 import { createPooledDb } from "@opencompany/db/pool";
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
+import { getGoatAppUrl } from "@opencompany/goat-agent/app-url";
 import { resolvePersistedAutoModelRouting } from "@opencompany/goat-agent/application/persisted-auto-model-routing";
 import { GoatBrainImportApplicationService } from "@opencompany/goat-agent/brain-imports";
 import { GoatBrainSourceApplicationService } from "@opencompany/goat-agent/brain-sources";
@@ -30,6 +33,7 @@ import { createAttachmentUploadService } from "./attachments";
 import { createAttioIngress } from "./attio-ingress";
 import { createWorkOsApiAuthenticator, createWorkOsApiIdentityVerifier } from "./auth";
 import { createAutomationServices } from "./automations";
+import { createBillingReconcileService } from "./billing-reconcile";
 import { createBrainAssetService } from "./brain-assets";
 import { createBrainControlService } from "./brain-control";
 import { parseBrowserOrigins } from "./browser-origins";
@@ -50,6 +54,7 @@ import { PostgresRunEventNotifier } from "./run-event-notifier";
 import { createRunnerClient } from "./runner-client";
 import { createSlackBotIngress } from "./slack-bot-ingress";
 import { createSlackIngress } from "./slack-ingress";
+import { createStripeIngress } from "./stripe-ingress";
 import { createUserSettingsService } from "./user-settings";
 import { createWorkspaceCapabilityService } from "./workspace-capabilities";
 import { createWorkspaceControlService } from "./workspace-control";
@@ -103,6 +108,7 @@ const presentation = createPresentationStream();
 const readModels = createElectricReadModels();
 const authenticate = createWorkOsApiAuthenticator(execute);
 const identityVerifier = createWorkOsApiIdentityVerifier();
+const stripe = getGoatStripe();
 const workos = createWorkOSClient();
 const app = createApiApp({
   chat,
@@ -121,6 +127,11 @@ const app = createApiApp({
   feedback: createFeedbackService({ db: database.db }),
   repoConfigs: createRepoConfigService({ db: database.db }),
   integrationAccounts: createIntegrationAccountService({ db: database.db }),
+  billing: createGoatBillingApplicationService({
+    db: database.db,
+    stripe,
+    appUrl: getGoatAppUrl(),
+  }),
   // The engine-auth device/browser flows run through the runner's internal
   // control routes; the client resolves RUNNER_INTERNAL_URL/RUNNER_PUBLIC_URL
   // and RUNNER_INTERNAL_TOKEN per call.
@@ -143,6 +154,16 @@ const app = createApiApp({
   mcpOAuthIngress: createMcpOAuthIngress({ db: database.db, identify: identityVerifier }),
   xAccountIngress: createXAccountIngress({ db: database.db, identify: identityVerifier }),
   slackBotIngress: createSlackBotIngress({ db: database.db, identify: identityVerifier }),
+  stripeIngress: createStripeIngress({
+    db: database.db,
+    stripe,
+    webhookSecret: getGoatStripeWebhookSecret(),
+  }),
+  billingReconcile: createBillingReconcileService({
+    db: database.db,
+    stripe,
+    secret: process.env.CRON_SECRET?.trim() ?? "",
+  }),
   notifier,
   resolveAutoModel: (input) =>
     resolvePersistedAutoModelRouting({
