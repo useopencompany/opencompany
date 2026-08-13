@@ -26,11 +26,12 @@ import {
 import { createLogger } from "@opencompany/observability";
 import { createApiApp } from "./app";
 import { createAttachmentUploadService } from "./attachments";
-import { createWorkOsApiAuthenticator } from "./auth";
+import { createWorkOsApiAuthenticator, createWorkOsApiIdentityVerifier } from "./auth";
 import { createAutomationServices } from "./automations";
 import { createBrainAssetService } from "./brain-assets";
 import { parseBrowserOrigins } from "./browser-origins";
 import { ElectricReadModelProxy } from "./electric-read-models";
+import { createGitHubIngress } from "./github-ingress";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "server" });
@@ -79,6 +80,7 @@ const skillImports = new SkillImportApplicationService(
 const notifier = new PostgresRunEventNotifier(database.pool);
 const presentation = createPresentationStream();
 const readModels = createElectricReadModels();
+const authenticate = createWorkOsApiAuthenticator(execute);
 const app = createApiApp({
   chat,
   tasks,
@@ -91,8 +93,12 @@ const app = createApiApp({
   skillImports,
   brainAssets: createBrainAssetService({ db: database.db, knowledge }),
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),
-  authenticate: createWorkOsApiAuthenticator(execute),
+  authenticate,
   browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),
+  githubIngress: createGitHubIngress({
+    db: database.db,
+    identify: createWorkOsApiIdentityVerifier(),
+  }),
   notifier,
   resolveAutoModel: (input) =>
     resolvePersistedAutoModelRouting({

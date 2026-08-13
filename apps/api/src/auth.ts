@@ -40,6 +40,14 @@ type VerifiedIdentity = {
   refreshedSessionCookie?: string;
 };
 
+// Verified caller identity plus the requested workspace, before any local
+// actor/onboarding resolution. Provider-ingress routes use this directly so
+// mid-onboarding users can still finish OAuth connect flows, matching the
+// retired web routes' currentGoatUser() semantics.
+export type ApiIdentity = VerifiedIdentity & { activeWorkspaceId: string | null };
+
+export type ApiIdentityVerifier = (request: Request) => Promise<ApiIdentity>;
+
 type AuthenticatorOptions = {
   audience?: string;
   authKitDomain?: string;
@@ -50,10 +58,9 @@ type AuthenticatorOptions = {
   verifyJwt?: typeof jwtVerify;
 };
 
-export function createWorkOsApiAuthenticator(
-  execute: ChatSqlExecute,
+export function createWorkOsApiIdentityVerifier(
   options: AuthenticatorOptions = {},
-): ApiAuthenticator {
+): ApiIdentityVerifier {
   const cookieName = options.cookieName ?? process.env.WORKOS_COOKIE_NAME ?? DEFAULT_SESSION_COOKIE;
   const audience = options.audience ?? process.env.GOAT_API_OAUTH_AUDIENCE?.trim();
   const authKitDomain = normalizeOrigin(
@@ -108,7 +115,18 @@ export function createWorkOsApiAuthenticator(
     const workspaceCookie = parseCookies(request.headers.get("cookie")).get(
       ACTIVE_WORKSPACE_COOKIE,
     );
-    const actor = await resolveLocalActor(execute, identity, workspaceCookie ?? null);
+    return { ...identity, activeWorkspaceId: workspaceCookie ?? null };
+  };
+}
+
+export function createWorkOsApiAuthenticator(
+  execute: ChatSqlExecute,
+  options: AuthenticatorOptions = {},
+): ApiAuthenticator {
+  const identify = createWorkOsApiIdentityVerifier(options);
+  return async (request) => {
+    const identity = await identify(request);
+    const actor = await resolveLocalActor(execute, identity, identity.activeWorkspaceId);
     return {
       actor,
       ...(identity.refreshedSessionCookie

@@ -19,6 +19,25 @@ describe("web /v1 API adapter", () => {
     ).toBeNull();
   });
 
+  it("targets top-level ingress paths when the /v1 base path is disabled", () => {
+    expect(
+      headlessApiTarget(
+        "https://app.example.test/api/webhooks/github/events",
+        ["webhooks", "github", "events"],
+        "https://api.example.test",
+        "",
+      )?.toString(),
+    ).toBe("https://api.example.test/webhooks/github/events");
+    expect(
+      headlessApiTarget(
+        "https://app.example.test/api/integrations/github/start?returnTo=%2Fsettings",
+        ["integrations", "github", "start"],
+        "https://api.example.test",
+        "",
+      )?.toString(),
+    ).toBe("https://api.example.test/integrations/github/start?returnTo=%2Fsettings");
+  });
+
   it("forwards authentication/idempotency headers and streams the upstream response", async () => {
     const fetchMock = vi.fn(async (_url: URL, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
