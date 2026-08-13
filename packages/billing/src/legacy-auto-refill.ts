@@ -10,8 +10,8 @@ import {
   fulfillAutoRefill,
   markAutoRefillAttemptFailed,
   saveAutoRefillPaymentMethod,
-} from "@/lib/billing/legacy-credits";
-import { getGoatStripe } from "@/lib/billing/stripe";
+} from "./legacy-credits";
+import { getGoatStripe } from "./stripe";
 
 function stripeIdOf(value: string | { id: string } | null | undefined): string | null {
   if (!value) return null;
@@ -20,14 +20,17 @@ function stripeIdOf(value: string | { id: string } | null | undefined): string |
 
 // Completes a setup-mode checkout: retrieves the saved card, marks it the
 // customer's default, and persists it so auto-refill can charge it off-session.
-export async function completeAutoRefillSetup(session: Stripe.Checkout.Session) {
+export async function completeAutoRefillSetup(
+  session: Stripe.Checkout.Session,
+  options: { stripe?: Stripe; db?: any } = {},
+) {
   if (session.mode !== "setup") return;
   const workspaceId = session.metadata?.workspaceId;
   const customerId = stripeIdOf(session.customer);
   const setupIntentId = stripeIdOf(session.setup_intent);
   if (!workspaceId || !customerId || !setupIntentId) return;
 
-  const stripe = getGoatStripe();
+  const stripe = options.stripe ?? getGoatStripe();
   const setupIntent = await stripe.setupIntents.retrieve(setupIntentId);
   const paymentMethodId = stripeIdOf(setupIntent.payment_method);
   if (!paymentMethodId) return;
@@ -43,6 +46,7 @@ export async function completeAutoRefillSetup(session: Stripe.Checkout.Session) 
     paymentMethodId,
     cardBrand: paymentMethod.card?.brand ?? null,
     cardLast4: paymentMethod.card?.last4 ?? null,
+    db: options.db,
   });
 }
 
@@ -51,14 +55,23 @@ export async function completeAutoRefillSetup(session: Stripe.Checkout.Session) 
 export async function handleAutoRefillPaymentIntentSucceeded(
   paymentIntent: Stripe.PaymentIntent,
   eventId: string,
+  options: { db?: any } = {},
 ) {
   if (paymentIntent.metadata?.kind !== "auto_refill") return;
   const attemptId = paymentIntent.metadata.attemptId;
   if (!attemptId) return;
-  await fulfillAutoRefill({ attemptId, stripePaymentIntentId: paymentIntent.id, eventId });
+  await fulfillAutoRefill({
+    attemptId,
+    stripePaymentIntentId: paymentIntent.id,
+    eventId,
+    db: options.db,
+  });
 }
 
-export async function handleAutoRefillPaymentIntentFailed(paymentIntent: Stripe.PaymentIntent) {
+export async function handleAutoRefillPaymentIntentFailed(
+  paymentIntent: Stripe.PaymentIntent,
+  options: { db?: any } = {},
+) {
   if (paymentIntent.metadata?.kind !== "auto_refill") return;
   const attemptId = paymentIntent.metadata.attemptId;
   const workspaceId = paymentIntent.metadata.workspaceId;
@@ -69,5 +82,6 @@ export async function handleAutoRefillPaymentIntentFailed(paymentIntent: Stripe.
     stripePaymentIntentId: paymentIntent.id,
     error: paymentIntent.last_payment_error?.message ?? "auto_refill_payment_failed",
     needsAttention: true,
+    db: options.db,
   });
 }

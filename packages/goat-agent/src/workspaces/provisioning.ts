@@ -1,5 +1,11 @@
 import { getDb } from "@opencompany/db/client";
-import { createGoatWorkspaceForUser, newGoatWorkspaceId } from "@opencompany/db/goat-workspaces";
+import {
+  createGoatWorkspaceForUser,
+  DEFAULT_GOAT_BRAIN_SLUG,
+  listAccessibleGoatBrains,
+  listGoatWorkspacesForUser,
+  newGoatWorkspaceId,
+} from "@opencompany/db/goat-workspaces";
 import type { WorkOSClientLike } from "./workos";
 
 type DbLike = any;
@@ -35,16 +41,20 @@ export async function provisionGoatWorkspace(
     userWorkosId: string;
     name: string;
     slug?: string | null;
+    workspaceId?: string;
   },
   deps: { workos: WorkOSClientLike; db?: DbLike },
 ) {
-  const workspaceId = newGoatWorkspaceId();
+  const workspaceId = input.workspaceId ?? newGoatWorkspaceId();
   const workos = deps.workos;
   const db: DbLike = deps.db ?? getDb();
   let workosOrganizationId: string | null = null;
   let localWorkspacePersisted = false;
 
   try {
+    const replay = await findProvisionedWorkspace(workspaceId, input.userWorkosId, db);
+    if (replay) return replay;
+
     const organization = await workos.organizations.createOrganization(
       {
         name: input.name,
@@ -57,11 +67,18 @@ export async function provisionGoatWorkspace(
     );
     workosOrganizationId = organization.id;
 
-    await workos.userManagement.createOrganizationMembership({
+    const memberships = await workos.userManagement.listOrganizationMemberships({
       organizationId: organization.id,
-      userId: input.authUserId,
-      roleSlug: ADMIN_ROLE,
+      userId: input.userWorkosId,
+      statuses: ["active", "pending", "inactive"],
     });
+    if (!memberships.data.some((membership) => membership.status !== "inactive")) {
+      await workos.userManagement.createOrganizationMembership({
+        organizationId: organization.id,
+        userId: input.authUserId,
+        roleSlug: ADMIN_ROLE,
+      });
+    }
 
     const created = await createGoatWorkspaceForUser(
       {
@@ -82,6 +99,11 @@ export async function provisionGoatWorkspace(
       },
     };
   } catch (cause) {
+    const replay = await findProvisionedWorkspace(workspaceId, input.userWorkosId, db).catch(
+      () => null,
+    );
+    if (replay) return replay;
+
     if (workosOrganizationId && !localWorkspacePersisted) {
       try {
         await workos.organizations.deleteOrganization(workosOrganizationId);
@@ -100,4 +122,18 @@ export async function provisionGoatWorkspace(
       cause,
     });
   }
+}
+
+async function findProvisionedWorkspace(workspaceId: string, userWorkosId: string, db: DbLike) {
+  const memberships = await listGoatWorkspacesForUser(userWorkosId, { db });
+  const existing = memberships.find((entry) => entry.workspace.id === workspaceId);
+  const workosOrganizationId = existing?.workspace.workosOrganizationId;
+  if (!existing || !workosOrganizationId) return null;
+  const brains = await listAccessibleGoatBrains({ userWorkosId, workspaceId }, { db });
+  const brain = brains.find((entry) => entry.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0];
+  if (!brain) return null;
+  return {
+    workspace: { ...existing.workspace, workosOrganizationId },
+    brain,
+  };
 }

@@ -25,6 +25,14 @@ services:
         sync: false
       - key: WORKOS_COOKIE_DOMAIN
         sync: false
+      # Workspace membership removal runs the per-event Stripe seat sync in
+      # the canonical API (#1203 5a4d).
+      - key: GOAT_STRIPE_API_KEY
+        sync: false
+      # Shared with the web cron/unsubscribe relays. It authenticates only the
+      # API's internal onboarding-email persistence endpoints.
+      - key: CRON_SECRET
+        sync: false
       - key: GOAT_AUTHKIT_DOMAIN
         sync: false
       - key: GOAT_API_OAUTH_AUDIENCE
@@ -42,6 +50,18 @@ services:
       # cutover. Redirects and install/callback URLs stay on the web origin,
       # which is why the API also needs the canonical app URL.
       - key: GOAT_NEXT_PUBLIC_APP_URL
+        sync: false
+      # Billing/usage commands and read models, the Stripe webhook, and the
+      # hourly reconcile handler moved to the API in the #1203 5b1 cutover.
+      - key: GOAT_STRIPE_API_KEY
+        sync: false
+      - key: GOAT_STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: GOAT_STRIPE_CHECKOUT_ENABLED
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+      - key: MONID_API_KEY
         sync: false
       - key: GITHUB_INTEGRATION_APP_ID
         sync: false

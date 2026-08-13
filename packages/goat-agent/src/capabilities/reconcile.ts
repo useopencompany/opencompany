@@ -1,16 +1,14 @@
-import "server-only";
-
 import { USD_MICROS_PER_DOLLAR } from "@opencompany/billing";
 import {
   expirePendingGoatCapabilityApprovals,
   listUnsettledGoatCapabilityRuns,
 } from "@opencompany/db/goat-capabilities";
 import { GOAT_METRICS, recordGoatHistogram } from "@opencompany/goat-observability";
-import { settleManagedCapabilityRun } from "@/lib/capabilities/execute";
-import { isTerminalMonidRun, MonidClient, type MonidMoney } from "@/lib/capabilities/monid";
+import { settleManagedCapabilityRun } from "./execute";
+import { isTerminalMonidRun, MonidClient, type MonidMoney } from "./monid";
 
-export async function reconcileGoatCapabilities(limit = 100) {
-  const expiredApprovals = await expirePendingGoatCapabilityApprovals({});
+export async function reconcileGoatCapabilities(limit = 100, deps: { db?: any } = {}) {
+  const expiredApprovals = await expirePendingGoatCapabilityApprovals({ db: deps.db });
   const apiKey = process.env.MONID_API_KEY?.trim();
   if (!apiKey) {
     return {
@@ -24,7 +22,7 @@ export async function reconcileGoatCapabilities(limit = 100) {
   }
 
   const client = new MonidClient({ apiKey });
-  const candidates = await listUnsettledGoatCapabilityRuns({ limit });
+  const candidates = await listUnsettledGoatCapabilityRuns({ limit, db: deps.db });
   let settled = 0;
   let pending = 0;
   let failed = 0;
@@ -47,6 +45,7 @@ export async function reconcileGoatCapabilities(limit = 100) {
       const result = await settleManagedCapabilityRun({
         auditRun,
         providerRun,
+        db: deps.db,
         ...(contractMismatch
           ? {
               forceFailure: {

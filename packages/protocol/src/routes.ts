@@ -6,14 +6,24 @@ import {
   AttachmentUploadBodySchema,
   AttachmentUploadEnvelopeSchema,
   AttioAccountStateEnvelopeSchema,
+  BillingAutoRefillEnvelopeSchema,
+  BillingBalanceEnvelopeSchema,
+  BillingOverviewEnvelopeSchema,
+  BillingRedirectEnvelopeSchema,
+  BillingUsageEnvelopeSchema,
+  BrainAccessEnvelopeSchema,
+  BrainAccessMutationEnvelopeSchema,
   BrainAssetMutationEnvelopeSchema,
   BrainAssetReplaceBodySchema,
   BrainAssetUploadBodySchema,
+  BrainControlMutationEnvelopeSchema,
   BrainDocumentDeleteEnvelopeSchema,
   BrainDocumentEnvelopeSchema,
+  BrainEnrichmentEnvelopeSchema,
   BrainFolderEnvelopeSchema,
   BrainFolderPathEnvelopeSchema,
   BrainImportRunCommandEnvelopeSchema,
+  BrainIntelligenceEnvelopeSchema,
   BrainOverviewEnvelopeSchema,
   BrainSnapshotEnvelopeSchema,
   BrainSourceDeleteEnvelopeSchema,
@@ -29,6 +39,9 @@ import {
   BrowserProfileLoginCompleteEnvelopeSchema,
   BrowserProfileLoginSessionEnvelopeSchema,
   CancelRunEnvelopeSchema,
+  CapabilityApprovalEnvelopeSchema,
+  CapabilitySessionBudgetEnvelopeSchema,
+  CheckOnboardingWorkspaceSlugBodySchema,
   ClaudeCodeAuthStatusEnvelopeSchema,
   CodexAuthStatusEnvelopeSchema,
   CodexDeviceAuthFlowEnvelopeSchema,
@@ -37,6 +50,8 @@ import {
   ConfirmImessagePairingBodySchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
+  CreateBillingTopUpBodySchema,
+  CreateBrainBodySchema,
   CreateBrainDocumentBodySchema,
   CreateBrainFolderBodySchema,
   CreateBrowserProfileBodySchema,
@@ -48,6 +63,7 @@ import {
   CreateTaskScheduleBodySchema,
   CreateWikiPageBodySchema,
   CreateWorkflowBodySchema,
+  CreateWorkspaceBodySchema,
   CursorSchema,
   DeleteBrainFolderBodySchema,
   DeleteWikiPageBodySchema,
@@ -58,6 +74,7 @@ import {
   ErrorEnvelopeSchema,
   FathomAccountStateEnvelopeSchema,
   FeedbackSubmissionEnvelopeSchema,
+  FinishOnboardingBodySchema,
   GranolaAccountStateEnvelopeSchema,
   ImessageAccountStateEnvelopeSchema,
   ImessagePairingStartedEnvelopeSchema,
@@ -69,16 +86,23 @@ import {
   IntegrationAccountUsageEnvelopeSchema,
   IntegrationApiKeyBodySchema,
   IntegrationCapabilityModeEnvelopeSchema,
+  InviteWorkspaceMemberBodySchema,
   InvokeWorkflowBodySchema,
   JamieWebhookSetupEnvelopeSchema,
   LegacyTaskHistoryEnvelopeSchema,
   LegacyTaskPageSchema,
+  ManagedCapabilitySourceSchema,
   McpSetupEnvelopeSchema,
   MessagePageSchema,
+  OnboardingCommandEnvelopeSchema,
+  OnboardingStateEnvelopeSchema,
+  OnboardingWorkspaceEnvelopeSchema,
+  OnboardingWorkspaceSlugEnvelopeSchema,
   PresentationCursorSchema,
   ReadModelSchema,
   RenameBrainDocumentBodySchema,
   RenameBrainFolderBodySchema,
+  RenameWorkspaceBodySchema,
   RepoConfigDeleteEnvelopeSchema,
   RepoConfigListEnvelopeSchema,
   RepoConfigMutationEnvelopeSchema,
@@ -88,10 +112,17 @@ import {
   ResourceIdSchema,
   RunEnvelopeSchema,
   SaveClaudeCodeTokenBodySchema,
+  SaveOnboardingProfileBodySchema,
+  SaveOnboardingWorkspaceBodySchema,
+  SetBrainAccessBodySchema,
+  SetBrainEnrichmentBodySchema,
+  SetBrainIntelligenceBodySchema,
   SetBrainSourceBodySchema,
+  SetCapabilitySessionBudgetBodySchema,
   SetIntegrationCapabilityModeBodySchema,
   SetRepoConfigEnvBodySchema,
   SetRepoConfigSetupBodySchema,
+  SetWorkspaceCapabilityBodySchema,
   SkillArchiveEnvelopeSchema,
   SkillCatalogEnvelopeSchema,
   SkillEnvelopeSchema,
@@ -113,6 +144,7 @@ import {
   TaskSchedulePageSchema,
   TaskScheduleUpdateEnvelopeSchema,
   TaskSummaryEnvelopeSchema,
+  UpdateBillingAutoRefillBodySchema,
   UpdateBrainDocumentBodySchema,
   UpdateConversationBodySchema,
   UpdateConversationEnvelopeSchema,
@@ -134,6 +166,12 @@ import {
   WorkflowMutationEnvelopeSchema,
   WorkflowPageSchema,
   WorkflowUpdateEnvelopeSchema,
+  WorkspaceActivationEnvelopeSchema,
+  WorkspaceCapabilityMutationEnvelopeSchema,
+  WorkspaceCapabilitySettingsEnvelopeSchema,
+  WorkspaceCommandEnvelopeSchema,
+  WorkspaceRenameEnvelopeSchema,
+  WorkspaceSettingsEnvelopeSchema,
 } from "./schemas";
 import { OPENAPI_DOCUMENT_VERSION, PROTOCOL_VERSION } from "./version";
 
@@ -1493,6 +1531,443 @@ export const getBrowserProfileLiveViewRoute = createRoute({
   },
 });
 
+export const getWorkspaceCapabilitiesRoute = createRoute({
+  method: "get",
+  path: "/v1/capabilities",
+  tags: ["Capabilities"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Workspace managed-capability settings and the per-chat spending budget.",
+      content: { "application/json": { schema: WorkspaceCapabilitySettingsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setCapabilitySessionBudgetRoute = createRoute({
+  method: "put",
+  path: "/v1/capabilities/session-budget",
+  tags: ["Capabilities"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetCapabilitySessionBudgetBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Workspace per-chat capability spending budget updated. Admin only.",
+      content: { "application/json": { schema: CapabilitySessionBudgetEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setWorkspaceCapabilityRoute = createRoute({
+  method: "put",
+  path: "/v1/capabilities/{source}",
+  tags: ["Capabilities"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ source: ManagedCapabilitySourceSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetWorkspaceCapabilityBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Workspace managed capability updated. Admin only.",
+      content: { "application/json": { schema: WorkspaceCapabilityMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getCapabilityApprovalByToolCallRoute = createRoute({
+  method: "get",
+  path: "/v1/capability-approvals/by-tool-call/{toolCallId}",
+  tags: ["Capabilities"],
+  security: actorSecurity,
+  request: { params: z.object({ toolCallId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description:
+        "Latest approval visible to the actor for a tool call, including session budget.",
+      content: { "application/json": { schema: CapabilityApprovalEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getCapabilityApprovalRoute = createRoute({
+  method: "get",
+  path: "/v1/capability-approvals/{runId}",
+  tags: ["Capabilities"],
+  security: actorSecurity,
+  request: { params: z.object({ runId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Capability approval visible to the acting user in the active workspace.",
+      content: { "application/json": { schema: CapabilityApprovalEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createBrainRoute = createRoute({
+  method: "post",
+  path: "/v1/brains",
+  tags: ["Brains"],
+  security: actorSecurity,
+  request: {
+    body: { required: true, content: { "application/json": { schema: CreateBrainBodySchema } } },
+  },
+  responses: {
+    201: {
+      description: "Brain created in the active workspace. Admin only.",
+      content: { "application/json": { schema: BrainControlMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const switchBrainRoute = createRoute({
+  method: "post",
+  path: "/v1/brains/{brainId}/switch",
+  tags: ["Brains"],
+  security: actorSecurity,
+  request: { params: z.object({ brainId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Brain access authorized for the active workspace; clients may activate it.",
+      content: { "application/json": { schema: BrainControlMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getBrainAccessRoute = createRoute({
+  method: "get",
+  path: "/v1/brains/{brainId}/access",
+  tags: ["Brains"],
+  security: actorSecurity,
+  request: { params: z.object({ brainId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Brain visibility, selected members, and workspace member choices. Admin only.",
+      content: { "application/json": { schema: BrainAccessEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setBrainAccessRoute = createRoute({
+  method: "put",
+  path: "/v1/brains/{brainId}/access",
+  tags: ["Brains"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: SetBrainAccessBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Brain visibility and restricted member set updated. Admin only.",
+      content: { "application/json": { schema: BrainAccessMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getBrainEnrichmentRoute = createRoute({
+  method: "get",
+  path: "/v1/brains/{brainId}/enrichment",
+  tags: ["Brains"],
+  security: actorSecurity,
+  request: { params: z.object({ brainId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Brain enrichment setting. Admin only.",
+      content: { "application/json": { schema: BrainEnrichmentEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setBrainEnrichmentRoute = createRoute({
+  method: "put",
+  path: "/v1/brains/{brainId}/enrichment",
+  tags: ["Brains"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetBrainEnrichmentBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Brain enrichment setting updated. Admin only.",
+      content: { "application/json": { schema: BrainEnrichmentEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getBrainIntelligenceRoute = createRoute({
+  method: "get",
+  path: "/v1/brains/{brainId}/intelligence",
+  tags: ["Brains"],
+  security: actorSecurity,
+  request: { params: z.object({ brainId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Brain intelligence tier. Admin only.",
+      content: { "application/json": { schema: BrainIntelligenceEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setBrainIntelligenceRoute = createRoute({
+  method: "put",
+  path: "/v1/brains/{brainId}/intelligence",
+  tags: ["Brains"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetBrainIntelligenceBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Brain intelligence tier updated. Admin only.",
+      content: { "application/json": { schema: BrainIntelligenceEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getWorkspaceSettingsRoute = createRoute({
+  method: "get",
+  path: "/v1/workspace",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Active workspace settings, members, plan, and pending invitations.",
+      content: { "application/json": { schema: WorkspaceSettingsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const renameWorkspaceRoute = createRoute({
+  method: "patch",
+  path: "/v1/workspace",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: RenameWorkspaceBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Active workspace and its identity organization renamed. Admin only.",
+      content: { "application/json": { schema: WorkspaceRenameEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const inviteWorkspaceMemberRoute = createRoute({
+  method: "post",
+  path: "/v1/workspace/invitations",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: InviteWorkspaceMemberBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Invitation sent within the active workspace member cap. Admin only.",
+      content: { "application/json": { schema: WorkspaceCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const revokeWorkspaceInvitationRoute = createRoute({
+  method: "delete",
+  path: "/v1/workspace/invitations/{invitationId}",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  request: { params: z.object({ invitationId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Pending invitation in the active identity organization revoked. Admin only.",
+      content: { "application/json": { schema: WorkspaceCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const removeWorkspaceMemberRoute = createRoute({
+  method: "delete",
+  path: "/v1/workspace/members/{userId}",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  request: { params: z.object({ userId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description:
+        "Member removed from the active workspace and identity organization. Admin only.",
+      content: { "application/json": { schema: WorkspaceCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createWorkspaceRoute = createRoute({
+  method: "post",
+  path: "/v1/workspaces",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: CreateWorkspaceBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Workspace provisioned idempotently by workspace id.",
+      content: { "application/json": { schema: WorkspaceActivationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const switchWorkspaceRoute = createRoute({
+  method: "post",
+  path: "/v1/workspaces/{workspaceId}/switch",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  request: { params: z.object({ workspaceId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Workspace membership authorized and browser activation resources returned.",
+      content: { "application/json": { schema: WorkspaceActivationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getOnboardingStateRoute = createRoute({
+  method: "get",
+  path: "/v1/onboarding",
+  tags: ["Onboarding"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Authenticated onboarding state without requiring onboarding completion.",
+      content: { "application/json": { schema: OnboardingStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const checkOnboardingWorkspaceSlugRoute = createRoute({
+  method: "post",
+  path: "/v1/onboarding/workspace-slug/check",
+  tags: ["Onboarding"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: CheckOnboardingWorkspaceSlugBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Normalized workspace slug availability for the authenticated identity.",
+      content: { "application/json": { schema: OnboardingWorkspaceSlugEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const saveOnboardingProfileRoute = createRoute({
+  method: "put",
+  path: "/v1/onboarding/profile",
+  tags: ["Onboarding"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: SaveOnboardingProfileBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Authenticated identity onboarding profile saved.",
+      content: { "application/json": { schema: OnboardingCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const saveOnboardingWorkspaceRoute = createRoute({
+  method: "put",
+  path: "/v1/onboarding/workspace",
+  tags: ["Onboarding"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: SaveOnboardingWorkspaceBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Onboarding workspace saved or provisioned for the authenticated identity.",
+      content: { "application/json": { schema: OnboardingWorkspaceEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const finishOnboardingRoute = createRoute({
+  method: "post",
+  path: "/v1/onboarding/complete",
+  tags: ["Onboarding"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: FinishOnboardingBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Onboarding completed for an identity with an accessible workspace.",
+      content: { "application/json": { schema: OnboardingCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const updateUserPreferencesRoute = createRoute({
   method: "patch",
   path: "/v1/me/preferences",
@@ -2070,6 +2545,122 @@ export const deleteInfisicalAuthRoute = createRoute({
   },
 });
 
+export const getBillingOverviewRoute = createRoute({
+  method: "get",
+  path: "/v1/billing",
+  tags: ["Billing"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Authorized workspace billing overview.",
+      content: { "application/json": { schema: BillingOverviewEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getBillingUsageRoute = createRoute({
+  method: "get",
+  path: "/v1/billing/usage",
+  tags: ["Billing"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Authorized workspace usage read model.",
+      content: { "application/json": { schema: BillingUsageEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getBillingBalanceRoute = createRoute({
+  method: "get",
+  path: "/v1/billing/balance",
+  tags: ["Billing"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Authorized workspace credit balance.",
+      content: { "application/json": { schema: BillingBalanceEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+const billingCommandHeaders = z.object({ "idempotency-key": z.string().min(1).max(200) });
+
+export const createBillingTopUpRoute = createRoute({
+  method: "post",
+  path: "/v1/billing/top-ups",
+  tags: ["Billing"],
+  security: actorSecurity,
+  request: {
+    headers: billingCommandHeaders,
+    body: {
+      required: true,
+      content: { "application/json": { schema: CreateBillingTopUpBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Idempotent Stripe credit top-up Checkout session created.",
+      content: { "application/json": { schema: BillingRedirectEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createBillingSubscriptionCheckoutRoute = createRoute({
+  method: "post",
+  path: "/v1/billing/subscription-checkouts",
+  tags: ["Billing"],
+  security: actorSecurity,
+  request: { headers: billingCommandHeaders },
+  responses: {
+    201: {
+      description: "Idempotent Stripe Pro subscription Checkout session created.",
+      content: { "application/json": { schema: BillingRedirectEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createBillingPortalSessionRoute = createRoute({
+  method: "post",
+  path: "/v1/billing/portal-sessions",
+  tags: ["Billing"],
+  security: actorSecurity,
+  request: { headers: billingCommandHeaders },
+  responses: {
+    201: {
+      description: "Idempotent Stripe billing portal session created.",
+      content: { "application/json": { schema: BillingRedirectEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const updateBillingAutoRefillRoute = createRoute({
+  method: "put",
+  path: "/v1/billing/auto-refill",
+  tags: ["Billing"],
+  security: actorSecurity,
+  request: {
+    headers: billingCommandHeaders,
+    body: {
+      required: true,
+      content: { "application/json": { schema: UpdateBillingAutoRefillBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Workspace auto-refill configuration updated idempotently.",
+      content: { "application/json": { schema: BillingAutoRefillEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export type V1RouteHandlers = {
   listTasks: RouteHandler<typeof listTasksRoute>;
   createTask: RouteHandler<typeof createTaskRoute>;
@@ -2103,6 +2694,31 @@ export type V1RouteHandlers = {
   createBrowserProfileLoginSession: RouteHandler<typeof createBrowserProfileLoginSessionRoute>;
   completeBrowserProfileLogin: RouteHandler<typeof completeBrowserProfileLoginRoute>;
   getBrowserProfileLiveView: RouteHandler<typeof getBrowserProfileLiveViewRoute>;
+  getWorkspaceCapabilities: RouteHandler<typeof getWorkspaceCapabilitiesRoute>;
+  setCapabilitySessionBudget: RouteHandler<typeof setCapabilitySessionBudgetRoute>;
+  setWorkspaceCapability: RouteHandler<typeof setWorkspaceCapabilityRoute>;
+  getCapabilityApprovalByToolCall: RouteHandler<typeof getCapabilityApprovalByToolCallRoute>;
+  getCapabilityApproval: RouteHandler<typeof getCapabilityApprovalRoute>;
+  createBrain: RouteHandler<typeof createBrainRoute>;
+  switchBrain: RouteHandler<typeof switchBrainRoute>;
+  getBrainAccess: RouteHandler<typeof getBrainAccessRoute>;
+  setBrainAccess: RouteHandler<typeof setBrainAccessRoute>;
+  getBrainEnrichment: RouteHandler<typeof getBrainEnrichmentRoute>;
+  setBrainEnrichment: RouteHandler<typeof setBrainEnrichmentRoute>;
+  getBrainIntelligence: RouteHandler<typeof getBrainIntelligenceRoute>;
+  setBrainIntelligence: RouteHandler<typeof setBrainIntelligenceRoute>;
+  getWorkspaceSettings: RouteHandler<typeof getWorkspaceSettingsRoute>;
+  renameWorkspace: RouteHandler<typeof renameWorkspaceRoute>;
+  inviteWorkspaceMember: RouteHandler<typeof inviteWorkspaceMemberRoute>;
+  revokeWorkspaceInvitation: RouteHandler<typeof revokeWorkspaceInvitationRoute>;
+  removeWorkspaceMember: RouteHandler<typeof removeWorkspaceMemberRoute>;
+  createWorkspace: RouteHandler<typeof createWorkspaceRoute>;
+  switchWorkspace: RouteHandler<typeof switchWorkspaceRoute>;
+  getOnboardingState: RouteHandler<typeof getOnboardingStateRoute>;
+  checkOnboardingWorkspaceSlug: RouteHandler<typeof checkOnboardingWorkspaceSlugRoute>;
+  saveOnboardingProfile: RouteHandler<typeof saveOnboardingProfileRoute>;
+  saveOnboardingWorkspace: RouteHandler<typeof saveOnboardingWorkspaceRoute>;
+  finishOnboarding: RouteHandler<typeof finishOnboardingRoute>;
   listBrainSourceOptions: RouteHandler<typeof listBrainSourceOptionsRoute>;
   startBrainImport: RouteHandler<typeof startBrainImportRoute>;
   confirmBrainImport: RouteHandler<typeof confirmBrainImportRoute>;
@@ -2176,6 +2792,13 @@ export type V1RouteHandlers = {
   startInfisicalAuth: RouteHandler<typeof startInfisicalAuthRoute>;
   completeInfisicalAuth: RouteHandler<typeof completeInfisicalAuthRoute>;
   deleteInfisicalAuth: RouteHandler<typeof deleteInfisicalAuthRoute>;
+  getBillingOverview: RouteHandler<typeof getBillingOverviewRoute>;
+  getBillingUsage: RouteHandler<typeof getBillingUsageRoute>;
+  getBillingBalance: RouteHandler<typeof getBillingBalanceRoute>;
+  createBillingTopUp: RouteHandler<typeof createBillingTopUpRoute>;
+  createBillingSubscriptionCheckout: RouteHandler<typeof createBillingSubscriptionCheckoutRoute>;
+  createBillingPortalSession: RouteHandler<typeof createBillingPortalSessionRoute>;
+  updateBillingAutoRefill: RouteHandler<typeof updateBillingAutoRefillRoute>;
 };
 
 export function createV1Router(
@@ -2221,6 +2844,33 @@ export function createV1Router(
       .openapi(createBrowserProfileLoginSessionRoute, handlers.createBrowserProfileLoginSession)
       .openapi(completeBrowserProfileLoginRoute, handlers.completeBrowserProfileLogin)
       .openapi(getBrowserProfileLiveViewRoute, handlers.getBrowserProfileLiveView)
+      .openapi(getWorkspaceCapabilitiesRoute, handlers.getWorkspaceCapabilities)
+      // Static segments register before the generic capability-source and
+      // approval-id paths so route matching cannot capture them as ids.
+      .openapi(setCapabilitySessionBudgetRoute, handlers.setCapabilitySessionBudget)
+      .openapi(setWorkspaceCapabilityRoute, handlers.setWorkspaceCapability)
+      .openapi(getCapabilityApprovalByToolCallRoute, handlers.getCapabilityApprovalByToolCall)
+      .openapi(getCapabilityApprovalRoute, handlers.getCapabilityApproval)
+      .openapi(createBrainRoute, handlers.createBrain)
+      .openapi(switchBrainRoute, handlers.switchBrain)
+      .openapi(getBrainAccessRoute, handlers.getBrainAccess)
+      .openapi(setBrainAccessRoute, handlers.setBrainAccess)
+      .openapi(getBrainEnrichmentRoute, handlers.getBrainEnrichment)
+      .openapi(setBrainEnrichmentRoute, handlers.setBrainEnrichment)
+      .openapi(getBrainIntelligenceRoute, handlers.getBrainIntelligence)
+      .openapi(setBrainIntelligenceRoute, handlers.setBrainIntelligence)
+      .openapi(getWorkspaceSettingsRoute, handlers.getWorkspaceSettings)
+      .openapi(renameWorkspaceRoute, handlers.renameWorkspace)
+      .openapi(inviteWorkspaceMemberRoute, handlers.inviteWorkspaceMember)
+      .openapi(revokeWorkspaceInvitationRoute, handlers.revokeWorkspaceInvitation)
+      .openapi(removeWorkspaceMemberRoute, handlers.removeWorkspaceMember)
+      .openapi(createWorkspaceRoute, handlers.createWorkspace)
+      .openapi(switchWorkspaceRoute, handlers.switchWorkspace)
+      .openapi(getOnboardingStateRoute, handlers.getOnboardingState)
+      .openapi(checkOnboardingWorkspaceSlugRoute, handlers.checkOnboardingWorkspaceSlug)
+      .openapi(saveOnboardingProfileRoute, handlers.saveOnboardingProfile)
+      .openapi(saveOnboardingWorkspaceRoute, handlers.saveOnboardingWorkspace)
+      .openapi(finishOnboardingRoute, handlers.finishOnboarding)
       .openapi(listBrainSourceOptionsRoute, handlers.listBrainSourceOptions)
       .openapi(startBrainImportRoute, handlers.startBrainImport)
       .openapi(confirmBrainImportRoute, handlers.confirmBrainImport)
@@ -2299,6 +2949,13 @@ export function createV1Router(
       .openapi(startInfisicalAuthRoute, handlers.startInfisicalAuth)
       .openapi(completeInfisicalAuthRoute, handlers.completeInfisicalAuth)
       .openapi(deleteInfisicalAuthRoute, handlers.deleteInfisicalAuth)
+      .openapi(getBillingOverviewRoute, handlers.getBillingOverview)
+      .openapi(getBillingUsageRoute, handlers.getBillingUsage)
+      .openapi(getBillingBalanceRoute, handlers.getBillingBalance)
+      .openapi(createBillingTopUpRoute, handlers.createBillingTopUp)
+      .openapi(createBillingSubscriptionCheckoutRoute, handlers.createBillingSubscriptionCheckout)
+      .openapi(createBillingPortalSessionRoute, handlers.createBillingPortalSession)
+      .openapi(updateBillingAutoRefillRoute, handlers.updateBillingAutoRefill)
   );
 }
 
@@ -2775,6 +3432,146 @@ const contractDocumentHandlers: V1RouteHandlers = {
     ),
   getBrowserProfileLiveView: (c) =>
     c.json({ data: { url: "https://live.example.com/session" }, meta }, 200),
+  getWorkspaceCapabilities: (c) =>
+    c.json(
+      {
+        data: {
+          capabilities: [{ source: "x" as const, enabled: true }],
+          sessionBudgetUsdMicros: 5_000_000,
+        },
+        meta,
+      },
+      200,
+    ),
+  setCapabilitySessionBudget: (c) =>
+    c.json({ data: { sessionBudgetUsdMicros: 5_000_000 }, meta }, 200),
+  setWorkspaceCapability: (c) =>
+    c.json({ data: { source: "x" as const, enabled: true }, meta }, 200),
+  getCapabilityApprovalByToolCall: (c) =>
+    c.json(
+      {
+        data: {
+          runId: "gcr_contract",
+          source: "x" as const,
+          action: "search",
+          status: "awaiting_approval" as const,
+          maxCostUsdMicros: 10_000,
+          expiresAt: placeholderTime,
+          settledCostUsdMicros: null,
+          sessionBudgetUsdMicros: 5_000_000,
+        },
+        meta,
+      },
+      200,
+    ),
+  getCapabilityApproval: (c) =>
+    c.json(
+      {
+        data: {
+          runId: "gcr_contract",
+          source: "x" as const,
+          action: "search",
+          status: "awaiting_approval" as const,
+          maxCostUsdMicros: 10_000,
+          expiresAt: placeholderTime,
+          settledCostUsdMicros: null,
+        },
+        meta,
+      },
+      200,
+    ),
+  createBrain: (c) => c.json({ data: { brainId: "brain_contract" }, meta }, 201),
+  switchBrain: (c) => c.json({ data: { brainId: "brain_contract" }, meta }, 200),
+  getBrainAccess: (c) =>
+    c.json(
+      {
+        data: {
+          visibility: "workspace" as const,
+          memberIds: [],
+          workspaceMembers: [],
+        },
+        meta,
+      },
+      200,
+    ),
+  setBrainAccess: (c) => c.json({ data: { updated: true as const }, meta }, 200),
+  getBrainEnrichment: (c) => c.json({ data: { enabled: true }, meta }, 200),
+  setBrainEnrichment: (c) => c.json({ data: { enabled: true }, meta }, 200),
+  getBrainIntelligence: (c) => c.json({ data: { intelligence: "basic" as const }, meta }, 200),
+  setBrainIntelligence: (c) => c.json({ data: { intelligence: "basic" as const }, meta }, 200),
+  getWorkspaceSettings: (c) =>
+    c.json(
+      {
+        data: {
+          workspace: { id: "goat_ws_contract", name: "Contract Workspace" },
+          role: "admin" as const,
+          plan: "hobby" as const,
+          memberCap: 1,
+          members: [],
+          invitations: [],
+        },
+        meta,
+      },
+      200,
+    ),
+  renameWorkspace: (c) =>
+    c.json({ data: { id: "goat_ws_contract", name: "Contract Workspace" }, meta }, 200),
+  inviteWorkspaceMember: (c) => c.json({ data: { completed: true as const }, meta }, 201),
+  revokeWorkspaceInvitation: (c) => c.json({ data: { completed: true as const }, meta }, 200),
+  removeWorkspaceMember: (c) => c.json({ data: { completed: true as const }, meta }, 200),
+  createWorkspace: (c) =>
+    c.json(
+      {
+        data: {
+          workspaceId: "goat_ws_contract",
+          organizationId: "org_contract",
+          brainId: "brain_contract",
+        },
+        meta,
+      },
+      201,
+    ),
+  switchWorkspace: (c) =>
+    c.json(
+      {
+        data: {
+          workspaceId: "goat_ws_contract",
+          organizationId: "org_contract",
+          brainId: "brain_contract",
+        },
+        meta,
+      },
+      200,
+    ),
+  getOnboardingState: (c) =>
+    c.json(
+      {
+        data: {
+          onboarding: null,
+          workspace: null,
+          activeBrainId: null,
+        },
+        meta,
+      },
+      200,
+    ),
+  checkOnboardingWorkspaceSlug: (c) =>
+    c.json({ data: { slug: "contract-workspace", available: true }, meta }, 200),
+  saveOnboardingProfile: (c) => c.json({ data: { completed: true as const }, meta }, 200),
+  saveOnboardingWorkspace: (c) =>
+    c.json(
+      {
+        data: {
+          workspaceId: "goat_ws_contract",
+          organizationId: "org_contract",
+          brainId: "brain_contract",
+          createdByCaller: true,
+        },
+        meta,
+      },
+      200,
+    ),
+  finishOnboarding: (c) => c.json({ data: { completed: true as const }, meta }, 200),
   startBrainImport: (c) =>
     c.json(
       {
@@ -3322,4 +4119,78 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   deleteInfisicalAuth: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
+  getBillingOverview: (c) =>
+    c.json(
+      {
+        data: {
+          creditBalanceUsdMicros: 0,
+          includedBalanceUsdMicros: 0,
+          topUpBalanceUsdMicros: 0,
+          plan: "hobby" as const,
+          subscriptionStatus: null,
+          seatQuantity: 0,
+          includedUsagePeriodEnd: null,
+          cancelAtPeriodEnd: false,
+          currentPeriodEnd: null,
+          paymentNeedsAttention: false,
+          proMonthlyPriceCents: 2_000,
+          hobbyIncludedUsageCents: 100,
+          memberCount: 1,
+          memberCap: 1,
+          spendThisMonthUsdMicros: 0,
+          spendThisMonthByCategory: { chat: 0, ingestion: 0, capabilities: 0 },
+          recentActivity: [],
+          lowBalanceWarnUsdMicros: 1_000_000,
+          includedUsagePerSeatCents: 2_000,
+          topUpAmountsCents: [1_000],
+          defaultTopUpCents: 1_000,
+          minTopUpCents: 500,
+          maxTopUpCents: 50_000,
+          autoRefillMonthlyMaxCents: 50_000,
+          autoRefill: {
+            enabled: false,
+            amountCents: 1_000,
+            hasPaymentMethod: false,
+            lastError: null,
+          },
+          isAdmin: true,
+        },
+        meta,
+      },
+      200,
+    ),
+  getBillingUsage: (c) =>
+    c.json(
+      {
+        data: {
+          breakdown: [],
+          ingestedThisMonth: 0,
+          pending: 0,
+          creditBalanceUsdMicros: 0,
+          providers: [],
+          recent: [],
+        },
+        meta,
+      },
+      200,
+    ),
+  getBillingBalance: (c) =>
+    c.json(
+      {
+        data: {
+          balanceUsdMicros: 0,
+          lowBalanceWarnUsdMicros: 1_000_000,
+          enforcementEnabled: true,
+        },
+        meta,
+      },
+      200,
+    ),
+  createBillingTopUp: (c) =>
+    c.json({ data: { redirectUrl: "https://checkout.stripe.com/session" }, meta }, 201),
+  createBillingSubscriptionCheckout: (c) =>
+    c.json({ data: { redirectUrl: "https://checkout.stripe.com/subscription" }, meta }, 201),
+  createBillingPortalSession: (c) =>
+    c.json({ data: { redirectUrl: "https://billing.stripe.com/session" }, meta }, 201),
+  updateBillingAutoRefill: (c) => c.json({ data: { updated: true as const }, meta }, 200),
 };

@@ -26,7 +26,7 @@ const markAutoRefillAttemptFailedMock = vi.mocked(markAutoRefillAttemptFailed);
 const saveAutoRefillPaymentMethodMock = vi.mocked(saveAutoRefillPaymentMethod);
 const getGoatStripeMock = vi.mocked(getGoatStripe);
 
-describe("legacy Stripe auto-refill compatibility", () => {
+describe("shared legacy Stripe auto-refill compatibility", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

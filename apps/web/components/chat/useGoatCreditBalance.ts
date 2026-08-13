@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getHeadlessBillingBalance } from "@/lib/headless-billing-api";
 
 export type GoatCreditBalanceState = {
   balanceUsdMicros: number;
@@ -19,16 +20,7 @@ export function useGoatCreditBalance() {
     if (inFlight.current) return;
     inFlight.current = true;
     try {
-      const response = await fetch("/api/billing/balance", { cache: "no-store" });
-      if (!response.ok) return;
-      const data = (await response.json()) as Partial<GoatCreditBalanceState>;
-      if (typeof data.balanceUsdMicros !== "number") return;
-      setBalance({
-        balanceUsdMicros: data.balanceUsdMicros,
-        lowBalanceWarnUsdMicros:
-          typeof data.lowBalanceWarnUsdMicros === "number" ? data.lowBalanceWarnUsdMicros : 0,
-        enforcementEnabled: Boolean(data.enforcementEnabled),
-      });
+      setBalance(await getHeadlessBillingBalance());
     } catch {
       // Keep the last known balance on transient fetch failures.
     } finally {

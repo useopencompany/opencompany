@@ -1,52 +1,63 @@
 "use server";
 
-import {
-  GOAT_MANAGED_CAPABILITY_SOURCES,
-  setGoatCapabilitySessionBudget,
-  setGoatWorkspaceCapability,
-} from "@opencompany/db/goat-capabilities";
-import type { GoatManagedCapabilitySource } from "@opencompany/db/goat-schema";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
+import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
+
+export type GoatManagedCapabilitySource =
+  | "x"
+  | "linkedin"
+  | "youtube"
+  | "instagram"
+  | "tiktok"
+  | "lead"
+  | "seo";
+
+export type GoatWorkspaceCapabilityState = {
+  source: GoatManagedCapabilitySource;
+  enabled: boolean;
+};
+
+export async function getWorkspaceCapabilitySettingsAction(): Promise<{
+  capabilities: GoatWorkspaceCapabilityState[];
+  sessionBudgetUsdMicros: number;
+}> {
+  const response = await (await serverApiClient()).v1.capabilities.$get();
+  if (!response.ok) throw new Error("Workspace capabilities could not be loaded.");
+  return (await response.json()).data;
+}
 
 export async function setWorkspaceCapabilityAction(input: {
   source: GoatManagedCapabilitySource;
   enabled: boolean;
 }) {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return {
-      ok: false as const,
-      error: "Only workspace admins can change paid capabilities.",
-    };
-  }
-  if (
-    !input ||
-    typeof input.enabled !== "boolean" ||
-    !GOAT_MANAGED_CAPABILITY_SOURCES.includes(input.source)
-  ) {
+  if (!input || typeof input.enabled !== "boolean" || !isManagedCapabilitySource(input.source)) {
     return { ok: false as const, error: "Invalid capability setting." };
   }
-  const row = await setGoatWorkspaceCapability({
-    workspaceId: context.workspace.id,
-    source: input.source,
-    enabled: input.enabled,
-    updatedByWorkosId: context.user.workosUserId,
-  });
-  revalidatePath("/settings/workspace/capabilities");
-  return { ok: true as const, source: row.source, enabled: row.enabled };
+  try {
+    const response = await (await serverApiClient()).v1.capabilities[":source"].$put({
+      param: { source: input.source },
+      json: { enabled: input.enabled },
+    });
+    if (!response.ok) {
+      return {
+        ok: false as const,
+        error: await serverApiErrorMessage(response, "Could not update the capability."),
+      };
+    }
+    const data = (await response.json()).data;
+    revalidatePath("/settings/workspace/capabilities");
+    return { ok: true as const, source: data.source, enabled: data.enabled };
+  } catch (error) {
+    return {
+      ok: false as const,
+      error: error instanceof Error ? error.message : "Could not update the capability.",
+    };
+  }
 }
 
 export async function setWorkspaceCapabilitySessionBudgetAction(input: {
   budgetUsd: number | null;
 }) {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return {
-      ok: false as const,
-      error: "Only workspace admins can change the per-chat spending limit.",
-    };
-  }
   if (
     !input ||
     (input.budgetUsd !== null &&
@@ -57,12 +68,33 @@ export async function setWorkspaceCapabilitySessionBudgetAction(input: {
   ) {
     return { ok: false as const, error: "Enter a spending limit between $0.01 and $1,000." };
   }
-  const budgetUsdMicros =
-    input.budgetUsd === null ? null : Math.max(1, Math.round(input.budgetUsd * 1_000_000));
-  const effectiveBudgetUsdMicros = await setGoatCapabilitySessionBudget({
-    workspaceId: context.workspace.id,
-    budgetUsdMicros,
-  });
-  revalidatePath("/settings/workspace/capabilities");
-  return { ok: true as const, budgetUsdMicros: effectiveBudgetUsdMicros };
+  try {
+    const response = await (await serverApiClient()).v1.capabilities["session-budget"].$put({
+      json: { budgetUsd: input.budgetUsd },
+    });
+    if (!response.ok) {
+      return {
+        ok: false as const,
+        error: await serverApiErrorMessage(
+          response,
+          "Could not update the per-chat spending limit.",
+        ),
+      };
+    }
+    const data = (await response.json()).data;
+    revalidatePath("/settings/workspace/capabilities");
+    return { ok: true as const, budgetUsdMicros: data.sessionBudgetUsdMicros };
+  } catch (error) {
+    return {
+      ok: false as const,
+      error:
+        error instanceof Error ? error.message : "Could not update the per-chat spending limit.",
+    };
+  }
+}
+
+function isManagedCapabilitySource(value: unknown): value is GoatManagedCapabilitySource {
+  return ["x", "linkedin", "youtube", "instagram", "tiktok", "lead", "seo"].includes(
+    value as GoatManagedCapabilitySource,
+  );
 }

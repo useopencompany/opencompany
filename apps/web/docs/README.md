@@ -278,11 +278,18 @@ the complete transcript as one plain-text result with video and language metadat
 action-result allowance reserved for this validated shape; oversized transcripts fail explicitly
 instead of being silently truncated. `youtube.find_in_transcript` searches the same provider result
 server-side and returns only bounded timestamped context windows for a requested phrase.
-`MONID_API_KEY` belongs in Infisical `prod` + `/goat`, and
+`MONID_API_KEY` belongs in Infisical `prod` + `/goat` for foreground execution and `prod` + `/api`
+for reconciliation, and
 `GOAT_MANAGED_CAPABILITIES_KILL_SWITCH=true` removes managed sources from new turns.
 `GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS` accepts comma-separated action ids for endpoint
 isolation. Managed sources never participate in automatic Brain-fill surveying; the user must
 explicitly ask to save their results.
+
+Workspace billing and usage settings read typed `/v1/billing` resources from `apps/api`. Billing
+commands require an explicit client idempotency key and run through the shared billing application
+service; client DTOs contain neither Stripe objects nor ledger rows. Stripe keeps calling the public
+web `/api/stripe/webhook` URL, whose streaming relay preserves the raw signed body for the API-owned
+handler. The Vercel billing cron path is likewise stable and relays to API-owned reconciliation.
 
 Managed X profile discovery uses X's People-ranked search rather than an exact bio-field predicate.
 It can also page through the public followers of a supplied profile with the provider's opaque
