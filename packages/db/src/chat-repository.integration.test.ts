@@ -381,9 +381,22 @@ describe("Postgres Chat repositories", () => {
       model: "provider/model",
     });
     await database.query(
-      `INSERT INTO goat.run_approvals (id, run_id, kind, prompt, options)
-       VALUES ('approval_before_archive', $1, 'use_action', 'Approve?', '["approved","denied"]')`,
+      `INSERT INTO goat.run_approvals (id, run_id, tool_call_id, kind, prompt, options)
+       VALUES (
+         'approval_before_archive', $1, 'tool_call_before_archive',
+         'use_action', 'Approve?', '["approved","denied"]'
+       )`,
       [created.runId],
+    );
+    await database.query(
+      `INSERT INTO goat.capability_runs (
+         id, workspace_id, user_workos_id, chat_session_id, tool_call_id, status,
+         approval_expires_at
+       ) VALUES (
+         'capability_before_archive', 'workspace_1', 'user_1', $1,
+         'tool_call_before_archive', 'awaiting_approval', '2026-08-10T20:15:00Z'
+       )`,
+      [created.conversationId],
     );
 
     const presented = await service.updateConversation(actor(), created.conversationId, {
@@ -485,6 +498,13 @@ describe("Postgres Chat repositories", () => {
         )
       ).rows,
     ).toEqual([{ type: "run.queued" }, { type: "run.canceled" }]);
+    expect(
+      (
+        await database.query<{ status: string }>(
+          "SELECT status FROM goat.capability_runs WHERE id = 'capability_before_archive'",
+        )
+      ).rows,
+    ).toEqual([{ status: "canceled" }]);
 
     await expect(
       service.updateConversation(actor(), created.conversationId, { archived: false }),
@@ -588,6 +608,16 @@ describe("Postgres Chat repositories", () => {
         ],
       }),
     ).resolves.toMatchObject([{ id: "approval_1", status: "pending" }]);
+    await database.query(
+      `INSERT INTO goat.capability_runs (
+         id, workspace_id, user_workos_id, chat_session_id, tool_call_id, status,
+         approval_expires_at
+       ) VALUES (
+         'capability_1', 'workspace_1', 'user_1', $1, 'tool_call_1',
+         'awaiting_approval', '2026-08-10T20:15:00Z'
+       )`,
+      [created.conversationId],
+    );
 
     const command = {
       runId: created.runId,
@@ -615,6 +645,18 @@ describe("Postgres Chat repositories", () => {
         `)
       ).rows,
     ).toEqual([{ status: "resolved", resolution: "approved" }]);
+    expect(
+      (
+        await database.query<{ status: string; approved_at: Date | null }>(
+          "SELECT status, approved_at FROM goat.capability_runs WHERE id = 'capability_1'",
+        )
+      ).rows,
+    ).toEqual([
+      {
+        status: "approved",
+        approved_at: new Date("2026-08-10T20:00:00.000Z"),
+      },
+    ]);
     expect(
       (
         await database.query<{ status: string; settings: Record<string, unknown> }>(
@@ -735,9 +777,22 @@ describe("Postgres Chat repositories", () => {
       paused.runId,
     ]);
     await database.query(
-      `INSERT INTO goat.run_approvals (id, run_id, kind, prompt, options)
-       VALUES ('approval_talked_past', $1, 'use_action', 'Approve crm.update?', '["approved","denied"]')`,
+      `INSERT INTO goat.run_approvals (id, run_id, tool_call_id, kind, prompt, options)
+       VALUES (
+         'approval_talked_past', $1, 'tool_call_talked_past',
+         'use_action', 'Approve crm.update?', '["approved","denied"]'
+       )`,
       [paused.runId],
+    );
+    await database.query(
+      `INSERT INTO goat.capability_runs (
+         id, workspace_id, user_workos_id, chat_session_id, tool_call_id, status,
+         approval_expires_at
+       ) VALUES (
+         'capability_talked_past', 'workspace_1', 'user_1', $1,
+         'tool_call_talked_past', 'awaiting_approval', '2026-08-10T20:15:00Z'
+       )`,
+      [paused.conversationId],
     );
     await database.query(
       `UPDATE goat.chat_messages AS message
@@ -780,6 +835,13 @@ describe("Postgres Chat repositories", () => {
         )
       ).rows,
     ).toEqual([{ status: "canceled", resolution: "canceled" }]);
+    expect(
+      (
+        await database.query<{ status: string }>(
+          "SELECT status FROM goat.capability_runs WHERE id = 'capability_talked_past'",
+        )
+      ).rows,
+    ).toEqual([{ status: "canceled" }]);
     const oldAssistant = await database.query<{ debug_trace: { uiMessageParts: unknown[] } }>(
       `SELECT message.debug_trace
        FROM goat.chat_messages AS message
@@ -861,6 +923,24 @@ describe("Postgres Chat repositories", () => {
       engine: "opencompany",
       model: "provider/model",
     });
+    await database.query(
+      `INSERT INTO goat.run_approvals (id, run_id, tool_call_id, kind, prompt, options)
+       VALUES (
+         'approval_before_cancel', $1, 'tool_call_before_cancel',
+         'use_action', 'Approve?', '["approved","denied"]'
+       )`,
+      [created.runId],
+    );
+    await database.query(
+      `INSERT INTO goat.capability_runs (
+         id, workspace_id, user_workos_id, chat_session_id, tool_call_id, status,
+         approval_expires_at
+       ) VALUES (
+         'capability_before_cancel', 'workspace_1', 'user_1', $1,
+         'tool_call_before_cancel', 'awaiting_approval', '2026-08-10T20:15:00Z'
+       )`,
+      [created.conversationId],
+    );
 
     await expect(service.cancelRun(actor(), created.runId)).resolves.toMatchObject({
       status: "canceled",
@@ -902,6 +982,17 @@ describe("Postgres Chat repositories", () => {
         `)
       ).rows,
     ).toEqual([{ type: "run.queued" }, { type: "run.canceled" }]);
+    expect(
+      (
+        await database.query<{ approval_status: string; capability_status: string }>(`
+          SELECT approval.status AS approval_status, capability.status AS capability_status
+          FROM goat.run_approvals AS approval
+          JOIN goat.capability_runs AS capability
+            ON capability.tool_call_id = approval.tool_call_id
+          WHERE approval.id = 'approval_before_cancel'
+        `)
+      ).rows,
+    ).toEqual([{ approval_status: "canceled", capability_status: "canceled" }]);
   });
 
   it("continues and cancels a Task through canonical Messages, Runs, and Events", async () => {
@@ -987,6 +1078,53 @@ describe("Postgres Chat repositories", () => {
     ).toMatchObject({
       rows: [{ skill_id: "review", activated_message_id: created.messageId }],
     });
+
+    await database.query("UPDATE goat.codex_chat_turns SET status = 'paused' WHERE id = $1", [
+      created.runId,
+    ]);
+    await database.query(
+      `UPDATE goat.chat_messages
+       SET debug_trace = jsonb_build_object(
+         'schemaVersion', 'opencompany.chat.debug.v1',
+         'uiMessageParts', jsonb_build_array(jsonb_build_object(
+           'type', 'tool-use_action',
+           'toolCallId', 'task_tool_call_approval',
+           'state', 'approval-requested',
+           'approval', jsonb_build_object('id', 'task_approval')
+         ))
+       )
+       WHERE id = $1`,
+      [created.assistantMessageId],
+    );
+    await database.query(
+      `INSERT INTO goat.run_approvals (id, run_id, tool_call_id, kind, prompt, options)
+       VALUES (
+         'task_approval', $1, 'task_tool_call_approval',
+         'use_action', 'Approve?', '["approved","denied"]'
+       )`,
+      [created.runId],
+    );
+    await database.query(
+      `INSERT INTO goat.capability_runs (
+         id, workspace_id, user_workos_id, chat_session_id, tool_call_id, status,
+         approval_expires_at
+       ) VALUES (
+         'task_capability', 'workspace_1', 'user_1', 'task_conversation_1',
+         'task_tool_call_approval', 'awaiting_approval', '2026-08-10T20:15:00Z'
+       )`,
+    );
+    await expect(
+      service.resolveApproval(sharedActor, {
+        runId: created.runId,
+        approvalId: "task_approval",
+        resolution: "approved",
+      }),
+    ).resolves.toMatchObject({ resolution: "approved", idempotentReplay: false });
+    expect(
+      await database.query<{ status: string; approved_at: Date | null }>(
+        "SELECT status, approved_at FROM goat.capability_runs WHERE id = 'task_capability'",
+      ),
+    ).toMatchObject({ rows: [{ status: "approved", approved_at: expect.any(Date) }] });
 
     await expect(service.cancelRun(sharedActor, created.runId)).resolves.toMatchObject({
       status: "canceled",
@@ -1103,6 +1241,17 @@ const BASE_SCHEMA = `
     pinned_at timestamptz,
     last_seen_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE TABLE goat.capability_runs (
+    id text PRIMARY KEY,
+    workspace_id text NOT NULL,
+    user_workos_id text NOT NULL,
+    chat_session_id text NOT NULL REFERENCES goat.chat_sessions(id),
+    tool_call_id text,
+    status text NOT NULL,
+    approval_expires_at timestamptz,
+    approved_at timestamptz,
     updated_at timestamptz NOT NULL DEFAULT now()
   );
   CREATE TABLE goat.tasks (

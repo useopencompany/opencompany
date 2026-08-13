@@ -1,7 +1,6 @@
 "use server";
 
-import { getDb } from "@opencompany/db/client";
-import { loadGoatCodexAuthStatus } from "@opencompany/db/goat-codex-auth";
+import { isGoatCodexConnectedForUser as readGoatCodexConnectionForUser } from "@opencompany/goat-agent/application/engine-auth-status";
 import { revalidatePath } from "next/cache";
 import { serverApiClient, serverApiError, serverApiErrorMessage } from "@/lib/server-api-client";
 
@@ -29,13 +28,8 @@ export async function loadCurrentGoatCodexAuthSettings(): Promise<GoatCodexAuthS
   return (await response.json()).data as GoatCodexAuthSettings;
 }
 
-// Temporary db-reading adapter: the frozen legacy chat route and sessionless
-// workflow-trigger paths check engine connectivity by an explicit user id, so
-// this read cannot ride the session-forwarding /v1 client. It moves behind the
-// API once those callers take an injected connectivity port.
 export async function isGoatCodexConnectedForUser(userWorkosId: string) {
-  const status = await loadGoatCodexAuthStatus({ db: getDb(), userWorkosId });
-  return status?.status === "connected";
+  return readGoatCodexConnectionForUser(userWorkosId);
 }
 
 export async function startGoatCodexDeviceAuth() {

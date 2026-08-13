@@ -1,5 +1,5 @@
-// Pure Slack text helpers shared by the answer pipeline and thread-context
-// reconstruction.
+// Pure Slack text helpers shared by API ingress and the runner-owned answer
+// pipeline.
 
 export function stripSlackBotMention(text: string, botUserId: string | null): string {
   const withoutBot = botUserId

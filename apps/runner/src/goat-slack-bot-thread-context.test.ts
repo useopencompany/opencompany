@@ -4,7 +4,7 @@ import {
   formatSpeaker,
   SLACK_CONTEXT_MESSAGE_LIMIT,
   SLACK_CONTEXT_TOTAL_MAX_CHARS,
-} from "./thread-context";
+} from "./goat-slack-bot-thread-context";
 
 const BOT = "UBOT";
 

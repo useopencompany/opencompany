@@ -18,25 +18,26 @@ import {
   recordGoatSlackBotThreadParticipation,
 } from "@opencompany/db/goat-slack-bot";
 import { DEFAULT_GOAT_BRAIN_SLUG, listAccessibleGoatBrains } from "@opencompany/db/goat-workspaces";
+import {
+  isGoatChatActionsKilled,
+  resolveGoatActionCatalog,
+} from "@opencompany/goat-agent/actions/catalog";
+import { executeGoatAction, type GoatActionResult } from "@opencompany/goat-agent/actions/execute";
 import { projectActionCatalog } from "@opencompany/goat-agent/actions/policy";
-import { recordGoatModelCost } from "@opencompany/goat-observability";
-import type { LanguageModelUsage } from "ai";
-import { eq } from "drizzle-orm";
-import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
-import { executeGoatAction, type GoatActionResult } from "@/lib/actions/execute";
-import type { GoatResolvedActionCatalog } from "@/lib/actions/types";
-import { captureToGoatBrainInbox } from "@/lib/brain-capture";
-import { runGoatBrainToolForUser } from "@/lib/brain-cli";
+import type { GoatResolvedActionCatalog } from "@opencompany/goat-agent/actions/types";
+import { captureToGoatBrainInbox } from "@opencompany/goat-agent/brain-capture";
+import { nextAvailableGoatBrainId } from "@opencompany/goat-agent/brain-files";
 import {
   type GoatBrainMultiBrainTarget,
   normalizeGoatBrainReadToolInput,
-} from "@/lib/brain-surface";
-import { runOpenCompanyChatAgent } from "@/lib/chat-agent";
-import { executeGoatChatExaSearch } from "@/lib/chat-web-search";
-import { slackApiRequest } from "@/lib/integrations/slack";
-import { goatSlackBotHasScope } from "@/lib/integrations/slack-bot";
-import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
-import { createGoatSlackSurfacePromptBlock } from "@/lib/prompts/slack-surface";
+} from "@opencompany/goat-agent/brain-surface";
+import { resolveGoatManagedCapabilities } from "@opencompany/goat-agent/capabilities/resolve";
+import { runOpenCompanyChatAgent } from "@opencompany/goat-agent/chat-agent";
+import { GOAT_CHAT_FRONTIER_MODEL } from "@opencompany/goat-agent/chat-model-router";
+import { executeGoatChatExaSearch } from "@opencompany/goat-agent/chat-web-search";
+import { slackApiRequest } from "@opencompany/goat-agent/integrations/slack";
+import { goatSlackBotHasScope } from "@opencompany/goat-agent/integrations/slack-bot";
+import type { GoatSlackBotEventInput } from "@opencompany/goat-agent/integrations/slack-bot-events";
 import {
   collectSlackMentionUserIds,
   mentionsSlackUser,
@@ -44,43 +45,44 @@ import {
   stripSlackBotMention,
   toSlackMrkdwn,
   truncateForSlack,
-} from "@/lib/slack-bot/format";
+} from "@opencompany/goat-agent/integrations/slack-bot-format";
+import { createGoatSlackSurfacePromptBlock } from "@opencompany/goat-agent/prompts/slack-surface";
+import { recordGoatModelCost } from "@opencompany/goat-observability";
+import type { LanguageModelUsage } from "ai";
+import { eq } from "drizzle-orm";
+import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
+import { runGoatTaskBrainRead } from "./goat-codex-brain-tool";
 import {
   type GoatSlackSenderResolution,
   getGoatUserBasics,
   resolveGoatSlackSender,
-} from "@/lib/slack-bot/identity";
+} from "./goat-slack-bot-identity";
 import {
   createGoatSlackBotStatusReporter,
   type GoatSlackBotStatusReporter,
-} from "@/lib/slack-bot/status";
+} from "./goat-slack-bot-status";
 import {
   fetchGoatSlackConversationContext,
   formatSpeaker,
   type SlackContextMessage,
-} from "@/lib/slack-bot/thread-context";
+} from "./goat-slack-bot-thread-context";
 
-export { stripSlackBotMention, toSlackMrkdwn, truncateForSlack } from "@/lib/slack-bot/format";
+export {
+  stripSlackBotMention,
+  toSlackMrkdwn,
+  truncateForSlack,
+} from "@opencompany/goat-agent/integrations/slack-bot-format";
 
 const SLACK_ANSWER_MAX_CHARS = 3000;
-// Leave headroom under the webhook route's maxDuration (240s) for the Slack
+// Leave headroom under the runner's graceful-drain window for the Slack
 // posting/cleanup that follows the agent turn.
 const SLACK_AGENT_TIMEOUT_MS = 200_000;
-
-export type GoatSlackBotEventInput = {
-  teamId: string;
-  channelId: string;
-  messageTs: string;
-  threadTs: string | null;
-  text: string;
-  slackUserId: string;
-};
 
 export type GoatSlackBotMentionInput = GoatSlackBotEventInput;
 
 type SlackAnswerMode = "mention" | "follow_up" | "dm";
 
-// Runs after the webhook has already acked Slack (via next/server after()):
+// Runs after the API webhook has dispatched the claimed event to the runner:
 // resolve the install → route to brains by channel → answer → post in-thread.
 // Individual integration failures reply best-effort and are logged so another
 // Goat workspace connected to the same Slack team can still answer.
@@ -305,7 +307,7 @@ async function answerForIntegration(
     await recordSlackBotUsage({
       workspaceId: integration.workspaceId,
       userWorkosId: identity.userWorkosId,
-      model: DEFAULT_GOAT_MODEL,
+      model: GOAT_CHAT_FRONTIER_MODEL,
       usage: answer.totalUsage,
       idempotencyKey: `slack_bot:${integration.id}:${input.teamId}:${input.channelId}:${input.messageTs}`,
     });
@@ -467,7 +469,7 @@ async function runSlackChatAgent(input: {
 
   return runOpenCompanyChatAgent({
     messages: [...input.contextMessages, { role: "user", content: finalUserContent }],
-    model: DEFAULT_GOAT_MODEL,
+    model: GOAT_CHAT_FRONTIER_MODEL,
     gatewayApiKey,
     feature: "slack-bot",
     taskToolsEnabled: false,
@@ -499,14 +501,13 @@ async function runSlackChatAgent(input: {
       delete toolArgs.brain;
       const normalized = multiBrain
         ? normalizeGoatBrainReadToolInput(toolArgs)
-        : (args as Parameters<typeof runGoatBrainToolForUser>[0]["toolInput"]);
-      return runGoatBrainToolForUser({
+        : (args as Parameters<typeof runGoatTaskBrainRead>[0]["toolInput"]);
+      return runGoatTaskBrainRead({
         brainRef: target.brainRef,
         userWorkosId: input.identity.userWorkosId,
+        chatSessionId: input.telemetrySessionId,
         toolInput: normalized,
         gatewayApiKey,
-        sourceRef: input.sourceRef,
-        signal,
       });
     },
     saveToBrain: async (toolInput) => {
@@ -516,21 +517,27 @@ async function runSlackChatAgent(input: {
       if (!content && !sourceRef) {
         return { ok: false, error: "Provide content or sourceRef to save." };
       }
-      const captured = await captureToGoatBrainInbox({
-        brainRef: primaryBrain.brainRef,
-        userWorkosId: input.identity.userWorkosId,
-        ...(content ? { text: content } : {}),
-        ...(toolInput.title ? { title: toolInput.title } : {}),
-        ...(toolInput.intent ? { intent: toolInput.intent } : {}),
-        ...(sourceRef ? { sourceRef } : {}),
-        ...(toolInput.integrationId ? { integrationId: toolInput.integrationId } : {}),
-        ...(toolInput.fallbackContent ? { fallbackText: toolInput.fallbackContent } : {}),
-        source: {
-          kind: "chat",
-          connectionId: input.sourceRef,
-          itemId: input.sourceRef,
+      const captured = await captureToGoatBrainInbox(
+        {
+          brainRef: primaryBrain.brainRef,
+          actorId: input.identity.userWorkosId,
+          ...(content ? { text: content } : {}),
+          ...(toolInput.title ? { title: toolInput.title } : {}),
+          ...(toolInput.intent ? { intent: toolInput.intent } : {}),
+          ...(sourceRef ? { sourceRef } : {}),
+          ...(toolInput.integrationId ? { integrationId: toolInput.integrationId } : {}),
+          ...(toolInput.fallbackContent ? { fallbackText: toolInput.fallbackContent } : {}),
+          source: {
+            kind: "chat",
+            connectionId: input.sourceRef,
+            itemId: input.sourceRef,
+          },
         },
-      });
+        {
+          nextAvailableBrainId: nextAvailableGoatBrainId,
+          wakeIngest: async () => wakeGoatBrainIngestWorker(),
+        },
+      );
       if (!captured.ok) return captured;
       return {
         ok: true,
@@ -568,10 +575,13 @@ async function resolveSlackActionDispatcher(input: {
   if (isGoatChatActionsKilled()) return null;
   let catalog: GoatResolvedActionCatalog;
   try {
-    const resolved = await resolveGoatActionCatalog({
-      userWorkosId: input.userWorkosId,
-      workspaceId: input.workspaceId,
-    });
+    const resolved = await resolveGoatActionCatalog(
+      {
+        userWorkosId: input.userWorkosId,
+        workspaceId: input.workspaceId,
+      },
+      { resolveManagedCapabilities: resolveGoatManagedCapabilities },
+    );
     // Slack has no tool-approval continuation UI. Keep actions the member has
     // explicitly enabled, and omit both "ask" actions and paid managed
     // capabilities, which require a persisted chat session for execution and

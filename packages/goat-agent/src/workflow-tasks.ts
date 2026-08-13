@@ -1,5 +1,4 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import { getDb } from "@opencompany/db/client";
 import type { GoatWorkflowHarnessSpec } from "@opencompany/db/goat-harness";
 import type {
   GoatChatMessageAttachment,
@@ -8,9 +7,11 @@ import type {
   GoatTaskToolName,
   GoatWorkflowStep,
 } from "@opencompany/db/goat-schema";
-import { goatClaudeCodeCredentials, goatCodexCredentials } from "@opencompany/db/goat-schema";
 import { serializeGoatBrainSkillMarkdown } from "@opencompany/goat-brain";
-import { eq } from "drizzle-orm";
+import {
+  isGoatClaudeCodeConnectedForUser,
+  isGoatCodexConnectedForUser,
+} from "./application/engine-auth-status";
 import { getGoatAvailableHarnessTools } from "./integrations/google-data";
 import {
   type GoatSkillMentionRef,
@@ -338,22 +339,4 @@ export async function prepareGoatWorkflowRunForUser(
   });
 
   return { description, stepSelections, harnessSpec };
-}
-
-async function isGoatCodexConnectedForUser(actorId: string) {
-  const [row] = await getDb()
-    .select({ status: goatCodexCredentials.status })
-    .from(goatCodexCredentials)
-    .where(eq(goatCodexCredentials.userWorkosId, actorId))
-    .limit(1);
-  return row?.status === "connected";
-}
-
-async function isGoatClaudeCodeConnectedForUser(actorId: string) {
-  const [row] = await getDb()
-    .select({ status: goatClaudeCodeCredentials.status })
-    .from(goatClaudeCodeCredentials)
-    .where(eq(goatClaudeCodeCredentials.userWorkosId, actorId))
-    .limit(1);
-  return row?.status === "connected";
 }

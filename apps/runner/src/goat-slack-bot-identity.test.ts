@@ -1,7 +1,10 @@
 import { getGoatWorkspaceRole } from "@opencompany/db/goat-workspaces";
+import { slackApiRequest } from "@opencompany/goat-agent/integrations/slack";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { slackApiRequest } from "@/lib/integrations/slack";
-import { clearGoatSlackSenderCacheForTests, resolveGoatSlackSender } from "./identity";
+import {
+  clearGoatSlackSenderCacheForTests,
+  resolveGoatSlackSender,
+} from "./goat-slack-bot-identity";
 
 const dbState = vi.hoisted(() => ({ rows: [] as unknown[] }));
 
@@ -19,7 +22,7 @@ vi.mock("@opencompany/db/goat-workspaces", () => ({
   getGoatWorkspaceRole: vi.fn(async () => null),
 }));
 
-vi.mock("@/lib/integrations/slack", () => ({
+vi.mock("@opencompany/goat-agent/integrations/slack", () => ({
   slackApiRequest: vi.fn(),
 }));
 

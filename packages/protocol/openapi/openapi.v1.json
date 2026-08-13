@@ -8761,6 +8761,40 @@
         ],
         "additionalProperties": false
       },
+      "ActionPermissionEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "actionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "allowed"
+                ]
+              }
+            },
+            "required": [
+              "actionId",
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
       "ClaudeCodeAuthStatusEnvelope": {
         "type": "object",
         "properties": {
@@ -15098,6 +15132,55 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/IntegrationCapabilityModeEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/actions/{actionId}/permissions/always-allow": {
+      "post": {
+        "tags": [
+          "Approvals"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "required": true,
+            "name": "actionId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Persist the standing permission represented by an action approval. The action catalog is re-resolved for the authenticated actor and workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionPermissionEnvelope"
                 }
               }
             }

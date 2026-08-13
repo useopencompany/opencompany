@@ -82,6 +82,7 @@ import {
 import { createLogger } from "@opencompany/observability";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { ApiError } from "./errors";
+import type { RunnerClient } from "./runner-client";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "integration-accounts" });
 
@@ -108,6 +109,7 @@ export type IntegrationAccountService = {
     capabilityId: string,
     mode: string,
   ): Promise<void>;
+  alwaysAllowAction(actor: Actor, actionId: string): Promise<void>;
   connectAttio(actor: Actor, apiKey: string): Promise<GoatAttioProviderState>;
   disconnectAttio(actor: Actor, integrationId: string): Promise<void>;
   connectFathom(actor: Actor, apiKey: string): Promise<GoatFathomProviderState>;
@@ -126,6 +128,7 @@ export function createIntegrationAccountService(input: {
   // Injectable so tests can exercise the pairing flow without Linq credentials.
   resolveImessageProvider?: () => GoatImessageProvider | null;
   generatePairingCode?: () => string;
+  runner?: RunnerClient;
 }): IntegrationAccountService {
   const db = input.db;
   const now = input.now ?? (() => new Date());
@@ -175,6 +178,29 @@ export function createIntegrationAccountService(input: {
         });
       } catch (error) {
         throw commandFailure(error, "Could not update the permission.", "capability_mode");
+      }
+    },
+
+    async alwaysAllowAction(actor, actionId) {
+      const trimmed = actionId.trim();
+      if (!trimmed || trimmed.length > 255) {
+        throw new ApiError(400, "invalid_request", "A valid action is required.");
+      }
+      if (!input.runner) {
+        throw new ApiError(503, "unavailable", "The action permission service is unavailable.");
+      }
+      try {
+        await input.runner.postJson(
+          "/internal/goat/actions/always-allow",
+          {
+            userWorkosId: actor.userId,
+            workspaceId: actor.workspaceId,
+            actionId: trimmed,
+          },
+          { errorFormat: "error-message" },
+        );
+      } catch (error) {
+        throw commandFailure(error, "Could not update the permission.", "always_allow_action");
       }
     },
 

@@ -199,6 +199,7 @@ describe("v1 protocol contract", () => {
       "/v1/integration-accounts/jamie/api-key",
       "/v1/integration-accounts/{integrationId}/usage",
       "/v1/integration-accounts/{integrationId}/capability-modes/{capabilityId}",
+      "/v1/actions/{actionId}/permissions/always-allow",
       "/v1/integration-accounts/{integrationId}",
       "/v1/engine-auth/claude-code",
       "/v1/engine-auth/codex",
@@ -217,6 +218,11 @@ describe("v1 protocol contract", () => {
     expect(
       client.v1.workflows[":workflowId"].$url({ param: { workflowId: "workflow_1" } }).pathname,
     ).toBe("/v1/workflows/workflow_1");
+    expect(
+      client.v1.actions[":actionId"].permissions["always-allow"].$url({
+        param: { actionId: "gmail.send_email" },
+      }).pathname,
+    ).toBe("/v1/actions/gmail.send_email/permissions/always-allow");
     expect(
       client.v1.schedules[":scheduleId"].$url({ param: { scheduleId: "schedule_1" } }).pathname,
     ).toBe("/v1/schedules/schedule_1");

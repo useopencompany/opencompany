@@ -37,6 +37,7 @@ import { startGoatGranolaPollWorker } from "./goat-granola-poll-worker";
 import { startGoatHubspotFlushWorker } from "./goat-hubspot-flush-worker";
 import { startGoatLinearFlushWorker } from "./goat-linear-flush-worker";
 import { startGoatTaskScheduleWorker } from "./goat-scheduler";
+import { activeGoatSlackBotEventCount, drainGoatSlackBotEvents } from "./goat-slack-bot-events";
 import { startGoatSlackFlushWorker } from "./goat-slack-flush-worker";
 import { settleExpiredBrokerTokens } from "./llm-broker-tokens";
 import { createServer } from "./server";
@@ -148,6 +149,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       active_goat_google_drive_sync_count: goatGoogleDriveSyncWorker?.activeCount() ?? 0,
       active_goat_brain_import_count: goatBrainImportWorker?.activeCount() ?? 0,
       active_goat_codex_chat_count: goatCodexChatWorker?.activeCount() ?? 0,
+      active_goat_slack_bot_event_count: activeGoatSlackBotEventCount(),
     });
     clearInterval(llmBrokerSweepTimer);
     // Stop accepting work and drain in-flight requests first, then close the DB pool so
@@ -167,6 +169,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       goatBrainIngestWorker?.stop() ?? Promise.resolve(),
       goatBrainImportWorker?.stop() ?? Promise.resolve(),
       goatSlackFlushWorker?.stop() ?? Promise.resolve(),
+      drainGoatSlackBotEvents(),
       goatLinearFlushWorker?.stop() ?? Promise.resolve(),
       goatGitHubFlushWorker?.stop() ?? Promise.resolve(),
       goatHubspotFlushWorker?.stop() ?? Promise.resolve(),
