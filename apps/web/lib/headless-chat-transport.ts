@@ -327,8 +327,8 @@ export async function startHeadlessBackgroundChat(
     conversationId: data.conversationId,
     transactionId: data.transactionId,
   });
-  // Background Chat has no mounted useChat consumer. Keep the promise aligned with the legacy
-  // route by consuming semantic events until the Run settles or pauses for user interaction.
+  // Background Chat has no mounted useChat consumer, so consume semantic events until the Run
+  // settles or pauses for user interaction.
   for await (const event of streamRunEvents({
     baseUrl,
     runId: data.runId,

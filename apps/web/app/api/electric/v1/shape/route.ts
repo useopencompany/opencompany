@@ -1,15 +1,7 @@
-import { getDb } from "@opencompany/db/client";
-import { goatChatSessions, goatCodexChatSessions } from "@opencompany/db/goat-schema";
-import { getGoatBrainAccess } from "@opencompany/db/goat-workspaces";
-import { and, eq, isNull, or } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 import {
   buildGoatElectricOriginUrl,
   goatElectricBaseUrl,
-  goatElectricBrainRef,
-  goatElectricChatMessagesSessionId,
-  goatElectricCodexChatSessionId,
-  goatElectricWikiShapeRequested,
   hasInvalidElectricCloudSecretPair,
 } from "@/lib/electric";
 
@@ -32,30 +24,11 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const requestUrl = new URL(request.url);
-  const authorizedChatSessionId = await authorizeChatSessionShape({
-    requestUrl,
-    userWorkosId: context.user.workosUserId,
-    workspaceId: context.workspace.id,
-  });
-  const authorizedBrainRef = await authorizeBrainShape({
-    requestUrl,
-    userWorkosId: context.user.workosUserId,
-  });
-  // Wiki shapes are tied to the session's active workspace and gated on the
-  // per-user wiki preview flag, mirroring the /wiki surface and `wiki` tool.
-  const authorizedWikiWorkspaceId =
-    goatElectricWikiShapeRequested(requestUrl) && context.user.wikiEnabled
-      ? context.workspace.id
-      : null;
-
   const originUrl = buildGoatElectricOriginUrl({
     electricUrl,
     requestUrl,
     userWorkosId: context.user.workosUserId,
     workspaceId: context.workspace.id,
-    authorizedChatSessionId,
-    authorizedBrainRef,
-    authorizedWikiWorkspaceId,
     sourceId,
     sourceSecret,
     electricSecret,
@@ -82,59 +55,4 @@ export async function GET(request: Request): Promise<Response> {
     statusText: response.statusText,
     headers,
   });
-}
-
-export async function authorizeChatSessionShape(input: {
-  requestUrl: URL;
-  userWorkosId: string;
-  workspaceId: string;
-}): Promise<string | null> {
-  const sessionId =
-    goatElectricChatMessagesSessionId(input.requestUrl) ??
-    goatElectricCodexChatSessionId(input.requestUrl);
-  if (!sessionId) return null;
-
-  const [session] = await getDb()
-    .select({ id: goatChatSessions.id })
-    .from(goatChatSessions)
-    .leftJoin(
-      goatCodexChatSessions,
-      and(
-        eq(goatCodexChatSessions.chatSessionId, goatChatSessions.id),
-        eq(goatCodexChatSessions.userWorkosId, goatChatSessions.userWorkosId),
-      ),
-    )
-    .where(
-      and(
-        eq(goatChatSessions.id, sessionId),
-        isNull(goatChatSessions.closedAt),
-        or(
-          and(
-            eq(goatChatSessions.kind, "chat"),
-            eq(goatChatSessions.userWorkosId, input.userWorkosId),
-          ),
-          and(
-            eq(goatChatSessions.kind, "task"),
-            eq(goatCodexChatSessions.workspaceId, input.workspaceId),
-          ),
-        ),
-      ),
-    )
-    .limit(1);
-
-  return session?.id ?? null;
-}
-
-async function authorizeBrainShape(input: {
-  requestUrl: URL;
-  userWorkosId: string;
-}): Promise<string | null> {
-  const brainRef = goatElectricBrainRef(input.requestUrl);
-  if (!brainRef) return null;
-
-  const access = await getGoatBrainAccess({
-    userWorkosId: input.userWorkosId,
-    brainRef,
-  });
-  return access?.brain.id ?? null;
 }

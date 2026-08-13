@@ -95,7 +95,7 @@ For ideas and thoughts, the curation agent applies an authorship test before top
 
 ### 3. The `goat_brain` chat tool
 
-Foreground chat (`apps/web/lib/chat-agent.ts`) exposes a read-only Brain surface: `get`, `list`, `query`, `timeline`, `help`, and `doctor`. All chat writes route through `save_to_brain`; raw CLI mutation commands are not exposed.
+The shared Chat agent exposes a read-only Brain surface: `get`, `list`, `query`, `timeline`, `help`, and `doctor`. All chat writes route through `save_to_brain`; raw CLI mutation commands are not exposed.
 
 ### 4. The durable ingestion agents
 
@@ -157,10 +157,9 @@ Brains belong to workspaces. `visibility: "workspace"` brains are readable by ev
 - Document format, links, validation, retrieval, CLI: `packages/goat-brain/src/` (after CLI changes, regenerate the bundle with `bun run bundle`).
 - Tables, access control, file sync, ingest queue: `packages/db/src/goat-schema.ts`, `goat-brain-files.ts`, `goat-brain-ingest.ts`, `goat-workspaces.ts` (schema changes need a Drizzle migration).
 - Ingestion worker and agent prompts: `apps/runner/src/goat-brain-ingest-worker.ts`, `apps/runner/src/goat-brain-agent-ingest.ts`.
-- Chat capture flow: `apps/web/lib/brain-capture.ts`, the main-chat wiring in
-  `apps/web/lib/chat-agent.ts` and `apps/web/app/api/chat/route.ts`, and the Cloud Codex host tool
-  and gateway in `apps/runner/src/goat-codex-brain-capture-tool.ts` and
-  `apps/web/lib/codex-brain-capture.ts`.
+- Chat capture flow: the shared agent tools in `packages/goat-agent`, their API/runner composition,
+  and the Cloud Codex host tool and gateway in
+  `apps/runner/src/goat-codex-brain-capture-tool.ts` and `apps/web/lib/codex-brain-capture.ts`.
 - New source providers: normalize into `brain_source_items`, enqueue a `brain_agent_ingest` job, and add a handler — the Jamie webhook route and the chat capture path are the templates.
 - Brain UI: `apps/web/components/GoatBrainView.tsx`, `MarkdownGoatBrainEditor.tsx`, `GoatBrainSwitcher.tsx`, and server actions in `apps/web/lib/brain-actions.ts`.
 - Design references: `apps/web/docs/brain/pointer-copy-contract.md` and `apps/web/docs/brain/retrieval-planes.md`.

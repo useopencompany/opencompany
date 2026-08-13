@@ -27,7 +27,7 @@ release variables. Important contracts include:
 
 - Web: database, WorkOS, canonical URL, shared cookie domain, Vercel AI Gateway, Blob, runner
   token/URL, Electric, managed capabilities, Stripe, X OAuth, cron, Goat PostHog, server and public
-  first-party API origins, and canonical Chat flag values.
+  first-party API origins.
 - API: direct database, WorkOS session/OAuth and shared cookie domain, the credentialed browser
   origin allowlist, billing/Stripe, managed capabilities and cron reconciliation, Vercel AI Gateway
   for canonical Auto routing, Blob, Electric, Redis, the cron secret for the internal email
@@ -38,12 +38,9 @@ release variables. Important contracts include:
   URLs.
 
 Canonical browser clients call the non-secret `NEXT_PUBLIC_GOAT_API_ORIGIN` directly for commands
-and authorized read models. RSC loaders and compatibility routes use the server-only
-`GOAT_API_ORIGIN`. Configure both origins, the shared `WORKOS_COOKIE_DOMAIN`, and API
-`API_BROWSER_ORIGINS`. `NEXT_PUBLIC_GOAT_HEADLESS_CHAT` controls only the Chat presentation rollout;
-pass its disabled smoke gate, then enable it and redeploy web as documented in
-[Headless Chat operations](./headless-chat-operations.md). Workflow, schedule, Brain, Wiki, and Skill
-API clients are not controlled by that Chat flag.
+and authorized read models. RSC loaders use the server-only `GOAT_API_ORIGIN`. Configure both
+origins, the shared `WORKOS_COOKIE_DOMAIN`, and API `API_BROWSER_ORIGINS`. Chat is fully cut over and
+operates fix-forward as documented in [Headless Chat operations](./headless-chat-operations.md).
 
 `CRON_SECRET` must have the same value in prod `/goat` and `/api`: web keeps the public cron and
 unsubscribe URLs while the API owns their onboarding-email persistence.

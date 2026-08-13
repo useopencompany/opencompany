@@ -5,7 +5,6 @@ import type { ReactNode } from "react";
 import { GoatAppDataProvider, type GoatAppInitialData } from "@/components/GoatAppDataProvider";
 import { currentGoatUser } from "@/lib/auth";
 import { listCurrentUserRecentGoatChats } from "@/lib/chat";
-import { isGoatChatResumeEnabled } from "@/lib/chat-streams";
 import { loadCurrentGoatClaudeCodeAuthSettings } from "@/lib/claude-code-auth";
 import { loadCurrentGoatCodexAuthSettings } from "@/lib/codex-auth";
 import { goatFeatureFlagsFromUser } from "@/lib/feature-flags";
@@ -153,7 +152,6 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     featureFlags,
     codexConnected: codex.status === "connected",
     claudeCodeConnected: claudeCode.status === "connected",
-    chatResumeEnabled: isGoatChatResumeEnabled(),
     mcpSetup: {
       preferredClient: user.preferredMcpClient,
       completedAt: user.mcpSetupCompletedAt?.toISOString() ?? null,

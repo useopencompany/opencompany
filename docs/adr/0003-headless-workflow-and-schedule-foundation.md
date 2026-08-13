@@ -60,10 +60,9 @@ Universal Chat is the final deletion gate. OpenCompany, Codex, and Claude Code b
 the same Message command, Conversation, Run stream, approval/answer semantics where compatible,
 and durable reconnect/recovery contract while preserving their engine settings, credentials,
 attachments, skills, reasoning, artifacts, interruption, sandbox continuity, and exactly-once
-behavior. `/api/chat`, its legacy adapter, bespoke coding Message routes, and the Chat feature flag
-remain rollback boundaries until production evidence is green, the rollback window is explicitly
-closed, and #1190 records its designated-workspace authenticated smoke. The 35 known sessionless
-historical Tasks and their read-only compatibility resources are not deleted by this migration.
+behavior. Issue #1203 closed the rollback window after the designated production smoke, and the
+web compatibility paths were deleted. The 35 known sessionless historical Tasks and their read-only
+compatibility resources are not deleted by this migration.
 
 ### Domain and tenancy
 

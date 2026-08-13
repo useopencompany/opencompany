@@ -16,14 +16,11 @@ import {
   GOAT_CHAT_ATTACHMENT_MAX_PER_MESSAGE,
   validateGoatChatAttachmentCandidate,
 } from "@/lib/chat-attachment-formats";
-import { uploadGoatChatAttachmentBlob } from "@/lib/chat-attachment-upload";
 
 // Drag/drop, paste and file-pick attachment handling for the Goat chat
 // composer. Owns the pending state, client-side validation/capability gate, upload lifecycle, window-wide
 // drop interception and the drop-overlay state.
 export function useGoatChatAttachments(opts: {
-  // Blob uploads are scoped to goat-chat/{userWorkosId}/ (enforced server-side).
-  userWorkosId: string;
   // Drives the per-file image/PDF capability gate; read at call time so a model
   // switch applies without re-creating callbacks.
   modelName: string;
@@ -32,17 +29,15 @@ export function useGoatChatAttachments(opts: {
   // Cloud engines can make uploaded files available through their own filesystem even when
   // the gateway model catalog does not advertise native PDF/image message parts.
   capabilities?: { images: boolean; pdf: boolean };
-  // The canonical API returns an opaque attachment id. The legacy uploader additionally returns
-  // private blob locators for compatibility with the rollback transport.
-  upload?: (input: {
+  // The canonical API returns an opaque attachment id.
+  upload: (input: {
     file: File;
     mediaType: string;
-  }) => Promise<{ id?: string; blobUrl?: string; blobPathname?: string; canonical?: boolean }>;
+  }) => Promise<{ id: string; canonical?: boolean }>;
 }) {
-  const { userWorkosId, modelName, enabled = true } = opts;
+  const { modelName, enabled = true, upload } = opts;
   const imagesOverride = opts.capabilities?.images;
   const pdfOverride = opts.capabilities?.pdf;
-  const upload = opts.upload;
   const [attachments, setAttachments] = useState<PendingGoatChatAttachment[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
   const dragCounterRef = useRef(0);
@@ -120,9 +115,7 @@ export function useGoatChatAttachments(opts: {
             status: "uploading",
             ...(validation.kind === "image" ? { previewUrl: URL.createObjectURL(file) } : {}),
           });
-          const uploadPromise = upload
-            ? upload({ file, mediaType: validation.mediaType })
-            : uploadGoatChatAttachmentBlob(userWorkosId, file, validation.mediaType);
+          const uploadPromise = upload({ file, mediaType: validation.mediaType });
           void uploadPromise
             .then((res) => {
               if (mountedRef.current) {
@@ -151,7 +144,7 @@ export function useGoatChatAttachments(opts: {
         return next;
       });
     },
-    [upload, userWorkosId],
+    [upload],
   );
 
   const removeAttachment = useCallback((id: string) => {
