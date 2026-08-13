@@ -23,23 +23,29 @@ import { assertGoatCheckoutEnabled, getGoatStripe } from "./stripe";
 // auto-refill (never loop on a failing card); transient errors keep it enabled
 // and the claim cooldown paces the retry.
 
-export async function maybeTriggerGoatAutoRefill(workspaceId: string) {
+export async function maybeTriggerGoatAutoRefill(
+  workspaceId: string,
+  deps: { db?: any; stripe?: Stripe } = {},
+) {
   try {
-    await ensureGoatMonthlyIncludedUsage(workspaceId);
-    const balance = await getGoatCreditBalanceUsdMicros(workspaceId);
+    await ensureGoatMonthlyIncludedUsage(workspaceId, { db: deps.db });
+    const balance = await getGoatCreditBalanceUsdMicros(workspaceId, deps.db);
     if (balance >= GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS) return;
-    await runGoatAutoRefill(workspaceId);
+    await runGoatAutoRefill(workspaceId, deps);
   } catch (error) {
     console.error(`Goat auto-refill trigger failed for workspace ${workspaceId}.`, error);
   }
 }
 
-export async function runGoatAutoRefill(workspaceId: string) {
+export async function runGoatAutoRefill(
+  workspaceId: string,
+  deps: { db?: any; stripe?: Stripe } = {},
+) {
   assertGoatCheckoutEnabled();
-  const claim = await claimGoatAutoRefill(workspaceId);
+  const claim = await claimGoatAutoRefill(workspaceId, { db: deps.db });
   if (!claim) return { charged: false as const, reason: "not_claimed" as const };
   try {
-    const intent = await getGoatStripe().paymentIntents.create({
+    const intent = await (deps.stripe ?? getGoatStripe()).paymentIntents.create({
       amount: claim.amountCents,
       currency: "usd",
       customer: claim.stripeCustomerId,
@@ -55,11 +61,14 @@ export async function runGoatAutoRefill(workspaceId: string) {
     });
     if (intent.status !== "succeeded") {
       // Off-session charges cannot complete extra authentication steps.
-      await settleGoatAutoRefill({
-        workspaceId,
-        disable: true,
-        error: `Auto-refill charge did not complete (status ${intent.status}).`,
-      });
+      await settleGoatAutoRefill(
+        {
+          workspaceId,
+          disable: true,
+          error: `Auto-refill charge did not complete (status ${intent.status}).`,
+        },
+        { db: deps.db },
+      );
       await captureServerEvent("goat_billing_auto_refill_failed", workspaceId, {
         workspace_id: workspaceId,
         amount_cents: claim.amountCents,
@@ -71,6 +80,7 @@ export async function runGoatAutoRefill(workspaceId: string) {
       workspaceId,
       amountCents: claim.amountCents,
       paymentIntentId: intent.id,
+      db: deps.db,
     });
     if (credit.ok) {
       await captureGoatServerEvent("billing_topup_completed", workspaceId, {
@@ -81,10 +91,10 @@ export async function runGoatAutoRefill(workspaceId: string) {
         balance_cents: goatUsdMicrosToCents(credit.balanceUsdMicros),
       });
     }
-    await settleGoatAutoRefill({ workspaceId });
+    await settleGoatAutoRefill({ workspaceId }, { db: deps.db });
     // Resume any balance-paused ingestion immediately instead of waiting for
     // the hourly reconcile sweep.
-    await releasePendingForWorkspace(workspaceId).catch(() => undefined);
+    await releasePendingForWorkspace(workspaceId, new Date(), deps.db).catch(() => undefined);
     await captureServerEvent("goat_billing_auto_refill_succeeded", workspaceId, {
       workspace_id: workspaceId,
       amount_cents: claim.amountCents,
@@ -92,11 +102,14 @@ export async function runGoatAutoRefill(workspaceId: string) {
     return { charged: true as const };
   } catch (error) {
     const isCardError = error instanceof Stripe.errors.StripeCardError;
-    await settleGoatAutoRefill({
-      workspaceId,
-      disable: isCardError,
-      error: error instanceof Error ? error.message : "Auto-refill charge failed.",
-    }).catch(() => undefined);
+    await settleGoatAutoRefill(
+      {
+        workspaceId,
+        disable: isCardError,
+        error: error instanceof Error ? error.message : "Auto-refill charge failed.",
+      },
+      { db: deps.db },
+    ).catch(() => undefined);
     await captureServerEvent("goat_billing_auto_refill_failed", workspaceId, {
       workspace_id: workspaceId,
       amount_cents: claim.amountCents,
@@ -108,12 +121,12 @@ export async function runGoatAutoRefill(workspaceId: string) {
 
 // Reconcile-cron sweep: covers balance drops recorded by other composition
 // roots, including the runner's ingestion debits.
-export async function sweepGoatAutoRefills(limit = 25) {
-  const candidates = await listGoatAutoRefillCandidates({ limit });
+export async function sweepGoatAutoRefills(limit = 25, deps: { db?: any; stripe?: Stripe } = {}) {
+  const candidates = await listGoatAutoRefillCandidates({ limit, db: deps.db });
   let charged = 0;
   for (const workspaceId of candidates) {
     try {
-      const result = await runGoatAutoRefill(workspaceId);
+      const result = await runGoatAutoRefill(workspaceId, deps);
       if (result.charged) charged += 1;
     } catch (error) {
       console.error(`Goat auto-refill sweep failed for workspace ${workspaceId}.`, error);

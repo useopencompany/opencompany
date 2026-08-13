@@ -10,7 +10,7 @@ duplicating every optional provider variable.
 | `dev` `/goat` | local web | shared auth, integration, billing, Electric, and product values |
 | `dev` `/runner` | local runner | runner tokens, provider credentials, sandbox configuration |
 | `prod` `/goat` | Vercel web | production product and webhook configuration |
-| `prod` `/api` | Render canonical Chat API | database, auth, Auto-routing gateway, Blob, Electric, Redis, and telemetry configuration |
+| `prod` `/api` | Render canonical API | database, auth, billing/Stripe, managed capabilities, Auto-routing gateway, Blob, Electric, Redis, and telemetry configuration |
 | `prod` `/runner` | Render runner | production worker and broker configuration |
 | `prod` `/release` | GitHub Actions | production URLs, project/service IDs, deploy tokens, DB URL |
 | `prod` `/ci/turbo` | GitHub Actions | optional Turborepo remote-cache credentials |
@@ -29,8 +29,9 @@ release variables. Important contracts include:
   token/URL, Electric, managed capabilities, Stripe, X OAuth, cron, Goat PostHog, server and public
   first-party API origins, and canonical Chat flag values.
 - API: direct database, WorkOS session/OAuth and shared cookie domain, the credentialed browser
-  origin allowlist, Vercel AI Gateway for canonical Auto routing, Blob, Electric, Redis, and the
-  runner token/URL for the engine-auth control calls.
+  origin allowlist, billing/Stripe, managed capabilities and cron reconciliation, Vercel AI Gateway
+  for canonical Auto routing, Blob, Electric, Redis, and the runner token/URL for the engine-auth
+  control calls.
 - Runner: database, internal/stream tokens, Goat origin, allowed origins, integration encryption,
   E2B, model providers, GitHub/X integration credentials, Goat PostHog, and Redis values.
 - Release: production DB URL, Vercel/Render credentials and project/service IDs, Goat/API/runner
@@ -50,7 +51,9 @@ enables the canonical Chat transient presentation lane; without it both services
 Postgres streaming and reconnect behavior. The value is server-only and must never be copied to a
 `NEXT_PUBLIC_*` variable.
 
-The Stripe endpoint secret is `GOAT_STRIPE_WEBHOOK_SECRET`; there is no second product webhook.
+The Stripe endpoint secret is `GOAT_STRIPE_WEBHOOK_SECRET` in `prod` `/api`; there is no second
+product webhook. Stripe still calls the unchanged web URL, which streams the signed raw body to the
+API-owned handler.
 Google OAuth uses the direct Goat callback URLs listed in `.env.example`.
 
 ## Local generated values

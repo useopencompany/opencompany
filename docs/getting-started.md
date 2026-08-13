@@ -31,8 +31,10 @@ development values, and `bun run setup:stripe` refreshes local Stripe configurat
 `bun run dev` and `bun run dev:web` start the same current stack:
 
 - the OpenCompany web app, normally at `https://localhost:3443`;
+- the canonical API, normally at `http://localhost:3001`;
 - the runner, normally at `http://localhost:3040`;
-- Stripe CLI forwarding to the web app's unchanged `/api/stripe/webhook` route;
+- Stripe CLI forwarding to the web app's unchanged `/api/stripe/webhook` relay, which streams to
+  the API-owned handler;
 - Electric and the local HTTPS/tunnel helpers used by integrations.
 
 Use `bun run dev:logs -- --source web --tail 100` or `--source runner` to inspect the gitignored

@@ -1,5 +1,6 @@
 "use client";
 
+import type { BillingOverviewDto } from "@opencompany/protocol";
 import { toast } from "@opencompany/ui/components/sonner";
 import { BadgeCheck, CreditCard, Loader2, RefreshCw, Users, Wallet } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
@@ -11,52 +12,7 @@ import {
   setGoatAutoRefillAction,
 } from "@/lib/billing/actions";
 
-export type GoatBillingPanelData = {
-  plan: "hobby" | "pro";
-  subscriptionStatus: string | null;
-  cancelAtPeriodEnd: boolean;
-  currentPeriodEnd: string | null;
-  includedUsagePeriodEnd: string | null;
-  paymentNeedsAttention: boolean;
-  proMonthlyPriceCents: number;
-  hobbyIncludedUsageCents: number;
-  includedUsagePerSeatCents: number;
-  seatQuantity: number;
-  memberCount: number;
-  memberCap: number;
-  creditBalanceUsdMicros: number;
-  includedBalanceUsdMicros: number;
-  topUpBalanceUsdMicros: number;
-  spendThisMonthUsdMicros: number;
-  spendThisMonthByCategory: {
-    chat: number;
-    ingestion: number;
-    capabilities: number;
-  };
-  recentActivity: Array<{
-    id: number;
-    source: string;
-    amountUsdMicros: number;
-    providerCostUsdMicros: number;
-    platformFeeUsdMicros: number;
-    capabilityAction: string | null;
-    isAutoRefill: boolean;
-    createdAt: string;
-  }>;
-  lowBalanceWarnUsdMicros: number;
-  topUpAmountsCents: number[];
-  defaultTopUpCents: number;
-  minTopUpCents: number;
-  maxTopUpCents: number;
-  autoRefillMonthlyMaxCents: number;
-  autoRefill: {
-    enabled: boolean;
-    amountCents: number;
-    hasPaymentMethod: boolean;
-    lastError: string | null;
-  };
-  isAdmin: boolean;
-};
+export type GoatBillingPanelData = BillingOverviewDto;
 
 export function GoatBillingPanel({
   data,
@@ -122,7 +78,7 @@ export function GoatBillingPanel({
       );
       return;
     }
-    run(() => createGoatCreditTopUpAction(cents));
+    run(() => createGoatCreditTopUpAction(cents, crypto.randomUUID()));
   };
 
   const saveAutoRefill = (enabled: boolean) => {
@@ -135,7 +91,10 @@ export function GoatBillingPanel({
       return;
     }
     startTransition(async () => {
-      const result = await setGoatAutoRefillAction({ enabled, amountCents: cents });
+      const result = await setGoatAutoRefillAction(
+        { enabled, amountCents: cents },
+        crypto.randomUUID(),
+      );
       if (!result.ok) {
         toast.error(result.error);
         return;
@@ -192,7 +151,7 @@ export function GoatBillingPanel({
               <button
                 type="button"
                 disabled={isPending}
-                onClick={() => run(createGoatBillingPortalAction)}
+                onClick={() => run(() => createGoatBillingPortalAction(crypto.randomUUID()))}
                 className="inline-flex shrink-0 items-center justify-center gap-2 rounded-md border border-border bg-canvas px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:opacity-50"
               >
                 {isPending ? (
@@ -206,7 +165,7 @@ export function GoatBillingPanel({
               <button
                 type="button"
                 disabled={isPending}
-                onClick={() => run(createGoatProCheckoutAction)}
+                onClick={() => run(() => createGoatProCheckoutAction(crypto.randomUUID()))}
                 className="inline-flex shrink-0 items-center justify-center gap-2 rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-50"
               >
                 {isPending ? <Loader2 size={13} className="animate-spin" /> : null}
@@ -275,7 +234,9 @@ export function GoatBillingPanel({
                   key={amountCents}
                   type="button"
                   disabled={isPending}
-                  onClick={() => run(() => createGoatCreditTopUpAction(amountCents))}
+                  onClick={() =>
+                    run(() => createGoatCreditTopUpAction(amountCents, crypto.randomUUID()))
+                  }
                   className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:opacity-50 ${
                     amountCents === data.defaultTopUpCents
                       ? "border-ink/30 bg-canvas"
@@ -426,7 +387,7 @@ export function GoatBillingPanel({
           <div className="overflow-hidden rounded-lg border border-border">
             {data.recentActivity.map((entry, index) => (
               <div
-                key={entry.id}
+                key={entry.activityId}
                 className={`flex items-center justify-between gap-4 px-3 py-2.5 ${
                   index > 0 ? "border-t border-border" : ""
                 }`}

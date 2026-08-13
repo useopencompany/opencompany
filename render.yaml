@@ -43,6 +43,18 @@ services:
       # which is why the API also needs the canonical app URL.
       - key: GOAT_NEXT_PUBLIC_APP_URL
         sync: false
+      # Billing/usage commands and read models, the Stripe webhook, and the
+      # hourly reconcile handler moved to the API in the #1203 5b1 cutover.
+      - key: GOAT_STRIPE_API_KEY
+        sync: false
+      - key: GOAT_STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: GOAT_STRIPE_CHECKOUT_ENABLED
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+      - key: MONID_API_KEY
+        sync: false
       - key: GITHUB_INTEGRATION_APP_ID
         sync: false
       - key: GITHUB_INTEGRATION_APP_PRIVATE_KEY

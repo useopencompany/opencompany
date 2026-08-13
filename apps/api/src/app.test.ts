@@ -97,6 +97,7 @@ describe("canonical Hono API", () => {
       repoConfigs: fakeRepoConfigs(),
       integrationAccounts: fakeIntegrationAccounts(),
       engineAuth: fakeEngineAuth(),
+      billing: fakeBilling(),
       authenticate: async () => {
         throw new ApiError(401, "authentication_required", "Authentication required.");
       },
@@ -2311,6 +2312,95 @@ describe("canonical Hono API", () => {
     });
     expect(completeInfisicalAuth).toHaveBeenCalledTimes(1);
   });
+
+  it("serves authorized billing read models without internal ledger or Stripe objects", async () => {
+    const getOverview = vi.fn(async () => ({
+      creditBalanceUsdMicros: 3_000_000,
+      includedBalanceUsdMicros: 1_000_000,
+      topUpBalanceUsdMicros: 2_000_000,
+      plan: "pro" as const,
+      subscriptionStatus: "active",
+      seatQuantity: 2,
+      includedUsagePeriodEnd: "2026-09-01T00:00:00.000Z",
+      cancelAtPeriodEnd: false,
+      currentPeriodEnd: "2026-09-01T00:00:00.000Z",
+      paymentNeedsAttention: false,
+      proMonthlyPriceCents: 2_000,
+      hobbyIncludedUsageCents: 100,
+      memberCount: 2,
+      memberCap: 10,
+      spendThisMonthUsdMicros: 500_000,
+      spendThisMonthByCategory: { chat: 500_000, ingestion: 0, capabilities: 0 },
+      recentActivity: [
+        {
+          activityId: "billing_activity_safe",
+          source: "chat_model_usage",
+          amountUsdMicros: -500_000,
+          providerCostUsdMicros: 500_000,
+          platformFeeUsdMicros: 0,
+          capabilityAction: null,
+          isAutoRefill: false,
+          createdAt: "2026-08-13T12:00:00.000Z",
+        },
+      ],
+      lowBalanceWarnUsdMicros: 1_000_000,
+      includedUsagePerSeatCents: 2_000,
+      topUpAmountsCents: [1_000],
+      defaultTopUpCents: 1_000,
+      minTopUpCents: 500,
+      maxTopUpCents: 50_000,
+      autoRefillMonthlyMaxCents: 50_000,
+      autoRefill: {
+        enabled: true,
+        amountCents: 1_000,
+        hasPaymentMethod: true,
+        lastError: null,
+      },
+      isAdmin: true,
+    }));
+    const app = testApp(fakeRepository(), {
+      billing: { ...fakeBilling(), getOverview },
+    });
+
+    const response = await app.request("/v1/billing");
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(body.data).toMatchObject({
+      plan: "pro",
+      creditBalanceUsdMicros: 3_000_000,
+      recentActivity: [{ activityId: "billing_activity_safe" }],
+    });
+    expect(JSON.stringify(body)).not.toMatch(/stripeCustomerId|paymentMethodId|ledgerId/u);
+    expect(getOverview).toHaveBeenCalledWith(actor);
+  });
+
+  it("forwards the required idempotency key to billing commands", async () => {
+    const createCreditTopUp = vi.fn(async () => ({
+      redirectUrl: "https://checkout.stripe.test/session",
+    }));
+    const app = testApp(fakeRepository(), {
+      billing: { ...fakeBilling(), createCreditTopUp },
+    });
+    const response = await app.request("/v1/billing/top-ups", {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "billing-command-1" },
+      body: JSON.stringify({ amountCents: 1_000 }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(createCreditTopUp).toHaveBeenCalledWith(actor, {
+      amountCents: 1_000,
+      idempotencyKey: "billing-command-1",
+    });
+    const missingKey = await app.request("/v1/billing/top-ups", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ amountCents: 1_000 }),
+    });
+    expect(missingKey.status).toBe(400);
+    expect(createCreditTopUp).toHaveBeenCalledTimes(1);
+  });
 });
 
 function testApp(
@@ -2333,6 +2423,7 @@ function testApp(
     repoConfigs: fakeRepoConfigs(),
     integrationAccounts: fakeIntegrationAccounts(),
     engineAuth: fakeEngineAuth(),
+    billing: fakeBilling(),
     authenticate: async () => ({ actor }),
     defaultModel: "provider/default",
     ...overrides,
@@ -2426,6 +2517,32 @@ function fakeFeedback(): Parameters<typeof createApiApp>[0]["feedback"] {
   return {
     submit: async () => {
       throw new Error("Unexpected feedback submission.");
+    },
+  };
+}
+
+function fakeBilling(): Parameters<typeof createApiApp>[0]["billing"] {
+  return {
+    getOverview: async () => {
+      throw new Error("Unexpected billing overview read.");
+    },
+    getUsage: async () => {
+      throw new Error("Unexpected billing usage read.");
+    },
+    getBalance: async () => {
+      throw new Error("Unexpected billing balance read.");
+    },
+    createCreditTopUp: async () => {
+      throw new Error("Unexpected billing top-up.");
+    },
+    createProCheckout: async () => {
+      throw new Error("Unexpected billing subscription checkout.");
+    },
+    createBillingPortal: async () => {
+      throw new Error("Unexpected billing portal session.");
+    },
+    updateAutoRefill: async () => {
+      throw new Error("Unexpected billing auto-refill update.");
     },
   };
 }

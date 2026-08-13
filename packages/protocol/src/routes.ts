@@ -6,6 +6,11 @@ import {
   AttachmentUploadBodySchema,
   AttachmentUploadEnvelopeSchema,
   AttioAccountStateEnvelopeSchema,
+  BillingAutoRefillEnvelopeSchema,
+  BillingBalanceEnvelopeSchema,
+  BillingOverviewEnvelopeSchema,
+  BillingRedirectEnvelopeSchema,
+  BillingUsageEnvelopeSchema,
   BrainAssetMutationEnvelopeSchema,
   BrainAssetReplaceBodySchema,
   BrainAssetUploadBodySchema,
@@ -37,6 +42,7 @@ import {
   ConfirmImessagePairingBodySchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
+  CreateBillingTopUpBodySchema,
   CreateBrainDocumentBodySchema,
   CreateBrainFolderBodySchema,
   CreateBrowserProfileBodySchema,
@@ -111,6 +117,7 @@ import {
   TaskSchedulePageSchema,
   TaskScheduleUpdateEnvelopeSchema,
   TaskSummaryEnvelopeSchema,
+  UpdateBillingAutoRefillBodySchema,
   UpdateBrainDocumentBodySchema,
   UpdateConversationBodySchema,
   UpdateConversationEnvelopeSchema,
@@ -2038,6 +2045,122 @@ export const deleteInfisicalAuthRoute = createRoute({
   },
 });
 
+export const getBillingOverviewRoute = createRoute({
+  method: "get",
+  path: "/v1/billing",
+  tags: ["Billing"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Authorized workspace billing overview.",
+      content: { "application/json": { schema: BillingOverviewEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getBillingUsageRoute = createRoute({
+  method: "get",
+  path: "/v1/billing/usage",
+  tags: ["Billing"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Authorized workspace usage read model.",
+      content: { "application/json": { schema: BillingUsageEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getBillingBalanceRoute = createRoute({
+  method: "get",
+  path: "/v1/billing/balance",
+  tags: ["Billing"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Authorized workspace credit balance.",
+      content: { "application/json": { schema: BillingBalanceEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+const billingCommandHeaders = z.object({ "idempotency-key": z.string().min(1).max(200) });
+
+export const createBillingTopUpRoute = createRoute({
+  method: "post",
+  path: "/v1/billing/top-ups",
+  tags: ["Billing"],
+  security: actorSecurity,
+  request: {
+    headers: billingCommandHeaders,
+    body: {
+      required: true,
+      content: { "application/json": { schema: CreateBillingTopUpBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Idempotent Stripe credit top-up Checkout session created.",
+      content: { "application/json": { schema: BillingRedirectEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createBillingSubscriptionCheckoutRoute = createRoute({
+  method: "post",
+  path: "/v1/billing/subscription-checkouts",
+  tags: ["Billing"],
+  security: actorSecurity,
+  request: { headers: billingCommandHeaders },
+  responses: {
+    201: {
+      description: "Idempotent Stripe Pro subscription Checkout session created.",
+      content: { "application/json": { schema: BillingRedirectEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createBillingPortalSessionRoute = createRoute({
+  method: "post",
+  path: "/v1/billing/portal-sessions",
+  tags: ["Billing"],
+  security: actorSecurity,
+  request: { headers: billingCommandHeaders },
+  responses: {
+    201: {
+      description: "Idempotent Stripe billing portal session created.",
+      content: { "application/json": { schema: BillingRedirectEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const updateBillingAutoRefillRoute = createRoute({
+  method: "put",
+  path: "/v1/billing/auto-refill",
+  tags: ["Billing"],
+  security: actorSecurity,
+  request: {
+    headers: billingCommandHeaders,
+    body: {
+      required: true,
+      content: { "application/json": { schema: UpdateBillingAutoRefillBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Workspace auto-refill configuration updated idempotently.",
+      content: { "application/json": { schema: BillingAutoRefillEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export type V1RouteHandlers = {
   listTasks: RouteHandler<typeof listTasksRoute>;
   createTask: RouteHandler<typeof createTaskRoute>;
@@ -2142,6 +2265,13 @@ export type V1RouteHandlers = {
   startInfisicalAuth: RouteHandler<typeof startInfisicalAuthRoute>;
   completeInfisicalAuth: RouteHandler<typeof completeInfisicalAuthRoute>;
   deleteInfisicalAuth: RouteHandler<typeof deleteInfisicalAuthRoute>;
+  getBillingOverview: RouteHandler<typeof getBillingOverviewRoute>;
+  getBillingUsage: RouteHandler<typeof getBillingUsageRoute>;
+  getBillingBalance: RouteHandler<typeof getBillingBalanceRoute>;
+  createBillingTopUp: RouteHandler<typeof createBillingTopUpRoute>;
+  createBillingSubscriptionCheckout: RouteHandler<typeof createBillingSubscriptionCheckoutRoute>;
+  createBillingPortalSession: RouteHandler<typeof createBillingPortalSessionRoute>;
+  updateBillingAutoRefill: RouteHandler<typeof updateBillingAutoRefillRoute>;
 };
 
 export function createV1Router(
@@ -2263,6 +2393,13 @@ export function createV1Router(
       .openapi(startInfisicalAuthRoute, handlers.startInfisicalAuth)
       .openapi(completeInfisicalAuthRoute, handlers.completeInfisicalAuth)
       .openapi(deleteInfisicalAuthRoute, handlers.deleteInfisicalAuth)
+      .openapi(getBillingOverviewRoute, handlers.getBillingOverview)
+      .openapi(getBillingUsageRoute, handlers.getBillingUsage)
+      .openapi(getBillingBalanceRoute, handlers.getBillingBalance)
+      .openapi(createBillingTopUpRoute, handlers.createBillingTopUp)
+      .openapi(createBillingSubscriptionCheckoutRoute, handlers.createBillingSubscriptionCheckout)
+      .openapi(createBillingPortalSessionRoute, handlers.createBillingPortalSession)
+      .openapi(updateBillingAutoRefillRoute, handlers.updateBillingAutoRefill)
   );
 }
 
@@ -3267,4 +3404,78 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   deleteInfisicalAuth: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
+  getBillingOverview: (c) =>
+    c.json(
+      {
+        data: {
+          creditBalanceUsdMicros: 0,
+          includedBalanceUsdMicros: 0,
+          topUpBalanceUsdMicros: 0,
+          plan: "hobby" as const,
+          subscriptionStatus: null,
+          seatQuantity: 0,
+          includedUsagePeriodEnd: null,
+          cancelAtPeriodEnd: false,
+          currentPeriodEnd: null,
+          paymentNeedsAttention: false,
+          proMonthlyPriceCents: 2_000,
+          hobbyIncludedUsageCents: 100,
+          memberCount: 1,
+          memberCap: 1,
+          spendThisMonthUsdMicros: 0,
+          spendThisMonthByCategory: { chat: 0, ingestion: 0, capabilities: 0 },
+          recentActivity: [],
+          lowBalanceWarnUsdMicros: 1_000_000,
+          includedUsagePerSeatCents: 2_000,
+          topUpAmountsCents: [1_000],
+          defaultTopUpCents: 1_000,
+          minTopUpCents: 500,
+          maxTopUpCents: 50_000,
+          autoRefillMonthlyMaxCents: 50_000,
+          autoRefill: {
+            enabled: false,
+            amountCents: 1_000,
+            hasPaymentMethod: false,
+            lastError: null,
+          },
+          isAdmin: true,
+        },
+        meta,
+      },
+      200,
+    ),
+  getBillingUsage: (c) =>
+    c.json(
+      {
+        data: {
+          breakdown: [],
+          ingestedThisMonth: 0,
+          pending: 0,
+          creditBalanceUsdMicros: 0,
+          providers: [],
+          recent: [],
+        },
+        meta,
+      },
+      200,
+    ),
+  getBillingBalance: (c) =>
+    c.json(
+      {
+        data: {
+          balanceUsdMicros: 0,
+          lowBalanceWarnUsdMicros: 1_000_000,
+          enforcementEnabled: true,
+        },
+        meta,
+      },
+      200,
+    ),
+  createBillingTopUp: (c) =>
+    c.json({ data: { redirectUrl: "https://checkout.stripe.com/session" }, meta }, 201),
+  createBillingSubscriptionCheckout: (c) =>
+    c.json({ data: { redirectUrl: "https://checkout.stripe.com/subscription" }, meta }, 201),
+  createBillingPortalSession: (c) =>
+    c.json({ data: { redirectUrl: "https://billing.stripe.com/session" }, meta }, 201),
+  updateBillingAutoRefill: (c) => c.json({ data: { updated: true as const }, meta }, 200),
 };

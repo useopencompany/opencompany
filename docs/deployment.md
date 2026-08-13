@@ -79,8 +79,8 @@ but it is not the active production streaming path.
 
 ## Stripe production endpoint
 
-The live Stripe webhook must target `${PRODUCTION_GOAT_URL}/api/stripe/webhook` and use the same
-signing secret as `GOAT_STRIPE_WEBHOOK_SECRET` in the web app. After billing or deployment changes, send a
-signed probe and replay a representative live event, confirm a `2xx`, and verify idempotent
-processing in `goat.stripe_webhook_events`. The billing compatibility path intentionally continues
-to update retained public-schema customer/subscription/credit tables.
+The live Stripe webhook remains `${PRODUCTION_GOAT_URL}/api/stripe/webhook`; do not change the
+Stripe Dashboard URL. Web streams the signed raw body to the API-owned handler, whose
+`GOAT_STRIPE_WEBHOOK_SECRET` lives in Infisical `prod` `/api`. The handler keeps Goat subscription,
+credit-ledger, and auto-refill idempotency authoritative and continues updating the retained
+public-schema billing tables for legacy product events.

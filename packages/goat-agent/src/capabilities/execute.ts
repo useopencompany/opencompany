@@ -486,6 +486,7 @@ export async function settleManagedCapabilityRun(input: {
     code: string;
     message: string;
   };
+  db?: any;
 }) {
   const providerHttpStatus = input.providerRun.providerResponse?.httpStatus ?? null;
   const success =
@@ -500,6 +501,7 @@ export async function settleManagedCapabilityRun(input: {
         id: input.auditRun.id,
         errorCode: input.forceFailure.code,
         errorMessage: input.forceFailure.message,
+        db: input.db,
       });
     }
     return {
@@ -534,6 +536,7 @@ export async function settleManagedCapabilityRun(input: {
         capabilityAction: input.auditRun.action,
         capabilityRunId: input.auditRun.id,
       },
+      db: input.db,
     });
   }
 
@@ -559,6 +562,7 @@ export async function settleManagedCapabilityRun(input: {
       ? null
       : (input.forceFailure?.message ??
         "The paid capability provider did not complete the request."),
+    db: input.db,
   });
   if (settledRow) {
     const metricAttributes = {
@@ -582,7 +586,7 @@ export async function settleManagedCapabilityRun(input: {
     }
   }
   if (totalCostUsdMicros > 0) {
-    void maybeTriggerGoatAutoRefill(input.auditRun.workspaceId);
+    void maybeTriggerGoatAutoRefill(input.auditRun.workspaceId, { db: input.db });
   }
   return {
     success,
