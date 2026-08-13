@@ -21,12 +21,20 @@ import {
   BrainSourceMutationEnvelopeSchema,
   BrainSourceOptionsBodySchema,
   BrainSourceOptionsEnvelopeSchema,
+  BrowserProfileDeleteEnvelopeSchema,
+  BrowserProfileEnvelopeSchema,
+  BrowserProfileListEnvelopeSchema,
+  BrowserProfileLiveViewEnvelopeSchema,
+  BrowserProfileLoginCompleteEnvelopeSchema,
+  BrowserProfileLoginSessionEnvelopeSchema,
   CancelRunEnvelopeSchema,
+  CompleteBrowserProfileLoginBodySchema,
   ConfirmBrainImportBodySchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
   CreateBrainDocumentBodySchema,
   CreateBrainFolderBodySchema,
+  CreateBrowserProfileBodySchema,
   CreateMessageBodySchema,
   CreateMessageEnvelopeSchema,
   CreateSkillBodySchema,
@@ -584,6 +592,110 @@ export const listBrainSourceOptionsRoute = createRoute({
     200: {
       description: "Provider resources the acting user may select for a Brain source.",
       content: { "application/json": { schema: BrainSourceOptionsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listBrowserProfilesRoute = createRoute({
+  method: "get",
+  path: "/v1/browser-profiles",
+  tags: ["Browser profiles"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "The acting user's authenticated browser profiles.",
+      content: { "application/json": { schema: BrowserProfileListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createBrowserProfileRoute = createRoute({
+  method: "post",
+  path: "/v1/browser-profiles",
+  tags: ["Browser profiles"],
+  security: actorSecurity,
+  request: {
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: CreateBrowserProfileBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Browser profile created or replayed.",
+      content: { "application/json": { schema: BrowserProfileEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deleteBrowserProfileRoute = createRoute({
+  method: "delete",
+  path: "/v1/browser-profiles/{profileId}",
+  tags: ["Browser profiles"],
+  security: actorSecurity,
+  request: { params: z.object({ profileId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Browser profile, its provider context, and any active session removed.",
+      content: { "application/json": { schema: BrowserProfileDeleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const startBrowserProfileLoginRoute = createRoute({
+  method: "post",
+  path: "/v1/browser-profiles/{profileId}/login-sessions",
+  tags: ["Browser profiles"],
+  security: actorSecurity,
+  request: { params: z.object({ profileId: ResourceIdSchema }) },
+  responses: {
+    201: {
+      description: "Interactive login session started with a short-lived live-view URL.",
+      content: { "application/json": { schema: BrowserProfileLoginSessionEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const completeBrowserProfileLoginRoute = createRoute({
+  method: "post",
+  path: "/v1/browser-profiles/{profileId}/complete-login",
+  tags: ["Browser profiles"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ profileId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: CompleteBrowserProfileLoginBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Login session finished; the profile is connected for agent use.",
+      content: { "application/json": { schema: BrowserProfileLoginCompleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getBrowserProfileLiveViewRoute = createRoute({
+  method: "get",
+  path: "/v1/browser-profiles/{profileId}/live-view",
+  tags: ["Browser profiles"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ profileId: ResourceIdSchema }),
+    query: z.object({ sessionId: z.string().min(1).max(128) }),
+  },
+  responses: {
+    200: {
+      description: "Short-lived live-view URL for the owner's active browser session.",
+      content: { "application/json": { schema: BrowserProfileLiveViewEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -1342,6 +1454,12 @@ export type V1RouteHandlers = {
   setBrainSource: RouteHandler<typeof setBrainSourceRoute>;
   deleteBrainSource: RouteHandler<typeof deleteBrainSourceRoute>;
   listBrainSourceOptions: RouteHandler<typeof listBrainSourceOptionsRoute>;
+  listBrowserProfiles: RouteHandler<typeof listBrowserProfilesRoute>;
+  createBrowserProfile: RouteHandler<typeof createBrowserProfileRoute>;
+  deleteBrowserProfile: RouteHandler<typeof deleteBrowserProfileRoute>;
+  startBrowserProfileLogin: RouteHandler<typeof startBrowserProfileLoginRoute>;
+  completeBrowserProfileLogin: RouteHandler<typeof completeBrowserProfileLoginRoute>;
+  getBrowserProfileLiveView: RouteHandler<typeof getBrowserProfileLiveViewRoute>;
   startBrainImport: RouteHandler<typeof startBrainImportRoute>;
   confirmBrainImport: RouteHandler<typeof confirmBrainImportRoute>;
   cancelBrainImport: RouteHandler<typeof cancelBrainImportRoute>;
@@ -1419,6 +1537,12 @@ export function createV1Router(
     .openapi(setBrainSourceRoute, handlers.setBrainSource)
     .openapi(deleteBrainSourceRoute, handlers.deleteBrainSource)
     .openapi(listBrainSourceOptionsRoute, handlers.listBrainSourceOptions)
+    .openapi(listBrowserProfilesRoute, handlers.listBrowserProfiles)
+    .openapi(createBrowserProfileRoute, handlers.createBrowserProfile)
+    .openapi(deleteBrowserProfileRoute, handlers.deleteBrowserProfile)
+    .openapi(startBrowserProfileLoginRoute, handlers.startBrowserProfileLogin)
+    .openapi(completeBrowserProfileLoginRoute, handlers.completeBrowserProfileLogin)
+    .openapi(getBrowserProfileLiveViewRoute, handlers.getBrowserProfileLiveView)
     .openapi(startBrainImportRoute, handlers.startBrainImport)
     .openapi(confirmBrainImportRoute, handlers.confirmBrainImport)
     .openapi(cancelBrainImportRoute, handlers.cancelBrainImport)
@@ -1566,6 +1690,18 @@ const placeholderBrainFolder = {
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
 };
+const placeholderBrowserProfile = {
+  id: "browser_profile_contract",
+  name: "Contract profile",
+  siteHost: "example.com",
+  allowedHosts: ["example.com"],
+  status: "pending_login" as const,
+  active: false,
+  lastUsedAt: null,
+  createdAt: placeholderTime,
+  updatedAt: placeholderTime,
+};
+
 const placeholderBrainDocument = {
   id: "brain_document_contract",
   brainId: "contract-note",
@@ -1891,6 +2027,32 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   listBrainSourceOptions: (c) => c.json({ data: { provider: "github", repos: [] }, meta }, 200),
+  listBrowserProfiles: (c) => c.json({ data: [], meta }, 200),
+  createBrowserProfile: (c) =>
+    c.json({ data: { profile: placeholderBrowserProfile, replayed: false }, meta }, 201),
+  deleteBrowserProfile: (c) =>
+    c.json({ data: { profileId: "browser_profile_contract", deleted: true as const }, meta }, 200),
+  startBrowserProfileLogin: (c) =>
+    c.json(
+      {
+        data: {
+          sessionId: "session_contract",
+          liveViewUrl: "https://example.com/live-view",
+        },
+        meta,
+      },
+      201,
+    ),
+  completeBrowserProfileLogin: (c) =>
+    c.json(
+      {
+        data: { profileId: "browser_profile_contract", status: "connected" as const },
+        meta,
+      },
+      200,
+    ),
+  getBrowserProfileLiveView: (c) =>
+    c.json({ data: { liveViewUrl: "https://example.com/live-view" }, meta }, 200),
   startBrainImport: (c) =>
     c.json(
       {

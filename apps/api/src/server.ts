@@ -16,6 +16,7 @@ import { PostgresTaskRepository } from "@opencompany/db/task-repository";
 import { resolvePersistedAutoModelRouting } from "@opencompany/goat-agent/application/persisted-auto-model-routing";
 import { GoatBrainImportApplicationService } from "@opencompany/goat-agent/brain-imports";
 import { GoatBrainSourceApplicationService } from "@opencompany/goat-agent/brain-sources";
+import { GoatBrowserProfileApplicationService } from "@opencompany/goat-agent/browser-profiles/service";
 import { getGoatAvailableHarnessTools } from "@opencompany/goat-agent/integrations/google-data";
 import { createGoatSkillImportResolver } from "@opencompany/goat-agent/skill-import";
 import {
@@ -70,6 +71,7 @@ const knowledgeRepository = new PostgresKnowledgeRepository(database.db);
 const knowledge = new KnowledgeApplicationService(knowledgeRepository);
 const brainSources = new GoatBrainSourceApplicationService(database.db);
 const brainImports = new GoatBrainImportApplicationService(database.db, brainSources);
+const browserProfiles = new GoatBrowserProfileApplicationService(database.db);
 const skillImports = new SkillImportApplicationService(
   knowledgeRepository,
   createGoatSkillImportResolver(),
@@ -85,6 +87,7 @@ const app = createApiApp({
   knowledge,
   brainSources,
   brainImports,
+  browserProfiles,
   skillImports,
   brainAssets: createBrainAssetService({ db: database.db, knowledge }),
   attachments: createAttachmentUploadService({ repository: attachmentRepository }),

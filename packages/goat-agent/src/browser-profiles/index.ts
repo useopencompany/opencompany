@@ -16,6 +16,10 @@ import {
 } from "@opencompany/db/goat-schema";
 import { and, desc, eq, isNull } from "drizzle-orm";
 
+// The API composition root passes its own pooled client; runner and legacy web callers keep the
+// process-global client.
+type DbLike = any;
+
 const COMMON_AUTH_HOSTS = [
   "accounts.google.com",
   "login.microsoftonline.com",
@@ -73,8 +77,11 @@ export function browserProfilesAvailable() {
   return browserProfilesEnabled() && !browserProfilesKilled();
 }
 
-export async function listBrowserProfilesForUser(userWorkosId: string) {
-  const rows = await getDb()
+export async function listBrowserProfilesForUser(
+  userWorkosId: string,
+  db: DbLike = getDb(),
+): Promise<BrowserProfileView[]> {
+  const rows = await db
     .select()
     .from(goatBrowserProfiles)
     .where(eq(goatBrowserProfiles.userWorkosId, userWorkosId))
@@ -110,13 +117,16 @@ export async function createBrowserProfile(input: {
   userWorkosId: string;
   name: string;
   siteUrl: string;
+  profileId?: string;
+  db?: DbLike;
 }) {
   assertBrowserProfilesAvailable();
+  const db = input.db ?? getDb();
   const name = normalizeProfileName(input.name);
   const siteHost = normalizeBrowserProfileSiteHost(input.siteUrl);
   assertAllowedProfileHost(siteHost);
   const allowedHosts = defaultAllowedBrowserProfileHosts(siteHost);
-  const profileId = randomUUID();
+  const profileId = input.profileId ?? randomUUID();
   const context = await browserbase().contexts.create(browserbaseProjectBody());
 
   try {
@@ -125,7 +135,7 @@ export async function createBrowserProfile(input: {
       profileId,
       contextId: context.id,
     });
-    const [row] = await getDb()
+    const [row] = await db
       .insert(goatBrowserProfiles)
       .values({
         id: profileId,
@@ -148,11 +158,16 @@ export async function createBrowserProfile(input: {
   }
 }
 
-export async function createLoginSession(input: { userWorkosId: string; profileId: string }) {
+export async function createLoginSession(input: {
+  userWorkosId: string;
+  profileId: string;
+  db?: DbLike;
+}) {
   assertBrowserProfilesAvailable();
-  const profile = await loadOwnedProfile(input.userWorkosId, input.profileId);
+  const db = input.db ?? getDb();
+  const profile = await loadOwnedProfile(input.userWorkosId, input.profileId, db);
   const contextId = decryptBrowserbaseContextId(profile);
-  const locked = await claimProfileSession(input.userWorkosId, input.profileId);
+  const locked = await claimProfileSession(input.userWorkosId, input.profileId, db);
   if (!locked) throw new Error("This browser profile already has an active session.");
 
   let browserbaseSessionId: string | null = null;
@@ -162,7 +177,7 @@ export async function createLoginSession(input: { userWorkosId: string; profileI
     );
     browserbaseSessionId = session.id;
     const live = await browserbase().sessions.debug(session.id);
-    await getDb()
+    await db
       .update(goatBrowserProfiles)
       .set({
         activeSessionId: session.id,
@@ -181,6 +196,7 @@ export async function createLoginSession(input: { userWorkosId: string; profileI
       browserbaseSessionId: session.id,
       kind: "login",
       startedAt: new Date(session.startedAt ?? Date.now()),
+      db,
     });
     return {
       sessionId: session.id,
@@ -188,7 +204,7 @@ export async function createLoginSession(input: { userWorkosId: string; profileI
     };
   } catch (error) {
     if (browserbaseSessionId) await requestSessionRelease(browserbaseSessionId);
-    await releaseProfileSession(input.userWorkosId, input.profileId);
+    await releaseProfileSession(input.userWorkosId, input.profileId, undefined, db);
     throw error;
   }
 }
@@ -197,15 +213,17 @@ export async function completeLoginSession(input: {
   userWorkosId: string;
   profileId: string;
   sessionId: string;
+  db?: DbLike;
 }) {
   assertBrowserProfilesAvailable();
-  const profile = await loadOwnedProfile(input.userWorkosId, input.profileId);
+  const db = input.db ?? getDb();
+  const profile = await loadOwnedProfile(input.userWorkosId, input.profileId, db);
   if (profile.activeSessionId !== input.sessionId) {
     throw new Error("This login session is no longer active.");
   }
   await requestSessionRelease(input.sessionId);
   const now = new Date();
-  await getDb()
+  await db
     .update(goatBrowserProfiles)
     .set({
       status: "connected",
@@ -224,6 +242,7 @@ export async function completeLoginSession(input: {
     profileId: input.profileId,
     browserbaseSessionId: input.sessionId,
     endedAt: now,
+    db,
   });
   return { ok: true };
 }
@@ -373,9 +392,14 @@ export async function endAgentSession(input: {
   });
 }
 
-export async function deleteBrowserProfile(input: { userWorkosId: string; profileId: string }) {
+export async function deleteBrowserProfile(input: {
+  userWorkosId: string;
+  profileId: string;
+  db?: DbLike;
+}) {
   assertBrowserProfilesAvailable();
-  const profile = await loadOwnedProfile(input.userWorkosId, input.profileId);
+  const db = input.db ?? getDb();
+  const profile = await loadOwnedProfile(input.userWorkosId, input.profileId, db);
   if (profile.activeSessionId) {
     await requestSessionRelease(profile.activeSessionId);
   }
@@ -383,7 +407,7 @@ export async function deleteBrowserProfile(input: { userWorkosId: string; profil
   await browserbase()
     .contexts.delete(contextId)
     .catch(() => undefined);
-  await getDb()
+  await db
     .delete(goatBrowserProfiles)
     .where(
       and(
@@ -398,8 +422,9 @@ export async function resolveLiveViewUrl(input: {
   userWorkosId: string;
   profileId: string;
   sessionId: string;
+  db?: DbLike;
 }) {
-  const profile = await loadOwnedProfile(input.userWorkosId, input.profileId);
+  const profile = await loadOwnedProfile(input.userWorkosId, input.profileId, input.db ?? getDb());
   if (
     profile.activeSessionId !== input.sessionId &&
     profile.lastLoginSessionId !== input.sessionId
@@ -488,8 +513,8 @@ function browserProfileAad(userWorkosId: string, profileId: string) {
   return buildAad({ userWorkosId, profileId });
 }
 
-async function loadOwnedProfile(userWorkosId: string, profileId: string) {
-  const [profile] = await getDb()
+async function loadOwnedProfile(userWorkosId: string, profileId: string, db: DbLike = getDb()) {
+  const [profile] = await db
     .select()
     .from(goatBrowserProfiles)
     .where(
@@ -503,8 +528,8 @@ async function loadOwnedProfile(userWorkosId: string, profileId: string) {
   return profile;
 }
 
-async function claimProfileSession(userWorkosId: string, profileId: string) {
-  const [row] = await getDb()
+async function claimProfileSession(userWorkosId: string, profileId: string, db: DbLike = getDb()) {
+  const [row] = await db
     .update(goatBrowserProfiles)
     .set({ activeSessionId: "starting", updatedAt: new Date() })
     .where(
@@ -518,8 +543,13 @@ async function claimProfileSession(userWorkosId: string, profileId: string) {
   return Boolean(row);
 }
 
-async function releaseProfileSession(userWorkosId: string, profileId: string, sessionId?: string) {
-  await getDb()
+async function releaseProfileSession(
+  userWorkosId: string,
+  profileId: string,
+  sessionId?: string,
+  db: DbLike = getDb(),
+) {
+  await db
     .update(goatBrowserProfiles)
     .set({ activeSessionId: null, updatedAt: new Date() })
     .where(
@@ -548,19 +578,18 @@ async function recordBrowserbaseSession(input: {
   browserbaseSessionId: string;
   kind: "login" | "agent";
   startedAt: Date;
+  db?: DbLike;
 }) {
-  await getDb()
-    .insert(goatBrowserProfileSessions)
-    .values({
-      userWorkosId: input.userWorkosId,
-      profileId: input.profileId,
-      chatSessionId: input.chatSessionId,
-      userMessageId: input.userMessageId,
-      browserbaseSessionId: input.browserbaseSessionId,
-      kind: input.kind,
-      startedAt: input.startedAt,
-      costBasis: { provider: "browserbase", status: "unpriced" },
-    });
+  await (input.db ?? getDb()).insert(goatBrowserProfileSessions).values({
+    userWorkosId: input.userWorkosId,
+    profileId: input.profileId,
+    chatSessionId: input.chatSessionId,
+    userMessageId: input.userMessageId,
+    browserbaseSessionId: input.browserbaseSessionId,
+    kind: input.kind,
+    startedAt: input.startedAt,
+    costBasis: { provider: "browserbase", status: "unpriced" },
+  });
 }
 
 async function finishBrowserbaseSession(input: {
@@ -568,8 +597,10 @@ async function finishBrowserbaseSession(input: {
   profileId: string;
   browserbaseSessionId: string;
   endedAt: Date;
+  db?: DbLike;
 }) {
-  const [row] = await getDb()
+  const db = input.db ?? getDb();
+  const [row] = await db
     .select({ startedAt: goatBrowserProfileSessions.startedAt })
     .from(goatBrowserProfileSessions)
     .where(
@@ -583,7 +614,7 @@ async function finishBrowserbaseSession(input: {
   const durationMs = row?.startedAt
     ? Math.max(0, input.endedAt.getTime() - row.startedAt.getTime())
     : 0;
-  await getDb()
+  await db
     .update(goatBrowserProfileSessions)
     .set({ endedAt: input.endedAt, durationMs })
     .where(

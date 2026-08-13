@@ -88,6 +88,7 @@ describe("canonical Hono API", () => {
       knowledge: fakeKnowledgeService(),
       brainSources: fakeBrainSources(),
       brainImports: fakeBrainImports(),
+      browserProfiles: fakeBrowserProfiles(),
       skillImports: fakeSkillImportService(),
       brainAssets: fakeBrainAssets(),
       attachments: fakeAttachments(),
@@ -711,6 +712,151 @@ describe("canonical Hono API", () => {
     });
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({ error: { code: "conflict" } });
+  });
+
+  it("drives the browser-profile login lifecycle through typed commands", async () => {
+    const profile = {
+      id: "browser_profile_1",
+      name: "Acme back office",
+      siteHost: "app.acme.com",
+      allowedHosts: ["app.acme.com", "accounts.google.com"],
+      status: "pending_login" as const,
+      active: false,
+      lastUsedAt: null,
+      createdAt: createdAt.toISOString(),
+      updatedAt: createdAt.toISOString(),
+    };
+    const list = vi.fn(async () => [profile]);
+    const create = vi.fn(async () => ({ profile, replayed: false }));
+    const startLoginSession = vi.fn(async () => ({
+      sessionId: "session_1",
+      liveViewUrl: "https://browserbase.example/live/session_1",
+    }));
+    const liveViewUrl = vi.fn(async () => "https://browserbase.example/live/session_1");
+    const completeLoginSession = vi.fn(async () => undefined);
+    const remove = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), {
+      browserProfiles: browserProfileService({
+        list,
+        create,
+        startLoginSession,
+        completeLoginSession,
+        liveViewUrl,
+        delete: remove,
+      }),
+    });
+
+    const created = await app.request("/v1/browser-profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "profile-key-1" },
+      body: JSON.stringify({ name: "Acme back office", siteUrl: "https://app.acme.com" }),
+    });
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toMatchObject({
+      data: { profile: { id: "browser_profile_1", status: "pending_login" }, replayed: false },
+    });
+    expect(create).toHaveBeenCalledWith(actor, {
+      idempotencyKey: "profile-key-1",
+      name: "Acme back office",
+      siteUrl: "https://app.acme.com",
+    });
+
+    const listed = await app.request("/v1/browser-profiles");
+    expect(listed.status).toBe(200);
+    await expect(listed.json()).resolves.toMatchObject({
+      data: [{ id: "browser_profile_1", siteHost: "app.acme.com" }],
+    });
+    expect(list).toHaveBeenCalledWith(actor);
+
+    const started = await app.request("/v1/browser-profiles/browser_profile_1/login-sessions", {
+      method: "POST",
+    });
+    expect(started.status).toBe(201);
+    await expect(started.json()).resolves.toMatchObject({
+      data: {
+        sessionId: "session_1",
+        liveViewUrl: "https://browserbase.example/live/session_1",
+      },
+    });
+    expect(startLoginSession).toHaveBeenCalledWith(actor, "browser_profile_1");
+
+    const liveView = await app.request(
+      "/v1/browser-profiles/browser_profile_1/live-view?sessionId=session_1",
+    );
+    expect(liveView.status).toBe(200);
+    await expect(liveView.json()).resolves.toMatchObject({
+      data: { liveViewUrl: "https://browserbase.example/live/session_1" },
+    });
+    expect(liveViewUrl).toHaveBeenCalledWith(actor, "browser_profile_1", "session_1");
+
+    const completed = await app.request("/v1/browser-profiles/browser_profile_1/complete-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId: "session_1" }),
+    });
+    expect(completed.status).toBe(200);
+    await expect(completed.json()).resolves.toMatchObject({
+      data: { profileId: "browser_profile_1", status: "connected" },
+    });
+    expect(completeLoginSession).toHaveBeenCalledWith(actor, "browser_profile_1", "session_1");
+
+    const deleted = await app.request("/v1/browser-profiles/browser_profile_1", {
+      method: "DELETE",
+    });
+    expect(deleted.status).toBe(200);
+    await expect(deleted.json()).resolves.toMatchObject({
+      data: { profileId: "browser_profile_1", deleted: true },
+    });
+    expect(remove).toHaveBeenCalledWith(actor, "browser_profile_1");
+  });
+
+  it("requires an Idempotency-Key and a valid body to create a browser profile", async () => {
+    const create = vi.fn(async () => {
+      throw new Error("Unexpected browser-profile creation.");
+    });
+    const app = testApp(fakeRepository(), {
+      browserProfiles: browserProfileService({ create }),
+    });
+
+    const missingKey = await app.request("/v1/browser-profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Acme back office", siteUrl: "https://app.acme.com" }),
+    });
+    expect(missingKey.status).toBe(400);
+
+    const emptyName = await app.request("/v1/browser-profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "profile-key-2" },
+      body: JSON.stringify({ name: "", siteUrl: "https://app.acme.com" }),
+    });
+    expect(emptyName.status).toBe(400);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("maps browser-profile session conflicts and provider outages to typed responses", async () => {
+    const app = testApp(fakeRepository(), {
+      browserProfiles: browserProfileService({
+        startLoginSession: async () => {
+          throw new CoreError("conflict", "This browser profile already has an active session.");
+        },
+        list: async () => {
+          throw new CoreError("unavailable", "Browser profiles are temporarily disabled.");
+        },
+      }),
+    });
+
+    const conflicted = await app.request("/v1/browser-profiles/browser_profile_1/login-sessions", {
+      method: "POST",
+    });
+    expect(conflicted.status).toBe(409);
+    await expect(conflicted.json()).resolves.toMatchObject({ error: { code: "conflict" } });
+
+    const unavailable = await app.request("/v1/browser-profiles");
+    expect(unavailable.status).toBe(503);
+    await expect(unavailable.json()).resolves.toMatchObject({
+      error: { code: "unavailable", retryable: true },
+    });
   });
 
   it("returns a retryable typed error when external Skill resolution is unavailable", async () => {
@@ -1438,6 +1584,7 @@ function testApp(
     knowledge: fakeKnowledgeService(),
     brainSources: fakeBrainSources(),
     brainImports: fakeBrainImports(),
+    browserProfiles: fakeBrowserProfiles(),
     skillImports: fakeSkillImportService(),
     brainAssets: fakeBrainAssets(),
     attachments: fakeAttachments(),
@@ -1514,6 +1661,35 @@ function brainImportService(
   overrides: Partial<Parameters<typeof createApiApp>[0]["brainImports"]>,
 ): Parameters<typeof createApiApp>[0]["brainImports"] {
   return { ...fakeBrainImports(), ...overrides };
+}
+
+function fakeBrowserProfiles(): Parameters<typeof createApiApp>[0]["browserProfiles"] {
+  return {
+    list: async () => {
+      throw new Error("Unexpected browser-profile list.");
+    },
+    create: async () => {
+      throw new Error("Unexpected browser-profile creation.");
+    },
+    delete: async () => {
+      throw new Error("Unexpected browser-profile deletion.");
+    },
+    startLoginSession: async () => {
+      throw new Error("Unexpected browser-profile login start.");
+    },
+    completeLoginSession: async () => {
+      throw new Error("Unexpected browser-profile login completion.");
+    },
+    liveViewUrl: async () => {
+      throw new Error("Unexpected browser-profile live-view request.");
+    },
+  };
+}
+
+function browserProfileService(
+  overrides: Partial<Parameters<typeof createApiApp>[0]["browserProfiles"]>,
+): Parameters<typeof createApiApp>[0]["browserProfiles"] {
+  return { ...fakeBrowserProfiles(), ...overrides };
 }
 
 function fakeBrainSources(): Parameters<typeof createApiApp>[0]["brainSources"] {

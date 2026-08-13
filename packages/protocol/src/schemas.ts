@@ -1001,6 +1001,85 @@ export const BrainImportProviderSummarySchema = z
   .strict()
   .openapi("BrainImportProviderSummaryV1");
 
+export const BrowserProfileStatusSchema = z.enum(["pending_login", "connected"]);
+
+export const BrowserProfileSchema = z
+  .object({
+    id: ResourceIdSchema,
+    name: z.string().min(1).max(80),
+    siteHost: z.string().min(1).max(255),
+    allowedHosts: z.array(z.string().min(1).max(255)).max(50),
+    status: BrowserProfileStatusSchema,
+    active: z.boolean(),
+    lastUsedAt: TimestampSchema.nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("BrowserProfile");
+
+export const BrowserProfileListEnvelopeSchema = z
+  .object({ data: z.array(BrowserProfileSchema), meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("BrowserProfileListEnvelope");
+
+export const CreateBrowserProfileBodySchema = z
+  .object({
+    name: z.string().min(1).max(80),
+    siteUrl: z.string().min(1).max(2_048),
+  })
+  .strict()
+  .openapi("CreateBrowserProfileBody");
+
+export const BrowserProfileEnvelopeSchema = z
+  .object({
+    data: z.object({ profile: BrowserProfileSchema, replayed: z.boolean() }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrowserProfileEnvelope");
+
+export const BrowserProfileDeleteEnvelopeSchema = z
+  .object({
+    data: z.object({ profileId: ResourceIdSchema, deleted: z.literal(true) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrowserProfileDeleteEnvelope");
+
+// The live-view URL is a short-lived provider debugger URL scoped to one active session; it is
+// returned only to the profile owner and never persisted in the protocol.
+export const BrowserProfileLoginSessionEnvelopeSchema = z
+  .object({
+    data: z
+      .object({ sessionId: z.string().min(1).max(128), liveViewUrl: z.url().max(4_096) })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrowserProfileLoginSessionEnvelope");
+
+export const BrowserProfileLoginCompleteEnvelopeSchema = z
+  .object({
+    data: z.object({ profileId: ResourceIdSchema, status: BrowserProfileStatusSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrowserProfileLoginCompleteEnvelope");
+
+export const CompleteBrowserProfileLoginBodySchema = z
+  .object({ sessionId: z.string().min(1).max(128) })
+  .strict()
+  .openapi("CompleteBrowserProfileLoginBody");
+
+export const BrowserProfileLiveViewEnvelopeSchema = z
+  .object({
+    data: z.object({ liveViewUrl: z.url().max(4_096) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("BrowserProfileLiveViewEnvelope");
+
 export const BrainImportRunReadModelSchema = z
   .object({
     id: ResourceIdSchema,
@@ -1894,6 +1973,9 @@ export type ConfirmBrainImportBody = z.infer<typeof ConfirmBrainImportBodySchema
 export type BrainImportRunCommandDto = z.infer<typeof BrainImportRunCommandEnvelopeSchema>["data"];
 export type BrainImportProviderSummary = z.infer<typeof BrainImportProviderSummarySchema>;
 export type BrainImportRunReadModel = z.infer<typeof BrainImportRunReadModelSchema>;
+export type BrowserProfileDto = z.infer<typeof BrowserProfileSchema>;
+export type CreateBrowserProfileBody = z.infer<typeof CreateBrowserProfileBodySchema>;
+export type CompleteBrowserProfileLoginBody = z.infer<typeof CompleteBrowserProfileLoginBodySchema>;
 export type BrainSourceDetailsDto = z.infer<typeof BrainSourceDetailsSchema>;
 export type SetBrainSourceBody = z.infer<typeof SetBrainSourceBodySchema>;
 export type BrainSourceOptionsBody = z.infer<typeof BrainSourceOptionsBodySchema>;

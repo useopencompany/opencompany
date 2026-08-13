@@ -70,6 +70,7 @@ export type GoatKnowledgeCommandOperation =
   | "skill.create"
   | "skill.import"
   | "brain_import.start";
+export type GoatIntegrationCommandOperation = "browser_profile.create";
 export type GoatWorkflowStep = {
   id: string;
   title: string;
@@ -4216,7 +4217,45 @@ export const goatKnowledgeCommandIdempotency = goat.table(
     ),
     operationCheck: check(
       "goat_knowledge_command_idempotency_operation_check",
-      sql`${table.operation} IN ('brain_document.create', 'brain_asset.create', 'brain_asset.replace', 'wiki_page.create', 'wiki_timeline.create', 'skill.create', 'skill.import')`,
+      sql`${table.operation} IN ('brain_document.create', 'brain_asset.create', 'brain_asset.replace', 'wiki_page.create', 'wiki_timeline.create', 'skill.create', 'skill.import', 'brain_import.start')`,
+    ),
+  }),
+);
+
+export const goatIntegrationCommandIdempotency = goat.table(
+  "integration_command_idempotency",
+  {
+    commandId: text("command_id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    operation: text("operation").$type<GoatIntegrationCommandOperation>().notNull(),
+    resourceId: text("resource_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    touchedAt: timestamp("touched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    actorKeyIdx: uniqueIndex("goat_integration_command_idempotency_actor_key_idx").on(
+      table.userWorkosId,
+      table.workspaceId,
+      table.idempotencyKey,
+    ),
+    requestHashCheck: check(
+      "goat_integration_command_idempotency_request_hash_check",
+      sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    keyLengthCheck: check(
+      "goat_integration_command_idempotency_key_length_check",
+      sql`length(${table.idempotencyKey}) BETWEEN 1 AND 200`,
+    ),
+    operationCheck: check(
+      "goat_integration_command_idempotency_operation_check",
+      sql`${table.operation} IN ('browser_profile.create')`,
     ),
   }),
 );
