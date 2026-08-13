@@ -30,7 +30,6 @@
     "apps/web/lib/auth.ts",
     "apps/web/lib/billing/actions.ts",
     "apps/web/lib/billing/legacy-credits.ts",
-    "apps/web/lib/billing/seats.ts",
     "apps/web/lib/brain-cli.ts",
     "apps/web/lib/brain-overview.ts",
     "apps/web/lib/brain-source-analytics.ts",
@@ -71,9 +70,7 @@
     "apps/web/lib/tasks.ts",
     "apps/web/lib/wiki-actions.ts",
     "apps/web/lib/workflow-tasks.ts",
-    "apps/web/lib/workos-organizations.ts",
-    "apps/web/lib/workspace-actions.ts",
-    "apps/web/lib/workspace-provisioning.ts"
+    "apps/web/lib/workspace-actions.ts"
   ],
   "drizzleImports": [
     "apps/web/app/(app)/settings/workspace/slack/page.tsx",

@@ -168,13 +168,16 @@ describe("createGoatWorkspaceAction", () => {
       userId: "user_123",
       roleSlug: "admin",
     });
-    expect(createGoatWorkspaceForUserMock).toHaveBeenCalledWith({
-      workspaceId: "goat_ws_new",
-      workosOrganizationId: "org_new",
-      userWorkosId: "user_123",
-      name: "Analytical Co",
-      slug: null,
-    });
+    expect(createGoatWorkspaceForUserMock).toHaveBeenCalledWith(
+      {
+        workspaceId: "goat_ws_new",
+        workosOrganizationId: "org_new",
+        userWorkosId: "user_123",
+        name: "Analytical Co",
+        slug: null,
+      },
+      { db: undefined },
+    );
     expect(switchToOrganizationMock).toHaveBeenCalledWith("org_new", {
       revalidationStrategy: "none",
     });
