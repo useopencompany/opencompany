@@ -1,6 +1,4 @@
 import { GoatAnalyticsProvider } from "@opencompany/analytics/goat/client";
-import { getGoatWorkspacePlan } from "@opencompany/db/goat-billing";
-import { listGoatWorkspaceMembers } from "@opencompany/db/goat-workspaces";
 import type { ReactNode } from "react";
 import { GoatAppDataProvider, type GoatAppInitialData } from "@/components/GoatAppDataProvider";
 import { currentGoatUser } from "@/lib/auth";
@@ -29,6 +27,7 @@ import { getGoatPostHogIntegrationState } from "@/lib/integrations/posthog-mcp";
 import { getGoatSlackIntegrationState } from "@/lib/integrations/slack";
 import { getGoatStripeIntegrationState } from "@/lib/integrations/stripe";
 import { getGoatXAccountIntegrationState } from "@/lib/integrations/x-account";
+import { getGoatWorkspaceSettingsAction } from "@/lib/workspace-actions";
 
 export async function GoatAppShell({ children }: { children: ReactNode }) {
   const { authUser, user, workspace, role, workspaces, brains, activeBrain } =
@@ -52,9 +51,8 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     codex,
     claudeCode,
     infisical,
-    workspaceMembers,
+    workspaceSettings,
     personalAccounts,
-    plan,
   ] = await Promise.all([
     featureFlags.taskSpawning ? listHeadlessTaskSchedules() : Promise.resolve([]),
     listCurrentUserRecentGoatChats(),
@@ -73,9 +71,8 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     loadCurrentGoatCodexAuthSettings(),
     loadCurrentGoatClaudeCodeAuthSettings(),
     loadCurrentGoatInfisicalAuthSettings(),
-    listGoatWorkspaceMembers(workspace.id),
-    getGoatPersonalAccounts(user.workosUserId),
-    getGoatWorkspacePlan(workspace.id),
+    getGoatWorkspaceSettingsAction(),
+    getGoatPersonalAccounts(),
   ]);
 
   const initialData: GoatAppInitialData = {
@@ -91,14 +88,14 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       name: workspace.name,
       role,
     },
-    plan,
+    plan: workspaceSettings.plan,
     workspaces: workspaces.map((entry) => ({
       id: entry.workspace.id,
       name: entry.workspace.name,
       role: entry.role,
     })),
-    workspaceMembers: workspaceMembers.map(({ user: member }) => ({
-      workosUserId: member.workosUserId,
+    workspaceMembers: workspaceSettings.members.map((member) => ({
+      workosUserId: member.userWorkosId,
       email: member.email,
       firstName: member.firstName,
       lastName: member.lastName,

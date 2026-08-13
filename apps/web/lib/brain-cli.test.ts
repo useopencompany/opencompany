@@ -41,7 +41,10 @@ import {
   searchGoatBrain,
 } from "@opencompany/db/goat-brain-read";
 import { goatBrainToolRuns, goatUsers } from "@opencompany/db/goat-schema";
-import { renderGoatBrainToolCommand, runGoatBrainToolForUser } from "@/lib/brain-cli";
+import {
+  renderGoatBrainToolCommand,
+  runGoatBrainToolForUser,
+} from "@opencompany/goat-agent/brain-cli";
 
 const BASE_INPUT = {
   brainRef: "goat_brain_user_1",

@@ -41,6 +41,8 @@
     "ai": "^6.0.189",
     "ajv": "8.20.0",
     "drizzle-orm": "^0.45.2",
+    "jose": "^5.10.0",
+    "mcp-handler": "^1.1.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

@@ -25,6 +25,8 @@ export type GoatWorkspaceMemberView = {
   userWorkosId: string;
   email: string;
   name: string;
+  firstName: string | null;
+  lastName: string | null;
   avatarUrl: string | null;
   role: "admin" | "member";
 };
@@ -262,12 +264,16 @@ export async function getGoatBrainAccessDetailsAction(brainRef: string): Promise
         id: string;
         email: string;
         name: string;
+        firstName: string | null;
+        lastName: string | null;
         avatarUrl: string | null;
         role: "admin" | "member";
       }) => ({
         userWorkosId: member.id,
         email: member.email,
         name: member.name,
+        firstName: member.firstName,
+        lastName: member.lastName,
         avatarUrl: member.avatarUrl,
         role: member.role,
       }),
@@ -470,12 +476,16 @@ export async function getGoatWorkspaceSettingsAction(): Promise<{
         id: string;
         email: string;
         name: string;
+        firstName: string | null;
+        lastName: string | null;
         avatarUrl: string | null;
         role: "admin" | "member";
       }) => ({
         userWorkosId: member.id,
         email: member.email,
         name: member.name,
+        firstName: member.firstName,
+        lastName: member.lastName,
         avatarUrl: member.avatarUrl,
         role: member.role,
       }),

@@ -1,9 +1,11 @@
 import type { GoatBrainWithWorkspace } from "@opencompany/db/goat-workspaces";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/brain-capture", () => ({ captureToGoatBrainInbox: vi.fn() }));
+vi.mock("@opencompany/goat-agent/brain-capture", () => ({
+  captureToGoatBrainInbox: vi.fn(),
+}));
 
-import { resolveGoatMcpBrain } from "./mcp-server";
+import { resolveGoatMcpBrain } from "@opencompany/goat-agent/mcp-server";
 
 function brainWithWorkspace(input: {
   id: string;

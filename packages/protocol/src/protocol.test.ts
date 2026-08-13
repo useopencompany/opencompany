@@ -127,6 +127,10 @@ describe("headless protocol", () => {
       "/v1/integration-accounts/stripe",
       "/v1/integration-accounts/jamie/webhook-endpoint",
       "/v1/integration-accounts/jamie/api-key",
+      "/v1/integration-accounts",
+      "/v1/workspace/slack-bot",
+      "/v1/brains/{brainId}/slack-bot",
+      "/v1/brains/{brainId}/slack-bot/channels",
       "/v1/integration-accounts/{integrationId}/usage",
       "/v1/integration-accounts/{integrationId}/capability-modes/{capabilityId}",
       "/v1/actions/{actionId}/permissions/always-allow",
@@ -198,6 +202,7 @@ describe("headless protocol", () => {
     expect(ReadModelSchema.safeParse("workflows-v1").success).toBe(true);
     expect(ReadModelSchema.safeParse("workflow-schedules-v1").success).toBe(true);
     expect(ReadModelSchema.safeParse("task-schedules-v1").success).toBe(true);
+    expect(ReadModelSchema.safeParse("integration-accounts-v1").success).toBe(true);
     expect(ReadModelSchema.safeParse("goat.workflow_read_model_v1").success).toBe(false);
   });
 

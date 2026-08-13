@@ -90,6 +90,7 @@ import {
   InfisicalAuthStatusEnvelopeSchema,
   IntegrationAccountDeleteEnvelopeSchema,
   IntegrationAccountIdSchema,
+  IntegrationAccountListEnvelopeSchema,
   IntegrationAccountUsageEnvelopeSchema,
   IntegrationApiKeyBodySchema,
   IntegrationCapabilityModeEnvelopeSchema,
@@ -131,6 +132,7 @@ import {
   SetIntegrationCapabilityModeBodySchema,
   SetRepoConfigEnvBodySchema,
   SetRepoConfigSetupBodySchema,
+  SetSlackBotDestinationBodySchema,
   SetWorkspaceCapabilityBodySchema,
   SkillArchiveEnvelopeSchema,
   SkillCatalogEnvelopeSchema,
@@ -139,6 +141,10 @@ import {
   SkillImportPreviewBodySchema,
   SkillImportPreviewEnvelopeSchema,
   SkillListEnvelopeSchema,
+  SlackBotChannelListEnvelopeSchema,
+  SlackBotDestinationEnvelopeSchema,
+  SlackBotMutationEnvelopeSchema,
+  SlackBotWorkspaceSettingsEnvelopeSchema,
   StartBrainImportBodySchema,
   StartImessagePairingBodySchema,
   StartInfisicalAuthBodySchema,
@@ -2545,6 +2551,99 @@ export const getIntegrationAccountUsageRoute = createRoute({
   },
 });
 
+export const listIntegrationAccountsRoute = createRoute({
+  method: "get",
+  path: "/v1/integration-accounts",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Credential-free personal integration accounts owned by the authenticated user.",
+      content: { "application/json": { schema: IntegrationAccountListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getSlackBotWorkspaceSettingsRoute = createRoute({
+  method: "get",
+  path: "/v1/workspace/slack-bot",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Credential-free Slack answer-bot status for the active workspace.",
+      content: { "application/json": { schema: SlackBotWorkspaceSettingsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const disconnectSlackBotRoute = createRoute({
+  method: "delete",
+  path: "/v1/workspace/slack-bot",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Workspace Slack answer-bot disconnected by an administrator.",
+      content: { "application/json": { schema: SlackBotMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getSlackBotDestinationRoute = createRoute({
+  method: "get",
+  path: "/v1/brains/{brainId}/slack-bot",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: { params: z.object({ brainId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Authorized Slack answer-bot destination settings for one Brain.",
+      content: { "application/json": { schema: SlackBotDestinationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setSlackBotDestinationRoute = createRoute({
+  method: "put",
+  path: "/v1/brains/{brainId}/slack-bot",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ brainId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetSlackBotDestinationBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Slack answer-bot channel scope saved by a workspace administrator.",
+      content: { "application/json": { schema: SlackBotMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listSlackBotChannelsRoute = createRoute({
+  method: "get",
+  path: "/v1/brains/{brainId}/slack-bot/channels",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: { params: z.object({ brainId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Channels visible to the workspace Slack bot; administrator only.",
+      content: { "application/json": { schema: SlackBotChannelListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const setIntegrationCapabilityModeRoute = createRoute({
   method: "put",
   path: "/v1/integration-accounts/{integrationId}/capability-modes/{capabilityId}",
@@ -3032,6 +3131,12 @@ export type V1RouteHandlers = {
   disconnectStripeAccount: RouteHandler<typeof disconnectStripeAccountRoute>;
   createJamieWebhookEndpoint: RouteHandler<typeof createJamieWebhookEndpointRoute>;
   saveJamieApiKey: RouteHandler<typeof saveJamieApiKeyRoute>;
+  listIntegrationAccounts: RouteHandler<typeof listIntegrationAccountsRoute>;
+  getSlackBotWorkspaceSettings: RouteHandler<typeof getSlackBotWorkspaceSettingsRoute>;
+  disconnectSlackBot: RouteHandler<typeof disconnectSlackBotRoute>;
+  getSlackBotDestination: RouteHandler<typeof getSlackBotDestinationRoute>;
+  setSlackBotDestination: RouteHandler<typeof setSlackBotDestinationRoute>;
+  listSlackBotChannels: RouteHandler<typeof listSlackBotChannelsRoute>;
   getIntegrationAccountUsage: RouteHandler<typeof getIntegrationAccountUsageRoute>;
   setIntegrationCapabilityMode: RouteHandler<typeof setIntegrationCapabilityModeRoute>;
   alwaysAllowAction: RouteHandler<typeof alwaysAllowActionRoute>;
@@ -3202,6 +3307,12 @@ export function createV1Router(
       .openapi(disconnectStripeAccountRoute, handlers.disconnectStripeAccount)
       .openapi(createJamieWebhookEndpointRoute, handlers.createJamieWebhookEndpoint)
       .openapi(saveJamieApiKeyRoute, handlers.saveJamieApiKey)
+      .openapi(listIntegrationAccountsRoute, handlers.listIntegrationAccounts)
+      .openapi(getSlackBotWorkspaceSettingsRoute, handlers.getSlackBotWorkspaceSettings)
+      .openapi(disconnectSlackBotRoute, handlers.disconnectSlackBot)
+      .openapi(getSlackBotDestinationRoute, handlers.getSlackBotDestination)
+      .openapi(setSlackBotDestinationRoute, handlers.setSlackBotDestination)
+      .openapi(listSlackBotChannelsRoute, handlers.listSlackBotChannels)
       .openapi(getIntegrationAccountUsageRoute, handlers.getIntegrationAccountUsage)
       .openapi(setIntegrationCapabilityModeRoute, handlers.setIntegrationCapabilityMode)
       .openapi(alwaysAllowActionRoute, handlers.alwaysAllowAction)
@@ -4316,6 +4427,41 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  listIntegrationAccounts: (c) => c.json({ data: [], meta }, 200),
+  getSlackBotWorkspaceSettings: (c) =>
+    c.json(
+      {
+        data: {
+          isAdmin: true,
+          configured: true,
+          installed: false,
+          status: "not_connected" as const,
+          needsScopeUpgrade: false,
+          teamName: null,
+          statusReason: null,
+          destinationCount: 0,
+        },
+        meta,
+      },
+      200,
+    ),
+  disconnectSlackBot: (c) => c.json({ data: { updated: true as const }, meta }, 200),
+  getSlackBotDestination: (c) =>
+    c.json(
+      {
+        data: {
+          installed: false,
+          botConnected: false,
+          isAdmin: true,
+          brainVisibility: "workspace" as const,
+          source: null,
+        },
+        meta,
+      },
+      200,
+    ),
+  setSlackBotDestination: (c) => c.json({ data: { updated: true as const }, meta }, 200),
+  listSlackBotChannels: (c) => c.json({ data: { channels: [], partial: false }, meta }, 200),
   getIntegrationAccountUsage: (c) => c.json({ data: { affectedBrainSourceCount: 0 }, meta }, 200),
   setIntegrationCapabilityMode: (c) =>
     c.json(

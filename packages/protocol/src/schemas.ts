@@ -335,6 +335,7 @@ export const BrainIngestJobReadModelNameSchema = z.literal("brain-ingest-jobs-v1
 export const BrainImportRunReadModelNameSchema = z.literal("brain-import-runs-v1");
 export const WikiPageReadModelNameSchema = z.literal("wiki-pages-v1");
 export const WikiTimelineReadModelNameSchema = z.literal("wiki-timeline-v1");
+export const IntegrationAccountReadModelNameSchema = z.literal("integration-accounts-v1");
 export const ReadModelSchema = z.enum([
   ...ChatReadModelSchema.options,
   TaskReadModelNameSchema.value,
@@ -349,7 +350,45 @@ export const ReadModelSchema = z.enum([
   BrainImportRunReadModelNameSchema.value,
   WikiPageReadModelNameSchema.value,
   WikiTimelineReadModelNameSchema.value,
+  IntegrationAccountReadModelNameSchema.value,
 ]);
+
+export const IntegrationAccountReadModelSchema = z
+  .object({
+    id: z.string().min(1).max(128),
+    provider: z.enum([
+      "gmail",
+      "google_calendar",
+      "google_drive",
+      "linear",
+      "github",
+      "jamie",
+      "slack",
+      "slack_bot",
+      "hubspot",
+      "granola",
+      "fathom",
+      "attio",
+      "stripe",
+      "latitude",
+      "posthog",
+      "neon",
+      "imessage",
+      "x_account",
+    ]),
+    workspaceId: z.string().min(1).max(128).nullable(),
+    externalId: z.string().max(1_024),
+    connectionLabel: z.string().max(512).nullable(),
+    accountName: z.string().max(512).nullable(),
+    accountEmail: z.string().max(320).nullable(),
+    accountType: z.string().max(256).nullable(),
+    status: z.enum(["connected", "needs_reauth", "sync_failed", "disconnected"]),
+    statusReason: z.string().max(2_000).nullable(),
+    scopes: z.array(z.string().max(512)).max(1_000),
+    capabilityModes: z.record(z.string(), z.unknown()),
+  })
+  .strict()
+  .openapi("IntegrationAccountReadModelV1");
 
 export const ChatPresentationAttachmentSchema = z
   .object({
@@ -2384,6 +2423,8 @@ export const WorkspaceMemberSchema = z
     id: ResourceIdSchema,
     email: z.email().max(320),
     name: z.string().min(1).max(512),
+    firstName: z.string().max(256).nullable(),
+    lastName: z.string().max(256).nullable(),
     avatarUrl: z.string().max(4_096).nullable(),
     role: z.enum(["admin", "member"]),
   })
@@ -2876,6 +2917,112 @@ export const IntegrationAccountStatusSchema = z.enum([
   "sync_failed",
 ]);
 
+export const PersonalIntegrationProviderSchema = z.enum([
+  "gmail",
+  "google_calendar",
+  "google_drive",
+  "linear",
+  "slack",
+  "hubspot",
+  "granola",
+  "fathom",
+  "attio",
+  "latitude",
+  "neon",
+  "x_account",
+]);
+
+export const IntegrationAccountSchema = z
+  .object({
+    integrationId: IntegrationAccountIdSchema,
+    provider: PersonalIntegrationProviderSchema,
+    status: IntegrationAccountStatusSchema,
+    connected: z.boolean(),
+    accountEmail: z.string().max(320).nullable(),
+    accountName: z.string().max(512).nullable(),
+    connectionLabel: z.string().max(512).nullable(),
+    statusReason: z.string().max(2_000).nullable(),
+    scopes: z.array(z.string().max(512)).max(1_000),
+    capabilityModes: z.record(z.string(), z.unknown()),
+  })
+  .strict()
+  .openapi("IntegrationAccount");
+
+export const IntegrationAccountListEnvelopeSchema = z
+  .object({ data: z.array(IntegrationAccountSchema).max(1_000), meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("IntegrationAccountListEnvelope");
+
+export const SlackBotChannelRefSchema = z
+  .object({ id: z.string().trim().min(1).max(256), name: z.string().trim().min(1).max(512) })
+  .strict()
+  .openapi("SlackBotChannelRef");
+
+export const SlackBotWorkspaceSettingsSchema = z
+  .object({
+    isAdmin: z.boolean(),
+    configured: z.boolean(),
+    installed: z.boolean(),
+    status: z.enum(["connected", "needs_reauth", "sync_failed", "not_connected"]),
+    needsScopeUpgrade: z.boolean(),
+    teamName: z.string().max(512).nullable(),
+    statusReason: z.string().max(2_000).nullable(),
+    destinationCount: z.number().int().min(0),
+  })
+  .strict()
+  .openapi("SlackBotWorkspaceSettings");
+
+export const SlackBotWorkspaceSettingsEnvelopeSchema = z
+  .object({ data: SlackBotWorkspaceSettingsSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("SlackBotWorkspaceSettingsEnvelope");
+
+export const SlackBotDestinationSchema = z
+  .object({
+    installed: z.boolean(),
+    botConnected: z.boolean(),
+    isAdmin: z.boolean(),
+    brainVisibility: BrainVisibilitySchema,
+    source: z
+      .object({ enabled: z.boolean(), channels: z.array(SlackBotChannelRefSchema).max(500) })
+      .strict()
+      .nullable(),
+  })
+  .strict()
+  .openapi("SlackBotDestination");
+
+export const SlackBotDestinationEnvelopeSchema = z
+  .object({ data: SlackBotDestinationSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("SlackBotDestinationEnvelope");
+
+export const SlackBotChannelSchema = SlackBotChannelRefSchema.extend({
+  isPrivate: z.boolean(),
+  isMember: z.boolean(),
+})
+  .strict()
+  .openapi("SlackBotChannel");
+
+export const SlackBotChannelListEnvelopeSchema = z
+  .object({
+    data: z
+      .object({ channels: z.array(SlackBotChannelSchema).max(5_000), partial: z.boolean() })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("SlackBotChannelListEnvelope");
+
+export const SetSlackBotDestinationBodySchema = z
+  .object({ enabled: z.boolean(), channels: z.array(SlackBotChannelRefSchema).max(500) })
+  .strict()
+  .openapi("SetSlackBotDestinationBody");
+
+export const SlackBotMutationEnvelopeSchema = z
+  .object({ data: z.object({ updated: z.literal(true) }).strict(), meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("SlackBotMutationEnvelope");
+
 export const IntegrationAccountUsageEnvelopeSchema = z
   .object({
     data: z
@@ -3245,6 +3392,7 @@ export type WorkflowReadModel = z.infer<typeof WorkflowReadModelSchema>;
 export type WorkflowScheduleReadModel = z.infer<typeof WorkflowScheduleReadModelSchema>;
 export type TaskScheduleDto = z.infer<typeof TaskScheduleSchema>;
 export type TaskScheduleReadModel = z.infer<typeof TaskScheduleReadModelSchema>;
+export type IntegrationAccountReadModel = z.infer<typeof IntegrationAccountReadModelSchema>;
 export type BrainSnapshotDto = z.infer<typeof BrainSnapshotSchema>;
 export type BrainOverviewDto = z.infer<typeof BrainOverviewSchema>;
 export type BrainDocumentDto = z.infer<typeof BrainDocumentSchema>;
@@ -3255,6 +3403,7 @@ export type BrainTimelineReadModel = z.infer<typeof BrainTimelineReadModelSchema
 export type BrainEdgeReadModel = z.infer<typeof BrainEdgeReadModelSchema>;
 export type BrainIngestJobReadModel = z.infer<typeof BrainIngestJobReadModelSchema>;
 export type BrainSourceItemDto = z.infer<typeof BrainSourceItemSchema>;
+export type BrainSourceConfigProvider = z.infer<typeof BrainSourceConfigProviderSchema>;
 export type BrainImportProvider = z.infer<typeof BrainImportProviderSchema>;
 export type BrainImportRunStatus = z.infer<typeof BrainImportRunStatusSchema>;
 export type StartBrainImportBody = z.infer<typeof StartBrainImportBodySchema>;
@@ -3417,6 +3566,12 @@ export type RepoConfigDto = z.infer<typeof RepoConfigSchema>;
 export type SetRepoConfigEnvBody = z.infer<typeof SetRepoConfigEnvBodySchema>;
 export type SetRepoConfigSetupBody = z.infer<typeof SetRepoConfigSetupBodySchema>;
 export type IntegrationAccountStatus = z.infer<typeof IntegrationAccountStatusSchema>;
+export type PersonalIntegrationProvider = z.infer<typeof PersonalIntegrationProviderSchema>;
+export type IntegrationAccountDto = z.infer<typeof IntegrationAccountSchema>;
+export type SlackBotWorkspaceSettingsDto = z.infer<typeof SlackBotWorkspaceSettingsSchema>;
+export type SlackBotDestinationDto = z.infer<typeof SlackBotDestinationSchema>;
+export type SlackBotChannelDto = z.infer<typeof SlackBotChannelSchema>;
+export type SetSlackBotDestinationBody = z.infer<typeof SetSlackBotDestinationBodySchema>;
 export type AttioAccountStateDto = z.infer<typeof AttioAccountStateSchema>;
 export type FathomAccountStateDto = z.infer<typeof FathomAccountStateSchema>;
 export type GranolaAccountStateDto = z.infer<typeof GranolaAccountStateSchema>;

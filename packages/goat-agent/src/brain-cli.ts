@@ -30,14 +30,14 @@ import {
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
 import { createGoatGatewayAttribution } from "@opencompany/goat-observability";
 import { and, eq, isNull } from "drizzle-orm";
-import { GOAT_BRAIN_READ_PLANE_COMMANDS } from "@/lib/brain-surface";
+import { GOAT_BRAIN_READ_PLANE_COMMANDS } from "./brain-surface";
 import type {
   GoatBrainCliCommand,
   GoatBrainToolFlagValue,
   GoatBrainToolInput,
   GoatBrainToolOutput,
-} from "@/lib/chat-ui";
-import { isGoatMcpSetupCompletionRun } from "@/lib/mcp-setup";
+} from "./chat-ui";
+import { isGoatMcpSetupCompletionRun } from "./mcp-setup";
 
 const GOAT_BRAIN_CHAT_CLI_TIMEOUT_MS = 60_000;
 const GOAT_BRAIN_TRACE_SCHEMA_VERSION = "goat.brain.cli-run.v2";

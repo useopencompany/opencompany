@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => {
   return {
     getHeadlessChatConversations: vi.fn(() => ({})),
     getHeadlessEngineSessions: vi.fn(() => ({})),
+    getHeadlessIntegrationAccounts: vi.fn(() => ({})),
     getHeadlessTaskSchedules: vi.fn(() => ({})),
     getHeadlessTasks: vi.fn(() => ({})),
     listLegacyTaskCompatibility: vi.fn(async () => []),
@@ -35,10 +36,8 @@ vi.mock("@/lib/headless-chat-collections", () => ({
   getHeadlessEngineSessions: mocks.getHeadlessEngineSessions,
 }));
 
-vi.mock("@/lib/task-collections", () => ({
-  createGoatCollections: () => ({
-    integrations: {},
-  }),
+vi.mock("@/lib/headless-integration-collections", () => ({
+  getHeadlessIntegrationAccounts: mocks.getHeadlessIntegrationAccounts,
 }));
 
 vi.mock("@/lib/headless-automation-collections", () => ({
@@ -59,6 +58,7 @@ describe("GoatAppDataProvider", () => {
   beforeEach(() => {
     mocks.getHeadlessTasks.mockClear();
     mocks.getHeadlessTaskSchedules.mockClear();
+    mocks.getHeadlessIntegrationAccounts.mockClear();
     mocks.listLegacyTaskCompatibility.mockClear();
     mocks.useLiveQuery.mockClear();
   });
@@ -100,6 +100,7 @@ describe("GoatAppDataProvider", () => {
 
     expect(mocks.getHeadlessTasks).toHaveBeenCalledWith("workspace_1");
     expect(mocks.getHeadlessTaskSchedules).toHaveBeenCalledWith("workspace_1");
+    expect(mocks.getHeadlessIntegrationAccounts).toHaveBeenCalledWith("workspace_1");
     await waitFor(() => expect(mocks.listLegacyTaskCompatibility).toHaveBeenCalledTimes(1));
 
     rerender(
@@ -115,6 +116,7 @@ describe("GoatAppDataProvider", () => {
 
     expect(mocks.getHeadlessTasks).toHaveBeenCalledWith("workspace_2");
     expect(mocks.getHeadlessTaskSchedules).toHaveBeenCalledWith("workspace_2");
+    expect(mocks.getHeadlessIntegrationAccounts).toHaveBeenCalledWith("workspace_2");
     await waitFor(() => expect(mocks.listLegacyTaskCompatibility).toHaveBeenCalledTimes(2));
   });
 

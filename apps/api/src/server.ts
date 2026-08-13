@@ -22,6 +22,7 @@ import { GoatBrainImportApplicationService } from "@opencompany/goat-agent/brain
 import { GoatBrainSourceApplicationService } from "@opencompany/goat-agent/brain-sources";
 import { GoatBrowserProfileApplicationService } from "@opencompany/goat-agent/browser-profiles/service";
 import { getGoatAvailableHarnessTools } from "@opencompany/goat-agent/integrations/google-data";
+import { createGoatMcpService } from "@opencompany/goat-agent/mcp-http";
 import { createGoatSkillImportResolver } from "@opencompany/goat-agent/skill-import";
 import {
   registerGoatNodeObservability,
@@ -58,6 +59,7 @@ import { createRepoConfigService } from "./repo-configs";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
 import { createRunnerClient } from "./runner-client";
 import { createSlackBotIngress } from "./slack-bot-ingress";
+import { createSlackBotSettingsService } from "./slack-bot-settings";
 import { createSlackIngress } from "./slack-ingress";
 import { createStripeIngress } from "./stripe-ingress";
 import { createUserSettingsService } from "./user-settings";
@@ -164,6 +166,12 @@ const app = createApiApp({
   feedback: createFeedbackService({ db: database.db }),
   repoConfigs: createRepoConfigService({ db: database.db }),
   integrationAccounts: createIntegrationAccountService({ db: database.db, runner: runnerClient }),
+  slackBotSettings: createSlackBotSettingsService({ db: database.db }),
+  mcp: createGoatMcpService({
+    ...(process.env.VERCEL_AI_GATEWAY_API_KEY
+      ? { gatewayApiKey: process.env.VERCEL_AI_GATEWAY_API_KEY }
+      : {}),
+  }),
   billing: createGoatBillingApplicationService({
     db: database.db,
     stripe,

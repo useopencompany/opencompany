@@ -43,6 +43,7 @@ import type {
   GoatImessageProviderState,
   GoatStripeProviderState,
 } from "@opencompany/goat-agent/integration-state";
+import type { GoatMcpService } from "@opencompany/goat-agent/mcp-http";
 import { GOAT_SPANS, withGoatSpan } from "@opencompany/goat-observability";
 import { captureException, createLogger } from "@opencompany/observability";
 import {
@@ -91,6 +92,7 @@ import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
 import type { RepoConfigService } from "./repo-configs";
 import { PollingRunEventNotifier, type RunEventNotifier } from "./run-event-notifier";
 import type { SlackBotIngressService } from "./slack-bot-ingress";
+import type { SlackBotSettingsService } from "./slack-bot-settings";
 import type { SlackIngressService } from "./slack-ingress";
 import type { StripeIngressService } from "./stripe-ingress";
 import type { UserSettingsService } from "./user-settings";
@@ -166,6 +168,8 @@ export type CreateApiAppInput = {
   feedback: FeedbackService;
   repoConfigs: RepoConfigService;
   integrationAccounts: IntegrationAccountService;
+  slackBotSettings: SlackBotSettingsService;
+  mcp?: GoatMcpService;
   engineAuth: EngineAuthService;
   engineSessions: EngineSessionService;
   billing: GoatBillingApplicationService;
@@ -1699,6 +1703,14 @@ export function createApiApp(input: CreateApiAppInput) {
           );
         }
         await input.schedules.listTaskSchedules(actor, { limit: 1 });
+      } else if (params.readModel === "integration-accounts-v1") {
+        if (query.conversationId || query.brainId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "conversationId and brainId are not valid for this read model.",
+          );
+        }
       } else if (
         params.readModel !== "chat-conversations-v1" &&
         params.readModel !== "engine-sessions-v1"
@@ -1874,6 +1886,47 @@ export function createApiApp(input: CreateApiAppInput) {
         c.req.valid("json").apiKey,
       );
       return c.json({ data: { setup }, meta }, 200);
+    },
+    listIntegrationAccounts: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json({ data: await input.integrationAccounts.list(actor), meta }, 200);
+    },
+    getSlackBotWorkspaceSettings: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json({ data: await input.slackBotSettings.getWorkspaceSettings(actor), meta }, 200);
+    },
+    disconnectSlackBot: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.slackBotSettings.disconnect(actor);
+      return c.json({ data: { updated: true as const }, meta }, 200);
+    },
+    getSlackBotDestination: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const destination = await input.slackBotSettings.getDestination(
+        actor,
+        c.req.valid("param").brainId,
+      );
+      return c.json({ data: destination, meta }, 200);
+    },
+    setSlackBotDestination: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.slackBotSettings.setDestination(
+        actor,
+        c.req.valid("param").brainId,
+        c.req.valid("json"),
+      );
+      return c.json({ data: { updated: true as const }, meta }, 200);
+    },
+    listSlackBotChannels: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const result = await input.slackBotSettings.listChannels(actor, c.req.valid("param").brainId);
+      return c.json({ data: result, meta }, 200);
     },
     getIntegrationAccountUsage: async (c) => {
       const actor = actorFrom(c);
@@ -2186,6 +2239,9 @@ export function createApiApp(input: CreateApiAppInput) {
     }),
   );
   app.get("/openapi.json", (c) => c.json(createOpenApiDocument()));
+  if (input.mcp) {
+    app.on(["GET", "POST", "DELETE"], "/mcp", (c) => input.mcp!.handle(c.req.raw));
+  }
   app.post("/internal/onboarding-emails/enroll", async (c) => {
     authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
     const body = await internalJsonBody(c.req.raw);

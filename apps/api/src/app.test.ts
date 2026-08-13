@@ -98,6 +98,7 @@ describe("canonical Hono API", () => {
       feedback: fakeFeedback(),
       repoConfigs: fakeRepoConfigs(),
       integrationAccounts: fakeIntegrationAccounts(),
+      slackBotSettings: fakeSlackBotSettings(),
       engineAuth: fakeEngineAuth(),
       engineSessions: fakeEngineSessions(),
       billing: fakeBilling(),
@@ -1636,6 +1637,25 @@ describe("canonical Hono API", () => {
     );
   });
 
+  it("streams the authenticated integration-account read model without client-selected scope", async () => {
+    const stream = vi.fn(async () => Response.json([]));
+    const app = testApp(fakeRepository(), { readModels: { stream } });
+
+    const response = await app.request(
+      "/v1/read-models/integration-accounts-v1?table=goat.integration_credentials&where=true",
+    );
+
+    expect(response.status).toBe(200);
+    expect(stream).toHaveBeenCalledWith(
+      expect.objectContaining({ actor, readModel: "integration-accounts-v1" }),
+    );
+
+    const invalid = await app.request(
+      "/v1/read-models/integration-accounts-v1?conversationId=conversation_1",
+    );
+    expect(invalid.status).toBe(400);
+  });
+
   it("uploads a private attachment through the typed multipart operation", async () => {
     const uploaded: File[] = [];
     const attachments: AttachmentUploadService = {
@@ -2234,16 +2254,38 @@ describe("canonical Hono API", () => {
   });
 
   it("serves the integration account control plane through typed commands", async () => {
+    const list = vi.fn(async () => [
+      {
+        integrationId: "gint_abc123",
+        provider: "gmail" as const,
+        status: "connected" as const,
+        connected: true,
+        accountEmail: "owner@example.com",
+        accountName: "Owner",
+        connectionLabel: null,
+        statusReason: null,
+        scopes: ["gmail.readonly"],
+        capabilityModes: {},
+      },
+    ]);
     const getUsage = vi.fn(async () => ({ affectedBrainSourceCount: 3 }));
     const disconnect = vi.fn(async () => undefined);
     const setCapabilityMode = vi.fn(async () => undefined);
     const app = testApp(fakeRepository(), {
       integrationAccounts: integrationAccountService({
+        list,
         getUsage,
         disconnect,
         setCapabilityMode,
       }),
     });
+
+    const listed = await app.request("/v1/integration-accounts");
+    expect(listed.status).toBe(200);
+    await expect(listed.json()).resolves.toMatchObject({
+      data: [{ integrationId: "gint_abc123", provider: "gmail" }],
+    });
+    expect(list).toHaveBeenCalledWith(actor);
 
     const usage = await app.request("/v1/integration-accounts/gint_abc123/usage");
     expect(usage.status).toBe(200);
@@ -2272,6 +2314,58 @@ describe("canonical Hono API", () => {
       data: { integrationId: "gint_abc123", deleted: true },
     });
     expect(disconnect).toHaveBeenCalledWith(actor, "gint_abc123");
+  });
+
+  it("serves authenticated Slack bot settings and destination resources", async () => {
+    const getWorkspaceSettings = vi.fn(async () => ({
+      isAdmin: true,
+      configured: true,
+      installed: true,
+      status: "connected" as const,
+      needsScopeUpgrade: false,
+      teamName: "Acme",
+      statusReason: null,
+      destinationCount: 1,
+    }));
+    const getDestination = vi.fn(async () => ({
+      installed: true,
+      botConnected: true,
+      isAdmin: true,
+      brainVisibility: "workspace" as const,
+      source: { enabled: true, channels: [{ id: "C1", name: "general" }] },
+    }));
+    const setDestination = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), {
+      slackBotSettings: {
+        ...fakeSlackBotSettings(),
+        getWorkspaceSettings,
+        getDestination,
+        setDestination,
+      },
+    });
+
+    const workspace = await app.request("/v1/workspace/slack-bot");
+    expect(workspace.status).toBe(200);
+    await expect(workspace.json()).resolves.toMatchObject({
+      data: { installed: true, teamName: "Acme", destinationCount: 1 },
+    });
+
+    const destination = await app.request("/v1/brains/brain_1/slack-bot");
+    expect(destination.status).toBe(200);
+    await expect(destination.json()).resolves.toMatchObject({
+      data: { source: { channels: [{ id: "C1", name: "general" }] } },
+    });
+
+    const updated = await app.request("/v1/brains/brain_1/slack-bot", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true, channels: [{ id: "C2", name: "product" }] }),
+    });
+    expect(updated.status).toBe(200);
+    expect(setDestination).toHaveBeenCalledWith(actor, "brain_1", {
+      enabled: true,
+      channels: [{ id: "C2", name: "product" }],
+    });
   });
 
   it("forwards standing action permissions through the authenticated command", async () => {
@@ -3104,6 +3198,7 @@ function testApp(
     feedback: fakeFeedback(),
     repoConfigs: fakeRepoConfigs(),
     integrationAccounts: fakeIntegrationAccounts(),
+    slackBotSettings: fakeSlackBotSettings(),
     engineAuth: fakeEngineAuth(),
     engineSessions: fakeEngineSessions(),
     billing: fakeBilling(),
@@ -3412,6 +3507,9 @@ function fakeRepoConfigs(): Parameters<typeof createApiApp>[0]["repoConfigs"] {
 
 function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrationAccounts"] {
   return {
+    list: async () => {
+      throw new Error("Unexpected integration account list.");
+    },
     getUsage: async () => {
       throw new Error("Unexpected integration account usage read.");
     },
@@ -3453,6 +3551,26 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     },
     saveJamieWebhookApiKey: async () => {
       throw new Error("Unexpected Jamie API key mutation.");
+    },
+  };
+}
+
+function fakeSlackBotSettings(): Parameters<typeof createApiApp>[0]["slackBotSettings"] {
+  return {
+    getWorkspaceSettings: async () => {
+      throw new Error("Unexpected Slack bot workspace settings read.");
+    },
+    disconnect: async () => {
+      throw new Error("Unexpected Slack bot disconnect.");
+    },
+    getDestination: async () => {
+      throw new Error("Unexpected Slack bot destination read.");
+    },
+    listChannels: async () => {
+      throw new Error("Unexpected Slack bot channel list.");
+    },
+    setDestination: async () => {
+      throw new Error("Unexpected Slack bot destination mutation.");
     },
   };
 }
