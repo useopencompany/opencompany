@@ -68,6 +68,8 @@ import type { ApiAuthenticator } from "./auth";
 import type { BrainAssetService } from "./brain-assets";
 import type { ReadModelService } from "./electric-read-models";
 import type { EngineAuthService } from "./engine-auth";
+import { admitEngineMessage } from "./engine-messages";
+import type { EngineSessionService } from "./engine-sessions";
 import { ApiError, errorResponse } from "./errors";
 import type { FeedbackService } from "./feedback";
 import type { GitHubIngressService } from "./github-ingress";
@@ -134,6 +136,7 @@ export type CreateApiAppInput = {
   repoConfigs: RepoConfigService;
   integrationAccounts: IntegrationAccountService;
   engineAuth: EngineAuthService;
+  engineSessions: EngineSessionService;
   authenticate: ApiAuthenticator;
   browserOrigins?: readonly string[];
   githubIngress?: GitHubIngressService;
@@ -997,14 +1000,21 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceRateLimit(rateLimiter, actor, "message", 30);
       const body = c.req.valid("json");
       const idempotencyKey = c.req.valid("header")["idempotency-key"];
+      const existingConversation = body.conversationId
+        ? await input.chat.getConversation(actor, body.conversationId)
+        : null;
+      if (existingConversation && existingConversation.engine !== body.engine.type) {
+        throw new ApiError(409, "conflict", "This conversation uses a different engine.");
+      }
       const requestedModel =
         body.model ??
+        existingConversation?.model ??
         input.defaultModel ??
         process.env.GOAT_DEFAULT_CHAT_MODEL ??
         "moonshotai/kimi-k3";
       let autoResolution: AutoModelRoutingResolution | null = null;
       if (requestedModel === "auto") {
-        if (body.engine !== "opencompany") {
+        if (body.engine.type !== "opencompany") {
           throw new ApiError(
             400,
             "invalid_request",
@@ -1041,10 +1051,22 @@ export function createApiApp(input: CreateApiAppInput) {
             : {}),
         });
       }
-      const result = await input.chat.createMessage(actor, {
-        ...body,
-        idempotencyKey,
+      const admitted = await admitEngineMessage({
+        actor,
+        engine: body.engine,
         model: autoResolution?.model ?? requestedModel,
+        defaultOpenCompanyModel:
+          input.defaultModel ?? process.env.GOAT_DEFAULT_CHAT_MODEL ?? "moonshotai/kimi-k3",
+        auth: input.engineAuth,
+      });
+      const { engine: _engine, model: _model, ...message } = body;
+      const result = await input.chat.createMessage(actor, {
+        ...message,
+        idempotencyKey,
+        engine: admitted.engine,
+        model: admitted.model,
+        runtimeModel: admitted.runtimeModel,
+        ...(admitted.settings ? { settings: admitted.settings } : {}),
       });
       return c.json(
         {
@@ -1086,6 +1108,20 @@ export function createApiApp(input: CreateApiAppInput) {
         },
         201,
       );
+    },
+    getEngineRuntimeStatus: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const conversationId = c.req.valid("param").conversationId;
+      const status = await input.engineSessions.getRuntimeStatus(actor, conversationId);
+      return c.json({ data: { conversationId, status }, meta }, 200);
+    },
+    createEngineRuntimeAccess: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "engine-runtime-access", 30);
+      const conversationId = c.req.valid("param").conversationId;
+      const access = await input.engineSessions.createRuntimeAccess(actor, conversationId);
+      return c.json({ data: access, meta }, 201);
     },
     getRun: async (c) => {
       const actor = actorFrom(c);
@@ -1300,7 +1336,10 @@ export function createApiApp(input: CreateApiAppInput) {
           );
         }
         await input.schedules.listTaskSchedules(actor, { limit: 1 });
-      } else if (params.readModel !== "chat-conversations-v1") {
+      } else if (
+        params.readModel !== "chat-conversations-v1" &&
+        params.readModel !== "engine-sessions-v1"
+      ) {
         if (!query.conversationId || query.brainId) {
           throw new ApiError(
             400,

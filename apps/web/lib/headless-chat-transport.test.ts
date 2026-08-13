@@ -283,7 +283,7 @@ describe("canonical Chat transport", () => {
       clientConversationId: "optimistic_conversation_1",
       clientMessageId: "ui_message_1",
       content: "Update the account",
-      engine: "opencompany",
+      engine: { type: "opencompany", schemaVersion: 1 },
       model: "model_1",
       attachmentIds: ["attachment_1"],
       mentions: [{ kind: "skill", id: "skill_1" }],

@@ -4,6 +4,8 @@ import {
   type ChatReadModel,
   type ConversationReadModel,
   ConversationReadModelSchema,
+  type EngineSessionReadModel,
+  EngineSessionReadModelSchema,
   type MessageReadModel,
   MessageReadModelSchema,
   type RunReadModel,
@@ -63,9 +65,21 @@ function createRuns(conversationId: string) {
   );
 }
 
+function createEngineSessions() {
+  return createCollection(
+    electricCollectionOptions({
+      id: "headless-chat:engine-sessions:v1",
+      schema: EngineSessionReadModelSchema,
+      shapeOptions: shapeOptions("engine-sessions-v1"),
+      getKey: (row) => row.conversationId,
+    }),
+  );
+}
+
 const messagesByConversation = new Map<string, ReturnType<typeof createMessages>>();
 const runsByConversation = new Map<string, ReturnType<typeof createRuns>>();
 let conversations: ReturnType<typeof createConversations> | null = null;
+let engineSessions: ReturnType<typeof createEngineSessions> | null = null;
 
 export function getHeadlessChatMessages(conversationId: string) {
   const cached = messagesByConversation.get(conversationId);
@@ -86,6 +100,11 @@ export function getHeadlessChatRuns(conversationId: string) {
 export function getHeadlessChatConversations() {
   conversations ??= createConversations();
   return conversations;
+}
+
+export function getHeadlessEngineSessions() {
+  engineSessions ??= createEngineSessions();
+  return engineSessions;
 }
 
 export async function awaitHeadlessChatTransaction(input: {
@@ -121,3 +140,4 @@ export async function awaitHeadlessConversationTransaction(
 export type HeadlessChatMessageReadModel = MessageReadModel;
 export type HeadlessChatRunReadModel = RunReadModel;
 export type HeadlessChatConversationReadModel = ConversationReadModel;
+export type HeadlessEngineSessionReadModel = EngineSessionReadModel;

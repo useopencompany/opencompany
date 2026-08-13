@@ -237,6 +237,31 @@ describe("ChatApplicationService", () => {
     await expect(
       service.resolveApproval(actor(), {
         runId: "run_1",
+        approvalId: "approval_question_1",
+        resolution: "answered",
+        answer: {
+          type: "engine_questions",
+          schemaVersion: 1,
+          answers: { question_1: { answers: [" Use Postgres. "] } },
+        },
+      }),
+    ).resolves.toMatchObject({ resolution: "answered" });
+    expect(repository.resolveApproval).toHaveBeenLastCalledWith({
+      actor: actor(),
+      command: {
+        runId: "run_1",
+        approvalId: "approval_question_1",
+        resolution: "answered",
+        answer: {
+          type: "engine_questions",
+          schemaVersion: 1,
+          answers: { question_1: { answers: [" Use Postgres. "] } },
+        },
+      },
+    });
+    await expect(
+      service.resolveApproval(actor(), {
+        runId: "run_1",
         approvalId: "approval_1",
         resolution: "approved",
         answer: "This must not be silently ignored.",

@@ -8,6 +8,7 @@ import {
   BrainIngestJobReadModelSchema,
   BrainTimelineReadModelSchema,
   ConversationReadModelSchema,
+  EngineSessionReadModelSchema,
   MessageReadModelSchema,
   type ReadModel,
   RunReadModelSchema,
@@ -207,6 +208,13 @@ function readModelShape(input: {
         "created_at",
         "updated_at",
       ]);
+    case "engine-sessions-v1":
+      return {
+        table: "goat.codex_chat_sessions",
+        columns: ["chat_session_id", "engine", "status", "active_turn_id", "error", "updated_at"],
+        where: `"user_workos_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
+        params: [input.actor.userId, input.actor.workspaceId],
+      };
     case "tasks-v1":
       return {
         table: "goat.task_read_model_v1",
@@ -524,6 +532,10 @@ function projectReadModelValue(
       return (partial ? MessageReadModelSchema.partial() : MessageReadModelSchema).parse(projected);
     case "chat-runs-v1":
       return (partial ? RunReadModelSchema.partial() : RunReadModelSchema).parse(projected);
+    case "engine-sessions-v1":
+      return (
+        partial ? EngineSessionReadModelSchema.partial() : EngineSessionReadModelSchema
+      ).parse(projected);
     case "workflow-schedules-v1":
       return (
         partial ? WorkflowScheduleReadModelSchema.partial() : WorkflowScheduleReadModelSchema
@@ -845,6 +857,14 @@ const READ_MODEL_COLUMN_NAMES = {
     attempt_count: "attemptCount",
     error: "error",
     created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "engine-sessions-v1": {
+    chat_session_id: "conversationId",
+    engine: "engine",
+    status: "status",
+    active_turn_id: "activeRunId",
+    error: "error",
     updated_at: "updatedAt",
   },
   "tasks-v1": {

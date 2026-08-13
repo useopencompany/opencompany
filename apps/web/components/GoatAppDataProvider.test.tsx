@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => {
     isLoading: true,
   };
   return {
+    getHeadlessChatConversations: vi.fn(() => ({})),
+    getHeadlessEngineSessions: vi.fn(() => ({})),
     getHeadlessTaskSchedules: vi.fn(() => ({})),
     getHeadlessTasks: vi.fn(() => ({})),
     listLegacyTaskCompatibility: vi.fn(async () => []),
@@ -26,6 +28,11 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("@tanstack/react-db", () => ({
   useLiveQuery: mocks.useLiveQuery,
+}));
+
+vi.mock("@/lib/headless-chat-collections", () => ({
+  getHeadlessChatConversations: mocks.getHeadlessChatConversations,
+  getHeadlessEngineSessions: mocks.getHeadlessEngineSessions,
 }));
 
 vi.mock("@/lib/task-collections", () => ({
@@ -151,17 +158,12 @@ describe("GoatAppDataProvider", () => {
       updated_at: now,
     };
     const runtimeRow = {
-      id: "goat_codex_chat_1",
-      user_workos_id: "user_1",
-      chat_session_id: "goat_chat_claude_1",
-      model: "claude-sonnet-5",
-      sandbox_id: "sbx_1",
-      codex_thread_id: null,
-      active_turn_id: null,
+      conversationId: "goat_chat_claude_1",
+      engine: "claude_code" as const,
+      activeRunId: null,
       status: "idle" as const,
       error: null,
-      created_at: now,
-      updated_at: now,
+      updatedAt: now,
     };
     // useLiveQuery is called once per collection per render, in a fixed order:
     // tasks, schedules, chatSessions, codexChatSessions, integrations. Only the
@@ -209,15 +211,12 @@ describe("GoatAppDataProvider", () => {
       updated_at: old,
     };
     const runtimeRow = {
-      id: "goat_codex_chat_1",
-      user_workos_id: "user_1",
-      chat_session_id: "goat_chat_active_turn",
-      model: "gpt-5.5",
-      active_turn_id: "goat_codex_chat_turn_1",
+      conversationId: "goat_chat_active_turn",
+      engine: "opencompany" as const,
+      activeRunId: "goat_codex_chat_turn_1",
       status: "idle" as const,
       error: null,
-      created_at: now,
-      updated_at: now,
+      updatedAt: now,
     };
     const perCollection = [
       { data: [], isLoading: false },

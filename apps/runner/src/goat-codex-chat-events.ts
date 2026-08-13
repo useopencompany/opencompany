@@ -475,6 +475,22 @@ export function createGoatCodexChatProjector(input: {
           RETURNING id
         `),
         );
+        if (target.canonicalAttemptId) {
+          assertRowsChanged(
+            await getDb().execute(sql`
+              INSERT INTO goat.run_approvals (
+                id, run_id, attempt_id, tool_call_id, kind, prompt, options,
+                status, created_at, updated_at
+              )
+              SELECT ${interactionId}, ${target.turnId}, ${target.canonicalAttemptId},
+                     ${interactionId}, 'engine_questions',
+                     'The coding engine needs more information.', NULL,
+                     'pending', ${now}, ${now}
+              WHERE EXISTS (${turnLeaseSubquery({ runningOnly: true })})
+              RETURNING id
+            `),
+          );
+        }
         await insertEventRow(event);
         const projection = applyCodexEventToUiMessageParts(parts, event);
         if (projection.changed) {
@@ -487,6 +503,24 @@ export function createGoatCodexChatProjector(input: {
 
     resolveInteraction(interactionId: string, status: "answered" | "auto-resolved" | "canceled") {
       return serializeProjection(async () => {
+        const now = new Date();
+        await getDb().execute(sql`
+          UPDATE goat.run_approvals AS approval
+          SET status = ${status === "canceled" ? "canceled" : "resolved"},
+              resolution = ${status === "canceled" ? "canceled" : "answered"},
+              response = COALESCE(
+                approval.response,
+                jsonb_build_object(
+                  'resolution', ${status === "canceled" ? "canceled" : "answered"}::text,
+                  'autoResolved', ${status === "auto-resolved"}::boolean
+                )
+              ),
+              resolved_at = COALESCE(approval.resolved_at, ${now}),
+              updated_at = ${now}
+          WHERE approval.id = ${interactionId}
+            AND approval.run_id = ${target.turnId}
+            AND approval.status = 'pending'
+        `);
         const projection = resolveCodexUiInteraction(parts, { interactionId, status });
         if (!projection.changed) return;
         parts = projection.parts;

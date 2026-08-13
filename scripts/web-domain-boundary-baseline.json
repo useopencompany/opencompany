@@ -19,7 +19,6 @@
     "apps/web/app/onboarding/page.tsx",
     "apps/web/app/share/[shareId]/artifacts/[artifactId]/versions/[versionId]/route.ts",
     "apps/web/app/share/[shareId]/attachments/[messageId]/[attachmentId]/route.ts",
-    "apps/web/components/GoatAppDataProvider.tsx",
     "apps/web/components/GoatAppShell.tsx",
     "apps/web/components/GoatCapabilitiesPanel.tsx",
     "apps/web/components/GoatIngestionUsagePanel.tsx",
