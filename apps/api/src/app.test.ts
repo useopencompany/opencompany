@@ -96,6 +96,7 @@ describe("canonical Hono API", () => {
       feedback: fakeFeedback(),
       repoConfigs: fakeRepoConfigs(),
       integrationAccounts: fakeIntegrationAccounts(),
+      engineAuth: fakeEngineAuth(),
       authenticate: async () => {
         throw new ApiError(401, "authentication_required", "Authentication required.");
       },
@@ -1728,6 +1729,13 @@ describe("canonical Hono API", () => {
       ["/v1/me/mcp-setup", "GET"],
       ["/v1/feedback", "POST"],
       ["/v1/repo-configs", "GET"],
+      ["/v1/engine-auth/claude-code", "GET"],
+      ["/v1/engine-auth/claude-code", "PUT"],
+      ["/v1/engine-auth/codex", "GET"],
+      ["/v1/engine-auth/codex/device", "POST"],
+      ["/v1/engine-auth/infisical", "GET"],
+      ["/v1/engine-auth/infisical/start", "POST"],
+      ["/v1/engine-auth/infisical", "DELETE"],
     ] as const) {
       const response = await app.request(path, {
         method,
@@ -2061,6 +2069,248 @@ describe("canonical Hono API", () => {
       },
     });
   });
+
+  it("serves engine auth status reads with credential-free DTOs", async () => {
+    const getClaudeCodeStatus = vi.fn(async () => ({
+      status: "connected" as const,
+      statusReason: null,
+      lastValidatedAt: "2026-08-12T10:00:00.000Z",
+      lastRotatedAt: "2026-08-10T10:00:00.000Z",
+    }));
+    const getCodexStatus = vi.fn(async () => ({
+      status: null,
+      statusReason: null,
+      lastValidatedAt: null,
+      lastRotatedAt: null,
+    }));
+    const getInfisicalStatus = vi.fn(async () => ({
+      status: "needs_reauth" as const,
+      statusReason: "Session expired.",
+      accountEmail: "ops@example.com",
+      host: "https://app.infisical.com",
+      lastValidatedAt: null,
+    }));
+    const app = testApp(fakeRepository(), {
+      engineAuth: engineAuthService({ getClaudeCodeStatus, getCodexStatus, getInfisicalStatus }),
+    });
+
+    const claude = await app.request("/v1/engine-auth/claude-code");
+    expect(claude.status).toBe(200);
+    // Pinned with toEqual so credential material can never ride along in the
+    // status DTO unnoticed.
+    await expect(claude.json()).resolves.toEqual({
+      data: {
+        status: "connected",
+        statusReason: null,
+        lastValidatedAt: "2026-08-12T10:00:00.000Z",
+        lastRotatedAt: "2026-08-10T10:00:00.000Z",
+      },
+      meta: { apiVersion: "v1", protocolVersion: expect.any(String) },
+    });
+    expect(getClaudeCodeStatus).toHaveBeenCalledWith(actor);
+
+    const codex = await app.request("/v1/engine-auth/codex");
+    expect(codex.status).toBe(200);
+    await expect(codex.json()).resolves.toMatchObject({
+      data: { status: null, lastValidatedAt: null },
+    });
+
+    const infisical = await app.request("/v1/engine-auth/infisical");
+    expect(infisical.status).toBe(200);
+    await expect(infisical.json()).resolves.toEqual({
+      data: {
+        status: "needs_reauth",
+        statusReason: "Session expired.",
+        accountEmail: "ops@example.com",
+        host: "https://app.infisical.com",
+        lastValidatedAt: null,
+      },
+      meta: { apiVersion: "v1", protocolVersion: expect.any(String) },
+    });
+  });
+
+  it("saves the Claude Code token without echoing it and disconnects engines", async () => {
+    const secretToken = "sk-ant-oat01-supersecretsetuptoken000000";
+    const saveClaudeCodeToken = vi.fn(async () => ({
+      status: "connected" as const,
+      statusReason: null,
+      lastValidatedAt: null,
+      lastRotatedAt: "2026-08-13T09:00:00.000Z",
+    }));
+    const disconnectClaudeCode = vi.fn(async () => undefined);
+    const disconnectCodex = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), {
+      engineAuth: engineAuthService({
+        saveClaudeCodeToken,
+        disconnectClaudeCode,
+        disconnectCodex,
+      }),
+    });
+
+    const saved = await app.request("/v1/engine-auth/claude-code", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: secretToken }),
+    });
+    expect(saved.status).toBe(200);
+    const savedBody = await saved.json();
+    expect(JSON.stringify(savedBody)).not.toContain(secretToken);
+    expect(savedBody).toMatchObject({ data: { status: "connected" } });
+    expect(saveClaudeCodeToken).toHaveBeenCalledWith(actor, secretToken);
+
+    const claudeRemoved = await app.request("/v1/engine-auth/claude-code", { method: "DELETE" });
+    expect(claudeRemoved.status).toBe(200);
+    await expect(claudeRemoved.json()).resolves.toMatchObject({ data: { deleted: true } });
+    expect(disconnectClaudeCode).toHaveBeenCalledWith(actor);
+
+    const codexRemoved = await app.request("/v1/engine-auth/codex", { method: "DELETE" });
+    expect(codexRemoved.status).toBe(200);
+    await expect(codexRemoved.json()).resolves.toMatchObject({ data: { deleted: true } });
+    expect(disconnectCodex).toHaveBeenCalledWith(actor);
+  });
+
+  it("gives engine auth flow starts their own small rate bucket", async () => {
+    const startCodexDeviceAuth = vi.fn(async () => ({
+      id: "gcodf_1",
+      status: "code_ready" as const,
+      userCode: "ABCD-1234",
+      verificationUri: "https://auth.example.com/device",
+      statusReason: null,
+      expiresAt: "2026-08-13T09:15:00.000Z",
+    }));
+    const startInfisicalAuth = vi.fn(async () => ({
+      id: "ginff_1",
+      status: "link_ready" as const,
+      loginUrl: "https://app.infisical.com/login?flow=1",
+      statusReason: null,
+      expiresAt: "2026-08-13T09:15:00.000Z",
+    }));
+    const buckets: string[] = [];
+    const rateLimiter: ApiRateLimiter = {
+      consume: async ({ bucket, limit }) => {
+        buckets.push(`${bucket}:${limit}`);
+        return { allowed: true };
+      },
+    };
+    const app = testApp(fakeRepository(), {
+      engineAuth: engineAuthService({ startCodexDeviceAuth, startInfisicalAuth }),
+      rateLimiter,
+    });
+
+    const codexStarted = await app.request("/v1/engine-auth/codex/device", { method: "POST" });
+    expect(codexStarted.status).toBe(201);
+    await expect(codexStarted.json()).resolves.toMatchObject({
+      data: { flow: { id: "gcodf_1", status: "code_ready", userCode: "ABCD-1234" } },
+    });
+    expect(startCodexDeviceAuth).toHaveBeenCalledWith(actor);
+
+    const infisicalStarted = await app.request("/v1/engine-auth/infisical/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ host: "https://app.infisical.com" }),
+    });
+    expect(infisicalStarted.status).toBe(201);
+    await expect(infisicalStarted.json()).resolves.toMatchObject({
+      data: { flow: { id: "ginff_1", status: "link_ready" } },
+    });
+    expect(startInfisicalAuth).toHaveBeenCalledWith(actor, "https://app.infisical.com");
+    expect(buckets).toEqual(["engine-auth-start:10", "engine-auth-start:10"]);
+  });
+
+  it("polls Codex device flows through the static-before-param route", async () => {
+    const pollCodexDeviceAuth = vi.fn(async () => ({
+      id: "gcodf_1",
+      status: "completed" as const,
+      userCode: null,
+      verificationUri: null,
+      statusReason: null,
+      expiresAt: "2026-08-13T09:15:00.000Z",
+    }));
+    const app = testApp(fakeRepository(), {
+      engineAuth: engineAuthService({ pollCodexDeviceAuth }),
+    });
+    const polled = await app.request("/v1/engine-auth/codex/device/gcodf_1/poll", {
+      method: "POST",
+    });
+    expect(polled.status).toBe(200);
+    await expect(polled.json()).resolves.toMatchObject({
+      data: { flow: { id: "gcodf_1", status: "completed" } },
+    });
+    expect(pollCodexDeviceAuth).toHaveBeenCalledWith(actor, "gcodf_1");
+  });
+
+  it("maps the Infisical admin gate to a structured forbidden error", async () => {
+    const app = testApp(fakeRepository(), {
+      engineAuth: engineAuthService({
+        startInfisicalAuth: async () => {
+          throw new ApiError(403, "forbidden", "Only workspace admins can manage Infisical.");
+        },
+      }),
+    });
+    const response = await app.request("/v1/engine-auth/infisical/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ host: "https://app.infisical.com" }),
+    });
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "forbidden", message: "Only workspace admins can manage Infisical." },
+    });
+  });
+
+  it("completes Infisical flows without echoing the browser token and pins the 64 KiB cap", async () => {
+    const browserToken = `infisical-browser-token-${"a".repeat(64)}`;
+    const completeInfisicalAuth = vi.fn(async () => ({
+      id: "ginff_1",
+      status: "completed" as const,
+      loginUrl: null,
+      statusReason: null,
+      expiresAt: "2026-08-13T09:15:00.000Z",
+    }));
+    const app = testApp(fakeRepository(), {
+      engineAuth: engineAuthService({ completeInfisicalAuth }),
+    });
+
+    const completed = await app.request("/v1/engine-auth/infisical/ginff_1/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ browserToken }),
+    });
+    expect(completed.status).toBe(200);
+    const completedBody = await completed.json();
+    expect(JSON.stringify(completedBody)).not.toContain(browserToken);
+    expect(completedBody).toMatchObject({ data: { flow: { status: "completed" } } });
+    expect(completeInfisicalAuth).toHaveBeenCalledWith(actor, "ginff_1", browserToken);
+
+    // The retired action capped browser tokens at 64 KiB; the protocol keeps
+    // the same ceiling, so oversized tokens never reach the service.
+    const oversized = await app.request("/v1/engine-auth/infisical/ginff_1/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ browserToken: "b".repeat(64 * 1024 + 1) }),
+    });
+    expect(oversized.status).toBe(400);
+    // Boot the real Node server adapter ourselves so this pin is
+    // self-contained: serve() patches global Response, and errorResponse must
+    // keep producing envelopes that survive the patched class (the
+    // Response.json regression this guards returned raw zod bodies in
+    // production). Closing immediately is fine — the patch is the side effect
+    // under test.
+    const envelopeServer = serve({ fetch: app.fetch, port: 0 });
+    envelopeServer.close();
+    const patchedOversized = await app.request("/v1/engine-auth/infisical/ginff_1/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ browserToken: "b".repeat(64 * 1024 + 1) }),
+    });
+    await expect(patchedOversized.json()).resolves.toMatchObject({
+      error: { code: "invalid_request" },
+    });
+    await expect(oversized.json()).resolves.toMatchObject({
+      error: { code: "invalid_request" },
+    });
+    expect(completeInfisicalAuth).toHaveBeenCalledTimes(1);
+  });
 });
 
 function testApp(
@@ -2082,6 +2332,7 @@ function testApp(
     feedback: fakeFeedback(),
     repoConfigs: fakeRepoConfigs(),
     integrationAccounts: fakeIntegrationAccounts(),
+    engineAuth: fakeEngineAuth(),
     authenticate: async () => ({ actor }),
     defaultModel: "provider/default",
     ...overrides,
@@ -2244,6 +2495,50 @@ function integrationAccountService(
   overrides: Partial<Parameters<typeof createApiApp>[0]["integrationAccounts"]>,
 ): Parameters<typeof createApiApp>[0]["integrationAccounts"] {
   return { ...fakeIntegrationAccounts(), ...overrides };
+}
+
+function fakeEngineAuth(): Parameters<typeof createApiApp>[0]["engineAuth"] {
+  return {
+    getClaudeCodeStatus: async () => {
+      throw new Error("Unexpected Claude Code status read.");
+    },
+    saveClaudeCodeToken: async () => {
+      throw new Error("Unexpected Claude Code token save.");
+    },
+    disconnectClaudeCode: async () => {
+      throw new Error("Unexpected Claude Code disconnect.");
+    },
+    getCodexStatus: async () => {
+      throw new Error("Unexpected Codex status read.");
+    },
+    startCodexDeviceAuth: async () => {
+      throw new Error("Unexpected Codex device auth start.");
+    },
+    pollCodexDeviceAuth: async () => {
+      throw new Error("Unexpected Codex device auth poll.");
+    },
+    disconnectCodex: async () => {
+      throw new Error("Unexpected Codex disconnect.");
+    },
+    getInfisicalStatus: async () => {
+      throw new Error("Unexpected Infisical status read.");
+    },
+    startInfisicalAuth: async () => {
+      throw new Error("Unexpected Infisical auth start.");
+    },
+    completeInfisicalAuth: async () => {
+      throw new Error("Unexpected Infisical auth completion.");
+    },
+    disconnectInfisical: async () => {
+      throw new Error("Unexpected Infisical disconnect.");
+    },
+  };
+}
+
+function engineAuthService(
+  overrides: Partial<Parameters<typeof createApiApp>[0]["engineAuth"]>,
+): Parameters<typeof createApiApp>[0]["engineAuth"] {
+  return { ...fakeEngineAuth(), ...overrides };
 }
 
 function fakeBrainSources(): Parameters<typeof createApiApp>[0]["brainSources"] {

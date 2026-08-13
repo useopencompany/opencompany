@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/neon-http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { rotateGoatCodexCredential } from "./goat-codex-auth";
+import { loadGoatCodexAuthStatus, rotateGoatCodexCredential } from "./goat-codex-auth";
 
 describe("rotateGoatCodexCredential", () => {
   afterEach(() => {
@@ -51,5 +51,26 @@ describe("rotateGoatCodexCredential", () => {
 
     const [statement] = query.mock.calls[0]!;
     expect(statement).toContain('"last_rotated_at" is null');
+  });
+
+  it("reads status fields without touching the encrypted payload", async () => {
+    const row = {
+      status: "connected" as const,
+      statusReason: null,
+      lastValidatedAt: new Date("2026-08-01T13:00:00.000Z"),
+      lastRotatedAt: null,
+    };
+    const limit = vi.fn(async () => [row]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+
+    await expect(
+      loadGoatCodexAuthStatus({ db: { select } as never, userWorkosId: "user_123" }),
+    ).resolves.toEqual(row);
+    // The status projection never selects the encrypted auth JSON.
+    expect(select).toHaveBeenCalledWith(
+      expect.not.objectContaining({ encryptedAuthJson: expect.anything() }),
+    );
   });
 });

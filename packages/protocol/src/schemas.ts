@@ -2299,6 +2299,134 @@ export const JamieWebhookSetupEnvelopeSchema = z
   .strict()
   .openapi("JamieWebhookSetupEnvelope");
 
+// Engine + secrets-manager auth commands (#1203 5a3). Credential material
+// (the Claude Code setup token, the Infisical browser token) arrives in
+// request bodies over TLS exactly as the retired Server Actions received it;
+// no status DTO or response envelope ever carries it back out.
+
+export const EngineAuthConnectionStatusSchema = z.enum(["connected", "needs_reauth"]);
+
+export const ClaudeCodeAuthStatusSchema = z
+  .object({
+    status: EngineAuthConnectionStatusSchema.nullable(),
+    statusReason: z.string().nullable(),
+    lastValidatedAt: TimestampSchema.nullable(),
+    lastRotatedAt: TimestampSchema.nullable(),
+  })
+  .strict()
+  .openapi("ClaudeCodeAuthStatus");
+
+export const ClaudeCodeAuthStatusEnvelopeSchema = z
+  .object({ data: ClaudeCodeAuthStatusSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("ClaudeCodeAuthStatusEnvelope");
+
+// No .min(1): empty submissions must reach the service so its validator keeps
+// the retired "Paste the token printed by `claude setup-token`." copy.
+export const SaveClaudeCodeTokenBodySchema = z
+  .object({ token: z.string().max(4_000) })
+  .strict()
+  .openapi("SaveClaudeCodeTokenBody");
+
+export const EngineAuthDisconnectEnvelopeSchema = z
+  .object({
+    data: z.object({ deleted: z.literal(true) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("EngineAuthDisconnectEnvelope");
+
+export const CodexAuthStatusSchema = z
+  .object({
+    status: EngineAuthConnectionStatusSchema.nullable(),
+    statusReason: z.string().nullable(),
+    lastValidatedAt: TimestampSchema.nullable(),
+    lastRotatedAt: TimestampSchema.nullable(),
+  })
+  .strict()
+  .openapi("CodexAuthStatus");
+
+export const CodexAuthStatusEnvelopeSchema = z
+  .object({ data: CodexAuthStatusSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("CodexAuthStatusEnvelope");
+
+export const EngineAuthFlowIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .openapi({ example: "gcodf_0f8e7d6c5b4a", description: "Engine auth flow id." });
+
+export const CodexDeviceAuthFlowSchema = z
+  .object({
+    id: EngineAuthFlowIdSchema,
+    status: z.enum(["pending", "code_ready", "completed", "failed", "expired"]),
+    userCode: z.string().nullable(),
+    verificationUri: z.string().nullable(),
+    statusReason: z.string().nullable(),
+    expiresAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("CodexDeviceAuthFlow");
+
+export const CodexDeviceAuthFlowEnvelopeSchema = z
+  .object({
+    data: z.object({ flow: CodexDeviceAuthFlowSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("CodexDeviceAuthFlowEnvelope");
+
+export const InfisicalAuthStatusSchema = z
+  .object({
+    status: z.enum(["connected", "needs_reauth", "disconnected"]).nullable(),
+    statusReason: z.string().nullable(),
+    accountEmail: z.string().nullable(),
+    // The supported host vocabulary lives beside the credential table in
+    // @opencompany/db; the service validates membership so unsupported regions
+    // keep the retired human-readable copy.
+    host: z.string().nullable(),
+    lastValidatedAt: TimestampSchema.nullable(),
+  })
+  .strict()
+  .openapi("InfisicalAuthStatus");
+
+export const InfisicalAuthStatusEnvelopeSchema = z
+  .object({ data: InfisicalAuthStatusSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("InfisicalAuthStatusEnvelope");
+
+export const StartInfisicalAuthBodySchema = z
+  .object({ host: z.string().min(1).max(256) })
+  .strict()
+  .openapi("StartInfisicalAuthBody");
+
+// The retired action rejected browser tokens above 64 KiB; the protocol pins
+// the same ceiling so oversized payloads never reach the runner.
+export const CompleteInfisicalAuthBodySchema = z
+  .object({ browserToken: z.string().max(64 * 1024) })
+  .strict()
+  .openapi("CompleteInfisicalAuthBody");
+
+export const InfisicalAuthFlowSchema = z
+  .object({
+    id: EngineAuthFlowIdSchema,
+    status: z.enum(["pending", "link_ready", "completed", "failed", "expired"]),
+    loginUrl: z.string().nullable(),
+    statusReason: z.string().nullable(),
+    expiresAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("InfisicalAuthFlow");
+
+export const InfisicalAuthFlowEnvelopeSchema = z
+  .object({
+    data: z.object({ flow: InfisicalAuthFlowSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("InfisicalAuthFlowEnvelope");
+
 export type ConversationDto = z.infer<typeof ConversationSchema>;
 export type UpdateConversationBody = z.infer<typeof UpdateConversationBodySchema>;
 export type MessageDto = z.infer<typeof MessageSchema>;

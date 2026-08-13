@@ -126,6 +126,12 @@ const groups = {
       "GOAT_SLACK_BOT_CLIENT_SECRET",
       "GOAT_SLACK_BOT_SIGNING_SECRET",
       "GOAT_SLACK_BOT_STATE_SECRET",
+      // Engine auth (#1203 5a3): the API makes the Codex/Infisical control
+      // calls to the runner's internal routes. Requiredness mirrors the web
+      // group: the public URL is the guaranteed fallback, the internal URL an
+      // optional override.
+      "RUNNER_PUBLIC_URL",
+      "RUNNER_INTERNAL_TOKEN",
     ],
     // Browser profiles are feature-flag gated: the Browserbase credentials are
     // required only when GOAT_BROWSER_PROFILES_ENABLED is "true" in this env.
@@ -181,6 +187,9 @@ const groups = {
       "LINQ_API_BASE_URL",
       "GOAT_IMESSAGE_PROVIDER",
       "GOAT_IMESSAGE_KILL_SWITCH",
+      // Engine auth (#1203 5a3): optional internal-network override for the
+      // runner control calls, mirroring the web group.
+      "RUNNER_INTERNAL_URL",
     ],
   },
   runner: {
