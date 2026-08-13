@@ -184,6 +184,32 @@ export async function loadGoatCodexCredential(input: {
   };
 }
 
+export type GoatCodexAuthStatus = {
+  status: GoatCodexCredentialStatus;
+  statusReason: string | null;
+  lastValidatedAt: Date | null;
+  lastRotatedAt: Date | null;
+};
+
+// Status-only read for settings surfaces and engine-availability checks; never
+// touches the encrypted auth payload.
+export async function loadGoatCodexAuthStatus(input: {
+  db: GoatCodexAuthDb;
+  userWorkosId: string;
+}): Promise<GoatCodexAuthStatus | null> {
+  const [row] = await input.db
+    .select({
+      status: goatCodexCredentials.status,
+      statusReason: goatCodexCredentials.statusReason,
+      lastValidatedAt: goatCodexCredentials.lastValidatedAt,
+      lastRotatedAt: goatCodexCredentials.lastRotatedAt,
+    })
+    .from(goatCodexCredentials)
+    .where(eq(goatCodexCredentials.userWorkosId, input.userWorkosId))
+    .limit(1);
+  return row ?? null;
+}
+
 export async function deleteGoatCodexCredential(input: {
   db: GoatCodexAuthDb;
   userWorkosId: string;

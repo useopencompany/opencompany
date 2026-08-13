@@ -175,6 +175,32 @@ export async function loadGoatClaudeCodeCredential(input: {
   };
 }
 
+export type GoatClaudeCodeAuthStatus = {
+  status: GoatCodexCredentialStatus;
+  statusReason: string | null;
+  lastValidatedAt: Date | null;
+  lastRotatedAt: Date | null;
+};
+
+// Status-only read for settings surfaces and engine-availability checks; never
+// touches the encrypted token payload.
+export async function loadGoatClaudeCodeAuthStatus(input: {
+  db: GoatClaudeCodeAuthDb;
+  userWorkosId: string;
+}): Promise<GoatClaudeCodeAuthStatus | null> {
+  const [row] = await input.db
+    .select({
+      status: goatClaudeCodeCredentials.status,
+      statusReason: goatClaudeCodeCredentials.statusReason,
+      lastValidatedAt: goatClaudeCodeCredentials.lastValidatedAt,
+      lastRotatedAt: goatClaudeCodeCredentials.lastRotatedAt,
+    })
+    .from(goatClaudeCodeCredentials)
+    .where(eq(goatClaudeCodeCredentials.userWorkosId, input.userWorkosId))
+    .limit(1);
+  return row ?? null;
+}
+
 export async function deleteGoatClaudeCodeCredential(input: {
   db: GoatClaudeCodeAuthDb;
   userWorkosId: string;

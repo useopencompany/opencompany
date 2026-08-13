@@ -8213,6 +8213,371 @@
           "mode"
         ],
         "additionalProperties": false
+      },
+      "ClaudeCodeAuthStatusEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ClaudeCodeAuthStatus"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ClaudeCodeAuthStatus": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "connected",
+              "needs_reauth",
+              null
+            ]
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "lastValidatedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "lastRotatedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "status",
+          "statusReason",
+          "lastValidatedAt",
+          "lastRotatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "SaveClaudeCodeTokenBody": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "additionalProperties": false
+      },
+      "EngineAuthDisconnectEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "deleted": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "deleted"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CodexAuthStatusEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CodexAuthStatus"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CodexAuthStatus": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "connected",
+              "needs_reauth",
+              null
+            ]
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "lastValidatedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "lastRotatedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "status",
+          "statusReason",
+          "lastValidatedAt",
+          "lastRotatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "CodexDeviceAuthFlowEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "flow": {
+                "$ref": "#/components/schemas/CodexDeviceAuthFlow"
+              }
+            },
+            "required": [
+              "flow"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CodexDeviceAuthFlow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "example": "gcodf_0f8e7d6c5b4a",
+            "description": "Engine auth flow id."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "code_ready",
+              "completed",
+              "failed",
+              "expired"
+            ]
+          },
+          "userCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "verificationUri": {
+            "type": "string",
+            "nullable": true
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "userCode",
+          "verificationUri",
+          "statusReason",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "InfisicalAuthStatusEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/InfisicalAuthStatus"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "InfisicalAuthStatus": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "connected",
+              "needs_reauth",
+              "disconnected",
+              null
+            ]
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "accountEmail": {
+            "type": "string",
+            "nullable": true
+          },
+          "host": {
+            "type": "string",
+            "nullable": true
+          },
+          "lastValidatedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "status",
+          "statusReason",
+          "accountEmail",
+          "host",
+          "lastValidatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "InfisicalAuthFlowEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "flow": {
+                "$ref": "#/components/schemas/InfisicalAuthFlow"
+              }
+            },
+            "required": [
+              "flow"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "InfisicalAuthFlow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "example": "gcodf_0f8e7d6c5b4a",
+            "description": "Engine auth flow id."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "link_ready",
+              "completed",
+              "failed",
+              "expired"
+            ]
+          },
+          "loginUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "loginUrl",
+          "statusReason",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "StartInfisicalAuthBody": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "host"
+        ],
+        "additionalProperties": false
+      },
+      "CompleteInfisicalAuthBody": {
+        "type": "object",
+        "properties": {
+          "browserToken": {
+            "type": "string",
+            "maxLength": 65536
+          }
+        },
+        "required": [
+          "browserToken"
+        ],
+        "additionalProperties": false
       }
     },
     "parameters": {}
@@ -13454,6 +13819,465 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/IntegrationAccountDeleteEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/engine-auth/claude-code": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Claude Code token connection status for the acting user. Never includes the stored token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaudeCodeAuthStatusEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveClaudeCodeTokenBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Claude Code setup token validated and stored encrypted for the acting user. The token never appears in the response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaudeCodeAuthStatusEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Claude Code token connection removed for the acting user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineAuthDisconnectEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/engine-auth/codex": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Codex connection status for the acting user. Never includes stored credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodexAuthStatusEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Codex connection removed for the acting user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineAuthDisconnectEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/engine-auth/codex/device": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Codex device authorization flow started via the runner control plane; returns the user code and verification link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodexDeviceAuthFlowEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/engine-auth/codex/device/{flowId}/poll": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "example": "gcodf_0f8e7d6c5b4a",
+              "description": "Engine auth flow id."
+            },
+            "required": true,
+            "description": "Engine auth flow id.",
+            "name": "flowId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current state of a Codex device authorization flow.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodexDeviceAuthFlowEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/engine-auth/infisical": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspace Infisical connection status. Member-visible; never includes the stored auth bundle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InfisicalAuthStatusEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspace Infisical connection disconnected. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineAuthDisconnectEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/engine-auth/infisical/start": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartInfisicalAuthBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Infisical browser-login flow started via the runner control plane. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InfisicalAuthFlowEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/engine-auth/infisical/{flowId}/complete": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "example": "gcodf_0f8e7d6c5b4a",
+              "description": "Engine auth flow id."
+            },
+            "required": true,
+            "description": "Engine auth flow id.",
+            "name": "flowId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteInfisicalAuthBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Infisical browser token submitted to the runner to finish the flow. Admin only; the token never appears in the response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InfisicalAuthFlowEnvelope"
                 }
               }
             }

@@ -144,6 +144,17 @@ services:
         sync: false
       - key: GOAT_IMESSAGE_KILL_SWITCH
         sync: false
+      # Engine auth (Codex device flow, Infisical browser login) moved behind
+      # /v1 in the #1203 5a3 cutover: the API now makes the sanctioned control
+      # calls to the runner's internal auth routes. RUNNER_INTERNAL_URL is an
+      # optional override; the public URL is the guaranteed fallback, mirroring
+      # the web requiredness.
+      - key: RUNNER_PUBLIC_URL
+        sync: false
+      - key: RUNNER_INTERNAL_URL
+        sync: false
+      - key: RUNNER_INTERNAL_TOKEN
+        sync: false
       # Browser profiles moved behind /v1 in the #1203 3e cutover. The feature is
       # flag-gated; the Browserbase credentials are only exercised when
       # GOAT_BROWSER_PROFILES_ENABLED is "true".

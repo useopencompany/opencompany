@@ -185,6 +185,13 @@ describe("v1 protocol contract", () => {
       "/v1/integration-accounts/{integrationId}/usage",
       "/v1/integration-accounts/{integrationId}/capability-modes/{capabilityId}",
       "/v1/integration-accounts/{integrationId}",
+      "/v1/engine-auth/claude-code",
+      "/v1/engine-auth/codex",
+      "/v1/engine-auth/codex/device",
+      "/v1/engine-auth/codex/device/{flowId}/poll",
+      "/v1/engine-auth/infisical",
+      "/v1/engine-auth/infisical/start",
+      "/v1/engine-auth/infisical/{flowId}/complete",
     ]);
     expect(JSON.stringify(document)).not.toMatch(/workos|codex_chat_turn|lease_owner/iu);
 

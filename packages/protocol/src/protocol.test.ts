@@ -95,6 +95,13 @@ describe("headless protocol", () => {
       "/v1/integration-accounts/{integrationId}/usage",
       "/v1/integration-accounts/{integrationId}/capability-modes/{capabilityId}",
       "/v1/integration-accounts/{integrationId}",
+      "/v1/engine-auth/claude-code",
+      "/v1/engine-auth/codex",
+      "/v1/engine-auth/codex/device",
+      "/v1/engine-auth/codex/device/{flowId}/poll",
+      "/v1/engine-auth/infisical",
+      "/v1/engine-auth/infisical/start",
+      "/v1/engine-auth/infisical/{flowId}/complete",
     ]);
     expect(document.components?.securitySchemes).toHaveProperty("bearerAuth");
   });

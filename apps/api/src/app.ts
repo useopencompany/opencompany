@@ -67,6 +67,7 @@ import type { AttioIngressService } from "./attio-ingress";
 import type { ApiAuthenticator } from "./auth";
 import type { BrainAssetService } from "./brain-assets";
 import type { ReadModelService } from "./electric-read-models";
+import type { EngineAuthService } from "./engine-auth";
 import { ApiError, errorResponse } from "./errors";
 import type { FeedbackService } from "./feedback";
 import type { GitHubIngressService } from "./github-ingress";
@@ -132,6 +133,7 @@ export type CreateApiAppInput = {
   feedback: FeedbackService;
   repoConfigs: RepoConfigService;
   integrationAccounts: IntegrationAccountService;
+  engineAuth: EngineAuthService;
   authenticate: ApiAuthenticator;
   browserOrigins?: readonly string[];
   githubIngress?: GitHubIngressService;
@@ -1510,6 +1512,81 @@ export function createApiApp(input: CreateApiAppInput) {
       const integrationId = c.req.valid("param").integrationId;
       await input.integrationAccounts.disconnect(actor, integrationId);
       return c.json({ data: { integrationId, deleted: true as const }, meta }, 200);
+    },
+    getClaudeCodeAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const status = await input.engineAuth.getClaudeCodeStatus(actor);
+      return c.json({ data: status, meta }, 200);
+    },
+    saveClaudeCodeToken: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const status = await input.engineAuth.saveClaudeCodeToken(actor, c.req.valid("json").token);
+      return c.json({ data: status, meta }, 200);
+    },
+    deleteClaudeCodeAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.engineAuth.disconnectClaudeCode(actor);
+      return c.json({ data: { deleted: true as const }, meta }, 200);
+    },
+    getCodexAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const status = await input.engineAuth.getCodexStatus(actor);
+      return c.json({ data: status, meta }, 200);
+    },
+    startCodexDeviceAuth: async (c) => {
+      const actor = actorFrom(c);
+      // Flow starts open device/browser authorizations against external auth
+      // providers, so they get a small dedicated bucket instead of the general
+      // write counter.
+      await enforceRateLimit(rateLimiter, actor, "engine-auth-start", 10);
+      const flow = await input.engineAuth.startCodexDeviceAuth(actor);
+      return c.json({ data: { flow }, meta }, 201);
+    },
+    pollCodexDeviceAuth: async (c) => {
+      const actor = actorFrom(c);
+      // The settings panel polls every few seconds during a device flow;
+      // sharing the write bucket would let ordinary mutations 429 the poll.
+      await enforceRateLimit(rateLimiter, actor, "engine-auth-poll", 120);
+      const flow = await input.engineAuth.pollCodexDeviceAuth(actor, c.req.valid("param").flowId);
+      return c.json({ data: { flow }, meta }, 200);
+    },
+    deleteCodexAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.engineAuth.disconnectCodex(actor);
+      return c.json({ data: { deleted: true as const }, meta }, 200);
+    },
+    getInfisicalAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const status = await input.engineAuth.getInfisicalStatus(actor);
+      return c.json({ data: status, meta }, 200);
+    },
+    startInfisicalAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "engine-auth-start", 10);
+      const flow = await input.engineAuth.startInfisicalAuth(actor, c.req.valid("json").host);
+      return c.json({ data: { flow }, meta }, 201);
+    },
+    completeInfisicalAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const flow = await input.engineAuth.completeInfisicalAuth(
+        actor,
+        c.req.valid("param").flowId,
+        c.req.valid("json").browserToken,
+      );
+      return c.json({ data: { flow }, meta }, 200);
+    },
+    deleteInfisicalAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.engineAuth.disconnectInfisical(actor);
+      return c.json({ data: { deleted: true as const }, meta }, 200);
     },
   };
 

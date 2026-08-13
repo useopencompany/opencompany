@@ -29,6 +29,10 @@ import {
   BrowserProfileLoginCompleteEnvelopeSchema,
   BrowserProfileLoginSessionEnvelopeSchema,
   CancelRunEnvelopeSchema,
+  ClaudeCodeAuthStatusEnvelopeSchema,
+  CodexAuthStatusEnvelopeSchema,
+  CodexDeviceAuthFlowEnvelopeSchema,
+  CompleteInfisicalAuthBodySchema,
   ConfirmBrainImportBodySchema,
   ConfirmImessagePairingBodySchema,
   ConversationEnvelopeSchema,
@@ -47,6 +51,8 @@ import {
   CursorSchema,
   DeleteBrainFolderBodySchema,
   DeleteWikiPageBodySchema,
+  EngineAuthDisconnectEnvelopeSchema,
+  EngineAuthFlowIdSchema,
   ErrorEnvelopeSchema,
   FathomAccountStateEnvelopeSchema,
   FeedbackSubmissionEnvelopeSchema,
@@ -54,6 +60,8 @@ import {
   ImessageAccountStateEnvelopeSchema,
   ImessagePairingStartedEnvelopeSchema,
   ImportSkillBodySchema,
+  InfisicalAuthFlowEnvelopeSchema,
+  InfisicalAuthStatusEnvelopeSchema,
   IntegrationAccountDeleteEnvelopeSchema,
   IntegrationAccountIdSchema,
   IntegrationAccountUsageEnvelopeSchema,
@@ -77,6 +85,7 @@ import {
   ResolveApprovalEnvelopeSchema,
   ResourceIdSchema,
   RunEnvelopeSchema,
+  SaveClaudeCodeTokenBodySchema,
   SetBrainSourceBodySchema,
   SetIntegrationCapabilityModeBodySchema,
   SetRepoConfigEnvBodySchema,
@@ -90,6 +99,7 @@ import {
   SkillListEnvelopeSchema,
   StartBrainImportBodySchema,
   StartImessagePairingBodySchema,
+  StartInfisicalAuthBodySchema,
   StripeAccountDeleteEnvelopeSchema,
   StripeAccountStateEnvelopeSchema,
   SubmitFeedbackBodySchema,
@@ -1844,6 +1854,190 @@ export const deleteIntegrationAccountRoute = createRoute({
   },
 });
 
+// Engine + secrets-manager auth commands (#1203 5a3). Static paths only, apart
+// from the flow-id continuation routes, which register after their static
+// siblings so e.g. POST /codex/device never captures "device" as a flow id.
+
+export const getClaudeCodeAuthRoute = createRoute({
+  method: "get",
+  path: "/v1/engine-auth/claude-code",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description:
+        "Claude Code token connection status for the acting user. Never includes the stored token.",
+      content: { "application/json": { schema: ClaudeCodeAuthStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const saveClaudeCodeTokenRoute = createRoute({
+  method: "put",
+  path: "/v1/engine-auth/claude-code",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: SaveClaudeCodeTokenBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        "Claude Code setup token validated and stored encrypted for the acting user. The token never appears in the response.",
+      content: { "application/json": { schema: ClaudeCodeAuthStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deleteClaudeCodeAuthRoute = createRoute({
+  method: "delete",
+  path: "/v1/engine-auth/claude-code",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Claude Code token connection removed for the acting user.",
+      content: { "application/json": { schema: EngineAuthDisconnectEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getCodexAuthRoute = createRoute({
+  method: "get",
+  path: "/v1/engine-auth/codex",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description:
+        "Codex connection status for the acting user. Never includes stored credentials.",
+      content: { "application/json": { schema: CodexAuthStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const startCodexDeviceAuthRoute = createRoute({
+  method: "post",
+  path: "/v1/engine-auth/codex/device",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    201: {
+      description:
+        "Codex device authorization flow started via the runner control plane; returns the user code and verification link.",
+      content: { "application/json": { schema: CodexDeviceAuthFlowEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const pollCodexDeviceAuthRoute = createRoute({
+  method: "post",
+  path: "/v1/engine-auth/codex/device/{flowId}/poll",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: { params: z.object({ flowId: EngineAuthFlowIdSchema }) },
+  responses: {
+    200: {
+      description: "Current state of a Codex device authorization flow.",
+      content: { "application/json": { schema: CodexDeviceAuthFlowEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deleteCodexAuthRoute = createRoute({
+  method: "delete",
+  path: "/v1/engine-auth/codex",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Codex connection removed for the acting user.",
+      content: { "application/json": { schema: EngineAuthDisconnectEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getInfisicalAuthRoute = createRoute({
+  method: "get",
+  path: "/v1/engine-auth/infisical",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description:
+        "Workspace Infisical connection status. Member-visible; never includes the stored auth bundle.",
+      content: { "application/json": { schema: InfisicalAuthStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const startInfisicalAuthRoute = createRoute({
+  method: "post",
+  path: "/v1/engine-auth/infisical/start",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: StartInfisicalAuthBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Infisical browser-login flow started via the runner control plane. Admin only.",
+      content: { "application/json": { schema: InfisicalAuthFlowEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const completeInfisicalAuthRoute = createRoute({
+  method: "post",
+  path: "/v1/engine-auth/infisical/{flowId}/complete",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ flowId: EngineAuthFlowIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: CompleteInfisicalAuthBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        "Infisical browser token submitted to the runner to finish the flow. Admin only; the token never appears in the response.",
+      content: { "application/json": { schema: InfisicalAuthFlowEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deleteInfisicalAuthRoute = createRoute({
+  method: "delete",
+  path: "/v1/engine-auth/infisical",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Workspace Infisical connection disconnected. Admin only.",
+      content: { "application/json": { schema: EngineAuthDisconnectEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export type V1RouteHandlers = {
   listTasks: RouteHandler<typeof listTasksRoute>;
   createTask: RouteHandler<typeof createTaskRoute>;
@@ -1937,6 +2131,17 @@ export type V1RouteHandlers = {
   getIntegrationAccountUsage: RouteHandler<typeof getIntegrationAccountUsageRoute>;
   setIntegrationCapabilityMode: RouteHandler<typeof setIntegrationCapabilityModeRoute>;
   deleteIntegrationAccount: RouteHandler<typeof deleteIntegrationAccountRoute>;
+  getClaudeCodeAuth: RouteHandler<typeof getClaudeCodeAuthRoute>;
+  saveClaudeCodeToken: RouteHandler<typeof saveClaudeCodeTokenRoute>;
+  deleteClaudeCodeAuth: RouteHandler<typeof deleteClaudeCodeAuthRoute>;
+  getCodexAuth: RouteHandler<typeof getCodexAuthRoute>;
+  startCodexDeviceAuth: RouteHandler<typeof startCodexDeviceAuthRoute>;
+  pollCodexDeviceAuth: RouteHandler<typeof pollCodexDeviceAuthRoute>;
+  deleteCodexAuth: RouteHandler<typeof deleteCodexAuthRoute>;
+  getInfisicalAuth: RouteHandler<typeof getInfisicalAuthRoute>;
+  startInfisicalAuth: RouteHandler<typeof startInfisicalAuthRoute>;
+  completeInfisicalAuth: RouteHandler<typeof completeInfisicalAuthRoute>;
+  deleteInfisicalAuth: RouteHandler<typeof deleteInfisicalAuthRoute>;
 };
 
 export function createV1Router(
@@ -2045,6 +2250,19 @@ export function createV1Router(
       .openapi(getIntegrationAccountUsageRoute, handlers.getIntegrationAccountUsage)
       .openapi(setIntegrationCapabilityModeRoute, handlers.setIntegrationCapabilityMode)
       .openapi(deleteIntegrationAccountRoute, handlers.deleteIntegrationAccount)
+      .openapi(getClaudeCodeAuthRoute, handlers.getClaudeCodeAuth)
+      .openapi(saveClaudeCodeTokenRoute, handlers.saveClaudeCodeToken)
+      .openapi(deleteClaudeCodeAuthRoute, handlers.deleteClaudeCodeAuth)
+      .openapi(getCodexAuthRoute, handlers.getCodexAuth)
+      // POST /codex/device registers before the {flowId} poll route so the
+      // static segment always wins route matching.
+      .openapi(startCodexDeviceAuthRoute, handlers.startCodexDeviceAuth)
+      .openapi(pollCodexDeviceAuthRoute, handlers.pollCodexDeviceAuth)
+      .openapi(deleteCodexAuthRoute, handlers.deleteCodexAuth)
+      .openapi(getInfisicalAuthRoute, handlers.getInfisicalAuth)
+      .openapi(startInfisicalAuthRoute, handlers.startInfisicalAuth)
+      .openapi(completeInfisicalAuthRoute, handlers.completeInfisicalAuth)
+      .openapi(deleteInfisicalAuthRoute, handlers.deleteInfisicalAuth)
   );
 }
 
@@ -2927,4 +3145,126 @@ const contractDocumentHandlers: V1RouteHandlers = {
     ),
   deleteIntegrationAccount: (c) =>
     c.json({ data: { integrationId: "gint_contract", deleted: true as const }, meta }, 200),
+  getClaudeCodeAuth: (c) =>
+    c.json(
+      {
+        data: {
+          status: "connected" as const,
+          statusReason: null,
+          lastValidatedAt: placeholderTime,
+          lastRotatedAt: placeholderTime,
+        },
+        meta,
+      },
+      200,
+    ),
+  saveClaudeCodeToken: (c) =>
+    c.json(
+      {
+        data: {
+          status: "connected" as const,
+          statusReason: null,
+          lastValidatedAt: null,
+          lastRotatedAt: placeholderTime,
+        },
+        meta,
+      },
+      200,
+    ),
+  deleteClaudeCodeAuth: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
+  getCodexAuth: (c) =>
+    c.json(
+      {
+        data: {
+          status: "connected" as const,
+          statusReason: null,
+          lastValidatedAt: placeholderTime,
+          lastRotatedAt: placeholderTime,
+        },
+        meta,
+      },
+      200,
+    ),
+  startCodexDeviceAuth: (c) =>
+    c.json(
+      {
+        data: {
+          flow: {
+            id: "gcodf_contract",
+            status: "code_ready" as const,
+            userCode: "ABCD-1234",
+            verificationUri: "https://auth.example.com/device",
+            statusReason: null,
+            expiresAt: placeholderTime,
+          },
+        },
+        meta,
+      },
+      201,
+    ),
+  pollCodexDeviceAuth: (c) =>
+    c.json(
+      {
+        data: {
+          flow: {
+            id: "gcodf_contract",
+            status: "completed" as const,
+            userCode: null,
+            verificationUri: null,
+            statusReason: null,
+            expiresAt: placeholderTime,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  deleteCodexAuth: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
+  getInfisicalAuth: (c) =>
+    c.json(
+      {
+        data: {
+          status: "connected" as const,
+          statusReason: null,
+          accountEmail: "ops@example.com",
+          host: "https://app.infisical.com",
+          lastValidatedAt: placeholderTime,
+        },
+        meta,
+      },
+      200,
+    ),
+  startInfisicalAuth: (c) =>
+    c.json(
+      {
+        data: {
+          flow: {
+            id: "ginff_contract",
+            status: "link_ready" as const,
+            loginUrl: "https://app.infisical.com/login?flow=contract",
+            statusReason: null,
+            expiresAt: placeholderTime,
+          },
+        },
+        meta,
+      },
+      201,
+    ),
+  completeInfisicalAuth: (c) =>
+    c.json(
+      {
+        data: {
+          flow: {
+            id: "ginff_contract",
+            status: "completed" as const,
+            loginUrl: null,
+            statusReason: null,
+            expiresAt: placeholderTime,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  deleteInfisicalAuth: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
 };

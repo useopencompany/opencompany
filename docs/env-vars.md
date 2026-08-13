@@ -29,7 +29,8 @@ release variables. Important contracts include:
   token/URL, Electric, managed capabilities, Stripe, X OAuth, cron, Goat PostHog, server and public
   first-party API origins, and canonical Chat flag values.
 - API: direct database, WorkOS session/OAuth and shared cookie domain, the credentialed browser
-  origin allowlist, Vercel AI Gateway for canonical Auto routing, Blob, Electric, and Redis values.
+  origin allowlist, Vercel AI Gateway for canonical Auto routing, Blob, Electric, Redis, and the
+  runner token/URL for the engine-auth control calls.
 - Runner: database, internal/stream tokens, Goat origin, allowed origins, integration encryption,
   E2B, model providers, GitHub/X integration credentials, Goat PostHog, and Redis values.
 - Release: production DB URL, Vercel/Render credentials and project/service IDs, Goat/API/runner

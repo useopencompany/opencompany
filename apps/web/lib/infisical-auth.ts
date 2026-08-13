@@ -1,14 +1,12 @@
 "use server";
 
-import { getDb } from "@opencompany/db/client";
-import {
-  disconnectGoatInfisicalConnection,
-  type GoatInfisicalHost,
-  isGoatInfisicalHost,
-  loadGoatInfisicalConnectionMetadata,
-} from "@opencompany/db/goat-infisical-auth";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
+import { serverApiClient, serverApiError, serverApiErrorMessage } from "@/lib/server-api-client";
+
+// Mirrors GOAT_INFISICAL_HOSTS in @opencompany/db/goat-infisical-auth without
+// pulling the db package into this API-only adapter; the API validates
+// membership server-side.
+export type GoatInfisicalHost = "https://app.infisical.com" | "https://eu.infisical.com";
 
 export type GoatInfisicalAuthSettings = {
   status: "connected" | "needs_reauth" | "disconnected" | null;
@@ -26,45 +24,27 @@ export type GoatInfisicalAuthFlow = {
   expiresAt: string;
 };
 
-type RunnerFlowResponse = { ok: boolean; flow: GoatInfisicalAuthFlow };
-
 export async function loadCurrentGoatInfisicalAuthSettings(): Promise<GoatInfisicalAuthSettings> {
-  const { workspace } = await currentGoatUser();
-  const connection = await loadGoatInfisicalConnectionMetadata({
-    db: getDb(),
-    workspaceId: workspace.id,
-  });
-  return {
-    status: connection?.status ?? null,
-    statusReason: connection?.statusReason ?? null,
-    accountEmail: connection?.accountEmail ?? null,
-    host: connection?.host ?? null,
-    lastValidatedAt: connection?.lastValidatedAt?.toISOString() ?? null,
-  };
+  const response = await (await serverApiClient()).v1["engine-auth"].infisical.$get();
+  if (!response.ok) {
+    throw await serverApiError(response, "Could not load the Infisical connection.");
+  }
+  return (await response.json()).data as GoatInfisicalAuthSettings;
 }
 
 export async function startGoatInfisicalAuth(input: { host: GoatInfisicalHost }) {
-  const gate = await requireWorkspaceAdmin();
-  if (!gate.ok) return gate;
-  if (!isGoatInfisicalHost(input.host)) {
-    return { ok: false as const, error: "Choose a supported Infisical region." };
-  }
   try {
-    const response = await callRunnerJson<RunnerFlowResponse>(
-      "/internal/goat/infisical-auth/start",
-      {
-        workspaceId: gate.workspaceId,
-        requestedByWorkosId: gate.userWorkosId,
-        host: input.host,
-      },
-    );
-    if (infisicalFlowHost(response.flow) !== input.host) {
+    const response = await (await serverApiClient()).v1["engine-auth"].infisical.start.$post({
+      json: { host: input.host },
+    });
+    if (!response.ok) {
       return {
         ok: false as const,
-        error: "The selected Infisical region is still updating. Please try again in a minute.",
+        error: await serverApiErrorMessage(response, "Could not start Infisical authentication."),
       };
     }
-    return { ok: true as const, flow: response.flow };
+    const data = (await response.json()).data as { flow: GoatInfisicalAuthFlow };
+    return { ok: true as const, flow: data.flow };
   } catch (error) {
     return {
       ok: false as const,
@@ -73,18 +53,7 @@ export async function startGoatInfisicalAuth(input: { host: GoatInfisicalHost })
   }
 }
 
-function infisicalFlowHost(flow: GoatInfisicalAuthFlow) {
-  if (!flow.loginUrl) return null;
-  try {
-    return new URL(flow.loginUrl).origin;
-  } catch {
-    return null;
-  }
-}
-
 export async function completeGoatInfisicalAuth(input: { flowId: string; browserToken: string }) {
-  const gate = await requireWorkspaceAdmin();
-  if (!gate.ok) return gate;
   const flowId = input.flowId.trim();
   const browserToken = input.browserToken.trim();
   if (!flowId || !browserToken) {
@@ -94,16 +63,21 @@ export async function completeGoatInfisicalAuth(input: { flowId: string; browser
     return { ok: false as const, error: "That Infisical browser token is too large." };
   }
   try {
-    const response = await callRunnerJson<RunnerFlowResponse>(
-      `/internal/goat/infisical-auth/${encodeURIComponent(flowId)}/complete`,
-      {
-        workspaceId: gate.workspaceId,
-        requestedByWorkosId: gate.userWorkosId,
-        browserToken,
-      },
-    );
-    if (response.flow.status === "completed") revalidatePath("/settings");
-    return { ok: true as const, flow: response.flow };
+    const response = await (await serverApiClient()).v1["engine-auth"].infisical[
+      ":flowId"
+    ].complete.$post({ param: { flowId }, json: { browserToken } });
+    if (!response.ok) {
+      return {
+        ok: false as const,
+        error: await serverApiErrorMessage(
+          response,
+          "Could not complete Infisical authentication.",
+        ),
+      };
+    }
+    const data = (await response.json()).data as { flow: GoatInfisicalAuthFlow };
+    if (data.flow.status === "completed") revalidatePath("/settings");
+    return { ok: true as const, flow: data.flow };
   } catch (error) {
     return {
       ok: false as const,
@@ -114,55 +88,13 @@ export async function completeGoatInfisicalAuth(input: { flowId: string; browser
 }
 
 export async function disconnectGoatInfisicalAuth() {
-  const gate = await requireWorkspaceAdmin();
-  if (!gate.ok) return gate;
-  await disconnectGoatInfisicalConnection({ db: getDb(), workspaceId: gate.workspaceId });
+  const response = await (await serverApiClient()).v1["engine-auth"].infisical.$delete();
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      error: await serverApiErrorMessage(response, "Could not disconnect Infisical."),
+    };
+  }
   revalidatePath("/settings");
   return { ok: true as const };
-}
-
-async function requireWorkspaceAdmin(): Promise<
-  { ok: false; error: string } | { ok: true; workspaceId: string; userWorkosId: string }
-> {
-  const context = await currentGoatUser({ optional: true });
-  if (!context) return { ok: false, error: "You must be signed in." };
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can manage Infisical." };
-  }
-  return {
-    ok: true,
-    workspaceId: context.workspace.id,
-    userWorkosId: context.user.workosUserId,
-  };
-}
-
-async function callRunnerJson<TResponse>(path: string, body: Record<string, unknown>) {
-  const baseUrl = runnerInternalBaseUrl();
-  const token = runnerToken();
-  if (!baseUrl || !token) throw new Error("Runner is not configured.");
-
-  const response = await fetch(`${baseUrl}${path}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
-    const reason = typeof payload?.error === "string" ? payload.error : "Runner request failed.";
-    throw new Error(reason);
-  }
-  return (await response.json()) as TResponse;
-}
-
-function runnerInternalBaseUrl() {
-  const internalUrl = process.env.RUNNER_INTERNAL_URL?.trim();
-  const publicUrl = process.env.RUNNER_PUBLIC_URL?.trim();
-  return (internalUrl || publicUrl)?.replace(/\/+$/, "");
-}
-
-function runnerToken() {
-  return process.env.RUNNER_INTERNAL_TOKEN?.trim();
 }

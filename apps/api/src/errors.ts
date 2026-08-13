@@ -18,21 +18,29 @@ export class ApiError extends Error {
 
 export function errorResponse(error: unknown, requestId: string): Response {
   const apiError = normalizeApiError(error);
-  return Response.json(
-    {
-      error: {
-        code: apiError.code,
-        message: apiError.message,
-        requestId,
-        retryable: apiError.retryable,
-      },
-      meta: { apiVersion: "v1", protocolVersion: PROTOCOL_VERSION },
-    } satisfies ErrorEnvelope,
-    {
-      status: apiError.status,
-      ...(apiError.responseHeaders ? { headers: apiError.responseHeaders } : {}),
+  const envelope = {
+    error: {
+      code: apiError.code,
+      message: apiError.message,
+      requestId,
+      retryable: apiError.retryable,
     },
-  );
+    meta: { apiVersion: "v1", protocolVersion: PROTOCOL_VERSION },
+  } satisfies ErrorEnvelope;
+  // `new Response(...)` instead of `Response.json(...)`: the Node server
+  // adapter replaces global Response with a lightweight subclass at serve()
+  // time, but the native Response.json factory keeps returning base-class
+  // instances. Those fail the `instanceof Response` check inside the zod
+  // validator hooks, which then silently discard this envelope and emit the
+  // raw zod error instead. The constructor always uses the current global
+  // class, so the envelope survives under the patched adapter.
+  return new Response(JSON.stringify(envelope), {
+    status: apiError.status,
+    headers: {
+      "content-type": "application/json",
+      ...(apiError.responseHeaders ?? {}),
+    },
+  });
 }
 
 function normalizeApiError(error: unknown): ApiError {
