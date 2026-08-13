@@ -100,7 +100,12 @@ describe("canonical Hono API", () => {
       engineAuth: fakeEngineAuth(),
       workspaceCapabilities: fakeWorkspaceCapabilities(),
       workspaceControl: fakeWorkspaceControl(),
+      onboarding: fakeOnboarding(),
+      onboardingEmails: fakeOnboardingEmails(),
       authenticate: async () => {
+        throw new ApiError(401, "authentication_required", "Authentication required.");
+      },
+      identify: async () => {
         throw new ApiError(401, "authentication_required", "Authentication required.");
       },
     });
@@ -110,6 +115,14 @@ describe("canonical Hono API", () => {
     expect(unauthorized.status).toBe(401);
     await expect(unauthorized.json()).resolves.toMatchObject({
       error: { code: "authentication_required", requestId: "request_test" },
+      meta: { apiVersion: "v1" },
+    });
+    const onboardingUnauthorized = await unauthenticated.request("/v1/onboarding", {
+      headers: { "X-Request-Id": "request_onboarding_test" },
+    });
+    expect(onboardingUnauthorized.status).toBe(401);
+    await expect(onboardingUnauthorized.json()).resolves.toMatchObject({
+      error: { code: "authentication_required", requestId: "request_onboarding_test" },
       meta: { apiVersion: "v1" },
     });
 
@@ -2457,6 +2470,154 @@ describe("canonical Hono API", () => {
     expect(switched.status).toBe(200);
     expect(switchWorkspace).toHaveBeenCalledWith(actor, "goat_ws_next");
   });
+
+  it("routes onboarding through verified identity without the onboarded actor gate", async () => {
+    const identity = {
+      userId: "user_mid_onboarding",
+      organizationId: null,
+      activeWorkspaceId: null,
+      method: "session" as const,
+      refreshedSessionCookie: "wos-session=refreshed; Path=/; HttpOnly",
+    };
+    const authenticate = vi.fn(async () => {
+      throw new Error("The actor tier must not run for onboarding.");
+    });
+    const identify = vi.fn(async () => identity);
+    const getState = vi.fn(async () => ({
+      onboarding: null,
+      workspace: null,
+      activeBrainId: null,
+    }));
+    const checkSlug = vi.fn(async () => ({ slug: "analytical-co", available: true }));
+    const saveProfile = vi.fn(async () => undefined);
+    const saveWorkspace = vi.fn(async () => ({
+      workspaceId: "goat_ws_new",
+      organizationId: "org_new",
+      brainId: "brain_general",
+      createdByCaller: true,
+    }));
+    const finish = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), {
+      authenticate,
+      identify,
+      onboarding: { getState, checkSlug, saveProfile, saveWorkspace, finish },
+    });
+
+    const state = await app.request("/v1/onboarding");
+    expect(state.status).toBe(200);
+    expect(state.headers.get("set-cookie")).toContain("wos-session=refreshed");
+    expect(getState).toHaveBeenCalledWith(identity);
+
+    const checked = await app.request("/v1/onboarding/workspace-slug/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slug: "analytical-co" }),
+    });
+    expect(checked.status).toBe(200);
+    expect(checkSlug).toHaveBeenCalledWith(identity, "analytical-co");
+
+    const profile = await app.request("/v1/onboarding/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: "founder", companyUrl: "https://opencompany.ai/" }),
+    });
+    expect(profile.status).toBe(200);
+    expect(saveProfile).toHaveBeenCalledWith(identity, {
+      role: "founder",
+      companyUrl: "https://opencompany.ai/",
+    });
+
+    const workspace = await app.request("/v1/onboarding/workspace", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: "goat_ws_00000000-0000-4000-8000-000000000123",
+        name: "Analytical Co",
+        slug: "analytical-co",
+      }),
+    });
+    expect(workspace.status).toBe(200);
+    expect(saveWorkspace).toHaveBeenCalledWith(identity, {
+      workspaceId: "goat_ws_00000000-0000-4000-8000-000000000123",
+      name: "Analytical Co",
+      slug: "analytical-co",
+    });
+
+    const completed = await app.request("/v1/onboarding/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ referralSource: "friend" }),
+    });
+    expect(completed.status).toBe(200);
+    expect(finish).toHaveBeenCalledWith(identity, "friend");
+    expect(identify).toHaveBeenCalledTimes(5);
+    expect(authenticate).not.toHaveBeenCalled();
+  });
+
+  it("protects internal onboarding-email persistence with the shared cron secret", async () => {
+    const enroll = vi.fn(async () => undefined);
+    const claimDue = vi.fn(async () => [
+      {
+        id: "goem_1",
+        workosUserId: "user_1",
+        step: "welcome" as const,
+        attempts: 1,
+        email: "owner@example.com",
+        firstName: "Owner",
+        terminalOnFailure: false,
+      },
+    ]);
+    const settle = vi.fn(async () => undefined);
+    const unsubscribe = vi.fn(async () => 2);
+    const app = testApp(fakeRepository(), {
+      onboardingEmails: { enroll, claimDue, settle, unsubscribe },
+      emailLifecycleInternalSecret: "cron-secret",
+    });
+
+    const unauthorized = await app.request("/internal/onboarding-emails/claim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 4 }),
+    });
+    expect(unauthorized.status).toBe(401);
+    expect(claimDue).not.toHaveBeenCalled();
+
+    const headers = {
+      Authorization: "Bearer cron-secret",
+      "Content-Type": "application/json",
+    };
+    const enrolled = await app.request("/internal/onboarding-emails/enroll", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ workosUserId: "user_1" }),
+    });
+    expect(enrolled.status).toBe(200);
+    expect(enroll).toHaveBeenCalledWith("user_1");
+
+    const claimed = await app.request("/internal/onboarding-emails/claim", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ limit: 4, workosUserId: "user_1" }),
+    });
+    expect(claimed.status).toBe(200);
+    expect(claimDue).toHaveBeenCalledWith(4, "user_1");
+
+    const settled = await app.request("/internal/onboarding-emails/settle", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ id: "goem_1", outcome: "sent" }),
+    });
+    expect(settled.status).toBe(200);
+    expect(settle).toHaveBeenCalledWith({ id: "goem_1", outcome: "sent" });
+
+    const unsubscribed = await app.request("/internal/onboarding-emails/unsubscribe", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ email: "OWNER@EXAMPLE.COM" }),
+    });
+    expect(unsubscribed.status).toBe(200);
+    expect(unsubscribe).toHaveBeenCalledWith("owner@example.com");
+  });
 });
 
 function testApp(
@@ -2482,7 +2643,15 @@ function testApp(
     engineAuth: fakeEngineAuth(),
     workspaceCapabilities: fakeWorkspaceCapabilities(),
     workspaceControl: fakeWorkspaceControl(),
+    onboarding: fakeOnboarding(),
+    onboardingEmails: fakeOnboardingEmails(),
     authenticate: async () => ({ actor }),
+    identify: async () => ({
+      userId: actor.userId,
+      organizationId: null,
+      activeWorkspaceId: actor.workspaceId,
+      method: actor.authenticationMethod,
+    }),
     defaultModel: "provider/default",
     ...overrides,
   });
@@ -2605,6 +2774,43 @@ function fakeWorkspaceControl(): Parameters<typeof createApiApp>[0]["workspaceCo
     },
     switch: async () => {
       throw new Error("Unexpected workspace switch.");
+    },
+  };
+}
+
+function fakeOnboarding(): Parameters<typeof createApiApp>[0]["onboarding"] {
+  return {
+    getState: async () => {
+      throw new Error("Unexpected onboarding state read.");
+    },
+    checkSlug: async () => {
+      throw new Error("Unexpected onboarding slug check.");
+    },
+    saveProfile: async () => {
+      throw new Error("Unexpected onboarding profile mutation.");
+    },
+    saveWorkspace: async () => {
+      throw new Error("Unexpected onboarding workspace mutation.");
+    },
+    finish: async () => {
+      throw new Error("Unexpected onboarding completion.");
+    },
+  };
+}
+
+function fakeOnboardingEmails(): Parameters<typeof createApiApp>[0]["onboardingEmails"] {
+  return {
+    enroll: async () => {
+      throw new Error("Unexpected onboarding email enrollment.");
+    },
+    claimDue: async () => {
+      throw new Error("Unexpected onboarding email claim.");
+    },
+    settle: async () => {
+      throw new Error("Unexpected onboarding email settlement.");
+    },
+    unsubscribe: async () => {
+      throw new Error("Unexpected onboarding email unsubscribe.");
     },
   };
 }

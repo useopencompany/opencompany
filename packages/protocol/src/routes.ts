@@ -36,6 +36,7 @@ import {
   CancelRunEnvelopeSchema,
   CapabilityApprovalEnvelopeSchema,
   CapabilitySessionBudgetEnvelopeSchema,
+  CheckOnboardingWorkspaceSlugBodySchema,
   ClaudeCodeAuthStatusEnvelopeSchema,
   CodexAuthStatusEnvelopeSchema,
   CodexDeviceAuthFlowEnvelopeSchema,
@@ -65,6 +66,7 @@ import {
   ErrorEnvelopeSchema,
   FathomAccountStateEnvelopeSchema,
   FeedbackSubmissionEnvelopeSchema,
+  FinishOnboardingBodySchema,
   GranolaAccountStateEnvelopeSchema,
   ImessageAccountStateEnvelopeSchema,
   ImessagePairingStartedEnvelopeSchema,
@@ -84,6 +86,10 @@ import {
   ManagedCapabilitySourceSchema,
   McpSetupEnvelopeSchema,
   MessagePageSchema,
+  OnboardingCommandEnvelopeSchema,
+  OnboardingStateEnvelopeSchema,
+  OnboardingWorkspaceEnvelopeSchema,
+  OnboardingWorkspaceSlugEnvelopeSchema,
   PresentationCursorSchema,
   ReadModelSchema,
   RenameBrainDocumentBodySchema,
@@ -98,6 +104,8 @@ import {
   ResourceIdSchema,
   RunEnvelopeSchema,
   SaveClaudeCodeTokenBodySchema,
+  SaveOnboardingProfileBodySchema,
+  SaveOnboardingWorkspaceBodySchema,
   SetBrainAccessBodySchema,
   SetBrainEnrichmentBodySchema,
   SetBrainIntelligenceBodySchema,
@@ -1827,6 +1835,100 @@ export const switchWorkspaceRoute = createRoute({
   },
 });
 
+export const getOnboardingStateRoute = createRoute({
+  method: "get",
+  path: "/v1/onboarding",
+  tags: ["Onboarding"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Authenticated onboarding state without requiring onboarding completion.",
+      content: { "application/json": { schema: OnboardingStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const checkOnboardingWorkspaceSlugRoute = createRoute({
+  method: "post",
+  path: "/v1/onboarding/workspace-slug/check",
+  tags: ["Onboarding"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: CheckOnboardingWorkspaceSlugBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Normalized workspace slug availability for the authenticated identity.",
+      content: { "application/json": { schema: OnboardingWorkspaceSlugEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const saveOnboardingProfileRoute = createRoute({
+  method: "put",
+  path: "/v1/onboarding/profile",
+  tags: ["Onboarding"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: SaveOnboardingProfileBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Authenticated identity onboarding profile saved.",
+      content: { "application/json": { schema: OnboardingCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const saveOnboardingWorkspaceRoute = createRoute({
+  method: "put",
+  path: "/v1/onboarding/workspace",
+  tags: ["Onboarding"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: SaveOnboardingWorkspaceBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Onboarding workspace saved or provisioned for the authenticated identity.",
+      content: { "application/json": { schema: OnboardingWorkspaceEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const finishOnboardingRoute = createRoute({
+  method: "post",
+  path: "/v1/onboarding/complete",
+  tags: ["Onboarding"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: FinishOnboardingBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Onboarding completed for an identity with an accessible workspace.",
+      content: { "application/json": { schema: OnboardingCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const updateUserPreferencesRoute = createRoute({
   method: "patch",
   path: "/v1/me/preferences",
@@ -2457,6 +2559,11 @@ export type V1RouteHandlers = {
   removeWorkspaceMember: RouteHandler<typeof removeWorkspaceMemberRoute>;
   createWorkspace: RouteHandler<typeof createWorkspaceRoute>;
   switchWorkspace: RouteHandler<typeof switchWorkspaceRoute>;
+  getOnboardingState: RouteHandler<typeof getOnboardingStateRoute>;
+  checkOnboardingWorkspaceSlug: RouteHandler<typeof checkOnboardingWorkspaceSlugRoute>;
+  saveOnboardingProfile: RouteHandler<typeof saveOnboardingProfileRoute>;
+  saveOnboardingWorkspace: RouteHandler<typeof saveOnboardingWorkspaceRoute>;
+  finishOnboarding: RouteHandler<typeof finishOnboardingRoute>;
   listBrainSourceOptions: RouteHandler<typeof listBrainSourceOptionsRoute>;
   startBrainImport: RouteHandler<typeof startBrainImportRoute>;
   confirmBrainImport: RouteHandler<typeof confirmBrainImportRoute>;
@@ -2595,6 +2702,11 @@ export function createV1Router(
       .openapi(removeWorkspaceMemberRoute, handlers.removeWorkspaceMember)
       .openapi(createWorkspaceRoute, handlers.createWorkspace)
       .openapi(switchWorkspaceRoute, handlers.switchWorkspace)
+      .openapi(getOnboardingStateRoute, handlers.getOnboardingState)
+      .openapi(checkOnboardingWorkspaceSlugRoute, handlers.checkOnboardingWorkspaceSlug)
+      .openapi(saveOnboardingProfileRoute, handlers.saveOnboardingProfile)
+      .openapi(saveOnboardingWorkspaceRoute, handlers.saveOnboardingWorkspace)
+      .openapi(finishOnboardingRoute, handlers.finishOnboarding)
       .openapi(listBrainSourceOptionsRoute, handlers.listBrainSourceOptions)
       .openapi(startBrainImportRoute, handlers.startBrainImport)
       .openapi(confirmBrainImportRoute, handlers.confirmBrainImport)
@@ -3258,6 +3370,35 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  getOnboardingState: (c) =>
+    c.json(
+      {
+        data: {
+          onboarding: null,
+          workspace: null,
+          activeBrainId: null,
+        },
+        meta,
+      },
+      200,
+    ),
+  checkOnboardingWorkspaceSlug: (c) =>
+    c.json({ data: { slug: "contract-workspace", available: true }, meta }, 200),
+  saveOnboardingProfile: (c) => c.json({ data: { completed: true as const }, meta }, 200),
+  saveOnboardingWorkspace: (c) =>
+    c.json(
+      {
+        data: {
+          workspaceId: "goat_ws_contract",
+          organizationId: "org_contract",
+          brainId: "brain_contract",
+          createdByCaller: true,
+        },
+        meta,
+      },
+      200,
+    ),
+  finishOnboarding: (c) => c.json({ data: { completed: true as const }, meta }, 200),
   startBrainImport: (c) =>
     c.json(
       {

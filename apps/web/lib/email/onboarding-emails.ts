@@ -1,16 +1,12 @@
-import {
-  type ClaimedGoatOnboardingEmail,
-  claimDueGoatOnboardingEmails,
-  enrollGoatOnboardingEmails,
-  failGoatOnboardingEmail,
-  MAX_GOAT_ONBOARDING_EMAIL_ATTEMPTS,
-  markGoatOnboardingEmailSent,
-  rescheduleGoatOnboardingEmail,
-} from "@opencompany/db/goat-onboarding-emails";
 import { captureException, createLogger } from "@opencompany/observability";
+import {
+  type OnboardingEmailClaimDto,
+  OnboardingEmailClaimEnvelopeSchema,
+} from "@opencompany/protocol";
 import { assertResendResponse, getResendClient, trimmed } from "@/lib/email/client";
 import { renderOnboardingEmail } from "@/lib/email/templates/onboarding";
 import { createGoatEmailUnsubscribeUrl } from "@/lib/email/unsubscribe";
+import { emailLifecycleApiRequest, serverApiError } from "@/lib/server-api-client";
 
 const logger = createLogger({ service: "opencompany-goat", runtime: "server" });
 
@@ -38,7 +34,7 @@ function getOnboardingEmailConfig(): OnboardingEmailConfig {
 }
 
 async function sendOnboardingEmail(
-  row: ClaimedGoatOnboardingEmail,
+  row: OnboardingEmailClaimDto,
   config: Extract<OnboardingEmailConfig, { enabled: true }>,
 ) {
   const client = getResendClient(config.apiKey);
@@ -84,16 +80,12 @@ export type OnboardingEmailSweepResult =
   | { status: "skipped"; reason: string }
   | { status: "ok"; claimed: number; sent: number; failed: number; rescheduled: number };
 
-// Claims and sends every due onboarding email. Safe to call concurrently (the
-// hourly cron and the inline send at signup both call it) — the DB claim uses
-// SKIP LOCKED and each send is idempotent. Pass `workosUserId` to scope the
-// sweep to one owner (the inline welcome); omit it for the global cron sweep.
+// Claims and sends every due onboarding email. Safe to call concurrently: the
+// API claim uses SKIP LOCKED and each Resend send is idempotent.
 export async function sweepDueOnboardingEmails({
   limit = 100,
-  workosUserId,
 }: {
   limit?: number;
-  workosUserId?: string;
 } = {}): Promise<OnboardingEmailSweepResult> {
   const config = getOnboardingEmailConfig();
   if (!config.enabled) {
@@ -104,18 +96,52 @@ export async function sweepDueOnboardingEmails({
     return { status: "skipped", reason: config.reason };
   }
 
-  const claimed = await claimDueGoatOnboardingEmails({
-    limit,
-    ...(workosUserId ? { workosUserId } : {}),
+  const response = await emailLifecycleApiRequest("claim", { limit });
+  if (!response.ok) throw await serverApiError(response, "Could not claim onboarding emails.");
+  const envelope = OnboardingEmailClaimEnvelopeSchema.parse(await response.json()) as {
+    data: { emails: OnboardingEmailClaimDto[] };
+  };
+  return deliverClaimedOnboardingEmails(envelope.data.emails, config);
+}
+
+// Enrolls a brand-new workspace owner into the sequence and fires the welcome
+// email immediately. Best-effort: callers wrap this so a Resend/DB hiccup never
+// blocks sign-in, and the hourly cron backstops both the welcome and the
+// delayed steps.
+export async function enrollOwnerInOnboardingEmails(user: { workosUserId: string }) {
+  const response = await emailLifecycleApiRequest("enroll", {
+    workosUserId: user.workosUserId,
   });
+  if (!response.ok) {
+    throw await serverApiError(response, "Could not enroll onboarding emails.");
+  }
+  const config = getOnboardingEmailConfig();
+  if (!config.enabled) return;
+  const claimed = await emailLifecycleApiRequest("claim", {
+    limit: 4,
+    workosUserId: user.workosUserId,
+  });
+  if (!claimed.ok) throw await serverApiError(claimed, "Could not claim the welcome email.");
+  const envelope = OnboardingEmailClaimEnvelopeSchema.parse(await claimed.json()) as {
+    data: { emails: OnboardingEmailClaimDto[] };
+  };
+  if (envelope.data.emails.some((row) => row.workosUserId !== user.workosUserId)) {
+    throw new Error("The onboarding email claim did not match the caller.");
+  }
+  await deliverClaimedOnboardingEmails(envelope.data.emails, config);
+}
+
+async function deliverClaimedOnboardingEmails(
+  claimed: OnboardingEmailClaimDto[],
+  config: Extract<OnboardingEmailConfig, { enabled: true }>,
+): Promise<OnboardingEmailSweepResult> {
   let sent = 0;
   let failed = 0;
   let rescheduled = 0;
-
   for (const row of claimed) {
     try {
       const result = await sendOnboardingEmail(row, config);
-      await markGoatOnboardingEmailSent(row.id);
+      await settleOnboardingEmail({ id: row.id, outcome: "sent" });
       sent += 1;
       logger.info("Sent onboarding email", {
         event: "opencompany.goat_onboarding_email_sent",
@@ -131,12 +157,13 @@ export async function sweepDueOnboardingEmails({
         step: row.step,
         attempts: row.attempts,
       });
-      if (row.attempts >= MAX_GOAT_ONBOARDING_EMAIL_ATTEMPTS) {
-        await failGoatOnboardingEmail({ id: row.id, error: message });
+      if (row.terminalOnFailure) {
+        await settleOnboardingEmail({ id: row.id, outcome: "failed", error: message });
         failed += 1;
       } else {
-        await rescheduleGoatOnboardingEmail({
+        await settleOnboardingEmail({
           id: row.id,
+          outcome: "rescheduled",
           nextRunAt: new Date(Date.now() + backoffMs(row.attempts)),
           error: message,
         });
@@ -144,17 +171,20 @@ export async function sweepDueOnboardingEmails({
       }
     }
   }
-
   return { status: "ok", claimed: claimed.length, sent, failed, rescheduled };
 }
 
-// Enrolls a brand-new workspace owner into the sequence and fires the welcome
-// email immediately. Best-effort: callers wrap this so a Resend/DB hiccup never
-// blocks sign-in, and the hourly cron backstops both the welcome and the
-// delayed steps.
-export async function enrollOwnerInOnboardingEmails(user: { workosUserId: string }) {
-  await enrollGoatOnboardingEmails({ workosUserId: user.workosUserId });
-  // Scope to this owner so the inline send only ever delivers their welcome (one
-  // Resend round-trip) and never processes another user's backlog during sign-in.
-  await sweepDueOnboardingEmails({ limit: 4, workosUserId: user.workosUserId });
+async function settleOnboardingEmail(input: {
+  id: string;
+  outcome: "sent" | "failed" | "rescheduled";
+  error?: string;
+  nextRunAt?: Date;
+}) {
+  const response = await emailLifecycleApiRequest("settle", {
+    id: input.id,
+    outcome: input.outcome,
+    ...(input.error ? { error: input.error } : {}),
+    ...(input.nextRunAt ? { nextRunAt: input.nextRunAt.toISOString() } : {}),
+  });
+  if (!response.ok) throw await serverApiError(response, "Could not settle onboarding email.");
 }

@@ -2190,6 +2190,133 @@ export const WorkspaceActivationEnvelopeSchema = z
   .strict()
   .openapi("WorkspaceActivationEnvelope");
 
+export const OnboardingRoleSchema = z.enum([
+  "founder",
+  "product",
+  "sales",
+  "marketing",
+  "operations",
+  "investing",
+  "consulting",
+  "research",
+]);
+
+export const OnboardingStateSchema = z
+  .object({
+    onboarding: z
+      .object({
+        role: z.string().nullable(),
+        companyDomain: z.string().nullable(),
+        contextUrls: z.array(z.url()).max(20).nullable(),
+        referralSource: z.string().nullable(),
+      })
+      .strict()
+      .nullable(),
+    workspace: z
+      .object({
+        id: ResourceIdSchema,
+        name: z.string().min(1).max(80),
+        slug: z.string().max(40).nullable(),
+        createdByCaller: z.boolean(),
+      })
+      .strict()
+      .nullable(),
+    activeBrainId: ResourceIdSchema.nullable(),
+  })
+  .strict()
+  .openapi("OnboardingState");
+
+export const OnboardingStateEnvelopeSchema = z
+  .object({ data: OnboardingStateSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("OnboardingStateEnvelope");
+
+export const CheckOnboardingWorkspaceSlugBodySchema = z
+  .object({ slug: z.string().max(256) })
+  .strict()
+  .openapi("CheckOnboardingWorkspaceSlugBody");
+
+export const OnboardingWorkspaceSlugEnvelopeSchema = z
+  .object({
+    data: z.object({ slug: z.string().max(40), available: z.boolean() }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("OnboardingWorkspaceSlugEnvelope");
+
+export const SaveOnboardingProfileBodySchema = z
+  .object({ role: OnboardingRoleSchema, companyUrl: z.url().max(2_048) })
+  .strict()
+  .openapi("SaveOnboardingProfileBody");
+
+export const SaveOnboardingWorkspaceBodySchema = z
+  .object({
+    workspaceId: ResourceIdSchema.refine((value: string) => value.startsWith("goat_ws_"), {
+      message: "workspaceId must be a Goat workspace id.",
+    }),
+    name: z.string().trim().min(1).max(80),
+    slug: z
+      .string()
+      .min(1)
+      .max(40)
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u),
+  })
+  .strict()
+  .openapi("SaveOnboardingWorkspaceBody");
+
+export const OnboardingWorkspaceEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        workspaceId: ResourceIdSchema,
+        organizationId: ResourceIdSchema,
+        brainId: ResourceIdSchema,
+        createdByCaller: z.boolean(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("OnboardingWorkspaceEnvelope");
+
+export const FinishOnboardingBodySchema = z
+  .object({ referralSource: z.string().trim().max(200).nullable() })
+  .strict()
+  .openapi("FinishOnboardingBody");
+
+export const OnboardingCommandEnvelopeSchema = z
+  .object({
+    data: z.object({ completed: z.literal(true) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("OnboardingCommandEnvelope");
+
+export const OnboardingEmailStepSchema = z
+  .enum(["welcome", "checkin", "feedback_call"])
+  .openapi("OnboardingEmailStep");
+
+export const OnboardingEmailClaimSchema = z
+  .object({
+    id: ResourceIdSchema,
+    workosUserId: ResourceIdSchema,
+    step: OnboardingEmailStepSchema,
+    attempts: z.number().int().positive(),
+    email: z.email().max(320),
+    firstName: z.string().max(128).nullable(),
+    terminalOnFailure: z.boolean(),
+  })
+  .strict()
+  .openapi("OnboardingEmailClaim");
+
+export const OnboardingEmailClaimEnvelopeSchema = z
+  .object({
+    data: z.object({ emails: z.array(OnboardingEmailClaimSchema).max(100) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("OnboardingEmailClaimEnvelope");
+
 export const TaskViewModeSchema = z.enum(["board", "list"]);
 export const McpClientSchema = z.enum(["claude", "chatgpt", "cursor"]);
 
@@ -2772,6 +2899,18 @@ export type BrainAccessDto = z.infer<typeof BrainAccessSchema>;
 export type WorkspaceInvitationDto = z.infer<typeof WorkspaceInvitationSchema>;
 export type WorkspaceSettingsDto = z.infer<typeof WorkspaceSettingsSchema>;
 export type WorkspaceActivationDto = z.infer<typeof WorkspaceActivationSchema>;
+export type OnboardingRole = z.infer<typeof OnboardingRoleSchema>;
+export type OnboardingStateDto = z.infer<typeof OnboardingStateSchema>;
+export type OnboardingEmailStep = "welcome" | "checkin" | "feedback_call";
+export type OnboardingEmailClaimDto = {
+  id: string;
+  workosUserId: string;
+  step: OnboardingEmailStep;
+  attempts: number;
+  email: string;
+  firstName: string | null;
+  terminalOnFailure: boolean;
+};
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelopeSchema>;
 export type TaskViewMode = z.infer<typeof TaskViewModeSchema>;
 export type McpClient = z.infer<typeof McpClientSchema>;

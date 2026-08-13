@@ -35,6 +35,26 @@ export async function serverApiError(response: Response, fallback: string) {
   return new Error(`${message ?? fallback}${requestId ? ` (request ${requestId})` : ""}`);
 }
 
+export async function emailLifecycleApiRequest(
+  operation: "claim" | "enroll" | "settle" | "unsubscribe",
+  body: Record<string, unknown>,
+) {
+  const secret = process.env.CRON_SECRET?.trim();
+  if (!secret) throw new Error("Email lifecycle persistence is unavailable.");
+  return globalThis.fetch(
+    `${serverApiOrigin(process.env.GOAT_API_ORIGIN)}/internal/onboarding-emails/${operation}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${secret}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    },
+  );
+}
+
 async function parseErrorEnvelope(response: Response) {
   const body = (await response.json().catch(() => null)) as {
     error?: { message?: unknown; requestId?: unknown };
