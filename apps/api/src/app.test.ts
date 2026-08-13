@@ -938,6 +938,62 @@ describe("canonical Hono API", () => {
     await expect(missing.json()).resolves.toMatchObject({ error: { code: "not_found" } });
   });
 
+  it("binds every provider ingress route to its service outside the /v1 middleware", async () => {
+    const record =
+      (name: string, calls: string[]) =>
+      async (...args: unknown[]) => {
+        calls.push(`${name}:${args.length}`);
+        return Response.json({ ok: true, service: name });
+      };
+    const calls: string[] = [];
+    const app = testApp(fakeRepository(), {
+      githubIngress: {
+        start: record("github.start", calls),
+        callback: record("github.callback", calls),
+        webhook: record("github.webhook", calls),
+      },
+      googleIngress: {
+        start: record("google.start", calls),
+        callback: record("google.callback", calls),
+        driveWebhook: record("google.driveWebhook", calls),
+      },
+      slackIngress: {
+        start: record("slack.start", calls),
+        callback: record("slack.callback", calls),
+        webhook: record("slack.webhook", calls),
+      },
+      linearIngress: {
+        start: record("linear.start", calls),
+        callback: record("linear.callback", calls),
+        webhook: record("linear.webhook", calls),
+      },
+    });
+
+    const routes: Array<[string, string, string]> = [
+      ["GET", "/integrations/github/start", "github.start"],
+      ["GET", "/integrations/github/callback", "github.callback"],
+      ["POST", "/webhooks/github/events", "github.webhook"],
+      ["GET", "/integrations/gmail/start", "google.start"],
+      ["GET", "/integrations/gmail/callback", "google.callback"],
+      ["GET", "/integrations/google-calendar/start", "google.start"],
+      ["GET", "/integrations/google-calendar/callback", "google.callback"],
+      ["GET", "/integrations/google-drive/start", "google.start"],
+      ["GET", "/integrations/google-drive/callback", "google.callback"],
+      ["POST", "/webhooks/google-drive", "google.driveWebhook"],
+      ["GET", "/integrations/slack/start", "slack.start"],
+      ["GET", "/integrations/slack/callback", "slack.callback"],
+      ["POST", "/webhooks/slack/events", "slack.webhook"],
+      ["GET", "/integrations/linear-ingest/start", "linear.start"],
+      ["GET", "/integrations/linear-ingest/callback", "linear.callback"],
+      ["POST", "/webhooks/linear/events", "linear.webhook"],
+    ];
+    for (const [method, path, service] of routes) {
+      const response = await app.request(path, { method, body: method === "POST" ? "{}" : null });
+      expect(response.status, `${method} ${path}`).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ ok: true, service });
+    }
+  });
+
   it("allows credentialed browser preflight only for configured origins", async () => {
     const app = testApp(fakeRepository(), {
       browserOrigins: ["https://my.opencompany.chat"],

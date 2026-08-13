@@ -65,6 +65,25 @@ services:
         sync: false
       - key: GOOGLE_INTEGRATION_STATE_SECRET
         sync: false
+      # Slack ingestion + Linear ingest OAuth/webhook ingress moved to the API
+      # in the #1203 4b1 cutover. The Slack answer bot stays web-owned until the
+      # universal-Chat slice.
+      - key: GOAT_SLACK_CLIENT_ID
+        sync: false
+      - key: GOAT_SLACK_CLIENT_SECRET
+        sync: false
+      - key: GOAT_SLACK_SIGNING_SECRET
+        sync: false
+      - key: GOAT_SLACK_STATE_SECRET
+        sync: false
+      - key: GOAT_LINEAR_CLIENT_ID
+        sync: false
+      - key: GOAT_LINEAR_CLIENT_SECRET
+        sync: false
+      - key: GOAT_LINEAR_WEBHOOK_SECRET
+        sync: false
+      - key: GOAT_LINEAR_STATE_SECRET
+        sync: false
       # Server-side integration analytics (fire-and-forget; safe when unset).
       - key: NEXT_PUBLIC_GOAT_POSTHOG_TOKEN
         sync: false

@@ -1,74 +1,49 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "./route";
 
-const mocks = vi.hoisted(() => ({
-  connectIntegration: vi.fn(),
-  exchangeCode: vi.fn(),
-  fetchIdentity: vi.fn(),
-}));
-
-vi.mock("@opencompany/db/goat-integrations", () => ({
-  connectGoatLinearIngestIntegration: mocks.connectIntegration,
-}));
-
-vi.mock("@/lib/app-url", () => ({
-  getGoatAppUrl: () => "https://localhost:3443",
-}));
-
-vi.mock("@/lib/auth", () => ({
-  currentGoatUser: () =>
-    Promise.resolve({
-      user: { workosUserId: "user_123" },
-    }),
-}));
-
-vi.mock("@/lib/integrations/linear-ingest", () => ({
-  appendGoatLinearIngestStatus: (returnTo: string, status: string, reason?: string) => {
-    const url = new URL(returnTo, "https://localhost:3443");
-    url.searchParams.set("integration", "linear");
-    url.searchParams.set("setup", status);
-    if (reason) url.searchParams.set("reason", reason);
-    return `${url.pathname}${url.search}`;
-  },
-  exchangeGoatLinearCode: mocks.exchangeCode,
-  fetchGoatLinearIdentity: mocks.fetchIdentity,
-  isGoatLinearIngestConfigured: () => true,
-  verifyGoatLinearIngestState: () => ({
-    userWorkosId: "user_123",
-    returnTo: "/onboarding/connected",
-  }),
-}));
-
-describe("Goat Linear ingestion callback", () => {
+describe("GET /api/integrations/linear-ingest/callback relay", () => {
   beforeEach(() => {
-    mocks.connectIntegration.mockReset();
-    mocks.exchangeCode.mockReset();
-    mocks.fetchIdentity.mockReset();
-
-    mocks.exchangeCode.mockResolvedValue({
-      accessToken: "linear-access-token",
-      scopes: ["read"],
-    });
-    mocks.fetchIdentity.mockResolvedValue({
-      organizationId: "linear-org-123",
-      organizationName: "Acme",
-      organizationUrlKey: "acme",
-      viewerId: "linear-user-123",
-      viewerName: "Ada Lovelace",
-      viewerEmail: "ada@example.com",
-    });
+    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
   });
 
-  it("returns to the canonical Goat HTTPS origin after a proxied local callback", async () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("forwards the callback with credentials and passes the redirect through untouched", async () => {
+    let upstream: Request | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+        upstream = input instanceof Request ? input : new Request(input, init);
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location: "https://my.opencompany.chat/settings?integration=linear&setup=connected",
+          },
+        });
+      }),
+    );
+
     const response = await GET(
       new Request(
-        "https://localhost:3002/api/integrations/linear-ingest/callback?state=valid&code=code",
+        "https://my.opencompany.chat/api/integrations/linear-ingest/callback?state=s1&code=c1",
+        { headers: { Cookie: "wos-session=sealed" } },
       ),
     );
 
+    expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe(
-      "https://localhost:3443/onboarding/connected?integration=linear&setup=connected",
+      "https://my.opencompany.chat/settings?integration=linear&setup=connected",
     );
-    expect(mocks.connectIntegration).toHaveBeenCalledOnce();
+    const request = upstream as unknown as Request;
+    const target = new URL(request.url);
+    expect(target.href.split("?")[0]).toBe(
+      "https://api.example.test/integrations/linear-ingest/callback",
+    );
+    expect(target.searchParams.get("state")).toBe("s1");
+    expect(target.searchParams.get("code")).toBe("c1");
+    expect(request.headers.get("cookie")).toBe("wos-session=sealed");
   });
 });
