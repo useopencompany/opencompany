@@ -31,6 +31,10 @@ services:
         sync: false
       - key: GOAT_DEFAULT_CHAT_MODEL
         sync: false
+      # Brain source option listing decrypts stored provider credentials in the API since the
+      # #1214 cutover, so the API runtime needs the same key as web and runner.
+      - key: INTEGRATION_CREDENTIAL_ENCRYPTION_KEY
+        sync: false
       # Canonical Auto model classification. Kept server-side in prod `/api`.
       - key: VERCEL_AI_GATEWAY_API_KEY
         sync: false
