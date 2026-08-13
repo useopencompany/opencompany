@@ -1,41 +1,32 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
 import type { GoatGranolaProviderState } from "@/lib/integration-state";
-import {
-  connectGoatGranolaIntegration,
-  getGoatGranolaIntegrationState,
-  isValidGranolaApiKey,
-  validateGoatGranolaApiKey,
-} from "@/lib/integrations/granola";
+import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
 export type GranolaConnectActionResult =
   | { ok: true; state: GoatGranolaProviderState }
   | { ok: false; error: string };
 
 export async function saveGranolaApiKeyAction(apiKey: string): Promise<GranolaConnectActionResult> {
-  const { user } = await currentGoatUser();
-  const trimmed = apiKey.trim();
-  if (!isValidGranolaApiKey(trimmed)) {
+  if (typeof apiKey !== "string" || !apiKey.trim()) {
     return { ok: false, error: "Granola API keys start with grn_. Check the key and try again." };
   }
   try {
-    const validation = await validateGoatGranolaApiKey(trimmed);
-    if (!validation.ok) return { ok: false, error: validation.error };
-    await connectGoatGranolaIntegration({
-      userWorkosId: user.workosUserId,
-      apiKey: trimmed,
-      accountEmail: validation.accountEmail,
-      accountName: validation.accountName,
+    const response = await (await serverApiClient()).v1["integration-accounts"].granola.$put({
+      json: { apiKey },
     });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not save the Granola API key."),
+      };
+    }
+    const data = (await response.json()).data as { state: GoatGranolaProviderState };
     revalidatePath("/", "layout");
-    return { ok: true, state: await getGoatGranolaIntegrationState(user.workosUserId) };
+    return { ok: true, state: data.state };
   } catch (error) {
     console.error("[goat-granola] Failed to save Granola API key", error);
-    return {
-      ok: false,
-      error: "Could not save the Granola API key.",
-    };
+    return { ok: false, error: "Could not save the Granola API key." };
   }
 }

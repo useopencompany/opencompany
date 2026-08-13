@@ -1,55 +1,142 @@
-import type { SQL } from "drizzle-orm";
-import { PgDialect } from "drizzle-orm/pg-core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  disconnectGoatIntegrationAccountAction,
+  getGoatIntegrationAccountUsageAction,
+  setGoatIntegrationCapabilityModeAction,
+} from "./integration-account-actions";
 
-const { executeMock, revalidatePathMock } = vi.hoisted(() => ({
-  executeMock: vi.fn(),
-  revalidatePathMock: vi.fn(),
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/headers", () => ({ headers: vi.fn() }));
+// The always-allow command stays web-owned (catalog resolvers are getDb-bound);
+// its dependencies are mocked so importing this module never touches AuthKit
+// or a database in tests.
+vi.mock("@/lib/auth", () => ({ currentGoatUser: vi.fn() }));
+vi.mock("@/lib/actions/catalog", () => ({ resolveGoatActionCatalog: vi.fn() }));
+vi.mock("@opencompany/db/client", () => ({ getDb: vi.fn() }));
+vi.mock("@opencompany/db/goat-integrations", () => ({
+  applyGoatIntegrationCapabilityMode: vi.fn(),
 }));
 
-vi.mock("@opencompany/db/client", () => ({
-  getDb: () => ({ execute: executeMock }),
-}));
-vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
-vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(async () => ({ user: { workosUserId: "user_owner" } })),
-}));
+function stubApi(response: () => Response) {
+  const requests: Request[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      requests.push(input instanceof Request ? input : new Request(input, init));
+      return response();
+    }),
+  );
+  return requests;
+}
 
-const { disconnectGoatIntegrationAccountAction } = await import("./integration-account-actions");
-const pgDialect = new PgDialect();
+const meta = { apiVersion: "v1", protocolVersion: "1.0.0" };
 
-describe("disconnectGoatIntegrationAccountAction", () => {
+describe("integration account adapters", () => {
   beforeEach(() => {
-    executeMock.mockReset();
-    revalidatePathMock.mockReset();
-  });
-
-  it("releases claims without a successful brain job before deleting the integration", async () => {
-    executeMock.mockResolvedValue([{ id: "integration_123" }]);
-
-    await expect(disconnectGoatIntegrationAccountAction("integration_123")).resolves.toEqual({
-      ok: true,
-    });
-
-    const query = pgDialect.sqlToQuery(executeMock.mock.calls[0]![0] as SQL);
-    const normalizedSql = query.sql.toLowerCase();
-    expect(normalizedSql).toContain("delete from goat.brain_source_event_claims");
-    expect(normalizedSql).toContain("job.status = 'succeeded'");
-    expect(normalizedSql).toContain("delete from goat.integrations");
-    expect(normalizedSql.indexOf("released_claims")).toBeLessThan(
-      normalizedSql.indexOf("release_guard"),
+    vi.clearAllMocks();
+    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
+    vi.mocked(headers).mockResolvedValue(
+      new Headers({ Cookie: "wos-session=sealed", Origin: "https://app.example.test" }) as never,
     );
-    expect(query.params).toEqual(expect.arrayContaining(["integration_123", "user_owner"]));
-    expect(revalidatePathMock).toHaveBeenCalledWith("/", "layout");
   });
 
-  it("rejects deleting an account the current user does not own", async () => {
-    executeMock.mockResolvedValue([]);
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
 
-    await expect(disconnectGoatIntegrationAccountAction("integration_other")).resolves.toEqual({
+  it("reads account usage through the typed usage query", async () => {
+    const requests = stubApi(() => Response.json({ data: { affectedBrainSourceCount: 2 }, meta }));
+
+    await expect(getGoatIntegrationAccountUsageAction("gint_abc")).resolves.toEqual({
+      ok: true,
+      affectedBrainSourceCount: 2,
+    });
+    const request = requests[0] as Request;
+    expect(request.method).toBe("GET");
+    expect(new URL(request.url).pathname).toBe("/v1/integration-accounts/gint_abc/usage");
+    expect(request.headers.get("cookie")).toBe("wos-session=sealed");
+  });
+
+  it("keeps the retired owner-only copy on non-owned disconnects", async () => {
+    stubApi(
+      () =>
+        Response.json(
+          {
+            error: {
+              code: "not_found",
+              message: "Only the connection owner can manage this account.",
+              requestId: "request_1",
+              retryable: false,
+            },
+            meta,
+          },
+          { status: 404 },
+        ) as Response,
+    );
+
+    await expect(disconnectGoatIntegrationAccountAction("gint_abc")).resolves.toEqual({
       ok: false,
       error: "Only the connection owner can manage this account.",
     });
-    expect(revalidatePathMock).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("disconnects through DELETE and revalidates the whole app", async () => {
+    const requests = stubApi(() =>
+      Response.json({ data: { integrationId: "gint_abc", deleted: true }, meta }),
+    );
+
+    await expect(disconnectGoatIntegrationAccountAction("gint_abc")).resolves.toEqual({
+      ok: true,
+    });
+    const request = requests[0] as Request;
+    expect(request.method).toBe("DELETE");
+    expect(new URL(request.url).pathname).toBe("/v1/integration-accounts/gint_abc");
+    expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
+  });
+
+  it("saves a capability mode through the typed command", async () => {
+    const requests = stubApi(() =>
+      Response.json({
+        data: { integrationId: "gint_abc", capabilityId: "write", mode: "ask" },
+        meta,
+      }),
+    );
+
+    await expect(
+      setGoatIntegrationCapabilityModeAction("gint_abc", "write", "ask"),
+    ).resolves.toEqual({ ok: true });
+    const request = requests[0] as Request;
+    expect(request.method).toBe("PUT");
+    expect(new URL(request.url).pathname).toBe(
+      "/v1/integration-accounts/gint_abc/capability-modes/write",
+    );
+    await expect(request.json()).resolves.toEqual({ mode: "ask" });
+    expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
+  });
+
+  it("surfaces the API's vocabulary error for unknown modes", async () => {
+    stubApi(
+      () =>
+        Response.json(
+          {
+            error: {
+              code: "invalid_request",
+              message: "Unknown permission mode.",
+              requestId: "request_1",
+              retryable: false,
+            },
+            meta,
+          },
+          { status: 400 },
+        ) as Response,
+    );
+
+    await expect(
+      setGoatIntegrationCapabilityModeAction("gint_abc", "write", "sometimes"),
+    ).resolves.toEqual({ ok: false, error: "Unknown permission mode." });
   });
 });

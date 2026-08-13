@@ -173,6 +173,14 @@ const groups = {
       "GOAT_FEEDBACK_LINEAR_TEAM_ID",
       "GOAT_FEEDBACK_LINEAR_LABELS",
       "GOAT_FEEDBACK_LINEAR_PROJECT_ID",
+      // iMessage pairing (#1203 5a2) moved behind /v1: the API sends the
+      // verification text. Optional (mirrors the web group's classification):
+      // without a provider, pairing fails with a clear "not configured" error.
+      "LINQ_API_TOKEN",
+      "LINQ_FROM_NUMBER",
+      "LINQ_API_BASE_URL",
+      "GOAT_IMESSAGE_PROVIDER",
+      "GOAT_IMESSAGE_KILL_SWITCH",
     ],
   },
   runner: {

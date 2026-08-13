@@ -56,8 +56,9 @@ export type GoatJamieWebhookApiKeyVerification =
 
 export async function getGoatJamieIntegrationState(
   workspaceId: string,
+  db: DbLike = getDb(),
 ): Promise<GoatJamieProviderState> {
-  const [row] = await getDb()
+  const [row] = await db
     .select({
       id: goatIntegrations.id,
       externalId: goatIntegrations.externalId,
@@ -112,8 +113,9 @@ export function isGoatJamieWebhookApiKeyConfigured(input: { status: string; exte
 export async function createOrResetGoatJamieWebhookEndpoint(input: {
   userWorkosId: string;
   workspaceId: string;
+  db?: DbLike;
 }): Promise<GoatJamieWebhookSetup> {
-  const db = getDb();
+  const db = input.db ?? getDb();
   const now = new Date();
   const [existing] = await db
     .select({ id: goatIntegrations.id, userWorkosId: goatIntegrations.userWorkosId })
@@ -210,13 +212,14 @@ export async function createOrResetGoatJamieWebhookEndpoint(input: {
 export async function saveGoatJamieWebhookApiKey(input: {
   workspaceId: string;
   apiKey: string;
+  db?: DbLike;
 }): Promise<GoatJamieWebhookSetup> {
   const apiKey = input.apiKey.trim();
   if (!isValidJamieProviderApiKey(apiKey)) {
     throw new Error("Jamie API keys must start with sk_ followed by 64 lowercase hex characters.");
   }
 
-  const db = getDb();
+  const db = input.db ?? getDb();
   const now = new Date();
   const [integration] = await db
     .select({ id: goatIntegrations.id, userWorkosId: goatIntegrations.userWorkosId })

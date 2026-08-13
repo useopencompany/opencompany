@@ -15,6 +15,10 @@ export const GOAT_STRIPE_CREDENTIAL_KIND = "api_key" as const;
 export const GOAT_STRIPE_API_BASE_URL = "https://api.stripe.com/v1";
 export const GOAT_STRIPE_API_VERSION = "2026-04-22.dahlia";
 
+// Follows the repo-wide injectable-db convention so the canonical API can pass
+// its pooled handle while web/runner callers keep the getDb() default.
+type DbLike = any;
+
 const STRIPE_API_TIMEOUT_MS = 15_000;
 const MAX_STRIPE_ERROR_DETAIL_CHARS = 200;
 
@@ -163,8 +167,9 @@ export async function connectGoatStripeIntegration(input: {
   apiKey: string;
   identity: GoatStripeAccountIdentity;
   now?: Date;
+  db?: DbLike;
 }): Promise<{ integrationId: string }> {
-  const db = getDb();
+  const db = input.db ?? getDb();
   const now = input.now ?? new Date();
   const values = {
     externalId: input.identity.accountId,
@@ -245,8 +250,9 @@ export async function connectGoatStripeIntegration(input: {
 
 export async function getGoatStripeIntegrationState(
   workspaceId: string,
+  db: DbLike = getDb(),
 ): Promise<GoatStripeProviderState> {
-  const [row] = await getDb()
+  const [row] = await db
     .select({
       id: goatIntegrations.id,
       status: goatIntegrations.status,
@@ -318,8 +324,11 @@ export async function loadGoatStripeConnection(
   };
 }
 
-export async function disconnectGoatStripeIntegration(workspaceId: string): Promise<boolean> {
-  const deleted = await getDb()
+export async function disconnectGoatStripeIntegration(
+  workspaceId: string,
+  db: DbLike = getDb(),
+): Promise<boolean> {
+  const deleted = await db
     .delete(goatIntegrations)
     .where(
       and(

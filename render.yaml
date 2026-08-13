@@ -130,6 +130,20 @@ services:
         sync: false
       - key: NEXT_PUBLIC_GOAT_POSTHOG_HOST
         sync: false
+      # iMessage pairing moved behind /v1 in the #1203 5a2 cutover: the API
+      # sends the verification text through the Linq (or log) provider.
+      # Optional, mirroring the web classification — when unset, pairing fails
+      # with a clear "not configured" error and nothing else degrades.
+      - key: LINQ_API_TOKEN
+        sync: false
+      - key: LINQ_FROM_NUMBER
+        sync: false
+      - key: LINQ_API_BASE_URL
+        sync: false
+      - key: GOAT_IMESSAGE_PROVIDER
+        sync: false
+      - key: GOAT_IMESSAGE_KILL_SWITCH
+        sync: false
       # Browser profiles moved behind /v1 in the #1203 3e cutover. The feature is
       # flag-gated; the Browserbase credentials are only exercised when
       # GOAT_BROWSER_PROFILES_ENABLED is "true".

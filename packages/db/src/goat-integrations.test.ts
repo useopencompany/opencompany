@@ -3,7 +3,9 @@ import { drizzle } from "drizzle-orm/neon-http";
 import { drizzle as drizzleNodePg } from "drizzle-orm/node-postgres";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  applyGoatIntegrationCapabilityMode,
   connectGoatSlackBotIntegration,
+  disconnectGoatPersonalIntegration,
   goatCredentialAad,
   refreshGoatIntegrationCredential,
 } from "./goat-integrations";
@@ -233,5 +235,75 @@ describe("connectGoatSlackBotIntegration", () => {
     expect(statements[integrationInsert]!.replace(/\s+/g, " ")).toContain(
       'on conflict ("workspace_id","provider")',
     );
+  });
+});
+
+describe("disconnectGoatPersonalIntegration", () => {
+  it("reports a deletion for both drizzle execute result shapes", async () => {
+    // node-postgres pooled drizzle returns { rows }; neon-http returns arrays.
+    const pooled = { execute: vi.fn(async () => ({ rows: [{ id: "gint_1" }] })) };
+    await expect(
+      disconnectGoatPersonalIntegration({
+        userWorkosId: "user_1",
+        integrationId: "gint_1",
+        db: pooled,
+      }),
+    ).resolves.toBe(true);
+
+    const arrayShaped = { execute: vi.fn(async () => [{ id: "gint_1" }]) };
+    await expect(
+      disconnectGoatPersonalIntegration({
+        userWorkosId: "user_1",
+        integrationId: "gint_1",
+        db: arrayShaped,
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("reports no deletion when the ownership guard matches nothing", async () => {
+    const db = { execute: vi.fn(async () => ({ rows: [] })) };
+    await expect(
+      disconnectGoatPersonalIntegration({
+        userWorkosId: "user_1",
+        integrationId: "gint_other",
+        db,
+      }),
+    ).resolves.toBe(false);
+    expect(db.execute).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("applyGoatIntegrationCapabilityMode", () => {
+  it("merges the sparse override and stamps updatedAt", async () => {
+    let setValues: Record<string, unknown> | null = null;
+    const db = {
+      update: () => ({
+        set: (values: Record<string, unknown>) => {
+          setValues = values;
+          return { where: async () => undefined };
+        },
+      }),
+    };
+    const now = new Date("2026-08-13T08:00:00.000Z");
+    await applyGoatIntegrationCapabilityMode({
+      integrationIds: ["gint_1", "gint_2"],
+      capabilityId: "write",
+      mode: "on",
+      db: db as never,
+      now,
+    });
+    expect(setValues).not.toBeNull();
+    expect((setValues as unknown as { updatedAt: Date }).updatedAt).toEqual(now);
+  });
+
+  it("skips the write entirely for an empty connection list", async () => {
+    const update = vi.fn();
+    await applyGoatIntegrationCapabilityMode({
+      integrationIds: [],
+      capabilityId: "write",
+      mode: "on",
+      db: { update } as never,
+    });
+    expect(update).not.toHaveBeenCalled();
   });
 });

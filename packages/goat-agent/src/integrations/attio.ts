@@ -19,6 +19,10 @@ import { captureGoatIntegrationAddedAnalytics } from "./analytics";
 
 export const GOAT_ATTIO_API_BASE_URL = "https://api.attio.com/v2";
 
+// Follows the repo-wide injectable-db convention so the canonical API can pass
+// its pooled handle while web/runner callers keep the getDb() default.
+type DbLike = any;
+
 const ATTIO_API_TIMEOUT_MS = 15_000;
 const MAX_ATTIO_ERROR_DETAIL_CHARS = 200;
 
@@ -258,8 +262,9 @@ export async function connectGoatAttioIntegration(input: {
   apiKey: string;
   identity: GoatAttioWorkspaceIdentity;
   now?: Date;
+  db?: DbLike;
 }): Promise<{ integrationId: string }> {
-  const db = getDb();
+  const db = input.db ?? getDb();
   const now = input.now ?? new Date();
   const connectionLabel = input.identity.workspaceName?.trim() || "Attio";
 
@@ -390,8 +395,9 @@ export async function connectGoatAttioIntegration(input: {
 
 export async function getGoatAttioIntegrationState(
   userWorkosId: string,
+  db: DbLike = getDb(),
 ): Promise<GoatAttioProviderState> {
-  const [row] = await getDb()
+  const [row] = await db
     .select({
       id: goatIntegrations.id,
       status: goatIntegrations.status,
