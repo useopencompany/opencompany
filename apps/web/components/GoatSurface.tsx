@@ -14,6 +14,7 @@ import type {
   GoatTaskStage,
   GoatTaskStatus,
 } from "@opencompany/db/goat-schema";
+import type { EngineRuntimeStatus, MessageEngine } from "@opencompany/protocol";
 import {
   Command,
   CommandEmpty,
@@ -181,15 +182,26 @@ import { uploadHeadlessChatAttachment } from "@/lib/headless-chat-attachment-upl
 import {
   getHeadlessChatMessages,
   getHeadlessChatRuns,
+  getHeadlessEngineSessions,
   type HeadlessChatMessageReadModel,
   type HeadlessChatRunReadModel,
+  type HeadlessEngineSessionReadModel,
 } from "@/lib/headless-chat-collections";
-import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
+import {
+  cancelHeadlessChatRun,
+  getEngineRuntimeStatus,
+  resolveEngineQuestions,
+  updateHeadlessChatConversation,
+} from "@/lib/headless-chat-commands";
 import {
   HEADLESS_CHAT_ENABLED,
   hasChatAttachmentTransportMismatch,
 } from "@/lib/headless-chat-feature";
-import { HeadlessChatTransport, startHeadlessBackgroundChat } from "@/lib/headless-chat-transport";
+import {
+  HeadlessChatTransport,
+  type HeadlessMessageAccepted,
+  startHeadlessBackgroundChat,
+} from "@/lib/headless-chat-transport";
 import { listHeadlessSkillCatalog } from "@/lib/headless-knowledge-commands";
 import { getHeadlessTasks, taskReadModelToRow } from "@/lib/headless-task-collections";
 import {
@@ -216,11 +228,9 @@ import type { GoatSkillCatalogItem } from "@/lib/skills";
 import {
   createGoatCollections,
   type GoatChatMessageRow,
-  type GoatCodexChatSessionRow,
   type GoatTaskRow,
 } from "@/lib/task-collections";
 import { GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
-import type { GoatCodexSandboxStatus } from "@/lib/task-runner";
 import {
   deriveGoatTaskWorkflowSteps,
   type GoatTaskWorkflowStepView,
@@ -272,8 +282,6 @@ type MentionOption =
       mention: GoatChatMention;
     };
 
-// Coding-engine chats bypass useChat entirely: sends go to an engine endpoint,
-// streaming arrives as Electric row updates, and stop is an interrupt call.
 type GoatEngineChatKind = "codex" | "claude_code";
 type CodexComposerSettings = GoatCodexComposerSettingsView;
 type EngineComposerSettings = {
@@ -300,27 +308,12 @@ function chatThreadBottomPaddingForComposerHeight(composerHeightPx: number) {
   );
 }
 
-const ENGINE_CHAT_CONFIG: Record<
-  GoatEngineChatKind,
-  {
-    label: string;
-    messagesEndpoint: string;
-    interruptEndpoint: (chatSessionId: string) => string;
-  }
-> = {
+const ENGINE_CHAT_CONFIG: Record<GoatEngineChatKind, { label: string }> = {
   codex: {
     label: CLOUD_CODING_ENGINE_CONFIG.codex.label,
-    messagesEndpoint: "/api/codex-chat/messages",
-    interruptEndpoint: (chatSessionId) =>
-      `/api/codex-chat/sessions/${encodeURIComponent(chatSessionId)}/interrupt`,
   },
   claude_code: {
     label: CLOUD_CODING_ENGINE_CONFIG.claude_code.label,
-    messagesEndpoint: "/api/claude-chat/messages",
-    // Claude chats share the codex_chat session/turn rows, so the codex interrupt
-    // and sandbox-status routes are engine-agnostic.
-    interruptEndpoint: (chatSessionId) =>
-      `/api/codex-chat/sessions/${encodeURIComponent(chatSessionId)}/interrupt`,
   },
 };
 
@@ -544,7 +537,7 @@ export function GoatSurface({
   const [codexGoalTokenBudget, setCodexGoalTokenBudget] = useState(
     initialCodexComposerUiState.goalTokenBudget,
   );
-  const [codexSandboxStatus, setCodexSandboxStatus] = useState<GoatCodexSandboxStatus | null>(null);
+  const [codexSandboxStatus, setCodexSandboxStatus] = useState<EngineRuntimeStatus | null>(null);
   const [codexRuntime, setCodexRuntime] = useState<GoatCodexRuntimeView | null>(
     initialChat?.codexRuntime ?? null,
   );
@@ -613,8 +606,17 @@ export function GoatSurface({
       activeSelectedMentions.find((mention) => mention.kind === "engine"),
     ) ?? baseChatModel;
   const isAutoChatModel = chatModel === AUTO_GOAT_MODEL_SELECTION;
+  const isCodexMode = chatModel === CODEX_PICKER_VALUE;
+  const isClaudeMode = chatModel === CLAUDE_PICKER_VALUE;
+  const selectedEngine: GoatEngineChatKind | null = isCodexMode
+    ? "codex"
+    : isClaudeMode
+      ? "claude_code"
+      : null;
   const headlessChatActive =
     HEADLESS_CHAT_ENABLED || Boolean(activeTaskConversation?.sessionBacked);
+  const canonicalChatActive =
+    headlessChatActive || selectedEngine !== null || engineChatKindFromChat(initialChat) !== null;
   const legacyTaskReadOnly = Boolean(
     activeTaskConversation && !activeTaskConversation.sessionBacked,
   );
@@ -700,23 +702,6 @@ export function GoatSurface({
     [isAutoChatModel, setChatModelOverride],
   );
 
-  const trackOptimisticAttachmentPreviews = useCallback(
-    (messageId: string, attachments: readonly GoatChatUiAttachment[]) => {
-      const urls = attachments.flatMap((attachment) =>
-        attachment.previewUrl ? [attachment.previewUrl] : [],
-      );
-      if (urls.length === 0) return;
-      if (persistedMessageIdsRef.current.has(messageId)) {
-        for (const url of urls) URL.revokeObjectURL(url);
-        return;
-      }
-      const next = new Map(optimisticAttachmentPreviewUrlsRef.current);
-      next.set(messageId, urls);
-      optimisticAttachmentPreviewUrlsRef.current = next;
-    },
-    [],
-  );
-
   const prepareSendMessagesRequest = useCallback(
     ({
       body,
@@ -762,14 +747,34 @@ export function GoatSurface({
       }),
     [prepareSendMessagesRequest],
   );
-  const headlessTransport = useMemo(
-    () =>
-      new HeadlessChatTransport<GoatChatUiMessage>({
-        onReconciled: ({ conversationId }) => removeOptimisticGoatChatSummary(conversationId),
-      }),
+  const handleHeadlessAccepted = useCallback(
+    ({ conversationId, assistantMessageId }: HeadlessMessageAccepted) => {
+      activeTurnAssistantMessageIdRef.current = assistantMessageId;
+      if (routedChatSessionIdRef.current === conversationId) {
+        setPersistedChatSessionId(conversationId);
+        if (pendingNewSessionIdRef.current === conversationId) {
+          pendingNewSessionIdRef.current = null;
+        }
+      }
+      setEngineSubmitting(false);
+    },
     [],
   );
-  const transport = headlessChatActive ? headlessTransport : legacyTransport;
+  const handleHeadlessReconciled = useCallback(
+    ({ conversationId }: Pick<HeadlessMessageAccepted, "conversationId">) =>
+      removeOptimisticGoatChatSummary(conversationId),
+    [],
+  );
+  const headlessTransport = useMemo(() => new HeadlessChatTransport<GoatChatUiMessage>(), []);
+  useEffect(
+    () =>
+      headlessTransport.setEventHandlers({
+        onAccepted: handleHeadlessAccepted,
+        onReconciled: handleHeadlessReconciled,
+      }),
+    [headlessTransport, handleHeadlessAccepted, handleHeadlessReconciled],
+  );
+  const transport = canonicalChatActive ? headlessTransport : legacyTransport;
   const { balance: creditBalance, refetch: refetchCreditBalance } = useGoatCreditBalance();
   const {
     messages,
@@ -785,9 +790,9 @@ export function GoatSurface({
     // useChat holds only this surface's in-flight overlay; persisted history
     // comes from the Electric-synced liveChat state and is merged below.
     resume:
-      (headlessChatActive || chatResumeEnabled) &&
+      (canonicalChatActive || chatResumeEnabled) &&
       Boolean(initialChat) &&
-      ((initialChat?.engine ?? "opencompany") === "opencompany" || Boolean(taskConversation)),
+      (canonicalChatActive || Boolean(taskConversation)),
     // Batch stream chunks into ~20fps UI updates instead of rendering the
     // whole thread on every token.
     experimental_throttle: 50,
@@ -845,13 +850,6 @@ export function GoatSurface({
     setWorkspacePanelSessionId(activeEngineChat?.chatSessionId ?? null);
     setWorkspacePanelExpanded(false);
   }
-  const isCodexMode = chatModel === CODEX_PICKER_VALUE;
-  const isClaudeMode = chatModel === CLAUDE_PICKER_VALUE;
-  const selectedEngine: GoatEngineChatKind | null = isCodexMode
-    ? "codex"
-    : isClaudeMode
-      ? "claude_code"
-      : null;
   const activeEngine = activeEngineChat?.engine ?? selectedEngine;
   const isEngineChat = activeEngine !== null;
   // Hard stop: with enforcement on and an empty balance, block new sends
@@ -913,7 +911,7 @@ export function GoatSurface({
       : isAutoChatModel
         ? { capabilities: AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES }
         : {}),
-    ...(headlessChatActive && !composerEngine
+    ...((headlessChatActive || composerEngine) && !activeTaskConversation
       ? { upload: uploadCanonicalAttachment }
       : taskSpawningEnabled
         ? {
@@ -1115,7 +1113,7 @@ export function GoatSurface({
     ].join(":");
     if (lastSeenMarkRef.current === markKey) return;
     lastSeenMarkRef.current = markKey;
-    const markSeen = headlessChatActive
+    const markSeen = canonicalChatActive
       ? updateHeadlessChatConversation(chatSessionId, { markSeen: true })
       : markGoatChatSeen(chatSessionId);
     void markSeen.catch(() => undefined);
@@ -1125,7 +1123,7 @@ export function GoatSurface({
     chatSessionId,
     isAgentWorking,
     latestAssistantMessageId,
-    headlessChatActive,
+    canonicalChatActive,
     mode,
     persistedChatSessionId,
   ]);
@@ -1470,7 +1468,7 @@ export function GoatSurface({
     startArchiveTransition(async () => {
       try {
         const result =
-          HEADLESS_CHAT_ENABLED && (chat.engine ?? "opencompany") === "opencompany"
+          HEADLESS_CHAT_ENABLED || (chat.engine ?? "opencompany") !== "opencompany"
             ? await updateHeadlessChatConversation(chat.id, { archived: true }).then(() => ({
                 ok: true,
                 error: null,
@@ -1552,7 +1550,7 @@ export function GoatSurface({
         // The chat route only serves open sessions, so the archived chat must be
         // reopened before we navigate — otherwise the page would render empty.
         const result =
-          HEADLESS_CHAT_ENABLED && (chat.engine ?? "opencompany") === "opencompany"
+          HEADLESS_CHAT_ENABLED || (chat.engine ?? "opencompany") !== "opencompany"
             ? await updateHeadlessChatConversation(chat.id, { archived: false }).then(() => ({
                 ok: true,
                 error: null,
@@ -1622,7 +1620,8 @@ export function GoatSurface({
     }));
     const canonicalAttachmentTarget =
       Boolean(mentions.find(isWorkflowMention)) ||
-      (headlessChatActive && !(backgroundEngine ?? activeEngine));
+      headlessChatActive ||
+      Boolean(backgroundEngine ?? activeEngine);
     if (hasChatAttachmentTransportMismatch(readyAttachments, canonicalAttachmentTarget)) {
       toast.error("Reattach files after switching models or engines.");
       return;
@@ -1770,21 +1769,12 @@ export function GoatSurface({
           engine,
         });
         setLocalGoatChatState(newSessionId, "working");
-        void sendEngineChatMessage({
-          endpoint: config.messagesEndpoint,
-          errorLabel: config.label,
+        void runBackgroundChatTurn({
           prompt: messagePrompt,
-          sessionId: null,
           newSessionId,
-          settings: settings.settings,
-          userMessageId: `goat_chat_msg_${crypto.randomUUID()}`,
-          attachments: attachmentsMetadata,
-          mentions: backgroundMentions.filter(isSkillMention),
-          ...(engine === "codex"
-            ? { model: codexModel }
-            : engine === "claude_code"
-              ? { model: claudeModel }
-              : {}),
+          model: engine === "codex" ? codexModel : claudeModel,
+          engine: canonicalMessageEngine(engine, settings.settings),
+          ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
         })
           .then(() => {
             revokeGoatAttachmentPreviews(pendingAttachments);
@@ -1947,13 +1937,13 @@ export function GoatSurface({
     setInput("");
     setMentionToken(null);
     setSelectedMentions([]);
+    let messageEngine: MessageEngine = { type: "opencompany", schemaVersion: 1 };
+    let model: GoatChatModelSelection | CodexChatModelId | ClaudeChatModelId = chatModel;
+    let engineSettings: EngineComposerSettings | null = null;
     if (activeEngine) {
       const settings =
         activeEngine === "claude_code"
-          ? ({
-              ok: true,
-              settings: { reasoningEffort: codexReasoningEffort },
-            } as const)
+          ? ({ ok: true, settings: { reasoningEffort: codexReasoningEffort } } as const)
           : buildCodexComposerSettings({
               prompt,
               reasoningEffort: codexReasoningEffort,
@@ -1968,111 +1958,16 @@ export function GoatSurface({
         toast.error(settings.error);
         return;
       }
-      clearComposerDraft(chatSessionId);
-      const engine = activeEngine;
-      const config = ENGINE_CHAT_CONFIG[engine];
-      const userMessageId = `goat_chat_msg_${crypto.randomUUID()}`;
-      const existingEngineSessionId = activeEngineChat?.chatSessionId ?? null;
-      const newSessionId = existingEngineSessionId
-        ? null
-        : (pendingNewSessionIdRef.current ?? newOptimisticGoatChatSessionId());
-      if (newSessionId && pendingNewSessionIdRef.current !== newSessionId) {
-        pendingNewSessionIdRef.current = newSessionId;
-        routedChatSessionIdRef.current = newSessionId;
-        setChatModelOverride(chatModel);
-        setChatSessionId(newSessionId);
-        setPersistedChatSessionId(null);
-        window.history.replaceState(null, "", chatHref(newSessionId));
-      }
-      if (newSessionId) {
-        addOptimisticGoatChatSummary({
-          workspaceId,
-          sessionId: newSessionId,
-          prompt,
-          model: String(chatModel),
-          engine,
-        });
-      }
-      beginActiveTurn();
-      setEngineSubmitting(true);
-      // Keep the object URLs alive for the optimistic user bubble.
-      composerAttachments.setAttachments([]);
-      void sendEngineChatMessage({
-        endpoint: config.messagesEndpoint,
-        errorLabel: config.label,
-        prompt,
-        sessionId: existingEngineSessionId,
-        newSessionId,
-        settings: settings.settings,
-        userMessageId,
-        attachments: attachmentsMetadata,
-        mentions: mentions.filter(isSkillMention),
-        ...(!existingEngineSessionId && engine === "codex"
-          ? { model: codexModel }
-          : !existingEngineSessionId && engine === "claude_code"
-            ? { model: claudeModel }
-            : {}),
-      })
-        .then((result) => {
-          const pendingNewSessionId = pendingNewSessionIdRef.current;
-          const ownsRoute = routedChatSessionIdRef.current === result.sessionId;
-          if (ownsRoute) {
-            trackOptimisticAttachmentPreviews(result.userMessageId, attachmentsMetadata);
-            setChatSessionId(result.sessionId);
-            setPersistedChatSessionId(result.sessionId);
-            if (pendingNewSessionId === result.sessionId) pendingNewSessionIdRef.current = null;
-            setEngineChatSession({ engine, chatSessionId: result.sessionId });
-            activeTurnAssistantMessageIdRef.current = result.assistantMessageId;
-            setEngineRunning(true);
-            setCodexComposerStateByChatId((current) => {
-              const next = new Map(current);
-              next.set(result.sessionId, codexComposerUiStateFromSettings(settings.settings));
-              return next;
-            });
-            setCodexPlanModeEnabled(false);
-            setCodexGoalModeEnabled(false);
-            setCodexGoalObjective("");
-            setCodexGoalTokenBudget("");
-            setMessages((current) =>
-              appendEngineOptimisticMessages(existingEngineSessionId ? current : [], {
-                sessionId: result.sessionId,
-                userMessageId: result.userMessageId,
-                assistantMessageId: result.assistantMessageId,
-                prompt,
-                attachments: attachmentsMetadata,
-              }),
-            );
-          }
-        })
-        .catch((error) => {
-          if (newSessionId) removeOptimisticGoatChatSummary(newSessionId);
-          const requestChatSessionId = existingEngineSessionId ?? newSessionId;
-          clearLocalActiveTurnState(requestChatSessionId);
-          clearActiveTurn();
-          if (requestChatSessionId && routedChatSessionIdRef.current === requestChatSessionId) {
-            setInput(prompt);
-            setSelectedMentions(mentions);
-            composerAttachments.setAttachments(pendingAttachments);
-          }
-          toast.error(
-            error instanceof Error ? error.message : `${config.label} could not start that turn.`,
-          );
-        })
-        .finally(() => {
-          if (!mountedRef.current) return;
-          setEngineSubmitting(false);
-        });
-      return;
+      engineSettings = settings.settings;
+      messageEngine = canonicalMessageEngine(activeEngine, settings.settings);
+      model = activeEngine === "codex" ? codexModel : claudeModel;
     }
-
-    clearComposerDraft(chatSessionId);
     const metadata: GoatChatMessageMetadata = {
       ...(mentions.length > 0 ? { mentions } : {}),
       ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
     };
     const message =
       Object.keys(metadata).length > 0 ? { text: prompt, metadata } : { text: prompt };
-    const model = chatModel;
     const newSessionId = chatSessionId
       ? pendingNewSessionIdRef.current === chatSessionId
         ? chatSessionId
@@ -2093,9 +1988,28 @@ export function GoatSurface({
         sessionId: newSessionId,
         prompt,
         model: String(model),
-        engine: "opencompany",
+        engine: activeEngine ?? "opencompany",
       });
     }
+    if (activeEngine) {
+      const activeSessionId = requestSessionId ?? newSessionId;
+      if (activeSessionId) {
+        setEngineChatSession({ engine: activeEngine, chatSessionId: activeSessionId });
+        if (engineSettings) {
+          setCodexComposerStateByChatId((current) => {
+            const next = new Map(current);
+            next.set(activeSessionId, codexComposerUiStateFromSettings(engineSettings));
+            return next;
+          });
+        }
+      }
+      setEngineSubmitting(true);
+      setCodexPlanModeEnabled(false);
+      setCodexGoalModeEnabled(false);
+      setCodexGoalObjective("");
+      setCodexGoalTokenBudget("");
+    }
+    clearComposerDraft(chatSessionId);
     beginActiveTurn();
     // Clear without revoking previews: the optimistic bubble still shows them.
     composerAttachments.setAttachments([]);
@@ -2104,9 +2018,10 @@ export function GoatSurface({
         sessionId: requestSessionId,
         newSessionId,
         model,
-        ...(activeTaskConversation && initialChat ? { engine: initialChat.engine } : {}),
+        engine: messageEngine,
       },
     }).catch((error) => {
+      setEngineSubmitting(false);
       if (newSessionId) removeOptimisticGoatChatSummary(newSessionId);
       const requestChatSessionId = requestSessionId ?? newSessionId;
       clearLocalActiveTurnState(requestChatSessionId);
@@ -2173,17 +2088,9 @@ export function GoatSurface({
 
   const handleCodexToolAction = async (action: CodexToolAction) => {
     if (action.type === "answer-question") {
-      const response = await fetch(
-        `/api/codex-chat/interactions/${encodeURIComponent(action.interactionId)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ answers: action.answers }),
-        },
-      );
-      if (!response.ok) {
-        throw new Error((await response.text()) || "Could not send your answer to Codex.");
-      }
+      const runId = codexRuntime?.activeTurnId;
+      if (!runId) throw new Error("The active coding Run is no longer available.");
+      await resolveEngineQuestions(runId, action.interactionId, action.answers);
       return;
     }
 
@@ -2199,48 +2106,35 @@ export function GoatSurface({
     const engine = activeEngineChat?.engine;
     const sessionId = activeEngineChat?.chatSessionId;
     if (!engine || !sessionId) throw new Error("This Codex session is no longer available.");
-    const config = ENGINE_CHAT_CONFIG[engine];
     const prompt = "Implement the plan.";
     const settings: CodexComposerSettings = {
       reasoningEffort: codexReasoningEffort,
       planModeEnabled: false,
       goalMode: null,
     };
-    const userMessageId = `goat_chat_msg_${crypto.randomUUID()}`;
 
     clearError();
     beginActiveTurn();
     setEngineSubmitting(true);
     try {
-      const result = await sendEngineChatMessage({
-        endpoint: config.messagesEndpoint,
-        errorLabel: config.label,
-        prompt,
-        sessionId,
-        newSessionId: null,
-        settings,
-        userMessageId,
-        attachments: [],
-        mentions: [],
-      });
-      setChatSessionId(result.sessionId);
-      activeTurnAssistantMessageIdRef.current = result.assistantMessageId;
-      setEngineRunning(true);
       setCodexPlanModeEnabled(false);
       setCodexComposerStateByChatId((current) => {
         const next = new Map(current);
-        next.set(result.sessionId, codexComposerUiStateFromSettings(settings));
+        next.set(sessionId, codexComposerUiStateFromSettings(settings));
         return next;
       });
-      setMessages((current) =>
-        appendEngineOptimisticMessages(current, {
-          sessionId: result.sessionId,
-          userMessageId: result.userMessageId,
-          assistantMessageId: result.assistantMessageId,
-          prompt,
-          attachments: [],
-        }),
+      await sendMessage(
+        { text: prompt },
+        {
+          body: {
+            engine: canonicalMessageEngine(engine, settings),
+            model: engine === "codex" ? codexModel : claudeModel,
+            sessionId,
+          },
+        },
       );
+      setChatSessionId(sessionId);
+      setEngineRunning(true);
       router.refresh();
     } catch (error) {
       clearActiveTurn();
@@ -2253,7 +2147,7 @@ export function GoatSurface({
   const closeChat = useCallback(() => {
     if (isGenerating) {
       clearLocalActiveTurnState(chatSessionId);
-      if (headlessChatActive) void headlessTransport.cancel(chatInstanceKey).catch(() => {});
+      if (canonicalChatActive) void headlessTransport.cancel(chatInstanceKey).catch(() => {});
       void stop();
     }
     openChat(null);
@@ -2264,7 +2158,7 @@ export function GoatSurface({
     chatSessionId,
     clearLocalActiveTurnState,
     headlessTransport,
-    headlessChatActive,
+    canonicalChatActive,
     isGenerating,
     openChat,
     router,
@@ -2294,13 +2188,16 @@ export function GoatSurface({
 
     if (activeEngineChat) {
       const config = ENGINE_CHAT_CONFIG[activeEngineChat.engine];
+      const activeRunId = codexRuntime?.activeTurnId ?? null;
       setEngineRunning(false);
       clearLocalActiveTurnState(activeEngineChat.chatSessionId);
-      void fetch(config.interruptEndpoint(activeEngineChat.chatSessionId), {
-        method: "POST",
-      }).catch(() => {
-        toast.error(`Could not interrupt ${config.label}.`);
-      });
+      void headlessTransport
+        .cancel(chatInstanceKey)
+        .then((canceled) => {
+          if (!canceled && activeRunId) return cancelHeadlessChatRun(activeRunId);
+        })
+        .catch(() => toast.error(`Could not interrupt ${config.label}.`));
+      void stop();
       return;
     }
 
@@ -2313,7 +2210,7 @@ export function GoatSurface({
     clearLocalActiveTurnState(chatSessionId ?? lastAssistantMessage?.metadata?.sessionId ?? null);
     // With resumable streams, aborting the connection is only a disconnect;
     // the stop endpoint cancels the server-side generation itself.
-    if (headlessChatActive) {
+    if (canonicalChatActive) {
       void headlessTransport.cancel(chatInstanceKey).catch(() => undefined);
     } else if (chatResumeEnabled) {
       const stopSessionId = chatSessionId ?? lastAssistantMessage?.metadata?.sessionId ?? null;
@@ -2331,9 +2228,10 @@ export function GoatSurface({
     chatInstanceKey,
     chatSessionId,
     clearLocalActiveTurnState,
+    codexRuntime?.activeTurnId,
     isTaskConversationStopping,
     headlessTransport,
-    headlessChatActive,
+    canonicalChatActive,
     messages,
     stop,
   ]);
@@ -2856,7 +2754,7 @@ export function GoatSurface({
           persistedChatSessionId === chatSessionId ? (
             <LiveChatMessages
               sessionId={chatSessionId}
-              headless={headlessChatActive && !activeEngineChat}
+              headless={canonicalChatActive}
               onChange={setLiveChat}
             />
           ) : null}
@@ -3371,7 +3269,7 @@ function QuickChatComposer({
     ? (parsedBackgroundChatDirective.engine ?? selectedEngine)
     : selectedEngine;
   const isEngineChat = composerEngine !== null;
-  const headlessQuickChatActive = HEADLESS_CHAT_ENABLED && !isEngineChat;
+  const canonicalQuickChatActive = HEADLESS_CHAT_ENABLED || isEngineChat;
   const adHocTaskMentionEnabled = taskSpawningEnabled && !selectedEngine;
   const backgroundAdHocTaskSelected = Boolean(
     parsedBackgroundChatDirective &&
@@ -3415,7 +3313,7 @@ function QuickChatComposer({
       : chatModel === AUTO_GOAT_MODEL_SELECTION
         ? { capabilities: AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES }
         : {}),
-    ...(headlessQuickChatActive
+    ...(canonicalQuickChatActive
       ? { upload: uploadCanonicalAttachment }
       : taskSpawningEnabled
         ? {
@@ -3728,7 +3626,7 @@ function QuickChatComposer({
     if (
       hasChatAttachmentTransportMismatch(
         readyAttachments,
-        Boolean(mentions.find(isWorkflowMention)) || headlessQuickChatActive,
+        Boolean(mentions.find(isWorkflowMention)) || canonicalQuickChatActive,
       )
     ) {
       toast.error("Reattach files after switching models or engines.");
@@ -3845,7 +3743,6 @@ function QuickChatComposer({
 
       const engine = targetEngine;
       const config = ENGINE_CHAT_CONFIG[engine];
-      const userMessageId = `goat_chat_msg_${crypto.randomUUID()}`;
       const newSessionId = newOptimisticGoatChatSessionId();
       addOptimisticGoatChatSummary({
         workspaceId,
@@ -3855,21 +3752,15 @@ function QuickChatComposer({
         engine,
       });
       setLocalGoatChatState(newSessionId, "working");
-      void sendEngineChatMessage({
-        endpoint: config.messagesEndpoint,
-        errorLabel: config.label,
+      void runBackgroundChatTurn({
         prompt,
-        sessionId: null,
         newSessionId,
-        settings: settings.settings,
-        userMessageId,
-        attachments: attachmentsMetadata,
-        mentions: mentions.filter(isSkillMention),
-        ...(engine === "codex"
-          ? { model: codexModel }
-          : engine === "claude_code"
-            ? { model: claudeModel }
-            : {}),
+        model: engine === "codex" ? codexModel : claudeModel,
+        engine: canonicalMessageEngine(engine, settings.settings),
+        metadata: {
+          ...(attachmentsMetadata.length ? { attachments: attachmentsMetadata } : {}),
+          ...(mentions.some(isSkillMention) ? { mentions: mentions.filter(isSkillMention) } : {}),
+        },
       })
         .then(() => {
           // Not gated on mountedRef: see the workflow branch above.
@@ -4665,90 +4556,6 @@ function latestChatTurnStartedAtMs(messages: readonly GoatChatUiMessage[]) {
   return null;
 }
 
-type EngineChatMessageResponse = {
-  ok: true;
-  sessionId: string;
-  userMessageId: string;
-  assistantMessageId: string | null;
-  mode: "started" | "steered" | "queued";
-};
-
-async function sendEngineChatMessage(input: {
-  endpoint: string;
-  errorLabel: string;
-  prompt: string;
-  sessionId: string | null;
-  newSessionId: string | null;
-  settings: EngineComposerSettings;
-  userMessageId: string;
-  attachments: GoatChatUiAttachment[];
-  mentions: GoatChatMention[];
-  model?: CodexChatModelId | ClaudeChatModelId;
-}): Promise<EngineChatMessageResponse> {
-  const response = await fetch(input.endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-      ...(input.newSessionId ? { newSessionId: input.newSessionId } : {}),
-      message: {
-        id: input.userMessageId,
-        role: "user",
-        parts: [{ type: "text", text: input.prompt }],
-        ...(input.attachments.length > 0 || input.mentions.length > 0
-          ? {
-              metadata: {
-                ...(input.attachments.length > 0 ? { attachments: input.attachments } : {}),
-                ...(input.mentions.length > 0 ? { mentions: input.mentions } : {}),
-              },
-            }
-          : {}),
-      },
-      settings: input.settings,
-      ...(input.model ? { model: input.model } : {}),
-    }),
-  });
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(error || `${input.errorLabel} could not start that turn.`);
-  }
-  return response.json() as Promise<EngineChatMessageResponse>;
-}
-
-function appendEngineOptimisticMessages(
-  current: GoatChatUiMessage[],
-  input: {
-    sessionId: string;
-    userMessageId: string;
-    assistantMessageId: string | null;
-    prompt: string;
-    attachments: GoatChatUiAttachment[];
-  },
-): GoatChatUiMessage[] {
-  const byId = new Set(current.map((message) => message.id));
-  const next = [...current];
-  if (!byId.has(input.userMessageId)) {
-    next.push({
-      id: input.userMessageId,
-      role: "user",
-      metadata: {
-        sessionId: input.sessionId,
-        ...(input.attachments.length > 0 ? { attachments: input.attachments } : {}),
-      },
-      parts: [{ type: "text", text: input.prompt }],
-    });
-  }
-  if (input.assistantMessageId && !byId.has(input.assistantMessageId)) {
-    next.push({
-      id: input.assistantMessageId,
-      role: "assistant",
-      metadata: { sessionId: input.sessionId },
-      parts: [],
-    });
-  }
-  return next;
-}
-
 function defaultCodexComposerUiState(
   reasoningEffort = DEFAULT_CODEX_CHAT_REASONING_EFFORT,
 ): CodexComposerUiState {
@@ -4842,6 +4649,28 @@ function buildCodexComposerSettings(input: {
       reasoningEffort: input.reasoningEffort,
       planModeEnabled: input.planModeEnabled,
       goalMode,
+    },
+  };
+}
+
+function canonicalMessageEngine(
+  engine: GoatEngineChatKind,
+  settings: EngineComposerSettings,
+): MessageEngine {
+  if (engine === "claude_code") {
+    return {
+      type: "claude_code",
+      schemaVersion: 1,
+      settings: { reasoningEffort: settings.reasoningEffort },
+    };
+  }
+  return {
+    type: "codex",
+    schemaVersion: 1,
+    settings: {
+      reasoningEffort: settings.reasoningEffort,
+      ...(settings.planModeEnabled ? { planModeEnabled: true } : {}),
+      ...(settings.goalMode ? { goalMode: settings.goalMode } : {}),
     },
   };
 }
@@ -5785,7 +5614,7 @@ function CodexSessionStatusIndicator({
   engine: GoatChatEngine;
   runtime: GoatCodexRuntimeView | null;
   optimisticStatus: "starting" | "running" | null;
-  sandboxStatus: GoatCodexSandboxStatus | null;
+  sandboxStatus: EngineRuntimeStatus | null;
 }) {
   let meta = codexRuntimeMeta(
     optimisticStatus
@@ -5932,7 +5761,7 @@ function LiveCodexChatSessionStatus({
 }: {
   chatSessionId: string;
   setRunning: Dispatch<SetStateAction<boolean>>;
-  setSandboxStatus: Dispatch<SetStateAction<GoatCodexSandboxStatus | null>>;
+  setSandboxStatus: Dispatch<SetStateAction<EngineRuntimeStatus | null>>;
   setRuntime: Dispatch<SetStateAction<GoatCodexRuntimeView | null>>;
 }) {
   const hydrated = useHydrated();
@@ -5955,16 +5784,17 @@ function LiveCodexChatSessionStatusSubscriber({
 }: {
   chatSessionId: string;
   setRunning: Dispatch<SetStateAction<boolean>>;
-  setSandboxStatus: Dispatch<SetStateAction<GoatCodexSandboxStatus | null>>;
+  setSandboxStatus: Dispatch<SetStateAction<EngineRuntimeStatus | null>>;
   setRuntime: Dispatch<SetStateAction<GoatCodexRuntimeView | null>>;
 }) {
-  const collections = useMemo(() => createGoatCollections(), []);
-  const { data: rows, isLoading } = useLiveQuery((q) =>
-    q.from({ codexChatSession: collections.codexChatSessions }),
+  const engineSessions = useMemo(() => getHeadlessEngineSessions(), []);
+  const { data: rows, isLoading } = useLiveQuery(
+    (q) => q.from({ engineSession: engineSessions }),
+    [engineSessions],
   );
   const row =
-    ((rows ?? []) as GoatCodexChatSessionRow[]).find(
-      (candidate) => candidate.chat_session_id === chatSessionId,
+    ((rows ?? []) as HeadlessEngineSessionReadModel[]).find(
+      (candidate) => candidate.conversationId === chatSessionId,
     ) ?? null;
   const status = row?.status ?? null;
 
@@ -5974,9 +5804,9 @@ function LiveCodexChatSessionStatusSubscriber({
       row
         ? {
             status: row.status,
-            activeTurnId: row.active_turn_id,
+            activeTurnId: row.activeRunId,
             error: row.error,
-            updatedAt: row.updated_at,
+            updatedAt: row.updatedAt,
           }
         : null,
     );
@@ -5994,18 +5824,11 @@ function LiveCodexChatSessionStatusSubscriber({
 
     const loadStatus = async () => {
       try {
-        const response = await fetch(
-          `/api/codex-chat/sessions/${encodeURIComponent(chatSessionId)}/sandbox-status`,
-          { signal: controller.signal },
-        );
-        if (!response.ok) return;
-        const body = (await response.json()) as { status?: unknown };
+        const runtimeStatus = await getEngineRuntimeStatus(chatSessionId, {
+          fetch: (input, init) => fetch(input, { ...init, signal: controller.signal }),
+        });
         if (!active) return;
-        if (body.status === "running" || body.status === "sleeping" || body.status === "deleted") {
-          setSandboxStatus(body.status);
-        } else if (body.status === null) {
-          setSandboxStatus(null);
-        }
+        setSandboxStatus(runtimeStatus);
       } catch {
         // The session status still tells us when a turn is actively starting/running.
         if (active && (status === "starting" || status === "running")) {
@@ -6840,15 +6663,17 @@ async function runBackgroundChatTurn(input: {
   prompt: string;
   model: string;
   newSessionId: string;
+  engine?: MessageEngine;
   metadata?: GoatChatMessageMetadata;
 }) {
   const clientMessageId = newBackgroundChatMessageId();
-  if (HEADLESS_CHAT_ENABLED) {
+  if (HEADLESS_CHAT_ENABLED || (input.engine && input.engine.type !== "opencompany")) {
     await startHeadlessBackgroundChat({
       content: input.prompt,
       clientConversationId: input.newSessionId,
       clientMessageId,
       model: input.model,
+      ...(input.engine ? { engine: input.engine } : {}),
       ...(input.metadata?.attachments?.length
         ? { attachmentIds: input.metadata.attachments.map((attachment) => attachment.id) }
         : {}),

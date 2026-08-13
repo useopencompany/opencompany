@@ -16,9 +16,12 @@ describe("v1 protocol contract", () => {
         clientConversationId: "conversation_1",
         clientMessageId: "message_1",
         content: "Hello",
-        engine: "opencompany",
+        engine: { type: "opencompany", schemaVersion: 1 },
       }),
-    ).toMatchObject({ content: "Hello", engine: "opencompany" });
+    ).toMatchObject({
+      content: "Hello",
+      engine: { type: "opencompany", schemaVersion: 1 },
+    });
 
     expect(() =>
       CreateMessageBodySchema.parse({
@@ -182,6 +185,8 @@ describe("v1 protocol contract", () => {
       "/v1/conversations/{conversationId}/messages",
       "/v1/messages",
       "/v1/attachments",
+      "/v1/conversations/{conversationId}/engine-session/runtime",
+      "/v1/conversations/{conversationId}/engine-session/runtime-access",
       "/v1/runs/{runId}",
       "/v1/runs/{runId}/events",
       "/v1/runs/{runId}/cancel",

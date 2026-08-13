@@ -69,6 +69,8 @@ import {
   DeleteWikiPageBodySchema,
   EngineAuthDisconnectEnvelopeSchema,
   EngineAuthFlowIdSchema,
+  EngineRuntimeAccessEnvelopeSchema,
+  EngineRuntimeStatusEnvelopeSchema,
   ErrorEnvelopeSchema,
   FathomAccountStateEnvelopeSchema,
   FeedbackSubmissionEnvelopeSchema,
@@ -1286,6 +1288,36 @@ export const uploadAttachmentRoute = createRoute({
     201: {
       description: "Actor-scoped attachment uploaded and ready for one Message command.",
       content: { "application/json": { schema: AttachmentUploadEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getEngineRuntimeStatusRoute = createRoute({
+  method: "get",
+  path: "/v1/conversations/{conversationId}/engine-session/runtime",
+  tags: ["Engine sessions"],
+  security: actorSecurity,
+  request: { params: z.object({ conversationId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Qualified runtime status for a coding-engine Conversation.",
+      content: { "application/json": { schema: EngineRuntimeStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createEngineRuntimeAccessRoute = createRoute({
+  method: "post",
+  path: "/v1/conversations/{conversationId}/engine-session/runtime-access",
+  tags: ["Engine sessions"],
+  security: actorSecurity,
+  request: { params: z.object({ conversationId: ResourceIdSchema }) },
+  responses: {
+    201: {
+      description: "Short-lived access to the Conversation's coding workspace runtime.",
+      content: { "application/json": { schema: EngineRuntimeAccessEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -2721,6 +2753,8 @@ export type V1RouteHandlers = {
   listMessages: RouteHandler<typeof listMessagesRoute>;
   createMessage: RouteHandler<typeof createMessageRoute>;
   uploadAttachment: RouteHandler<typeof uploadAttachmentRoute>;
+  getEngineRuntimeStatus: RouteHandler<typeof getEngineRuntimeStatusRoute>;
+  createEngineRuntimeAccess: RouteHandler<typeof createEngineRuntimeAccessRoute>;
   getRun: RouteHandler<typeof getRunRoute>;
   streamRunEvents: RouteHandler<typeof streamRunEventsRoute>;
   cancelRun: RouteHandler<typeof cancelRunRoute>;
@@ -2871,6 +2905,8 @@ export function createV1Router(
       .openapi(listMessagesRoute, handlers.listMessages)
       .openapi(createMessageRoute, handlers.createMessage)
       .openapi(uploadAttachmentRoute, handlers.uploadAttachment)
+      .openapi(getEngineRuntimeStatusRoute, handlers.getEngineRuntimeStatus)
+      .openapi(createEngineRuntimeAccessRoute, handlers.createEngineRuntimeAccess)
       .openapi(getRunRoute, handlers.getRun)
       .openapi(streamRunEventsRoute, handlers.streamRunEvents)
       .openapi(cancelRunRoute, handlers.cancelRun)
@@ -3708,6 +3744,25 @@ const contractDocumentHandlers: V1RouteHandlers = {
             kind: "document",
           },
           expiresAt: placeholderTime,
+        },
+        meta,
+      },
+      201,
+    ),
+  getEngineRuntimeStatus: (c) =>
+    c.json(
+      { data: { conversationId: "conversation_contract", status: "running" as const }, meta },
+      200,
+    ),
+  createEngineRuntimeAccess: (c) =>
+    c.json(
+      {
+        data: {
+          conversationId: "conversation_contract",
+          websocketUrl: "wss://runner.example.test/goat/runtime",
+          ticket: "runtime_ticket_contract",
+          expiresAt: 1_786_449_900,
+          runtimeStatus: "running" as const,
         },
         meta,
       },

@@ -92,6 +92,8 @@ describe("headless protocol", () => {
       "/v1/conversations/{conversationId}/messages",
       "/v1/messages",
       "/v1/attachments",
+      "/v1/conversations/{conversationId}/engine-session/runtime",
+      "/v1/conversations/{conversationId}/engine-session/runtime-access",
       "/v1/runs/{runId}",
       "/v1/runs/{runId}/events",
       "/v1/runs/{runId}/cancel",
@@ -138,7 +140,7 @@ describe("headless protocol", () => {
     expect(
       CreateMessageBodySchema.safeParse({
         content: "Hello",
-        engine: "opencompany",
+        engine: { type: "opencompany", schemaVersion: 1 },
         model: "provider/model",
         workspaceId: "workspace_1",
         sessionId: "goat_chat_1",
@@ -161,7 +163,7 @@ describe("headless protocol", () => {
     expect(
       CreateMessageBodySchema.safeParse({
         content: "Use the sales skill",
-        engine: "opencompany",
+        engine: { type: "opencompany", schemaVersion: 1 },
         mentions: [{ kind: "skill", id: "sales" }],
       }).success,
     ).toBe(true);

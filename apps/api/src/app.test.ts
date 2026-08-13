@@ -98,6 +98,7 @@ describe("canonical Hono API", () => {
       repoConfigs: fakeRepoConfigs(),
       integrationAccounts: fakeIntegrationAccounts(),
       engineAuth: fakeEngineAuth(),
+      engineSessions: fakeEngineSessions(),
       billing: fakeBilling(),
       workspaceCapabilities: fakeWorkspaceCapabilities(),
       workspaceControl: fakeWorkspaceControl(),
@@ -131,7 +132,10 @@ describe("canonical Hono API", () => {
     const invalid = await app.request("/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": "send_1" },
-      body: JSON.stringify({ content: "", engine: "opencompany" }),
+      body: JSON.stringify({
+        content: "",
+        engine: { type: "opencompany", schemaVersion: 1 },
+      }),
     });
     expect(invalid.status).toBe(400);
     await expect(invalid.json()).resolves.toMatchObject({
@@ -1100,7 +1104,10 @@ describe("canonical Hono API", () => {
     const app = testApp(repository, {
       browserOrigins: ["https://my.opencompany.chat"],
     });
-    const body = JSON.stringify({ content: "Hello", engine: "opencompany" });
+    const body = JSON.stringify({
+      content: "Hello",
+      engine: { type: "opencompany", schemaVersion: 1 },
+    });
     const headers = { "Content-Type": "application/json", "Idempotency-Key": "send_1" };
 
     for (const origin of [undefined, "https://attacker.example"]) {
@@ -1151,7 +1158,10 @@ describe("canonical Hono API", () => {
     const response = await app.request("/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": "send_1" },
-      body: JSON.stringify({ content: "Hello", engine: "opencompany" }),
+      body: JSON.stringify({
+        content: "Hello",
+        engine: { type: "opencompany", schemaVersion: 1 },
+      }),
     });
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toMatchObject({
@@ -1170,6 +1180,96 @@ describe("canonical Hono API", () => {
     });
   });
 
+  it("admits Codex through the canonical Message command with versioned engine settings", async () => {
+    const repository = fakeRepository();
+    const getCodexStatus = vi.fn(async () => ({
+      status: "connected" as const,
+      statusReason: null,
+      lastValidatedAt: null,
+      lastRotatedAt: null,
+    }));
+    const app = testApp(repository, {
+      engineAuth: engineAuthService({ getCodexStatus }),
+    });
+    const response = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "send_codex_1" },
+      body: JSON.stringify({
+        clientConversationId: "conversation_codex_1",
+        content: "Build the feature",
+        engine: {
+          type: "codex",
+          schemaVersion: 1,
+          settings: {
+            reasoningEffort: "xhigh",
+            planModeEnabled: true,
+            goalMode: { objective: "Ship it", tokenBudget: 12_000 },
+          },
+        },
+        model: "openai/gpt-5.6-sol",
+      }),
+    });
+
+    expect(response.status).toBe(202);
+    expect(getCodexStatus).toHaveBeenCalledWith(actor);
+    expect(repository.lastCommand).toMatchObject({
+      engine: "codex",
+      model: "openai/gpt-5.6-sol",
+      runtimeModel: "gpt-5.6-sol",
+      settings: {
+        reasoningEffort: "xhigh",
+        planModeReasoningEffort: "high",
+        goalMode: { objective: "Ship it", tokenBudget: 12_000 },
+      },
+    });
+  });
+
+  it("fails closed when a coding-engine credential is disconnected", async () => {
+    const response = await testApp(fakeRepository(), {
+      engineAuth: engineAuthService({
+        getClaudeCodeStatus: async () => ({
+          status: null,
+          statusReason: null,
+          lastValidatedAt: null,
+          lastRotatedAt: null,
+        }),
+      }),
+    }).request("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "send_claude_1" },
+      body: JSON.stringify({
+        content: "Build the feature",
+        engine: {
+          type: "claude_code",
+          schemaVersion: 1,
+          settings: { reasoningEffort: "high" },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "conflict" } });
+  });
+
+  it("rejects a follow-up that tries to switch Conversation engines", async () => {
+    const response = await testApp(fakeRepository()).request("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "send_switch_1" },
+      body: JSON.stringify({
+        conversationId: "conversation_1",
+        content: "Continue",
+        engine: {
+          type: "codex",
+          schemaVersion: 1,
+          settings: { reasoningEffort: "high" },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "conflict" } });
+  });
+
   it("resolves Auto inside the authenticated command boundary", async () => {
     const repository = fakeRepository();
     const resolveAutoModel = vi.fn(async () => ({
@@ -1184,7 +1284,7 @@ describe("canonical Hono API", () => {
         clientConversationId: "conversation_auto",
         clientMessageId: "message_auto",
         content: "Route this",
-        engine: "opencompany",
+        engine: { type: "opencompany", schemaVersion: 1 },
         model: "auto",
         attachmentIds: ["attachment_1"],
       }),
@@ -1212,7 +1312,11 @@ describe("canonical Hono API", () => {
     const response = await testApp(fakeRepository()).request("/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": "send_auto_2" },
-      body: JSON.stringify({ content: "Route this", engine: "opencompany", model: "auto" }),
+      body: JSON.stringify({
+        content: "Route this",
+        engine: { type: "opencompany", schemaVersion: 1 },
+        model: "auto",
+      }),
     });
 
     expect(response.status).toBe(503);
@@ -1226,7 +1330,15 @@ describe("canonical Hono API", () => {
     const response = await testApp(fakeRepository(), { resolveAutoModel }).request("/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": "send_auto_3" },
-      body: JSON.stringify({ content: "Route this", engine: "claude_code", model: "auto" }),
+      body: JSON.stringify({
+        content: "Route this",
+        engine: {
+          type: "claude_code",
+          schemaVersion: 1,
+          settings: { reasoningEffort: "high" },
+        },
+        model: "auto",
+      }),
     });
 
     expect(response.status).toBe(400);
@@ -2146,6 +2258,41 @@ describe("canonical Hono API", () => {
     });
   });
 
+  it("serves qualified coding runtime status and access resources", async () => {
+    const getRuntimeStatus = vi.fn(async () => "sleeping" as const);
+    const createRuntimeAccess = vi.fn(async () => ({
+      conversationId: "conversation_1",
+      websocketUrl: "wss://runner.example.test/goat/runtime",
+      ticket: "short-lived-ticket",
+      expiresAt: 1_786_449_900,
+      runtimeStatus: "running" as const,
+    }));
+    const app = testApp(fakeRepository(), {
+      engineSessions: engineSessionService({ getRuntimeStatus, createRuntimeAccess }),
+    });
+
+    const status = await app.request("/v1/conversations/conversation_1/engine-session/runtime");
+    expect(status.status).toBe(200);
+    await expect(status.json()).resolves.toMatchObject({
+      data: { conversationId: "conversation_1", status: "sleeping" },
+    });
+    expect(getRuntimeStatus).toHaveBeenCalledWith(actor, "conversation_1");
+
+    const access = await app.request(
+      "/v1/conversations/conversation_1/engine-session/runtime-access",
+      { method: "POST" },
+    );
+    expect(access.status).toBe(201);
+    await expect(access.json()).resolves.toMatchObject({
+      data: {
+        conversationId: "conversation_1",
+        websocketUrl: "wss://runner.example.test/goat/runtime",
+        runtimeStatus: "running",
+      },
+    });
+    expect(createRuntimeAccess).toHaveBeenCalledWith(actor, "conversation_1");
+  });
+
   it("saves the Claude Code token without echoing it and disconnects engines", async () => {
     const secretToken = "sk-ant-oat01-supersecretsetuptoken000000";
     const saveClaudeCodeToken = vi.fn(async () => ({
@@ -2731,6 +2878,7 @@ function testApp(
     repoConfigs: fakeRepoConfigs(),
     integrationAccounts: fakeIntegrationAccounts(),
     engineAuth: fakeEngineAuth(),
+    engineSessions: fakeEngineSessions(),
     billing: fakeBilling(),
     workspaceCapabilities: fakeWorkspaceCapabilities(),
     workspaceControl: fakeWorkspaceControl(),
@@ -3086,6 +3234,23 @@ function engineAuthService(
   overrides: Partial<Parameters<typeof createApiApp>[0]["engineAuth"]>,
 ): Parameters<typeof createApiApp>[0]["engineAuth"] {
   return { ...fakeEngineAuth(), ...overrides };
+}
+
+function fakeEngineSessions(): Parameters<typeof createApiApp>[0]["engineSessions"] {
+  return {
+    getRuntimeStatus: async () => {
+      throw new Error("Unexpected engine runtime status read.");
+    },
+    createRuntimeAccess: async () => {
+      throw new Error("Unexpected engine runtime access mutation.");
+    },
+  };
+}
+
+function engineSessionService(
+  overrides: Partial<Parameters<typeof createApiApp>[0]["engineSessions"]>,
+): Parameters<typeof createApiApp>[0]["engineSessions"] {
+  return { ...fakeEngineSessions(), ...overrides };
 }
 
 function fakeBrainSources(): Parameters<typeof createApiApp>[0]["brainSources"] {

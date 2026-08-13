@@ -1,5 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runtime";
+import {
+  GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
+  GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION,
+} from "@opencompany/agent-runtime";
 import {
   type Actor,
   type ChatAttachmentFormat,
@@ -9,6 +12,7 @@ import {
   CoreError,
   type CreateMessageCommand,
   type CreateMessageResult,
+  type EngineQuestionAnswer,
   type Message,
   type MessageAttachment,
   type MessagePage,
@@ -575,8 +579,23 @@ export class PostgresChatRepository implements ChatRepository {
     const attachmentsJson = JSON.stringify(resolvedAttachments.attachments);
     const attachmentTextsJson = JSON.stringify(resolvedAttachments.attachmentTexts);
     const settingsJson = JSON.stringify({
+      ...(input.command.settings ?? {}),
       ...(input.command.mentions?.length ? { mentions: input.command.mentions } : {}),
     });
+    const runtimeModel = input.command.runtimeModel ?? input.command.model;
+    const assistantDebugTrace =
+      input.command.engine === "opencompany"
+        ? {
+            schemaVersion: "opencompany.chat.debug.v1",
+            model: runtimeModel,
+            steps: [],
+            uiMessageParts: [],
+          }
+        : {
+            schemaVersion: "goat.codex_chat.debug.v1",
+            model: runtimeModel,
+            uiMessageParts: [],
+          };
     const title = conversationTitle(
       input.command.content,
       resolvedAttachments.attachments[0]?.filename,
@@ -822,9 +841,13 @@ export class PostgresChatRepository implements ChatRepository {
         )
         SELECT
           ${runtimeId}, target_chat.owner_user_workos_id, target_chat.id, ${input.command.engine},
-          target_chat.model, ${input.actor.workspaceId},
+          ${runtimeModel}, ${input.actor.workspaceId},
           CASE WHEN target_chat.task_id IS NULL
-            THEN ${GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION}
+            THEN ${
+              input.command.engine === "opencompany"
+                ? GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION
+                : GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION
+            }
             ELSE NULL
           END,
           ${runId}, 'queued', ${now}, ${now}
@@ -907,7 +930,7 @@ export class PostgresChatRepository implements ChatRepository {
         SELECT
           reservation.assistant_message_id, target_chat.id, 'assistant', '',
           target_chat.task_id,
-          '{"schemaVersion":"opencompany.chat.debug.v1","steps":[]}'::jsonb,
+          ${JSON.stringify(assistantDebugTrace)}::jsonb,
           ${now}, ${now}
         FROM winner AS reservation
         JOIN target_chat ON true
@@ -1208,9 +1231,17 @@ export class PostgresChatRepository implements ChatRepository {
       runId: string;
       approvalId: string;
       resolution: "approved" | "denied" | "answered" | "canceled";
-      answer?: string;
+      answer?: string | EngineQuestionAnswer;
     };
   }): Promise<ResolveApprovalResult | null> {
+    if (typeof input.command.answer === "object") {
+      return this.resolveEngineQuestionApproval({
+        actor: input.actor,
+        runId: input.command.runId,
+        approvalId: input.command.approvalId,
+        answer: input.command.answer,
+      });
+    }
     const now = this.options.now?.() ?? new Date();
     const eventId = (this.options.ids ?? defaultIds).event();
     const response = { resolution: input.command.resolution, answer: input.command.answer };
@@ -1283,7 +1314,9 @@ export class PostgresChatRepository implements ChatRepository {
                           'reason', ${
                             input.command.resolution === "approved"
                               ? null
-                              : (input.command.answer ?? "Denied by user.")
+                              : typeof input.command.answer === "string"
+                                ? input.command.answer
+                                : "Denied by user."
                           }::text
                         )
                       )
@@ -1394,6 +1427,104 @@ export class PostgresChatRepository implements ChatRepository {
     };
   }
 
+  private async resolveEngineQuestionApproval(input: {
+    actor: Actor;
+    runId: string;
+    approvalId: string;
+    answer: EngineQuestionAnswer;
+  }): Promise<ResolveApprovalResult | null> {
+    const [current] = await this.rows<{
+      request: Record<string, unknown>;
+      response: Record<string, unknown> | null;
+      status: string;
+    }>(sql`
+      SELECT interaction.request, approval.response, interaction.status
+      FROM goat.codex_chat_interactions AS interaction
+      JOIN goat.run_approvals AS approval
+        ON approval.id = interaction.id
+       AND approval.run_id = interaction.codex_chat_turn_id
+      JOIN goat.codex_chat_turns AS run ON run.id = interaction.codex_chat_turn_id
+      JOIN goat.codex_chat_sessions AS runtime ON runtime.id = run.codex_chat_session_id
+      JOIN goat.chat_sessions AS chat ON chat.id = run.chat_session_id
+      WHERE interaction.id = ${input.approvalId}
+        AND run.id = ${input.runId}
+        AND runtime.workspace_id = ${input.actor.workspaceId}
+        AND chat.kind = 'chat'
+        AND chat.user_workos_id = ${input.actor.userId}
+        AND run.user_workos_id = ${input.actor.userId}
+        AND chat.closed_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM goat.workspace_members AS member
+          WHERE member.workspace_id = ${input.actor.workspaceId}
+            AND member.user_workos_id = ${input.actor.userId}
+        )
+      LIMIT 1
+    `);
+    if (!current) return null;
+    const answers = normalizeEngineQuestionAnswers(current.request, input.answer.answers);
+    const canonicalAnswer = { type: "engine_questions", schemaVersion: 1, answers } as const;
+    const storedAnswer = current.response?.answer;
+    if (current.status === "resolved") {
+      if (JSON.stringify(storedAnswer) !== JSON.stringify(canonicalAnswer)) {
+        throw new CoreError(
+          "idempotency_conflict",
+          "The approval was already resolved differently.",
+        );
+      }
+      return {
+        approvalId: input.approvalId,
+        runId: input.runId,
+        resolution: "answered",
+        idempotentReplay: true,
+      };
+    }
+    if (current.status !== "pending") {
+      throw new CoreError("conflict", "This engine question is no longer waiting.");
+    }
+
+    const now = this.options.now?.() ?? new Date();
+    const interactionResponse = { answers };
+    const approvalResponse = { resolution: "answered", answer: canonicalAnswer };
+    const [changed] = await this.rows<{ id: string }>(sql`
+      WITH resolved_interaction AS MATERIALIZED (
+        UPDATE goat.codex_chat_interactions AS interaction
+        SET status = 'resolved',
+            response = ${JSON.stringify(interactionResponse)}::jsonb,
+            resolved_at = ${now},
+            updated_at = ${now}
+        WHERE interaction.id = ${input.approvalId}
+          AND interaction.codex_chat_turn_id = ${input.runId}
+          AND interaction.status = 'pending'
+          AND EXISTS (
+            SELECT 1 FROM goat.codex_chat_turns AS run
+            WHERE run.id = interaction.codex_chat_turn_id
+              AND run.status = 'running'
+              AND run.lease_id = interaction.lease_id
+          )
+        RETURNING interaction.id
+      )
+      UPDATE goat.run_approvals AS approval
+      SET status = 'resolved',
+          resolution = 'answered',
+          response = ${JSON.stringify(approvalResponse)}::jsonb,
+          resolved_at = ${now},
+          updated_at = ${now}
+      WHERE approval.id IN (SELECT id FROM resolved_interaction)
+        AND approval.run_id = ${input.runId}
+        AND approval.status = 'pending'
+      RETURNING approval.id
+    `);
+    if (!changed) {
+      throw new CoreError("conflict", "This engine question is no longer waiting.");
+    }
+    return {
+      approvalId: input.approvalId,
+      runId: input.runId,
+      resolution: "answered",
+      idempotentReplay: false,
+    };
+  }
+
   private async resolveAttachments(
     actor: Actor,
     attachmentIds: readonly string[],
@@ -1408,6 +1539,35 @@ export class PostgresChatRepository implements ChatRepository {
   private async rows<Row>(query: SQL): Promise<Row[]> {
     return rowsFromExecute<Row>(await this.execute(query));
   }
+}
+
+function normalizeEngineQuestionAnswers(
+  request: Record<string, unknown>,
+  rawAnswers: Readonly<Record<string, { answers: readonly string[] }>>,
+) {
+  const questions = Array.isArray(request.questions) ? request.questions : [];
+  const expectedIds = questions.flatMap((question) => {
+    if (!question || typeof question !== "object" || Array.isArray(question)) return [];
+    const id = (question as Record<string, unknown>).id;
+    return typeof id === "string" && id.trim() ? [id] : [];
+  });
+  if (
+    expectedIds.length === 0 ||
+    expectedIds.length !== questions.length ||
+    new Set(expectedIds).size !== expectedIds.length ||
+    Object.keys(rawAnswers).some((id) => !expectedIds.includes(id))
+  ) {
+    throw new CoreError("invalid_argument", "The engine question is invalid.");
+  }
+  return Object.fromEntries(
+    expectedIds.map((id) => {
+      const answers = rawAnswers[id]?.answers.map((answer) => answer.trim()).filter(Boolean) ?? [];
+      if (answers.length === 0 || answers.length > 8) {
+        throw new CoreError("invalid_argument", "Answer every engine question.");
+      }
+      return [id, { answers }];
+    }),
+  );
 }
 
 export class PostgresRunExecutionRepository implements RunExecutionRepository {
@@ -2070,6 +2230,8 @@ function hashCommand(command: CreateMessageCommand) {
         content: command.content,
         engine: command.engine,
         model: command.model,
+        runtimeModel: command.runtimeModel ?? null,
+        settings: command.settings ?? {},
         attachmentIds: command.attachmentIds ?? [],
         mentions: command.mentions ?? [],
       }),

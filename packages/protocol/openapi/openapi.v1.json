@@ -6684,12 +6684,7 @@
             "maxLength": 10000
           },
           "engine": {
-            "type": "string",
-            "enum": [
-              "opencompany",
-              "codex",
-              "claude_code"
-            ]
+            "$ref": "#/components/schemas/MessageEngineV1"
           },
           "model": {
             "type": "string",
@@ -6717,6 +6712,141 @@
         "required": [
           "content",
           "engine"
+        ],
+        "additionalProperties": false
+      },
+      "MessageEngineV1": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "opencompany"
+                ]
+              },
+              "schemaVersion": {
+                "type": "number",
+                "enum": [
+                  1
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "schemaVersion"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "codex"
+                ]
+              },
+              "schemaVersion": {
+                "type": "number",
+                "enum": [
+                  1
+                ]
+              },
+              "settings": {
+                "type": "object",
+                "properties": {
+                  "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh"
+                    ]
+                  },
+                  "planModeEnabled": {
+                    "type": "boolean"
+                  },
+                  "goalMode": {
+                    "$ref": "#/components/schemas/CodexGoalModeV1"
+                  }
+                },
+                "required": [
+                  "reasoningEffort"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "type",
+              "schemaVersion",
+              "settings"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "claude_code"
+                ]
+              },
+              "schemaVersion": {
+                "type": "number",
+                "enum": [
+                  1
+                ]
+              },
+              "settings": {
+                "type": "object",
+                "properties": {
+                  "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh"
+                    ]
+                  }
+                },
+                "required": [
+                  "reasoningEffort"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "type",
+              "schemaVersion",
+              "settings"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "CodexGoalModeV1": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "objective": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "tokenBudget": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 1,
+            "maximum": 2000000
+          }
+        },
+        "required": [
+          "objective"
         ],
         "additionalProperties": false
       },
@@ -6782,6 +6912,98 @@
         },
         "required": [
           "file"
+        ],
+        "additionalProperties": false
+      },
+      "EngineRuntimeStatusEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "conversationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "status": {
+                "type": "string",
+                "nullable": true,
+                "enum": [
+                  "running",
+                  "sleeping",
+                  "deleted",
+                  null
+                ]
+              }
+            },
+            "required": [
+              "conversationId",
+              "status"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EngineRuntimeAccessEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "conversationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "websocketUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "ticket": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8192
+              },
+              "expiresAt": {
+                "type": "integer",
+                "minimum": 0,
+                "exclusiveMinimum": true
+              },
+              "runtimeStatus": {
+                "type": "string",
+                "enum": [
+                  "running",
+                  "sleeping"
+                ]
+              }
+            },
+            "required": [
+              "conversationId",
+              "websocketUrl",
+              "ticket",
+              "expiresAt",
+              "runtimeStatus"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
         ],
         "additionalProperties": false
       },
@@ -8232,8 +8454,57 @@
             ]
           },
           "answer": {
-            "type": "string",
-            "maxLength": 10000
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 10000
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "engine_questions"
+                    ]
+                  },
+                  "schemaVersion": {
+                    "type": "number",
+                    "enum": [
+                      1
+                    ]
+                  },
+                  "answers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "answers": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          },
+                          "minItems": 1,
+                          "maxItems": 8
+                        }
+                      },
+                      "required": [
+                        "answers"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "type",
+                  "schemaVersion",
+                  "answers"
+                ],
+                "additionalProperties": false
+              }
+            ]
           }
         },
         "required": [
@@ -15219,6 +15490,106 @@
         }
       }
     },
+    "/v1/conversations/{conversationId}/engine-session/runtime": {
+      "get": {
+        "tags": [
+          "Engine sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "conversationId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Qualified runtime status for a coding-engine Conversation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineRuntimeStatusEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversationId}/engine-session/runtime-access": {
+      "post": {
+        "tags": [
+          "Engine sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "conversationId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Short-lived access to the Conversation's coding workspace runtime.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineRuntimeAccessEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/runs/{runId}": {
       "get": {
         "tags": [
@@ -15497,6 +15868,7 @@
                 "chat-conversations-v1",
                 "chat-messages-v1",
                 "chat-runs-v1",
+                "engine-sessions-v1",
                 "tasks-v1",
                 "workflows-v1",
                 "workflow-schedules-v1",

@@ -1,7 +1,6 @@
 "use client";
 
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import type { GoatMcpClient } from "@opencompany/db/goat-schema";
 import { type Collection, useLiveQuery } from "@tanstack/react-db";
 import {
   createContext,
@@ -29,7 +28,9 @@ import {
 import type { GoatTaskScheduleView } from "@/lib/headless-automation-types";
 import {
   getHeadlessChatConversations,
+  getHeadlessEngineSessions,
   type HeadlessChatConversationReadModel,
+  type HeadlessEngineSessionReadModel,
 } from "@/lib/headless-chat-collections";
 import { HEADLESS_CHAT_ENABLED } from "@/lib/headless-chat-feature";
 import {
@@ -41,6 +42,7 @@ import {
 import { listLegacyTaskCompatibility } from "@/lib/headless-task-commands";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
+import type { GoatMcpClient } from "@/lib/mcp-setup";
 import {
   mergeOptimisticGoatChatSummaries,
   reconcileOptimisticGoatChatSummaries,
@@ -49,7 +51,6 @@ import {
 import {
   createGoatCollections,
   type GoatChatSessionRow,
-  type GoatCodexChatSessionRow,
   type GoatIntegrationRow,
   type GoatTaskRow,
 } from "@/lib/task-collections";
@@ -262,6 +263,7 @@ function GoatAppLiveDataSubscriptions({
     () => (HEADLESS_CHAT_ENABLED ? getHeadlessChatConversations() : null),
     [],
   );
+  const engineSessionsCollection = useMemo(() => getHeadlessEngineSessions(), []);
   // Both collections are read-only here and narrowed to their selected schema below. Erasing the
   // row generic lets this remain one hook/subscription, so the rollback switch cannot perturb the
   // rest of the provider's subscription lifecycle.
@@ -277,8 +279,9 @@ function GoatAppLiveDataSubscriptions({
   );
   const chatSessionRows = HEADLESS_CHAT_ENABLED ? undefined : chatRows;
   const headlessConversationRows = HEADLESS_CHAT_ENABLED ? chatRows : undefined;
-  const { data: codexChatSessionRows } = useLiveQuery((q) =>
-    q.from({ codexSession: collections.codexChatSessions }),
+  const { data: engineSessionRows } = useLiveQuery(
+    (q) => q.from({ engineSession: engineSessionsCollection }),
+    [engineSessionsCollection],
   );
   const { data: integrationRows, isLoading: integrationsLoading } = useLiveQuery((q) =>
     q.from({ integration: collections.integrations }),
@@ -316,13 +319,13 @@ function GoatAppLiveDataSubscriptions({
       if (chatsLoading && !headlessConversationRows?.length) return initialData.recentChats;
       const initialById = new Map(initialData.recentChats.map((chat) => [chat.id, chat]));
       const codexRuntimeByChatId = new Map(
-        ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[]).map((row) => [
-          row.chat_session_id,
+        ((engineSessionRows ?? []) as HeadlessEngineSessionReadModel[]).map((row) => [
+          row.conversationId,
           {
             status: row.status,
-            activeTurnId: row.active_turn_id,
+            activeTurnId: row.activeRunId,
             error: row.error,
-            updatedAt: row.updated_at,
+            updatedAt: row.updatedAt,
           },
         ]),
       );
@@ -354,11 +357,11 @@ function GoatAppLiveDataSubscriptions({
         (headlessConversationRows ?? []) as HeadlessChatConversationReadModel[]
       ).filter((row) => !row.archivedAt);
       const activeRuntimeChatIds = new Set(
-        ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[])
+        ((engineSessionRows ?? []) as HeadlessEngineSessionReadModel[])
           .filter((row) =>
-            isGoatChatRuntimeActive({ status: row.status, activeTurnId: row.active_turn_id }),
+            isGoatChatRuntimeActive({ status: row.status, activeTurnId: row.activeRunId }),
           )
-          .map((row) => row.chat_session_id),
+          .map((row) => row.conversationId),
       );
       const pinned = openRows
         .filter((row) => row.pinnedAt)
@@ -386,13 +389,13 @@ function GoatAppLiveDataSubscriptions({
     if (chatsLoading && !chatSessionRows?.length) return initialData.recentChats;
     const initialById = new Map(initialData.recentChats.map((chat) => [chat.id, chat]));
     const codexRuntimeByChatId = new Map(
-      ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[]).map((row) => [
-        row.chat_session_id,
+      ((engineSessionRows ?? []) as HeadlessEngineSessionReadModel[]).map((row) => [
+        row.conversationId,
         {
           status: row.status,
-          activeTurnId: row.active_turn_id,
+          activeTurnId: row.activeRunId,
           error: row.error,
-          updatedAt: row.updated_at,
+          updatedAt: row.updatedAt,
         },
       ]),
     );
@@ -424,11 +427,11 @@ function GoatAppLiveDataSubscriptions({
       (row) => !row.closed_at && row.kind !== "task",
     );
     const activeRuntimeChatIds = new Set(
-      ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[])
+      ((engineSessionRows ?? []) as HeadlessEngineSessionReadModel[])
         .filter((row) =>
-          isGoatChatRuntimeActive({ status: row.status, activeTurnId: row.active_turn_id }),
+          isGoatChatRuntimeActive({ status: row.status, activeTurnId: row.activeRunId }),
         )
-        .map((row) => row.chat_session_id),
+        .map((row) => row.conversationId),
     );
     // Pinned chats stay visible regardless of the recency window, with separate
     // caps for pinned and unpinned hydration (mirrors listOpenSessions on the server).
@@ -457,20 +460,20 @@ function GoatAppLiveDataSubscriptions({
   }, [
     chatSessionRows,
     chatsLoading,
-    codexChatSessionRows,
+    engineSessionRows,
     headlessConversationRows,
     initialData.recentChats,
   ]);
 
   const archivedChats = useMemo<GoatChatSummaryView[]>(() => {
     const codexRuntimeByChatId = new Map(
-      ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[]).map((row) => [
-        row.chat_session_id,
+      ((engineSessionRows ?? []) as HeadlessEngineSessionReadModel[]).map((row) => [
+        row.conversationId,
         {
           status: row.status,
-          activeTurnId: row.active_turn_id,
+          activeTurnId: row.activeRunId,
           error: row.error,
-          updatedAt: row.updated_at,
+          updatedAt: row.updatedAt,
         },
       ]),
     );
@@ -516,7 +519,7 @@ function GoatAppLiveDataSubscriptions({
         pinnedAt: null,
         archived: true,
       }));
-  }, [chatSessionRows, codexChatSessionRows, headlessConversationRows]);
+  }, [chatSessionRows, engineSessionRows, headlessConversationRows]);
 
   const integrations = useMemo(() => {
     if (integrationsLoading && !integrationRows?.length) return initialData.integrations;

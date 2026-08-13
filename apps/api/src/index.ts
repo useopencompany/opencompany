@@ -3,6 +3,8 @@ export * from "./attachments";
 export * from "./auth";
 export * from "./automations";
 export * from "./electric-read-models";
+export * from "./engine-messages";
+export * from "./engine-sessions";
 export * from "./errors";
 export * from "./rate-limit";
 export * from "./run-event-notifier";

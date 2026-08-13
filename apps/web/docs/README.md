@@ -51,9 +51,10 @@ Browser
       call the canonical Task application service
       atomically create Task + Conversation + Message + Run
   GoatSurface cloud coding modes
-    POST /api/codex-chat/messages or /api/claude-chat/messages
-      persist the message and attachment metadata
-      enqueue a turn for the shared cloud coding chat worker
+    POST /v1/messages with a versioned codex or claude_code engine descriptor
+      authorize the Actor and selected engine settings in apps/api
+      persist the canonical Message and Run with attachment and skill references
+      enqueue the shared cloud coding chat worker
 
 Runner
   Shared durable turn worker wakes/polls
@@ -339,9 +340,10 @@ Entry points:
 
 - `apps/web/components/GoatSurface.tsx`
 - `apps/web/components/CodingWorkspacePanel.tsx`
-- `apps/web/app/api/codex-chat/*` and `apps/web/app/api/claude-chat/*`
-- `apps/web/app/api/coding-workspaces/*`
-- `apps/web/lib/codex-chat.ts`
+- `apps/web/lib/headless-chat-transport.ts`
+- `apps/web/lib/headless-chat-commands.ts`
+- `apps/api/src/engine-messages.ts`
+- `apps/api/src/engine-sessions.ts`
 - `apps/runner/src/goat-codex-chat.ts`
 - `apps/runner/src/goat-claude-code-chat.ts`
 - `apps/runner/src/goat-coding-workspace-runtime*.ts`
@@ -356,7 +358,7 @@ persistent sandbox, while the shared engine descriptor selects the trusted worki
 
 Both engines expose the same Preview and Terminal workspace sidebar, collapsed by default. The
 browser requests an owner-bound, short-lived ticket from
-`POST /api/coding-workspaces/sessions/:chatSessionId/runtime-access`, then connects to
+`POST /v1/conversations/:conversationId/engine-session/runtime-access`, then connects to
 `/goat/runtime` with the `goat-coding-workspace-v1` WebSocket protocol. The runner revalidates the
 open session and sandbox before connecting, chooses the working directory from its trusted engine
 descriptor, and never accepts a directory from the browser. Preview URLs use signed,

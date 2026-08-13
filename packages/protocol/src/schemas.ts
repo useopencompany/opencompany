@@ -15,6 +15,48 @@ export const PresentationCursorSchema = z
   });
 export const TimestampSchema = z.iso.datetime({ offset: true });
 export const ChatEngineSchema = z.enum(["opencompany", "codex", "claude_code"]);
+export const EngineReasoningEffortSchema = z.enum(["low", "medium", "high", "xhigh"]);
+export const CodexGoalModeSchema = z
+  .object({
+    objective: z.string().min(1).max(4_000),
+    tokenBudget: z.number().int().min(1).max(2_000_000).nullable().optional(),
+  })
+  .strict()
+  .openapi("CodexGoalModeV1");
+export const MessageEngineSchema = z
+  .discriminatedUnion("type", [
+    z
+      .object({
+        type: z.literal("opencompany"),
+        schemaVersion: z.literal(1),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("codex"),
+        schemaVersion: z.literal(1),
+        settings: z
+          .object({
+            reasoningEffort: EngineReasoningEffortSchema,
+            planModeEnabled: z.boolean().optional(),
+            goalMode: CodexGoalModeSchema.nullable().optional(),
+          })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("claude_code"),
+        schemaVersion: z.literal(1),
+        settings: z
+          .object({
+            reasoningEffort: EngineReasoningEffortSchema,
+          })
+          .strict(),
+      })
+      .strict(),
+  ])
+  .openapi("MessageEngineV1");
 export const MessageMentionSchema = z
   .object({ kind: z.literal("skill"), id: ResourceIdSchema })
   .strict()
@@ -235,6 +277,7 @@ export const ChatReadModelSchema = z.enum([
   "chat-conversations-v1",
   "chat-messages-v1",
   "chat-runs-v1",
+  "engine-sessions-v1",
 ]);
 export const TaskReadModelNameSchema = z.literal("tasks-v1");
 export const WorkflowReadModelNameSchema = z.literal("workflows-v1");
@@ -321,6 +364,48 @@ export const RunReadModelSchema = z
   })
   .strict()
   .openapi("RunReadModelV1");
+
+export const EngineSessionReadModelSchema = z
+  .object({
+    conversationId: ResourceIdSchema,
+    engine: z.enum(["opencompany", "codex", "claude_code"]),
+    status: z.enum(["queued", "starting", "idle", "running", "failed", "interrupted", "closed"]),
+    activeRunId: ResourceIdSchema.nullable(),
+    error: z.string().max(2_000).nullable(),
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("EngineSessionReadModelV1");
+
+export const EngineRuntimeStatusSchema = z.enum(["running", "sleeping", "deleted"]);
+export const EngineRuntimeStatusEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        conversationId: ResourceIdSchema,
+        status: EngineRuntimeStatusSchema.nullable(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("EngineRuntimeStatusEnvelope");
+
+export const EngineRuntimeAccessEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        conversationId: ResourceIdSchema,
+        websocketUrl: z.url(),
+        ticket: z.string().min(1).max(8_192),
+        expiresAt: z.number().int().positive(),
+        runtimeStatus: z.enum(["running", "sleeping"]),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("EngineRuntimeAccessEnvelope");
 
 export const TaskReadModelSchema = TaskSchema.openapi("TaskReadModelV1");
 export const WorkflowReadModelSchema = WorkflowSchema.openapi("WorkflowReadModelV1");
@@ -1911,7 +1996,7 @@ export const CreateMessageBodySchema = z
     clientConversationId: ResourceIdSchema.optional(),
     clientMessageId: ResourceIdSchema.optional(),
     content: z.string().max(10_000),
-    engine: ChatEngineSchema,
+    engine: MessageEngineSchema,
     model: z.string().min(1).max(256).optional(),
     attachmentIds: z.array(ResourceIdSchema).max(5).optional(),
     mentions: z.array(MessageMentionSchema).max(16).optional(),
@@ -1965,17 +2050,45 @@ export const CancelRunEnvelopeSchema = z
 export const ResolveApprovalBodySchema = z
   .object({
     resolution: z.enum(["approved", "denied", "answered", "canceled"]),
-    answer: z.string().max(10_000).optional(),
+    answer: z
+      .union([
+        z.string().max(10_000),
+        z
+          .object({
+            type: z.literal("engine_questions"),
+            schemaVersion: z.literal(1),
+            answers: z
+              .record(
+                ResourceIdSchema,
+                z.object({ answers: z.array(z.string().min(1).max(4_000)).min(1).max(8) }).strict(),
+              )
+              .refine(
+                (answers: Record<string, { answers: string[] }>) =>
+                  Object.values(answers).reduce(
+                    (total, entry) =>
+                      total + entry.answers.reduce((sum, answer) => sum + answer.length, 0),
+                    0,
+                  ) <= 12_000,
+                { message: "The engine answers are too long." },
+              ),
+          })
+          .strict(),
+      ])
+      .optional(),
   })
   .strict()
   .refine(
-    (body: { resolution: string; answer?: string }) =>
-      body.resolution !== "answered" || Boolean(body.answer?.trim()),
+    (body: {
+      resolution: "approved" | "denied" | "answered" | "canceled";
+      answer?: string | { type: "engine_questions"; schemaVersion: 1 };
+    }) =>
+      body.resolution !== "answered" ||
+      (typeof body.answer === "string" ? Boolean(body.answer.trim()) : Boolean(body.answer)),
     { message: "answer is required when resolution is answered" },
   )
   .refine(
-    (body: { resolution: string; answer?: string }) =>
-      body.resolution === "answered" || !body.answer?.trim(),
+    (body: { resolution: "approved" | "denied" | "answered" | "canceled"; answer?: unknown }) =>
+      body.resolution === "answered" || body.answer === undefined,
     { message: "answer is only valid when resolution is answered" },
   )
   .openapi("ResolveApprovalBody");
@@ -2948,6 +3061,7 @@ export type ConversationDto = z.infer<typeof ConversationSchema>;
 export type UpdateConversationBody = z.infer<typeof UpdateConversationBodySchema>;
 export type MessageDto = z.infer<typeof MessageSchema>;
 export type RunDto = z.infer<typeof RunSchema>;
+export type MessageEngine = z.infer<typeof MessageEngineSchema>;
 export type ChatReadModel = z.infer<typeof ChatReadModelSchema>;
 export type ReadModel = z.infer<typeof ReadModelSchema>;
 export type TaskDto = z.infer<typeof TaskSchema>;
@@ -3015,6 +3129,9 @@ export type SetTaskScheduleEnabledBody = z.infer<typeof SetTaskScheduleEnabledBo
 export type ConversationReadModel = z.infer<typeof ConversationReadModelSchema>;
 export type MessageReadModel = z.infer<typeof MessageReadModelSchema>;
 export type RunReadModel = z.infer<typeof RunReadModelSchema>;
+export type EngineSessionReadModel = z.infer<typeof EngineSessionReadModelSchema>;
+export type EngineRuntimeStatus = z.infer<typeof EngineRuntimeStatusSchema>;
+export type EngineRuntimeAccess = z.infer<typeof EngineRuntimeAccessEnvelopeSchema>["data"];
 export type AttachmentUploadEnvelope = z.infer<typeof AttachmentUploadEnvelopeSchema>;
 export type CreateMessageBody = z.infer<typeof CreateMessageBodySchema>;
 export type CreateTaskBody = z.infer<typeof CreateTaskBodySchema>;

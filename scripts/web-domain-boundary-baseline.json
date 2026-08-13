@@ -9,7 +9,6 @@
     "apps/web/app/api/webhooks/slack-bot/events/route.ts",
     "apps/web/app/share/[shareId]/artifacts/[artifactId]/versions/[versionId]/route.ts",
     "apps/web/app/share/[shareId]/attachments/[messageId]/[attachmentId]/route.ts",
-    "apps/web/components/GoatAppDataProvider.tsx",
     "apps/web/components/GoatAppShell.tsx",
     "apps/web/components/GoatSurface.tsx",
     "apps/web/components/chat/ChatComposerAttachments.tsx",

@@ -1,5 +1,6 @@
 "use client";
 
+import type { EngineRuntimeStatus } from "@opencompany/protocol";
 import { cn } from "@opencompany/ui/lib/utils";
 import {
   AppWindow,
@@ -24,7 +25,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { GoatCodexSandboxStatus } from "@/lib/task-runner";
+import { createEngineRuntimeAccess } from "@/lib/headless-chat-commands";
 
 const CodingWorkspaceTerminal = dynamic(() => import("./CodingWorkspaceTerminal"), {
   ssr: false,
@@ -55,7 +56,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
     onRequestFocusReturn,
   }: {
     chatSessionId: string;
-    sandboxStatus: GoatCodexSandboxStatus | null;
+    sandboxStatus: EngineRuntimeStatus | null;
     engineLabel: string;
     onExpandedChange?: (expanded: boolean) => void;
     onRequestFocusReturn?: () => void;
@@ -140,15 +141,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
       setPortsLoaded(false);
 
       try {
-        const response = await fetch(
-          `/api/coding-workspaces/sessions/${encodeURIComponent(chatSessionId)}/runtime-access`,
-          { method: "POST" },
-        );
-        if (!response.ok) throw new Error((await response.text()) || "Workspace access failed.");
-        const access = (await response.json()) as { websocketUrl?: unknown; ticket?: unknown };
-        if (typeof access.websocketUrl !== "string" || typeof access.ticket !== "string") {
-          throw new Error("The runner returned invalid workspace access.");
-        }
+        const access = await createEngineRuntimeAccess(chatSessionId);
         if (connectAttemptRef.current !== attempt) return;
 
         const nextSocket = new WebSocket(access.websocketUrl, [
@@ -672,7 +665,7 @@ function tabClass(active: boolean) {
   );
 }
 
-function workspaceStateTitle(status: GoatCodexSandboxStatus | null) {
+function workspaceStateTitle(status: EngineRuntimeStatus | null) {
   if (status === "sleeping") return "Workspace is sleeping";
   if (status === "running") return "Workspace is ready";
   if (status === "deleted") return "Workspace was deleted";

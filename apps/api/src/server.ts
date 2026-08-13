@@ -39,6 +39,7 @@ import { createBrainControlService } from "./brain-control";
 import { parseBrowserOrigins } from "./browser-origins";
 import { ElectricReadModelProxy } from "./electric-read-models";
 import { createEngineAuthService } from "./engine-auth";
+import { createEngineSessionService } from "./engine-sessions";
 import { createFeedbackService } from "./feedback";
 import { createGitHubIngress } from "./github-ingress";
 import { createGoogleIngress } from "./google-ingress";
@@ -108,6 +109,7 @@ const presentation = createPresentationStream();
 const readModels = createElectricReadModels();
 const authenticate = createWorkOsApiAuthenticator(execute);
 const identityVerifier = createWorkOsApiIdentityVerifier();
+const runnerClient = createRunnerClient();
 const stripe = getGoatStripe();
 const workos = createWorkOSClient();
 const app = createApiApp({
@@ -135,7 +137,8 @@ const app = createApiApp({
   // The engine-auth device/browser flows run through the runner's internal
   // control routes; the client resolves RUNNER_INTERNAL_URL/RUNNER_PUBLIC_URL
   // and RUNNER_INTERNAL_TOKEN per call.
-  engineAuth: createEngineAuthService({ db: database.db, runner: createRunnerClient() }),
+  engineAuth: createEngineAuthService({ db: database.db, runner: runnerClient }),
+  engineSessions: createEngineSessionService({ db: database.db, runner: runnerClient }),
   workspaceCapabilities: createWorkspaceCapabilityService({ db: database.db }),
   workspaceControl: createWorkspaceControlService({ db: database.db, workos }),
   onboarding: createOnboardingService({ db: database.db, workos }),
