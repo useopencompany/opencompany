@@ -57,6 +57,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Check setup script syntax
+        run: node --check scripts/setup.mjs
+
       - name: Check formatting
         run: bun run format:check
 

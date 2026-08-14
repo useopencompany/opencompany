@@ -5,6 +5,7 @@
 import { findPortListeners, normalizePort } from "./port-kill.mjs";
 
 const DEFAULT_WEB_PORT = "3002";
+const DEFAULT_API_PORT = "3001";
 const DEFAULT_RUNNER_PORT = "3040";
 const DEFAULT_WEB_HTTPS_PORT = "3443";
 
@@ -16,6 +17,7 @@ export function resolveWebDevPorts({ env = process.env } = {}) {
       runner: offsetPort(conductorBase, 1, "runner"),
       https: offsetPort(conductorBase, 2, "web HTTPS"),
       electric: offsetPort(conductorBase, 3, "Electric"),
+      api: offsetPort(conductorBase, 4, "API"),
       isolated: true,
     };
   }
@@ -32,7 +34,7 @@ export function selectWebDevPorts({
   if (!allocated.isolated) return allocated;
 
   const conventional = resolveConventionalWebDevPorts({ env });
-  const requiredPorts = [conventional.app, conventional.runner];
+  const requiredPorts = [conventional.app, conventional.api, conventional.runner];
   if (!httpsDisabled) requiredPorts.push(conventional.https);
 
   return requiredPorts.every((port) => portIsAvailable(port)) ? conventional : allocated;
@@ -41,6 +43,7 @@ export function selectWebDevPorts({
 function resolveConventionalWebDevPorts({ env }) {
   return {
     app: optionalPort(env.GOAT_PORT, "GOAT_PORT") ?? DEFAULT_WEB_PORT,
+    api: configuredApiPort(env) ?? DEFAULT_API_PORT,
     runner: configuredRunnerPort(env) ?? DEFAULT_RUNNER_PORT,
     https: optionalPort(env.GOAT_HTTPS_PORT, "GOAT_HTTPS_PORT") ?? DEFAULT_WEB_HTTPS_PORT,
     isolated: false,
@@ -52,9 +55,12 @@ export function isolatedWebDevEnvironment(ports, { httpsDisabled = false } = {})
 
   const httpOrigin = `http://localhost:${ports.app}`;
   const appOrigin = httpsDisabled ? httpOrigin : `https://localhost:${ports.https}`;
+  const apiOrigin = `http://localhost:${ports.api}`;
   const runnerOrigin = `http://localhost:${ports.runner}`;
 
   return {
+    API_BROWSER_ORIGINS: appOrigin,
+    GOAT_API_ORIGIN: apiOrigin,
     GOAT_PORT: ports.app,
     GOAT_HTTPS_PORT: ports.https,
     GOAT_NEXT_PUBLIC_APP_URL: appOrigin,
@@ -64,6 +70,20 @@ export function isolatedWebDevEnvironment(ports, { httpsDisabled = false } = {})
     RUNNER_PUBLIC_URL: runnerOrigin,
     ELECTRIC_URL: `http://localhost:${ports.electric}`,
   };
+}
+
+function configuredApiPort(env) {
+  const configured = env.GOAT_API_ORIGIN?.trim();
+  if (!configured) return null;
+
+  try {
+    const url = new URL(configured);
+    if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") return null;
+    if (url.port) return normalizePort(url.port);
+    return url.protocol === "https:" ? "443" : "80";
+  } catch {
+    return null;
+  }
 }
 
 function configuredRunnerPort(env) {
