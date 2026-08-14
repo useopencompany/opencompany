@@ -55,7 +55,7 @@ export async function getHeadlessSkill(slug: string): Promise<SkillDto | null> {
 }
 
 async function serverKnowledgeClient() {
-  const origin = serverApiOrigin(process.env.GOAT_API_ORIGIN);
+  const origin = serverApiOrigin(process.env.OPENCOMPANY_API_ORIGIN);
   const incoming = await headers();
   const cookie = incoming.get("cookie");
   const authorization = incoming.get("authorization");

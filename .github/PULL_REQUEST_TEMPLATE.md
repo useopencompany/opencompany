@@ -4,11 +4,16 @@
 
 ## Checks
 
-- [ ] Ran or expect CI to run `bun run lint`, `bun run typecheck`, `bun run build`, `bun run test`, and `bun run format:check`.
+- [ ] Ran the relevant local checks, including OpenAPI and docs checks when affected, or documented why CI is the only practical verifier.
 - [ ] Added/updated tests for changed behavior, or the change is docs/config only.
 - [ ] Updated `.env.example` and docs for any new env vars.
-- [ ] Added a Drizzle migration for changes to `packages/db/src/schema.ts` or `packages/db/src/product-schema.ts`.
+- [ ] Added a Drizzle migration for database schema DDL changes.
 - [ ] Checked that no secrets, tokens, private URLs, or sensitive user data were added.
+- [ ] Every commit includes a `Signed-off-by` line certifying the Developer Certificate of Origin.
+
+## Design Approval
+
+- [ ] This change does not alter architecture, schema, authentication, billing, deployment, or perform a broad refactor; or a maintainer approved the design before implementation.
 
 ## Risk Notes
 

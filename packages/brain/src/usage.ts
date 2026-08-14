@@ -2,7 +2,7 @@ import type { BrainUsageEntry } from "./retrieval/gateway";
 
 export type { BrainUsageEntry } from "./retrieval/gateway";
 
-export const BRAIN_USAGE_MARKER = "__GOAT_BRAIN_USAGE__";
+export const BRAIN_USAGE_MARKER = "__OPENCOMPANY_BRAIN_USAGE__";
 
 export type BrainUsageReport = {
   entries: BrainUsageEntry[];

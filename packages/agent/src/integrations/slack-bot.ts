@@ -24,10 +24,10 @@ export type SlackBotOAuthResult = {
 
 const SLACK_BOT_ENVS = [
   "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
-  "GOAT_SLACK_BOT_CLIENT_ID",
-  "GOAT_SLACK_BOT_CLIENT_SECRET",
-  "GOAT_SLACK_BOT_SIGNING_SECRET",
-  "GOAT_SLACK_BOT_STATE_SECRET",
+  "OPENCOMPANY_SLACK_BOT_CLIENT_ID",
+  "OPENCOMPANY_SLACK_BOT_CLIENT_SECRET",
+  "OPENCOMPANY_SLACK_BOT_SIGNING_SECRET",
+  "OPENCOMPANY_SLACK_BOT_STATE_SECRET",
 ] as const;
 
 // Bot scopes: receive mentions and channel/DM messages, reply, list channels
@@ -65,7 +65,7 @@ export function isSlackBotConfigured() {
 }
 
 export function slackBotSigningSecret() {
-  return process.env.GOAT_SLACK_BOT_SIGNING_SECRET?.trim();
+  return process.env.OPENCOMPANY_SLACK_BOT_SIGNING_SECRET?.trim();
 }
 
 export function createSlackBotState(input: Omit<SlackBotStatePayload, "expiresAt" | "nonce">) {
@@ -101,7 +101,7 @@ export function verifySlackBotState(state: string): SlackBotStatePayload {
 
 export function buildSlackBotAuthorizationUrl(state: string) {
   const url = new URL("https://slack.com/oauth/v2/authorize");
-  url.searchParams.set("client_id", requiredEnv("GOAT_SLACK_BOT_CLIENT_ID"));
+  url.searchParams.set("client_id", requiredEnv("OPENCOMPANY_SLACK_BOT_CLIENT_ID"));
   // scope (not user_scope): we request a bot token only.
   url.searchParams.set("scope", SLACK_BOT_SCOPES.join(","));
   url.searchParams.set("redirect_uri", slackBotCallbackUrl());
@@ -120,8 +120,8 @@ export async function exchangeSlackBotCode(code: string): Promise<SlackBotOAuthR
   }>({
     method: "oauth.v2.access",
     form: {
-      client_id: requiredEnv("GOAT_SLACK_BOT_CLIENT_ID"),
-      client_secret: requiredEnv("GOAT_SLACK_BOT_CLIENT_SECRET"),
+      client_id: requiredEnv("OPENCOMPANY_SLACK_BOT_CLIENT_ID"),
+      client_secret: requiredEnv("OPENCOMPANY_SLACK_BOT_CLIENT_SECRET"),
       code,
       redirect_uri: slackBotCallbackUrl(),
     },
@@ -177,7 +177,7 @@ function sanitizeReturnTo(value: string) {
 }
 
 function signStateBody(body: string) {
-  return createHmac("sha256", requiredEnv("GOAT_SLACK_BOT_STATE_SECRET"))
+  return createHmac("sha256", requiredEnv("OPENCOMPANY_SLACK_BOT_STATE_SECRET"))
     .update(body)
     .digest("base64url");
 }

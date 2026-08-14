@@ -1,11 +1,11 @@
 export function getAppUrl() {
-  const appUrl = process.env.GOAT_NEXT_PUBLIC_APP_URL?.trim();
+  const appUrl = process.env.OPENCOMPANY_NEXT_PUBLIC_APP_URL?.trim();
   if (appUrl && !/^\/+$/u.test(appUrl)) {
-    return parseAppOrigin(appUrl, "GOAT_NEXT_PUBLIC_APP_URL");
+    return parseAppOrigin(appUrl, "OPENCOMPANY_NEXT_PUBLIC_APP_URL");
   }
 
   if (process.env.NODE_ENV === "production") {
-    throw new Error("GOAT_NEXT_PUBLIC_APP_URL is required for opencompany in production.");
+    throw new Error("OPENCOMPANY_NEXT_PUBLIC_APP_URL is required for opencompany in production.");
   }
 
   return parseAppOrigin(

@@ -88,7 +88,7 @@ async function main() {
 function parseArgs(args) {
   const parsed = {
     label: "Vercel",
-    projectEnv: "GOAT_VERCEL_PROJECT_ID",
+    projectEnv: "OPENCOMPANY_VERCEL_PROJECT_ID",
     promoteTimeout: "3m",
   };
 

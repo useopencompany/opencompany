@@ -34,9 +34,9 @@ const X_PROVIDER = "x_account" as const;
 const X_AUTHORIZATION_ENDPOINT = "https://x.com/i/oauth2/authorize";
 const X_TOKEN_ENDPOINT = "https://api.x.com/2/oauth2/token";
 const X_ACCOUNT_INTEGRATION_ENVS = [
-  "GOAT_X_CLIENT_ID",
-  "GOAT_X_CLIENT_SECRET",
-  "GOAT_X_STATE_SECRET",
+  "OPENCOMPANY_X_CLIENT_ID",
+  "OPENCOMPANY_X_CLIENT_SECRET",
+  "OPENCOMPANY_X_STATE_SECRET",
 ] as const;
 
 // tweet.write posts on the user's behalf; offline.access is required to
@@ -135,7 +135,7 @@ export function createXAccountPkce(): XAccountPkcePair {
 
 export function buildXAccountAuthorizationUrl(state: string, codeChallenge: string) {
   const url = new URL(X_AUTHORIZATION_ENDPOINT);
-  url.searchParams.set("client_id", requiredEnv("GOAT_X_CLIENT_ID"));
+  url.searchParams.set("client_id", requiredEnv("OPENCOMPANY_X_CLIENT_ID"));
   url.searchParams.set("redirect_uri", xAccountCallbackUrl());
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", X_ACCOUNT_SCOPES.join(" "));
@@ -222,8 +222,8 @@ export function xAccountCallbackUrl() {
 }
 
 function basicAuthHeader() {
-  const clientId = requiredEnv("GOAT_X_CLIENT_ID");
-  const clientSecret = requiredEnv("GOAT_X_CLIENT_SECRET");
+  const clientId = requiredEnv("OPENCOMPANY_X_CLIENT_ID");
+  const clientSecret = requiredEnv("OPENCOMPANY_X_CLIENT_SECRET");
   return `Basic ${Buffer.from(`${clientId}:${clientSecret}`, "utf8").toString("base64")}`;
 }
 
@@ -251,7 +251,9 @@ function sanitizeReturnTo(value: string) {
 }
 
 function signStateBody(body: string) {
-  return createHmac("sha256", requiredEnv("GOAT_X_STATE_SECRET")).update(body).digest("base64url");
+  return createHmac("sha256", requiredEnv("OPENCOMPANY_X_STATE_SECRET"))
+    .update(body)
+    .digest("base64url");
 }
 
 function safeEqual(left: string, right: string) {

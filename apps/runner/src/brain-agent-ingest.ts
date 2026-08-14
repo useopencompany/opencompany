@@ -3137,15 +3137,15 @@ const runBrainAgentCli: BrainAgentCliRunner = async (input) => {
       PATH: process.env.PATH ?? "",
       HOME: process.env.HOME ?? "",
       NODE_ENV: process.env.NODE_ENV ?? "production",
-      GOAT_BRAIN_ROOT: input.root,
+      OPENCOMPANY_BRAIN_ROOT: input.root,
       VERCEL_AI_GATEWAY_API_KEY: input.gatewayApiKey,
-      ...(process.env.GOAT_BRAIN_GATEWAY_BASE_URL
+      ...(process.env.OPENCOMPANY_BRAIN_GATEWAY_BASE_URL
         ? {
-            GOAT_BRAIN_GATEWAY_BASE_URL: process.env.GOAT_BRAIN_GATEWAY_BASE_URL,
+            OPENCOMPANY_BRAIN_GATEWAY_BASE_URL: process.env.OPENCOMPANY_BRAIN_GATEWAY_BASE_URL,
           }
         : {}),
-      ...(process.env.GOAT_BRAIN_EMBEDDING_MODEL
-        ? { GOAT_BRAIN_EMBEDDING_MODEL: process.env.GOAT_BRAIN_EMBEDDING_MODEL }
+      ...(process.env.OPENCOMPANY_BRAIN_EMBEDDING_MODEL
+        ? { OPENCOMPANY_BRAIN_EMBEDDING_MODEL: process.env.OPENCOMPANY_BRAIN_EMBEDDING_MODEL }
         : {}),
       ...(input.reporting?.user ? { GATEWAY_REPORTING_USER: input.reporting.user } : {}),
       ...(input.reporting?.tags.length

@@ -18,7 +18,7 @@ const meta = { apiVersion: "v1", protocolVersion: "1.0.0" };
 describe("server knowledge reads", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.example.test");
     vi.mocked(headers).mockResolvedValue(
       new Headers({ Cookie: "wos-session=session", Authorization: "Bearer token" }) as never,
     );
@@ -84,7 +84,7 @@ describe("server knowledge reads", () => {
     const unsafeOrigin = new URL("https://api.example.test");
     unsafeOrigin.username = "test-user";
     unsafeOrigin.password = "test-password";
-    vi.stubEnv("GOAT_API_ORIGIN", unsafeOrigin.href);
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", unsafeOrigin.href);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 

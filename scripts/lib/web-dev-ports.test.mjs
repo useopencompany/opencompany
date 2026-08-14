@@ -9,6 +9,7 @@ import {
 test("web dev keeps conventional ports outside Conductor", () => {
   assert.deepEqual(resolveWebDevPorts({ env: {} }), {
     app: "3002",
+    api: "3001",
     runner: "3040",
     https: "3443",
     isolated: false,
@@ -19,13 +20,15 @@ test("web dev respects explicitly configured fixed ports outside Conductor", () 
   assert.deepEqual(
     resolveWebDevPorts({
       env: {
-        GOAT_PORT: "3102",
-        GOAT_HTTPS_PORT: "3543",
+        OPENCOMPANY_API_ORIGIN: "http://localhost:3101",
+        OPENCOMPANY_PORT: "3102",
+        OPENCOMPANY_HTTPS_PORT: "3543",
         RUNNER_INTERNAL_URL: "http://localhost:3140",
       },
     }),
     {
       app: "3102",
+      api: "3101",
       runner: "3140",
       https: "3543",
       isolated: false,
@@ -37,24 +40,27 @@ test("Conductor allocation provides isolated ports for every web-stack service",
   const ports = resolveWebDevPorts({
     env: {
       CONDUCTOR_PORT: "55010",
-      GOAT_PORT: "3002",
-      GOAT_HTTPS_PORT: "3443",
+      OPENCOMPANY_PORT: "3002",
+      OPENCOMPANY_HTTPS_PORT: "3443",
       RUNNER_INTERNAL_URL: "http://localhost:3040",
     },
   });
 
   assert.deepEqual(ports, {
     app: "55010",
+    api: "55014",
     runner: "55011",
     https: "55012",
     electric: "55013",
     isolated: true,
   });
   assert.deepEqual(isolatedWebDevEnvironment(ports), {
-    GOAT_PORT: "55010",
-    GOAT_HTTPS_PORT: "55012",
-    GOAT_NEXT_PUBLIC_APP_URL: "https://localhost:55012",
-    GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: "https://localhost:55012/auth/callback",
+    API_BROWSER_ORIGINS: "https://localhost:55012",
+    OPENCOMPANY_API_ORIGIN: "http://localhost:55014",
+    OPENCOMPANY_PORT: "55010",
+    OPENCOMPANY_HTTPS_PORT: "55012",
+    OPENCOMPANY_NEXT_PUBLIC_APP_URL: "https://localhost:55012",
+    OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: "https://localhost:55012/auth/callback",
     PORT: "55011",
     RUNNER_INTERNAL_URL: "http://localhost:55011",
     RUNNER_PUBLIC_URL: "http://localhost:55011",
@@ -66,8 +72,8 @@ test("Conductor keeps conventional ports when they are available", () => {
   const ports = selectWebDevPorts({
     env: {
       CONDUCTOR_PORT: "55010",
-      GOAT_PORT: "3002",
-      GOAT_HTTPS_PORT: "3443",
+      OPENCOMPANY_PORT: "3002",
+      OPENCOMPANY_HTTPS_PORT: "3443",
       RUNNER_INTERNAL_URL: "http://localhost:3040",
     },
     portIsAvailable: () => true,
@@ -75,6 +81,7 @@ test("Conductor keeps conventional ports when they are available", () => {
 
   assert.deepEqual(ports, {
     app: "3002",
+    api: "3001",
     runner: "3040",
     https: "3443",
     isolated: false,
@@ -89,6 +96,7 @@ test("Conductor falls back to its isolated range when a conventional port is bus
 
   assert.deepEqual(ports, {
     app: "55010",
+    api: "55014",
     runner: "55011",
     https: "55012",
     electric: "55013",
@@ -111,7 +119,7 @@ test("Conductor allocation uses the HTTP web origin when local HTTPS is disabled
   const ports = resolveWebDevPorts({ env: { CONDUCTOR_PORT: "55010" } });
 
   assert.equal(
-    isolatedWebDevEnvironment(ports, { httpsDisabled: true }).GOAT_NEXT_PUBLIC_APP_URL,
+    isolatedWebDevEnvironment(ports, { httpsDisabled: true }).OPENCOMPANY_NEXT_PUBLIC_APP_URL,
     "http://localhost:55010",
   );
 });

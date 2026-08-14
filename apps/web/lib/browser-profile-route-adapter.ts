@@ -194,7 +194,7 @@ function applyCookies(response: Response, setCookies: string[]) {
 }
 
 function apiOrigin() {
-  const value = process.env.GOAT_API_ORIGIN?.trim();
+  const value = process.env.OPENCOMPANY_API_ORIGIN?.trim();
   if (!value) return null;
   let url: URL;
   try {

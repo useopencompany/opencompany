@@ -20,8 +20,8 @@ function debugWarn(message: string, error?: unknown) {
 export function initMarketingAnalytics() {
   if (typeof window === "undefined" || initialized) return;
 
-  const token = process.env.NEXT_PUBLIC_GOAT_POSTHOG_TOKEN;
-  const host = process.env.NEXT_PUBLIC_GOAT_POSTHOG_HOST;
+  const token = process.env.NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN;
+  const host = process.env.NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST;
   if (!token || !host) return;
 
   try {

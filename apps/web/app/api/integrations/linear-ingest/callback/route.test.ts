@@ -3,7 +3,7 @@ import { GET } from "./route";
 
 describe("GET /api/integrations/linear-ingest/callback relay", () => {
   beforeEach(() => {
-    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.example.test");
   });
 
   afterEach(() => {

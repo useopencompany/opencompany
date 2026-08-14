@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { migratedEnvironmentName } from "./lib/env-name-migration.mjs";
+
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const historicalRoots = ["drizzle/", "docs/adr/"];
 const historicalFiles = new Set(["docs/future-concepts/oss-readiness.md"]);
@@ -89,7 +91,7 @@ for (const relativePath of files) {
     }
     if (codeFacingGoatSymbolPattern.test(line)) {
       failures.push(
-        `${relativePath}:${lineNumber}: GOAT_* code symbol is reserved for environment variables`,
+        `${relativePath}:${lineNumber}: legacy GOAT_* code symbol outside the env migration boundary`,
       );
     }
     const documentationLine = line.replaceAll("goat-brain-hubspot-public", "");
@@ -171,8 +173,9 @@ const baseEnvKeys = envKeys(
     encoding: "utf8",
   }),
 );
-if (currentEnvKeys.join("\n") !== baseEnvKeys.join("\n")) {
-  failures.push(".env.example: GOAT_* operational key set changed in the code-only slice");
+const expectedEnvKeys = baseEnvKeys.map((key) => migratedEnvironmentName(key) ?? key).sort();
+if (currentEnvKeys.join("\n") !== expectedEnvKeys.join("\n")) {
+  failures.push(".env.example: environment keys do not match the accepted hard-cut mapping");
 }
 
 if (failures.length > 0) {
@@ -213,6 +216,7 @@ function gitMatchCount(pattern) {
         ":(exclude)drizzle/**",
         ":(exclude)docs/adr/**",
         ":(exclude)docs/future-concepts/oss-readiness.md",
+        ":(exclude)scripts/check-naming-boundary.mjs",
       ],
       { cwd: repositoryRoot, encoding: "utf8" },
     )

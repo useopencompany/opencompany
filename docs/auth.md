@@ -14,9 +14,9 @@ all associated persistence reads and writes; web does not import the database.
 identity resource under React `cache()`, preserving one request-scoped resolution and the existing
 consumer semantics without creating another identity backend.
 
-Local development uses `GOAT_NEXT_PUBLIC_APP_URL=https://localhost:3443` and
-`GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI=https://localhost:3443/auth/callback` by default. Production
-values live in Infisical `prod` `/goat` and must match the WorkOS dashboard exactly.
+Local development uses `OPENCOMPANY_NEXT_PUBLIC_APP_URL=https://localhost:3443` and
+`OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI=https://localhost:3443/auth/callback` by default. Production
+values live in Infisical `prod` `/web` and must match the WorkOS dashboard exactly.
 
 ## Browser/API session boundary
 

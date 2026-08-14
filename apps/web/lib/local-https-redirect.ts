@@ -21,7 +21,7 @@ export function localHttpsRedirectUrl(request: RedirectRequest) {
   if (!isInitialDocumentRequest(request)) return null;
 
   const configured = (
-    process.env.GOAT_NEXT_PUBLIC_APP_URL?.trim() ||
+    process.env.OPENCOMPANY_NEXT_PUBLIC_APP_URL?.trim() ||
     process.env.NEXT_PUBLIC_APP_URL?.trim() ||
     ""
   ).replace(/\/+$/, "");

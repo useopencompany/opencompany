@@ -9,9 +9,9 @@ import {
 
 describe("opencompany X account OAuth", () => {
   beforeEach(() => {
-    vi.stubEnv("GOAT_X_CLIENT_ID", "client-id");
-    vi.stubEnv("GOAT_X_STATE_SECRET", "state-secret");
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
+    vi.stubEnv("OPENCOMPANY_X_CLIENT_ID", "client-id");
+    vi.stubEnv("OPENCOMPANY_X_STATE_SECRET", "state-secret");
+    vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
   });
 
   afterEach(() => {

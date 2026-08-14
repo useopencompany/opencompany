@@ -280,6 +280,10 @@ describe("session-backed task turns", () => {
     );
     expect(query.params).toContainEqual(expect.stringContaining('"type":"run.completed"'));
     expect(canonicalEventTypes(query.params)).toEqual(["message.content_updated", "run.completed"]);
+    expect(query.sql).toMatch(
+      /codex_thread_id = CASE\s+WHEN \$\d+::boolean\s+AND \$\d+::text IS DISTINCT FROM runtime\.engine/u,
+    );
+    expect(query.params).toContain(false);
   });
 
   it.each([
@@ -360,7 +364,9 @@ describe("session-backed task turns", () => {
     expect(statement).not.toMatch(/'triggerMessageId', next\.user_message_id,\s*'taskId'/u);
     expect(statement).toContain("notified_next_queued_event AS");
     expect(statement).toContain("UPDATE goat.codex_chat_sessions AS runtime");
-    expect(statement).toContain("codex_thread_id = CASE");
+    expect(statement).toMatch(
+      /codex_thread_id = CASE\s+WHEN \$\d+::boolean\s+AND \$\d+::text IS DISTINCT FROM runtime\.engine/u,
+    );
     expect(statement).toContain("task.status IN ('queued', 'running')");
     expect(statement).toContain("SELECT next.id");
     expect(statement).toContain("FROM next_turn AS next");

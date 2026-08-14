@@ -27,7 +27,7 @@ apps/runner ---- fenced Run claims, Attempts, Events, settlement --+
 
 ## Configuration
 
-The browser uses `NEXT_PUBLIC_GOAT_API_ORIGIN`; Server Components use `GOAT_API_ORIGIN`. Production
+The browser uses `NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN`; Server Components use `OPENCOMPANY_API_ORIGIN`. Production
 browser traffic connects directly to the API with the shared secure WorkOS cookie.
 `API_BROWSER_ORIGINS` must contain the exact production web origin. Required values are enforced by
 `scripts/release-preflight.mjs` and belong to the owning Infisical runtime path.

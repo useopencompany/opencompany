@@ -22,7 +22,7 @@ test("pulls current Vercel production env before every prebuilt build", async ()
 
   assert.match(
     workflow,
-    /VERCEL_PROJECT_ID="\$GOAT_VERCEL_PROJECT_ID" bunx vercel pull --yes --environment=production/,
+    /VERCEL_PROJECT_ID="\$OPENCOMPANY_VERCEL_PROJECT_ID" bunx vercel pull --yes --environment=production/,
   );
   assert.match(
     workflow,
@@ -42,10 +42,10 @@ test("checks only web-owned production environment keys", async () => {
   assert.match(requiredKeysBlock, /"BLOB_READ_WRITE_TOKEN"/u);
   assert.match(requiredKeysBlock, /"DATABASE_URL"/u);
   for (const retiredKey of [
-    "GOAT_AUTHKIT_DOMAIN",
-    "GOAT_STRIPE_API_KEY",
-    "GOAT_STRIPE_CHECKOUT_ENABLED",
-    "GOAT_STRIPE_WEBHOOK_SECRET",
+    "OPENCOMPANY_AUTHKIT_DOMAIN",
+    "OPENCOMPANY_STRIPE_API_KEY",
+    "OPENCOMPANY_STRIPE_CHECKOUT_ENABLED",
+    "OPENCOMPANY_STRIPE_WEBHOOK_SECRET",
     "ELECTRIC_URL",
     "VERCEL_AI_GATEWAY_API_KEY",
   ]) {
@@ -61,8 +61,8 @@ test("requires PostHog configuration in the marketing Vercel project", async () 
   const stepEnd = workflow.indexOf("- name: Pull Vercel marketing production env", stepStart);
   const step = workflow.slice(stepStart, stepEnd);
 
-  assert.match(step, /"NEXT_PUBLIC_GOAT_POSTHOG_TOKEN"/u);
-  assert.match(step, /"NEXT_PUBLIC_GOAT_POSTHOG_HOST"/u);
+  assert.match(step, /"NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN"/u);
+  assert.match(step, /"NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST"/u);
   assert.match(step, /Missing marketing Vercel production env keys/u);
 });
 

@@ -1291,7 +1291,7 @@ function spawnNode(
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   return new Promise((resolve, reject) => {
     const child = spawn("node", [script, ...args], {
-      env: { ...process.env, GOAT_BRAIN_ROOT: root },
+      env: { ...process.env, OPENCOMPANY_BRAIN_ROOT: root },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";

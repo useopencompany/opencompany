@@ -617,7 +617,7 @@ export function filterVectorCandidates(
 }
 
 function vectorMaxDistance(): number {
-  const raw = Number(process.env.GOAT_BRAIN_VECTOR_MAX_DISTANCE);
+  const raw = Number(process.env.OPENCOMPANY_BRAIN_VECTOR_MAX_DISTANCE);
   return Number.isFinite(raw) && raw > 0 ? raw : VECTOR_MAX_DISTANCE_DEFAULT;
 }
 
@@ -630,7 +630,7 @@ async function vectorCandidates(
   // Ranking assist only: any gateway or pgvector failure degrades this list to empty and the
   // query stays lexical, mirroring the CLI's silent degrade.
   try {
-    const model = process.env.GOAT_BRAIN_EMBEDDING_MODEL?.trim() || DEFAULT_EMBEDDING_MODEL;
+    const model = process.env.OPENCOMPANY_BRAIN_EMBEDDING_MODEL?.trim() || DEFAULT_EMBEDDING_MODEL;
     const embeddingJoin = and(
       eq(brainDocumentEmbeddings.documentId, brainDocuments.id),
       eq(brainDocumentEmbeddings.contentHash, brainDocuments.contentHash),
@@ -659,8 +659,8 @@ async function vectorCandidates(
     const gateway = createGateway({
       apiKey: ctx.gatewayApiKey ?? "",
       embeddingModel: model,
-      ...(process.env.GOAT_BRAIN_GATEWAY_BASE_URL
-        ? { baseUrl: process.env.GOAT_BRAIN_GATEWAY_BASE_URL }
+      ...(process.env.OPENCOMPANY_BRAIN_GATEWAY_BASE_URL
+        ? { baseUrl: process.env.OPENCOMPANY_BRAIN_GATEWAY_BASE_URL }
         : {}),
       ...(ctx.reporting ? { reporting: ctx.reporting } : {}),
       ...(ctx.onUsage ? { onUsage: ctx.onUsage } : {}),

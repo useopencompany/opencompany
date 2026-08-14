@@ -3,7 +3,7 @@ import { POST } from "./route";
 
 describe("POST /api/webhooks/google-drive relay", () => {
   beforeEach(() => {
-    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.example.test");
   });
 
   afterEach(() => {
@@ -42,7 +42,7 @@ describe("POST /api/webhooks/google-drive relay", () => {
   });
 
   it("fails closed when the API origin is unset", async () => {
-    vi.stubEnv("GOAT_API_ORIGIN", "");
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "");
     const response = await POST(
       new Request("https://my.opencompany.chat/api/webhooks/google-drive", { method: "POST" }),
     );

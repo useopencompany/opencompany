@@ -1544,7 +1544,7 @@ describe("runChatCaptureAgentIngest", () => {
       exitCode: 0,
       stdout: "match",
       stderr:
-        '__GOAT_BRAIN_USAGE__ {"entries":[{"model":"openai/text-embedding-3-small","operation":"embeddings","inputTokens":50,"outputTokens":0,"totalTokens":50,"costUsd":0.001}]}\n',
+        '__OPENCOMPANY_BRAIN_USAGE__ {"entries":[{"model":"openai/text-embedding-3-small","operation":"embeddings","inputTokens":50,"outputTokens":0,"totalTokens":50,"costUsd":0.001}]}\n',
     });
     mockAgentRun({
       finalText: "Updated the pricing page.",
@@ -1700,7 +1700,7 @@ describe("runChatCaptureAgentIngest", () => {
       exitCode: 0,
       stdout: "match",
       stderr:
-        '__GOAT_BRAIN_USAGE__ {"entries":[{"model":"unknown/embedding-model","operation":"embeddings","inputTokens":50,"outputTokens":0,"totalTokens":50,"costUsd":null}]}\n',
+        '__OPENCOMPANY_BRAIN_USAGE__ {"entries":[{"model":"unknown/embedding-model","operation":"embeddings","inputTokens":50,"outputTokens":0,"totalTokens":50,"costUsd":null}]}\n',
     });
     mockAgentRun({
       finalText: "",

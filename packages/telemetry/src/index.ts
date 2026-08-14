@@ -185,7 +185,7 @@ const LOW_CARDINAL_METRIC_ATTRIBUTE_KEYS = new Set([
 ]);
 
 export function isObservabilityEnabled(env: EnvLike = readEnv()) {
-  return enabledFromEnv(env.GOAT_OBSERVABILITY_ENABLED);
+  return enabledFromEnv(env.OPENCOMPANY_OBSERVABILITY_ENABLED);
 }
 
 export function hashUserId(userWorkosId: string | null | undefined) {

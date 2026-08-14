@@ -10,7 +10,7 @@ describe("POST /api/auth/share-api-session", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("WORKOS_COOKIE_DOMAIN", "opencompany.chat");
-    vi.stubEnv("NEXT_PUBLIC_GOAT_API_ORIGIN", "https://api.opencompany.chat");
+    vi.stubEnv("NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN", "https://api.opencompany.chat");
     vi.mocked(withAuth).mockResolvedValue({ user: { id: "user_1" } } as never);
     vi.mocked(headers).mockResolvedValue(
       new Headers({ "x-workos-session": "sealed-session" }) as never,

@@ -76,11 +76,11 @@ function issueEnvelope(overrides: Record<string, unknown> = {}) {
 describe("Linear ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
-    vi.stubEnv("GOAT_LINEAR_CLIENT_ID", "linear-client");
-    vi.stubEnv("GOAT_LINEAR_CLIENT_SECRET", "linear-secret");
-    vi.stubEnv("GOAT_LINEAR_WEBHOOK_SECRET", WEBHOOK_SECRET);
-    vi.stubEnv("GOAT_LINEAR_STATE_SECRET", "linear-state-secret-linear-state-secret");
+    vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
+    vi.stubEnv("OPENCOMPANY_LINEAR_CLIENT_ID", "linear-client");
+    vi.stubEnv("OPENCOMPANY_LINEAR_CLIENT_SECRET", "linear-secret");
+    vi.stubEnv("OPENCOMPANY_LINEAR_WEBHOOK_SECRET", WEBHOOK_SECRET);
+    vi.stubEnv("OPENCOMPANY_LINEAR_STATE_SECRET", "linear-state-secret-linear-state-secret");
     vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", "a".repeat(44));
     vi.mocked(listLinearIntegrationsForOrganization).mockResolvedValue([
       { id: "gint_1", userWorkosId: "user_1", status: "connected" },

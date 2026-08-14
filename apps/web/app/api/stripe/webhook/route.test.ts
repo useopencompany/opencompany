@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
 describe("POST /api/stripe/webhook relay", () => {
-  beforeEach(() => vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test"));
+  beforeEach(() => vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.example.test"));
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
@@ -36,7 +36,7 @@ describe("POST /api/stripe/webhook relay", () => {
   });
 
   it("fails closed when the canonical API is unavailable", async () => {
-    vi.stubEnv("GOAT_API_ORIGIN", "");
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "");
     const response = await POST(
       new Request("https://my.opencompany.chat/api/stripe/webhook", {
         method: "POST",
