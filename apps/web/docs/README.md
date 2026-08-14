@@ -33,7 +33,10 @@ Relevant web entry points:
 - `apps/web/lib/headless-chat-collections.ts`: fixed API-owned read-model collections.
 - `apps/web/lib/chat.ts`: Server Component Conversation metadata reader through the typed client.
 
-OpenCompany, Codex, and Claude Code are versioned engine descriptors on the same Message command.
+OpenCompany, Codex, and Claude Code are explicit versioned engine descriptors on the same Message
+command. OpenCompany is selected by default for non-coding chats, but the API does not infer a
+missing engine. Message commands also carry `X-OpenCompany-Protocol-Version`; stale browser builds
+are rejected with an instruction to refresh rather than being parsed through a legacy contract.
 Attachments are uploaded to `/v1/attachments` and referenced by opaque IDs. Credential or storage
 locator fields never enter client DTOs.
 

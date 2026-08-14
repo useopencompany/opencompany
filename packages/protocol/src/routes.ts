@@ -188,7 +188,7 @@ import {
   WorkspaceRenameEnvelopeSchema,
   WorkspaceSettingsEnvelopeSchema,
 } from "./schemas";
-import { OPENAPI_DOCUMENT_VERSION, PROTOCOL_VERSION } from "./version";
+import { OPENAPI_DOCUMENT_VERSION, PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER } from "./version";
 
 const actorSecurity = [{ bearerAuth: [] }, { sessionCookie: [] }];
 const errorResponse = {
@@ -1342,7 +1342,10 @@ export const createMessageRoute = createRoute({
   tags: ["Chat"],
   security: actorSecurity,
   request: {
-    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    headers: z.object({
+      "idempotency-key": z.string().min(1).max(200),
+      [PROTOCOL_VERSION_HEADER]: z.literal(PROTOCOL_VERSION),
+    }),
     body: { required: true, content: { "application/json": { schema: CreateMessageBodySchema } } },
   },
   responses: {

@@ -8,6 +8,7 @@ import {
 } from "./client";
 import { createOpenApiDocument } from "./routes";
 import { BrainDocumentSchema, CreateMessageBodySchema, ErrorEnvelopeSchema } from "./schemas";
+import { PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER } from "./version";
 
 describe("v1 protocol contract", () => {
   it("validates canonical Message commands without accepting legacy physical vocabulary", () => {
@@ -29,6 +30,12 @@ describe("v1 protocol contract", () => {
         turnId: "legacy_turn",
         userWorkosId: "provider_identity",
         content: "Hello",
+      }),
+    ).toThrow();
+    expect(() =>
+      CreateMessageBodySchema.parse({
+        content: "Hello",
+        engine: "opencompany",
       }),
     ).toThrow();
   });
@@ -243,6 +250,16 @@ describe("v1 protocol contract", () => {
       "/v1/billing/portal-sessions",
       "/v1/billing/auto-refill",
     ]);
+    expect(document.paths?.["/v1/messages"]?.post?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          in: "header",
+          name: PROTOCOL_VERSION_HEADER,
+          required: true,
+          schema: expect.objectContaining({ enum: [PROTOCOL_VERSION] }),
+        }),
+      ]),
+    );
     expect(JSON.stringify(document)).not.toMatch(/workos|codex_chat_turn|lease_owner/iu);
 
     const client = createOpenCompanyClient("https://api.opencompany.test");
