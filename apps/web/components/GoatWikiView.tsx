@@ -773,6 +773,7 @@ function WikiPageEditor({
           }}
           placeholder="Write, or type / for commands…"
           wikiSlashCommands={slashHandlers}
+          blockHandles
         />
       </div>
 

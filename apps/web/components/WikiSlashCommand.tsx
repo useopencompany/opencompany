@@ -1,33 +1,29 @@
 "use client";
 
-// Notion-style "/" menu for the wiki editor. Typing "/" opens a small command
-// list; "page" creates a sub-page of the current page, inserts a bare
-// [[slug]] link at the cursor (the chip renders the target's live title), and
-// opens the new page ready to name. Page creation is optimistic (local-first),
-// so the whole interaction is synchronous.
+// Notion-style "/" menu for the wiki editor. Typing "/" opens a command list of
+// block types (headings, lists, plain text) plus "Page", which creates a
+// sub-page of the current page and inserts a bare [[slug]] link at the cursor
+// (the chip renders the target's live title). Page creation is optimistic
+// (local-first), so the whole interaction is synchronous.
 //
-// The list itself is the design system's cmdk-based Command component — the
-// same battle-tested primitive as the app's command palette. The editor keeps
-// keyboard focus; the tiptap Suggestion plugin forwards ArrowUp/ArrowDown/
-// Enter to cmdk as native keydown events, which is the established pattern
-// for tiptap slash menus built on cmdk.
+// Rendering, keyboard navigation, and positioning are handled by the shared
+// EditorSuggestionMenu; this file only defines the commands and their rows.
 
-import {
-  Command,
-  CommandEmpty,
-  CommandItem,
-  CommandList,
-} from "@opencompany/ui/components/command";
+import type { Editor, Range } from "@tiptap/core";
 import { PluginKey } from "@tiptap/pm/state";
-import { ReactRenderer } from "@tiptap/react";
 import { Suggestion, type SuggestionOptions } from "@tiptap/suggestion";
-import { FilePlus2 } from "lucide-react";
-
-export type WikiSlashCommandItem = {
-  id: string;
-  label: string;
-  description: string;
-};
+import {
+  FilePlus2,
+  Heading1,
+  Heading2,
+  Heading3,
+  List,
+  ListOrdered,
+  type LucideIcon,
+  Type,
+} from "lucide-react";
+import { createSuggestionRenderer } from "@/components/EditorSuggestionMenu";
+import { wikiLinkContent } from "@/components/WikiLinkNode";
 
 export type WikiSlashCreatedPage = {
   id: string;
@@ -46,21 +42,107 @@ export type WikiSlashCommandHandlers = {
   onPageCreated?: (page: WikiSlashCreatedPage) => void;
 };
 
+type WikiSlashRunContext = {
+  editor: Editor;
+  range: Range;
+  handlers: WikiSlashCommandHandlers;
+};
+
+export type WikiSlashCommandItem = {
+  id: string;
+  label: string;
+  description: string;
+  // Extra terms the query matches against, so "list" finds both list kinds and
+  // "title" finds Heading 1 even though the label doesn't contain the word.
+  keywords: string[];
+  icon: LucideIcon;
+  // Runs against the block the "/" was typed in. `range` covers the "/query"
+  // text, which every command deletes before applying itself.
+  run: (context: WikiSlashRunContext) => void;
+};
+
 const WIKI_SLASH_ITEMS: WikiSlashCommandItem[] = [
-  { id: "page", label: "Page", description: "Create a sub-page and link it here" },
+  {
+    id: "text",
+    label: "Text",
+    description: "Plain paragraph",
+    keywords: ["paragraph", "plain", "body"],
+    icon: Type,
+    run: ({ editor, range }) => editor.chain().focus().deleteRange(range).setParagraph().run(),
+  },
+  {
+    id: "h1",
+    label: "Heading 1",
+    description: "Large section heading",
+    keywords: ["heading", "title", "large"],
+    icon: Heading1,
+    run: ({ editor, range }) =>
+      editor.chain().focus().deleteRange(range).setNode("heading", { level: 1 }).run(),
+  },
+  {
+    id: "h2",
+    label: "Heading 2",
+    description: "Medium section heading",
+    keywords: ["heading", "subtitle", "medium"],
+    icon: Heading2,
+    run: ({ editor, range }) =>
+      editor.chain().focus().deleteRange(range).setNode("heading", { level: 2 }).run(),
+  },
+  {
+    id: "h3",
+    label: "Heading 3",
+    description: "Small section heading",
+    keywords: ["heading", "small"],
+    icon: Heading3,
+    run: ({ editor, range }) =>
+      editor.chain().focus().deleteRange(range).setNode("heading", { level: 3 }).run(),
+  },
+  {
+    id: "bulletList",
+    label: "Bulleted list",
+    description: "Simple bulleted list",
+    keywords: ["bullet", "list", "unordered", "ul"],
+    icon: List,
+    run: ({ editor, range }) => editor.chain().focus().deleteRange(range).toggleBulletList().run(),
+  },
+  {
+    id: "numberedList",
+    label: "Numbered list",
+    description: "Ordered list with numbers",
+    keywords: ["numbered", "ordered", "list", "ol"],
+    icon: ListOrdered,
+    run: ({ editor, range }) => editor.chain().focus().deleteRange(range).toggleOrderedList().run(),
+  },
+  {
+    id: "page",
+    label: "Page",
+    description: "Create a sub-page and link it here",
+    keywords: ["page", "subpage", "link", "new"],
+    icon: FilePlus2,
+    run: ({ editor, range, handlers }) => {
+      const created = handlers.createPage();
+      if (!created) return;
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        .insertContent([wikiLinkContent(`[[${created.slug}]]`), { type: "text", text: " " }])
+        .run();
+      handlers.onPageCreated?.(created);
+    },
+  },
 ];
 
 // A dedicated key: the default Suggestion key is shared module-wide and would
 // collide with any other suggestion plugin on the same editor.
 const WIKI_SLASH_PLUGIN_KEY = new PluginKey("wikiSlashCommand");
 
-const FORWARDED_KEYS = new Set(["ArrowUp", "ArrowDown", "Enter", "Tab"]);
-
 export function filterWikiSlashItems(query: string): WikiSlashCommandItem[] {
   const q = query.trim().toLowerCase();
-  return q
-    ? WIKI_SLASH_ITEMS.filter((item) => `${item.id} ${item.label}`.toLowerCase().includes(q))
-    : WIKI_SLASH_ITEMS;
+  if (!q) return WIKI_SLASH_ITEMS;
+  return WIKI_SLASH_ITEMS.filter((item) =>
+    `${item.id} ${item.label} ${item.keywords.join(" ")}`.toLowerCase().includes(q),
+  );
 }
 
 export function createWikiSlashCommandSuggestion(
@@ -71,70 +153,26 @@ export function createWikiSlashCommandSuggestion(
     pluginKey: WIKI_SLASH_PLUGIN_KEY,
     allowSpaces: false,
     items: ({ query }) => filterWikiSlashItems(query),
-    command: ({ editor, range, props }) => {
-      if (props.id !== "page") return;
-      const created = handlers.createPage();
-      if (!created) return;
-      editor.chain().focus().deleteRange(range).insertContent(`[[${created.slug}]] `).run();
-      handlers.onPageCreated?.(created);
-    },
-    render: () => {
-      let component: ReactRenderer<unknown, WikiSlashMenuProps> | null = null;
-      let container: HTMLDivElement | null = null;
-
-      const position = (clientRect?: (() => DOMRect | null) | null) => {
-        const rect = clientRect?.();
-        if (!container || !rect) return;
-        container.style.left = `${rect.left}px`;
-        container.style.top = `${rect.bottom + 6}px`;
-      };
-
-      return {
-        onStart: (props) => {
-          component = new ReactRenderer(WikiSlashMenu, {
-            props: {
-              items: props.items,
-              command: (item: WikiSlashCommandItem) => props.command(item),
-            },
-            editor: props.editor,
-          });
-          container = document.createElement("div");
-          container.style.position = "fixed";
-          container.style.zIndex = "90";
-          container.appendChild(component.element);
-          document.body.appendChild(container);
-          position(props.clientRect);
-        },
-        onUpdate: (props) => {
-          component?.updateProps({
-            items: props.items,
-            command: (item: WikiSlashCommandItem) => props.command(item),
-          });
-          position(props.clientRect);
-        },
-        onKeyDown: ({ event }) => {
-          if (!FORWARDED_KEYS.has(event.key)) return false;
-          // The editor keeps focus; drive cmdk by replaying the key on its
-          // root element (Tab confirms like Enter).
-          const commandRoot = container?.querySelector("[cmdk-root]");
-          if (!commandRoot) return false;
-          commandRoot.dispatchEvent(
-            new KeyboardEvent("keydown", {
-              key: event.key === "Tab" ? "Enter" : event.key,
-              bubbles: true,
-              cancelable: true,
-            }),
-          );
-          return true;
-        },
-        onExit: () => {
-          component?.destroy();
-          container?.remove();
-          component = null;
-          container = null;
-        },
-      };
-    },
+    command: ({ editor, range, props }) => props.run({ editor, range, handlers }),
+    render: createSuggestionRenderer<WikiSlashCommandItem>({
+      ariaLabel: "Slash commands",
+      emptyLabel: "No commands.",
+      getKey: (item) => item.id,
+      renderItem: (item) => {
+        const Icon = item.icon;
+        return (
+          <>
+            <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-subtle" />
+            <span className="flex min-w-0 flex-col">
+              <span className="text-[13px] font-medium leading-4 text-ink">{item.label}</span>
+              <span className="mt-0.5 truncate text-[11.5px] leading-4 text-ink-subtle">
+                {item.description}
+              </span>
+            </span>
+          </>
+        );
+      },
+    }),
   };
 }
 
@@ -143,35 +181,4 @@ export function createWikiSlashCommandPlugin(
   handlers: WikiSlashCommandHandlers,
 ) {
   return Suggestion({ editor, ...createWikiSlashCommandSuggestion(handlers) });
-}
-
-type WikiSlashMenuProps = {
-  items: WikiSlashCommandItem[];
-  command: (item: WikiSlashCommandItem) => void;
-};
-
-function WikiSlashMenu({ items, command }: WikiSlashMenuProps) {
-  if (items.length === 0) return null;
-
-  return (
-    <Command
-      shouldFilter={false}
-      // Keep focus (and the caret) in the editor while clicking the menu.
-      onMouseDown={(event) => event.preventDefault()}
-      className="min-w-56 rounded-lg border border-edge bg-surface shadow-lg"
-    >
-      <CommandList>
-        <CommandEmpty>No commands.</CommandEmpty>
-        {items.map((item) => (
-          <CommandItem key={item.id} value={item.id} onSelect={() => command(item)}>
-            <FilePlus2 className="h-3.5 w-3.5 shrink-0 text-ink-subtle" />
-            <span className="flex min-w-0 flex-col">
-              <span className="text-[13px] font-medium">{item.label}</span>
-              <span className="truncate text-[11.5px] text-ink-subtle">{item.description}</span>
-            </span>
-          </CommandItem>
-        ))}
-      </CommandList>
-    </Command>
-  );
 }

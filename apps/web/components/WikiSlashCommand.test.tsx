@@ -5,6 +5,7 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect } from "react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { WikiLink } from "./WikiLinkNode";
 import {
   createWikiSlashCommandPlugin,
   filterWikiSlashItems,
@@ -28,9 +29,12 @@ beforeAll(() => {
 });
 
 describe("filterWikiSlashItems", () => {
-  it("matches the page command by id and label", () => {
-    expect(filterWikiSlashItems("")).toHaveLength(1);
+  it("matches commands by id, label, and keywords", () => {
+    // Text, Heading 1-3, Bulleted list, Numbered list, Page.
+    expect(filterWikiSlashItems("")).toHaveLength(7);
     expect(filterWikiSlashItems("pag")).toHaveLength(1);
+    expect(filterWikiSlashItems("head")).toHaveLength(3);
+    expect(filterWikiSlashItems("list")).toHaveLength(2);
     expect(filterWikiSlashItems("nope")).toHaveLength(0);
   });
 });
@@ -49,6 +53,7 @@ function Harness({
     extensions: [
       StarterKit.configure({ link: { openOnClick: false } }),
       Markdown.configure({ markedOptions: { gfm: true, breaks: false } }),
+      WikiLink,
       Extension.create({
         name: "wikiSlashCommand",
         addProseMirrorPlugins() {

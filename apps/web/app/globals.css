@@ -248,6 +248,42 @@ body {
 .tiptap-brain > *:last-child {
   margin-bottom: 0;
 }
+/* Placeholder extension: hint shown only while the whole document is empty. */
+.tiptap-brain .is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--color-ink-subtle);
+  opacity: 0.7;
+}
+/* Drag handle element (the plugin toggles its visibility + position). It floats
+   in the left margin, so the body text stays aligned with the page title. */
+.wiki-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.75rem;
+  border-radius: 6px;
+  color: var(--color-ink-subtle);
+  cursor: grab;
+  user-select: none;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+.wiki-drag-handle:hover {
+  background: var(--color-surface-subtle);
+  color: var(--color-ink-muted);
+}
+.wiki-drag-handle[data-dragging="true"] {
+  cursor: grabbing;
+}
+.wiki-drag-handle-grip {
+  display: inline-flex;
+  pointer-events: none;
+}
 .tiptap-brain p,
 .tiptap-brain ul,
 .tiptap-brain ol,
@@ -337,8 +373,10 @@ body {
   border: 0;
   border-top: 1px solid var(--color-border);
 }
+/* No selected-node box for now (e.g. the outline a block shows right after a
+   drag-drop). `none` also overrides prosemirror-view's default blue outline. */
 .tiptap-brain .ProseMirror-selectednode {
-  outline: 2px solid var(--color-border-strong);
+  outline: none;
 }
 .tiptap-brain .wiki-brain-link {
   cursor: pointer;
