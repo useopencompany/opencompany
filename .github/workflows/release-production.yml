@@ -403,7 +403,6 @@ jobs:
             "RUNNER_INTERNAL_TOKEN",
             "GOAT_API_ORIGIN",
             "NEXT_PUBLIC_GOAT_API_ORIGIN",
-            "NEXT_PUBLIC_GOAT_HEADLESS_CHAT",
             "ELECTRIC_URL",
             "GOAT_STRIPE_API_KEY",
             "GOAT_STRIPE_WEBHOOK_SECRET",
@@ -530,18 +529,6 @@ jobs:
               throw new Error(
                 `Web Vercel production origins do not match the release contract: ${mismatched.join(", ")}`,
               );
-            }
-
-            const headlessChatFlag = await readEnvValue(
-              webProjectId,
-              webEnv,
-              "NEXT_PUBLIC_GOAT_HEADLESS_CHAT",
-              "web",
-              teamId,
-              token,
-            );
-            if (!["true", "false"].includes(headlessChatFlag.trim())) {
-              throw new Error("Web NEXT_PUBLIC_GOAT_HEADLESS_CHAT must be exactly true or false.");
             }
 
           }

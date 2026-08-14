@@ -1,7 +1,6 @@
 {
   "dbImports": [
     "apps/web/app/(app)/settings/workspace/slack/page.tsx",
-    "apps/web/app/api/electric/v1/shape/route.ts",
     "apps/web/components/GoatAppShell.tsx",
     "apps/web/lib/auth.ts",
     "apps/web/lib/brain-cli.ts",
@@ -9,26 +8,16 @@
     "apps/web/lib/brain-source-analytics.ts",
     "apps/web/lib/brain-sources/registry.ts",
     "apps/web/lib/brain.ts",
-    "apps/web/lib/chat.ts",
-    "apps/web/lib/claude-chat-settings.ts",
-    "apps/web/lib/cloud-chat-message-handler.ts",
-    "apps/web/lib/codex-chat-interactions.ts",
-    "apps/web/lib/codex-chat.ts",
     "apps/web/lib/integrations/personal-accounts.ts",
-    "apps/web/lib/legacy-chat-route.ts",
     "apps/web/lib/mcp-server.ts",
     "apps/web/lib/slack-bot-actions.ts",
     "apps/web/lib/wiki-actions.ts"
   ],
   "drizzleImports": [
     "apps/web/app/(app)/settings/workspace/slack/page.tsx",
-    "apps/web/app/api/electric/v1/shape/route.ts",
     "apps/web/lib/auth.ts",
     "apps/web/lib/brain-cli.ts",
     "apps/web/lib/brain-overview.ts",
-    "apps/web/lib/chat.ts",
-    "apps/web/lib/codex-chat-interactions.ts",
-    "apps/web/lib/codex-chat.ts",
     "apps/web/lib/integrations/personal-accounts.ts",
     "apps/web/lib/slack-bot-actions.ts"
   ]

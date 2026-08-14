@@ -80,12 +80,11 @@ const workspaceActionsMock = vi.hoisted(() => ({
 
 vi.mock("@/lib/workspace-actions", () => workspaceActionsMock);
 
-const chatActionsMock = vi.hoisted(() => ({
-  closeGoatChatSessionAction: vi.fn(async () => ({ ok: true, error: null })),
-  setGoatChatPinnedAction: vi.fn(async () => ({ ok: true, error: null })),
+const chatCommandsMock = vi.hoisted(() => ({
+  updateHeadlessChatConversation: vi.fn(async () => ({ transactionId: "1" })),
 }));
 
-vi.mock("@/lib/chat-actions", () => chatActionsMock);
+vi.mock("@/lib/headless-chat-commands", () => chatCommandsMock);
 
 vi.mock("@/components/GoatAppDataProvider", () => ({
   useGoatAppData: () => ({
@@ -649,7 +648,10 @@ describe("GoatSidebar", () => {
     render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     await user.click(screen.getByRole("button", { name: "Pin Recent chat" }));
-    expect(chatActionsMock.setGoatChatPinnedAction).toHaveBeenCalledWith("goat_chat_recent", true);
+    expect(chatCommandsMock.updateHeadlessChatConversation).toHaveBeenCalledWith(
+      "goat_chat_recent",
+      { pinned: true },
+    );
     expect(screen.getByRole("button", { name: "Unpin Recent chat" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -658,14 +660,17 @@ describe("GoatSidebar", () => {
     const unpin = screen.getByRole("button", { name: "Unpin Pinned chat" });
     expect(unpin).toHaveAttribute("aria-pressed", "true");
     await user.click(unpin);
-    expect(chatActionsMock.setGoatChatPinnedAction).toHaveBeenCalledWith("goat_chat_pinned", false);
+    expect(chatCommandsMock.updateHeadlessChatConversation).toHaveBeenCalledWith(
+      "goat_chat_pinned",
+      { pinned: false },
+    );
   });
 
   it("tracks concurrent pin requests independently and restores failed rows", async () => {
     const user = userEvent.setup();
-    let resolvePin!: (value: { ok: true; error: null }) => void;
+    let resolvePin!: (value: { transactionId: string }) => void;
     let rejectUnpin!: (reason: Error) => void;
-    chatActionsMock.setGoatChatPinnedAction
+    chatCommandsMock.updateHeadlessChatConversation
       .mockImplementationOnce(() => new Promise((resolve) => (resolvePin = resolve)))
       .mockImplementationOnce(() => new Promise((_, reject) => (rejectUnpin = reject)));
     recentChatsMock.value = [
@@ -695,11 +700,11 @@ describe("GoatSidebar", () => {
     await user.click(screen.getByRole("button", { name: "Pin Recent chat" }));
     await user.click(screen.getByRole("button", { name: "Unpin Pinned chat" }));
 
-    expect(chatActionsMock.setGoatChatPinnedAction).toHaveBeenCalledTimes(2);
+    expect(chatCommandsMock.updateHeadlessChatConversation).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("button", { name: "Unpin Recent chat" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Pin Pinned chat" })).toBeDisabled();
 
-    await act(async () => resolvePin({ ok: true, error: null }));
+    await act(async () => resolvePin({ transactionId: "1" }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Unpin Recent chat" })).toBeEnabled(),
     );
@@ -712,7 +717,7 @@ describe("GoatSidebar", () => {
 
   it("keeps the sidebar usable when archiving a chat rejects", async () => {
     const user = userEvent.setup();
-    chatActionsMock.closeGoatChatSessionAction.mockRejectedValueOnce(
+    chatCommandsMock.updateHeadlessChatConversation.mockRejectedValueOnce(
       new Error("network unavailable"),
     );
     recentChatsMock.value = [
@@ -732,7 +737,10 @@ describe("GoatSidebar", () => {
     const archiveButton = screen.getByRole("button", { name: "Archive Archive me" });
     await user.click(archiveButton);
 
-    expect(chatActionsMock.closeGoatChatSessionAction).toHaveBeenCalledWith("goat_chat_archive");
+    expect(chatCommandsMock.updateHeadlessChatConversation).toHaveBeenCalledWith(
+      "goat_chat_archive",
+      { archived: true },
+    );
     await waitFor(() => expect(archiveButton).toBeEnabled());
     expect(routerMock.push).not.toHaveBeenCalled();
   });

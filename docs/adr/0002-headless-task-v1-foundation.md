@@ -179,9 +179,9 @@ eligible Runs whose projection rows had already been absent before that remap. A
 `0205_goat_task_history_projection_repair.sql` upserts the same bounded Message/Run projection set
 without mutating physical history.
 
-The frozen `/api/chat` and legacy Chat adapter are unaffected. Workflow invocation moves in this
-phase, but Workflow editor/catalog CRUD does not. Expo/mobile, macOS, broad web DB cleanup, runner
-renaming, and new infrastructure remain out of scope.
+The Chat cutover is independent of this historical Task retention gate. Workflow invocation moves
+in this phase, but Workflow editor/catalog CRUD does not. Expo/mobile, macOS, runner renaming, and
+new infrastructure remain out of scope.
 
 ## Rollback
 

@@ -1,7 +1,7 @@
 "use client";
 
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import { type Collection, useLiveQuery } from "@tanstack/react-db";
+import { useLiveQuery } from "@tanstack/react-db";
 import {
   createContext,
   type ReactNode,
@@ -32,7 +32,6 @@ import {
   type HeadlessChatConversationReadModel,
   type HeadlessEngineSessionReadModel,
 } from "@/lib/headless-chat-collections";
-import { HEADLESS_CHAT_ENABLED } from "@/lib/headless-chat-feature";
 import {
   getHeadlessTasks,
   type HeadlessTaskReadModel,
@@ -50,15 +49,13 @@ import {
 } from "@/lib/optimistic-chat-summaries";
 import {
   createGoatCollections,
-  type GoatChatSessionRow,
   type GoatIntegrationRow,
   type GoatTaskRow,
 } from "@/lib/task-collections";
 import { deriveGoatTaskWorkflowSteps } from "@/lib/task-workflow-activity";
 
-// Durable background chats for every engine persist runtime in goat.codex_chat_sessions.
-// The name is historical: OpenCompany, Codex, and Claude Code all use it now.
-function hasDurableChatRuntime(engine: GoatChatSessionRow["engine"]): boolean {
+// Every engine exposes the same durable engine-session read model.
+function hasDurableChatRuntime(engine: HeadlessChatConversationReadModel["engine"]): boolean {
   return engine === "opencompany" || engine === "codex" || engine === "claude_code";
 }
 
@@ -111,7 +108,6 @@ export type GoatAppInitialData = {
   featureFlags: GoatFeatureFlags;
   codexConnected: boolean;
   claudeCodeConnected: boolean;
-  chatResumeEnabled: boolean;
   mcpSetup: {
     preferredClient: GoatMcpClient | null;
     completedAt: string | null;
@@ -259,26 +255,12 @@ function GoatAppLiveDataSubscriptions({
     (q) => (taskSchedulesCollection ? q.from({ schedule: taskSchedulesCollection }) : undefined),
     [initialData.featureFlags.taskSpawning, taskSchedulesCollection],
   );
-  const headlessConversations = useMemo(
-    () => (HEADLESS_CHAT_ENABLED ? getHeadlessChatConversations() : null),
-    [],
-  );
+  const conversationsCollection = useMemo(() => getHeadlessChatConversations(), []);
   const engineSessionsCollection = useMemo(() => getHeadlessEngineSessions(), []);
-  // Both collections are read-only here and narrowed to their selected schema below. Erasing the
-  // row generic lets this remain one hook/subscription, so the rollback switch cannot perturb the
-  // rest of the provider's subscription lifecycle.
-  const selectedChatCollection = (headlessConversations ??
-    collections.chatSessions) as unknown as Collection<
-    Record<string, unknown>,
-    string | number,
-    Record<string, unknown>
-  >;
   const { data: chatRows, isLoading: chatsLoading } = useLiveQuery(
-    () => selectedChatCollection,
-    [selectedChatCollection],
+    (q) => q.from({ conversation: conversationsCollection }),
+    [conversationsCollection],
   );
-  const chatSessionRows = HEADLESS_CHAT_ENABLED ? undefined : chatRows;
-  const headlessConversationRows = HEADLESS_CHAT_ENABLED ? chatRows : undefined;
   const { data: engineSessionRows } = useLiveQuery(
     (q) => q.from({ engineSession: engineSessionsCollection }),
     [engineSessionsCollection],
@@ -315,78 +297,7 @@ function GoatAppLiveDataSubscriptions({
   ]);
 
   const recentChats = useMemo(() => {
-    if (HEADLESS_CHAT_ENABLED) {
-      if (chatsLoading && !headlessConversationRows?.length) return initialData.recentChats;
-      const initialById = new Map(initialData.recentChats.map((chat) => [chat.id, chat]));
-      const codexRuntimeByChatId = new Map(
-        ((engineSessionRows ?? []) as HeadlessEngineSessionReadModel[]).map((row) => [
-          row.conversationId,
-          {
-            status: row.status,
-            activeTurnId: row.activeRunId,
-            error: row.error,
-            updatedAt: row.updatedAt,
-          },
-        ]),
-      );
-      const toSummary = (row: HeadlessChatConversationReadModel): GoatChatSummaryView => {
-        const initial = initialById.get(row.id);
-        const durableRuntime = codexRuntimeByChatId.get(row.id);
-        const codexRuntime = hasDurableChatRuntime(row.engine)
-          ? (durableRuntime ?? initial?.codexRuntime ?? null)
-          : null;
-        return {
-          id: row.id,
-          title: row.title,
-          model: row.model as AgentModelId,
-          engine: row.engine,
-          codexComposerSettings: initial?.codexComposerSettings ?? null,
-          codexRuntime,
-          state: deriveGoatChatState({
-            updatedAt: row.updatedAt,
-            lastSeenAt: row.lastSeenAt,
-            codexRuntime,
-          }),
-          preview: initial?.preview ?? "No messages yet.",
-          updatedAt: row.updatedAt,
-          lastSeenAt: row.lastSeenAt,
-          pinnedAt: row.pinnedAt,
-        };
-      };
-      const openRows = (
-        (headlessConversationRows ?? []) as HeadlessChatConversationReadModel[]
-      ).filter((row) => !row.archivedAt);
-      const activeRuntimeChatIds = new Set(
-        ((engineSessionRows ?? []) as HeadlessEngineSessionReadModel[])
-          .filter((row) =>
-            isGoatChatRuntimeActive({ status: row.status, activeTurnId: row.activeRunId }),
-          )
-          .map((row) => row.conversationId),
-      );
-      const pinned = openRows
-        .filter((row) => row.pinnedAt)
-        .toSorted(
-          (a, b) => new Date(b.pinnedAt ?? 0).getTime() - new Date(a.pinnedAt ?? 0).getTime(),
-        )
-        .slice(0, GOAT_PINNED_CHAT_LIMIT)
-        .map(toSummary);
-      const activeRuntime = openRows
-        .filter((row) => !row.pinnedAt && activeRuntimeChatIds.has(row.id))
-        .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-        .map(toSummary);
-      const recent = openRows
-        .filter(
-          (row) =>
-            !row.pinnedAt &&
-            !activeRuntimeChatIds.has(row.id) &&
-            isRecentGoatHomeActivity(row.updatedAt),
-        )
-        .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-        .slice(0, 8)
-        .map(toSummary);
-      return [...pinned, ...activeRuntime, ...recent];
-    }
-    if (chatsLoading && !chatSessionRows?.length) return initialData.recentChats;
+    if (chatsLoading && !chatRows?.length) return initialData.recentChats;
     const initialById = new Map(initialData.recentChats.map((chat) => [chat.id, chat]));
     const codexRuntimeByChatId = new Map(
       ((engineSessionRows ?? []) as HeadlessEngineSessionReadModel[]).map((row) => [
@@ -399,11 +310,11 @@ function GoatAppLiveDataSubscriptions({
         },
       ]),
     );
-    const toSummary = (row: GoatChatSessionRow) => {
+    const toSummary = (row: HeadlessChatConversationReadModel): GoatChatSummaryView => {
       const initial = initialById.get(row.id);
-      const liveCodexRuntime = codexRuntimeByChatId.get(row.id);
+      const durableRuntime = codexRuntimeByChatId.get(row.id);
       const codexRuntime = hasDurableChatRuntime(row.engine)
-        ? (liveCodexRuntime ?? initial?.codexRuntime ?? null)
+        ? (durableRuntime ?? initial?.codexRuntime ?? null)
         : null;
       return {
         id: row.id,
@@ -413,18 +324,18 @@ function GoatAppLiveDataSubscriptions({
         codexComposerSettings: initial?.codexComposerSettings ?? null,
         codexRuntime,
         state: deriveGoatChatState({
-          updatedAt: row.updated_at,
-          lastSeenAt: row.last_seen_at,
+          updatedAt: row.updatedAt,
+          lastSeenAt: row.lastSeenAt,
           codexRuntime,
         }),
         preview: initial?.preview ?? "No messages yet.",
-        updatedAt: row.updated_at,
-        lastSeenAt: row.last_seen_at,
-        pinnedAt: row.pinned_at,
+        updatedAt: row.updatedAt,
+        lastSeenAt: row.lastSeenAt,
+        pinnedAt: row.pinnedAt,
       };
     };
-    const openRows = ((chatSessionRows ?? []) as GoatChatSessionRow[]).filter(
-      (row) => !row.closed_at && row.kind !== "task",
+    const openRows = ((chatRows ?? []) as HeadlessChatConversationReadModel[]).filter(
+      (row) => !row.archivedAt,
     );
     const activeRuntimeChatIds = new Set(
       ((engineSessionRows ?? []) as HeadlessEngineSessionReadModel[])
@@ -433,37 +344,27 @@ function GoatAppLiveDataSubscriptions({
         )
         .map((row) => row.conversationId),
     );
-    // Pinned chats stay visible regardless of the recency window, with separate
-    // caps for pinned and unpinned hydration (mirrors listOpenSessions on the server).
     const pinned = openRows
-      .filter((row) => row.pinned_at)
-      .toSorted(
-        (a, b) => new Date(b.pinned_at ?? 0).getTime() - new Date(a.pinned_at ?? 0).getTime(),
-      )
+      .filter((row) => row.pinnedAt)
+      .toSorted((a, b) => new Date(b.pinnedAt ?? 0).getTime() - new Date(a.pinnedAt ?? 0).getTime())
       .slice(0, GOAT_PINNED_CHAT_LIMIT)
       .map(toSummary);
     const activeRuntime = openRows
-      .filter((row) => !row.pinned_at && activeRuntimeChatIds.has(row.id))
-      .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .filter((row) => !row.pinnedAt && activeRuntimeChatIds.has(row.id))
+      .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       .map(toSummary);
     const recent = openRows
       .filter(
         (row) =>
-          !row.pinned_at &&
+          !row.pinnedAt &&
           !activeRuntimeChatIds.has(row.id) &&
-          isRecentGoatHomeActivity(row.updated_at),
+          isRecentGoatHomeActivity(row.updatedAt),
       )
-      .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       .slice(0, 8)
       .map(toSummary);
     return [...pinned, ...activeRuntime, ...recent];
-  }, [
-    chatSessionRows,
-    chatsLoading,
-    engineSessionRows,
-    headlessConversationRows,
-    initialData.recentChats,
-  ]);
+  }, [chatRows, chatsLoading, engineSessionRows, initialData.recentChats]);
 
   const archivedChats = useMemo<GoatChatSummaryView[]>(() => {
     const codexRuntimeByChatId = new Map(
@@ -477,31 +378,9 @@ function GoatAppLiveDataSubscriptions({
         },
       ]),
     );
-    if (HEADLESS_CHAT_ENABLED) {
-      return ((headlessConversationRows ?? []) as HeadlessChatConversationReadModel[])
-        .filter((row) => row.archivedAt)
-        .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-        .slice(0, GOAT_ARCHIVED_CHAT_LIMIT)
-        .map((row) => ({
-          id: row.id,
-          title: row.title,
-          model: row.model as AgentModelId,
-          engine: row.engine,
-          codexComposerSettings: null,
-          codexRuntime: hasDurableChatRuntime(row.engine)
-            ? (codexRuntimeByChatId.get(row.id) ?? null)
-            : null,
-          state: "done_seen",
-          preview: "Archived",
-          updatedAt: row.updatedAt,
-          lastSeenAt: row.lastSeenAt,
-          pinnedAt: null,
-          archived: true,
-        }));
-    }
-    return ((chatSessionRows ?? []) as GoatChatSessionRow[])
-      .filter((row) => row.closed_at && row.kind !== "task")
-      .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+    return ((chatRows ?? []) as HeadlessChatConversationReadModel[])
+      .filter((row) => row.archivedAt)
+      .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       .slice(0, GOAT_ARCHIVED_CHAT_LIMIT)
       .map((row) => ({
         id: row.id,
@@ -514,12 +393,12 @@ function GoatAppLiveDataSubscriptions({
           : null,
         state: "done_seen",
         preview: "Archived",
-        updatedAt: row.updated_at,
-        lastSeenAt: row.last_seen_at,
+        updatedAt: row.updatedAt,
+        lastSeenAt: row.lastSeenAt,
         pinnedAt: null,
         archived: true,
       }));
-  }, [chatSessionRows, engineSessionRows, headlessConversationRows]);
+  }, [chatRows, engineSessionRows]);
 
   const integrations = useMemo(() => {
     if (integrationsLoading && !integrationRows?.length) return initialData.integrations;

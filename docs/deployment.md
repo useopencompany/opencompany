@@ -68,14 +68,12 @@ Database migrations are forward-only; design them so the previous application re
 External webhook/OAuth rollback may also require restoring a provider dashboard URL, which must be
 called out in the pull request.
 
-For canonical Chat, the immediate rollback is configuration-only: set
-`NEXT_PUBLIC_GOAT_HEADLESS_CHAT=false` and redeploy web. Existing canonical Runs continue to settle
-through the API and runner. The release must pull the updated Vercel production environment before
-building because this public flag and `NEXT_PUBLIC_GOAT_API_ORIGIN` are compiled into the browser
-bundle. Production browser traffic connects directly to `https://api.opencompany.chat`; the web and
-API runtimes share `WORKOS_COOKIE_DOMAIN=opencompany.chat`, and the API allows credentialed CORS only
-from the production web origin. Server-only `GOAT_API_ORIGIN` retains the same-origin fallback route,
-but it is not the active production streaming path.
+Canonical Chat is fix-forward. Existing Runs continue to settle through the API and runner while a
+corrective release is prepared. Production browser traffic connects directly to
+`https://api.opencompany.chat`; the web and API runtimes share
+`WORKOS_COOKIE_DOMAIN=opencompany.chat`, and the API allows credentialed CORS only from the
+production web origin. `NEXT_PUBLIC_GOAT_API_ORIGIN` is compiled into the browser bundle, while
+Server Components use `GOAT_API_ORIGIN`.
 
 ## Stripe production endpoint
 

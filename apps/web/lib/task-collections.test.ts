@@ -7,13 +7,12 @@ describe("createGoatCollections", () => {
     const second = createGoatCollections();
 
     expect(second).toBe(first);
-    expect(second.chatSessions).toBe(first.chatSessions);
     expect(second.integrations).toBe(first.integrations);
   });
 
-  it("no longer exposes physical brain-scoped collections", () => {
+  it("only exposes the physical integration collection that still has a reader", () => {
     const collections = createGoatCollections();
 
-    expect("brainCollections" in collections).toBe(false);
+    expect(Object.keys(collections)).toEqual(["integrations"]);
   });
 });

@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,7 @@ const forbiddenPatterns = {
   brainWorkerControl:
     /\btriggerGoat(?:BrainIngestWake|BrainImportWake|GoogleDriveSyncWake)\b|\/internal\/goat\/(?:brain-ingest\/wake|brain-import\/wake|google-drive\/sync)/u,
 };
+const updateBaseline = process.argv.includes("--update");
 
 const baseline = JSON.parse(await readFile(baselinePath, "utf8"));
 const sourceFiles = await listSourceFiles(webRoot);
@@ -36,9 +37,34 @@ for (const absolutePath of sourceFiles) {
   }
 }
 
+for (const boundary of Object.keys(importPatterns)) actual[boundary].sort();
+
+if (updateBaseline) {
+  const additions = Object.keys(importPatterns).flatMap((boundary) => {
+    const expected = baseline[boundary] ?? [];
+    return actual[boundary]
+      .filter((file) => !expected.includes(file))
+      .map((file) => `${boundary}: ${file}`);
+  });
+  const forbiddenCallers = Object.entries(forbidden).flatMap(([boundary, files]) =>
+    files.map((file) => `${boundary}: ${file}`),
+  );
+  if (additions.length || forbiddenCallers.length) {
+    for (const addition of additions) console.error(`Unexpected boundary addition: ${addition}`);
+    for (const caller of forbiddenCallers) console.error(`Forbidden boundary caller: ${caller}`);
+    console.error("The baseline updater only accepts removals from a clean boundary scan.");
+    process.exit(1);
+  }
+
+  await writeFile(baselinePath, `${JSON.stringify(actual, null, 2)}\n`, "utf8");
+  console.log(
+    `Updated the web domain boundary baseline (${actual.dbImports.length} @opencompany/db files, ${actual.drizzleImports.length} drizzle-orm files).`,
+  );
+  process.exit(0);
+}
+
 let failed = false;
 for (const boundary of Object.keys(importPatterns)) {
-  actual[boundary].sort();
   const expected = [...(baseline[boundary] ?? [])].sort();
   const additions = actual[boundary].filter((file) => !expected.includes(file));
   const stale = expected.filter((file) => !actual[boundary].includes(file));
