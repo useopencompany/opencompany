@@ -85,7 +85,7 @@
     "drizzle-kit": "^0.31.10",
     "jsdom": "^29.1.1",
     "neonctl": "^2.22.0",
-    "postcss": "8.5.15",
+    "postcss": "8.5.23",
     "turbo": "^2.9.15",
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"
