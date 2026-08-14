@@ -47,6 +47,10 @@ const eventMocks = vi.hoisted(() => ({
   loadCodexChatAssistantMessageParts: vi.fn(),
 }));
 
+const historyMocks = vi.hoisted(() => ({
+  loadCodingChatHistory: vi.fn(),
+}));
+
 const repoMocks = vi.hoisted(() => ({
   loadRepositoryBootstrap: vi.fn(),
   stageRepositoryBootstrap: vi.fn(),
@@ -102,6 +106,14 @@ vi.mock("./coding-agent-shared", () => ({
   buildGitHubCommandEnv: () => ({}),
   createKnownSecretRedactor: () => (value: string) => value,
 }));
+
+vi.mock("./coding-chat-history", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./coding-chat-history")>();
+  return {
+    ...original,
+    loadCodingChatHistory: historyMocks.loadCodingChatHistory,
+  };
+});
 
 vi.mock("./db", () => ({
   getDb: () => ({}),
@@ -280,6 +292,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     });
     chatMocks.summarizeCodexChatRecoveryProgress.mockReturnValue("");
     chatMocks.updateCodexChatSessionIfLeaseHeld.mockResolvedValue(true);
+    historyMocks.loadCodingChatHistory.mockResolvedValue([]);
     cliMocks.ensureClaudeInstalled.mockResolvedValue(undefined);
     cliMocks.killLeftoverClaudeTurnProcesses.mockResolvedValue(undefined);
     cliMocks.buildClaudeTurnCommand.mockReturnValue("claude -p prompt");
@@ -448,6 +461,62 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       expect(result.value.finalize).not.toHaveBeenCalled();
     }
     expect(taskMocks.buildTaskTerminalProjection).not.toHaveBeenCalled();
+  });
+
+  it("bootstraps durable history after a stale Claude session cannot resume", async () => {
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+    historyMocks.loadCodingChatHistory.mockResolvedValueOnce([
+      { role: "user", content: "Inspect the repository.", attachments: [] },
+      { role: "assistant", content: "It uses Next.js.", attachments: [] },
+    ]);
+    cliMocks.runClaudeCodeCliProcess
+      .mockResolvedValueOnce({
+        exitCode: 1,
+        timedOut: false,
+        killed: false,
+        stderrTail: "No conversation found for session.",
+      })
+      .mockImplementationOnce(
+        async (input: { onEvent: (event: Record<string, unknown>) => Promise<void> }) => {
+          await input.onEvent({ type: "system", subtype: "init", session_id: "claude_thread_2" });
+          await input.onEvent(assistantEvent([{ type: "text", text: "We established Next.js." }]));
+          await input.onEvent({
+            type: "result",
+            subtype: "success",
+            is_error: false,
+            result: "We established Next.js.",
+            session_id: "claude_thread_2",
+            usage: { input_tokens: 10, output_tokens: 5 },
+          });
+          return { exitCode: 0, timedOut: false, killed: false, stderrTail: "" };
+        },
+      );
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn({ prompt: "What did we establish?" }),
+        session: claudeSession({ codexThreadId: "claude_thread_missing" }),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(cliMocks.buildClaudeTurnCommand).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ resumeSessionId: "claude_thread_missing" }),
+    );
+    expect(cliMocks.buildClaudeTurnCommand).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ resumeSessionId: null }),
+    );
+    const promptWrites = sandbox.files.write.mock.calls.filter(([path]) =>
+      String(path).includes("prompt-goat_codex_turn_1.txt"),
+    );
+    expect(promptWrites).toHaveLength(2);
+    expect(promptWrites[0]?.[1]).not.toContain("Inspect the repository.");
+    expect(promptWrites[1]?.[1]).toMatch(
+      /conversation_history_json[\s\S]*Inspect the repository\.[\s\S]*What did we establish\?/u,
+    );
   });
 
   it("projects a task wakeup as the next durable task turn", async () => {
@@ -662,7 +731,7 @@ function fakeSandbox(sandboxId: string) {
       run: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })),
     },
     files: {
-      write: vi.fn(async () => undefined),
+      write: vi.fn(async (_path: string, _content: string) => undefined),
     },
   };
 }

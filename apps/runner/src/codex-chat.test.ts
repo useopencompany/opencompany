@@ -1,6 +1,7 @@
 import { CODEX_COMMAND_TOOL_PART_TYPE, type CodexUiMessagePart } from "@opencompany/agent-runtime";
 import type { WorkflowHarnessSpec } from "@opencompany/db/harness";
 import type { Task } from "@opencompany/db/product-schema";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CodexAppServerRequest } from "./codex-app-server";
 import {
@@ -29,6 +30,10 @@ const codexAuthMocks = vi.hoisted(() => ({
 
 const codexToolMocks = vi.hoisted(() => ({
   ensureCodexInstalled: vi.fn(),
+}));
+
+const historyMocks = vi.hoisted(() => ({
+  loadCodingChatHistory: vi.fn(),
 }));
 
 const dbMocks = vi.hoisted(() => ({
@@ -69,6 +74,14 @@ vi.mock("./coding-agent-shared", () => ({
   createKnownSecretRedactor: () => (value: string) => value,
   gitAuthHeader: (token: string) => `Authorization: Basic ${token}`,
 }));
+
+vi.mock("./coding-chat-history", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./coding-chat-history")>();
+  return {
+    ...original,
+    loadCodingChatHistory: historyMocks.loadCodingChatHistory,
+  };
+});
 
 vi.mock("./db", () => ({
   getDb: () => queryBuilder(dbMocks.selectRows, dbMocks.execute),
@@ -165,6 +178,7 @@ describe("runCodexChatTurn", () => {
     });
     codexAuthMocks.persistRefreshedCodexAuth.mockResolvedValue(undefined);
     codexToolMocks.ensureCodexInstalled.mockResolvedValue(undefined);
+    historyMocks.loadCodingChatHistory.mockResolvedValue([]);
     eventMocks.loadCodexChatAssistantMessageParts.mockResolvedValue([]);
     eventMocks.createCodexChatProjector.mockReturnValue({
       push: vi.fn(async () => undefined),
@@ -250,6 +264,53 @@ describe("runCodexChatTurn", () => {
       session: codexSession(),
       env: env(),
     });
+  });
+
+  it("supplies durable history only when Codex must bootstrap a native thread", async () => {
+    historyMocks.loadCodingChatHistory.mockResolvedValueOnce([
+      { role: "user", content: "Inspect the repository.", attachments: [] },
+      { role: "assistant", content: "It uses Next.js.", attachments: [] },
+    ]);
+
+    await runCodexChatTurn({
+      turn: { ...codexTurn(), prompt: "What did we establish?" },
+      session: { ...codexSession(), codexThreadId: null },
+      env: env(),
+    });
+
+    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        existingEngineSessionId: null,
+        task: expect.not.stringContaining("Inspect the repository."),
+        bootstrapTask: expect.stringMatching(
+          /conversation_history_json[\s\S]*Inspect the repository\.[\s\S]*What did we establish\?/u,
+        ),
+      }),
+    );
+  });
+
+  it("invalidates a Codex checkpoint when its sandbox is replaced", async () => {
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(fakeSandbox("sbx_replacement"));
+
+    await runCodexChatTurn({
+      turn: codexTurn(),
+      session: {
+        ...codexSession(),
+        sandboxId: "sbx_missing",
+        codexThreadId: "thread_missing",
+      },
+      env: env(),
+    });
+
+    const statements = dbMocks.execute.mock.calls.map(
+      ([query]) => new PgDialect().sqlToQuery(query).sql,
+    );
+    expect(
+      statements.some((statement) => /sandbox_id = \$\d+, codex_thread_id = NULL/u.test(statement)),
+    ).toBe(true);
+    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ existingEngineSessionId: null }),
+    );
   });
 
   it("materializes uploaded files and passes screenshots to Codex as local images", async () => {

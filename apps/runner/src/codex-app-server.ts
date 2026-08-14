@@ -186,6 +186,7 @@ export async function runCodexAppServerTurn(input: {
   codexHome: string;
   skillFingerprint: string;
   task: string;
+  bootstrapTask?: string;
   skills?: CodexAppServerSkill[];
   localImages?: CodexAppServerLocalImage[];
   dynamicTools?: CodexAppServerDynamicTool[];
@@ -317,6 +318,7 @@ async function killSocketAppServerProcesses(sandbox: SandboxHandle, socketPath: 
 async function runTurnThroughProxy(input: {
   sandbox: SandboxHandle;
   task: string;
+  bootstrapTask?: string;
   skills?: CodexAppServerSkill[];
   localImages?: CodexAppServerLocalImage[];
   dynamicTools?: CodexAppServerDynamicTool[];
@@ -404,7 +406,11 @@ async function runTurnThroughProxy(input: {
 
     const thread = await startOrResumeThread({
       client,
-      input: { ...input, dynamicTools },
+      input: {
+        ...input,
+        dynamicTools,
+        allowFreshThreadOnResumeFailure: !input.reattachExistingTurn,
+      },
     });
     threadId = thread.id;
     if (threadId !== input.existingEngineSessionId) {
@@ -450,7 +456,11 @@ async function runTurnThroughProxy(input: {
       const turn = await client.request("turn/start", {
         threadId,
         input: [
-          { type: "text", text: input.task, text_elements: [] },
+          {
+            type: "text",
+            text: thread.resumed ? input.task : (input.bootstrapTask ?? input.task),
+            text_elements: [],
+          },
           ...(input.skills ?? []).map((skill) => ({
             type: "skill",
             name: skill.name,
@@ -543,22 +553,32 @@ async function startOrResumeThread(input: {
     reasoningEffort: CodexReasoningEffort;
     planModeReasoningEffort: CodexReasoningEffort | null;
     dynamicTools: CodexAppServerDynamicTool[];
+    allowFreshThreadOnResumeFailure: boolean;
     plan: ReturnType<typeof buildCodexAppServerCommandPlan>;
   };
 }) {
   if (input.input.existingEngineSessionId) {
-    const resumed = await input.client.request("thread/resume", {
-      threadId: input.input.existingEngineSessionId,
-      model: input.input.model,
-      cwd: input.input.plan.codexWorkRoot,
-      sandbox: "workspace-write",
-      approvalPolicy: "never",
-      config: reasoningConfig(input.input.reasoningEffort, input.input.planModeReasoningEffort),
-    });
-    return {
-      id: stringFromPath(resumed, ["thread", "id"]) ?? input.input.existingEngineSessionId,
-      value: isRecord(resumed) && isRecord(resumed.thread) ? resumed.thread : {},
-    };
+    try {
+      const resumed = await input.client.request("thread/resume", {
+        threadId: input.input.existingEngineSessionId,
+        model: input.input.model,
+        cwd: input.input.plan.codexWorkRoot,
+        sandbox: "workspace-write",
+        approvalPolicy: "never",
+        config: reasoningConfig(input.input.reasoningEffort, input.input.planModeReasoningEffort),
+      });
+      return {
+        id: stringFromPath(resumed, ["thread", "id"]) ?? input.input.existingEngineSessionId,
+        value: isRecord(resumed) && isRecord(resumed.thread) ? resumed.thread : {},
+        resumed: true,
+      };
+    } catch (error) {
+      if (!input.input.allowFreshThreadOnResumeFailure) throw error;
+      logger.warn("Codex thread resume failed; bootstrapping a fresh thread", {
+        event: "opencompany.codex_app_server_thread_resume_failed",
+        error_name: error instanceof Error ? error.name : typeof error,
+      });
+    }
   }
 
   const started = await input.client.request("thread/start", {
@@ -576,6 +596,7 @@ async function startOrResumeThread(input: {
   return {
     id: threadId,
     value: isRecord(started) && isRecord(started.thread) ? started.thread : {},
+    resumed: false,
   };
 }
 

@@ -59,6 +59,11 @@ import {
 } from "./codex-chat-wakeup";
 import { materializeClaudeSkillSnapshotsForSession } from "./codex-managed-skills";
 import { buildGitHubCommandEnv, createKnownSecretRedactor } from "./coding-agent-shared";
+import {
+  type CodingChatHistoryMessage,
+  codingChatHistoryPromptLines,
+  loadCodingChatHistory,
+} from "./coding-chat-history";
 import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
 import { CODING_WORKSPACE_SANDBOX_NETWORK } from "./coding-workspace-runtime";
 import { getDb } from "./db";
@@ -270,6 +275,8 @@ export async function runClaudeCodeChatTurn(input: {
     turn.userWorkosId,
   );
   void repositoryBootstrapPromise.catch(() => undefined);
+  const conversationHistoryPromise = loadCodingChatHistory(turn);
+  void conversationHistoryPromise.catch(() => undefined);
 
   let sandbox;
   try {
@@ -305,7 +312,10 @@ export async function runClaudeCodeChatTurn(input: {
     });
   }
 
-  const repositoryBootstrap = await repositoryBootstrapPromise;
+  const [repositoryBootstrap, conversationHistory] = await Promise.all([
+    repositoryBootstrapPromise,
+    conversationHistoryPromise,
+  ]);
   const infisicalAuth = await reconcileInfisicalSandboxAuth({
     sandbox,
     workspaceId: session.workspaceId,
@@ -434,34 +444,40 @@ export async function runClaudeCodeChatTurn(input: {
     await checkAbort();
 
     executionStage = "write_prompt";
-    const task = input.recovery
-      ? buildClaudeChatRecoveryTask({
-          prompt: turn.prompt,
-          githubAvailable: Boolean(github),
-          actionsAvailable: actionToolsEnabled,
-          artifactsAvailable: artifactToolsEnabled,
-          repositoryBootstrapPrompt: combineSandboxPromptFragments(
-            repositoryBootstrap.promptFragment,
-            infisicalAuth.promptFragment,
-          ),
-          previousProgress: summarizeCodexChatRecoveryProgress(initialParts),
-          attachmentPaths: materializedAttachments.paths,
-          skillPaths: invokedSkillPaths,
-          taskContext,
-        })
-      : buildClaudeChatTask({
-          prompt: turn.prompt,
-          githubAvailable: Boolean(github),
-          actionsAvailable: actionToolsEnabled,
-          artifactsAvailable: artifactToolsEnabled,
-          repositoryBootstrapPrompt: combineSandboxPromptFragments(
-            repositoryBootstrap.promptFragment,
-            infisicalAuth.promptFragment,
-          ),
-          attachmentPaths: materializedAttachments.paths,
-          skillPaths: invokedSkillPaths,
-          taskContext,
-        });
+    const buildTask = (history: readonly CodingChatHistoryMessage[]) =>
+      input.recovery
+        ? buildClaudeChatRecoveryTask({
+            prompt: turn.prompt,
+            githubAvailable: Boolean(github),
+            actionsAvailable: actionToolsEnabled,
+            artifactsAvailable: artifactToolsEnabled,
+            repositoryBootstrapPrompt: combineSandboxPromptFragments(
+              repositoryBootstrap.promptFragment,
+              infisicalAuth.promptFragment,
+            ),
+            previousProgress: summarizeCodexChatRecoveryProgress(initialParts),
+            attachmentPaths: materializedAttachments.paths,
+            skillPaths: invokedSkillPaths,
+            conversationHistory: history,
+            taskContext,
+          })
+        : buildClaudeChatTask({
+            prompt: turn.prompt,
+            githubAvailable: Boolean(github),
+            actionsAvailable: actionToolsEnabled,
+            artifactsAvailable: artifactToolsEnabled,
+            repositoryBootstrapPrompt: combineSandboxPromptFragments(
+              repositoryBootstrap.promptFragment,
+              infisicalAuth.promptFragment,
+            ),
+            attachmentPaths: materializedAttachments.paths,
+            skillPaths: invokedSkillPaths,
+            conversationHistory: history,
+            taskContext,
+          });
+    const resumeSessionId = sandboxReplaced ? null : session.codexThreadId;
+    const bootstrapTask = buildTask(conversationHistory);
+    const task = resumeSessionId ? buildTask([]) : bootstrapTask;
     const promptPath = `${CLAUDE_CHAT_PROMPTS_ROOT}/prompt-${turn.id}.txt`;
     await sandbox.files.write(promptPath, task);
     await checkAbort();
@@ -492,7 +508,6 @@ export async function runClaudeCodeChatTurn(input: {
     };
 
     executionStage = "run_turn";
-    const resumeSessionId = sandboxReplaced ? null : session.codexThreadId;
     const runOnce = (resume: string | null) => {
       normalizer.beginRun();
       return runClaudeCodeCliProcess({
@@ -560,6 +575,7 @@ export async function runClaudeCodeChatTurn(input: {
         leaseOwner,
         setSql: sql`codex_thread_id = NULL, updated_at = ${new Date()}`,
       });
+      await sandbox.files.write(promptPath, bootstrapTask);
       runResult = await runOnce(null);
       summary = normalizer.summary();
     }
@@ -920,6 +936,7 @@ function buildClaudeChatTask(input: {
   repositoryBootstrapPrompt: string;
   attachmentPaths: string[];
   skillPaths: string[];
+  conversationHistory: readonly CodingChatHistoryMessage[];
   taskContext?: TaskTurnContext | undefined;
 }) {
   return [
@@ -935,6 +952,7 @@ function buildClaudeChatTask(input: {
     "Answer conversationally. Run commands or edit files only when the message calls for it, and keep replies concise unless the user asks for detail.",
     CLAUDE_CHAT_SCHEDULE_WAKEUP_CONTRACT,
     ...claudeChatSkillPromptLines(input.skillPaths),
+    ...codingChatHistoryPromptLines(input.conversationHistory),
     "",
     "<user_message>",
     input.prompt || "Review the attached file(s).",
@@ -954,6 +972,7 @@ function buildClaudeChatRecoveryTask(input: {
   previousProgress: string;
   attachmentPaths: string[];
   skillPaths: string[];
+  conversationHistory: readonly CodingChatHistoryMessage[];
   taskContext?: TaskTurnContext | undefined;
 }) {
   return [
@@ -970,6 +989,7 @@ function buildClaudeChatRecoveryTask(input: {
     "If the interrupted work already finished, report the final result. If additional work is needed, finish it and then answer concisely.",
     CLAUDE_CHAT_SCHEDULE_WAKEUP_CONTRACT,
     ...claudeChatSkillPromptLines(input.skillPaths),
+    ...codingChatHistoryPromptLines(input.conversationHistory),
     "",
     "<original_user_message>",
     input.prompt || "Review the attached file(s).",
