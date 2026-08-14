@@ -5,6 +5,8 @@ import {
   createOpenCompanyClient,
   type MessageEngine,
   MessageEngineSchema,
+  PROTOCOL_VERSION,
+  PROTOCOL_VERSION_HEADER,
   type RunEventDto,
   streamRunEvents,
 } from "@opencompany/protocol";
@@ -109,7 +111,10 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
     const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.apiFetchImpl });
     const response = await client.v1.messages.$post(
       {
-        header: { "idempotency-key": idempotencyKey(latest.id) },
+        header: {
+          "idempotency-key": idempotencyKey(latest.id),
+          [PROTOCOL_VERSION_HEADER]: PROTOCOL_VERSION,
+        },
         json: body,
       },
       input.abortSignal ? { init: { signal: input.abortSignal } } : undefined,
@@ -310,7 +315,10 @@ export async function startHeadlessBackgroundChat(
   const apiFetchImpl = createHeadlessChatApiFetch({ baseUrl, fetch: fetchImpl });
   const client = createOpenCompanyClient(baseUrl, { fetch: apiFetchImpl });
   const response = await client.v1.messages.$post({
-    header: { "idempotency-key": idempotencyKey(input.clientMessageId) },
+    header: {
+      "idempotency-key": idempotencyKey(input.clientMessageId),
+      [PROTOCOL_VERSION_HEADER]: PROTOCOL_VERSION,
+    },
     json: {
       clientConversationId: input.clientConversationId,
       clientMessageId: input.clientMessageId,

@@ -53,7 +53,9 @@ import {
   decodePresentationCursor,
   encodeEventCursor,
   encodePresentationCursor,
+  PROTOCOL_UPDATE_REQUIRED_MESSAGE,
   PROTOCOL_VERSION,
+  PROTOCOL_VERSION_HEADER,
   PresentationDeltaEventSchema,
   RunEventSchema,
   type V1RouteHandlers,
@@ -111,7 +113,13 @@ const HEARTBEAT_MS = 15_000;
 const TERMINAL_RUN_STATUSES = new Set(["paused", "completed", "failed", "canceled"]);
 const MULTIPART_ENVELOPE_BYTES = 64 * 1024;
 const SAFE_BROWSER_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-const CORS_ALLOW_HEADERS = ["Accept", "Content-Type", "Idempotency-Key", "Last-Event-ID"];
+const CORS_ALLOW_HEADERS = [
+  "Accept",
+  "Content-Type",
+  "Idempotency-Key",
+  "Last-Event-ID",
+  "X-OpenCompany-Protocol-Version",
+];
 const CORS_EXPOSE_HEADERS = [
   "Content-Disposition",
   "Electric-Cursor",
@@ -2156,6 +2164,7 @@ export function createApiApp(input: CreateApiAppInput) {
                   c.header("Set-Cookie", authentication.refreshedSessionCookie);
                 }
               }
+              enforceMessageProtocolVersion(c);
               await next();
               span.setAttributes({ "goat.http_status_code": c.res.status });
               return c.res;
@@ -2211,6 +2220,16 @@ export function createApiApp(input: CreateApiAppInput) {
     },
     defaultHook(result, c) {
       if (result.success) return;
+      logger.warn("API request validation failed", {
+        event: "opencompany.api_request_validation_failed",
+        request_id: requestIdFrom(c),
+        method: c.req.method,
+        path: c.req.path,
+        validation_issues: result.error.issues.slice(0, 20).map((issue) => ({
+          code: issue.code,
+          path: issue.path.map(String).join(".") || "(root)",
+        })),
+      });
       return apiErrorResponse(
         c,
         new ApiError(400, "invalid_request", "Request validation failed."),
@@ -2230,6 +2249,7 @@ export function createApiApp(input: CreateApiAppInput) {
       ok: true,
       service: "opencompany-api",
       environment: process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
+      protocolVersion: PROTOCOL_VERSION,
       release:
         process.env.RENDER_GIT_COMMIT ??
         process.env.OBSERVABILITY_RELEASE ??
@@ -2468,6 +2488,21 @@ function enforceCookieMutationOrigin(request: Request, browserOrigins: readonly 
       "Cookie-authenticated mutations require an allowed browser origin.",
     );
   }
+}
+
+function enforceMessageProtocolVersion(c: Context) {
+  if (c.req.method !== "POST" || c.req.path !== "/v1/messages") return;
+  const receivedProtocolVersion = c.req.header(PROTOCOL_VERSION_HEADER);
+  if (receivedProtocolVersion === PROTOCOL_VERSION) return;
+
+  logger.warn("Canonical Chat protocol version rejected", {
+    event: "opencompany.api_protocol_version_rejected",
+    request_id: requestIdFrom(c),
+    path: c.req.path,
+    expected_protocol_version: PROTOCOL_VERSION,
+    received_protocol_version: receivedProtocolVersion ?? "missing",
+  });
+  throw new ApiError(400, "invalid_request", PROTOCOL_UPDATE_REQUIRED_MESSAGE);
 }
 
 function isIdentityTierPath(path: string) {

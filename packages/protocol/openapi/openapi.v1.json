@@ -16257,6 +16257,17 @@
             "required": true,
             "name": "idempotency-key",
             "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0.0"
+              ]
+            },
+            "required": true,
+            "name": "x-opencompany-protocol-version",
+            "in": "header"
           }
         ],
         "requestBody": {

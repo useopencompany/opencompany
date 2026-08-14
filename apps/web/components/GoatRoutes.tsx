@@ -98,13 +98,14 @@ export function GoatHomeRoute({
     if (!chatId) return null;
     if (routeInitialChat?.id === chatId) return routeInitialChat;
     const summary = data.recentChats.find((chat) => chat.id === chatId);
+    if (!summary?.engine) return null;
     return {
       id: chatId,
-      title: summary?.title ?? "Goat",
-      model: summary?.model ?? DEFAULT_GOAT_MODEL,
-      engine: summary?.engine ?? "opencompany",
-      codexComposerSettings: summary?.codexComposerSettings ?? null,
-      codexRuntime: summary?.codexRuntime ?? null,
+      title: summary.title,
+      model: summary.model,
+      engine: summary.engine,
+      codexComposerSettings: summary.codexComposerSettings ?? null,
+      codexRuntime: summary.codexRuntime ?? null,
       messages: [],
     };
   }, [chatId, data.recentChats, routeInitialChat]);

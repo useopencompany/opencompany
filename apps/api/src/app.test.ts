@@ -25,6 +25,11 @@ import {
   WorkflowApplicationService,
   type WorkflowRepository,
 } from "@opencompany/core";
+import {
+  PROTOCOL_UPDATE_REQUIRED_MESSAGE,
+  PROTOCOL_VERSION,
+  PROTOCOL_VERSION_HEADER,
+} from "@opencompany/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { createApiApp } from "./app";
 import type { AttachmentUploadService } from "./attachments";
@@ -57,6 +62,14 @@ const actor: Actor = {
 };
 const createdAt = new Date("2026-08-10T20:00:00.000Z");
 
+function messageHeaders(idempotencyKey: string) {
+  return {
+    "Content-Type": "application/json",
+    "Idempotency-Key": idempotencyKey,
+    [PROTOCOL_VERSION_HEADER]: PROTOCOL_VERSION,
+  };
+}
+
 describe("canonical Hono API", () => {
   it("reports the deployed API release for expected-SHA health gates", async () => {
     const previousRelease = process.env.RENDER_GIT_COMMIT;
@@ -68,6 +81,7 @@ describe("canonical Hono API", () => {
       await expect(response.json()).resolves.toMatchObject({
         ok: true,
         service: "opencompany-api",
+        protocolVersion: PROTOCOL_VERSION,
         release: "api-release-sha",
         renderGitCommit: "api-release-sha",
       });
@@ -134,7 +148,7 @@ describe("canonical Hono API", () => {
     const app = testApp(repository);
     const invalid = await app.request("/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "send_1" },
+      headers: messageHeaders("send_1"),
       body: JSON.stringify({
         content: "",
         engine: { type: "opencompany", schemaVersion: 1 },
@@ -1083,13 +1097,17 @@ describe("canonical Hono API", () => {
       headers: {
         Origin: "https://my.opencompany.chat",
         "Access-Control-Request-Method": "POST",
-        "Access-Control-Request-Headers": "content-type,idempotency-key",
+        "Access-Control-Request-Headers":
+          "content-type,idempotency-key,x-opencompany-protocol-version",
       },
     });
     expect(allowed.status).toBe(204);
     expect(allowed.headers.get("access-control-allow-origin")).toBe("https://my.opencompany.chat");
     expect(allowed.headers.get("access-control-allow-credentials")).toBe("true");
     expect(allowed.headers.get("access-control-allow-headers")).toContain("Idempotency-Key");
+    expect(allowed.headers.get("access-control-allow-headers")).toContain(
+      "X-OpenCompany-Protocol-Version",
+    );
     expect(allowed.headers.get("access-control-allow-methods")).toContain("PUT");
     expect(allowed.headers.get("access-control-allow-methods")).toContain("DELETE");
 
@@ -1113,7 +1131,7 @@ describe("canonical Hono API", () => {
       content: "Hello",
       engine: { type: "opencompany", schemaVersion: 1 },
     });
-    const headers = { "Content-Type": "application/json", "Idempotency-Key": "send_1" };
+    const headers = messageHeaders("send_1");
 
     for (const origin of [undefined, "https://attacker.example"]) {
       const response = await app.request("/v1/messages", {
@@ -1141,6 +1159,36 @@ describe("canonical Hono API", () => {
     expect(bearer.status).toBe(202);
   });
 
+  it.each([
+    undefined,
+    "0.9.0",
+  ])("rejects stale Message clients with an actionable refresh error (%s)", async (protocolVersion) => {
+    const repository = fakeRepository();
+    const response = await testApp(repository).request("/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": "send_stale_1",
+        ...(protocolVersion ? { [PROTOCOL_VERSION_HEADER]: protocolVersion } : {}),
+      },
+      body: JSON.stringify({
+        content: "Hello",
+        engine: "opencompany",
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "invalid_request",
+        message: PROTOCOL_UPDATE_REQUIRED_MESSAGE,
+        retryable: false,
+      },
+      meta: { protocolVersion: PROTOCOL_VERSION },
+    });
+    expect(repository.lastCommand).toBeNull();
+  });
+
   it("exposes durable cursor and Electric headers to the configured browser origin", async () => {
     const app = testApp(fakeRepository(), {
       browserOrigins: ["https://my.opencompany.chat"],
@@ -1162,7 +1210,7 @@ describe("canonical Hono API", () => {
     const app = testApp(repository);
     const response = await app.request("/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "send_1" },
+      headers: messageHeaders("send_1"),
       body: JSON.stringify({
         content: "Hello",
         engine: { type: "opencompany", schemaVersion: 1 },
@@ -1198,7 +1246,7 @@ describe("canonical Hono API", () => {
     });
     const response = await app.request("/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "send_codex_1" },
+      headers: messageHeaders("send_codex_1"),
       body: JSON.stringify({
         clientConversationId: "conversation_codex_1",
         content: "Build the feature",
@@ -1241,7 +1289,7 @@ describe("canonical Hono API", () => {
       }),
     }).request("/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "send_claude_1" },
+      headers: messageHeaders("send_claude_1"),
       body: JSON.stringify({
         content: "Build the feature",
         engine: {
@@ -1259,7 +1307,7 @@ describe("canonical Hono API", () => {
   it("rejects a follow-up that tries to switch Conversation engines", async () => {
     const response = await testApp(fakeRepository()).request("/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "send_switch_1" },
+      headers: messageHeaders("send_switch_1"),
       body: JSON.stringify({
         conversationId: "conversation_1",
         content: "Continue",
@@ -1284,7 +1332,7 @@ describe("canonical Hono API", () => {
     const app = testApp(repository, { resolveAutoModel });
     const response = await app.request("/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "send_auto_1" },
+      headers: messageHeaders("send_auto_1"),
       body: JSON.stringify({
         clientConversationId: "conversation_auto",
         clientMessageId: "message_auto",
@@ -1316,7 +1364,7 @@ describe("canonical Hono API", () => {
   it("fails closed when Auto is not composed into the API", async () => {
     const response = await testApp(fakeRepository()).request("/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "send_auto_2" },
+      headers: messageHeaders("send_auto_2"),
       body: JSON.stringify({
         content: "Route this",
         engine: { type: "opencompany", schemaVersion: 1 },
@@ -1334,7 +1382,7 @@ describe("canonical Hono API", () => {
     const resolveAutoModel = vi.fn();
     const response = await testApp(fakeRepository(), { resolveAutoModel }).request("/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "send_auto_3" },
+      headers: messageHeaders("send_auto_3"),
       body: JSON.stringify({
         content: "Route this",
         engine: {
@@ -1752,7 +1800,7 @@ describe("canonical Hono API", () => {
 
     const message = await app.request("/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "message-title-1" },
+      headers: messageHeaders("message-title-1"),
       body: JSON.stringify({
         content: "Prepare a launch plan",
         engine: { type: "opencompany", schemaVersion: 1 },
@@ -1800,7 +1848,7 @@ describe("canonical Hono API", () => {
 
     const response = await app.request("/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "message-replay-1" },
+      headers: messageHeaders("message-replay-1"),
       body: JSON.stringify({
         content: "Prepare a launch plan",
         engine: { type: "opencompany", schemaVersion: 1 },

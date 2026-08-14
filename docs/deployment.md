@@ -45,18 +45,23 @@ compatibility tables or rewrite migration history.
 
 ## Health checks and recovery
 
-Web, API, and runner `/healthz` responses include the deployed release. `scripts/release-smoke.mjs`
-requires the expected SHA, preventing a healthy but stale deployment from passing. A failed Vercel
-promotion cancels in-flight Render deploys where possible.
+Web and API `/healthz` responses include both the deployed release and canonical protocol version;
+the runner reports its deployed release. `scripts/release-smoke.mjs` requires the expected SHA,
+preventing a healthy but stale deployment from passing. A failed Vercel promotion cancels in-flight
+Render deploys where possible.
 
 Application rollback redeploys a known-good commit through the same protected release workflow.
 Database migrations remain forward-only. Accepted Runs keep their stable IDs and continue through
 the API/runner path; do not reintroduce a web execution path or move work to a retired queue.
 
-Production browser traffic connects to `https://api.opencompany.chat`. Web and API share
-`WORKOS_COOKIE_DOMAIN=opencompany.chat`, and `API_BROWSER_ORIGINS` restricts credentialed browser
-access. `NEXT_PUBLIC_GOAT_API_ORIGIN` is compiled into the browser bundle; Server Components use
-`GOAT_API_ORIGIN`.
+Canonical Chat is fix-forward. Existing Runs continue to settle through the API and runner while a
+corrective release is prepared. Production browser traffic connects directly to
+`https://api.opencompany.chat`; the web and API runtimes share
+`WORKOS_COOKIE_DOMAIN=opencompany.chat`, and the API allows credentialed CORS only from the
+production web origin. `NEXT_PUBLIC_GOAT_API_ORIGIN` is compiled into the browser bundle, while
+Server Components use `GOAT_API_ORIGIN`. Message commands require the matching
+`X-OpenCompany-Protocol-Version` header. A hard protocol cutover intentionally rejects already-open
+stale tabs with a refresh instruction; it does not normalize their payload through retired schemas.
 
 External webhook or OAuth recovery may require restoring a provider dashboard URL. Historical web
 URLs intentionally remain stable where the web app is a byte-preserving relay to API-owned ingress;
