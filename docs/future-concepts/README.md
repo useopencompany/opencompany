@@ -10,10 +10,10 @@ the owning spec, architecture doc, migration plan, or code comments.
 
 ## Concepts
 
-- [Open-source Readiness](./oss-readiness.md) - decision document for OpenCompany's
+- [Open-source Readiness](./oss-readiness.md) - decision document for opencompany's
   public naming boundary, monorepo layout, license and open scope, history safety,
   contributor model, and independently landable release sequence.
-- [OpenCompany Headless Core Architecture](./headless-core-architecture.md) -
+- [opencompany Headless Core Architecture](./headless-core-architecture.md) -
   reference architecture for the foundation refactor: product vocabulary,
   universal Runs, versioned API and stream contracts, Postgres durability,
   Electric read sync, and the minimal web/mobile monorepo shape.

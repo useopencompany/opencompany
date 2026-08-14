@@ -1,10 +1,10 @@
-# OpenCompany monorepo hygiene and open-source readiness
+# opencompany monorepo hygiene and open-source readiness
 
-- Status: Proposed decision document
+- Status: Owner decisions accepted; implementation pending
 - Date: 2026-08-14
-- Decision owner: OpenCompany owner
+- Decision owner: Repository owner
 - Predecessor: [#1203](https://github.com/useopencompany/opencompany-experimental/issues/1203)
-- Draft successor tracker:
+- Implementation tracker:
   [#1242](https://github.com/useopencompany/opencompany-experimental/issues/1242)
 - Completion evidence:
   [#1203 final comment](https://github.com/useopencompany/opencompany-experimental/issues/1203#issuecomment-5289844745)
@@ -21,19 +21,23 @@ application behavior and adapters live in `packages/core`, `packages/protocol`, 
 This project documents and presents that architecture; it does not reopen it.
 
 The remaining question is whether the repository around that architecture is safe, legible, and
-honest enough to make public. This document asks the owner to make six calls before any broad
-rename, move, deletion, relicensing, or visibility change begins.
+honest enough to make public. This document records the owner's six calls before any broad rename,
+move, deletion, relicensing, or visibility change begins.
 
-## Recommended decision sheet
+## Recorded decision sheet
 
-| Area | Recommended call | Owner decision |
+| Area | Accepted decision | Status |
 | --- | --- | --- |
-| Naming | Use OpenCompany for every public and code-facing name; retain legacy physical `goat.*` storage names. | Pending |
-| Layout | Keep the `apps/*` and `packages/*` architecture, improve its signposting, and extract the existing Fumadocs surface to `apps/docs`. | Pending |
-| Open boundary and license | Open the full engineering monorepo under Apache-2.0 after a provenance and asset audit. | Pending |
-| Secret and history safety | Scan a mirror of every ref with two detectors; rotate first and rewrite only when publication hygiene or sensitive data requires it. | Pending |
-| Contributor surface | Launch as maintainer-led OSS with curated external contributions and fully untrusted PR CI. | Pending |
-| Sequence | Land small gated slices; make repository visibility the final, explicitly approved operation. | Pending |
+| Naming | Write `opencompany` lowercase everywhere; hard-cut public, code, environment, and operational names with no Goat aliases; retain only legacy physical `goat.*` storage names. | Accepted 2026-08-14 |
+| Layout | Keep the `apps/*` and `packages/*` architecture, improve its signposting, and extract the existing Fumadocs surface to `apps/docs`. | Accepted 2026-08-14 |
+| Open boundary and license | Open the full engineering monorepo under Apache-2.0 after a provenance and asset audit. | Accepted 2026-08-14 |
+| Secret and history safety | Scan a mirror of every ref with two detectors; rotate first and rewrite only when publication hygiene or sensitive data requires it. | Accepted 2026-08-14 |
+| Contributor surface | Launch as maintainer-led OSS with sensible startup defaults, fully untrusted PR CI, and a policy review two to four weeks after publication. | Accepted 2026-08-14 |
+| Sequence | Land small gated slices; make repository visibility the final, explicitly approved operation. | Accepted 2026-08-14 |
+
+The written product name is always lowercase `opencompany`. Uppercase `OPENCOMPANY_*` is permitted
+only where environment-variable syntax requires uppercase; it is not a brand spelling. The only
+retained Goat namespace is the historical physical Postgres/migration compatibility boundary.
 
 Effort estimates below are engineering time, not elapsed calendar time. They exclude legal review,
 provider response time, and any incident response caused by a historical secret finding.
@@ -42,7 +46,7 @@ provider response time, and any incident response caused by a historical secret 
 
 ### Current state
 
-The product is OpenCompany, the GitHub organization is `useopencompany`, and all 22 workspace
+The product is `opencompany`, the GitHub organization is `useopencompany`, and all 22 workspace
 package manifests use the private `@opencompany/*` scope. `apps/runner` accurately describes the
 durable worker composition root. The accepted ADRs deliberately use the neutral public vocabulary
 Conversation, Message, Run, Task, Workflow, Actor, and Workspace.
@@ -67,15 +71,15 @@ migration history are data contracts.
 
 | Option | Benefits | Costs and risks |
 | --- | --- | --- |
-| Keep Goat everywhere | Lowest immediate change and deployment risk. | Makes a cold reader wonder whether Goat and OpenCompany are different products; turns a historical codename into a permanent public API. |
+| Keep Goat everywhere | Lowest immediate change and deployment risk. | Makes a cold reader wonder whether Goat and opencompany are different products; turns a historical codename into a permanent public API. |
 | Rename every Goat reference, including storage | Produces a perfectly uniform tree and database. | High-risk, low-value data migration; rewrites or layers compatibility across 215 migrations, tables, constraints, projections, provider configuration, and production secrets. It contradicts the additive/fix-forward posture of ADRs 0001–0003. |
 | Rename the public/code surface and retain physical compatibility names | Makes the contributor and self-hosting contract coherent without risking customer data or migration history. | Requires an explicit legacy boundary and a coordinated environment migration; some `goat` names remain visible to repository readers in storage code and historical ADRs. |
 
 ### Recommendation
 
-Choose the bounded rename.
+Accepted: use the bounded physical-storage exception with a hard public/code/operations cutover.
 
-- OpenCompany is the only product name in UI copy, current docs, examples, supported configuration,
+- opencompany is the only product name in UI copy, current docs, examples, supported configuration,
   package names, and non-historical code symbols. Historical ADRs and migrations remain honest.
 - Keep `apps/runner`. `runner` says what the process does and is already the accepted architecture;
   renaming it to a brand or to `worker` would lose information.
@@ -89,12 +93,12 @@ Choose the bounded rename.
   application/contract/adapter layering. Package READMEs and an enforced dependency map will make
   that story clearer than renaming `core` to another generic noun.
 - Make `OPENCOMPANY_*` the supported environment contract before the repository becomes public.
-  Add temporary reads for the corresponding `GOAT_*` names, migrate Vercel, Render, Infisical,
-  setup, docs, and release preflights, then remove aliases after two successful production releases
-  and evidence that no legacy name was read.
-- Replace the Infisical `/goat` path with runtime-aligned `/web` configuration during that same
-  controlled migration. Keep `/api`, `/runner`, and `/release`. This is an operational rename, not a
-  prerequisite for the code-only package PR.
+  Do not add application-level `GOAT_*` fallback reads. Pre-provision the new Vercel, Render, and
+  Infisical values, deploy an exact release that reads only the new names, verify every runtime, and
+  remove the old hosted values during the bounded cutover window.
+- Replace the Infisical `/goat` path with runtime-aligned `/web` during that same hard cutover. Keep
+  `/api`, `/runner`, and `/release`. The completed state contains no Goat environment or secret-store
+  namespace.
 - Permanently retain the physical `goat` Postgres schema, existing table/constraint names, stored
   compatibility values, and applied migration filenames. Document them once as a legacy physical
   namespace behind `packages/db`; do not burden every contributor-facing page with the history.
@@ -116,7 +120,7 @@ The cold-start experience does not yet match that architecture:
 
 - `apps/api`, `apps/web`, `apps/runner`, `packages/core`, `packages/protocol`, and `packages/db` have
   no local README explaining ownership, imports, or how to test them;
-- the root quick start assumes access to OpenCompany's Infisical and Neon projects;
+- the root quick start assumes access to opencompany's Infisical and Neon projects;
 - contributor/operator docs are split between root `docs/`, `apps/web/docs/`, and
   `apps/web/content/docs`;
 - Fumadocs is already installed in `apps/web`, and `/docs` is built as part of the main product
@@ -136,7 +140,7 @@ The cold-start experience does not yet match that architecture:
 
 ### Recommendation
 
-Preserve `apps/*` versus `packages/*` and make the dependency story explicit:
+Accepted: preserve `apps/*` versus `packages/*` and make the dependency story explicit:
 
 ```text
 apps/web       apps/docs
@@ -176,18 +180,19 @@ Land the following layout contract:
 
 A newcomer's first ten minutes should be deterministic:
 
-1. The root README states what OpenCompany is, shows the three-runtime diagram, links a live demo or
+1. The root README states what opencompany is, shows the three-runtime diagram, links a live demo or
    screenshot, and offers internal and community setup paths.
 2. `bun install --frozen-lockfile` and one documented community setup command work without access to
-   OpenCompany's Infisical, Neon, Vercel, or Render accounts. Provider-backed features may be
+   opencompany's Infisical, Neon, Vercel, or Render accounts. Provider-backed features may be
    disabled, but the web/API/runner path must boot and explain missing optional capabilities.
 3. `bun run dev:web` starts the supported local stack, and one smoke command verifies API and runner
    health without requiring production data.
 4. `CONTRIBUTING.md` tells the reader where a UI, API contract, application service, repository,
    worker, migration, and doc change belongs.
 
-Do not call the repository self-hostable until that community path is exercised from a clean clone
-on macOS and Linux by someone without company credentials.
+The initial promise is development-supported community setup, not production-grade self-hosting.
+Raise that promise only after the community path is exercised from a clean clone on macOS and Linux
+by someone without company credentials and its ongoing support is staffed.
 
 ## Decision 3: License and open boundary
 
@@ -224,9 +229,10 @@ document is an engineering recommendation, not legal advice.
 
 ### Recommendation
 
-Open the full engineering monorepo under Apache-2.0.
+Accepted: open the full engineering monorepo under Apache-2.0.
 
-The architecture, migrations, checks, and release automation are part of the product's credibility;
+This is the best default for the startup: the architecture, migrations, checks, and release
+automation are part of the product's credibility;
 hiding them would make the public tree less useful and create a costly mirror. Apache-2.0 preserves
 permissive commercial adoption while making the patent grant explicit for a company-led project
 that intends to accept outside contributions. If the owner wants a competitive-use restriction,
@@ -245,7 +251,7 @@ choose FSL/BUSL deliberately and call the launch source-available, not open sour
 - audit marketing and docs media for ownership and third-party license obligations. Keep authored
   marketing code/content in the repo; remove or separately license only assets that cannot be
   distributed under the repository license; and
-- publish a trademark policy for the OpenCompany name and logo. Apache-2.0 does not grant trademark
+- publish a trademark policy for the opencompany name and logo. Apache-2.0 does not grant trademark
   rights, so there is no need to hide the marketing application merely to protect the brand.
 
 Before changing `LICENSE`, confirm the company can relicense all historical contributions and add
@@ -282,8 +288,8 @@ actions still use mutable tags. The production environment has no protection rul
 
 ### Recommendation
 
-Create a temporary bare mirror after freezing pushes, fetch every branch and tag, and run both
-TruffleHog and Gitleaks across all reachable history. Store reports in a restricted incident
+Accepted: create a temporary bare mirror after freezing pushes, fetch every branch and tag, and run
+both TruffleHog and Gitleaks across all reachable history. Store reports in a restricted incident
 location, never as repository or public CI artifacts. Inventory current repository, organization,
 Actions, environment, deploy, OAuth, database, and provider credentials before triage so every
 finding has an owner and a revocation path. Record only detector, commit/path, credential owner,
@@ -311,9 +317,11 @@ erase it and rotate regardless.
 The public-repository gate is:
 
 - replace branch protection with or mirror it in a visible `main` ruleset: pull requests required,
-  branch current, four existing CI checks required, conversations resolved, one non-author approval,
-  stale approvals dismissed, CODEOWNER approval for `.github/`, auth, schema/migrations, release,
-  and security policy, admins enforced, and no force pushes or deletions;
+  branch current, four existing CI checks required, conversations resolved, stale approvals
+  dismissed, admins enforced, and no force pushes or deletions. External pull requests require one
+  maintainer approval; the owner may use an explicit ruleset bypass for owner-authored changes after
+  all required checks pass. Make critical-path CODEOWNER approval mandatory after a second active
+  maintainer is assigned;
 - keep squash-only merges for linear history. Do not require signed commits at launch; DCO sign-off,
   immutable action pins, protected merges, and review provide more value with less contributor
   friction;
@@ -358,11 +366,15 @@ typed client provide a natural example surface, but none is packaged for a newco
 
 ### Recommendation
 
-Launch as maintainer-led OSS. Explicitly welcome documentation, reproducible bug fixes, tests,
+Accepted: launch as maintainer-led OSS. Explicitly welcome documentation, reproducible bug fixes, tests,
 small UX improvements, and scoped integrations. Require an accepted issue or design discussion
 before architecture, schema, authentication, billing, deployment, or broad refactor work. Do not
 publish a performative `good first issue` backlog until maintainers can respond and merge promptly.
 The product roadmap and final design calls remain owner-led.
+
+Review these contribution and review defaults two to four weeks after publication using actual issue
+and pull-request volume. Until then, favor fast owner-led decisions over premature governance while
+keeping all untrusted-code and CI protections mandatory.
 
 Before launch, add:
 
@@ -405,23 +417,22 @@ history safety, contributor policy, and an effectively irreversible visibility c
 
 ### Recommendation
 
-Use the following order. No slice may rely on a future visibility change to be safe.
+Accepted: use the following order. No slice may rely on a future visibility change to be safe.
 
 | Slice | Work and exit gate | Owner decision? | Estimate |
 | --- | --- | --- | --- |
-| 0. Ratify this document | Record the six calls, license counsel/provenance owner, contribution owner, npm-scope owner, and public-launch approver. | Yes | 0.5–1 day |
+| 0. Record owners | The six policy calls are accepted. Record the license counsel/provenance owner, contribution owner, npm-scope owner, security incident owner, and public-launch approver. | Owner assignments | 0.5 day |
 | 1. History and content safety | Freeze/fetch all refs; run both history scanners; inventory personal/internal references, dependencies, media provenance, and project bindings; rotate/rewrite if required; add repository-level `.context/` ignore. Exit with sanitized evidence and no unresolved finding. | Owner only if a finding requires incident scope or history rewrite. | 2–4 days, incident work unbounded |
-| 2. Code-only naming | Rename user-facing/code-only Goat vocabulary and the four packages; update imports, generated artifacts, checks, and current docs. Do not touch physical schema, migration history, env names, or Infisical. | Approve exact package mapping. | 4–7 days |
-| 3. Environment and operations naming | Add `OPENCOMPANY_*` aliases, migrate setup/hosts/Infisical/release preflight, deploy, observe two releases, then remove `GOAT_*` aliases and `/goat`. | Approve compatibility window and production cutover. | 3–5 engineering days plus two releases |
-| 4. Layout, docs, and community setup | Add package/app READMEs and dependency map; extract Fumadocs to `apps/docs`; normalize provider/maintenance tooling; add the credential-free community setup and API example; test clean clones on macOS/Linux. | Approve supported self-hosting/maturity promise. | 6–10 days |
-| 5. License and contributor surface | Complete provenance/asset report; switch to Apache-2.0; add notices/trademark/DCO, README/CONTRIBUTING/security/conduct/forms, and maintainer ownership. | Yes: license, trademark, and contribution policy. | 2–4 days plus legal review |
-| 6. Public CI and repository controls | Harden/pin Actions, isolate fork CI, add dependency/license/docs/example gates, enable Dependabot/security features, configure ruleset/CODEOWNERS and production-environment protection. Prove a fork PR cannot access secrets or deploy. | Approve review and deploy policy. | 2–4 days |
+| 2. Code-only naming | Rename user-facing/code-only Goat vocabulary and the four packages; update imports, generated artifacts, checks, and current docs. Do not touch physical schema, migration history, env names, or Infisical. | Package mapping accepted | 4–7 days |
+| 3. Environment and operations naming | Pre-provision `OPENCOMPANY_*` and `/web`, switch code/setup/hosts/release preflight in one exact release with no fallback reads, verify, then remove every `GOAT_*` hosted value and `/goat`. | Exact production cutover approval | 3–5 engineering days plus a cutover window |
+| 4. Layout, docs, and community setup | Add package/app READMEs and dependency map; extract Fumadocs to `apps/docs`; normalize provider/maintenance tooling; add the credential-free community setup and API example; test clean clones on macOS/Linux. | Development-supported promise accepted | 6–10 days |
+| 5. License and contributor surface | Complete provenance/asset report; switch to Apache-2.0; add notices/trademark/DCO, README/CONTRIBUTING/security/conduct/forms, and maintainer ownership. | Apache-2.0 and maintainer-led model accepted; legal gate remains | 2–4 days plus legal review |
+| 6. Public CI and repository controls | Harden/pin Actions, isolate fork CI, add dependency/license/docs/example gates, enable Dependabot/security features, configure ruleset/CODEOWNERS and production-environment protection. Prove a fork PR cannot access secrets or deploy. | Startup defaults accepted; review after launch | 2–4 days |
 | 7. Publication | Rerun full mirror scans and clean-clone checks, capture a repository/settings backup, review the exact tracked tree, switch visibility, verify clone/docs/issues/security reporting, and monitor the first public CI/deploy cycle. | Yes; this is the final irreversible call. | 1–2 days |
 
-Slices 1–4 and most of 6 are mechanical after their narrow policy choices. Slices 0, 5, and 7 must
-not proceed on inferred consent. If the owner retains MIT, keeps the `/goat` Infisical name, or
-chooses product-only publication, revise the affected slices before implementation rather than
-quietly mixing recommendations.
+Slices 1–4 and most of 6 are mechanical under the recorded decisions. Legal/provenance clearance,
+any incident response, the exact production environment cutover, and the final visibility change
+remain explicit gates. Revisit contributor and review policy two to four weeks after publication.
 
 ## Project non-goals
 
