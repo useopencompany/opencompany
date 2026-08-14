@@ -86,7 +86,7 @@ body {
   }
 }
 
-@keyframes goat-timer-dot {
+@keyframes opencompany-timer-dot {
   0%,
   100% {
     opacity: 0.35;
@@ -101,7 +101,7 @@ body {
  * The flip lives in the last ~16% of the cycle so it reads as an occasional
  * flourish rather than constant motion. Mirrors the marketing site's mark.
  */
-@keyframes goat-mark-spin {
+@keyframes opencompany-mark-spin {
   0%,
   84% {
     transform: perspective(200px) rotateY(0);
@@ -111,13 +111,13 @@ body {
   }
 }
 
-.animate-goat-mark-spin {
+.animate-opencompany-mark-spin {
   transform-origin: 50% 50%;
-  animation: goat-mark-spin 5s ease-in-out infinite;
+  animation: opencompany-mark-spin 5s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-goat-mark-spin {
+  .animate-opencompany-mark-spin {
     animation: none;
   }
 }

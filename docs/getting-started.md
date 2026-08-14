@@ -41,7 +41,7 @@ development values, and `bun run setup:stripe` refreshes local Stripe configurat
 
 `bun run dev` and `bun run dev:web` start the same current stack:
 
-- the OpenCompany web app, normally at `https://localhost:3443`;
+- the opencompany web app, normally at `https://localhost:3443`;
 - the product API, normally at `http://localhost:3001`;
 - the runner, normally at `http://localhost:3040`;
 - Stripe CLI forwarding to the web app's unchanged `/api/stripe/webhook` relay, which streams to

@@ -1,6 +1,6 @@
+import { chatTitleFromPrompt, generateChatTitle } from "@opencompany/agent/chat-title";
 import type { Actor } from "@opencompany/core";
-import { goatChatMessages, goatChatSessions } from "@opencompany/db/goat-schema";
-import { generateGoatChatTitle, goatChatTitleFromPrompt } from "@opencompany/goat-agent/chat-title";
+import { chatMessages, chatSessions } from "@opencompany/db/product-schema";
 import { and, asc, eq, isNull } from "drizzle-orm";
 
 export type ChatTitleGenerationResult = {
@@ -27,49 +27,47 @@ export function createChatTitleService(input: {
       if (!apiKey) return { conversationId, title: null, generated: false };
 
       const [session] = await input.db
-        .select({ id: goatChatSessions.id, userWorkosId: goatChatSessions.userWorkosId })
-        .from(goatChatSessions)
+        .select({ id: chatSessions.id, userWorkosId: chatSessions.userWorkosId })
+        .from(chatSessions)
         .where(
           and(
-            eq(goatChatSessions.id, conversationId),
-            eq(goatChatSessions.userWorkosId, actor.userId),
-            eq(goatChatSessions.kind, "chat"),
-            isNull(goatChatSessions.closedAt),
+            eq(chatSessions.id, conversationId),
+            eq(chatSessions.userWorkosId, actor.userId),
+            eq(chatSessions.kind, "chat"),
+            isNull(chatSessions.closedAt),
           ),
         )
         .limit(1);
       if (!session) return { conversationId, title: null, generated: false };
 
       const [firstMessage] = await input.db
-        .select({ id: goatChatMessages.id, content: goatChatMessages.content })
-        .from(goatChatMessages)
-        .where(
-          and(eq(goatChatMessages.sessionId, conversationId), eq(goatChatMessages.role, "user")),
-        )
-        .orderBy(asc(goatChatMessages.createdAt))
+        .select({ id: chatMessages.id, content: chatMessages.content })
+        .from(chatMessages)
+        .where(and(eq(chatMessages.sessionId, conversationId), eq(chatMessages.role, "user")))
+        .orderBy(asc(chatMessages.createdAt))
         .limit(1);
       if (!firstMessage || firstMessage.id !== messageId) {
         return { conversationId, title: null, generated: false };
       }
 
-      const title = await generateGoatChatTitle({
+      const title = await generateChatTitle({
         content: firstMessage.content,
-        fallbackTitle: goatChatTitleFromPrompt(firstMessage.content),
+        fallbackTitle: chatTitleFromPrompt(firstMessage.content),
         apiKey,
         userWorkosId: actor.userId,
         chatSessionId: conversationId,
       });
       const [updated] = await input.db
-        .update(goatChatSessions)
+        .update(chatSessions)
         .set({ title, updatedAt: new Date() })
         .where(
           and(
-            eq(goatChatSessions.id, conversationId),
-            eq(goatChatSessions.userWorkosId, actor.userId),
-            isNull(goatChatSessions.closedAt),
+            eq(chatSessions.id, conversationId),
+            eq(chatSessions.userWorkosId, actor.userId),
+            isNull(chatSessions.closedAt),
           ),
         )
-        .returning({ id: goatChatSessions.id });
+        .returning({ id: chatSessions.id });
       return { conversationId, title: updated ? title : null, generated: Boolean(updated) };
     },
   };

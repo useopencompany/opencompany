@@ -1,6 +1,6 @@
 # opencompany
 
-OpenCompany is an AI workspace with chat, durable tasks and workflows,
+opencompany is an AI workspace with chat, durable tasks and workflows,
 connected integrations, Brain knowledge, and cloud coding sessions.
 
 ## Stack
@@ -21,7 +21,7 @@ bun run dev:web
 
 `bun run setup` pulls development values from Infisical, creates or reuses a Neon branch tied to
 the current Git branch, runs migrations, and writes local app env files. `bun run dev` and
-`bun run dev:web` both start the OpenCompany web app, canonical API, runner, Stripe CLI webhook
+`bun run dev:web` both start the opencompany web app, canonical API, runner, Stripe CLI webhook
 forwarding, Electric, and the local HTTPS/tunnel support needed by integrations.
 
 Live Infisical and Vercel project bindings are local, gitignored state. The tracked example files
@@ -31,15 +31,15 @@ See [Getting started](./docs/getting-started.md) for prerequisites and troublesh
 
 ## Repository layout
 
-- `apps/web` — the OpenCompany Next.js presentation client and stable public relay surface.
+- `apps/web` — the opencompany Next.js presentation client and stable public relay surface.
 - `apps/api` — the canonical typed API, application services, and provider ingress handlers.
-- `apps/runner` — Goat background workers, durable turns, Brain ingestion, and cloud coding.
+- `apps/runner` — opencompany background workers, durable turns, Brain ingestion, and cloud coding.
 - `apps/docs` — user and API documentation built with Fumadocs.
-- `apps/stripe-webhooks` — local Stripe CLI forwarding for Goat billing.
+- `apps/stripe-webhooks` — local Stripe CLI forwarding for opencompany billing.
 - `apps/marketing` — the public marketing site.
 - `apps/design-system` and `packages/ui` — shared UI development.
-- `packages/db` — Goat schema plus isolated billing and LLM-broker compatibility schemas.
-- `packages/goat-*` — Goat agent, Brain, observability, and wiki support.
+- `packages/db` — opencompany schema plus isolated billing and LLM-broker compatibility schemas.
+- `packages/goat-*` — opencompany agent, Brain, observability, and wiki support.
 - `drizzle` — immutable migration history.
 - `scripts` — local setup, Neon branching, release, and operational checks.
 
@@ -59,7 +59,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the review and verification expecta
 
 ## Documentation
 
-- [OpenCompany system map](./apps/web/docs/README.md)
+- [opencompany system map](./apps/web/docs/README.md)
 - [Getting started](./docs/getting-started.md)
 - [Architecture](./docs/architecture.md)
 - [Database and migrations](./docs/database.md)

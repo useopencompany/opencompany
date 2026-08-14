@@ -1,11 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { GoatFathomProviderState } from "@/lib/integration-state";
+import type { FathomProviderState } from "@/lib/integration-state";
 import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
 export type FathomConnectActionResult =
-  | { ok: true; state: GoatFathomProviderState }
+  | { ok: true; state: FathomProviderState }
   | { ok: false; error: string };
 
 export async function saveFathomApiKeyAction(apiKey: string): Promise<FathomConnectActionResult> {
@@ -25,11 +25,11 @@ export async function saveFathomApiKeyAction(apiKey: string): Promise<FathomConn
         error: await serverApiErrorMessage(response, "Could not save the Fathom API key."),
       };
     }
-    const data = (await response.json()).data as { state: GoatFathomProviderState };
+    const data = (await response.json()).data as { state: FathomProviderState };
     revalidatePath("/", "layout");
     return { ok: true, state: data.state };
   } catch (error) {
-    console.error("[goat-fathom] Failed to save Fathom API key", error);
+    console.error("[opencompany-fathom] Failed to save Fathom API key", error);
     return { ok: false, error: "Could not save the Fathom API key." };
   }
 }

@@ -1,4 +1,4 @@
-import { GoatBillingPanel } from "@/components/GoatBillingPanel";
+import { BillingPanel } from "@/components/BillingPanel";
 import { serverApiClient, serverApiError } from "@/lib/server-api-client";
 
 export default async function WorkspaceBillingSettingsPage({
@@ -11,7 +11,7 @@ export default async function WorkspaceBillingSettingsPage({
   if (!response.ok) throw await serverApiError(response, "Could not load workspace billing.");
   const data = (await response.json()).data;
   return (
-    <GoatBillingPanel
+    <BillingPanel
       data={data}
       topupResult={
         params.topup === "success" ? "success" : params.topup === "cancelled" ? "cancelled" : null

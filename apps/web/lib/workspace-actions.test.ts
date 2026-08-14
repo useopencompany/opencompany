@@ -1,15 +1,15 @@
 import { revalidatePath } from "next/cache";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { serverApiErrorMessage } from "@/lib/server-api-client";
-import { activateGoatWorkspace } from "@/lib/workspace-session";
+import { activateWorkspace } from "@/lib/workspace-session";
 import {
-  createGoatWorkspaceAction,
-  getGoatWorkspaceSettingsAction,
-  inviteToGoatWorkspaceAction,
-  removeGoatWorkspaceMemberAction,
-  revokeGoatWorkspaceInvitationAction,
-  switchGoatWorkspaceAction,
-  updateGoatWorkspaceNameAction,
+  createWorkspaceAction,
+  getWorkspaceSettingsAction,
+  inviteToWorkspaceAction,
+  removeWorkspaceMemberAction,
+  revokeWorkspaceInvitationAction,
+  switchWorkspaceAction,
+  updateWorkspaceNameAction,
 } from "./workspace-actions";
 
 const mocks = vi.hoisted(() => ({
@@ -56,11 +56,11 @@ vi.mock("@/lib/server-api-client", () => ({
 }));
 
 vi.mock("@/lib/workspace-session", () => ({
-  activateGoatWorkspace: vi.fn(),
-  GOAT_ACTIVE_BRAIN_COOKIE: "goat-active-brain",
+  activateWorkspace: vi.fn(),
+  ACTIVE_BRAIN_COOKIE: "goat-active-brain",
 }));
 
-const activateGoatWorkspaceMock = vi.mocked(activateGoatWorkspace);
+const activateWorkspaceMock = vi.mocked(activateWorkspace);
 const revalidatePathMock = vi.mocked(revalidatePath);
 const serverApiErrorMessageMock = vi.mocked(serverApiErrorMessage);
 
@@ -70,23 +70,23 @@ const activation = {
   brainId: "brain_general",
 };
 
-describe("createGoatWorkspaceAction", () => {
+describe("createWorkspaceAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.createWorkspace.mockResolvedValue(Response.json({ data: activation }));
-    activateGoatWorkspaceMock.mockResolvedValue(undefined);
+    activateWorkspaceMock.mockResolvedValue(undefined);
   });
 
   it("validates the organization name before calling the API", async () => {
-    await expect(createGoatWorkspaceAction("   ")).resolves.toEqual({
+    await expect(createWorkspaceAction("   ")).resolves.toEqual({
       ok: false,
       error: "Name cannot be empty.",
     });
-    await expect(createGoatWorkspaceAction(null)).resolves.toEqual({
+    await expect(createWorkspaceAction(null)).resolves.toEqual({
       ok: false,
       error: "Name cannot be empty.",
     });
-    await expect(createGoatWorkspaceAction("x".repeat(81))).resolves.toEqual({
+    await expect(createWorkspaceAction("x".repeat(81))).resolves.toEqual({
       ok: false,
       error: "Name is too long (max 80 chars).",
     });
@@ -94,7 +94,7 @@ describe("createGoatWorkspaceAction", () => {
   });
 
   it("creates through the canonical API before activating the WorkOS session", async () => {
-    await expect(createGoatWorkspaceAction("  Analytical Co  ")).resolves.toEqual({
+    await expect(createWorkspaceAction("  Analytical Co  ")).resolves.toEqual({
       ok: true,
       workspaceId: "goat_ws_new",
     });
@@ -104,7 +104,7 @@ describe("createGoatWorkspaceAction", () => {
         name: "Analytical Co",
       },
     });
-    expect(activateGoatWorkspaceMock).toHaveBeenCalledWith({
+    expect(activateWorkspaceMock).toHaveBeenCalledWith({
       workspaceId: "goat_ws_new",
       workosOrganizationId: "org_new",
       brainId: "brain_general",
@@ -115,17 +115,17 @@ describe("createGoatWorkspaceAction", () => {
   it("preserves API errors without activating a workspace", async () => {
     mocks.createWorkspace.mockResolvedValueOnce(Response.json({}, { status: 409 }));
     serverApiErrorMessageMock.mockResolvedValueOnce("Hobby includes one workspace.");
-    await expect(createGoatWorkspaceAction("Another workspace")).resolves.toEqual({
+    await expect(createWorkspaceAction("Another workspace")).resolves.toEqual({
       ok: false,
       error: "Hobby includes one workspace.",
     });
-    expect(activateGoatWorkspaceMock).not.toHaveBeenCalled();
+    expect(activateWorkspaceMock).not.toHaveBeenCalled();
   });
 
   it("keeps a durable workspace when session activation fails", async () => {
-    activateGoatWorkspaceMock.mockRejectedValue(new Error("session refresh unavailable"));
+    activateWorkspaceMock.mockRejectedValue(new Error("session refresh unavailable"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    await expect(createGoatWorkspaceAction("Analytical Co")).resolves.toEqual({
+    await expect(createWorkspaceAction("Analytical Co")).resolves.toEqual({
       ok: false,
       error:
         "The organization was created, but could not be activated. Please try switching to it.",
@@ -135,19 +135,19 @@ describe("createGoatWorkspaceAction", () => {
   });
 });
 
-describe("switchGoatWorkspaceAction", () => {
+describe("switchWorkspaceAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.switchWorkspace.mockResolvedValue(Response.json({ data: activation }));
-    activateGoatWorkspaceMock.mockResolvedValue(undefined);
+    activateWorkspaceMock.mockResolvedValue(undefined);
   });
 
   it("resolves access in the API before activating the WorkOS session", async () => {
-    await expect(switchGoatWorkspaceAction("goat_ws_new")).resolves.toEqual({ ok: true });
+    await expect(switchWorkspaceAction("goat_ws_new")).resolves.toEqual({ ok: true });
     expect(mocks.switchWorkspace).toHaveBeenCalledWith({
       param: { workspaceId: "goat_ws_new" },
     });
-    expect(activateGoatWorkspaceMock).toHaveBeenCalledWith({
+    expect(activateWorkspaceMock).toHaveBeenCalledWith({
       workspaceId: "goat_ws_new",
       workosOrganizationId: "org_new",
       brainId: "brain_general",
@@ -156,17 +156,17 @@ describe("switchGoatWorkspaceAction", () => {
 
   it("rejects an inaccessible workspace without touching the session", async () => {
     mocks.switchWorkspace.mockResolvedValueOnce(Response.json({}, { status: 404 }));
-    await expect(switchGoatWorkspaceAction("goat_ws_other")).resolves.toEqual({
+    await expect(switchWorkspaceAction("goat_ws_other")).resolves.toEqual({
       ok: false,
       error: "You do not have access to that workspace.",
     });
-    expect(activateGoatWorkspaceMock).not.toHaveBeenCalled();
+    expect(activateWorkspaceMock).not.toHaveBeenCalled();
   });
 
   it("returns a stable error for an ordinary AuthKit failure", async () => {
-    activateGoatWorkspaceMock.mockRejectedValue(new Error("session refresh unavailable"));
+    activateWorkspaceMock.mockRejectedValue(new Error("session refresh unavailable"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    await expect(switchGoatWorkspaceAction("goat_ws_new")).resolves.toEqual({
+    await expect(switchWorkspaceAction("goat_ws_new")).resolves.toEqual({
       ok: false,
       error: "Could not switch organizations. Please try again.",
     });
@@ -178,8 +178,8 @@ describe("switchGoatWorkspaceAction", () => {
     const redirectError = Object.assign(new Error("NEXT_REDIRECT"), {
       digest: "NEXT_REDIRECT;replace;https://authkit.example.test/authorize;307;",
     });
-    activateGoatWorkspaceMock.mockRejectedValue(redirectError);
-    await expect(switchGoatWorkspaceAction("goat_ws_new")).rejects.toBe(redirectError);
+    activateWorkspaceMock.mockRejectedValue(redirectError);
+    await expect(switchWorkspaceAction("goat_ws_new")).rejects.toBe(redirectError);
   });
 });
 
@@ -217,24 +217,24 @@ describe("workspace settings actions", () => {
   });
 
   it("maps member DTO ids to the existing presentation model", async () => {
-    await expect(getGoatWorkspaceSettingsAction()).resolves.toMatchObject({
+    await expect(getWorkspaceSettingsAction()).resolves.toMatchObject({
       members: [{ userWorkosId: "user_123", email: "owner@example.com" }],
     });
   });
 
   it("forwards membership and rename commands to /v1", async () => {
-    await expect(inviteToGoatWorkspaceAction(" TEAMMATE@EXAMPLE.COM ")).resolves.toEqual({
+    await expect(inviteToWorkspaceAction(" TEAMMATE@EXAMPLE.COM ")).resolves.toEqual({
       ok: true,
     });
     expect(mocks.invite).toHaveBeenCalledWith({ json: { email: "teammate@example.com" } });
 
-    await revokeGoatWorkspaceInvitationAction("inv_123");
+    await revokeWorkspaceInvitationAction("inv_123");
     expect(mocks.revokeInvitation).toHaveBeenCalledWith({ param: { invitationId: "inv_123" } });
 
-    await removeGoatWorkspaceMemberAction("user_456");
+    await removeWorkspaceMemberAction("user_456");
     expect(mocks.removeMember).toHaveBeenCalledWith({ param: { userId: "user_456" } });
 
-    await updateGoatWorkspaceNameAction("  Renamed  ");
+    await updateWorkspaceNameAction("  Renamed  ");
     expect(mocks.rename).toHaveBeenCalledWith({ json: { name: "Renamed" } });
   });
 });

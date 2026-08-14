@@ -1,47 +1,47 @@
-import { updateGoatTaskForActor } from "@opencompany/goat-agent/application/task-creation";
-import type { GoatChatMessageAttachment } from "@opencompany/goat-agent/chat-attachment-formats";
-import type { GoatSkillMentionRef } from "@opencompany/goat-agent/skills";
-import { createGoatTaskFromWorkflow as createSharedGoatTaskFromWorkflow } from "@opencompany/goat-agent/workflow-tasks";
-import type { GoatWorkflowMentionRef } from "@opencompany/goat-agent/workflows";
-import { generateGoatChatTitle } from "@/lib/chat-title";
-import { isGoatClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
-import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
-import { getGoatAvailableHarnessTools } from "@/lib/integrations/google-data";
-import { resolveGoatSkillMentions } from "@/lib/skills";
-import { createGoatTaskForUser } from "@/lib/tasks";
-import { resolveGoatWorkflowMention } from "@/lib/workflows";
+import { updateTaskForActor } from "@opencompany/agent/application/task-creation";
+import type { ChatMessageAttachment } from "@opencompany/agent/chat-attachment-formats";
+import type { SkillMentionRef } from "@opencompany/agent/skills";
+import { createTaskFromWorkflow as createSharedTaskFromWorkflow } from "@opencompany/agent/workflow-tasks";
+import type { WorkflowMentionRef } from "@opencompany/agent/workflows";
+import { generateChatTitle } from "@/lib/chat-title";
+import { isClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
+import { isCodexConnectedForUser } from "@/lib/codex-auth";
+import { getAvailableHarnessTools } from "@/lib/integrations/google-data";
+import { resolveSkillMentions } from "@/lib/skills";
+import { createTaskForUser } from "@/lib/tasks";
+import { resolveWorkflowMention } from "@/lib/workflows";
 
-export * from "@opencompany/goat-agent/workflow-tasks";
+export * from "@opencompany/agent/workflow-tasks";
 
-export function createGoatTaskFromWorkflow(input: {
+export function createTaskFromWorkflow(input: {
   userWorkosId: string;
   workspaceId: string | null;
-  mention: GoatWorkflowMentionRef;
-  skillMentions?: GoatSkillMentionRef[];
+  mention: WorkflowMentionRef;
+  skillMentions?: SkillMentionRef[];
   description: string;
-  attachments?: GoatChatMessageAttachment[];
+  attachments?: ChatMessageAttachment[];
   attachmentTexts?: Record<string, string> | null;
 }) {
-  return createSharedGoatTaskFromWorkflow(input, {
+  return createSharedTaskFromWorkflow(input, {
     createTask: ({ actorId, ...task }) =>
-      createGoatTaskForUser({
+      createTaskForUser({
         ...task,
         userWorkosId: actorId,
         source: "workflow",
       }),
-    resolveWorkflow: resolveGoatWorkflowMention,
+    resolveWorkflow: resolveWorkflowMention,
     preparation: {
-      isCodexConnected: isGoatCodexConnectedForUser,
-      isClaudeCodeConnected: isGoatClaudeCodeConnectedForUser,
-      resolveSkills: resolveGoatSkillMentions,
-      getAvailableTools: getGoatAvailableHarnessTools,
+      isCodexConnected: isCodexConnectedForUser,
+      isClaudeCodeConnected: isClaudeCodeConnectedForUser,
+      resolveSkills: resolveSkillMentions,
+      getAvailableTools: getAvailableHarnessTools,
     },
   });
 }
 
 // Chat- and trigger-created workflow tasks share this: the task is created instantly with the
 // workflow name, then renamed to a cheap one-line summary of the request once generation lands.
-export async function generateGoatWorkflowTaskTitle(input: {
+export async function generateWorkflowTaskTitle(input: {
   taskId: string;
   userWorkosId: string;
   workspaceId: string;
@@ -52,14 +52,14 @@ export async function generateGoatWorkflowTaskTitle(input: {
   const apiKey = input.apiKey?.trim();
   if (!apiKey) return;
   try {
-    const title = await generateGoatChatTitle({
+    const title = await generateChatTitle({
       content: input.description,
       fallbackTitle: input.workflowName,
       apiKey,
       userWorkosId: input.userWorkosId,
     });
     if (!title || title === input.workflowName) return;
-    await updateGoatTaskForActor({
+    await updateTaskForActor({
       actorId: input.userWorkosId,
       workspaceId: input.workspaceId,
       taskId: input.taskId,

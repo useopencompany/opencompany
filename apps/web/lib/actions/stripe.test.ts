@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
-  class MockGoatStripeApiError extends Error {
+  class MockStripeApiError extends Error {
     readonly status: number;
     constructor(status: number) {
       super(`Stripe failed (${status}).`);
@@ -9,22 +9,22 @@ const mocks = vi.hoisted(() => {
     }
   }
   return {
-    GoatStripeApiError: MockGoatStripeApiError,
-    loadGoatStripeConnection: vi.fn(),
-    markGoatStripeConnectionNeedsReauth: vi.fn(),
-    requestGoatStripeApi: vi.fn(),
+    StripeApiError: MockStripeApiError,
+    loadStripeConnection: vi.fn(),
+    markStripeConnectionNeedsReauth: vi.fn(),
+    requestStripeApi: vi.fn(),
   };
 });
 
-vi.mock("@opencompany/goat-agent/integrations/stripe", () => ({
-  GoatStripeApiError: mocks.GoatStripeApiError,
-  loadGoatStripeConnection: mocks.loadGoatStripeConnection,
-  markGoatStripeConnectionNeedsReauth: mocks.markGoatStripeConnectionNeedsReauth,
-  requestGoatStripeApi: mocks.requestGoatStripeApi,
+vi.mock("@opencompany/agent/integrations/stripe", () => ({
+  StripeApiError: mocks.StripeApiError,
+  loadStripeConnection: mocks.loadStripeConnection,
+  markStripeConnectionNeedsReauth: mocks.markStripeConnectionNeedsReauth,
+  requestStripeApi: mocks.requestStripeApi,
 }));
 
 import { resolveStripeActions } from "@/lib/actions/stripe";
-import { GoatActionAuthError } from "@/lib/actions/types";
+import { ActionAuthError } from "@/lib/actions/types";
 
 const connection = {
   integrationId: "gint_stripe",
@@ -36,21 +36,21 @@ const connection = {
 };
 
 beforeEach(() => {
-  mocks.loadGoatStripeConnection.mockReset();
-  mocks.loadGoatStripeConnection.mockResolvedValue(connection);
-  mocks.markGoatStripeConnectionNeedsReauth.mockReset();
-  mocks.markGoatStripeConnectionNeedsReauth.mockResolvedValue(undefined);
-  mocks.requestGoatStripeApi.mockReset();
+  mocks.loadStripeConnection.mockReset();
+  mocks.loadStripeConnection.mockResolvedValue(connection);
+  mocks.markStripeConnectionNeedsReauth.mockReset();
+  mocks.markStripeConnectionNeedsReauth.mockResolvedValue(undefined);
+  mocks.requestStripeApi.mockReset();
 });
 
 describe("resolveStripeActions", () => {
   it("is absent when the workspace has no connected Stripe account", async () => {
-    mocks.loadGoatStripeConnection.mockResolvedValue(null);
+    mocks.loadStripeConnection.mockResolvedValue(null);
     await expect(resolveStripeActions("workspace_1")).resolves.toBeNull();
   });
 
   it("summarizes period balance activity by currency and reporting category", async () => {
-    mocks.requestGoatStripeApi.mockResolvedValue({
+    mocks.requestStripeApi.mockResolvedValue({
       data: [
         {
           id: "txn_charge",
@@ -140,7 +140,7 @@ describe("resolveStripeActions", () => {
         },
       ],
     });
-    expect(mocks.requestGoatStripeApi).toHaveBeenCalledWith(
+    expect(mocks.requestStripeApi).toHaveBeenCalledWith(
       expect.objectContaining({
         path: "/balance_transactions",
         params: expect.objectContaining({
@@ -153,7 +153,7 @@ describe("resolveStripeActions", () => {
   });
 
   it("returns current available and pending balances without provider metadata", async () => {
-    mocks.requestGoatStripeApi.mockResolvedValue({
+    mocks.requestStripeApi.mockResolvedValue({
       available: [{ amount: 4_200, currency: "usd", source_types: { card: 4_200 } }],
       pending: [{ amount: 900, currency: "usd" }],
     });
@@ -167,77 +167,75 @@ describe("resolveStripeActions", () => {
   });
 
   it("separates active, trialing, and at-risk recurring value", async () => {
-    mocks.requestGoatStripeApi.mockImplementation(
-      async (input: { params?: { status?: string } }) => {
-        const status = input.params?.status;
-        const amount =
-          status === "active"
-            ? 12_000
-            : status === "trialing"
-              ? 2_400
-              : status === "past_due"
-                ? 600
-                : 0;
-        return {
-          data:
-            amount > 0
-              ? [
-                  {
-                    id: `sub_${status}`,
-                    status,
-                    cancel_at_period_end: status === "active",
-                    items: {
-                      data: [
-                        {
-                          quantity: 1,
-                          price: {
-                            currency: "usd",
-                            unit_amount: amount,
-                            recurring: {
-                              interval: "year",
-                              interval_count: 1,
-                              usage_type: "licensed",
-                            },
+    mocks.requestStripeApi.mockImplementation(async (input: { params?: { status?: string } }) => {
+      const status = input.params?.status;
+      const amount =
+        status === "active"
+          ? 12_000
+          : status === "trialing"
+            ? 2_400
+            : status === "past_due"
+              ? 600
+              : 0;
+      return {
+        data:
+          amount > 0
+            ? [
+                {
+                  id: `sub_${status}`,
+                  status,
+                  cancel_at_period_end: status === "active",
+                  items: {
+                    data: [
+                      {
+                        quantity: 1,
+                        price: {
+                          currency: "usd",
+                          unit_amount: amount,
+                          recurring: {
+                            interval: "year",
+                            interval_count: 1,
+                            usage_type: "licensed",
                           },
                         },
-                        ...(status === "active"
-                          ? [
-                              {
-                                quantity: 1,
-                                price: {
-                                  billing_scheme: "tiered",
-                                  currency: "usd",
-                                  unit_amount: 5_000,
-                                  recurring: {
-                                    interval: "month",
-                                    interval_count: 1,
-                                    usage_type: "licensed",
-                                  },
+                      },
+                      ...(status === "active"
+                        ? [
+                            {
+                              quantity: 1,
+                              price: {
+                                billing_scheme: "tiered",
+                                currency: "usd",
+                                unit_amount: 5_000,
+                                recurring: {
+                                  interval: "month",
+                                  interval_count: 1,
+                                  usage_type: "licensed",
                                 },
                               },
-                              {
-                                quantity: 1,
-                                price: {
-                                  currency: "usd",
-                                  unit_amount: 8_000,
-                                  recurring: {
-                                    interval: "month",
-                                    interval_count: 1,
-                                    usage_type: "metered",
-                                  },
+                            },
+                            {
+                              quantity: 1,
+                              price: {
+                                currency: "usd",
+                                unit_amount: 8_000,
+                                recurring: {
+                                  interval: "month",
+                                  interval_count: 1,
+                                  usage_type: "metered",
                                 },
                               },
-                            ]
-                          : []),
-                      ],
-                    },
+                            },
+                          ]
+                        : []),
+                    ],
                   },
-                ]
-              : [],
-          has_more: false,
-        };
-      },
-    );
+                },
+              ]
+            : [],
+        has_more: false,
+      };
+    });
 
     await expect(executeAction("stripe.get_subscription_summary", {})).resolves.toMatchObject({
       statusCounts: { active: 1, trialing: 1, past_due: 1, unpaid: 0, paused: 0 },
@@ -251,7 +249,7 @@ describe("resolveStripeActions", () => {
   });
 
   it("summarizes open receivables and keeps only safe Stripe invoice links", async () => {
-    mocks.requestGoatStripeApi.mockResolvedValue({
+    mocks.requestStripeApi.mockResolvedValue({
       data: [
         {
           id: "in_1",
@@ -304,12 +302,10 @@ describe("resolveStripeActions", () => {
   });
 
   it("marks the connection for reauth when Stripe rejects the key", async () => {
-    mocks.requestGoatStripeApi.mockRejectedValue(new mocks.GoatStripeApiError(401));
+    mocks.requestStripeApi.mockRejectedValue(new mocks.StripeApiError(401));
 
-    await expect(executeAction("stripe.get_balance", {})).rejects.toBeInstanceOf(
-      GoatActionAuthError,
-    );
-    expect(mocks.markGoatStripeConnectionNeedsReauth).toHaveBeenCalledWith(connection);
+    await expect(executeAction("stripe.get_balance", {})).rejects.toBeInstanceOf(ActionAuthError);
+    expect(mocks.markStripeConnectionNeedsReauth).toHaveBeenCalledWith(connection);
   });
 });
 

@@ -7,7 +7,7 @@ hashed at rest, limited by provider/endpoint family, expiration, revocation, and
 `apps/runner/src/llm-broker.ts` validates and forwards requests. `llm-broker-usage.ts` parses usage,
 and `llm-broker-tokens.ts` records requests and settles spend once. The retained physical tables are
 modeled by `packages/db/src/llm-broker-schema.ts` and existing migrations. They are intentionally
-outside the Goat schema and must not be dropped during product cleanup.
+outside the opencompany schema and must not be dropped during product cleanup.
 
 The runner registers broker routes and the expired-token settlement sweep at startup. Provider keys
 are server-only. Never inject `OPENAI_CODEX_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, or database

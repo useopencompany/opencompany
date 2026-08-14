@@ -12,10 +12,10 @@ const actionMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/repo-config-actions", () => ({
-  saveGoatRepoEnvAction: actionMocks.saveEnv,
-  clearGoatRepoEnvAction: actionMocks.clearEnv,
-  saveGoatRepoSetupInstructionsAction: actionMocks.saveInstructions,
-  deleteGoatRepoConfigAction: actionMocks.deleteConfig,
+  saveRepoEnvAction: actionMocks.saveEnv,
+  clearRepoEnvAction: actionMocks.clearEnv,
+  saveRepoSetupInstructionsAction: actionMocks.saveInstructions,
+  deleteRepoConfigAction: actionMocks.deleteConfig,
 }));
 
 describe("RepositorySettings", () => {

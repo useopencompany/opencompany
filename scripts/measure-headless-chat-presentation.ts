@@ -1,8 +1,8 @@
 import { createApiApp } from "../apps/api/src/app";
 import {
-  consumeGoatOpenCompanyChatStream,
-  type GoatOpenCompanyChatProjection,
-} from "../apps/runner/src/goat-opencompany-chat";
+  consumeProductChatStream,
+  type ProductChatProjection,
+} from "../apps/runner/src/opencompany-chat";
 import { RedisChatPresentationStream } from "../packages/chat-presentation/src/index";
 import type { RunEvent } from "../packages/core/src/chat";
 import { streamRunEvents } from "../packages/protocol/src/client";
@@ -81,7 +81,7 @@ const consumeSse = (async () => {
   }
 })();
 
-const finalProjection = await consumeGoatOpenCompanyChatStream({
+const finalProjection = await consumeProductChatStream({
   fullStream: controlledProviderStream(providerTimes),
   signal: new AbortController().signal,
   sink: {
@@ -95,7 +95,7 @@ const finalProjection = await consumeGoatOpenCompanyChatStream({
         payload: { messageId: assistantMessageId, ...delta },
       });
     },
-    async project(projection: GoatOpenCompanyChatProjection) {
+    async project(projection: ProductChatProjection) {
       const content = projection.parts
         .flatMap((part) =>
           part.type === "text" && typeof part.text === "string" ? [part.text] : [],

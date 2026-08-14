@@ -1,50 +1,50 @@
+import {
+  connectImessageIntegration,
+  getImessageIntegrationState,
+  hashImessagePairingCode,
+} from "@opencompany/agent/imessage/connect";
+import {
+  connectGranolaIntegration,
+  getGranolaIntegrationState,
+  validateGranolaApiKey,
+} from "@opencompany/agent/integrations/granola";
+import { saveJamieWebhookApiKey } from "@opencompany/agent/integrations/jamie";
+import { disconnectStripeIntegration } from "@opencompany/agent/integrations/stripe";
 import type { Actor } from "@opencompany/core";
 import {
-  consumeGoatImessageChallenge,
-  getGoatImessagePairingChallenge,
-  incrementGoatImessageChallengeAttempts,
-  upsertGoatImessagePairingChallenge,
-} from "@opencompany/db/goat-imessage";
+  consumeImessageChallenge,
+  getImessagePairingChallenge,
+  incrementImessageChallengeAttempts,
+  upsertImessagePairingChallenge,
+} from "@opencompany/db/imessage";
 import {
-  applyGoatIntegrationCapabilityMode,
-  disconnectGoatPersonalIntegration,
-} from "@opencompany/db/goat-integrations";
-import {
-  connectGoatImessageIntegration,
-  getGoatImessageIntegrationState,
-  hashGoatImessagePairingCode,
-} from "@opencompany/goat-agent/imessage/connect";
-import {
-  connectGoatGranolaIntegration,
-  getGoatGranolaIntegrationState,
-  validateGoatGranolaApiKey,
-} from "@opencompany/goat-agent/integrations/granola";
-import { saveGoatJamieWebhookApiKey } from "@opencompany/goat-agent/integrations/jamie";
-import { disconnectGoatStripeIntegration } from "@opencompany/goat-agent/integrations/stripe";
+  applyIntegrationCapabilityMode,
+  disconnectPersonalIntegration,
+} from "@opencompany/db/integrations";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createIntegrationAccountService } from "./integration-accounts";
 import type { RunnerClient } from "./runner-client";
 
-vi.mock("@opencompany/db/goat-integrations", async (importOriginal) => ({
+vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  applyGoatIntegrationCapabilityMode: vi.fn(async () => undefined),
-  disconnectGoatPersonalIntegration: vi.fn(async () => true),
-  loadGoatIntegrationCredential: vi.fn(async () => null),
+  applyIntegrationCapabilityMode: vi.fn(async () => undefined),
+  disconnectPersonalIntegration: vi.fn(async () => true),
+  loadIntegrationCredential: vi.fn(async () => null),
 }));
 
-vi.mock("@opencompany/db/goat-imessage", async (importOriginal) => ({
+vi.mock("@opencompany/db/imessage", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  getGoatImessagePairingChallenge: vi.fn(async () => null),
-  upsertGoatImessagePairingChallenge: vi.fn(async () => undefined),
-  incrementGoatImessageChallengeAttempts: vi.fn(async () => undefined),
-  consumeGoatImessageChallenge: vi.fn(async () => undefined),
-  recordGoatImessageSend: vi.fn(async () => undefined),
+  getImessagePairingChallenge: vi.fn(async () => null),
+  upsertImessagePairingChallenge: vi.fn(async () => undefined),
+  incrementImessageChallengeAttempts: vi.fn(async () => undefined),
+  consumeImessageChallenge: vi.fn(async () => undefined),
+  recordImessageSend: vi.fn(async () => undefined),
 }));
 
-vi.mock("@opencompany/goat-agent/imessage/connect", async (importOriginal) => ({
+vi.mock("@opencompany/agent/imessage/connect", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  connectGoatImessageIntegration: vi.fn(async () => ({ integrationId: "gint_imsg" })),
-  getGoatImessageIntegrationState: vi.fn(async () => ({
+  connectImessageIntegration: vi.fn(async () => ({ integrationId: "gint_imsg" })),
+  getImessageIntegrationState: vi.fn(async () => ({
     provider: "imessage" as const,
     connected: true,
     status: "connected" as const,
@@ -54,11 +54,11 @@ vi.mock("@opencompany/goat-agent/imessage/connect", async (importOriginal) => ({
   })),
 }));
 
-vi.mock("@opencompany/goat-agent/integrations/granola", async (importOriginal) => ({
+vi.mock("@opencompany/agent/integrations/granola", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  validateGoatGranolaApiKey: vi.fn(),
-  connectGoatGranolaIntegration: vi.fn(async () => ({ integrationId: "gint_granola" })),
-  getGoatGranolaIntegrationState: vi.fn(async () => ({
+  validateGranolaApiKey: vi.fn(),
+  connectGranolaIntegration: vi.fn(async () => ({ integrationId: "gint_granola" })),
+  getGranolaIntegrationState: vi.fn(async () => ({
     provider: "granola" as const,
     connected: true,
     status: "connected" as const,
@@ -69,22 +69,22 @@ vi.mock("@opencompany/goat-agent/integrations/granola", async (importOriginal) =
   })),
 }));
 
-vi.mock("@opencompany/goat-agent/integrations/jamie", async (importOriginal) => ({
+vi.mock("@opencompany/agent/integrations/jamie", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  createOrResetGoatJamieWebhookEndpoint: vi.fn(),
-  saveGoatJamieWebhookApiKey: vi.fn(),
+  createOrResetJamieWebhookEndpoint: vi.fn(),
+  saveJamieWebhookApiKey: vi.fn(),
 }));
 
-vi.mock("@opencompany/goat-agent/integrations/stripe", async (importOriginal) => ({
+vi.mock("@opencompany/agent/integrations/stripe", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  validateGoatStripeRestrictedApiKey: vi.fn(),
-  connectGoatStripeIntegration: vi.fn(),
-  getGoatStripeIntegrationState: vi.fn(),
-  disconnectGoatStripeIntegration: vi.fn(async () => false),
+  validateStripeRestrictedApiKey: vi.fn(),
+  connectStripeIntegration: vi.fn(),
+  getStripeIntegrationState: vi.fn(),
+  disconnectStripeIntegration: vi.fn(async () => false),
 }));
 
-vi.mock("@opencompany/goat-agent/integrations/analytics", () => ({
-  captureGoatIntegrationAddedAnalytics: vi.fn(async () => undefined),
+vi.mock("@opencompany/agent/integrations/analytics", () => ({
+  captureIntegrationAddedAnalytics: vi.fn(async () => undefined),
 }));
 
 const admin: Actor = {
@@ -193,7 +193,7 @@ describe("integration account service", () => {
   });
 
   it("reports a non-owned disconnect with the retired owner-only copy", async () => {
-    vi.mocked(disconnectGoatPersonalIntegration).mockResolvedValueOnce(false);
+    vi.mocked(disconnectPersonalIntegration).mockResolvedValueOnce(false);
     const service = createIntegrationAccountService({ db: fakeDb() });
     await expect(service.disconnect(member, "gint_x")).rejects.toMatchObject({
       status: 404,
@@ -204,7 +204,7 @@ describe("integration account service", () => {
   it("runs the shared disconnect for the owner", async () => {
     const service = createIntegrationAccountService({ db: fakeDb() });
     await expect(service.disconnect(member, "gint_x")).resolves.toBeUndefined();
-    expect(disconnectGoatPersonalIntegration).toHaveBeenCalledWith(
+    expect(disconnectPersonalIntegration).toHaveBeenCalledWith(
       expect.objectContaining({ userWorkosId: "user_1", integrationId: "gint_x" }),
     );
   });
@@ -217,7 +217,7 @@ describe("integration account service", () => {
     await expect(
       service.setCapabilityMode(member, "gint_x", "unknown-capability", "on"),
     ).rejects.toMatchObject({ status: 400, message: "Unknown permission mode." });
-    expect(applyGoatIntegrationCapabilityMode).not.toHaveBeenCalled();
+    expect(applyIntegrationCapabilityMode).not.toHaveBeenCalled();
   });
 
   it("rejects capability updates for providers without that capability", async () => {
@@ -235,7 +235,7 @@ describe("integration account service", () => {
     await expect(
       service.setCapabilityMode(member, "gint_x", "write", "ask"),
     ).resolves.toBeUndefined();
-    expect(applyGoatIntegrationCapabilityMode).toHaveBeenCalledWith(
+    expect(applyIntegrationCapabilityMode).toHaveBeenCalledWith(
       expect.objectContaining({ integrationIds: ["gint_x"], capabilityId: "write", mode: "ask" }),
     );
   });
@@ -282,7 +282,7 @@ describe("integration account service", () => {
   });
 
   it("connects Granola with the trimmed key and returns the refreshed state", async () => {
-    vi.mocked(validateGoatGranolaApiKey).mockResolvedValueOnce({
+    vi.mocked(validateGranolaApiKey).mockResolvedValueOnce({
       ok: true,
       accountEmail: "sam@example.com",
       accountName: "Sam",
@@ -293,14 +293,14 @@ describe("integration account service", () => {
       connected: true,
       integrationId: "gint_granola",
     });
-    expect(connectGoatGranolaIntegration).toHaveBeenCalledWith(
+    expect(connectGranolaIntegration).toHaveBeenCalledWith(
       expect.objectContaining({ userWorkosId: "user_1", apiKey: "grn_valid_key_12345" }),
     );
-    expect(getGoatGranolaIntegrationState).toHaveBeenCalled();
+    expect(getGranolaIntegrationState).toHaveBeenCalled();
   });
 
   it("surfaces provider-rejected keys with the validator's message", async () => {
-    vi.mocked(validateGoatGranolaApiKey).mockResolvedValueOnce({
+    vi.mocked(validateGranolaApiKey).mockResolvedValueOnce({
       ok: false,
       error: "Granola rejected this API key. Check it and try again.",
     });
@@ -342,9 +342,9 @@ describe("integration account service", () => {
     ).resolves.toBeUndefined();
     expect(send).toHaveBeenCalledWith({
       to: "+14155551234",
-      text: "Your OpenCompany verification code is 123456. It expires in 10 minutes.",
+      text: "Your opencompany verification code is 123456. It expires in 10 minutes.",
     });
-    expect(upsertGoatImessagePairingChallenge).toHaveBeenCalledWith(
+    expect(upsertImessagePairingChallenge).toHaveBeenCalledWith(
       expect.objectContaining({ userWorkosId: "user_1", phoneE164: "+14155551234" }),
       expect.anything(),
     );
@@ -352,7 +352,7 @@ describe("integration account service", () => {
 
   it("throttles pairing resends inside the cooldown window", async () => {
     const now = new Date("2026-08-13T08:00:00.000Z");
-    vi.mocked(getGoatImessagePairingChallenge).mockResolvedValueOnce({
+    vi.mocked(getImessagePairingChallenge).mockResolvedValueOnce({
       id: "chal_1",
       phoneE164: "+14155551234",
       codeHash: "hash",
@@ -374,12 +374,12 @@ describe("integration account service", () => {
 
   it("confirms a matching pairing code and connects the number", async () => {
     const now = new Date("2026-08-13T08:00:00.000Z");
-    const codeHash = hashGoatImessagePairingCode({
+    const codeHash = hashImessagePairingCode({
       code: "654321",
       userWorkosId: "user_1",
       phoneE164: "+14155551234",
     });
-    vi.mocked(getGoatImessagePairingChallenge).mockResolvedValueOnce({
+    vi.mocked(getImessagePairingChallenge).mockResolvedValueOnce({
       id: "chal_1",
       phoneE164: "+14155551234",
       codeHash,
@@ -394,18 +394,18 @@ describe("integration account service", () => {
       connected: true,
       phoneE164: "+14155551234",
     });
-    expect(consumeGoatImessageChallenge).toHaveBeenCalledWith("chal_1", expect.anything());
-    expect(connectGoatImessageIntegration).toHaveBeenCalledWith(
+    expect(consumeImessageChallenge).toHaveBeenCalledWith("chal_1", expect.anything());
+    expect(connectImessageIntegration).toHaveBeenCalledWith(
       expect.objectContaining({ userWorkosId: "user_1", phoneE164: "+14155551234" }),
     );
   });
 
   it("counts down remaining attempts on a mismatched code", async () => {
     const now = new Date("2026-08-13T08:00:00.000Z");
-    vi.mocked(getGoatImessagePairingChallenge).mockResolvedValueOnce({
+    vi.mocked(getImessagePairingChallenge).mockResolvedValueOnce({
       id: "chal_1",
       phoneE164: "+14155551234",
-      codeHash: hashGoatImessagePairingCode({
+      codeHash: hashImessagePairingCode({
         code: "654321",
         userWorkosId: "user_1",
         phoneE164: "+14155551234",
@@ -420,11 +420,8 @@ describe("integration account service", () => {
       status: 400,
       message: "That code doesn't match. 1 attempt left.",
     });
-    expect(incrementGoatImessageChallengeAttempts).toHaveBeenCalledWith(
-      "chal_1",
-      expect.anything(),
-    );
-    expect(getGoatImessageIntegrationState).not.toHaveBeenCalled();
+    expect(incrementImessageChallengeAttempts).toHaveBeenCalledWith("chal_1", expect.anything());
+    expect(getImessageIntegrationState).not.toHaveBeenCalled();
   });
 
   it("admin-gates the workspace-scoped Stripe and Jamie commands", async () => {
@@ -453,7 +450,7 @@ describe("integration account service", () => {
       message:
         "Use a restricted Stripe key beginning with rk_test_ or rk_live_. Unrestricted sk_ keys are not accepted.",
     });
-    vi.mocked(disconnectGoatStripeIntegration).mockResolvedValueOnce(false);
+    vi.mocked(disconnectStripeIntegration).mockResolvedValueOnce(false);
     await expect(service.disconnectStripe(admin)).rejects.toMatchObject({
       status: 404,
       message: "Stripe is not connected.",
@@ -461,7 +458,7 @@ describe("integration account service", () => {
   });
 
   it("surfaces Jamie lib validation errors verbatim like the retired action", async () => {
-    vi.mocked(saveGoatJamieWebhookApiKey).mockRejectedValueOnce(
+    vi.mocked(saveJamieWebhookApiKey).mockRejectedValueOnce(
       new Error("Create a Jamie webhook endpoint before saving the API key."),
     );
     const service = createIntegrationAccountService({ db: fakeDb() });

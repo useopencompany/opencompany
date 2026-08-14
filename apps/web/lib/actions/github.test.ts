@@ -19,16 +19,16 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("@opencompany/goat-agent/integrations/github", () => ({
-  GoatGitHubApiError: mocks.ApiError,
-  listConnectedGoatGitHubInstallations: mocks.connections,
-  searchGoatGitHubIssues: mocks.searchIssues,
+vi.mock("@opencompany/agent/integrations/github", () => ({
+  GitHubApiError: mocks.ApiError,
+  listConnectedGitHubInstallations: mocks.connections,
+  searchGitHubIssues: mocks.searchIssues,
 }));
 
 import { resolveGitHubActions } from "@/lib/actions/github";
-import { GoatActionAuthError, type GoatActionExecuteContext } from "@/lib/actions/types";
+import { ActionAuthError, type ActionExecuteContext } from "@/lib/actions/types";
 
-const CONTEXT: GoatActionExecuteContext = {
+const CONTEXT: ActionExecuteContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-22T00:00:00.000Z"),
@@ -96,7 +96,7 @@ describe("github.search_issues", () => {
       incomplete_results: false,
       items: [
         {
-          repository_url: "https://api.github.com/repos/opencompany/goat",
+          repository_url: "https://api.github.com/repos/useopencompany/opencompany",
           number: 42,
           title: "Fix account switching",
           state: "open",
@@ -107,7 +107,7 @@ describe("github.search_issues", () => {
           labels: [{ name: "bug" }],
           updated_at: "2026-07-21T12:00:00Z",
           body: "The active account can become stale.",
-          html_url: "https://github.com/opencompany/goat/pull/42",
+          html_url: "https://github.com/useopencompany/opencompany/pull/42",
           ignored_secret_field: "do not return",
         },
         { number: "invalid", title: "Skipped invalid record" },
@@ -130,7 +130,7 @@ describe("github.search_issues", () => {
       incompleteResults: false,
       items: [
         {
-          repository: "opencompany/goat",
+          repository: "useopencompany/opencompany",
           number: 42,
           type: "pull_request",
           title: "Fix account switching",
@@ -141,7 +141,7 @@ describe("github.search_issues", () => {
           labels: ["bug"],
           updatedAt: "2026-07-21T12:00:00Z",
           bodyPreview: "The active account can become stale.",
-          url: "https://github.com/opencompany/goat/pull/42",
+          url: "https://github.com/useopencompany/opencompany/pull/42",
         },
       ],
     });
@@ -172,16 +172,16 @@ describe("github.search_issues", () => {
     for (const status of [401, 404]) {
       mocks.searchIssues.mockRejectedValueOnce(new mocks.ApiError(status));
       await expect(search.execute({ query: "is:issue" }, CONTEXT)).rejects.toMatchObject({
-        name: "GoatActionAuthError",
+        name: "ActionAuthError",
         code: "auth_expired",
         provider: "github",
         message: expect.stringContaining("Settings → Integrations"),
-      } satisfies Partial<GoatActionAuthError>);
+      } satisfies Partial<ActionAuthError>);
     }
 
     mocks.searchIssues.mockRejectedValueOnce(new mocks.ApiError(403, "installation_token"));
     await expect(search.execute({ query: "is:issue" }, CONTEXT)).rejects.toBeInstanceOf(
-      GoatActionAuthError,
+      ActionAuthError,
     );
   });
 

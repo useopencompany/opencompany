@@ -3,14 +3,14 @@ import { saveSession, withAuth } from "@workos-inc/authkit-nextjs";
 import { redirect } from "next/navigation";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  completeGoatAuthentication,
-  currentGoatBrainByRef,
-  currentGoatIdentity,
-  currentGoatUser,
+  completeAuthentication,
+  currentBrainByRef,
+  currentIdentity,
+  currentUser,
 } from "@/lib/auth";
-import { recordLastGoatAuthMethod } from "@/lib/auth-methods";
+import { recordLastAuthMethod } from "@/lib/auth-methods";
 import { serverApiClient } from "@/lib/server-api-client";
-import { rememberActiveGoatWorkspace } from "@/lib/workspace-session";
+import { rememberActiveWorkspace } from "@/lib/workspace-session";
 
 vi.mock("@workos-inc/authkit-nextjs", () => ({
   saveSession: vi.fn(),
@@ -23,7 +23,7 @@ vi.mock("react", () => ({
   cache: <T extends (...args: never[]) => unknown>(fn: T) => fn,
 }));
 
-vi.mock("@/lib/auth-methods", () => ({ recordLastGoatAuthMethod: vi.fn() }));
+vi.mock("@/lib/auth-methods", () => ({ recordLastAuthMethod: vi.fn() }));
 
 vi.mock("@/lib/server-api-client", () => ({
   serverApiClient: vi.fn(),
@@ -31,9 +31,9 @@ vi.mock("@/lib/server-api-client", () => ({
 }));
 
 vi.mock("@/lib/workspace-session", () => ({
-  GOAT_ACTIVE_BRAIN_COOKIE: "goat-active-brain",
-  GOAT_ACTIVE_WORKSPACE_COOKIE: "goat-active-workspace",
-  rememberActiveGoatWorkspace: vi.fn(),
+  ACTIVE_BRAIN_COOKIE: "goat-active-brain",
+  ACTIVE_WORKSPACE_COOKIE: "goat-active-workspace",
+  rememberActiveWorkspace: vi.fn(),
 }));
 
 const authUser = {
@@ -102,7 +102,7 @@ function apiClient(data: IdentityDto = identity) {
   } as never;
 }
 
-describe("completeGoatAuthentication", () => {
+describe("completeAuthentication", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     serverApiClientMock.mockResolvedValue(apiClient());
@@ -117,12 +117,12 @@ describe("completeGoatAuthentication", () => {
       authenticationMethod: "MagicAuth",
     };
 
-    await completeGoatAuthentication(authResponse as never, "https://my.opencompany.chat");
+    await completeAuthentication(authResponse as never, "https://my.opencompany.chat");
 
     expect(saveSession).toHaveBeenCalledWith(authResponse, "https://my.opencompany.chat");
-    expect(recordLastGoatAuthMethod).toHaveBeenCalledWith("MagicAuth");
+    expect(recordLastAuthMethod).toHaveBeenCalledWith("MagicAuth");
     expect(serverApiClientMock).toHaveBeenCalledWith({ authorization: "Bearer access_token" });
-    expect(rememberActiveGoatWorkspace).toHaveBeenCalledWith({
+    expect(rememberActiveWorkspace).toHaveBeenCalledWith({
       workspaceId: "goat_ws_company",
       brainId: "brain_company",
     });
@@ -138,7 +138,7 @@ describe("completeGoatAuthentication", () => {
         activeBrainId: null,
       }),
     );
-    await completeGoatAuthentication(
+    await completeAuthentication(
       {
         user: authUser,
         accessToken: "access_token",
@@ -147,7 +147,7 @@ describe("completeGoatAuthentication", () => {
       } as never,
       "https://my.opencompany.chat",
     );
-    expect(rememberActiveGoatWorkspace).not.toHaveBeenCalled();
+    expect(rememberActiveWorkspace).not.toHaveBeenCalled();
   });
 });
 
@@ -158,8 +158,8 @@ describe("request-cached identity adapter", () => {
     serverApiClientMock.mockResolvedValue(apiClient());
   });
 
-  it("maps the narrow identity DTO onto the established currentGoatUser shape", async () => {
-    const context = await currentGoatUser();
+  it("maps the narrow identity DTO onto the established currentUser shape", async () => {
+    const context = await currentUser();
 
     expect(context.user).toMatchObject({
       workosUserId: authUser.id,
@@ -186,23 +186,23 @@ describe("request-cached identity adapter", () => {
       }),
     );
 
-    await expect(currentGoatIdentity()).resolves.toMatchObject({ workspaces: [] });
-    await currentGoatUser();
+    await expect(currentIdentity()).resolves.toMatchObject({ workspaces: [] });
+    await currentUser();
     expect(redirectMock).toHaveBeenCalledWith("/onboarding");
   });
 
   it("resolves an accessible Brain by id or slug without a persistence call", async () => {
-    await expect(currentGoatBrainByRef("general")).resolves.toMatchObject({
+    await expect(currentBrainByRef("general")).resolves.toMatchObject({
       brain: { id: "brain_company" },
     });
-    await expect(currentGoatBrainByRef("missing")).rejects.toThrow(
+    await expect(currentBrainByRef("missing")).rejects.toThrow(
       "You do not have access to that brain.",
     );
   });
 
   it("redirects anonymous browsers to sign in", async () => {
     withAuthMock.mockResolvedValue({ user: null } as never);
-    await currentGoatIdentity();
+    await currentIdentity();
     expect(redirectMock).toHaveBeenCalledWith("/signin");
   });
 });

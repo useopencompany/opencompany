@@ -1,7 +1,7 @@
 # Observability
 
 Web, API, and runner use `@opencompany/observability` for structured logs and handled-error
-capture. Canonical product spans and metrics use `@opencompany/goat-observability`.
+capture. Canonical product spans and metrics use `@opencompany/telemetry`.
 
 Current service names are:
 

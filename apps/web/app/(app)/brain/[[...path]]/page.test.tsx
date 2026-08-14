@@ -1,17 +1,17 @@
 import { expect, it, vi } from "vitest";
-import GoatBrainPage from "./page";
+import BrainPage from "./page";
 
 const routeMock = vi.hoisted(() => vi.fn(() => null));
-const currentGoatUserMock = vi.hoisted(() => vi.fn());
+const currentUserMock = vi.hoisted(() => vi.fn());
 const getHeadlessBrainSnapshotMock = vi.hoisted(() => vi.fn());
 const getHeadlessBrainOverviewMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@/components/GoatRoutes", () => ({
-  GoatBrainRoute: routeMock,
+vi.mock("@/components/Routes", () => ({
+  BrainRoute: routeMock,
 }));
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: currentGoatUserMock,
+  currentUser: currentUserMock,
 }));
 
 vi.mock("@/lib/headless-knowledge-server", () => ({
@@ -34,10 +34,10 @@ it("loads only aggregate stats for the Brain overview", async () => {
     retrievalsLast7Days: 7,
     activeSources: 3,
   };
-  currentGoatUserMock.mockResolvedValue({ brains: [brain], activeBrain: brain });
+  currentUserMock.mockResolvedValue({ brains: [brain], activeBrain: brain });
   getHeadlessBrainOverviewMock.mockResolvedValue(stats);
 
-  const page = await GoatBrainPage({
+  const page = await BrainPage({
     params: Promise.resolve({ path: ["goat_brain_1"] }),
   });
 
@@ -59,11 +59,11 @@ it("loads the document snapshot and aggregate stats for local Overview navigatio
     retrievalsLast7Days: 7,
     activeSources: 3,
   };
-  currentGoatUserMock.mockResolvedValue({ brains: [brain], activeBrain: brain });
+  currentUserMock.mockResolvedValue({ brains: [brain], activeBrain: brain });
   getHeadlessBrainSnapshotMock.mockResolvedValue(snapshot);
   getHeadlessBrainOverviewMock.mockResolvedValue(stats);
 
-  const page = await GoatBrainPage({
+  const page = await BrainPage({
     params: Promise.resolve({ path: ["goat_brain_1", "people", "ada-lovelace"] }),
   });
 

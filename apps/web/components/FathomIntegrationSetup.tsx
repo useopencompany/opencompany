@@ -4,8 +4,8 @@ import { Check } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { disconnectGoatIntegrationAccountAction } from "@/lib/integration-account-actions";
-import type { GoatFathomProviderState } from "@/lib/integration-state";
+import { disconnectIntegrationAccountAction } from "@/lib/integration-account-actions";
+import type { FathomProviderState } from "@/lib/integration-state";
 import { saveFathomApiKeyAction } from "@/lib/integrations/fathom-actions";
 
 export function FathomIntegrationSetup({
@@ -14,7 +14,7 @@ export function FathomIntegrationSetup({
   variant = "settings",
   onSaved,
 }: {
-  initialState: GoatFathomProviderState;
+  initialState: FathomProviderState;
   brainSourcesHref?: string | null;
   // "modal" embeds the form in the onboarding connect dialog: the Status
   // section (which duplicates the dialog title) is dropped.
@@ -47,7 +47,7 @@ export function FathomIntegrationSetup({
     if (!state.integrationId) return;
     setError(null);
     startTransition(async () => {
-      const result = await disconnectGoatIntegrationAccountAction(state.integrationId as string);
+      const result = await disconnectIntegrationAccountAction(state.integrationId as string);
       if (!result.ok) {
         setError(result.error);
         return;
@@ -175,20 +175,20 @@ export function FathomIntegrationSetup({
         </ol>
         <p className="px-2 text-[13px] leading-5 text-ink-subtle">
           New meetings are usually picked up within about 20 minutes of ending. If Fathom is still
-          generating a summary or transcript, Goat keeps retrying until content is ready. Live
-          polling does not automatically import older meetings; use Import company context when you
-          want to scan recent history.
+          generating a summary or transcript, opencompany keeps retrying until content is ready.
+          Live polling does not automatically import older meetings; use Import company context when
+          you want to scan recent history.
         </p>
       </section>
     </div>
   );
 }
 
-function setupStatus(state: GoatFathomProviderState) {
+function setupStatus(state: FathomProviderState) {
   if (state.connected) {
     return {
       label: state.accountEmail ? `Connected as ${state.accountEmail}` : "Fathom is connected",
-      detail: "New meetings are picked up by the Goat Brain ingestion queue.",
+      detail: "New meetings are picked up by the opencompany Brain ingestion queue.",
       badge: "Connected",
     };
   }

@@ -4,20 +4,20 @@ import { randomUUID } from "node:crypto";
 import type { OnboardingStateDto } from "@opencompany/protocol";
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { currentGoatIdentity } from "@/lib/auth";
+import { currentIdentity } from "@/lib/auth";
 import { enrollOwnerInOnboardingEmails } from "@/lib/email/onboarding-emails";
-import { parseGoatOnboardingProfile } from "@/lib/onboarding-profile";
+import { parseOnboardingProfile } from "@/lib/onboarding-profile";
 import { serverApiClient, serverApiError, serverApiErrorMessage } from "@/lib/server-api-client";
-import { activateGoatWorkspace } from "@/lib/workspace-session";
+import { activateWorkspace } from "@/lib/workspace-session";
 
-export type GoatOnboardingActionResult = { ok: true } | { ok: false; error: string };
-export type GoatOnboardingWorkspaceActionResult =
+export type OnboardingActionResult = { ok: true } | { ok: false; error: string };
+export type OnboardingWorkspaceActionResult =
   | { ok: true; workspaceId: string; brainRef: string }
   | { ok: false; error: string };
 
 const WORKSPACE_SAVE_ERROR = "Could not save your workspace. Please try again.";
 
-function normalizeGoatWorkspaceSlug(value: unknown): string {
+function normalizeWorkspaceSlug(value: unknown): string {
   if (typeof value !== "string") return "";
   return value
     .toLowerCase()
@@ -28,16 +28,16 @@ function normalizeGoatWorkspaceSlug(value: unknown): string {
     .replace(/-+$/g, "");
 }
 
-export async function getGoatOnboardingState(): Promise<OnboardingStateDto> {
+export async function getOnboardingState(): Promise<OnboardingStateDto> {
   const response = await (await serverApiClient()).v1.onboarding.$get();
   if (!response.ok) throw await serverApiError(response, "Could not load onboarding.");
   return (await response.json()).data;
 }
 
-export async function checkGoatWorkspaceSlugAction(
+export async function checkWorkspaceSlugAction(
   rawSlug: unknown,
 ): Promise<{ slug: string; available: boolean }> {
-  const slug = normalizeGoatWorkspaceSlug(rawSlug);
+  const slug = normalizeWorkspaceSlug(rawSlug);
   if (!slug) return { slug, available: false };
   const response = await (await serverApiClient()).v1.onboarding["workspace-slug"].check.$post({
     json: { slug },
@@ -46,16 +46,16 @@ export async function checkGoatWorkspaceSlugAction(
   return (await response.json()).data;
 }
 
-export async function saveGoatOnboardingWorkspaceAction(input: {
+export async function saveOnboardingWorkspaceAction(input: {
   name: string;
   slug: string;
-}): Promise<GoatOnboardingWorkspaceActionResult> {
+}): Promise<OnboardingWorkspaceActionResult> {
   const candidate = input as Partial<typeof input> | null | undefined;
   const name = typeof candidate?.name === "string" ? candidate.name.trim() : "";
   if (!name) return { ok: false, error: "Enter a company name." };
   if (name.length > 80) return { ok: false, error: "Name is too long (max 80 chars)." };
 
-  const slug = normalizeGoatWorkspaceSlug(candidate?.slug);
+  const slug = normalizeWorkspaceSlug(candidate?.slug);
   if (!slug) return { ok: false, error: "Enter a valid workspace URL." };
 
   const workspaceId = `goat_ws_${randomUUID()}`;
@@ -72,18 +72,18 @@ export async function saveGoatOnboardingWorkspaceAction(input: {
     const activation = (await response.json()).data;
 
     if (activation.createdByCaller) {
-      const identity = await currentGoatIdentity();
+      const identity = await currentIdentity();
       await enrollOwnerInOnboardingEmails({
         workosUserId: identity.user.workosUserId,
       }).catch((error) => {
-        console.error("[goat] Failed to enroll owner in onboarding emails", {
+        console.error("[opencompany] Failed to enroll owner in onboarding emails", {
           workspaceId: activation.workspaceId,
           errorName: error instanceof Error ? error.name : typeof error,
         });
       });
     }
 
-    await activateGoatWorkspace({
+    await activateWorkspace({
       workspaceId: activation.workspaceId,
       workosOrganizationId: activation.organizationId,
       brainId: activation.brainId,
@@ -96,19 +96,22 @@ export async function saveGoatOnboardingWorkspaceAction(input: {
     };
   } catch (error) {
     unstable_rethrow(error);
-    console.error("[goat] Failed to save the onboarding workspace through the canonical API", {
-      workspaceId,
-      errorName: error instanceof Error ? error.name : typeof error,
-    });
+    console.error(
+      "[opencompany] Failed to save the onboarding workspace through the canonical API",
+      {
+        workspaceId,
+        errorName: error instanceof Error ? error.name : typeof error,
+      },
+    );
     return { ok: false, error: WORKSPACE_SAVE_ERROR };
   }
 }
 
-export async function saveGoatOnboardingProfileAction(input: {
+export async function saveOnboardingProfileAction(input: {
   role: string | null;
   companyUrl: string;
-}): Promise<GoatOnboardingActionResult> {
-  const profile = parseGoatOnboardingProfile(input);
+}): Promise<OnboardingActionResult> {
+  const profile = parseOnboardingProfile(input);
   if (!profile.ok) return profile;
   try {
     const response = await (await serverApiClient()).v1.onboarding.profile.$put({
@@ -129,9 +132,9 @@ export async function saveGoatOnboardingProfileAction(input: {
   }
 }
 
-export async function finishGoatOnboardingAction(input: {
+export async function finishOnboardingAction(input: {
   referralSource: string | null;
-}): Promise<GoatOnboardingActionResult> {
+}): Promise<OnboardingActionResult> {
   const referralSource =
     typeof input?.referralSource === "string" ? input.referralSource.trim() || null : null;
   try {

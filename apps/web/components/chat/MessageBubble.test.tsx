@@ -3,11 +3,7 @@ import { CODEX_PLAN_TOOL_NAME, CODEX_QUESTION_TOOL_NAME } from "@opencompany/age
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  GOAT_BRAIN_TOOL_PART_TYPE,
-  type GoatChatUiMessage,
-  USE_ACTION_TOOL_PART_TYPE,
-} from "@/lib/chat-ui";
+import { BRAIN_TOOL_PART_TYPE, type ChatUiMessage, USE_ACTION_TOOL_PART_TYPE } from "@/lib/chat-ui";
 import { getVisibleBrainCitationCount } from "./AssistantTextBubble";
 import type { ChatTaskLookup } from "./assistant-items";
 import { MessageBubble } from "./MessageBubble";
@@ -20,7 +16,7 @@ afterEach(() => {
 
 describe("MessageBubble scheduled wakeups", () => {
   it("renders the synthetic trigger as a centered muted check-in instead of a user bubble", () => {
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "scheduled_wakeup_1",
       role: "user",
       metadata: {
@@ -42,7 +38,7 @@ describe("MessageBubble scheduled wakeups", () => {
 });
 
 describe("MessageBubble generated files", () => {
-  const message: GoatChatUiMessage = {
+  const message: ChatUiMessage = {
     id: "assistant_artifact",
     role: "assistant",
     parts: [
@@ -117,7 +113,7 @@ describe("MessageBubble generated files", () => {
 
   it("reacts to a tombstone synced from another card or client", () => {
     const { rerender } = render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
-    const deletedMessage: GoatChatUiMessage = {
+    const deletedMessage: ChatUiMessage = {
       ...message,
       parts: message.parts.map((part) =>
         part.type === "data-artifact-file"
@@ -135,7 +131,7 @@ describe("MessageBubble generated files", () => {
 
 describe("MessageBubble assistant errors", () => {
   it("renders the turn error even when the assistant produced no parts", () => {
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "assistant_1",
       role: "assistant",
       metadata: {
@@ -151,7 +147,7 @@ describe("MessageBubble assistant errors", () => {
   });
 
   it("renders the error after tool-only turns", () => {
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "assistant_2",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1", error: "Codex turn failed." },
@@ -162,7 +158,7 @@ describe("MessageBubble assistant errors", () => {
           state: "output-error",
           input: { command: "npm test" },
           errorText: "exit 1",
-        } as GoatChatUiMessage["parts"][number],
+        } as ChatUiMessage["parts"][number],
       ],
     };
 
@@ -172,7 +168,7 @@ describe("MessageBubble assistant errors", () => {
   });
 
   it("does not duplicate the error when a text bubble already carries it", () => {
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "assistant_3",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1", error: "boom" },
@@ -186,13 +182,13 @@ describe("MessageBubble assistant errors", () => {
   });
 
   it("renders source chips for text after successful brain reads", () => {
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "assistant_4",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1" },
       parts: [
         {
-          type: GOAT_BRAIN_TOOL_PART_TYPE,
+          type: BRAIN_TOOL_PART_TYPE,
           toolCallId: "tool_brain_1",
           state: "output-available",
           input: { command: "query", flags: { text: "gtm", limit: 3 } },
@@ -236,13 +232,13 @@ describe("MessageBubble assistant errors", () => {
   });
 
   it("cites wiki pages without their underlying evidence", () => {
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "assistant_5",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1" },
       parts: [
         {
-          type: GOAT_BRAIN_TOOL_PART_TYPE,
+          type: BRAIN_TOOL_PART_TYPE,
           toolCallId: "tool_brain_2",
           state: "output-available",
           input: { command: "get", flags: { id: "ada" } },
@@ -297,7 +293,7 @@ describe("MessageBubble assistant errors", () => {
 
   it("renders use_action parts as expandable input and output details", async () => {
     const user = userEvent.setup();
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "assistant_6",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1" },
@@ -306,14 +302,14 @@ describe("MessageBubble assistant errors", () => {
           type: USE_ACTION_TOOL_PART_TYPE,
           toolCallId: "tool_action_1",
           state: "output-available",
-          input: { action: "linear.list_issues", params: { team: "Goat" } },
+          input: { action: "linear.list_issues", params: { team: "opencompany" } },
           output: {
             ok: true,
             action: "linear.list_issues",
             result: { issues: [] },
           },
         },
-        { type: "text", text: "No open issues for the Goat team." },
+        { type: "text", text: "No open issues for the opencompany team." },
       ],
     };
 
@@ -330,13 +326,13 @@ describe("MessageBubble assistant errors", () => {
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
     expect(within(toolCall).getByText("Input")).toBeInTheDocument();
     expect(within(toolCall).getByText("Output")).toBeInTheDocument();
-    expect(within(toolCall).getByText(/"team": "Goat"/)).toBeInTheDocument();
+    expect(within(toolCall).getByText(/"team": "opencompany"/)).toBeInTheDocument();
     expect(within(toolCall).getByText(/"issues": \[\]/)).toBeInTheDocument();
-    expect(screen.getByText("No open issues for the Goat team.")).toBeInTheDocument();
+    expect(screen.getByText("No open issues for the opencompany team.")).toBeInTheDocument();
   });
 
   it("renders browser screenshots from the authenticated transcript route", () => {
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "assistant_browser",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1" },
@@ -360,14 +356,14 @@ describe("MessageBubble assistant errors", () => {
     expect(screen.getByText("Screenshot")).toBeInTheDocument();
     expect(screen.getByText("Full page")).toBeInTheDocument();
     expect(
-      screen.getByRole("img", { name: "Screenshot captured by Goat's browser" }),
+      screen.getByRole("img", { name: "Screenshot captured by opencompany's browser" }),
     ).toHaveAttribute("src", "/v1/chat-screenshots/goat_chat_1/1234-aabb.png");
   });
 
   it("renders shared transcripts without approval requests or task navigation", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "assistant_shared",
       role: "assistant",
       metadata: {
@@ -419,7 +415,7 @@ describe("MessageBubble assistant errors", () => {
   });
 
   it("does not render task attribution metadata as a card inside a task session", () => {
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "assistant_task_session",
       role: "assistant",
       metadata: {
@@ -455,7 +451,7 @@ describe("MessageBubble assistant errors", () => {
           ),
       ),
     );
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "assistant_approval",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1" },
@@ -516,7 +512,7 @@ describe("MessageBubble assistant errors", () => {
       ),
     );
     const onActionApproval = vi.fn(async () => undefined);
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "assistant_native_approval",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1" },
@@ -558,7 +554,7 @@ describe("MessageBubble assistant errors", () => {
   });
 
   it("renders proposed X posts instead of coercing structured params to object strings", () => {
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "assistant_x_post_approval",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1" },
@@ -609,7 +605,7 @@ describe("MessageBubble assistant errors", () => {
   });
 
   it("renders historical use_capability parts through the generic tool row without crashing", () => {
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "assistant_7",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1" },
@@ -624,7 +620,7 @@ describe("MessageBubble assistant errors", () => {
             summary: "ENG-123 tracks the launch.",
             entities: [],
           },
-        } as unknown as GoatChatUiMessage["parts"][number],
+        } as unknown as ChatUiMessage["parts"][number],
         { type: "text", text: "ENG-123 tracks the launch." },
       ],
     };
@@ -639,7 +635,7 @@ describe("MessageBubble assistant errors", () => {
 describe("MessageBubble Codex interactions", () => {
   it("renders the terminal Plan-mode implementation choice", async () => {
     const onCodexAction = vi.fn(async () => undefined);
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "assistant_plan",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1" },
@@ -655,7 +651,7 @@ describe("MessageBubble Codex interactions", () => {
             text: "1. Inspect\n2. Patch\n3. Verify",
             implementationAvailable: true,
           },
-        } as GoatChatUiMessage["parts"][number],
+        } as ChatUiMessage["parts"][number],
       ],
     };
 
@@ -674,7 +670,7 @@ describe("MessageBubble Codex interactions", () => {
 
   it("collects option answers and notes for an app-server question", async () => {
     const onCodexAction = vi.fn(async () => undefined);
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "assistant_question",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1" },
@@ -703,7 +699,7 @@ describe("MessageBubble Codex interactions", () => {
               },
             ],
           },
-        } as GoatChatUiMessage["parts"][number],
+        } as ChatUiMessage["parts"][number],
       ],
     };
 
@@ -735,7 +731,7 @@ describe("MessageBubble Codex interactions", () => {
 
   it("sends a free-text answer raw, without the user_note prefix", async () => {
     const onCodexAction = vi.fn(async () => undefined);
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "assistant_question",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1" },
@@ -757,7 +753,7 @@ describe("MessageBubble Codex interactions", () => {
               },
             ],
           },
-        } as GoatChatUiMessage["parts"][number],
+        } as ChatUiMessage["parts"][number],
       ],
     };
 
@@ -782,7 +778,7 @@ describe("MessageBubble Codex interactions", () => {
 
   it("requires a note for Other and sends the note as the answer", async () => {
     const onCodexAction = vi.fn(async () => undefined);
-    const message: GoatChatUiMessage = {
+    const message: ChatUiMessage = {
       id: "assistant_question",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1" },
@@ -811,7 +807,7 @@ describe("MessageBubble Codex interactions", () => {
               },
             ],
           },
-        } as GoatChatUiMessage["parts"][number],
+        } as ChatUiMessage["parts"][number],
       ],
     };
 

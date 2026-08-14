@@ -1,42 +1,39 @@
 import { createHmac } from "node:crypto";
+import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
 import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-} from "@opencompany/db/goat-integrations";
-import {
-  insertGoatSlackMessageEvents,
-  listEnabledGoatSlackBrainSourceRoutes,
-  listGoatSlackIntegrationsForTeam,
-} from "@opencompany/db/goat-slack";
-import { listGoatWorkspacesForUser } from "@opencompany/db/goat-workspaces";
+  insertSlackMessageEvents,
+  listEnabledSlackBrainSourceRoutes,
+  listSlackIntegrationsForTeam,
+} from "@opencompany/db/slack";
+import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./errors";
 import { createSlackIngress } from "./slack-ingress";
 
-vi.mock("@opencompany/db/goat-integrations", async (importOriginal) => ({
+vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  loadGoatIntegrationCredential: vi.fn(),
-  markGoatIntegrationStatus: vi.fn(async () => undefined),
+  loadIntegrationCredential: vi.fn(),
+  markIntegrationStatus: vi.fn(async () => undefined),
 }));
-vi.mock("@opencompany/db/goat-slack", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@opencompany/db/goat-slack")>();
+vi.mock("@opencompany/db/slack", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@opencompany/db/slack")>();
   return {
     ...original,
-    insertGoatSlackMessageEvents: vi.fn(),
-    listEnabledGoatSlackBrainSourceRoutes: vi.fn(),
-    listGoatSlackIntegrationsForTeam: vi.fn(),
+    insertSlackMessageEvents: vi.fn(),
+    listEnabledSlackBrainSourceRoutes: vi.fn(),
+    listSlackIntegrationsForTeam: vi.fn(),
   };
 });
-vi.mock("@opencompany/db/goat-workspaces", async (importOriginal) => ({
+vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  listGoatWorkspacesForUser: vi.fn(),
+  listWorkspacesForUser: vi.fn(),
 }));
 
 const SIGNING_SECRET = "test-signing-secret";
 const sentinelDb = { sentinel: "db" };
 
 function ingress(overrides: { authError?: ApiError } = {}) {
-  vi.mocked(listGoatWorkspacesForUser).mockResolvedValue([
+  vi.mocked(listWorkspacesForUser).mockResolvedValue([
     { workspace: { id: "workspace_1", workosOrganizationId: null }, role: "admin" },
   ] as never);
   return createSlackIngress({
@@ -93,23 +90,23 @@ function messageEnvelope(event: Record<string, unknown> = {}) {
 describe("Slack ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://goat.example.com");
+    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
     vi.stubEnv("GOAT_SLACK_SIGNING_SECRET", SIGNING_SECRET);
     vi.stubEnv("GOAT_SLACK_CLIENT_ID", "slack-client");
     vi.stubEnv("GOAT_SLACK_CLIENT_SECRET", "slack-secret");
     vi.stubEnv("GOAT_SLACK_STATE_SECRET", "slack-state-secret-slack-state-secret");
     vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", "a".repeat(44));
-    vi.mocked(listGoatSlackIntegrationsForTeam).mockResolvedValue([
+    vi.mocked(listSlackIntegrationsForTeam).mockResolvedValue([
       { id: "gint_1", userWorkosId: "user_1", status: "connected" },
     ] as never);
-    vi.mocked(listEnabledGoatSlackBrainSourceRoutes).mockResolvedValue([
+    vi.mocked(listEnabledSlackBrainSourceRoutes).mockResolvedValue([
       {
         integrationId: "gint_1",
         brainRef: "gbrain_1",
         config: { channels: [{ id: "C09ABC", name: "product" }] },
       },
     ] as never);
-    vi.mocked(insertGoatSlackMessageEvents).mockResolvedValue(1);
+    vi.mocked(insertSlackMessageEvents).mockResolvedValue(1);
   });
 
   afterEach(() => {
@@ -133,7 +130,7 @@ describe("Slack ingress", () => {
       const response = await ingress({
         authError: new ApiError(401, "authentication_required", "Authentication required."),
       }).start(new Request("https://api.example.com/integrations/slack/start"));
-      expect(response.headers.get("location")).toBe("https://goat.example.com/signin");
+      expect(response.headers.get("location")).toBe("https://opencompany.example.com/signin");
     });
 
     it("rejects a tampered callback state", async () => {
@@ -141,7 +138,7 @@ describe("Slack ingress", () => {
         new Request("https://api.example.com/integrations/slack/callback?state=garbage"),
       );
       const location = new URL(response.headers.get("location") ?? "");
-      expect(location.origin).toBe("https://goat.example.com");
+      expect(location.origin).toBe("https://opencompany.example.com");
       expect(location.searchParams.get("reason")).toBe("invalid_state");
     });
   });
@@ -152,7 +149,7 @@ describe("Slack ingress", () => {
         signedRequest(messageEnvelope(), { signature: "v0=nope" }),
       );
       expect(response.status).toBe(401);
-      expect(insertGoatSlackMessageEvents).not.toHaveBeenCalled();
+      expect(insertSlackMessageEvents).not.toHaveBeenCalled();
     });
 
     it("rejects a stale timestamp (replay guard)", async () => {
@@ -175,7 +172,7 @@ describe("Slack ingress", () => {
       const response = await ingress().webhook(signedRequest(messageEnvelope()));
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ ok: true, buffered: 1 });
-      expect(insertGoatSlackMessageEvents).toHaveBeenCalledWith(
+      expect(insertSlackMessageEvents).toHaveBeenCalledWith(
         [
           expect.objectContaining({
             integrationId: "gint_1",
@@ -199,7 +196,7 @@ describe("Slack ingress", () => {
         const response = await ingress().webhook(signedRequest(messageEnvelope(event)));
         expect(await response.json()).toMatchObject({ ok: true, dropped: true });
       }
-      expect(insertGoatSlackMessageEvents).not.toHaveBeenCalled();
+      expect(insertSlackMessageEvents).not.toHaveBeenCalled();
     });
 
     it("keeps file_share and thread_broadcast subtypes", async () => {
@@ -207,7 +204,7 @@ describe("Slack ingress", () => {
         const response = await ingress().webhook(signedRequest(messageEnvelope({ subtype })));
         expect(await response.json()).toMatchObject({ ok: true, buffered: 1 });
       }
-      expect(insertGoatSlackMessageEvents).toHaveBeenCalledTimes(2);
+      expect(insertSlackMessageEvents).toHaveBeenCalledTimes(2);
     });
 
     it("marks all team integrations needs_reauth on app_uninstalled with the injected db", async () => {
@@ -219,7 +216,7 @@ describe("Slack ingress", () => {
         }),
       );
       expect(await response.json()).toMatchObject({ ok: true, marked: 1 });
-      expect(markGoatIntegrationStatus).toHaveBeenCalledWith(
+      expect(markIntegrationStatus).toHaveBeenCalledWith(
         expect.objectContaining({
           integrationId: "gint_1",
           status: "needs_reauth",
@@ -229,11 +226,11 @@ describe("Slack ingress", () => {
     });
 
     it("marks only the revoked user's integration on tokens_revoked", async () => {
-      vi.mocked(listGoatSlackIntegrationsForTeam).mockResolvedValue([
+      vi.mocked(listSlackIntegrationsForTeam).mockResolvedValue([
         { id: "gint_1", userWorkosId: "user_1", status: "connected" },
         { id: "gint_2", userWorkosId: "user_2", status: "connected" },
       ] as never);
-      vi.mocked(loadGoatIntegrationCredential).mockImplementation(
+      vi.mocked(loadIntegrationCredential).mockImplementation(
         async (input) =>
           ({
             payload: { authed_user_id: input.integrationId === "gint_1" ? "U01" : "U02" },
@@ -252,14 +249,14 @@ describe("Slack ingress", () => {
         }),
       );
       expect(await response.json()).toMatchObject({ ok: true, marked: 1 });
-      expect(markGoatIntegrationStatus).toHaveBeenCalledTimes(1);
-      expect(markGoatIntegrationStatus).toHaveBeenCalledWith(
+      expect(markIntegrationStatus).toHaveBeenCalledTimes(1);
+      expect(markIntegrationStatus).toHaveBeenCalledWith(
         expect.objectContaining({ integrationId: "gint_2" }),
       );
     });
 
     it("acks with 200 when processing fails after verification", async () => {
-      vi.mocked(listGoatSlackIntegrationsForTeam).mockRejectedValue(new Error("db down"));
+      vi.mocked(listSlackIntegrationsForTeam).mockRejectedValue(new Error("db down"));
       const response = await ingress().webhook(signedRequest(messageEnvelope()));
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ ok: true });

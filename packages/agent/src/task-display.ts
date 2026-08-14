@@ -1,0 +1,163 @@
+import type {
+  TaskReportedOutcome,
+  TaskStage,
+  TaskStatus,
+  TaskViewMode,
+} from "@opencompany/db/product-schema";
+
+export const TASK_VIEW_MODES: TaskViewMode[] = ["board", "list"];
+
+export function isTaskViewMode(value: unknown): value is TaskViewMode {
+  return TASK_VIEW_MODES.some((mode) => mode === value);
+}
+
+export const STAGE_COPY: Record<TaskStage, string> = {
+  queued: "Waiting for runner",
+  planning: "Planning task",
+  sandboxing: "Preparing task",
+  running: "Running task",
+  completed: "Completed",
+  failed: "Failed",
+  canceled: "Canceled",
+};
+
+export const STATUS_COPY: Record<TaskStatus, string> = {
+  queued: "Queued",
+  running: "Running",
+  succeeded: "Done",
+  failed: "Failed",
+  canceled: "Canceled",
+};
+
+export type TaskBoardColumn = "in_progress" | "in_review" | "done" | "canceled";
+
+export const TASK_BOARD_COLUMNS: TaskBoardColumn[] = [
+  "in_progress",
+  "in_review",
+  "done",
+  "canceled",
+];
+
+export const TASK_BOARD_COLUMN_COPY: Record<TaskBoardColumn, string> = {
+  in_progress: "In progress",
+  in_review: "In review",
+  done: "Done",
+  canceled: "Canceled",
+};
+
+export function taskBoardColumn(task: {
+  status: TaskStatus;
+  reportedOutcome?: TaskReportedOutcome | null;
+}): TaskBoardColumn {
+  if (task.status === "queued" || task.status === "running") return "in_progress";
+  if (task.status === "canceled") return "canceled";
+  if (task.status === "failed" || task.reportedOutcome === "needs_attention") {
+    return "in_review";
+  }
+  return "done";
+}
+
+// User-facing status for workflow tasks: the worker owns `status`; the agent's
+// post-run report decides done vs needs-attention on top of a succeeded run.
+export type WorkflowTaskDisplayStatus =
+  | "running"
+  | "failed"
+  | "done"
+  | "canceled"
+  | "needs-attention";
+
+export const WORKFLOW_TASK_STATUS_COPY: Record<WorkflowTaskDisplayStatus, string> = {
+  running: "Running",
+  failed: "Failed",
+  done: "Done",
+  canceled: "Canceled",
+  "needs-attention": "Needs attention",
+};
+
+export const WORKFLOW_TASK_STATUS_DOT_CLASS: Record<WorkflowTaskDisplayStatus, string> = {
+  running: "bg-ink/40 animate-pulse",
+  failed: "bg-danger",
+  done: "bg-success",
+  canceled: "bg-ink/30",
+  "needs-attention": "bg-warning",
+};
+
+export function workflowTaskDisplayStatus(task: {
+  status: TaskStatus;
+  reportedOutcome?: TaskReportedOutcome | null;
+}): WorkflowTaskDisplayStatus {
+  if (task.status === "queued" || task.status === "running") return "running";
+  if (task.status === "failed") return "failed";
+  if (task.status === "canceled") return "canceled";
+  return task.reportedOutcome === "needs_attention" ? "needs-attention" : "done";
+}
+
+export function taskBoardStatusCopy(task: {
+  status: TaskStatus;
+  reportedOutcome?: TaskReportedOutcome | null;
+}): string {
+  if (task.status === "succeeded" && task.reportedOutcome === "needs_attention") {
+    return WORKFLOW_TASK_STATUS_COPY["needs-attention"];
+  }
+  return STATUS_COPY[task.status];
+}
+
+export function toTaskTitle(text: string): string {
+  const trimmed = text.trim().replace(/[.!]+$/, "");
+  const clipped = trimmed.length > 64 ? `${trimmed.slice(0, 64).trimEnd()}...` : trimmed;
+  return clipped.charAt(0).toUpperCase() + clipped.slice(1);
+}
+
+export function normalizeTaskName(input: unknown, fallbackPrompt: string): string {
+  if (typeof input === "string" && input.trim()) {
+    return toTaskName(input);
+  }
+  return toTaskName(fallbackPrompt);
+}
+
+export function toTaskName(text: string): string {
+  const firstLine =
+    text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean) ?? "Untitled task";
+  const cleaned = firstLine
+    .replace(/^(please\s+)?(can|could|would)\s+you\s+/i, "")
+    .replace(/^(please\s+)?(help me|i need you to|i want you to)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .replace(/[.!?]+$/, "")
+    .trim();
+  const words = cleaned.split(/\s+/).filter(Boolean).slice(0, 7).join(" ");
+  const clipped = words.length > 48 ? `${words.slice(0, 48).trimEnd()}...` : words;
+  const fallback = clipped || "Untitled task";
+  return fallback.charAt(0).toUpperCase() + fallback.slice(1);
+}
+
+export function formatStartedAt(value: Date | string) {
+  const date = typeof value === "string" ? new Date(value) : value;
+  return new Intl.DateTimeFormat("en", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+export function formatTaskDuration(createdAt: Date | string, updatedAt: Date | string): string {
+  const started =
+    typeof createdAt === "string" ? new Date(createdAt).getTime() : createdAt.getTime();
+  const finished =
+    typeof updatedAt === "string" ? new Date(updatedAt).getTime() : updatedAt.getTime();
+  if (!Number.isFinite(started) || !Number.isFinite(finished)) return "—";
+  return formatTaskDurationMs(finished - started);
+}
+
+export function formatTaskDurationMs(durationMs: number): string {
+  if (!Number.isFinite(durationMs)) return "—";
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1_000));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}

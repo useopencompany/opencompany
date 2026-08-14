@@ -25,9 +25,9 @@ carry source content, create jobs, or bypass polling and leases.
   chooses a different Brain at execution time.
 - `external_id` plus `content_hash` makes normalized source admission idempotent.
 - Claimed payloads are checked with the typed guards in
-  `packages/goat-brain/src/source-items.ts` before a handler receives them.
-- Handler registration is explicit in `GOAT_BRAIN_INGEST_HANDLERS` in
-  `apps/runner/src/goat-brain-ingest-worker.ts`.
+  `packages/brain/src/source-items.ts` before a handler receives them.
+- Handler registration is explicit in `BRAIN_INGEST_HANDLERS` in
+  `apps/runner/src/brain-ingest-worker.ts`.
 - Agentic handlers materialize one Brain into a temporary filesystem, run an allowlisted Brain CLI
   loop, and sync validated changes back. They do not make the filesystem canonical.
 
@@ -45,8 +45,8 @@ stay behind API/runner boundaries and do not enter Brain documents or public rea
 
 ## Capture from Chat and MCP
 
-The shared capture service in `packages/goat-agent/src/brain-capture.ts` writes an immediate draft in
-`inbox/`, records a source item, and enqueues curation. OpenCompany Chat invokes it from the
+The shared capture service in `packages/agent/src/brain-capture.ts` writes an immediate draft in
+`inbox/`, records a source item, and enqueues curation. opencompany Chat invokes it from the
 runner-owned host-tool boundary; the API-owned MCP server exposes the same capture behavior to
 authorized clients. Both pin the selected Brain and preserve canonical integration source refs.
 
@@ -81,7 +81,7 @@ agent. The API serves bytes through `/v1/brain-assets/{documentId}` after Brain 
 ## Per-attempt spend gate
 
 Agentic ingestion enforces a provider-spend circuit breaker in
-`apps/runner/src/goat-brain-agent-ingest.ts`. The result records the limit, stop threshold,
+`apps/runner/src/brain-agent-ingest.ts`. The result records the limit, stop threshold,
 model/query/search breakdown, total provider spend, accounting completeness, and exhaustion state.
 If the limit is reached after valid mutations, the job may commit those valid changes and report
 exhaustion; if no valid mutation exists, it fails terminally instead of starting another paid
@@ -92,6 +92,6 @@ the job ID in traces rather than source text or provider payloads.
 
 ## CLI distinction
 
-`goat-brain ingest` is a one-shot planner over a local filesystem root. Runner agentic jobs may use
+`opencompany-brain ingest` is a one-shot planner over a local filesystem root. Runner agentic jobs may use
 the same CLI against their materialized root, but the command itself is not a queue or public ingest
 endpoint.

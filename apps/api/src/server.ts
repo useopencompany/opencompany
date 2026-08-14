@@ -1,7 +1,15 @@
 import { serve } from "@hono/node-server";
-import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
-import { createGoatBillingApplicationService } from "@opencompany/billing/application-service";
-import { getGoatStripe, getGoatStripeWebhookSecret } from "@opencompany/billing/stripe";
+import { getAppUrl } from "@opencompany/agent/app-url";
+import { resolvePersistedAutoModelRouting } from "@opencompany/agent/application/persisted-auto-model-routing";
+import { BrainImportApplicationService } from "@opencompany/agent/brain-imports";
+import { BrainSourceApplicationService } from "@opencompany/agent/brain-sources";
+import { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
+import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
+import { createMcpService } from "@opencompany/agent/mcp-http";
+import { createSkillImportResolver } from "@opencompany/agent/skill-import";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
+import { createBillingApplicationService } from "@opencompany/billing/application-service";
+import { getStripe, getStripeWebhookSecret } from "@opencompany/billing/stripe";
 import { RedisChatPresentationStream } from "@opencompany/chat-presentation";
 import {
   ChatApplicationService,
@@ -16,19 +24,8 @@ import {
 import { PostgresKnowledgeRepository } from "@opencompany/db/knowledge-repository";
 import { createPooledDb } from "@opencompany/db/pool";
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
-import { getGoatAppUrl } from "@opencompany/goat-agent/app-url";
-import { resolvePersistedAutoModelRouting } from "@opencompany/goat-agent/application/persisted-auto-model-routing";
-import { GoatBrainImportApplicationService } from "@opencompany/goat-agent/brain-imports";
-import { GoatBrainSourceApplicationService } from "@opencompany/goat-agent/brain-sources";
-import { GoatBrowserProfileApplicationService } from "@opencompany/goat-agent/browser-profiles/service";
-import { getGoatAvailableHarnessTools } from "@opencompany/goat-agent/integrations/google-data";
-import { createGoatMcpService } from "@opencompany/goat-agent/mcp-http";
-import { createGoatSkillImportResolver } from "@opencompany/goat-agent/skill-import";
-import {
-  registerGoatNodeObservability,
-  shutdownGoatNodeObservability,
-} from "@opencompany/goat-observability/node";
 import { createLogger } from "@opencompany/observability";
+import { registerNodeObservability, shutdownNodeObservability } from "@opencompany/telemetry/node";
 import { WorkOS } from "@workos-inc/node";
 import { createApiApp } from "./app";
 import { createAttachmentUploadService } from "./attachments";
@@ -68,7 +65,7 @@ import { createWorkspaceControlService } from "./workspace-control";
 import { createXAccountIngress } from "./x-account-ingress";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "server" });
-registerGoatNodeObservability({ serviceName: "opencompany-api" });
+registerNodeObservability({ serviceName: "opencompany-api" });
 
 const database = createPooledDb(resolveApiDatabaseUrl(), { max: resolvePoolMax() });
 const execute = (query: Parameters<typeof database.db.execute>[0]) => database.db.execute(query);
@@ -87,7 +84,7 @@ const tasks = new TaskApplicationService(
       model: command.model,
       systemPrompt: "",
       initialUserMessage: command.goal,
-      tools: await getGoatAvailableHarnessTools(actor.userId),
+      tools: await getAvailableHarnessTools(actor.userId),
       skills: [],
       maxModelSteps: 16,
       resultMode: "assistant_final",
@@ -103,12 +100,12 @@ const automations = createAutomationServices({
 });
 const knowledgeRepository = new PostgresKnowledgeRepository(database.db);
 const knowledge = new KnowledgeApplicationService(knowledgeRepository);
-const brainSources = new GoatBrainSourceApplicationService(database.db);
-const brainImports = new GoatBrainImportApplicationService(database.db, brainSources);
-const browserProfiles = new GoatBrowserProfileApplicationService(database.db);
+const brainSources = new BrainSourceApplicationService(database.db);
+const brainImports = new BrainImportApplicationService(database.db, brainSources);
+const browserProfiles = new BrowserProfileApplicationService(database.db);
 const skillImports = new SkillImportApplicationService(
   knowledgeRepository,
-  createGoatSkillImportResolver(),
+  createSkillImportResolver(),
 );
 const notifier = new PostgresRunEventNotifier(database.pool);
 const presentation = createPresentationStream();
@@ -116,7 +113,7 @@ const readModels = createElectricReadModels();
 const authenticate = createWorkOsApiAuthenticator(execute);
 const identityVerifier = createWorkOsApiIdentityVerifier();
 const runnerClient = createRunnerClient();
-const stripe = getGoatStripe();
+const stripe = getStripe();
 const workos = createWorkOSClient();
 const app = createApiApp({
   chat,
@@ -137,7 +134,7 @@ const app = createApiApp({
       : {}),
   }),
   captureChatMessage: (event) =>
-    captureGoatServerEvent(
+    captureProductServerEvent(
       "chat_message_sent",
       event.actor.userId,
       {
@@ -167,15 +164,15 @@ const app = createApiApp({
   repoConfigs: createRepoConfigService({ db: database.db }),
   integrationAccounts: createIntegrationAccountService({ db: database.db, runner: runnerClient }),
   slackBotSettings: createSlackBotSettingsService({ db: database.db }),
-  mcp: createGoatMcpService({
+  mcp: createMcpService({
     ...(process.env.VERCEL_AI_GATEWAY_API_KEY
       ? { gatewayApiKey: process.env.VERCEL_AI_GATEWAY_API_KEY }
       : {}),
   }),
-  billing: createGoatBillingApplicationService({
+  billing: createBillingApplicationService({
     db: database.db,
     stripe,
-    appUrl: getGoatAppUrl(),
+    appUrl: getAppUrl(),
   }),
   // The engine-auth device/browser flows run through the runner's internal
   // control routes; the client resolves RUNNER_INTERNAL_URL/RUNNER_PUBLIC_URL
@@ -208,7 +205,7 @@ const app = createApiApp({
   stripeIngress: createStripeIngress({
     db: database.db,
     stripe,
-    webhookSecret: getGoatStripeWebhookSecret(),
+    webhookSecret: getStripeWebhookSecret(),
   }),
   billingReconcile: createBillingReconcileService({
     db: database.db,
@@ -238,7 +235,7 @@ async function close(signal: string) {
   await notifier.close();
   await presentation?.close();
   await database.close();
-  await shutdownGoatNodeObservability();
+  await shutdownNodeObservability();
 }
 
 process.once("SIGINT", () => void close("SIGINT"));

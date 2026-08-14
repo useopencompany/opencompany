@@ -1,11 +1,11 @@
 import { createMCPClient } from "@ai-sdk/mcp";
 import {
-  getGoatLatitudeIntegrationState,
-  loadGoatLatitudeMcpWorkerConnection,
-} from "@opencompany/goat-agent/integrations/latitude-mcp";
+  getLatitudeIntegrationState,
+  loadLatitudeMcpWorkerConnection,
+} from "@opencompany/agent/integrations/latitude-mcp";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveLatitudeActions } from "@/lib/actions/latitude";
-import { GoatActionInvalidParamsError, GoatActionPermissionError } from "@/lib/actions/types";
+import { ActionInvalidParamsError, ActionPermissionError } from "@/lib/actions/types";
 
 const clientMocks = vi.hoisted(() => ({
   listTools: vi.fn(),
@@ -19,10 +19,10 @@ vi.mock("@ai-sdk/mcp", () => ({
   createMCPClient: vi.fn(async () => clientMocks),
 }));
 
-vi.mock("@opencompany/goat-agent/integrations/latitude-mcp", () => ({
-  GOAT_LATITUDE_MCP_ENDPOINT_URL: "https://api.latitude.so/v1/mcp",
-  getGoatLatitudeIntegrationState: vi.fn(),
-  loadGoatLatitudeMcpWorkerConnection: vi.fn(),
+vi.mock("@opencompany/agent/integrations/latitude-mcp", () => ({
+  LATITUDE_MCP_ENDPOINT_URL: "https://api.latitude.so/v1/mcp",
+  getLatitudeIntegrationState: vi.fn(),
+  loadLatitudeMcpWorkerConnection: vi.fn(),
 }));
 
 const definitions = {
@@ -52,7 +52,7 @@ const definitions = {
 describe("Latitude actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getGoatLatitudeIntegrationState).mockResolvedValue({
+    vi.mocked(getLatitudeIntegrationState).mockResolvedValue({
       provider: "latitude",
       connected: true,
       status: "connected",
@@ -61,7 +61,7 @@ describe("Latitude actions", () => {
       statusReason: null,
       capabilityModes: {},
     });
-    vi.mocked(loadGoatLatitudeMcpWorkerConnection).mockResolvedValue({
+    vi.mocked(loadLatitudeMcpWorkerConnection).mockResolvedValue({
       ok: true,
       integrationId: "gint_latitude",
       authProvider: {} as never,
@@ -147,7 +147,7 @@ describe("Latitude actions", () => {
           userTimezone: "UTC",
         },
       ),
-    ).rejects.toBeInstanceOf(GoatActionInvalidParamsError);
+    ).rejects.toBeInstanceOf(ActionInvalidParamsError);
     expect(clientMocks.executeRead).not.toHaveBeenCalled();
   });
 
@@ -173,6 +173,6 @@ describe("Latitude actions", () => {
           userTimezone: "UTC",
         },
       ),
-    ).rejects.toBeInstanceOf(GoatActionPermissionError);
+    ).rejects.toBeInstanceOf(ActionPermissionError);
   });
 });

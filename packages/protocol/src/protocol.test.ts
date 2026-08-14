@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createOpenCompanyClient } from "./client";
+import { createApiClient } from "./client";
 import { decodeEventCursor, encodeEventCursor, RunEventSchema } from "./events";
 import { createOpenApiDocument } from "./routes";
 import {
@@ -289,7 +289,7 @@ describe("headless protocol", () => {
   });
 
   it("exposes an inferred Hono client rooted at the canonical version", () => {
-    const client = createOpenCompanyClient("https://api.example.test");
+    const client = createApiClient("https://api.example.test");
     expect(client.v1.messages.$url().pathname).toBe("/v1/messages");
     expect(client.v1.tasks[":taskId"].$url({ param: { taskId: "task_1" } }).pathname).toBe(
       "/v1/tasks/task_1",

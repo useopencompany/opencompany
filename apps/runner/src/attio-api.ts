@@ -1,14 +1,11 @@
 import {
-  GOAT_ATTIO_CREDENTIAL_KIND,
-  GOAT_ATTIO_OBJECT_SLUGS,
-  GOAT_ATTIO_PROVIDER,
-  type GoatAttioApiKeyCredentialPayload,
-} from "@opencompany/db/goat-attio";
-import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-} from "@opencompany/db/goat-integrations";
-import type { GoatAttioObjectType } from "@opencompany/db/goat-schema";
+  ATTIO_CREDENTIAL_KIND,
+  ATTIO_OBJECT_SLUGS,
+  ATTIO_PROVIDER,
+  type AttioApiKeyCredentialPayload,
+} from "@opencompany/db/attio";
+import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
+import type { AttioObjectType } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import { getDb } from "./db";
 
@@ -51,14 +48,14 @@ export async function loadAttioApiKey(input: {
   userWorkosId: string;
   integrationId: string;
 }): Promise<string | null> {
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId: input.userWorkosId,
     integrationId: input.integrationId,
-    provider: GOAT_ATTIO_PROVIDER,
-    kind: GOAT_ATTIO_CREDENTIAL_KIND,
+    provider: ATTIO_PROVIDER,
+    kind: ATTIO_CREDENTIAL_KIND,
     db: getDb(),
   }).catch((error) => {
-    logger.warn("Goat Attio credential load failed", {
+    logger.warn("opencompany Attio credential load failed", {
       event: "opencompany.goat_attio_credential_load_failed",
       integration_id: input.integrationId,
       error,
@@ -66,7 +63,7 @@ export async function loadAttioApiKey(input: {
     return null;
   });
   if (!credential) return null;
-  const payload = credential.payload as GoatAttioApiKeyCredentialPayload;
+  const payload = credential.payload as AttioApiKeyCredentialPayload;
   return typeof payload.apiKey === "string" && payload.apiKey ? payload.apiKey : null;
 }
 
@@ -74,15 +71,15 @@ export async function markAttioNeedsReauth(
   input: { userWorkosId: string; integrationId: string },
   reason: string,
 ) {
-  await markGoatIntegrationStatus({
+  await markIntegrationStatus({
     userWorkosId: input.userWorkosId,
     integrationId: input.integrationId,
-    provider: GOAT_ATTIO_PROVIDER,
+    provider: ATTIO_PROVIDER,
     status: "needs_reauth",
     statusReason: reason,
     db: getDb(),
   }).catch((error) => {
-    logger.warn("Goat Attio needs_reauth marking failed", {
+    logger.warn("opencompany Attio needs_reauth marking failed", {
       event: "opencompany.goat_attio_needs_reauth_mark_failed",
       integration_id: input.integrationId,
       error,
@@ -96,11 +93,11 @@ export async function markAttioNeedsReauth(
 // integration.
 export async function fetchAttioRecordSnapshot(input: {
   apiKey: string;
-  objectType: GoatAttioObjectType;
+  objectType: AttioObjectType;
   recordId: string;
 }): Promise<AttioRecordSnapshot | null> {
   try {
-    const slug = GOAT_ATTIO_OBJECT_SLUGS[input.objectType];
+    const slug = ATTIO_OBJECT_SLUGS[input.objectType];
     const record = (await attioApiRequest({
       apiKey: input.apiKey,
       path: `/objects/${slug}/records/${encodeURIComponent(input.recordId)}`,
@@ -145,11 +142,11 @@ export async function fetchAttioRecordSnapshot(input: {
 // an empty map on failure; activity lines then fall back to "an attribute".
 export async function fetchAttioAttributeTitles(input: {
   apiKey: string;
-  objectType: GoatAttioObjectType;
+  objectType: AttioObjectType;
 }): Promise<Map<string, string>> {
   const titles = new Map<string, string>();
   try {
-    const slug = GOAT_ATTIO_OBJECT_SLUGS[input.objectType];
+    const slug = ATTIO_OBJECT_SLUGS[input.objectType];
     const response = (await attioApiRequest({
       apiKey: input.apiKey,
       path: `/objects/${slug}/attributes?limit=500`,

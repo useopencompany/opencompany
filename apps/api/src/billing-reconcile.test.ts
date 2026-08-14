@@ -1,21 +1,21 @@
-import { sweepGoatAutoRefills } from "@opencompany/billing/auto-refill";
-import { reconcileGoatStripeSeatQuantities } from "@opencompany/billing/seats";
+import { reconcileCapabilities } from "@opencompany/agent/capabilities/reconcile";
+import { sweepAutoRefills } from "@opencompany/billing/auto-refill";
+import { reconcileStripeSeatQuantities } from "@opencompany/billing/seats";
 import {
-  refreshGoatMonthlyIncludedUsage,
-  releasePendingGoatIngestionReservations,
-} from "@opencompany/db/goat-billing";
-import { reconcileGoatCapabilities } from "@opencompany/goat-agent/capabilities/reconcile";
+  refreshMonthlyIncludedUsage,
+  releasePendingIngestionReservations,
+} from "@opencompany/db/billing";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createBillingReconcileService } from "./billing-reconcile";
 
-vi.mock("@opencompany/billing/auto-refill", () => ({ sweepGoatAutoRefills: vi.fn() }));
-vi.mock("@opencompany/billing/seats", () => ({ reconcileGoatStripeSeatQuantities: vi.fn() }));
-vi.mock("@opencompany/db/goat-billing", () => ({
-  refreshGoatMonthlyIncludedUsage: vi.fn(),
-  releasePendingGoatIngestionReservations: vi.fn(),
+vi.mock("@opencompany/billing/auto-refill", () => ({ sweepAutoRefills: vi.fn() }));
+vi.mock("@opencompany/billing/seats", () => ({ reconcileStripeSeatQuantities: vi.fn() }));
+vi.mock("@opencompany/db/billing", () => ({
+  refreshMonthlyIncludedUsage: vi.fn(),
+  releasePendingIngestionReservations: vi.fn(),
 }));
-vi.mock("@opencompany/goat-agent/capabilities/reconcile", () => ({
-  reconcileGoatCapabilities: vi.fn(),
+vi.mock("@opencompany/agent/capabilities/reconcile", () => ({
+  reconcileCapabilities: vi.fn(),
 }));
 
 describe("billing reconciliation", () => {
@@ -28,11 +28,11 @@ describe("billing reconciliation", () => {
     const service = createBillingReconcileService({ db, stripe, secret: "cron-secret" });
     const response = await service.reconcile(new Request("https://api.test/billing/reconcile"));
     expect(response.status).toBe(401);
-    expect(sweepGoatAutoRefills).not.toHaveBeenCalled();
+    expect(sweepAutoRefills).not.toHaveBeenCalled();
   });
 
   it("uses the API database and Stripe client for the unchanged reconcile sequence", async () => {
-    vi.mocked(reconcileGoatCapabilities).mockResolvedValue({
+    vi.mocked(reconcileCapabilities).mockResolvedValue({
       expiredApprovals: 0,
       candidates: 0,
       settled: 0,
@@ -40,22 +40,22 @@ describe("billing reconciliation", () => {
       failed: 0,
       wallet: null,
     });
-    vi.mocked(releasePendingGoatIngestionReservations).mockResolvedValue({
+    vi.mocked(releasePendingIngestionReservations).mockResolvedValue({
       released: 2,
       failed: 0,
     });
-    vi.mocked(refreshGoatMonthlyIncludedUsage).mockResolvedValue({
+    vi.mocked(refreshMonthlyIncludedUsage).mockResolvedValue({
       candidates: 1,
       refreshed: 1,
       failed: 0,
     });
-    vi.mocked(reconcileGoatStripeSeatQuantities).mockResolvedValue({
+    vi.mocked(reconcileStripeSeatQuantities).mockResolvedValue({
       candidates: 1,
       reconciled: 1,
       changed: 0,
       failed: 0,
     });
-    vi.mocked(sweepGoatAutoRefills).mockResolvedValue({ candidates: 1, charged: 0 });
+    vi.mocked(sweepAutoRefills).mockResolvedValue({ candidates: 1, charged: 0 });
     const service = createBillingReconcileService({ db, stripe, secret: "cron-secret" });
     const response = await service.reconcile(
       new Request("https://api.test/billing/reconcile", {
@@ -64,13 +64,13 @@ describe("billing reconciliation", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(reconcileGoatCapabilities).toHaveBeenCalledWith(100, { db });
-    expect(releasePendingGoatIngestionReservations).toHaveBeenCalledWith({
+    expect(reconcileCapabilities).toHaveBeenCalledWith(100, { db });
+    expect(releasePendingIngestionReservations).toHaveBeenCalledWith({
       maxWorkspaces: 200,
       db,
     });
-    expect(refreshGoatMonthlyIncludedUsage).toHaveBeenCalledWith({ limit: 500, db });
-    expect(reconcileGoatStripeSeatQuantities).toHaveBeenCalledWith(100, { db, stripe });
-    expect(sweepGoatAutoRefills).toHaveBeenCalledWith(25, { db, stripe });
+    expect(refreshMonthlyIncludedUsage).toHaveBeenCalledWith({ limit: 500, db });
+    expect(reconcileStripeSeatQuantities).toHaveBeenCalledWith(100, { db, stripe });
+    expect(sweepAutoRefills).toHaveBeenCalledWith(25, { db, stripe });
   });
 });

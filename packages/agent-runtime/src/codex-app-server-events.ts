@@ -1,4 +1,4 @@
-import { GOAT_PUBLISH_ARTIFACT_TOOL_NAME, parseGoatPublishedChatArtifact } from "./chat-artifacts";
+import { PUBLISH_ARTIFACT_TOOL_NAME, parsePublishedChatArtifact } from "./chat-artifacts";
 
 export type CodexAppServerEventType =
   | "assistant.delta"
@@ -409,7 +409,7 @@ function dynamicToolCallPayload(item: Record<string, unknown>) {
   const success = typeof item.success === "boolean" ? item.success : undefined;
   const tool = firstString(item.tool);
   const artifact =
-    tool === GOAT_PUBLISH_ARTIFACT_TOOL_NAME
+    tool === PUBLISH_ARTIFACT_TOOL_NAME
       ? publishedArtifactFromContentItems(item.contentItems)
       : null;
   return {
@@ -429,7 +429,7 @@ function publishedArtifactFromContentItems(value: unknown) {
     const text = record?.type === "inputText" ? firstString(record.text) : null;
     if (!text) continue;
     try {
-      const artifact = parseGoatPublishedChatArtifact(JSON.parse(text) as unknown);
+      const artifact = parsePublishedChatArtifact(JSON.parse(text) as unknown);
       if (artifact) return artifact;
     } catch {
       // Invalid host-tool output cannot become a durable UI part.

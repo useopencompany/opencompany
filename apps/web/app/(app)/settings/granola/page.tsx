@@ -1,5 +1,5 @@
-import { GoatGranolaSettingsRoute } from "@/components/GoatRoutes";
+import { GranolaSettingsRoute } from "@/components/Routes";
 
 export default function GranolaSettingsPage() {
-  return <GoatGranolaSettingsRoute />;
+  return <GranolaSettingsRoute />;
 }

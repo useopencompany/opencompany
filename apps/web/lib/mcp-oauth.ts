@@ -1,1 +1,1 @@
-export * from "@opencompany/goat-agent/mcp-oauth";
+export * from "@opencompany/agent/mcp-oauth";

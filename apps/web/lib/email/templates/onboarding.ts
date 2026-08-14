@@ -1,4 +1,4 @@
-import type { OnboardingEmailStep as GoatOnboardingEmailStep } from "@opencompany/protocol";
+import type { OnboardingEmailStep as OnboardingEmailStep } from "@opencompany/protocol";
 
 // Plain, personal founder emails — no heavy HTML chrome, no emojis, all lowercase.
 // Each email is written so replies land in Louis' inbox and every send carries an
@@ -125,7 +125,7 @@ export function renderFeedbackCallEmail(input: OnboardingEmailRenderInput) {
 }
 
 export function renderOnboardingEmail(
-  step: GoatOnboardingEmailStep,
+  step: OnboardingEmailStep,
   input: OnboardingEmailRenderInput,
 ) {
   switch (step) {

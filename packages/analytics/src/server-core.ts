@@ -12,7 +12,7 @@ type PostHogServerEvent = {
 
 type PostHogServerConfig = {
   host: string | undefined;
-  project: "goat" | "web";
+  project: "product" | "web";
   token: string | undefined;
 };
 

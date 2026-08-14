@@ -13,9 +13,9 @@ import {
   Video,
 } from "lucide-react";
 
-export const GOAT_JAMIE_DOCS_HREF = "/docs/integrations/jamie";
+export const JAMIE_DOCS_HREF = "/docs/integrations/jamie";
 
-export type GoatBrainSourceProviderDef = {
+export type BrainSourceProviderDef = {
   id: BrainSourceConfigProvider;
   name: string;
   description: string;
@@ -30,8 +30,8 @@ export type GoatBrainSourceProviderDef = {
 
 // Deliberately excludes "slack_bot": those brain_sources rows are answer
 // destinations (rendered by the Destinations section in brain settings via
-// GoatSlackBotDestinationCard), not ingestion sources.
-export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
+// SlackBotDestinationCard), not ingestion sources.
+export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
   {
     id: "jamie",
     name: "Jamie",
@@ -40,7 +40,7 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
     connectionKind: "webhook",
     available: true,
     connectHref: "/settings/jamie",
-    docsHref: GOAT_JAMIE_DOCS_HREF,
+    docsHref: JAMIE_DOCS_HREF,
   },
   {
     id: "granola",
@@ -137,7 +137,7 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
 // The meeting-note providers (Jamie, Granola, Fathom) have nothing to scope —
 // once connected, every meeting flows in — so onboarding auto-enables them on
 // connect instead of prompting for config.
-export function goatBrainSourceNeedsConfig(id: BrainSourceConfigProvider): boolean {
+export function brainSourceNeedsConfig(id: BrainSourceConfigProvider): boolean {
   return (
     id === "slack" ||
     id === "linear" ||

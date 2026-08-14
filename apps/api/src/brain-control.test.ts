@@ -1,25 +1,25 @@
 import type { Actor } from "@opencompany/core";
 import {
-  createGoatBrain,
-  getGoatBrainAccess,
-  listGoatBrainMemberIds,
-  listGoatWorkspaceMembers,
-  replaceGoatBrainMembers,
-  updateGoatBrainVisibility,
-} from "@opencompany/db/goat-workspaces";
+  createBrain,
+  getBrainAccess,
+  listBrainMemberIds,
+  listWorkspaceMembers,
+  replaceBrainMembers,
+  updateBrainVisibility,
+} from "@opencompany/db/workspaces";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createBrainControlService } from "./brain-control";
 
-vi.mock("@opencompany/db/goat-workspaces", async (importOriginal) => ({
+vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  createGoatBrain: vi.fn(async () => ({ id: "brain_new" })),
-  getGoatBrainAccess: vi.fn(),
-  listGoatBrainMemberIds: vi.fn(async () => ["user_1"]),
-  listGoatWorkspaceMembers: vi.fn(),
-  replaceGoatBrainMembers: vi.fn(async () => undefined),
-  updateGoatBrainEnrichmentEnabled: vi.fn(async () => undefined),
-  updateGoatBrainIntelligence: vi.fn(async () => undefined),
-  updateGoatBrainVisibility: vi.fn(async () => undefined),
+  createBrain: vi.fn(async () => ({ id: "brain_new" })),
+  getBrainAccess: vi.fn(),
+  listBrainMemberIds: vi.fn(async () => ["user_1"]),
+  listWorkspaceMembers: vi.fn(),
+  replaceBrainMembers: vi.fn(async () => undefined),
+  updateBrainEnrichmentEnabled: vi.fn(async () => undefined),
+  updateBrainIntelligence: vi.fn(async () => undefined),
+  updateBrainVisibility: vi.fn(async () => undefined),
 }));
 
 const admin: Actor = {
@@ -35,19 +35,19 @@ const db = { sentinel: true } as never;
 describe("Brain control service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getGoatBrainAccess).mockResolvedValue(brainAccess() as never);
-    vi.mocked(listGoatWorkspaceMembers).mockResolvedValue(workspaceMembers() as never);
+    vi.mocked(getBrainAccess).mockResolvedValue(brainAccess() as never);
+    vi.mocked(listWorkspaceMembers).mockResolvedValue(workspaceMembers() as never);
   });
 
   it("authorizes a Brain switch against the actor's active workspace", async () => {
     const service = createBrainControlService({ db });
     await expect(service.switchBrain(member, "brain_1")).resolves.toEqual({ brainId: "brain_1" });
-    expect(getGoatBrainAccess).toHaveBeenCalledWith(
+    expect(getBrainAccess).toHaveBeenCalledWith(
       { userWorkosId: "user_1", brainRef: "brain_1" },
       { db },
     );
 
-    vi.mocked(getGoatBrainAccess).mockResolvedValueOnce(
+    vi.mocked(getBrainAccess).mockResolvedValueOnce(
       brainAccess({ workspaceId: "workspace_other" }) as never,
     );
     await expect(service.switchBrain(member, "brain_1")).rejects.toMatchObject({
@@ -63,7 +63,7 @@ describe("Brain control service", () => {
     await expect(
       service.createBrain(admin, { name: "Research", visibility: "workspace" }),
     ).resolves.toEqual({ brainId: "brain_new" });
-    expect(createGoatBrain).toHaveBeenCalledWith(
+    expect(createBrain).toHaveBeenCalledWith(
       {
         workspaceId: "workspace_1",
         name: "Research",
@@ -83,7 +83,7 @@ describe("Brain control service", () => {
         memberIds: ["user_outside"],
       }),
     ).rejects.toMatchObject({ status: 400 });
-    expect(updateGoatBrainVisibility).not.toHaveBeenCalled();
+    expect(updateBrainVisibility).not.toHaveBeenCalled();
   });
 
   it("keeps the acting admin in a restricted Brain and exposes member-safe DTOs", async () => {
@@ -92,7 +92,7 @@ describe("Brain control service", () => {
       visibility: "restricted",
       memberIds: ["user_2"],
     });
-    expect(replaceGoatBrainMembers).toHaveBeenCalledWith(
+    expect(replaceBrainMembers).toHaveBeenCalledWith(
       {
         brainRef: "brain_1",
         userWorkosIds: ["user_2", "user_1"],
@@ -121,7 +121,7 @@ describe("Brain control service", () => {
         },
       ],
     });
-    expect(listGoatBrainMemberIds).toHaveBeenCalledWith("brain_1", { db });
+    expect(listBrainMemberIds).toHaveBeenCalledWith("brain_1", { db });
   });
 });
 

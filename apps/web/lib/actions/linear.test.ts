@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  getGoatLinearIntegrationState: vi.fn(),
-  loadGoatLinearMcpWorkerConnection: vi.fn(),
+  getLinearIntegrationState: vi.fn(),
+  loadLinearMcpWorkerConnection: vi.fn(),
   createMCPClient: vi.fn(),
 }));
 
-vi.mock("@opencompany/goat-agent/integrations/linear-mcp", () => ({
-  GOAT_LINEAR_MCP_ENDPOINT_URL: "https://mcp.linear.app/mcp",
-  getGoatLinearIntegrationState: mocks.getGoatLinearIntegrationState,
-  loadGoatLinearMcpWorkerConnection: mocks.loadGoatLinearMcpWorkerConnection,
+vi.mock("@opencompany/agent/integrations/linear-mcp", () => ({
+  LINEAR_MCP_ENDPOINT_URL: "https://mcp.linear.app/mcp",
+  getLinearIntegrationState: mocks.getLinearIntegrationState,
+  loadLinearMcpWorkerConnection: mocks.loadLinearMcpWorkerConnection,
 }));
 vi.mock("@ai-sdk/mcp", () => ({
   createMCPClient: mocks.createMCPClient,
@@ -23,12 +23,12 @@ import {
   resolveLinearActions,
 } from "@/lib/actions/linear";
 import {
-  GoatActionAuthError,
-  type GoatActionExecuteContext,
-  GoatActionPermissionError,
+  ActionAuthError,
+  type ActionExecuteContext,
+  ActionPermissionError,
 } from "@/lib/actions/types";
 
-const CONTEXT: GoatActionExecuteContext = {
+const CONTEXT: ActionExecuteContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-18T00:00:00.000Z"),
@@ -60,7 +60,7 @@ function mockClient(remoteTools: Record<string, { execute?: unknown }>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.getGoatLinearIntegrationState.mockResolvedValue(connectedLinearState());
+  mocks.getLinearIntegrationState.mockResolvedValue(connectedLinearState());
 });
 
 describe("normalizeLinearListIssuesInput", () => {
@@ -71,7 +71,7 @@ describe("normalizeLinearListIssuesInput", () => {
         cursor: "",
         orderBy: "updatedAt",
         query: "",
-        team: "Goat",
+        team: "opencompany",
         state: "Todo",
         cycle: "",
         label: "",
@@ -88,7 +88,7 @@ describe("normalizeLinearListIssuesInput", () => {
     ).toEqual({
       limit: 100,
       orderBy: "updatedAt",
-      team: "Goat",
+      team: "opencompany",
       state: "Todo",
       project: "company brain",
       includeArchived: false,
@@ -98,11 +98,11 @@ describe("normalizeLinearListIssuesInput", () => {
   it("maps explicit unassigned and no-priority filters to Linear sentinels", () => {
     expect(
       normalizeLinearListIssuesInput({
-        team: "Goat",
+        team: "opencompany",
         unassigned: true,
         unprioritized: true,
       }),
-    ).toEqual({ team: "Goat", assignee: null, priority: 0 });
+    ).toEqual({ team: "opencompany", assignee: null, priority: 0 });
   });
 
   it("rejects contradictory explicit filters", () => {
@@ -120,50 +120,54 @@ describe("normalizeLinearCreateIssueInput", () => {
     expect(
       normalizeLinearCreateIssueInput({
         title: "  Add export flow  ",
-        team: " GOAT ",
+        team: " opencompany ",
         description: " Ship the first cut. ",
         assignee: " me ",
         state: " Todo ",
         project: " Company Brain ",
         priority: 2,
         labels: ["Feature", " feature ", "Customer"],
-        parentId: " GOAT-10 ",
+        parentId: " opencompany-10 ",
       }),
     ).toEqual({
       title: "Add export flow",
-      team: "GOAT",
+      team: "opencompany",
       description: "Ship the first cut.",
       assignee: "me",
       state: "Todo",
       project: "Company Brain",
       priority: 2,
       labels: ["Feature", "Customer"],
-      parentId: "GOAT-10",
+      parentId: "opencompany-10",
     });
   });
 
   it("requires a title and team and rejects unsafe or unknown fields", () => {
-    expect(() => normalizeLinearCreateIssueInput({ team: "GOAT" })).toThrow('"title" is required');
+    expect(() => normalizeLinearCreateIssueInput({ team: "opencompany" })).toThrow(
+      '"title" is required',
+    );
     expect(() =>
-      normalizeLinearCreateIssueInput({ title: "Ship", team: "GOAT", priority: 5 }),
+      normalizeLinearCreateIssueInput({ title: "Ship", team: "opencompany", priority: 5 }),
     ).toThrow('"priority" must be an integer');
     expect(() =>
-      normalizeLinearCreateIssueInput({ title: "Ship", team: "GOAT", deleteAll: true }),
+      normalizeLinearCreateIssueInput({ title: "Ship", team: "opencompany", deleteAll: true }),
     ).toThrow("Unknown parameter");
   });
 
   it("allows issue descriptions up to Linear's documented message body cap", () => {
     const description = "x".repeat(LINEAR_MAX_MARKDOWN_BODY_CHARS);
-    expect(normalizeLinearCreateIssueInput({ title: "Ship", team: "GOAT", description })).toEqual({
+    expect(
+      normalizeLinearCreateIssueInput({ title: "Ship", team: "opencompany", description }),
+    ).toEqual({
       title: "Ship",
-      team: "GOAT",
+      team: "opencompany",
       description,
     });
 
     expect(() =>
       normalizeLinearCreateIssueInput({
         title: "Ship",
-        team: "GOAT",
+        team: "opencompany",
         description: `${description}x`,
       }),
     ).toThrow('"description" exceeds 249999 characters');
@@ -174,7 +178,7 @@ describe("normalizeLinearUpdateIssueInput", () => {
   it("normalizes requested changes, supports cancellation, and preserves explicit clears", () => {
     expect(
       normalizeLinearUpdateIssueInput({
-        id: " GOAT-123 ",
+        id: " opencompany-123 ",
         title: " Ship Linear updates ",
         description: "  ",
         assignee: null,
@@ -184,7 +188,7 @@ describe("normalizeLinearUpdateIssueInput", () => {
         labels: [],
       }),
     ).toEqual({
-      id: "GOAT-123",
+      id: "opencompany-123",
       title: "Ship Linear updates",
       description: "",
       assignee: null,
@@ -197,26 +201,26 @@ describe("normalizeLinearUpdateIssueInput", () => {
 
   it("requires an identifier and at least one known field to update", () => {
     expect(() => normalizeLinearUpdateIssueInput({ state: "Done" })).toThrow('"id" is required');
-    expect(() => normalizeLinearUpdateIssueInput({ id: "GOAT-123" })).toThrow(
+    expect(() => normalizeLinearUpdateIssueInput({ id: "opencompany-123" })).toThrow(
       "at least one issue field",
     );
-    expect(() => normalizeLinearUpdateIssueInput({ id: "GOAT-123", delete: true })).toThrow(
+    expect(() => normalizeLinearUpdateIssueInput({ id: "opencompany-123", delete: true })).toThrow(
       "Unknown parameter",
     );
-    expect(() => normalizeLinearUpdateIssueInput({ id: "GOAT-123", project: "" })).toThrow(
+    expect(() => normalizeLinearUpdateIssueInput({ id: "opencompany-123", project: "" })).toThrow(
       '"project" must be a non-empty string',
     );
   });
 
   it("allows replacement descriptions up to Linear's documented message body cap", () => {
     const description = "x".repeat(LINEAR_MAX_MARKDOWN_BODY_CHARS);
-    expect(normalizeLinearUpdateIssueInput({ id: "GOAT-123", description })).toEqual({
-      id: "GOAT-123",
+    expect(normalizeLinearUpdateIssueInput({ id: "opencompany-123", description })).toEqual({
+      id: "opencompany-123",
       description,
     });
 
     expect(() =>
-      normalizeLinearUpdateIssueInput({ id: "GOAT-123", description: `${description}x` }),
+      normalizeLinearUpdateIssueInput({ id: "opencompany-123", description: `${description}x` }),
     ).toThrow('"description" exceeds 249999 characters');
   });
 });
@@ -225,22 +229,22 @@ describe("normalizeLinearCreateCommentInput", () => {
   it("normalizes the issue identifier and Markdown body", () => {
     expect(
       normalizeLinearCreateCommentInput({
-        issueId: " GOAT-123 ",
+        issueId: " opencompany-123 ",
         body: "  Shipped in #456.  ",
       }),
     ).toEqual({
-      issueId: "GOAT-123",
+      issueId: "opencompany-123",
       body: "Shipped in #456.",
     });
   });
 
   it("requires both fields and rejects unknown parameters", () => {
-    expect(() => normalizeLinearCreateCommentInput({ issueId: "GOAT-123" })).toThrow(
+    expect(() => normalizeLinearCreateCommentInput({ issueId: "opencompany-123" })).toThrow(
       '"body" is required',
     );
     expect(() =>
       normalizeLinearCreateCommentInput({
-        issueId: "GOAT-123",
+        issueId: "opencompany-123",
         body: "Done",
         notifyAll: true,
       }),
@@ -249,20 +253,20 @@ describe("normalizeLinearCreateCommentInput", () => {
 
   it("allows comments up to Linear's documented message body cap", () => {
     const body = "x".repeat(LINEAR_MAX_MARKDOWN_BODY_CHARS);
-    expect(normalizeLinearCreateCommentInput({ issueId: "GOAT-123", body })).toEqual({
-      issueId: "GOAT-123",
+    expect(normalizeLinearCreateCommentInput({ issueId: "opencompany-123", body })).toEqual({
+      issueId: "opencompany-123",
       body,
     });
 
     expect(() =>
-      normalizeLinearCreateCommentInput({ issueId: "GOAT-123", body: `${body}x` }),
+      normalizeLinearCreateCommentInput({ issueId: "opencompany-123", body: `${body}x` }),
     ).toThrow('"body" exceeds 249999 characters');
   });
 });
 
 describe("resolveLinearActions", () => {
   it("is absent when Linear is not connected", async () => {
-    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce({
+    mocks.getLinearIntegrationState.mockResolvedValueOnce({
       ...connectedLinearState(),
       connected: false,
       status: "not_connected",
@@ -324,23 +328,17 @@ describe("resolveLinearActions", () => {
   });
 
   it("honors read and write permission modes", async () => {
-    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce(
-      connectedLinearState({ write: "on" }),
-    );
+    mocks.getLinearIntegrationState.mockResolvedValueOnce(connectedLinearState({ write: "on" }));
     let catalog = await resolveLinearActions("user_1");
     expect(catalog?.actions.find((action) => action.id === "linear.create_issue")).toMatchObject({
       permissionMode: "on",
     });
 
-    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce(
-      connectedLinearState({ write: "off" }),
-    );
+    mocks.getLinearIntegrationState.mockResolvedValueOnce(connectedLinearState({ write: "off" }));
     catalog = await resolveLinearActions("user_1");
     expect(catalog?.actions.some((action) => action.capability === "write")).toBe(false);
 
-    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce(
-      connectedLinearState({ read: "off" }),
-    );
+    mocks.getLinearIntegrationState.mockResolvedValueOnce(connectedLinearState({ read: "off" }));
     catalog = await resolveLinearActions("user_1");
     expect(catalog?.actions.map((action) => action.id)).toEqual([
       "linear.create_issue",
@@ -348,7 +346,7 @@ describe("resolveLinearActions", () => {
       "linear.create_comment",
     ]);
 
-    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce(
+    mocks.getLinearIntegrationState.mockResolvedValueOnce(
       connectedLinearState({ read: "off", write: "off" }),
     );
     expect(await resolveLinearActions("user_1")).toBeNull();
@@ -356,18 +354,18 @@ describe("resolveLinearActions", () => {
 });
 
 describe("linear action execution", () => {
-  it("maps auth failures to GoatActionAuthError", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValueOnce({
+  it("maps auth failures to ActionAuthError", async () => {
+    mocks.loadLinearMcpWorkerConnection.mockResolvedValueOnce({
       ok: false,
       reason: "not_connected",
     });
     const catalog = await resolveLinearActions("user_1");
     const listIssues = catalog?.actions.find((action) => action.id === "linear.list_issues");
-    await expect(listIssues?.execute({}, CONTEXT)).rejects.toBeInstanceOf(GoatActionAuthError);
+    await expect(listIssues?.execute({}, CONTEXT)).rejects.toBeInstanceOf(ActionAuthError);
   });
 
   it("normalizes list_issues input, calls the remote tool, and closes the client", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+    mocks.loadLinearMcpWorkerConnection.mockResolvedValue({
       ok: true,
       integrationId: "gint_linear_1",
       authProvider: {},
@@ -380,11 +378,11 @@ describe("linear action execution", () => {
     const catalog = await resolveLinearActions("user_1");
     const listIssues = catalog?.actions.find((action) => action.id === "linear.list_issues");
     const result = await listIssues?.execute(
-      { team: "Goat", assignee: null, priority: 0 },
+      { team: "opencompany", assignee: null, priority: 0 },
       CONTEXT,
     );
 
-    expect(remoteExecute).toHaveBeenCalledWith({ team: "Goat" }, expect.anything());
+    expect(remoteExecute).toHaveBeenCalledWith({ team: "opencompany" }, expect.anything());
     expect(result).toEqual({
       integrationId: "gint_linear_1",
       issues: [
@@ -399,7 +397,7 @@ describe("linear action execution", () => {
   });
 
   it("fails as a provider error when the remote tool is missing and still closes the client", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+    mocks.loadLinearMcpWorkerConnection.mockResolvedValue({
       ok: true,
       integrationId: "gint_linear_1",
       authProvider: {},
@@ -415,7 +413,7 @@ describe("linear action execution", () => {
   });
 
   it("surfaces MCP isError results as thrown provider errors", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+    mocks.loadLinearMcpWorkerConnection.mockResolvedValue({
       ok: true,
       integrationId: "gint_linear_1",
       authProvider: {},
@@ -432,7 +430,7 @@ describe("linear action execution", () => {
   });
 
   it("creates an issue with selected fields and returns canonical source metadata", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+    mocks.loadLinearMcpWorkerConnection.mockResolvedValue({
       ok: true,
       integrationId: "gint_linear_1",
       authProvider: {},
@@ -441,7 +439,7 @@ describe("linear action execution", () => {
       content: [
         {
           type: "text",
-          text: '{"id":"issue_1","identifier":"GOAT-123","url":"https://linear.app/acme/issue/GOAT-123"}',
+          text: '{"id":"issue_1","identifier":"opencompany-123","url":"https://linear.app/acme/issue/opencompany-123"}',
         },
       ],
     }));
@@ -452,7 +450,7 @@ describe("linear action execution", () => {
     const result = await createIssue?.execute(
       {
         title: " Add ticket creation ",
-        team: " GOAT ",
+        team: " opencompany ",
         assignee: "me",
         priority: 2,
         labels: ["Feature"],
@@ -463,7 +461,7 @@ describe("linear action execution", () => {
     expect(remoteExecute).toHaveBeenCalledWith(
       {
         title: "Add ticket creation",
-        team: "GOAT",
+        team: "opencompany",
         assignee: "me",
         priority: 2,
         labels: ["Feature"],
@@ -472,16 +470,16 @@ describe("linear action execution", () => {
     );
     expect(result).toEqual({
       id: "issue_1",
-      identifier: "GOAT-123",
-      url: "https://linear.app/acme/issue/GOAT-123",
-      sourceRef: "linear:issue:GOAT-123",
+      identifier: "opencompany-123",
+      url: "https://linear.app/acme/issue/opencompany-123",
+      sourceRef: "linear:issue:opencompany-123",
       integrationId: "gint_linear_1",
     });
     expect(close).toHaveBeenCalled();
   });
 
   it("updates an issue through save_issue and returns canonical source metadata", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+    mocks.loadLinearMcpWorkerConnection.mockResolvedValue({
       ok: true,
       integrationId: "gint_linear_1",
       authProvider: {},
@@ -490,7 +488,7 @@ describe("linear action execution", () => {
       content: [
         {
           type: "text",
-          text: '{"id":"issue_1","identifier":"GOAT-123","state":{"name":"Canceled"}}',
+          text: '{"id":"issue_1","identifier":"opencompany-123","state":{"name":"Canceled"}}',
         },
       ],
     }));
@@ -500,7 +498,7 @@ describe("linear action execution", () => {
     const updateIssue = catalog?.actions.find((action) => action.id === "linear.update_issue");
     const result = await updateIssue?.execute(
       {
-        id: " GOAT-123 ",
+        id: " opencompany-123 ",
         state: " Canceled ",
         description: " No longer planned. ",
       },
@@ -509,7 +507,7 @@ describe("linear action execution", () => {
 
     expect(remoteExecute).toHaveBeenCalledWith(
       {
-        id: "GOAT-123",
+        id: "opencompany-123",
         state: "Canceled",
         description: "No longer planned.",
       },
@@ -517,16 +515,16 @@ describe("linear action execution", () => {
     );
     expect(result).toEqual({
       id: "issue_1",
-      identifier: "GOAT-123",
+      identifier: "opencompany-123",
       state: { name: "Canceled" },
-      sourceRef: "linear:issue:GOAT-123",
+      sourceRef: "linear:issue:opencompany-123",
       integrationId: "gint_linear_1",
     });
     expect(close).toHaveBeenCalled();
   });
 
   it("removes an issue's project through save_issue", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+    mocks.loadLinearMcpWorkerConnection.mockResolvedValue({
       ok: true,
       integrationId: "gint_linear_1",
       authProvider: {},
@@ -535,7 +533,7 @@ describe("linear action execution", () => {
       content: [
         {
           type: "text",
-          text: '{"id":"issue_1","identifier":"GOAT-123","project":null}',
+          text: '{"id":"issue_1","identifier":"opencompany-123","project":null}',
         },
       ],
     }));
@@ -543,27 +541,27 @@ describe("linear action execution", () => {
 
     const catalog = await resolveLinearActions("user_1");
     const updateIssue = catalog?.actions.find((action) => action.id === "linear.update_issue");
-    const result = await updateIssue?.execute({ id: " GOAT-123 ", project: null }, CONTEXT);
+    const result = await updateIssue?.execute({ id: " opencompany-123 ", project: null }, CONTEXT);
 
     expect(remoteExecute).toHaveBeenCalledWith(
       {
-        id: "GOAT-123",
+        id: "opencompany-123",
         project: null,
       },
       expect.anything(),
     );
     expect(result).toEqual({
       id: "issue_1",
-      identifier: "GOAT-123",
+      identifier: "opencompany-123",
       project: null,
-      sourceRef: "linear:issue:GOAT-123",
+      sourceRef: "linear:issue:opencompany-123",
       integrationId: "gint_linear_1",
     });
     expect(close).toHaveBeenCalled();
   });
 
   it("adds a comment through save_comment", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+    mocks.loadLinearMcpWorkerConnection.mockResolvedValue({
       ok: true,
       integrationId: "gint_linear_1",
       authProvider: {},
@@ -576,12 +574,12 @@ describe("linear action execution", () => {
     const catalog = await resolveLinearActions("user_1");
     const createComment = catalog?.actions.find((action) => action.id === "linear.create_comment");
     const result = await createComment?.execute(
-      { issueId: " GOAT-123 ", body: " Shipped. " },
+      { issueId: " opencompany-123 ", body: " Shipped. " },
       CONTEXT,
     );
 
     expect(remoteExecute).toHaveBeenCalledWith(
-      { issueId: "GOAT-123", body: "Shipped." },
+      { issueId: "opencompany-123", body: "Shipped." },
       expect.anything(),
     );
     expect(result).toEqual({ id: "comment_1", body: "Shipped." });
@@ -590,14 +588,12 @@ describe("linear action execution", () => {
 
   it("blocks a stale write when Linear writes were turned off after catalog resolution", async () => {
     const catalog = await resolveLinearActions("user_1");
-    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce(
-      connectedLinearState({ write: "off" }),
-    );
+    mocks.getLinearIntegrationState.mockResolvedValueOnce(connectedLinearState({ write: "off" }));
     const createIssue = catalog?.actions.find((action) => action.id === "linear.create_issue");
 
     await expect(
-      createIssue?.execute({ title: "Should not happen", team: "GOAT" }, CONTEXT),
-    ).rejects.toBeInstanceOf(GoatActionPermissionError);
+      createIssue?.execute({ title: "Should not happen", team: "opencompany" }, CONTEXT),
+    ).rejects.toBeInstanceOf(ActionPermissionError);
     expect(mocks.createMCPClient).not.toHaveBeenCalled();
   });
 });

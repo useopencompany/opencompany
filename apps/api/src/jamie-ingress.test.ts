@@ -1,36 +1,36 @@
-import { upsertGoatBrainSourceItemAndEnqueue } from "@opencompany/db/goat-brain-ingest";
+import {
+  hashJamieWebhookApiKey,
+  loadJamieWebhookContext,
+  loadJamieWebhookContextForApiKey,
+  markJamieWebhookConnected,
+} from "@opencompany/agent/integrations/jamie";
+import { upsertBrainSourceItemAndEnqueue } from "@opencompany/db/brain-ingest";
 import {
   hasAnyBrainSourceForIntegration,
   listEnabledBrainRefsForIntegration,
-} from "@opencompany/db/goat-brain-sources";
-import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
-import {
-  hashGoatJamieWebhookApiKey,
-  loadGoatJamieWebhookContext,
-  loadGoatJamieWebhookContextForApiKey,
-  markGoatJamieWebhookConnected,
-} from "@opencompany/goat-agent/integrations/jamie";
+} from "@opencompany/db/brain-sources";
+import { getDefaultBrainForUser } from "@opencompany/db/workspaces";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createJamieIngress } from "./jamie-ingress";
 
-vi.mock("@opencompany/goat-agent/integrations/jamie", async (importOriginal) => ({
+vi.mock("@opencompany/agent/integrations/jamie", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  loadGoatJamieWebhookContext: vi.fn(),
-  loadGoatJamieWebhookContextForApiKey: vi.fn(),
-  markGoatJamieWebhookConnected: vi.fn(),
+  loadJamieWebhookContext: vi.fn(),
+  loadJamieWebhookContextForApiKey: vi.fn(),
+  markJamieWebhookConnected: vi.fn(),
 }));
-vi.mock("@opencompany/db/goat-brain-ingest", async (importOriginal) => ({
+vi.mock("@opencompany/db/brain-ingest", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  upsertGoatBrainSourceItemAndEnqueue: vi.fn(),
+  upsertBrainSourceItemAndEnqueue: vi.fn(),
 }));
-vi.mock("@opencompany/db/goat-brain-sources", async (importOriginal) => ({
+vi.mock("@opencompany/db/brain-sources", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   hasAnyBrainSourceForIntegration: vi.fn(),
   listEnabledBrainRefsForIntegration: vi.fn(),
 }));
-vi.mock("@opencompany/db/goat-workspaces", async (importOriginal) => ({
+vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  getDefaultGoatBrainForUser: vi.fn(),
+  getDefaultBrainForUser: vi.fn(),
 }));
 
 const sentinelDb = { sentinel: "db" };
@@ -42,9 +42,9 @@ function ingress() {
 describe("Jamie ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(loadGoatJamieWebhookContextForApiKey).mockResolvedValue(webhookContext());
-    vi.mocked(loadGoatJamieWebhookContext).mockResolvedValue(webhookContext());
-    vi.mocked(upsertGoatBrainSourceItemAndEnqueue).mockResolvedValue({
+    vi.mocked(loadJamieWebhookContextForApiKey).mockResolvedValue(webhookContext());
+    vi.mocked(loadJamieWebhookContext).mockResolvedValue(webhookContext());
+    vi.mocked(upsertBrainSourceItemAndEnqueue).mockResolvedValue({
       sourceItemId: "gbsrc_123",
       jobId: "gbjob_123",
       jobIds: ["gbjob_123"],
@@ -53,8 +53,8 @@ describe("Jamie ingress", () => {
     } as never);
     vi.mocked(listEnabledBrainRefsForIntegration).mockResolvedValue([]);
     vi.mocked(hasAnyBrainSourceForIntegration).mockResolvedValue(false);
-    vi.mocked(getDefaultGoatBrainForUser).mockResolvedValue({ id: "gbrain_123" } as never);
-    vi.mocked(markGoatJamieWebhookConnected).mockResolvedValue(undefined);
+    vi.mocked(getDefaultBrainForUser).mockResolvedValue({ id: "gbrain_123" } as never);
+    vi.mocked(markJamieWebhookConnected).mockResolvedValue(undefined);
   });
 
   it("resolves the global path by API key and enqueues through the injected db", async () => {
@@ -63,10 +63,10 @@ describe("Jamie ingress", () => {
 
     expect(response.status).toBe(200);
     expect(body).toMatchObject({ ok: true, enqueued: true });
-    expect(loadGoatJamieWebhookContextForApiKey).toHaveBeenCalledWith(jamieApiKey(), sentinelDb);
+    expect(loadJamieWebhookContextForApiKey).toHaveBeenCalledWith(jamieApiKey(), sentinelDb);
     expect(listEnabledBrainRefsForIntegration).toHaveBeenCalledWith("gint_123", sentinelDb);
-    expect(getDefaultGoatBrainForUser).toHaveBeenCalledWith("user_123", { db: sentinelDb });
-    expect(upsertGoatBrainSourceItemAndEnqueue).toHaveBeenCalledWith(
+    expect(getDefaultBrainForUser).toHaveBeenCalledWith("user_123", { db: sentinelDb });
+    expect(upsertBrainSourceItemAndEnqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         userWorkosId: "user_123",
         sourceConnectionId: "gint_123",
@@ -82,7 +82,7 @@ describe("Jamie ingress", () => {
         }),
       }),
     );
-    expect(markGoatJamieWebhookConnected).toHaveBeenCalledWith(
+    expect(markJamieWebhookConnected).toHaveBeenCalledWith(
       expect.objectContaining({ integrationId: "gint_123", userWorkosId: "user_123" }),
       sentinelDb,
     );
@@ -94,9 +94,9 @@ describe("Jamie ingress", () => {
     const response = await ingress().webhook(jamieRequest(jamiePayload()));
 
     expect(response.status).toBe(200);
-    expect(getDefaultGoatBrainForUser).not.toHaveBeenCalled();
+    expect(getDefaultBrainForUser).not.toHaveBeenCalled();
     expect(hasAnyBrainSourceForIntegration).not.toHaveBeenCalled();
-    expect(upsertGoatBrainSourceItemAndEnqueue).toHaveBeenCalledWith(
+    expect(upsertBrainSourceItemAndEnqueue).toHaveBeenCalledWith(
       expect.objectContaining({ brainRefs: ["gbrain_a", "gbrain_b"] }),
     );
   });
@@ -108,20 +108,20 @@ describe("Jamie ingress", () => {
     const response = await ingress().webhook(jamieRequest(jamiePayload()));
 
     expect(response.status).toBe(200);
-    expect(getDefaultGoatBrainForUser).not.toHaveBeenCalled();
-    expect(upsertGoatBrainSourceItemAndEnqueue).toHaveBeenCalledWith(
+    expect(getDefaultBrainForUser).not.toHaveBeenCalled();
+    expect(upsertBrainSourceItemAndEnqueue).toHaveBeenCalledWith(
       expect.objectContaining({ brainRefs: [] }),
     );
   });
 
   it("returns 401 on the global path when the API key resolves no integration", async () => {
-    vi.mocked(loadGoatJamieWebhookContextForApiKey).mockResolvedValue(null);
+    vi.mocked(loadJamieWebhookContextForApiKey).mockResolvedValue(null);
 
     const response = await ingress().webhook(jamieRequest(jamiePayload()));
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({ error: "Invalid Jamie webhook API key." });
-    expect(upsertGoatBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
+    expect(upsertBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
   });
 
   it("returns 401 when the delivery's API key does not match the stored hash", async () => {
@@ -130,11 +130,11 @@ describe("Jamie ingress", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(upsertGoatBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
+    expect(upsertBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
   });
 
   it("returns 404 on the per-integration path for an unknown integration", async () => {
-    vi.mocked(loadGoatJamieWebhookContext).mockResolvedValue(null);
+    vi.mocked(loadJamieWebhookContext).mockResolvedValue(null);
 
     const response = await ingress().webhookForIntegration(
       "gint_missing",
@@ -143,8 +143,8 @@ describe("Jamie ingress", () => {
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: "Jamie integration not found." });
-    expect(loadGoatJamieWebhookContext).toHaveBeenCalledWith("gint_missing", sentinelDb);
-    expect(upsertGoatBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
+    expect(loadJamieWebhookContext).toHaveBeenCalledWith("gint_missing", sentinelDb);
+    expect(upsertBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
   });
 
   it("returns 400 for unsupported Jamie events", async () => {
@@ -153,7 +153,7 @@ describe("Jamie ingress", () => {
     );
 
     expect(response.status).toBe(400);
-    expect(upsertGoatBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
+    expect(upsertBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
   });
 });
 
@@ -161,7 +161,7 @@ function webhookContext() {
   return {
     integrationId: "gint_123",
     userWorkosId: "user_123",
-    apiKeyHash: hashGoatJamieWebhookApiKey(jamieApiKey()),
+    apiKeyHash: hashJamieWebhookApiKey(jamieApiKey()),
     legacySecretHash: null,
   };
 }

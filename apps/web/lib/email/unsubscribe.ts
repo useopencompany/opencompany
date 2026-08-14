@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { getGoatAppUrl } from "@/lib/app-url";
+import { getAppUrl } from "@/lib/app-url";
 import { trimmed } from "@/lib/email/client";
 import { emailLifecycleApiRequest, serverApiError } from "@/lib/server-api-client";
 
@@ -7,7 +7,7 @@ import { emailLifecycleApiRequest, serverApiError } from "@/lib/server-api-clien
 // The token is an HMAC over {email, type} using RESEND_API_KEY as the signing
 // secret (same convention as web — it never leaves the server). Unsubscribing
 // stops the remaining onboarding sequence for that address; there is no Resend
-// contact to flip because Goat does not sync contacts/segments.
+// contact to flip because opencompany does not sync contacts/segments.
 
 const UNSUBSCRIBE_TOKEN_VERSION = 1;
 const SIGNATURE_ALGORITHM = "sha256";
@@ -61,7 +61,7 @@ function parsePayload(value: unknown): EmailUnsubscribeTokenPayload {
   };
 }
 
-export function createGoatEmailUnsubscribeToken(input: { email: string; secret?: string }) {
+export function createEmailUnsubscribeToken(input: { email: string; secret?: string }) {
   const email = input.email.trim().toLowerCase();
   if (!email.includes("@")) throw new Error("A valid email is required for unsubscribe links.");
 
@@ -75,7 +75,7 @@ export function createGoatEmailUnsubscribeToken(input: { email: string; secret?:
   return `${payload}.${signature}`;
 }
 
-export function verifyGoatEmailUnsubscribeToken(token: string, secret = getEmailSecret()) {
+export function verifyEmailUnsubscribeToken(token: string, secret = getEmailSecret()) {
   const [encodedPayload, signature, extra] = token.split(".");
   if (!encodedPayload || !signature || extra) throw new Error("Invalid unsubscribe token.");
 
@@ -85,16 +85,16 @@ export function verifyGoatEmailUnsubscribeToken(token: string, secret = getEmail
   return parsePayload(decodeJson(encodedPayload));
 }
 
-export function createGoatEmailUnsubscribeUrl(input: {
+export function createEmailUnsubscribeUrl(input: {
   email: string;
   baseUrl?: string;
   secret?: string;
 }) {
-  const base = input.baseUrl ?? getGoatAppUrl();
+  const base = input.baseUrl ?? getAppUrl();
   const url = new URL("/api/email/unsubscribe", base);
   url.searchParams.set(
     "token",
-    createGoatEmailUnsubscribeToken({
+    createEmailUnsubscribeToken({
       email: input.email,
       ...(input.secret ? { secret: input.secret } : {}),
     }),
@@ -102,8 +102,8 @@ export function createGoatEmailUnsubscribeUrl(input: {
   return url.toString();
 }
 
-export async function unsubscribeGoatOnboardingEmails(input: { token: string }) {
-  const payload = verifyGoatEmailUnsubscribeToken(input.token);
+export async function unsubscribeOnboardingEmails(input: { token: string }) {
+  const payload = verifyEmailUnsubscribeToken(input.token);
   const response = await emailLifecycleApiRequest("unsubscribe", { email: payload.email });
   if (!response.ok) {
     throw await serverApiError(response, "Could not unsubscribe from onboarding emails.");

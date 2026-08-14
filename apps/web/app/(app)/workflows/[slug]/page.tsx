@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { TasksWorkflowsDisabledRoute } from "@/components/GoatRoutes";
-import { GoatWorkflowEditor } from "@/components/GoatWorkflowEditor";
-import { currentGoatUser } from "@/lib/auth";
+import { TasksWorkflowsDisabledRoute } from "@/components/Routes";
+import { WorkflowEditor } from "@/components/WorkflowEditor";
+import { currentUser } from "@/lib/auth";
 import { getHeadlessWorkflow } from "@/lib/headless-automation-server";
 import { listHeadlessSkillCatalog } from "@/lib/headless-knowledge-server";
 
@@ -11,7 +11,7 @@ type WorkflowEditorPageProps = {
 
 export default async function WorkflowEditorPage({ params }: WorkflowEditorPageProps) {
   const { slug } = await params;
-  const context = await currentGoatUser();
+  const context = await currentUser();
   if (!context.user.taskSpawningEnabled) {
     return <TasksWorkflowsDisabledRoute />;
   }
@@ -43,5 +43,5 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
     );
   }
 
-  return <GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={skillCatalog} />;
+  return <WorkflowEditor workflow={workflow} canEdit skillCatalog={skillCatalog} />;
 }

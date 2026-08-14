@@ -1,5 +1,5 @@
-import { listGoatWorkspacesForUser } from "@opencompany/db/goat-workspaces";
-import { getGoatAppUrl } from "@opencompany/goat-agent/app-url";
+import { getAppUrl } from "@opencompany/agent/app-url";
+import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import type { ApiIdentityVerifier } from "./auth";
 import { ApiError } from "./errors";
 
@@ -22,7 +22,7 @@ export type IngressSession =
   | { kind: "redirect"; response: Response };
 
 // The retired web OAuth routes resolved the hosted session with
-// currentGoatUser(): anonymous browsers redirect to /signin, users without a
+// currentUser(): anonymous browsers redirect to /signin, users without a
 // visible workspace to /onboarding, and the active workspace resolves
 // org-match -> workspace cookie -> first visible workspace over the
 // billing-filtered membership list. There is deliberately no onboarding gate:
@@ -40,7 +40,7 @@ export async function resolveIngressSession(
     }
     throw error;
   }
-  const workspaces: IngressWorkspace[] = await listGoatWorkspacesForUser(identity.userId, {
+  const workspaces: IngressWorkspace[] = await listWorkspacesForUser(identity.userId, {
     db: input.db,
   });
   const first = workspaces[0];
@@ -65,7 +65,7 @@ export async function resolveIngressSession(
 }
 
 export function webRedirect(path: string) {
-  return Response.redirect(new URL(path, getGoatAppUrl()), 302);
+  return Response.redirect(new URL(path, getAppUrl()), 302);
 }
 
 export function sessionRedirect(

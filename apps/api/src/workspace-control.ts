@@ -1,21 +1,21 @@
-import { syncGoatStripeSeatQuantityForWorkspace } from "@opencompany/billing/seats";
+import { ensureWorkspaceOrganization } from "@opencompany/agent/workspaces/organizations";
+import {
+  provisionWorkspace,
+  WorkspaceProvisioningError,
+} from "@opencompany/agent/workspaces/provisioning";
+import { syncStripeSeatQuantityForWorkspace } from "@opencompany/billing/seats";
 import type { Actor } from "@opencompany/core";
-import { getGoatWorkspacePlan, goatWorkspaceMemberCap } from "@opencompany/db/goat-billing";
-import { goatWorkspaces } from "@opencompany/db/goat-schema";
+import { getWorkspacePlan, workspaceMemberCap } from "@opencompany/db/billing";
+import { workspaces } from "@opencompany/db/product-schema";
 import {
-  DEFAULT_GOAT_BRAIN_SLUG,
-  hasOwnedGoatHobbyWorkspace,
-  listAccessibleGoatBrains,
-  listGoatWorkspaceMembers,
-  listGoatWorkspacesForUser,
-  removeGoatWorkspaceMember,
-  updateGoatWorkspaceName,
-} from "@opencompany/db/goat-workspaces";
-import { ensureGoatWorkspaceOrganization } from "@opencompany/goat-agent/workspaces/organizations";
-import {
-  GoatWorkspaceProvisioningError,
-  provisionGoatWorkspace,
-} from "@opencompany/goat-agent/workspaces/provisioning";
+  DEFAULT_BRAIN_SLUG,
+  hasOwnedHobbyWorkspace,
+  listAccessibleBrains,
+  listWorkspaceMembers,
+  listWorkspacesForUser,
+  removeWorkspaceMember,
+  updateWorkspaceName,
+} from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
 import type { WorkOS } from "@workos-inc/node";
 import { eq } from "drizzle-orm";
@@ -80,8 +80,8 @@ export function createWorkspaceControlService(input: {
   async function currentWorkspace(actor: Actor) {
     const [workspace] = await db
       .select()
-      .from(goatWorkspaces)
-      .where(eq(goatWorkspaces.id, actor.workspaceId))
+      .from(workspaces)
+      .where(eq(workspaces.id, actor.workspaceId))
       .limit(1);
     if (!workspace) throw new ApiError(404, "not_found", "Workspace not found.");
     return workspace;
@@ -118,15 +118,15 @@ export function createWorkspaceControlService(input: {
     async getSettings(actor) {
       const workspace = await currentWorkspace(actor);
       const [members, invitations, plan] = await Promise.all([
-        listGoatWorkspaceMembers(actor.workspaceId, { db }),
+        listWorkspaceMembers(actor.workspaceId, { db }),
         listInvitations(actor, workspace.workosOrganizationId, true),
-        getGoatWorkspacePlan(actor.workspaceId, { db }),
+        getWorkspacePlan(actor.workspaceId, { db }),
       ]);
       return {
         workspace: { id: workspace.id, name: workspace.name },
         role: actor.role === "admin" ? "admin" : "member",
         plan,
-        memberCap: goatWorkspaceMemberCap(plan),
+        memberCap: workspaceMemberCap(plan),
         members: members.map(workspaceMemberView),
         invitations,
       };
@@ -140,11 +140,11 @@ export function createWorkspaceControlService(input: {
       }
       const workspace = await currentWorkspace(actor);
       const [members, invitations, plan] = await Promise.all([
-        listGoatWorkspaceMembers(actor.workspaceId, { db }),
+        listWorkspaceMembers(actor.workspaceId, { db }),
         listInvitations(actor, workspace.workosOrganizationId, true),
-        getGoatWorkspacePlan(actor.workspaceId, { db }),
+        getWorkspacePlan(actor.workspaceId, { db }),
       ]);
-      const memberCap = goatWorkspaceMemberCap(plan);
+      const memberCap = workspaceMemberCap(plan);
       if (members.length + invitations.length >= memberCap) {
         throw new ApiError(
           409,
@@ -154,7 +154,7 @@ export function createWorkspaceControlService(input: {
             : `Workspaces allow up to ${memberCap} members (including pending invites). Remove a member or revoke an invite first.`,
         );
       }
-      const organizationId = await ensureGoatWorkspaceOrganization(workspace, { workos, db });
+      const organizationId = await ensureWorkspaceOrganization(workspace, { workos, db });
       await workos.userManagement.sendInvitation({
         email,
         organizationId,
@@ -187,7 +187,7 @@ export function createWorkspaceControlService(input: {
       }
       const [workspace, members] = await Promise.all([
         currentWorkspace(actor),
-        listGoatWorkspaceMembers(actor.workspaceId, { db }),
+        listWorkspaceMembers(actor.workspaceId, { db }),
       ]);
       if (!members.some((entry) => entry.user.workosUserId === userId)) {
         throw new ApiError(404, "not_found", "Member not found in this workspace.");
@@ -201,11 +201,8 @@ export function createWorkspaceControlService(input: {
           await workos.userManagement.deleteOrganizationMembership(membership.id);
         }
       }
-      await removeGoatWorkspaceMember(
-        { workspaceId: actor.workspaceId, userWorkosId: userId },
-        { db },
-      );
-      await syncGoatStripeSeatQuantityForWorkspace(actor.workspaceId, { db }).catch((error) => {
+      await removeWorkspaceMember({ workspaceId: actor.workspaceId, userWorkosId: userId }, { db });
+      await syncStripeSeatQuantityForWorkspace(actor.workspaceId, { db }).catch((error) => {
         logger.warn("Stripe seat sync failed after workspace member removal", {
           event: "opencompany.api_workspace_seat_sync_failed",
           workspace_id: actor.workspaceId,
@@ -224,13 +221,13 @@ export function createWorkspaceControlService(input: {
           name,
         });
       }
-      await updateGoatWorkspaceName({ workspaceId: actor.workspaceId, name }, { db });
+      await updateWorkspaceName({ workspaceId: actor.workspaceId, name }, { db });
       return { id: actor.workspaceId, name };
     },
 
     async create(actor, command) {
       const name = validWorkspaceName(command.name);
-      if (await hasOwnedGoatHobbyWorkspace(actor.userId, { db })) {
+      if (await hasOwnedHobbyWorkspace(actor.userId, { db })) {
         const replay = await findWorkspaceActivation(actor, command.workspaceId, db);
         if (replay) return replay;
         throw new ApiError(
@@ -239,9 +236,9 @@ export function createWorkspaceControlService(input: {
           "Hobby includes one workspace. Upgrade your Hobby workspace to Pro to create another.",
         );
       }
-      let created: Awaited<ReturnType<typeof provisionGoatWorkspace>>;
+      let created: Awaited<ReturnType<typeof provisionWorkspace>>;
       try {
-        created = await provisionGoatWorkspace(
+        created = await provisionWorkspace(
           {
             authUserId: actor.userId,
             userWorkosId: actor.userId,
@@ -251,7 +248,7 @@ export function createWorkspaceControlService(input: {
           { workos, db },
         );
       } catch (error) {
-        if (!(error instanceof GoatWorkspaceProvisioningError)) throw error;
+        if (!(error instanceof WorkspaceProvisioningError)) throw error;
         logger.error("Workspace provisioning failed", {
           event: "opencompany.api_workspace_provisioning_failed",
           workspace_id: command.workspaceId,
@@ -303,15 +300,12 @@ async function findWorkspaceActivation(
   workspaceId: string,
   db: DbLike,
 ): Promise<WorkspaceActivationView | null> {
-  const memberships = await listGoatWorkspacesForUser(actor.userId, { db });
+  const memberships = await listWorkspacesForUser(actor.userId, { db });
   const target = memberships.find((entry) => entry.workspace.id === workspaceId);
   if (!target?.workspace.workosOrganizationId) return null;
-  const brains = await listAccessibleGoatBrains(
-    { userWorkosId: actor.userId, workspaceId },
-    { db },
-  );
+  const brains = await listAccessibleBrains({ userWorkosId: actor.userId, workspaceId }, { db });
   const activeBrain =
-    brains.find((brain) => brain.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
+    brains.find((brain) => brain.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
   return {
     workspaceId,
     organizationId: target.workspace.workosOrganizationId,

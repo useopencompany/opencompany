@@ -1,2 +1,2 @@
-// Re-export shim: source moved to @opencompany/goat-agent (shared with the API).
-export * from "@opencompany/goat-agent/integrations/slack-bot";
+// Re-export shim: source moved to @opencompany/agent (shared with the API).
+export * from "@opencompany/agent/integrations/slack-bot";

@@ -1,29 +1,23 @@
-import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
+import { slackApiRequest } from "@opencompany/agent/integrations/slack";
+import {
+  isSlackBotConfigured,
+  slackBotScopesSatisfied,
+} from "@opencompany/agent/integrations/slack-bot";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { Actor } from "@opencompany/core";
-import { upsertGoatBrainSource } from "@opencompany/db/goat-brain-sources";
-import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-} from "@opencompany/db/goat-integrations";
-import { goatBrainSources } from "@opencompany/db/goat-schema";
-import {
-  type GoatSlackConversationRef,
-  parseGoatSlackBrainSourceConfig,
-} from "@opencompany/db/goat-slack";
-import { getGoatSlackBotIntegrationForWorkspace } from "@opencompany/db/goat-slack-bot";
-import { getGoatBrainAccess } from "@opencompany/db/goat-workspaces";
-import { slackApiRequest } from "@opencompany/goat-agent/integrations/slack";
-import {
-  goatSlackBotScopesSatisfied,
-  isGoatSlackBotConfigured,
-} from "@opencompany/goat-agent/integrations/slack-bot";
+import { upsertBrainSource } from "@opencompany/db/brain-sources";
+import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
+import { brainSources } from "@opencompany/db/product-schema";
+import { parseSlackBrainSourceConfig, type SlackConversationRef } from "@opencompany/db/slack";
+import { getSlackBotIntegrationForWorkspace } from "@opencompany/db/slack-bot";
+import { getBrainAccess } from "@opencompany/db/workspaces";
 import { and, count, eq } from "drizzle-orm";
 import { ApiError } from "./errors";
 
 type DbLike = any;
 const SLACK_BOT_CHANNEL_LIMIT = 5_000;
 
-export type SlackBotChannel = GoatSlackConversationRef & {
+export type SlackBotChannel = SlackConversationRef & {
   isPrivate: boolean;
   isMember: boolean;
 };
@@ -44,7 +38,7 @@ export type SlackBotDestination = {
   botConnected: boolean;
   isAdmin: boolean;
   brainVisibility: "workspace" | "restricted";
-  source: { enabled: boolean; channels: GoatSlackConversationRef[] } | null;
+  source: { enabled: boolean; channels: SlackConversationRef[] } | null;
 };
 
 export type SlackBotSettingsService = {
@@ -58,7 +52,7 @@ export type SlackBotSettingsService = {
   setDestination(
     actor: Actor,
     brainId: string,
-    input: { enabled: boolean; channels: GoatSlackConversationRef[] },
+    input: { enabled: boolean; channels: SlackConversationRef[] },
   ): Promise<void>;
 };
 
@@ -70,17 +64,14 @@ export function createSlackBotSettingsService(input: {
   const request = input.request ?? slackApiRequest;
 
   async function integrationFor(actor: Actor) {
-    return getGoatSlackBotIntegrationForWorkspace(actor.workspaceId, db);
+    return getSlackBotIntegrationForWorkspace(actor.workspaceId, db);
   }
 
   async function requireAdminBrain(actor: Actor, brainId: string) {
     if (actor.role !== "admin") {
       throw new ApiError(403, "forbidden", "Only workspace admins can configure the Slack bot.");
     }
-    const access = await getGoatBrainAccess(
-      { userWorkosId: actor.userId, brainRef: brainId },
-      { db },
-    );
+    const access = await getBrainAccess({ userWorkosId: actor.userId, brainRef: brainId }, { db });
     if (!access || access.brain.workspaceId !== actor.workspaceId) {
       throw new ApiError(404, "not_found", "Brain not found.");
     }
@@ -90,7 +81,7 @@ export function createSlackBotSettingsService(input: {
   async function workspaceBotToken(actor: Actor): Promise<string | null> {
     const integration = await integrationFor(actor);
     if (!integration || integration.status === "disconnected") return null;
-    const credential = await loadGoatIntegrationCredential({
+    const credential = await loadIntegrationCredential({
       userWorkosId: integration.userWorkosId,
       integrationId: integration.id,
       provider: "slack_bot",
@@ -109,19 +100,19 @@ export function createSlackBotSettingsService(input: {
       if (integration && installed) {
         const [row] = await db
           .select({ value: count() })
-          .from(goatBrainSources)
+          .from(brainSources)
           .where(
             and(
-              eq(goatBrainSources.integrationId, integration.id),
-              eq(goatBrainSources.provider, "slack_bot"),
-              eq(goatBrainSources.enabled, true),
+              eq(brainSources.integrationId, integration.id),
+              eq(brainSources.provider, "slack_bot"),
+              eq(brainSources.enabled, true),
             ),
           );
         destinationCount = Number(row?.value ?? 0);
       }
       return {
         isAdmin: actor.role === "admin",
-        configured: isGoatSlackBotConfigured(),
+        configured: isSlackBotConfigured(),
         installed,
         status:
           integration && integration.status !== "disconnected"
@@ -131,7 +122,7 @@ export function createSlackBotSettingsService(input: {
           integration &&
             installed &&
             integration.status === "connected" &&
-            !goatSlackBotScopesSatisfied(integration.scopes),
+            !slackBotScopesSatisfied(integration.scopes),
         ),
         teamName: integration?.connectionLabel ?? null,
         statusReason: integration?.statusReason ?? null,
@@ -147,7 +138,7 @@ export function createSlackBotSettingsService(input: {
       if (!integration) {
         throw new ApiError(404, "not_found", "The Slack bot is not connected.");
       }
-      await markGoatIntegrationStatus({
+      await markIntegrationStatus({
         userWorkosId: integration.userWorkosId,
         integrationId: integration.id,
         provider: "slack_bot",
@@ -158,7 +149,7 @@ export function createSlackBotSettingsService(input: {
     },
 
     async getDestination(actor, brainId) {
-      const access = await getGoatBrainAccess(
+      const access = await getBrainAccess(
         { userWorkosId: actor.userId, brainRef: brainId },
         { db },
       );
@@ -170,17 +161,14 @@ export function createSlackBotSettingsService(input: {
       let source: SlackBotDestination["source"] = null;
       if (integration) {
         const [row] = await db
-          .select({ enabled: goatBrainSources.enabled, config: goatBrainSources.config })
-          .from(goatBrainSources)
+          .select({ enabled: brainSources.enabled, config: brainSources.config })
+          .from(brainSources)
           .where(
-            and(
-              eq(goatBrainSources.brainId, brainId),
-              eq(goatBrainSources.integrationId, integration.id),
-            ),
+            and(eq(brainSources.brainId, brainId), eq(brainSources.integrationId, integration.id)),
           )
           .limit(1);
         if (row) {
-          const config = parseGoatSlackBrainSourceConfig(row.config);
+          const config = parseSlackBrainSourceConfig(row.config);
           source = { enabled: row.enabled, channels: config.channels ?? [] };
         }
       }
@@ -263,7 +251,7 @@ export function createSlackBotSettingsService(input: {
       if (!integration || integration.status === "disconnected") {
         throw new ApiError(409, "conflict", "Connect the Slack bot in workspace settings first.");
       }
-      const result = await upsertGoatBrainSource({
+      const result = await upsertBrainSource({
         brainRef: brainId,
         provider: "slack_bot",
         integrationId: integration.id,
@@ -274,7 +262,7 @@ export function createSlackBotSettingsService(input: {
         db,
       });
       if (result.created && command.enabled) {
-        await captureGoatServerEvent("brain_source_added", actor.userId, {
+        await captureProductServerEvent("brain_source_added", actor.userId, {
           workspace_id: actor.workspaceId,
           brain_id: brainId,
           provider: "slack_bot",
@@ -284,9 +272,9 @@ export function createSlackBotSettingsService(input: {
   };
 }
 
-function sanitizeChannelRefs(refs: GoatSlackConversationRef[]): GoatSlackConversationRef[] {
+function sanitizeChannelRefs(refs: SlackConversationRef[]): SlackConversationRef[] {
   const seen = new Set<string>();
-  const sanitized: GoatSlackConversationRef[] = [];
+  const sanitized: SlackConversationRef[] = [];
   for (const ref of refs) {
     const id = typeof ref.id === "string" ? ref.id.trim() : "";
     if (!id || seen.has(id)) continue;

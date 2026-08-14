@@ -1,22 +1,22 @@
-import { connectGoatSlackBotIntegration } from "@opencompany/db/goat-integrations";
+import { getAppUrl } from "@opencompany/agent/app-url";
 import {
-  claimGoatSlackBotEvent,
-  getGoatSlackBotThreadParticipation,
-  markGoatSlackBotIntegrationStatusForTeam,
-  releaseGoatSlackBotEvent,
-} from "@opencompany/db/goat-slack-bot";
-import { getGoatAppUrl } from "@opencompany/goat-agent/app-url";
+  appendSlackBotSetupStatus,
+  buildSlackBotAuthorizationUrl,
+  createSlackBotState,
+  exchangeSlackBotCode,
+  isSlackBotConfigured,
+  verifySlackBotState,
+} from "@opencompany/agent/integrations/slack-bot";
+import { SLACK_BOT_EVENT_COMMAND_SCHEMA_VERSION } from "@opencompany/agent/integrations/slack-bot-events";
+import { mentionsOtherHuman } from "@opencompany/agent/integrations/slack-bot-format";
+import { verifySlackEventSignature } from "@opencompany/agent/integrations/slack-signature";
+import { connectSlackBotIntegration } from "@opencompany/db/integrations";
 import {
-  appendGoatSlackBotSetupStatus,
-  buildGoatSlackBotAuthorizationUrl,
-  createGoatSlackBotState,
-  exchangeGoatSlackBotCode,
-  isGoatSlackBotConfigured,
-  verifyGoatSlackBotState,
-} from "@opencompany/goat-agent/integrations/slack-bot";
-import { GOAT_SLACK_BOT_EVENT_COMMAND_SCHEMA_VERSION } from "@opencompany/goat-agent/integrations/slack-bot-events";
-import { mentionsOtherHuman } from "@opencompany/goat-agent/integrations/slack-bot-format";
-import { verifyGoatSlackEventSignature } from "@opencompany/goat-agent/integrations/slack-signature";
+  claimSlackBotEvent,
+  getSlackBotThreadParticipation,
+  markSlackBotIntegrationStatusForTeam,
+  releaseSlackBotEvent,
+} from "@opencompany/db/slack-bot";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
 import { type IngressSession, resolveIngressSession, sessionRedirect } from "./ingress-session";
@@ -66,16 +66,16 @@ async function handleStart(input: IngressInput, request: Request): Promise<Respo
   if (session.role !== "admin") {
     return statusRedirect(session, returnTo, "error", "admin_required");
   }
-  if (!isGoatSlackBotConfigured()) {
+  if (!isSlackBotConfigured()) {
     return statusRedirect(session, returnTo, "error", "not_configured");
   }
 
-  const state = createGoatSlackBotState({
+  const state = createSlackBotState({
     userWorkosId: session.userId,
     workspaceId: session.workspaceId,
     returnTo,
   });
-  return sessionRedirect(session, buildGoatSlackBotAuthorizationUrl(state));
+  return sessionRedirect(session, buildSlackBotAuthorizationUrl(state));
 }
 
 async function handleCallback(input: IngressInput, request: Request): Promise<Response> {
@@ -84,15 +84,15 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
   const url = new URL(request.url);
   const stateValue = url.searchParams.get("state") ?? "";
 
-  let state: ReturnType<typeof verifyGoatSlackBotState>;
+  let state: ReturnType<typeof verifySlackBotState>;
   try {
-    state = verifyGoatSlackBotState(stateValue);
+    state = verifySlackBotState(stateValue);
   } catch {
     return sessionRedirect(
       session,
       new URL(
         "/settings/workspace/slack?integration=slack_bot&setup=error&reason=invalid_state",
-        getGoatAppUrl(),
+        getAppUrl(),
       ),
     );
   }
@@ -106,7 +106,7 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
   ) {
     return statusRedirect(session, state.returnTo, "error", "session_mismatch");
   }
-  if (!isGoatSlackBotConfigured()) {
+  if (!isSlackBotConfigured()) {
     return statusRedirect(session, state.returnTo, "error", "not_configured");
   }
   if (url.searchParams.get("error")) {
@@ -118,9 +118,9 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
   }
 
   try {
-    const oauth = await exchangeGoatSlackBotCode(code);
+    const oauth = await exchangeSlackBotCode(code);
 
-    await connectGoatSlackBotIntegration({
+    await connectSlackBotIntegration({
       userWorkosId: session.userId,
       workspaceId: session.workspaceId,
       teamId: oauth.teamId,
@@ -143,7 +143,7 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
 
 async function handleWebhook(input: IngressInput, request: Request): Promise<Response> {
   const rawBody = await request.text();
-  const verified = verifyGoatSlackEventSignature({
+  const verified = verifySlackEventSignature({
     rawBody,
     timestamp: request.headers.get("x-slack-request-timestamp"),
     signature: request.headers.get("x-slack-signature"),
@@ -201,13 +201,13 @@ async function handleEventCallback(
   event: Record<string, unknown>,
 ) {
   if (event.type === "tokens_revoked" || event.type === "app_uninstalled") {
-    await markGoatSlackBotIntegrationStatusForTeam(
+    await markSlackBotIntegrationStatusForTeam(
       {
         teamId,
         status: "needs_reauth",
         statusReason:
           event.type === "app_uninstalled"
-            ? "The OpenCompany Slack app was uninstalled from the workspace."
+            ? "The opencompany Slack app was uninstalled from the workspace."
             : "The Slack bot token was revoked.",
       },
       input.db,
@@ -238,7 +238,7 @@ async function handleEventCallback(
     // addresses somebody else. Neither should be answered by this delivery.
     if (!threadTs) return { ok: true, ignored: true };
     if (mentionsOtherHuman(text, null)) return { ok: true, ignored: true };
-    const participation = await getGoatSlackBotThreadParticipation(
+    const participation = await getSlackBotThreadParticipation(
       { teamId, channelId, threadTs },
       input.db,
     );
@@ -256,14 +256,14 @@ async function handleEventCallback(
     return { ok: true, dropped: true };
   }
 
-  const claim = await claimGoatSlackBotEvent({ eventId, teamId }, input.db);
+  const claim = await claimSlackBotEvent({ eventId, teamId }, input.db);
   if (!claim) return { ok: true, skipped: "duplicate" };
 
   try {
     await input.runner.postJson(
       "/internal/goat/slack-bot/events",
       {
-        schemaVersion: GOAT_SLACK_BOT_EVENT_COMMAND_SCHEMA_VERSION,
+        schemaVersion: SLACK_BOT_EVENT_COMMAND_SCHEMA_VERSION,
         eventId: claim.eventId,
         claimId: claim.claimId,
         kind,
@@ -272,7 +272,7 @@ async function handleEventCallback(
       { errorFormat: "error-message" },
     );
   } catch (error) {
-    await releaseGoatSlackBotEvent(claim, input.db).catch((releaseError) => {
+    await releaseSlackBotEvent(claim, input.db).catch((releaseError) => {
       logger.error("Failed to release undispatched Slack bot event", {
         event: "goat.slack_bot_event_dispatch_release_failed",
         event_id: eventId,
@@ -292,6 +292,6 @@ function statusRedirect(
 ) {
   return sessionRedirect(
     session,
-    new URL(appendGoatSlackBotSetupStatus(returnTo, status, reason), getGoatAppUrl()),
+    new URL(appendSlackBotSetupStatus(returnTo, status, reason), getAppUrl()),
   );
 }

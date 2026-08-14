@@ -1,1 +1,1 @@
-export * from "@opencompany/goat-agent/capabilities/catalog";
+export * from "@opencompany/agent/capabilities/catalog";

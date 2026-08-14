@@ -1,10 +1,10 @@
 import type {
-  GoatTaskReportedOutcome,
-  GoatTaskStage,
-  GoatTaskStatus,
-} from "@opencompany/goat-agent/task-runtime-types";
+  TaskReportedOutcome,
+  TaskStage,
+  TaskStatus,
+} from "@opencompany/agent/task-runtime-types";
 
-export type GoatTaskRow = {
+export type TaskRow = {
   id: string;
   display_id: string;
   name: string;
@@ -18,11 +18,11 @@ export type GoatTaskRow = {
   scheduled_for: string | null;
   workflow_id: string | null;
   workflow_brain_ref: string | null;
-  status: GoatTaskStatus;
-  stage: GoatTaskStage;
+  status: TaskStatus;
+  stage: TaskStage;
   result: string | null;
   error: string | null;
-  reported_outcome: GoatTaskReportedOutcome | null;
+  reported_outcome: TaskReportedOutcome | null;
   outcome_comment: string | null;
   harness_spec: unknown;
   debug_trace: unknown;

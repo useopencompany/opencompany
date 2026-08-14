@@ -10,21 +10,21 @@ import {
 import { CircleAlert } from "lucide-react";
 import {
   AttioObjectPicker,
+  brainSourceHasScope,
   GitHubRepoPicker,
   GmailSourceEditor,
   GoogleDriveSourceEditor,
-  goatBrainSourceHasScope,
   HubspotObjectPicker,
   LinearTeamPicker,
-  resolveGoatBrainSourceState,
+  resolveBrainSourceState,
   SlackChannelPicker,
-} from "@/components/GoatBrainSourceCards";
-import type { GoatBrainSourcesDetails } from "@/lib/brain-source-actions";
-import type { GoatBrainSourceProviderDef } from "@/lib/brain-sources/registry";
+} from "@/components/BrainSourceCards";
+import type { BrainSourcesDetails } from "@/lib/brain-source-actions";
+import type { BrainSourceProviderDef } from "@/lib/brain-sources/registry";
 
 // Per-provider framing for the focused config surface. Kept intentionally short
 // and action-first: the picker below already carries the mechanics.
-const CONFIG_HINT: Partial<Record<GoatBrainSourceProviderDef["id"], string>> = {
+const CONFIG_HINT: Partial<Record<BrainSourceProviderDef["id"], string>> = {
   slack:
     "Pick the channels whose conversations should flow into your Brain. Start with your most active ones — you can change this anytime.",
   linear: "Choose the teams whose issue and comment activity should feed your Brain.",
@@ -48,15 +48,15 @@ export function SourceConfigSheet({
   onChanged,
 }: {
   brainRef: string;
-  provider: GoatBrainSourceProviderDef;
-  details: GoatBrainSourcesDetails | null;
+  provider: BrainSourceProviderDef;
+  details: BrainSourcesDetails | null;
   onClose: () => void;
   onChanged: () => Promise<void>;
 }) {
   const Icon = provider.icon;
-  const state = resolveGoatBrainSourceState(provider.id, details);
+  const state = resolveBrainSourceState(provider.id, details);
   const integrationId = state.integrationId;
-  const feeding = state.enabled && goatBrainSourceHasScope(provider.id, state.source?.config);
+  const feeding = state.enabled && brainSourceHasScope(provider.id, state.source?.config);
 
   const pickerProps = integrationId
     ? {
@@ -122,7 +122,7 @@ function SourcePicker({
   providerId,
   ...props
 }: {
-  providerId: GoatBrainSourceProviderDef["id"];
+  providerId: BrainSourceProviderDef["id"];
 } & React.ComponentProps<typeof SlackChannelPicker>) {
   switch (providerId) {
     case "slack":

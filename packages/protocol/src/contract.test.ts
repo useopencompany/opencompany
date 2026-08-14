@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  createOpenCompanyClient,
+  createApiClient,
   formatEventCursor,
   parseEventCursor,
   parseRunEvent,
@@ -262,7 +262,7 @@ describe("v1 protocol contract", () => {
     );
     expect(JSON.stringify(document)).not.toMatch(/workos|codex_chat_turn|lease_owner/iu);
 
-    const client = createOpenCompanyClient("https://api.opencompany.test");
+    const client = createApiClient("https://api.opencompany.test");
     expect(
       client.v1.runs[":runId"].events.$url({ param: { runId: "run_1" }, query: {} }).pathname,
     ).toBe("/v1/runs/run_1/events");

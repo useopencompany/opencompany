@@ -1,10 +1,10 @@
-import { sweepGoatAutoRefills } from "@opencompany/billing/auto-refill";
-import { reconcileGoatStripeSeatQuantities } from "@opencompany/billing/seats";
+import { reconcileCapabilities } from "@opencompany/agent/capabilities/reconcile";
+import { sweepAutoRefills } from "@opencompany/billing/auto-refill";
+import { reconcileStripeSeatQuantities } from "@opencompany/billing/seats";
 import {
-  refreshGoatMonthlyIncludedUsage,
-  releasePendingGoatIngestionReservations,
-} from "@opencompany/db/goat-billing";
-import { reconcileGoatCapabilities } from "@opencompany/goat-agent/capabilities/reconcile";
+  refreshMonthlyIncludedUsage,
+  releasePendingIngestionReservations,
+} from "@opencompany/db/billing";
 import type Stripe from "stripe";
 
 type DbLike = any;
@@ -24,12 +24,12 @@ export function createBillingReconcileService(input: {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
       const [capabilities, ingestion, includedUsage, seats] = await Promise.all([
-        reconcileGoatCapabilities(100, { db: input.db }),
-        releasePendingGoatIngestionReservations({ maxWorkspaces: 200, db: input.db }),
-        refreshGoatMonthlyIncludedUsage({ limit: 500, db: input.db }),
-        reconcileGoatStripeSeatQuantities(100, { db: input.db, stripe: input.stripe }),
+        reconcileCapabilities(100, { db: input.db }),
+        releasePendingIngestionReservations({ maxWorkspaces: 200, db: input.db }),
+        refreshMonthlyIncludedUsage({ limit: 500, db: input.db }),
+        reconcileStripeSeatQuantities(100, { db: input.db, stripe: input.stripe }),
       ]);
-      const autoRefills = await sweepGoatAutoRefills(25, {
+      const autoRefills = await sweepAutoRefills(25, {
         db: input.db,
         stripe: input.stripe,
       });

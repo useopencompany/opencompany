@@ -1,14 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { GoatAttioProviderState } from "@/lib/integration-state";
+import type { AttioProviderState } from "@/lib/integration-state";
 import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
 const ATTIO_CONNECT_FALLBACK =
   "Could not connect Attio. Make sure the key has object_configuration:read, record_permission:read-write, list_configuration:read-write, list_entry:read-write, comment:read-write, note:read-write, and webhook:read-write, then try again.";
 
 export type AttioConnectActionResult =
-  | { ok: true; state: GoatAttioProviderState }
+  | { ok: true; state: AttioProviderState }
   | { ok: false; error: string };
 
 export async function saveAttioApiKeyAction(apiKey: string): Promise<AttioConnectActionResult> {
@@ -25,11 +25,11 @@ export async function saveAttioApiKeyAction(apiKey: string): Promise<AttioConnec
     if (!response.ok) {
       return { ok: false, error: await serverApiErrorMessage(response, ATTIO_CONNECT_FALLBACK) };
     }
-    const data = (await response.json()).data as { state: GoatAttioProviderState };
+    const data = (await response.json()).data as { state: AttioProviderState };
     revalidatePath("/", "layout");
     return { ok: true, state: data.state };
   } catch (error) {
-    console.error("[goat-attio] Failed to save Attio API key", error);
+    console.error("[opencompany-attio] Failed to save Attio API key", error);
     return { ok: false, error: ATTIO_CONNECT_FALLBACK };
   }
 }

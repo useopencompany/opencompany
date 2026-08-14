@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { BlogShell } from "@/components/marketing/BlogShell";
 import { DEFAULT_SOCIAL_IMAGE } from "@/lib/social-image";
 
-const title = "Sponsor OpenCompany — the channel for the startup scene";
+const title = "Sponsor opencompany — the channel for the startup scene";
 const description =
-  "OpenCompany is the YouTube show founders actually watch. Every viewer is building or working at a startup. Put your product in front of them.";
+  "opencompany is the YouTube show founders actually watch. Every viewer is building or working at a startup. Put your product in front of them.";
 
 export const metadata: Metadata = {
   title,
@@ -94,7 +94,7 @@ export default function MediaPage() {
           Put your product in front of founders who are actually building.
         </h1>
         <p className="mt-6 max-w-2xl text-pretty text-[15px] text-ink-muted leading-7">
-          OpenCompany is the YouTube channel for the startup scene. We&apos;re not chasing millions
+          opencompany is the YouTube channel for the startup scene. We&apos;re not chasing millions
           of passive views — every viewer is a founder or works at a startup. It&apos;s the exact
           room your product is trying to get into.
         </p>

@@ -1,19 +1,19 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import type { GoatChatState } from "@/lib/chat-ui";
+import type { ChatState } from "@/lib/chat-ui";
 
-const EMPTY_SNAPSHOT: ReadonlyMap<string, GoatChatState> = new Map();
+const EMPTY_SNAPSHOT: ReadonlyMap<string, ChatState> = new Map();
 const CHAT_STATE_CHANNEL_NAME = "opencompany-goat-chat-session-state";
 
-let snapshot: ReadonlyMap<string, GoatChatState> = EMPTY_SNAPSHOT;
-const localStates = new Map<string, GoatChatState>();
+let snapshot: ReadonlyMap<string, ChatState> = EMPTY_SNAPSHOT;
+const localStates = new Map<string, ChatState>();
 const remoteWorkingStates = new Map<string, Set<string>>();
 const listeners = new Set<() => void>();
 const channelSourceId = createChannelSourceId();
 let channel: BroadcastChannel | null = null;
 
-export function setLocalGoatChatState(sessionId: string | null, state: GoatChatState | null) {
+export function setLocalChatState(sessionId: string | null, state: ChatState | null) {
   if (!sessionId) return;
   const current = localStates.get(sessionId) ?? null;
   if (current === state) return;
@@ -26,7 +26,7 @@ export function setLocalGoatChatState(sessionId: string | null, state: GoatChatS
   broadcastWorkingState(sessionId, state === "working");
 }
 
-export function clearLocalGoatChatState(sessionId: string | null, expectedState?: GoatChatState) {
+export function clearLocalChatState(sessionId: string | null, expectedState?: ChatState) {
   if (!sessionId) return;
   const current = localStates.get(sessionId) ?? null;
   if (!current || (expectedState && current !== expectedState)) return;
@@ -35,7 +35,7 @@ export function clearLocalGoatChatState(sessionId: string | null, expectedState?
   broadcastWorkingState(sessionId, false);
 }
 
-export function clearAllLocalGoatChatStates() {
+export function clearAllLocalChatStates() {
   for (const [sessionId, state] of localStates) {
     if (state === "working") broadcastWorkingState(sessionId, false);
   }
@@ -45,7 +45,7 @@ export function clearAllLocalGoatChatStates() {
   publishSnapshot();
 }
 
-export function useLocalGoatChatStates() {
+export function useLocalChatStates() {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 

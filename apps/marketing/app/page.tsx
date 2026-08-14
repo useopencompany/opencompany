@@ -9,7 +9,7 @@ import { Proof } from "@/components/marketing/Proof";
 import { SiteFooter } from "@/components/marketing/SiteFooter";
 import { TopNav } from "@/components/marketing/TopNav";
 import { UseCases } from "@/components/marketing/UseCases";
-import { WhatIsOpenCompany } from "@/components/marketing/WhatIsOpenCompany";
+import { WhatIsProduct } from "@/components/marketing/WhatIsProduct";
 import { DEFAULT_SOCIAL_IMAGE } from "@/lib/social-image";
 
 const title = "opencompany — The workspace where agents run your company";
@@ -46,7 +46,7 @@ export default function HomePage() {
       <main>
         <Hero />
         <ProductVideo />
-        <WhatIsOpenCompany />
+        <WhatIsProduct />
         <HowItWorks />
         <UseCases />
         <Proof />

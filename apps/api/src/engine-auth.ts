@@ -1,19 +1,16 @@
+import { validateClaudeCodeToken } from "@opencompany/agent/claude-code-token";
 import type { Actor } from "@opencompany/core";
 import {
-  deleteGoatClaudeCodeCredential,
-  loadGoatClaudeCodeAuthStatus,
-  saveGoatClaudeCodeCredential,
-} from "@opencompany/db/goat-claude-code-auth";
+  deleteClaudeCodeCredential,
+  loadClaudeCodeAuthStatus,
+  saveClaudeCodeCredential,
+} from "@opencompany/db/claude-code-auth";
+import { deleteCodexCredential, loadCodexAuthStatus } from "@opencompany/db/codex-auth";
 import {
-  deleteGoatCodexCredential,
-  loadGoatCodexAuthStatus,
-} from "@opencompany/db/goat-codex-auth";
-import {
-  disconnectGoatInfisicalConnection,
-  isGoatInfisicalHost,
-  loadGoatInfisicalConnectionMetadata,
-} from "@opencompany/db/goat-infisical-auth";
-import { validateGoatClaudeCodeToken } from "@opencompany/goat-agent/claude-code-token";
+  disconnectInfisicalConnection,
+  isInfisicalHost,
+  loadInfisicalConnectionMetadata,
+} from "@opencompany/db/infisical-auth";
 import { createLogger } from "@opencompany/observability";
 import { ApiError } from "./errors";
 import type { RunnerClient } from "./runner-client";
@@ -85,12 +82,12 @@ export function createEngineAuthService(input: {
   const { db, runner } = input;
 
   async function getClaudeCodeStatus(actor: Actor) {
-    const row = await loadGoatClaudeCodeAuthStatus({ db, userWorkosId: actor.userId });
+    const row = await loadClaudeCodeAuthStatus({ db, userWorkosId: actor.userId });
     return connectionStatusDto(row);
   }
 
   async function getCodexStatus(actor: Actor) {
-    const row = await loadGoatCodexAuthStatus({ db, userWorkosId: actor.userId });
+    const row = await loadCodexAuthStatus({ db, userWorkosId: actor.userId });
     return connectionStatusDto(row);
   }
 
@@ -99,10 +96,10 @@ export function createEngineAuthService(input: {
     getCodexStatus,
 
     async saveClaudeCodeToken(actor, token) {
-      const validated = validateGoatClaudeCodeToken(token);
+      const validated = validateClaudeCodeToken(token);
       if (!validated.ok) throw new ApiError(400, "invalid_request", validated.error);
       try {
-        await saveGoatClaudeCodeCredential({
+        await saveClaudeCodeCredential({
           db,
           userWorkosId: actor.userId,
           authJson: { token: validated.token },
@@ -116,7 +113,7 @@ export function createEngineAuthService(input: {
 
     async disconnectClaudeCode(actor) {
       try {
-        await deleteGoatClaudeCodeCredential({ db, userWorkosId: actor.userId });
+        await deleteClaudeCodeCredential({ db, userWorkosId: actor.userId });
       } catch (error) {
         throw commandFailure(error, "Could not disconnect Claude Code.", "claude_code_disconnect");
       }
@@ -154,7 +151,7 @@ export function createEngineAuthService(input: {
 
     async disconnectCodex(actor) {
       try {
-        await deleteGoatCodexCredential({ db, userWorkosId: actor.userId });
+        await deleteCodexCredential({ db, userWorkosId: actor.userId });
       } catch (error) {
         throw commandFailure(error, "Could not disconnect Codex.", "codex_disconnect");
       }
@@ -164,7 +161,7 @@ export function createEngineAuthService(input: {
       // Member-visible on purpose: the retired settings read powered the
       // provider states for every workspace member; only mutations are
       // admin-gated.
-      const connection = await loadGoatInfisicalConnectionMetadata({
+      const connection = await loadInfisicalConnectionMetadata({
         db,
         workspaceId: actor.workspaceId,
       });
@@ -179,7 +176,7 @@ export function createEngineAuthService(input: {
 
     async startInfisicalAuth(actor, host) {
       requireAdmin(actor, INFISICAL_ADMIN_ONLY_MESSAGE);
-      if (!isGoatInfisicalHost(host)) {
+      if (!isInfisicalHost(host)) {
         throw new ApiError(400, "invalid_request", "Choose a supported Infisical region.");
       }
       let flow: InfisicalAuthFlow;
@@ -236,7 +233,7 @@ export function createEngineAuthService(input: {
     async disconnectInfisical(actor) {
       requireAdmin(actor, INFISICAL_ADMIN_ONLY_MESSAGE);
       try {
-        await disconnectGoatInfisicalConnection({ db, workspaceId: actor.workspaceId });
+        await disconnectInfisicalConnection({ db, workspaceId: actor.workspaceId });
       } catch (error) {
         throw commandFailure(error, "Could not disconnect Infisical.", "infisical_disconnect");
       }

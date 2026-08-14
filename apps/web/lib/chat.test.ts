@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { listCurrentUserRecentGoatChats, loadCurrentGoatChatSessionById } from "./chat";
+import { listCurrentUserRecentChats, loadCurrentChatSessionById } from "./chat";
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/headers", () => ({ headers: vi.fn() }));
@@ -37,7 +37,7 @@ describe("canonical Chat server reads", () => {
       }),
     );
 
-    await expect(listCurrentUserRecentGoatChats()).resolves.toEqual([
+    await expect(listCurrentUserRecentChats()).resolves.toEqual([
       expect.objectContaining({
         id: conversation.id,
         title: conversation.title,
@@ -57,7 +57,7 @@ describe("canonical Chat server reads", () => {
       vi.fn(async () => Response.json({ data: conversation, meta })),
     );
 
-    await expect(loadCurrentGoatChatSessionById(" goat_chat_1 ")).resolves.toEqual({
+    await expect(loadCurrentChatSessionById(" goat_chat_1 ")).resolves.toEqual({
       id: conversation.id,
       title: conversation.title,
       engine: conversation.engine,
@@ -74,6 +74,6 @@ describe("canonical Chat server reads", () => {
       vi.fn(async () => new Response(null, { status: 404 })),
     );
 
-    await expect(loadCurrentGoatChatSessionById("goat_chat_missing")).resolves.toBeNull();
+    await expect(loadCurrentChatSessionById("goat_chat_missing")).resolves.toBeNull();
   });
 });

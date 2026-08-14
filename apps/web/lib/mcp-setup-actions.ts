@@ -1,15 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { type GoatMcpClient, isGoatMcpClient } from "@/lib/mcp-setup";
+import { isMcpClient, type McpClient } from "@/lib/mcp-setup";
 import { serverApiClient, serverApiError } from "@/lib/server-api-client";
 
-export type GoatMcpSetupActionResult = { ok: true } | { ok: false; error: string };
+export type McpSetupActionResult = { ok: true } | { ok: false; error: string };
 
-export async function savePreferredGoatMcpClientAction(
-  client: GoatMcpClient,
-): Promise<GoatMcpSetupActionResult> {
-  if (!isGoatMcpClient(client)) {
+export async function savePreferredMcpClientAction(
+  client: McpClient,
+): Promise<McpSetupActionResult> {
+  if (!isMcpClient(client)) {
     return { ok: false, error: "Choose a supported AI client." };
   }
 
@@ -23,14 +23,14 @@ export async function savePreferredGoatMcpClientAction(
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
-    console.error("[goat] Could not save MCP client preference", {
+    console.error("[opencompany] Could not save MCP client preference", {
       error: error instanceof Error ? error.message : String(error),
     });
     return { ok: false, error: "Could not save your AI client." };
   }
 }
 
-export async function checkGoatMcpSetupStatusAction(): Promise<{
+export async function checkMcpSetupStatusAction(): Promise<{
   complete: boolean;
   completedAt: string | null;
 }> {

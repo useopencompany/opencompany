@@ -1,14 +1,14 @@
 import { redirect } from "next/navigation";
-import { GoatHomeRoute } from "@/components/GoatRoutes";
+import { HomeRoute } from "@/components/Routes";
 
-type GoatHomePageProps = {
+type HomePageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-export default async function GoatHomePage({ searchParams }: GoatHomePageProps) {
+export default async function HomePage({ searchParams }: HomePageProps) {
   const params = await searchParams;
   const chatParam = Array.isArray(params.chat) ? params.chat[0] : params.chat;
   const chatId = chatParam?.trim();
   if (chatId) redirect(`/chat/${encodeURIComponent(chatId)}`);
-  return <GoatHomeRoute chatId={null} />;
+  return <HomeRoute chatId={null} />;
 }

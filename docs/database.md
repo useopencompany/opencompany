@@ -1,17 +1,17 @@
 # Database and migrations
 
-OpenCompany uses Neon Postgres and Drizzle. Local development creates a Neon child branch for the
+opencompany uses Neon Postgres and Drizzle. Local development creates a Neon child branch for the
 current Git branch; production releases use `PRODUCTION_DATABASE_URL` only inside the release
 workflow.
 
 ## Schema modules
 
-- `packages/db/src/goat-schema.ts` — current Goat product tables in the `goat` schema.
+- `packages/db/src/product-schema.ts` — current opencompany product tables in the `goat` schema.
 - `packages/db/src/legacy-billing-schema.ts` — retained public-schema billing compatibility tables.
 - `packages/db/src/llm-broker-schema.ts` — retained public-schema broker token/request tables.
 
 `client.ts`, `pool.ts`, and `drizzle.config.ts` compose exactly those modules. Feature-specific
-query helpers live in `packages/db/src/goat-*`; consumers should import the narrow package export
+query helpers live in `packages/db/src/*`; consumers should import the narrow package export
 instead of the entire schema where practical.
 
 ## Local branches
@@ -45,7 +45,7 @@ analysis.
 ## Canonical execution projections
 
 Canonical Chat, Task, and automation repositories map the public `Conversation`, `Message`, `Run`,
-`Attempt`, `Event`, `Task`, `Workflow`, and `TaskSchedule` vocabulary onto retained physical Goat
+`Attempt`, `Event`, `Task`, `Workflow`, and `TaskSchedule` vocabulary onto retained physical opencompany
 tables. Keep that mapping inside `packages/db/src/chat-repository.ts`,
 `packages/db/src/task-repository.ts`, and `packages/db/src/workflow-repository.ts`; API and client
 code must not depend on physical table, planner payload, or lease names.

@@ -21,7 +21,7 @@ type BraintrustTraceInput = {
 };
 
 const logger = createLogger({ service: "opencompany-braintrust", runtime: "server" });
-const DEFAULT_PROJECT_NAME = "OpenCompany Runner";
+const DEFAULT_PROJECT_NAME = "opencompany Runner";
 
 let braintrustLogger: BraintrustLogger<true> | null | undefined;
 let loggedMissingApiKey = false;

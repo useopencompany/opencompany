@@ -1,1 +1,1 @@
-export * from "@opencompany/goat-agent/browser-profiles/index";
+export * from "@opencompany/agent/browser-profiles/index";

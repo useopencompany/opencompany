@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildGoatHarnessRun, type GoatTaskRunEventInput } from "@/lib/task-harness-run";
+import { buildHarnessRun, type TaskRunEventInput } from "@/lib/task-harness-run";
 
-describe("buildGoatHarnessRun", () => {
+describe("buildHarnessRun", () => {
   it("builds a durable run transcript from messages and tool events", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task({ status: "succeeded", stage: "completed", result: "Done." }),
       messages: [
         message({ id: "user_msg", role: "user", content: "Research Marseille" }),
@@ -48,7 +48,7 @@ describe("buildGoatHarnessRun", () => {
   });
 
   it("marks failed tool events and keeps the error preview separate", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task({ status: "failed", stage: "failed", error: "Task failed." }),
       messages: [message({ id: "user_msg", role: "user", content: "Research" })],
       events: [
@@ -74,7 +74,7 @@ describe("buildGoatHarnessRun", () => {
   });
 
   it("labels Gmail and Calendar tools", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task(),
       messages: [],
       events: [
@@ -100,7 +100,7 @@ describe("buildGoatHarnessRun", () => {
   });
 
   it("labels Browser tools", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task(),
       messages: [],
       events: [
@@ -121,7 +121,7 @@ describe("buildGoatHarnessRun", () => {
   });
 
   it("labels X tools in the Results timeline", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task(),
       messages: [],
       events: [
@@ -154,7 +154,7 @@ describe("buildGoatHarnessRun", () => {
   });
 
   it("extracts brain report artifacts from durable events", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task({
         status: "succeeded",
         stage: "completed",
@@ -191,7 +191,7 @@ describe("buildGoatHarnessRun", () => {
   });
 
   it("ignores artifact events with non-brain URLs", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task(),
       messages: [],
       events: [
@@ -215,7 +215,7 @@ describe("buildGoatHarnessRun", () => {
   });
 
   it("returns a legacy fallback model when no durable rows exist", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task({ status: "succeeded", stage: "completed", result: "Stored result." }),
       messages: [],
       events: [],
@@ -243,7 +243,7 @@ describe("buildGoatHarnessRun", () => {
   });
 
   it("extracts Codex goal mode from harness specs", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task({
         harnessSpec: {
           schemaVersion: "goat.harness.v1",
@@ -276,7 +276,7 @@ describe("buildGoatHarnessRun", () => {
   });
 
   it("preserves the Claude Code harness engine in run details", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task({
         harnessSpec: {
           schemaVersion: "goat.harness.v1",
@@ -298,7 +298,7 @@ describe("buildGoatHarnessRun", () => {
   });
 
   it("summarizes the models used by model usage rows", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task({ model: "openai/gpt-5.4-mini" }),
       messages: [],
       events: [],
@@ -334,7 +334,7 @@ describe("buildGoatHarnessRun", () => {
   });
 
   it("aggregates model tool and sandbox costs", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task(),
       messages: [],
       events: [],
@@ -408,7 +408,7 @@ describe("buildGoatHarnessRun", () => {
   });
 
   it("aggregates Electric numeric string usage rows", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task(),
       messages: [],
       events: [],
@@ -457,7 +457,7 @@ describe("buildGoatHarnessRun", () => {
 
   it("bounds long previews without truncating raw JSON", () => {
     const longText = "x".repeat(2_000);
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task(),
       messages: [],
       events: [
@@ -603,9 +603,9 @@ function message(overrides: {
 
 function event(
   id: number,
-  type: GoatTaskRunEventInput["type"],
+  type: TaskRunEventInput["type"],
   payload: Record<string, unknown>,
-): GoatTaskRunEventInput {
+): TaskRunEventInput {
   return {
     id,
     taskId: "goat_task_1",

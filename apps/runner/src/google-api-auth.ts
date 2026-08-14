@@ -1,9 +1,9 @@
 import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-  refreshGoatIntegrationCredential,
-} from "@opencompany/db/goat-integrations";
-import type { GoatIntegrationProvider } from "@opencompany/db/goat-schema";
+  loadIntegrationCredential,
+  markIntegrationStatus,
+  refreshIntegrationCredential,
+} from "@opencompany/db/integrations";
+import type { IntegrationProvider } from "@opencompany/db/product-schema";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 
@@ -16,7 +16,7 @@ const REFRESH_SKEW_MS = 60_000;
 
 export type GoogleApiAccount = {
   integrationId: string;
-  provider: GoatIntegrationProvider;
+  provider: IntegrationProvider;
   accountEmail: string | null;
 };
 
@@ -36,7 +36,7 @@ export async function getGoogleAccessToken(input: {
   signal: AbortSignal;
   forceRefresh?: boolean;
 }) {
-  const credential = await loadGoatIntegrationCredential({
+  const credential = await loadIntegrationCredential({
     userWorkosId: input.userWorkosId,
     integrationId: input.account.integrationId,
     provider: input.account.provider,
@@ -119,7 +119,7 @@ async function refreshGoogleAccessToken(
   const expiresAt =
     typeof result.expires_in === "number" ? new Date(Date.now() + result.expires_in * 1000) : null;
 
-  await refreshGoatIntegrationCredential({
+  await refreshIntegrationCredential({
     userWorkosId: input.userWorkosId,
     integrationId: input.account.integrationId,
     provider: input.account.provider,
@@ -136,7 +136,7 @@ async function markGoogleNeedsReauth(
   input: { userWorkosId: string; account: GoogleApiAccount },
   reason: string,
 ) {
-  await markGoatIntegrationStatus({
+  await markIntegrationStatus({
     userWorkosId: input.userWorkosId,
     integrationId: input.account.integrationId,
     provider: input.account.provider,
@@ -206,7 +206,7 @@ export async function googleApiFetch(input: {
   return response;
 }
 
-export function googleProviderDisplayName(provider: GoatIntegrationProvider) {
+export function googleProviderDisplayName(provider: IntegrationProvider) {
   if (provider === "gmail") return "Gmail";
   if (provider === "google_drive") return "Google Drive";
   return "Google Calendar";

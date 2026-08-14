@@ -3359,7 +3359,7 @@ export function createOpenApiDocument() {
   });
   return app.getOpenAPIDocument({
     openapi: OPENAPI_DOCUMENT_VERSION,
-    info: { title: "OpenCompany Headless API", version: PROTOCOL_VERSION },
+    info: { title: "opencompany Headless API", version: PROTOCOL_VERSION },
     servers: [{ url: "/", description: "Current origin" }],
   });
 }

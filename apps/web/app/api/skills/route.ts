@@ -1,4 +1,4 @@
-import { createOpenCompanyClient, type ErrorEnvelope } from "@opencompany/protocol";
+import { createApiClient, type ErrorEnvelope } from "@opencompany/protocol";
 
 // Temporary read-only compatibility adapter. First-party callers use /v1/skills/catalog directly;
 // retain this browser URL through the Skills rollback window for older deployed clients.
@@ -32,7 +32,7 @@ function compatibilityClient(request: Request) {
     if (refreshedCookie) responseHeaders.set("Set-Cookie", refreshedCookie);
     return response;
   };
-  return { client: createOpenCompanyClient(origin, { fetch: fetchWithActor }), responseHeaders };
+  return { client: createApiClient(origin, { fetch: fetchWithActor }), responseHeaders };
 }
 
 function configuredApiOrigin(value: string | undefined) {

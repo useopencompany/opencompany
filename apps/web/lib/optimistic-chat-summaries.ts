@@ -1,25 +1,25 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import type { GoatChatSummaryView } from "@/lib/chat-ui";
+import type { ChatSummaryView } from "@/lib/chat-ui";
 
-export type OptimisticGoatChatSummary = {
+export type OptimisticChatSummary = {
   workspaceId: string;
-  chat: GoatChatSummaryView;
+  chat: ChatSummaryView;
 };
 
-const EMPTY_SNAPSHOT: readonly OptimisticGoatChatSummary[] = [];
+const EMPTY_SNAPSHOT: readonly OptimisticChatSummary[] = [];
 
-let snapshot: readonly OptimisticGoatChatSummary[] = EMPTY_SNAPSHOT;
-const summaries = new Map<string, OptimisticGoatChatSummary>();
+let snapshot: readonly OptimisticChatSummary[] = EMPTY_SNAPSHOT;
+const summaries = new Map<string, OptimisticChatSummary>();
 const listeners = new Set<() => void>();
 
-export function addOptimisticGoatChatSummary(input: {
+export function addOptimisticChatSummary(input: {
   workspaceId: string;
   sessionId: string;
   prompt: string;
   model: string;
-  engine: NonNullable<GoatChatSummaryView["engine"]>;
+  engine: NonNullable<ChatSummaryView["engine"]>;
 }) {
   const now = new Date().toISOString();
   const normalizedPrompt = input.prompt.replace(/\s+/g, " ").trim();
@@ -28,7 +28,7 @@ export function addOptimisticGoatChatSummary(input: {
     chat: {
       id: input.sessionId,
       title: optimisticTitleFromPrompt(input.prompt),
-      model: input.model as GoatChatSummaryView["model"],
+      model: input.model as ChatSummaryView["model"],
       engine: input.engine,
       codexComposerSettings: null,
       codexRuntime: null,
@@ -42,13 +42,13 @@ export function addOptimisticGoatChatSummary(input: {
   publishSnapshot();
 }
 
-export function removeOptimisticGoatChatSummary(sessionId: string) {
+export function removeOptimisticChatSummary(sessionId: string) {
   if (!summaries.delete(sessionId)) return;
   publishSnapshot();
 }
 
-export function reconcileOptimisticGoatChatSummaries(
-  persistedChats: readonly Pick<GoatChatSummaryView, "id">[],
+export function reconcileOptimisticChatSummaries(
+  persistedChats: readonly Pick<ChatSummaryView, "id">[],
 ) {
   let changed = false;
   for (const chat of persistedChats) {
@@ -57,21 +57,21 @@ export function reconcileOptimisticGoatChatSummaries(
   if (changed) publishSnapshot();
 }
 
-export function clearAllOptimisticGoatChatSummaries() {
+export function clearAllOptimisticChatSummaries() {
   if (summaries.size === 0) return;
   summaries.clear();
   publishSnapshot();
 }
 
-export function useOptimisticGoatChatSummaries() {
+export function useOptimisticChatSummaries() {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
-export function mergeOptimisticGoatChatSummaries(input: {
-  persistedChats: readonly GoatChatSummaryView[];
-  optimisticChats: readonly OptimisticGoatChatSummary[];
+export function mergeOptimisticChatSummaries(input: {
+  persistedChats: readonly ChatSummaryView[];
+  optimisticChats: readonly OptimisticChatSummary[];
   workspaceId: string;
-}): GoatChatSummaryView[] {
+}): ChatSummaryView[] {
   const persistedIds = new Set(input.persistedChats.map((chat) => chat.id));
   const pending = input.optimisticChats
     .filter((entry) => entry.workspaceId === input.workspaceId && !persistedIds.has(entry.chat.id))

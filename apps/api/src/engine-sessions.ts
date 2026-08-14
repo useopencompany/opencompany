@@ -1,9 +1,5 @@
 import type { Actor } from "@opencompany/core";
-import {
-  goatChatSessions,
-  goatCodexChatSessions,
-  goatWorkspaceMembers,
-} from "@opencompany/db/goat-schema";
+import { chatSessions, codexChatSessions, workspaceMembers } from "@opencompany/db/product-schema";
 import type { EngineRuntimeAccess, EngineRuntimeStatus } from "@opencompany/protocol";
 import { and, eq, isNull, or } from "drizzle-orm";
 import { ApiError } from "./errors";
@@ -30,28 +26,28 @@ export function createEngineSessionService(input: {
   const load = async (actor: Actor, conversationId: string): Promise<QualifiedEngineSession> => {
     const [row] = await input.db
       .select({
-        id: goatCodexChatSessions.id,
-        conversationId: goatCodexChatSessions.chatSessionId,
-        sandboxId: goatCodexChatSessions.sandboxId,
+        id: codexChatSessions.id,
+        conversationId: codexChatSessions.chatSessionId,
+        sandboxId: codexChatSessions.sandboxId,
       })
-      .from(goatCodexChatSessions)
-      .innerJoin(goatChatSessions, eq(goatChatSessions.id, goatCodexChatSessions.chatSessionId))
+      .from(codexChatSessions)
+      .innerJoin(chatSessions, eq(chatSessions.id, codexChatSessions.chatSessionId))
       .innerJoin(
-        goatWorkspaceMembers,
+        workspaceMembers,
         and(
-          eq(goatWorkspaceMembers.workspaceId, actor.workspaceId),
-          eq(goatWorkspaceMembers.userWorkosId, actor.userId),
+          eq(workspaceMembers.workspaceId, actor.workspaceId),
+          eq(workspaceMembers.userWorkosId, actor.userId),
         ),
       )
       .where(
         and(
-          eq(goatCodexChatSessions.chatSessionId, conversationId),
-          eq(goatCodexChatSessions.userWorkosId, actor.userId),
+          eq(codexChatSessions.chatSessionId, conversationId),
+          eq(codexChatSessions.userWorkosId, actor.userId),
           or(
-            eq(goatCodexChatSessions.workspaceId, actor.workspaceId),
-            isNull(goatCodexChatSessions.workspaceId),
+            eq(codexChatSessions.workspaceId, actor.workspaceId),
+            isNull(codexChatSessions.workspaceId),
           ),
-          isNull(goatChatSessions.closedAt),
+          isNull(chatSessions.closedAt),
         ),
       )
       .limit(1);

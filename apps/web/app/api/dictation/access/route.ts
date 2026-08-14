@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
-import { requestGoatDictationAccess } from "@/lib/task-runner";
+import { currentUser } from "@/lib/auth";
+import { requestDictationAccess } from "@/lib/task-runner";
 
 export const runtime = "nodejs";
 
 export async function POST() {
-  const context = await currentGoatUser({ optional: true });
+  const context = await currentUser({ optional: true });
   if (!context) return new Response("Unauthorized", { status: 401 });
 
   try {
     return NextResponse.json(
-      await requestGoatDictationAccess({ userWorkosId: context.user.workosUserId }),
+      await requestDictationAccess({ userWorkosId: context.user.workosUserId }),
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Dictation is unavailable.";

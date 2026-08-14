@@ -1,5 +1,5 @@
-import { isValidGoatBrainId } from "@opencompany/goat-brain";
-import { createOpenCompanyClient, type ErrorEnvelope } from "@opencompany/protocol";
+import { isValidBrainId } from "@opencompany/brain";
+import { createApiClient, type ErrorEnvelope } from "@opencompany/protocol";
 
 // Temporary compatibility adapter for the pre-/v1 browser URL. The first-party web client no
 // longer calls this route; retain it through the Workflow cutover rollback window, then delete it.
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     !isRecord(body) ||
     !isRecord(body.workflow) ||
     typeof body.workflow.id !== "string" ||
-    !isValidGoatBrainId(body.workflow.id)
+    !isValidBrainId(body.workflow.id)
   ) {
     return Response.json({ error: "A workflow is required." }, { status: 400 });
   }
@@ -60,7 +60,7 @@ export async function POST(request: Request) {
       (mention) =>
         isRecord(mention) &&
         mention.kind === "skill" &&
-        (typeof mention.id !== "string" || !isValidGoatBrainId(mention.id)),
+        (typeof mention.id !== "string" || !isValidBrainId(mention.id)),
     )
   ) {
     return Response.json({ error: "Invalid skill mention." }, { status: 400 });
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
     isRecord(mention) &&
     mention.kind === "skill" &&
     typeof mention.id === "string" &&
-    isValidGoatBrainId(mention.id)
+    isValidBrainId(mention.id)
       ? [mention.id]
       : [],
   );
@@ -124,7 +124,7 @@ function compatibilityClient(request: Request) {
     if (refreshedCookie) responseHeaders.set("Set-Cookie", refreshedCookie);
     return response;
   };
-  return { client: createOpenCompanyClient(origin, { fetch: fetchWithActor }), responseHeaders };
+  return { client: createApiClient(origin, { fetch: fetchWithActor }), responseHeaders };
 }
 
 function configuredApiOrigin(value: string | undefined) {

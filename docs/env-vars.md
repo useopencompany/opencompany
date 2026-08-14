@@ -23,7 +23,7 @@ mirror an API-owned secret into `/goat` unless a current thin relay actually con
 The names-only production audit is recorded in [#1243](https://github.com/useopencompany/opencompany-experimental/issues/1243).
 Two web exceptions remain deliberately classified as suspects rather than prune candidates:
 `BLOB_READ_WRITE_TOKEN` backs the cached-client Brain upload adapter, and `DATABASE_URL` is still
-reached indirectly by `GoatAppShell` integration-state loaders composed from shared packages. The
+reached indirectly by `AppShell` integration-state loaders composed from shared packages. The
 latter violates the intended pure-client boundary and must be removed from code before the web
 database value can be deleted.
 
@@ -33,7 +33,7 @@ database value can be deleted.
 release variables. Important contracts include:
 
 - Web: WorkOS/AuthKit, canonical URL, shared cookie domain, first-party API origins, the narrow
-  runner relay token/URL, cron relay secret, Goat PostHog, the cached-client Blob adapter, and the
+  runner relay token/URL, cron relay secret, opencompany PostHog, the cached-client Blob adapter, and the
   temporary database suspect documented above; onboarding email settings remain optional. Web does
   not require Electric, model, billing, or provider-ingress credentials.
 - API: direct database, WorkOS session/OAuth and shared cookie domain, the credentialed browser
@@ -41,11 +41,11 @@ release variables. Important contracts include:
   for canonical Auto routing, Blob, Electric, Redis, the cron secret for the internal email
   persistence relays and the runner token/URL for the engine-auth control calls. The retained
   generic PostHog compatibility sink remains optional.
-- Runner: database, internal/stream tokens, Goat origin, allowed origins, integration encryption,
+- Runner: database, internal/stream tokens, opencompany origin, allowed origins, integration encryption,
   an explicitly enabled task-worker gate, E2B, Blob, model providers, GitHub/Google/X integration
-  credentials, Goat PostHog, and Redis values; capability controls and provider-specific tuning
+  credentials, opencompany PostHog, and Redis values; capability controls and provider-specific tuning
   remain optional.
-- Release: production DB URL, Vercel/Render credentials and project/service IDs, Goat/API/runner
+- Release: production DB URL, Vercel/Render credentials and project/service IDs, opencompany/API/runner
   URLs.
 
 Browser clients call the non-secret `NEXT_PUBLIC_GOAT_API_ORIGIN` directly for commands and

@@ -11,7 +11,7 @@ import {
   type CreateBrainDocumentBody,
   type CreateBrainFolderBody,
   type CreateSkillBody,
-  createOpenCompanyClient,
+  createApiClient,
   type DeleteBrainFolderBody,
   type ImportSkillBody,
   type RenameBrainDocumentBody,
@@ -227,7 +227,7 @@ export async function listHeadlessSkillCatalog(options: ClientOptions = {}) {
 
 function knowledgeClient(options: ClientOptions) {
   const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
-  return createOpenCompanyClient(baseUrl, {
+  return createApiClient(baseUrl, {
     fetch: createHeadlessChatApiFetch({
       baseUrl,
       ...(options.fetch ? { fetch: options.fetch } : {}),

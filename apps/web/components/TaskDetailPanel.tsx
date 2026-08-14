@@ -2,18 +2,18 @@
 
 import { useLiveQuery } from "@tanstack/react-db";
 import { useMemo } from "react";
-import { useGoatAppData } from "@/components/GoatAppDataProvider";
-import { GoatSurface } from "@/components/GoatSurface";
-import type { GoatChatSessionView } from "@/lib/chat-ui";
+import { useAppData } from "@/components/AppDataProvider";
+import { Surface } from "@/components/Surface";
+import type { ChatSessionView } from "@/lib/chat-ui";
 import {
   getHeadlessChatRuns,
   type HeadlessChatRunReadModel,
 } from "@/lib/headless-chat-collections";
-import { legacyGoatHarnessRunToChatMessages } from "@/lib/legacy-task-chat-messages";
-import { normalizeGoatModel } from "@/lib/model-options";
-import type { GoatHarnessRunViewModel } from "@/lib/task-harness-run";
+import { legacyHarnessRunToChatMessages } from "@/lib/legacy-task-chat-messages";
+import { normalizeModel } from "@/lib/model-options";
+import type { HarnessRunViewModel } from "@/lib/task-harness-run";
 
-export function TaskDetailPanel({ initialRun }: { initialRun: GoatHarnessRunViewModel }) {
+export function TaskDetailPanel({ initialRun }: { initialRun: HarnessRunViewModel }) {
   if (initialRun.task.sessionId) {
     return <CanonicalTaskDetailPanel run={initialRun} conversationId={initialRun.task.sessionId} />;
   }
@@ -24,10 +24,10 @@ function CanonicalTaskDetailPanel({
   run,
   conversationId,
 }: {
-  run: GoatHarnessRunViewModel;
+  run: HarnessRunViewModel;
   conversationId: string;
 }) {
-  const data = useGoatAppData();
+  const data = useAppData();
   const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
   const runsCollection = useMemo(() => getHeadlessChatRuns(conversationId), [conversationId]);
   const { data: runRows } = useLiveQuery(
@@ -43,16 +43,16 @@ function CanonicalTaskDetailPanel({
     [runRows],
   );
   const title = taskDetailTitle(run);
-  const initialChat: GoatChatSessionView = {
+  const initialChat: ChatSessionView = {
     id: conversationId,
     title,
-    model: normalizeGoatModel(run.task.model),
+    model: normalizeModel(run.task.model),
     engine: run.task.engine,
     messages: run.chat?.messages ?? [],
   };
 
   return (
-    <GoatSurface
+    <Surface
       key={data.activeBrain?.id ?? "no-brain"}
       tasks={data.tasks}
       schedules={data.schedules}
@@ -76,20 +76,20 @@ function CanonicalTaskDetailPanel({
   );
 }
 
-function LegacyTaskDetailPanel({ initialRun }: { initialRun: GoatHarnessRunViewModel }) {
-  const data = useGoatAppData();
+function LegacyTaskDetailPanel({ initialRun }: { initialRun: HarnessRunViewModel }) {
+  const data = useAppData();
   const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
   const title = taskDetailTitle(initialRun);
-  const initialChat: GoatChatSessionView = {
+  const initialChat: ChatSessionView = {
     id: initialRun.task.id,
     title,
-    model: normalizeGoatModel(initialRun.task.model),
+    model: normalizeModel(initialRun.task.model),
     engine: "opencompany",
-    messages: legacyGoatHarnessRunToChatMessages(initialRun),
+    messages: legacyHarnessRunToChatMessages(initialRun),
   };
 
   return (
-    <GoatSurface
+    <Surface
       key={data.activeBrain?.id ?? "no-brain"}
       tasks={data.tasks}
       schedules={data.schedules}
@@ -112,11 +112,11 @@ function LegacyTaskDetailPanel({ initialRun }: { initialRun: GoatHarnessRunViewM
   );
 }
 
-function taskDetailTitle(run: GoatHarnessRunViewModel) {
+function taskDetailTitle(run: HarnessRunViewModel) {
   return run.task.name.trim() || run.chat?.title.trim() || "Task";
 }
 
-function taskActivityStartedAtMs(run: GoatHarnessRunViewModel) {
+function taskActivityStartedAtMs(run: HarnessRunViewModel) {
   const parsed = Date.parse(run.task.updatedAt || run.task.createdAt);
   return Number.isFinite(parsed) ? parsed : Date.now();
 }

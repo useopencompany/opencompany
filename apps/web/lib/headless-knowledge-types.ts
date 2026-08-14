@@ -1,4 +1,4 @@
-import type { GoatBrainDocumentView } from "@opencompany/goat-agent/brain-files";
+import type { BrainDocumentView } from "@opencompany/agent/brain-files";
 import type {
   BrainDocumentDto,
   BrainDocumentReadModel,
@@ -7,20 +7,20 @@ import type {
   BrainOverviewDto,
 } from "@opencompany/protocol";
 
-export type { GoatBrainDocumentView } from "@opencompany/goat-agent/brain-files";
+export type { BrainDocumentView } from "@opencompany/agent/brain-files";
 
-export type GoatBrainFolderView = BrainFolderDto & { name: string };
+export type BrainFolderView = BrainFolderDto & { name: string };
 
-export type GoatBrainSnapshot = {
-  folders: GoatBrainFolderView[];
-  documents: GoatBrainDocumentView[];
+export type BrainSnapshot = {
+  folders: BrainFolderView[];
+  documents: BrainDocumentView[];
 };
 
-export type GoatBrainOverviewStats = BrainOverviewDto;
+export type BrainOverviewStats = BrainOverviewDto;
 
 export function brainDocumentToView(
   document: BrainDocumentDto | BrainDocumentReadModel,
-): GoatBrainDocumentView {
+): BrainDocumentView {
   const { createdByActorId, ...canonical } = document;
   return {
     ...canonical,
@@ -32,9 +32,7 @@ export function brainDocumentToView(
   };
 }
 
-export function brainFolderToView(
-  folder: BrainFolderDto | BrainFolderReadModel,
-): GoatBrainFolderView {
+export function brainFolderToView(folder: BrainFolderDto | BrainFolderReadModel): BrainFolderView {
   return {
     ...folder,
     name: folder.path.split("/").at(-1) ?? folder.path,

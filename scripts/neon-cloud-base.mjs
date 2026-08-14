@@ -79,7 +79,7 @@ function migrationSourceMatchesMain() {
     "drizzle",
     "packages/db/drizzle.config.ts",
     "packages/db/src/schema.ts",
-    "packages/db/src/goat-schema.ts",
+    "packages/db/src/product-schema.ts",
   ];
   const diff = spawnSync("git", ["diff", "--quiet", "origin/main", "--", ...paths], {
     stdio: "ignore",

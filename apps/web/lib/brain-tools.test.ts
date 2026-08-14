@@ -5,7 +5,7 @@ import {
   listDocumentsToToolInput,
   resolveBrainParam,
   searchBrainToToolInput,
-} from "@opencompany/goat-agent/brain-tools";
+} from "@opencompany/agent/brain-tools";
 import { describe, expect, it } from "vitest";
 
 describe("resolveBrainParam", () => {

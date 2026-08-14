@@ -1,20 +1,16 @@
 "use client";
 
-import { GoatChatAttachmentCard } from "@/components/chat/ChatComposerAttachments";
-import {
-  type GoatChatUiAttachment,
-  type GoatChatUiMessage,
-  textFromGoatChatUiMessage,
-} from "@/lib/chat-ui";
+import { ChatAttachmentCard } from "@/components/chat/ChatComposerAttachments";
+import { type ChatUiAttachment, type ChatUiMessage, textFromChatUiMessage } from "@/lib/chat-ui";
 
 export function UserMessageBubble({
   message,
   attachmentSrc,
 }: {
-  message: GoatChatUiMessage;
-  attachmentSrc?: (messageId: string, attachment: GoatChatUiAttachment) => string | undefined;
+  message: ChatUiMessage;
+  attachmentSrc?: (messageId: string, attachment: ChatUiAttachment) => string | undefined;
 }) {
-  const text = textFromGoatChatUiMessage(message);
+  const text = textFromChatUiMessage(message);
   const attachments = message.metadata?.attachments ?? [];
   const scheduledWakeup = message.metadata?.scheduledWakeup;
 
@@ -34,7 +30,7 @@ export function UserMessageBubble({
       {attachments.length > 0 ? (
         <div className="flex max-w-[80%] flex-wrap justify-end gap-2">
           {attachments.map((attachment) => (
-            <GoatChatAttachmentCard
+            <ChatAttachmentCard
               key={attachment.id}
               kind={attachment.kind}
               filename={attachment.filename}
@@ -60,7 +56,7 @@ export function UserMessageBubble({
 // persisted rows are fetched through the auth-scoped serving route.
 function attachmentThumbnailSrc(
   messageId: string,
-  attachment: GoatChatUiAttachment,
+  attachment: ChatUiAttachment,
 ): string | undefined {
   if (attachment.kind !== "image") return undefined;
   if (attachment.previewUrl) return attachment.previewUrl;

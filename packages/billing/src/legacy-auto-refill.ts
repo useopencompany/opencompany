@@ -1,4 +1,4 @@
-// Legacy-product auto-refill webhook handlers. The Goat and legacy web
+// Legacy-product auto-refill webhook handlers. The opencompany and legacy web
 // products bill through the same Stripe account, so the shared webhook that
 // now lives in this app still receives legacy setup-mode checkouts and
 // auto-refill PaymentIntent events. Ported verbatim from the webhook section
@@ -11,7 +11,7 @@ import {
   markAutoRefillAttemptFailed,
   saveAutoRefillPaymentMethod,
 } from "./legacy-credits";
-import { getGoatStripe } from "./stripe";
+import { getStripe } from "./stripe";
 
 function stripeIdOf(value: string | { id: string } | null | undefined): string | null {
   if (!value) return null;
@@ -30,7 +30,7 @@ export async function completeAutoRefillSetup(
   const setupIntentId = stripeIdOf(session.setup_intent);
   if (!workspaceId || !customerId || !setupIntentId) return;
 
-  const stripe = options.stripe ?? getGoatStripe();
+  const stripe = options.stripe ?? getStripe();
   const setupIntent = await stripe.setupIntents.retrieve(setupIntentId);
   const paymentMethodId = stripeIdOf(setupIntent.payment_method);
   if (!paymentMethodId) return;

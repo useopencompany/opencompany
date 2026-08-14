@@ -1,4 +1,4 @@
 export {
-  reconcileGoatStripeSeatQuantities,
-  syncGoatStripeSeatQuantityForWorkspace,
+  reconcileStripeSeatQuantities,
+  syncStripeSeatQuantityForWorkspace,
 } from "@opencompany/billing/seats";

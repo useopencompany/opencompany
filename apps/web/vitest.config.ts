@@ -14,8 +14,8 @@ export default defineConfig({
         replacement: new URL("../../packages/db/src/client.ts", import.meta.url).pathname,
       },
       {
-        find: /^@opencompany\/db\/goat-schema$/,
-        replacement: new URL("../../packages/db/src/goat-schema.ts", import.meta.url).pathname,
+        find: /^@opencompany\/db\/product-schema$/,
+        replacement: new URL("../../packages/db/src/product-schema.ts", import.meta.url).pathname,
       },
       {
         find: /^@opencompany\/db$/,

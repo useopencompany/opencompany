@@ -1,52 +1,46 @@
-import {
-  createGoatBrainAssetDocument,
-  goatBrainFilePathFor,
-} from "@opencompany/db/goat-brain-files";
-import { upsertGoatBrainSourceItemAndEnqueue } from "@opencompany/db/goat-brain-ingest";
-import {
-  documentViewFromFileRow,
-  nextAvailableGoatBrainId,
-} from "@opencompany/goat-agent/brain-files";
+import { documentViewFromFileRow, nextAvailableBrainId } from "@opencompany/agent/brain-files";
+import { brainFilePathFor, createBrainAssetDocument } from "@opencompany/db/brain-files";
+import { upsertBrainSourceItemAndEnqueue } from "@opencompany/db/brain-ingest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createGoatBrainAssetForUser } from "./brain-assets";
+import { createBrainAssetForUser } from "./brain-assets";
 
-vi.mock("@opencompany/analytics/goat", () => ({
-  captureGoatIngestionQuotaAnalytics: vi.fn(),
+vi.mock("@opencompany/analytics/product", () => ({
+  captureProductIngestionQuotaAnalytics: vi.fn(),
 }));
-vi.mock("@opencompany/db/goat-brain-files", () => ({
-  createGoatBrainAssetDocument: vi.fn(),
-  goatBrainFilePathFor: vi.fn(),
-  replaceGoatBrainAssetFile: vi.fn(),
+vi.mock("@opencompany/db/brain-files", () => ({
+  createBrainAssetDocument: vi.fn(),
+  brainFilePathFor: vi.fn(),
+  replaceBrainAssetFile: vi.fn(),
 }));
-vi.mock("@opencompany/db/goat-brain-ingest", () => ({
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND: "goat-brain-agent-ingest",
-  upsertGoatBrainSourceItemAndEnqueue: vi.fn(),
+vi.mock("@opencompany/db/brain-ingest", () => ({
+  BRAIN_AGENT_INGEST_JOB_KIND: "goat-brain-agent-ingest",
+  upsertBrainSourceItemAndEnqueue: vi.fn(),
 }));
-vi.mock("@opencompany/goat-agent/brain-files", () => ({
+vi.mock("@opencompany/agent/brain-files", () => ({
   documentViewFromFileRow: vi.fn(),
-  nextAvailableGoatBrainId: vi.fn(),
+  nextAvailableBrainId: vi.fn(),
 }));
 
-describe("Goat Brain asset uploads", () => {
+describe("opencompany Brain asset uploads", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("stores an SRT asset with a canonical MIME type when the browser reports plain text", async () => {
-    vi.mocked(nextAvailableGoatBrainId).mockResolvedValue("captions");
-    vi.mocked(createGoatBrainAssetDocument).mockResolvedValue({
+    vi.mocked(nextAvailableBrainId).mockResolvedValue("captions");
+    vi.mocked(createBrainAssetDocument).mockResolvedValue({
       id: "document_1",
       brainId: "captions",
       folderPath: "inbox",
     } as never);
-    vi.mocked(upsertGoatBrainSourceItemAndEnqueue).mockResolvedValue({
+    vi.mocked(upsertBrainSourceItemAndEnqueue).mockResolvedValue({
       paused: false,
       quotaUpdates: [],
     } as never);
     vi.mocked(documentViewFromFileRow).mockReturnValue({ id: "document_1" } as never);
-    vi.mocked(goatBrainFilePathFor).mockReturnValue("inbox/captions.md");
+    vi.mocked(brainFilePathFor).mockReturnValue("inbox/captions.md");
 
-    const result = await createGoatBrainAssetForUser({
+    const result = await createBrainAssetForUser({
       brainRef: "goat_brain_1",
       userWorkosId: "user_1",
       folderPath: "inbox",
@@ -58,7 +52,7 @@ describe("Goat Brain asset uploads", () => {
     });
 
     expect(result).toMatchObject({ ok: true, path: "inbox/captions.md" });
-    expect(createGoatBrainAssetDocument).toHaveBeenCalledWith(
+    expect(createBrainAssetDocument).toHaveBeenCalledWith(
       expect.objectContaining({
         format: "srt",
         mimeType: "application/x-subrip",
@@ -71,7 +65,7 @@ describe("Goat Brain asset uploads", () => {
 
   it("requires the SRT extension for subtitle MIME types", async () => {
     await expect(
-      createGoatBrainAssetForUser({
+      createBrainAssetForUser({
         brainRef: "goat_brain_1",
         userWorkosId: "user_1",
         folderPath: "inbox",
@@ -88,20 +82,20 @@ describe("Goat Brain asset uploads", () => {
   });
 
   it("stores a CSV asset with a canonical MIME type when the browser reports Excel", async () => {
-    vi.mocked(nextAvailableGoatBrainId).mockResolvedValue("customers");
-    vi.mocked(createGoatBrainAssetDocument).mockResolvedValue({
+    vi.mocked(nextAvailableBrainId).mockResolvedValue("customers");
+    vi.mocked(createBrainAssetDocument).mockResolvedValue({
       id: "document_1",
       brainId: "customers",
       folderPath: "inbox",
     } as never);
-    vi.mocked(upsertGoatBrainSourceItemAndEnqueue).mockResolvedValue({
+    vi.mocked(upsertBrainSourceItemAndEnqueue).mockResolvedValue({
       paused: false,
       quotaUpdates: [],
     } as never);
     vi.mocked(documentViewFromFileRow).mockReturnValue({ id: "document_1" } as never);
-    vi.mocked(goatBrainFilePathFor).mockReturnValue("inbox/customers.md");
+    vi.mocked(brainFilePathFor).mockReturnValue("inbox/customers.md");
 
-    const result = await createGoatBrainAssetForUser({
+    const result = await createBrainAssetForUser({
       brainRef: "goat_brain_1",
       userWorkosId: "user_1",
       folderPath: "inbox",
@@ -113,7 +107,7 @@ describe("Goat Brain asset uploads", () => {
     });
 
     expect(result).toMatchObject({ ok: true, path: "inbox/customers.md" });
-    expect(createGoatBrainAssetDocument).toHaveBeenCalledWith(
+    expect(createBrainAssetDocument).toHaveBeenCalledWith(
       expect.objectContaining({
         format: "csv",
         mimeType: "text/csv",
@@ -126,7 +120,7 @@ describe("Goat Brain asset uploads", () => {
 
   it("rejects uploads inside the skills zone", async () => {
     await expect(
-      createGoatBrainAssetForUser({
+      createBrainAssetForUser({
         brainRef: "goat_brain_1",
         userWorkosId: "user_1",
         folderPath: "skills/engineering",

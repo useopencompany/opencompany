@@ -6,7 +6,7 @@ import {
   renderWelcomeEmail,
 } from "@/lib/email/templates/onboarding";
 
-const UNSUB = "https://goat.example.com/api/email/unsubscribe?token=abc.def";
+const UNSUB = "https://opencompany.example.com/api/email/unsubscribe?token=abc.def";
 
 describe("onboarding email templates", () => {
   it("greets by first name (lowercased) and includes the reply + unsubscribe affordances", () => {

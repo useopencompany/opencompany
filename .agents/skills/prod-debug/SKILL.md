@@ -1,6 +1,6 @@
 ---
 name: prod-debug
-description: Use when debugging production incidents, prod state, logs, errors, secrets, credentials, Better Stack telemetry, Infisical prod env vars, or read-only production database inspection for OpenCompany.
+description: Use when debugging production incidents, prod state, logs, errors, secrets, credentials, Better Stack telemetry, Infisical prod env vars, or read-only production database inspection for opencompany.
 ---
 
 # Production Debugging

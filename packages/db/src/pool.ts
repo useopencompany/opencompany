@@ -1,10 +1,10 @@
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { type Notification, Pool, type PoolClient, type PoolConfig } from "pg";
-import * as goatSchema from "./goat-schema";
 import * as legacyBillingSchema from "./legacy-billing-schema";
 import * as llmBrokerSchema from "./llm-broker-schema";
+import * as productSchema from "./product-schema";
 
-const schema = { ...legacyBillingSchema, ...llmBrokerSchema, ...goatSchema };
+const schema = { ...legacyBillingSchema, ...llmBrokerSchema, ...productSchema };
 
 // Pooled driver for long-lived services (the runner). Unlike the default
 // `neon-http` client in `./client` — which issues one HTTPS request per query and

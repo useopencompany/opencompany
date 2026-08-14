@@ -1,1 +1,1 @@
-export * from "@opencompany/goat-agent/workflow-model-options";
+export * from "@opencompany/agent/workflow-model-options";

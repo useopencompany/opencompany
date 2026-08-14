@@ -2,19 +2,15 @@
 
 import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
-export type CreateGoatChatShareResult =
-  | { ok: true; shareId: string }
-  | { ok: false; error: string };
+export type CreateChatShareResult = { ok: true; shareId: string } | { ok: false; error: string };
 
-export type GetGoatChatShareResult =
+export type GetChatShareResult =
   | { ok: true; shareId: string | null }
   | { ok: false; error: string };
 
-export type RevokeGoatChatShareResult = { ok: true } | { ok: false; error: string };
+export type RevokeChatShareResult = { ok: true } | { ok: false; error: string };
 
-export async function getGoatChatShareAction(
-  sessionId: string | null,
-): Promise<GetGoatChatShareResult> {
+export async function getChatShareAction(sessionId: string | null): Promise<GetChatShareResult> {
   const trimmed = sessionId?.trim();
   if (!trimmed) return { ok: false, error: "Could not load sharing settings." };
 
@@ -31,9 +27,9 @@ export async function getGoatChatShareAction(
   return { ok: true, shareId: (await response.json()).data.shareId };
 }
 
-export async function createGoatChatShareAction(
+export async function createChatShareAction(
   sessionId: string | null,
-): Promise<CreateGoatChatShareResult> {
+): Promise<CreateChatShareResult> {
   const trimmed = sessionId?.trim();
   if (!trimmed) return { ok: false, error: "Could not share that chat." };
 
@@ -50,9 +46,9 @@ export async function createGoatChatShareAction(
   return { ok: true, shareId: (await response.json()).data.shareId };
 }
 
-export async function revokeGoatChatShareAction(
+export async function revokeChatShareAction(
   sessionId: string | null,
-): Promise<RevokeGoatChatShareResult> {
+): Promise<RevokeChatShareResult> {
   const trimmed = sessionId?.trim();
   if (!trimmed) return { ok: false, error: "Could not stop sharing that chat." };
 

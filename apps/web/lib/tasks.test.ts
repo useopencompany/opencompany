@@ -1,21 +1,21 @@
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
-import { createGoatTaskForUser } from "@/lib/tasks";
+import { DEFAULT_MODEL } from "@/lib/model-options";
+import { createTaskForUser } from "@/lib/tasks";
 
 const mocks = vi.hoisted(() => ({
   after: vi.fn((work: Promise<unknown> | (() => unknown)) =>
     typeof work === "function" ? work() : work,
   ),
-  captureGoatTaskSpawned: vi.fn(async () => undefined),
+  captureProductTaskSpawned: vi.fn(async () => undefined),
   execute: vi.fn(),
   select: vi.fn(),
-  triggerGoatCodexChatWake: vi.fn(),
+  triggerCodexChatWake: vi.fn(),
 }));
 
-vi.mock("@opencompany/analytics/goat/server", () => ({
-  captureGoatTaskSpawned: mocks.captureGoatTaskSpawned,
+vi.mock("@opencompany/analytics/product/server", () => ({
+  captureProductTaskSpawned: mocks.captureProductTaskSpawned,
 }));
 
 vi.mock("@opencompany/db/client", () => ({
@@ -23,11 +23,11 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@/lib/task-runner", () => ({
-  triggerGoatCodexChatWake: mocks.triggerGoatCodexChatWake,
+  triggerCodexChatWake: mocks.triggerCodexChatWake,
 }));
 
-vi.mock("@opencompany/goat-agent/integrations/google-data", () => ({
-  getGoatAvailableHarnessTools: vi.fn(async () => ["exa_search", "gmail_search"]),
+vi.mock("@opencompany/agent/integrations/google-data", () => ({
+  getAvailableHarnessTools: vi.fn(async () => ["exa_search", "gmail_search"]),
 }));
 
 vi.mock("next/server", () => ({ after: mocks.after }));
@@ -35,10 +35,10 @@ vi.mock("next/server", () => ({ after: mocks.after }));
 beforeEach(() => {
   mocks.execute.mockReset();
   mocks.select.mockReset();
-  mocks.triggerGoatCodexChatWake.mockReset().mockResolvedValue(undefined);
+  mocks.triggerCodexChatWake.mockReset().mockResolvedValue(undefined);
 });
 
-describe("createGoatTaskForUser", () => {
+describe("createTaskForUser", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -50,12 +50,12 @@ describe("createGoatTaskForUser", () => {
   afterEach(() => warnSpy.mockRestore());
 
   it("creates the canonical conversation and leaves its Run queued when dispatch fails", async () => {
-    mocks.triggerGoatCodexChatWake.mockRejectedValue(new Error("runner unavailable"));
+    mocks.triggerCodexChatWake.mockRejectedValue(new Error("runner unavailable"));
 
-    const task = await createGoatTaskForUser({
+    const task = await createTaskForUser({
       userWorkosId: "user_1",
       prompt: "Research x",
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
     });
 
     expect(task).toMatchObject({
@@ -69,25 +69,25 @@ describe("createGoatTaskForUser", () => {
     expect(sqlTextFromExecuteCall(1)).toContain("INSERT INTO goat.codex_chat_turns");
     expect(sqlTextFromExecuteCall(1)).toContain("'run.queued'");
     expect(sqlTextFromExecuteCall(1)).not.toContain("goat.task_messages");
-    expect(mocks.triggerGoatCodexChatWake).toHaveBeenCalledOnce();
+    expect(mocks.triggerCodexChatWake).toHaveBeenCalledOnce();
     expect(warnSpy).toHaveBeenCalledWith(
-      "Goat durable task wake failed; the turn remains queued for polling.",
+      "opencompany durable task wake failed; the turn remains queued for polling.",
       expect.objectContaining({ event: "goat.durable_task_created_wake_failed" }),
     );
   });
 
   it("records the same source metadata for internal web producers", async () => {
     mockCanonicalTaskCreation({ source: "workflow", workflowId: "workflow_1" });
-    await createGoatTaskForUser({
+    await createTaskForUser({
       userWorkosId: "user_1",
       prompt: "Research x",
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       workflowId: "workflow_1",
       source: "workflow",
       idempotencyKey: "workflow:workflow_1:run:1",
     });
 
-    expect(mocks.captureGoatTaskSpawned).toHaveBeenCalledWith(
+    expect(mocks.captureProductTaskSpawned).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: "task_1",
         workspaceId: "workspace_1",
@@ -104,26 +104,26 @@ describe("createGoatTaskForUser", () => {
       .mockResolvedValueOnce([{ authorized: true, featureEnabled: false, commandId: null }]);
 
     await expect(
-      createGoatTaskForUser({
+      createTaskForUser({
         userWorkosId: "user_1",
         prompt: "Research x",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
       }),
     ).rejects.toThrow("Tasks & Workflows is disabled");
 
     expect(mocks.execute).toHaveBeenCalledOnce();
-    expect(mocks.captureGoatTaskSpawned).not.toHaveBeenCalled();
-    expect(mocks.triggerGoatCodexChatWake).not.toHaveBeenCalled();
+    expect(mocks.captureProductTaskSpawned).not.toHaveBeenCalled();
+    expect(mocks.triggerCodexChatWake).not.toHaveBeenCalled();
   });
 
   it("reports an actor without workspace membership", async () => {
     mockSelectRows([]);
 
     await expect(
-      createGoatTaskForUser({
+      createTaskForUser({
         userWorkosId: "missing_user",
         prompt: "Research x",
-        model: DEFAULT_GOAT_MODEL,
+        model: DEFAULT_MODEL,
       }),
     ).rejects.toThrow("workspace membership");
     expect(mocks.execute).not.toHaveBeenCalled();
@@ -159,7 +159,7 @@ function mockCanonicalTaskCreation(
     name: "Research x",
     prompt: "Research x",
     source,
-    model: DEFAULT_GOAT_MODEL,
+    model: DEFAULT_MODEL,
     sessionId: "conversation_1",
     scheduleId: null,
     scheduledFor: null,
@@ -174,7 +174,7 @@ function mockCanonicalTaskCreation(
     harnessSpec: {
       schemaVersion: "goat.harness.v1" as const,
       engine: "opencompany" as const,
-      model: DEFAULT_GOAT_MODEL,
+      model: DEFAULT_MODEL,
       systemPrompt: "",
       initialUserMessage: "Research x",
       tools: ["exa_search", "gmail_search"],
@@ -221,7 +221,7 @@ function mockCanonicalTaskCreation(
           status: "queued",
           source,
           engine: "opencompany",
-          model: DEFAULT_GOAT_MODEL,
+          model: DEFAULT_MODEL,
           workflowId,
           scheduleId: null,
           scheduledFor: null,
