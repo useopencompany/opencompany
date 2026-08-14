@@ -708,8 +708,12 @@ export const agentSessionMessages = pgTable(
     status: text("status").notNull().default("created"),
     content: text("content").notNull().default(""),
     internal: boolean("internal").notNull().default(false),
-    // Retained first-generation send-mode field. Canonical Chat commands and Run behavior live in
-    // packages/protocol and do not use this compatibility schema.
+    // How a user message was dispatched while a run was already in flight (the composer's
+    // send-mode picker): "steer" stops the active turn at the next model-step boundary,
+    // "queue" lets the active turn finish all its steps first, "interrupt" aborts the active
+    // turn (discarding in-flight work) and runs immediately. NULL on idle/first sends and all
+    // legacy rows — the runner treats NULL as "steer" so historical behavior is preserved.
+    // See docs/agent-turn-vocabulary.md and apps/runner/src/session-lifecycle.ts.
     sendMode: text("send_mode"),
     modelMessage: jsonb("model_message").$type<Record<string, unknown>>(),
     toolName: text("tool_name"),
