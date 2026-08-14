@@ -4,6 +4,8 @@
 - Date: 2026-08-14
 - Decision owner: OpenCompany owner
 - Predecessor: [#1203](https://github.com/useopencompany/opencompany-experimental/issues/1203)
+- Draft successor tracker:
+  [#1242](https://github.com/useopencompany/opencompany-experimental/issues/1242)
 - Completion evidence:
   [#1203 final comment](https://github.com/useopencompany/opencompany-experimental/issues/1203#issuecomment-5289844745)
 - Architecture baseline: [ADR 0001](../adr/0001-headless-chat-v1-foundation.md),
