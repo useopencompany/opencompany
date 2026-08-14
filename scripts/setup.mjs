@@ -200,6 +200,7 @@ const SHARED_DEV_ENV_KEYS = [
 const NEON_ENV_KEYS = ["NEON_PROJECT_ID"];
 const INFISICAL_DEV_ENV = "dev";
 const INFISICAL_DEV_PATHS = ["/web", "/runner"];
+const LOCAL_API_ORIGIN = "http://localhost:3001";
 const HTTP_LOCAL_WEB_APP_URL = "http://localhost:3002";
 const LOCAL_WEB_APP_URL = webHttpsOrigin(process.env);
 const LOCAL_WEB_WORKOS_REDIRECT_URI = `${LOCAL_WEB_APP_URL}/auth/callback`;
@@ -207,6 +208,9 @@ const WEB_ENV_PATH = "apps/web/.env.local";
 const LOCAL_ONLY_ENV_KEYS = new Set([
   "DATABASE_URL",
   "NEON_BRANCH",
+  "API_BROWSER_ORIGINS",
+  "OPENCOMPANY_API_ORIGIN",
+  "NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN",
   "OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS",
   "OPENCOMPANY_PORT",
   "OPENCOMPANY_HTTPS_PORT",
@@ -214,6 +218,9 @@ const LOCAL_ONLY_ENV_KEYS = new Set([
   "OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
 ]);
 const LOCAL_DEV_DEFAULT_ENV_VALUES = {
+  API_BROWSER_ORIGINS: LOCAL_WEB_APP_URL,
+  OPENCOMPANY_API_ORIGIN: LOCAL_API_ORIGIN,
+  NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN: "",
   OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS: "developer@example.com",
   OPENCOMPANY_PORT: "3002",
   OPENCOMPANY_HTTPS_PORT: webHttpsPort(process.env),
@@ -610,6 +617,13 @@ async function ensureLocalDevDefaults() {
 }
 
 function shouldReplaceLocalDefault(key, current, next) {
+  if (
+    key === "API_BROWSER_ORIGINS" ||
+    key === "OPENCOMPANY_API_ORIGIN" ||
+    key === "NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN"
+  ) {
+    return current !== next;
+  }
   if (key === "OPENCOMPANY_NEXT_PUBLIC_APP_URL") {
     return current === HTTP_LOCAL_WEB_APP_URL && next !== current;
   }
@@ -629,6 +643,7 @@ async function ensureWebEnvFile() {
   const values = {
     OPENCOMPANY_NEXT_PUBLIC_APP_URL: webAppUrl,
     OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
+    NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN: env.NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN || "",
     NEXT_PUBLIC_APP_URL: webAppUrl,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
     WORKOS_REDIRECT_URI: webRedirectUri,

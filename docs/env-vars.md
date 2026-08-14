@@ -78,10 +78,10 @@ as the product. Both variables are required in production and optional for local
 
 ## Local generated values
 
-`bun run setup` writes branch-specific `DATABASE_URL`, local ports/origins, runner tokens, and
-Electric configuration to `.env.local`. It mirrors only the web auth/proxy/compatibility and
-observability subset into `apps/web/.env.local`; API/runner provider credentials are not copied
-into that app-local file.
+`bun run setup` writes branch-specific `DATABASE_URL`, the local API listener/origin and browser
+allowlist, web ports/origins, runner tokens, and Electric configuration to `.env.local`. It mirrors
+only the web auth/proxy/compatibility and observability subset into `apps/web/.env.local`;
+API/runner provider credentials are not copied into that app-local file.
 Do not put branch database URLs or generated local tokens in Infisical. `.env.override.local` may
 override a developer's generated values and remains gitignored.
 

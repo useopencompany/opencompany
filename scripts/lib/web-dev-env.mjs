@@ -23,6 +23,7 @@ export function resolveWebDevEnv({
     trimmed(webHttpsEnv.OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI) ||
     configuredWebRedirectUri(processEnv, webHttpsEnv) ||
     `${localRedirectAppUrl}/auth/callback`;
+  const apiOrigin = trimmed(processEnv.OPENCOMPANY_API_ORIGIN) || "http://localhost:3001";
 
   return {
     ...(trimmed(webHttpsEnv.OPENCOMPANY_NEXT_PUBLIC_APP_URL)
@@ -33,6 +34,13 @@ export function resolveWebDevEnv({
     NEXT_PUBLIC_APP_URL: webAppUrl,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
     WORKOS_REDIRECT_URI: webRedirectUri,
+    OPENCOMPANY_API_ORIGIN: apiOrigin,
+    API_BROWSER_ORIGINS: appendCsvValues(
+      processEnv.API_BROWSER_ORIGINS,
+      [webAppUrl, tunnelEnv.NEXT_PUBLIC_APP_URL, tunnelEnv.OPENCOMPANY_NEXT_PUBLIC_APP_URL].filter(
+        Boolean,
+      ),
+    ),
     RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED: "true",
     RUNNER_ALLOWED_ORIGINS: appendCsvValues(
       processEnv.RUNNER_ALLOWED_ORIGINS,
