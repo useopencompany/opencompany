@@ -1,5 +1,3 @@
+# The repository owner is the sole code owner during startup governance. Do not
+# enable mandatory CODEOWNER review until a second active maintainer is assigned.
 * @louismorgner
-
-/packages/db/ @louismorgner
-/drizzle/ @louismorgner
-/.github/ @louismorgner
