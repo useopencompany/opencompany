@@ -13,21 +13,29 @@ import {
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 import { awaitHeadlessChatTransaction } from "./headless-chat-collections";
-import { HeadlessChatUiProjector } from "./headless-chat-ui-projector";
+import {
+  HeadlessChatUiProjector,
+  type HeadlessToolCallCheckpoint,
+} from "./headless-chat-ui-projector";
 
+// Keep the storage key stable so older sessions can be discovered and migrated by payload version.
 const STORAGE_PREFIX = "opencompany:headless-chat:v1:";
+const CHECKPOINT_VERSION = 2;
+
+type HeadlessRunStatus = "queued" | "running" | "paused" | "completed" | "failed" | "canceled";
 
 type HeadlessRunState = {
+  checkpointVersion: typeof CHECKPOINT_VERSION;
   runId: string;
   conversationId: string;
   assistantMessageId: string;
   model: string;
   content?: string;
   textSegment?: number;
-  startedToolCallIds?: string[];
+  activeToolCalls: HeadlessToolCallCheckpoint[];
   cursor?: string;
   presentationCursor?: string;
-  status: "queued" | "running" | "paused" | "completed" | "failed" | "canceled";
+  status: HeadlessRunStatus;
 };
 
 type MessageMetadata = {
@@ -116,7 +124,9 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
           }
         : {}),
     };
-    const client = createApiClient(this.baseUrl(), { fetch: this.apiFetchImpl });
+    const client = createApiClient(this.baseUrl(), {
+      fetch: this.apiFetchImpl,
+    });
     const response = await client.v1.messages.$post(
       {
         header: {
@@ -130,10 +140,12 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
     if (!response.ok) throw await responseError(response);
     const envelope = await response.json();
     const state: HeadlessRunState = {
+      checkpointVersion: CHECKPOINT_VERSION,
       runId: envelope.data.runId,
       conversationId: envelope.data.conversationId,
       assistantMessageId: envelope.data.assistantMessageId,
       model: envelope.data.model ?? model ?? "",
+      activeToolCalls: [],
       status: "queued",
     };
     writeRunStateAliases(input.chatId, state);
@@ -156,8 +168,12 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
   async reconnectToStream(input: Parameters<ChatTransport<UI_MESSAGE>["reconnectToStream"]>[0]) {
     const state = readRunState(input.chatId);
     if (!state || isTerminal(state.status) || state.status === "paused") return null;
-    const client = createApiClient(this.baseUrl(), { fetch: this.apiFetchImpl });
-    const response = await client.v1.runs[":runId"].$get({ param: { runId: state.runId } });
+    const client = createApiClient(this.baseUrl(), {
+      fetch: this.apiFetchImpl,
+    });
+    const response = await client.v1.runs[":runId"].$get({
+      param: { runId: state.runId },
+    });
     if (!response.ok) return null;
     const run = (await response.json()).data;
     state.status = run.status;
@@ -169,7 +185,9 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
   async cancel(chatId: string) {
     const state = readRunState(chatId);
     if (!state || isTerminal(state.status)) return false;
-    const client = createApiClient(this.baseUrl(), { fetch: this.apiFetchImpl });
+    const client = createApiClient(this.baseUrl(), {
+      fetch: this.apiFetchImpl,
+    });
     const response = await client.v1.runs[":runId"].cancel.$post({
       param: { runId: state.runId },
     });
@@ -183,23 +201,29 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
     let state = readRunState(input.chatId);
     if (input.runId && state?.runId !== input.runId) state = null;
     if (!state && input.runId && input.assistantMessageId) {
-      const client = createApiClient(this.baseUrl(), { fetch: this.apiFetchImpl });
+      const client = createApiClient(this.baseUrl(), {
+        fetch: this.apiFetchImpl,
+      });
       const response = await client.v1.runs[":runId"].$get({
         param: { runId: input.runId },
       });
       if (!response.ok) throw await responseError(response);
       const run = (await response.json()).data;
       state = {
+        checkpointVersion: CHECKPOINT_VERSION,
         runId: run.id,
         conversationId: run.conversationId,
         assistantMessageId: input.assistantMessageId,
         model: input.model ?? run.model,
+        activeToolCalls: [],
         status: run.status,
       };
       writeRunStateAliases(input.chatId, state);
     }
     if (!state) throw new Error("The durable Run for this approval is no longer available.");
-    const client = createApiClient(this.baseUrl(), { fetch: this.apiFetchImpl });
+    const client = createApiClient(this.baseUrl(), {
+      fetch: this.apiFetchImpl,
+    });
     const response = await client.v1.runs[":runId"].approvals[":approvalId"].$post(
       {
         param: { runId: state.runId, approvalId: input.approvalId },
@@ -226,7 +250,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
           state.assistantMessageId,
           state.content,
           state.textSegment,
-          state.startedToolCallIds,
+          state.activeToolCalls,
         );
         controller.enqueue({
           type: "start",
@@ -237,6 +261,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
             ...(state.model ? { model: state.model } : {}),
           },
         });
+        for (const chunk of projector.rehydrate()) controller.enqueue(chunk);
         try {
           for await (const event of streamRunEvents({
             baseUrl,
@@ -245,20 +270,15 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
             ...(state.presentationCursor ? { presentationCursor: state.presentationCursor } : {}),
             ...(signal ? { signal } : {}),
             fetch: fetchImpl,
-            onCursor(cursor) {
-              state.cursor = cursor;
-              writeRunStateAliases(chatId, state);
-            },
-            onPresentationCursor(cursor) {
-              state.presentationCursor = cursor;
-              writeRunStateAliases(chatId, state);
-            },
           })) {
             for (const chunk of projector.project(event)) controller.enqueue(chunk);
             state.content = projector.content;
             state.textSegment = projector.segment;
-            state.startedToolCallIds = projector.startedToolCallIds;
-            if (event.type !== "message.presentation_delta") {
+            state.activeToolCalls = projector.toolCallCheckpoint;
+            if (event.type === "message.presentation_delta") {
+              state.presentationCursor = event.presentationCursor;
+            } else {
+              state.cursor = event.cursor;
               state.status = statusFromEvent(event, state.status);
             }
             writeRunStateAliases(chatId, state);
@@ -281,7 +301,10 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
           controller.close();
         } catch (error) {
           if (signal?.aborted) {
-            controller.enqueue({ type: "abort", reason: "Disconnected from the Run stream." });
+            controller.enqueue({
+              type: "abort",
+              reason: "Disconnected from the Run stream.",
+            });
             controller.close();
             return;
           }
@@ -311,7 +334,10 @@ export async function startHeadlessBackgroundChat(
 ) {
   const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
   const fetchImpl = bindFetchToRuntime(options.fetch);
-  const apiFetchImpl = createHeadlessChatApiFetch({ baseUrl, fetch: fetchImpl });
+  const apiFetchImpl = createHeadlessChatApiFetch({
+    baseUrl,
+    fetch: fetchImpl,
+  });
   const client = createApiClient(baseUrl, { fetch: apiFetchImpl });
   const response = await client.v1.messages.$post({
     header: {
@@ -434,12 +460,33 @@ function readRunState(chatId: string): HeadlessRunState | null {
   if (typeof sessionStorage === "undefined") return null;
   try {
     const value = JSON.parse(sessionStorage.getItem(storageKey(chatId)) ?? "null") as unknown;
-    if (!value || typeof value !== "object") return null;
-    const state = value as Partial<HeadlessRunState>;
-    if (!state.runId || !state.conversationId || !state.assistantMessageId || !state.status) {
-      return null;
-    }
-    return state as HeadlessRunState;
+    if (!isRecord(value)) return null;
+    const runId = stringValue(value.runId);
+    const conversationId = stringValue(value.conversationId);
+    const assistantMessageId = stringValue(value.assistantMessageId);
+    const status = runStatus(value.status);
+    if (!runId || !conversationId || !assistantMessageId || !status) return null;
+
+    const activeToolCalls = toolCallCheckpoint(value.activeToolCalls);
+    const currentCheckpoint =
+      value.checkpointVersion === CHECKPOINT_VERSION && activeToolCalls !== null;
+    const cursor = currentCheckpoint ? stringValue(value.cursor) : undefined;
+    const presentationCursor = currentCheckpoint
+      ? stringValue(value.presentationCursor)
+      : undefined;
+    return {
+      checkpointVersion: CHECKPOINT_VERSION,
+      runId,
+      conversationId,
+      assistantMessageId,
+      model: stringValue(value.model) ?? "",
+      ...(typeof value.content === "string" ? { content: value.content } : {}),
+      ...(isNonNegativeSafeInteger(value.textSegment) ? { textSegment: value.textSegment } : {}),
+      activeToolCalls: currentCheckpoint ? activeToolCalls : [],
+      ...(cursor ? { cursor } : {}),
+      ...(presentationCursor ? { presentationCursor } : {}),
+      status,
+    };
   } catch {
     return null;
   }
@@ -457,6 +504,38 @@ function writeRunStateAliases(chatId: string, state: HeadlessRunState) {
 
 function isTerminal(status: HeadlessRunState["status"]) {
   return status === "completed" || status === "failed" || status === "canceled";
+}
+
+function runStatus(value: unknown): HeadlessRunStatus | undefined {
+  return value === "queued" ||
+    value === "running" ||
+    value === "paused" ||
+    value === "completed" ||
+    value === "failed" ||
+    value === "canceled"
+    ? value
+    : undefined;
+}
+
+function toolCallCheckpoint(value: unknown): HeadlessToolCallCheckpoint[] | null {
+  if (!Array.isArray(value)) return null;
+  const calls: HeadlessToolCallCheckpoint[] = [];
+  for (const candidate of value) {
+    if (!isRecord(candidate)) return null;
+    const toolCallId = stringValue(candidate.toolCallId);
+    const toolName = stringValue(candidate.toolName);
+    if (!toolCallId || !toolName || !("input" in candidate)) return null;
+    calls.push({ toolCallId, toolName, input: candidate.input });
+  }
+  return calls;
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function stringValue(value: unknown) {
