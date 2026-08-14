@@ -2,7 +2,7 @@
 
 import {
   type CreateTaskBody,
-  createOpenCompanyClient,
+  createApiClient,
   type LegacyTaskDto,
   type LegacyTaskHistoryDto,
   type TaskDto,
@@ -96,7 +96,7 @@ export async function cancelHeadlessTaskRun(runId: string, options: ClientOption
 
 function taskClient(options: ClientOptions) {
   const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
-  return createOpenCompanyClient(baseUrl, {
+  return createApiClient(baseUrl, {
     fetch: createHeadlessChatApiFetch({
       baseUrl,
       ...(options.fetch ? { fetch: options.fetch } : {}),

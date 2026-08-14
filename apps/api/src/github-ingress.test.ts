@@ -1,63 +1,63 @@
-import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
-import { upsertGoatBrainSourceItemAndEnqueue } from "@opencompany/db/goat-brain-ingest";
 import {
-  insertGoatGitHubPullRequestEvents,
-  listEnabledGoatGitHubBrainSourceRoutes,
-  listGoatGitHubIntegrationsForInstallation,
-} from "@opencompany/db/goat-github";
-import { markGoatIntegrationStatus } from "@opencompany/db/goat-integrations";
-import { listGoatWorkspacesForUser } from "@opencompany/db/goat-workspaces";
+  createGitHubIntegrationState,
+  exchangeGitHubUserCode,
+  getGitHubInstallation,
+  listGitHubInstallationRepositories,
+  syncGitHubIntegrationRepositories,
+  verifyGitHubUserInstallation,
+} from "@opencompany/agent/integrations/github";
+import { verifyGitHubWebhookSignature } from "@opencompany/agent/integrations/github-signature";
+import { captureProductIngestionQuotaAnalytics } from "@opencompany/analytics/product";
+import { upsertBrainSourceItemAndEnqueue } from "@opencompany/db/brain-ingest";
 import {
-  createGoatGitHubIntegrationState,
-  exchangeGoatGitHubUserCode,
-  getGoatGitHubInstallation,
-  listGoatGitHubInstallationRepositories,
-  syncGoatGitHubIntegrationRepositories,
-  verifyGoatGitHubUserInstallation,
-} from "@opencompany/goat-agent/integrations/github";
-import { verifyGoatGitHubWebhookSignature } from "@opencompany/goat-agent/integrations/github-signature";
+  insertGitHubPullRequestEvents,
+  listEnabledGitHubBrainSourceRoutes,
+  listGitHubIntegrationsForInstallation,
+} from "@opencompany/db/github";
+import { markIntegrationStatus } from "@opencompany/db/integrations";
+import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./errors";
 import { createGitHubIngress } from "./github-ingress";
 
-vi.mock("@opencompany/analytics/goat", () => ({
-  captureGoatIngestionQuotaAnalytics: vi.fn(),
+vi.mock("@opencompany/analytics/product", () => ({
+  captureProductIngestionQuotaAnalytics: vi.fn(),
 }));
-vi.mock("@opencompany/db/goat-brain-ingest", async (importOriginal) => ({
+vi.mock("@opencompany/db/brain-ingest", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  upsertGoatBrainSourceItemAndEnqueue: vi.fn(),
+  upsertBrainSourceItemAndEnqueue: vi.fn(),
 }));
-vi.mock("@opencompany/db/goat-github", async (importOriginal) => ({
+vi.mock("@opencompany/db/github", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  insertGoatGitHubPullRequestEvents: vi.fn(),
-  listEnabledGoatGitHubBrainSourceRoutes: vi.fn(),
-  listGoatGitHubIntegrationsForInstallation: vi.fn(),
+  insertGitHubPullRequestEvents: vi.fn(),
+  listEnabledGitHubBrainSourceRoutes: vi.fn(),
+  listGitHubIntegrationsForInstallation: vi.fn(),
 }));
-vi.mock("@opencompany/goat-agent/integrations/github", async (importOriginal) => ({
+vi.mock("@opencompany/agent/integrations/github", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  exchangeGoatGitHubUserCode: vi.fn(),
-  verifyGoatGitHubUserInstallation: vi.fn(),
-  getGoatGitHubInstallation: vi.fn(),
-  listGoatGitHubInstallationRepositories: vi.fn(),
-  syncGoatGitHubIntegrationRepositories: vi.fn(),
+  exchangeGitHubUserCode: vi.fn(),
+  verifyGitHubUserInstallation: vi.fn(),
+  getGitHubInstallation: vi.fn(),
+  listGitHubInstallationRepositories: vi.fn(),
+  syncGitHubIntegrationRepositories: vi.fn(),
 }));
-vi.mock("@opencompany/goat-agent/integrations/github-signature", () => ({
-  verifyGoatGitHubWebhookSignature: vi.fn(),
+vi.mock("@opencompany/agent/integrations/github-signature", () => ({
+  verifyGitHubWebhookSignature: vi.fn(),
 }));
-vi.mock("@opencompany/db/goat-integrations", async (importOriginal) => ({
+vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  markGoatIntegrationStatus: vi.fn(),
+  markIntegrationStatus: vi.fn(),
 }));
 
 const sentinelDb = { sentinel: "db" };
 
-vi.mock("@opencompany/db/goat-workspaces", async (importOriginal) => ({
+vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  listGoatWorkspacesForUser: vi.fn(),
+  listWorkspacesForUser: vi.fn(),
 }));
 
 function ingress(overrides: { role?: string; noWorkspaces?: boolean; authError?: ApiError } = {}) {
-  vi.mocked(listGoatWorkspacesForUser).mockResolvedValue(
+  vi.mocked(listWorkspacesForUser).mockResolvedValue(
     overrides.noWorkspaces
       ? []
       : ([
@@ -85,18 +85,18 @@ function ingress(overrides: { role?: string; noWorkspaces?: boolean; authError?:
 describe("GitHub ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://goat.example.com");
+    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
     vi.stubEnv("GITHUB_INTEGRATION_APP_ID", "1234");
     vi.stubEnv("GITHUB_INTEGRATION_APP_PRIVATE_KEY", "key");
     vi.stubEnv("GITHUB_INTEGRATION_APP_SLUG", "goat-app");
     vi.stubEnv("GITHUB_INTEGRATION_APP_CLIENT_ID", "Iv1_client");
     vi.stubEnv("GITHUB_INTEGRATION_APP_CLIENT_SECRET", "client-secret");
     vi.stubEnv("GITHUB_INTEGRATION_STATE_SECRET", "state-secret-state-secret-state-secret");
-    vi.mocked(verifyGoatGitHubWebhookSignature).mockReturnValue(true);
-    vi.mocked(listGoatGitHubIntegrationsForInstallation).mockResolvedValue([
+    vi.mocked(verifyGitHubWebhookSignature).mockReturnValue(true);
+    vi.mocked(listGitHubIntegrationsForInstallation).mockResolvedValue([
       { id: "gint_github_1", userWorkosId: "user_1", status: "connected" },
     ] as never);
-    vi.mocked(listEnabledGoatGitHubBrainSourceRoutes).mockResolvedValue([
+    vi.mocked(listEnabledGitHubBrainSourceRoutes).mockResolvedValue([
       {
         integrationId: "gint_github_1",
         brainRef: "gbrain_1",
@@ -112,8 +112,8 @@ describe("GitHub ingress", () => {
         },
       },
     ] as never);
-    vi.mocked(insertGoatGitHubPullRequestEvents).mockResolvedValue(1);
-    vi.mocked(upsertGoatBrainSourceItemAndEnqueue).mockResolvedValue({
+    vi.mocked(insertGitHubPullRequestEvents).mockResolvedValue(1);
+    vi.mocked(upsertBrainSourceItemAndEnqueue).mockResolvedValue({
       sourceItemId: "gbsrc_1",
       jobId: "gbjob_1",
       jobIds: ["gbjob_1"],
@@ -145,7 +145,7 @@ describe("GitHub ingress", () => {
       );
       expect(response.status).toBe(302);
       const location = new URL(response.headers.get("location") ?? "");
-      expect(location.origin).toBe("https://goat.example.com");
+      expect(location.origin).toBe("https://opencompany.example.com");
       expect(location.searchParams.get("reason")).toBe("admin_required");
     });
 
@@ -154,7 +154,7 @@ describe("GitHub ingress", () => {
         authError: new ApiError(401, "authentication_required", "Authentication required."),
       }).start(new Request("https://api.example.com/integrations/github/start"));
       expect(response.status).toBe(302);
-      expect(response.headers.get("location")).toBe("https://goat.example.com/signin");
+      expect(response.headers.get("location")).toBe("https://opencompany.example.com/signin");
     });
 
     it("redirects users without a visible workspace to onboarding", async () => {
@@ -162,7 +162,7 @@ describe("GitHub ingress", () => {
         new Request("https://api.example.com/integrations/github/start"),
       );
       expect(response.status).toBe(302);
-      expect(response.headers.get("location")).toBe("https://goat.example.com/onboarding");
+      expect(response.headers.get("location")).toBe("https://opencompany.example.com/onboarding");
     });
 
     it("admits mid-onboarding admins whose workspace already exists", async () => {
@@ -181,7 +181,7 @@ describe("GitHub ingress", () => {
 
   describe("callback", () => {
     it("rejects a state minted for a different user with session_mismatch", async () => {
-      const state = createGoatGitHubIntegrationState({
+      const state = createGitHubIntegrationState({
         userWorkosId: "user_other",
         workspaceId: "workspace_1",
         returnTo: "/settings",
@@ -197,7 +197,7 @@ describe("GitHub ingress", () => {
     });
 
     it("maps GitHub denial and a missing installation id to their reasons", async () => {
-      const state = createGoatGitHubIntegrationState({
+      const state = createGitHubIntegrationState({
         userWorkosId: "user_1",
         workspaceId: "workspace_1",
         returnTo: "/settings",
@@ -227,12 +227,12 @@ describe("GitHub ingress", () => {
       );
       expect(response.status).toBe(302);
       const location = new URL(response.headers.get("location") ?? "");
-      expect(location.origin).toBe("https://goat.example.com");
+      expect(location.origin).toBe("https://opencompany.example.com");
       expect(location.searchParams.get("reason")).toBe("invalid_state");
     });
 
     it("requires the finishing session to still be an admin of the state workspace", async () => {
-      const state = createGoatGitHubIntegrationState({
+      const state = createGitHubIntegrationState({
         userWorkosId: "user_1",
         workspaceId: "workspace_1",
         returnTo: "/settings",
@@ -246,11 +246,11 @@ describe("GitHub ingress", () => {
       expect(new URL(response.headers.get("location") ?? "").searchParams.get("reason")).toBe(
         "admin_required",
       );
-      expect(syncGoatGitHubIntegrationRepositories).not.toHaveBeenCalled();
+      expect(syncGitHubIntegrationRepositories).not.toHaveBeenCalled();
     });
 
     it("redirects to user authorization when the installation lands without a code", async () => {
-      const state = createGoatGitHubIntegrationState({
+      const state = createGitHubIntegrationState({
         userWorkosId: "user_1",
         workspaceId: "workspace_1",
         returnTo: "/settings",
@@ -265,26 +265,26 @@ describe("GitHub ingress", () => {
       expect(location.origin).toBe("https://github.com");
       expect(location.pathname).toBe("/login/oauth/authorize");
       expect(location.searchParams.get("redirect_uri")).toBe(
-        "https://goat.example.com/api/integrations/github/callback",
+        "https://opencompany.example.com/api/integrations/github/callback",
       );
     });
 
     it("syncs repositories through the injected database and reports connected", async () => {
-      vi.mocked(exchangeGoatGitHubUserCode).mockResolvedValue("user-token");
-      vi.mocked(verifyGoatGitHubUserInstallation).mockResolvedValue({
+      vi.mocked(exchangeGitHubUserCode).mockResolvedValue("user-token");
+      vi.mocked(verifyGitHubUserInstallation).mockResolvedValue({
         id: 777,
         account: { login: "acme", type: "Organization" },
       } as never);
-      vi.mocked(getGoatGitHubInstallation).mockResolvedValue({
+      vi.mocked(getGitHubInstallation).mockResolvedValue({
         id: 777,
         account: { login: "acme", type: "Organization" },
       } as never);
-      vi.mocked(listGoatGitHubInstallationRepositories).mockResolvedValue([
+      vi.mocked(listGitHubInstallationRepositories).mockResolvedValue([
         { githubRepoId: "4242", fullName: "acme/api", defaultBranch: "main", private: true },
       ]);
-      vi.mocked(syncGoatGitHubIntegrationRepositories).mockResolvedValue(undefined as never);
+      vi.mocked(syncGitHubIntegrationRepositories).mockResolvedValue(undefined as never);
 
-      const state = createGoatGitHubIntegrationState({
+      const state = createGitHubIntegrationState({
         userWorkosId: "user_1",
         workspaceId: "workspace_1",
         returnTo: "/settings",
@@ -297,7 +297,7 @@ describe("GitHub ingress", () => {
       expect(response.status).toBe(302);
       const location = new URL(response.headers.get("location") ?? "");
       expect(location.searchParams.get("setup")).toBe("connected");
-      expect(syncGoatGitHubIntegrationRepositories).toHaveBeenCalledWith(
+      expect(syncGitHubIntegrationRepositories).toHaveBeenCalledWith(
         expect.objectContaining({ workspaceId: "workspace_1", installationId: "777" }),
         expect.objectContaining({ sentinel: "db" }),
       );
@@ -319,7 +319,7 @@ describe("GitHub ingress", () => {
     }
 
     it("rejects deliveries with an invalid signature", async () => {
-      vi.mocked(verifyGoatGitHubWebhookSignature).mockReturnValue(false);
+      vi.mocked(verifyGitHubWebhookSignature).mockReturnValue(false);
       const response = await ingress().webhook(githubRequest("issues", issuePayload()));
       expect(response.status).toBe(401);
     });
@@ -330,7 +330,7 @@ describe("GitHub ingress", () => {
       );
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({ ok: true, marked: 1 });
-      expect(markGoatIntegrationStatus).toHaveBeenCalledWith(
+      expect(markIntegrationStatus).toHaveBeenCalledWith(
         expect.objectContaining({
           integrationId: "gint_github_1",
           status: "needs_reauth",
@@ -349,7 +349,7 @@ describe("GitHub ingress", () => {
       const response = await ingress().webhook(githubRequest("pull_request", pullRequestPayload()));
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({ ok: true, buffered: 1 });
-      expect(insertGoatGitHubPullRequestEvents).toHaveBeenCalledWith(
+      expect(insertGitHubPullRequestEvents).toHaveBeenCalledWith(
         [
           expect.objectContaining({
             integrationId: "gint_github_1",
@@ -363,16 +363,16 @@ describe("GitHub ingress", () => {
         ],
         expect.objectContaining({ sentinel: "db" }),
       );
-      expect(upsertGoatBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
-      expect(captureGoatIngestionQuotaAnalytics).not.toHaveBeenCalled();
+      expect(upsertBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
+      expect(captureProductIngestionQuotaAnalytics).not.toHaveBeenCalled();
     });
 
     it("keeps issue activity on the immediate ingest path with the injected db", async () => {
       const response = await ingress().webhook(githubRequest("issues", issuePayload()));
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({ ok: true, enqueued: 1 });
-      expect(insertGoatGitHubPullRequestEvents).not.toHaveBeenCalled();
-      expect(upsertGoatBrainSourceItemAndEnqueue).toHaveBeenCalledWith(
+      expect(insertGitHubPullRequestEvents).not.toHaveBeenCalled();
+      expect(upsertBrainSourceItemAndEnqueue).toHaveBeenCalledWith(
         expect.objectContaining({
           integrationId: "gint_github_1",
           brainRefs: ["gbrain_1"],
@@ -382,7 +382,7 @@ describe("GitHub ingress", () => {
     });
 
     it("returns a retryable response when pull-request buffering fails", async () => {
-      vi.mocked(insertGoatGitHubPullRequestEvents).mockRejectedValueOnce(
+      vi.mocked(insertGitHubPullRequestEvents).mockRejectedValueOnce(
         new Error("database unavailable"),
       );
       const response = await ingress().webhook(githubRequest("pull_request", pullRequestPayload()));

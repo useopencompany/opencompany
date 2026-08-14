@@ -1,25 +1,25 @@
 import { randomUUID } from "node:crypto";
+import {
+  chatScreenshotBlobPath,
+  safeScreenshotFilename,
+} from "@opencompany/agent/chat-screenshot-storage";
+import {
+  compareChatMessageOrder,
+  type StoredChatMessage,
+  toChatUiMessage,
+} from "@opencompany/agent/chat-ui";
 import type { Actor } from "@opencompany/core";
 import {
-  type GoatChatArtifactVersion,
-  type GoatChatMessageAttachment,
-  goatChatArtifacts,
-  goatChatArtifactVersions,
-  goatChatMessages,
-  goatChatSessions,
-  goatChatShares,
-  goatCodexChatSessions,
-  goatTasks,
-} from "@opencompany/db/goat-schema";
-import {
-  goatChatScreenshotBlobPath,
-  safeScreenshotFilename,
-} from "@opencompany/goat-agent/chat-screenshot-storage";
-import {
-  compareGoatChatMessageOrder,
-  type GoatStoredChatMessage,
-  toGoatChatUiMessage,
-} from "@opencompany/goat-agent/chat-ui";
+  type ChatArtifactVersion,
+  type ChatMessageAttachment,
+  chatArtifacts,
+  chatArtifactVersions,
+  chatMessages,
+  chatSessions,
+  chatShares,
+  codexChatSessions,
+  tasks,
+} from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import {
   PublicChatMessageSchema,
@@ -113,9 +113,9 @@ export function createChatResourceService(input: {
     async findShare(actor, conversationId) {
       const sessionId = await authorizeShareableConversation(input.db, actor, conversationId);
       const [share] = await input.db
-        .select({ id: goatChatShares.id })
-        .from(goatChatShares)
-        .where(eq(goatChatShares.chatSessionId, sessionId))
+        .select({ id: chatShares.id })
+        .from(chatShares)
+        .where(eq(chatShares.chatSessionId, sessionId))
         .limit(1);
       return share?.id ?? null;
     },
@@ -123,13 +123,13 @@ export function createChatResourceService(input: {
     async ensureShare(actor, conversationId) {
       const sessionId = await authorizeShareableConversation(input.db, actor, conversationId);
       await input.db
-        .insert(goatChatShares)
+        .insert(chatShares)
         .values({ id: id(), chatSessionId: sessionId })
-        .onConflictDoNothing({ target: goatChatShares.chatSessionId });
+        .onConflictDoNothing({ target: chatShares.chatSessionId });
       const [share] = await input.db
-        .select({ id: goatChatShares.id })
-        .from(goatChatShares)
-        .where(eq(goatChatShares.chatSessionId, sessionId))
+        .select({ id: chatShares.id })
+        .from(chatShares)
+        .where(eq(chatShares.chatSessionId, sessionId))
         .limit(1);
       if (!share) throw new ApiError(500, "internal_error", "The Chat share could not be created.");
       return share.id;
@@ -137,7 +137,7 @@ export function createChatResourceService(input: {
 
     async revokeShare(actor, conversationId) {
       const sessionId = await authorizeShareableConversation(input.db, actor, conversationId);
-      await input.db.delete(goatChatShares).where(eq(goatChatShares.chatSessionId, sessionId));
+      await input.db.delete(chatShares).where(eq(chatShares.chatSessionId, sessionId));
     },
 
     async loadPublicShare(shareId) {
@@ -158,16 +158,16 @@ export function createChatResourceService(input: {
     async deleteArtifact(actor, artifactId) {
       const [artifact] = await input.db
         .select({
-          id: goatChatArtifacts.id,
-          chatSessionId: goatChatArtifacts.chatSessionId,
-          archivedAt: goatChatArtifacts.archivedAt,
+          id: chatArtifacts.id,
+          chatSessionId: chatArtifacts.chatSessionId,
+          archivedAt: chatArtifacts.archivedAt,
         })
-        .from(goatChatArtifacts)
+        .from(chatArtifacts)
         .where(
           and(
-            eq(goatChatArtifacts.id, artifactId),
-            eq(goatChatArtifacts.userWorkosId, actor.userId),
-            eq(goatChatArtifacts.workspaceId, actor.workspaceId),
+            eq(chatArtifacts.id, artifactId),
+            eq(chatArtifacts.userWorkosId, actor.userId),
+            eq(chatArtifacts.workspaceId, actor.workspaceId),
           ),
         )
         .limit(1);
@@ -176,19 +176,19 @@ export function createChatResourceService(input: {
 
       const deletedAt = now();
       await input.db
-        .update(goatChatArtifacts)
+        .update(chatArtifacts)
         .set({ archivedAt: deletedAt, updatedAt: deletedAt })
         .where(
           and(
-            eq(goatChatArtifacts.id, artifact.id),
-            eq(goatChatArtifacts.userWorkosId, actor.userId),
-            eq(goatChatArtifacts.workspaceId, actor.workspaceId),
+            eq(chatArtifacts.id, artifact.id),
+            eq(chatArtifacts.userWorkosId, actor.userId),
+            eq(chatArtifacts.workspaceId, actor.workspaceId),
           ),
         );
       const versions = await input.db
-        .select({ blobPathname: goatChatArtifactVersions.blobPathname })
-        .from(goatChatArtifactVersions)
-        .where(eq(goatChatArtifactVersions.artifactId, artifact.id));
+        .select({ blobPathname: chatArtifactVersions.blobPathname })
+        .from(chatArtifactVersions)
+        .where(eq(chatArtifactVersions.artifactId, artifact.id));
       await input.db.execute(sql`
         UPDATE goat.chat_messages AS message
         SET debug_trace = jsonb_set(
@@ -242,16 +242,16 @@ export function createChatResourceService(input: {
 
     async downloadArtifact(command) {
       const [row] = await input.db
-        .select({ version: goatChatArtifactVersions })
-        .from(goatChatArtifactVersions)
-        .innerJoin(goatChatArtifacts, eq(goatChatArtifactVersions.artifactId, goatChatArtifacts.id))
+        .select({ version: chatArtifactVersions })
+        .from(chatArtifactVersions)
+        .innerJoin(chatArtifacts, eq(chatArtifactVersions.artifactId, chatArtifacts.id))
         .where(
           and(
-            eq(goatChatArtifacts.id, command.artifactId),
-            eq(goatChatArtifactVersions.id, command.versionId),
-            eq(goatChatArtifacts.userWorkosId, command.actor.userId),
-            eq(goatChatArtifacts.workspaceId, command.actor.workspaceId),
-            isNull(goatChatArtifacts.archivedAt),
+            eq(chatArtifacts.id, command.artifactId),
+            eq(chatArtifactVersions.id, command.versionId),
+            eq(chatArtifacts.userWorkosId, command.actor.userId),
+            eq(chatArtifacts.workspaceId, command.actor.workspaceId),
+            isNull(chatArtifacts.archivedAt),
           ),
         )
         .limit(1);
@@ -261,19 +261,13 @@ export function createChatResourceService(input: {
 
     async downloadAttachment(command) {
       const [row] = await input.db
-        .select({ attachments: goatChatMessages.attachments })
-        .from(goatChatMessages)
-        .innerJoin(goatChatSessions, eq(goatChatMessages.sessionId, goatChatSessions.id))
-        .leftJoin(goatTasks, eq(goatTasks.sessionId, goatChatSessions.id))
-        .leftJoin(
-          goatCodexChatSessions,
-          eq(goatCodexChatSessions.chatSessionId, goatChatSessions.id),
-        )
+        .select({ attachments: chatMessages.attachments })
+        .from(chatMessages)
+        .innerJoin(chatSessions, eq(chatMessages.sessionId, chatSessions.id))
+        .leftJoin(tasks, eq(tasks.sessionId, chatSessions.id))
+        .leftJoin(codexChatSessions, eq(codexChatSessions.chatSessionId, chatSessions.id))
         .where(
-          and(
-            eq(goatChatMessages.id, command.messageId),
-            conversationAccessCondition(command.actor),
-          ),
+          and(eq(chatMessages.id, command.messageId), conversationAccessCondition(command.actor)),
         )
         .limit(1);
       const attachment = findAttachment(row?.attachments, command.attachmentId);
@@ -289,23 +283,20 @@ export function createChatResourceService(input: {
         throw notFound("Chat screenshot not found.");
       }
       const [session] = await input.db
-        .select({ id: goatChatSessions.id, userWorkosId: goatChatSessions.userWorkosId })
-        .from(goatChatSessions)
-        .leftJoin(goatTasks, eq(goatTasks.sessionId, goatChatSessions.id))
-        .leftJoin(
-          goatCodexChatSessions,
-          eq(goatCodexChatSessions.chatSessionId, goatChatSessions.id),
-        )
+        .select({ id: chatSessions.id, userWorkosId: chatSessions.userWorkosId })
+        .from(chatSessions)
+        .leftJoin(tasks, eq(tasks.sessionId, chatSessions.id))
+        .leftJoin(codexChatSessions, eq(codexChatSessions.chatSessionId, chatSessions.id))
         .where(
           and(
-            eq(goatChatSessions.id, command.conversationId),
+            eq(chatSessions.id, command.conversationId),
             conversationAccessCondition(command.actor),
           ),
         )
         .limit(1);
       if (!session) throw notFound("Chat screenshot not found.");
       const stream = await storage.get(
-        goatChatScreenshotBlobPath({
+        chatScreenshotBlobPath({
           userWorkosId: session.userWorkosId,
           chatSessionId: session.id,
           filename,
@@ -325,12 +316,10 @@ export function createChatResourceService(input: {
 
     async downloadPublicAttachment(command) {
       const [row] = await input.db
-        .select({ attachments: goatChatMessages.attachments })
-        .from(goatChatMessages)
-        .innerJoin(goatChatShares, eq(goatChatMessages.sessionId, goatChatShares.chatSessionId))
-        .where(
-          and(eq(goatChatShares.id, command.shareId), eq(goatChatMessages.id, command.messageId)),
-        )
+        .select({ attachments: chatMessages.attachments })
+        .from(chatMessages)
+        .innerJoin(chatShares, eq(chatMessages.sessionId, chatShares.chatSessionId))
+        .where(and(eq(chatShares.id, command.shareId), eq(chatMessages.id, command.messageId)))
         .limit(1);
       const attachment = findAttachment(row?.attachments, command.attachmentId);
       if (!attachment) throw notFound("Shared Chat attachment not found.");
@@ -339,19 +328,16 @@ export function createChatResourceService(input: {
 
     async downloadPublicArtifact(command) {
       const [row] = await input.db
-        .select({ version: goatChatArtifactVersions })
-        .from(goatChatArtifactVersions)
-        .innerJoin(goatChatArtifacts, eq(goatChatArtifactVersions.artifactId, goatChatArtifacts.id))
-        .innerJoin(
-          goatChatShares,
-          eq(goatChatArtifacts.chatSessionId, goatChatShares.chatSessionId),
-        )
+        .select({ version: chatArtifactVersions })
+        .from(chatArtifactVersions)
+        .innerJoin(chatArtifacts, eq(chatArtifactVersions.artifactId, chatArtifacts.id))
+        .innerJoin(chatShares, eq(chatArtifacts.chatSessionId, chatShares.chatSessionId))
         .where(
           and(
-            eq(goatChatShares.id, command.shareId),
-            eq(goatChatArtifacts.id, command.artifactId),
-            eq(goatChatArtifactVersions.id, command.versionId),
-            isNull(goatChatArtifacts.archivedAt),
+            eq(chatShares.id, command.shareId),
+            eq(chatArtifacts.id, command.artifactId),
+            eq(chatArtifactVersions.id, command.versionId),
+            isNull(chatArtifacts.archivedAt),
           ),
         )
         .limit(1);
@@ -367,14 +353,14 @@ async function authorizeShareableConversation(
   conversationId: string,
 ) {
   const [session] = await db
-    .select({ id: goatChatSessions.id })
-    .from(goatChatSessions)
-    .leftJoin(goatTasks, eq(goatTasks.sessionId, goatChatSessions.id))
-    .leftJoin(goatCodexChatSessions, eq(goatCodexChatSessions.chatSessionId, goatChatSessions.id))
+    .select({ id: chatSessions.id })
+    .from(chatSessions)
+    .leftJoin(tasks, eq(tasks.sessionId, chatSessions.id))
+    .leftJoin(codexChatSessions, eq(codexChatSessions.chatSessionId, chatSessions.id))
     .where(
       and(
-        eq(goatChatSessions.id, conversationId),
-        inArray(goatChatSessions.kind, SHAREABLE_SESSION_KINDS),
+        eq(chatSessions.id, conversationId),
+        inArray(chatSessions.kind, SHAREABLE_SESSION_KINDS),
         conversationAccessCondition(actor),
       ),
     )
@@ -386,16 +372,16 @@ async function authorizeShareableConversation(
 function conversationAccessCondition(actor: Actor) {
   return and(
     sql`(
-      ${goatChatSessions.userWorkosId} = ${actor.userId}
+      ${chatSessions.userWorkosId} = ${actor.userId}
       OR (
-        ${goatChatSessions.kind} = 'task'
-        AND ${goatTasks.workspaceId} = ${actor.workspaceId}
+        ${chatSessions.kind} = 'task'
+        AND ${tasks.workspaceId} = ${actor.workspaceId}
       )
     )`,
     or(
-      isNull(goatCodexChatSessions.id),
-      isNull(goatCodexChatSessions.workspaceId),
-      eq(goatCodexChatSessions.workspaceId, actor.workspaceId),
+      isNull(codexChatSessions.id),
+      isNull(codexChatSessions.workspaceId),
+      eq(codexChatSessions.workspaceId, actor.workspaceId),
     ),
   );
 }
@@ -406,54 +392,52 @@ async function findPublicShare(
 ): Promise<PublicChatShareMetadataDto & { conversationId: string }> {
   const [row] = await db
     .select({
-      shareId: goatChatShares.id,
-      conversationId: goatChatSessions.id,
+      shareId: chatShares.id,
+      conversationId: chatSessions.id,
       title: sql<string>`CASE
-        WHEN ${goatChatSessions.kind} = 'task'
-        THEN COALESCE(NULLIF(${goatTasks.name}, ''), ${goatChatSessions.title})
-        ELSE ${goatChatSessions.title}
+        WHEN ${chatSessions.kind} = 'task'
+        THEN COALESCE(NULLIF(${tasks.name}, ''), ${chatSessions.title})
+        ELSE ${chatSessions.title}
       END`,
-      kind: goatChatSessions.kind,
-      engine: goatChatSessions.engine,
+      kind: chatSessions.kind,
+      engine: chatSessions.engine,
     })
-    .from(goatChatShares)
-    .innerJoin(goatChatSessions, eq(goatChatShares.chatSessionId, goatChatSessions.id))
-    .leftJoin(goatTasks, eq(goatTasks.sessionId, goatChatSessions.id))
-    .where(
-      and(eq(goatChatShares.id, shareId), inArray(goatChatSessions.kind, SHAREABLE_SESSION_KINDS)),
-    )
+    .from(chatShares)
+    .innerJoin(chatSessions, eq(chatShares.chatSessionId, chatSessions.id))
+    .leftJoin(tasks, eq(tasks.sessionId, chatSessions.id))
+    .where(and(eq(chatShares.id, shareId), inArray(chatSessions.kind, SHAREABLE_SESSION_KINDS)))
     .limit(1);
   if (!row) throw notFound("Chat share not found.");
   return row;
 }
 
 async function listStoredMessages(db: ChatResourceDb, conversationId: string) {
-  const messages: GoatStoredChatMessage[] = await db
+  const messages: StoredChatMessage[] = await db
     .select({
-      id: goatChatMessages.id,
-      sessionId: goatChatMessages.sessionId,
-      role: goatChatMessages.role,
-      content: goatChatMessages.content,
-      taskId: goatChatMessages.taskId,
-      debugTrace: goatChatMessages.debugTrace,
-      attachments: goatChatMessages.attachments,
-      attachmentTexts: goatChatMessages.attachmentTexts,
-      createdAt: goatChatMessages.createdAt,
-      updatedAt: goatChatMessages.updatedAt,
-      taskDisplayId: goatTasks.displayId,
-      taskName: goatTasks.name,
-      taskPrompt: goatTasks.prompt,
-      taskStatus: goatTasks.status,
+      id: chatMessages.id,
+      sessionId: chatMessages.sessionId,
+      role: chatMessages.role,
+      content: chatMessages.content,
+      taskId: chatMessages.taskId,
+      debugTrace: chatMessages.debugTrace,
+      attachments: chatMessages.attachments,
+      attachmentTexts: chatMessages.attachmentTexts,
+      createdAt: chatMessages.createdAt,
+      updatedAt: chatMessages.updatedAt,
+      taskDisplayId: tasks.displayId,
+      taskName: tasks.name,
+      taskPrompt: tasks.prompt,
+      taskStatus: tasks.status,
     })
-    .from(goatChatMessages)
-    .leftJoin(goatTasks, eq(goatChatMessages.taskId, goatTasks.id))
-    .where(eq(goatChatMessages.sessionId, conversationId))
-    .orderBy(asc(goatChatMessages.createdAt));
-  return messages.toSorted(compareGoatChatMessageOrder);
+    .from(chatMessages)
+    .leftJoin(tasks, eq(chatMessages.taskId, tasks.id))
+    .where(eq(chatMessages.sessionId, conversationId))
+    .orderBy(asc(chatMessages.createdAt));
+  return messages.toSorted(compareChatMessageOrder);
 }
 
-function toPublicChatMessage(message: GoatStoredChatMessage) {
-  const uiMessage = toGoatChatUiMessage(message);
+function toPublicChatMessage(message: StoredChatMessage) {
+  const uiMessage = toChatUiMessage(message);
   if (uiMessage.metadata) {
     const metadata = { ...uiMessage.metadata };
     delete metadata.sessionId;
@@ -468,7 +452,7 @@ function toPublicChatMessage(message: GoatStoredChatMessage) {
 }
 
 function findAttachment(
-  attachments: readonly GoatChatMessageAttachment[] | null | undefined,
+  attachments: readonly ChatMessageAttachment[] | null | undefined,
   attachmentId: string,
 ) {
   return attachments?.find((attachment) => attachment.id === attachmentId) ?? null;
@@ -476,7 +460,7 @@ function findAttachment(
 
 async function artifactDownload(
   storage: ChatResourceStorage,
-  version: Pick<GoatChatArtifactVersion, "blobPathname" | "filename" | "mediaType" | "sizeBytes">,
+  version: Pick<ChatArtifactVersion, "blobPathname" | "filename" | "mediaType" | "sizeBytes">,
   download: boolean,
 ): Promise<ChatResourceDownload> {
   const stream = await storage.get(version.blobPathname);
@@ -495,7 +479,7 @@ async function artifactDownload(
 
 async function attachmentDownload(
   storage: ChatResourceStorage,
-  attachment: GoatChatMessageAttachment,
+  attachment: ChatMessageAttachment,
 ): Promise<ChatResourceDownload> {
   const stream = await storage.get(attachment.blobUrl);
   if (!stream) throw notFound("Chat attachment bytes not found.");

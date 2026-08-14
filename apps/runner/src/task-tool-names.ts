@@ -1,0 +1,54 @@
+import type { TaskToolName } from "@opencompany/db/product-schema";
+
+export const TASK_TOOL_NAMES = [
+  "exa_search",
+  "browser_open",
+  "browser_snapshot",
+  "browser_click",
+  "browser_fill",
+  "browser_wait",
+  "browser_read",
+  "browser_get",
+  "browser_find",
+  "browser_scroll",
+  "browser_screenshot",
+  "browser_close",
+  "x_search_posts",
+  "x_get_profile",
+  "x_get_user_posts",
+  "x_get_discussion",
+  "social_get_job",
+  "gmail_search",
+  "gmail_get_message",
+  "gmail_list_threads",
+  "gmail_get_thread",
+  "calendar_list_calendars",
+  "calendar_list_events",
+  "calendar_get_event",
+  "calendar_get_freebusy",
+  "linear_search_tools",
+  "linear_use_tool",
+  "latitude_search_tools",
+  "latitude_use_tool",
+  "github_clone_repository",
+  "github_shell",
+  "github_status",
+  "github_open_pull_request",
+] as const satisfies readonly TaskToolName[];
+
+const TASK_TOOL_SET = new Set<TaskToolName>(TASK_TOOL_NAMES);
+
+export function normalizeTaskToolNames(value: unknown): TaskToolName[] {
+  const selected = new Set<TaskToolName>();
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (typeof item === "string" && TASK_TOOL_SET.has(item as TaskToolName)) {
+        selected.add(item as TaskToolName);
+      }
+    }
+  }
+  if (selected.size === 0) {
+    selected.add("exa_search");
+  }
+  return TASK_TOOL_NAMES.filter((name) => selected.has(name));
+}

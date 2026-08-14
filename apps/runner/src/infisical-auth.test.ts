@@ -1,7 +1,4 @@
-import {
-  GOAT_INFISICAL_EU_HOST,
-  GOAT_INFISICAL_US_HOST,
-} from "@opencompany/db/goat-infisical-auth";
+import { INFISICAL_EU_HOST, INFISICAL_US_HOST } from "@opencompany/db/infisical-auth";
 import { describe, expect, it, vi } from "vitest";
 import {
   decodeInfisicalBrowserToken,
@@ -36,47 +33,44 @@ describe("Infisical CLI browser login", () => {
     expect(
       parseInfisicalLoginUrl(
         "To complete your login, open this address in your browser: https://app.infisical.com/login?callback_port=43123",
-        GOAT_INFISICAL_US_HOST,
+        INFISICAL_US_HOST,
       ),
     ).toBe("https://app.infisical.com/login?callback_port=43123");
     expect(
       parseInfisicalLoginUrl(
         "To complete your login, open this address in your browser: https://app.infisical\n.com/login?callback_port=43123",
-        GOAT_INFISICAL_US_HOST,
+        INFISICAL_US_HOST,
       ),
     ).toBe("https://app.infisical.com/login?callback_port=43123");
     expect(
       parseInfisicalLoginUrl(
         "https://eu.infisical.com/login?callback_port=43123",
-        GOAT_INFISICAL_EU_HOST,
+        INFISICAL_EU_HOST,
       ),
     ).toBe("https://eu.infisical.com/login?callback_port=43123");
     expect(
       parseInfisicalLoginUrl(
         "https://eu.infisical.com/login?callback_port=43123",
-        GOAT_INFISICAL_US_HOST,
+        INFISICAL_US_HOST,
       ),
     ).toBeNull();
     expect(
-      parseInfisicalLoginUrl(
-        "https://evil.example/login?callback_port=43123",
-        GOAT_INFISICAL_US_HOST,
-      ),
+      parseInfisicalLoginUrl("https://evil.example/login?callback_port=43123", INFISICAL_US_HOST),
     ).toBeNull();
     expect(
       parseInfisicalLoginUrl(
         "https://app.infisical.com/login?callback_port=99999",
-        GOAT_INFISICAL_US_HOST,
+        INFISICAL_US_HOST,
       ),
     ).toBeNull();
   });
 
   it("recovers only an allowlisted region from a persisted login URL", () => {
     expect(infisicalHostFromLoginUrl("https://eu.infisical.com/login?callback_port=43123")).toBe(
-      GOAT_INFISICAL_EU_HOST,
+      INFISICAL_EU_HOST,
     );
     expect(infisicalHostFromLoginUrl("https://app.infisical.com/login?callback_port=43123")).toBe(
-      GOAT_INFISICAL_US_HOST,
+      INFISICAL_US_HOST,
     );
     expect(infisicalHostFromLoginUrl("https://evil.example/login?callback_port=43123")).toBeNull();
     expect(infisicalHostFromLoginUrl("https://eu.infisical.com/dashboard")).toBeNull();

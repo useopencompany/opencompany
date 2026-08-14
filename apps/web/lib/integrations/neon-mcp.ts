@@ -1,3 +1,3 @@
 import "server-only";
 
-export * from "@opencompany/goat-agent/integrations/neon-mcp";
+export * from "@opencompany/agent/integrations/neon-mcp";

@@ -2,7 +2,7 @@
 
 import {
   type CreateMessageBody,
-  createOpenCompanyClient,
+  createApiClient,
   type MessageEngine,
   MessageEngineSchema,
   PROTOCOL_VERSION,
@@ -116,7 +116,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
           }
         : {}),
     };
-    const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.apiFetchImpl });
+    const client = createApiClient(this.baseUrl(), { fetch: this.apiFetchImpl });
     const response = await client.v1.messages.$post(
       {
         header: {
@@ -156,7 +156,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
   async reconnectToStream(input: Parameters<ChatTransport<UI_MESSAGE>["reconnectToStream"]>[0]) {
     const state = readRunState(input.chatId);
     if (!state || isTerminal(state.status) || state.status === "paused") return null;
-    const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.apiFetchImpl });
+    const client = createApiClient(this.baseUrl(), { fetch: this.apiFetchImpl });
     const response = await client.v1.runs[":runId"].$get({ param: { runId: state.runId } });
     if (!response.ok) return null;
     const run = (await response.json()).data;
@@ -169,7 +169,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
   async cancel(chatId: string) {
     const state = readRunState(chatId);
     if (!state || isTerminal(state.status)) return false;
-    const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.apiFetchImpl });
+    const client = createApiClient(this.baseUrl(), { fetch: this.apiFetchImpl });
     const response = await client.v1.runs[":runId"].cancel.$post({
       param: { runId: state.runId },
     });
@@ -183,7 +183,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
     let state = readRunState(input.chatId);
     if (input.runId && state?.runId !== input.runId) state = null;
     if (!state && input.runId && input.assistantMessageId) {
-      const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.apiFetchImpl });
+      const client = createApiClient(this.baseUrl(), { fetch: this.apiFetchImpl });
       const response = await client.v1.runs[":runId"].$get({
         param: { runId: input.runId },
       });
@@ -199,7 +199,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
       writeRunStateAliases(input.chatId, state);
     }
     if (!state) throw new Error("The durable Run for this approval is no longer available.");
-    const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.apiFetchImpl });
+    const client = createApiClient(this.baseUrl(), { fetch: this.apiFetchImpl });
     const response = await client.v1.runs[":runId"].approvals[":approvalId"].$post(
       {
         param: { runId: state.runId, approvalId: input.approvalId },
@@ -312,7 +312,7 @@ export async function startHeadlessBackgroundChat(
   const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
   const fetchImpl = bindFetchToRuntime(options.fetch);
   const apiFetchImpl = createHeadlessChatApiFetch({ baseUrl, fetch: fetchImpl });
-  const client = createOpenCompanyClient(baseUrl, { fetch: apiFetchImpl });
+  const client = createApiClient(baseUrl, { fetch: apiFetchImpl });
   const response = await client.v1.messages.$post({
     header: {
       "idempotency-key": idempotencyKey(input.clientMessageId),

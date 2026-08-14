@@ -1,11 +1,11 @@
 import { createMCPClient } from "@ai-sdk/mcp";
 import {
-  getGoatPostHogIntegrationState,
-  loadGoatPostHogMcpWorkerConnection,
-} from "@opencompany/goat-agent/integrations/posthog-mcp";
+  getPostHogIntegrationState,
+  loadPostHogMcpWorkerConnection,
+} from "@opencompany/agent/integrations/posthog-mcp";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolvePostHogActions } from "@/lib/actions/posthog";
-import { GoatActionInvalidParamsError, GoatActionPermissionError } from "@/lib/actions/types";
+import { ActionInvalidParamsError, ActionPermissionError } from "@/lib/actions/types";
 
 const clientMocks = vi.hoisted(() => ({
   listTools: vi.fn(),
@@ -19,11 +19,11 @@ vi.mock("@ai-sdk/mcp", () => ({
   createMCPClient: vi.fn(async () => clientMocks),
 }));
 
-vi.mock("@opencompany/goat-agent/integrations/posthog-mcp", () => ({
-  GOAT_POSTHOG_MCP_ENDPOINT_URL:
+vi.mock("@opencompany/agent/integrations/posthog-mcp", () => ({
+  POSTHOG_MCP_ENDPOINT_URL:
     "https://mcp.posthog.com/mcp?mode=tools&tools=dashboards-get-all,insight-create",
-  getGoatPostHogIntegrationState: vi.fn(),
-  loadGoatPostHogMcpWorkerConnection: vi.fn(),
+  getPostHogIntegrationState: vi.fn(),
+  loadPostHogMcpWorkerConnection: vi.fn(),
 }));
 
 const definitions = {
@@ -54,7 +54,7 @@ const definitions = {
     },
     {
       name: "agent-feedback",
-      description: "Always exposed by PostHog but outside Goat's focused catalog.",
+      description: "Always exposed by PostHog but outside opencompany's focused catalog.",
       inputSchema: { type: "object", properties: {} },
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
@@ -64,7 +64,7 @@ const definitions = {
 describe("PostHog actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getGoatPostHogIntegrationState).mockResolvedValue({
+    vi.mocked(getPostHogIntegrationState).mockResolvedValue({
       provider: "posthog",
       connected: true,
       status: "connected",
@@ -73,7 +73,7 @@ describe("PostHog actions", () => {
       statusReason: null,
       capabilityModes: {},
     });
-    vi.mocked(loadGoatPostHogMcpWorkerConnection).mockResolvedValue({
+    vi.mocked(loadPostHogMcpWorkerConnection).mockResolvedValue({
       ok: true,
       integrationId: "gint_posthog",
       authProvider: {} as never,
@@ -165,7 +165,7 @@ describe("PostHog actions", () => {
           userTimezone: "UTC",
         },
       ),
-    ).rejects.toBeInstanceOf(GoatActionInvalidParamsError);
+    ).rejects.toBeInstanceOf(ActionInvalidParamsError);
     expect(clientMocks.executeWrite).not.toHaveBeenCalled();
   });
 
@@ -193,14 +193,14 @@ describe("PostHog actions", () => {
           userTimezone: "UTC",
         },
       ),
-    ).rejects.toBeInstanceOf(GoatActionPermissionError);
+    ).rejects.toBeInstanceOf(ActionPermissionError);
     expect(clientMocks.executeRead).not.toHaveBeenCalled();
   });
 
   it("rechecks capability modes immediately before execution", async () => {
     const catalog = await resolvePostHogActions("user_1");
     const action = catalog?.actions.find((candidate) => candidate.id === "posthog.insight-create");
-    vi.mocked(getGoatPostHogIntegrationState).mockResolvedValueOnce({
+    vi.mocked(getPostHogIntegrationState).mockResolvedValueOnce({
       provider: "posthog",
       connected: true,
       status: "connected",
@@ -220,7 +220,7 @@ describe("PostHog actions", () => {
           userTimezone: "UTC",
         },
       ),
-    ).rejects.toBeInstanceOf(GoatActionPermissionError);
+    ).rejects.toBeInstanceOf(ActionPermissionError);
     expect(clientMocks.executeWrite).not.toHaveBeenCalled();
   });
 });

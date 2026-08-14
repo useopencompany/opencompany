@@ -1,6 +1,6 @@
 // Called by: apps/web package scripts for dev, build, and start.
 // Purpose: runs Next.js from the web app directory with repo-root env loading and
-// the existing Goat-prefixed WorkOS compatibility variables.
+// the existing opencompany-prefixed WorkOS compatibility variables.
 
 import "./load-env.mjs";
 import { spawnSync } from "node:child_process";

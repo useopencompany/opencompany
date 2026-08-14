@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
-export type GoatManagedCapabilitySource =
+export type ManagedCapabilitySource =
   | "x"
   | "linkedin"
   | "youtube"
@@ -12,13 +12,13 @@ export type GoatManagedCapabilitySource =
   | "lead"
   | "seo";
 
-export type GoatWorkspaceCapabilityState = {
-  source: GoatManagedCapabilitySource;
+export type WorkspaceCapabilityState = {
+  source: ManagedCapabilitySource;
   enabled: boolean;
 };
 
 export async function getWorkspaceCapabilitySettingsAction(): Promise<{
-  capabilities: GoatWorkspaceCapabilityState[];
+  capabilities: WorkspaceCapabilityState[];
   sessionBudgetUsdMicros: number;
 }> {
   const response = await (await serverApiClient()).v1.capabilities.$get();
@@ -27,7 +27,7 @@ export async function getWorkspaceCapabilitySettingsAction(): Promise<{
 }
 
 export async function setWorkspaceCapabilityAction(input: {
-  source: GoatManagedCapabilitySource;
+  source: ManagedCapabilitySource;
   enabled: boolean;
 }) {
   if (!input || typeof input.enabled !== "boolean" || !isManagedCapabilitySource(input.source)) {
@@ -93,8 +93,8 @@ export async function setWorkspaceCapabilitySessionBudgetAction(input: {
   }
 }
 
-function isManagedCapabilitySource(value: unknown): value is GoatManagedCapabilitySource {
+function isManagedCapabilitySource(value: unknown): value is ManagedCapabilitySource {
   return ["x", "linkedin", "youtube", "instagram", "tiktok", "lead", "seo"].includes(
-    value as GoatManagedCapabilitySource,
+    value as ManagedCapabilitySource,
   );
 }

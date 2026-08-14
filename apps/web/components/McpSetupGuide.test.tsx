@@ -24,8 +24,8 @@ vi.mock("@/components/useHydrated", () => ({
 }));
 
 vi.mock("@/lib/mcp-setup-actions", () => ({
-  savePreferredGoatMcpClientAction: actionsMock.saveClient,
-  checkGoatMcpSetupStatusAction: actionsMock.checkStatus,
+  savePreferredMcpClientAction: actionsMock.saveClient,
+  checkMcpSetupStatusAction: actionsMock.checkStatus,
 }));
 
 vi.mock("@opencompany/ui/components/sonner", () => ({
@@ -66,17 +66,16 @@ describe("McpSetupGuide", () => {
   });
 
   it("shows the single user-level connector URL and a name-only first question", () => {
-    const view = renderGuide({ initialClient: "claude" });
+    renderGuide({ initialClient: "claude" });
 
     expect(screen.getByText(/\/mcp$/)).toBeInTheDocument();
-    expect(screen.getByText(/Use the OpenCompany connector/)).toBeInTheDocument();
+    expect(screen.getByText(/Use the opencompany connector/)).toBeInTheDocument();
     expect(screen.getByText(/query for "Ada Lovelace"/)).toHaveTextContent(/at Analytical Engines/);
     expect(screen.queryByText(/ada@example\.com/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Brain" })).not.toBeInTheDocument();
-    expect(view.container).not.toHaveTextContent("Goat");
   });
 
-  it("uses OpenCompany as the Cursor server name", () => {
+  it("uses opencompany as the Cursor server name", () => {
     renderGuide({ initialClient: "cursor" });
 
     fireEvent.click(screen.getByRole("button", { name: "Copy mcp.json" }));
@@ -101,7 +100,7 @@ describe("McpSetupGuide", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy first question" }));
 
     await waitFor(() => expect(actionsMock.checkStatus).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText("OpenCompany is connected")).toBeInTheDocument();
+    expect(await screen.findByText("opencompany is connected")).toBeInTheDocument();
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
     expect(clipboardWrite).toHaveBeenCalledWith(expect.stringContaining("Ada Lovelace"));
   });

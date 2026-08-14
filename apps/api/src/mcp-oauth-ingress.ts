@@ -1,28 +1,28 @@
-import { getGoatAppUrl } from "@opencompany/goat-agent/app-url";
+import { getAppUrl } from "@opencompany/agent/app-url";
 import {
-  appendGoatLatitudeMcpStatus,
-  completeGoatLatitudeMcpOAuth,
-  startGoatLatitudeMcpOAuth,
-  verifyGoatLatitudeMcpState,
-} from "@opencompany/goat-agent/integrations/latitude-mcp";
+  appendLatitudeMcpStatus,
+  completeLatitudeMcpOAuth,
+  startLatitudeMcpOAuth,
+  verifyLatitudeMcpState,
+} from "@opencompany/agent/integrations/latitude-mcp";
 import {
-  appendGoatLinearMcpStatus,
-  completeGoatLinearMcpOAuth,
-  startGoatLinearMcpOAuth,
-  verifyGoatLinearMcpState,
-} from "@opencompany/goat-agent/integrations/linear-mcp";
+  appendLinearMcpStatus,
+  completeLinearMcpOAuth,
+  startLinearMcpOAuth,
+  verifyLinearMcpState,
+} from "@opencompany/agent/integrations/linear-mcp";
 import {
-  appendGoatNeonMcpStatus,
-  completeGoatNeonMcpOAuth,
-  startGoatNeonMcpOAuth,
-  verifyGoatNeonMcpState,
-} from "@opencompany/goat-agent/integrations/neon-mcp";
+  appendNeonMcpStatus,
+  completeNeonMcpOAuth,
+  startNeonMcpOAuth,
+  verifyNeonMcpState,
+} from "@opencompany/agent/integrations/neon-mcp";
 import {
-  appendGoatPostHogMcpStatus,
-  completeGoatPostHogMcpOAuth,
-  startGoatPostHogMcpOAuth,
-  verifyGoatPostHogMcpState,
-} from "@opencompany/goat-agent/integrations/posthog-mcp";
+  appendPostHogMcpStatus,
+  completePostHogMcpOAuth,
+  startPostHogMcpOAuth,
+  verifyPostHogMcpState,
+} from "@opencompany/agent/integrations/posthog-mcp";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
 import { type IngressSession, resolveIngressSession, sessionRedirect } from "./ingress-session";
@@ -34,7 +34,7 @@ type DbLike = any;
 export type McpOAuthProvider = "linear" | "posthog" | "neon" | "latitude";
 
 // Provider ingress composition for the four remote-MCP connectors. Each
-// provider shares the createGoatRemoteMcpIntegration factory; this module
+// provider shares the createRemoteMcpIntegration factory; this module
 // owns only the browser-facing OAuth start/callback flows — the runner keeps
 // loading worker connections through the module-level defaults.
 export type McpOAuthIngressService = {
@@ -43,10 +43,10 @@ export type McpOAuthIngressService = {
 };
 
 type McpProviderFlow = {
-  start: typeof startGoatLinearMcpOAuth;
-  complete: typeof completeGoatLinearMcpOAuth;
-  verifyState: typeof verifyGoatLinearMcpState;
-  appendStatus: typeof appendGoatLinearMcpStatus;
+  start: typeof startLinearMcpOAuth;
+  complete: typeof completeLinearMcpOAuth;
+  verifyState: typeof verifyLinearMcpState;
+  appendStatus: typeof appendLinearMcpStatus;
   deniedReason: string;
   // The retired web routes hard-coded the invalid-state redirect before the
   // state's returnTo was trusted; Linear predates the /settings/integrations
@@ -56,34 +56,34 @@ type McpProviderFlow = {
 
 const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
   linear: {
-    start: startGoatLinearMcpOAuth,
-    complete: completeGoatLinearMcpOAuth,
-    verifyState: verifyGoatLinearMcpState,
-    appendStatus: appendGoatLinearMcpStatus,
+    start: startLinearMcpOAuth,
+    complete: completeLinearMcpOAuth,
+    verifyState: verifyLinearMcpState,
+    appendStatus: appendLinearMcpStatus,
     deniedReason: "linear_denied",
     invalidStatePath: "/settings?integration=linear&setup=error&reason=invalid_state",
   },
   posthog: {
-    start: startGoatPostHogMcpOAuth,
-    complete: completeGoatPostHogMcpOAuth,
-    verifyState: verifyGoatPostHogMcpState,
-    appendStatus: appendGoatPostHogMcpStatus,
+    start: startPostHogMcpOAuth,
+    complete: completePostHogMcpOAuth,
+    verifyState: verifyPostHogMcpState,
+    appendStatus: appendPostHogMcpStatus,
     deniedReason: "posthog_denied",
     invalidStatePath: "/settings/integrations?integration=posthog&setup=error&reason=invalid_state",
   },
   neon: {
-    start: startGoatNeonMcpOAuth,
-    complete: completeGoatNeonMcpOAuth,
-    verifyState: verifyGoatNeonMcpState,
-    appendStatus: appendGoatNeonMcpStatus,
+    start: startNeonMcpOAuth,
+    complete: completeNeonMcpOAuth,
+    verifyState: verifyNeonMcpState,
+    appendStatus: appendNeonMcpStatus,
     deniedReason: "neon_denied",
     invalidStatePath: "/settings/integrations?integration=neon&setup=error&reason=invalid_state",
   },
   latitude: {
-    start: startGoatLatitudeMcpOAuth,
-    complete: completeGoatLatitudeMcpOAuth,
-    verifyState: verifyGoatLatitudeMcpState,
-    appendStatus: appendGoatLatitudeMcpStatus,
+    start: startLatitudeMcpOAuth,
+    complete: completeLatitudeMcpOAuth,
+    verifyState: verifyLatitudeMcpState,
+    appendStatus: appendLatitudeMcpStatus,
     deniedReason: "latitude_denied",
     invalidStatePath:
       "/settings/integrations?integration=latitude&setup=error&reason=invalid_state",
@@ -148,7 +148,7 @@ async function handleCallback(
   try {
     state = flow.verifyState(stateValue);
   } catch {
-    return sessionRedirect(session, new URL(flow.invalidStatePath, getGoatAppUrl()));
+    return sessionRedirect(session, new URL(flow.invalidStatePath, getAppUrl()));
   }
 
   if (state.userWorkosId !== session.userId) {
@@ -190,6 +190,6 @@ function statusRedirect(
 ) {
   return sessionRedirect(
     session,
-    new URL(flow.appendStatus(returnTo, status, reason), getGoatAppUrl()),
+    new URL(flow.appendStatus(returnTo, status, reason), getAppUrl()),
   );
 }

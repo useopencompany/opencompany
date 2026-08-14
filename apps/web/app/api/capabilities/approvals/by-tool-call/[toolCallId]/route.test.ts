@@ -33,7 +33,7 @@ describe("capability approval by tool call URL adapter", () => {
   });
 
   it("forwards the tool-call id and preserves the browser-polled body", async () => {
-    const response = await GET(new Request("https://goat.test"), {
+    const response = await GET(new Request("https://opencompany.test"), {
       params: Promise.resolve({ toolCallId: "tool_1" }),
     });
     expect(response.status).toBe(200);

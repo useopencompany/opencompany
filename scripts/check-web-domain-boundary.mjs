@@ -15,7 +15,7 @@ const importPatterns = {
 };
 const forbiddenPatterns = {
   brainWorkerControl:
-    /\btriggerGoat(?:BrainIngestWake|BrainImportWake|GoogleDriveSyncWake)\b|\/internal\/goat\/(?:brain-ingest\/wake|brain-import\/wake|google-drive\/sync)/u,
+    /\btrigger(?:BrainIngestWake|BrainImportWake|GoogleDriveSyncWake)\b|\/internal\/goat\/(?:brain-ingest\/wake|brain-import\/wake|google-drive\/sync)/u,
 };
 
 const sourceFiles = await listSourceFiles(webRoot);

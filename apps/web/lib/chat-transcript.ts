@@ -1,8 +1,8 @@
-import type { GoatChatUiMessage } from "@/lib/chat-ui";
+import type { ChatUiMessage } from "@/lib/chat-ui";
 
 type ComposeChatTranscriptInput = {
-  persistedMessages: readonly GoatChatUiMessage[];
-  transientMessages: readonly GoatChatUiMessage[];
+  persistedMessages: readonly ChatUiMessage[];
+  transientMessages: readonly ChatUiMessage[];
   streaming: boolean;
 };
 
@@ -17,7 +17,7 @@ export function composeChatTranscript({
   persistedMessages,
   transientMessages,
   streaming,
-}: ComposeChatTranscriptInput): GoatChatUiMessage[] {
+}: ComposeChatTranscriptInput): ChatUiMessage[] {
   if (persistedMessages.length === 0) return [...transientMessages];
 
   const persistedIds = new Set(persistedMessages.map((message) => message.id));
@@ -41,9 +41,9 @@ export function composeChatTranscript({
 }
 
 function augmentPersistedMessage(
-  persisted: GoatChatUiMessage,
-  transient: GoatChatUiMessage,
-): GoatChatUiMessage {
+  persisted: ChatUiMessage,
+  transient: ChatUiMessage,
+): ChatUiMessage {
   const persistedText = textFromParts(persisted.parts);
   const transientText = textFromParts(transient.parts);
   const canAppendText = transientText.startsWith(persistedText);
@@ -51,7 +51,7 @@ function augmentPersistedMessage(
   const persistedToolCallIds = new Set(
     persisted.parts.map(toolCallId).filter((id): id is string => Boolean(id)),
   );
-  const additions: GoatChatUiMessage["parts"] = [];
+  const additions: ChatUiMessage["parts"] = [];
 
   for (const part of transient.parts) {
     if (part.type === "text") {
@@ -79,7 +79,7 @@ function augmentPersistedMessage(
   };
 }
 
-function textFromParts(parts: GoatChatUiMessage["parts"]) {
+function textFromParts(parts: ChatUiMessage["parts"]) {
   return parts
     .filter((part): part is Extract<(typeof parts)[number], { type: "text" }> =>
       Boolean(part && part.type === "text"),
@@ -88,6 +88,6 @@ function textFromParts(parts: GoatChatUiMessage["parts"]) {
     .join("");
 }
 
-function toolCallId(part: GoatChatUiMessage["parts"][number]) {
+function toolCallId(part: ChatUiMessage["parts"][number]) {
   return "toolCallId" in part && typeof part.toolCallId === "string" ? part.toolCallId : null;
 }

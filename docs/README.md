@@ -2,7 +2,7 @@
 
 Start with:
 
-- [OpenCompany system map](../apps/web/docs/README.md) — current web, API, runner, Chat, Task,
+- [opencompany system map](../apps/web/docs/README.md) — current web, API, runner, Chat, Task,
   Workflow, Brain, and coding paths.
 - [Getting started](./getting-started.md) — local prerequisites, branch-isolated setup, and development.
 - [Architecture](./architecture.md) — application, runner, database, and integration boundaries.

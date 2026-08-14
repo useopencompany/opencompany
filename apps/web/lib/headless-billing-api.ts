@@ -1,6 +1,6 @@
 "use client";
 
-import { type BillingBalanceDto, createOpenCompanyClient } from "@opencompany/protocol";
+import { type BillingBalanceDto, createApiClient } from "@opencompany/protocol";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 
 type ClientOptions = {
@@ -12,7 +12,7 @@ export async function getHeadlessBillingBalance(
   options: ClientOptions = {},
 ): Promise<BillingBalanceDto> {
   const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
-  const client = createOpenCompanyClient(baseUrl, {
+  const client = createApiClient(baseUrl, {
     fetch: createHeadlessChatApiFetch({
       baseUrl,
       ...(options.fetch ? { fetch: options.fetch } : {}),

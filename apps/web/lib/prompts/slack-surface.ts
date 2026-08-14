@@ -1,2 +1,2 @@
-// Re-export shim: source moved to @opencompany/goat-agent (shared with the runner).
-export * from "@opencompany/goat-agent/prompts/slack-surface";
+// Re-export shim: source moved to @opencompany/agent (shared with the runner).
+export * from "@opencompany/agent/prompts/slack-surface";

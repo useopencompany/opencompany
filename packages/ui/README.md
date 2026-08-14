@@ -1,9 +1,9 @@
 # @opencompany/ui
 
-The OpenCompany design system — a shadcn-style component library built on
+The opencompany design system — a shadcn-style component library built on
 [Base UI](https://base-ui.com) and Tailwind CSS v4. Components are owned source
 (not a black-box dependency), styled with design tokens that follow shadcn naming
-but carry the OpenCompany palette.
+but carry the opencompany palette.
 
 ## Usage
 
@@ -39,16 +39,16 @@ const nextConfig = { transpilePackages: ["@opencompany/ui"] };
 | --- | --- |
 | `src/components/*` | One file per component (Base UI based). |
 | `src/lib/utils.ts` | `cn()` class-merge helper. |
-| `src/icons/*` | Icons (`@opencompany/ui/icons`): Lucide re-export + project-owned brand/provider logos (`OpenCompanyMark`, `OpenAIIcon`, `AnthropicIcon`, …). |
+| `src/icons/*` | Icons (`@opencompany/ui/icons`): Lucide re-export + project-owned brand/provider logos (`BrandMark`, `OpenAIIcon`, `AnthropicIcon`, …). |
 | `src/styles/globals.css` | Tailwind import, design tokens, base layer. |
 
 ## Theming
 
 Tokens are defined in `src/styles/globals.css` using shadcn names
 (`background`, `foreground`, `primary`, `muted`, `accent`, `destructive`, …) plus
-OpenCompany semantics (`success`, `warning`, `info`, `brand`, `sidebar`, …). Dark
+opencompany semantics (`success`, `warning`, `info`, `brand`, `sidebar`, …). Dark
 mode is driven by `data-theme="dark"` with a `prefers-color-scheme` fallback —
-the same convention used in Goat.
+the same convention used in opencompany.
 
 ## Adding components
 

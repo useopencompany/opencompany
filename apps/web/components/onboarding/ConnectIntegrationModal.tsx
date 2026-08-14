@@ -12,8 +12,8 @@ import { AttioIntegrationSetup } from "@/components/AttioIntegrationSetup";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
 import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
-import type { GoatBrainSourcesDetails } from "@/lib/brain-source-actions";
-import type { GoatBrainSourceProviderDef } from "@/lib/brain-sources/registry";
+import type { BrainSourcesDetails } from "@/lib/brain-source-actions";
+import type { BrainSourceProviderDef } from "@/lib/brain-sources/registry";
 
 // In-wizard connect surface for the non-OAuth providers (api_key + webhook).
 // OAuth providers still route through the popup + /onboarding/connected bridge;
@@ -24,10 +24,10 @@ export function ConnectIntegrationModal({
   onClose,
   onConnected,
 }: {
-  provider: GoatBrainSourceProviderDef;
-  details: GoatBrainSourcesDetails | null;
+  provider: BrainSourceProviderDef;
+  details: BrainSourcesDetails | null;
   onClose: () => void;
-  onConnected: (providerId: GoatBrainSourceProviderDef["id"]) => void;
+  onConnected: (providerId: BrainSourceProviderDef["id"]) => void;
 }) {
   const Icon = provider.icon;
   const handleConnected = () => onConnected(provider.id);
@@ -81,8 +81,8 @@ function ConnectIntegrationForm({
   details,
   onConnected,
 }: {
-  provider: GoatBrainSourceProviderDef;
-  details: GoatBrainSourcesDetails | null;
+  provider: BrainSourceProviderDef;
+  details: BrainSourcesDetails | null;
   onConnected: () => void;
 }) {
   // Fresh brains open the modal before the first sources fetch resolves; show a

@@ -1,16 +1,16 @@
-import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
-import { syncGoatStripeSeatQuantityForWorkspace } from "@opencompany/billing/seats";
-import { type GoatUser, goatUsers } from "@opencompany/db/goat-schema";
+import { ensureWorkspaceOrganizationsForEntries } from "@opencompany/agent/workspaces/organizations";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
+import { syncStripeSeatQuantityForWorkspace } from "@opencompany/billing/seats";
+import { type User, users } from "@opencompany/db/product-schema";
 import {
-  adoptGoatWorkspaceMembershipsFromOrgs,
-  DEFAULT_GOAT_BRAIN_SLUG,
-  listAccessibleGoatBrains,
-  listGoatWorkspacesForUser,
-} from "@opencompany/db/goat-workspaces";
-import { ensureGoatWorkspaceOrganizationsForEntries } from "@opencompany/goat-agent/workspaces/organizations";
-import { recordGoatSignup } from "@opencompany/goat-observability";
+  adoptWorkspaceMembershipsFromOrgs,
+  DEFAULT_BRAIN_SLUG,
+  listAccessibleBrains,
+  listWorkspacesForUser,
+} from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
 import type { IdentityDto } from "@opencompany/protocol";
+import { recordSignup } from "@opencompany/telemetry";
 import type { WorkOS, User as WorkOSUser } from "@workos-inc/node";
 import { eq } from "drizzle-orm";
 import type Stripe from "stripe";
@@ -32,7 +32,7 @@ export function createIdentityService(input: {
 }): IdentityService {
   const { db, workos } = input;
 
-  async function syncUser(authUser: WorkOSUser): Promise<GoatUser> {
+  async function syncUser(authUser: WorkOSUser): Promise<User> {
     const now = new Date();
     const values = {
       workosUserId: authUser.id,
@@ -43,13 +43,13 @@ export function createIdentityService(input: {
       updatedAt: now,
     };
     const [insertedUser] = await db
-      .insert(goatUsers)
+      .insert(users)
       .values(values)
-      .onConflictDoNothing({ target: goatUsers.workosUserId })
+      .onConflictDoNothing({ target: users.workosUserId })
       .returning();
     if (insertedUser) {
-      recordGoatSignup({ source: "user_sync" });
-      await captureGoatServerEvent(
+      recordSignup({ source: "user_sync" });
+      await captureProductServerEvent(
         "signup_completed",
         insertedUser.workosUserId,
         { source: "user_sync" },
@@ -62,7 +62,7 @@ export function createIdentityService(input: {
       return insertedUser;
     }
     const [updatedUser] = await db
-      .update(goatUsers)
+      .update(users)
       .set({
         email: values.email,
         firstName: values.firstName,
@@ -70,9 +70,9 @@ export function createIdentityService(input: {
         avatarUrl: values.avatarUrl,
         updatedAt: values.updatedAt,
       })
-      .where(eq(goatUsers.workosUserId, authUser.id))
+      .where(eq(users.workosUserId, authUser.id))
       .returning();
-    if (!updatedUser) throw new Error("Unable to sync the OpenCompany user.");
+    if (!updatedUser) throw new Error("Unable to sync the opencompany user.");
     return updatedUser;
   }
 
@@ -82,7 +82,7 @@ export function createIdentityService(input: {
         userId,
         statuses: ["active"],
       });
-      const adopted = await adoptGoatWorkspaceMembershipsFromOrgs(
+      const adopted = await adoptWorkspaceMembershipsFromOrgs(
         {
           userWorkosId: userId,
           memberships: memberships.data.map((membership) => ({
@@ -93,10 +93,10 @@ export function createIdentityService(input: {
         { db },
       );
       if (adopted === 0) return;
-      const workspaces = await listGoatWorkspacesForUser(userId, { db });
+      const workspaces = await listWorkspacesForUser(userId, { db });
       await Promise.all(
         workspaces.map((entry) =>
-          syncGoatStripeSeatQuantityForWorkspace(entry.workspace.id, {
+          syncStripeSeatQuantityForWorkspace(entry.workspace.id, {
             db,
             ...(input.stripe ? { stripe: input.stripe } : {}),
           }).catch((error) => {
@@ -119,13 +119,13 @@ export function createIdentityService(input: {
     }
   }
 
-  async function resolve(identity: ApiIdentity, user: GoatUser): Promise<IdentityDto> {
-    let accessibleWorkspaces = await listGoatWorkspacesForUser(identity.userId, { db });
+  async function resolve(identity: ApiIdentity, user: User): Promise<IdentityDto> {
+    let accessibleWorkspaces = await listWorkspacesForUser(identity.userId, { db });
     if (accessibleWorkspaces.length === 0 && identity.organizationId) {
       await adoptMemberships(identity.userId);
-      accessibleWorkspaces = await listGoatWorkspacesForUser(identity.userId, { db });
+      accessibleWorkspaces = await listWorkspacesForUser(identity.userId, { db });
     }
-    const workspaces = await ensureGoatWorkspaceOrganizationsForEntries(accessibleWorkspaces, {
+    const workspaces = await ensureWorkspaceOrganizationsForEntries(accessibleWorkspaces, {
       workos,
       db,
     });
@@ -140,14 +140,14 @@ export function createIdentityService(input: {
         first)
       : null;
     const brains = active
-      ? await listAccessibleGoatBrains(
+      ? await listAccessibleBrains(
           { userWorkosId: identity.userId, workspaceId: active.workspace.id },
           { db },
         )
       : [];
     const activeBrain =
       brains.find((brain) => brain.id === identity.activeBrainId) ??
-      brains.find((brain) => brain.slug === DEFAULT_GOAT_BRAIN_SLUG) ??
+      brains.find((brain) => brain.slug === DEFAULT_BRAIN_SLUG) ??
       brains[0] ??
       null;
 
@@ -195,8 +195,8 @@ export function createIdentityService(input: {
   async function localUser(identity: ApiIdentity) {
     const [existing] = await db
       .select()
-      .from(goatUsers)
-      .where(eq(goatUsers.workosUserId, identity.userId))
+      .from(users)
+      .where(eq(users.workosUserId, identity.userId))
       .limit(1);
     return existing ?? syncUser(await workos.userManagement.getUser(identity.userId));
   }

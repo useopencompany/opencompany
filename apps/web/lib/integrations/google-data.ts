@@ -1,1 +1,1 @@
-export * from "@opencompany/goat-agent/integrations/google-data";
+export * from "@opencompany/agent/integrations/google-data";

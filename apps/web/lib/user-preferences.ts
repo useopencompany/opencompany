@@ -5,30 +5,30 @@ import { serverApiClient, serverApiError } from "@/lib/server-api-client";
 
 // Mirrors the protocol's UserPreferences contract with concrete web-side types:
 // the generated z.infer types collapse to `any` under this app's tsconfig.
-export type GoatTaskViewMode = "board" | "list";
+export type TaskViewMode = "board" | "list";
 
-type GoatUserPreferences = {
+type UserPreferences = {
   timezone: string;
   taskSpawningEnabled: boolean;
   wikiEnabled: boolean;
-  taskViewMode: GoatTaskViewMode;
+  taskViewMode: TaskViewMode;
   imessageEnabled: boolean;
   autoModelRoutingEnabled: boolean;
 };
 
-export async function updateGoatTimezoneAction(timezone: string) {
+export async function updateTimezoneAction(timezone: string) {
   const preferences = await patchPreferences({ timezone });
   return { ok: true, timezone: preferences.timezone } as const;
 }
 
-export async function updateGoatTaskSpawningAction(enabled: boolean) {
+export async function updateTaskSpawningAction(enabled: boolean) {
   const preferences = await patchPreferences({ taskSpawningEnabled: enabled === true });
   revalidatePath("/");
   revalidatePath("/settings/preferences");
   return { ok: true, enabled: preferences.taskSpawningEnabled } as const;
 }
 
-export async function updateGoatWikiEnabledAction(enabled: boolean) {
+export async function updateWikiEnabledAction(enabled: boolean) {
   const preferences = await patchPreferences({ wikiEnabled: enabled === true });
   revalidatePath("/");
   revalidatePath("/settings/preferences");
@@ -36,7 +36,7 @@ export async function updateGoatWikiEnabledAction(enabled: boolean) {
   return { ok: true, enabled: preferences.wikiEnabled } as const;
 }
 
-export async function updateGoatTaskViewModeAction(mode: GoatTaskViewMode) {
+export async function updateTaskViewModeAction(mode: TaskViewMode) {
   // Callers use the result without a try/catch, so invalid modes and transport
   // failures both surface as ok: false instead of a thrown error.
   try {
@@ -48,7 +48,7 @@ export async function updateGoatTaskViewModeAction(mode: GoatTaskViewMode) {
   }
 }
 
-export async function updateGoatImessageEnabledAction(enabled: boolean) {
+export async function updateImessageEnabledAction(enabled: boolean) {
   const preferences = await patchPreferences({ imessageEnabled: enabled === true });
   revalidatePath("/");
   revalidatePath("/settings/preferences");
@@ -56,14 +56,14 @@ export async function updateGoatImessageEnabledAction(enabled: boolean) {
   return { ok: true, enabled: preferences.imessageEnabled } as const;
 }
 
-export async function updateGoatAutoModelRoutingAction(enabled: boolean) {
+export async function updateAutoModelRoutingAction(enabled: boolean) {
   const preferences = await patchPreferences({ autoModelRoutingEnabled: enabled === true });
   revalidatePath("/");
   revalidatePath("/settings/preferences");
   return { ok: true, enabled: preferences.autoModelRoutingEnabled } as const;
 }
 
-async function patchPreferences(body: Partial<GoatUserPreferences>): Promise<GoatUserPreferences> {
+async function patchPreferences(body: Partial<UserPreferences>): Promise<UserPreferences> {
   const response = await (await serverApiClient()).v1.me.preferences.$patch({ json: body });
   if (!response.ok) {
     throw await serverApiError(response, "Preferences could not be saved.");

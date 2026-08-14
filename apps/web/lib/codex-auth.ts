@@ -1,17 +1,17 @@
 "use server";
 
-import { isGoatCodexConnectedForUser as readGoatCodexConnectionForUser } from "@opencompany/goat-agent/application/engine-auth-status";
+import { isCodexConnectedForUser as readCodexConnectionForUser } from "@opencompany/agent/application/engine-auth-status";
 import { revalidatePath } from "next/cache";
 import { serverApiClient, serverApiError, serverApiErrorMessage } from "@/lib/server-api-client";
 
-export type GoatCodexAuthSettings = {
+export type CodexAuthSettings = {
   status: "connected" | "needs_reauth" | null;
   statusReason: string | null;
   lastValidatedAt: string | null;
   lastRotatedAt: string | null;
 };
 
-export type GoatCodexDeviceAuthFlow = {
+export type CodexDeviceAuthFlow = {
   id: string;
   status: "pending" | "code_ready" | "completed" | "failed" | "expired";
   userCode: string | null;
@@ -20,19 +20,19 @@ export type GoatCodexDeviceAuthFlow = {
   expiresAt: string;
 };
 
-export async function loadCurrentGoatCodexAuthSettings(): Promise<GoatCodexAuthSettings> {
+export async function loadCurrentCodexAuthSettings(): Promise<CodexAuthSettings> {
   const response = await (await serverApiClient()).v1["engine-auth"].codex.$get();
   if (!response.ok) {
     throw await serverApiError(response, "Could not load the Codex connection.");
   }
-  return (await response.json()).data as GoatCodexAuthSettings;
+  return (await response.json()).data as CodexAuthSettings;
 }
 
-export async function isGoatCodexConnectedForUser(userWorkosId: string) {
-  return readGoatCodexConnectionForUser(userWorkosId);
+export async function isCodexConnectedForUser(userWorkosId: string) {
+  return readCodexConnectionForUser(userWorkosId);
 }
 
-export async function startGoatCodexDeviceAuth() {
+export async function startCodexDeviceAuth() {
   try {
     const response = await (await serverApiClient()).v1["engine-auth"].codex.device.$post();
     if (!response.ok) {
@@ -41,7 +41,7 @@ export async function startGoatCodexDeviceAuth() {
         error: await serverApiErrorMessage(response, "Could not start Codex authentication."),
       };
     }
-    const data = (await response.json()).data as { flow: GoatCodexDeviceAuthFlow };
+    const data = (await response.json()).data as { flow: CodexDeviceAuthFlow };
     return { ok: true as const, flow: data.flow };
   } catch (error) {
     return {
@@ -51,7 +51,7 @@ export async function startGoatCodexDeviceAuth() {
   }
 }
 
-export async function pollGoatCodexDeviceAuth(flowId: string) {
+export async function pollCodexDeviceAuth(flowId: string) {
   const trimmedFlowId = flowId.trim();
   if (!trimmedFlowId) return { ok: false as const, error: "Codex auth flow is required." };
 
@@ -65,7 +65,7 @@ export async function pollGoatCodexDeviceAuth(flowId: string) {
         error: await serverApiErrorMessage(response, "Could not check Codex authentication."),
       };
     }
-    const data = (await response.json()).data as { flow: GoatCodexDeviceAuthFlow };
+    const data = (await response.json()).data as { flow: CodexDeviceAuthFlow };
     if (data.flow.status === "completed") revalidatePath("/settings");
     return { ok: true as const, flow: data.flow };
   } catch (error) {
@@ -76,7 +76,7 @@ export async function pollGoatCodexDeviceAuth(flowId: string) {
   }
 }
 
-export async function disconnectGoatCodexAuth() {
+export async function disconnectCodexAuth() {
   const response = await (await serverApiClient()).v1["engine-auth"].codex.$delete();
   if (!response.ok) {
     throw await serverApiError(response, "Could not disconnect Codex.");

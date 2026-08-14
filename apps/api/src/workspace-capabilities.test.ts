@@ -1,23 +1,23 @@
 import type { Actor } from "@opencompany/core";
 import {
-  getGoatCapabilityApproval,
-  getGoatCapabilityApprovalByToolCall,
-  getGoatCapabilitySessionBudgetUsdMicros,
-  listGoatWorkspaceCapabilities,
-  setGoatCapabilitySessionBudget,
-  setGoatWorkspaceCapability,
-} from "@opencompany/db/goat-capabilities";
+  getCapabilityApproval,
+  getCapabilityApprovalByToolCall,
+  getCapabilitySessionBudgetUsdMicros,
+  listWorkspaceCapabilities,
+  setCapabilitySessionBudget,
+  setWorkspaceCapability,
+} from "@opencompany/db/capabilities";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createWorkspaceCapabilityService } from "./workspace-capabilities";
 
-vi.mock("@opencompany/db/goat-capabilities", async (importOriginal) => ({
+vi.mock("@opencompany/db/capabilities", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  getGoatCapabilityApproval: vi.fn(),
-  getGoatCapabilityApprovalByToolCall: vi.fn(),
-  getGoatCapabilitySessionBudgetUsdMicros: vi.fn(async () => 5_000_000),
-  listGoatWorkspaceCapabilities: vi.fn(async () => [{ source: "x", enabled: true }]),
-  setGoatCapabilitySessionBudget: vi.fn(async () => 2_500_000),
-  setGoatWorkspaceCapability: vi.fn(async (input) => ({
+  getCapabilityApproval: vi.fn(),
+  getCapabilityApprovalByToolCall: vi.fn(),
+  getCapabilitySessionBudgetUsdMicros: vi.fn(async () => 5_000_000),
+  listWorkspaceCapabilities: vi.fn(async () => [{ source: "x", enabled: true }]),
+  setCapabilitySessionBudget: vi.fn(async () => 2_500_000),
+  setWorkspaceCapability: vi.fn(async (input) => ({
     source: input.source,
     enabled: input.enabled,
   })),
@@ -42,8 +42,8 @@ describe("workspace capability service", () => {
       capabilities: [{ source: "x", enabled: true }],
       sessionBudgetUsdMicros: 5_000_000,
     });
-    expect(listGoatWorkspaceCapabilities).toHaveBeenCalledWith("workspace_1", db);
-    expect(getGoatCapabilitySessionBudgetUsdMicros).toHaveBeenCalledWith("workspace_1", db);
+    expect(listWorkspaceCapabilities).toHaveBeenCalledWith("workspace_1", db);
+    expect(getCapabilitySessionBudgetUsdMicros).toHaveBeenCalledWith("workspace_1", db);
   });
 
   it("requires workspace-admin authorization for toggles and budgets", async () => {
@@ -53,8 +53,8 @@ describe("workspace capability service", () => {
       message: "Only workspace admins can change paid capabilities.",
     });
     await expect(service.setSessionBudget(member, 2.5)).rejects.toMatchObject({ status: 403 });
-    expect(setGoatWorkspaceCapability).not.toHaveBeenCalled();
-    expect(setGoatCapabilitySessionBudget).not.toHaveBeenCalled();
+    expect(setWorkspaceCapability).not.toHaveBeenCalled();
+    expect(setCapabilitySessionBudget).not.toHaveBeenCalled();
   });
 
   it("stores the admin's identity and normalizes dollars to integer micros", async () => {
@@ -63,7 +63,7 @@ describe("workspace capability service", () => {
       source: "linkedin",
       enabled: false,
     });
-    expect(setGoatWorkspaceCapability).toHaveBeenCalledWith({
+    expect(setWorkspaceCapability).toHaveBeenCalledWith({
       workspaceId: "workspace_1",
       source: "linkedin",
       enabled: false,
@@ -71,7 +71,7 @@ describe("workspace capability service", () => {
       db,
     });
     await expect(service.setSessionBudget(admin, 2.5)).resolves.toBe(2_500_000);
-    expect(setGoatCapabilitySessionBudget).toHaveBeenCalledWith({
+    expect(setCapabilitySessionBudget).toHaveBeenCalledWith({
       workspaceId: "workspace_1",
       budgetUsdMicros: 2_500_000,
       db,
@@ -79,15 +79,15 @@ describe("workspace capability service", () => {
   });
 
   it("scopes approval reads to both actor and workspace", async () => {
-    vi.mocked(getGoatCapabilityApproval).mockResolvedValueOnce(approvalRow() as never);
-    vi.mocked(getGoatCapabilityApprovalByToolCall).mockResolvedValueOnce(approvalRow() as never);
+    vi.mocked(getCapabilityApproval).mockResolvedValueOnce(approvalRow() as never);
+    vi.mocked(getCapabilityApprovalByToolCall).mockResolvedValueOnce(approvalRow() as never);
     const service = createWorkspaceCapabilityService({ db });
 
     await expect(service.getApproval(member, "gcr_1")).resolves.toMatchObject({
       runId: "gcr_1",
       action: "lead.find_person_email",
     });
-    expect(getGoatCapabilityApproval).toHaveBeenCalledWith({
+    expect(getCapabilityApproval).toHaveBeenCalledWith({
       id: "gcr_1",
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
@@ -96,7 +96,7 @@ describe("workspace capability service", () => {
     await expect(service.getApprovalByToolCall(member, "tool_1")).resolves.toMatchObject({
       sessionBudgetUsdMicros: 5_000_000,
     });
-    expect(getGoatCapabilityApprovalByToolCall).toHaveBeenCalledWith({
+    expect(getCapabilityApprovalByToolCall).toHaveBeenCalledWith({
       toolCallId: "tool_1",
       userWorkosId: "user_1",
       workspaceId: "workspace_1",

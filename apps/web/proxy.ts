@@ -1,7 +1,7 @@
 import { authkit, handleAuthkitHeaders } from "@workos-inc/authkit-nextjs";
 import { type NextRequest, NextResponse } from "next/server";
-import { isInitialDocumentRequest, localGoatHttpsRedirectUrl } from "@/lib/local-https-redirect";
-import { getGoatWorkOSRedirectUri } from "@/lib/workos";
+import { isInitialDocumentRequest, localHttpsRedirectUrl } from "@/lib/local-https-redirect";
+import { getWorkOSRedirectUri } from "@/lib/workos";
 
 const UNAUTHENTICATED_PATHS = new Set([
   "/auth/callback",
@@ -17,13 +17,13 @@ const UNAUTHENTICATED_PATHS = new Set([
 const UNAUTHENTICATED_PREFIXES = ["/.well-known/oauth-", "/share/"];
 
 export default async function proxy(request: NextRequest) {
-  const localHttpsRedirect = localGoatHttpsRedirectUrl(request);
+  const localHttpsRedirect = localHttpsRedirectUrl(request);
   if (localHttpsRedirect) {
     return NextResponse.redirect(localHttpsRedirect);
   }
 
   const { session, headers } = await authkit(request, {
-    redirectUri: getGoatWorkOSRedirectUri(),
+    redirectUri: getWorkOSRedirectUri(),
   });
 
   if (isUnauthenticatedPath(request.nextUrl.pathname) || session.user) {

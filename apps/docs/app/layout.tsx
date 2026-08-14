@@ -5,10 +5,10 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "OpenCompany docs",
-    template: "%s | OpenCompany docs",
+    default: "opencompany docs",
+    template: "%s | opencompany docs",
   },
-  description: "Learn how to use OpenCompany and its public API.",
+  description: "Learn how to use opencompany and its public API.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

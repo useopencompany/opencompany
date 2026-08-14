@@ -8,8 +8,8 @@ export default function IntroductionPage() {
   return (
     <article>
       <PageHeader
-        title="OpenCompany Design System"
-        description="A shadcn-style component library built on Base UI and Tailwind CSS v4, sharing the OpenCompany palette. Components live in @opencompany/ui and are consumable across the monorepo."
+        title="opencompany Design System"
+        description="A shadcn-style component library built on Base UI and Tailwind CSS v4, sharing the opencompany palette. Components live in @opencompany/ui and are consumable across the monorepo."
       />
 
       <div className="flex flex-wrap gap-2">

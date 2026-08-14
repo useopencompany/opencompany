@@ -4,11 +4,11 @@ import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client"
 
 // A small feedback report from the sidebar widget. Bug / Feedback / Idea only —
 // the Linear dispatch lives in the canonical API's feedback service.
-type GoatFeedbackKind = "bug" | "feedback" | "idea";
+type FeedbackKind = "bug" | "feedback" | "idea";
 
-export type GoatFeedbackActionState = { ok: true } | { ok: false; error: string };
+export type FeedbackActionState = { ok: true } | { ok: false; error: string };
 
-function isGoatFeedbackKind(value: string): value is GoatFeedbackKind {
+function isFeedbackKind(value: string): value is FeedbackKind {
   return value === "bug" || value === "feedback" || value === "idea";
 }
 
@@ -17,13 +17,13 @@ function readString(formData: FormData, key: string) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-export async function submitGoatFeedback(
-  _previousState: GoatFeedbackActionState | null,
+export async function submitFeedback(
+  _previousState: FeedbackActionState | null,
   formData: FormData,
-): Promise<GoatFeedbackActionState> {
+): Promise<FeedbackActionState> {
   const rawKind = readString(formData, "kind");
   const message = readString(formData, "message");
-  const kind = isGoatFeedbackKind(rawKind) ? rawKind : "feedback";
+  const kind = isFeedbackKind(rawKind) ? rawKind : "feedback";
 
   if (message.length < 3) {
     return { ok: false, error: "Enter a bit more detail." };

@@ -1,5 +1,20 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import type { GoatBillingApplicationService } from "@opencompany/billing/application-service";
+import {
+  AutoModelRoutingError,
+  type AutoModelRoutingResolution,
+} from "@opencompany/agent/application/auto-model-routing";
+import type { BrainImportApplicationService } from "@opencompany/agent/brain-imports";
+import type { BrainSourceApplicationService } from "@opencompany/agent/brain-sources";
+import type { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
+import type {
+  AttioProviderState,
+  FathomProviderState,
+  GranolaProviderState,
+  ImessageProviderState,
+  StripeProviderState,
+} from "@opencompany/agent/integration-state";
+import type { McpService } from "@opencompany/agent/mcp-http";
+import type { BillingApplicationService } from "@opencompany/billing/application-service";
 import {
   CHAT_PRESENTATION_READ_LIMIT,
   type ChatPresentationReader,
@@ -29,22 +44,6 @@ import {
   type Workflow,
   type WorkflowApplicationService,
 } from "@opencompany/core";
-import {
-  AutoModelRoutingError,
-  type AutoModelRoutingResolution,
-} from "@opencompany/goat-agent/application/auto-model-routing";
-import type { GoatBrainImportApplicationService } from "@opencompany/goat-agent/brain-imports";
-import type { GoatBrainSourceApplicationService } from "@opencompany/goat-agent/brain-sources";
-import type { GoatBrowserProfileApplicationService } from "@opencompany/goat-agent/browser-profiles/service";
-import type {
-  GoatAttioProviderState,
-  GoatFathomProviderState,
-  GoatGranolaProviderState,
-  GoatImessageProviderState,
-  GoatStripeProviderState,
-} from "@opencompany/goat-agent/integration-state";
-import type { GoatMcpService } from "@opencompany/goat-agent/mcp-http";
-import { GOAT_SPANS, withGoatSpan } from "@opencompany/goat-observability";
 import { captureException, createLogger } from "@opencompany/observability";
 import {
   createOpenApiDocument,
@@ -60,6 +59,7 @@ import {
   RunEventSchema,
   type V1RouteHandlers,
 } from "@opencompany/protocol";
+import { SPANS, withSpan } from "@opencompany/telemetry";
 import type { Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
@@ -140,10 +140,10 @@ export type CreateApiAppInput = {
   workflows: WorkflowApplicationService;
   schedules: TaskScheduleApplicationService;
   knowledge: KnowledgeApplicationService;
-  brainSources: Pick<GoatBrainSourceApplicationService, "list" | "set" | "remove" | "listOptions">;
-  brainImports: Pick<GoatBrainImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
+  brainSources: Pick<BrainSourceApplicationService, "list" | "set" | "remove" | "listOptions">;
+  brainImports: Pick<BrainImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
   browserProfiles: Pick<
-    GoatBrowserProfileApplicationService,
+    BrowserProfileApplicationService,
     | "list"
     | "create"
     | "remove"
@@ -177,10 +177,10 @@ export type CreateApiAppInput = {
   repoConfigs: RepoConfigService;
   integrationAccounts: IntegrationAccountService;
   slackBotSettings: SlackBotSettingsService;
-  mcp?: GoatMcpService;
+  mcp?: McpService;
   engineAuth: EngineAuthService;
   engineSessions: EngineSessionService;
-  billing: GoatBillingApplicationService;
+  billing: BillingApplicationService;
   workspaceCapabilities: WorkspaceCapabilityService;
   workspaceControl: WorkspaceControlService;
   identity: IdentityService;
@@ -252,7 +252,7 @@ export function createApiApp(input: CreateApiAppInput) {
           throw new ApiError(
             400,
             "invalid_request",
-            "Auto model routing is available only for OpenCompany Tasks.",
+            "Auto model routing is available only for opencompany Tasks.",
           );
         }
         if (!input.resolveAutoModel) {
@@ -1289,7 +1289,7 @@ export function createApiApp(input: CreateApiAppInput) {
           throw new ApiError(
             400,
             "invalid_request",
-            "Auto model routing is available only for OpenCompany Chat.",
+            "Auto model routing is available only for opencompany Chat.",
           );
         }
         if (!input.resolveAutoModel) {
@@ -1326,7 +1326,7 @@ export function createApiApp(input: CreateApiAppInput) {
         actor,
         engine: body.engine,
         model: autoResolution?.model ?? requestedModel,
-        defaultOpenCompanyModel:
+        defaultProductModel:
           input.defaultModel ?? process.env.GOAT_DEFAULT_CHAT_MODEL ?? "moonshotai/kimi-k3",
         auth: input.engineAuth,
       });
@@ -2145,8 +2145,8 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       router.use("/v1/*", async (c, next) => {
         const startedAt = performance.now();
-        return withGoatSpan(
-          GOAT_SPANS.apiRequest,
+        return withSpan(
+          SPANS.apiRequest,
           { "goat.http_method": c.req.method, "goat.http_route": c.req.path },
           async (span) => {
             try {
@@ -2922,12 +2922,12 @@ function repoConfigDto(config: {
 // filter those rows out; the protocol contract therefore omits it and any
 // straggler collapses to "not_connected".
 function integrationAccountStatusDto(
-  status: GoatAttioProviderState["status"],
+  status: AttioProviderState["status"],
 ): "not_connected" | "connected" | "needs_reauth" | "sync_failed" {
   return status === "disconnected" ? "not_connected" : status;
 }
 
-function attioStateDto(state: GoatAttioProviderState) {
+function attioStateDto(state: AttioProviderState) {
   return {
     provider: state.provider,
     connected: state.connected,
@@ -2938,7 +2938,7 @@ function attioStateDto(state: GoatAttioProviderState) {
   };
 }
 
-function fathomStateDto(state: GoatFathomProviderState) {
+function fathomStateDto(state: FathomProviderState) {
   return {
     provider: state.provider,
     connected: state.connected,
@@ -2950,7 +2950,7 @@ function fathomStateDto(state: GoatFathomProviderState) {
   };
 }
 
-function granolaStateDto(state: GoatGranolaProviderState) {
+function granolaStateDto(state: GranolaProviderState) {
   return {
     provider: state.provider,
     connected: state.connected,
@@ -2962,7 +2962,7 @@ function granolaStateDto(state: GoatGranolaProviderState) {
   };
 }
 
-function imessageStateDto(state: GoatImessageProviderState) {
+function imessageStateDto(state: ImessageProviderState) {
   return {
     provider: state.provider,
     connected: state.connected,
@@ -2973,7 +2973,7 @@ function imessageStateDto(state: GoatImessageProviderState) {
   };
 }
 
-function stripeStateDto(state: GoatStripeProviderState) {
+function stripeStateDto(state: StripeProviderState) {
   return {
     provider: state.provider,
     connected: state.connected,

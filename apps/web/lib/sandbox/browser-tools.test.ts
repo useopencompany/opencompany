@@ -18,12 +18,12 @@ vi.mock("@vercel/blob", () => ({
 
 import { createChatBrowserToolSession } from "./browser-tools";
 import {
-  GOAT_CHAT_SANDBOX_ACTION_POLICY_PATH,
-  GOAT_CHAT_SANDBOX_AGENT_BROWSER_BIN,
-  GOAT_CHAT_SANDBOX_NETWORK_POLICY,
-  GOAT_CHAT_SANDBOX_ROOT,
-  GOAT_CHAT_SANDBOX_SCREENSHOT_DIR,
-  getGoatChatSandbox,
+  CHAT_SANDBOX_ACTION_POLICY_PATH,
+  CHAT_SANDBOX_AGENT_BROWSER_BIN,
+  CHAT_SANDBOX_NETWORK_POLICY,
+  CHAT_SANDBOX_ROOT,
+  CHAT_SANDBOX_SCREENSHOT_DIR,
+  getChatSandbox,
 } from "./chat-sandbox";
 
 const runCommand = vi.fn(async (input: { args: string[] }) => {
@@ -56,7 +56,7 @@ const sandbox = {
   currentSession: () => ({ sessionId: "sbx_session_1" }),
 };
 
-describe("Goat chat browser sandbox", () => {
+describe("opencompany chat browser sandbox", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
@@ -66,7 +66,7 @@ describe("Goat chat browser sandbox", () => {
 
   it("configures a named persistent sandbox and provisions the stock runtime once", async () => {
     const signal = new AbortController().signal;
-    await getGoatChatSandbox({ chatSessionId: "chat/1", signal });
+    await getChatSandbox({ chatSessionId: "chat/1", signal });
 
     expect(mocks.getOrCreate).toHaveBeenCalledOnce();
     const params = mocks.getOrCreate.mock.calls[0]?.[0] as {
@@ -81,10 +81,10 @@ describe("Goat chat browser sandbox", () => {
       name: "goat-chat-chat-1",
       persistent: true,
       runtime: "node24",
-      networkPolicy: GOAT_CHAT_SANDBOX_NETWORK_POLICY,
+      networkPolicy: CHAT_SANDBOX_NETWORK_POLICY,
       signal,
     });
-    expect(GOAT_CHAT_SANDBOX_NETWORK_POLICY).toMatchObject({
+    expect(CHAT_SANDBOX_NETWORK_POLICY).toMatchObject({
       subnets: {
         deny: expect.arrayContaining([
           "0.0.0.0/8",
@@ -101,14 +101,14 @@ describe("Goat chat browser sandbox", () => {
       1,
       expect.objectContaining({
         cmd: "mkdir",
-        args: ["-p", GOAT_CHAT_SANDBOX_SCREENSHOT_DIR],
+        args: ["-p", CHAT_SANDBOX_SCREENSHOT_DIR],
         signal,
       }),
     );
     expect(writeFiles).toHaveBeenCalledWith(
       [
         expect.objectContaining({
-          path: GOAT_CHAT_SANDBOX_ACTION_POLICY_PATH,
+          path: CHAT_SANDBOX_ACTION_POLICY_PATH,
           mode: 0o600,
         }),
       ],
@@ -123,11 +123,11 @@ describe("Goat chat browser sandbox", () => {
     );
     expect(runCommand).toHaveBeenCalledWith(
       expect.objectContaining({
-        cmd: GOAT_CHAT_SANDBOX_AGENT_BROWSER_BIN,
+        cmd: CHAT_SANDBOX_AGENT_BROWSER_BIN,
         args: ["install", "--with-deps"],
         signal,
         env: expect.objectContaining({
-          AGENT_BROWSER_SCREENSHOT_DIR: GOAT_CHAT_SANDBOX_SCREENSHOT_DIR,
+          AGENT_BROWSER_SCREENSHOT_DIR: CHAT_SANDBOX_SCREENSHOT_DIR,
         }),
       }),
     );
@@ -135,7 +135,7 @@ describe("Goat chat browser sandbox", () => {
     expect(runCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         cmd: "chmod",
-        args: expect.arrayContaining(["a+rX", `${GOAT_CHAT_SANDBOX_ROOT}/agent-browser`]),
+        args: expect.arrayContaining(["a+rX", `${CHAT_SANDBOX_ROOT}/agent-browser`]),
         signal,
       }),
     );
@@ -208,7 +208,7 @@ describe("Goat chat browser sandbox", () => {
     expect(readFileToBuffer).toHaveBeenCalledWith(
       {
         path: expect.stringMatching(
-          new RegExp(`^${GOAT_CHAT_SANDBOX_SCREENSHOT_DIR}/\\d+-[a-f0-9-]+\\.png$`),
+          new RegExp(`^${CHAT_SANDBOX_SCREENSHOT_DIR}/\\d+-[a-f0-9-]+\\.png$`),
         ),
       },
       { signal },

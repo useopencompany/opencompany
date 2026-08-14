@@ -1,13 +1,13 @@
 import "server-only";
 
 export {
-  generateGoatChatTitle,
-  sanitizeGoatChatTitle,
-} from "@opencompany/goat-agent/chat-title";
+  generateChatTitle,
+  sanitizeChatTitle,
+} from "@opencompany/agent/chat-title";
 
 import { serverApiClient } from "@/lib/server-api-client";
 
-type GoatTitleGenerationResult =
+type TitleGenerationResult =
   | { ok: true; title: string }
   | {
       ok: false;
@@ -20,11 +20,11 @@ type GoatTitleGenerationResult =
 
 // Retained only for the routes awaiting the deletion PR. The mutation itself is
 // API-owned; canonical /v1 Message creation triggers the same service directly.
-export async function generateGoatChatTitleForMessage(input: {
+export async function generateChatTitleForMessage(input: {
   sessionId: string;
   messageId: string;
   apiKey?: string | null;
-}): Promise<GoatTitleGenerationResult> {
+}): Promise<TitleGenerationResult> {
   if (!input.apiKey?.trim()) return { ok: false, skipped: "missing_api_key" };
   try {
     const client = await serverApiClient();

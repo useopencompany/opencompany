@@ -1,9 +1,6 @@
 import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  confirmGoatBrainImportAction,
-  startGoatBrainImportDiscoveryAction,
-} from "./brain-import-actions";
+import { confirmBrainImportAction, startBrainImportDiscoveryAction } from "./brain-import-actions";
 
 vi.mock("next/headers", () => ({ headers: vi.fn() }));
 
@@ -42,7 +39,7 @@ describe("Brain import API actions", () => {
     );
 
     await expect(
-      startGoatBrainImportDiscoveryAction({
+      startBrainImportDiscoveryAction({
         brainRef: "brain_1",
         companyUrl: "acme.com",
         focus: "Product",
@@ -108,7 +105,7 @@ describe("Brain import API actions", () => {
     );
 
     await expect(
-      confirmGoatBrainImportAction({
+      confirmBrainImportAction({
         brainRef: "brain_1",
         importRunId: "gbimp_1",
         enabledProviders: ["public_web"],

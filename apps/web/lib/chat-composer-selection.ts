@@ -1,60 +1,57 @@
 import type { AgentModelId } from "@opencompany/agent-runtime";
-import { AUTO_GOAT_MODEL_SELECTION, type AutoGoatModelSelection } from "@/lib/chat-auto-model";
+import { AUTO_MODEL_SELECTION, type AutoModelSelection } from "@/lib/chat-auto-model";
 import { CLAUDE_PICKER_VALUE, type ClaudePickerValue } from "@/lib/claude-chat-constants";
 import { CODEX_PICKER_VALUE, type CodexPickerValue } from "@/lib/codex-chat-constants";
-import { DEFAULT_GOAT_MODEL, normalizeGoatModel } from "@/lib/model-options";
+import { DEFAULT_MODEL, normalizeModel } from "@/lib/model-options";
 
-export type GoatChatModelSelection =
+export type ChatModelSelection =
   | AgentModelId
-  | AutoGoatModelSelection
+  | AutoModelSelection
   | CodexPickerValue
   | ClaudePickerValue;
 
-type GoatChatEngineAvailability = {
+type ChatEngineAvailability = {
   codexConnected: boolean;
   claudeCodeConnected?: boolean;
   autoModelRoutingEnabled?: boolean;
 };
 
-const GOAT_CHAT_SELECTION_STORAGE_KEY = "opencompany-goat-main-chat-selection";
+const CHAT_SELECTION_STORAGE_KEY = "opencompany-goat-main-chat-selection";
 const chatSelectionListeners = new Set<() => void>();
 
-export function normalizeStoredGoatChatSelection(
+export function normalizeStoredChatSelection(
   value: unknown,
-  availability: GoatChatEngineAvailability,
-): GoatChatModelSelection {
-  if (value === AUTO_GOAT_MODEL_SELECTION) {
-    return availability.autoModelRoutingEnabled ? AUTO_GOAT_MODEL_SELECTION : DEFAULT_GOAT_MODEL;
+  availability: ChatEngineAvailability,
+): ChatModelSelection {
+  if (value === AUTO_MODEL_SELECTION) {
+    return availability.autoModelRoutingEnabled ? AUTO_MODEL_SELECTION : DEFAULT_MODEL;
   }
   if (value === CODEX_PICKER_VALUE) {
-    return availability.codexConnected ? CODEX_PICKER_VALUE : DEFAULT_GOAT_MODEL;
+    return availability.codexConnected ? CODEX_PICKER_VALUE : DEFAULT_MODEL;
   }
   if (value === CLAUDE_PICKER_VALUE) {
-    return availability.claudeCodeConnected ? CLAUDE_PICKER_VALUE : DEFAULT_GOAT_MODEL;
+    return availability.claudeCodeConnected ? CLAUDE_PICKER_VALUE : DEFAULT_MODEL;
   }
-  return normalizeGoatModel(value);
+  return normalizeModel(value);
 }
 
-export function readLastGoatChatSelection(
+export function readLastChatSelection(
   userWorkosId: string,
-  availability: GoatChatEngineAvailability,
-): GoatChatModelSelection {
-  if (typeof window === "undefined") return DEFAULT_GOAT_MODEL;
+  availability: ChatEngineAvailability,
+): ChatModelSelection {
+  if (typeof window === "undefined") return DEFAULT_MODEL;
 
   try {
-    return normalizeStoredGoatChatSelection(
+    return normalizeStoredChatSelection(
       window.localStorage.getItem(storageKey(userWorkosId)),
       availability,
     );
   } catch {
-    return DEFAULT_GOAT_MODEL;
+    return DEFAULT_MODEL;
   }
 }
 
-export function persistLastGoatChatSelection(
-  userWorkosId: string,
-  selection: GoatChatModelSelection,
-) {
+export function persistLastChatSelection(userWorkosId: string, selection: ChatModelSelection) {
   if (typeof window === "undefined") return;
 
   try {
@@ -66,11 +63,11 @@ export function persistLastGoatChatSelection(
   }
 }
 
-export function subscribeLastGoatChatSelection(onStoreChange: () => void) {
+export function subscribeLastChatSelection(onStoreChange: () => void) {
   chatSelectionListeners.add(onStoreChange);
 
   function handleStorage(event: StorageEvent) {
-    if (event.key === null || event.key.startsWith(`${GOAT_CHAT_SELECTION_STORAGE_KEY}:`)) {
+    if (event.key === null || event.key.startsWith(`${CHAT_SELECTION_STORAGE_KEY}:`)) {
       onStoreChange();
     }
   }
@@ -84,5 +81,5 @@ export function subscribeLastGoatChatSelection(onStoreChange: () => void) {
 
 function storageKey(userWorkosId: string) {
   const userKey = userWorkosId.trim() || "anonymous";
-  return `${GOAT_CHAT_SELECTION_STORAGE_KEY}:${userKey}`;
+  return `${CHAT_SELECTION_STORAGE_KEY}:${userKey}`;
 }

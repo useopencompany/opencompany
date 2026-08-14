@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
 import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
-import { activateGoatWorkspace, GOAT_ACTIVE_BRAIN_COOKIE } from "@/lib/workspace-session";
+import { ACTIVE_BRAIN_COOKIE, activateWorkspace } from "@/lib/workspace-session";
 
 const WORKSPACE_NAME_MAX_LENGTH = 80;
 const CREATE_WORKSPACE_ERROR_MESSAGE = "Could not create the organization. Please try again.";
@@ -13,15 +13,13 @@ const ACTIVATE_WORKSPACE_ERROR_MESSAGE = "Could not switch organizations. Please
 const ACTIVATE_CREATED_WORKSPACE_ERROR_MESSAGE =
   "The organization was created, but could not be activated. Please try switching to it.";
 
-export type GoatWorkspaceActionResult =
-  | { ok: true; warning?: string }
-  | { ok: false; error: string };
+export type WorkspaceActionResult = { ok: true; warning?: string } | { ok: false; error: string };
 
-export type GoatWorkspaceCreateResult =
+export type WorkspaceCreateResult =
   | { ok: true; workspaceId: string }
   | { ok: false; error: string };
 
-export type GoatWorkspaceMemberView = {
+export type WorkspaceMemberView = {
   userWorkosId: string;
   email: string;
   name: string;
@@ -31,21 +29,21 @@ export type GoatWorkspaceMemberView = {
   role: "admin" | "member";
 };
 
-export type GoatWorkspaceView = {
+export type WorkspaceView = {
   id: string;
   name: string;
   role: "admin" | "member";
 };
 
-export type GoatWorkspaceInvitationView = {
+export type WorkspaceInvitationView = {
   id: string;
   email: string;
   state: string;
   expiresAt: string | null;
 };
 
-export type GoatBrainVisibility = "workspace" | "restricted";
-export type GoatBrainIntelligence = "basic" | "frontier";
+export type BrainVisibility = "workspace" | "restricted";
+export type BrainIntelligence = "basic" | "frontier";
 
 function errorResult(error: unknown, fallback: string): { ok: false; error: string } {
   return { ok: false, error: error instanceof Error ? error.message : fallback };
@@ -63,7 +61,7 @@ function validateWorkspaceName(name: unknown) {
   return { ok: true as const, name: trimmed };
 }
 
-export async function switchGoatBrainAction(brainRef: string): Promise<GoatWorkspaceActionResult> {
+export async function switchBrainAction(brainRef: string): Promise<WorkspaceActionResult> {
   const response = await (await serverApiClient()).v1.brains[":brainId"].switch.$post({
     param: { brainId: brainRef },
   });
@@ -76,7 +74,7 @@ export async function switchGoatBrainAction(brainRef: string): Promise<GoatWorks
   const { brainId } = (await response.json()).data;
 
   const cookieStore = await cookies();
-  cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, brainId, {
+  cookieStore.set(ACTIVE_BRAIN_COOKIE, brainId, {
     path: "/",
     sameSite: "lax",
     maxAge: 60 * 60 * 24 * 365,
@@ -85,9 +83,7 @@ export async function switchGoatBrainAction(brainRef: string): Promise<GoatWorks
   return { ok: true };
 }
 
-export async function switchGoatWorkspaceAction(
-  workspaceId: string,
-): Promise<GoatWorkspaceActionResult> {
+export async function switchWorkspaceAction(workspaceId: string): Promise<WorkspaceActionResult> {
   let activation: {
     workspaceId: string;
     organizationId: string;
@@ -105,7 +101,7 @@ export async function switchGoatWorkspaceAction(
     }
     activation = (await response.json()).data;
   } catch (error) {
-    console.error("[goat] Failed to resolve workspace activation", {
+    console.error("[opencompany] Failed to resolve workspace activation", {
       workspaceId,
       errorName: error instanceof Error ? error.name : typeof error,
     });
@@ -113,7 +109,7 @@ export async function switchGoatWorkspaceAction(
   }
 
   try {
-    await activateGoatWorkspace({
+    await activateWorkspace({
       workspaceId: activation.workspaceId,
       workosOrganizationId: activation.organizationId,
       brainId: activation.brainId,
@@ -123,7 +119,7 @@ export async function switchGoatWorkspaceAction(
     // that framework control flow while translating ordinary refresh failures
     // into the server action's inline-error contract.
     unstable_rethrow(error);
-    console.error("[goat] Failed to activate workspace organization", {
+    console.error("[opencompany] Failed to activate workspace organization", {
       workspaceId: activation.workspaceId,
       workosOrganizationId: activation.organizationId,
       error,
@@ -135,7 +131,7 @@ export async function switchGoatWorkspaceAction(
   return { ok: true };
 }
 
-export async function createGoatWorkspaceAction(name: unknown): Promise<GoatWorkspaceCreateResult> {
+export async function createWorkspaceAction(name: unknown): Promise<WorkspaceCreateResult> {
   const validation = validateWorkspaceName(name);
   if (!validation.ok) return validation;
 
@@ -160,7 +156,7 @@ export async function createGoatWorkspaceAction(name: unknown): Promise<GoatWork
     }
     activation = (await response.json()).data;
   } catch (error) {
-    console.error("[goat] Failed to create workspace through the canonical API", {
+    console.error("[opencompany] Failed to create workspace through the canonical API", {
       workspaceId,
       errorName: error instanceof Error ? error.name : typeof error,
     });
@@ -168,14 +164,14 @@ export async function createGoatWorkspaceAction(name: unknown): Promise<GoatWork
   }
 
   try {
-    await activateGoatWorkspace({
+    await activateWorkspace({
       workspaceId: activation.workspaceId,
       workosOrganizationId: activation.organizationId,
       brainId: activation.brainId,
     });
   } catch (error) {
     unstable_rethrow(error);
-    console.error("[goat] Failed to activate newly created workspace organization", {
+    console.error("[opencompany] Failed to activate newly created workspace organization", {
       workspaceId: activation.workspaceId,
       workosOrganizationId: activation.organizationId,
       error,
@@ -190,11 +186,11 @@ export async function createGoatWorkspaceAction(name: unknown): Promise<GoatWork
   return { ok: true, workspaceId: activation.workspaceId };
 }
 
-export async function createGoatBrainAction(input: {
+export async function createBrainAction(input: {
   name: string;
-  visibility: GoatBrainVisibility;
+  visibility: BrainVisibility;
   description?: string;
-}): Promise<GoatWorkspaceActionResult & { brainRef?: string }> {
+}): Promise<WorkspaceActionResult & { brainRef?: string }> {
   try {
     const response = await (await serverApiClient()).v1.brains.$post({
       json: {
@@ -211,7 +207,7 @@ export async function createGoatBrainAction(input: {
     }
     const { brainId } = (await response.json()).data;
     const cookieStore = await cookies();
-    cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, brainId, {
+    cookieStore.set(ACTIVE_BRAIN_COOKIE, brainId, {
       path: "/",
       sameSite: "lax",
       maxAge: 60 * 60 * 24 * 365,
@@ -223,11 +219,11 @@ export async function createGoatBrainAction(input: {
   }
 }
 
-export async function setGoatBrainAccessAction(input: {
+export async function setBrainAccessAction(input: {
   brainRef: string;
-  visibility: GoatBrainVisibility;
+  visibility: BrainVisibility;
   memberWorkosIds: string[];
-}): Promise<GoatWorkspaceActionResult> {
+}): Promise<WorkspaceActionResult> {
   try {
     const response = await (await serverApiClient()).v1.brains[":brainId"].access.$put({
       param: { brainId: input.brainRef },
@@ -246,10 +242,10 @@ export async function setGoatBrainAccessAction(input: {
   }
 }
 
-export async function getGoatBrainAccessDetailsAction(brainRef: string): Promise<{
-  visibility: GoatBrainVisibility;
+export async function getBrainAccessDetailsAction(brainRef: string): Promise<{
+  visibility: BrainVisibility;
   memberWorkosIds: string[];
-  workspaceMembers: GoatWorkspaceMemberView[];
+  workspaceMembers: WorkspaceMemberView[];
 } | null> {
   const response = await (await serverApiClient()).v1.brains[":brainId"].access.$get({
     param: { brainId: brainRef },
@@ -281,7 +277,7 @@ export async function getGoatBrainAccessDetailsAction(brainRef: string): Promise
   };
 }
 
-export async function getGoatBrainEnrichmentEnabledAction(
+export async function getBrainEnrichmentEnabledAction(
   brainRef: string,
 ): Promise<{ enabled: boolean } | null> {
   const response = await (await serverApiClient()).v1.brains[":brainId"].enrichment.$get({
@@ -291,10 +287,10 @@ export async function getGoatBrainEnrichmentEnabledAction(
   return (await response.json()).data;
 }
 
-export async function setGoatBrainEnrichmentAction(input: {
+export async function setBrainEnrichmentAction(input: {
   brainRef: string;
   enabled: boolean;
-}): Promise<GoatWorkspaceActionResult> {
+}): Promise<WorkspaceActionResult> {
   try {
     const response = await (await serverApiClient()).v1.brains[":brainId"].enrichment.$put({
       param: { brainId: input.brainRef },
@@ -313,9 +309,9 @@ export async function setGoatBrainEnrichmentAction(input: {
   }
 }
 
-export async function getGoatBrainIntelligenceAction(
+export async function getBrainIntelligenceAction(
   brainRef: string,
-): Promise<{ intelligence: GoatBrainIntelligence } | null> {
+): Promise<{ intelligence: BrainIntelligence } | null> {
   const response = await (await serverApiClient()).v1.brains[":brainId"].intelligence.$get({
     param: { brainId: brainRef },
   });
@@ -323,10 +319,10 @@ export async function getGoatBrainIntelligenceAction(
   return (await response.json()).data;
 }
 
-export async function setGoatBrainIntelligenceAction(input: {
+export async function setBrainIntelligenceAction(input: {
   brainRef: string;
-  intelligence: GoatBrainIntelligence;
-}): Promise<GoatWorkspaceActionResult> {
+  intelligence: BrainIntelligence;
+}): Promise<WorkspaceActionResult> {
   if (input.intelligence !== "basic" && input.intelligence !== "frontier") {
     return { ok: false, error: "Unknown intelligence tier." };
   }
@@ -348,14 +344,12 @@ export async function setGoatBrainIntelligenceAction(input: {
   }
 }
 
-export async function listGoatWorkspaceMembersAction(): Promise<GoatWorkspaceMemberView[]> {
-  const settings = await getGoatWorkspaceSettingsAction();
+export async function listWorkspaceMembersAction(): Promise<WorkspaceMemberView[]> {
+  const settings = await getWorkspaceSettingsAction();
   return settings.members;
 }
 
-export async function inviteToGoatWorkspaceAction(
-  email: string,
-): Promise<GoatWorkspaceActionResult> {
+export async function inviteToWorkspaceAction(email: string): Promise<WorkspaceActionResult> {
   const trimmed = email.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
     return { ok: false, error: "Enter a valid email address." };
@@ -374,24 +368,24 @@ export async function inviteToGoatWorkspaceAction(
     revalidatePath("/settings/workspace");
     return { ok: true };
   } catch (error) {
-    console.error("[goat] Failed to send workspace invitation", error);
+    console.error("[opencompany] Failed to send workspace invitation", error);
     return errorResult(error, "Could not send the invitation.");
   }
 }
 
-export async function listGoatWorkspaceInvitationsAction(): Promise<GoatWorkspaceInvitationView[]> {
+export async function listWorkspaceInvitationsAction(): Promise<WorkspaceInvitationView[]> {
   try {
-    const settings = await getGoatWorkspaceSettingsAction();
+    const settings = await getWorkspaceSettingsAction();
     return settings.invitations;
   } catch (error) {
-    console.error("[goat] Failed to list workspace invitations", error);
+    console.error("[opencompany] Failed to list workspace invitations", error);
     return [];
   }
 }
 
-export async function revokeGoatWorkspaceInvitationAction(
+export async function revokeWorkspaceInvitationAction(
   invitationId: string,
-): Promise<GoatWorkspaceActionResult> {
+): Promise<WorkspaceActionResult> {
   try {
     const response = await (await serverApiClient()).v1.workspace.invitations[
       ":invitationId"
@@ -409,9 +403,9 @@ export async function revokeGoatWorkspaceInvitationAction(
   }
 }
 
-export async function removeGoatWorkspaceMemberAction(
+export async function removeWorkspaceMemberAction(
   userWorkosId: string,
-): Promise<GoatWorkspaceActionResult> {
+): Promise<WorkspaceActionResult> {
   try {
     const response = await (await serverApiClient()).v1.workspace.members[":userId"].$delete({
       param: { userId: userWorkosId },
@@ -429,9 +423,7 @@ export async function removeGoatWorkspaceMemberAction(
   }
 }
 
-export async function updateGoatWorkspaceNameAction(
-  name: string,
-): Promise<GoatWorkspaceActionResult> {
+export async function updateWorkspaceNameAction(name: string): Promise<WorkspaceActionResult> {
   const trimmed = name.trim();
   if (!trimmed) return { ok: false, error: "Name cannot be empty." };
   if (trimmed.length > 80) return { ok: false, error: "Name is too long (max 80 chars)." };
@@ -453,13 +445,13 @@ export async function updateGoatWorkspaceNameAction(
   }
 }
 
-export async function getGoatWorkspaceSettingsAction(): Promise<{
+export async function getWorkspaceSettingsAction(): Promise<{
   workspace: { id: string; name: string };
   role: "admin" | "member";
   plan: "hobby" | "pro";
   memberCap: number;
-  members: GoatWorkspaceMemberView[];
-  invitations: GoatWorkspaceInvitationView[];
+  members: WorkspaceMemberView[];
+  invitations: WorkspaceInvitationView[];
 }> {
   const response = await (await serverApiClient()).v1.workspace.$get();
   if (!response.ok) {

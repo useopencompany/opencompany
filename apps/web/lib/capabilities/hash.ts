@@ -1,3 +1,3 @@
 import "server-only";
 
-export * from "@opencompany/goat-agent/capabilities/hash";
+export * from "@opencompany/agent/capabilities/hash";

@@ -1,0 +1,404 @@
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { shellQuote } from "@opencompany/agent-runtime";
+import {
+  BRAIN_FOLDER_MANIFEST_PATH,
+  type BrainDocument,
+  brainTimelineEntryFromParts,
+  formatBrainEvidenceLink,
+  normalizeBrainId,
+  normalizeEvidenceId,
+  parseBrainFolderManifest,
+  serializeBrainDocument,
+  serializeBrainFolderManifest,
+} from "@opencompany/brain";
+import { getBrainCliSource } from "@opencompany/brain/cli-bundle";
+import {
+  BRAIN_FILE_MIME_TYPE,
+  type BrainSyncFile,
+  brainFilePathFor,
+  type MaterializedBrainFile as DbMaterializedBrainFile,
+  listBrainFiles,
+  listBrainFolderRows,
+  materializeBrainFilesToRoot,
+  readBrainFilesFromRoot,
+  syncBrainFiles,
+  upsertBrainFile,
+} from "@opencompany/db/brain-files";
+import { getDefaultBrainForUser } from "@opencompany/db/workspaces";
+import { getDb } from "./db";
+import type { SandboxHandle } from "./sandbox";
+
+export const BRAIN_ROOT = "/home/user/opencompany-brain";
+export const BRAIN_CLI_PATH = "/tmp/opencompany-brain.mjs";
+export const MAX_BRAIN_MARKDOWN_DOCUMENT_BYTES = 256 * 1024;
+export const MAX_BRAIN_SANDBOX_FILE_BYTES = MAX_BRAIN_MARKDOWN_DOCUMENT_BYTES;
+export const BRAIN_REPORT_FOLDER = "research";
+
+export type MaterializedBrainSnapshot = {
+  files: MaterializedBrainFile[];
+};
+
+export type MaterializedBrainFile = {
+  documentId: string;
+  brainId: string;
+  folderPath: string;
+  relativePath: string;
+  contentHash: string;
+  assetContentHash?: string | null;
+};
+
+export type BrainMarkdownReportArtifact = {
+  type: "brain_markdown_report";
+  title: string;
+  documentId: string;
+  brainId: string;
+  folderPath: string;
+  brainPath: string;
+  url: string;
+  mimeType: typeof BRAIN_FILE_MIME_TYPE;
+};
+
+export async function createBrainMarkdownReportForTask(input: {
+  userWorkosId: string;
+  taskId: string;
+  taskTurnId?: string | undefined;
+  title: string;
+  markdown: string;
+}): Promise<BrainMarkdownReportArtifact> {
+  const body = input.markdown.trim();
+  if (!body) throw new Error("Cannot save an empty opencompany research report.");
+  if (Buffer.byteLength(body, "utf8") > MAX_BRAIN_MARKDOWN_DOCUMENT_BYTES) {
+    throw new Error("opencompany research report is too large to save to the Brain.");
+  }
+
+  const title = firstMarkdownHeading(body) || input.title.trim() || "Research report";
+  const brainRef = await resolveBrainRefForUser(input.userWorkosId);
+  const existingFiles = await listBrainFiles(
+    { brainRef },
+    {
+      includeInvalid: true,
+      db: getDb(),
+    },
+  );
+  const taskTurnSourceRef = input.taskTurnId ? `goat-task-turn:${input.taskTurnId}` : null;
+  const existingReport = taskTurnSourceRef
+    ? existingFiles.find((file) => file.sources.some((source) => source.ref === taskTurnSourceRef))
+    : null;
+  if (existingReport) {
+    return {
+      type: "brain_markdown_report",
+      title: existingReport.title || title,
+      documentId: existingReport.id,
+      brainId: existingReport.brainId,
+      folderPath: existingReport.folderPath,
+      brainPath: brainFilePathFor(existingReport.folderPath, existingReport.brainId),
+      url: brainDocumentUrl(existingReport.folderPath, existingReport.brainId),
+      mimeType: BRAIN_FILE_MIME_TYPE,
+    };
+  }
+
+  const brainId = nextAvailableBrainId(existingFiles, title);
+  const folderPath = BRAIN_REPORT_FOLDER;
+  const now = new Date().toISOString();
+  const evidenceId = normalizeEvidenceId(`ev-created-from-${input.taskId}`) ?? "ev-task-created";
+  const citedBody = `${body}\n\nEvidence: ${formatBrainEvidenceLink(evidenceId, `Task ${input.taskId}`)}`;
+  const doc: BrainDocument = {
+    frontmatter: {
+      id: brainId,
+      folder: folderPath,
+      kind: "page",
+      type: "analysis",
+      status: "active",
+      title,
+      createdAt: now,
+      updatedAt: now,
+      relations: [],
+      sources: [
+        {
+          ref: `goat-task:${input.taskId}`,
+          title: `Task ${input.taskId}`,
+          capturedAt: now,
+        },
+        ...(taskTurnSourceRef
+          ? [
+              {
+                ref: taskTurnSourceRef,
+                title: `Task turn ${input.taskTurnId}`,
+                capturedAt: now,
+              },
+            ]
+          : []),
+      ],
+    },
+    title,
+    compiledTruth: citedBody,
+    timeline: [
+      brainTimelineEntryFromParts({
+        evidenceId,
+        at: now,
+        summary: `Created from opencompany task ${input.taskId}.`,
+        sourceRef: `goat-task:${input.taskId}`,
+        sourceTitle: `Task ${input.taskId}`,
+      }),
+    ],
+  };
+  const content = serializeBrainDocument(doc);
+  if (Buffer.byteLength(content, "utf8") > MAX_BRAIN_MARKDOWN_DOCUMENT_BYTES) {
+    throw new Error("opencompany research report is too large to save to the Brain.");
+  }
+  const row = await upsertBrainFile(
+    {
+      brainRef,
+      userWorkosId: input.userWorkosId,
+      path: brainFilePathFor(folderPath, brainId),
+      content,
+      id: `goat_brain_file_${randomUUID()}`,
+    },
+    { db: getDb() },
+  );
+
+  return {
+    type: "brain_markdown_report",
+    title,
+    documentId: row.id,
+    brainId,
+    folderPath,
+    brainPath: brainFilePathFor(folderPath, brainId),
+    url: brainDocumentUrl(folderPath, brainId),
+    mimeType: BRAIN_FILE_MIME_TYPE,
+  };
+}
+
+export async function materializeBrainForTask(input: {
+  sandbox: SandboxHandle;
+  userWorkosId: string;
+}): Promise<MaterializedBrainSnapshot> {
+  const brainRef = await resolveBrainRefForUser(input.userWorkosId);
+  const rows = await listBrainFiles(
+    { brainRef },
+    {
+      includeInvalid: true,
+      db: getDb(),
+    },
+  );
+  const folderRows = await listBrainFolderRows({ brainRef }, { db: getDb() });
+  await input.sandbox.commands.run(
+    `rm -rf ${shellQuote(BRAIN_ROOT)} && mkdir -p ${shellQuote(BRAIN_ROOT)}`,
+    { timeoutMs: 30_000 },
+  );
+  await input.sandbox.commands.run(`mkdir -p ${shellQuote(`${BRAIN_ROOT}/.brain`)}`, {
+    timeoutMs: 30_000,
+  });
+  await input.sandbox.files.write(
+    `${BRAIN_ROOT}/${BRAIN_FOLDER_MANIFEST_PATH}`,
+    serializeBrainFolderManifest(folderRows),
+  );
+  await input.sandbox.files.write(BRAIN_CLI_PATH, getBrainCliSource());
+  await input.sandbox.commands.run(`chmod 700 ${shellQuote(BRAIN_CLI_PATH)}`, {
+    timeoutMs: 30_000,
+  });
+
+  const files: MaterializedBrainFile[] = [];
+  for (const row of rows) {
+    const relativePath = brainFilePathFor(row.folderPath, row.brainId);
+    await input.sandbox.commands.run(
+      `mkdir -p ${shellQuote(`${BRAIN_ROOT}/${path.posix.dirname(relativePath)}`)}`,
+      { timeoutMs: 30_000 },
+    );
+    await input.sandbox.files.write(`${BRAIN_ROOT}/${relativePath}`, row.content);
+    files.push(materializedFileFromDb({ ...row, path: relativePath }));
+  }
+  return { files };
+}
+
+export async function materializeBrainToLocalRoot(input: {
+  root: string;
+  userWorkosId: string;
+}): Promise<MaterializedBrainSnapshot & { cliPath: string }> {
+  const brainRef = await resolveBrainRefForUser(input.userWorkosId);
+  const files = await materializeBrainFilesToRoot({
+    brainRef,
+    root: input.root,
+    cliSource: getBrainCliSource(),
+    db: getDb(),
+  });
+  return {
+    files: files.map(materializedFileFromDb),
+    cliPath: path.join(input.root, "opencompany-brain.mjs"),
+  };
+}
+
+export async function syncBrainFromSandbox(input: {
+  sandbox: SandboxHandle;
+  userWorkosId: string;
+  taskId?: string | null;
+  baseSnapshot: MaterializedBrainSnapshot;
+}): Promise<void> {
+  const listed = await input.sandbox.commands.run(
+    `if [ -d ${shellQuote(BRAIN_ROOT)} ]; then find ${shellQuote(
+      BRAIN_ROOT,
+    )} -type f -name '*.md' -not -path '*/.*/*' | sort; fi`,
+    { timeoutMs: 30_000 },
+  );
+  const files: BrainSyncFile[] = [];
+  for (const absolutePath of listed.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)) {
+    if (!absolutePath.startsWith(`${BRAIN_ROOT}/`)) continue;
+    const relativePath = absolutePath.slice(`${BRAIN_ROOT}/`.length);
+    const content = String(await input.sandbox.files.read(absolutePath));
+    if (Buffer.byteLength(content, "utf8") > MAX_BRAIN_SANDBOX_FILE_BYTES) {
+      throw new Error(`Brain file "${relativePath}" is too large to sync.`);
+    }
+    files.push({ path: relativePath, content });
+  }
+  const folders = await readSandboxFolderManifest(input.sandbox);
+  await syncFiles({
+    userWorkosId: input.userWorkosId,
+    files,
+    folders,
+    baseSnapshot: input.baseSnapshot,
+    taskId: input.taskId ?? null,
+  });
+}
+
+export async function syncBrainFromLocalRoot(input: {
+  root: string;
+  userWorkosId: string;
+  taskId?: string | null;
+  baseSnapshot: MaterializedBrainSnapshot;
+}): Promise<void> {
+  const files = await readBrainFilesFromRoot(input.root);
+  await syncFiles({
+    userWorkosId: input.userWorkosId,
+    files,
+    baseSnapshot: input.baseSnapshot,
+    taskId: input.taskId ?? null,
+  });
+}
+
+async function syncFiles(input: {
+  userWorkosId: string;
+  files: BrainSyncFile[];
+  folders?: ReturnType<typeof parseBrainFolderManifest> | null;
+  baseSnapshot: MaterializedBrainSnapshot;
+  taskId?: string | null;
+}) {
+  const brainRef = await resolveBrainRefForUser(input.userWorkosId);
+  const result = await syncBrainFiles({
+    brainRef,
+    userWorkosId: input.userWorkosId,
+    files: input.files,
+    folders: input.folders ?? null,
+    baseSnapshot: input.baseSnapshot.files.map(dbMaterializedFileFromRunner),
+    taskId: input.taskId ?? null,
+    db: getDb(),
+  });
+  if (result.conflicts.length > 0) {
+    throw new Error(
+      `Brain changed while the task was running. Retry before writing ${result.conflicts
+        .map((conflict) => conflict.path)
+        .join(", ")}.`,
+    );
+  }
+}
+
+async function readSandboxFolderManifest(sandbox: SandboxHandle) {
+  try {
+    const source = String(await sandbox.files.read(`${BRAIN_ROOT}/${BRAIN_FOLDER_MANIFEST_PATH}`));
+    return parseBrainFolderManifest(source);
+  } catch {
+    return null;
+  }
+}
+
+function materializedFileFromDb(input: DbMaterializedBrainFile): MaterializedBrainFile;
+function materializedFileFromDb(input: {
+  id: string;
+  brainId: string;
+  folderPath: string;
+  path: string;
+  contentHash: string;
+  assetContentHash?: string | null;
+}): MaterializedBrainFile;
+function materializedFileFromDb(input: {
+  id: string;
+  brainId: string;
+  folderPath: string;
+  path: string;
+  contentHash: string;
+  assetContentHash?: string | null;
+}): MaterializedBrainFile {
+  return {
+    documentId: input.id,
+    brainId: input.brainId,
+    folderPath: input.folderPath,
+    relativePath: input.path,
+    contentHash: input.contentHash,
+    ...(input.assetContentHash !== undefined ? { assetContentHash: input.assetContentHash } : {}),
+  };
+}
+
+function dbMaterializedFileFromRunner(input: MaterializedBrainFile): DbMaterializedBrainFile {
+  return {
+    id: input.documentId,
+    brainId: input.brainId,
+    folderPath: input.folderPath,
+    path: input.relativePath,
+    contentHash: input.contentHash,
+    ...(input.assetContentHash !== undefined ? { assetContentHash: input.assetContentHash } : {}),
+  };
+}
+
+// Runner work has no interactive session, so it targets the user's default
+// ("General") brain; the chat surface targets the user's active brain instead.
+async function resolveBrainRefForUser(userWorkosId: string): Promise<string> {
+  const brain = await getDefaultBrainForUser(userWorkosId, { db: getDb() });
+  if (!brain) {
+    throw new Error(`No accessible opencompany brain found for user ${userWorkosId}.`);
+  }
+  return brain.id;
+}
+
+function nextAvailableBrainId(
+  rows: Awaited<ReturnType<typeof listBrainFiles>>,
+  title: string,
+): string {
+  const base = normalizeBrainId(title) || "research-report";
+  const used = new Set(rows.map((row) => row.brainId));
+  if (!used.has(base)) return base;
+  for (let index = 2; index < 1000; index++) {
+    const candidate = `${base}-${index}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  throw new Error("Could not allocate a unique brain id.");
+}
+
+function firstMarkdownHeading(markdown: string) {
+  for (const line of markdown.split(/\r?\n/)) {
+    const match = /^#\s+(.+?)\s*$/.exec(line);
+    if (match?.[1]) return match[1].trim();
+  }
+  return "";
+}
+
+function brainDocumentUrl(folderPath: string, brainId: string) {
+  return `/brain/${folderPath}/${brainId}`;
+}
+
+export async function writeLocalBrainFile(root: string, relativePath: string, content: string) {
+  const target = path.join(root, relativePath);
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, content, "utf8");
+}
+
+export async function readLocalBrainFile(root: string, relativePath: string) {
+  return readFile(path.join(root, relativePath), "utf8");
+}
+
+export async function clearLocalBrainRoot(root: string) {
+  await rm(root, { recursive: true, force: true });
+}

@@ -2,23 +2,23 @@ import "server-only";
 
 import {
   ChatShareIdSchema,
-  createOpenCompanyClient,
+  createApiClient,
   PublicChatShareEnvelopeSchema,
   PublicChatShareMetadataEnvelopeSchema,
 } from "@opencompany/protocol";
-import type { GoatChatUiMessage } from "@/lib/chat-ui";
+import type { ChatUiMessage } from "@/lib/chat-ui";
 
-export type PublicGoatChatMetadata = {
+export type PublicChatMetadata = {
   shareId: string;
   title: string;
   kind: "chat" | "task";
   engine: "opencompany" | "codex" | "claude_code";
 };
-export type PublicGoatChatView = PublicGoatChatMetadata & {
-  messages: GoatChatUiMessage[];
+export type PublicChatView = PublicChatMetadata & {
+  messages: ChatUiMessage[];
 };
 
-export async function loadPublicGoatChat(shareIdInput: string): Promise<PublicGoatChatView | null> {
+export async function loadPublicChat(shareIdInput: string): Promise<PublicChatView | null> {
   const shareId = validShareId(shareIdInput);
   if (!shareId) return null;
   const response = await publicApiClient().public["chat-shares"][":shareId"].$get({
@@ -29,13 +29,13 @@ export async function loadPublicGoatChat(shareIdInput: string): Promise<PublicGo
   const envelope = PublicChatShareEnvelopeSchema.parse(await response.json());
   return {
     ...envelope.data,
-    messages: envelope.data.messages as unknown as GoatChatUiMessage[],
+    messages: envelope.data.messages as unknown as ChatUiMessage[],
   };
 }
 
-export async function loadPublicGoatChatMetadata(
+export async function loadPublicChatMetadata(
   shareIdInput: string,
-): Promise<PublicGoatChatMetadata | null> {
+): Promise<PublicChatMetadata | null> {
   const shareId = validShareId(shareIdInput);
   if (!shareId) return null;
   const response = await publicApiClient().public["chat-shares"][":shareId"].metadata.$get({
@@ -52,7 +52,7 @@ function validShareId(value: string) {
 }
 
 function publicApiClient() {
-  return createOpenCompanyClient(publicApiOrigin(process.env.GOAT_API_ORIGIN), {
+  return createApiClient(publicApiOrigin(process.env.GOAT_API_ORIGIN), {
     fetch: (request: RequestInfo | URL, init?: RequestInit) =>
       globalThis.fetch(request, { ...init, cache: "no-store" }),
   });

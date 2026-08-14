@@ -1,6 +1,5 @@
 "use client";
 
-import { parentWikiPath } from "@opencompany/goat-wiki";
 import {
   type BrainDocumentReadModel,
   BrainDocumentReadModelSchema,
@@ -19,6 +18,7 @@ import {
   type WikiTimelineReadModel,
   WikiTimelineReadModelSchema,
 } from "@opencompany/protocol";
+import { parentWikiPath } from "@opencompany/wiki";
 import { electricCollectionOptions } from "@tanstack/electric-db-collection";
 import { createCollection } from "@tanstack/react-db";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";

@@ -2545,7 +2545,7 @@ export const WorkspaceCommandEnvelopeSchema = z
 export const CreateWorkspaceBodySchema = z
   .object({
     workspaceId: ResourceIdSchema.refine((value: string) => value.startsWith("goat_ws_"), {
-      message: "workspaceId must be a Goat workspace id.",
+      message: "workspaceId must be an opencompany workspace id.",
     }),
     name: z.string().trim().min(1).max(80),
   })
@@ -2628,7 +2628,7 @@ export const SaveOnboardingProfileBodySchema = z
 export const SaveOnboardingWorkspaceBodySchema = z
   .object({
     workspaceId: ResourceIdSchema.refine((value: string) => value.startsWith("goat_ws_"), {
-      message: "workspaceId must be a Goat workspace id.",
+      message: "workspaceId must be an opencompany workspace id.",
     }),
     name: z.string().trim().min(1).max(80),
     slug: z

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { MarkdownGoatBrainEditor } from "./MarkdownGoatBrainEditor";
+import { MarkdownBrainEditor } from "./MarkdownBrainEditor";
 
 // jsdom has no layout; ProseMirror's post-dispatch scrollIntoView asks ranges
 // for client rects, and cmdk needs ResizeObserver + element scrollIntoView.
@@ -34,14 +34,14 @@ vi.mock("@tiptap/react", async (importOriginal) => {
   };
 });
 
-describe("wiki slash command inside MarkdownGoatBrainEditor", () => {
+describe("wiki slash command inside MarkdownBrainEditor", () => {
   it("selects the /page entry with Enter and with a click", async () => {
     const createPage = vi
       .fn()
       .mockReturnValue({ id: "page-1", slug: "untitled", path: "untitled", title: "" });
     const onPageCreated = vi.fn();
     render(
-      <MarkdownGoatBrainEditor
+      <MarkdownBrainEditor
         content=""
         onChange={vi.fn()}
         brainLinks={{}}

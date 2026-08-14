@@ -1,39 +1,39 @@
 import { createHash } from "node:crypto";
-import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
+import { getAppUrl } from "@opencompany/agent/app-url";
+import { captureIntegrationAddedAnalytics } from "@opencompany/agent/integrations/analytics";
 import {
-  GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
-  upsertGoatBrainSourceItemAndEnqueue,
-} from "@opencompany/db/goat-brain-ingest";
-import {
-  type GoatGitHubPullRequestEventInsert,
-  goatGitHubEnabledEventTypes,
-  goatGitHubSelectedRepoIds,
-  insertGoatGitHubPullRequestEvents,
-  listEnabledGoatGitHubBrainSourceRoutes,
-  listGoatGitHubIntegrationsForInstallation,
-} from "@opencompany/db/goat-github";
-import { markGoatIntegrationStatus } from "@opencompany/db/goat-integrations";
-import { getGoatAppUrl } from "@opencompany/goat-agent/app-url";
-import { captureGoatIntegrationAddedAnalytics } from "@opencompany/goat-agent/integrations/analytics";
-import {
-  appendGoatGitHubIntegrationStatus,
-  buildGoatGitHubInstallUrl,
-  buildGoatGitHubUserAuthorizationUrl,
-  createGoatGitHubIntegrationState,
-  exchangeGoatGitHubUserCode,
-  getGoatGitHubInstallation,
-  isGoatGitHubIntegrationConfigured,
-  listGoatGitHubInstallationRepositories,
-  syncGoatGitHubIntegrationRepositories,
-  verifyGoatGitHubIntegrationState,
-  verifyGoatGitHubUserInstallation,
-} from "@opencompany/goat-agent/integrations/github";
-import { verifyGoatGitHubWebhookSignature } from "@opencompany/goat-agent/integrations/github-signature";
+  appendGitHubIntegrationStatus,
+  buildGitHubInstallUrl,
+  buildGitHubUserAuthorizationUrl,
+  createGitHubIntegrationState,
+  exchangeGitHubUserCode,
+  getGitHubInstallation,
+  isGitHubIntegrationConfigured,
+  listGitHubInstallationRepositories,
+  syncGitHubIntegrationRepositories,
+  verifyGitHubIntegrationState,
+  verifyGitHubUserInstallation,
+} from "@opencompany/agent/integrations/github";
+import { verifyGitHubWebhookSignature } from "@opencompany/agent/integrations/github-signature";
+import { captureProductIngestionQuotaAnalytics } from "@opencompany/analytics/product";
 import {
   BrainSourceNormalizationError,
   githubActivityEventType,
   normalizeGitHubActivityWebhook,
-} from "@opencompany/goat-brain";
+} from "@opencompany/brain";
+import {
+  BRAIN_AGENT_INGEST_JOB_KIND,
+  upsertBrainSourceItemAndEnqueue,
+} from "@opencompany/db/brain-ingest";
+import {
+  type GitHubPullRequestEventInsert,
+  gitHubEnabledEventTypes,
+  gitHubSelectedRepoIds,
+  insertGitHubPullRequestEvents,
+  listEnabledGitHubBrainSourceRoutes,
+  listGitHubIntegrationsForInstallation,
+} from "@opencompany/db/github";
+import { markIntegrationStatus } from "@opencompany/db/integrations";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
 import { type IngressSession, resolveIngressSession, sessionRedirect } from "./ingress-session";
@@ -75,16 +75,16 @@ async function handleStart(input: IngressInput, request: Request): Promise<Respo
   if (session.role !== "admin") {
     return statusRedirect(session, returnTo, "error", "admin_required");
   }
-  if (!isGoatGitHubIntegrationConfigured()) {
+  if (!isGitHubIntegrationConfigured()) {
     return statusRedirect(session, returnTo, "error", "not_configured");
   }
 
-  const state = createGoatGitHubIntegrationState({
+  const state = createGitHubIntegrationState({
     userWorkosId: session.userId,
     workspaceId: session.workspaceId,
     returnTo,
   });
-  return sessionRedirect(session, buildGoatGitHubInstallUrl(state));
+  return sessionRedirect(session, buildGitHubInstallUrl(state));
 }
 
 async function handleCallback(input: IngressInput, request: Request): Promise<Response> {
@@ -93,13 +93,13 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
   const url = new URL(request.url);
   const stateValue = url.searchParams.get("state") ?? "";
 
-  let state: ReturnType<typeof verifyGoatGitHubIntegrationState>;
+  let state: ReturnType<typeof verifyGitHubIntegrationState>;
   try {
-    state = verifyGoatGitHubIntegrationState(stateValue);
+    state = verifyGitHubIntegrationState(stateValue);
   } catch {
     return sessionRedirect(
       session,
-      new URL("/settings?integration=github&setup=error&reason=invalid_state", getGoatAppUrl()),
+      new URL("/settings?integration=github&setup=error&reason=invalid_state", getAppUrl()),
     );
   }
 
@@ -115,7 +115,7 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
     return statusRedirect(session, state.returnTo, "error", "admin_required");
   }
 
-  if (!isGoatGitHubIntegrationConfigured()) {
+  if (!isGitHubIntegrationConfigured()) {
     return statusRedirect(session, state.returnTo, "error", "not_configured");
   }
 
@@ -130,25 +130,25 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
   }
 
   if (!code) {
-    const nextState = createGoatGitHubIntegrationState({
+    const nextState = createGitHubIntegrationState({
       userWorkosId: state.userWorkosId,
       workspaceId: state.workspaceId,
       returnTo: state.returnTo,
       installationId,
     });
-    return sessionRedirect(session, buildGoatGitHubUserAuthorizationUrl(nextState));
+    return sessionRedirect(session, buildGitHubUserAuthorizationUrl(nextState));
   }
 
   try {
-    const userToken = await exchangeGoatGitHubUserCode(code);
-    const verifiedInstallation = await verifyGoatGitHubUserInstallation({
+    const userToken = await exchangeGitHubUserCode(code);
+    const verifiedInstallation = await verifyGitHubUserInstallation({
       userToken,
       installationId,
     });
-    const installation = await getGoatGitHubInstallation({ installationId });
-    const repositories = await listGoatGitHubInstallationRepositories({ installationId });
+    const installation = await getGitHubInstallation({ installationId });
+    const repositories = await listGitHubInstallationRepositories({ installationId });
 
-    await syncGoatGitHubIntegrationRepositories(
+    await syncGitHubIntegrationRepositories(
       {
         userWorkosId: session.userId,
         workspaceId: state.workspaceId,
@@ -159,7 +159,7 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
       },
       input.db,
     );
-    await captureGoatIntegrationAddedAnalytics({
+    await captureIntegrationAddedAnalytics({
       userWorkosId: session.userId,
       workspaceId: state.workspaceId,
       provider: "github",
@@ -177,7 +177,7 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
 
 async function handleWebhook(input: IngressInput, request: Request): Promise<Response> {
   const rawBody = await request.text();
-  const verified = verifyGoatGitHubWebhookSignature({
+  const verified = verifyGitHubWebhookSignature({
     rawBody,
     signature: request.headers.get("x-hub-signature-256"),
   });
@@ -232,11 +232,11 @@ async function handleInstallationEvent(db: DbLike, payload: Record<string, unkno
   const installationId = readInstallationId(payload);
   if (!installationId) return { ok: true, ignored: true };
 
-  const integrations = await listGoatGitHubIntegrationsForInstallation(installationId, db);
+  const integrations = await listGitHubIntegrationsForInstallation(installationId, db);
   let marked = 0;
   for (const integration of integrations) {
     if (integration.status === "disconnected") continue;
-    await markGoatIntegrationStatus({
+    await markIntegrationStatus({
       userWorkosId: integration.userWorkosId,
       integrationId: integration.id,
       provider: "github",
@@ -280,11 +280,11 @@ async function handleActivityEvent(
   const installationId = readInstallationId(payload);
   if (!installationId) return { ok: true, dropped: true };
 
-  const integrations = await listGoatGitHubIntegrationsForInstallation(installationId, db);
+  const integrations = await listGitHubIntegrationsForInstallation(installationId, db);
   const connected = integrations.filter((integration) => integration.status === "connected");
   if (connected.length === 0) return { ok: true, dropped: true };
 
-  const routes = await listEnabledGoatGitHubBrainSourceRoutes(
+  const routes = await listEnabledGitHubBrainSourceRoutes(
     connected.map((integration) => integration.id),
     db,
   );
@@ -292,8 +292,8 @@ async function handleActivityEvent(
   const eventType = githubActivityEventType(item.content.activity);
   const brainRefsByIntegration = new Map<string, string[]>();
   for (const route of routes) {
-    if (!goatGitHubSelectedRepoIds(route.config).has(repoId)) continue;
-    if (!goatGitHubEnabledEventTypes(route.config).has(eventType)) continue;
+    if (!gitHubSelectedRepoIds(route.config).has(repoId)) continue;
+    if (!gitHubEnabledEventTypes(route.config).has(eventType)) continue;
     const refs = brainRefsByIntegration.get(route.integrationId) ?? [];
     refs.push(route.brainRef);
     brainRefsByIntegration.set(route.integrationId, refs);
@@ -311,7 +311,7 @@ async function handleActivityEvent(
     if (pullRequestNumber === undefined || !pullRequestEventType) {
       return { ok: true, dropped: true };
     }
-    const inserts: GoatGitHubPullRequestEventInsert[] = connected.flatMap((integration) => {
+    const inserts: GitHubPullRequestEventInsert[] = connected.flatMap((integration) => {
       const brainRefs = brainRefsByIntegration.get(integration.id);
       if (!brainRefs || brainRefs.length === 0) return [];
       return [
@@ -328,7 +328,7 @@ async function handleActivityEvent(
         },
       ];
     });
-    const buffered = await insertGoatGitHubPullRequestEvents(inserts, db);
+    const buffered = await insertGitHubPullRequestEvents(inserts, db);
     return { ok: true, buffered };
   }
 
@@ -336,17 +336,17 @@ async function handleActivityEvent(
   for (const integration of connected) {
     const brainRefs = brainRefsByIntegration.get(integration.id);
     if (!brainRefs || brainRefs.length === 0) continue;
-    const result = await upsertGoatBrainSourceItemAndEnqueue({
+    const result = await upsertBrainSourceItemAndEnqueue({
       userWorkosId: integration.userWorkosId,
       sourceConnectionId: integration.id,
       integrationId: integration.id,
       item,
       rawPayload: payload,
-      kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+      kind: BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
       db,
     });
-    captureGoatIngestionQuotaAnalytics(result.quotaUpdates);
+    captureProductIngestionQuotaAnalytics(result.quotaUpdates);
     enqueued += result.jobIds.length;
   }
 
@@ -361,7 +361,7 @@ function statusRedirect(
 ) {
   return sessionRedirect(
     session,
-    new URL(appendGoatGitHubIntegrationStatus(returnTo, status, reason), getGoatAppUrl()),
+    new URL(appendGitHubIntegrationStatus(returnTo, status, reason), getAppUrl()),
   );
 }
 

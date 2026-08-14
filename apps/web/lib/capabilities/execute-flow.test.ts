@@ -15,36 +15,36 @@ const mocks = vi.hoisted(() => ({
   autoRefill: vi.fn(),
 }));
 
-vi.mock("@opencompany/db/goat-capabilities", () => ({
-  consumeGoatCapabilityApprovalByToolCall: mocks.consumeApproval,
-  createGoatCapabilityRun: mocks.createRun,
-  getGoatCapabilitySessionBudgetUsdMicros: mocks.getBudget,
-  isGoatWorkspaceCapabilityEnabled: mocks.isWorkspaceCapabilityEnabled,
-  markGoatCapabilityRunStarted: mocks.markStarted,
-  markGoatCapabilityRunSettlementFailure: mocks.markSettlementFailure,
-  markGoatCapabilityRunStopping: mocks.markStopping,
-  settleGoatCapabilityRun: mocks.settleRun,
-  sumGoatCapabilitySessionSpendUsdMicros: mocks.sumSpend,
+vi.mock("@opencompany/db/capabilities", () => ({
+  consumeCapabilityApprovalByToolCall: mocks.consumeApproval,
+  createCapabilityRun: mocks.createRun,
+  getCapabilitySessionBudgetUsdMicros: mocks.getBudget,
+  isWorkspaceCapabilityEnabled: mocks.isWorkspaceCapabilityEnabled,
+  markCapabilityRunStarted: mocks.markStarted,
+  markCapabilityRunSettlementFailure: mocks.markSettlementFailure,
+  markCapabilityRunStopping: mocks.markStopping,
+  settleCapabilityRun: mocks.settleRun,
+  sumCapabilitySessionSpendUsdMicros: mocks.sumSpend,
 }));
-vi.mock("@opencompany/db/goat-billing", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@opencompany/db/goat-billing")>()),
-  ensureGoatMonthlyIncludedUsage: vi.fn().mockResolvedValue({ ok: false, reason: "current" }),
+vi.mock("@opencompany/db/billing", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@opencompany/db/billing")>()),
+  ensureMonthlyIncludedUsage: vi.fn().mockResolvedValue({ ok: false, reason: "current" }),
 }));
-vi.mock("@opencompany/db/goat-credits", () => ({
-  getGoatCreditBalanceUsdMicros: mocks.getBalance,
-  recordGoatCreditDebit: mocks.recordDebit,
+vi.mock("@opencompany/db/credits", () => ({
+  getCreditBalanceUsdMicros: mocks.getBalance,
+  recordCreditDebit: mocks.recordDebit,
 }));
 vi.mock("@opencompany/billing/auto-refill", () => ({
-  maybeTriggerGoatAutoRefill: mocks.autoRefill,
+  maybeTriggerAutoRefill: mocks.autoRefill,
 }));
 
-import type { GoatActionExecuteContext } from "@/lib/actions/types";
-import { GoatActionInvalidParamsError } from "@/lib/actions/types";
+import type { ActionExecuteContext } from "@/lib/actions/types";
+import { ActionInvalidParamsError } from "@/lib/actions/types";
 import type { ManagedCapabilityActionSpec } from "@/lib/capabilities/catalog";
 import {
+  CAPABILITY_ASYNC_RUNS_PER_TURN,
   evaluateManagedCapabilityApproval,
   executeManagedCapability,
-  GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
 } from "@/lib/capabilities/execute";
 import {
   MonidApiError,
@@ -225,7 +225,7 @@ describe("executeManagedCapability", () => {
     const action = {
       ...spec(),
       mapOutput: () => {
-        throw new GoatActionInvalidParamsError("Use the canonical LinkedIn company URL.");
+        throw new ActionInvalidParamsError("Use the canonical LinkedIn company URL.");
       },
     };
     const client = fakeClient({
@@ -240,7 +240,7 @@ describe("executeManagedCapability", () => {
         context: context(),
         client,
       }),
-    ).rejects.toMatchObject({ name: "GoatActionInvalidParamsError" });
+    ).rejects.toMatchObject({ name: "ActionInvalidParamsError" });
 
     expect(mocks.recordDebit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -658,7 +658,7 @@ describe("executeManagedCapability", () => {
 
   it("permits six asynchronous runs per turn and rejects a seventh without quoting it", async () => {
     const sharedContext = context();
-    const clients = Array.from({ length: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN + 1 }, (_, index) =>
+    const clients = Array.from({ length: CAPABILITY_ASYNC_RUNS_PER_TURN + 1 }, (_, index) =>
       fakeClient({
         inspection: inspectPrice(0.01),
         run: providerRun({
@@ -687,35 +687,35 @@ describe("executeManagedCapability", () => {
     );
 
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(
-      GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+      CAPABILITY_ASYNC_RUNS_PER_TURN,
     );
     const [rejected] = results.filter((result) => result.status === "rejected");
     expect(rejected?.reason).toMatchObject({
       code: "call_budget",
-      message: `Only ${GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN} long-running paid capabilities can be started in a turn.`,
+      message: `Only ${CAPABILITY_ASYNC_RUNS_PER_TURN} long-running paid capabilities can be started in a turn.`,
     });
     expect(clients.reduce((calls, client) => calls + client.run.mock.calls.length, 0)).toBe(
-      GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+      CAPABILITY_ASYNC_RUNS_PER_TURN,
     );
     expect(clients.reduce((calls, client) => calls + client.getRun.mock.calls.length, 0)).toBe(
-      GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+      CAPABILITY_ASYNC_RUNS_PER_TURN,
     );
     expect(sharedContext.capabilityTurnState).toMatchObject({
-      quotedTotalUsdMicros: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN * 10_000,
-      asyncRunsStarted: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+      quotedTotalUsdMicros: CAPABILITY_ASYNC_RUNS_PER_TURN * 10_000,
+      asyncRunsStarted: CAPABILITY_ASYNC_RUNS_PER_TURN,
       admittedToolCallIds: Array.from(
-        { length: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN },
+        { length: CAPABILITY_ASYNC_RUNS_PER_TURN },
         (_, index) => `tool_${index + 1}`,
       ),
     });
     expect(sharedContext.capabilityTurnState?.quotesByToolCallId.size).toBe(
-      GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+      CAPABILITY_ASYNC_RUNS_PER_TURN,
     );
   });
 
   it("releases a pre-admitted quote when the asynchronous run limit is reached", async () => {
     const sharedContext = context();
-    sharedContext.capabilityTurnState!.asyncRunsStarted = GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN;
+    sharedContext.capabilityTurnState!.asyncRunsStarted = CAPABILITY_ASYNC_RUNS_PER_TURN;
     const client = fakeClient({
       inspection: inspectPrice(0.01),
       run: providerRun(),
@@ -748,7 +748,7 @@ describe("executeManagedCapability", () => {
     expect(sharedContext.capabilityTurnState).toMatchObject({
       quotedTotalUsdMicros: 0,
       admittedToolCallIds: [],
-      asyncRunsStarted: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+      asyncRunsStarted: CAPABILITY_ASYNC_RUNS_PER_TURN,
     });
     expect(sharedContext.capabilityTurnState?.quotesByToolCallId.size).toBe(0);
   });
@@ -804,7 +804,7 @@ describe("executeManagedCapability", () => {
   });
 });
 
-function context(): GoatActionExecuteContext {
+function context(): ActionExecuteContext {
   return {
     userWorkosId: "user_1",
     workspaceId: "workspace_1",

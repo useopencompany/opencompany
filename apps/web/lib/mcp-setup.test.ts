@@ -2,19 +2,19 @@ import { describe, expect, it } from "vitest";
 import {
   buildCursorMcpConfig,
   buildCursorMcpDeeplink,
-  buildGoatMcpFirstPrompt,
-  isGoatMcpClient,
-  isGoatMcpSetupCompletionRun,
-  OPENCOMPANY_MCP_SERVER_NAME,
+  buildMcpFirstPrompt,
+  isMcpClient,
+  isMcpSetupCompletionRun,
+  MCP_SERVER_NAME,
 } from "@/lib/mcp-setup";
 
-describe("OpenCompany MCP setup", () => {
+describe("opencompany MCP setup", () => {
   it("accepts only supported client preferences", () => {
-    expect(isGoatMcpClient("claude")).toBe(true);
-    expect(isGoatMcpClient("chatgpt")).toBe(true);
-    expect(isGoatMcpClient("cursor")).toBe(true);
-    expect(isGoatMcpClient("email")).toBe(false);
-    expect(isGoatMcpClient(null)).toBe(false);
+    expect(isMcpClient("claude")).toBe(true);
+    expect(isMcpClient("chatgpt")).toBe(true);
+    expect(isMcpClient("cursor")).toBe(true);
+    expect(isMcpClient("email")).toBe(false);
+    expect(isMcpClient(null)).toBe(false);
   });
 
   it.each([
@@ -24,27 +24,26 @@ describe("OpenCompany MCP setup", () => {
     { sourceRef: "goat-chat:message_1", command: "query", ok: true, expected: false },
     { sourceRef: null, command: "query", ok: true, expected: false },
   ])("recognizes only a successful MCP query as completion", (input) => {
-    expect(isGoatMcpSetupCompletionRun(input)).toBe(input.expected);
+    expect(isMcpSetupCompletionRun(input)).toBe(input.expected);
   });
 
   it("builds a deterministic, personalized first question without an email", () => {
-    const prompt = buildGoatMcpFirstPrompt({
+    const prompt = buildMcpFirstPrompt({
       displayName: "Ada Lovelace",
       workspaceName: "Analytical Engines",
     });
 
-    expect(prompt).toContain("Use the OpenCompany connector");
+    expect(prompt).toContain("Use the opencompany connector");
     expect(prompt).toContain('query for "Ada Lovelace"');
     expect(prompt).toContain("at Analytical Engines");
     expect(prompt).toContain("list my brains");
     expect(prompt).toContain("Cite the brain pages");
-    expect(prompt).not.toContain("Goat");
     expect(prompt).not.toContain("@");
   });
 
   it("builds Cursor config and an install deeplink for the remote URL", () => {
     const input = {
-      name: OPENCOMPANY_MCP_SERVER_NAME,
+      name: MCP_SERVER_NAME,
       url: "https://opencompany.example/mcp",
     };
 

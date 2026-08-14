@@ -1,6 +1,6 @@
 # Agent MCP
 
-OpenCompany supports local agent MCP configuration for Conductor workspaces, Claude Code, and Codex.
+opencompany supports local agent MCP configuration for Conductor workspaces, Claude Code, and Codex.
 The current project-level MCP server is SigNoz Cloud.
 
 Conductor does not use a separate MCP format. Claude Code reads `.mcp.json` from the repository root,
@@ -9,7 +9,7 @@ gitignored because MCP auth can create machine-specific credentials.
 
 ## Configure SigNoz
 
-OpenCompany's default SigNoz MCP region is `eu2`, so most local and Conductor workspaces only need:
+opencompany's default SigNoz MCP region is `eu2`, so most local and Conductor workspaces only need:
 
 ```sh
 bun run mcp:configure

@@ -1,23 +1,20 @@
 import { createHash } from "node:crypto";
+import {
+  BRAIN_ASSET_MAX_BYTES,
+  brainAssetUploadPrefix,
+  createBrainAssetForUser,
+  replaceBrainAssetForUser,
+  validateBrainAssetFile,
+  validateBrainAssetFolderPath,
+} from "@opencompany/agent/brain-assets";
+import { type BrainDocumentView, documentViewFromFileRow } from "@opencompany/agent/brain-files";
 import type { Actor, BrainDocument, KnowledgeApplicationService } from "@opencompany/core";
-import { getGoatBrainFile, getGoatBrainFileById } from "@opencompany/db/goat-brain-files";
+import { getBrainFile, getBrainFileById } from "@opencompany/db/brain-files";
 import {
-  type GoatBrainDocument as GoatBrainDocumentRow,
-  type GoatKnowledgeCommandOperation,
-  goatKnowledgeCommandIdempotency,
-} from "@opencompany/db/goat-schema";
-import {
-  createGoatBrainAssetForUser,
-  GOAT_BRAIN_ASSET_MAX_BYTES,
-  goatBrainAssetUploadPrefix,
-  replaceGoatBrainAssetForUser,
-  validateGoatBrainAssetFile,
-  validateGoatBrainAssetFolderPath,
-} from "@opencompany/goat-agent/brain-assets";
-import {
-  documentViewFromFileRow,
-  type GoatBrainDocumentView,
-} from "@opencompany/goat-agent/brain-files";
+  type BrainDocument as BrainDocumentRow,
+  type KnowledgeCommandOperation,
+  knowledgeCommandIdempotency,
+} from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import { del, get, put } from "@vercel/blob";
 import { and, eq } from "drizzle-orm";
@@ -99,10 +96,7 @@ export function createBrainAssetService(input: {
         request,
         proposedResourceId: proposedDocumentId,
       });
-      const existing = await getGoatBrainFileById(
-        { fileId: reservation.resourceId },
-        { db: input.db },
-      );
+      const existing = await getBrainFileById({ fileId: reservation.resourceId }, { db: input.db });
       if (existing && reservation.completed) return mutationFromRow(existing, true);
       if (existing) {
         if (!matchesAsset(existing, request)) throw idempotencyConflict();
@@ -114,14 +108,14 @@ export function createBrainAssetService(input: {
       }
 
       const stored = await storage.put({
-        pathname: `${goatBrainAssetUploadPrefix(brainId)}${reservation.commandId}/${safePathSegment(file.filename)}`,
+        pathname: `${brainAssetUploadPrefix(brainId)}${reservation.commandId}/${safePathSegment(file.filename)}`,
         bytes: file.bytes,
         mediaType: file.mediaType,
       });
-      let result: Awaited<ReturnType<typeof createGoatBrainAssetForUser>>;
+      let result: Awaited<ReturnType<typeof createBrainAssetForUser>>;
       try {
         result = await input.db.transaction((tx: any) =>
-          createGoatBrainAssetForUser(
+          createBrainAssetForUser(
             {
               brainRef: brainId,
               userWorkosId: command.actor.userId,
@@ -143,10 +137,7 @@ export function createBrainAssetService(input: {
           );
         }
       } catch (error) {
-        const winner = await getGoatBrainFileById(
-          { fileId: reservation.resourceId },
-          { db: input.db },
-        );
+        const winner = await getBrainFileById({ fileId: reservation.resourceId }, { db: input.db });
         if (winner && matchesAsset(winner, request)) {
           if (winner.assetStorageKey !== stored.url) {
             await cleanupStoredAsset(storage, stored.url, "upload_race_loser");
@@ -167,7 +158,7 @@ export function createBrainAssetService(input: {
 
     async replace(command) {
       const brainId = await input.knowledge.authorizeBrainWrite(command.actor, command.brainId);
-      const current = await getGoatBrainFile(
+      const current = await getBrainFile(
         { brainRef: brainId, fileId: command.documentId },
         { db: input.db },
       );
@@ -192,7 +183,7 @@ export function createBrainAssetService(input: {
         proposedResourceId: current.id,
         initialStateHash: assetStateHash(current.assetStorageKey),
       });
-      const latest = await getGoatBrainFile(
+      const latest = await getBrainFile(
         { brainRef: brainId, fileId: current.id },
         { db: input.db },
       );
@@ -210,15 +201,15 @@ export function createBrainAssetService(input: {
       }
 
       const stored = await storage.put({
-        pathname: `${goatBrainAssetUploadPrefix(brainId)}${reservation.commandId}/${safePathSegment(file.filename)}`,
+        pathname: `${brainAssetUploadPrefix(brainId)}${reservation.commandId}/${safePathSegment(file.filename)}`,
         bytes: file.bytes,
         mediaType: file.mediaType,
       });
       let replacedStorageKey: string | null = null;
-      let result: Awaited<ReturnType<typeof replaceGoatBrainAssetForUser>>;
+      let result: Awaited<ReturnType<typeof replaceBrainAssetForUser>>;
       try {
         result = await input.db.transaction((tx: any) =>
-          replaceGoatBrainAssetForUser(
+          replaceBrainAssetForUser(
             {
               brainRef: brainId,
               userWorkosId: command.actor.userId,
@@ -248,7 +239,7 @@ export function createBrainAssetService(input: {
           );
         }
       } catch (error) {
-        const winner = await getGoatBrainFile(
+        const winner = await getBrainFile(
           { brainRef: brainId, fileId: latest.id },
           { db: input.db },
         );
@@ -283,7 +274,7 @@ export function createBrainAssetService(input: {
     },
 
     async download(command) {
-      const row = await getGoatBrainFileById({ fileId: command.documentId }, { db: input.db });
+      const row = await getBrainFileById({ fileId: command.documentId }, { db: input.db });
       if (!row?.assetStorageKey) throw new ApiError(404, "not_found", "Brain asset not found.");
       await input.knowledge.authorizeBrainRead(command.actor, row.brainRef);
       const blob = await storage.get({ url: row.assetStorageKey });
@@ -305,14 +296,14 @@ export function createBrainAssetService(input: {
 
 async function validatedFile(file: File) {
   const filename = normalizedFilename(file.name);
-  const validation = validateGoatBrainAssetFile({
+  const validation = validateBrainAssetFile({
     originalFileName: filename,
     mimeType: file.type,
     sizeBytes: file.size,
   });
   if (!validation.ok) throw new ApiError(400, "invalid_request", validation.message);
   const bytes = Buffer.from(await file.arrayBuffer());
-  if (bytes.byteLength > GOAT_BRAIN_ASSET_MAX_BYTES || bytes.byteLength !== file.size) {
+  if (bytes.byteLength > BRAIN_ASSET_MAX_BYTES || bytes.byteLength !== file.size) {
     throw new ApiError(400, "invalid_request", "The uploaded file size is invalid.");
   }
   return {
@@ -324,7 +315,7 @@ async function validatedFile(file: File) {
 }
 
 function validFolderPath(value: string) {
-  const validation = validateGoatBrainAssetFolderPath(value);
+  const validation = validateBrainAssetFolderPath(value);
   if (!validation.ok) throw new ApiError(400, "invalid_request", validation.message);
   return validation.folderPath;
 }
@@ -342,7 +333,7 @@ async function reserveCommand(
   input: {
     actor: Actor;
     idempotencyKey: string;
-    operation: Extract<GoatKnowledgeCommandOperation, "brain_asset.create" | "brain_asset.replace">;
+    operation: Extract<KnowledgeCommandOperation, "brain_asset.create" | "brain_asset.replace">;
     request: unknown;
     proposedResourceId: string;
     initialStateHash?: string;
@@ -355,7 +346,7 @@ async function reserveCommand(
   );
   const requestHash = commandHash(input.operation, input.request);
   const inserted = await db
-    .insert(goatKnowledgeCommandIdempotency)
+    .insert(knowledgeCommandIdempotency)
     .values({
       commandId,
       userWorkosId: input.actor.userId,
@@ -368,29 +359,29 @@ async function reserveCommand(
     })
     .onConflictDoNothing()
     .returning({
-      commandId: goatKnowledgeCommandIdempotency.commandId,
-      resourceId: goatKnowledgeCommandIdempotency.resourceId,
-      completedAt: goatKnowledgeCommandIdempotency.completedAt,
-      initialStateHash: goatKnowledgeCommandIdempotency.initialStateHash,
+      commandId: knowledgeCommandIdempotency.commandId,
+      resourceId: knowledgeCommandIdempotency.resourceId,
+      completedAt: knowledgeCommandIdempotency.completedAt,
+      initialStateHash: knowledgeCommandIdempotency.initialStateHash,
     });
   const reservation =
     inserted[0] ??
     (
       await db
         .select({
-          commandId: goatKnowledgeCommandIdempotency.commandId,
-          requestHash: goatKnowledgeCommandIdempotency.requestHash,
-          operation: goatKnowledgeCommandIdempotency.operation,
-          resourceId: goatKnowledgeCommandIdempotency.resourceId,
-          completedAt: goatKnowledgeCommandIdempotency.completedAt,
-          initialStateHash: goatKnowledgeCommandIdempotency.initialStateHash,
+          commandId: knowledgeCommandIdempotency.commandId,
+          requestHash: knowledgeCommandIdempotency.requestHash,
+          operation: knowledgeCommandIdempotency.operation,
+          resourceId: knowledgeCommandIdempotency.resourceId,
+          completedAt: knowledgeCommandIdempotency.completedAt,
+          initialStateHash: knowledgeCommandIdempotency.initialStateHash,
         })
-        .from(goatKnowledgeCommandIdempotency)
+        .from(knowledgeCommandIdempotency)
         .where(
           and(
-            eq(goatKnowledgeCommandIdempotency.userWorkosId, input.actor.userId),
-            eq(goatKnowledgeCommandIdempotency.workspaceId, input.actor.workspaceId),
-            eq(goatKnowledgeCommandIdempotency.idempotencyKey, input.idempotencyKey),
+            eq(knowledgeCommandIdempotency.userWorkosId, input.actor.userId),
+            eq(knowledgeCommandIdempotency.workspaceId, input.actor.workspaceId),
+            eq(knowledgeCommandIdempotency.idempotencyKey, input.idempotencyKey),
           ),
         )
         .limit(1)
@@ -412,13 +403,13 @@ async function reserveCommand(
 
 async function completeCommand(db: any, commandId: string) {
   await db
-    .update(goatKnowledgeCommandIdempotency)
+    .update(knowledgeCommandIdempotency)
     .set({ completedAt: new Date(), touchedAt: new Date() })
-    .where(eq(goatKnowledgeCommandIdempotency.commandId, commandId));
+    .where(eq(knowledgeCommandIdempotency.commandId, commandId));
 }
 
 function matchesAsset(
-  row: GoatBrainDocumentRow,
+  row: BrainDocumentRow,
   request: {
     brainId: string;
     folderPath?: string;
@@ -438,7 +429,7 @@ function matchesAsset(
   );
 }
 
-function mutationFromRow(row: GoatBrainDocumentRow, replayed: boolean): BrainAssetMutation {
+function mutationFromRow(row: BrainDocumentRow, replayed: boolean): BrainAssetMutation {
   return {
     document: canonicalDocumentRow(row),
     quotaPaused: false,
@@ -446,7 +437,7 @@ function mutationFromRow(row: GoatBrainDocumentRow, replayed: boolean): BrainAss
   };
 }
 
-function canonicalDocument(document: GoatBrainDocumentView): BrainDocument {
+function canonicalDocument(document: BrainDocumentView): BrainDocument {
   return {
     id: document.id,
     brainId: document.brainId,
@@ -475,7 +466,7 @@ function canonicalDocument(document: GoatBrainDocumentView): BrainDocument {
   };
 }
 
-function canonicalDocumentRow(row: GoatBrainDocumentRow) {
+function canonicalDocumentRow(row: BrainDocumentRow) {
   return canonicalDocument(documentViewFromFileRow(row));
 }
 

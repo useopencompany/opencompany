@@ -1,12 +1,12 @@
-import { GoatCapabilitiesPanel } from "@/components/GoatCapabilitiesPanel";
-import { currentGoatUser } from "@/lib/auth";
+import { CapabilitiesPanel } from "@/components/CapabilitiesPanel";
+import { currentUser } from "@/lib/auth";
 import { getWorkspaceCapabilitySettingsAction } from "@/lib/capabilities/actions";
 
 export default async function WorkspaceCapabilitiesPage() {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   const { capabilities, sessionBudgetUsdMicros } = await getWorkspaceCapabilitySettingsAction();
   return (
-    <GoatCapabilitiesPanel
+    <CapabilitiesPanel
       capabilities={capabilities}
       sessionBudgetUsdMicros={sessionBudgetUsdMicros}
       isAdmin={context.role === "admin"}

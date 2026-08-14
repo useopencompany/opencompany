@@ -1,11 +1,11 @@
-import type { GoatBrainWithWorkspace } from "@opencompany/db/goat-workspaces";
+import type { BrainWithWorkspace } from "@opencompany/db/workspaces";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@opencompany/goat-agent/brain-capture", () => ({
-  captureToGoatBrainInbox: vi.fn(),
+vi.mock("@opencompany/agent/brain-capture", () => ({
+  captureToBrainInbox: vi.fn(),
 }));
 
-import { resolveGoatMcpBrain } from "@opencompany/goat-agent/mcp-server";
+import { resolveMcpBrain } from "@opencompany/agent/mcp-server";
 
 function brainWithWorkspace(input: {
   id: string;
@@ -13,13 +13,13 @@ function brainWithWorkspace(input: {
   name?: string;
   workspaceId?: string;
   workspaceName?: string;
-}): GoatBrainWithWorkspace {
+}): BrainWithWorkspace {
   return {
     brain: {
       id: input.id,
       slug: input.slug,
       name: input.name ?? input.slug,
-    } as GoatBrainWithWorkspace["brain"],
+    } as BrainWithWorkspace["brain"],
     workspace: {
       id: input.workspaceId ?? "goat_ws_1",
       name: input.workspaceName ?? "Acme",
@@ -49,14 +49,14 @@ const research = brainWithWorkspace({
   workspaceName: "Acme",
 });
 
-describe("resolveGoatMcpBrain", () => {
+describe("resolveMcpBrain", () => {
   it("auto-selects the only accessible brain when the param is omitted", () => {
-    const result = resolveGoatMcpBrain([generalAcme], undefined);
+    const result = resolveMcpBrain([generalAcme], undefined);
     expect(result).toEqual({ ok: true, brain: generalAcme.brain });
   });
 
   it("lists the choices when the param is omitted with multiple brains", () => {
-    const result = resolveGoatMcpBrain([generalAcme, research], undefined);
+    const result = resolveMcpBrain([generalAcme, research], undefined);
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toContain(generalAcme.brain.id);
@@ -64,22 +64,22 @@ describe("resolveGoatMcpBrain", () => {
   });
 
   it("errors when the user has no brains", () => {
-    const result = resolveGoatMcpBrain([], undefined);
+    const result = resolveMcpBrain([], undefined);
     expect(result.ok).toBe(false);
   });
 
   it("resolves an exact brain id", () => {
-    const result = resolveGoatMcpBrain([generalAcme, research], research.brain.id);
+    const result = resolveMcpBrain([generalAcme, research], research.brain.id);
     expect(result).toEqual({ ok: true, brain: research.brain });
   });
 
   it("resolves a unique slug", () => {
-    const result = resolveGoatMcpBrain([generalAcme, research], "research");
+    const result = resolveMcpBrain([generalAcme, research], "research");
     expect(result).toEqual({ ok: true, brain: research.brain });
   });
 
   it("rejects a slug that matches brains in multiple workspaces", () => {
-    const result = resolveGoatMcpBrain([generalAcme, generalOther], "general");
+    const result = resolveMcpBrain([generalAcme, generalOther], "general");
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toContain(generalAcme.brain.id);
@@ -87,7 +87,7 @@ describe("resolveGoatMcpBrain", () => {
   });
 
   it("suggests list_brains for unknown brains", () => {
-    const result = resolveGoatMcpBrain([generalAcme], "missing");
+    const result = resolveMcpBrain([generalAcme], "missing");
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toContain("list_brains");

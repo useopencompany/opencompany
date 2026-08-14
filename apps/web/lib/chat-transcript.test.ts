@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { GoatChatUiMessage } from "@/lib/chat-ui";
+import type { ChatUiMessage } from "@/lib/chat-ui";
 import { composeChatTranscript } from "./chat-transcript";
 
 describe("composeChatTranscript", () => {
@@ -140,10 +140,10 @@ describe("composeChatTranscript", () => {
   });
 });
 
-function assistant(id: string, parts: GoatChatUiMessage["parts"]): GoatChatUiMessage {
+function assistant(id: string, parts: ChatUiMessage["parts"]): ChatUiMessage {
   return { id, role: "assistant", parts };
 }
 
-function user(id: string, text: string): GoatChatUiMessage {
+function user(id: string, text: string): ChatUiMessage {
   return { id, role: "user", parts: [{ type: "text", text }] };
 }

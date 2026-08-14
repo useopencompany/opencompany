@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
-  GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
-  GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION,
+  ACTION_HOST_TOOL_CONTRACT_VERSION,
+  CHAT_HOST_TOOL_CONTRACT_VERSION,
 } from "@opencompany/agent-runtime";
 import {
   type Actor,
@@ -26,14 +26,14 @@ import {
   type RunStatus,
 } from "@opencompany/core";
 import { type SQL, sql } from "drizzle-orm";
-import type { GoatChatMessageAttachment } from "./goat-schema";
+import type { ChatMessageAttachment } from "./product-schema";
 
 export const RUN_EVENT_NOTIFY_CHANNEL = "goat_run_events_v1";
 
 export type ChatSqlExecute = (query: SQL) => Promise<unknown>;
 
 export type ResolvedChatAttachments = {
-  attachments: readonly GoatChatMessageAttachment[];
+  attachments: readonly ChatMessageAttachment[];
   attachmentTexts: Readonly<Record<string, string>> | null;
 };
 
@@ -872,8 +872,8 @@ export class PostgresChatRepository implements ChatRepository {
           CASE WHEN target_chat.task_id IS NULL
             THEN ${
               input.command.engine === "opencompany"
-                ? GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION
-                : GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION
+                ? CHAT_HOST_TOOL_CONTRACT_VERSION
+                : ACTION_HOST_TOOL_CONTRACT_VERSION
             }
             ELSE NULL
           END,
@@ -1954,7 +1954,7 @@ type MessageRow = {
   conversationId: string;
   role: Message["role"];
   content: string;
-  attachments: GoatChatMessageAttachment[] | null;
+  attachments: ChatMessageAttachment[] | null;
   createdAt: Date | string;
   updatedAt: Date | string;
 };
@@ -1965,7 +1965,7 @@ type MessagePageRow = {
   conversationId: string | null;
   role: Message["role"] | null;
   content: string | null;
-  attachments: GoatChatMessageAttachment[] | null;
+  attachments: ChatMessageAttachment[] | null;
   createdAt: Date | string | null;
   updatedAt: Date | string | null;
 };
@@ -2044,7 +2044,7 @@ type ChatAttachmentUploadRow = {
 
 type ResolvedAttachmentRow = {
   id: string;
-  format: GoatChatMessageAttachment["kind"];
+  format: ChatMessageAttachment["kind"];
   mediaType: string;
   filename: string;
   sizeBytes: number;
@@ -2297,7 +2297,7 @@ function mapAttachmentUpload(row: ChatAttachmentUploadRow): ChatAttachmentUpload
   };
 }
 
-function toPublicAttachment(attachment: GoatChatMessageAttachment): MessageAttachment {
+function toPublicAttachment(attachment: ChatMessageAttachment): MessageAttachment {
   return {
     id: attachment.id,
     filename: attachment.filename,

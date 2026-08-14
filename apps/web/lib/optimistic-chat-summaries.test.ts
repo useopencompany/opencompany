@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { GoatChatSummaryView } from "@/lib/chat-ui";
-import { mergeOptimisticGoatChatSummaries } from "@/lib/optimistic-chat-summaries";
+import type { ChatSummaryView } from "@/lib/chat-ui";
+import { mergeOptimisticChatSummaries } from "@/lib/optimistic-chat-summaries";
 
-describe("mergeOptimisticGoatChatSummaries", () => {
+describe("mergeOptimisticChatSummaries", () => {
   it("puts the pending chat ahead of persisted recents", () => {
-    const merged = mergeOptimisticGoatChatSummaries({
+    const merged = mergeOptimisticChatSummaries({
       persistedChats: [persistedChat("goat_chat_existing")],
       optimisticChats: [optimisticChat("goat_chat_pending", "workspace_1")],
       workspaceId: "workspace_1",
@@ -17,7 +17,7 @@ describe("mergeOptimisticGoatChatSummaries", () => {
     const persisted = [persistedChat("goat_chat_1")];
 
     expect(
-      mergeOptimisticGoatChatSummaries({
+      mergeOptimisticChatSummaries({
         persistedChats: persisted,
         optimisticChats: [optimisticChat("goat_chat_1", "workspace_1")],
         workspaceId: "workspace_1",
@@ -27,7 +27,7 @@ describe("mergeOptimisticGoatChatSummaries", () => {
 
   it("does not leak a pending chat into another workspace", () => {
     expect(
-      mergeOptimisticGoatChatSummaries({
+      mergeOptimisticChatSummaries({
         persistedChats: [],
         optimisticChats: [optimisticChat("goat_chat_1", "workspace_1")],
         workspaceId: "workspace_2",
@@ -43,7 +43,7 @@ function optimisticChat(id: string, workspaceId: string) {
   };
 }
 
-function persistedChat(id: string): GoatChatSummaryView {
+function persistedChat(id: string): ChatSummaryView {
   return {
     id,
     title: "Generated Q3 title",

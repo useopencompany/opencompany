@@ -1,5 +1,5 @@
-import { GoatBrainRoute } from "@/components/GoatRoutes";
-import { currentGoatUser } from "@/lib/auth";
+import { BrainRoute } from "@/components/Routes";
+import { currentUser } from "@/lib/auth";
 import {
   getHeadlessBrainOverview,
   getHeadlessBrainSnapshot,
@@ -10,10 +10,10 @@ type PageProps = {
   params: Promise<{ path?: string[] }>;
 };
 
-export default async function GoatBrainPage({ params }: PageProps) {
+export default async function BrainPage({ params }: PageProps) {
   const { path } = await params;
   const segments = path ?? [];
-  const { brains, activeBrain } = await currentGoatUser();
+  const { brains, activeBrain } = await currentUser();
   const explicitBrain = segments[0] ? brains.find((brain) => brain.id === segments[0]) : null;
   const selectedBrain = explicitBrain ?? activeBrain;
   const routeBrainId = explicitBrain?.id ?? null;
@@ -37,7 +37,7 @@ export default async function GoatBrainPage({ params }: PageProps) {
   ]);
 
   return (
-    <GoatBrainRoute
+    <BrainRoute
       path={brainPath}
       routeBrainId={routeBrainId}
       selectedBrain={selectedBrain ? brainSummaryView(selectedBrain) : null}

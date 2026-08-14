@@ -15,7 +15,7 @@ vi.mock("@/lib/email/client", () => ({
 }));
 
 vi.mock("@/lib/email/unsubscribe", () => ({
-  createGoatEmailUnsubscribeUrl: vi.fn(() => "https://goat.example.test/api/email/unsubscribe"),
+  createEmailUnsubscribeUrl: vi.fn(() => "https://opencompany.example.test/api/email/unsubscribe"),
 }));
 
 vi.mock("@/lib/server-api-client", () => ({

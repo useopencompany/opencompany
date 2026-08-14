@@ -1,13 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { GoatImessageProviderState } from "@/lib/integration-state";
+import type { ImessageProviderState } from "@/lib/integration-state";
 import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
 export type ImessagePairingActionResult = { ok: true } | { ok: false; error: string };
 
 export type ImessageConfirmActionResult =
-  | { ok: true; state: GoatImessageProviderState }
+  | { ok: true; state: ImessageProviderState }
   | { ok: false; error: string };
 
 export async function startImessagePairingAction(
@@ -31,7 +31,7 @@ export async function startImessagePairingAction(
     }
     return { ok: true };
   } catch (error) {
-    console.error("[goat-imessage] Failed to start pairing", error);
+    console.error("[opencompany-imessage] Failed to start pairing", error);
     return { ok: false, error: "Could not send the verification code." };
   }
 }
@@ -52,11 +52,11 @@ export async function confirmImessagePairingAction(
         error: await serverApiErrorMessage(response, "Could not verify the code."),
       };
     }
-    const data = (await response.json()).data as { state: GoatImessageProviderState };
+    const data = (await response.json()).data as { state: ImessageProviderState };
     revalidatePath("/", "layout");
     return { ok: true, state: data.state };
   } catch (error) {
-    console.error("[goat-imessage] Failed to confirm pairing", error);
+    console.error("[opencompany-imessage] Failed to confirm pairing", error);
     return { ok: false, error: "Could not verify the code." };
   }
 }

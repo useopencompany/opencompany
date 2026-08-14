@@ -1,29 +1,29 @@
-import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
-import { syncGoatStripeSeatQuantityForWorkspace } from "@opencompany/billing/seats";
+import { ensureWorkspaceOrganizationsForEntries } from "@opencompany/agent/workspaces/organizations";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
+import { syncStripeSeatQuantityForWorkspace } from "@opencompany/billing/seats";
 import {
-  adoptGoatWorkspaceMembershipsFromOrgs,
-  listAccessibleGoatBrains,
-  listGoatWorkspacesForUser,
-} from "@opencompany/db/goat-workspaces";
-import { ensureGoatWorkspaceOrganizationsForEntries } from "@opencompany/goat-agent/workspaces/organizations";
-import { recordGoatSignup } from "@opencompany/goat-observability";
+  adoptWorkspaceMembershipsFromOrgs,
+  listAccessibleBrains,
+  listWorkspacesForUser,
+} from "@opencompany/db/workspaces";
+import { recordSignup } from "@opencompany/telemetry";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createIdentityService } from "./identity";
 
-vi.mock("@opencompany/analytics/goat/server", () => ({ captureGoatServerEvent: vi.fn() }));
+vi.mock("@opencompany/analytics/product/server", () => ({ captureProductServerEvent: vi.fn() }));
 vi.mock("@opencompany/billing/seats", () => ({
-  syncGoatStripeSeatQuantityForWorkspace: vi.fn(),
+  syncStripeSeatQuantityForWorkspace: vi.fn(),
 }));
-vi.mock("@opencompany/db/goat-workspaces", () => ({
-  adoptGoatWorkspaceMembershipsFromOrgs: vi.fn(),
-  DEFAULT_GOAT_BRAIN_SLUG: "general",
-  listAccessibleGoatBrains: vi.fn(),
-  listGoatWorkspacesForUser: vi.fn(),
+vi.mock("@opencompany/db/workspaces", () => ({
+  adoptWorkspaceMembershipsFromOrgs: vi.fn(),
+  DEFAULT_BRAIN_SLUG: "general",
+  listAccessibleBrains: vi.fn(),
+  listWorkspacesForUser: vi.fn(),
 }));
-vi.mock("@opencompany/goat-agent/workspaces/organizations", () => ({
-  ensureGoatWorkspaceOrganizationsForEntries: vi.fn(),
+vi.mock("@opencompany/agent/workspaces/organizations", () => ({
+  ensureWorkspaceOrganizationsForEntries: vi.fn(),
 }));
-vi.mock("@opencompany/goat-observability", () => ({ recordGoatSignup: vi.fn() }));
+vi.mock("@opencompany/telemetry", () => ({ recordSignup: vi.fn() }));
 
 const now = new Date("2026-08-13T12:00:00.000Z");
 const authUser = {
@@ -79,7 +79,7 @@ function dbWith(input: { selected?: unknown[]; inserted?: unknown[]; updated?: u
 describe("identity service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(listGoatWorkspacesForUser).mockResolvedValue([
+    vi.mocked(listWorkspacesForUser).mockResolvedValue([
       {
         workspace: {
           id: "goat_ws_company",
@@ -90,10 +90,10 @@ describe("identity service", () => {
         role: "admin",
       },
     ] as never);
-    vi.mocked(ensureGoatWorkspaceOrganizationsForEntries).mockImplementation(
+    vi.mocked(ensureWorkspaceOrganizationsForEntries).mockImplementation(
       async (entries) => entries,
     );
-    vi.mocked(listAccessibleGoatBrains).mockResolvedValue([
+    vi.mocked(listAccessibleBrains).mockResolvedValue([
       {
         id: "brain_general",
         workspaceId: "goat_ws_company",
@@ -113,7 +113,7 @@ describe("identity service", () => {
     const listOrganizationMemberships = vi.fn(async () => ({
       data: [{ organizationId: "org_company", role: { slug: "admin" } }],
     }));
-    vi.mocked(adoptGoatWorkspaceMembershipsFromOrgs).mockResolvedValue(0);
+    vi.mocked(adoptWorkspaceMembershipsFromOrgs).mockResolvedValue(0);
     const service = createIdentityService({
       db,
       workos: { userManagement: { getUser, listOrganizationMemberships } } as never,
@@ -128,9 +128,9 @@ describe("identity service", () => {
     });
     expect(result.user).not.toHaveProperty("workosUserId");
     expect(result.workspaces[0]).not.toHaveProperty("workosOrganizationId");
-    expect(recordGoatSignup).toHaveBeenCalledWith({ source: "user_sync" });
-    expect(captureGoatServerEvent).toHaveBeenCalledOnce();
-    expect(adoptGoatWorkspaceMembershipsFromOrgs).toHaveBeenCalledWith(
+    expect(recordSignup).toHaveBeenCalledWith({ source: "user_sync" });
+    expect(captureProductServerEvent).toHaveBeenCalledOnce();
+    expect(adoptWorkspaceMembershipsFromOrgs).toHaveBeenCalledWith(
       {
         userWorkosId: authUser.id,
         memberships: [{ organizationId: "org_company", role: "admin" }],
@@ -141,7 +141,7 @@ describe("identity service", () => {
 
   it("retries membership adoption on a workspace-free identity read without blocking sign-in", async () => {
     const db = dbWith({ selected: [localUser] });
-    vi.mocked(listGoatWorkspacesForUser).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    vi.mocked(listWorkspacesForUser).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
     const membershipError = new Error("WorkOS unavailable");
     const service = createIdentityService({
       db,
@@ -160,6 +160,6 @@ describe("identity service", () => {
       activeWorkspaceId: null,
       brains: [],
     });
-    expect(syncGoatStripeSeatQuantityForWorkspace).not.toHaveBeenCalled();
+    expect(syncStripeSeatQuantityForWorkspace).not.toHaveBeenCalled();
   });
 });

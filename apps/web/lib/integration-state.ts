@@ -1,2 +1,2 @@
-// Re-export shim: source moved to @opencompany/goat-agent (shared with the runner).
-export * from "@opencompany/goat-agent/integration-state";
+// Re-export shim: source moved to @opencompany/agent (shared with the runner).
+export * from "@opencompany/agent/integration-state";

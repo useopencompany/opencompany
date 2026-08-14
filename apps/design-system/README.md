@@ -1,6 +1,6 @@
 # @opencompany/design-system
 
-The documentation & showcase site for the OpenCompany design system, modeled on
+The documentation & showcase site for the opencompany design system, modeled on
 [ds.meetjamie.ai](https://ds.meetjamie.ai/). It consumes `@opencompany/ui` and
 documents the foundations (colors, typography, corner radius, icons) and every
 component with live previews.

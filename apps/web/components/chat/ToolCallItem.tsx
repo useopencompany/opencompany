@@ -16,19 +16,19 @@ import {
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import {
+  BRAIN_TOOL_NAME,
   CODEX_COMMAND_TOOL_NAME,
   CODEX_PLAN_TOOL_NAME,
   CODEX_QUESTION_TOOL_NAME,
   type CodexCommandToolOutput,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
-  GOAT_BRAIN_TOOL_NAME,
   SCHEDULE_TASK_TOOL_NAME,
   USE_ACTION_TOOL_NAME,
 } from "@/lib/chat-ui";
 import {
   formatDebugValue,
-  isGoatBrainToolOutput,
+  isBrainToolOutput,
   isRecord,
   type ToolCallView,
 } from "./assistant-items";
@@ -68,7 +68,7 @@ export function ToolCallItem({
 }) {
   if (readOnly) return <ToolCallRow tool={tool} />;
 
-  if (tool.name === GOAT_BRAIN_TOOL_NAME) {
+  if (tool.name === BRAIN_TOOL_NAME) {
     return <BrainToolCallRow tool={tool} />;
   }
   if (tool.name === CODEX_COMMAND_TOOL_NAME) {
@@ -901,7 +901,7 @@ function ToolCallRow({ tool }: { tool: ToolCallView }) {
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={screenshotUrl}
-          alt="Screenshot captured by Goat's browser"
+          alt="Screenshot captured by opencompany's browser"
           loading="lazy"
           className="ml-6 mt-2 max-h-[560px] w-auto max-w-[calc(100%-1.5rem)] rounded-lg border border-border bg-surface object-contain"
         />
@@ -1053,7 +1053,7 @@ function BrainToolCallRow({ tool }: { tool: ToolCallView }) {
           {parsedPreview ? <ToolPreviewBlock label="Parsed" value={parsedPreview} /> : null}
           {stderrPreview ? <ToolPreviewBlock label="Stderr" value={stderrPreview} /> : null}
           {errorPreview ? <ToolPreviewBlock label="Error" value={errorPreview} /> : null}
-          {!isGoatBrainToolOutput(tool.output) && !tool.errorText ? (
+          {!isBrainToolOutput(tool.output) && !tool.errorText ? (
             <div className="py-1 text-[11px] text-ink-subtle">Waiting for result</div>
           ) : null}
         </div>
@@ -1209,30 +1209,30 @@ function ToolPreviewBlock({ label, value }: { label: string; value: string }) {
 }
 
 function brainOutputCommand(value: unknown) {
-  if (!isGoatBrainToolOutput(value)) return null;
+  if (!isBrainToolOutput(value)) return null;
   const lines: string[] = [];
-  if (value.command) lines.push(`goat_brain ${value.command}`);
+  if (value.command) lines.push(`brain ${value.command}`);
   if (Array.isArray(value.argv)) lines.push(`argv: ${JSON.stringify(value.argv)}`);
   return lines.length > 0 ? lines.join("\n") : null;
 }
 
 function brainOutputStdout(value: unknown) {
-  return isGoatBrainToolOutput(value) && value.stdout?.trim() ? value.stdout : null;
+  return isBrainToolOutput(value) && value.stdout?.trim() ? value.stdout : null;
 }
 
 function brainOutputStderr(value: unknown) {
-  return isGoatBrainToolOutput(value) && value.stderr?.trim() ? value.stderr : null;
+  return isBrainToolOutput(value) && value.stderr?.trim() ? value.stderr : null;
 }
 
 function brainOutputParsed(value: unknown) {
-  return isGoatBrainToolOutput(value) && value.parsed !== undefined
+  return isBrainToolOutput(value) && value.parsed !== undefined
     ? formatDebugValue(value.parsed)
     : null;
 }
 
 function brainOutputError(value: unknown, errorText: string | null) {
   if (errorText?.trim()) return errorText;
-  return isGoatBrainToolOutput(value) && value.error?.trim() ? value.error : null;
+  return isBrainToolOutput(value) && value.error?.trim() ? value.error : null;
 }
 
 function getToolCallMeta(tool: ToolCallView): {
@@ -1254,7 +1254,7 @@ function getToolCallMeta(tool: ToolCallView): {
   }
   return {
     icon:
-      tool.name === GOAT_BRAIN_TOOL_NAME
+      tool.name === BRAIN_TOOL_NAME
         ? BookOpen
         : tool.name === SCHEDULE_TASK_TOOL_NAME ||
             tool.name === EDIT_TASK_SCHEDULE_TOOL_NAME ||
@@ -1263,7 +1263,7 @@ function getToolCallMeta(tool: ToolCallView): {
           : CircleDotDashed,
     className: "text-amber-500",
     spin:
-      tool.name !== GOAT_BRAIN_TOOL_NAME &&
+      tool.name !== BRAIN_TOOL_NAME &&
       tool.name !== SCHEDULE_TASK_TOOL_NAME &&
       tool.name !== EDIT_TASK_SCHEDULE_TOOL_NAME &&
       tool.name !== DELETE_TASK_SCHEDULE_TOOL_NAME,

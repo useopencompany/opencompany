@@ -73,8 +73,8 @@ export type WorkspaceUsageDebitInput = {
   metadata?: Record<string, unknown>;
 };
 
-// This table is the single cost basis for every metered surface (goat chat,
-// goat ingestion, legacy web usage). Keep it current with provider list
+// This table is the single cost basis for every metered surface (opencompany chat,
+// opencompany ingestion, legacy web usage). Keep it current with provider list
 // prices: when verifying or changing an entry, note it as
 // `// verified YYYY-MM-DD` on the entry and bump the pricingVersion below —
 // a stale entry silently misprices real debits.

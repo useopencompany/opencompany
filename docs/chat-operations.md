@@ -1,6 +1,6 @@
 # Chat operations
 
-OpenCompany, Codex, and Claude Code use one authenticated `/v1` protocol, durable runner execution,
+opencompany, Codex, and Claude Code use one authenticated `/v1` protocol, durable runner execution,
 semantic SSE, and API-owned Electric read models. Postgres is the authority for accepted work;
 Redis and notifications only reduce presentation latency.
 
@@ -37,7 +37,7 @@ browser traffic connects directly to the API with the shared secure WorkOS cooki
 After a Chat-affecting release:
 
 1. Confirm web, API, and runner health checks report the expected SHA.
-2. Send one OpenCompany Message and confirm the user Message, assistant Message, and terminal Run
+2. Send one opencompany Message and confirm the user Message, assistant Message, and terminal Run
    survive a reload.
 3. Exercise a follow-up, cancellation, or approval when the change touches that command.
 4. Confirm authorized Conversation, Message, Run, and Event state converges in the browser.

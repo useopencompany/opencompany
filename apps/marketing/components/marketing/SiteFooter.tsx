@@ -1,6 +1,6 @@
 import { LinkedInIcon, XIcon, YouTubeIcon } from "@opencompany/ui/icons";
 import { DayCount } from "./DayCount";
-import { GoatMark } from "./GoatMark";
+import { Mark } from "./Mark";
 
 const SOCIAL_LINKS = [
   {
@@ -22,7 +22,7 @@ export function SiteFooter() {
       <div className="mx-auto flex max-w-5xl flex-col items-center gap-4 px-6 py-10 sm:grid sm:grid-cols-[1fr_auto_1fr]">
         <div className="flex items-center gap-3 text-ink sm:justify-self-start">
           <div className="flex items-center gap-2">
-            <GoatMark className="size-4" />
+            <Mark className="size-4" />
             <span className="font-medium font-mono text-[14px] tracking-tight">opencompany</span>
           </div>
           <span aria-hidden="true" className="h-3 w-px bg-border" />

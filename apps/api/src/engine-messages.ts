@@ -12,9 +12,9 @@ import type { EngineAuthService } from "./engine-auth";
 import { ApiError } from "./errors";
 
 const CODEX_DISCONNECTED_MESSAGE =
-  "Connect Codex in Goat settings before chatting with the Codex engine.";
+  "Connect Codex in opencompany settings before chatting with the Codex engine.";
 const CLAUDE_CODE_DISCONNECTED_MESSAGE =
-  "Connect Claude Code in Goat settings before chatting with the Claude engine.";
+  "Connect Claude Code in opencompany settings before chatting with the Claude engine.";
 
 export type EngineMessageAdmission = {
   engine: ChatEngine;
@@ -27,11 +27,11 @@ export async function admitEngineMessage(input: {
   actor: Actor;
   engine: MessageEngine;
   model?: string;
-  defaultOpenCompanyModel: string;
+  defaultProductModel: string;
   auth: Pick<EngineAuthService, "getClaudeCodeStatus" | "getCodexStatus">;
 }): Promise<EngineMessageAdmission> {
   if (input.engine.type === "opencompany") {
-    const model = input.model ?? input.defaultOpenCompanyModel;
+    const model = input.model ?? input.defaultProductModel;
     return { engine: "opencompany", model, runtimeModel: model };
   }
 

@@ -28,7 +28,7 @@ describe("capability approval URL adapter", () => {
   });
 
   it("forwards the approval id to the canonical API and preserves the legacy body", async () => {
-    const response = await GET(new Request("https://goat.test"), {
+    const response = await GET(new Request("https://opencompany.test"), {
       params: Promise.resolve({ runId: "gcr_1" }),
     });
     expect(response.status).toBe(200);
@@ -42,7 +42,7 @@ describe("capability approval URL adapter", () => {
 
   it("preserves the legacy unauthenticated response", async () => {
     mocks.getApproval.mockResolvedValueOnce(Response.json({}, { status: 401 }));
-    const response = await GET(new Request("https://goat.test"), {
+    const response = await GET(new Request("https://opencompany.test"), {
       params: Promise.resolve({ runId: "gcr_1" }),
     });
     expect(response.status).toBe(401);

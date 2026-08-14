@@ -1,14 +1,14 @@
 import { shellQuote } from "@opencompany/agent-runtime";
 import {
-  type GoatInfisicalAuthBundle,
-  type GoatInfisicalHost,
-  isGoatInfisicalSessionDomain,
-  loadGoatInfisicalConnection,
-  loadGoatInfisicalConnectionMetadata,
-  markGoatInfisicalConnectionNeedsReauth,
-  markGoatInfisicalConnectionValidated,
-} from "@opencompany/db/goat-infisical-auth";
-import { getGoatWorkspaceRole } from "@opencompany/db/goat-workspaces";
+  type InfisicalAuthBundle,
+  type InfisicalHost,
+  isInfisicalSessionDomain,
+  loadInfisicalConnection,
+  loadInfisicalConnectionMetadata,
+  markInfisicalConnectionNeedsReauth,
+  markInfisicalConnectionValidated,
+} from "@opencompany/db/infisical-auth";
+import { getWorkspaceRole } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
 import { getDb } from "./db";
 import { createInfisicalBackupKeyEntry } from "./infisical-keyring";
@@ -28,21 +28,21 @@ const INFISICAL_GENERATION_PATH = "/home/user/.opencompany/infisical-generation"
 const INFISICAL_VALIDATION_INTERVAL_MS = 6 * 60 * 60_000;
 const INFISICAL_BUNDLE_MAX_BYTES = 512 * 1024;
 
-export type GoatInfisicalSandboxAuth = {
+export type InfisicalSandboxAuth = {
   available: boolean;
   promptFragment: string;
   redactionValues: string[];
 };
 
-export async function reconcileGoatInfisicalSandboxAuth(input: {
+export async function reconcileInfisicalSandboxAuth(input: {
   sandbox: SandboxHandle;
   workspaceId: string | null;
   userWorkosId: string;
-}): Promise<GoatInfisicalSandboxAuth> {
+}): Promise<InfisicalSandboxAuth> {
   if (!input.workspaceId) return unavailableAuth();
 
   const db = getDb();
-  const role = await getGoatWorkspaceRole(
+  const role = await getWorkspaceRole(
     { workspaceId: input.workspaceId, userWorkosId: input.userWorkosId },
     { db },
   );
@@ -51,7 +51,7 @@ export async function reconcileGoatInfisicalSandboxAuth(input: {
     return unavailableAuth();
   }
 
-  const metadata = await loadGoatInfisicalConnectionMetadata({
+  const metadata = await loadInfisicalConnectionMetadata({
     db,
     workspaceId: input.workspaceId,
   });
@@ -76,9 +76,9 @@ export async function reconcileGoatInfisicalSandboxAuth(input: {
     return needsReauthAuth();
   }
 
-  let connection: Awaited<ReturnType<typeof loadGoatInfisicalConnection>>;
+  let connection: Awaited<ReturnType<typeof loadInfisicalConnection>>;
   try {
-    connection = await loadGoatInfisicalConnection({ db, workspaceId: input.workspaceId });
+    connection = await loadInfisicalConnection({ db, workspaceId: input.workspaceId });
   } catch {
     await markNeedsReauth({
       workspaceId: input.workspaceId,
@@ -123,7 +123,7 @@ export async function reconcileGoatInfisicalSandboxAuth(input: {
         await writeGeneration(input.sandbox, connection.credentialGeneration);
         return needsReauthAuth();
       }
-      await markGoatInfisicalConnectionValidated({
+      await markInfisicalConnectionValidated({
         db,
         workspaceId: input.workspaceId,
         expectedCredentialGeneration: connection.credentialGeneration,
@@ -211,7 +211,7 @@ async function ensureInfisicalInstalled(sandbox: SandboxHandle) {
 
 async function restoreAuthBundle(
   sandbox: SandboxHandle,
-  bundle: GoatInfisicalAuthBundle,
+  bundle: InfisicalAuthBundle,
   credentialGeneration: string,
 ) {
   const files = decodeBundleFiles(bundle);
@@ -240,7 +240,7 @@ async function restoreAuthBundle(
   await writeGeneration(sandbox, credentialGeneration);
 }
 
-function decodeBundleFiles(bundle: GoatInfisicalAuthBundle) {
+function decodeBundleFiles(bundle: InfisicalAuthBundle) {
   if (bundle.files.length < 2 || bundle.files.length > 6) {
     throw new Error("Infisical auth bundle contains an unexpected number of files.");
   }
@@ -270,7 +270,7 @@ function isAllowedBundlePath(path: string) {
   );
 }
 
-async function validateInfisicalLogin(sandbox: SandboxHandle, host: GoatInfisicalHost) {
+async function validateInfisicalLogin(sandbox: SandboxHandle, host: InfisicalHost) {
   const result = await sandbox.commands.run("HOME=/home/user infisical login status --json", {
     user: "user",
     timeoutMs: 30_000,
@@ -283,7 +283,7 @@ async function validateInfisicalLogin(sandbox: SandboxHandle, host: GoatInfisica
         (session) =>
           session.principalType === "user" &&
           session.status === "authenticated" &&
-          isGoatInfisicalSessionDomain(session.domain, host),
+          isInfisicalSessionDomain(session.domain, host),
       ),
     );
   } catch {
@@ -333,7 +333,7 @@ async function markNeedsReauth(input: {
   credentialGeneration: string;
   reason: string;
 }) {
-  await markGoatInfisicalConnectionNeedsReauth({
+  await markInfisicalConnectionNeedsReauth({
     db: getDb(),
     workspaceId: input.workspaceId,
     expectedCredentialGeneration: input.credentialGeneration,
@@ -341,11 +341,11 @@ async function markNeedsReauth(input: {
   });
 }
 
-function unavailableAuth(): GoatInfisicalSandboxAuth {
+function unavailableAuth(): InfisicalSandboxAuth {
   return { available: false, promptFragment: "", redactionValues: [] };
 }
 
-function needsReauthAuth(): GoatInfisicalSandboxAuth {
+function needsReauthAuth(): InfisicalSandboxAuth {
   return {
     available: false,
     redactionValues: [],

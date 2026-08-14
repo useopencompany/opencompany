@@ -1,42 +1,42 @@
 import { createHash } from "node:crypto";
 import {
-  loadGoatGoogleDriveWatchChannel,
-  requestGoatGoogleDriveCursorWake,
-} from "@opencompany/db/goat-google-drive";
-import { connectGoatGoogleIntegration } from "@opencompany/db/goat-integrations";
-import { listGoatWorkspacesForUser } from "@opencompany/db/goat-workspaces";
+  createGoogleIntegrationState,
+  exchangeGoogleCode,
+  fetchGoogleUserInfo,
+} from "@opencompany/agent/integrations/google-oauth";
 import {
-  createGoatGoogleIntegrationState,
-  exchangeGoatGoogleCode,
-  fetchGoatGoogleUserInfo,
-} from "@opencompany/goat-agent/integrations/google-oauth";
+  loadGoogleDriveWatchChannel,
+  requestGoogleDriveCursorWake,
+} from "@opencompany/db/google-drive";
+import { connectGoogleIntegration } from "@opencompany/db/integrations";
+import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./errors";
 import { createGoogleIngress } from "./google-ingress";
 
-vi.mock("@opencompany/db/goat-integrations", async (importOriginal) => ({
+vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  connectGoatGoogleIntegration: vi.fn(),
+  connectGoogleIntegration: vi.fn(),
 }));
-vi.mock("@opencompany/db/goat-google-drive", async (importOriginal) => ({
+vi.mock("@opencompany/db/google-drive", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  loadGoatGoogleDriveWatchChannel: vi.fn(),
-  requestGoatGoogleDriveCursorWake: vi.fn(),
+  loadGoogleDriveWatchChannel: vi.fn(),
+  requestGoogleDriveCursorWake: vi.fn(),
 }));
-vi.mock("@opencompany/db/goat-workspaces", async (importOriginal) => ({
+vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  listGoatWorkspacesForUser: vi.fn(),
+  listWorkspacesForUser: vi.fn(),
 }));
-vi.mock("@opencompany/goat-agent/integrations/google-oauth", async (importOriginal) => ({
+vi.mock("@opencompany/agent/integrations/google-oauth", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  exchangeGoatGoogleCode: vi.fn(),
-  fetchGoatGoogleUserInfo: vi.fn(),
+  exchangeGoogleCode: vi.fn(),
+  fetchGoogleUserInfo: vi.fn(),
 }));
 
 const sentinelDb = { sentinel: "db" };
 
 function ingress(overrides: { noWorkspaces?: boolean; authError?: ApiError } = {}) {
-  vi.mocked(listGoatWorkspacesForUser).mockResolvedValue(
+  vi.mocked(listWorkspacesForUser).mockResolvedValue(
     overrides.noWorkspaces
       ? []
       : ([
@@ -61,7 +61,7 @@ function ingress(overrides: { noWorkspaces?: boolean; authError?: ApiError } = {
 describe("Google ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://goat.example.com");
+    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
     vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "google-client");
     vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "google-secret");
     vi.stubEnv("GOOGLE_INTEGRATION_STATE_SECRET", "google-state-secret-google-state-secret");
@@ -83,7 +83,7 @@ describe("Google ingress", () => {
     expect(location.origin).toBe("https://accounts.google.com");
     expect(location.searchParams.get("client_id")).toBe("google-client");
     expect(location.searchParams.get("redirect_uri")).toBe(
-      "https://goat.example.com/api/integrations/gmail/callback",
+      "https://opencompany.example.com/api/integrations/gmail/callback",
     );
     expect(location.searchParams.get("state")).toBeTruthy();
   });
@@ -96,11 +96,11 @@ describe("Google ingress", () => {
       new Request("https://api.example.com/integrations/google-drive/start"),
     );
     expect(response.status).toBe(302);
-    expect(response.headers.get("location")).toBe("https://goat.example.com/signin");
+    expect(response.headers.get("location")).toBe("https://opencompany.example.com/signin");
   });
 
   it("rejects a state minted for another provider or user", async () => {
-    const state = createGoatGoogleIntegrationState({
+    const state = createGoogleIntegrationState({
       provider: "gmail",
       userWorkosId: "user_1",
       returnTo: "/settings",
@@ -114,11 +114,11 @@ describe("Google ingress", () => {
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("location") ?? "");
     expect(location.searchParams.get("setup")).toBe("error");
-    expect(connectGoatGoogleIntegration).not.toHaveBeenCalled();
+    expect(connectGoogleIntegration).not.toHaveBeenCalled();
   });
 
   it("maps GitHub-style denial and a missing code to error redirects on the state returnTo", async () => {
-    const state = createGoatGoogleIntegrationState({
+    const state = createGoogleIntegrationState({
       provider: "gmail",
       userWorkosId: "user_1",
       returnTo: "/onboarding/connected",
@@ -142,11 +142,11 @@ describe("Google ingress", () => {
     const missingLocation = new URL(missingCode.headers.get("location") ?? "");
     expect(missingLocation.pathname).toBe("/onboarding/connected");
     expect(missingLocation.searchParams.get("setup")).toBe("error");
-    expect(connectGoatGoogleIntegration).not.toHaveBeenCalled();
+    expect(connectGoogleIntegration).not.toHaveBeenCalled();
   });
 
   it("connects the account through the injected database and reports connected", async () => {
-    vi.mocked(exchangeGoatGoogleCode).mockResolvedValue({
+    vi.mocked(exchangeGoogleCode).mockResolvedValue({
       tokens: {
         access_token: "at",
         refresh_token: "rt",
@@ -154,14 +154,14 @@ describe("Google ingress", () => {
       },
       expiresAt: new Date(Date.now() + 3_600_000),
     } as never);
-    vi.mocked(fetchGoatGoogleUserInfo).mockResolvedValue({
+    vi.mocked(fetchGoogleUserInfo).mockResolvedValue({
       sub: "google-sub-1",
       email: "ada@example.com",
       name: "Ada",
     } as never);
-    vi.mocked(connectGoatGoogleIntegration).mockResolvedValue(undefined as never);
+    vi.mocked(connectGoogleIntegration).mockResolvedValue(undefined as never);
 
-    const state = createGoatGoogleIntegrationState({
+    const state = createGoogleIntegrationState({
       provider: "gmail",
       userWorkosId: "user_1",
       returnTo: "/settings",
@@ -174,9 +174,9 @@ describe("Google ingress", () => {
     );
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("location") ?? "");
-    expect(location.origin).toBe("https://goat.example.com");
+    expect(location.origin).toBe("https://opencompany.example.com");
     expect(location.searchParams.get("setup")).toBe("connected");
-    expect(connectGoatGoogleIntegration).toHaveBeenCalledWith(
+    expect(connectGoogleIntegration).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: "gmail",
         userWorkosId: "user_1",
@@ -200,7 +200,7 @@ describe("Google ingress", () => {
     }
 
     it("turns an authenticated notification into an idempotent cursor wake", async () => {
-      vi.mocked(loadGoatGoogleDriveWatchChannel).mockResolvedValue({
+      vi.mocked(loadGoogleDriveWatchChannel).mockResolvedValue({
         id: "channel_1",
         cursorId: "cursor_1",
         tokenHash: sha256("secret-token"),
@@ -211,19 +211,19 @@ describe("Google ingress", () => {
 
       const response = await ingress().driveWebhook(driveNotification());
       expect(response.status).toBe(204);
-      expect(requestGoatGoogleDriveCursorWake).toHaveBeenCalledWith(
+      expect(requestGoogleDriveCursorWake).toHaveBeenCalledWith(
         "cursor_1",
         expect.any(Date),
         expect.objectContaining({ sentinel: "db" }),
       );
-      expect(loadGoatGoogleDriveWatchChannel).toHaveBeenCalledWith(
+      expect(loadGoogleDriveWatchChannel).toHaveBeenCalledWith(
         "channel_1",
         expect.objectContaining({ sentinel: "db" }),
       );
     });
 
     it("rejects an invalid channel token without waking", async () => {
-      vi.mocked(loadGoatGoogleDriveWatchChannel).mockResolvedValue({
+      vi.mocked(loadGoogleDriveWatchChannel).mockResolvedValue({
         id: "channel_1",
         cursorId: "cursor_1",
         tokenHash: sha256("different-token"),
@@ -234,11 +234,11 @@ describe("Google ingress", () => {
 
       const response = await ingress().driveWebhook(driveNotification());
       expect(response.status).toBe(401);
-      expect(requestGoatGoogleDriveCursorWake).not.toHaveBeenCalled();
+      expect(requestGoogleDriveCursorWake).not.toHaveBeenCalled();
     });
 
     it("accepts the early sync notification for a creating channel", async () => {
-      vi.mocked(loadGoatGoogleDriveWatchChannel).mockResolvedValue({
+      vi.mocked(loadGoogleDriveWatchChannel).mockResolvedValue({
         id: "channel_1",
         cursorId: "cursor_1",
         tokenHash: sha256("secret-token"),
@@ -249,7 +249,7 @@ describe("Google ingress", () => {
 
       const response = await ingress().driveWebhook(driveNotification("sync"));
       expect(response.status).toBe(204);
-      expect(requestGoatGoogleDriveCursorWake).toHaveBeenCalled();
+      expect(requestGoogleDriveCursorWake).toHaveBeenCalled();
     });
 
     it("rejects notifications with missing headers", async () => {

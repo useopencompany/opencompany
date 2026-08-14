@@ -1,5 +1,5 @@
-import { GoatJamieSettingsRoute } from "@/components/GoatRoutes";
+import { JamieSettingsRoute } from "@/components/Routes";
 
 export default function JamieSettingsPage() {
-  return <GoatJamieSettingsRoute />;
+  return <JamieSettingsRoute />;
 }

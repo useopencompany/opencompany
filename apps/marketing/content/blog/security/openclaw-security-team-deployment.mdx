@@ -30,7 +30,7 @@ The problem is that OpenClaw was designed for a single power user running agents
 
 OpenClaw's security challenges aren't primarily about bugs. Bugs get patched. The real security risks are architectural: the framework gives agents broad system access by default, loads and executes third-party skills without adequate vetting, and places credentials within the model's context window where they can be exfiltrated via prompt injection. That requires a different kind of analysis than a CVE list.
 
-We're not here to dunk on OpenClaw. We build agent infrastructure at [OpenCompany](https://opencompany.cloud) and we think about these problems constantly. This article is for security teams and developers evaluating OpenClaw for team or organizational deployment. It covers the main security risks, the architectural limitations that cause them, and what you can actually do about it, whether that means hardening your setup, switching to something else, or waiting for the project to catch up.
+We're not here to dunk on OpenClaw. We build agent infrastructure at [opencompany](https://opencompany.cloud) and we think about these problems constantly. This article is for security teams and developers evaluating OpenClaw for team or organizational deployment. It covers the main security risks, the architectural limitations that cause them, and what you can actually do about it, whether that means hardening your setup, switching to something else, or waiting for the project to catch up.
 
 ## OpenClaw security: three categories of risk
 
@@ -259,7 +259,7 @@ Agent definitions live in version-controlled config files. Permission changes go
 
 The infrastructure layer should work the same whether you're running Claude, GPT, or an open-source model. Your security posture shouldn't change because you swapped a model.
 
-We built [OpenCompany](https://opencompany.cloud) around these patterns. We think AI agent security is an infrastructure problem, and you can't solve it by bolting features onto a framework that wasn't designed for it. Our articles on [permission models](/blog/ai-agent-permission-models) and [running agents in production](/blog/running-ai-agents-in-production) go into more detail on how we've implemented this.
+We built [opencompany](https://opencompany.cloud) around these patterns. We think AI agent security is an infrastructure problem, and you can't solve it by bolting features onto a framework that wasn't designed for it. Our articles on [permission models](/blog/ai-agent-permission-models) and [running agents in production](/blog/running-ai-agents-in-production) go into more detail on how we've implemented this.
 
 ## FAQ
 
@@ -295,4 +295,4 @@ The question for your team isn't "is OpenClaw bad?" It's "does OpenClaw's securi
 
 If you're looking at alternatives, our [comparison of secure agent platforms](/blog/openclaw-alternatives-secure-teams) covers what's available today. For more on the infrastructure patterns, see [permission models](/blog/ai-agent-permission-models) and [production deployment](/blog/running-ai-agents-in-production).
 
-We're building OpenCompany to make secure agent deployment simple: one config file, hard boundaries on what agents can do, every action audited, fully open-source. [Check it out on GitHub](https://github.com/useopencompany) or [talk to our team](/talk).
+We're building opencompany to make secure agent deployment simple: one config file, hard boundaries on what agents can do, every action audited, fully open-source. [Check it out on GitHub](https://github.com/useopencompany) or [talk to our team](/talk).

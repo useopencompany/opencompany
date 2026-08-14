@@ -1,4 +1,4 @@
-// Shared helpers for Goat's Codex and Claude Code harnesses.
+// Shared helpers for opencompany's Codex and Claude Code harnesses.
 
 export const GITHUB_AUTH_HEADER_ENV = "GITHUB_AUTH_HEADER";
 

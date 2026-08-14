@@ -1,7 +1,7 @@
 # Authentication
 
-OpenCompany uses WorkOS AuthKit for browser sessions. `apps/web/lib/workos.ts` owns the canonical app
-URL and redirect URI. The web sign-in/callback/sign-out routes and `activateGoatWorkspace` are
+opencompany uses WorkOS AuthKit for browser sessions. `apps/web/lib/workos.ts` owns the canonical app
+URL and redirect URI. The web sign-in/callback/sign-out routes and `activateWorkspace` are
 permanent browser-shell responsibilities: they handle framework redirects, SSO/MFA flows, AuthKit
 session re-sealing, and presentation cookies.
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GoatActionInvalidParamsError } from "@/lib/actions/types";
+import { ActionInvalidParamsError } from "@/lib/actions/types";
 import { shapeCompanyEmployeesOutput } from "@/lib/capabilities/lead-company-employees";
 
 describe("shapeCompanyEmployeesOutput", () => {
@@ -64,7 +64,7 @@ describe("shapeCompanyEmployeesOutput", () => {
           query: "partnerships content brand",
         },
       ),
-    ).toThrow(GoatActionInvalidParamsError);
+    ).toThrow(ActionInvalidParamsError);
     expect(() =>
       shapeCompanyEmployeesOutput([], {
         companyUrl: "https://www.linkedin.com/company/red-bull-media-house",

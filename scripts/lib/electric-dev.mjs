@@ -62,7 +62,7 @@ export function directDatabaseUrl(env = process.env) {
  *
  * Security mode: Electric is secure-by-default and its HTTP API is public unless an
  * ELECTRIC_SECRET is set. When `env.ELECTRIC_SECRET` is present we run secure — every
- * request must carry the `secret` query param, which the Goat auth proxy injects server-side.
+ * request must carry the `secret` query param, which the opencompany auth proxy injects server-side.
  * With no secret we run
  * insecure, which is safe for local dev only because the container binds to localhost
  * behind the same-origin proxy. Shared deployments MUST set ELECTRIC_SECRET.

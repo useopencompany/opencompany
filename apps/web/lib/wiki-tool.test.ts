@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
-import type { WikiToolInput } from "@opencompany/goat-wiki/tool";
+import type { WikiToolInput } from "@opencompany/wiki/tool";
 import { drizzle } from "drizzle-orm/pglite";
 import { beforeAll, describe, expect, it } from "vitest";
 import { runWikiToolForUser } from "./wiki-tool";

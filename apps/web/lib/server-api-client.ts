@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createOpenCompanyClient } from "@opencompany/protocol";
+import { createApiClient } from "@opencompany/protocol";
 import { headers } from "next/headers";
 
 // Server-side typed /v1 client for Server Actions and Server Components.
@@ -18,7 +18,7 @@ export async function serverApiClient(options: { authorization?: string } = {}) 
     if (browserOrigin) forwarded.set("Origin", browserOrigin);
     return globalThis.fetch(input, { ...init, headers: forwarded, cache: "no-store" });
   };
-  return createOpenCompanyClient(serverApiOrigin(process.env.GOAT_API_ORIGIN), {
+  return createApiClient(serverApiOrigin(process.env.GOAT_API_ORIGIN), {
     fetch: fetchWithActor,
   });
 }

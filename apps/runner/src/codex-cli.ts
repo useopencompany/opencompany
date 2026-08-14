@@ -5,7 +5,7 @@ import type { SandboxHandle } from "./sandbox";
 const CODEX_BIN_PATH = '"$HOME/.codex/bin"';
 export const CODEX_FALLBACK_NPM_PACKAGE = CODEX_CLI_PACKAGE;
 const CODEX_PROVIDER_ID = "opencompany";
-const CODEX_PROVIDER_NAME = "OpenCompany";
+const CODEX_PROVIDER_NAME = "opencompany";
 
 export type CodexCliAuth =
   | {

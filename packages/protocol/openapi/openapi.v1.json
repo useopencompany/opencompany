@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "OpenCompany Headless API",
+    "title": "opencompany Headless API",
     "version": "1.0.0"
   },
   "servers": [
@@ -4138,6 +4138,16 @@
             "minLength": 1,
             "maxLength": 512
           },
+          "firstName": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 256
+          },
+          "lastName": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 256
+          },
           "avatarUrl": {
             "type": "string",
             "nullable": true,
@@ -4155,6 +4165,8 @@
           "id",
           "email",
           "name",
+          "firstName",
+          "lastName",
           "avatarUrl",
           "role"
         ],
@@ -9990,6 +10002,376 @@
           "webhookUrl",
           "headerName",
           "apiKeyConfigured"
+        ],
+        "additionalProperties": false
+      },
+      "IntegrationAccountListEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IntegrationAccount"
+            },
+            "maxItems": 1000
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "IntegrationAccount": {
+        "type": "object",
+        "properties": {
+          "integrationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "example": "gint_0f8e7d6c5b4a",
+            "description": "Integration connection id."
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "gmail",
+              "google_calendar",
+              "google_drive",
+              "linear",
+              "slack",
+              "hubspot",
+              "granola",
+              "fathom",
+              "attio",
+              "latitude",
+              "neon",
+              "x_account"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_connected",
+              "connected",
+              "needs_reauth",
+              "sync_failed"
+            ]
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "accountEmail": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 320
+          },
+          "accountName": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 512
+          },
+          "connectionLabel": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 512
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 2000
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "maxItems": 1000
+          },
+          "capabilityModes": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
+          }
+        },
+        "required": [
+          "integrationId",
+          "provider",
+          "status",
+          "connected",
+          "accountEmail",
+          "accountName",
+          "connectionLabel",
+          "statusReason",
+          "scopes",
+          "capabilityModes"
+        ],
+        "additionalProperties": false
+      },
+      "SlackBotWorkspaceSettingsEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SlackBotWorkspaceSettings"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SlackBotWorkspaceSettings": {
+        "type": "object",
+        "properties": {
+          "isAdmin": {
+            "type": "boolean"
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "installed": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "connected",
+              "needs_reauth",
+              "sync_failed",
+              "not_connected"
+            ]
+          },
+          "needsScopeUpgrade": {
+            "type": "boolean"
+          },
+          "teamName": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 512
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 2000
+          },
+          "destinationCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "isAdmin",
+          "configured",
+          "installed",
+          "status",
+          "needsScopeUpgrade",
+          "teamName",
+          "statusReason",
+          "destinationCount"
+        ],
+        "additionalProperties": false
+      },
+      "SlackBotMutationEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "updated": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "updated"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SlackBotDestinationEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SlackBotDestination"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SlackBotDestination": {
+        "type": "object",
+        "properties": {
+          "installed": {
+            "type": "boolean"
+          },
+          "botConnected": {
+            "type": "boolean"
+          },
+          "isAdmin": {
+            "type": "boolean"
+          },
+          "brainVisibility": {
+            "type": "string",
+            "enum": [
+              "workspace",
+              "restricted"
+            ]
+          },
+          "source": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "channels": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SlackBotChannelRef"
+                },
+                "maxItems": 500
+              }
+            },
+            "required": [
+              "enabled",
+              "channels"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "installed",
+          "botConnected",
+          "isAdmin",
+          "brainVisibility",
+          "source"
+        ],
+        "additionalProperties": false
+      },
+      "SlackBotChannelRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "SetSlackBotDestinationBody": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SlackBotChannelRef"
+            },
+            "maxItems": 500
+          }
+        },
+        "required": [
+          "enabled",
+          "channels"
+        ],
+        "additionalProperties": false
+      },
+      "SlackBotChannelListEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "channels": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SlackBotChannel"
+                },
+                "maxItems": 5000
+              },
+              "partial": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "channels",
+              "partial"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SlackBotChannel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "isPrivate": {
+            "type": "boolean"
+          },
+          "isMember": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "isPrivate",
+          "isMember"
         ],
         "additionalProperties": false
       },
@@ -17218,7 +17600,8 @@
                 "brain-ingest-jobs-v1",
                 "brain-import-runs-v1",
                 "wiki-pages-v1",
-                "wiki-timeline-v1"
+                "wiki-timeline-v1",
+                "integration-accounts-v1"
               ]
             },
             "required": true,
@@ -18150,6 +18533,273 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/JamieWebhookSetupEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integration-accounts": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Credential-free personal integration accounts owned by the authenticated user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationAccountListEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/workspace/slack-bot": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Credential-free Slack answer-bot status for the active workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackBotWorkspaceSettingsEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspace Slack answer-bot disconnected by an administrator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackBotMutationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/brains/{brainId}/slack-bot": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "brainId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized Slack answer-bot destination settings for one Brain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackBotDestinationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "brainId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSlackBotDestinationBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Slack answer-bot channel scope saved by a workspace administrator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackBotMutationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/brains/{brainId}/slack-bot/channels": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "brainId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Channels visible to the workspace Slack bot; administrator only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackBotChannelListEnvelope"
                 }
               }
             }

@@ -2,9 +2,9 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  updateGoatAutoModelRoutingAction,
-  updateGoatTaskViewModeAction,
-  updateGoatTimezoneAction,
+  updateAutoModelRoutingAction,
+  updateTaskViewModeAction,
+  updateTimezoneAction,
 } from "./user-preferences";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -59,7 +59,7 @@ describe("user preference API actions", () => {
   it("forwards actor credentials on the preferences PATCH and revalidates the app", async () => {
     const requests = stubApi(okEnvelope);
 
-    await expect(updateGoatAutoModelRoutingAction(true)).resolves.toEqual({
+    await expect(updateAutoModelRoutingAction(true)).resolves.toEqual({
       ok: true,
       enabled: true,
     });
@@ -78,7 +78,7 @@ describe("user preference API actions", () => {
   it("returns the API's normalized timezone", async () => {
     stubApi(okEnvelope);
 
-    await expect(updateGoatTimezoneAction("Europe/Berlin")).resolves.toEqual({
+    await expect(updateTimezoneAction("Europe/Berlin")).resolves.toEqual({
       ok: true,
       timezone: "Europe/Berlin",
     });
@@ -87,7 +87,7 @@ describe("user preference API actions", () => {
 
   it("maps task view mode updates and degrades API failures to ok: false", async () => {
     const requests = stubApi(okEnvelope);
-    await expect(updateGoatTaskViewModeAction("list")).resolves.toEqual({
+    await expect(updateTaskViewModeAction("list")).resolves.toEqual({
       ok: true,
       mode: "list",
     });
@@ -109,7 +109,7 @@ describe("user preference API actions", () => {
         { status: 400 },
       ),
     );
-    await expect(updateGoatTaskViewModeAction("kanban" as never)).resolves.toEqual({
+    await expect(updateTaskViewModeAction("kanban" as never)).resolves.toEqual({
       ok: false,
       mode: "kanban",
     });
@@ -132,7 +132,7 @@ describe("user preference API actions", () => {
       ),
     );
 
-    await expect(updateGoatAutoModelRoutingAction(true)).rejects.toThrow(
+    await expect(updateAutoModelRoutingAction(true)).rejects.toThrow(
       "The acting user's profile was not found. (request request_2)",
     );
     expect(revalidatePath).not.toHaveBeenCalled();

@@ -1,12 +1,12 @@
-import { GoatRepositoriesSettingsRoute } from "@/components/GoatRoutes";
-import { currentGoatUser } from "@/lib/auth";
-import { listGoatRepoConfigsAction } from "@/lib/repo-config-actions";
+import { RepositoriesSettingsRoute } from "@/components/Routes";
+import { currentUser } from "@/lib/auth";
+import { listRepoConfigsAction } from "@/lib/repo-config-actions";
 
 export default async function RepositoriesSettingsPage() {
-  const context = await currentGoatUser();
-  const { repositories, configs } = await listGoatRepoConfigsAction();
+  const context = await currentUser();
+  const { repositories, configs } = await listRepoConfigsAction();
   return (
-    <GoatRepositoriesSettingsRoute
+    <RepositoriesSettingsRoute
       repositories={repositories}
       configs={configs}
       canEdit={context.role === "admin"}

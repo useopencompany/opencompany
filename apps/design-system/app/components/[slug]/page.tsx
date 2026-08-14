@@ -9,7 +9,7 @@ export function generateStaticParams() {
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const title = COMPONENT_TITLES[slug as ComponentSlug];
-  return { title: title ? `${title} — OpenCompany DS` : "OpenCompany DS" };
+  return { title: title ? `${title} — opencompany DS` : "opencompany DS" };
 }
 
 export default async function ComponentPage({ params }: { params: Promise<{ slug: string }> }) {

@@ -1,8 +1,8 @@
 import {
-  GOAT_CHAT_ARTIFACT_DATA_PART_TYPE,
-  GOAT_PUBLISH_ARTIFACT_TOOL_NAME,
-  type GoatPublishedChatArtifact,
-  parseGoatPublishedChatArtifact,
+  CHAT_ARTIFACT_DATA_PART_TYPE,
+  PUBLISH_ARTIFACT_TOOL_NAME,
+  type PublishedChatArtifact,
+  parsePublishedChatArtifact,
 } from "./chat-artifacts";
 import type { CodexAppServerNormalizedEvent } from "./codex-app-server-events";
 
@@ -35,8 +35,8 @@ export type CodexCommandToolOutput = {
 export type CodexUiTextPart = { type: "text"; text: string };
 export type CodexUiReasoningPart = { type: "reasoning"; text: string; state: "done" };
 export type CodexUiArtifactPart = {
-  type: typeof GOAT_CHAT_ARTIFACT_DATA_PART_TYPE;
-  data: GoatPublishedChatArtifact;
+  type: typeof CHAT_ARTIFACT_DATA_PART_TYPE;
+  data: PublishedChatArtifact;
 };
 export type CodexUiCommandPart = {
   type: typeof CODEX_COMMAND_TOOL_PART_TYPE;
@@ -124,7 +124,7 @@ export function applyCodexEventToUiMessageParts(
       event.type === "dynamic_tool.completed" ||
       event.type === "mcp_tool.started" ||
       event.type === "mcp_tool.completed") &&
-    readString(event.payload.tool) === GOAT_PUBLISH_ARTIFACT_TOOL_NAME
+    readString(event.payload.tool) === PUBLISH_ARTIFACT_TOOL_NAME
   ) {
     return applyPublishedArtifactEvent(parts, event);
   }
@@ -393,9 +393,9 @@ export function parseCodexUiMessageParts(value: unknown): CodexUiMessagePart[] {
       parts.push({ type: "reasoning", text: part.text, state: "done" });
       continue;
     }
-    if (part.type === GOAT_CHAT_ARTIFACT_DATA_PART_TYPE) {
-      const artifact = parseGoatPublishedChatArtifact({ ok: true, artifact: part.data });
-      if (artifact) parts.push({ type: GOAT_CHAT_ARTIFACT_DATA_PART_TYPE, data: artifact });
+    if (part.type === CHAT_ARTIFACT_DATA_PART_TYPE) {
+      const artifact = parsePublishedChatArtifact({ ok: true, artifact: part.data });
+      if (artifact) parts.push({ type: CHAT_ARTIFACT_DATA_PART_TYPE, data: artifact });
       continue;
     }
     if (part.type === CODEX_COMMAND_TOOL_PART_TYPE && typeof part.toolCallId === "string") {
@@ -514,7 +514,7 @@ function applyPublishedArtifactEvent(
   if (event.type !== "dynamic_tool.completed" && event.type !== "mcp_tool.completed") {
     return unchanged(parts);
   }
-  const artifact = parseGoatPublishedChatArtifact({ ok: true, artifact: event.payload.artifact });
+  const artifact = parsePublishedChatArtifact({ ok: true, artifact: event.payload.artifact });
   if (!artifact) {
     const toolName =
       event.type === "dynamic_tool.completed" ? CODEX_DYNAMIC_TOOL_NAME : CODEX_MCP_TOOL_NAME;
@@ -527,13 +527,13 @@ function applyPublishedArtifactEvent(
   if (
     parts.some(
       (part) =>
-        part.type === GOAT_CHAT_ARTIFACT_DATA_PART_TYPE &&
+        part.type === CHAT_ARTIFACT_DATA_PART_TYPE &&
         part.data.artifactVersionId === artifact.artifactVersionId,
     )
   ) {
     return unchanged(parts);
   }
-  return changed([...parts, { type: GOAT_CHAT_ARTIFACT_DATA_PART_TYPE, data: artifact }]);
+  return changed([...parts, { type: CHAT_ARTIFACT_DATA_PART_TYPE, data: artifact }]);
 }
 
 // Buffers command.output deltas per command item so a truncated tail can be attached
@@ -790,7 +790,7 @@ function dynamicToolStatusPart(event: CodexAppServerNormalizedEvent): CodexUiSta
       ? "Brain"
       : tool === "save_to_brain"
         ? "Save to Brain"
-        : "OpenCompany tool";
+        : "opencompany tool";
   const input = {
     label,
     ...(namespace ? { namespace } : {}),
