@@ -39,7 +39,7 @@ See [Getting started](./docs/getting-started.md) for prerequisites and troublesh
 - `apps/marketing` — the public marketing site.
 - `apps/design-system` and `packages/ui` — shared UI development.
 - `packages/db` — opencompany schema plus isolated billing and LLM-broker compatibility schemas.
-- `packages/goat-*` — opencompany agent, Brain, observability, and wiki support.
+- `packages/agent`, `packages/brain`, `packages/telemetry`, `packages/wiki` — opencompany agent, Brain, telemetry, and wiki support.
 - `drizzle` — immutable migration history.
 - `scripts` — local setup, Neon branching, release, and operational checks.
 
