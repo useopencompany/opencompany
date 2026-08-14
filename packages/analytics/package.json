@@ -9,6 +9,8 @@
     "./product/client": "./src/product-client.tsx",
     "./product/events": "./src/product-events.ts",
     "./product/server": "./src/product-server.ts",
+    "./marketing/client": "./src/marketing-client.ts",
+    "./marketing/events": "./src/marketing-events.ts",
     "./server": "./src/server.ts"
   },
   "scripts": {

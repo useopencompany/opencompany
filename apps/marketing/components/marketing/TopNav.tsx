@@ -21,12 +21,14 @@ export function TopNav() {
             href="https://cal.com/louis-morgner-k0wc9i/opencompany-onboarding"
             variant="secondary"
             className="hidden px-3 py-1.5 text-[12px] sm:inline-flex"
+            analyticsIntent="demo"
           >
             Get a Demo
           </Cta>
           <Cta
             href="https://my.opencompany.chat"
             className="hidden px-3 py-1.5 text-[12px] sm:inline-flex"
+            analyticsIntent="signup"
           >
             Sign up
           </Cta>
@@ -65,12 +67,14 @@ export function TopNav() {
                 href="https://cal.com/louis-morgner-k0wc9i/opencompany-onboarding"
                 variant="secondary"
                 className="mt-1 w-full justify-center px-3 py-2 text-[12px]"
+                analyticsIntent="demo"
               >
                 Get a Demo
               </Cta>
               <Cta
                 href="https://my.opencompany.chat"
                 className="mt-1 w-full justify-center px-3 py-2 text-[12px]"
+                analyticsIntent="signup"
               >
                 Sign up
               </Cta>

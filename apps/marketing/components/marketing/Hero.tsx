@@ -67,10 +67,13 @@ export function Hero() {
             <Cta
               href="https://cal.com/louis-morgner-k0wc9i/opencompany-onboarding"
               variant="secondary"
+              analyticsIntent="demo"
             >
               Get a Demo
             </Cta>
-            <Cta href="https://my.opencompany.chat">Sign up</Cta>
+            <Cta href="https://my.opencompany.chat" analyticsIntent="signup">
+              Sign up
+            </Cta>
           </div>
         </div>
       </div>
