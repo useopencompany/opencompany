@@ -31,9 +31,11 @@ test("the pull request gate is isolated and credential-free", async () => {
 
   assert.match(workflow, /^on:\n\s+pull_request:\n\s+branches: \[main\]/mu);
   assert.match(workflow, /^permissions:\n\s+contents: read$/mu);
-  assert.match(workflow, /runs-on: ubuntu-latest/u);
   assert.match(workflow, /persist-credentials: false/u);
 
+  // The workflow may run on Blacksmith for speed, but never on a raw self-hosted
+  // runner, and never with any credential that could reach deploy or the cache
+  // remote. Speed comes from `--affected` and the token-free Blacksmith cache.
   for (const forbidden of [
     /pull_request_target:/u,
     /workflow_run:/u,
@@ -41,8 +43,8 @@ test("the pull request gate is isolated and credential-free", async () => {
     /\bid-token:\s*write\b/u,
     /\bdeployments:\s*write\b/u,
     /^\s*environment:/mu,
+    /runs-on:\s*self-hosted/u,
     /actions\/cache@/u,
-    /^\s*cache:/mu,
     /TURBO_TOKEN/u,
     /TURBO_TEAM/u,
   ]) {
@@ -53,18 +55,18 @@ test("the pull request gate is isolated and credential-free", async () => {
     "bun install --frozen-lockfile",
     "node scripts/check-schema-migration.mjs",
     "bun run db:migrations:check",
+    "node --check scripts/setup.mjs",
     "bun run format:check",
     "bun run boundary:check",
-    "bun --bun turbo run lint",
-    "bun run typecheck",
     "bun --filter @opencompany/protocol openapi:check",
-    "bun run build",
-    "bun run build:docs",
-    "bun run test",
+    "bun --bun turbo run lint typecheck build test --affected",
     "node --test scripts/lib/*.test.mjs",
   ]) {
     assert.ok(workflow.includes(command), `PR gate must run: ${command}`);
   }
+
+  // The persistent cache must be the token-free Blacksmith cache, pinned to a SHA.
+  assert.match(workflow, /useblacksmith\/cache@[a-f0-9]{40}/u);
 
   assert.match(workflow, /trufflesecurity\/trufflehog@[a-f0-9]{40}/u);
   assert.match(workflow, /base: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/u);
