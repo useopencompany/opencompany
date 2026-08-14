@@ -1,0 +1,20 @@
+---
+title: Stripe
+description: Give OpenCompany restricted read-only access to business metrics.
+---
+
+## What connecting does
+
+Stripe is a workspace connection managed by workspace admins. It provides read-only access to
+payment activity, subscriptions, and receivables for founder and operating questions.
+
+## Scopes and permissions
+
+Connect a restricted Stripe key, not a general secret key. OpenCompany's Stripe action surface is
+read-only. The exact restricted-key permission checklist and supported metric catalog are coming
+soon.
+
+## Brain ingestion
+
+Stripe is not a Brain source and connecting it does not continuously copy payment or customer data
+into Brain.

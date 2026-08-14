@@ -1,0 +1,21 @@
+---
+title: Linear
+description: Work with Linear issues and ingest selected team activity.
+---
+
+## What connecting does
+
+OpenCompany uses Linear for issue, project, and comment actions and also supports a separate
+source-ingestion connection. Current agent actions include creating or updating issues and adding
+comments when the corresponding action is allowed.
+
+## Scopes and permissions
+
+Agent actions follow their **On**, **Ask**, or **Off** modes. The action connector and ingestion
+connector have distinct provider flows even though both appear as Linear in the product. A complete
+OAuth scope and action matrix is coming soon.
+
+## Brain ingestion
+
+Choose the Linear teams and issue or comment event types in the destination Brain's Sources
+settings. Authorizing Linear without that selection does not feed issue activity into Brain.

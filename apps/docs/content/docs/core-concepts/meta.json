@@ -1,0 +1,11 @@
+{
+  "title": "Core concepts",
+  "pages": [
+    "index",
+    "chat-and-engines",
+    "tasks",
+    "workflows-and-schedules",
+    "brain",
+    "integrations"
+  ]
+}

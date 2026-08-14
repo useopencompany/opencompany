@@ -1,0 +1,27 @@
+---
+title: Tasks
+description: Track durable background work with a goal, status, Conversation, and outcome.
+---
+
+A Task is tracked work around exactly one Conversation. The Task owns its name, goal, source,
+lifecycle status, optional Workflow or schedule link, and final outcome. Its Conversation owns the
+Messages; Runs perform the work.
+
+Tasks can be created manually or by a Workflow, schedule, or agent action. Each new Task starts with
+an initial Message and queued Run, then moves through states such as queued, running, waiting,
+blocked, succeeded, failed, or canceled.
+
+## Continue or intervene
+
+Open a Task to read its Conversation and Run activity. A follow-up is another Message in the same
+Conversation, so it keeps the Task's identity and history. Cancel the active Run when execution
+should stop.
+
+Archiving is organization, not execution control. A Task can be archived after it is terminal;
+archiving does not cancel active work or delete its history.
+
+## When to use a Task
+
+Use a Task when you care about a durable goal and outcome, want work to continue away from the
+foreground composer, or expect to return to the same job later. Use an ordinary Chat for quick
+interactive work. Use a Workflow when the Task shape itself should be reusable.

@@ -1,0 +1,29 @@
+{
+  "title": "Integrations",
+  "pages": [
+    "index",
+    "---Workspace connections---",
+    "infisical",
+    "github",
+    "jamie",
+    "linear",
+    "posthog",
+    "stripe",
+    "hubspot",
+    "attio",
+    "granola",
+    "fathom",
+    "---Personal connections---",
+    "gmail",
+    "google-calendar",
+    "google-drive",
+    "slack",
+    "latitude",
+    "neon",
+    "x",
+    "codex",
+    "claude-code",
+    "imessage",
+    "browser-profiles"
+  ]
+}

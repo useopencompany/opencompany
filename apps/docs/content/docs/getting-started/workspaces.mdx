@@ -1,0 +1,43 @@
+---
+title: Workspaces
+description: Learn how OpenCompany scopes people, work, integrations, and knowledge.
+---
+
+A workspace is the main collaboration and access boundary in OpenCompany. Conversations, Tasks,
+Workflows, schedules, Skills, connected workspace services, billing, and workspace-visible Brains
+belong to one workspace.
+
+If you belong to more than one workspace, use the workspace switcher in the sidebar before starting
+work or connecting an account. OpenCompany derives the active workspace from your signed-in session;
+you do not choose it by sending an arbitrary workspace ID from the browser.
+
+## Admins and members
+
+Workspace roles are **admin** and **member**.
+
+- Admins manage membership and invitations, workspace settings, Workflows, Skills, billing, and
+  workspace-owned integrations.
+- Members use the shared workspace surfaces and manage the personal connections available to their
+  own account.
+
+Some UI controls are hidden or read-only for members. If a setting is owned by the workspace, ask an
+admin to change it rather than connecting a second personal copy.
+
+## Workspace and personal connections
+
+The Integrations screen groups connections by how they are presented in the product:
+
+- **Workspace** connections provide shared company tooling or are managed for the workspace.
+- **Personal** connections act as the signed-in person. Only that person can manage the account and
+  decide how it is wired into a Brain.
+
+Some providers support multiple personal accounts. A second OAuth connection adds another account
+instead of silently replacing the first; use the connection label and provider account identity to
+choose the right one.
+
+## Brain visibility
+
+A Brain can be visible to the whole workspace or restricted to selected members. Access is checked
+again for reads, edits, source configuration, MCP calls, ingestion jobs, and file downloads. Moving
+to another workspace or Brain changes the knowledge boundary for later work; it does not merge the
+underlying content.

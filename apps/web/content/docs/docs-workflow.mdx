@@ -1,11 +1,13 @@
 ---
-title: Docs workflow
-description: How to keep Goat documentation current while the app changes.
+title: Engineering notes workflow
+description: How to maintain the embedded engineering notes while the standalone user docs are prepared.
 ---
 
 ## Source files
 
-Write documentation in `apps/web/content/docs`.
+User- and API-facing documentation lives in the standalone Fumadocs app under
+`apps/docs/content/docs`. The files in `apps/web/content/docs` are retained engineering notes served
+by the product until the owner chooses the standalone docs hosting and domain cutover.
 
 Each page is an MDX file with frontmatter:
 
@@ -20,9 +22,9 @@ Update `apps/web/content/docs/meta.json` when adding, removing, or reordering pa
 
 ## When to update docs
 
-Update these docs when a change affects:
+Update the standalone user docs when a change affects product behavior. Update these embedded notes
+only when a change affects the engineering material still rendered by the product, including:
 
-- User-facing Goat behavior.
 - Chat or task flow.
 - Runner behavior for Goat tasks.
 - Tool availability, model selection, or task planning.
@@ -32,11 +34,19 @@ Small internal refactors do not need docs unless they invalidate an existing pag
 
 ## Verification
 
-Before merging a docs change that touches MDX routing or rendering, run:
+For the standalone site, run:
+
+```bash
+bun --filter @opencompany/docs lint
+bun --filter @opencompany/docs typecheck
+bun --filter @opencompany/docs build
+```
+
+For an embedded-note change that touches the existing web MDX routing or rendering, run:
 
 ```bash
 bun --filter @opencompany/web typecheck
 bun --filter @opencompany/web build
 ```
 
-For copy-only changes, typecheck is usually enough. For route or rendering changes, open `/docs` in the web app and click at least one nested docs page.
+For route or rendering changes, open the affected app and click at least one nested docs page.

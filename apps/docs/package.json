@@ -1,0 +1,38 @@
+{
+  "name": "@opencompany/docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run generate:openapi && next dev --port 3004",
+    "build": "bun run docs:generate && next build",
+    "start": "next start --port 3004",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "bun run docs:generate && tsc --noEmit",
+    "docs:generate": "bun run generate:openapi && fumadocs-mdx",
+    "generate:openapi": "bun scripts/generate-openapi.ts"
+  },
+  "dependencies": {
+    "fumadocs-core": "16.14.4",
+    "fumadocs-mdx": "^15.2.3",
+    "fumadocs-openapi": "^11.2.4",
+    "fumadocs-ui": "16.14.4",
+    "json-schema-typed": "^8.0.2",
+    "next": "16.2.10",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.0",
+    "@types/mdx": "^2.0.13",
+    "@types/node": "^25.9.1",
+    "@types/react": "19.2.15",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.10",
+    "postcss": "8.5.15",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^6.0.3"
+  }
+}
