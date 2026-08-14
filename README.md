@@ -67,3 +67,9 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the review and verification expecta
 - [Deployment](./docs/deployment.md)
 - [Environment variables](./docs/env-vars.md)
 - [Secret management](./docs/secret-management.md)
+
+## License and Trademarks
+
+The source code is licensed under the [Apache License 2.0](./LICENSE). See [NOTICE](./NOTICE) for
+attributions. The opencompany name and logos are not granted under the software license; see the
+[trademark policy](./TRADEMARKS.md).
