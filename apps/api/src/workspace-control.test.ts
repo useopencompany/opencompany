@@ -1,45 +1,45 @@
-import { syncGoatStripeSeatQuantityForWorkspace } from "@opencompany/billing/seats";
+import { ensureWorkspaceOrganization } from "@opencompany/agent/workspaces/organizations";
+import { provisionWorkspace } from "@opencompany/agent/workspaces/provisioning";
+import { syncStripeSeatQuantityForWorkspace } from "@opencompany/billing/seats";
 import type { Actor } from "@opencompany/core";
-import { getGoatWorkspacePlan } from "@opencompany/db/goat-billing";
+import { getWorkspacePlan } from "@opencompany/db/billing";
 import {
-  hasOwnedGoatHobbyWorkspace,
-  listAccessibleGoatBrains,
-  listGoatWorkspaceMembers,
-  listGoatWorkspacesForUser,
-  removeGoatWorkspaceMember,
-  updateGoatWorkspaceName,
-} from "@opencompany/db/goat-workspaces";
-import { ensureGoatWorkspaceOrganization } from "@opencompany/goat-agent/workspaces/organizations";
-import { provisionGoatWorkspace } from "@opencompany/goat-agent/workspaces/provisioning";
+  hasOwnedHobbyWorkspace,
+  listAccessibleBrains,
+  listWorkspaceMembers,
+  listWorkspacesForUser,
+  removeWorkspaceMember,
+  updateWorkspaceName,
+} from "@opencompany/db/workspaces";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createWorkspaceControlService } from "./workspace-control";
 
 vi.mock("@opencompany/billing/seats", () => ({
-  syncGoatStripeSeatQuantityForWorkspace: vi.fn(async () => ({ ok: true, changed: true })),
+  syncStripeSeatQuantityForWorkspace: vi.fn(async () => ({ ok: true, changed: true })),
 }));
 
-vi.mock("@opencompany/db/goat-billing", () => ({
-  getGoatWorkspacePlan: vi.fn(async () => "pro"),
-  goatWorkspaceMemberCap: (plan: string) => (plan === "pro" ? 10 : 1),
+vi.mock("@opencompany/db/billing", () => ({
+  getWorkspacePlan: vi.fn(async () => "pro"),
+  workspaceMemberCap: (plan: string) => (plan === "pro" ? 10 : 1),
 }));
 
-vi.mock("@opencompany/db/goat-workspaces", async (importOriginal) => ({
+vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  hasOwnedGoatHobbyWorkspace: vi.fn(async () => false),
-  listAccessibleGoatBrains: vi.fn(async () => [{ id: "brain_general", slug: "general" }]),
-  listGoatWorkspaceMembers: vi.fn(),
-  listGoatWorkspacesForUser: vi.fn(),
-  removeGoatWorkspaceMember: vi.fn(async () => undefined),
-  updateGoatWorkspaceName: vi.fn(async () => undefined),
+  hasOwnedHobbyWorkspace: vi.fn(async () => false),
+  listAccessibleBrains: vi.fn(async () => [{ id: "brain_general", slug: "general" }]),
+  listWorkspaceMembers: vi.fn(),
+  listWorkspacesForUser: vi.fn(),
+  removeWorkspaceMember: vi.fn(async () => undefined),
+  updateWorkspaceName: vi.fn(async () => undefined),
 }));
 
-vi.mock("@opencompany/goat-agent/workspaces/organizations", () => ({
-  ensureGoatWorkspaceOrganization: vi.fn(async () => "org_current"),
+vi.mock("@opencompany/agent/workspaces/organizations", () => ({
+  ensureWorkspaceOrganization: vi.fn(async () => "org_current"),
 }));
 
-vi.mock("@opencompany/goat-agent/workspaces/provisioning", async (importOriginal) => ({
+vi.mock("@opencompany/agent/workspaces/provisioning", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  provisionGoatWorkspace: vi.fn(),
+  provisionWorkspace: vi.fn(),
 }));
 
 const admin: Actor = {
@@ -73,14 +73,14 @@ const workos = {
 describe("workspace control service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getGoatWorkspacePlan).mockResolvedValue("pro");
-    vi.mocked(hasOwnedGoatHobbyWorkspace).mockResolvedValue(false);
-    vi.mocked(listGoatWorkspaceMembers).mockResolvedValue(workspaceMembers() as never);
-    vi.mocked(listGoatWorkspacesForUser).mockResolvedValue([{ workspace, role: "admin" }] as never);
-    vi.mocked(listAccessibleGoatBrains).mockResolvedValue([
+    vi.mocked(getWorkspacePlan).mockResolvedValue("pro");
+    vi.mocked(hasOwnedHobbyWorkspace).mockResolvedValue(false);
+    vi.mocked(listWorkspaceMembers).mockResolvedValue(workspaceMembers() as never);
+    vi.mocked(listWorkspacesForUser).mockResolvedValue([{ workspace, role: "admin" }] as never);
+    vi.mocked(listAccessibleBrains).mockResolvedValue([
       { id: "brain_general", slug: "general" },
     ] as never);
-    vi.mocked(provisionGoatWorkspace).mockResolvedValue({
+    vi.mocked(provisionWorkspace).mockResolvedValue({
       workspace: { ...workspace, id: "goat_ws_new", workosOrganizationId: "org_new" },
       brain: { id: "brain_new" },
     } as never);
@@ -136,7 +136,7 @@ describe("workspace control service", () => {
     });
     await expect(service.rename(member, "Renamed")).rejects.toMatchObject({ status: 403 });
     expect(workos.userManagement.sendInvitation).not.toHaveBeenCalled();
-    expect(updateGoatWorkspaceName).not.toHaveBeenCalled();
+    expect(updateWorkspaceName).not.toHaveBeenCalled();
   });
 
   it("verifies invitation and member ownership before destructive WorkOS calls", async () => {
@@ -169,11 +169,11 @@ describe("workspace control service", () => {
     await service.removeMember(admin, "user_2");
 
     expect(workos.userManagement.deleteOrganizationMembership).toHaveBeenCalledWith("om_2");
-    expect(removeGoatWorkspaceMember).toHaveBeenCalledWith(
+    expect(removeWorkspaceMember).toHaveBeenCalledWith(
       { workspaceId: "goat_ws_current", userWorkosId: "user_2" },
       { db: expect.anything() },
     );
-    expect(syncGoatStripeSeatQuantityForWorkspace).toHaveBeenCalledWith("goat_ws_current", {
+    expect(syncStripeSeatQuantityForWorkspace).toHaveBeenCalledWith("goat_ws_current", {
       db: expect.anything(),
     });
   });
@@ -189,7 +189,7 @@ describe("workspace control service", () => {
       organizationId: "org_new",
       brainId: "brain_new",
     });
-    expect(provisionGoatWorkspace).toHaveBeenCalledWith(
+    expect(provisionWorkspace).toHaveBeenCalledWith(
       {
         authUserId: "user_1",
         userWorkosId: "user_1",

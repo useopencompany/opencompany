@@ -1,8 +1,8 @@
-import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/goat-agent/task-runtime-types";
+import type { TaskStage, TaskStatus } from "@opencompany/agent/task-runtime-types";
 
-export type GoatTaskStepInput = {
-  status: GoatTaskStatus;
-  stage: GoatTaskStage;
+export type TaskStepInput = {
+  status: TaskStatus;
+  stage: TaskStage;
   result: string | null;
   error: string | null;
   harnessSpec: unknown;
@@ -29,7 +29,7 @@ type SearchEvent = {
   error: string | null;
 };
 
-export function deriveGoatTaskSteps(task: GoatTaskStepInput): string[] {
+export function deriveTaskSteps(task: TaskStepInput): string[] {
   const steps: string[] = [];
   const toolEvents = readToolEvents(task.debugTrace);
   const searchEvents = readSearchEvents(toolEvents);
@@ -57,7 +57,7 @@ export function deriveGoatTaskSteps(task: GoatTaskStepInput): string[] {
   return steps.slice(0, MAX_STEPS);
 }
 
-function addStageSteps(steps: string[], task: GoatTaskStepInput) {
+function addStageSteps(steps: string[], task: TaskStepInput) {
   const hasPlannerTrace = Boolean(readRecord(task.debugTrace)?.planner);
   const hasHarnessSpec = hasObjectKeys(task.harnessSpec);
 
@@ -196,7 +196,7 @@ function pushStep(steps: string[], step: string) {
   steps.push(normalized);
 }
 
-function fallbackStepForStage(stage: GoatTaskStepInput["stage"]) {
+function fallbackStepForStage(stage: TaskStepInput["stage"]) {
   switch (stage) {
     case "queued":
       return "Waiting for the runner to start the task.";

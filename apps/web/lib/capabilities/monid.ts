@@ -1,3 +1,3 @@
 import "server-only";
 
-export * from "@opencompany/goat-agent/capabilities/monid";
+export * from "@opencompany/agent/capabilities/monid";

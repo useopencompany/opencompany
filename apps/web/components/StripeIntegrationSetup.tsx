@@ -3,7 +3,7 @@
 import { Check, ExternalLink } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import type { GoatStripeProviderState } from "@/lib/integration-state";
+import type { StripeProviderState } from "@/lib/integration-state";
 import {
   disconnectStripeIntegrationAction,
   saveStripeRestrictedApiKeyAction,
@@ -13,7 +13,7 @@ export function StripeIntegrationSetup({
   initialState,
   canManage,
 }: {
-  initialState: GoatStripeProviderState;
+  initialState: StripeProviderState;
   canManage: boolean;
 }) {
   const router = useRouter();
@@ -154,7 +154,8 @@ export function StripeIntegrationSetup({
             in the Stripe Dashboard.
           </li>
           <li>
-            Create a restricted key named <strong className="font-medium text-ink">Goat</strong>.
+            Create a restricted key named{" "}
+            <strong className="font-medium text-ink">opencompany</strong>.
           </li>
           <li>
             Give it read access to Balance, Subscriptions, and Invoices. Balance access includes
@@ -164,7 +165,7 @@ export function StripeIntegrationSetup({
         </ol>
         <p className="px-2 text-[13px] leading-5 text-ink-subtle">
           Main chat can then answer questions about recent payment activity, cash available in
-          Stripe, subscription health and estimated MRR, and open receivables. Goat rejects
+          Stripe, subscription health and estimated MRR, and open receivables. opencompany rejects
           unrestricted <code>sk_</code> keys and never exposes the saved key to the model.
         </p>
       </section>
@@ -172,7 +173,7 @@ export function StripeIntegrationSetup({
   );
 }
 
-function setupStatus(state: GoatStripeProviderState) {
+function setupStatus(state: StripeProviderState) {
   if (state.connected) {
     const mode = state.livemode === true ? "live" : state.livemode === false ? "test" : null;
     return {
@@ -197,7 +198,7 @@ function setupStatus(state: GoatStripeProviderState) {
   };
 }
 
-function emptyStripeState(): GoatStripeProviderState {
+function emptyStripeState(): StripeProviderState {
   return {
     provider: "stripe",
     connected: false,

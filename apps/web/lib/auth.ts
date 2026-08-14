@@ -4,17 +4,17 @@ import type { AuthenticationResponse, User as WorkOSUser } from "@workos-inc/nod
 import { redirect } from "next/navigation";
 import type { NextRequest } from "next/server";
 import { cache } from "react";
-import { recordLastGoatAuthMethod } from "@/lib/auth-methods";
+import { recordLastAuthMethod } from "@/lib/auth-methods";
 import { serverApiClient, serverApiError } from "@/lib/server-api-client";
 import {
-  GOAT_ACTIVE_BRAIN_COOKIE,
-  GOAT_ACTIVE_WORKSPACE_COOKIE,
-  rememberActiveGoatWorkspace,
+  ACTIVE_BRAIN_COOKIE,
+  ACTIVE_WORKSPACE_COOKIE,
+  rememberActiveWorkspace,
 } from "@/lib/workspace-session";
 
-export { GOAT_ACTIVE_BRAIN_COOKIE, GOAT_ACTIVE_WORKSPACE_COOKIE };
+export { ACTIVE_BRAIN_COOKIE, ACTIVE_WORKSPACE_COOKIE };
 
-export type GoatIdentityUser = {
+export type IdentityUser = {
   workosUserId: string;
   email: string;
   firstName: string | null;
@@ -34,46 +34,46 @@ export type GoatIdentityUser = {
   updatedAt: Date;
 };
 
-export type GoatIdentityWorkspace = {
+export type IdentityWorkspace = {
   id: string;
   name: string;
   slug: string | null;
 };
 
-export type GoatWorkspaceWithRole = {
-  workspace: GoatIdentityWorkspace;
+export type WorkspaceWithRole = {
+  workspace: IdentityWorkspace;
   role: "admin" | "member";
 };
 
-export type GoatIdentityBrain = IdentityDto["brains"][number];
+export type IdentityBrain = IdentityDto["brains"][number];
 
-export type GoatIdentityContext = {
+export type IdentityContext = {
   authUser: WorkOSUser;
   organizationId: string | null;
-  user: GoatIdentityUser;
-  workspaces: GoatWorkspaceWithRole[];
+  user: IdentityUser;
+  workspaces: WorkspaceWithRole[];
 };
 
-export type GoatAuthContext = {
+export type AuthContext = {
   authUser: WorkOSUser;
   organizationId: string | null;
-  user: GoatIdentityUser;
-  workspace: GoatIdentityWorkspace;
+  user: IdentityUser;
+  workspace: IdentityWorkspace;
   role: "admin" | "member";
-  workspaces: GoatWorkspaceWithRole[];
-  brains: GoatIdentityBrain[];
-  activeBrain: GoatIdentityBrain | null;
+  workspaces: WorkspaceWithRole[];
+  brains: IdentityBrain[];
+  activeBrain: IdentityBrain | null;
 };
 
 // Shared by both custom sign-in surfaces. WorkOS session sealing and browser
 // preference cookies remain in Next.js; all identity persistence and membership
 // adoption run through the authenticated API identity tier.
-export async function completeGoatAuthentication(
+export async function completeAuthentication(
   authResponse: AuthenticationResponse,
   request: NextRequest | string,
 ) {
   await saveSession(authResponse, request);
-  await recordLastGoatAuthMethod(authResponse.authenticationMethod);
+  await recordLastAuthMethod(authResponse.authenticationMethod);
   const client = await serverApiClient({ authorization: `Bearer ${authResponse.accessToken}` });
   const response = await client.v1.identity.sync.$post();
   if (!response.ok) {
@@ -82,19 +82,19 @@ export async function completeGoatAuthentication(
   const { data } = await response.json();
   if (authResponse.organizationId && data.activeWorkspaceId) {
     try {
-      await rememberActiveGoatWorkspace({
+      await rememberActiveWorkspace({
         workspaceId: data.activeWorkspaceId,
         brainId: data.activeBrainId,
       });
     } catch (error) {
-      console.error("[goat] Failed to activate the authenticated workspace", error);
+      console.error("[opencompany] Failed to activate the authenticated workspace", error);
     }
   }
 }
 
 // React cache() preserves the request-local semantics relied on by the RSC and
 // route callers: every consumer shares one AuthKit read and one API identity read.
-const resolveGoatSession = cache(
+const resolveSession = cache(
   async (): Promise<{
     authUser: WorkOSUser;
     organizationId: string | null;
@@ -113,8 +113,8 @@ const resolveGoatSession = cache(
   },
 );
 
-const resolveGoatIdentity = cache(async (): Promise<GoatIdentityContext | null> => {
-  const session = await resolveGoatSession();
+const resolveIdentity = cache(async (): Promise<IdentityContext | null> => {
+  const session = await resolveSession();
   if (!session) return null;
   return {
     authUser: session.authUser,
@@ -127,8 +127,8 @@ const resolveGoatIdentity = cache(async (): Promise<GoatIdentityContext | null> 
   };
 });
 
-const resolveGoatAuthContext = cache(async (): Promise<GoatAuthContext | null> => {
-  const [session, identity] = await Promise.all([resolveGoatSession(), resolveGoatIdentity()]);
+const resolveAuthContext = cache(async (): Promise<AuthContext | null> => {
+  const [session, identity] = await Promise.all([resolveSession(), resolveIdentity()]);
   if (!session || !identity || !session.data.activeWorkspaceId) return null;
   const active = identity.workspaces.find(
     (entry) => entry.workspace.id === session.data.activeWorkspaceId,
@@ -146,14 +146,10 @@ const resolveGoatAuthContext = cache(async (): Promise<GoatAuthContext | null> =
   };
 });
 
-export async function currentGoatIdentity(options: {
-  optional: true;
-}): Promise<GoatIdentityContext | null>;
-export async function currentGoatIdentity(options?: {
-  optional?: false;
-}): Promise<GoatIdentityContext>;
-export async function currentGoatIdentity(options: { optional?: boolean } = {}) {
-  const identity = await resolveGoatIdentity();
+export async function currentIdentity(options: { optional: true }): Promise<IdentityContext | null>;
+export async function currentIdentity(options?: { optional?: false }): Promise<IdentityContext>;
+export async function currentIdentity(options: { optional?: boolean } = {}) {
+  const identity = await resolveIdentity();
   if (!identity) {
     if (options.optional) return null;
     redirect("/signin");
@@ -161,15 +157,15 @@ export async function currentGoatIdentity(options: { optional?: boolean } = {}) 
   return identity;
 }
 
-export async function currentGoatUser(options: { optional: true }): Promise<GoatAuthContext | null>;
-export async function currentGoatUser(options?: { optional?: false }): Promise<GoatAuthContext>;
-export async function currentGoatUser(options: { optional?: boolean } = {}) {
-  const identity = await resolveGoatIdentity();
+export async function currentUser(options: { optional: true }): Promise<AuthContext | null>;
+export async function currentUser(options?: { optional?: false }): Promise<AuthContext>;
+export async function currentUser(options: { optional?: boolean } = {}) {
+  const identity = await resolveIdentity();
   if (!identity) {
     if (options.optional) return null;
     redirect("/signin");
   }
-  const context = await resolveGoatAuthContext();
+  const context = await resolveAuthContext();
   if (!context) {
     if (options.optional) return null;
     redirect("/onboarding");
@@ -177,21 +173,21 @@ export async function currentGoatUser(options: { optional?: boolean } = {}) {
   return context;
 }
 
-export async function currentGoatBrain(): Promise<{
-  context: GoatAuthContext;
-  brain: GoatIdentityBrain;
+export async function currentBrain(): Promise<{
+  context: AuthContext;
+  brain: IdentityBrain;
 }> {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   if (!context.activeBrain) {
     throw new Error("You do not have access to any brain in this workspace.");
   }
   return { context, brain: context.activeBrain };
 }
 
-export async function currentGoatBrainByRef(
+export async function currentBrainByRef(
   brainRef: string,
-): Promise<{ context: GoatAuthContext; brain: GoatIdentityBrain }> {
-  const context = await currentGoatUser();
+): Promise<{ context: AuthContext; brain: IdentityBrain }> {
+  const context = await currentUser();
   const brain = context.brains.find(
     (candidate) => candidate.id === brainRef || candidate.slug === brainRef,
   );
@@ -201,7 +197,7 @@ export async function currentGoatBrainByRef(
   return { context, brain };
 }
 
-function identityUser(user: IdentityDto["user"]): GoatIdentityUser {
+function identityUser(user: IdentityDto["user"]): IdentityUser {
   return {
     workosUserId: user.id,
     email: user.email,

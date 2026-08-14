@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  createGoatEmailUnsubscribeToken,
-  createGoatEmailUnsubscribeUrl,
-  unsubscribeGoatOnboardingEmails,
-  verifyGoatEmailUnsubscribeToken,
+  createEmailUnsubscribeToken,
+  createEmailUnsubscribeUrl,
+  unsubscribeOnboardingEmails,
+  verifyEmailUnsubscribeToken,
 } from "@/lib/email/unsubscribe";
 import { emailLifecycleApiRequest } from "@/lib/server-api-client";
 
@@ -13,10 +13,10 @@ vi.mock("@/lib/server-api-client", () => ({
 }));
 
 vi.mock("@/lib/app-url", () => ({
-  getGoatAppUrl: () => "https://goat.example.com",
+  getAppUrl: () => "https://opencompany.example.com",
 }));
 
-describe("goat onboarding unsubscribe tokens", () => {
+describe("opencompany onboarding unsubscribe tokens", () => {
   beforeEach(() => {
     process.env.RESEND_API_KEY = "re_test_secret";
   });
@@ -26,29 +26,29 @@ describe("goat onboarding unsubscribe tokens", () => {
   });
 
   it("round-trips a valid token (case-normalized email)", () => {
-    const token = createGoatEmailUnsubscribeToken({ email: "Ada@Example.com" });
-    const payload = verifyGoatEmailUnsubscribeToken(token);
+    const token = createEmailUnsubscribeToken({ email: "Ada@Example.com" });
+    const payload = verifyEmailUnsubscribeToken(token);
     expect(payload).toEqual({ v: 1, type: "goat_onboarding", email: "ada@example.com" });
   });
 
   it("rejects a tampered signature", () => {
-    const token = createGoatEmailUnsubscribeToken({ email: "ada@example.com" });
+    const token = createEmailUnsubscribeToken({ email: "ada@example.com" });
     const [payload] = token.split(".");
-    expect(() => verifyGoatEmailUnsubscribeToken(`${payload}.deadbeef`)).toThrow(
+    expect(() => verifyEmailUnsubscribeToken(`${payload}.deadbeef`)).toThrow(
       "Invalid unsubscribe token.",
     );
   });
 
   it("rejects a token signed with a different secret", () => {
-    const token = createGoatEmailUnsubscribeToken({ email: "ada@example.com", secret: "other" });
-    expect(() => verifyGoatEmailUnsubscribeToken(token)).toThrow("Invalid unsubscribe token.");
+    const token = createEmailUnsubscribeToken({ email: "ada@example.com", secret: "other" });
+    expect(() => verifyEmailUnsubscribeToken(token)).toThrow("Invalid unsubscribe token.");
   });
 
-  it("builds an unsubscribe url on the goat origin", () => {
-    const url = new URL(createGoatEmailUnsubscribeUrl({ email: "ada@example.com" }));
-    expect(url.origin).toBe("https://goat.example.com");
+  it("builds an unsubscribe URL on the opencompany origin", () => {
+    const url = new URL(createEmailUnsubscribeUrl({ email: "ada@example.com" }));
+    expect(url.origin).toBe("https://opencompany.example.com");
     expect(url.pathname).toBe("/api/email/unsubscribe");
-    expect(verifyGoatEmailUnsubscribeToken(url.searchParams.get("token") ?? "").email).toBe(
+    expect(verifyEmailUnsubscribeToken(url.searchParams.get("token") ?? "").email).toBe(
       "ada@example.com",
     );
   });
@@ -57,8 +57,8 @@ describe("goat onboarding unsubscribe tokens", () => {
     vi.mocked(emailLifecycleApiRequest).mockResolvedValueOnce(
       Response.json({ data: { skipped: 2 } }),
     );
-    const token = createGoatEmailUnsubscribeToken({ email: "Ada@Example.com" });
-    await expect(unsubscribeGoatOnboardingEmails({ token })).resolves.toEqual({
+    const token = createEmailUnsubscribeToken({ email: "Ada@Example.com" });
+    await expect(unsubscribeOnboardingEmails({ token })).resolves.toEqual({
       status: "unsubscribed",
       email: "ada@example.com",
       skipped: 2,

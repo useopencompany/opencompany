@@ -3,7 +3,7 @@ title: Brain
 description: Keep reusable workspace knowledge with provenance, controlled sources, and durable files.
 ---
 
-Brain is OpenCompany's durable knowledge store. It contains Markdown knowledge pages, immutable
+Brain is opencompany's durable knowledge store. It contains Markdown knowledge pages, immutable
 evidence, uploaded files, provenance, and links between related subjects. It is not a copy of every
 Conversation and it is not a mirror of every connected provider.
 
@@ -19,7 +19,7 @@ filed, merged, or promoted by the background curation path later.
 
 ## Reading and saving from Chat
 
-The OpenCompany engine can search and read the Brains available to the Conversation. When you
+The opencompany engine can search and read the Brains available to the Conversation. When you
 explicitly ask it to remember or save something, `save_to_brain` captures a draft and queues durable
 curation. The model does not receive unrestricted document mutation access.
 
@@ -33,7 +33,7 @@ Provider ingestion is durable and scoped to one Brain. A configured source creat
 items and jobs; background workers validate, claim, and settle those jobs. Pausing a source stops
 later ingestion but does not silently delete knowledge that was already curated.
 
-Uploaded files are private. OpenCompany stores the bytes behind authenticated access and extracts
+Uploaded files are private. opencompany stores the bytes behind authenticated access and extracts
 supported text for search and curation.
 
 ## Visibility

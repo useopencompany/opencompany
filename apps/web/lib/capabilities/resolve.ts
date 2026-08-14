@@ -1,1 +1,1 @@
-export * from "@opencompany/goat-agent/capabilities/resolve";
+export * from "@opencompany/agent/capabilities/resolve";

@@ -1,7 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setGoatBrainSourceEnabledAction } from "./brain-source-actions";
+import { setBrainSourceEnabledAction } from "./brain-source-actions";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/headers", () => ({ headers: vi.fn() }));
@@ -43,7 +43,7 @@ describe("Brain source API actions", () => {
     );
 
     await expect(
-      setGoatBrainSourceEnabledAction({
+      setBrainSourceEnabledAction({
         brainRef: "brain_1",
         integrationId: "integration_1",
         provider: "slack",

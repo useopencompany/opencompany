@@ -27,24 +27,21 @@ vi.mock("@opencompany/db/client", () => ({
   getDb: () => dbMocks.db,
 }));
 
-vi.mock("@opencompany/db/goat-brain-read", () => ({
-  searchGoatBrain: vi.fn(),
-  getGoatBrainDocuments: vi.fn(),
-  getGoatBrainTimeline: vi.fn(),
-  listGoatBrainDocuments: vi.fn(),
+vi.mock("@opencompany/db/brain-read", () => ({
+  searchBrain: vi.fn(),
+  getBrainDocuments: vi.fn(),
+  getBrainTimeline: vi.fn(),
+  listBrainDocuments: vi.fn(),
 }));
 
+import { renderBrainToolCommand, runBrainToolForUser } from "@opencompany/agent/brain-cli";
 import {
-  getGoatBrainDocuments,
-  getGoatBrainTimeline,
-  listGoatBrainDocuments,
-  searchGoatBrain,
-} from "@opencompany/db/goat-brain-read";
-import { goatBrainToolRuns, goatUsers } from "@opencompany/db/goat-schema";
-import {
-  renderGoatBrainToolCommand,
-  runGoatBrainToolForUser,
-} from "@opencompany/goat-agent/brain-cli";
+  getBrainDocuments,
+  getBrainTimeline,
+  listBrainDocuments,
+  searchBrain,
+} from "@opencompany/db/brain-read";
+import { brainToolRuns, users } from "@opencompany/db/product-schema";
 
 const BASE_INPUT = {
   brainRef: "goat_brain_user_1",
@@ -53,19 +50,19 @@ const BASE_INPUT = {
   sourceRef: "goat-chat:user_message_1",
 };
 
-describe("runGoatBrainToolForUser", () => {
+describe("runBrainToolForUser", () => {
   it("does not silently ignore stdin for create truth", () => {
     expect(
-      renderGoatBrainToolCommand(
+      renderBrainToolCommand(
         {
           command: "create",
           flags: {
             id: "opencompany",
-            title: "OpenCompany",
+            title: "opencompany",
             type: "company",
             json: true,
           },
-          stdin: "OpenCompany is a company.",
+          stdin: "opencompany is a company.",
         },
         "goat-chat:user_message_1",
       ),
@@ -75,7 +72,7 @@ describe("runGoatBrainToolForUser", () => {
         "--id",
         "opencompany",
         "--title",
-        "OpenCompany",
+        "opencompany",
         "--type",
         "company",
         "--json",
@@ -83,32 +80,32 @@ describe("runGoatBrainToolForUser", () => {
         "--source-ref",
         "goat-chat:user_message_1",
       ],
-      stdin: "OpenCompany is a company.",
+      stdin: "opencompany is a company.",
     });
   });
 
   it("rejects create without an explicit type", () => {
     expect(() =>
-      renderGoatBrainToolCommand(
+      renderBrainToolCommand(
         {
           command: "create",
           flags: {
             id: "opencompany",
-            title: "OpenCompany",
-            truth: "OpenCompany is a company.",
+            title: "opencompany",
+            truth: "opencompany is a company.",
           },
         },
         "goat-chat:user_message_1",
       ),
-    ).toThrow("goat_brain create requires a type.");
+    ).toThrow("brain create requires a type.");
     expect(() =>
-      renderGoatBrainToolCommand(
+      renderBrainToolCommand(
         {
           command: "create",
           flags: {
             id: "opencompany",
-            title: "OpenCompany",
-            truth: "OpenCompany is a company.",
+            title: "opencompany",
+            truth: "opencompany is a company.",
           },
         },
         "goat-chat:user_message_1",
@@ -118,31 +115,31 @@ describe("runGoatBrainToolForUser", () => {
 
   it("rejects create without compiled truth", () => {
     expect(() =>
-      renderGoatBrainToolCommand(
+      renderBrainToolCommand(
         {
           command: "create",
           flags: {
             id: "opencompany",
-            title: "OpenCompany",
+            title: "opencompany",
             type: "company",
           },
         },
         "goat-chat:user_message_1",
       ),
-    ).toThrow("goat_brain create requires compiled truth");
+    ).toThrow("brain create requires compiled truth");
   });
 
   it("allows create in any free-form folder", () => {
     expect(
-      renderGoatBrainToolCommand(
+      renderBrainToolCommand(
         {
           command: "create",
           flags: {
             id: "opencompany",
             folder: "accounts/customers",
-            title: "OpenCompany",
+            title: "opencompany",
             type: "company",
-            truth: "OpenCompany is a company.",
+            truth: "opencompany is a company.",
           },
         },
         "goat-chat:user_message_1",
@@ -152,32 +149,32 @@ describe("runGoatBrainToolForUser", () => {
 
   it("rejects create with an invalid kind", () => {
     expect(() =>
-      renderGoatBrainToolCommand(
+      renderBrainToolCommand(
         {
           command: "create",
           flags: {
             id: "ev-opencompany-chat",
             kind: "snapshot",
-            title: "OpenCompany chat",
+            title: "opencompany chat",
             type: "source",
-            truth: "OpenCompany was discussed in chat.",
+            truth: "opencompany was discussed in chat.",
           },
         },
         "goat-chat:user_message_1",
       ),
-    ).toThrow('goat_brain create kind must be "page" or "evidence"');
+    ).toThrow('brain create kind must be "page" or "evidence"');
 
     expect(
-      renderGoatBrainToolCommand(
+      renderBrainToolCommand(
         {
           command: "create",
           flags: {
             id: "ev-opencompany-chat",
             kind: "evidence",
             folder: "evidence",
-            title: "OpenCompany chat",
+            title: "opencompany chat",
             type: "source",
-            truth: "OpenCompany was discussed in chat.",
+            truth: "opencompany was discussed in chat.",
           },
         },
         "goat-chat:user_message_1",
@@ -185,9 +182,9 @@ describe("runGoatBrainToolForUser", () => {
     ).toContain("evidence");
   });
 
-  it("renders goat_brain help invocations", () => {
+  it("renders brain help invocations", () => {
     expect(
-      renderGoatBrainToolCommand(
+      renderBrainToolCommand(
         {
           command: "help",
           flags: { topic: "create" },
@@ -201,7 +198,7 @@ describe("runGoatBrainToolForUser", () => {
 
   it("passes includeMerged through for list and query", () => {
     expect(
-      renderGoatBrainToolCommand(
+      renderBrainToolCommand(
         {
           command: "query",
           flags: { text: "Sarah Chen", includeMerged: true, json: true },
@@ -211,7 +208,7 @@ describe("runGoatBrainToolForUser", () => {
     ).toEqual(["query", "--text", "Sarah Chen", "--include-merged", "--json"]);
 
     expect(
-      renderGoatBrainToolCommand(
+      renderBrainToolCommand(
         {
           command: "list",
           flags: { folder: "people", includeMerged: true, json: true },
@@ -223,7 +220,7 @@ describe("runGoatBrainToolForUser", () => {
 
   it("renders append-evidence as an evidence-record command", () => {
     expect(
-      renderGoatBrainToolCommand(
+      renderBrainToolCommand(
         {
           command: "append-evidence",
           flags: {
@@ -250,7 +247,7 @@ describe("runGoatBrainToolForUser", () => {
   });
 
   it("returns a helpful error for unsupported create entity types", async () => {
-    const output = await runGoatBrainToolForUser({
+    const output = await runBrainToolForUser({
       ...BASE_INPUT,
       toolInput: {
         command: "create",
@@ -269,14 +266,14 @@ describe("runGoatBrainToolForUser", () => {
       stdout: "",
       stderr: "",
       error: expect.stringContaining(
-        'Unsupported Goat Brain entity type "candidate". Use one of: person, company, project, meeting, concept, source, analysis, note.',
+        'Unsupported opencompany Brain entity type "candidate". Use one of: person, company, project, meeting, concept, source, analysis, note.',
       ),
     });
     expect(output.error).toContain('Relevant help command: { command: "help"');
   });
 
   it("does not expose ingest through the chat tool", async () => {
-    const output = await runGoatBrainToolForUser({
+    const output = await runBrainToolForUser({
       ...BASE_INPUT,
       toolInput: {
         command: "ingest",
@@ -290,7 +287,7 @@ describe("runGoatBrainToolForUser", () => {
       exitCode: null,
       stdout: "",
       stderr: "",
-      error: expect.stringContaining('Unsupported goat_brain command "ingest".'),
+      error: expect.stringContaining('Unsupported brain command "ingest".'),
     });
     expect(output.error).toContain("For command-specific usage");
   });
@@ -304,10 +301,10 @@ describe("read plane commands", () => {
     dbMocks.update.mockClear();
     dbMocks.updateSet.mockClear();
     dbMocks.updateWhere.mockClear();
-    vi.mocked(searchGoatBrain).mockReset();
-    vi.mocked(getGoatBrainDocuments).mockReset();
-    vi.mocked(getGoatBrainTimeline).mockReset();
-    vi.mocked(listGoatBrainDocuments).mockReset();
+    vi.mocked(searchBrain).mockReset();
+    vi.mocked(getBrainDocuments).mockReset();
+    vi.mocked(getBrainTimeline).mockReset();
+    vi.mocked(listBrainDocuments).mockReset();
   });
 
   const HIT = {
@@ -348,9 +345,9 @@ describe("read plane commands", () => {
   };
 
   it("serves query from the read module with mapped options", async () => {
-    vi.mocked(searchGoatBrain).mockResolvedValue([HIT as never]);
+    vi.mocked(searchBrain).mockResolvedValue([HIT as never]);
 
-    const output = await runGoatBrainToolForUser({
+    const output = await runBrainToolForUser({
       ...BASE_INPUT,
       toolInput: {
         command: "query",
@@ -367,7 +364,7 @@ describe("read plane commands", () => {
       },
     });
 
-    expect(searchGoatBrain).toHaveBeenCalledWith(
+    expect(searchBrain).toHaveBeenCalledWith(
       expect.objectContaining({ brainRef: "goat_brain_user_1", gatewayApiKey: "gateway_test" }),
       {
         text: "who runs gtm",
@@ -395,7 +392,7 @@ describe("read plane commands", () => {
       },
     });
     expect(output.traceId).toMatch(/^goat_brain_run_/);
-    expect(dbMocks.insert).toHaveBeenCalledWith(goatBrainToolRuns);
+    expect(dbMocks.insert).toHaveBeenCalledWith(brainToolRuns);
     expect(dbMocks.insertValues).toHaveBeenCalledWith(
       expect.objectContaining({
         brainRef: "goat_brain_user_1",
@@ -409,9 +406,9 @@ describe("read plane commands", () => {
   });
 
   it("records MCP queries and setup completion in a non-interactive transaction", async () => {
-    vi.mocked(searchGoatBrain).mockResolvedValue([HIT as never]);
+    vi.mocked(searchBrain).mockResolvedValue([HIT as never]);
 
-    const output = await runGoatBrainToolForUser({
+    const output = await runBrainToolForUser({
       ...BASE_INPUT,
       sourceRef: "mcp:chatgpt",
       toolInput: { command: "query", flags: { text: "who runs gtm" } },
@@ -427,7 +424,7 @@ describe("read plane commands", () => {
         ok: true,
       }),
     );
-    expect(dbMocks.update).toHaveBeenCalledWith(goatUsers);
+    expect(dbMocks.update).toHaveBeenCalledWith(users);
     expect(dbMocks.updateSet).toHaveBeenCalledWith({
       mcpSetupCompletedAt: expect.any(Date),
       updatedAt: expect.any(Date),
@@ -435,7 +432,7 @@ describe("read plane commands", () => {
   });
 
   it("serves get for multiple ids and reports missing ones", async () => {
-    vi.mocked(getGoatBrainDocuments).mockResolvedValue({
+    vi.mocked(getBrainDocuments).mockResolvedValue({
       documents: [
         {
           requestedId: "ada lovelace",
@@ -471,7 +468,7 @@ describe("read plane commands", () => {
       missing: ["ghost"],
     });
 
-    const output = await runGoatBrainToolForUser({
+    const output = await runBrainToolForUser({
       ...BASE_INPUT,
       toolInput: {
         command: "get",
@@ -479,10 +476,7 @@ describe("read plane commands", () => {
       },
     });
 
-    expect(getGoatBrainDocuments).toHaveBeenCalledWith(expect.anything(), [
-      "ada lovelace",
-      "ghost",
-    ]);
+    expect(getBrainDocuments).toHaveBeenCalledWith(expect.anything(), ["ada lovelace", "ghost"]);
     expect(output.ok).toBe(true);
     expect(output.stdout).toBeUndefined();
     expect(output.parsed).toMatchObject({
@@ -492,9 +486,9 @@ describe("read plane commands", () => {
   });
 
   it("fails get with a surface-neutral message and no write-command manual", async () => {
-    vi.mocked(getGoatBrainDocuments).mockResolvedValue({ documents: [], missing: ["ghost"] });
+    vi.mocked(getBrainDocuments).mockResolvedValue({ documents: [], missing: ["ghost"] });
 
-    const output = await runGoatBrainToolForUser({
+    const output = await runBrainToolForUser({
       ...BASE_INPUT,
       toolInput: { command: "get", flags: { id: "ghost" } },
     });
@@ -504,13 +498,13 @@ describe("read plane commands", () => {
     expect(output.error).toContain("Search for it to find the right id.");
     // Read errors no longer append the CLI manual (which documents create/rewrite/merge/delete).
     expect(output.error).not.toContain("append-evidence");
-    expect(output.error).not.toContain("Use goat_brain as { command, flags, stdin? }");
+    expect(output.error).not.toContain("Use brain as { command, flags, stdin? }");
   });
 
   it("marks a recency-only browse as mode: browse and threads verbosity flags", async () => {
-    vi.mocked(searchGoatBrain).mockResolvedValue([]);
+    vi.mocked(searchBrain).mockResolvedValue([]);
 
-    const output = await runGoatBrainToolForUser({
+    const output = await runBrainToolForUser({
       ...BASE_INPUT,
       toolInput: {
         command: "query",
@@ -518,7 +512,7 @@ describe("read plane commands", () => {
       },
     });
 
-    expect(searchGoatBrain).toHaveBeenCalledWith(
+    expect(searchBrain).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         kind: "page",
@@ -543,7 +537,7 @@ describe("read plane commands", () => {
   });
 
   it("returns an explicit continuation when more query matches are available", async () => {
-    vi.mocked(searchGoatBrain).mockResolvedValue(
+    vi.mocked(searchBrain).mockResolvedValue(
       Array.from({ length: 11 }, (_, index) => ({
         ...HIT,
         id: `person-${index + 1}`,
@@ -551,7 +545,7 @@ describe("read plane commands", () => {
       })) as never,
     );
 
-    const output = await runGoatBrainToolForUser({
+    const output = await runBrainToolForUser({
       ...BASE_INPUT,
       toolInput: {
         command: "query",
@@ -559,7 +553,7 @@ describe("read plane commands", () => {
       },
     });
 
-    expect(searchGoatBrain).toHaveBeenCalledWith(
+    expect(searchBrain).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         text: "team",
@@ -585,7 +579,7 @@ describe("read plane commands", () => {
   });
 
   it("serves timeline and list from the read module", async () => {
-    vi.mocked(getGoatBrainTimeline).mockResolvedValue({
+    vi.mocked(getBrainTimeline).mockResolvedValue({
       id: "ada",
       entries: [
         {
@@ -598,7 +592,7 @@ describe("read plane commands", () => {
         },
       ],
     });
-    vi.mocked(listGoatBrainDocuments).mockResolvedValue([
+    vi.mocked(listBrainDocuments).mockResolvedValue([
       {
         id: "ada",
         title: "Ada",
@@ -610,11 +604,11 @@ describe("read plane commands", () => {
       },
     ]);
 
-    const timeline = await runGoatBrainToolForUser({
+    const timeline = await runBrainToolForUser({
       ...BASE_INPUT,
       toolInput: { command: "timeline", flags: { id: "ada", limit: 10 } },
     });
-    expect(getGoatBrainTimeline).toHaveBeenCalledWith(expect.anything(), "ada", { limit: 10 });
+    expect(getBrainTimeline).toHaveBeenCalledWith(expect.anything(), "ada", { limit: 10 });
     expect(timeline.ok).toBe(true);
     expect(timeline.stdout).toBeUndefined();
     expect(timeline.parsed).toMatchObject({
@@ -622,11 +616,11 @@ describe("read plane commands", () => {
       entries: [expect.objectContaining({ sourceRef: "jamie:meeting:1" })],
     });
 
-    const list = await runGoatBrainToolForUser({
+    const list = await runBrainToolForUser({
       ...BASE_INPUT,
       toolInput: { command: "list", flags: { type: "person", limit: 20 } },
     });
-    expect(listGoatBrainDocuments).toHaveBeenCalledWith(expect.anything(), {
+    expect(listBrainDocuments).toHaveBeenCalledWith(expect.anything(), {
       type: "person",
       limit: 20,
     });
@@ -643,22 +637,22 @@ describe("read plane commands", () => {
   });
 
   it("rejects invalid read flags before touching the module", async () => {
-    const output = await runGoatBrainToolForUser({
+    const output = await runBrainToolForUser({
       ...BASE_INPUT,
       toolInput: { command: "query", flags: { text: "x", kind: "wiki" } },
     });
     expect(output.ok).toBe(false);
     expect(output.error).toContain('kind must be "page" or "evidence"');
-    expect(searchGoatBrain).not.toHaveBeenCalled();
+    expect(searchBrain).not.toHaveBeenCalled();
 
-    const invalidOffset = await runGoatBrainToolForUser({
+    const invalidOffset = await runBrainToolForUser({
       ...BASE_INPUT,
       toolInput: { command: "query", flags: { text: "x", offset: -1 } },
     });
     expect(invalidOffset.ok).toBe(false);
     expect(invalidOffset.error).toContain("offset must be a non-negative integer");
 
-    const malformedOffset = await runGoatBrainToolForUser({
+    const malformedOffset = await runBrainToolForUser({
       ...BASE_INPUT,
       toolInput: { command: "query", flags: { text: "x", offset: "later" } },
     });

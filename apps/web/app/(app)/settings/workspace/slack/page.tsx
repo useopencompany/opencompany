@@ -1,4 +1,4 @@
-import { GoatSlackBotSettings } from "@/components/GoatSlackBotSettings";
+import { SlackBotSettings } from "@/components/SlackBotSettings";
 import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
 export default async function WorkspaceSlackBotSettingsPage({
@@ -18,7 +18,7 @@ export default async function WorkspaceSlackBotSettingsPage({
   const data = (await response.json()).data;
 
   return (
-    <GoatSlackBotSettings
+    <SlackBotSettings
       data={{
         ...data,
         setup: params.setup === "connected" || params.setup === "error" ? params.setup : null,

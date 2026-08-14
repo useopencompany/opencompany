@@ -1,5 +1,5 @@
 import type { Actor } from "@opencompany/core";
-import { normalizeGoatBrainIngestTrace } from "@opencompany/db/goat-brain-ingest-trace";
+import { normalizeBrainIngestTrace } from "@opencompany/db/brain-ingest-trace";
 import {
   BrainDocumentReadModelSchema,
   BrainEdgeReadModelSchema,
@@ -730,7 +730,7 @@ function publicBrainIngestJobResult(value: unknown) {
         return [{ brainId, folderPath, title, action }];
       })
     : undefined;
-  const trace = normalizeGoatBrainIngestTrace(result.trace);
+  const trace = normalizeBrainIngestTrace(result.trace);
   const durationMs = typeof result.durationMs === "number" ? result.durationMs : null;
 
   return {

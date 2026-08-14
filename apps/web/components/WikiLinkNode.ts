@@ -14,7 +14,7 @@
 // host editor), fed to the node views through node decorations so a rename
 // updates every chip instantly.
 
-import { parseGoatBrainInlineLinks } from "@opencompany/goat-brain/inline-links";
+import { parseBrainInlineLinks } from "@opencompany/brain/inline-links";
 import { type JSONContent, Node } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
@@ -41,7 +41,7 @@ const DEFAULT_STATE: WikiLinkState = {
 };
 
 // Single token anchored at the start of the source, mirroring the grammar in
-// parseGoatBrainInlineLinks so the editor and the shared parser never disagree.
+// parseBrainInlineLinks so the editor and the shared parser never disagree.
 const BRACKET_AT_START = /^\[\[([^[\]\n|]+)(?:\|([^[\]\n]+))?\]\]/;
 const LEGACY_EVIDENCE_AT_START = /^\[\^ev:([^\]\n]+)\]/;
 
@@ -60,7 +60,7 @@ type ResolvedWikiLink = {
 };
 
 function hrefForLink(
-  link: ReturnType<typeof parseGoatBrainInlineLinks>[number],
+  link: ReturnType<typeof parseBrainInlineLinks>[number],
   links: Record<string, string>,
 ): string {
   const mapped = links[`${link.kind}:${link.target}`];
@@ -71,7 +71,7 @@ function hrefForLink(
 }
 
 export function resolveWikiLink(raw: string, state: WikiLinkState): ResolvedWikiLink {
-  const link = parseGoatBrainInlineLinks(raw)[0];
+  const link = parseBrainInlineLinks(raw)[0];
   if (!link) {
     return { href: "", label: raw, icon: "link", external: false, title: raw };
   }

@@ -30,18 +30,18 @@
       "version": "0.1.0",
       "dependencies": {
         "@hono/node-server": "^1.19.11",
+        "@opencompany/agent": "workspace:*",
         "@opencompany/agent-runtime": "workspace:*",
         "@opencompany/analytics": "workspace:*",
         "@opencompany/billing": "workspace:*",
+        "@opencompany/brain": "workspace:*",
         "@opencompany/chat-presentation": "workspace:*",
         "@opencompany/core": "workspace:*",
         "@opencompany/db": "workspace:*",
         "@opencompany/file-extract": "workspace:*",
-        "@opencompany/goat-agent": "workspace:*",
-        "@opencompany/goat-brain": "workspace:*",
-        "@opencompany/goat-observability": "workspace:*",
         "@opencompany/observability": "workspace:*",
         "@opencompany/protocol": "workspace:*",
+        "@opencompany/telemetry": "workspace:*",
         "@vercel/blob": "^2.4.0",
         "@workos-inc/node": "^9.3.1",
         "drizzle-orm": "^0.45.2",
@@ -137,18 +137,18 @@
       "version": "0.2.0",
       "dependencies": {
         "@modelcontextprotocol/sdk": "1.26.0",
+        "@opencompany/agent": "workspace:*",
         "@opencompany/agent-runtime": "workspace:*",
         "@opencompany/analytics": "workspace:*",
         "@opencompany/billing": "workspace:*",
+        "@opencompany/brain": "workspace:*",
         "@opencompany/chat-presentation": "workspace:*",
         "@opencompany/core": "workspace:*",
         "@opencompany/crypto": "workspace:*",
         "@opencompany/db": "workspace:*",
         "@opencompany/file-extract": "workspace:*",
-        "@opencompany/goat-agent": "workspace:*",
-        "@opencompany/goat-brain": "workspace:*",
-        "@opencompany/goat-observability": "workspace:*",
         "@opencompany/observability": "workspace:*",
+        "@opencompany/telemetry": "workspace:*",
         "@sentry/bun": "^10.53.1",
         "@vercel/blob": "^2.4.0",
         "ai": "^6.0.189",
@@ -181,21 +181,21 @@
         "@browserbasehq/sdk": "^2.16.0",
         "@floating-ui/dom": "1.7.6",
         "@modelcontextprotocol/sdk": "1.26.0",
+        "@opencompany/agent": "workspace:*",
         "@opencompany/agent-runtime": "workspace:*",
         "@opencompany/analytics": "workspace:*",
         "@opencompany/billing": "workspace:*",
+        "@opencompany/brain": "workspace:*",
         "@opencompany/browser-tools": "workspace:*",
         "@opencompany/core": "workspace:*",
         "@opencompany/crypto": "workspace:*",
         "@opencompany/db": "workspace:*",
         "@opencompany/file-extract": "workspace:*",
-        "@opencompany/goat-agent": "workspace:*",
-        "@opencompany/goat-brain": "workspace:*",
-        "@opencompany/goat-observability": "workspace:*",
-        "@opencompany/goat-wiki": "workspace:*",
         "@opencompany/observability": "workspace:*",
         "@opencompany/protocol": "workspace:*",
+        "@opencompany/telemetry": "workspace:*",
         "@opencompany/ui": "workspace:*",
+        "@opencompany/wiki": "workspace:*",
         "@tanstack/electric-db-collection": "^0.3.5",
         "@tanstack/react-db": "^0.1.85",
         "@tiptap/core": "3.23.5",
@@ -243,6 +243,39 @@
         "eslint-config-next": "16.2.10",
         "postcss": "8.5.15",
         "tailwindcss": "^4.3.0",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.7",
+      },
+    },
+    "packages/agent": {
+      "name": "@opencompany/agent",
+      "version": "0.1.0",
+      "dependencies": {
+        "@ai-sdk/mcp": "^1.0.44",
+        "@browserbasehq/sdk": "^2.16.0",
+        "@modelcontextprotocol/sdk": "1.26.0",
+        "@opencompany/agent-runtime": "workspace:*",
+        "@opencompany/analytics": "workspace:*",
+        "@opencompany/billing": "workspace:*",
+        "@opencompany/brain": "workspace:*",
+        "@opencompany/browser-tools": "workspace:*",
+        "@opencompany/core": "workspace:*",
+        "@opencompany/crypto": "workspace:*",
+        "@opencompany/db": "workspace:*",
+        "@opencompany/observability": "workspace:*",
+        "@opencompany/telemetry": "workspace:*",
+        "@opencompany/wiki": "workspace:*",
+        "@vercel/blob": "^2.4.0",
+        "@vercel/sandbox": "^2.9.0",
+        "ai": "^6.0.189",
+        "ajv": "8.20.0",
+        "drizzle-orm": "^0.45.2",
+        "jose": "^5.10.0",
+        "mcp-handler": "^1.1.0",
+        "zod": "^4.4.3",
+      },
+      "devDependencies": {
+        "@types/node": "^25.9.1",
         "typescript": "^6.0.3",
         "vitest": "^4.1.7",
       },
@@ -298,6 +331,22 @@
         "vitest": "^4.1.7",
       },
     },
+    "packages/brain": {
+      "name": "@opencompany/brain",
+      "version": "0.1.0",
+      "bin": {
+        "opencompany-brain": "./src/cli/index.ts",
+      },
+      "dependencies": {
+        "minisearch": "^7.1.2",
+        "yaml": "^2.9.0",
+      },
+      "devDependencies": {
+        "@types/node": "^25.9.1",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.7",
+      },
+    },
     "packages/browser-tools": {
       "name": "@opencompany/browser-tools",
       "version": "0.1.0",
@@ -344,10 +393,10 @@
       "dependencies": {
         "@neondatabase/serverless": "^1.1.0",
         "@opencompany/agent-runtime": "workspace:*",
+        "@opencompany/brain": "workspace:*",
         "@opencompany/core": "workspace:*",
         "@opencompany/crypto": "workspace:*",
-        "@opencompany/goat-brain": "workspace:*",
-        "@opencompany/goat-wiki": "workspace:*",
+        "@opencompany/wiki": "workspace:*",
         "@vercel/blob": "^2.4.0",
         "dotenv": "^17.4.2",
         "drizzle-orm": "^0.45.2",
@@ -368,89 +417,6 @@
       "dependencies": {
         "exceljs": "^4.4.0",
         "mammoth": "^1.11.0",
-      },
-      "devDependencies": {
-        "@types/node": "^25.9.1",
-        "typescript": "^6.0.3",
-        "vitest": "^4.1.7",
-      },
-    },
-    "packages/goat-agent": {
-      "name": "@opencompany/goat-agent",
-      "version": "0.1.0",
-      "dependencies": {
-        "@ai-sdk/mcp": "^1.0.44",
-        "@browserbasehq/sdk": "^2.16.0",
-        "@modelcontextprotocol/sdk": "1.26.0",
-        "@opencompany/agent-runtime": "workspace:*",
-        "@opencompany/analytics": "workspace:*",
-        "@opencompany/billing": "workspace:*",
-        "@opencompany/browser-tools": "workspace:*",
-        "@opencompany/core": "workspace:*",
-        "@opencompany/crypto": "workspace:*",
-        "@opencompany/db": "workspace:*",
-        "@opencompany/goat-brain": "workspace:*",
-        "@opencompany/goat-observability": "workspace:*",
-        "@opencompany/goat-wiki": "workspace:*",
-        "@opencompany/observability": "workspace:*",
-        "@vercel/blob": "^2.4.0",
-        "@vercel/sandbox": "^2.9.0",
-        "ai": "^6.0.189",
-        "ajv": "8.20.0",
-        "drizzle-orm": "^0.45.2",
-        "jose": "^5.10.0",
-        "mcp-handler": "^1.1.0",
-        "zod": "^4.4.3",
-      },
-      "devDependencies": {
-        "@types/node": "^25.9.1",
-        "typescript": "^6.0.3",
-        "vitest": "^4.1.7",
-      },
-    },
-    "packages/goat-brain": {
-      "name": "@opencompany/goat-brain",
-      "version": "0.1.0",
-      "bin": {
-        "goat-brain": "./src/cli/index.ts",
-      },
-      "dependencies": {
-        "minisearch": "^7.1.2",
-        "yaml": "^2.9.0",
-      },
-      "devDependencies": {
-        "@types/node": "^25.9.1",
-        "typescript": "^6.0.3",
-        "vitest": "^4.1.7",
-      },
-    },
-    "packages/goat-observability": {
-      "name": "@opencompany/goat-observability",
-      "version": "0.1.0",
-      "dependencies": {
-        "@latitude-data/telemetry": "^4.0.0",
-        "@opentelemetry/api": "^1.9.0",
-        "@opentelemetry/exporter-metrics-otlp-http": "^0.208.0",
-        "@opentelemetry/exporter-trace-otlp-http": "^0.208.0",
-        "@opentelemetry/resources": "^2.2.0",
-        "@opentelemetry/sdk-metrics": "^2.2.0",
-        "@opentelemetry/sdk-node": "^0.208.0",
-        "@opentelemetry/sdk-trace-base": "^2.2.0",
-        "@opentelemetry/sdk-trace-node": "^2.2.0",
-        "@opentelemetry/semantic-conventions": "^1.38.0",
-        "@vercel/otel": "^2.0.0",
-      },
-      "devDependencies": {
-        "@types/node": "^25.9.1",
-        "typescript": "^6.0.3",
-        "vitest": "^4.1.7",
-      },
-    },
-    "packages/goat-wiki": {
-      "name": "@opencompany/goat-wiki",
-      "version": "0.1.0",
-      "dependencies": {
-        "yaml": "^2.9.0",
       },
       "devDependencies": {
         "@types/node": "^25.9.1",
@@ -485,6 +451,28 @@
         "vitest": "^4.1.7",
       },
     },
+    "packages/telemetry": {
+      "name": "@opencompany/telemetry",
+      "version": "0.1.0",
+      "dependencies": {
+        "@latitude-data/telemetry": "^4.0.0",
+        "@opentelemetry/api": "^1.9.0",
+        "@opentelemetry/exporter-metrics-otlp-http": "^0.208.0",
+        "@opentelemetry/exporter-trace-otlp-http": "^0.208.0",
+        "@opentelemetry/resources": "^2.2.0",
+        "@opentelemetry/sdk-metrics": "^2.2.0",
+        "@opentelemetry/sdk-node": "^0.208.0",
+        "@opentelemetry/sdk-trace-base": "^2.2.0",
+        "@opentelemetry/sdk-trace-node": "^2.2.0",
+        "@opentelemetry/semantic-conventions": "^1.38.0",
+        "@vercel/otel": "^2.0.0",
+      },
+      "devDependencies": {
+        "@types/node": "^25.9.1",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.7",
+      },
+    },
     "packages/ui": {
       "name": "@opencompany/ui",
       "version": "0.2.0",
@@ -511,6 +499,18 @@
       "peerDependencies": {
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
+      },
+    },
+    "packages/wiki": {
+      "name": "@opencompany/wiki",
+      "version": "0.1.0",
+      "dependencies": {
+        "yaml": "^2.9.0",
+      },
+      "devDependencies": {
+        "@types/node": "^25.9.1",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.7",
       },
     },
   },
@@ -982,6 +982,8 @@
 
     "@nolyfill/is-core-module": ["@nolyfill/is-core-module@1.0.39", "", {}, "sha512-nn5ozdjYQpUCZlWGuxcJY/KpxkWQs4DcbMCmKojjyrYDEAGy4Ce19NN4v5MduafTwJlbKc99UA8YhSVqq9yPZA=="],
 
+    "@opencompany/agent": ["@opencompany/agent@workspace:packages/agent"],
+
     "@opencompany/agent-runtime": ["@opencompany/agent-runtime@workspace:packages/agent-runtime"],
 
     "@opencompany/analytics": ["@opencompany/analytics@workspace:packages/analytics"],
@@ -989,6 +991,8 @@
     "@opencompany/api": ["@opencompany/api@workspace:apps/api"],
 
     "@opencompany/billing": ["@opencompany/billing@workspace:packages/billing"],
+
+    "@opencompany/brain": ["@opencompany/brain@workspace:packages/brain"],
 
     "@opencompany/browser-tools": ["@opencompany/browser-tools@workspace:packages/browser-tools"],
 
@@ -1006,14 +1010,6 @@
 
     "@opencompany/file-extract": ["@opencompany/file-extract@workspace:packages/file-extract"],
 
-    "@opencompany/goat-agent": ["@opencompany/goat-agent@workspace:packages/goat-agent"],
-
-    "@opencompany/goat-brain": ["@opencompany/goat-brain@workspace:packages/goat-brain"],
-
-    "@opencompany/goat-observability": ["@opencompany/goat-observability@workspace:packages/goat-observability"],
-
-    "@opencompany/goat-wiki": ["@opencompany/goat-wiki@workspace:packages/goat-wiki"],
-
     "@opencompany/marketing": ["@opencompany/marketing@workspace:apps/marketing"],
 
     "@opencompany/observability": ["@opencompany/observability@workspace:packages/observability"],
@@ -1024,9 +1020,13 @@
 
     "@opencompany/stripe-webhooks": ["@opencompany/stripe-webhooks@workspace:apps/stripe-webhooks"],
 
+    "@opencompany/telemetry": ["@opencompany/telemetry@workspace:packages/telemetry"],
+
     "@opencompany/ui": ["@opencompany/ui@workspace:packages/ui"],
 
     "@opencompany/web": ["@opencompany/web@workspace:apps/web"],
+
+    "@opencompany/wiki": ["@opencompany/wiki@workspace:packages/wiki"],
 
     "@opentelemetry/api": ["@opentelemetry/api@1.9.1", "", {}, "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="],
 

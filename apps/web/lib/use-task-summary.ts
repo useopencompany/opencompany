@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { getHeadlessTaskSummary } from "@/lib/headless-task-commands";
 
-export type GoatTaskSummary = {
+export type TaskSummary = {
   cost: {
     hasRecordedCosts: boolean;
     totalCostUsdMicros: number;
@@ -11,15 +11,15 @@ export type GoatTaskSummary = {
   durationMs: number | null;
 };
 
-type GoatTaskSummaryState = {
+type TaskSummaryState = {
   requestKey: string;
-  summary: GoatTaskSummary | null;
+  summary: TaskSummary | null;
   error: Error | null;
 };
 
-export function useGoatTaskSummary(taskId: string, terminal: boolean) {
+export function useTaskSummary(taskId: string, terminal: boolean) {
   const requestKey = `${taskId}:${terminal}`;
-  const [state, setState] = useState<GoatTaskSummaryState | null>(null);
+  const [state, setState] = useState<TaskSummaryState | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -27,7 +27,7 @@ export function useGoatTaskSummary(taskId: string, terminal: boolean) {
       fetch: (input, init) => fetch(input, { ...init, signal: controller.signal }),
     })
       .then((summary) => {
-        setState({ requestKey, summary: summary as GoatTaskSummary | null, error: null });
+        setState({ requestKey, summary: summary as TaskSummary | null, error: null });
       })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;

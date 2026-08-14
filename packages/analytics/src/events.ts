@@ -1,6 +1,6 @@
 // Typed catalog for events still sent to the billing-compatibility PostHog project.
-// The shared Stripe webhook and the goat billing/ingestion paths are the only
-// remaining emitters; everything else moved to the goat project (goat-events.ts).
+// The shared Stripe webhook and the product billing/ingestion paths are the only
+// remaining emitters; everything else moved to the product project (product-events.ts).
 export type AnalyticsEventPropertiesByName = {
   // Legacy-product credit fulfillment, still emitted by the shared Stripe webhook
   // when a legacy checkout session completes.

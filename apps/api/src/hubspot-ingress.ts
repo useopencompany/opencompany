@@ -1,25 +1,25 @@
+import { getAppUrl } from "@opencompany/agent/app-url";
 import {
-  type GoatHubspotObjectEventInsert,
-  goatHubspotEventTypeFor,
-  goatHubspotRouteMatchesEvent,
-  goatHubspotSelectedObjectTypes,
-  insertGoatHubspotObjectEvents,
-  listEnabledGoatHubspotBrainSourceRoutes,
-  listGoatHubspotIntegrationsForPortal,
-} from "@opencompany/db/goat-hubspot";
-import { connectGoatHubspotIntegration } from "@opencompany/db/goat-integrations";
-import type { GoatHubspotEventAction, GoatHubspotObjectType } from "@opencompany/db/goat-schema";
-import { getGoatAppUrl } from "@opencompany/goat-agent/app-url";
+  appendHubspotIngestStatus,
+  buildHubspotAuthorizationUrl,
+  createHubspotIngestState,
+  exchangeHubspotCode,
+  fetchHubspotIdentity,
+  isHubspotIngestConfigured,
+  verifyHubspotIngestState,
+} from "@opencompany/agent/integrations/hubspot-ingest";
+import { verifyHubspotWebhookSignature } from "@opencompany/agent/integrations/hubspot-signature";
 import {
-  appendGoatHubspotIngestStatus,
-  buildGoatHubspotAuthorizationUrl,
-  createGoatHubspotIngestState,
-  exchangeGoatHubspotCode,
-  fetchGoatHubspotIdentity,
-  isGoatHubspotIngestConfigured,
-  verifyGoatHubspotIngestState,
-} from "@opencompany/goat-agent/integrations/hubspot-ingest";
-import { verifyGoatHubspotWebhookSignature } from "@opencompany/goat-agent/integrations/hubspot-signature";
+  type HubspotObjectEventInsert,
+  hubspotEventTypeFor,
+  hubspotRouteMatchesEvent,
+  hubspotSelectedObjectTypes,
+  insertHubspotObjectEvents,
+  listEnabledHubspotBrainSourceRoutes,
+  listHubspotIntegrationsForPortal,
+} from "@opencompany/db/hubspot";
+import { connectHubspotIntegration } from "@opencompany/db/integrations";
+import type { HubspotEventAction, HubspotObjectType } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
 import { type IngressSession, resolveIngressSession, sessionRedirect } from "./ingress-session";
@@ -97,15 +97,15 @@ async function handleStart(input: IngressInput, request: Request): Promise<Respo
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
 
-  if (!isGoatHubspotIngestConfigured()) {
+  if (!isHubspotIngestConfigured()) {
     return statusRedirect(session, returnTo, "error", "not_configured");
   }
 
-  const state = createGoatHubspotIngestState({
+  const state = createHubspotIngestState({
     userWorkosId: session.userId,
     returnTo,
   });
-  return sessionRedirect(session, buildGoatHubspotAuthorizationUrl(state));
+  return sessionRedirect(session, buildHubspotAuthorizationUrl(state));
 }
 
 async function handleCallback(input: IngressInput, request: Request): Promise<Response> {
@@ -114,20 +114,20 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
   const url = new URL(request.url);
   const stateValue = url.searchParams.get("state") ?? "";
 
-  let state: ReturnType<typeof verifyGoatHubspotIngestState>;
+  let state: ReturnType<typeof verifyHubspotIngestState>;
   try {
-    state = verifyGoatHubspotIngestState(stateValue);
+    state = verifyHubspotIngestState(stateValue);
   } catch {
     return sessionRedirect(
       session,
-      new URL("/settings?integration=hubspot&setup=error&reason=invalid_state", getGoatAppUrl()),
+      new URL("/settings?integration=hubspot&setup=error&reason=invalid_state", getAppUrl()),
     );
   }
 
   if (state.userWorkosId !== session.userId) {
     return statusRedirect(session, state.returnTo, "error", "session_mismatch");
   }
-  if (!isGoatHubspotIngestConfigured()) {
+  if (!isHubspotIngestConfigured()) {
     return statusRedirect(session, state.returnTo, "error", "not_configured");
   }
   if (url.searchParams.get("error")) {
@@ -139,10 +139,10 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
   }
 
   try {
-    const oauth = await exchangeGoatHubspotCode(code);
-    const identity = await fetchGoatHubspotIdentity(oauth.accessToken);
+    const oauth = await exchangeHubspotCode(code);
+    const identity = await fetchHubspotIdentity(oauth.accessToken);
 
-    await connectGoatHubspotIntegration({
+    await connectHubspotIntegration({
       userWorkosId: session.userId,
       portalId: identity.portalId,
       hubDomain: identity.hubDomain,
@@ -174,7 +174,7 @@ async function handleWebhook(input: IngressInput, request: Request): Promise<Res
   const requestUrl = new URL(request.url);
   const canonicalUrl = new URL(
     `/api/webhooks/hubspot/events${requestUrl.search}`,
-    getGoatAppUrl(),
+    getAppUrl(),
   ).toString();
   // The relay also records the host it actually received the delivery on;
   // reconstructing that candidate keeps verification working if the registered
@@ -187,7 +187,7 @@ async function handleWebhook(input: IngressInput, request: Request): Promise<Res
   const candidateUris = [
     ...new Set([request.url, canonicalUrl, ...(forwardedUrl ? [forwardedUrl] : [])]),
   ];
-  const verified = verifyGoatHubspotWebhookSignature({
+  const verified = verifyHubspotWebhookSignature({
     method: "POST",
     candidateUris,
     rawBody,
@@ -238,29 +238,29 @@ async function handleHubspotEvents(db: DbLike, events: HubspotWebhookEvent[]) {
 
   let buffered = 0;
   for (const [portalId, portalEvents] of byPortal) {
-    const integrations = await listGoatHubspotIntegrationsForPortal(portalId, db);
+    const integrations = await listHubspotIntegrationsForPortal(portalId, db);
     const connected = integrations.filter((integration) => integration.status === "connected");
     if (connected.length === 0) continue;
 
-    const routes = await listEnabledGoatHubspotBrainSourceRoutes(
+    const routes = await listEnabledHubspotBrainSourceRoutes(
       connected.map((integration) => integration.id),
       db,
     );
 
-    const inserts: GoatHubspotObjectEventInsert[] = [];
+    const inserts: HubspotObjectEventInsert[] = [];
     for (const event of portalEvents) {
       if (!event) continue;
-      const eventType = goatHubspotEventTypeFor({
+      const eventType = hubspotEventTypeFor({
         action: event.action,
         propertyName: event.propertyName,
       });
       const matchedIntegrationIds = new Set(
         routes
           .filter((route) => {
-            const selected = goatHubspotSelectedObjectTypes(route.config);
+            const selected = hubspotSelectedObjectTypes(route.config);
             if (selected.size === 0) return false;
             if (!selected.has(event.objectType)) return false;
-            return goatHubspotRouteMatchesEvent(route.config, eventType);
+            return hubspotRouteMatchesEvent(route.config, eventType);
           })
           .map((route) => route.integrationId),
       );
@@ -283,7 +283,7 @@ async function handleHubspotEvents(db: DbLike, events: HubspotWebhookEvent[]) {
       }
     }
 
-    buffered += await insertGoatHubspotObjectEvents(inserts, db);
+    buffered += await insertHubspotObjectEvents(inserts, db);
   }
 
   return { ok: true, buffered };
@@ -291,10 +291,10 @@ async function handleHubspotEvents(db: DbLike, events: HubspotWebhookEvent[]) {
 
 function parseHubspotEvent(event: HubspotWebhookEvent): {
   portalId: string;
-  objectType: GoatHubspotObjectType;
+  objectType: HubspotObjectType;
   objectId: string;
   deliveryId: string;
-  action: GoatHubspotEventAction;
+  action: HubspotEventAction;
   propertyName: string | null;
   payload: Record<string, unknown>;
   eventTime: Date;
@@ -351,8 +351,8 @@ function parseHubspotEvent(event: HubspotWebhookEvent): {
 }
 
 function parseSubscriptionType(value: string | undefined): {
-  objectType: GoatHubspotObjectType;
-  action: GoatHubspotEventAction;
+  objectType: HubspotObjectType;
+  action: HubspotEventAction;
 } | null {
   if (!value) return null;
   const [objectPart, actionPart] = value.split(".");
@@ -382,6 +382,6 @@ function statusRedirect(
 ) {
   return sessionRedirect(
     session,
-    new URL(appendGoatHubspotIngestStatus(returnTo, status, reason), getGoatAppUrl()),
+    new URL(appendHubspotIngestStatus(returnTo, status, reason), getAppUrl()),
   );
 }

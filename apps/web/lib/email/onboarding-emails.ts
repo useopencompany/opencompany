@@ -5,7 +5,7 @@ import {
 } from "@opencompany/protocol";
 import { assertResendResponse, getResendClient, trimmed } from "@/lib/email/client";
 import { renderOnboardingEmail } from "@/lib/email/templates/onboarding";
-import { createGoatEmailUnsubscribeUrl } from "@/lib/email/unsubscribe";
+import { createEmailUnsubscribeUrl } from "@/lib/email/unsubscribe";
 import { emailLifecycleApiRequest, serverApiError } from "@/lib/server-api-client";
 
 const logger = createLogger({ service: "opencompany-goat", runtime: "server" });
@@ -38,7 +38,7 @@ async function sendOnboardingEmail(
   config: Extract<OnboardingEmailConfig, { enabled: true }>,
 ) {
   const client = getResendClient(config.apiKey);
-  const unsubscribeUrl = createGoatEmailUnsubscribeUrl({ email: row.email });
+  const unsubscribeUrl = createEmailUnsubscribeUrl({ email: row.email });
   const rendered = renderOnboardingEmail(row.step, {
     firstName: row.firstName,
     unsubscribeUrl,

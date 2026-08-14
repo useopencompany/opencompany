@@ -1,1 +1,1 @@
-export * from "@opencompany/goat-agent/capabilities/youtube-transcript";
+export * from "@opencompany/agent/capabilities/youtube-transcript";

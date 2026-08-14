@@ -22,13 +22,14 @@ beforeAll(() => {
   vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
 });
 
-describe("cross-tab Goat chat session state", () => {
+describe("cross-tab opencompany chat session state", () => {
   it("shows remote work as active, then falls back when that work finishes", async () => {
-    const { clearAllLocalGoatChatStates, setLocalGoatChatState, useLocalGoatChatStates } =
-      await import("@/lib/chat-session-state");
+    const { clearAllLocalChatStates, setLocalChatState, useLocalChatStates } = await import(
+      "@/lib/chat-session-state"
+    );
 
     function Probe() {
-      const states = useLocalGoatChatStates();
+      const states = useLocalChatStates();
       return <div data-testid="state">{states.get("goat_chat_1") ?? "done_unseen"}</div>;
     }
 
@@ -92,7 +93,7 @@ describe("cross-tab Goat chat session state", () => {
     });
     expect(screen.getByTestId("state")).toHaveTextContent("done_unseen");
 
-    setLocalGoatChatState("goat_chat_2", "working");
+    setLocalChatState("goat_chat_2", "working");
     act(() => {
       channel?.dispatchEvent(
         new MessageEvent("message", {
@@ -106,6 +107,6 @@ describe("cross-tab Goat chat session state", () => {
       sessionId: "goat_chat_2",
       active: true,
     });
-    clearAllLocalGoatChatStates();
+    clearAllLocalChatStates();
   });
 });

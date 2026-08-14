@@ -4,7 +4,7 @@ import { type LegacyTaskDto, type TaskReadModel, TaskReadModelSchema } from "@op
 import { electricCollectionOptions } from "@tanstack/electric-db-collection";
 import { createCollection } from "@tanstack/react-db";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
-import type { GoatTaskRow } from "./task-collections";
+import type { TaskRow } from "./task-collections";
 
 const tasksByScope = new Map<string, ReturnType<typeof createTasks>>();
 
@@ -44,15 +44,15 @@ export async function awaitHeadlessTaskTransaction(
 // The current Task UI still consumes its established presentation row. This adapter deliberately
 // derives legacy-only stage detail from canonical lifecycle state instead of exposing harness data
 // through the public read model.
-export function taskReadModelToRow(task: TaskReadModel): GoatTaskRow {
+export function taskReadModelToRow(task: TaskReadModel): TaskRow {
   return taskDtoToRow(task, task.conversationId);
 }
 
-export function legacyTaskDtoToRow(task: LegacyTaskDto): GoatTaskRow {
+export function legacyTaskDtoToRow(task: LegacyTaskDto): TaskRow {
   return taskDtoToRow(task, null);
 }
 
-function taskDtoToRow(task: LegacyTaskDto, conversationId: string | null): GoatTaskRow {
+function taskDtoToRow(task: LegacyTaskDto, conversationId: string | null): TaskRow {
   const status = task.status === "archived" ? "succeeded" : canonicalUiStatus(task.status);
   return {
     id: task.id,

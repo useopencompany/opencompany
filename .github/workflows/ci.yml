@@ -44,13 +44,7 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          changed_existing_schemas="$(git diff --diff-filter=MR --name-only "$BASE_SHA" "$HEAD_SHA")"
-          added_migrations="$(git diff --diff-filter=A --name-only "$BASE_SHA" "$HEAD_SHA")"
-          if printf '%s\n' "$changed_existing_schemas" | rg -q '^packages/db/src/(schema|goat-schema|legacy-billing-schema|llm-broker-schema)\.ts$' && ! printf '%s\n' "$added_migrations" | rg -q '^drizzle/[0-9][^/]*\.sql$'; then
-            echo "A change to an existing packages/db schema file requires a numbered Drizzle migration."
-            exit 1
-          fi
+        run: node scripts/check-schema-migration.mjs
 
       - name: Check migration journal
         run: node scripts/check-migration-journal.mjs

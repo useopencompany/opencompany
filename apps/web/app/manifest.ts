@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Goat",
-    short_name: "Goat",
+    name: "opencompany",
+    short_name: "opencompany",
     description: "Experimental just-in-time agent harness.",
     start_url: "/",
     display: "standalone",

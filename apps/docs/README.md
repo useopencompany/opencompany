@@ -1,4 +1,4 @@
-# OpenCompany documentation app
+# opencompany documentation app
 
 `apps/docs` is the user- and API-facing Fumadocs site. Contributor and operational documentation
 stays in the repository root `docs/` directory.

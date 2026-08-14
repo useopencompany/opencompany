@@ -1,10 +1,10 @@
 import { cookies } from "next/headers";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
-import { currentGoatIdentity, currentGoatUser } from "@/lib/auth";
-import { getGoatBrainSourcesAction } from "@/lib/brain-source-actions";
-import { getGoatOnboardingState } from "@/lib/onboarding-actions";
-import type { GoatOnboardingConnectionResult } from "@/lib/onboarding-integrations";
+import { currentIdentity, currentUser } from "@/lib/auth";
+import { getBrainSourcesAction } from "@/lib/brain-source-actions";
+import { getOnboardingState } from "@/lib/onboarding-actions";
+import type { OnboardingConnectionResult } from "@/lib/onboarding-integrations";
 
 export const dynamic = "force-dynamic";
 
@@ -18,15 +18,15 @@ export default async function OnboardingPage({
     reason?: string;
   }>;
 }) {
-  const identity = await currentGoatIdentity();
+  const identity = await currentIdentity();
   const name =
     [identity.user.firstName, identity.user.lastName].filter(Boolean).join(" ").trim() ||
     "Teammate";
 
   const [context, params, state, cookieStore] = await Promise.all([
-    currentGoatUser({ optional: true }),
+    currentUser({ optional: true }),
     searchParams,
-    getGoatOnboardingState(),
+    getOnboardingState(),
     cookies(),
   ]);
   const onboarding = state.onboarding;
@@ -47,9 +47,9 @@ export default async function OnboardingPage({
   // Source hydration depends on the workspace/brain resolution above; all
   // independent first-run reads already ran in parallel.
   const sourceDetails = context?.activeBrain
-    ? await getGoatBrainSourcesAction(context.activeBrain.id)
+    ? await getBrainSourcesAction(context.activeBrain.id)
     : null;
-  const connectionResult: GoatOnboardingConnectionResult | null =
+  const connectionResult: OnboardingConnectionResult | null =
     params.setup === "connected" || params.setup === "error"
       ? {
           provider: params.integration ?? null,

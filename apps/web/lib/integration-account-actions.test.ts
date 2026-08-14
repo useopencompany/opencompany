@@ -2,10 +2,10 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  alwaysAllowGoatChatActionAction,
-  disconnectGoatIntegrationAccountAction,
-  getGoatIntegrationAccountUsageAction,
-  setGoatIntegrationCapabilityModeAction,
+  alwaysAllowChatActionAction,
+  disconnectIntegrationAccountAction,
+  getIntegrationAccountUsageAction,
+  setIntegrationCapabilityModeAction,
 } from "./integration-account-actions";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -42,7 +42,7 @@ describe("integration account adapters", () => {
   it("reads account usage through the typed usage query", async () => {
     const requests = stubApi(() => Response.json({ data: { affectedBrainSourceCount: 2 }, meta }));
 
-    await expect(getGoatIntegrationAccountUsageAction("gint_abc")).resolves.toEqual({
+    await expect(getIntegrationAccountUsageAction("gint_abc")).resolves.toEqual({
       ok: true,
       affectedBrainSourceCount: 2,
     });
@@ -69,7 +69,7 @@ describe("integration account adapters", () => {
         ) as Response,
     );
 
-    await expect(disconnectGoatIntegrationAccountAction("gint_abc")).resolves.toEqual({
+    await expect(disconnectIntegrationAccountAction("gint_abc")).resolves.toEqual({
       ok: false,
       error: "Only the connection owner can manage this account.",
     });
@@ -81,7 +81,7 @@ describe("integration account adapters", () => {
       Response.json({ data: { integrationId: "gint_abc", deleted: true }, meta }),
     );
 
-    await expect(disconnectGoatIntegrationAccountAction("gint_abc")).resolves.toEqual({
+    await expect(disconnectIntegrationAccountAction("gint_abc")).resolves.toEqual({
       ok: true,
     });
     const request = requests[0] as Request;
@@ -98,9 +98,9 @@ describe("integration account adapters", () => {
       }),
     );
 
-    await expect(
-      setGoatIntegrationCapabilityModeAction("gint_abc", "write", "ask"),
-    ).resolves.toEqual({ ok: true });
+    await expect(setIntegrationCapabilityModeAction("gint_abc", "write", "ask")).resolves.toEqual({
+      ok: true,
+    });
     const request = requests[0] as Request;
     expect(request.method).toBe("PUT");
     expect(new URL(request.url).pathname).toBe(
@@ -128,7 +128,7 @@ describe("integration account adapters", () => {
     );
 
     await expect(
-      setGoatIntegrationCapabilityModeAction("gint_abc", "write", "sometimes"),
+      setIntegrationCapabilityModeAction("gint_abc", "write", "sometimes"),
     ).resolves.toEqual({ ok: false, error: "Unknown permission mode." });
   });
 
@@ -137,7 +137,7 @@ describe("integration account adapters", () => {
       Response.json({ data: { actionId: "gmail.send_email", state: "allowed" }, meta }),
     );
 
-    await expect(alwaysAllowGoatChatActionAction("gmail.send_email")).resolves.toEqual({
+    await expect(alwaysAllowChatActionAction("gmail.send_email")).resolves.toEqual({
       ok: true,
     });
     const request = requests[0] as Request;

@@ -29,7 +29,7 @@ external provider or fixture was unavailable.
 
 ## Schema and environment changes
 
-- Any change to `packages/db/src/goat-schema.ts`, `legacy-billing-schema.ts`, or
+- Any change to `packages/db/src/product-schema.ts`, `legacy-billing-schema.ts`, or
   `llm-broker-schema.ts` needs a reviewed Drizzle migration unless it is strictly a TypeScript-only
   model adjustment with no database effect.
 - Never rewrite migration history or run production migrations from a development task.

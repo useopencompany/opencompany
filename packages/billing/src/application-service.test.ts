@@ -1,31 +1,28 @@
 import type { Actor } from "@opencompany/core";
-import { loadGoatBillingOverview } from "@opencompany/db/goat-billing";
-import {
-  createGoatPendingCheckoutRecord,
-  markGoatCheckoutRecordOpen,
-} from "@opencompany/db/goat-credits";
+import { loadBillingOverview } from "@opencompany/db/billing";
+import { createPendingCheckoutRecord, markCheckoutRecordOpen } from "@opencompany/db/credits";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createGoatBillingApplicationService } from "./application-service";
+import { createBillingApplicationService } from "./application-service";
 
 vi.mock("@opencompany/analytics/server", () => ({
   captureServerEvent: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@opencompany/db/goat-billing", () => ({
-  ensureGoatMonthlyIncludedUsage: vi.fn(),
-  isGoatCreditsEnforcementEnabled: vi.fn(() => true),
-  loadGoatBillingOverview: vi.fn(),
-  setGoatAutoRefillConfig: vi.fn(),
-  setGoatStripeCustomerId: vi.fn(),
+vi.mock("@opencompany/db/billing", () => ({
+  ensureMonthlyIncludedUsage: vi.fn(),
+  isCreditsEnforcementEnabled: vi.fn(() => true),
+  loadBillingOverview: vi.fn(),
+  setAutoRefillConfig: vi.fn(),
+  setStripeCustomerId: vi.fn(),
 }));
-vi.mock("@opencompany/db/goat-credits", () => ({
-  createGoatPendingCheckoutRecord: vi.fn().mockResolvedValue(undefined),
-  getGoatCreditBalanceUsdMicros: vi.fn(),
-  loadGoatCreditOverview: vi.fn(),
-  loadGoatSpendBreakdown: vi.fn(),
-  markGoatCheckoutRecordFailed: vi.fn().mockResolvedValue(undefined),
-  markGoatCheckoutRecordOpen: vi.fn().mockResolvedValue(undefined),
+vi.mock("@opencompany/db/credits", () => ({
+  createPendingCheckoutRecord: vi.fn().mockResolvedValue(undefined),
+  getCreditBalanceUsdMicros: vi.fn(),
+  loadCreditOverview: vi.fn(),
+  loadSpendBreakdown: vi.fn(),
+  markCheckoutRecordFailed: vi.fn().mockResolvedValue(undefined),
+  markCheckoutRecordOpen: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("./stripe", () => ({ assertGoatCheckoutEnabled: vi.fn() }));
+vi.mock("./stripe", () => ({ assertCheckoutEnabled: vi.fn() }));
 
 const actor: Actor = {
   userId: "user_1",
@@ -35,12 +32,12 @@ const actor: Actor = {
   authenticationMethod: "session",
 };
 
-describe("Goat billing application service", () => {
+describe("opencompany billing application service", () => {
   const checkoutCreate = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(loadGoatBillingOverview).mockResolvedValue({
+    vi.mocked(loadBillingOverview).mockResolvedValue({
       billing: { plan: "pro", stripeCustomerId: "cus_1" },
       memberCount: 2,
     } as never);
@@ -52,7 +49,7 @@ describe("Goat billing application service", () => {
 
   it("replays a durable billing command without creating a second Stripe session", async () => {
     const db = commandDb();
-    const service = createGoatBillingApplicationService({
+    const service = createBillingApplicationService({
       db,
       stripe: { checkout: { sessions: { create: checkoutCreate } } } as never,
       appUrl: "https://app.example.test",
@@ -73,13 +70,13 @@ describe("Goat billing application service", () => {
       }),
       expect.objectContaining({ idempotencyKey: expect.stringMatching(/^goat-topup-/u) }),
     );
-    expect(createGoatPendingCheckoutRecord).toHaveBeenCalledTimes(1);
-    expect(markGoatCheckoutRecordOpen).toHaveBeenCalledTimes(1);
+    expect(createPendingCheckoutRecord).toHaveBeenCalledTimes(1);
+    expect(markCheckoutRecordOpen).toHaveBeenCalledTimes(1);
   });
 
   it("rejects reuse of a billing key for a changed request", async () => {
     const db = commandDb();
-    const service = createGoatBillingApplicationService({
+    const service = createBillingApplicationService({
       db,
       stripe: { checkout: { sessions: { create: checkoutCreate } } } as never,
       appUrl: "https://app.example.test",
@@ -96,7 +93,7 @@ describe("Goat billing application service", () => {
 
   it("authorizes workspace billing commands before reserving or calling Stripe", async () => {
     const db = commandDb();
-    const service = createGoatBillingApplicationService({
+    const service = createBillingApplicationService({
       db,
       stripe: { checkout: { sessions: { create: checkoutCreate } } } as never,
       appUrl: "https://app.example.test",

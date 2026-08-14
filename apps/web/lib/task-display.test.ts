@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-  formatGoatTaskDuration,
-  formatGoatTaskDurationMs,
-  goatTaskBoardColumn,
-  goatWorkflowTaskDisplayStatus,
-  isGoatTaskViewMode,
+  formatTaskDuration,
+  formatTaskDurationMs,
+  isTaskViewMode,
+  taskBoardColumn,
+  workflowTaskDisplayStatus,
 } from "@/lib/task-display";
 
-describe("goatTaskBoardColumn", () => {
+describe("taskBoardColumn", () => {
   it.each([
     ["queued", null, "in_progress"],
     ["queued", "done", "in_progress"],
@@ -25,11 +25,11 @@ describe("goatTaskBoardColumn", () => {
     ["canceled", "done", "canceled"],
     ["canceled", "needs_attention", "canceled"],
   ] as const)("maps %s with %s to %s", (status, reportedOutcome, expected) => {
-    expect(goatTaskBoardColumn({ status, reportedOutcome })).toBe(expected);
+    expect(taskBoardColumn({ status, reportedOutcome })).toBe(expected);
   });
 });
 
-describe("goatWorkflowTaskDisplayStatus", () => {
+describe("workflowTaskDisplayStatus", () => {
   it.each([
     ["queued", null, "running"],
     ["running", null, "running"],
@@ -39,41 +39,39 @@ describe("goatWorkflowTaskDisplayStatus", () => {
     ["succeeded", "done", "done"],
     ["succeeded", "needs_attention", "needs-attention"],
   ] as const)("maps %s with %s to %s", (status, reportedOutcome, expected) => {
-    expect(goatWorkflowTaskDisplayStatus({ status, reportedOutcome })).toBe(expected);
+    expect(workflowTaskDisplayStatus({ status, reportedOutcome })).toBe(expected);
   });
 });
 
-describe("formatGoatTaskDuration", () => {
+describe("formatTaskDuration", () => {
   it("formats seconds, minutes, and hours", () => {
     const startedAt = "2026-07-29T09:00:00.000Z";
 
-    expect(formatGoatTaskDuration(startedAt, "2026-07-29T09:00:12.999Z")).toBe("12s");
-    expect(formatGoatTaskDuration(startedAt, "2026-07-29T09:03:12.000Z")).toBe("3m 12s");
-    expect(formatGoatTaskDuration(startedAt, "2026-07-29T10:03:12.000Z")).toBe("1h 3m 12s");
+    expect(formatTaskDuration(startedAt, "2026-07-29T09:00:12.999Z")).toBe("12s");
+    expect(formatTaskDuration(startedAt, "2026-07-29T09:03:12.000Z")).toBe("3m 12s");
+    expect(formatTaskDuration(startedAt, "2026-07-29T10:03:12.000Z")).toBe("1h 3m 12s");
   });
 
   it("clamps negative durations", () => {
-    expect(formatGoatTaskDuration("2026-07-29T09:00:01.000Z", "2026-07-29T09:00:00.000Z")).toBe(
-      "0s",
-    );
+    expect(formatTaskDuration("2026-07-29T09:00:01.000Z", "2026-07-29T09:00:00.000Z")).toBe("0s");
   });
 });
 
-describe("formatGoatTaskDurationMs", () => {
+describe("formatTaskDurationMs", () => {
   it("formats raw durations and rejects non-finite values", () => {
-    expect(formatGoatTaskDurationMs(12_999)).toBe("12s");
-    expect(formatGoatTaskDurationMs(192_000)).toBe("3m 12s");
-    expect(formatGoatTaskDurationMs(3_792_000)).toBe("1h 3m 12s");
-    expect(formatGoatTaskDurationMs(Number.NaN)).toBe("—");
+    expect(formatTaskDurationMs(12_999)).toBe("12s");
+    expect(formatTaskDurationMs(192_000)).toBe("3m 12s");
+    expect(formatTaskDurationMs(3_792_000)).toBe("1h 3m 12s");
+    expect(formatTaskDurationMs(Number.NaN)).toBe("—");
   });
 });
 
-describe("isGoatTaskViewMode", () => {
+describe("isTaskViewMode", () => {
   it("accepts only the known view modes", () => {
-    expect(isGoatTaskViewMode("board")).toBe(true);
-    expect(isGoatTaskViewMode("list")).toBe(true);
-    expect(isGoatTaskViewMode("kanban")).toBe(false);
-    expect(isGoatTaskViewMode(null)).toBe(false);
-    expect(isGoatTaskViewMode(undefined)).toBe(false);
+    expect(isTaskViewMode("board")).toBe(true);
+    expect(isTaskViewMode("list")).toBe(true);
+    expect(isTaskViewMode("kanban")).toBe(false);
+    expect(isTaskViewMode(null)).toBe(false);
+    expect(isTaskViewMode(undefined)).toBe(false);
   });
 });

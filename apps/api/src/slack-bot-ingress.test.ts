@@ -1,32 +1,32 @@
 import { createHmac } from "node:crypto";
-import { connectGoatSlackBotIntegration } from "@opencompany/db/goat-integrations";
+import { slackApiRequest } from "@opencompany/agent/integrations/slack";
+import { createSlackBotState } from "@opencompany/agent/integrations/slack-bot";
+import { connectSlackBotIntegration } from "@opencompany/db/integrations";
 import {
-  claimGoatSlackBotEvent,
-  getGoatSlackBotThreadParticipation,
-  releaseGoatSlackBotEvent,
-} from "@opencompany/db/goat-slack-bot";
-import { listGoatWorkspacesForUser } from "@opencompany/db/goat-workspaces";
-import { slackApiRequest } from "@opencompany/goat-agent/integrations/slack";
-import { createGoatSlackBotState } from "@opencompany/goat-agent/integrations/slack-bot";
+  claimSlackBotEvent,
+  getSlackBotThreadParticipation,
+  releaseSlackBotEvent,
+} from "@opencompany/db/slack-bot";
+import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerClient } from "./runner-client";
 import { createSlackBotIngress } from "./slack-bot-ingress";
 
-vi.mock("@opencompany/db/goat-workspaces", async (importOriginal) => ({
+vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  listGoatWorkspacesForUser: vi.fn(),
+  listWorkspacesForUser: vi.fn(),
 }));
-vi.mock("@opencompany/db/goat-integrations", async (importOriginal) => ({
+vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  connectGoatSlackBotIntegration: vi.fn(),
+  connectSlackBotIntegration: vi.fn(),
 }));
-vi.mock("@opencompany/db/goat-slack-bot", () => ({
-  claimGoatSlackBotEvent: vi.fn(),
-  getGoatSlackBotThreadParticipation: vi.fn(async () => null),
-  markGoatSlackBotIntegrationStatusForTeam: vi.fn(async () => undefined),
-  releaseGoatSlackBotEvent: vi.fn(async () => undefined),
+vi.mock("@opencompany/db/slack-bot", () => ({
+  claimSlackBotEvent: vi.fn(),
+  getSlackBotThreadParticipation: vi.fn(async () => null),
+  markSlackBotIntegrationStatusForTeam: vi.fn(async () => undefined),
+  releaseSlackBotEvent: vi.fn(async () => undefined),
 }));
-vi.mock("@opencompany/goat-agent/integrations/slack", async (importOriginal) => ({
+vi.mock("@opencompany/agent/integrations/slack", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   slackApiRequest: vi.fn(),
 }));
@@ -35,7 +35,7 @@ const sentinelDb = { sentinel: "db" };
 const runnerRequest = vi.fn(async () => ({ ok: true }));
 
 function ingress(overrides: { role?: string } = {}) {
-  vi.mocked(listGoatWorkspacesForUser).mockResolvedValue([
+  vi.mocked(listWorkspacesForUser).mockResolvedValue([
     {
       workspace: { id: "workspace_1", workosOrganizationId: null },
       role: overrides.role ?? "admin",
@@ -58,7 +58,7 @@ function ingress(overrides: { role?: string } = {}) {
 }
 
 function mintState(overrides: Record<string, unknown> = {}) {
-  return createGoatSlackBotState({
+  return createSlackBotState({
     userWorkosId: "user_1",
     workspaceId: "workspace_1",
     returnTo: "/settings/workspace/slack",
@@ -69,17 +69,17 @@ function mintState(overrides: Record<string, unknown> = {}) {
 describe("Slack bot ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://goat.example.com");
+    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
     vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
     vi.stubEnv("GOAT_SLACK_BOT_CLIENT_ID", "slack-bot-client");
     vi.stubEnv("GOAT_SLACK_BOT_CLIENT_SECRET", "slack-bot-secret");
     vi.stubEnv("GOAT_SLACK_BOT_SIGNING_SECRET", "slack-bot-signing");
     vi.stubEnv("GOAT_SLACK_BOT_STATE_SECRET", "slack-bot-state-secret");
-    vi.mocked(claimGoatSlackBotEvent).mockResolvedValue({
+    vi.mocked(claimSlackBotEvent).mockResolvedValue({
       eventId: "Ev123",
       claimId: "gsbec_claim",
     });
-    vi.mocked(getGoatSlackBotThreadParticipation).mockResolvedValue(null);
+    vi.mocked(getSlackBotThreadParticipation).mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -104,7 +104,7 @@ describe("Slack bot ingress", () => {
       new Request("https://api.example.com/integrations/slack-bot/start"),
     );
     expect(response.headers.get("location")).toBe(
-      "https://goat.example.com/settings/workspace/slack?integration=slack_bot&setup=error&reason=admin_required",
+      "https://opencompany.example.com/settings/workspace/slack?integration=slack_bot&setup=error&reason=admin_required",
     );
   });
 
@@ -113,7 +113,7 @@ describe("Slack bot ingress", () => {
       new Request("https://api.example.com/integrations/slack-bot/callback?state=garbage&code=abc"),
     );
     expect(response.headers.get("location")).toBe(
-      "https://goat.example.com/settings/workspace/slack?integration=slack_bot&setup=error&reason=invalid_state",
+      "https://opencompany.example.com/settings/workspace/slack?integration=slack_bot&setup=error&reason=invalid_state",
     );
   });
 
@@ -139,7 +139,7 @@ describe("Slack bot ingress", () => {
     expect(new URL(demoted.headers.get("location") ?? "").searchParams.get("reason")).toBe(
       "session_mismatch",
     );
-    expect(connectGoatSlackBotIntegration).not.toHaveBeenCalled();
+    expect(connectSlackBotIntegration).not.toHaveBeenCalled();
   });
 
   it("maps Slack denial and a missing code to their reasons", async () => {
@@ -164,7 +164,7 @@ describe("Slack bot ingress", () => {
     expect(new URL(missing.headers.get("location") ?? "").searchParams.get("reason")).toBe(
       "missing_code",
     );
-    expect(connectGoatSlackBotIntegration).not.toHaveBeenCalled();
+    expect(connectSlackBotIntegration).not.toHaveBeenCalled();
   });
 
   it("exchanges the code and connects the bot through the injected db", async () => {
@@ -172,9 +172,9 @@ describe("Slack bot ingress", () => {
       access_token: "xoxb-bot-token",
       bot_user_id: "B_1",
       scope: "app_mentions:read,chat:write",
-      team: { id: "T_1", name: "Goat HQ" },
+      team: { id: "T_1", name: "opencompany HQ" },
     } as never);
-    vi.mocked(connectGoatSlackBotIntegration).mockResolvedValue({
+    vi.mocked(connectSlackBotIntegration).mockResolvedValue({
       integrationId: "gint_bot_1",
     } as never);
 
@@ -187,7 +187,7 @@ describe("Slack bot ingress", () => {
     );
 
     expect(response.headers.get("location")).toBe(
-      "https://goat.example.com/settings/workspace/slack?integration=slack_bot&setup=connected",
+      "https://opencompany.example.com/settings/workspace/slack?integration=slack_bot&setup=connected",
     );
     expect(slackApiRequest).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -195,11 +195,11 @@ describe("Slack bot ingress", () => {
         form: expect.objectContaining({ code: "slack-code", client_id: "slack-bot-client" }),
       }),
     );
-    expect(connectGoatSlackBotIntegration).toHaveBeenCalledWith({
+    expect(connectSlackBotIntegration).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
       teamId: "T_1",
-      teamName: "Goat HQ",
+      teamName: "opencompany HQ",
       botUserId: "B_1",
       accessToken: "xoxb-bot-token",
       scopes: ["app_mentions:read", "chat:write"],
@@ -217,7 +217,7 @@ describe("Slack bot ingress", () => {
       ),
     );
     expect(response.headers.get("location")).toBe(
-      "https://goat.example.com/settings/workspace/slack?integration=slack_bot&setup=error&reason=connection_sync_failed",
+      "https://opencompany.example.com/settings/workspace/slack?integration=slack_bot&setup=error&reason=connection_sync_failed",
     );
   });
 
@@ -234,7 +234,7 @@ describe("Slack bot ingress", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true });
-    expect(claimGoatSlackBotEvent).toHaveBeenCalledWith(
+    expect(claimSlackBotEvent).toHaveBeenCalledWith(
       { eventId: "Ev123", teamId: "T123" },
       sentinelDb,
     );
@@ -272,7 +272,7 @@ describe("Slack bot ingress", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(releaseGoatSlackBotEvent).toHaveBeenCalledWith(
+    expect(releaseSlackBotEvent).toHaveBeenCalledWith(
       { eventId: "Ev123", claimId: "gsbec_claim" },
       sentinelDb,
     );
@@ -293,7 +293,7 @@ describe("Slack bot ingress", () => {
     await expect(unknown.json()).resolves.toEqual({ ok: true, ignored: true });
     expect(runnerRequest).not.toHaveBeenCalled();
 
-    vi.mocked(getGoatSlackBotThreadParticipation).mockResolvedValue({
+    vi.mocked(getSlackBotThreadParticipation).mockResolvedValue({
       integrationId: "gint_1",
     });
     const known = await ingress().webhook(

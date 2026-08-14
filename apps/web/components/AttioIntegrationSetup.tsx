@@ -4,7 +4,7 @@ import { Check } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import type { GoatAttioProviderState } from "@/lib/integration-state";
+import type { AttioProviderState } from "@/lib/integration-state";
 import {
   disconnectAttioIntegrationAction,
   saveAttioApiKeyAction,
@@ -16,7 +16,7 @@ export function AttioIntegrationSetup({
   variant = "settings",
   onSaved,
 }: {
-  initialState: GoatAttioProviderState;
+  initialState: AttioProviderState;
   brainSourcesHref?: string | null;
   // "modal" embeds the form in the onboarding connect dialog: the Status
   // section (which duplicates the dialog title) is dropped.
@@ -186,11 +186,11 @@ export function AttioIntegrationSetup({
   );
 }
 
-function setupStatus(state: GoatAttioProviderState) {
+function setupStatus(state: AttioProviderState) {
   if (state.connected) {
     return {
       label: state.workspaceName ? `Connected to ${state.workspaceName}` : "Attio is connected",
-      detail: "CRM activity is picked up by the Goat Brain ingestion queue.",
+      detail: "CRM activity is picked up by the opencompany Brain ingestion queue.",
       badge: "Connected",
     };
   }

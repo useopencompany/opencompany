@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
-  class MockGoatRevolutApiError extends Error {
+  class MockRevolutApiError extends Error {
     readonly status: number;
     constructor(status: number) {
       super(`Revolut failed (${status}).`);
@@ -9,20 +9,20 @@ const mocks = vi.hoisted(() => {
     }
   }
   return {
-    GoatRevolutApiError: MockGoatRevolutApiError,
-    loadGoatRevolutBusinessConnection: vi.fn(),
-    requestGoatRevolutBusinessApi: vi.fn(),
+    RevolutApiError: MockRevolutApiError,
+    loadRevolutBusinessConnection: vi.fn(),
+    requestRevolutBusinessApi: vi.fn(),
   };
 });
 
-vi.mock("@opencompany/goat-agent/integrations/revolut", () => ({
-  GoatRevolutApiError: mocks.GoatRevolutApiError,
-  loadGoatRevolutBusinessConnection: mocks.loadGoatRevolutBusinessConnection,
-  requestGoatRevolutBusinessApi: mocks.requestGoatRevolutBusinessApi,
+vi.mock("@opencompany/agent/integrations/revolut", () => ({
+  RevolutApiError: mocks.RevolutApiError,
+  loadRevolutBusinessConnection: mocks.loadRevolutBusinessConnection,
+  requestRevolutBusinessApi: mocks.requestRevolutBusinessApi,
 }));
 
 import { resolveRevolutActions } from "@/lib/actions/revolut";
-import { GoatActionAuthError, GoatActionInvalidParamsError } from "@/lib/actions/types";
+import { ActionAuthError, ActionInvalidParamsError } from "@/lib/actions/types";
 
 const connection = {
   workspaceId: "workspace_1",
@@ -33,19 +33,19 @@ const connection = {
 };
 
 beforeEach(() => {
-  mocks.loadGoatRevolutBusinessConnection.mockReset();
-  mocks.loadGoatRevolutBusinessConnection.mockReturnValue(connection);
-  mocks.requestGoatRevolutBusinessApi.mockReset();
+  mocks.loadRevolutBusinessConnection.mockReset();
+  mocks.loadRevolutBusinessConnection.mockReturnValue(connection);
+  mocks.requestRevolutBusinessApi.mockReset();
 });
 
 describe("resolveRevolutActions", () => {
   it("is absent when no env-gated Revolut connection is configured for the workspace", async () => {
-    mocks.loadGoatRevolutBusinessConnection.mockReturnValue(null);
+    mocks.loadRevolutBusinessConnection.mockReturnValue(null);
     await expect(resolveRevolutActions("workspace_1")).resolves.toBeNull();
   });
 
   it("lists compact accounts without account numbers or tokens", async () => {
-    mocks.requestGoatRevolutBusinessApi.mockResolvedValue([
+    mocks.requestRevolutBusinessApi.mockResolvedValue([
       {
         id: "account_1",
         name: "Current GBP account",
@@ -82,7 +82,7 @@ describe("resolveRevolutActions", () => {
   });
 
   it("lists expenses with missing receipt filtering and bounded date params", async () => {
-    mocks.requestGoatRevolutBusinessApi.mockResolvedValue([
+    mocks.requestRevolutBusinessApi.mockResolvedValue([
       {
         id: "expense_1",
         state: "missing_info",
@@ -114,7 +114,7 @@ describe("resolveRevolutActions", () => {
       onlyMissingReceipts: true,
     });
 
-    expect(mocks.requestGoatRevolutBusinessApi).toHaveBeenCalledWith(
+    expect(mocks.requestRevolutBusinessApi).toHaveBeenCalledWith(
       expect.objectContaining({
         connection,
         path: "/expenses",
@@ -153,7 +153,7 @@ describe("resolveRevolutActions", () => {
   });
 
   it("retrieves one compact expense", async () => {
-    mocks.requestGoatRevolutBusinessApi.mockResolvedValue({
+    mocks.requestRevolutBusinessApi.mockResolvedValue({
       id: "expense_123",
       state: "completed",
       receipt_ids: ["receipt_1"],
@@ -171,7 +171,7 @@ describe("resolveRevolutActions", () => {
         needsReceipt: false,
       },
     });
-    expect(mocks.requestGoatRevolutBusinessApi).toHaveBeenCalledWith(
+    expect(mocks.requestRevolutBusinessApi).toHaveBeenCalledWith(
       expect.objectContaining({ path: "/expenses/expense_123" }),
     );
   });
@@ -179,16 +179,14 @@ describe("resolveRevolutActions", () => {
   it("rejects unsafe provider filters before calling Revolut", async () => {
     await expect(
       executeAction("revolut.list_expenses", { state: "missing-info" }),
-    ).rejects.toBeInstanceOf(GoatActionInvalidParamsError);
-    expect(mocks.requestGoatRevolutBusinessApi).not.toHaveBeenCalled();
+    ).rejects.toBeInstanceOf(ActionInvalidParamsError);
+    expect(mocks.requestRevolutBusinessApi).not.toHaveBeenCalled();
   });
 
   it("maps 401 and 403 provider responses to an auth error", async () => {
-    mocks.requestGoatRevolutBusinessApi.mockRejectedValue(new mocks.GoatRevolutApiError(401));
+    mocks.requestRevolutBusinessApi.mockRejectedValue(new mocks.RevolutApiError(401));
 
-    await expect(executeAction("revolut.get_accounts", {})).rejects.toBeInstanceOf(
-      GoatActionAuthError,
-    );
+    await expect(executeAction("revolut.get_accounts", {})).rejects.toBeInstanceOf(ActionAuthError);
   });
 });
 

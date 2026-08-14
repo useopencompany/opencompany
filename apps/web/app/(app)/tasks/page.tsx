@@ -1,10 +1,10 @@
-import { TasksWorkflowsDisabledRoute } from "@/components/GoatRoutes";
-import { GoatTasksBoardRoute } from "@/components/GoatTasksBoard";
-import { currentGoatUser } from "@/lib/auth";
+import { TasksWorkflowsDisabledRoute } from "@/components/Routes";
+import { TasksBoardRoute } from "@/components/TasksBoard";
+import { currentUser } from "@/lib/auth";
 import { listHeadlessWorkflows } from "@/lib/headless-automation-server";
 
 export default async function TasksPage() {
-  const context = await currentGoatUser();
+  const context = await currentUser();
   if (!context.user.taskSpawningEnabled) {
     return <TasksWorkflowsDisabledRoute />;
   }
@@ -14,9 +14,6 @@ export default async function TasksPage() {
     workflows.map((workflow) => [workflow.slug, workflow.name]),
   );
   return (
-    <GoatTasksBoardRoute
-      workflowNames={workflowNames}
-      initialViewMode={context.user.taskViewMode}
-    />
+    <TasksBoardRoute workflowNames={workflowNames} initialViewMode={context.user.taskViewMode} />
   );
 }

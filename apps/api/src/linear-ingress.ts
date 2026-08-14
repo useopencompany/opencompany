@@ -1,26 +1,26 @@
 import { createHash } from "node:crypto";
-import { connectGoatLinearIngestIntegration } from "@opencompany/db/goat-integrations";
+import { getAppUrl } from "@opencompany/agent/app-url";
 import {
-  type GoatLinearIssueEventInsert,
-  goatLinearEventTypeFor,
-  goatLinearRouteMatchesEvent,
-  goatLinearSelectedTeamIds,
-  insertGoatLinearIssueEvents,
-  listEnabledGoatLinearBrainSourceRoutes,
-  listGoatLinearIntegrationsForOrganization,
-} from "@opencompany/db/goat-linear";
-import type { GoatLinearEventAction, GoatLinearEventEntityType } from "@opencompany/db/goat-schema";
-import { getGoatAppUrl } from "@opencompany/goat-agent/app-url";
+  appendLinearIngestStatus,
+  buildLinearAuthorizationUrl,
+  createLinearIngestState,
+  exchangeLinearCode,
+  fetchLinearIdentity,
+  isLinearIngestConfigured,
+  verifyLinearIngestState,
+} from "@opencompany/agent/integrations/linear-ingest";
+import { verifyLinearWebhookSignature } from "@opencompany/agent/integrations/linear-signature";
+import { connectLinearIngestIntegration } from "@opencompany/db/integrations";
 import {
-  appendGoatLinearIngestStatus,
-  buildGoatLinearAuthorizationUrl,
-  createGoatLinearIngestState,
-  exchangeGoatLinearCode,
-  fetchGoatLinearIdentity,
-  isGoatLinearIngestConfigured,
-  verifyGoatLinearIngestState,
-} from "@opencompany/goat-agent/integrations/linear-ingest";
-import { verifyGoatLinearWebhookSignature } from "@opencompany/goat-agent/integrations/linear-signature";
+  insertLinearIssueEvents,
+  type LinearIssueEventInsert,
+  linearEventTypeFor,
+  linearRouteMatchesEvent,
+  linearSelectedTeamIds,
+  listEnabledLinearBrainSourceRoutes,
+  listLinearIntegrationsForOrganization,
+} from "@opencompany/db/linear";
+import type { LinearEventAction, LinearEventEntityType } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
 import { type IngressSession, resolveIngressSession, sessionRedirect } from "./ingress-session";
@@ -83,15 +83,15 @@ async function handleStart(input: IngressInput, request: Request): Promise<Respo
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
 
-  if (!isGoatLinearIngestConfigured()) {
+  if (!isLinearIngestConfigured()) {
     return statusRedirect(session, returnTo, "error", "not_configured");
   }
 
-  const state = createGoatLinearIngestState({
+  const state = createLinearIngestState({
     userWorkosId: session.userId,
     returnTo,
   });
-  return sessionRedirect(session, buildGoatLinearAuthorizationUrl(state));
+  return sessionRedirect(session, buildLinearAuthorizationUrl(state));
 }
 
 async function handleCallback(input: IngressInput, request: Request): Promise<Response> {
@@ -100,20 +100,20 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
   const url = new URL(request.url);
   const stateValue = url.searchParams.get("state") ?? "";
 
-  let state: ReturnType<typeof verifyGoatLinearIngestState>;
+  let state: ReturnType<typeof verifyLinearIngestState>;
   try {
-    state = verifyGoatLinearIngestState(stateValue);
+    state = verifyLinearIngestState(stateValue);
   } catch {
     return sessionRedirect(
       session,
-      new URL("/settings?integration=linear&setup=error&reason=invalid_state", getGoatAppUrl()),
+      new URL("/settings?integration=linear&setup=error&reason=invalid_state", getAppUrl()),
     );
   }
 
   if (state.userWorkosId !== session.userId) {
     return statusRedirect(session, state.returnTo, "error", "session_mismatch");
   }
-  if (!isGoatLinearIngestConfigured()) {
+  if (!isLinearIngestConfigured()) {
     return statusRedirect(session, state.returnTo, "error", "not_configured");
   }
   if (url.searchParams.get("error")) {
@@ -125,10 +125,10 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
   }
 
   try {
-    const oauth = await exchangeGoatLinearCode(code);
-    const identity = await fetchGoatLinearIdentity(oauth.accessToken);
+    const oauth = await exchangeLinearCode(code);
+    const identity = await fetchLinearIdentity(oauth.accessToken);
 
-    await connectGoatLinearIngestIntegration({
+    await connectLinearIngestIntegration({
       userWorkosId: session.userId,
       organizationId: identity.organizationId,
       organizationName: identity.organizationName,
@@ -161,7 +161,7 @@ async function handleWebhook(input: IngressInput, request: Request): Promise<Res
     return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  const verified = verifyGoatLinearWebhookSignature({
+  const verified = verifyLinearWebhookSignature({
     rawBody,
     signature: request.headers.get("linear-signature"),
     webhookTimestampMs:
@@ -205,7 +205,7 @@ async function handleLinearEvent(
   if (entityType === "issue" && action === "update" && isNoiseIssueUpdate(envelope.updatedFrom)) {
     return { ok: true, dropped: true };
   }
-  const eventType = goatLinearEventTypeFor({
+  const eventType = linearEventTypeFor({
     entityType,
     action,
     updatedFrom: envelope.updatedFrom ?? null,
@@ -225,11 +225,11 @@ async function handleLinearEvent(
   const issueTitle =
     entityType === "issue" ? asString(data.title) : asString(asRecord(data.issue)?.title);
 
-  const integrations = await listGoatLinearIntegrationsForOrganization(organizationId, db);
+  const integrations = await listLinearIntegrationsForOrganization(organizationId, db);
   const connected = integrations.filter((integration) => integration.status === "connected");
   if (connected.length === 0) return { ok: true, dropped: true };
 
-  const routes = await listEnabledGoatLinearBrainSourceRoutes(
+  const routes = await listEnabledLinearBrainSourceRoutes(
     connected.map((integration) => integration.id),
     db,
   );
@@ -239,9 +239,9 @@ async function handleLinearEvent(
   const matchedIntegrationIds = new Set(
     routes
       .filter((route) => {
-        const selected = goatLinearSelectedTeamIds(route.config);
+        const selected = linearSelectedTeamIds(route.config);
         if (selected.size === 0) return false;
-        if (!goatLinearRouteMatchesEvent(route.config, eventType)) return false;
+        if (!linearRouteMatchesEvent(route.config, eventType)) return false;
         return teamId ? selected.has(teamId) : true;
       })
       .map((route) => route.integrationId),
@@ -255,7 +255,7 @@ async function handleLinearEvent(
       : createHash("sha256").update(rawBody).digest("hex"));
   const eventTime = envelope.createdAt ? new Date(envelope.createdAt) : new Date();
 
-  const inserts: GoatLinearIssueEventInsert[] = connected
+  const inserts: LinearIssueEventInsert[] = connected
     .filter((integration) => matchedIntegrationIds.has(integration.id))
     .map((integration) => ({
       integrationId: integration.id,
@@ -280,17 +280,17 @@ async function handleLinearEvent(
       eventTime: Number.isNaN(eventTime.getTime()) ? new Date() : eventTime,
     }));
 
-  const buffered = await insertGoatLinearIssueEvents(inserts, db);
+  const buffered = await insertLinearIssueEvents(inserts, db);
   return { ok: true, buffered };
 }
 
-function linearEntityType(type: string | undefined): GoatLinearEventEntityType | null {
+function linearEntityType(type: string | undefined): LinearEventEntityType | null {
   if (type === "Issue") return "issue";
   if (type === "Comment") return "comment";
   return null;
 }
 
-function linearEventAction(action: string | undefined): GoatLinearEventAction | null {
+function linearEventAction(action: string | undefined): LinearEventAction | null {
   if (action === "create" || action === "update" || action === "remove") return action;
   return null;
 }
@@ -319,6 +319,6 @@ function statusRedirect(
 ) {
   return sessionRedirect(
     session,
-    new URL(appendGoatLinearIngestStatus(returnTo, status, reason), getGoatAppUrl()),
+    new URL(appendLinearIngestStatus(returnTo, status, reason), getAppUrl()),
   );
 }

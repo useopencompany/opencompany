@@ -4,7 +4,7 @@ import {
   type ArchiveVersionBody,
   type CreateTaskScheduleBody,
   type CreateWorkflowBody,
-  createOpenCompanyClient,
+  createApiClient,
   type InvokeWorkflowBody,
   type SetTaskScheduleEnabledBody,
   type UpdateTaskScheduleBody,
@@ -196,7 +196,7 @@ async function reconcileCreatedTask(
 
 function automationClient(options: ClientOptions) {
   const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
-  return createOpenCompanyClient(baseUrl, {
+  return createApiClient(baseUrl, {
     fetch: createHeadlessChatApiFetch({
       baseUrl,
       ...(options.fetch ? { fetch: options.fetch } : {}),

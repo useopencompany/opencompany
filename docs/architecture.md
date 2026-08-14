@@ -1,12 +1,12 @@
 # Architecture
 
-OpenCompany is a modular monolith with three product composition roots: `web` presents the product,
+opencompany is a modular monolith with three product composition roots: `web` presents the product,
 `api` owns the public product boundary, and `runner` owns durable execution and background work.
 
 ## Runtime boundaries
 
 - `apps/web` owns the Next.js UI, Server Component composition, optimistic browser state, WorkOS
-  browser-authentication routes, `activateGoatWorkspace`, health/static delivery, and narrow
+  browser-authentication routes, `activateWorkspace`, health/static delivery, and narrow
   same-origin or provider-URL continuity proxies. It owns no product persistence or execution.
 - `apps/api` owns authenticated `/v1` resources for Chat, Tasks, Workflows, schedules, Brain, Wiki,
   Skills, integrations, workspace/identity settings, onboarding, billing, usage, feedback, and MCP.
@@ -19,13 +19,13 @@ OpenCompany is a modular monolith with three product composition roots: `web` pr
 - `apps/marketing` is released independently from the product.
 
 The detailed product flow is maintained in
-[the OpenCompany system map](../apps/web/docs/README.md). Operational behavior is in
+[the opencompany system map](../apps/web/docs/README.md). Operational behavior is in
 [Chat operations](./chat-operations.md), and the permanent ownership decision is
 [ADR 0003](./adr/0003-headless-workflow-and-schedule-foundation.md).
 
 ## Data and client boundary
 
-`packages/db/src/goat-schema.ts` is the current product schema. The Drizzle client also composes two
+`packages/db/src/product-schema.ts` is the current product schema. The Drizzle client also composes two
 narrow public-schema compatibility modules:
 
 - `legacy-billing-schema.ts` preserves existing customer, subscription, credit, and webhook-event
@@ -50,9 +50,9 @@ session re-sealing, and workspace activation; the API owns identity synchronizat
 adoption, Actor/workspace resolution, and product persistence. The cached web identity resolver calls
 the API so Server Components retain one request-scoped result without creating a second data path.
 
-OpenCompany creates durable Runs in Postgres. Runner workers claim them with fenced leases,
+opencompany creates durable Runs in Postgres. Runner workers claim them with fenced leases,
 heartbeat while executing, persist Messages, Events, artifacts, approvals, and usage, and settle the
-projection transactionally. OpenCompany, Codex, and Claude Code are engines on the same canonical
+projection transactionally. opencompany, Codex, and Claude Code are engines on the same canonical
 Conversation/Message/Run protocol.
 
 Brain import, Brain ingestion, Google Drive sync, polling, and schedules follow the same admission

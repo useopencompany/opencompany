@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
-export type GoatIntegrationAccountUsage = {
+export type IntegrationAccountUsage = {
   ok: true;
   // brain_sources rows fed by this account (across all brains).
   affectedBrainSourceCount: number;
@@ -11,9 +11,9 @@ export type GoatIntegrationAccountUsage = {
 
 // Pre-disconnect check so the UI can warn before removing an account that
 // still feeds brains.
-export async function getGoatIntegrationAccountUsageAction(
+export async function getIntegrationAccountUsageAction(
   integrationId: string,
-): Promise<GoatIntegrationAccountUsage | { ok: false; error: string }> {
+): Promise<IntegrationAccountUsage | { ok: false; error: string }> {
   try {
     const response = await (await serverApiClient()).v1["integration-accounts"][
       ":integrationId"
@@ -37,7 +37,7 @@ export async function getGoatIntegrationAccountUsageAction(
 // Hard-deletes a personal integration account. Credentials, synced resources,
 // brain sources, and buffered events cascade away; already-ingested brain
 // content stays (pointer/copy rule) and event claims survive via SET NULL.
-export async function disconnectGoatIntegrationAccountAction(
+export async function disconnectIntegrationAccountAction(
   integrationId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
@@ -63,7 +63,7 @@ export async function disconnectGoatIntegrationAccountAction(
 // Settings control: one capability mode ("on" | "ask" | "off") for one
 // connection. Modes are stored as sparse overrides; registry defaults cover
 // missing keys. Vocabulary and ownership validation happen in the API.
-export async function setGoatIntegrationCapabilityModeAction(
+export async function setIntegrationCapabilityModeAction(
   integrationId: string,
   capabilityId: string,
   mode: string,
@@ -97,7 +97,7 @@ export async function setGoatIntegrationCapabilityModeAction(
 // Chat "Always allow": the execution owner re-resolves the action catalog and
 // flips every ask-mode connection behind the action to "on". The browser only
 // sends the opaque action id from the approval card.
-export async function alwaysAllowGoatChatActionAction(
+export async function alwaysAllowChatActionAction(
   actionId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {

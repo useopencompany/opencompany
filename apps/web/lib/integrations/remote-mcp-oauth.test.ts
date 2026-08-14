@@ -1,26 +1,23 @@
 import { createHmac } from "node:crypto";
 import { auth } from "@ai-sdk/mcp";
 import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-  saveGoatIntegrationCredential,
-} from "@opencompany/db/goat-integrations";
+  loadIntegrationCredential,
+  markIntegrationStatus,
+  saveIntegrationCredential,
+} from "@opencompany/db/integrations";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  appendGoatLatitudeMcpStatus,
-  startGoatLatitudeMcpOAuth,
-  verifyGoatLatitudeMcpState,
+  appendLatitudeMcpStatus,
+  startLatitudeMcpOAuth,
+  verifyLatitudeMcpState,
 } from "@/lib/integrations/latitude-mcp";
 import {
-  loadGoatLinearMcpWorkerConnection,
-  startGoatLinearMcpOAuth,
-  verifyGoatLinearMcpState,
+  loadLinearMcpWorkerConnection,
+  startLinearMcpOAuth,
+  verifyLinearMcpState,
 } from "@/lib/integrations/linear-mcp";
-import { startGoatNeonMcpOAuth, verifyGoatNeonMcpState } from "@/lib/integrations/neon-mcp";
-import {
-  startGoatPostHogMcpOAuth,
-  verifyGoatPostHogMcpState,
-} from "@/lib/integrations/posthog-mcp";
+import { startNeonMcpOAuth, verifyNeonMcpState } from "@/lib/integrations/neon-mcp";
+import { startPostHogMcpOAuth, verifyPostHogMcpState } from "@/lib/integrations/posthog-mcp";
 
 const observed = vi.hoisted(() => ({
   callbackUrl: "",
@@ -50,18 +47,18 @@ vi.mock("@opencompany/db/client", () => ({
   }),
 }));
 
-vi.mock("@opencompany/db/goat-integrations", () => ({
-  loadGoatIntegrationCredential: vi.fn(async () => null),
-  markGoatIntegrationStatus: vi.fn(async () => undefined),
-  saveGoatIntegrationCredential: vi.fn(async () => undefined),
+vi.mock("@opencompany/db/integrations", () => ({
+  loadIntegrationCredential: vi.fn(async () => null),
+  markIntegrationStatus: vi.fn(async () => undefined),
+  saveIntegrationCredential: vi.fn(async () => undefined),
 }));
 
-vi.mock("@opencompany/goat-agent/integrations/analytics", () => ({
-  captureGoatIntegrationAddedAnalytics: vi.fn(async () => undefined),
+vi.mock("@opencompany/agent/integrations/analytics", () => ({
+  captureIntegrationAddedAnalytics: vi.fn(async () => undefined),
 }));
 
-vi.mock("@opencompany/goat-agent/app-url", () => ({
-  getGoatAppUrl: () => "https://goat.example",
+vi.mock("@opencompany/agent/app-url", () => ({
+  getAppUrl: () => "https://opencompany.example",
 }));
 
 vi.mock("@ai-sdk/mcp", () => ({
@@ -77,7 +74,7 @@ vi.mock("@ai-sdk/mcp", () => ({
   }),
 }));
 
-describe("Goat remote MCP OAuth", () => {
+describe("opencompany remote MCP OAuth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("MCP_OAUTH_STATE_SECRET", "test-state-secret");
@@ -89,7 +86,7 @@ describe("Goat remote MCP OAuth", () => {
 
   it("connects Latitude with dynamic registration and its documented endpoint", async () => {
     await expect(
-      startGoatLatitudeMcpOAuth({
+      startLatitudeMcpOAuth({
         userWorkosId: "user_1",
         returnTo: "/settings/integrations",
       }),
@@ -105,13 +102,15 @@ describe("Goat remote MCP OAuth", () => {
       }),
     );
     expect(vi.mocked(auth).mock.calls[0]?.[1]).not.toHaveProperty("scope");
-    expect(observed.callbackUrl).toBe("https://goat.example/api/integrations/latitude/callback");
+    expect(observed.callbackUrl).toBe(
+      "https://opencompany.example/api/integrations/latitude/callback",
+    );
     expect(observed.clientMetadata).toMatchObject({
-      client_name: "OpenCompany Goat",
-      redirect_uris: ["https://goat.example/api/integrations/latitude/callback"],
+      client_name: "opencompany",
+      redirect_uris: ["https://opencompany.example/api/integrations/latitude/callback"],
       grant_types: ["authorization_code", "refresh_token"],
     });
-    expect(saveGoatIntegrationCredential).toHaveBeenCalledWith(
+    expect(saveIntegrationCredential).toHaveBeenCalledWith(
       expect.objectContaining({
         userWorkosId: "user_1",
         integrationId: "gint_remote_mcp",
@@ -122,18 +121,18 @@ describe("Goat remote MCP OAuth", () => {
         }),
       }),
     );
-    expect(verifyGoatLatitudeMcpState(observed.state)).toMatchObject({
+    expect(verifyLatitudeMcpState(observed.state)).toMatchObject({
       provider: "latitude",
       userWorkosId: "user_1",
       returnTo: "/settings/integrations",
     });
-    expect(() => verifyGoatLinearMcpState(observed.state)).toThrow(
+    expect(() => verifyLinearMcpState(observed.state)).toThrow(
       "Invalid Linear MCP provider state.",
     );
   });
 
   it("preserves Linear's explicit read/write scope in registered client metadata", async () => {
-    await startGoatLinearMcpOAuth({
+    await startLinearMcpOAuth({
       userWorkosId: "user_1",
       returnTo: "/settings/integrations",
     });
@@ -148,8 +147,8 @@ describe("Goat remote MCP OAuth", () => {
     expect(observed.clientMetadata).toMatchObject({ scope: "read write" });
   });
 
-  it("connects PostHog with only the analytics scopes and tools Goat exposes", async () => {
-    await startGoatPostHogMcpOAuth({
+  it("connects PostHog with only the analytics scopes and tools opencompany exposes", async () => {
+    await startPostHogMcpOAuth({
       userWorkosId: "user_1",
       returnTo: "/settings/integrations",
     });
@@ -164,12 +163,14 @@ describe("Goat remote MCP OAuth", () => {
     expect(serverUrl).toContain("dashboards-get-all");
     expect(serverUrl).toContain("insight-create");
     expect(serverUrl).not.toContain("feature-flag");
-    expect(observed.callbackUrl).toBe("https://goat.example/api/integrations/posthog/callback");
+    expect(observed.callbackUrl).toBe(
+      "https://opencompany.example/api/integrations/posthog/callback",
+    );
     expect(observed.clientMetadata).toMatchObject({
       scope:
         "dashboard:read insight:read query:read event_definition:read property_definition:read insight:write",
     });
-    expect(verifyGoatPostHogMcpState(observed.state)).toMatchObject({
+    expect(verifyPostHogMcpState(observed.state)).toMatchObject({
       provider: "posthog",
       userWorkosId: "user_1",
       returnTo: "/settings/integrations",
@@ -177,7 +178,7 @@ describe("Goat remote MCP OAuth", () => {
   });
 
   it("connects Neon with read-only OAuth and provider-side tool categories", async () => {
-    await startGoatNeonMcpOAuth({
+    await startNeonMcpOAuth({
       userWorkosId: "user_1",
       returnTo: "/settings/integrations",
     });
@@ -189,9 +190,9 @@ describe("Goat remote MCP OAuth", () => {
           "https://mcp.neon.tech/mcp?readonly=true&category=projects&category=branches&category=schema&category=querying",
       }),
     );
-    expect(observed.callbackUrl).toBe("https://goat.example/api/integrations/neon/callback");
+    expect(observed.callbackUrl).toBe("https://opencompany.example/api/integrations/neon/callback");
     expect(observed.clientMetadata).toMatchObject({ scope: "read" });
-    expect(verifyGoatNeonMcpState(observed.state)).toMatchObject({
+    expect(verifyNeonMcpState(observed.state)).toMatchObject({
       provider: "neon",
       userWorkosId: "user_1",
       returnTo: "/settings/integrations",
@@ -199,7 +200,7 @@ describe("Goat remote MCP OAuth", () => {
   });
 
   it("accepts provider-less legacy state only for Linear", async () => {
-    await startGoatLinearMcpOAuth({
+    await startLinearMcpOAuth({
       userWorkosId: "user_1",
       returnTo: "/settings/integrations",
     });
@@ -214,17 +215,17 @@ describe("Goat remote MCP OAuth", () => {
       .digest("base64url");
     const legacyState = `${legacyBody}.${signature}`;
 
-    expect(verifyGoatLinearMcpState(legacyState)).toMatchObject({
+    expect(verifyLinearMcpState(legacyState)).toMatchObject({
       userWorkosId: "user_1",
       returnTo: "/settings/integrations",
     });
-    expect(() => verifyGoatLatitudeMcpState(legacyState)).toThrow(
+    expect(() => verifyLatitudeMcpState(legacyState)).toThrow(
       "Invalid Latitude MCP provider state.",
     );
   });
 
   it("sanitizes off-site callback return paths", () => {
-    expect(appendGoatLatitudeMcpStatus("//evil.example", "connected")).toBe(
+    expect(appendLatitudeMcpStatus("//evil.example", "connected")).toBe(
       "/settings?integration=latitude&setup=connected",
     );
   });
@@ -233,7 +234,7 @@ describe("Goat remote MCP OAuth", () => {
     observed.dbRows = [{ id: "gint_linear", status: "connected" }];
 
     await expect(
-      loadGoatLinearMcpWorkerConnection({
+      loadLinearMcpWorkerConnection({
         userWorkosId: "user_1",
         onAuthorizationRequired: () => {
           throw new Error("unexpected authorization redirect");
@@ -241,20 +242,20 @@ describe("Goat remote MCP OAuth", () => {
       }),
     ).resolves.toEqual({ ok: false, reason: "needs_reauth" });
 
-    expect(markGoatIntegrationStatus).toHaveBeenCalledWith(
+    expect(markIntegrationStatus).toHaveBeenCalledWith(
       expect.objectContaining({
         userWorkosId: "user_1",
         integrationId: "gint_linear",
         provider: "linear",
         status: "needs_reauth",
-        statusReason: "Linear needs to be reconnected before Goat can use it.",
+        statusReason: "Linear needs to be reconnected before opencompany can use it.",
       }),
     );
   });
 
   it("marks remote MCP connections as needing reconnect when OAuth credentials are invalidated", async () => {
     observed.dbRows = [{ id: "gint_linear", status: "connected" }];
-    vi.mocked(loadGoatIntegrationCredential).mockResolvedValueOnce({
+    vi.mocked(loadIntegrationCredential).mockResolvedValueOnce({
       payload: {
         clientInformation: { client_id: "dynamic_client" },
         tokens: { access_token: "stale_token", token_type: "Bearer" },
@@ -265,7 +266,7 @@ describe("Goat remote MCP OAuth", () => {
       encryptionKeyVersion: 1,
     });
 
-    const connection = await loadGoatLinearMcpWorkerConnection({
+    const connection = await loadLinearMcpWorkerConnection({
       userWorkosId: "user_1",
       onAuthorizationRequired: () => {
         throw new Error("unexpected authorization redirect");
@@ -278,7 +279,7 @@ describe("Goat remote MCP OAuth", () => {
 
     await connection.authProvider.invalidateCredentials("tokens");
 
-    expect(saveGoatIntegrationCredential).toHaveBeenCalledWith(
+    expect(saveIntegrationCredential).toHaveBeenCalledWith(
       expect.objectContaining({
         userWorkosId: "user_1",
         integrationId: "gint_linear",
@@ -286,7 +287,7 @@ describe("Goat remote MCP OAuth", () => {
         payload: expect.not.objectContaining({ tokens: expect.anything() }),
       }),
     );
-    expect(markGoatIntegrationStatus).toHaveBeenCalledWith(
+    expect(markIntegrationStatus).toHaveBeenCalledWith(
       expect.objectContaining({
         userWorkosId: "user_1",
         integrationId: "gint_linear",
@@ -301,7 +302,7 @@ describe("Goat remote MCP OAuth", () => {
     observed.dbRows = [{ id: "gint_linear", status: "needs_reauth" }];
 
     await expect(
-      loadGoatLinearMcpWorkerConnection({
+      loadLinearMcpWorkerConnection({
         userWorkosId: "user_1",
         onAuthorizationRequired: () => {
           throw new Error("unexpected authorization redirect");
@@ -309,6 +310,6 @@ describe("Goat remote MCP OAuth", () => {
       }),
     ).resolves.toEqual({ ok: false, reason: "needs_reauth" });
 
-    expect(markGoatIntegrationStatus).not.toHaveBeenCalled();
+    expect(markIntegrationStatus).not.toHaveBeenCalled();
   });
 });

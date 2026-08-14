@@ -1,6 +1,6 @@
-import { GoatSkillEditorRoute } from "@/components/GoatRoutes";
-import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
-import { currentGoatUser } from "@/lib/auth";
+import { SkillEditorRoute } from "@/components/Routes";
+import { SettingsContent } from "@/components/SettingsChrome";
+import { currentUser } from "@/lib/auth";
 import { getHeadlessSkill } from "@/lib/headless-knowledge-server";
 
 type SkillEditorPageProps = {
@@ -9,23 +9,23 @@ type SkillEditorPageProps = {
 
 export default async function SkillEditorPage({ params }: SkillEditorPageProps) {
   const { slug } = await params;
-  const context = await currentGoatUser();
+  const context = await currentUser();
   const skill = await getHeadlessSkill(slug);
 
   if (!skill) {
     return (
-      <GoatSettingsContent
+      <SettingsContent
         title="Skill not found"
         description="This skill may have been archived or never existed."
         backLink={{ href: "/settings/skills", label: "Skills" }}
       >
         <div />
-      </GoatSettingsContent>
+      </SettingsContent>
     );
   }
 
   return (
-    <GoatSkillEditorRoute
+    <SkillEditorRoute
       skill={skill}
       initialStatus={skill.status}
       canEdit={context.role === "admin"}

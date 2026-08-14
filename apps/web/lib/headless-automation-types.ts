@@ -1,6 +1,6 @@
 import type { TaskScheduleReadModel, WorkflowDto } from "@opencompany/protocol";
 
-export type GoatWorkflowStep = {
+export type WorkflowStep = {
   id: string;
   title: string;
   model: string;
@@ -9,7 +9,7 @@ export type GoatWorkflowStep = {
   instructions: string;
 };
 
-export type GoatWorkflowTrigger =
+export type WorkflowTrigger =
   | { type: "manual" }
   | {
       type: "schedule";
@@ -21,34 +21,34 @@ export type GoatWorkflowTrigger =
       nextRunAt: string | null;
     };
 
-export type GoatWorkflowDetail = {
+export type WorkflowDetail = {
   id: string;
   slug: string;
   name: string;
   description: string;
-  steps: GoatWorkflowStep[];
+  steps: WorkflowStep[];
   status: "draft" | "active";
-  trigger: GoatWorkflowTrigger;
+  trigger: WorkflowTrigger;
   version: number;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
 
-export type GoatWorkflowListItem = GoatWorkflowDetail;
-export type GoatTaskScheduleView = TaskScheduleReadModel;
+export type WorkflowListItem = WorkflowDetail;
+export type TaskScheduleView = TaskScheduleReadModel;
 
-export type GoatWorkflowCatalogItem = {
+export type WorkflowCatalogItem = {
   id: string;
   name: string;
   description: string;
 };
 
-export function workflowDtoToCatalogItem(workflow: WorkflowDto): GoatWorkflowCatalogItem | null {
+export function workflowDtoToCatalogItem(workflow: WorkflowDto): WorkflowCatalogItem | null {
   if (
     workflow.status !== "active" ||
     workflow.steps.length === 0 ||
-    (workflow.steps as GoatWorkflowStep[]).some((step) => !step.instructions.trim())
+    (workflow.steps as WorkflowStep[]).some((step) => !step.instructions.trim())
   ) {
     return null;
   }

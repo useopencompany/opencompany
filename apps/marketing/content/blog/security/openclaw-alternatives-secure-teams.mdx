@@ -63,7 +63,7 @@ Before evaluating any OpenClaw alternative, define what "production ready" means
 | Self-hostable | Run locally on your own infrastructure. A self hosted agent is ideal for individual developers or small teams seeking control over their infrastructure, offering secure, production-ready deployment options. Some enterprise environments can't send data to a third-party cloud. |
 | Cost transparency | Understand the cost of each agent execution, each tool call, and each automation run. Self hosted alternatives give you full cost visibility. |
 
-This list also happens to describe what we built at OpenCompany — but it should be the baseline for any OpenClaw alternative your team evaluates, not just ours.
+This list also happens to describe what we built at opencompany — but it should be the baseline for any OpenClaw alternative your team evaluates, not just ours.
 
 ## Evaluation Framework for OpenClaw Alternatives
 
@@ -89,7 +89,7 @@ By systematically evaluating these factors, organizations can confidently select
 
 ## **The alternatives to OpenClaw worth considering**
 
-We've evaluated the major alternatives to OpenClaw available today. We're including OpenCompany because we built it to solve these problems — but we'll be honest about the limitations and where other OpenClaw alternatives are stronger.
+We've evaluated the major alternatives to OpenClaw available today. We're including opencompany because we built it to solve these problems — but we'll be honest about the limitations and where other OpenClaw alternatives are stronger.
 
 ### **NanoClaw: AI agents in constrained environments**
 
@@ -103,9 +103,9 @@ The tradeoff is flexibility. Container overhead adds latency to every tool call,
 
 **Limitation:** Container overhead and reduced flexibility for complex workflows spanning many external services.
 
-### **OpenCompany: lightweight OpenClaw alternative with Claude Code support**
+### **opencompany: lightweight OpenClaw alternative with Claude Code support**
 
-We built [OpenCompany](https://opencompany.cloud/product) as an open source alternative to OpenClaw because the existing tools forced a choice: either an AI assistant that can do everything or one that can't do anything useful. Neither works for production use.
+We built [opencompany](https://opencompany.cloud/product) as an open source alternative to OpenClaw because the existing tools forced a choice: either an AI assistant that can do everything or one that can't do anything useful. Neither works for production use.
 
 Our approach is a per-action permission model with three states — off, on, and ask — defined in YAML code that lives in your repo:
 
@@ -124,9 +124,9 @@ Secrets are injected at runtime through vault references. The AI agent never see
 
 The config-as-code approach means permission changes go through pull requests. When someone changes **delete_branch** from **ask** to **on**, that shows up in a diff. Any developer can question it.
 
-OpenCompany also supports using cron jobs to automate recurring tasks and orchestrate workflows within the platform, enabling scheduled actions such as web browsing, file operations, and integrations.
+opencompany also supports using cron jobs to automate recurring tasks and orchestrate workflows within the platform, enabling scheduled actions such as web browsing, file operations, and integrations.
 
-OpenCompany works with Claude Code, Codex, OpenCode, or any runtime — it's a lightweight OpenClaw alternative that enables users to run AI agents without vendor lock-in. You can self host it, run locally on your own infrastructure, or deploy it as a managed service. Claude Code users in particular find the integration seamless because the execution model maps directly to how Claude Code already handles tool use and task execution.
+opencompany works with Claude Code, Codex, OpenCode, or any runtime — it's a lightweight OpenClaw alternative that enables users to run AI agents without vendor lock-in. You can self host it, run locally on your own infrastructure, or deploy it as a managed service. Claude Code users in particular find the integration seamless because the execution model maps directly to how Claude Code already handles tool use and task execution.
 
 The open-source core is free. We charge for the managed enterprise version with team security features.
 
@@ -198,20 +198,20 @@ With this many alternatives available, choosing the right OpenClaw alternative d
 
 | If you... | Consider... |
 |---|---|
-| Need an open source, self hosted OpenClaw alternative to run agents with per-action control | OpenCompany |
+| Need an open source, self hosted OpenClaw alternative to run agents with per-action control | opencompany |
 | Need maximum sandbox isolation for enterprise AI agents | NanoClaw |
 | Are migrating a complex, multi agent OpenClaw setup at enterprise scale | IronClaw |
 | Are all-in on AWS or Azure and need managed AI infrastructure | Bedrock AgentCore or Copilot Studio |
 | Want to stay on OpenClaw and have engineering capacity | Hardened OpenClaw |
-| Want a lightweight OpenClaw alternative you can run locally | OpenCompany |
+| Want a lightweight OpenClaw alternative you can run locally | opencompany |
 | Need an ultra-lightweight agent for embedded systems or edge computing | PicoClaw or ZeroClaw |
 | Need corporate governance and regulatory compliance controls | Carapace |
 
 Three factors that don't show up in feature matrices:
 
-**Total cost of ownership.** The sticker price of each alternative matters less than the full picture: setup time, ongoing maintenance, the engineering effort to keep agents running, and the cost when agents go wrong. Open source alternatives like OpenCompany have zero licensing cost but require self hosted infrastructure. Managed enterprise alternatives like Bedrock reduce operational burden but increase vendor dependency and long-term spend.
+**Total cost of ownership.** The sticker price of each alternative matters less than the full picture: setup time, ongoing maintenance, the engineering effort to keep agents running, and the cost when agents go wrong. Open source alternatives like opencompany have zero licensing cost but require self hosted infrastructure. Managed enterprise alternatives like Bedrock reduce operational burden but increase vendor dependency and long-term spend.
 
-**Execution model compatibility.** If your existing automation relies on multi agent orchestration, multi step workflows, or specific tool execution patterns, the migration effort varies dramatically between alternatives. IronClaw minimizes this for teams with complex setups. A lightweight OpenClaw alternative like OpenCompany wraps existing tools rather than replacing them. Claude Code and other runtimes each have different integration patterns — test agents against your real tasks before committing.
+**Execution model compatibility.** If your existing automation relies on multi agent orchestration, multi step workflows, or specific tool execution patterns, the migration effort varies dramatically between alternatives. IronClaw minimizes this for teams with complex setups. A lightweight OpenClaw alternative like opencompany wraps existing tools rather than replacing them. Claude Code and other runtimes each have different integration patterns — test agents against your real tasks before committing.
 
 **Who are your users?** If your agents serve developers who write code, the execution controls matter less — they can evaluate what autonomous AI agents are doing. If your AI assistant serves support agents, executives, or operations managers on a team, the permission model and task controls matter more than any sandbox. You need tools that enable users to work with agents for daily tasks without understanding the underlying architecture.
 
@@ -243,11 +243,11 @@ For individual developers who use OpenClaw as a personal AI assistant and can ev
 
 **What is the most production-ready OpenClaw alternative?**
 
-It depends on your threat model. NanoClaw offers the strongest isolation for autonomous AI agents. OpenCompany offers the most granular control with vault-based secrets and the ability to self host agents and run locally. IronClaw offers WebAssembly sandboxing for enterprise execution environments. Among these alternatives, the right OpenClaw alternative depends on which compliance requirements your AI systems need to meet.
+It depends on your threat model. NanoClaw offers the strongest isolation for autonomous AI agents. opencompany offers the most granular control with vault-based secrets and the ability to self host agents and run locally. IronClaw offers WebAssembly sandboxing for enterprise execution environments. Among these alternatives, the right OpenClaw alternative depends on which compliance requirements your AI systems need to meet.
 
 **Can I migrate my OpenClaw tools and automation?**
 
-Most alternatives to OpenClaw support similar tools, tasks, and agent concepts but with different configuration code. IronClaw is the most compatible migration path for complex multi agent setups. OpenCompany uses YAML-based definitions that can wrap existing agents, tools, and automation tasks without rewriting your software.
+Most alternatives to OpenClaw support similar tools, tasks, and agent concepts but with different configuration code. IronClaw is the most compatible migration path for complex multi agent setups. opencompany uses YAML-based definitions that can wrap existing agents, tools, and automation tasks without rewriting your software.
 
 **Are OpenClaw alternatives easier to set up?**
 
@@ -261,6 +261,6 @@ The project is actively patching CVEs, and attention from developers is driving 
 
 The choice between these alternatives to OpenClaw isn't about which one is "best." It's about which OpenClaw alternative matches your team's threat model, your security requirements, and your compliance needs. The worst choice is the default one — deploying autonomous agents with full access to tools, tasks, and execution and hoping nothing goes wrong.
 
-If you're evaluating alternatives to OpenClaw for your team, we're happy to talk through the tradeoffs. [**Talk to our team**](/talk) or [**try OpenCompany on GitHub**](https://github.com/useopencompany).
+If you're evaluating alternatives to OpenClaw for your team, we're happy to talk through the tradeoffs. [**Talk to our team**](/talk) or [**try opencompany on GitHub**](https://github.com/useopencompany).
 
 *For more on the alternatives discussed here, see [**Running AI Agents in Production**](/blog/running-ai-agents-in-production) for the full infrastructure picture and [**Permission Models for AI Agents**](/blog/ai-agent-permission-models) for a deep dive on the off/on/ask approach.*

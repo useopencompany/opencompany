@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import GoatChatPage from "./page";
+import ChatPage from "./page";
 
 const routeMock = vi.hoisted(() => vi.fn(() => null));
 const loadChatMock = vi.hoisted(() => vi.fn());
@@ -11,15 +11,15 @@ const redirectMock = vi.hoisted(() =>
 
 vi.mock("next/navigation", () => ({ redirect: redirectMock }));
 
-vi.mock("@/components/GoatRoutes", () => ({
-  GoatHomeRoute: routeMock,
+vi.mock("@/components/Routes", () => ({
+  HomeRoute: routeMock,
 }));
 
 vi.mock("@/lib/chat", () => ({
-  loadCurrentGoatChatSessionById: loadChatMock,
+  loadCurrentChatSessionById: loadChatMock,
 }));
 
-describe("Goat chat route", () => {
+describe("opencompany chat route", () => {
   beforeEach(() => {
     routeMock.mockClear();
     loadChatMock.mockReset();
@@ -36,7 +36,7 @@ describe("Goat chat route", () => {
     };
     loadChatMock.mockResolvedValue(chat);
 
-    const page = await GoatChatPage({
+    const page = await ChatPage({
       params: Promise.resolve({ chatId: " goat_chat_1 " }),
     });
 
@@ -49,7 +49,7 @@ describe("Goat chat route", () => {
     loadChatMock.mockResolvedValue(null);
 
     await expect(
-      GoatChatPage({ params: Promise.resolve({ chatId: "goat_chat_missing" }) }),
+      ChatPage({ params: Promise.resolve({ chatId: "goat_chat_missing" }) }),
     ).rejects.toThrow("redirect:/");
 
     expect(loadChatMock).toHaveBeenCalledWith("goat_chat_missing");
@@ -58,7 +58,7 @@ describe("Goat chat route", () => {
   });
 
   it("redirects an empty route id without calling the API", async () => {
-    await expect(GoatChatPage({ params: Promise.resolve({ chatId: "   " }) })).rejects.toThrow(
+    await expect(ChatPage({ params: Promise.resolve({ chatId: "   " }) })).rejects.toThrow(
       "redirect:/",
     );
 

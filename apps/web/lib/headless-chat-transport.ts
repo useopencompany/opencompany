@@ -2,7 +2,7 @@
 
 import {
   type CreateMessageBody,
-  createOpenCompanyClient,
+  createApiClient,
   type MessageEngine,
   MessageEngineSchema,
   PROTOCOL_VERSION,
@@ -45,6 +45,16 @@ export type HeadlessMessageAccepted = {
   transactionId: string;
 };
 
+export type ResolveHeadlessApprovalInput = {
+  chatId: string;
+  approvalId: string;
+  approved: boolean;
+  runId?: string;
+  assistantMessageId?: string;
+  model?: string;
+  signal?: AbortSignal;
+};
+
 type TransportOptions = {
   baseUrl?: string;
   fetch?: typeof globalThis.fetch;
@@ -82,8 +92,6 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
   async sendMessages(input: Parameters<ChatTransport<UI_MESSAGE>["sendMessages"]>[0]) {
     const latest = input.messages.at(-1);
     if (!latest) throw new Error("A Chat message is required.");
-    if (latest.role === "assistant")
-      return this.continueApproval(input.chatId, latest, input.abortSignal);
     if (latest.role !== "user") throw new Error("Only user Messages can start a Run.");
 
     const request = requestContext(input.body);
@@ -108,7 +116,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
           }
         : {}),
     };
-    const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.apiFetchImpl });
+    const client = createApiClient(this.baseUrl(), { fetch: this.apiFetchImpl });
     const response = await client.v1.messages.$post(
       {
         header: {
@@ -148,7 +156,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
   async reconnectToStream(input: Parameters<ChatTransport<UI_MESSAGE>["reconnectToStream"]>[0]) {
     const state = readRunState(input.chatId);
     if (!state || isTerminal(state.status) || state.status === "paused") return null;
-    const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.apiFetchImpl });
+    const client = createApiClient(this.baseUrl(), { fetch: this.apiFetchImpl });
     const response = await client.v1.runs[":runId"].$get({ param: { runId: state.runId } });
     if (!response.ok) return null;
     const run = (await response.json()).data;
@@ -161,7 +169,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
   async cancel(chatId: string) {
     const state = readRunState(chatId);
     if (!state || isTerminal(state.status)) return false;
-    const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.apiFetchImpl });
+    const client = createApiClient(this.baseUrl(), { fetch: this.apiFetchImpl });
     const response = await client.v1.runs[":runId"].cancel.$post({
       param: { runId: state.runId },
     });
@@ -171,51 +179,43 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
     return true;
   }
 
-  private async continueApproval(chatId: string, message: UI_MESSAGE, signal?: AbortSignal) {
-    let state = readRunState(chatId);
-    const metadata = messageMetadata(message);
-    if (!state && metadata.runId && metadata.sessionId) {
-      const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.apiFetchImpl });
+  async resolveApproval(input: ResolveHeadlessApprovalInput) {
+    let state = readRunState(input.chatId);
+    if (input.runId && state?.runId !== input.runId) state = null;
+    if (!state && input.runId && input.assistantMessageId) {
+      const client = createApiClient(this.baseUrl(), { fetch: this.apiFetchImpl });
       const response = await client.v1.runs[":runId"].$get({
-        param: { runId: metadata.runId },
+        param: { runId: input.runId },
       });
-      if (response.ok) {
-        const run = (await response.json()).data;
-        state = {
-          runId: run.id,
-          conversationId: run.conversationId,
-          assistantMessageId: message.id,
-          model: metadata.model ?? run.model,
-          content: textFromMessage(message),
-          status: run.status,
-        };
-        writeRunStateAliases(chatId, state);
-      }
+      if (!response.ok) throw await responseError(response);
+      const run = (await response.json()).data;
+      state = {
+        runId: run.id,
+        conversationId: run.conversationId,
+        assistantMessageId: input.assistantMessageId,
+        model: input.model ?? run.model,
+        status: run.status,
+      };
+      writeRunStateAliases(input.chatId, state);
     }
     if (!state) throw new Error("The durable Run for this approval is no longer available.");
-    const approvals = approvalResponses(message);
-    if (approvals.length === 0) throw new Error("An approval response is required.");
-    const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.apiFetchImpl });
-    for (const approval of approvals) {
-      const response = await client.v1.runs[":runId"].approvals[":approvalId"].$post(
-        {
-          param: { runId: state.runId, approvalId: approval.id },
-          json: { resolution: approval.approved ? "approved" : "denied" },
-        },
-        signal ? { init: { signal } } : undefined,
-      );
-      if (!response.ok) throw await responseError(response);
-    }
+    const client = createApiClient(this.baseUrl(), { fetch: this.apiFetchImpl });
+    const response = await client.v1.runs[":runId"].approvals[":approvalId"].$post(
+      {
+        param: { runId: state.runId, approvalId: input.approvalId },
+        json: { resolution: input.approved ? "approved" : "denied" },
+      },
+      input.signal ? { init: { signal: input.signal } } : undefined,
+    );
+    if (!response.ok) throw await responseError(response);
     state.status = "queued";
-    writeRunStateAliases(chatId, state);
-    return this.uiStream(chatId, state, signal, true);
+    writeRunStateAliases(input.chatId, state);
   }
 
   private uiStream(
     chatId: string,
     initialState: HeadlessRunState,
     signal?: AbortSignal,
-    continuation = false,
   ): ReadableStream<UIMessageChunk> {
     const state = { ...initialState };
     const fetchImpl = this.apiFetchImpl;
@@ -237,7 +237,6 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
             ...(state.model ? { model: state.model } : {}),
           },
         });
-        if (continuation) controller.enqueue({ type: "start-step" });
         try {
           for await (const event of streamRunEvents({
             baseUrl,
@@ -313,7 +312,7 @@ export async function startHeadlessBackgroundChat(
   const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
   const fetchImpl = bindFetchToRuntime(options.fetch);
   const apiFetchImpl = createHeadlessChatApiFetch({ baseUrl, fetch: fetchImpl });
-  const client = createOpenCompanyClient(baseUrl, { fetch: apiFetchImpl });
+  const client = createApiClient(baseUrl, { fetch: apiFetchImpl });
   const response = await client.v1.messages.$post({
     header: {
       "idempotency-key": idempotencyKey(input.clientMessageId),
@@ -381,20 +380,6 @@ function textFromMessage(message: UIMessage) {
     .map((part) => part.text)
     .join("")
     .trim();
-}
-
-function approvalResponses(message: UIMessage) {
-  const responses: Array<{ id: string; approved: boolean }> = [];
-  for (const part of message.parts) {
-    if (!part || typeof part !== "object" || !("state" in part) || !("approval" in part)) continue;
-    if (part.state !== "approval-responded") continue;
-    const approval = part.approval;
-    if (!approval || typeof approval !== "object") continue;
-    if (!("id" in approval) || typeof approval.id !== "string") continue;
-    if (!("approved" in approval) || typeof approval.approved !== "boolean") continue;
-    responses.push({ id: approval.id, approved: approval.approved });
-  }
-  return responses;
 }
 
 function statusFromEvent(event: RunEventDto, current: HeadlessRunState["status"]) {

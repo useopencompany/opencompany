@@ -5,13 +5,13 @@ description: Inspect Neon projects and run permission-gated read-only SQL.
 
 ## What connecting does
 
-Neon is a personal OAuth connection. OpenCompany can inspect organizations, projects, branches,
+Neon is a personal OAuth connection. opencompany can inspect organizations, projects, branches,
 tables, and schemas, and can run bounded read-only SQL through Neon's hosted MCP path.
 
 ## Scopes and permissions
 
 The connection requests Neon's read scope and forces hosted MCP calls into read-only mode. Project
-and schema inspection defaults to **On**; querying database rows defaults to **Ask**. OpenCompany
+and schema inspection defaults to **On**; querying database rows defaults to **Ask**. opencompany
 does not expose connection-string, migration, branch-mutation, reset, or deletion tools. A complete
 query guard and result-limit reference is coming soon.
 

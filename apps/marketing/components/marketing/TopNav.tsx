@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Cta } from "./Cta";
-import { GoatMark } from "./GoatMark";
+import { Mark } from "./Mark";
 import { TopNavLinks } from "./TopNavLinks";
 
 export function TopNav() {
@@ -8,7 +8,7 @@ export function TopNav() {
     <header className="sticky top-0 z-50 bg-background">
       <div className="mx-auto grid h-14 max-w-5xl grid-cols-[1fr_auto_1fr] items-center px-6 lg:max-w-7xl xl:max-w-[90rem]">
         <Link href="/" className="flex items-center gap-2 text-ink" aria-label="opencompany home">
-          <GoatMark className="size-5 animate-goat-mark-spin" />
+          <Mark className="size-5 animate-goat-mark-spin" />
           <span className="font-medium font-mono text-[15px] tracking-tight">opencompany</span>
         </Link>
 

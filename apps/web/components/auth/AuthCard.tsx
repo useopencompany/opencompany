@@ -20,14 +20,14 @@ import {
   startGoogleAuth,
   verifyMagicCode,
 } from "@/lib/auth-actions";
-import type { GoatAuthMethod, GoatOrganizationOption } from "@/lib/auth-methods";
+import type { AuthMethod, OrganizationOption } from "@/lib/auth-methods";
 
 type AuthCardProps = {
   mode: "sign-in" | "sign-up";
   invitationToken?: string;
   prefillEmail?: string;
-  lastUsedMethod: GoatAuthMethod | null;
-  organizationOptions?: GoatOrganizationOption[] | null;
+  lastUsedMethod: AuthMethod | null;
+  organizationOptions?: OrganizationOption[] | null;
   initialError?: string | null;
 };
 
@@ -65,7 +65,7 @@ function GoogleGlyph() {
   );
 }
 
-function GoogleSubmitButton({ lastUsedMethod }: { lastUsedMethod: GoatAuthMethod | null }) {
+function GoogleSubmitButton({ lastUsedMethod }: { lastUsedMethod: AuthMethod | null }) {
   const { pending } = useFormStatus();
   return (
     <Button

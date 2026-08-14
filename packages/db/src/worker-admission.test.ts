@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { parseGoatBrainWorkerAdmission } from "./worker-admission";
+import { parseBrainWorkerAdmission } from "./worker-admission";
 
-describe("parseGoatBrainWorkerAdmission", () => {
+describe("parseBrainWorkerAdmission", () => {
   it.each([
     "brain_import",
     "brain_ingest",
     "google_drive_sync",
   ])("accepts the %s worker hint", (worker) => {
-    expect(parseGoatBrainWorkerAdmission(JSON.stringify({ worker }))).toBe(worker);
+    expect(parseBrainWorkerAdmission(JSON.stringify({ worker }))).toBe(worker);
   });
 
   it.each([
@@ -16,6 +16,6 @@ describe("parseGoatBrainWorkerAdmission", () => {
     JSON.stringify({ worker: "codex_chat" }),
     JSON.stringify({ worker: 1 }),
   ])("rejects an invalid or unrelated payload", (payload) => {
-    expect(parseGoatBrainWorkerAdmission(payload)).toBeNull();
+    expect(parseBrainWorkerAdmission(payload)).toBeNull();
   });
 });

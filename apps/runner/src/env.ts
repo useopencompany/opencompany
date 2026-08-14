@@ -12,25 +12,25 @@ export type RunnerEnv = {
   // (llm-broker.ts) as the upstream credential for the "openai" provider. Never enters
   // the sandbox.
   openaiCodexApiKey: string | undefined;
-  // Platform OpenAI key used only by the runner-hosted Goat voice dictation relay.
-  // It is never sent to the browser; the Goat app mints short-lived runner tickets instead.
+  // Platform OpenAI key used only by the runner-hosted opencompany voice dictation relay.
+  // It is never sent to the browser; the opencompany app mints short-lived runner tickets instead.
   openaiApiKey?: string | undefined;
-  goatDictationRealtimeModel?: string | undefined;
-  goatDictationFinalModel?: string | undefined;
+  dictationRealtimeModel?: string | undefined;
+  dictationFinalModel?: string | undefined;
   // Browser/sandbox-reachable runner origin. Render supplies RENDER_EXTERNAL_URL in hosted
   // services; RUNNER_PUBLIC_URL is the explicit local and non-Render override.
   runnerPublicUrl?: string | undefined;
-  // Wildcard preview hostname routed to this runner, for example preview.goat.example.com.
+  // Wildcard preview hostname routed to this runner, for example preview.opencompany.example.com.
   // Capability labels are prepended to this domain. A port may be included for local development.
   previewBaseDomain?: string | undefined;
   previewProtocol?: "http" | "https" | undefined;
   exaApiKey: string | undefined;
-  goatBrowserEnabled: boolean;
+  browserEnabled: boolean;
   // Google OAuth client, shared by the Gmail, Google Calendar, and Google Drive integrations. The runner
   // needs it to refresh per-account access tokens against Google's token endpoint.
   googleOAuthClientId?: string | undefined;
   googleOAuthClientSecret?: string | undefined;
-  // HubSpot OAuth client (same app as the goat web OAuth flow). HubSpot access
+  // HubSpot OAuth client (same app as the opencompany web OAuth flow). HubSpot access
   // tokens are short-lived, so the runner refreshes them against HubSpot's
   // token endpoint before snapshot enrichment.
   hubspotOAuthClientId?: string | undefined;
@@ -41,18 +41,18 @@ export type RunnerEnv = {
   // never publish a pull request.
   codexTimeoutMs: number;
   codexModel: string;
-  // Idle timeout for persistent Goat codex-chat sandboxes. Unlike per-task sandboxes (killed after
+  // Idle timeout for persistent opencompany codex-chat sandboxes. Unlike per-task sandboxes (killed after
   // each run), a chat sandbox stays alive across turns so files and the app-server daemon survive;
   // on idle timeout E2B pauses it and Sandbox.connect auto-resumes on the next message.
-  goatCodexChatIdleTimeoutMs: number;
+  codexChatIdleTimeoutMs: number;
   // Delivery-lease TTL for runner jobs. The lease heartbeats every 5s while a job runs, so this only
   // matters when the heartbeat stops (deploy, instance recycle, GC, or network blip).
   jobLeaseTtlMs: number;
-  // Durable Goat chat turn lease TTL. Kept shorter than the ingestion-job delivery lease so a dead
+  // Durable opencompany chat turn lease TTL. Kept shorter than the ingestion-job delivery lease so a dead
   // worker's chat turn can be reclaimed quickly.
-  goatCodexChatLeaseTtlMs?: number | undefined;
-  // Explicit opt-in for Goat's durable task worker and runner-hosted tools.
-  goatTaskWorkerEnabled: boolean;
+  codexChatLeaseTtlMs?: number | undefined;
+  // Explicit opt-in for opencompany's durable task worker and runner-hosted tools.
+  taskWorkerEnabled: boolean;
   workerConcurrency: number;
   port: number;
   allowedOrigins: string[];
@@ -71,13 +71,13 @@ export function loadEnv(): RunnerEnv {
     vercelAiGatewayApiKey: requiredEnv("VERCEL_AI_GATEWAY_API_KEY"),
     openaiCodexApiKey: optionalEnv("OPENAI_CODEX_API_KEY"),
     openaiApiKey: optionalEnv("OPENAI_API_KEY"),
-    goatDictationRealtimeModel: optionalEnv("GOAT_DICTATION_REALTIME_MODEL"),
-    goatDictationFinalModel: optionalEnv("GOAT_DICTATION_FINAL_MODEL"),
+    dictationRealtimeModel: optionalEnv("GOAT_DICTATION_REALTIME_MODEL"),
+    dictationFinalModel: optionalEnv("GOAT_DICTATION_FINAL_MODEL"),
     runnerPublicUrl: optionalEnv("RUNNER_PUBLIC_URL") ?? optionalEnv("RENDER_EXTERNAL_URL"),
     previewBaseDomain: optionalPreviewBaseDomainEnv(),
     previewProtocol: optionalPreviewProtocolEnv(),
     exaApiKey: optionalEnv("EXA_API_KEY"),
-    goatBrowserEnabled: optionalBooleanEnv("RUNNER_GOAT_BROWSER_ENABLED", false),
+    browserEnabled: optionalBooleanEnv("RUNNER_GOAT_BROWSER_ENABLED", false),
     googleOAuthClientId: optionalEnv("GOOGLE_OAUTH_CLIENT_ID"),
     googleOAuthClientSecret: optionalEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
     hubspotOAuthClientId: optionalEnv("GOAT_HUBSPOT_CLIENT_ID"),
@@ -86,16 +86,13 @@ export function loadEnv(): RunnerEnv {
     blobReadWriteToken: optionalEnv("BLOB_READ_WRITE_TOKEN"),
     codexTimeoutMs: optionalPositiveIntegerEnv("RUNNER_CODEX_TIMEOUT_MS", DEFAULT_CODEX_TIMEOUT_MS),
     codexModel: optionalEnv("RUNNER_CODEX_MODEL") ?? "gpt-5.6-sol",
-    goatCodexChatIdleTimeoutMs: optionalPositiveIntegerEnv(
+    codexChatIdleTimeoutMs: optionalPositiveIntegerEnv(
       "RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS",
       5 * 60_000,
     ),
     jobLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_JOB_LEASE_TTL_MS", 300_000),
-    goatCodexChatLeaseTtlMs: optionalPositiveIntegerEnv(
-      "RUNNER_GOAT_CODEX_CHAT_LEASE_TTL_MS",
-      90_000,
-    ),
-    goatTaskWorkerEnabled: optionalBooleanEnv("RUNNER_GOAT_TASK_WORKER_ENABLED", false),
+    codexChatLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_CODEX_CHAT_LEASE_TTL_MS", 90_000),
+    taskWorkerEnabled: optionalBooleanEnv("RUNNER_GOAT_TASK_WORKER_ENABLED", false),
     // Max parallel sessions this instance runs. Sessions are I/O-bound (mostly waiting on
     // model token streaming + remote E2B sandboxes), so this is bounded by the single
     // event loop, the E2B concurrent-sandbox quota, and model-gateway rate limits — not

@@ -1,10 +1,6 @@
 import "server-only";
 
-import {
-  createOpenCompanyClient,
-  type TaskScheduleDto,
-  type WorkflowDto,
-} from "@opencompany/protocol";
+import { createApiClient, type TaskScheduleDto, type WorkflowDto } from "@opencompany/protocol";
 import { headers } from "next/headers";
 
 export async function listHeadlessWorkflows(): Promise<WorkflowDto[]> {
@@ -63,7 +59,7 @@ async function serverAutomationClient() {
       cache: "no-store",
     });
   };
-  return createOpenCompanyClient(origin, { fetch: fetchWithActor });
+  return createApiClient(origin, { fetch: fetchWithActor });
 }
 
 function serverApiOrigin(value: string | undefined) {

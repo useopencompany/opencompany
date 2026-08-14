@@ -1,25 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { generateMetadata } from "./page";
 
-const loadPublicGoatChatMock = vi.hoisted(() => vi.fn());
+const loadPublicChatMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/components/chat/SharedChatView", () => ({
   SharedChatView: vi.fn(() => null),
 }));
 
 vi.mock("@/lib/app-url", () => ({
-  getGoatAppUrl: vi.fn(() => "https://goat.example.com"),
+  getAppUrl: vi.fn(() => "https://opencompany.example.com"),
 }));
 
 vi.mock("@/lib/chat-sharing", () => ({
-  loadPublicGoatChat: loadPublicGoatChatMock,
+  loadPublicChat: loadPublicChatMock,
 }));
 
 const SHARE_ID = "goat_chat_share_123e4567-e89b-42d3-a456-426614174000";
 
 describe("shared chat metadata", () => {
   beforeEach(() => {
-    loadPublicGoatChatMock.mockResolvedValue({
+    loadPublicChatMock.mockResolvedValue({
       shareId: SHARE_ID,
       title: "Architecture review",
       kind: "chat",
@@ -48,10 +48,10 @@ describe("shared chat metadata", () => {
         siteName: "opencompany",
         title: "Architecture review",
         description: "Architecture review — a read-only chat shared from opencompany.",
-        url: new URL(`https://goat.example.com/share/${SHARE_ID}`),
+        url: new URL(`https://opencompany.example.com/share/${SHARE_ID}`),
         images: [
           {
-            url: new URL(`https://goat.example.com/share/${SHARE_ID}/opengraph-image`),
+            url: new URL(`https://opencompany.example.com/share/${SHARE_ID}/opengraph-image`),
             width: 1200,
             height: 630,
             type: "image/png",
@@ -65,7 +65,7 @@ describe("shared chat metadata", () => {
         description: "Architecture review — a read-only chat shared from opencompany.",
         images: [
           {
-            url: new URL(`https://goat.example.com/share/${SHARE_ID}/opengraph-image`),
+            url: new URL(`https://opencompany.example.com/share/${SHARE_ID}/opengraph-image`),
             width: 1200,
             height: 630,
             type: "image/png",
@@ -77,7 +77,7 @@ describe("shared chat metadata", () => {
   });
 
   it("describes shared task runs distinctly from chats", async () => {
-    loadPublicGoatChatMock.mockResolvedValueOnce({
+    loadPublicChatMock.mockResolvedValueOnce({
       shareId: SHARE_ID,
       title: "Ship feature",
       kind: "task",
@@ -115,7 +115,7 @@ describe("shared chat metadata", () => {
     ["codex", "Codex chat"],
     ["claude_code", "Claude Code chat"],
   ] as const)("describes shared %s cloud chats distinctly", async (engine, subject) => {
-    loadPublicGoatChatMock.mockResolvedValueOnce({
+    loadPublicChatMock.mockResolvedValueOnce({
       shareId: SHARE_ID,
       title: `${subject} session`,
       kind: "chat",
@@ -150,7 +150,7 @@ describe("shared chat metadata", () => {
   });
 
   it("returns not found when a share does not exist", async () => {
-    loadPublicGoatChatMock.mockResolvedValueOnce(null);
+    loadPublicChatMock.mockResolvedValueOnce(null);
 
     await expect(
       generateMetadata({

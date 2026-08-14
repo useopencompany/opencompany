@@ -3,7 +3,7 @@ import "server-only";
 import {
   type BrainOverviewDto,
   type BrainSnapshotDto,
-  createOpenCompanyClient,
+  createApiClient,
   type SkillCatalogItemDto,
   type SkillDto,
   type SkillListItemDto,
@@ -65,7 +65,7 @@ async function serverKnowledgeClient() {
     if (authorization) forwarded.set("Authorization", authorization);
     return globalThis.fetch(input, { ...init, headers: forwarded, cache: "no-store" });
   };
-  return createOpenCompanyClient(origin, { fetch: fetchWithActor });
+  return createApiClient(origin, { fetch: fetchWithActor });
 }
 
 function serverApiOrigin(value: string | undefined) {

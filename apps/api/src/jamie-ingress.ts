@@ -1,9 +1,9 @@
 import {
-  loadGoatJamieWebhookContext,
-  loadGoatJamieWebhookContextForApiKey,
-} from "@opencompany/goat-agent/integrations/jamie";
-import { GOAT_JAMIE_WEBHOOK_SECRET_HEADER } from "@opencompany/goat-agent/integrations/jamie-constants";
-import { handleGoatJamieWebhookDelivery } from "@opencompany/goat-agent/integrations/jamie-webhook";
+  loadJamieWebhookContext,
+  loadJamieWebhookContextForApiKey,
+} from "@opencompany/agent/integrations/jamie";
+import { JAMIE_WEBHOOK_SECRET_HEADER } from "@opencompany/agent/integrations/jamie-constants";
+import { handleJamieWebhookDelivery } from "@opencompany/agent/integrations/jamie-webhook";
 
 type DbLike = any;
 
@@ -19,11 +19,11 @@ export type JamieIngressService = {
 export function createJamieIngress(input: { db: DbLike }): JamieIngressService {
   return {
     webhook: async (request) => {
-      const webhookContext = await loadGoatJamieWebhookContextForApiKey(
-        request.headers.get(GOAT_JAMIE_WEBHOOK_SECRET_HEADER),
+      const webhookContext = await loadJamieWebhookContextForApiKey(
+        request.headers.get(JAMIE_WEBHOOK_SECRET_HEADER),
         input.db,
       );
-      return handleGoatJamieWebhookDelivery({
+      return handleJamieWebhookDelivery({
         request,
         webhookContext,
         missingContextStatus: 401,
@@ -31,8 +31,8 @@ export function createJamieIngress(input: { db: DbLike }): JamieIngressService {
       });
     },
     webhookForIntegration: async (integrationId, request) => {
-      const webhookContext = await loadGoatJamieWebhookContext(integrationId, input.db);
-      return handleGoatJamieWebhookDelivery({
+      const webhookContext = await loadJamieWebhookContext(integrationId, input.db);
+      return handleJamieWebhookDelivery({
         request,
         webhookContext,
         missingContextStatus: 404,

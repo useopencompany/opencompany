@@ -1,4 +1,4 @@
-# OpenCompany app and runner map
+# opencompany app and runner map
 
 This document describes the current product flow. The web app presents Chat, Tasks, Workflows,
 Brain, Wiki, integrations, and settings; the canonical API owns public commands and read models;
@@ -7,7 +7,7 @@ the runner owns durable execution.
 ## Chat
 
 ```text
-GoatSurface
+Surface
   typed POST /v1/messages
     authenticate Actor and workspace
     reserve idempotency key
@@ -19,13 +19,13 @@ GoatSurface
 
 Runner
   claim queued Run with a fenced lease
-  execute OpenCompany, Codex, or Claude Code adapter
+  execute opencompany, Codex, or Claude Code adapter
   persist Messages, Events, artifacts, approvals, usage, and terminal state
 ```
 
 Relevant web entry points:
 
-- `apps/web/components/GoatSurface.tsx`: composer, stream presentation, approvals, attachments,
+- `apps/web/components/Surface.tsx`: composer, stream presentation, approvals, attachments,
   interruption, and coding runtime UI.
 - `apps/web/lib/headless-chat-transport.ts`: canonical AI SDK transport and background sends.
 - `apps/web/lib/headless-chat-commands.ts`: Conversation updates, cancellation, approvals, and
@@ -33,8 +33,8 @@ Relevant web entry points:
 - `apps/web/lib/headless-chat-collections.ts`: fixed API-owned read-model collections.
 - `apps/web/lib/chat.ts`: Server Component Conversation metadata reader through the typed client.
 
-OpenCompany, Codex, and Claude Code are explicit versioned engine descriptors on the same Message
-command. OpenCompany is selected by default for non-coding chats, but the API does not infer a
+opencompany, Codex, and Claude Code are explicit versioned engine descriptors on the same Message
+command. opencompany is selected by default for non-coding chats, but the API does not infer a
 missing engine. Message commands also carry `X-OpenCompany-Protocol-Version`; stale browser builds
 are rejected with an instruction to refresh rather than being parsed through a legacy contract.
 Attachments are uploaded to `/v1/attachments` and referenced by opaque IDs. Credential or storage
@@ -62,7 +62,7 @@ proxy is deleted; clients cannot select physical tables or predicates.
 - Public contracts and the typed client: `packages/protocol`.
 - Application services and ports: `packages/core`.
 - Database adapters and schema: `packages/db`.
-- Provider-neutral agent behavior: shared packages such as `packages/goat-agent`.
+- Provider-neutral agent behavior: shared packages such as `packages/agent`.
 - Public HTTP composition: `apps/api`.
 - Durable worker composition: `apps/runner`.
 - UI and Server Components: `apps/web`.
@@ -71,7 +71,7 @@ All `/v1` routes require Actor authentication. Browser cookie mutations addition
 allowed `Origin`. Command retries retain existing idempotency semantics, and schema changes require
 additive Drizzle migrations.
 
-The web WorkOS routes, cached API-backed identity resolver, and `activateGoatWorkspace` remain the
+The web WorkOS routes, cached API-backed identity resolver, and `activateWorkspace` remain the
 permanent browser-authentication shell. Production web code has zero `@opencompany/db` and zero
 `drizzle-orm` imports; the boundary check has no exception list or migration baseline.
 

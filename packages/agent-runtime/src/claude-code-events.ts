@@ -1,9 +1,9 @@
-import { GOAT_PUBLISH_ARTIFACT_TOOL_NAME, parseGoatPublishedChatArtifact } from "./chat-artifacts";
+import { PUBLISH_ARTIFACT_TOOL_NAME, parsePublishedChatArtifact } from "./chat-artifacts";
 import type { CodexAppServerNormalizedEvent } from "./codex-app-server-events";
 
 // Translates Claude Code headless stream-json events (`claude -p --output-format
 // stream-json --verbose`) into the CodexAppServerNormalizedEvent vocabulary, so the
-// goat chat projector, audit log, and renderer consume Claude turns unchanged.
+// opencompany chat projector, audit log, and renderer consume Claude turns unchanged.
 //
 // The normalizer is stateful: tool_result events only carry a tool_use_id, so routing
 // them to the right terminal event (command vs file change vs web search vs generic
@@ -350,7 +350,7 @@ function normalizeUserMessage(
         tool: started.tool,
         status: isError ? "failed" : "completed",
         error: isError ? (truncate(outputText, 600) ?? "Tool failed.") : undefined,
-        ...(started.tool === GOAT_PUBLISH_ARTIFACT_TOOL_NAME
+        ...(started.tool === PUBLISH_ARTIFACT_TOOL_NAME
           ? { artifact: publishedArtifactFromText(outputText) ?? undefined }
           : {}),
       }),
@@ -363,7 +363,7 @@ function normalizeUserMessage(
 function publishedArtifactFromText(value: string | null) {
   if (!value) return null;
   try {
-    return parseGoatPublishedChatArtifact(JSON.parse(value) as unknown);
+    return parsePublishedChatArtifact(JSON.parse(value) as unknown);
   } catch {
     return null;
   }

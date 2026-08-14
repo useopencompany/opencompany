@@ -1,6 +1,6 @@
 # Analytics
 
-OpenCompany uses PostHog through the shared `@opencompany/analytics` package. Product code should
+opencompany uses PostHog through the shared `@opencompany/analytics` package. Product code should
 not import PostHog directly.
 
 The marketing site sends its basic traffic and conversion signals to the same current-product
@@ -9,7 +9,7 @@ without maintaining a second analytics sink.
 
 ## Event registries
 
-`packages/analytics/src/goat-events.ts` is the current product registry. It defines every event
+`packages/analytics/src/product-events.ts` is the current product registry. It defines every event
 name, allowed property shape, description, and safe property keys. Events cover app and onboarding
 activity, Chat and Task use, integrations and Brain ingestion, model usage and spend, and billing
 top-ups.
@@ -30,7 +30,7 @@ signal that already answers the question.
 ## Privacy rules
 
 Event payloads may contain internal entity IDs, selected enum values, counts, durations, model
-metadata, and changed field names. OpenCompany identifies a person with the internal WorkOS user
+metadata, and changed field names. opencompany identifies a person with the internal WorkOS user
 ID; the allowlisted workspace and display fields may be set as person properties.
 
 Do not send prompts, Messages, tool arguments or output, provider payloads, file contents, company
@@ -61,5 +61,5 @@ without requiring a PostHog project.
 
 With product PostHog values missing, exercise the changed flow and confirm there are no
 analytics-related failures. With debug enabled, confirm logs contain only properties registered in
-`goat-events.ts` and never print values for sensitive person fields. With hosted values, confirm the
+`product-events.ts` and never print values for sensitive person fields. With hosted values, confirm the
 event arrives in the product project once and does not also enter the billing-compatibility project.

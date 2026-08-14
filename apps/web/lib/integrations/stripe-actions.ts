@@ -1,11 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { GoatStripeProviderState } from "@/lib/integration-state";
+import type { StripeProviderState } from "@/lib/integration-state";
 import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
 export type StripeConnectActionResult =
-  | { ok: true; state: GoatStripeProviderState }
+  | { ok: true; state: StripeProviderState }
   | { ok: false; error: string };
 
 export async function saveStripeRestrictedApiKeyAction(
@@ -27,11 +27,11 @@ export async function saveStripeRestrictedApiKeyAction(
         ),
       };
     }
-    const data = (await response.json()).data as { state: GoatStripeProviderState };
+    const data = (await response.json()).data as { state: StripeProviderState };
     revalidatePath("/", "layout");
     return { ok: true, state: data.state };
   } catch (error) {
-    console.error("[goat-stripe] Failed to save Stripe restricted key", {
+    console.error("[opencompany-stripe] Failed to save Stripe restricted key", {
       error: error instanceof Error ? error.message : String(error),
     });
     return {

@@ -1,4 +1,4 @@
-import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import {
   completeAutoRefillSetup,
@@ -7,21 +7,21 @@ import {
 } from "@opencompany/billing/legacy-auto-refill";
 import { fulfillCheckoutSession } from "@opencompany/billing/legacy-credits";
 import {
-  applyGoatStripeInvoicePaymentState,
-  applyGoatStripeSubscriptionProjection,
-  findGoatWorkspaceIdForStripeSubscription,
-  GOAT_PRO_STRIPE_PRODUCT_KEY,
+  applyStripeInvoicePaymentState,
+  applyStripeSubscriptionProjection,
+  findWorkspaceIdForStripeSubscription,
+  PRO_STRIPE_PRODUCT_KEY,
   releasePendingForWorkspace,
-  setGoatAutoRefillPaymentMethod,
-  settleGoatAutoRefill,
-} from "@opencompany/db/goat-billing";
+  setAutoRefillPaymentMethod,
+  settleAutoRefill,
+} from "@opencompany/db/billing";
 import {
-  fulfillGoatTopUpCheckoutSession,
-  goatUsdMicrosToCents,
-  markGoatCheckoutRecordFailed,
-  recordGoatAutoRefillCredit,
-} from "@opencompany/db/goat-credits";
-import type { GoatStripeSubscriptionStatus } from "@opencompany/db/goat-schema";
+  fulfillTopUpCheckoutSession,
+  markCheckoutRecordFailed,
+  recordAutoRefillCredit,
+  usdMicrosToCents,
+} from "@opencompany/db/credits";
+import type { StripeSubscriptionStatus } from "@opencompany/db/product-schema";
 import type Stripe from "stripe";
 
 type DbLike = any;
@@ -66,12 +66,11 @@ async function handleStripeEvent(event: Stripe.Event, input: { db: DbLike; strip
     event.type === "checkout.session.async_payment_failed"
   ) {
     const session = event.data.object;
-    const isGoatTopUp =
-      session.mode === "payment" && session.metadata?.billingProduct === "goat_topup";
-    if (isGoatTopUp && event.type === "checkout.session.async_payment_failed") {
+    const isTopUp = session.mode === "payment" && session.metadata?.billingProduct === "goat_topup";
+    if (isTopUp && event.type === "checkout.session.async_payment_failed") {
       const checkoutRecordId = session.metadata?.checkoutRecordId;
       if (checkoutRecordId) {
-        await markGoatCheckoutRecordFailed({
+        await markCheckoutRecordFailed({
           id: checkoutRecordId,
           error: "Stripe reported that the delayed Checkout payment failed.",
           db: input.db,
@@ -79,18 +78,18 @@ async function handleStripeEvent(event: Stripe.Event, input: { db: DbLike; strip
       }
       return;
     }
-    if (isGoatTopUp) {
-      const result = await fulfillGoatTopUpCheckoutSession(session, {
+    if (isTopUp) {
+      const result = await fulfillTopUpCheckoutSession(session, {
         eventId: event.id,
         db: input.db,
       });
-      if (result.ok) await finalizeGoatTopUp(session, result, input);
+      if (result.ok) await finalizeTopUp(session, result, input);
       return;
     }
     if (event.type !== "checkout.session.completed") return;
     if (
       session.mode === "subscription" &&
-      (session.metadata?.billingProduct === GOAT_PRO_STRIPE_PRODUCT_KEY ||
+      (session.metadata?.billingProduct === PRO_STRIPE_PRODUCT_KEY ||
         session.metadata?.billingProduct === "goat")
     ) {
       // Subscription lifecycle events remain the seat and plan authority.
@@ -124,17 +123,17 @@ async function handleStripeEvent(event: Stripe.Event, input: { db: DbLike; strip
     event.type === "customer.subscription.updated" ||
     event.type === "customer.subscription.deleted"
   ) {
-    await handleGoatSubscriptionEvent(event, input.db);
+    await handleSubscriptionEvent(event, input.db);
     return;
   }
   if (event.type === "invoice.paid" || event.type === "invoice.payment_failed") {
-    await handleGoatInvoiceEvent(event, input.db);
+    await handleInvoiceEvent(event, input.db);
     return;
   }
   if (event.type === "payment_intent.succeeded") {
     const intent = event.data.object;
     if (intent.metadata?.billingProduct === "goat_auto_refill") {
-      await handleGoatAutoRefillPaymentIntentSucceeded(intent, input.db);
+      await handleProductAutoRefillPaymentIntentSucceeded(intent, input.db);
     } else {
       await handleAutoRefillPaymentIntentSucceeded(intent, event.id, { db: input.db });
     }
@@ -143,27 +142,30 @@ async function handleStripeEvent(event: Stripe.Event, input: { db: DbLike; strip
   if (event.type === "payment_intent.payment_failed") {
     const intent = event.data.object;
     if (intent.metadata?.billingProduct === "goat_auto_refill") {
-      await handleGoatAutoRefillPaymentIntentFailed(intent, input.db);
+      await handleProductAutoRefillPaymentIntentFailed(intent, input.db);
     } else {
       await handleAutoRefillPaymentIntentFailed(intent, { db: input.db });
     }
   }
 }
 
-async function finalizeGoatTopUp(
+async function finalizeTopUp(
   session: Stripe.Checkout.Session,
   result: { amountCents: number; balanceCents: number; checkoutRecordId: string },
   input: { db: DbLike; stripe: Stripe },
 ) {
-  const workspaceId = session.metadata?.goatWorkspaceId ?? "";
+  const workspaceId = session.metadata?.workspaceId ?? "";
   await Promise.all([
     releasePendingForWorkspace(workspaceId, new Date(), input.db).catch((error) => {
       console.error(`Failed to release paused ingestion for ${workspaceId}.`, error);
     }),
-    captureGoatTopUpPaymentMethod(session, input).catch((error) => {
-      console.error(`Failed to capture the Goat top-up payment method for ${workspaceId}.`, error);
+    captureTopUpPaymentMethod(session, input).catch((error) => {
+      console.error(
+        `Failed to capture the opencompany top-up payment method for ${workspaceId}.`,
+        error,
+      );
     }),
-    captureGoatServerEvent(
+    captureProductServerEvent(
       "billing_topup_completed",
       session.metadata?.userWorkosId ?? workspaceId,
       {
@@ -174,7 +176,10 @@ async function finalizeGoatTopUp(
         balance_cents: result.balanceCents,
       },
     ).catch((error) => {
-      console.error(`Failed to capture the Goat top-up product event for ${workspaceId}.`, error);
+      console.error(
+        `Failed to capture the opencompany top-up product event for ${workspaceId}.`,
+        error,
+      );
     }),
     captureServerEvent("goat_billing_topup_completed", workspaceId, {
       workspace_id: workspaceId,
@@ -183,12 +188,15 @@ async function finalizeGoatTopUp(
       amount_usd: result.amountCents / 100,
       balance_cents: result.balanceCents,
     }).catch((error) => {
-      console.error(`Failed to capture the Goat top-up server event for ${workspaceId}.`, error);
+      console.error(
+        `Failed to capture the opencompany top-up server event for ${workspaceId}.`,
+        error,
+      );
     }),
   ]);
 }
 
-async function handleGoatSubscriptionEvent(
+async function handleSubscriptionEvent(
   event:
     | Stripe.CustomerSubscriptionCreatedEvent
     | Stripe.CustomerSubscriptionUpdatedEvent
@@ -197,12 +205,12 @@ async function handleGoatSubscriptionEvent(
 ) {
   const subscription = event.data.object;
   const productKey = subscription.metadata.billingProduct;
-  if (productKey !== GOAT_PRO_STRIPE_PRODUCT_KEY && productKey !== "goat") return;
+  if (productKey !== PRO_STRIPE_PRODUCT_KEY && productKey !== "goat") return;
   const storedWorkspaceId =
-    productKey === GOAT_PRO_STRIPE_PRODUCT_KEY
-      ? await findGoatWorkspaceIdForStripeSubscription(subscription.id, { db })
+    productKey === PRO_STRIPE_PRODUCT_KEY
+      ? await findWorkspaceIdForStripeSubscription(subscription.id, { db })
       : null;
-  const workspaceId = subscription.metadata.goatWorkspaceId?.trim() || storedWorkspaceId;
+  const workspaceId = subscription.metadata.workspaceId?.trim() || storedWorkspaceId;
   if (!workspaceId) return;
 
   const item = subscription.items.data[0] ?? null;
@@ -213,8 +221,8 @@ async function handleGoatSubscriptionEvent(
       })
     | null;
   const customerId = stripeObjectId(subscription.customer);
-  if (!customerId) throw new Error("OpenCompany seat subscription is missing its customer id.");
-  const projection = await applyGoatStripeSubscriptionProjection(
+  if (!customerId) throw new Error("opencompany seat subscription is missing its customer id.");
+  const projection = await applyStripeSubscriptionProjection(
     {
       eventId: event.id,
       eventType: event.type,
@@ -225,7 +233,7 @@ async function handleGoatSubscriptionEvent(
       subscriptionItemId: item?.id ?? null,
       priceId: item ? stripeObjectId(item.price) : null,
       productKey,
-      status: subscription.status as GoatStripeSubscriptionStatus,
+      status: subscription.status as StripeSubscriptionStatus,
       cancelAtPeriodEnd: subscription.cancel_at_period_end,
       currentPeriodStart: itemWithPeriod?.current_period_start
         ? new Date(itemWithPeriod.current_period_start * 1_000)
@@ -246,7 +254,7 @@ async function handleGoatSubscriptionEvent(
   }
 }
 
-async function handleGoatInvoiceEvent(
+async function handleInvoiceEvent(
   event: Stripe.InvoicePaidEvent | Stripe.InvoicePaymentFailedEvent,
   db: DbLike,
 ) {
@@ -258,9 +266,9 @@ async function handleGoatInvoiceEvent(
     stripeObjectId(invoice.parent?.subscription_details?.subscription) ??
     stripeObjectId(legacySubscription);
   if (!subscriptionId) return;
-  const workspaceId = await findGoatWorkspaceIdForStripeSubscription(subscriptionId, { db });
+  const workspaceId = await findWorkspaceIdForStripeSubscription(subscriptionId, { db });
   if (!workspaceId) return;
-  const applied = await applyGoatStripeInvoicePaymentState(
+  const applied = await applyStripeInvoicePaymentState(
     {
       eventId: event.id,
       eventType: event.type,
@@ -278,38 +286,41 @@ async function handleGoatInvoiceEvent(
   }
 }
 
-async function handleGoatAutoRefillPaymentIntentSucceeded(
+async function handleProductAutoRefillPaymentIntentSucceeded(
   intent: Stripe.PaymentIntent,
   db: DbLike,
 ) {
-  const workspaceId = intent.metadata?.goatWorkspaceId;
+  const workspaceId = intent.metadata?.workspaceId;
   const amountCents = Number(intent.metadata?.amountCents);
   if (!workspaceId || !Number.isSafeInteger(amountCents) || amountCents <= 0) return;
-  const credit = await recordGoatAutoRefillCredit({
+  const credit = await recordAutoRefillCredit({
     workspaceId,
     amountCents,
     paymentIntentId: intent.id,
     db,
   });
   if (credit.ok) {
-    await captureGoatServerEvent("billing_topup_completed", workspaceId, {
+    await captureProductServerEvent("billing_topup_completed", workspaceId, {
       workspace_id: workspaceId,
       topup_type: "auto_refill",
       amount_cents: amountCents,
       amount_usd: amountCents / 100,
-      balance_cents: goatUsdMicrosToCents(credit.balanceUsdMicros),
+      balance_cents: usdMicrosToCents(credit.balanceUsdMicros),
     });
   }
-  await settleGoatAutoRefill({ workspaceId }, { db }).catch(() => undefined);
+  await settleAutoRefill({ workspaceId }, { db }).catch(() => undefined);
   await releasePendingForWorkspace(workspaceId, new Date(), db).catch((error) => {
     console.error(`Failed to release paused ingestion for ${workspaceId}.`, error);
   });
 }
 
-async function handleGoatAutoRefillPaymentIntentFailed(intent: Stripe.PaymentIntent, db: DbLike) {
-  const workspaceId = intent.metadata?.goatWorkspaceId;
+async function handleProductAutoRefillPaymentIntentFailed(
+  intent: Stripe.PaymentIntent,
+  db: DbLike,
+) {
+  const workspaceId = intent.metadata?.workspaceId;
   if (!workspaceId) return;
-  await settleGoatAutoRefill(
+  await settleAutoRefill(
     {
       workspaceId,
       disable: true,
@@ -320,17 +331,17 @@ async function handleGoatAutoRefillPaymentIntentFailed(intent: Stripe.PaymentInt
   );
 }
 
-async function captureGoatTopUpPaymentMethod(
+async function captureTopUpPaymentMethod(
   session: Stripe.Checkout.Session,
   input: { db: DbLike; stripe: Stripe },
 ) {
-  const workspaceId = session.metadata?.goatWorkspaceId;
+  const workspaceId = session.metadata?.workspaceId;
   const paymentIntentId = stripeObjectId(session.payment_intent);
   if (!workspaceId || !paymentIntentId) return;
   const intent = await input.stripe.paymentIntents.retrieve(paymentIntentId);
   const paymentMethodId = stripeObjectId(intent.payment_method);
   if (!paymentMethodId) return;
-  await setGoatAutoRefillPaymentMethod({ workspaceId, paymentMethodId }, { db: input.db });
+  await setAutoRefillPaymentMethod({ workspaceId, paymentMethodId }, { db: input.db });
 }
 
 function stripeObjectId(value: string | { id: string } | null | undefined) {

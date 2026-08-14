@@ -6,11 +6,11 @@ const mocks = vi.hoisted(() => ({
   dbRows: [] as unknown[],
 }));
 
-vi.mock("@opencompany/goat-agent/integrations/slack", () => ({
+vi.mock("@opencompany/agent/integrations/slack", () => ({
   slackApiRequest: mocks.slackApiRequest,
 }));
-vi.mock("@opencompany/db/goat-integrations", () => ({
-  loadGoatIntegrationCredential: mocks.loadCredential,
+vi.mock("@opencompany/db/integrations", () => ({
+  loadIntegrationCredential: mocks.loadCredential,
 }));
 vi.mock("@opencompany/db/client", () => ({
   getDb: () => ({
@@ -25,9 +25,9 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 import { resolveSlackActions } from "@/lib/actions/slack";
-import { GoatActionAuthError, type GoatActionExecuteContext } from "@/lib/actions/types";
+import { ActionAuthError, type ActionExecuteContext } from "@/lib/actions/types";
 
-const CONTEXT: GoatActionExecuteContext = {
+const CONTEXT: ActionExecuteContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-18T00:00:00.000Z"),
@@ -118,7 +118,7 @@ describe("resolveSlackActions", () => {
     const catalog = await resolveSlackActions("user_1");
     const history = catalog?.actions.find((action) => action.id === "slack.fetch_history");
     await expect(history?.execute({ channel: "C1234567" }, CONTEXT)).rejects.toBeInstanceOf(
-      GoatActionAuthError,
+      ActionAuthError,
     );
   });
 

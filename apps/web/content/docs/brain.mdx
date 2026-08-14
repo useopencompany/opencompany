@@ -5,15 +5,15 @@ description: The current Brain document model, API boundary, retrieval, and dura
 
 ## What Brain is
 
-Brain is OpenCompany's durable workspace knowledge store: Markdown knowledge pages, immutable
+Brain is opencompany's durable workspace knowledge store: Markdown knowledge pages, immutable
 evidence, file-backed documents, provenance, and a lightweight graph of typed relations and wiki
 links. Postgres is the source of truth.
 
 The current ownership boundary is:
 
-- `packages/goat-brain` owns document parsing, schemas, validation, retrieval helpers, the
+- `packages/brain` owns document parsing, schemas, validation, retrieval helpers, the
   filesystem CLI, and the pointer/copy rule.
-- `packages/goat-agent` owns shared Brain reads, capture behavior, MCP tools, and asset behavior.
+- `packages/agent` owns shared Brain reads, capture behavior, MCP tools, and asset behavior.
 - `packages/db` owns tables, repository queries, fixed read projections, and temporary filesystem
   materialization.
 - `apps/api` owns authenticated Brain commands, assets, sources, MCP, authorization, and API read
@@ -39,14 +39,14 @@ entity type, status, compiled truth, and an append-only evidence timeline.
   and extracted text when supported.
 
 The detailed schema reference is in `apps/web/docs/brain/data-model.md`; code-level truth lives in
-`packages/goat-brain/src/schema.ts` and `packages/db/src/goat-schema.ts`.
+`packages/brain/src/schema.ts` and `packages/db/src/product-schema.ts`.
 
 ## Pointer/copy rule
 
 Brain writers prefer canonical pointers over stale copies. Claims cite a provider source ref.
 Ephemeral or unfetchable content may be snapshotted under `evidence/`; live systems such as issue
 trackers or Drive remain the canonical home and are represented by a pointer plus synthesized facts.
-The shared prompt contract lives in `packages/goat-brain/src/pointer-copy.ts`.
+The shared prompt contract lives in `packages/brain/src/pointer-copy.ts`.
 
 ## Commands and reads
 
@@ -55,9 +55,9 @@ import, and asset changes. Updates use optimistic content hashes and creation us
 idempotency. Fixed `brain-*-v1` read models keep authorized folders, documents, timelines, graph
 edges, source state, and ingestion activity current after hydration.
 
-Chat and MCP use the shared read surface in `packages/goat-agent/src/brain-surface.ts` and
+Chat and MCP use the shared read surface in `packages/agent/src/brain-surface.ts` and
 `brain-cli.ts`. Search, list, point reads, and timelines execute against indexed Postgres queries in
-`packages/db/src/goat-brain-read.ts`; they do not materialize the whole Brain. Chat and MCP expose
+`packages/db/src/brain-read.ts`; they do not materialize the whole Brain. Chat and MCP expose
 capture-to-curation rather than arbitrary mutation CLI commands.
 
 The API hosts MCP at `/mcp`; the web `/mcp` URL is only a continuity relay. Each MCP call resolves
@@ -67,7 +67,7 @@ the workspace-admin write boundary.
 ## Capture and ingestion
 
 `save_to_brain` creates a visible draft in `inbox/`, records a normalized source item, and commits a
-durable curation job. OpenCompany Chat invokes this through the runner host-tool boundary; API-hosted
+durable curation job. opencompany Chat invokes this through the runner host-tool boundary; API-hosted
 MCP uses the same shared capture behavior. Ref-only Slack, Gmail, and Linear captures can hydrate the
 provider source in the runner before curation.
 
@@ -90,7 +90,7 @@ changes back at job completion.
 Registered source families include meeting providers, Chat/MCP capture, uploaded assets, Google
 Drive documents, Slack/Gmail/Linear pointers, and provider activity from GitHub, HubSpot, Attio, and
 other current integrations. The handler registry in
-`apps/runner/src/goat-brain-ingest-worker.ts` is the executable source of truth.
+`apps/runner/src/brain-ingest-worker.ts` is the executable source of truth.
 
 ## Access and validation
 
@@ -99,8 +99,8 @@ workspace membership; restricted Brains additionally require a Brain membership 
 read models, MCP, runner jobs, and asset routes each enforce that boundary rather than trusting a
 client-supplied workspace.
 
-`validateGoatBrainDocument` enforces identifiers, folder/kind alignment, statuses, timestamps,
-links, and active-page provenance on write. `goat-brain doctor` performs corpus integrity checks for
+`validateBrainDocument` enforces identifiers, folder/kind alignment, statuses, timestamps,
+links, and active-page provenance on write. `opencompany-brain doctor` performs corpus integrity checks for
 broken links, citations, aliases, relations, and weak provenance.
 
 ## Engineering references

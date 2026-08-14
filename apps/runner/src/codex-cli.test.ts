@@ -33,10 +33,10 @@ describe("ensureCodexInstalled", () => {
 });
 
 describe("buildCodexConfig", () => {
-  it("configures Codex to use the OpenCompany Responses provider", () => {
+  it("configures Codex to use the opencompany Responses provider", () => {
     const config = buildCodexConfig({
       baseUrl: "https://runner.example.com/broker/openai/v1",
-      apiKeyEnvVar: "OPENCOMPANY_LLM_BROKER_TOKEN",
+      apiKeyEnvVar: "LLM_BROKER_TOKEN",
     });
 
     expect(config).toContain('model_provider = "opencompany"');
@@ -46,9 +46,9 @@ describe("buildCodexConfig", () => {
     expect(config).toContain("[sandbox_workspace_write]");
     expect(config).toContain("network_access = true");
     expect(config).toContain("[model_providers.opencompany]");
-    expect(config).toContain('name = "OpenCompany"');
+    expect(config).toContain('name = "opencompany"');
     expect(config).toContain('base_url = "https://runner.example.com/broker/openai/v1"');
-    expect(config).toContain('env_key = "OPENCOMPANY_LLM_BROKER_TOKEN"');
+    expect(config).toContain('env_key = "LLM_BROKER_TOKEN"');
     expect(config).toContain('wire_api = "responses"');
   });
 

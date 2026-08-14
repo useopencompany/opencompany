@@ -1,56 +1,56 @@
-import type { GoatChatMessageAttachment } from "@opencompany/goat-agent/chat-attachment-formats";
+import type { ChatMessageAttachment } from "@opencompany/agent/chat-attachment-formats";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { generateGoatChatTitle } from "@/lib/chat-title";
+import { generateChatTitle } from "@/lib/chat-title";
 
 const mocks = vi.hoisted(() => ({
-  createGoatTaskForUser: vi.fn(),
-  isGoatClaudeCodeConnectedForUser: vi.fn(),
-  isGoatCodexConnectedForUser: vi.fn(),
-  getGoatAvailableHarnessTools: vi.fn(),
-  resolveGoatSkillMentions: vi.fn(),
-  resolveGoatWorkflowMention: vi.fn(),
-  updateGoatTaskForActor: vi.fn(),
+  createTaskForUser: vi.fn(),
+  isClaudeCodeConnectedForUser: vi.fn(),
+  isCodexConnectedForUser: vi.fn(),
+  getAvailableHarnessTools: vi.fn(),
+  resolveSkillMentions: vi.fn(),
+  resolveWorkflowMention: vi.fn(),
+  updateTaskForActor: vi.fn(),
 }));
 
-vi.mock("@/lib/tasks", () => ({ createGoatTaskForUser: mocks.createGoatTaskForUser }));
+vi.mock("@/lib/tasks", () => ({ createTaskForUser: mocks.createTaskForUser }));
 vi.mock("@/lib/claude-code-auth", () => ({
-  isGoatClaudeCodeConnectedForUser: mocks.isGoatClaudeCodeConnectedForUser,
+  isClaudeCodeConnectedForUser: mocks.isClaudeCodeConnectedForUser,
 }));
 vi.mock("@/lib/codex-auth", () => ({
-  isGoatCodexConnectedForUser: mocks.isGoatCodexConnectedForUser,
+  isCodexConnectedForUser: mocks.isCodexConnectedForUser,
 }));
 vi.mock("@/lib/integrations/google-data", () => ({
-  getGoatAvailableHarnessTools: mocks.getGoatAvailableHarnessTools,
+  getAvailableHarnessTools: mocks.getAvailableHarnessTools,
 }));
-vi.mock("@/lib/chat-title", () => ({ generateGoatChatTitle: vi.fn() }));
-vi.mock("@/lib/skills", () => ({ resolveGoatSkillMentions: mocks.resolveGoatSkillMentions }));
+vi.mock("@/lib/chat-title", () => ({ generateChatTitle: vi.fn() }));
+vi.mock("@/lib/skills", () => ({ resolveSkillMentions: mocks.resolveSkillMentions }));
 vi.mock("@/lib/workflows", () => ({
-  resolveGoatWorkflowMention: mocks.resolveGoatWorkflowMention,
-  GoatWorkflowMentionError: class GoatWorkflowMentionError extends Error {},
+  resolveWorkflowMention: mocks.resolveWorkflowMention,
+  WorkflowMentionError: class WorkflowMentionError extends Error {},
 }));
-vi.mock("@opencompany/goat-agent/application/task-creation", () => ({
-  updateGoatTaskForActor: mocks.updateGoatTaskForActor,
+vi.mock("@opencompany/agent/application/task-creation", () => ({
+  updateTaskForActor: mocks.updateTaskForActor,
 }));
 
 const {
-  compileGoatWorkflowHarnessSpec,
-  createGoatTaskFromWorkflow,
-  extractGoatWorkflowSkillMentionRefs,
-  generateGoatWorkflowTaskTitle,
-  resolveGoatWorkflowStepSelection,
+  compileWorkflowHarnessSpec,
+  createTaskFromWorkflow,
+  extractWorkflowSkillMentionRefs,
+  generateWorkflowTaskTitle,
+  resolveWorkflowStepSelection,
 } = await import("@/lib/workflow-tasks");
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.isGoatClaudeCodeConnectedForUser.mockResolvedValue(true);
-  mocks.isGoatCodexConnectedForUser.mockResolvedValue(true);
-  mocks.getGoatAvailableHarnessTools.mockResolvedValue(["exa_search"]);
-  mocks.resolveGoatSkillMentions.mockResolvedValue([]);
+  mocks.isClaudeCodeConnectedForUser.mockResolvedValue(true);
+  mocks.isCodexConnectedForUser.mockResolvedValue(true);
+  mocks.getAvailableHarnessTools.mockResolvedValue(["exa_search"]);
+  mocks.resolveSkillMentions.mockResolvedValue([]);
 });
 
-describe("resolveGoatWorkflowStepSelection", () => {
+describe("resolveWorkflowStepSelection", () => {
   it("defaults to the opencompany engine on Kimi", () => {
-    expect(resolveGoatWorkflowStepSelection({ model: "", instructions: "Do the work." })).toEqual({
+    expect(resolveWorkflowStepSelection({ model: "", instructions: "Do the work." })).toEqual({
       engine: "opencompany",
       model: "moonshotai/kimi-k2.6",
     });
@@ -58,7 +58,7 @@ describe("resolveGoatWorkflowStepSelection", () => {
 
   it("prefers the step model field over inline mentions", () => {
     expect(
-      resolveGoatWorkflowStepSelection({
+      resolveWorkflowStepSelection({
         model: "sonnet-5",
         instructions: "Fix the bug with @codex.",
       }),
@@ -70,7 +70,7 @@ describe("resolveGoatWorkflowStepSelection", () => {
 
   it("uses an inline model mention for a backfilled step", () => {
     expect(
-      resolveGoatWorkflowStepSelection({
+      resolveWorkflowStepSelection({
         model: "",
         instructions: "Fix the bug with @codex.",
       }),
@@ -83,7 +83,7 @@ describe("resolveGoatWorkflowStepSelection", () => {
 
   it("uses Claude Code when the step selects the Claude Code sandbox", () => {
     expect(
-      resolveGoatWorkflowStepSelection({
+      resolveWorkflowStepSelection({
         model: "claude-code",
         instructions: "Fix the bug.",
       }),
@@ -96,7 +96,7 @@ describe("resolveGoatWorkflowStepSelection", () => {
 
   it("uses configured coding model and effort for cloud coding steps", () => {
     expect(
-      resolveGoatWorkflowStepSelection({
+      resolveWorkflowStepSelection({
         model: "codex",
         runtimeModel: "openai/gpt-5.6-luna",
         reasoningEffort: "medium",
@@ -108,7 +108,7 @@ describe("resolveGoatWorkflowStepSelection", () => {
       reasoningEffort: "medium",
     });
     expect(
-      resolveGoatWorkflowStepSelection({
+      resolveWorkflowStepSelection({
         model: "claude-code",
         runtimeModel: "anthropic/claude-opus-4.8",
         reasoningEffort: "xhigh",
@@ -123,10 +123,10 @@ describe("resolveGoatWorkflowStepSelection", () => {
 
   it("rejects unavailable and ambiguous step models", () => {
     expect(() =>
-      resolveGoatWorkflowStepSelection({ model: "gpt-9", instructions: "Do it." }),
+      resolveWorkflowStepSelection({ model: "gpt-9", instructions: "Do it." }),
     ).toThrowError(/not available/);
     expect(() =>
-      resolveGoatWorkflowStepSelection({
+      resolveWorkflowStepSelection({
         model: "",
         instructions: "Try @codex or @sonnet-5.",
       }),
@@ -134,19 +134,19 @@ describe("resolveGoatWorkflowStepSelection", () => {
   });
 });
 
-describe("extractGoatWorkflowSkillMentionRefs", () => {
+describe("extractWorkflowSkillMentionRefs", () => {
   it("collects deduped skill mentions from one step", () => {
     expect(
-      extractGoatWorkflowSkillMentionRefs(
+      extractWorkflowSkillMentionRefs(
         "Use @skill/research and @skill/writing then @skill/research again.",
       ),
     ).toEqual([{ id: "research" }, { id: "writing" }]);
   });
 });
 
-describe("compileGoatWorkflowHarnessSpec", () => {
+describe("compileWorkflowHarnessSpec", () => {
   it("compiles configured cloud coding model and effort onto the active step", () => {
-    const spec = compileGoatWorkflowHarnessSpec({
+    const spec = compileWorkflowHarnessSpec({
       workflow: {
         id: "ship-feature",
         name: "Ship feature",
@@ -185,7 +185,7 @@ describe("compileGoatWorkflowHarnessSpec", () => {
   });
 
   it("compiles independent step models and skills with a step-zero compatibility mirror", () => {
-    const spec = compileGoatWorkflowHarnessSpec({
+    const spec = compileWorkflowHarnessSpec({
       workflow: {
         id: "weekly-report",
         name: "Weekly report",
@@ -277,7 +277,7 @@ describe("compileGoatWorkflowHarnessSpec", () => {
   });
 
   it("applies explicitly invoked skills to the first workflow step", () => {
-    const spec = compileGoatWorkflowHarnessSpec({
+    const spec = compileWorkflowHarnessSpec({
       workflow: {
         id: "ship-feature",
         name: "Ship feature",
@@ -326,9 +326,9 @@ describe("compileGoatWorkflowHarnessSpec", () => {
   });
 });
 
-describe("createGoatTaskFromWorkflow", () => {
+describe("createTaskFromWorkflow", () => {
   it("requires Codex connectivity when any workflow step uses Codex", async () => {
-    mocks.resolveGoatWorkflowMention.mockResolvedValue({
+    mocks.resolveWorkflowMention.mockResolvedValue({
       id: "mixed-workflow",
       name: "Mixed workflow",
       description: "",
@@ -347,10 +347,10 @@ describe("createGoatTaskFromWorkflow", () => {
         },
       ],
     });
-    mocks.isGoatCodexConnectedForUser.mockResolvedValue(false);
+    mocks.isCodexConnectedForUser.mockResolvedValue(false);
 
     await expect(
-      createGoatTaskFromWorkflow({
+      createTaskFromWorkflow({
         userWorkosId: "user_1",
         workspaceId: "ws_1",
         mention: { id: "mixed-workflow" },
@@ -358,12 +358,12 @@ describe("createGoatTaskFromWorkflow", () => {
       }),
     ).rejects.toThrow(/uses Codex/);
 
-    expect(mocks.isGoatCodexConnectedForUser).toHaveBeenCalledWith("user_1");
-    expect(mocks.createGoatTaskForUser).not.toHaveBeenCalled();
+    expect(mocks.isCodexConnectedForUser).toHaveBeenCalledWith("user_1");
+    expect(mocks.createTaskForUser).not.toHaveBeenCalled();
   });
 
   it("requires Claude Code connectivity when any workflow step uses Claude Code", async () => {
-    mocks.resolveGoatWorkflowMention.mockResolvedValue({
+    mocks.resolveWorkflowMention.mockResolvedValue({
       id: "mixed-workflow",
       name: "Mixed workflow",
       description: "",
@@ -382,10 +382,10 @@ describe("createGoatTaskFromWorkflow", () => {
         },
       ],
     });
-    mocks.isGoatClaudeCodeConnectedForUser.mockResolvedValue(false);
+    mocks.isClaudeCodeConnectedForUser.mockResolvedValue(false);
 
     await expect(
-      createGoatTaskFromWorkflow({
+      createTaskFromWorkflow({
         userWorkosId: "user_1",
         workspaceId: "ws_1",
         mention: { id: "mixed-workflow" },
@@ -393,12 +393,12 @@ describe("createGoatTaskFromWorkflow", () => {
       }),
     ).rejects.toThrow(/uses Claude Code/);
 
-    expect(mocks.isGoatClaudeCodeConnectedForUser).toHaveBeenCalledWith("user_1");
-    expect(mocks.createGoatTaskForUser).not.toHaveBeenCalled();
+    expect(mocks.isClaudeCodeConnectedForUser).toHaveBeenCalledWith("user_1");
+    expect(mocks.createTaskForUser).not.toHaveBeenCalled();
   });
 
   it("resolves workflow and invocation skills once and queues step zero's model", async () => {
-    mocks.resolveGoatWorkflowMention.mockResolvedValue({
+    mocks.resolveWorkflowMention.mockResolvedValue({
       id: "mixed-workflow",
       name: "Mixed workflow",
       description: "",
@@ -417,7 +417,7 @@ describe("createGoatTaskFromWorkflow", () => {
         },
       ],
     });
-    mocks.resolveGoatSkillMentions.mockResolvedValue([
+    mocks.resolveSkillMentions.mockResolvedValue([
       { id: "research", name: "Research", description: "", instructions: "Research well." },
       { id: "writing", name: "Writing", description: "", instructions: "Write clearly." },
       {
@@ -427,9 +427,9 @@ describe("createGoatTaskFromWorkflow", () => {
         instructions: "Polish elevation styles.",
       },
     ]);
-    mocks.createGoatTaskForUser.mockResolvedValue({ id: "task_1" });
+    mocks.createTaskForUser.mockResolvedValue({ id: "task_1" });
 
-    await createGoatTaskFromWorkflow({
+    await createTaskFromWorkflow({
       userWorkosId: "user_1",
       workspaceId: "ws_1",
       mention: { id: "mixed-workflow" },
@@ -439,11 +439,11 @@ describe("createGoatTaskFromWorkflow", () => {
       attachmentTexts: { [attachment.id]: "Extracted report text." },
     });
 
-    expect(mocks.resolveGoatSkillMentions).toHaveBeenCalledWith({
+    expect(mocks.resolveSkillMentions).toHaveBeenCalledWith({
       workspaceId: "ws_1",
       mentions: [{ id: "research" }, { id: "writing" }, { id: "smooth-shadow-ring" }],
     });
-    expect(mocks.createGoatTaskForUser).toHaveBeenCalledWith(
+    expect(mocks.createTaskForUser).toHaveBeenCalledWith(
       expect.objectContaining({
         model: "moonshotai/kimi-k2.6",
         workflowId: "mixed-workflow",
@@ -463,11 +463,11 @@ describe("createGoatTaskFromWorkflow", () => {
   });
 });
 
-describe("generateGoatWorkflowTaskTitle", () => {
+describe("generateWorkflowTaskTitle", () => {
   it("keeps the task chat session title in sync with the generated task title", async () => {
-    vi.mocked(generateGoatChatTitle).mockResolvedValue("Acme interview follow-up");
+    vi.mocked(generateChatTitle).mockResolvedValue("Acme interview follow-up");
 
-    await generateGoatWorkflowTaskTitle({
+    await generateWorkflowTaskTitle({
       taskId: "goat_task_1",
       userWorkosId: "user_1",
       workspaceId: "ws_1",
@@ -476,13 +476,13 @@ describe("generateGoatWorkflowTaskTitle", () => {
       apiKey: "test-key",
     });
 
-    expect(generateGoatChatTitle).toHaveBeenCalledWith({
+    expect(generateChatTitle).toHaveBeenCalledWith({
       content: "Synthesize the Acme interview using the confirmed pricing concern.",
       fallbackTitle: "Customer interview synthesis",
       apiKey: "test-key",
       userWorkosId: "user_1",
     });
-    expect(mocks.updateGoatTaskForActor).toHaveBeenCalledWith({
+    expect(mocks.updateTaskForActor).toHaveBeenCalledWith({
       actorId: "user_1",
       workspaceId: "ws_1",
       taskId: "goat_task_1",
@@ -491,9 +491,9 @@ describe("generateGoatWorkflowTaskTitle", () => {
   });
 
   it("keeps the workflow fallback without issuing a Task update", async () => {
-    vi.mocked(generateGoatChatTitle).mockResolvedValue("Customer interview synthesis");
+    vi.mocked(generateChatTitle).mockResolvedValue("Customer interview synthesis");
 
-    await generateGoatWorkflowTaskTitle({
+    await generateWorkflowTaskTitle({
       taskId: "goat_task_1",
       userWorkosId: "user_1",
       workspaceId: "ws_1",
@@ -502,11 +502,11 @@ describe("generateGoatWorkflowTaskTitle", () => {
       apiKey: "test-key",
     });
 
-    expect(mocks.updateGoatTaskForActor).not.toHaveBeenCalled();
+    expect(mocks.updateTaskForActor).not.toHaveBeenCalled();
   });
 });
 
-const attachment: GoatChatMessageAttachment = {
+const attachment: ChatMessageAttachment = {
   id: "goat_chat_att_1",
   kind: "docx",
   mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

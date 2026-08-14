@@ -39,7 +39,7 @@ describe("filterWikiSlashItems", () => {
   });
 });
 
-// Mirrors how MarkdownGoatBrainEditor registers the plugin, with the editor
+// Mirrors how MarkdownBrainEditor registers the plugin, with the editor
 // instance exposed so the test can type and press keys like a user would.
 function Harness({
   handlers,

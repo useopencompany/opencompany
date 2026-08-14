@@ -2,7 +2,7 @@
 
 Use a dedicated development GitHub App and the stable public tunnel started by `bun run dev:web`.
 The app needs repository metadata plus the Contents, Pull requests, and Issues permissions required
-by the OpenCompany coding flows.
+by the opencompany coding flows.
 
 Configure these routes on the development app, replacing the origin with the tunnel URL:
 

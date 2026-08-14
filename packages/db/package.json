@@ -28,145 +28,145 @@
       "types": "./src/knowledge-repository.ts",
       "default": "./src/knowledge-repository.ts"
     },
-    "./goat-claude-code-auth": {
-      "types": "./src/goat-claude-code-auth.ts",
-      "default": "./src/goat-claude-code-auth.ts"
+    "./claude-code-auth": {
+      "types": "./src/claude-code-auth.ts",
+      "default": "./src/claude-code-auth.ts"
     },
-    "./goat-codex-auth": {
-      "types": "./src/goat-codex-auth.ts",
-      "default": "./src/goat-codex-auth.ts"
+    "./codex-auth": {
+      "types": "./src/codex-auth.ts",
+      "default": "./src/codex-auth.ts"
     },
-    "./goat-capabilities": {
-      "types": "./src/goat-capabilities.ts",
-      "default": "./src/goat-capabilities.ts"
+    "./capabilities": {
+      "types": "./src/capabilities.ts",
+      "default": "./src/capabilities.ts"
     },
-    "./goat-chat-model-routing": {
-      "types": "./src/goat-chat-model-routing.ts",
-      "default": "./src/goat-chat-model-routing.ts"
+    "./chat-model-routing": {
+      "types": "./src/chat-model-routing.ts",
+      "default": "./src/chat-model-routing.ts"
     },
-    "./goat-integrations": {
-      "types": "./src/goat-integrations.ts",
-      "default": "./src/goat-integrations.ts"
+    "./integrations": {
+      "types": "./src/integrations.ts",
+      "default": "./src/integrations.ts"
     },
-    "./goat-infisical-auth": {
-      "types": "./src/goat-infisical-auth.ts",
-      "default": "./src/goat-infisical-auth.ts"
+    "./infisical-auth": {
+      "types": "./src/infisical-auth.ts",
+      "default": "./src/infisical-auth.ts"
     },
-    "./goat-repo-configs": {
-      "types": "./src/goat-repo-configs.ts",
-      "default": "./src/goat-repo-configs.ts"
+    "./repo-configs": {
+      "types": "./src/repo-configs.ts",
+      "default": "./src/repo-configs.ts"
     },
-    "./goat-brain-files": {
-      "types": "./src/goat-brain-files.ts",
-      "default": "./src/goat-brain-files.ts"
+    "./brain-files": {
+      "types": "./src/brain-files.ts",
+      "default": "./src/brain-files.ts"
     },
-    "./goat-brain-ingest": {
-      "types": "./src/goat-brain-ingest.ts",
-      "default": "./src/goat-brain-ingest.ts"
+    "./brain-ingest": {
+      "types": "./src/brain-ingest.ts",
+      "default": "./src/brain-ingest.ts"
     },
-    "./goat-brain-import": {
-      "types": "./src/goat-brain-import.ts",
-      "default": "./src/goat-brain-import.ts"
+    "./brain-import": {
+      "types": "./src/brain-import.ts",
+      "default": "./src/brain-import.ts"
     },
-    "./goat-brain-ingest-trace": {
-      "types": "./src/goat-brain-ingest-trace.ts",
-      "default": "./src/goat-brain-ingest-trace.ts"
+    "./brain-ingest-trace": {
+      "types": "./src/brain-ingest-trace.ts",
+      "default": "./src/brain-ingest-trace.ts"
     },
-    "./goat-brain-read": {
-      "types": "./src/goat-brain-read.ts",
-      "default": "./src/goat-brain-read.ts"
+    "./brain-read": {
+      "types": "./src/brain-read.ts",
+      "default": "./src/brain-read.ts"
     },
-    "./goat-wiki": {
-      "types": "./src/goat-wiki.ts",
-      "default": "./src/goat-wiki.ts"
+    "./wiki": {
+      "types": "./src/wiki.ts",
+      "default": "./src/wiki.ts"
     },
-    "./goat-wiki-migrate": {
-      "types": "./src/goat-wiki-migrate.ts",
-      "default": "./src/goat-wiki-migrate.ts"
+    "./wiki-migrate": {
+      "types": "./src/wiki-migrate.ts",
+      "default": "./src/wiki-migrate.ts"
     },
-    "./goat-brain-sources": {
-      "types": "./src/goat-brain-sources.ts",
-      "default": "./src/goat-brain-sources.ts"
+    "./brain-sources": {
+      "types": "./src/brain-sources.ts",
+      "default": "./src/brain-sources.ts"
     },
-    "./goat-brain-event-claims": {
-      "types": "./src/goat-brain-event-claims.ts",
-      "default": "./src/goat-brain-event-claims.ts"
+    "./brain-event-claims": {
+      "types": "./src/brain-event-claims.ts",
+      "default": "./src/brain-event-claims.ts"
     },
-    "./goat-github": {
-      "types": "./src/goat-github.ts",
-      "default": "./src/goat-github.ts"
+    "./github": {
+      "types": "./src/github.ts",
+      "default": "./src/github.ts"
     },
-    "./goat-harness": {
-      "types": "./src/goat-harness.ts",
-      "default": "./src/goat-harness.ts"
+    "./harness": {
+      "types": "./src/harness.ts",
+      "default": "./src/harness.ts"
     },
-    "./goat-schema": {
-      "types": "./src/goat-schema.ts",
-      "default": "./src/goat-schema.ts"
+    "./product-schema": {
+      "types": "./src/product-schema.ts",
+      "default": "./src/product-schema.ts"
     },
-    "./goat-action-governance": {
-      "types": "./src/goat-action-governance.ts",
-      "default": "./src/goat-action-governance.ts"
+    "./action-governance": {
+      "types": "./src/action-governance.ts",
+      "default": "./src/action-governance.ts"
     },
-    "./goat-gmail": {
-      "types": "./src/goat-gmail.ts",
-      "default": "./src/goat-gmail.ts"
+    "./gmail": {
+      "types": "./src/gmail.ts",
+      "default": "./src/gmail.ts"
     },
-    "./goat-granola": {
-      "types": "./src/goat-granola.ts",
-      "default": "./src/goat-granola.ts"
+    "./granola": {
+      "types": "./src/granola.ts",
+      "default": "./src/granola.ts"
     },
-    "./goat-imessage": {
-      "types": "./src/goat-imessage.ts",
-      "default": "./src/goat-imessage.ts"
+    "./imessage": {
+      "types": "./src/imessage.ts",
+      "default": "./src/imessage.ts"
     },
-    "./goat-fathom": {
-      "types": "./src/goat-fathom.ts",
-      "default": "./src/goat-fathom.ts"
+    "./fathom": {
+      "types": "./src/fathom.ts",
+      "default": "./src/fathom.ts"
     },
-    "./goat-google-drive": {
-      "types": "./src/goat-google-drive.ts",
-      "default": "./src/goat-google-drive.ts"
+    "./google-drive": {
+      "types": "./src/google-drive.ts",
+      "default": "./src/google-drive.ts"
     },
-    "./goat-hubspot": {
-      "types": "./src/goat-hubspot.ts",
-      "default": "./src/goat-hubspot.ts"
+    "./hubspot": {
+      "types": "./src/hubspot.ts",
+      "default": "./src/hubspot.ts"
     },
-    "./goat-attio": {
-      "types": "./src/goat-attio.ts",
-      "default": "./src/goat-attio.ts"
+    "./attio": {
+      "types": "./src/attio.ts",
+      "default": "./src/attio.ts"
     },
-    "./goat-linear": {
-      "types": "./src/goat-linear.ts",
-      "default": "./src/goat-linear.ts"
+    "./linear": {
+      "types": "./src/linear.ts",
+      "default": "./src/linear.ts"
     },
-    "./goat-slack": {
-      "types": "./src/goat-slack.ts",
-      "default": "./src/goat-slack.ts"
+    "./slack": {
+      "types": "./src/slack.ts",
+      "default": "./src/slack.ts"
     },
-    "./goat-slack-bot": {
-      "types": "./src/goat-slack-bot.ts",
-      "default": "./src/goat-slack-bot.ts"
+    "./slack-bot": {
+      "types": "./src/slack-bot.ts",
+      "default": "./src/slack-bot.ts"
     },
-    "./goat-workspaces": {
-      "types": "./src/goat-workspaces.ts",
-      "default": "./src/goat-workspaces.ts"
+    "./workspaces": {
+      "types": "./src/workspaces.ts",
+      "default": "./src/workspaces.ts"
     },
-    "./goat-onboarding-emails": {
-      "types": "./src/goat-onboarding-emails.ts",
-      "default": "./src/goat-onboarding-emails.ts"
+    "./onboarding-emails": {
+      "types": "./src/onboarding-emails.ts",
+      "default": "./src/onboarding-emails.ts"
     },
-    "./goat-billing": {
-      "types": "./src/goat-billing.ts",
-      "default": "./src/goat-billing.ts"
+    "./billing": {
+      "types": "./src/billing.ts",
+      "default": "./src/billing.ts"
     },
-    "./goat-credits": {
-      "types": "./src/goat-credits.ts",
-      "default": "./src/goat-credits.ts"
+    "./credits": {
+      "types": "./src/credits.ts",
+      "default": "./src/credits.ts"
     },
-    "./goat-billing-constants": {
-      "types": "./src/goat-billing-constants.ts",
-      "default": "./src/goat-billing-constants.ts"
+    "./billing-constants": {
+      "types": "./src/billing-constants.ts",
+      "default": "./src/billing-constants.ts"
     },
     "./legacy-billing-schema": {
       "types": "./src/legacy-billing-schema.ts",
@@ -196,8 +196,8 @@
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/core": "workspace:*",
     "@opencompany/crypto": "workspace:*",
-    "@opencompany/goat-brain": "workspace:*",
-    "@opencompany/goat-wiki": "workspace:*",
+    "@opencompany/brain": "workspace:*",
+    "@opencompany/wiki": "workspace:*",
     "@vercel/blob": "^2.4.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",

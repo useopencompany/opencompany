@@ -1,29 +1,29 @@
 import { createHash } from "node:crypto";
-import { connectGoatXAccountIntegration } from "@opencompany/db/goat-integrations";
-import { listGoatWorkspacesForUser } from "@opencompany/db/goat-workspaces";
-import { captureGoatIntegrationAddedAnalytics } from "@opencompany/goat-agent/integrations/analytics";
-import { createGoatXAccountIntegrationState } from "@opencompany/goat-agent/integrations/x-account";
+import { captureIntegrationAddedAnalytics } from "@opencompany/agent/integrations/analytics";
+import { createXAccountIntegrationState } from "@opencompany/agent/integrations/x-account";
+import { connectXAccountIntegration } from "@opencompany/db/integrations";
+import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./errors";
 import { createXAccountIngress } from "./x-account-ingress";
 
-vi.mock("@opencompany/db/goat-workspaces", async (importOriginal) => ({
+vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  listGoatWorkspacesForUser: vi.fn(),
+  listWorkspacesForUser: vi.fn(),
 }));
-vi.mock("@opencompany/db/goat-integrations", async (importOriginal) => ({
+vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  connectGoatXAccountIntegration: vi.fn(),
+  connectXAccountIntegration: vi.fn(),
 }));
-vi.mock("@opencompany/goat-agent/integrations/analytics", () => ({
-  captureGoatIntegrationAddedAnalytics: vi.fn(),
+vi.mock("@opencompany/agent/integrations/analytics", () => ({
+  captureIntegrationAddedAnalytics: vi.fn(),
 }));
 
 const sentinelDb = { sentinel: "db" };
 const PKCE_COOKIE = "goat_x_pkce_verifier";
 
 function ingress(overrides: { authError?: ApiError } = {}) {
-  vi.mocked(listGoatWorkspacesForUser).mockResolvedValue([
+  vi.mocked(listWorkspacesForUser).mockResolvedValue([
     { workspace: { id: "workspace_1", workosOrganizationId: null }, role: "admin" },
   ] as never);
   return createXAccountIngress({
@@ -63,7 +63,7 @@ function stubXFetch() {
     }
     if (url.startsWith("https://api.x.com/2/users/me")) {
       return Response.json({
-        data: { id: "x_user_1", username: "goat_dev", name: "Goat Dev" },
+        data: { id: "x_user_1", username: "goat_dev", name: "opencompany Dev" },
       });
     }
     throw new Error(`Unexpected fetch: ${url}`);
@@ -75,7 +75,7 @@ function stubXFetch() {
 describe("X account ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://goat.example.com");
+    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
     vi.stubEnv("GOAT_X_CLIENT_ID", "x-client");
     vi.stubEnv("GOAT_X_CLIENT_SECRET", "x-client-secret");
     vi.stubEnv("GOAT_X_STATE_SECRET", "x-state-secret-x-state-secret");
@@ -116,10 +116,10 @@ describe("X account ingress", () => {
 
   it("exchanges the code with the cookie verifier, connects through the injected db, and deletes the cookie", async () => {
     const fetchMock = stubXFetch();
-    vi.mocked(connectGoatXAccountIntegration).mockResolvedValue({
+    vi.mocked(connectXAccountIntegration).mockResolvedValue({
       integrationId: "gint_x_1",
     } as never);
-    const state = createGoatXAccountIntegrationState({
+    const state = createXAccountIntegrationState({
       userWorkosId: "user_1",
       returnTo: "/settings",
     });
@@ -129,7 +129,7 @@ describe("X account ingress", () => {
     );
 
     expect(response.headers.get("location")).toBe(
-      "https://goat.example.com/settings?integration=x_account&setup=connected",
+      "https://opencompany.example.com/settings?integration=x_account&setup=connected",
     );
     expect(response.headers.get("set-cookie")).toContain(
       "goat_x_pkce_verifier=; Path=/; Max-Age=0",
@@ -140,18 +140,18 @@ describe("X account ingress", () => {
     expect(tokenBody.get("code")).toBe("auth-code");
     expect(tokenBody.get("code_verifier")).toBe("verifier123");
 
-    expect(connectGoatXAccountIntegration).toHaveBeenCalledWith({
+    expect(connectXAccountIntegration).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       xUserId: "x_user_1",
       username: "goat_dev",
-      name: "Goat Dev",
+      name: "opencompany Dev",
       accessToken: "x-access-token",
       refreshToken: "x-refresh-token",
       expiresAt: expect.any(Date),
       scopes: ["tweet.read", "tweet.write", "users.read", "offline.access"],
       db: sentinelDb,
     });
-    expect(captureGoatIntegrationAddedAnalytics).toHaveBeenCalledWith({
+    expect(captureIntegrationAddedAnalytics).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
       provider: "x_account",
@@ -159,16 +159,16 @@ describe("X account ingress", () => {
   });
 
   it("maps a missing PKCE cookie to missing_code", async () => {
-    const state = createGoatXAccountIntegrationState({
+    const state = createXAccountIntegrationState({
       userWorkosId: "user_1",
       returnTo: "/settings",
     });
     const response = await ingress().callback(callbackRequest({ state, code: "auth-code" }));
     expect(response.headers.get("location")).toBe(
-      "https://goat.example.com/settings?integration=x_account&setup=error&reason=missing_code",
+      "https://opencompany.example.com/settings?integration=x_account&setup=error&reason=missing_code",
     );
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
-    expect(connectGoatXAccountIntegration).not.toHaveBeenCalled();
+    expect(connectXAccountIntegration).not.toHaveBeenCalled();
   });
 
   it("rejects a tampered state with invalid_state and still deletes the cookie", async () => {
@@ -176,7 +176,7 @@ describe("X account ingress", () => {
       callbackRequest({ state: "garbage", code: "auth-code", verifier: "verifier123" }),
     );
     expect(response.headers.get("location")).toBe(
-      "https://goat.example.com/settings?integration=x_account&setup=error&reason=invalid_state",
+      "https://opencompany.example.com/settings?integration=x_account&setup=error&reason=invalid_state",
     );
     expect(response.headers.get("set-cookie")).toContain(
       "goat_x_pkce_verifier=; Path=/; Max-Age=0",

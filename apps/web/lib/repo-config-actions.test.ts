@@ -2,10 +2,10 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  clearGoatRepoEnvAction,
-  deleteGoatRepoConfigAction,
-  listGoatRepoConfigsAction,
-  saveGoatRepoEnvAction,
+  clearRepoEnvAction,
+  deleteRepoConfigAction,
+  listRepoConfigsAction,
+  saveRepoEnvAction,
 } from "./repo-config-actions";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -13,7 +13,7 @@ vi.mock("next/headers", () => ({ headers: vi.fn() }));
 
 const configDto = {
   repositoryExternalId: "123",
-  repositoryFullName: "OpenCompany/App",
+  repositoryFullName: "opencompany/App",
   envKeys: ["API_TOKEN"],
   setupInstructions: "",
   updatedAt: "2026-08-12T10:00:00.000Z",
@@ -53,7 +53,7 @@ describe("repository config API actions", () => {
       Response.json({
         data: {
           repositories: [
-            { repositoryExternalId: "123", repositoryFullName: "OpenCompany/App", private: true },
+            { repositoryExternalId: "123", repositoryFullName: "opencompany/App", private: true },
           ],
           configs: [configDto],
         },
@@ -61,7 +61,7 @@ describe("repository config API actions", () => {
       }),
     );
 
-    const result = await listGoatRepoConfigsAction();
+    const result = await listRepoConfigsAction();
     expect(new URL((requests[0] as Request).url).pathname).toBe("/v1/repo-configs");
     expect(result.repositories).toHaveLength(1);
     expect(result.configs[0]).toMatchObject({
@@ -76,7 +76,7 @@ describe("repository config API actions", () => {
       Response.json({ data: configDto, meta: { apiVersion: "v1", protocolVersion: "1.0.0" } }),
     );
 
-    const result = await saveGoatRepoEnvAction({
+    const result = await saveRepoEnvAction({
       repositoryExternalId: "123",
       envContent: "API_TOKEN=secret-value",
     });
@@ -99,7 +99,7 @@ describe("repository config API actions", () => {
       Response.json({ data: configDto, meta: { apiVersion: "v1", protocolVersion: "1.0.0" } }),
     );
 
-    await clearGoatRepoEnvAction({ repositoryExternalId: "123" });
+    await clearRepoEnvAction({ repositoryExternalId: "123" });
     await expect((requests[0] as Request).json()).resolves.toEqual({ content: null });
   });
 
@@ -108,9 +108,9 @@ describe("repository config API actions", () => {
     vi.stubGlobal("fetch", fetchSpy);
 
     await expect(
-      saveGoatRepoEnvAction({ repositoryExternalId: "repo_123", envContent: "KEY=value" }),
+      saveRepoEnvAction({ repositoryExternalId: "repo_123", envContent: "KEY=value" }),
     ).resolves.toEqual({ ok: false, message: "Invalid repository environment." });
-    await expect(deleteGoatRepoConfigAction({ repositoryExternalId: "" })).resolves.toEqual({
+    await expect(deleteRepoConfigAction({ repositoryExternalId: "" })).resolves.toEqual({
       ok: false,
       message: "Invalid repository.",
     });
@@ -135,7 +135,7 @@ describe("repository config API actions", () => {
     );
 
     await expect(
-      saveGoatRepoEnvAction({ repositoryExternalId: "123", envContent: "KEY=value" }),
+      saveRepoEnvAction({ repositoryExternalId: "123", envContent: "KEY=value" }),
     ).resolves.toEqual({
       ok: false,
       message: "Only workspace admins can configure repository environments.",
@@ -151,7 +151,7 @@ describe("repository config API actions", () => {
       }),
     );
 
-    await expect(deleteGoatRepoConfigAction({ repositoryExternalId: "123" })).resolves.toEqual({
+    await expect(deleteRepoConfigAction({ repositoryExternalId: "123" })).resolves.toEqual({
       ok: true,
       repositoryExternalId: "123",
     });

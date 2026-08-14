@@ -9,7 +9,7 @@ const groups = {
   web: {
     label: "Vercel web app",
     required: [
-      // GoatAppShell still composes shared integration-state readers that
+      // AppShell still composes shared integration-state readers that
       // resolve through @opencompany/db. Keep this required until #1243's
       // suspect is removed from the web runtime.
       "DATABASE_URL",
@@ -37,7 +37,7 @@ const groups = {
       "RESEND_WELCOME_FROM",
       "RESEND_REPLY_TO",
       // Compatibility fallbacks remain code-readable but are not provisioned
-      // when the canonical Goat-specific values above are present.
+      // when the canonical opencompany-specific values above are present.
       "NEXT_PUBLIC_APP_URL",
       "NEXT_PUBLIC_WORKOS_REDIRECT_URI",
       "WORKOS_REDIRECT_URI",

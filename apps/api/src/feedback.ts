@@ -1,15 +1,15 @@
 import type { Actor } from "@opencompany/core";
-import { goatUsers, goatWorkspaces } from "@opencompany/db/goat-schema";
+import { users, workspaces } from "@opencompany/db/product-schema";
 import { eq } from "drizzle-orm";
 import { ApiError } from "./errors";
 
 // A small feedback report from the sidebar widget. Bug / Feedback / Idea only —
 // enough for Linear Triage Intelligence to sort, without asking the user to pick
 // a team or priority.
-export type GoatFeedbackKind = "bug" | "feedback" | "idea";
+export type FeedbackKind = "bug" | "feedback" | "idea";
 
 export type FeedbackService = {
-  submit(actor: Actor, command: { kind: GoatFeedbackKind; message: string }): Promise<void>;
+  submit(actor: Actor, command: { kind: FeedbackKind; message: string }): Promise<void>;
 };
 
 type DbLike = any;
@@ -44,7 +44,7 @@ type LinearLabelCreateResponse = {
   } | null;
 };
 
-const KIND_LABELS: Record<GoatFeedbackKind, string> = {
+const KIND_LABELS: Record<FeedbackKind, string> = {
   bug: "bug",
   feedback: "feedback",
   idea: "idea",
@@ -67,20 +67,20 @@ export function createFeedbackService(input: {
     async submit(actor, command) {
       const [user] = await input.db
         .select({
-          email: goatUsers.email,
-          firstName: goatUsers.firstName,
-          lastName: goatUsers.lastName,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName,
         })
-        .from(goatUsers)
-        .where(eq(goatUsers.workosUserId, actor.userId))
+        .from(users)
+        .where(eq(users.workosUserId, actor.userId))
         .limit(1);
       if (!user) {
         throw new ApiError(404, "not_found", "The acting user's profile was not found.");
       }
       const [workspace] = await input.db
-        .select({ id: goatWorkspaces.id, name: goatWorkspaces.name })
-        .from(goatWorkspaces)
-        .where(eq(goatWorkspaces.id, actor.workspaceId))
+        .select({ id: workspaces.id, name: workspaces.name })
+        .from(workspaces)
+        .where(eq(workspaces.id, actor.workspaceId))
         .limit(1);
       if (!workspace) {
         throw new ApiError(404, "not_found", "The acting workspace was not found.");
@@ -125,7 +125,7 @@ function uniqueLabels(labels: string[]) {
   return Array.from(new Set(labels.map((label) => label.toLowerCase())));
 }
 
-function titlePrefix(kind: GoatFeedbackKind) {
+function titlePrefix(kind: FeedbackKind) {
   switch (kind) {
     case "bug":
       return "Bug";
@@ -136,7 +136,7 @@ function titlePrefix(kind: GoatFeedbackKind) {
   }
 }
 
-function titleFromMessage(kind: GoatFeedbackKind, message: string) {
+function titleFromMessage(kind: FeedbackKind, message: string) {
   const firstLine = message
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -154,7 +154,7 @@ function buildDescription({
   workspace,
 }: {
   message: string;
-  kind: GoatFeedbackKind;
+  kind: FeedbackKind;
   user: { email: string; firstName?: string | null; lastName?: string | null };
   workspace: { id: string; name: string };
 }) {
@@ -165,7 +165,7 @@ function buildDescription({
     message,
     "",
     "---",
-    "Submitted from: Goat app",
+    "Submitted from: opencompany app",
     `Submitted by: ${submittedBy}`,
     `User email: ${user.email}`,
     `Workspace: ${workspace.name} (${workspace.id})`,
@@ -179,7 +179,7 @@ async function linearGraphql<T>(
   variables: Record<string, unknown>,
 ): Promise<T> {
   // Reuses the shared Linear API key (same one the web app's feedback intake uses).
-  // Only the target team differs — GOAT_FEEDBACK_LINEAR_TEAM_ID points at the Goat team.
+  // Only the target team differs — GOAT_FEEDBACK_LINEAR_TEAM_ID points at the opencompany team.
   const apiKey = process.env.LINEAR_API_KEY;
   if (!apiKey) {
     throw new Error("Missing LINEAR_API_KEY.");
@@ -224,7 +224,7 @@ async function resolveTriageStateId(
     const data = await linearGraphql<LinearTeamStatesResponse>(
       fetchImpl,
       `
-        query GoatFeedbackTriageState($teamId: String!) {
+        query FeedbackTriageState($teamId: String!) {
           team(id: $teamId) {
             states {
               nodes {
@@ -252,7 +252,7 @@ async function resolveLabelIds(
   const data = await linearGraphql<LinearLabelsResponse>(
     fetchImpl,
     `
-      query GoatFeedbackLabels($teamId: String!) {
+      query FeedbackLabels($teamId: String!) {
         team(id: $teamId) {
           labels {
             nodes {
@@ -280,7 +280,7 @@ async function resolveLabelIds(
       const created = await linearGraphql<LinearLabelCreateResponse>(
         fetchImpl,
         `
-          mutation GoatFeedbackCreateLabel($input: IssueLabelCreateInput!) {
+          mutation FeedbackCreateLabel($input: IssueLabelCreateInput!) {
             issueLabelCreate(input: $input) {
               success
               issueLabel {
@@ -315,7 +315,7 @@ async function createLinearIssue(
   }: {
     title: string;
     description: string;
-    kind: GoatFeedbackKind;
+    kind: FeedbackKind;
   },
 ) {
   const teamId = process.env.GOAT_FEEDBACK_LINEAR_TEAM_ID;
@@ -337,7 +337,7 @@ async function createLinearIssue(
   const data = await linearGraphql<LinearIssueResponse>(
     fetchImpl,
     `
-      mutation GoatFeedbackCreateIssue($input: IssueCreateInput!) {
+      mutation FeedbackCreateIssue($input: IssueCreateInput!) {
         issueCreate(input: $input) {
           success
           issue {

@@ -1,5 +1,17 @@
 import { createHash } from "node:crypto";
 import {
+  BRAIN_RETRIEVAL_COMMANDS,
+  BRAIN_SKILL_DESCRIPTION_MAX_LENGTH,
+  BRAIN_SKILL_NAME_MAX_LENGTH,
+  isValidBrainFolder,
+  normalizeBrainCompiledTruth,
+  normalizeBrainFolderForV1,
+  normalizeBrainId,
+  nowIso,
+  parseBrainDocument,
+  serializeBrainDocument,
+} from "@opencompany/brain";
+import {
   type Actor,
   type BrainDocument,
   type BrainFolder,
@@ -15,52 +27,40 @@ import {
   type WikiPage,
   type WikiTimelineEntry,
 } from "@opencompany/core";
-import {
-  GOAT_BRAIN_RETRIEVAL_COMMANDS,
-  GOAT_BRAIN_SKILL_DESCRIPTION_MAX_LENGTH,
-  GOAT_BRAIN_SKILL_NAME_MAX_LENGTH,
-  isValidGoatBrainFolder,
-  normalizeGoatBrainCompiledTruth,
-  normalizeGoatBrainFolderForV1,
-  normalizeGoatBrainId,
-  nowIso,
-  parseGoatBrainDocument,
-  serializeGoatBrainDocument,
-} from "@opencompany/goat-brain";
-import { isValidWikiKind, isValidWikiSlug, wikiSlugFromTitle } from "@opencompany/goat-wiki";
+import { isValidWikiKind, isValidWikiSlug, wikiSlugFromTitle } from "@opencompany/wiki";
 import { and, asc, count, desc, eq, gte, inArray, isNull, ne } from "drizzle-orm";
 import {
-  createGoatBrainFolderRow,
-  createGoatBrainMarkdownContent,
-  createGoatBrainMarkdownDocument,
-  deleteGoatBrainFile,
-  deleteGoatBrainFolderRow,
-  getGoatBrainFile,
-  goatBrainFilePathFor,
-  listGoatBrainFiles,
-  listGoatBrainFolderRows,
-  renameGoatBrainFolderRow,
-  replaceGoatBrainFileCompiledTruth,
-  updateGoatBrainFileContent,
-} from "./goat-brain-files";
+  brainFilePathFor,
+  createBrainFolderRow,
+  createBrainMarkdownContent,
+  createBrainMarkdownDocument,
+  deleteBrainFile,
+  deleteBrainFolderRow,
+  getBrainFile,
+  listBrainFiles,
+  listBrainFolderRows,
+  renameBrainFolderRow,
+  replaceBrainFileCompiledTruth,
+  updateBrainFileContent,
+} from "./brain-files";
 import type {
-  GoatBrainDocument as GoatBrainDocumentRow,
-  GoatKnowledgeCommandOperation,
-  GoatSkill,
-  GoatWikiPage,
-  GoatWikiTimelineEntry,
-} from "./goat-schema";
+  BrainDocument as BrainDocumentRow,
+  KnowledgeCommandOperation,
+  Skill as SkillRow,
+  WikiPage as WikiPageRow,
+  WikiTimelineEntry as WikiTimelineEntryRow,
+} from "./product-schema";
 import {
-  goatBrainDocuments,
-  goatBrainIngestJobs,
-  goatBrainSourceItems,
-  goatBrainSources,
-  goatBrainToolRuns,
-  goatKnowledgeCommandIdempotency,
-  goatSkills,
-  goatWikiPages,
-  goatWikiTimelineEntries,
-} from "./goat-schema";
+  brainDocuments,
+  brainIngestJobs,
+  brainSourceItems,
+  brainSources,
+  brainToolRuns,
+  knowledgeCommandIdempotency,
+  skills,
+  wikiPages,
+  wikiTimelineEntries,
+} from "./product-schema";
 import {
   addWikiTimelineEntry,
   deleteWikiPage,
@@ -68,8 +68,8 @@ import {
   resolveWikiPages,
   WikiError,
   writeWikiPage,
-} from "./goat-wiki";
-import { getGoatBrainAccess } from "./goat-workspaces";
+} from "./wiki";
+import { getBrainAccess } from "./workspaces";
 
 type DbClient = any;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1_000;
@@ -78,7 +78,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
   constructor(private readonly db: DbClient) {}
 
   async assertBrainAccess(input: { actor: Actor; brainId: string }) {
-    const access = await getGoatBrainAccess(
+    const access = await getBrainAccess(
       { userWorkosId: input.actor.userId, brainRef: input.brainId },
       { db: this.db },
     );
@@ -89,8 +89,8 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
 
   async getBrainSnapshot(input: { actor: Actor; brainId: string }): Promise<BrainSnapshot> {
     const [documents, folders] = await Promise.all([
-      listGoatBrainFiles({ brainRef: input.brainId }, { db: this.db, includeInvalid: true }),
-      listGoatBrainFolderRows({ brainRef: input.brainId }, { db: this.db }),
+      listBrainFiles({ brainRef: input.brainId }, { db: this.db, includeInvalid: true }),
+      listBrainFolderRows({ brainRef: input.brainId }, { db: this.db }),
     ]);
     return {
       folders: folders.map(brainFolder),
@@ -107,32 +107,29 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     const [[itemsAdded], [retrievals], [sources]] = await Promise.all([
       this.db
         .select({ value: count() })
-        .from(goatBrainDocuments)
+        .from(brainDocuments)
+        .where(
+          and(eq(brainDocuments.brainRef, input.brainId), gte(brainDocuments.createdAt, cutoff)),
+        ),
+      this.db
+        .select({ value: count() })
+        .from(brainToolRuns)
         .where(
           and(
-            eq(goatBrainDocuments.brainRef, input.brainId),
-            gte(goatBrainDocuments.createdAt, cutoff),
+            eq(brainToolRuns.brainRef, input.brainId),
+            eq(brainToolRuns.ok, true),
+            gte(brainToolRuns.createdAt, cutoff),
+            inArray(brainToolRuns.action, BRAIN_RETRIEVAL_COMMANDS),
           ),
         ),
       this.db
         .select({ value: count() })
-        .from(goatBrainToolRuns)
+        .from(brainSources)
         .where(
           and(
-            eq(goatBrainToolRuns.brainRef, input.brainId),
-            eq(goatBrainToolRuns.ok, true),
-            gte(goatBrainToolRuns.createdAt, cutoff),
-            inArray(goatBrainToolRuns.action, GOAT_BRAIN_RETRIEVAL_COMMANDS),
-          ),
-        ),
-      this.db
-        .select({ value: count() })
-        .from(goatBrainSources)
-        .where(
-          and(
-            eq(goatBrainSources.brainId, input.brainId),
-            eq(goatBrainSources.enabled, true),
-            ne(goatBrainSources.provider, "slack_bot"),
+            eq(brainSources.brainId, input.brainId),
+            eq(brainSources.enabled, true),
+            ne(brainSources.provider, "slack_bot"),
           ),
         ),
     ]);
@@ -151,21 +148,18 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
   }): Promise<BrainSourceItem[]> {
     const rows = await this.db
       .select({
-        id: goatBrainSourceItems.id,
-        sourceProvider: goatBrainSourceItems.sourceProvider,
-        sourceType: goatBrainSourceItems.sourceType,
-        externalId: goatBrainSourceItems.externalId,
-        title: goatBrainSourceItems.title,
-        lastIngestError: goatBrainSourceItems.lastIngestError,
-        createdAt: goatBrainSourceItems.createdAt,
+        id: brainSourceItems.id,
+        sourceProvider: brainSourceItems.sourceProvider,
+        sourceType: brainSourceItems.sourceType,
+        externalId: brainSourceItems.externalId,
+        title: brainSourceItems.title,
+        lastIngestError: brainSourceItems.lastIngestError,
+        createdAt: brainSourceItems.createdAt,
       })
-      .from(goatBrainSourceItems)
-      .innerJoin(goatBrainIngestJobs, eq(goatBrainIngestJobs.sourceItemId, goatBrainSourceItems.id))
+      .from(brainSourceItems)
+      .innerJoin(brainIngestJobs, eq(brainIngestJobs.sourceItemId, brainSourceItems.id))
       .where(
-        and(
-          eq(goatBrainIngestJobs.brainRef, input.brainId),
-          inArray(goatBrainSourceItems.id, input.ids),
-        ),
+        and(eq(brainIngestJobs.brainRef, input.brainId), inArray(brainSourceItems.id, input.ids)),
       );
     const sourceItems = rows as BrainSourceItem[];
     return Array.from(new Map(sourceItems.map((row) => [row.id, row])).values());
@@ -179,7 +173,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     fileName: string;
   }) {
     try {
-      const folderPath = normalizeGoatBrainFolderForV1(input.folderPath);
+      const folderPath = normalizeBrainFolderForV1(input.folderPath);
       const fileName = input.fileName.trim();
       const id = await this.reserveCreate(
         input,
@@ -187,12 +181,9 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
         { folderPath, fileName },
         deterministicResourceId("goat_brain_doc", input, input.idempotencyKey),
       );
-      const replay = await getGoatBrainFile(
-        { brainRef: input.brainId, fileId: id },
-        { db: this.db },
-      );
+      const replay = await getBrainFile({ brainRef: input.brainId, fileId: id }, { db: this.db });
       if (replay) return brainDocument(replay);
-      if (!isValidGoatBrainFolder(folderPath)) {
+      if (!isValidBrainFolder(folderPath)) {
         throw new CoreError(
           "invalid_argument",
           "Folder paths must be lowercase slugs separated by /.",
@@ -202,26 +193,26 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
         throw new CoreError("invalid_argument", "Give the Markdown file a valid name.");
       }
       const title = fileName.replace(/\.md$/iu, "").trim();
-      const baseId = normalizeGoatBrainId(title).slice(0, 80).replace(/-+$/gu, "");
+      const baseId = normalizeBrainId(title).slice(0, 80).replace(/-+$/gu, "");
       if (!baseId) {
         throw new CoreError(
           "invalid_argument",
           "File names must contain at least one letter or number.",
         );
       }
-      const rows = await listGoatBrainFiles({ brainRef: input.brainId }, { db: this.db });
+      const rows = await listBrainFiles({ brainRef: input.brainId }, { db: this.db });
       const used = new Set(rows.map((row) => row.brainId));
       for (let suffix = 1; suffix < 1_000; suffix += 1) {
         const brainId = suffixedId(baseId, suffix, 80);
         if (used.has(brainId)) continue;
-        const path = goatBrainFilePathFor(folderPath, brainId);
-        const row = await createGoatBrainMarkdownDocument(
+        const path = brainFilePathFor(folderPath, brainId);
+        const row = await createBrainMarkdownDocument(
           {
             id,
             brainRef: input.brainId,
             userWorkosId: input.actor.userId,
             path,
-            content: createGoatBrainMarkdownContent({
+            content: createBrainMarkdownContent({
               id: brainId,
               folderPath,
               title,
@@ -232,7 +223,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
           { db: this.db },
         );
         if (row) return brainDocument(row);
-        const claimed = await getGoatBrainFile(
+        const claimed = await getBrainFile(
           { brainRef: input.brainId, fileId: id },
           { db: this.db },
         );
@@ -254,12 +245,12 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
   }) {
     try {
       const existing = await this.requireBrainDocument(input.brainId, input.documentId);
-      const content = replaceGoatBrainFileCompiledTruth({
+      const content = replaceBrainFileCompiledTruth({
         content: existing.content,
         compiledTruth: input.body,
         updatedAt: nowIso(),
       });
-      const row = await updateGoatBrainFileContent(
+      const row = await updateBrainFileContent(
         {
           brainRef: input.brainId,
           userWorkosId: input.actor.userId,
@@ -285,8 +276,8 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
       const title = input.title.trim();
       if (!title) throw new CoreError("invalid_argument", "Title cannot be empty.");
       const existing = await this.requireBrainDocument(input.brainId, input.documentId);
-      const parsed = parseGoatBrainDocument(existing.content);
-      const content = serializeGoatBrainDocument({
+      const parsed = parseBrainDocument(existing.content);
+      const content = serializeBrainDocument({
         title,
         compiledTruth: parsed.compiledTruth,
         timeline: parsed.timeline,
@@ -309,7 +300,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
         },
       });
       return brainDocument(
-        await updateGoatBrainFileContent(
+        await updateBrainFileContent(
           {
             brainRef: input.brainId,
             userWorkosId: input.actor.userId,
@@ -327,7 +318,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
   async deleteBrainDocument(input: { actor: Actor; brainId: string; documentId: string }) {
     try {
       await this.requireBrainDocument(input.brainId, input.documentId);
-      await deleteGoatBrainFile(
+      await deleteBrainFile(
         {
           brainRef: input.brainId,
           userWorkosId: input.actor.userId,
@@ -343,7 +334,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
   async createBrainFolder(input: { actor: Actor; brainId: string; path: string }) {
     try {
       return brainFolder(
-        await createGoatBrainFolderRow(
+        await createBrainFolderRow(
           {
             brainRef: input.brainId,
             userWorkosId: input.actor.userId,
@@ -364,7 +355,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     toPath: string;
   }) {
     try {
-      await renameGoatBrainFolderRow(
+      await renameBrainFolderRow(
         {
           brainRef: input.brainId,
           userWorkosId: input.actor.userId,
@@ -373,7 +364,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
         },
         { db: this.db },
       );
-      return { path: normalizeGoatBrainFolderForV1(input.toPath) };
+      return { path: normalizeBrainFolderForV1(input.toPath) };
     } catch (error) {
       throw knowledgeError(error);
     }
@@ -381,7 +372,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
 
   async deleteBrainFolder(input: { actor: Actor; brainId: string; path: string }) {
     try {
-      await deleteGoatBrainFolderRow(
+      await deleteBrainFolderRow(
         {
           brainRef: input.brainId,
           userWorkosId: input.actor.userId,
@@ -421,10 +412,8 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
       );
       const [replay] = await this.db
         .select()
-        .from(goatWikiPages)
-        .where(
-          and(eq(goatWikiPages.workspaceId, input.actor.workspaceId), eq(goatWikiPages.id, id)),
-        )
+        .from(wikiPages)
+        .where(and(eq(wikiPages.workspaceId, input.actor.workspaceId), eq(wikiPages.id, id)))
         .limit(1);
       if (replay) return { page: wikiPage(replay), transactionIds: [] };
       let slug = input.slug?.trim();
@@ -462,10 +451,8 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
           input.clientPageId ?? deterministicUuid("wiki-page", input, input.idempotencyKey);
         const [replay] = await this.db
           .select()
-          .from(goatWikiPages)
-          .where(
-            and(eq(goatWikiPages.workspaceId, input.actor.workspaceId), eq(goatWikiPages.id, id)),
-          )
+          .from(wikiPages)
+          .where(and(eq(wikiPages.workspaceId, input.actor.workspaceId), eq(wikiPages.id, id)))
           .limit(1);
         if (replay) return { page: wikiPage(replay), transactionIds: [] };
         throw new CoreError("conflict", "A Wiki page with that identity already exists.");
@@ -543,11 +530,11 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
       );
       const [replay] = await this.db
         .select()
-        .from(goatWikiTimelineEntries)
+        .from(wikiTimelineEntries)
         .where(
           and(
-            eq(goatWikiTimelineEntries.workspaceId, input.actor.workspaceId),
-            eq(goatWikiTimelineEntries.id, id),
+            eq(wikiTimelineEntries.workspaceId, input.actor.workspaceId),
+            eq(wikiTimelineEntries.id, id),
           ),
         )
         .limit(1);
@@ -570,11 +557,11 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
           input.clientEntryId ?? deterministicUuid("wiki-timeline", input, input.idempotencyKey);
         const [replay] = await this.db
           .select()
-          .from(goatWikiTimelineEntries)
+          .from(wikiTimelineEntries)
           .where(
             and(
-              eq(goatWikiTimelineEntries.workspaceId, input.actor.workspaceId),
-              eq(goatWikiTimelineEntries.id, id),
+              eq(wikiTimelineEntries.workspaceId, input.actor.workspaceId),
+              eq(wikiTimelineEntries.id, id),
             ),
           )
           .limit(1);
@@ -588,38 +575,36 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
   async listSkills(input: { actor: Actor }): Promise<SkillListItem[]> {
     const rows: SkillListRow[] = await this.db
       .select({
-        id: goatSkills.id,
-        slug: goatSkills.slug,
-        name: goatSkills.name,
-        description: goatSkills.description,
-        status: goatSkills.status,
-        sourceType: goatSkills.sourceType,
-        sourceUrl: goatSkills.sourceUrl,
-        sourceRef: goatSkills.sourceRef,
-        sourcePath: goatSkills.sourcePath,
-        resolvedCommit: goatSkills.resolvedCommit,
-        updatedAt: goatSkills.updatedAt,
+        id: skills.id,
+        slug: skills.slug,
+        name: skills.name,
+        description: skills.description,
+        status: skills.status,
+        sourceType: skills.sourceType,
+        sourceUrl: skills.sourceUrl,
+        sourceRef: skills.sourceRef,
+        sourcePath: skills.sourcePath,
+        resolvedCommit: skills.resolvedCommit,
+        updatedAt: skills.updatedAt,
       })
-      .from(goatSkills)
-      .where(
-        and(eq(goatSkills.workspaceId, input.actor.workspaceId), isNull(goatSkills.archivedAt)),
-      )
-      .orderBy(desc(goatSkills.updatedAt));
+      .from(skills)
+      .where(and(eq(skills.workspaceId, input.actor.workspaceId), isNull(skills.archivedAt)))
+      .orderBy(desc(skills.updatedAt));
     return rows.map(skillListRow);
   }
 
   async listSkillCatalog(input: { actor: Actor }): Promise<SkillCatalogItem[]> {
     const rows = await this.db
-      .select({ slug: goatSkills.slug, name: goatSkills.name, description: goatSkills.description })
-      .from(goatSkills)
+      .select({ slug: skills.slug, name: skills.name, description: skills.description })
+      .from(skills)
       .where(
         and(
-          eq(goatSkills.workspaceId, input.actor.workspaceId),
-          eq(goatSkills.status, "active"),
-          isNull(goatSkills.archivedAt),
+          eq(skills.workspaceId, input.actor.workspaceId),
+          eq(skills.status, "active"),
+          isNull(skills.archivedAt),
         ),
       )
-      .orderBy(asc(goatSkills.name));
+      .orderBy(asc(skills.name));
     return rows.map((row: { slug: string; name: string; description: string }) => ({
       id: row.slug,
       name: row.name,
@@ -647,15 +632,15 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     );
     const [replay] = await this.db
       .select()
-      .from(goatSkills)
-      .where(and(eq(goatSkills.workspaceId, input.actor.workspaceId), eq(goatSkills.id, id)))
+      .from(skills)
+      .where(and(eq(skills.workspaceId, input.actor.workspaceId), eq(skills.id, id)))
       .limit(1);
     if (replay) return skillRow(replay);
     const slug = await this.uniqueSkillSlug(input.actor.workspaceId, input.name);
-    let rows: GoatSkill[];
+    let rows: SkillRow[];
     try {
       rows = await this.db
-        .insert(goatSkills)
+        .insert(skills)
         .values({
           id,
           workspaceId: input.actor.workspaceId,
@@ -671,8 +656,8 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
       if (!isUniqueViolation(error)) throw error;
       const [replay] = await this.db
         .select()
-        .from(goatSkills)
-        .where(and(eq(goatSkills.workspaceId, input.actor.workspaceId), eq(goatSkills.id, id)))
+        .from(skills)
+        .where(and(eq(skills.workspaceId, input.actor.workspaceId), eq(skills.id, id)))
         .limit(1);
       if (replay) return skillRow(replay);
       throw new CoreError("conflict", "A Skill with that identity already exists.");
@@ -702,7 +687,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     const requestHash = commandHash(operation, command);
     const proposedResourceId = deterministicResourceId("goat_skill", input, input.idempotencyKey);
     const [reservation] = await this.db
-      .insert(goatKnowledgeCommandIdempotency)
+      .insert(knowledgeCommandIdempotency)
       .values({
         commandId: deterministicResourceId("goat_knowledge_command", input, input.idempotencyKey),
         userWorkosId: input.actor.userId,
@@ -714,16 +699,16 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
       })
       .onConflictDoUpdate({
         target: [
-          goatKnowledgeCommandIdempotency.userWorkosId,
-          goatKnowledgeCommandIdempotency.workspaceId,
-          goatKnowledgeCommandIdempotency.idempotencyKey,
+          knowledgeCommandIdempotency.userWorkosId,
+          knowledgeCommandIdempotency.workspaceId,
+          knowledgeCommandIdempotency.idempotencyKey,
         ],
         set: { touchedAt: new Date() },
       })
       .returning({
-        requestHash: goatKnowledgeCommandIdempotency.requestHash,
-        operation: goatKnowledgeCommandIdempotency.operation,
-        resourceId: goatKnowledgeCommandIdempotency.resourceId,
+        requestHash: knowledgeCommandIdempotency.requestHash,
+        operation: knowledgeCommandIdempotency.operation,
+        resourceId: knowledgeCommandIdempotency.resourceId,
       });
     if (!reservation) throw new CoreError("conflict", "Could not reserve the Skill import.");
     if (reservation.operation !== operation || reservation.requestHash !== requestHash) {
@@ -748,7 +733,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
       const slug = await this.uniqueSkillSlug(input.actor.workspaceId, input.name);
       try {
         const [created] = await this.db
-          .insert(goatSkills)
+          .insert(skills)
           .values({
             id: proposedResourceId,
             workspaceId: input.actor.workspaceId,
@@ -793,13 +778,13 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
   }) {
     validateSkill(input);
     const [target] = await this.db
-      .select({ sourceType: goatSkills.sourceType, sourceUrl: goatSkills.sourceUrl })
-      .from(goatSkills)
+      .select({ sourceType: skills.sourceType, sourceUrl: skills.sourceUrl })
+      .from(skills)
       .where(
         and(
-          eq(goatSkills.workspaceId, input.actor.workspaceId),
-          eq(goatSkills.slug, input.slug),
-          isNull(goatSkills.archivedAt),
+          eq(skills.workspaceId, input.actor.workspaceId),
+          eq(skills.slug, input.slug),
+          isNull(skills.archivedAt),
         ),
       )
       .limit(1);
@@ -811,7 +796,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
       );
     }
     const [row] = await this.db
-      .update(goatSkills)
+      .update(skills)
       .set({
         name: input.name.trim(),
         description: input.description.trim(),
@@ -821,9 +806,9 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
       })
       .where(
         and(
-          eq(goatSkills.workspaceId, input.actor.workspaceId),
-          eq(goatSkills.slug, input.slug),
-          isNull(goatSkills.archivedAt),
+          eq(skills.workspaceId, input.actor.workspaceId),
+          eq(skills.slug, input.slug),
+          isNull(skills.archivedAt),
         ),
       )
       .returning();
@@ -833,21 +818,21 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
 
   async archiveSkill(input: { actor: Actor; slug: string }) {
     const rows = await this.db
-      .update(goatSkills)
+      .update(skills)
       .set({ archivedAt: new Date(), updatedAt: new Date() })
       .where(
         and(
-          eq(goatSkills.workspaceId, input.actor.workspaceId),
-          eq(goatSkills.slug, input.slug),
-          isNull(goatSkills.archivedAt),
+          eq(skills.workspaceId, input.actor.workspaceId),
+          eq(skills.slug, input.slug),
+          isNull(skills.archivedAt),
         ),
       )
-      .returning({ slug: goatSkills.slug });
+      .returning({ slug: skills.slug });
     if (rows.length === 0) throw new CoreError("not_found", "Skill not found.");
   }
 
   private async requireBrainDocument(brainId: string, documentId: string) {
-    const row = await getGoatBrainFile({ brainRef: brainId, fileId: documentId }, { db: this.db });
+    const row = await getBrainFile({ brainRef: brainId, fileId: documentId }, { db: this.db });
     if (!row) throw new CoreError("not_found", "Brain document not found.");
     return row;
   }
@@ -855,36 +840,36 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
   private skillRows(workspaceId: string, slug?: string) {
     return this.db
       .select({
-        id: goatSkills.id,
-        slug: goatSkills.slug,
-        name: goatSkills.name,
-        description: goatSkills.description,
-        instructions: goatSkills.instructions,
-        status: goatSkills.status,
-        sourceType: goatSkills.sourceType,
-        sourceUrl: goatSkills.sourceUrl,
-        sourceRef: goatSkills.sourceRef,
-        sourcePath: goatSkills.sourcePath,
-        resolvedCommit: goatSkills.resolvedCommit,
-        createdAt: goatSkills.createdAt,
-        updatedAt: goatSkills.updatedAt,
+        id: skills.id,
+        slug: skills.slug,
+        name: skills.name,
+        description: skills.description,
+        instructions: skills.instructions,
+        status: skills.status,
+        sourceType: skills.sourceType,
+        sourceUrl: skills.sourceUrl,
+        sourceRef: skills.sourceRef,
+        sourcePath: skills.sourcePath,
+        resolvedCommit: skills.resolvedCommit,
+        createdAt: skills.createdAt,
+        updatedAt: skills.updatedAt,
       })
-      .from(goatSkills)
+      .from(skills)
       .where(
         and(
-          eq(goatSkills.workspaceId, workspaceId),
-          ...(slug ? [eq(goatSkills.slug, slug)] : []),
-          isNull(goatSkills.archivedAt),
+          eq(skills.workspaceId, workspaceId),
+          ...(slug ? [eq(skills.slug, slug)] : []),
+          isNull(skills.archivedAt),
         ),
       )
-      .orderBy(desc(goatSkills.updatedAt));
+      .orderBy(desc(skills.updatedAt));
   }
 
-  private async findSkillById(workspaceId: string, id: string): Promise<GoatSkill | null> {
+  private async findSkillById(workspaceId: string, id: string): Promise<SkillRow | null> {
     const [row] = await this.db
       .select()
-      .from(goatSkills)
-      .where(and(eq(goatSkills.workspaceId, workspaceId), eq(goatSkills.id, id)))
+      .from(skills)
+      .where(and(eq(skills.workspaceId, workspaceId), eq(skills.id, id)))
       .limit(1);
     return row ?? null;
   }
@@ -892,17 +877,17 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
   private async findImportedSkill(
     workspaceId: string,
     source: SkillImportSource,
-  ): Promise<GoatSkill | null> {
+  ): Promise<SkillRow | null> {
     const [row] = await this.db
       .select()
-      .from(goatSkills)
+      .from(skills)
       .where(
         and(
-          eq(goatSkills.workspaceId, workspaceId),
-          eq(goatSkills.sourceUrl, source.url),
-          eq(goatSkills.sourceRef, source.ref),
-          eq(goatSkills.sourcePath, source.path),
-          isNull(goatSkills.archivedAt),
+          eq(skills.workspaceId, workspaceId),
+          eq(skills.sourceUrl, source.url),
+          eq(skills.sourceRef, source.ref),
+          eq(skills.sourcePath, source.path),
+          isNull(skills.archivedAt),
         ),
       )
       .limit(1);
@@ -914,24 +899,24 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     resourceId: string,
   ) {
     await this.db
-      .update(goatKnowledgeCommandIdempotency)
+      .update(knowledgeCommandIdempotency)
       .set({ resourceId, completedAt: new Date(), touchedAt: new Date() })
       .where(
         and(
-          eq(goatKnowledgeCommandIdempotency.userWorkosId, input.actor.userId),
-          eq(goatKnowledgeCommandIdempotency.workspaceId, input.actor.workspaceId),
-          eq(goatKnowledgeCommandIdempotency.idempotencyKey, input.idempotencyKey),
-          eq(goatKnowledgeCommandIdempotency.operation, "skill.import"),
+          eq(knowledgeCommandIdempotency.userWorkosId, input.actor.userId),
+          eq(knowledgeCommandIdempotency.workspaceId, input.actor.workspaceId),
+          eq(knowledgeCommandIdempotency.idempotencyKey, input.idempotencyKey),
+          eq(knowledgeCommandIdempotency.operation, "skill.import"),
         ),
       );
   }
 
   private async uniqueSkillSlug(workspaceId: string, name: string) {
-    const base = normalizeGoatBrainId(name).slice(0, 64).replace(/-+$/gu, "") || "skill";
+    const base = normalizeBrainId(name).slice(0, 64).replace(/-+$/gu, "") || "skill";
     const rows = await this.db
-      .select({ slug: goatSkills.slug })
-      .from(goatSkills)
-      .where(and(eq(goatSkills.workspaceId, workspaceId), isNull(goatSkills.archivedAt)));
+      .select({ slug: skills.slug })
+      .from(skills)
+      .where(and(eq(skills.workspaceId, workspaceId), isNull(skills.archivedAt)));
     const taken = new Set(rows.map((row: { slug: string }) => row.slug));
     if (!taken.has(base)) return base;
     for (let suffix = 2; suffix < 1_000; suffix += 1) {
@@ -943,13 +928,13 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
 
   private async reserveCreate(
     input: { actor: Actor; idempotencyKey: string },
-    operation: GoatKnowledgeCommandOperation,
+    operation: KnowledgeCommandOperation,
     command: unknown,
     proposedResourceId: string,
   ) {
     const requestHash = commandHash(operation, command);
     const [reservation] = await this.db
-      .insert(goatKnowledgeCommandIdempotency)
+      .insert(knowledgeCommandIdempotency)
       .values({
         commandId: deterministicResourceId("goat_knowledge_command", input, input.idempotencyKey),
         userWorkosId: input.actor.userId,
@@ -961,16 +946,16 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
       })
       .onConflictDoUpdate({
         target: [
-          goatKnowledgeCommandIdempotency.userWorkosId,
-          goatKnowledgeCommandIdempotency.workspaceId,
-          goatKnowledgeCommandIdempotency.idempotencyKey,
+          knowledgeCommandIdempotency.userWorkosId,
+          knowledgeCommandIdempotency.workspaceId,
+          knowledgeCommandIdempotency.idempotencyKey,
         ],
         set: { touchedAt: new Date() },
       })
       .returning({
-        requestHash: goatKnowledgeCommandIdempotency.requestHash,
-        operation: goatKnowledgeCommandIdempotency.operation,
-        resourceId: goatKnowledgeCommandIdempotency.resourceId,
+        requestHash: knowledgeCommandIdempotency.requestHash,
+        operation: knowledgeCommandIdempotency.operation,
+        resourceId: knowledgeCommandIdempotency.resourceId,
       });
     if (!reservation) throw new CoreError("conflict", "Could not reserve the command.");
     if (reservation.operation !== operation || reservation.requestHash !== requestHash) {
@@ -983,18 +968,18 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
   }
 }
 
-function brainDocument(row: GoatBrainDocumentRow): BrainDocument {
-  const parsed = parseGoatBrainDocument(row.content);
+function brainDocument(row: BrainDocumentRow): BrainDocument {
+  const parsed = parseBrainDocument(row.content);
   const title = row.title || parsed.title || row.brainId;
   return {
     id: row.id,
     brainId: row.brainId,
     folderPath: row.folderPath,
-    path: goatBrainFilePathFor(row.folderPath, row.brainId),
+    path: brainFilePathFor(row.folderPath, row.brainId),
     title,
     ...(parsed.frontmatter.description ? { description: parsed.frontmatter.description } : {}),
     content: row.content,
-    body: normalizeGoatBrainCompiledTruth(row.body, title),
+    body: normalizeBrainCompiledTruth(row.body, title),
     timeline: parsed.timeline,
     format: row.format,
     mimeType: row.mimeType ?? "text/markdown",
@@ -1030,7 +1015,7 @@ function brainFolder(row: {
   };
 }
 
-function wikiPage(row: GoatWikiPage): WikiPage {
+function wikiPage(row: WikiPageRow): WikiPage {
   return {
     id: row.id,
     slug: row.slug,
@@ -1049,7 +1034,7 @@ function wikiPage(row: GoatWikiPage): WikiPage {
   };
 }
 
-function wikiTimelineEntry(row: GoatWikiTimelineEntry): WikiTimelineEntry {
+function wikiTimelineEntry(row: WikiTimelineEntryRow): WikiTimelineEntry {
   return {
     id: row.id,
     pageId: row.pageId,
@@ -1059,7 +1044,7 @@ function wikiTimelineEntry(row: GoatWikiTimelineEntry): WikiTimelineEntry {
   };
 }
 
-function skillRow(row: GoatSkill): Skill {
+function skillRow(row: SkillRow): Skill {
   return {
     id: row.id,
     slug: row.slug,
@@ -1074,7 +1059,7 @@ function skillRow(row: GoatSkill): Skill {
 }
 
 type SkillListRow = Pick<
-  GoatSkill,
+  SkillRow,
   | "id"
   | "slug"
   | "name"
@@ -1101,7 +1086,7 @@ function skillListRow(row: SkillListRow): SkillListItem {
 }
 
 function skillSource(
-  row: Pick<GoatSkill, "sourceType" | "sourceUrl" | "sourceRef" | "sourcePath" | "resolvedCommit">,
+  row: Pick<SkillRow, "sourceType" | "sourceUrl" | "sourceRef" | "sourcePath" | "resolvedCommit">,
 ) {
   return row.sourceType && row.sourceUrl
     ? {
@@ -1123,16 +1108,16 @@ function validateSkill(input: {
   const name = input.name.trim();
   const description = input.description.trim();
   if (!name) throw new CoreError("invalid_argument", "Skill name cannot be empty.");
-  if (name.length > GOAT_BRAIN_SKILL_NAME_MAX_LENGTH) {
+  if (name.length > BRAIN_SKILL_NAME_MAX_LENGTH) {
     throw new CoreError(
       "invalid_argument",
-      `Skill names must be ${GOAT_BRAIN_SKILL_NAME_MAX_LENGTH} characters or fewer.`,
+      `Skill names must be ${BRAIN_SKILL_NAME_MAX_LENGTH} characters or fewer.`,
     );
   }
-  if (description.length > GOAT_BRAIN_SKILL_DESCRIPTION_MAX_LENGTH) {
+  if (description.length > BRAIN_SKILL_DESCRIPTION_MAX_LENGTH) {
     throw new CoreError(
       "invalid_argument",
-      `Skill descriptions must be ${GOAT_BRAIN_SKILL_DESCRIPTION_MAX_LENGTH} characters or fewer.`,
+      `Skill descriptions must be ${BRAIN_SKILL_DESCRIPTION_MAX_LENGTH} characters or fewer.`,
     );
   }
   if (description.includes("<") || description.includes(">")) {

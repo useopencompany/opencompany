@@ -1,0 +1,36 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getHeadlessBillingBalance } from "@/lib/headless-billing-api";
+
+export type CreditBalanceState = {
+  balanceUsdMicros: number;
+  lowBalanceWarnUsdMicros: number;
+  enforcementEnabled: boolean;
+};
+
+// Client-side view of the workspace credit balance for the chat surface.
+// Fetched on mount and refetched after each finished turn (and on a 402), so
+// the low-balance warning and out-of-credits hard stop track real spend. The
+// display is best-effort — the server 402 gate is the source of truth.
+export function useCreditBalance() {
+  const [balance, setBalance] = useState<CreditBalanceState | null>(null);
+  const inFlight = useRef(false);
+  const refetch = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      setBalance(await getHeadlessBillingBalance());
+    } catch {
+      // Keep the last known balance on transient fetch failures.
+    } finally {
+      inFlight.current = false;
+    }
+  }, []);
+  useEffect(() => {
+    // The state update happens asynchronously after the balance request resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refetch();
+  }, [refetch]);
+  return { balance, refetch };
+}

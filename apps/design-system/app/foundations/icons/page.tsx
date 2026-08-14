@@ -6,6 +6,7 @@ import {
   ArrowRight,
   Bell,
   Bookmark,
+  BrandMark,
   Calendar,
   Check,
   ChevronDown,
@@ -39,7 +40,6 @@ import {
   MoonshotIcon,
   MoreHorizontal,
   OpenAIIcon,
-  OpenCompanyMark,
   Plus,
   Search,
   Send,
@@ -107,9 +107,7 @@ const ICONS: { name: string; Icon: LucideIcon }[] = [
   { name: "Zap", Icon: Zap },
 ];
 
-const PRODUCT: { name: string; Icon: LucideIcon }[] = [
-  { name: "OpenCompanyMark", Icon: OpenCompanyMark },
-];
+const PRODUCT: { name: string; Icon: LucideIcon }[] = [{ name: "BrandMark", Icon: BrandMark }];
 
 const PROVIDERS: { name: string; Icon: LucideIcon }[] = [
   { name: "OpenAIIcon", Icon: OpenAIIcon },

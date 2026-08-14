@@ -3,17 +3,17 @@
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect } from "react";
 import {
-  GOAT_ONBOARDING_CONNECTION_MESSAGE,
-  GOAT_ONBOARDING_CONNECTION_STORAGE_KEY,
-  type GoatOnboardingConnectionMessage,
+  ONBOARDING_CONNECTION_MESSAGE,
+  ONBOARDING_CONNECTION_STORAGE_KEY,
+  type OnboardingConnectionMessage,
 } from "@/lib/onboarding-integrations";
 
 function ConnectionNotifier() {
   const params = useSearchParams();
 
   useEffect(() => {
-    const message: GoatOnboardingConnectionMessage = {
-      type: GOAT_ONBOARDING_CONNECTION_MESSAGE,
+    const message: OnboardingConnectionMessage = {
+      type: ONBOARDING_CONNECTION_MESSAGE,
       provider: params.get("integration"),
       status: params.get("setup"),
       reason: params.get("reason"),
@@ -26,7 +26,7 @@ function ConnectionNotifier() {
     }
 
     window.localStorage.setItem(
-      GOAT_ONBOARDING_CONNECTION_STORAGE_KEY,
+      ONBOARDING_CONNECTION_STORAGE_KEY,
       JSON.stringify({ ...message, completedAt: Date.now() }),
     );
 

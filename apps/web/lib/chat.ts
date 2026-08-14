@@ -1,17 +1,17 @@
 import "server-only";
 
 import type { ConversationDto } from "@opencompany/protocol";
-import type { GoatChatSessionView, GoatChatSummaryView } from "@/lib/chat-ui";
-import { normalizeGoatModel } from "@/lib/model-options";
+import type { ChatSessionView, ChatSummaryView } from "@/lib/chat-ui";
+import { normalizeModel } from "@/lib/model-options";
 import { serverApiClient, serverApiError } from "@/lib/server-api-client";
 
-const GOAT_RECENT_CHAT_LIMIT = "100";
+const RECENT_CHAT_LIMIT = "100";
 
-export type { GoatChatSessionView, GoatChatSummaryView } from "@/lib/chat-ui";
+export type { ChatSessionView, ChatSummaryView } from "@/lib/chat-ui";
 
-export async function loadCurrentGoatChatSessionById(
+export async function loadCurrentChatSessionById(
   sessionId: string | null | undefined,
-): Promise<GoatChatSessionView | null> {
+): Promise<ChatSessionView | null> {
   const trimmed = sessionId?.trim();
   if (!trimmed) return null;
 
@@ -25,34 +25,34 @@ export async function loadCurrentGoatChatSessionById(
   return toChatSessionView((await response.json()).data);
 }
 
-export async function listCurrentUserRecentGoatChats(): Promise<GoatChatSummaryView[]> {
+export async function listCurrentUserRecentChats(): Promise<ChatSummaryView[]> {
   const client = await serverApiClient();
   const response = await client.v1.conversations.$get({
-    query: { limit: GOAT_RECENT_CHAT_LIMIT },
+    query: { limit: RECENT_CHAT_LIMIT },
   });
   if (!response.ok) throw await serverApiError(response, "Could not load recent chats.");
 
   return (await response.json()).data.map(toChatSummaryView);
 }
 
-function toChatSessionView(conversation: ConversationDto): GoatChatSessionView {
+function toChatSessionView(conversation: ConversationDto): ChatSessionView {
   return {
     id: conversation.id,
     title: conversation.title,
-    model: normalizeGoatModel(conversation.model),
+    model: normalizeModel(conversation.model),
     engine: conversation.engine,
     codexComposerSettings: null,
     codexRuntime: null,
-    // The API-owned Electric read model hydrates the transcript in GoatSurface.
+    // The API-owned Electric read model hydrates the transcript in Surface.
     messages: [],
   };
 }
 
-function toChatSummaryView(conversation: ConversationDto): GoatChatSummaryView {
+function toChatSummaryView(conversation: ConversationDto): ChatSummaryView {
   return {
     id: conversation.id,
     title: conversation.title,
-    model: normalizeGoatModel(conversation.model),
+    model: normalizeModel(conversation.model),
     engine: conversation.engine,
     codexComposerSettings: null,
     codexRuntime: null,

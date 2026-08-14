@@ -2,16 +2,16 @@
 
 import {
   type BrainImportProvider,
-  createOpenCompanyClient,
+  createApiClient,
   type StartBrainImportBody,
 } from "@opencompany/protocol";
 import { headers } from "next/headers";
 
-export type GoatBrainImportActionResult =
+export type BrainImportActionResult =
   | { ok: true; importRunId: string }
   | { ok: false; message: string };
 
-export async function startGoatBrainImportDiscoveryAction(input: {
+export async function startBrainImportDiscoveryAction(input: {
   brainRef: string;
   companyUrl: string;
   focus?: string;
@@ -19,7 +19,7 @@ export async function startGoatBrainImportDiscoveryAction(input: {
     string,
     { enabled: boolean; integrationId?: string; config?: Record<string, unknown> }
   >;
-}): Promise<GoatBrainImportActionResult> {
+}): Promise<BrainImportActionResult> {
   return importCommand(async () => {
     const response = await (await serverImportClient()).v1.brains[":brainId"].imports.$post({
       param: { brainId: input.brainRef },
@@ -67,11 +67,11 @@ function protocolSourceSelection(
   return next;
 }
 
-export async function confirmGoatBrainImportAction(input: {
+export async function confirmBrainImportAction(input: {
   brainRef: string;
   importRunId: string;
   enabledProviders: BrainImportProvider[];
-}): Promise<GoatBrainImportActionResult> {
+}): Promise<BrainImportActionResult> {
   return importCommand(
     async () =>
       (await serverImportClient()).v1.brains[":brainId"].imports[":importRunId"].confirm.$post({
@@ -82,10 +82,10 @@ export async function confirmGoatBrainImportAction(input: {
   );
 }
 
-export async function cancelGoatBrainImportAction(input: {
+export async function cancelBrainImportAction(input: {
   brainRef: string;
   importRunId: string;
-}): Promise<GoatBrainImportActionResult> {
+}): Promise<BrainImportActionResult> {
   return importCommand(
     async () =>
       (await serverImportClient()).v1.brains[":brainId"].imports[":importRunId"].cancel.$post({
@@ -95,10 +95,10 @@ export async function cancelGoatBrainImportAction(input: {
   );
 }
 
-export async function retryGoatBrainImportDiscoveryAction(input: {
+export async function retryBrainImportDiscoveryAction(input: {
   brainRef: string;
   importRunId: string;
-}): Promise<GoatBrainImportActionResult> {
+}): Promise<BrainImportActionResult> {
   return importCommand(
     async () =>
       (await serverImportClient()).v1.brains[":brainId"].imports[":importRunId"].retry.$post({
@@ -111,7 +111,7 @@ export async function retryGoatBrainImportDiscoveryAction(input: {
 async function importCommand(
   request: () => Promise<Response>,
   fallback: string,
-): Promise<GoatBrainImportActionResult> {
+): Promise<BrainImportActionResult> {
   try {
     const response = await request();
     if (!response.ok) {
@@ -136,7 +136,7 @@ async function serverImportClient() {
     if (browserOrigin) forwarded.set("Origin", browserOrigin);
     return globalThis.fetch(input, { ...init, headers: forwarded, cache: "no-store" });
   };
-  return createOpenCompanyClient(apiOrigin(process.env.GOAT_API_ORIGIN), {
+  return createApiClient(apiOrigin(process.env.GOAT_API_ORIGIN), {
     fetch: fetchWithActor,
   });
 }

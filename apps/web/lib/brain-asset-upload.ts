@@ -1,18 +1,18 @@
-import { createOpenCompanyClient } from "@opencompany/protocol";
+import { createApiClient } from "@opencompany/protocol";
 import {
-  GOAT_CHAT_ATTACHMENT_ACCEPT,
-  validateGoatChatAttachmentCandidate,
+  CHAT_ATTACHMENT_ACCEPT,
+  validateChatAttachmentCandidate,
 } from "@/lib/chat-attachment-formats";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 
 // Client validation is for fast feedback only. The canonical API receives the
 // bytes, recomputes their hash, stores them privately, and registers the asset.
-export const BRAIN_ASSET_ACCEPT = GOAT_CHAT_ATTACHMENT_ACCEPT;
+export const BRAIN_ASSET_ACCEPT = CHAT_ATTACHMENT_ACCEPT;
 export const BRAIN_ASSET_MAX_BYTES = 20 * 1024 * 1024;
 
 export function validateBrainAssetFile(file: File): string | null {
   if (file.size === 0) return "That file is empty.";
-  const validation = validateGoatChatAttachmentCandidate({
+  const validation = validateChatAttachmentCandidate({
     mediaType: file.type,
     filename: file.name,
     sizeBytes: file.size,
@@ -54,7 +54,7 @@ export async function replaceHeadlessBrainAsset(
 
 function brainAssetClient(options: { baseUrl?: string; fetch?: typeof globalThis.fetch }) {
   const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
-  return createOpenCompanyClient(baseUrl, {
+  return createApiClient(baseUrl, {
     fetch: createHeadlessChatApiFetch({
       baseUrl,
       ...(options.fetch ? { fetch: options.fetch } : {}),

@@ -1,8 +1,8 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { GoatChatSessionView } from "@/lib/chat-ui";
-import { buildGoatHarnessRun } from "@/lib/task-harness-run";
+import type { ChatSessionView } from "@/lib/chat-ui";
+import { buildHarnessRun } from "@/lib/task-harness-run";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 
 const mocks = vi.hoisted(() => ({
@@ -10,8 +10,8 @@ const mocks = vi.hoisted(() => ({
   tasks: [] as Record<string, unknown>[],
 }));
 
-vi.mock("@/components/GoatAppDataProvider", () => ({
-  useGoatAppData: () => ({
+vi.mock("@/components/AppDataProvider", () => ({
+  useAppData: () => ({
     user: {
       workosUserId: "user_1",
       email: "ada@example.com",
@@ -31,11 +31,11 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
   }),
 }));
 
-vi.mock("@/components/GoatSurface", () => ({
-  GoatSurface: (props: Record<string, unknown>) => {
+vi.mock("@/components/Surface", () => ({
+  Surface: (props: Record<string, unknown>) => {
     mocks.surfaceProps = props;
-    const chat = props.initialChat as GoatChatSessionView;
-    return <div data-testid="goat-surface">{chat.title}</div>;
+    const chat = props.initialChat as ChatSessionView;
+    return <div data-testid="opencompany-surface">{chat.title}</div>;
   },
 }));
 
@@ -46,7 +46,7 @@ beforeEach(() => {
 
 describe("TaskDetailPanel", () => {
   it("projects a workflow run into the standard chat surface", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task(),
       messages: [
         message({ id: "user_1", role: "user", content: "Run the morning workflow" }),
@@ -62,8 +62,8 @@ describe("TaskDetailPanel", () => {
 
     render(<TaskDetailPanel initialRun={run} />);
 
-    expect(screen.getByTestId("goat-surface")).toHaveTextContent("Morning workflow");
-    const chat = mocks.surfaceProps?.initialChat as GoatChatSessionView;
+    expect(screen.getByTestId("opencompany-surface")).toHaveTextContent("Morning workflow");
+    const chat = mocks.surfaceProps?.initialChat as ChatSessionView;
     expect(chat.messages).toEqual([]);
     expect(mocks.surfaceProps?.taskConversation).toMatchObject({
       taskId: "goat_task_1",
@@ -78,7 +78,7 @@ describe("TaskDetailPanel", () => {
   });
 
   it("uses the task name over a stale workflow chat title", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: {
         ...task(),
         name: "Acme interview follow-up",
@@ -97,7 +97,7 @@ describe("TaskDetailPanel", () => {
 
     render(<TaskDetailPanel initialRun={run} />);
 
-    expect(screen.getByTestId("goat-surface")).toHaveTextContent("Acme interview follow-up");
+    expect(screen.getByTestId("opencompany-surface")).toHaveTextContent("Acme interview follow-up");
     expect(mocks.surfaceProps?.initialChat).toMatchObject({
       id: "goat_chat_task_1",
       title: "Acme interview follow-up",
@@ -116,7 +116,7 @@ describe("TaskDetailPanel", () => {
 
     render(
       <TaskDetailPanel
-        initialRun={buildGoatHarnessRun({ task: initialTask, messages: [], events: [] })}
+        initialRun={buildHarnessRun({ task: initialTask, messages: [], events: [] })}
       />,
     );
 

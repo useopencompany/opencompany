@@ -1,20 +1,20 @@
 import {
-  GOAT_MCP_METADATA_CORS_HEADERS,
-  goatMcpProtectedResourceMetadata,
-  resolveGoatAuthKitDomain,
+  MCP_METADATA_CORS_HEADERS,
+  mcpProtectedResourceMetadata,
+  resolveAuthKitDomain,
 } from "@/lib/mcp-oauth";
 
 export const dynamic = "force-dynamic";
 
 export function GET(request: Request) {
-  const authKitDomain = resolveGoatAuthKitDomain();
+  const authKitDomain = resolveAuthKitDomain();
   if (!authKitDomain.ok) {
     return Response.json({ error: authKitDomain.error }, { status: 503 });
   }
 
-  return Response.json(goatMcpProtectedResourceMetadata(request, authKitDomain.domain), {
+  return Response.json(mcpProtectedResourceMetadata(request, authKitDomain.domain), {
     headers: {
-      ...GOAT_MCP_METADATA_CORS_HEADERS,
+      ...MCP_METADATA_CORS_HEADERS,
       "Cache-Control": "max-age=3600",
     },
   });
@@ -23,6 +23,6 @@ export function GET(request: Request) {
 export function OPTIONS() {
   return new Response(null, {
     status: 200,
-    headers: GOAT_MCP_METADATA_CORS_HEADERS,
+    headers: MCP_METADATA_CORS_HEADERS,
   });
 }

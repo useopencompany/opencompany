@@ -9,14 +9,14 @@ const mocks = vi.hoisted(() => ({
   upsertConfig: vi.fn(),
 }));
 
-vi.mock("@opencompany/db/goat-repo-configs", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@opencompany/db/goat-repo-configs")>();
+vi.mock("@opencompany/db/repo-configs", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@opencompany/db/repo-configs")>();
   return {
     ...original,
-    deleteGoatRepoConfig: mocks.deleteConfig,
-    listGoatRepoConfigs: mocks.listConfigs,
-    listGoatWorkspaceRepositories: mocks.listRepositories,
-    upsertGoatRepoConfig: mocks.upsertConfig,
+    deleteRepoConfig: mocks.deleteConfig,
+    listRepoConfigs: mocks.listConfigs,
+    listWorkspaceRepositories: mocks.listRepositories,
+    upsertRepoConfig: mocks.upsertConfig,
   };
 });
 
@@ -35,7 +35,7 @@ const admin = actorWithRole("admin");
 function configView() {
   return {
     repositoryExternalId: "123",
-    repositoryFullName: "OpenCompany/Renamed-App",
+    repositoryFullName: "opencompany/Renamed-App",
     envKeys: ["API_TOKEN"],
     setupInstructions: "",
     updatedAt: new Date("2026-08-12T10:00:00.000Z"),
@@ -51,7 +51,7 @@ describe("repository config service", () => {
     mocks.listRepositories.mockResolvedValue([
       {
         repositoryExternalId: "123",
-        repositoryFullName: "OpenCompany/Renamed-App",
+        repositoryFullName: "opencompany/Renamed-App",
         private: true,
       },
     ]);
@@ -65,7 +65,7 @@ describe("repository config service", () => {
       repositories: [
         {
           repositoryExternalId: "123",
-          repositoryFullName: "OpenCompany/Renamed-App",
+          repositoryFullName: "opencompany/Renamed-App",
           private: true,
         },
       ],
@@ -93,7 +93,7 @@ describe("repository config service", () => {
       db,
       workspaceId: "gws_1",
       repositoryExternalId: "123",
-      repositoryFullName: "OpenCompany/Renamed-App",
+      repositoryFullName: "opencompany/Renamed-App",
       createdByWorkosId: "user_1",
       env: { content: "API_TOKEN=secret-value" },
     });

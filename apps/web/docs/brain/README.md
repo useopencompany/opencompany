@@ -1,6 +1,6 @@
 # Brain engineering map
 
-Brain is OpenCompany's workspace knowledge store: Markdown knowledge pages, immutable evidence,
+Brain is opencompany's workspace knowledge store: Markdown knowledge pages, immutable evidence,
 file-backed documents, provenance, and a lightweight relation/wiki-link graph. Postgres is the
 durable authority. Filesystem trees are temporary projections for runner ingestion agents, not the
 storage model.
@@ -11,9 +11,9 @@ storage model.
   authorization, and persistence composition.
 - `apps/runner` owns durable ingestion/import, Google Drive sync, provider poll/flush work, and the
   agentic curation loop.
-- `packages/goat-agent` owns shared Brain tools, capture behavior, MCP registration, and asset
+- `packages/agent` owns shared Brain tools, capture behavior, MCP registration, and asset
   behavior used by those composition roots.
-- `packages/goat-brain` owns document schemas, parsing, validation, retrieval helpers, CLI behavior,
+- `packages/brain` owns document schemas, parsing, validation, retrieval helpers, CLI behavior,
   and the pointer/copy rule.
 - `packages/db` owns Brain tables, repositories, read queries, projections, and materialization.
 - `apps/web` renders Brain UI and calls typed `/v1` resources or named API read models. It does not
@@ -35,14 +35,14 @@ not host MCP tools, authorize Brain access, verify provider payloads, or persist
 
 | Area | Source |
 | --- | --- |
-| Schemas, validators, and folder rules | `packages/goat-brain/src/schema.ts`, `schemas.ts`, and `folders.ts` |
-| Document parse/serialize and graph edges | `packages/goat-brain/src/document.ts`, `frontmatter.ts`, `inline-links.ts`, and `edges.ts` |
-| Pointer/copy prompt contract | `packages/goat-brain/src/pointer-copy.ts` |
-| Filesystem CLI | `packages/goat-brain/src/cli/index.ts` |
-| Shared Chat/MCP Brain tools and capture | `packages/goat-agent/src/brain-cli.ts`, `brain-surface.ts`, `brain-capture.ts`, and `mcp-server.ts` |
+| Schemas, validators, and folder rules | `packages/brain/src/schema.ts`, `schemas.ts`, and `folders.ts` |
+| Document parse/serialize and graph edges | `packages/brain/src/document.ts`, `frontmatter.ts`, `inline-links.ts`, and `edges.ts` |
+| Pointer/copy prompt contract | `packages/brain/src/pointer-copy.ts` |
+| Filesystem CLI | `packages/brain/src/cli/index.ts` |
+| Shared Chat/MCP Brain tools and capture | `packages/agent/src/brain-cli.ts`, `brain-surface.ts`, `brain-capture.ts`, and `mcp-server.ts` |
 | API composition | `apps/api/src/server.ts`, `app.ts`, and `brain-assets.ts` |
-| Runner ingestion | `apps/runner/src/goat-brain-ingest-worker.ts` and `goat-brain-agent-ingest.ts` |
-| Tables, materialization, and read plane | `packages/db/src/goat-schema.ts`, `goat-brain-files.ts`, and `goat-brain-read.ts` |
+| Runner ingestion | `apps/runner/src/brain-ingest-worker.ts` and `brain-agent-ingest.ts` |
+| Tables, materialization, and read plane | `packages/db/src/product-schema.ts`, `brain-files.ts`, and `brain-read.ts` |
 
 ## Invariants
 

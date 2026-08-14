@@ -1,20 +1,20 @@
 import { completeAutoRefillSetup } from "@opencompany/billing/legacy-auto-refill";
 import {
-  applyGoatStripeSubscriptionProjection,
+  applyStripeSubscriptionProjection,
   releasePendingForWorkspace,
-  setGoatAutoRefillPaymentMethod,
-  settleGoatAutoRefill,
-} from "@opencompany/db/goat-billing";
+  setAutoRefillPaymentMethod,
+  settleAutoRefill,
+} from "@opencompany/db/billing";
 import {
-  fulfillGoatTopUpCheckoutSession,
-  markGoatCheckoutRecordFailed,
-  recordGoatAutoRefillCredit,
-} from "@opencompany/db/goat-credits";
+  fulfillTopUpCheckoutSession,
+  markCheckoutRecordFailed,
+  recordAutoRefillCredit,
+} from "@opencompany/db/credits";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createStripeIngress } from "./stripe-ingress";
 
-vi.mock("@opencompany/analytics/goat/server", () => ({
-  captureGoatServerEvent: vi.fn().mockResolvedValue(undefined),
+vi.mock("@opencompany/analytics/product/server", () => ({
+  captureProductServerEvent: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@opencompany/analytics/server", () => ({
   captureServerEvent: vi.fn().mockResolvedValue(undefined),
@@ -25,20 +25,20 @@ vi.mock("@opencompany/billing/legacy-auto-refill", () => ({
   handleAutoRefillPaymentIntentSucceeded: vi.fn(),
 }));
 vi.mock("@opencompany/billing/legacy-credits", () => ({ fulfillCheckoutSession: vi.fn() }));
-vi.mock("@opencompany/db/goat-billing", () => ({
-  GOAT_PRO_STRIPE_PRODUCT_KEY: "goat_pro",
-  applyGoatStripeInvoicePaymentState: vi.fn(),
-  applyGoatStripeSubscriptionProjection: vi.fn(),
-  findGoatWorkspaceIdForStripeSubscription: vi.fn(),
+vi.mock("@opencompany/db/billing", () => ({
+  PRO_STRIPE_PRODUCT_KEY: "goat_pro",
+  applyStripeInvoicePaymentState: vi.fn(),
+  applyStripeSubscriptionProjection: vi.fn(),
+  findWorkspaceIdForStripeSubscription: vi.fn(),
   releasePendingForWorkspace: vi.fn().mockResolvedValue(0),
-  setGoatAutoRefillPaymentMethod: vi.fn().mockResolvedValue(undefined),
-  settleGoatAutoRefill: vi.fn().mockResolvedValue(undefined),
+  setAutoRefillPaymentMethod: vi.fn().mockResolvedValue(undefined),
+  settleAutoRefill: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@opencompany/db/goat-credits", () => ({
-  fulfillGoatTopUpCheckoutSession: vi.fn(),
-  goatUsdMicrosToCents: vi.fn((value: number) => value / 10_000),
-  markGoatCheckoutRecordFailed: vi.fn(),
-  recordGoatAutoRefillCredit: vi.fn(),
+vi.mock("@opencompany/db/credits", () => ({
+  fulfillTopUpCheckoutSession: vi.fn(),
+  usdMicrosToCents: vi.fn((value: number) => value / 10_000),
+  markCheckoutRecordFailed: vi.fn(),
+  recordAutoRefillCredit: vi.fn(),
 }));
 
 describe("Stripe ingress", () => {
@@ -87,7 +87,7 @@ describe("Stripe ingress", () => {
     expect(invalid.status).toBe(400);
   });
 
-  it("delegates Goat top-up retries to the idempotent ledger fulfillment", async () => {
+  it("delegates opencompany top-up retries to the idempotent ledger fulfillment", async () => {
     constructEvent.mockReturnValue({
       id: "evt_topup_1",
       type: "checkout.session.completed",
@@ -100,7 +100,7 @@ describe("Stripe ingress", () => {
         },
       },
     });
-    vi.mocked(fulfillGoatTopUpCheckoutSession).mockResolvedValue({
+    vi.mocked(fulfillTopUpCheckoutSession).mockResolvedValue({
       ok: false,
       reason: "already_fulfilled_or_missing",
     });
@@ -114,8 +114,8 @@ describe("Stripe ingress", () => {
 
     expect((await ingress.webhook(request())).status).toBe(200);
     expect((await ingress.webhook(request())).status).toBe(200);
-    expect(fulfillGoatTopUpCheckoutSession).toHaveBeenCalledTimes(2);
-    expect(fulfillGoatTopUpCheckoutSession).toHaveBeenCalledWith(
+    expect(fulfillTopUpCheckoutSession).toHaveBeenCalledTimes(2);
+    expect(fulfillTopUpCheckoutSession).toHaveBeenCalledWith(
       expect.objectContaining({ id: "cs_1" }),
       { eventId: "evt_topup_1", db },
     );
@@ -135,7 +135,7 @@ describe("Stripe ingress", () => {
     });
     const response = await signedRequest(createStripeIngress({ db, stripe, webhookSecret: "x" }));
     expect(response.status).toBe(200);
-    expect(markGoatCheckoutRecordFailed).toHaveBeenCalledWith({
+    expect(markCheckoutRecordFailed).toHaveBeenCalledWith({
       id: "goat_chk_failed",
       error: "Stripe reported that the delayed Checkout payment failed.",
       db,
@@ -154,14 +154,14 @@ describe("Stripe ingress", () => {
           payment_intent: "pi_1",
           metadata: {
             billingProduct: "goat_topup",
-            goatWorkspaceId: "workspace_1",
+            workspaceId: "workspace_1",
             userWorkosId: "user_1",
             checkoutRecordId: "goat_chk_1",
           },
         },
       },
     });
-    vi.mocked(fulfillGoatTopUpCheckoutSession).mockResolvedValue({
+    vi.mocked(fulfillTopUpCheckoutSession).mockResolvedValue({
       ok: true,
       checkoutRecordId: "goat_chk_1",
       amountCents: 1_000,
@@ -175,7 +175,7 @@ describe("Stripe ingress", () => {
     const response = await signedRequest(createStripeIngress({ db, stripe, webhookSecret: "x" }));
     expect(response.status).toBe(200);
     expect(releasePendingForWorkspace).toHaveBeenCalledWith("workspace_1", expect.any(Date), db);
-    expect(setGoatAutoRefillPaymentMethod).toHaveBeenCalledWith(
+    expect(setAutoRefillPaymentMethod).toHaveBeenCalledWith(
       { workspaceId: "workspace_1", paymentMethodId: "pm_1" },
       { db },
     );
@@ -192,7 +192,7 @@ describe("Stripe ingress", () => {
           customer: "cus_1",
           status: "active",
           cancel_at_period_end: false,
-          metadata: { billingProduct: "goat_pro", goatWorkspaceId: "workspace_1" },
+          metadata: { billingProduct: "goat_pro", workspaceId: "workspace_1" },
           items: {
             data: [
               {
@@ -207,13 +207,13 @@ describe("Stripe ingress", () => {
         },
       },
     });
-    vi.mocked(applyGoatStripeSubscriptionProjection).mockResolvedValue({
+    vi.mocked(applyStripeSubscriptionProjection).mockResolvedValue({
       applied: false,
       reason: "duplicate",
     });
     const response = await signedRequest(createStripeIngress({ db, stripe, webhookSecret: "x" }));
     expect(response.status).toBe(200);
-    expect(applyGoatStripeSubscriptionProjection).toHaveBeenCalledWith(
+    expect(applyStripeSubscriptionProjection).toHaveBeenCalledWith(
       expect.objectContaining({
         eventId: "evt_subscription_1",
         workspaceId: "workspace_1",
@@ -234,22 +234,22 @@ describe("Stripe ingress", () => {
           id: "pi_refill_1",
           metadata: {
             billingProduct: "goat_auto_refill",
-            goatWorkspaceId: "workspace_1",
+            workspaceId: "workspace_1",
             amountCents: "2000",
           },
         },
       },
     });
-    vi.mocked(recordGoatAutoRefillCredit).mockResolvedValue({ ok: false } as never);
+    vi.mocked(recordAutoRefillCredit).mockResolvedValue({ ok: false } as never);
     const response = await signedRequest(createStripeIngress({ db, stripe, webhookSecret: "x" }));
     expect(response.status).toBe(200);
-    expect(recordGoatAutoRefillCredit).toHaveBeenCalledWith({
+    expect(recordAutoRefillCredit).toHaveBeenCalledWith({
       workspaceId: "workspace_1",
       amountCents: 2_000,
       paymentIntentId: "pi_refill_1",
       db,
     });
-    expect(settleGoatAutoRefill).toHaveBeenCalledWith({ workspaceId: "workspace_1" }, { db });
+    expect(settleAutoRefill).toHaveBeenCalledWith({ workspaceId: "workspace_1" }, { db });
   });
 
   it("keeps legacy setup-mode events on the shared compatibility tables", async () => {

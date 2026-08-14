@@ -1,6 +1,6 @@
 "use client";
 
-import { type BrowserProfileDto, createOpenCompanyClient } from "@opencompany/protocol";
+import { type BrowserProfileDto, createApiClient } from "@opencompany/protocol";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 
 type ClientOptions = {
@@ -58,7 +58,7 @@ export async function completeHeadlessBrowserProfileLogin(
 
 function profileClient(options: ClientOptions) {
   const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
-  return createOpenCompanyClient(baseUrl, {
+  return createApiClient(baseUrl, {
     fetch: createHeadlessChatApiFetch({
       baseUrl,
       ...(options.fetch ? { fetch: options.fetch } : {}),

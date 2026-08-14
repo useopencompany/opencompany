@@ -1,6 +1,6 @@
 "use client";
 
-import type { GoatPublishedChatArtifact } from "@opencompany/agent-runtime";
+import type { PublishedChatArtifact } from "@opencompany/agent-runtime";
 import { Download, ExternalLink, FileText, Loader2, Trash2 } from "lucide-react";
 import { useState } from "react";
 
@@ -9,7 +9,7 @@ export function ArtifactFileCard({
   href,
   readOnly,
 }: {
-  artifact: GoatPublishedChatArtifact;
+  artifact: PublishedChatArtifact;
   href: string;
   readOnly: boolean;
 }) {

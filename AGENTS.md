@@ -1,6 +1,6 @@
 # Agent coding guidelines
 
-You're working on OpenCompany: an AI workspace for chat, durable tasks and workflows,
+You're working on opencompany: an AI workspace for chat, durable tasks and workflows,
 connected integrations, Brain knowledge, and cloud coding sessions.
 
 Read the nested `AGENTS.md` files when reading/editing files inside folders that contain it.
@@ -35,15 +35,15 @@ Use judgment. The goal is not to follow rules mechanically; the goal is to ship 
 
 The user usually keeps a dev server running. Do not start another one unless asked or unless you have confirmed it is needed.
 
-## OpenCompany product surface
+## opencompany product surface
 
 - Start in `apps/web` for product and API work.
-- `web` is the Next.js client and composition root. "Goat runner" means the retained Goat-domain
-  execution paths inside `apps/runner`. Look first at `goat-*`
+- `web` is the Next.js client and composition root. "opencompany runner" means the retained
+  opencompany-domain execution paths inside `apps/runner`. Look first at Brain, task, and chat
   modules, `/internal/goat/*` routes, and the `RUNNER_GOAT_TASK_WORKER_ENABLED` gate. There is no
   separate runner package.
-- Follow shared code into `packages/db/src/goat-*`, `packages/goat-brain`, and
-  `packages/goat-observability` as needed. Preserve the isolated legacy-billing and LLM-broker
+- Follow shared code into `packages/db/src/*`, `packages/brain`, and
+  `packages/telemetry` as needed. Preserve the isolated legacy-billing and LLM-broker
   compatibility schemas unless a task explicitly retires those contracts.
 - Use `apps/web/docs/README.md` for the current app/runner flow and `bun run dev:web` for the
   local product stack.

@@ -1,11 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { GoatGranolaProviderState } from "@/lib/integration-state";
+import type { GranolaProviderState } from "@/lib/integration-state";
 import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
 export type GranolaConnectActionResult =
-  | { ok: true; state: GoatGranolaProviderState }
+  | { ok: true; state: GranolaProviderState }
   | { ok: false; error: string };
 
 export async function saveGranolaApiKeyAction(apiKey: string): Promise<GranolaConnectActionResult> {
@@ -22,11 +22,11 @@ export async function saveGranolaApiKeyAction(apiKey: string): Promise<GranolaCo
         error: await serverApiErrorMessage(response, "Could not save the Granola API key."),
       };
     }
-    const data = (await response.json()).data as { state: GoatGranolaProviderState };
+    const data = (await response.json()).data as { state: GranolaProviderState };
     revalidatePath("/", "layout");
     return { ok: true, state: data.state };
   } catch (error) {
-    console.error("[goat-granola] Failed to save Granola API key", error);
+    console.error("[opencompany-granola] Failed to save Granola API key", error);
     return { ok: false, error: "Could not save the Granola API key." };
   }
 }

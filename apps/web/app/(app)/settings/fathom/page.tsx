@@ -1,5 +1,5 @@
-import { GoatFathomSettingsRoute } from "@/components/GoatRoutes";
+import { FathomSettingsRoute } from "@/components/Routes";
 
 export default function FathomSettingsPage() {
-  return <GoatFathomSettingsRoute />;
+  return <FathomSettingsRoute />;
 }

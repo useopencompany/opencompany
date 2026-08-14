@@ -395,7 +395,7 @@ async function runTurnThroughProxy(input: {
     await client.request("initialize", {
       clientInfo: {
         name: CODEX_APP_SERVER_CLIENT_NAME,
-        title: "OpenCompany Runner",
+        title: "opencompany Runner",
         version: "0.1.0",
       },
       capabilities: { experimentalApi: true },

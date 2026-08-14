@@ -1,0 +1,53 @@
+{
+  "name": "@opencompany/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./prompts": {
+      "types": "./src/prompts/index.ts",
+      "default": "./src/prompts/index.ts"
+    },
+    "./*": {
+      "types": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ai-sdk/mcp": "^1.0.44",
+    "@browserbasehq/sdk": "^2.16.0",
+    "@modelcontextprotocol/sdk": "1.26.0",
+    "@opencompany/agent-runtime": "workspace:*",
+    "@opencompany/analytics": "workspace:*",
+    "@opencompany/billing": "workspace:*",
+    "@opencompany/browser-tools": "workspace:*",
+    "@opencompany/crypto": "workspace:*",
+    "@opencompany/core": "workspace:*",
+    "@opencompany/db": "workspace:*",
+    "@opencompany/brain": "workspace:*",
+    "@opencompany/telemetry": "workspace:*",
+    "@opencompany/wiki": "workspace:*",
+    "@opencompany/observability": "workspace:*",
+    "@vercel/blob": "^2.4.0",
+    "@vercel/sandbox": "^2.9.0",
+    "ai": "^6.0.189",
+    "ajv": "8.20.0",
+    "drizzle-orm": "^0.45.2",
+    "jose": "^5.10.0",
+    "mcp-handler": "^1.1.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
+}

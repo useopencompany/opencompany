@@ -1,30 +1,30 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_GOAT_MODEL,
-  GOAT_MODELS,
-  goatModelContextWindowTokens,
-  normalizeGoatModel,
+  DEFAULT_MODEL,
+  MODELS,
+  modelContextWindowTokens,
+  normalizeModel,
 } from "@/lib/model-options";
 
-describe("Goat model options", () => {
+describe("opencompany model options", () => {
   it("defaults new chats to Kimi K3", () => {
-    expect(DEFAULT_GOAT_MODEL).toBe("moonshotai/kimi-k3");
-    expect(normalizeGoatModel(undefined)).toBe("moonshotai/kimi-k3");
+    expect(DEFAULT_MODEL).toBe("moonshotai/kimi-k3");
+    expect(normalizeModel(undefined)).toBe("moonshotai/kimi-k3");
   });
 
   it("offers DeepSeek V4 Pro in main chat with its full context window", () => {
-    expect(GOAT_MODELS).toContainEqual(
+    expect(MODELS).toContainEqual(
       expect.objectContaining({
         id: "deepseek/deepseek-v4-pro",
         label: "DeepSeek V4 Pro",
       }),
     );
-    expect(normalizeGoatModel("deepseek/deepseek-v4-pro")).toBe("deepseek/deepseek-v4-pro");
-    expect(goatModelContextWindowTokens("deepseek/deepseek-v4-pro")).toBe(1_000_000);
+    expect(normalizeModel("deepseek/deepseek-v4-pro")).toBe("deepseek/deepseek-v4-pro");
+    expect(modelContextWindowTokens("deepseek/deepseek-v4-pro")).toBe(1_000_000);
   });
 
   it("offers Qwen 3.8 Max in main chat with its full context window", () => {
-    expect(GOAT_MODELS).toContainEqual(
+    expect(MODELS).toContainEqual(
       expect.objectContaining({
         id: "alibaba/qwen3.8-max",
         label: "Qwen 3.8 Max",
@@ -32,17 +32,17 @@ describe("Goat model options", () => {
         supportsReasoning: true,
       }),
     );
-    expect(normalizeGoatModel("alibaba/qwen3.8-max")).toBe("alibaba/qwen3.8-max");
-    expect(goatModelContextWindowTokens("alibaba/qwen3.8-max")).toBe(1_000_000);
+    expect(normalizeModel("alibaba/qwen3.8-max")).toBe("alibaba/qwen3.8-max");
+    expect(modelContextWindowTokens("alibaba/qwen3.8-max")).toBe(1_000_000);
   });
 
   it("preserves the GLM model used by workflow tasks", () => {
-    expect(GOAT_MODELS).toContainEqual(
+    expect(MODELS).toContainEqual(
       expect.objectContaining({
         id: "zai/glm-5.2",
         label: "GLM 5.2",
       }),
     );
-    expect(normalizeGoatModel("zai/glm-5.2")).toBe("zai/glm-5.2");
+    expect(normalizeModel("zai/glm-5.2")).toBe("zai/glm-5.2");
   });
 });

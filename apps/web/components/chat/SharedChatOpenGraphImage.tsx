@@ -67,7 +67,7 @@ export function createSharedChatOpenGraphImage(titleInput: string) {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <OpenCompanyMark />
+            <BrandMark />
             <div
               style={{
                 display: "flex",
@@ -163,7 +163,7 @@ export function createSharedChatOpenGraphImage(titleInput: string) {
   );
 }
 
-function OpenCompanyMark() {
+function BrandMark() {
   return (
     <svg
       width="38"

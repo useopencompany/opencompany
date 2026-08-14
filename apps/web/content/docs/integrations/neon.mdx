@@ -5,31 +5,31 @@ description: Inspect Neon projects and databases through a permission-gated, rea
 
 ## What the connection does
 
-Neon is a personal OAuth tool connector for main chat and persistent Codex or Claude Code chats. It lets Goat:
+Neon is a personal OAuth tool connector for main chat and persistent Codex or Claude Code chats. It lets opencompany:
 
 - List Neon organizations, personal projects, and shared projects you can access.
 - Describe projects and branches.
 - List database tables and inspect table schemas.
 - Run one read-only `SELECT`, `WITH`, or `SHOW` query against a project, branch, and database.
 
-Goat does not expose Neon's connection-string, transaction, migration, branch mutation, reset, or deletion tools. It also redacts PostgreSQL connection URLs and credential-shaped fields if a provider response unexpectedly contains them.
+opencompany does not expose Neon's connection-string, transaction, migration, branch mutation, reset, or deletion tools. It also redacts PostgreSQL connection URLs and credential-shaped fields if a provider response unexpectedly contains them.
 
 ## Permission layers
 
 The connection is read-only at several independent boundaries:
 
-1. Goat requests only Neon's `read` OAuth scope.
+1. opencompany requests only Neon's `read` OAuth scope.
 2. Every hosted MCP request includes Neon's `readonly=true` enforcement and is restricted to project, branch, schema, and querying categories.
-3. Goat keeps a reviewed tool allowlist. Newly added Neon MCP tools remain unavailable until OpenCompany explicitly reviews them.
-4. Raw SQL must begin with `SELECT`, `WITH`, or `SHOW`; known administrative and side-effecting Postgres functions are rejected before the request leaves Goat.
-5. Neon executes SQL through its read-only MCP path. Goat also bounds execution time and truncates oversized results.
+3. opencompany keeps a reviewed tool allowlist. Newly added Neon MCP tools remain unavailable until opencompany explicitly reviews them.
+4. Raw SQL must begin with `SELECT`, `WITH`, or `SHOW`; known administrative and side-effecting Postgres functions are rejected before the request leaves opencompany.
+5. Neon executes SQL through its read-only MCP path. opencompany also bounds execution time and truncates oversized results.
 
 Under **Settings → Integrations**, the connection has two controls:
 
 - **Inspect Neon structure** defaults to **On**. This covers project, branch, table, and schema metadata.
 - **Query database data** defaults to **Ask**. Main chat pauses for confirmation before a SQL query. Persistent coding chats expose only permissions set to **On**, so switch this permission to **On** explicitly if Codex or Claude Code should query rows.
 
-Setting either permission to **Off** removes its tools from subsequent turns. Changing **Query database data** to **On** removes OpenCompany's per-call confirmation, but the provider connection remains technically read-only.
+Setting either permission to **Off** removes its tools from subsequent turns. Changing **Query database data** to **On** removes opencompany's per-call confirmation, but the provider connection remains technically read-only.
 
 ## Connect Neon
 
@@ -38,7 +38,7 @@ Setting either permission to **Off** removes its tools from subsequent turns. Ch
 3. Review the Neon OAuth consent screen and authorize read access.
 4. Leave **Query database data** on **Ask** unless persistent coding sessions need autonomous read access.
 
-The OAuth tokens are encrypted in OpenCompany and remain server-side. Disconnecting Neon deletes the saved connection and encrypted credentials from Goat.
+The OAuth tokens are encrypted in opencompany and remain server-side. Disconnecting Neon deletes the saved connection and encrypted credentials from opencompany.
 
 ## Production data
 
@@ -47,6 +47,6 @@ Database rows can contain customer data, credentials, or other sensitive materia
 ## Example requests
 
 - “Show me the tables and columns in the production branch.”
-- “Count failed Goat coding turns in the last 24 hours.”
+- “Count failed opencompany coding turns in the last 24 hours.”
 - “Inspect this Conversation and summarize its Run and Event timeline.”
 - “Compare the status distribution of queued and running tasks without returning prompts.”

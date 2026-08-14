@@ -1,34 +1,31 @@
-import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { Actor } from "@opencompany/core";
-import { upsertGoatBrainSource } from "@opencompany/db/goat-brain-sources";
-import {
-  loadGoatIntegrationCredential,
-  markGoatIntegrationStatus,
-} from "@opencompany/db/goat-integrations";
-import { getGoatSlackBotIntegrationForWorkspace } from "@opencompany/db/goat-slack-bot";
-import { getGoatBrainAccess } from "@opencompany/db/goat-workspaces";
+import { upsertBrainSource } from "@opencompany/db/brain-sources";
+import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
+import { getSlackBotIntegrationForWorkspace } from "@opencompany/db/slack-bot";
+import { getBrainAccess } from "@opencompany/db/workspaces";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createSlackBotSettingsService } from "./slack-bot-settings";
 
-vi.mock("@opencompany/analytics/goat/server", () => ({
-  captureGoatServerEvent: vi.fn(async () => undefined),
+vi.mock("@opencompany/analytics/product/server", () => ({
+  captureProductServerEvent: vi.fn(async () => undefined),
 }));
-vi.mock("@opencompany/db/goat-brain-sources", () => ({
-  upsertGoatBrainSource: vi.fn(async () => ({ id: "source_1", created: true })),
+vi.mock("@opencompany/db/brain-sources", () => ({
+  upsertBrainSource: vi.fn(async () => ({ id: "source_1", created: true })),
 }));
-vi.mock("@opencompany/db/goat-integrations", () => ({
-  loadGoatIntegrationCredential: vi.fn(),
-  markGoatIntegrationStatus: vi.fn(async () => undefined),
+vi.mock("@opencompany/db/integrations", () => ({
+  loadIntegrationCredential: vi.fn(),
+  markIntegrationStatus: vi.fn(async () => undefined),
 }));
-vi.mock("@opencompany/db/goat-slack-bot", () => ({
-  getGoatSlackBotIntegrationForWorkspace: vi.fn(),
+vi.mock("@opencompany/db/slack-bot", () => ({
+  getSlackBotIntegrationForWorkspace: vi.fn(),
 }));
-vi.mock("@opencompany/db/goat-workspaces", () => ({
-  getGoatBrainAccess: vi.fn(),
+vi.mock("@opencompany/db/workspaces", () => ({
+  getBrainAccess: vi.fn(),
 }));
-vi.mock("@opencompany/goat-agent/integrations/slack-bot", () => ({
-  goatSlackBotScopesSatisfied: vi.fn(() => true),
-  isGoatSlackBotConfigured: vi.fn(() => true),
+vi.mock("@opencompany/agent/integrations/slack-bot", () => ({
+  slackBotScopesSatisfied: vi.fn(() => true),
+  isSlackBotConfigured: vi.fn(() => true),
 }));
 
 const admin: Actor = {
@@ -62,9 +59,9 @@ function unusedDb() {
 describe("Slack bot settings service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getGoatSlackBotIntegrationForWorkspace).mockResolvedValue(integration as never);
-    vi.mocked(getGoatBrainAccess).mockResolvedValue(access as never);
-    vi.mocked(loadGoatIntegrationCredential).mockResolvedValue({
+    vi.mocked(getSlackBotIntegrationForWorkspace).mockResolvedValue(integration as never);
+    vi.mocked(getBrainAccess).mockResolvedValue(access as never);
+    vi.mocked(loadIntegrationCredential).mockResolvedValue({
       payload: { access_token: "token_test" },
       expiresAt: null,
       lastRotatedAt: new Date(),
@@ -85,7 +82,7 @@ describe("Slack bot settings service", () => {
       statusReason: null,
       destinationCount: 0,
     });
-    expect(getGoatSlackBotIntegrationForWorkspace).not.toHaveBeenCalled();
+    expect(getSlackBotIntegrationForWorkspace).not.toHaveBeenCalled();
   });
 
   it("admin-gates channel listing before loading the bot credential", async () => {
@@ -94,7 +91,7 @@ describe("Slack bot settings service", () => {
       status: 403,
       message: "Only workspace admins can configure the Slack bot.",
     });
-    expect(loadGoatIntegrationCredential).not.toHaveBeenCalled();
+    expect(loadIntegrationCredential).not.toHaveBeenCalled();
   });
 
   it("pages and sorts channels without returning the bot credential", async () => {
@@ -130,7 +127,7 @@ describe("Slack bot settings service", () => {
       ],
     });
 
-    expect(upsertGoatBrainSource).toHaveBeenCalledWith(
+    expect(upsertBrainSource).toHaveBeenCalledWith(
       expect.objectContaining({
         brainRef: "brain_1",
         integrationId: "gint_slack_bot",
@@ -142,7 +139,7 @@ describe("Slack bot settings service", () => {
         },
       }),
     );
-    expect(captureGoatServerEvent).toHaveBeenCalledWith(
+    expect(captureProductServerEvent).toHaveBeenCalledWith(
       "brain_source_added",
       "user_1",
       expect.objectContaining({ provider: "slack_bot" }),
@@ -152,7 +149,7 @@ describe("Slack bot settings service", () => {
   it("disconnects the workspace bot without returning its credential", async () => {
     const service = createSlackBotSettingsService({ db: unusedDb() });
     await service.disconnect(admin);
-    expect(markGoatIntegrationStatus).toHaveBeenCalledWith(
+    expect(markIntegrationStatus).toHaveBeenCalledWith(
       expect.objectContaining({
         integrationId: "gint_slack_bot",
         status: "disconnected",

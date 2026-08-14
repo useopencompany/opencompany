@@ -1,16 +1,16 @@
 import { redirect } from "next/navigation";
-import { GoatHomeRoute } from "@/components/GoatRoutes";
-import { loadCurrentGoatChatSessionById } from "@/lib/chat";
+import { HomeRoute } from "@/components/Routes";
+import { loadCurrentChatSessionById } from "@/lib/chat";
 
-type GoatChatPageProps = {
+type ChatPageProps = {
   params: Promise<{ chatId: string }>;
 };
 
-export default async function GoatChatPage({ params }: GoatChatPageProps) {
+export default async function ChatPage({ params }: ChatPageProps) {
   const { chatId } = await params;
   const trimmedChatId = chatId.trim();
   if (!trimmedChatId) redirect("/");
-  const initialChat = await loadCurrentGoatChatSessionById(trimmedChatId);
+  const initialChat = await loadCurrentChatSessionById(trimmedChatId);
   if (!initialChat) redirect("/");
-  return <GoatHomeRoute chatId={trimmedChatId} initialChat={initialChat} />;
+  return <HomeRoute chatId={trimmedChatId} initialChat={initialChat} />;
 }

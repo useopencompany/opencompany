@@ -9,7 +9,7 @@ import {
   markAutoRefillAttemptFailed,
   saveAutoRefillPaymentMethod,
 } from "./legacy-credits";
-import { getGoatStripe } from "./stripe";
+import { getStripe } from "./stripe";
 
 vi.mock("./legacy-credits", () => ({
   fulfillAutoRefill: vi.fn(),
@@ -18,13 +18,13 @@ vi.mock("./legacy-credits", () => ({
 }));
 
 vi.mock("./stripe", () => ({
-  getGoatStripe: vi.fn(),
+  getStripe: vi.fn(),
 }));
 
 const fulfillAutoRefillMock = vi.mocked(fulfillAutoRefill);
 const markAutoRefillAttemptFailedMock = vi.mocked(markAutoRefillAttemptFailed);
 const saveAutoRefillPaymentMethodMock = vi.mocked(saveAutoRefillPaymentMethod);
-const getGoatStripeMock = vi.mocked(getGoatStripe);
+const getStripeMock = vi.mocked(getStripe);
 
 describe("shared legacy Stripe auto-refill compatibility", () => {
   beforeEach(() => {
@@ -37,7 +37,7 @@ describe("shared legacy Stripe auto-refill compatibility", () => {
       .fn()
       .mockResolvedValue({ card: { brand: "visa", last4: "4242" } });
     const customersUpdate = vi.fn().mockResolvedValue({});
-    getGoatStripeMock.mockReturnValue({
+    getStripeMock.mockReturnValue({
       setupIntents: { retrieve: setupIntentsRetrieve },
       paymentMethods: { retrieve: paymentMethodsRetrieve },
       customers: { update: customersUpdate },
@@ -67,7 +67,7 @@ describe("shared legacy Stripe auto-refill compatibility", () => {
   it("ignores setup sessions without tenant and Stripe ownership metadata", async () => {
     await completeAutoRefillSetup({ mode: "setup", metadata: {} } as never);
 
-    expect(getGoatStripeMock).not.toHaveBeenCalled();
+    expect(getStripeMock).not.toHaveBeenCalled();
     expect(saveAutoRefillPaymentMethodMock).not.toHaveBeenCalled();
   });
 

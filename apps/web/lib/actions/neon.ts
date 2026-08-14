@@ -1,2 +1,2 @@
-// Re-export shim: implementation is shared with the runner-facing Goat agent package.
-export * from "@opencompany/goat-agent/actions/neon";
+// Re-export shim: implementation is shared with the runner-facing opencompany agent package.
+export * from "@opencompany/agent/actions/neon";
