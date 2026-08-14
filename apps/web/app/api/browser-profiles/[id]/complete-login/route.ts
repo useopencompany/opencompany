@@ -1,25 +1,11 @@
-import { currentGoatUser } from "@/lib/auth";
-import { completeLoginSession } from "@/lib/browser-profiles";
+import { legacyCompleteBrowserProfileLogin } from "@/lib/browser-profile-route-adapter";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+// Temporary rollback/cached-client bridge; the canonical API owns browser
+// profiles. Removal signal: the #1203 compatibility observation-window closure.
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const context = await currentGoatUser({ optional: true });
-  if (!context) return new Response(null, { status: 401 });
-
-  try {
-    const { id } = await params;
-    const body = (await request.json()) as { sessionId?: unknown };
-    await completeLoginSession({
-      userWorkosId: context.user.workosUserId,
-      profileId: id,
-      sessionId: typeof body.sessionId === "string" ? body.sessionId : "",
-    });
-    return Response.json({ ok: true });
-  } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "Could not complete login.",
-      },
-      { status: 400 },
-    );
-  }
+  const { id } = await params;
+  return legacyCompleteBrowserProfileLogin(request, id);
 }

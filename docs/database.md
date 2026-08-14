@@ -33,20 +33,32 @@ Generate a migration for physical schema changes, inspect the SQL, and test it o
 database. Never edit already-applied migrations or the Drizzle journal. CI checks schema/migration
 coupling and journal consistency.
 
+Migrations are forward-only deployment mechanics, not a runtime mode switch. The application has
+one canonical API/runner data path after a migration lands; do not add dual writes, rollback tables,
+or client adapters to make an additive migration look reversible. A safe application revert may
+leave additive columns, reservations, and rebuildable projections deployed.
+
 Compatibility tables must not be dropped as incidental cleanup. Retiring their schemas requires a
 separate, explicitly destructive migration plan with production data verification and rollback
 analysis.
 
 ## Canonical execution projections
 
-Canonical Chat and Task repositories map the public `Conversation`, `Message`, `Run`, `Attempt`,
-`Event`, and `Task` vocabulary onto retained physical Goat tables. Keep that mapping inside
-`packages/db/src/chat-repository.ts` and `packages/db/src/task-repository.ts`; API and client code
-must not depend on physical table or lease names.
+Canonical Chat, Task, and automation repositories map the public `Conversation`, `Message`, `Run`,
+`Attempt`, `Event`, `Task`, `Workflow`, and `TaskSchedule` vocabulary onto retained physical Goat
+tables. Keep that mapping inside `packages/db/src/chat-repository.ts`,
+`packages/db/src/task-repository.ts`, and `packages/db/src/workflow-repository.ts`; API and client
+code must not depend on physical table, planner payload, or lease names.
 
 The `*_read_model_v1` tables are derived, API-owned Electric projections. Postgres source rows stay
-authoritative, and every Electric shape must use a fixed server-owned table, columns, predicate,
-Actor, and Workspace. Adding or changing a projection requires an additive migration, a backfill,
-and authorization tests. Historical sessionless Tasks are intentionally excluded from the
-canonical Task projection until the bounded compatibility migration in issue #1190; do not delete
-their legacy history while that adapter exists.
+authoritative, and every public Electric model fixes its server-owned table, columns, predicate,
+Actor, Workspace, and allowed parameters. Clients select only named versions such as
+`chat-conversations-v1`, `tasks-v1`, `workflows-v1`, `brain-documents-v1`, or
+`integration-accounts-v1`; there is no generic web shape selector. Adding or changing a projection
+requires an additive migration, an idempotent backfill when existing rows need it, and authorization
+tests.
+
+Production `apps/web` code does not import the database or Drizzle. API and runner composition roots
+own repository wiring; shared packages own the mapping. The 35 sessionless pre-cutover Tasks remain
+readable only through the bounded actor-scoped compatibility resources governed by ADR 0002. Their
+physical history must not be deleted without the separate retention, usage, and data-rollback gate.

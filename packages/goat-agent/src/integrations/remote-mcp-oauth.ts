@@ -24,6 +24,8 @@ import { captureGoatIntegrationAddedAnalytics } from "./analytics";
 const STATE_TTL_MS = 10 * 60 * 1000;
 const CREDENTIAL_KIND = "oauth_token" as const;
 
+type DbLike = any;
+
 export type GoatRemoteMcpProviderState<TProvider extends GoatIntegrationProvider> = {
   provider: TProvider;
   connected: boolean;
@@ -157,11 +159,15 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
     };
   }
 
-  async function start(input: { userWorkosId: string; returnTo: string }) {
+  // The web settings surface and runner workers keep resolving the shared
+  // neon-http client through getDb(); the canonical API ingress injects its
+  // node-postgres pooled db into start/complete instead.
+  async function start(input: { userWorkosId: string; returnTo: string; db?: DbLike }) {
     const integration = await upsertIntegration({
       userWorkosId: input.userWorkosId,
       status: "needs_reauth",
       statusReason: `${config.displayName} MCP authorization started.`,
+      db: input.db,
     });
     const state = createState({
       provider: config.provider,
@@ -177,16 +183,18 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
       payload: await loadPayload({
         userWorkosId: input.userWorkosId,
         integrationId: integration.id,
+        db: input.db,
       }),
       state,
       onAuthorizationUrl: (url) => {
         authorizationUrl = url.toString();
       },
+      db: input.db,
     });
 
     const result = await auth(provider, { serverUrl: config.endpointUrl });
     if (result === "AUTHORIZED") {
-      await markConnected(integration.id, input.userWorkosId);
+      await markConnected(integration.id, input.userWorkosId, input.db);
       return { status: "connected" as const, redirectUrl: null };
     }
     if (!authorizationUrl) {
@@ -200,11 +208,13 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
     integrationId: string;
     code: string;
     state: string;
+    db?: DbLike;
   }) {
     const provider = createClientProvider({
       userWorkosId: input.userWorkosId,
       integrationId: input.integrationId,
       payload: await loadPayload(input),
+      db: input.db,
     });
 
     const result = await auth(provider, {
@@ -216,7 +226,7 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
       throw new Error(`${config.displayName} MCP authorization was not completed.`);
     }
 
-    await markConnected(input.integrationId, input.userWorkosId);
+    await markConnected(input.integrationId, input.userWorkosId, input.db);
   }
 
   function createState(input: Omit<GoatRemoteMcpState, "expiresAt" | "nonce">) {
@@ -265,9 +275,10 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
     userWorkosId: string;
     status: GoatIntegrationStatus;
     statusReason: string | null;
+    db?: DbLike;
   }) {
     const now = new Date();
-    const [integration] = await getDb()
+    const [integration] = await (input.db ?? getDb())
       .insert(goatIntegrations)
       .values({
         id: `gint_${randomUUID().replaceAll("-", "").slice(0, 16)}`,
@@ -309,8 +320,8 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
     return integration;
   }
 
-  async function markConnected(integrationId: string, userWorkosId: string) {
-    await getDb()
+  async function markConnected(integrationId: string, userWorkosId: string, db?: DbLike) {
+    await (db ?? getDb())
       .update(goatIntegrations)
       .set({
         status: "connected",
@@ -335,12 +346,13 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
     });
   }
 
-  async function loadPayload(input: { userWorkosId: string; integrationId: string }) {
+  async function loadPayload(input: { userWorkosId: string; integrationId: string; db?: DbLike }) {
     const credential = await loadGoatIntegrationCredential({
       userWorkosId: input.userWorkosId,
       integrationId: input.integrationId,
       provider: config.provider,
       kind: CREDENTIAL_KIND,
+      db: input.db,
     });
     return credential ? parsePayload(credential.payload) : {};
   }
@@ -351,6 +363,7 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
     payload: GoatRemoteMcpOAuthPayload;
     state?: string;
     onAuthorizationUrl?: (url: URL) => void;
+    db?: DbLike;
   }): OAuthClientProvider {
     let payload = input.payload;
 
@@ -362,6 +375,7 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
         provider: config.provider,
         kind: CREDENTIAL_KIND,
         payload: { ...next },
+        db: input.db,
       });
     }
 
@@ -418,6 +432,7 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
             userWorkosId: input.userWorkosId,
             integrationId: input.integrationId,
             statusReason: `${config.displayName} authorization expired. Reconnect ${config.displayName} in Settings.`,
+            db: input.db,
           });
         }
       },
@@ -428,6 +443,7 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
     userWorkosId: string;
     integrationId: string;
     statusReason: string;
+    db?: DbLike;
   }) {
     await markGoatIntegrationStatus({
       userWorkosId: input.userWorkosId,
@@ -435,6 +451,7 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
       provider: config.provider,
       status: "needs_reauth",
       statusReason: input.statusReason,
+      db: input.db,
     });
   }
 

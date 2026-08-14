@@ -22,6 +22,7 @@ const migrationPaths = [
   "0201_goat_chat_read_models_v1.sql",
   "0202_goat_headless_task_foundation.sql",
   "0204_goat_task_conversation_history_projection.sql",
+  "0205_goat_task_history_projection_repair.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -39,6 +40,7 @@ describe("Postgres Task repository", () => {
     physicalHistoryUntouched: boolean;
     normalChatTaskCardUntouched: boolean;
     crossWorkspaceLinkRejected: boolean;
+    crossWorkspaceRunRejected: boolean;
   };
 
   beforeEach(async () => {
@@ -123,16 +125,36 @@ describe("Postgres Task repository", () => {
       INSERT INTO goat.codex_chat_turns (
         id, user_workos_id, codex_chat_session_id, chat_session_id, user_message_id,
         assistant_message_id, status, prompt
-      ) VALUES (
-        'migration_prior_task_run', 'migration_user', 'migration_prior_task_runtime',
-        'migration_prior_task_conversation', 'migration_prior_task_message',
-        'migration_prior_task_assistant', 'completed', 'Prior workflow step'
-      );
+      ) VALUES
+        (
+          'migration_prior_task_run', 'migration_user', 'migration_prior_task_runtime',
+          'migration_prior_task_conversation', 'migration_prior_task_message',
+          'migration_prior_task_assistant', 'completed', 'Prior workflow step'
+        ),
+        (
+          'migration_cross_workspace_run', 'migration_user',
+          'migration_other_workspace_runtime', 'migration_other_workspace_task_conversation',
+          'migration_cross_workspace_message', 'migration_cross_workspace_message',
+          'completed', 'Must stay isolated'
+        );
     `);
     for (const migrationPath of migrationPaths) {
+      if (migrationPath.endsWith("0205_goat_task_history_projection_repair.sql")) {
+        // Reproduce the production gap: valid physical Task history whose projection row is absent.
+        await database.exec(`
+          DELETE FROM goat.message_read_model_v1 WHERE id = 'migration_prior_task_message';
+          DELETE FROM goat.run_read_model_v1 WHERE id = 'migration_prior_task_run';
+        `);
+      }
       const migration = await readFile(migrationPath, "utf8");
-      for (const statement of migration.split("--> statement-breakpoint")) {
+      const statements = migration.split("--> statement-breakpoint");
+      for (const statement of statements) {
         if (statement.trim()) await database.exec(statement);
+      }
+      if (migrationPath.endsWith("0205_goat_task_history_projection_repair.sql")) {
+        for (const statement of statements) {
+          if (statement.trim()) await database.exec(statement);
+        }
       }
     }
     const migrationRows = await database.query<{
@@ -145,6 +167,7 @@ describe("Postgres Task repository", () => {
       physical_history_untouched: boolean;
       normal_chat_task_card_untouched: boolean;
       cross_workspace_link_rejected: boolean;
+      cross_workspace_run_rejected: boolean;
     }>(`
       SELECT
         EXISTS (
@@ -193,7 +216,14 @@ describe("Postgres Task repository", () => {
           WHERE id = 'migration_cross_workspace_message'
             AND conversation_id = 'migration_other_workspace_task_conversation'
             AND workspace_id = 'migration_other_workspace'
-        ) AS cross_workspace_link_rejected
+        ) AS cross_workspace_link_rejected,
+        EXISTS (
+          SELECT 1
+          FROM goat.run_read_model_v1
+          WHERE id = 'migration_cross_workspace_run'
+            AND conversation_id = 'migration_other_workspace_task_conversation'
+            AND workspace_id = 'migration_other_workspace'
+        ) AS cross_workspace_run_rejected
     `);
     const migrationRow = migrationRows.rows[0];
     migrationEvidence = {
@@ -206,6 +236,7 @@ describe("Postgres Task repository", () => {
       physicalHistoryUntouched: migrationRow?.physical_history_untouched ?? false,
       normalChatTaskCardUntouched: migrationRow?.normal_chat_task_card_untouched ?? false,
       crossWorkspaceLinkRejected: migrationRow?.cross_workspace_link_rejected ?? false,
+      crossWorkspaceRunRejected: migrationRow?.cross_workspace_run_rejected ?? false,
     };
 
     await database.exec(`
@@ -275,6 +306,7 @@ describe("Postgres Task repository", () => {
       physicalHistoryUntouched: true,
       normalChatTaskCardUntouched: true,
       crossWorkspaceLinkRejected: true,
+      crossWorkspaceRunRejected: true,
     });
   });
 

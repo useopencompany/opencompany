@@ -514,6 +514,7 @@ describe("normalizeUploadAsset", () => {
     expect(item.sourceRef).toBe("upload:goat_brain_doc_abc");
     expect(item.title).toBe("Q3 Board Deck.pdf");
     expect(item.content.asset.brainId).toBe("q3-board-deck");
+    expect(item.content.asset.contentSha256).toBe("a".repeat(64));
     expect(isNormalizedUploadAssetSourceItem(item)).toBe(true);
     // Same bytes dedupe; different bytes re-enqueue.
     expect(normalizeUploadAsset(input).contentHash).toBe(item.contentHash);
@@ -529,6 +530,9 @@ describe("normalizeUploadAsset", () => {
   });
 
   it("guards against other item shapes", () => {
+    const legacy = normalizeUploadAsset(input);
+    delete legacy.content.asset.contentSha256;
+    expect(isNormalizedUploadAssetSourceItem(legacy)).toBe(true);
     expect(isNormalizedUploadAssetSourceItem({ sourceProvider: "upload" })).toBe(false);
     expect(isNormalizedUploadAssetSourceItem(null)).toBe(false);
   });
@@ -867,21 +871,21 @@ describe("Gmail thread window normalization", () => {
     windowId: "ggmwin_abc123",
     threadId: "thread_789",
     subject: "Series A term sheet",
-    accountEmail: "founder@acme.com",
+    accountEmail: "founder@acme.example",
     messages: [
       {
         messageId: "msg_2",
         direction: "sent" as const,
-        from: "Founder <founder@acme.com>",
-        to: "Ada Investor <ada@fund.vc>",
+        from: "Founder <founder@acme.example>",
+        to: "Ada Investor <ada@investor.example>",
         sentAt: "2026-07-13T10:05:00.000Z",
         bodyText: "Thanks, reviewing the terms now.",
       },
       {
         messageId: "msg_1",
         direction: "received" as const,
-        from: "Ada Investor <ada@fund.vc>",
-        to: "founder@acme.com, cofounder@acme.com",
+        from: "Ada Investor <ada@investor.example>",
+        to: "founder@acme.example, cofounder@acme.example",
         sentAt: "2026-07-13T10:00:00.000Z",
         bodyText: "Attached is the term sheet we discussed.",
         snippet: "Attached is the term sheet",
@@ -904,8 +908,8 @@ describe("Gmail thread window normalization", () => {
       "msg_1",
       "msg_2",
     ]);
-    expect(item.content.thread.participants).toContain("Ada Investor <ada@fund.vc>");
-    expect(item.content.thread.participants).toContain("cofounder@acme.com");
+    expect(item.content.thread.participants).toContain("Ada Investor <ada@investor.example>");
+    expect(item.content.thread.participants).toContain("cofounder@acme.example");
     expect(item.occurredAt).toBe("2026-07-13T10:00:00.000Z");
     expect(item.capturedAt).toBe("2026-07-13T10:30:00.000Z");
     expect(item.contentHash).toMatch(/^[a-f0-9]{64}$/);

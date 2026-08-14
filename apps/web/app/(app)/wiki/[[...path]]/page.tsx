@@ -1,7 +1,7 @@
-import { listWikiPagesWithBodies } from "@opencompany/db/goat-wiki";
 import { notFound } from "next/navigation";
 import { GoatWikiView } from "@/components/GoatWikiView";
 import { currentGoatUser } from "@/lib/auth";
+import { listHeadlessWikiPages } from "@/lib/headless-knowledge-server";
 
 type PageProps = {
   params: Promise<{ path?: string[] }>;
@@ -9,14 +9,14 @@ type PageProps = {
 
 // The server ships every page once for instant first paint; after hydration
 // the client switches to its Electric-synced collections (see
-// lib/wiki-collections.ts) and this payload is never consulted again.
+// lib/headless-knowledge-collections.ts) and this payload is never consulted again.
 export default async function GoatWikiPage({ params }: PageProps) {
   const { path } = await params;
   const { user, workspace } = await currentGoatUser();
   if (!user.wikiEnabled) notFound();
 
   const pagePath = (path ?? []).map((segment) => decodeURIComponent(segment)).join("/");
-  const pages = await listWikiPagesWithBodies(workspace.id);
+  const pages = await listHeadlessWikiPages();
   if (pagePath && !pages.some((page) => page.path === pagePath)) notFound();
 
   return (
@@ -28,7 +28,7 @@ export default async function GoatWikiPage({ params }: PageProps) {
         path: page.path,
         title: page.title,
         kind: page.kind,
-        body: page.content,
+        body: page.body,
       }))}
       initialPath={pagePath || null}
     />

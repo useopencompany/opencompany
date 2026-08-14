@@ -1,5 +1,12 @@
-import { handleGoatGoogleOAuthStart } from "@/lib/integrations/google-routes";
+import { proxyHeadlessApiRequest } from "@/lib/headless-api-proxy";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+// URL-continuity relay: the canonical API owns the Google OAuth flow; this
+// public web path only forwards the request unchanged.
 export async function GET(request: Request) {
-  return handleGoatGoogleOAuthStart("google_drive", request);
+  return proxyHeadlessApiRequest(request, ["integrations", "google-drive", "start"], {
+    basePath: "",
+  });
 }

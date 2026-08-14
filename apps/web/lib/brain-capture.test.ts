@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   findExistingPointer: vi.fn(),
   nextBrainId: vi.fn(),
   upsertFile: vi.fn(),
-  wake: vi.fn(),
 }));
 
 vi.mock("@opencompany/analytics/goat", () => ({
@@ -27,11 +26,8 @@ vi.mock("@opencompany/db/goat-brain-ingest", async (importOriginal) => {
     upsertGoatBrainSourceItemAndEnqueue: mocks.enqueue,
   };
 });
-vi.mock("@/lib/brain", () => ({
+vi.mock("@opencompany/goat-agent/brain-files", () => ({
   nextAvailableGoatBrainId: mocks.nextBrainId,
-}));
-vi.mock("@/lib/task-runner", () => ({
-  triggerGoatBrainIngestWake: mocks.wake,
 }));
 
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
@@ -59,7 +55,6 @@ describe("captureToGoatBrainInbox", () => {
       paused: false,
       quotaUpdates: [],
     });
-    mocks.wake.mockResolvedValue(undefined);
   });
 
   it("preserves source provenance for copied integration content", async () => {
@@ -113,7 +108,6 @@ describe("captureToGoatBrainInbox", () => {
         }),
       }),
     );
-    expect(mocks.wake).toHaveBeenCalledOnce();
   });
 
   it("rejects pointers without a provider integration id", async () => {

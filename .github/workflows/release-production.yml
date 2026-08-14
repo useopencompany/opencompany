@@ -212,10 +212,6 @@ jobs:
         if: ${{ github.event_name == 'workflow_run' && steps.production-release.outputs.should_release == 'false' }}
         run: echo "This automatic release was superseded before migrations/deploy, so production was not changed."
 
-      - name: Check web billing env before production changes
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
-        run: node scripts/check-goat-billing-production-env.mjs
-
       - name: Create GitHub deployment
         id: github-deployment
         if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
@@ -395,26 +391,14 @@ jobs:
             "WORKOS_COOKIE_DOMAIN",
             "GOAT_NEXT_PUBLIC_APP_URL",
             "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
-            "GOAT_AUTHKIT_DOMAIN",
             "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
             "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
-            "VERCEL_AI_GATEWAY_API_KEY",
             "RUNNER_PUBLIC_URL",
             "RUNNER_INTERNAL_TOKEN",
             "GOAT_API_ORIGIN",
             "NEXT_PUBLIC_GOAT_API_ORIGIN",
-            "NEXT_PUBLIC_GOAT_HEADLESS_CHAT",
-            "ELECTRIC_URL",
-            "GOAT_STRIPE_API_KEY",
-            "GOAT_STRIPE_WEBHOOK_SECRET",
-            "GOAT_STRIPE_CHECKOUT_ENABLED",
             "CRON_SECRET",
-            "GOAT_HUBSPOT_CLIENT_ID",
-            "GOAT_HUBSPOT_CLIENT_SECRET",
-            "GOAT_HUBSPOT_STATE_SECRET",
-            "GOAT_X_CLIENT_ID",
-            "GOAT_X_CLIENT_SECRET",
-            "GOAT_X_STATE_SECRET",
+            "BLOB_READ_WRITE_TOKEN",
           ];
 
           async function listProductionEnv(projectId, label, teamId, token) {
@@ -480,34 +464,6 @@ jobs:
               throw new Error(`Missing web Vercel production env keys: ${missing.join(", ")}`);
             }
 
-            const checkoutEnabled = await readEnvValue(
-              webProjectId,
-              webEnv,
-              "GOAT_STRIPE_CHECKOUT_ENABLED",
-              "web",
-              teamId,
-              token,
-            );
-            if (checkoutEnabled.trim() !== "true") {
-              throw new Error(
-                "Web GOAT_STRIPE_CHECKOUT_ENABLED must be true before a production billing release.",
-              );
-            }
-
-            const webhookSecret = await readEnvValue(
-              webProjectId,
-              webEnv,
-              "GOAT_STRIPE_WEBHOOK_SECRET",
-              "web",
-              teamId,
-              token,
-            );
-            if (!webhookSecret.trim().startsWith("whsec_")) {
-              throw new Error(
-                "Web GOAT_STRIPE_WEBHOOK_SECRET must be a Stripe webhook signing secret.",
-              );
-            }
-
             const expectedWebOrigin = new URL(process.env.PRODUCTION_GOAT_URL).origin;
             const expectedApiOrigin = new URL(process.env.PRODUCTION_API_URL).origin;
             const expectedValues = new Map([
@@ -532,18 +488,6 @@ jobs:
               );
             }
 
-            const headlessChatFlag = await readEnvValue(
-              webProjectId,
-              webEnv,
-              "NEXT_PUBLIC_GOAT_HEADLESS_CHAT",
-              "web",
-              teamId,
-              token,
-            );
-            if (!["true", "false"].includes(headlessChatFlag.trim())) {
-              throw new Error("Web NEXT_PUBLIC_GOAT_HEADLESS_CHAT must be exactly true or false.");
-            }
-
           }
 
           main().catch((error) => {
@@ -561,6 +505,11 @@ jobs:
         env:
           OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
           NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
+          # The typed /v1 client's inferred router type grew Next's type-check
+          # memory past Node's ~2GB default heap on the release runner; PR CI
+          # and local builds pass with larger effective limits. The runner has
+          # 16GB, so give the build real headroom.
+          NODE_OPTIONS: --max-old-space-size=6144
         run: VERCEL_PROJECT_ID="$GOAT_VERCEL_PROJECT_ID" bunx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$GOAT_VERCEL_PROJECT_ID"
 
       - name: Deploy web
@@ -609,6 +558,40 @@ jobs:
               throw new Error(`Marketing Vercel project rootDirectory must be apps/marketing, got ${project.rootDirectory ?? "<unset>"}.`);
             }
 
+            const envResponse = await fetch(
+              `https://api.vercel.com/v10/projects/${projectId}/env?teamId=${teamId}&target=production`,
+              { headers: { Authorization: `Bearer ${token}` } },
+            );
+
+            if (!envResponse.ok) {
+              throw new Error(`Could not fetch marketing Vercel env metadata: ${envResponse.status} ${envResponse.statusText}`);
+            }
+
+            const { envs } = await envResponse.json();
+            const productionKeys = new Set(
+              envs
+                .filter(
+                  (env) =>
+                    Array.isArray(env.target) &&
+                    env.target.includes("production") &&
+                    !env.gitBranch,
+                )
+                .map((env) => env.key),
+            );
+            const requiredAnalyticsKeys = [
+              "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
+              "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
+            ];
+            const missingAnalyticsKeys = requiredAnalyticsKeys.filter(
+              (key) => !productionKeys.has(key),
+            );
+
+            if (missingAnalyticsKeys.length > 0) {
+              throw new Error(
+                `Missing marketing Vercel production env keys: ${missingAnalyticsKeys.join(", ")}`,
+              );
+            }
+
             mkdirSync(".vercel", { recursive: true });
             writeFileSync(
               ".vercel/project.json",
@@ -633,7 +616,9 @@ jobs:
               )}\n`,
             );
 
-            console.log(`Verified Vercel project ${project.name} with root ${project.rootDirectory}.`);
+            console.log(
+              `Verified Vercel project ${project.name}, root ${project.rootDirectory}, and marketing analytics env.`,
+            );
           }
 
           main().catch((error) => {

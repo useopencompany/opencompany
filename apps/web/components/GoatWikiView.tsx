@@ -3,7 +3,7 @@
 // The wiki surface: a Notion-lite tree of markdown pages with subpages.
 //
 // Local-first: the tree, page bodies, and timelines are Electric-synced
-// TanStack DB collections (see lib/wiki-collections.ts). Every mutation is
+// TanStack DB collections (see lib/headless-knowledge-collections.ts). Every mutation is
 // applied optimistically — a rename is visible in the sidebar and in every
 // [[link]] chip on the same keystroke — and persisted through the same server
 // actions/storage layer the `wiki` agent tool uses, with Postgres txids
@@ -43,12 +43,12 @@ import {
 } from "react";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import {
-  asWikiPageWriteMutations,
-  type GoatWikiCollections,
-  type GoatWikiPageRow,
-  getGoatWikiCollections,
-  persistWikiPageWrites,
-} from "@/lib/wiki-collections";
+  asHeadlessWikiPageWriteMutations,
+  getHeadlessWikiCollections,
+  type HeadlessWikiCollections,
+  type HeadlessWikiPageReadModel,
+  persistHeadlessWikiPageWrites,
+} from "@/lib/headless-knowledge-collections";
 
 export type WikiPageData = {
   id: string;
@@ -135,14 +135,14 @@ function GoatWikiLiveView({
 }) {
   const pathname = usePathname();
   const [error, setError] = useState<string | null>(null);
-  const collections = useMemo(() => getGoatWikiCollections(workspaceId), [workspaceId]);
+  const collections = useMemo(() => getHeadlessWikiCollections(workspaceId), [workspaceId]);
 
   const { data: pageRows, isLoading: pagesLoading } = useLiveQuery(
     (q) => q.from({ page: collections.pages }),
     [collections],
   );
   const { data: timelineRows } = useLiveQuery(
-    (q) => q.from({ entry: collections.timelineEntries }),
+    (q) => q.from({ entry: collections.timeline }),
     [collections],
   );
 
@@ -151,13 +151,13 @@ function GoatWikiLiveView({
   const syncReady = !pagesLoading;
   const pages: WikiPageData[] = useMemo(() => {
     if (!syncReady) return initialPages;
-    return ((pageRows ?? []) as GoatWikiPageRow[]).map(pageRowToData);
+    return ((pageRows ?? []) as HeadlessWikiPageReadModel[]).map(pageRowToData);
   }, [initialPages, pageRows, syncReady]);
 
   const timelineCountByPageId = useMemo(() => {
     const counts = new Map<string, number>();
     for (const row of timelineRows ?? []) {
-      counts.set(row.page_id, (counts.get(row.page_id) ?? 0) + 1);
+      counts.set(row.pageId, (counts.get(row.pageId) ?? 0) + 1);
     }
     return counts;
   }, [timelineRows]);
@@ -230,29 +230,24 @@ function GoatWikiLiveView({
       trackPersistence(
         collections.pages.insert({
           id,
-          workspace_id: workspaceId,
           slug,
           path,
           title,
           kind: "other",
-          content: "",
-          content_hash: "",
-          size_bytes: 0,
+          body: "",
+          contentHash: "0".repeat(64),
+          sizeBytes: 0,
           format: "markdown",
-          mime_type: null,
-          original_file_name: null,
-          asset_storage_key: null,
-          asset_content_hash: null,
-          asset_size_bytes: null,
-          created_by_workos_id: null,
-          updated_by_workos_id: null,
-          created_at: now,
-          updated_at: now,
+          mimeType: null,
+          originalFileName: null,
+          assetSizeBytes: null,
+          createdAt: now,
+          updatedAt: now,
         }),
       );
       return { id, slug, path, title };
     },
-    [collections, pages, surfaceError, syncReady, trackPersistence, workspaceId],
+    [collections, pages, surfaceError, syncReady, trackPersistence],
   );
 
   // New pages start with an empty name ("Untitled" placeholder) and open with
@@ -590,7 +585,7 @@ function WikiPageEditor({
 }: {
   page: WikiPageData;
   pages: WikiPageData[];
-  collections: GoatWikiCollections;
+  collections: HeadlessWikiCollections;
   editable: boolean;
   wikiLinks: Record<string, string>;
   pageTitles: Record<string, string>;
@@ -624,16 +619,16 @@ function WikiPageEditor({
     onMutate: (patch) => {
       collections.pages.update(page.id, (draft) => {
         if (patch.title !== undefined) draft.title = patch.title;
-        if (patch.content !== undefined) draft.content = patch.content;
+        if (patch.content !== undefined) draft.body = patch.content;
       });
     },
     mutationFn: async ({ transaction }) => {
       // A row can vanish between the keystroke and the debounced flush (page
       // deleted); saving it would silently re-create the page.
-      const mutations = asWikiPageWriteMutations(transaction.mutations).filter(
+      const mutations = asHeadlessWikiPageWriteMutations(transaction.mutations).filter(
         (mutation) => collections.pages.get(mutation.original.id) !== undefined,
       );
-      const txids = await persistWikiPageWrites(mutations);
+      const txids = await persistHeadlessWikiPageWrites(mutations);
       // The write is durable once the action returns; waiting for the txids to
       // stream back only holds optimistic state so nothing flickers. A missed
       // txid (e.g. Electric briefly unreachable) must not fail the save.
@@ -955,19 +950,19 @@ function WikiTimelinePanel({
   onError,
 }: {
   page: WikiPageData;
-  collections: GoatWikiCollections;
+  collections: HeadlessWikiCollections;
   editable: boolean;
   onError: (message: string | undefined) => void;
 }) {
   const [text, setText] = useState("");
   const { data: entryRows } = useLiveQuery(
-    (q) => q.from({ entry: collections.timelineEntries }),
+    (q) => q.from({ entry: collections.timeline }),
     [collections],
   );
   const entries = useMemo(
     () =>
       (entryRows ?? [])
-        .filter((entry) => entry.page_id === page.id)
+        .filter((entry) => entry.pageId === page.id)
         .toSorted((a, b) => b.at.localeCompare(a.at)),
     [entryRows, page.id],
   );
@@ -977,15 +972,13 @@ function WikiTimelinePanel({
     if (!trimmed || !editable) return;
     setText("");
     const now = new Date().toISOString();
-    collections.timelineEntries
+    collections.timeline
       .insert({
         id: crypto.randomUUID(),
-        workspace_id: collections.pages.get(page.id)?.workspace_id ?? "",
-        page_id: page.id,
+        pageId: page.id,
         at: now,
         text: trimmed,
-        created_by_workos_id: null,
-        created_at: now,
+        createdAt: now,
       })
       .isPersisted.promise.catch((cause: unknown) =>
         onError(cause instanceof Error ? cause.message : undefined),
@@ -1052,14 +1045,14 @@ function WikiEmptyState({ hasPages, onCreate }: { hasPages: boolean; onCreate: (
 
 // --- helpers ----------------------------------------------------------------
 
-function pageRowToData(row: GoatWikiPageRow): WikiPageData {
+function pageRowToData(row: HeadlessWikiPageReadModel): WikiPageData {
   return {
     id: row.id,
     slug: row.slug,
     path: row.path,
     title: row.title,
     kind: row.kind,
-    body: row.content,
+    body: row.body,
   };
 }
 

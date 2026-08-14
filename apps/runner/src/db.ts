@@ -21,6 +21,10 @@ export function getDb(): PooledDb {
   return getHandle().db;
 }
 
+export function getDbPool(): PooledDbHandle["pool"] {
+  return getHandle().pool;
+}
+
 export async function closeDb(): Promise<void> {
   if (!handle) return;
   const current = handle;

@@ -1,4 +1,4 @@
-import type { GoatOnboardingEmailStep } from "@opencompany/db/goat-onboarding-emails";
+import type { OnboardingEmailStep as GoatOnboardingEmailStep } from "@opencompany/protocol";
 
 // Plain, personal founder emails — no heavy HTML chrome, no emojis, all lowercase.
 // Each email is written so replies land in Louis' inbox and every send carries an

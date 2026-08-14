@@ -56,7 +56,7 @@
 .blog-prose h3 {
   scroll-margin-top: 6rem;
   color: var(--foreground);
-  font-weight: 600;
+  font-weight: 400;
   letter-spacing: -0.025em;
 }
 

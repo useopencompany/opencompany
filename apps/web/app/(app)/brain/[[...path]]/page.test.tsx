@@ -3,8 +3,8 @@ import GoatBrainPage from "./page";
 
 const routeMock = vi.hoisted(() => vi.fn(() => null));
 const currentGoatUserMock = vi.hoisted(() => vi.fn());
-const listGoatBrainForBrainMock = vi.hoisted(() => vi.fn());
-const getGoatBrainOverviewStatsMock = vi.hoisted(() => vi.fn());
+const getHeadlessBrainSnapshotMock = vi.hoisted(() => vi.fn());
+const getHeadlessBrainOverviewMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/components/GoatRoutes", () => ({
   GoatBrainRoute: routeMock,
@@ -14,12 +14,9 @@ vi.mock("@/lib/auth", () => ({
   currentGoatUser: currentGoatUserMock,
 }));
 
-vi.mock("@/lib/brain", () => ({
-  listGoatBrainForBrain: listGoatBrainForBrainMock,
-}));
-
-vi.mock("@/lib/brain-overview", () => ({
-  getGoatBrainOverviewStats: getGoatBrainOverviewStatsMock,
+vi.mock("@/lib/headless-knowledge-server", () => ({
+  getHeadlessBrainSnapshot: getHeadlessBrainSnapshotMock,
+  getHeadlessBrainOverview: getHeadlessBrainOverviewMock,
 }));
 
 const brain = {
@@ -38,14 +35,14 @@ it("loads only aggregate stats for the Brain overview", async () => {
     activeSources: 3,
   };
   currentGoatUserMock.mockResolvedValue({ brains: [brain], activeBrain: brain });
-  getGoatBrainOverviewStatsMock.mockResolvedValue(stats);
+  getHeadlessBrainOverviewMock.mockResolvedValue(stats);
 
   const page = await GoatBrainPage({
     params: Promise.resolve({ path: ["goat_brain_1"] }),
   });
 
-  expect(listGoatBrainForBrainMock).not.toHaveBeenCalled();
-  expect(getGoatBrainOverviewStatsMock).toHaveBeenCalledWith("goat_brain_1");
+  expect(getHeadlessBrainSnapshotMock).not.toHaveBeenCalled();
+  expect(getHeadlessBrainOverviewMock).toHaveBeenCalledWith("goat_brain_1");
   expect(page.props).toMatchObject({
     path: [],
     routeBrainId: "goat_brain_1",
@@ -63,15 +60,15 @@ it("loads the document snapshot and aggregate stats for local Overview navigatio
     activeSources: 3,
   };
   currentGoatUserMock.mockResolvedValue({ brains: [brain], activeBrain: brain });
-  listGoatBrainForBrainMock.mockResolvedValue(snapshot);
-  getGoatBrainOverviewStatsMock.mockResolvedValue(stats);
+  getHeadlessBrainSnapshotMock.mockResolvedValue(snapshot);
+  getHeadlessBrainOverviewMock.mockResolvedValue(stats);
 
   const page = await GoatBrainPage({
     params: Promise.resolve({ path: ["goat_brain_1", "people", "ada-lovelace"] }),
   });
 
-  expect(listGoatBrainForBrainMock).toHaveBeenCalledWith("goat_brain_1");
-  expect(getGoatBrainOverviewStatsMock).toHaveBeenCalledWith("goat_brain_1");
+  expect(getHeadlessBrainSnapshotMock).toHaveBeenCalledWith("goat_brain_1");
+  expect(getHeadlessBrainOverviewMock).toHaveBeenCalledWith("goat_brain_1");
   expect(page.props).toMatchObject({
     path: ["people", "ada-lovelace"],
     routeBrainId: "goat_brain_1",

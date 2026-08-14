@@ -20,6 +20,14 @@
       "types": "./src/task-repository.ts",
       "default": "./src/task-repository.ts"
     },
+    "./workflow-repository": {
+      "types": "./src/workflow-repository.ts",
+      "default": "./src/workflow-repository.ts"
+    },
+    "./knowledge-repository": {
+      "types": "./src/knowledge-repository.ts",
+      "default": "./src/knowledge-repository.ts"
+    },
     "./goat-claude-code-auth": {
       "types": "./src/goat-claude-code-auth.ts",
       "default": "./src/goat-claude-code-auth.ts"
@@ -171,6 +179,10 @@
     "./pool": {
       "types": "./src/pool.ts",
       "default": "./src/pool.ts"
+    },
+    "./worker-admission": {
+      "types": "./src/worker-admission.ts",
+      "default": "./src/worker-admission.ts"
     }
   },
   "scripts": {

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  loadGoatClaudeCodeAuthStatus,
   markGoatClaudeCodeCredentialValidated,
   saveGoatClaudeCodeCredential,
 } from "./goat-claude-code-auth";
@@ -85,5 +86,36 @@ describe("Goat Claude Code credential validation state", () => {
         expectedUpdatedAt: new Date("2026-07-28T10:00:00.000Z"),
       }),
     ).resolves.toBe(false);
+  });
+
+  it("reads status fields without touching the encrypted payload", async () => {
+    const row = {
+      status: "needs_reauth" as const,
+      statusReason: "Token expired.",
+      lastValidatedAt: null,
+      lastRotatedAt: new Date("2026-07-28T10:00:00.000Z"),
+    };
+    const limit = vi.fn(async () => [row]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+    const db = { select };
+
+    await expect(
+      loadGoatClaudeCodeAuthStatus({ db: db as never, userWorkosId: "user_123" }),
+    ).resolves.toEqual(row);
+    // The status projection never selects the encrypted auth JSON.
+    expect(select).toHaveBeenCalledWith(
+      expect.not.objectContaining({ encryptedAuthJson: expect.anything() }),
+    );
+
+    const empty = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({ where: vi.fn(() => ({ limit: vi.fn(async () => []) })) })),
+      })),
+    };
+    await expect(
+      loadGoatClaudeCodeAuthStatus({ db: empty as never, userWorkosId: "user_123" }),
+    ).resolves.toBeNull();
   });
 });

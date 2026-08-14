@@ -1,57 +1,13 @@
-import { NextResponse } from "next/server";
-import { currentGoatUser } from "@/lib/auth";
-import {
-  appendGoatLinearMcpStatus,
-  completeGoatLinearMcpOAuth,
-  verifyGoatLinearMcpState,
-} from "@/lib/integrations/linear-mcp";
+import { proxyHeadlessApiRequest } from "@/lib/headless-api-proxy";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+// URL-continuity relay: this exact path is the Linear MCP server's registered
+// redirect URL. The canonical API owns state verification, the code exchange,
+// and credential persistence.
 export async function GET(request: Request) {
-  const { user } = await currentGoatUser();
-  const url = new URL(request.url);
-  const stateValue = url.searchParams.get("state") ?? "";
-
-  let state;
-  try {
-    state = verifyGoatLinearMcpState(stateValue);
-  } catch {
-    return NextResponse.redirect(
-      new URL("/settings?integration=linear&setup=error&reason=invalid_state", url),
-    );
-  }
-
-  if (state.userWorkosId !== user.workosUserId) {
-    return NextResponse.redirect(
-      new URL(appendGoatLinearMcpStatus(state.returnTo, "error", "session_mismatch"), url),
-    );
-  }
-
-  if (url.searchParams.get("error")) {
-    return NextResponse.redirect(
-      new URL(appendGoatLinearMcpStatus(state.returnTo, "error", "linear_denied"), url),
-    );
-  }
-
-  const code = url.searchParams.get("code");
-  if (!code) {
-    return NextResponse.redirect(
-      new URL(appendGoatLinearMcpStatus(state.returnTo, "error", "missing_code"), url),
-    );
-  }
-
-  try {
-    await completeGoatLinearMcpOAuth({
-      userWorkosId: user.workosUserId,
-      integrationId: state.integrationId,
-      code,
-      state: stateValue,
-    });
-    return NextResponse.redirect(
-      new URL(appendGoatLinearMcpStatus(state.returnTo, "connected"), url),
-    );
-  } catch {
-    return NextResponse.redirect(
-      new URL(appendGoatLinearMcpStatus(state.returnTo, "error", "token_exchange_failed"), url),
-    );
-  }
+  return proxyHeadlessApiRequest(request, ["integrations", "linear", "callback"], {
+    basePath: "",
+  });
 }

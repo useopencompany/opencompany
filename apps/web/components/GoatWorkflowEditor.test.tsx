@@ -9,22 +9,17 @@ const routerMock = vi.hoisted(() => ({
 }));
 
 const workflowActionsMock = vi.hoisted(() => ({
-  update: vi.fn(
-    async (): Promise<{ ok: true; slug: string } | { ok: false; message: string }> => ({
-      ok: true,
-      slug: "weekly-update",
-    }),
-  ),
-  archive: vi.fn(async () => ({ ok: true as const, slug: "weekly-update" })),
+  update: vi.fn(async () => ({ version: 2 })),
+  archive: vi.fn(async () => ({ workflowId: "workflow_1", version: 2 })),
 }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => routerMock,
 }));
 
-vi.mock("@/lib/workflow-actions", () => ({
-  updateGoatWorkflowAction: workflowActionsMock.update,
-  archiveGoatWorkflowAction: workflowActionsMock.archive,
+vi.mock("@/lib/headless-automation-commands", () => ({
+  updateHeadlessWorkflow: workflowActionsMock.update,
+  archiveHeadlessWorkflow: workflowActionsMock.archive,
 }));
 
 vi.mock("@/components/MarkdownGoatBrainEditor", () => ({
@@ -49,7 +44,8 @@ vi.mock("@/components/MarkdownGoatBrainEditor", () => ({
 }));
 
 const workflow = {
-  id: "weekly-update",
+  id: "workflow_1",
+  slug: "weekly-update",
   name: "Weekly update",
   description: "Summarize the week.",
   status: "draft" as const,
@@ -62,14 +58,18 @@ const workflow = {
       instructions: "Collect the week's updates.",
     },
   ],
+  version: 1,
+  archivedAt: null,
+  createdAt: "2026-08-12T08:00:00.000Z",
+  updatedAt: "2026-08-12T08:00:00.000Z",
 };
 
 describe("GoatWorkflowEditor", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
-    workflowActionsMock.update.mockResolvedValue({ ok: true, slug: "weekly-update" });
-    workflowActionsMock.archive.mockResolvedValue({ ok: true, slug: "weekly-update" });
+    workflowActionsMock.update.mockResolvedValue({ version: 2 });
+    workflowActionsMock.archive.mockResolvedValue({ workflowId: "workflow_1", version: 2 });
   });
 
   afterEach(() => {
@@ -87,22 +87,26 @@ describe("GoatWorkflowEditor", () => {
     await advanceAutosave();
 
     expect(workflowActionsMock.update).toHaveBeenCalledTimes(1);
-    expect(workflowActionsMock.update).toHaveBeenCalledWith({
-      slug: "weekly-update",
-      name: "Investor update",
-      description: "Summarize the week.",
-      steps: workflow.steps,
-      status: "draft",
-      trigger: { type: "manual" },
-    });
+    expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      "workflow_1",
+      {
+        expectedVersion: 1,
+        name: "Investor update",
+        description: "Summarize the week.",
+        steps: workflow.steps,
+        status: "draft",
+        trigger: { type: "manual" },
+      },
+      { waitForWorkflowSchedule: false },
+    );
     expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
   it("collapses edits made during an in-flight save into one trailing save", async () => {
-    const firstSave = deferred<{ ok: true; slug: string }>();
+    const firstSave = deferred<{ version: number }>();
     workflowActionsMock.update
       .mockImplementationOnce(() => firstSave.promise)
-      .mockResolvedValue({ ok: true, slug: "weekly-update" });
+      .mockResolvedValue({ version: 3 });
     render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     fireEvent.change(screen.getByLabelText("Step 1 name"), { target: { value: "First edit" } });
@@ -115,23 +119,26 @@ describe("GoatWorkflowEditor", () => {
     expect(workflowActionsMock.update).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      firstSave.resolve({ ok: true, slug: "weekly-update" });
+      firstSave.resolve({ version: 2 });
       await firstSave.promise;
     });
 
     expect(workflowActionsMock.update).toHaveBeenCalledTimes(2);
     expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
+      "workflow_1",
       expect.objectContaining({
+        expectedVersion: 2,
         steps: [expect.objectContaining({ id: "step-1", title: "Final edit" })],
         trigger: { type: "manual" },
       }),
+      { waitForWorkflowSchedule: false },
     );
   });
 
   it("lets an editor retry a transient autosave failure without another edit", async () => {
     workflowActionsMock.update
-      .mockResolvedValueOnce({ ok: false, message: "Temporary save failure." })
-      .mockResolvedValueOnce({ ok: true, slug: "weekly-update" });
+      .mockRejectedValueOnce(new Error("Temporary save failure."))
+      .mockResolvedValueOnce({ version: 2 });
     render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     fireEvent.change(screen.getByLabelText("Step 1 name"), { target: { value: "Retry me" } });
@@ -192,6 +199,7 @@ describe("GoatWorkflowEditor", () => {
     await advanceAutosave();
 
     expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      "workflow_1",
       expect.objectContaining({
         steps: [
           expect.objectContaining({
@@ -203,6 +211,7 @@ describe("GoatWorkflowEditor", () => {
         ],
         trigger: { type: "manual" },
       }),
+      { waitForWorkflowSchedule: false },
     );
   });
 
@@ -220,6 +229,7 @@ describe("GoatWorkflowEditor", () => {
     await advanceAutosave();
 
     expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      "workflow_1",
       expect.objectContaining({
         steps: [
           expect.objectContaining({
@@ -231,6 +241,7 @@ describe("GoatWorkflowEditor", () => {
         ],
         trigger: { type: "manual" },
       }),
+      { waitForWorkflowSchedule: false },
     );
   });
 
@@ -249,6 +260,7 @@ describe("GoatWorkflowEditor", () => {
     await advanceAutosave();
 
     expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      "workflow_1",
       expect.objectContaining({
         trigger: {
           type: "schedule",
@@ -257,6 +269,7 @@ describe("GoatWorkflowEditor", () => {
           prompt: "Draft the weekday update.",
         },
       }),
+      { waitForWorkflowSchedule: true },
     );
   });
 
@@ -272,6 +285,7 @@ describe("GoatWorkflowEditor", () => {
     await advanceAutosave();
 
     expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      "workflow_1",
       expect.objectContaining({
         trigger: {
           type: "schedule",
@@ -280,6 +294,7 @@ describe("GoatWorkflowEditor", () => {
           prompt: "Check for updates.",
         },
       }),
+      { waitForWorkflowSchedule: true },
     );
   });
 
@@ -295,6 +310,7 @@ describe("GoatWorkflowEditor", () => {
     await advanceAutosave();
 
     expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      "workflow_1",
       expect.objectContaining({
         trigger: {
           type: "schedule",
@@ -303,6 +319,7 @@ describe("GoatWorkflowEditor", () => {
           prompt: "Run the monthly report.",
         },
       }),
+      { waitForWorkflowSchedule: true },
     );
   });
 
@@ -315,8 +332,59 @@ describe("GoatWorkflowEditor", () => {
       await Promise.resolve();
     });
 
-    expect(workflowActionsMock.archive).toHaveBeenCalledWith({ slug: "weekly-update" });
+    expect(workflowActionsMock.archive).toHaveBeenCalledWith(
+      "workflow_1",
+      {
+        expectedVersion: 1,
+      },
+      { waitForWorkflowSchedule: false },
+    );
     expect(routerMock.push).toHaveBeenCalledWith("/workflows");
+  });
+
+  it("does not wait for a deleted schedule projection when archiving after a manual save", async () => {
+    render(
+      <GoatWorkflowEditor
+        workflow={{
+          ...workflow,
+          trigger: {
+            type: "schedule",
+            cron: "0 9 * * 1",
+            timezone: "UTC",
+            prompt: "Run the weekly report.",
+            enabled: true,
+            lastRunAt: null,
+            nextRunAt: "2026-08-17T09:00:00.000Z",
+          },
+        }}
+        canEdit
+        skillCatalog={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "Manual" }));
+    await advanceAutosave();
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive workflow" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(workflowActionsMock.archive).toHaveBeenCalledWith(
+      "workflow_1",
+      { expectedVersion: 2 },
+      { waitForWorkflowSchedule: false },
+    );
+  });
+
+  it("does not race archive against a pending autosave version", () => {
+    render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    fireEvent.change(screen.getByLabelText("Step 1 name"), { target: { value: "Unsaved edit" } });
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+
+    expect(screen.getByRole("button", { name: "Archive workflow" })).toBeDisabled();
+    expect(workflowActionsMock.archive).not.toHaveBeenCalled();
   });
 });
 

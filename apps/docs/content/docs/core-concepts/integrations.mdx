@@ -1,0 +1,30 @@
+---
+title: Integrations
+description: Understand connections, agent actions, Brain sources, and provider-owned scope.
+---
+
+An integration is a saved relationship between OpenCompany and an external service or engine. One
+connection can support more than one product behavior:
+
+- **Agent actions** let an engine read or change provider data on your behalf.
+- **Brain sources** ingest selected provider activity into durable knowledge.
+- **Provider ingress** accepts verified webhooks or OAuth callbacks.
+- **Engine connections** authorize Codex or Claude Code cloud coding sessions.
+- **Workspace capabilities** make tools such as Infisical available inside coding environments.
+
+These behaviors are configured separately. Connecting Slack, for example, can make Slack actions
+available without feeding any channel into Brain. Brain ingestion starts only after a specific source
+is selected and enabled.
+
+## Permissions
+
+Agent actions can be **On**, **Ask**, or **Off**. **Ask** requires confirmation before the action.
+The provider's own OAuth scopes or API-key permissions remain the outer boundary: changing an action
+to **On** cannot grant a capability the provider credential does not have.
+
+Workspace and personal connections also have different owners. Workspace admins manage shared
+connections; each person manages accounts that act as them. Review the provider identity shown in
+Settings before enabling actions or ingestion.
+
+See [Integrations](/docs/integrations) for the provider index and the documentation status of each
+connection.

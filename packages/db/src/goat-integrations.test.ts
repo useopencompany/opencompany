@@ -1,8 +1,11 @@
 import { decryptJson } from "@opencompany/crypto";
 import { drizzle } from "drizzle-orm/neon-http";
+import { drizzle as drizzleNodePg } from "drizzle-orm/node-postgres";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  applyGoatIntegrationCapabilityMode,
   connectGoatSlackBotIntegration,
+  disconnectGoatPersonalIntegration,
   goatCredentialAad,
   refreshGoatIntegrationCredential,
 } from "./goat-integrations";
@@ -176,5 +179,131 @@ describe("connectGoatSlackBotIntegration", () => {
       team_name: "New Slack",
       scope: "app_mentions:read,chat:write",
     });
+  });
+
+  it("falls back to an interactive transaction on drivers without a batch API", async () => {
+    vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
+    const now = new Date("2026-08-13T09:00:00.000Z");
+    const statements: string[] = [];
+    // node-postgres client shape: drizzle's pooled session drives BEGIN/COMMIT
+    // through client.query, unlike neon-http's batch endpoint.
+    const query = vi.fn(
+      async (config: string | { text: string }, _params?: unknown[], _options?: object) => {
+        const text = typeof config === "string" ? config : config.text;
+        statements.push(text);
+        if (text.startsWith('select "id", "user_workos_id" from "goat"."integrations"')) {
+          return { rows: [] };
+        }
+        if (text.startsWith('insert into "goat"."integrations"')) {
+          return { rows: [["gint_bot_new"]] };
+        }
+        if (text.startsWith('insert into "goat"."integration_credentials"')) {
+          return { rows: [["gcred_bot", null, now.toISOString(), now.toISOString(), 1]] };
+        }
+        return { rows: [] };
+      },
+    );
+    const db = drizzleNodePg({ query } as never);
+
+    await expect(
+      connectGoatSlackBotIntegration({
+        userWorkosId: "user_connecting",
+        workspaceId: "workspace_123",
+        teamId: "T_NEW",
+        teamName: "New Slack",
+        botUserId: "B_NEW",
+        accessToken: "xoxb-test",
+        scopes: ["app_mentions:read", "chat:write"],
+        db,
+        now,
+      }),
+    ).resolves.toEqual({ integrationId: "gint_bot_new" });
+
+    // Both writes must sit inside one interactive transaction.
+    const begin = statements.findIndex((text) => text === "begin");
+    const commit = statements.findIndex((text) => text === "commit");
+    const integrationInsert = statements.findIndex((text) =>
+      text.startsWith('insert into "goat"."integrations"'),
+    );
+    const credentialInsert = statements.findIndex((text) =>
+      text.startsWith('insert into "goat"."integration_credentials"'),
+    );
+    expect(begin).toBeGreaterThanOrEqual(0);
+    expect(integrationInsert).toBeGreaterThan(begin);
+    expect(credentialInsert).toBeGreaterThan(integrationInsert);
+    expect(commit).toBeGreaterThan(credentialInsert);
+    expect(statements[integrationInsert]!.replace(/\s+/g, " ")).toContain(
+      'on conflict ("workspace_id","provider")',
+    );
+  });
+});
+
+describe("disconnectGoatPersonalIntegration", () => {
+  it("reports a deletion for both drizzle execute result shapes", async () => {
+    // node-postgres pooled drizzle returns { rows }; neon-http returns arrays.
+    const pooled = { execute: vi.fn(async () => ({ rows: [{ id: "gint_1" }] })) };
+    await expect(
+      disconnectGoatPersonalIntegration({
+        userWorkosId: "user_1",
+        integrationId: "gint_1",
+        db: pooled,
+      }),
+    ).resolves.toBe(true);
+
+    const arrayShaped = { execute: vi.fn(async () => [{ id: "gint_1" }]) };
+    await expect(
+      disconnectGoatPersonalIntegration({
+        userWorkosId: "user_1",
+        integrationId: "gint_1",
+        db: arrayShaped,
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("reports no deletion when the ownership guard matches nothing", async () => {
+    const db = { execute: vi.fn(async () => ({ rows: [] })) };
+    await expect(
+      disconnectGoatPersonalIntegration({
+        userWorkosId: "user_1",
+        integrationId: "gint_other",
+        db,
+      }),
+    ).resolves.toBe(false);
+    expect(db.execute).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("applyGoatIntegrationCapabilityMode", () => {
+  it("merges the sparse override and stamps updatedAt", async () => {
+    let setValues: Record<string, unknown> | null = null;
+    const db = {
+      update: () => ({
+        set: (values: Record<string, unknown>) => {
+          setValues = values;
+          return { where: async () => undefined };
+        },
+      }),
+    };
+    const now = new Date("2026-08-13T08:00:00.000Z");
+    await applyGoatIntegrationCapabilityMode({
+      integrationIds: ["gint_1", "gint_2"],
+      capabilityId: "write",
+      mode: "on",
+      db: db as never,
+      now,
+    });
+    expect(setValues).not.toBeNull();
+    expect((setValues as unknown as { updatedAt: Date }).updatedAt).toEqual(now);
+  });
+
+  it("skips the write entirely for an empty connection list", async () => {
+    const update = vi.fn();
+    await applyGoatIntegrationCapabilityMode({
+      integrationIds: [],
+      capabilityId: "write",
+      mode: "on",
+      db: { update } as never,
+    });
+    expect(update).not.toHaveBeenCalled();
   });
 });

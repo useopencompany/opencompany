@@ -4,6 +4,11 @@ import { goatIntegrationResources, goatIntegrations } from "@opencompany/db/goat
 import { and, desc, eq, notInArray, sql } from "drizzle-orm";
 import { getGoatAppUrl } from "../app-url";
 
+// Matches the loose injection convention used by the other shared goat modules:
+// callers may pass either the neon-http or the pooled node-postgres Drizzle
+// instance. Defaults preserve the existing getDb() behavior for web/runner.
+type DbLike = any;
+
 type GitHubInstallation = {
   id: number | string;
   account?: {
@@ -312,15 +317,17 @@ export async function searchGoatGitHubIssues(input: {
   });
 }
 
-export async function syncGoatGitHubIntegrationRepositories(input: {
-  userWorkosId: string;
-  workspaceId: string;
-  installationId: string;
-  accountLogin: string | null;
-  accountType: string | null;
-  repositories: GoatGitHubRepository[];
-}) {
-  const db = getDb();
+export async function syncGoatGitHubIntegrationRepositories(
+  input: {
+    userWorkosId: string;
+    workspaceId: string;
+    installationId: string;
+    accountLogin: string | null;
+    accountType: string | null;
+    repositories: GoatGitHubRepository[];
+  },
+  db: DbLike = getDb(),
+) {
   const now = new Date();
   const connectionLabel = input.accountLogin?.trim() || "GitHub";
   // On reconnect (possibly by a different admin) user_workos_id stays as the

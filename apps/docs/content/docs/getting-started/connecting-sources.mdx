@@ -1,0 +1,47 @@
+---
+title: Connecting sources
+description: Connect provider accounts and separately choose what should feed Brain.
+---
+
+OpenCompany separates **connecting an account** from **using it as a Brain source**. That distinction
+is important: authorizing a provider can make agent actions available without automatically copying
+provider content into workspace knowledge.
+
+## Connect an account
+
+Open **Settings → Integrations**, choose the Workspace or Personal group, and select a provider. The
+connection flow may use OAuth, an API key, a provider webhook, a CLI subscription login, or a
+verified phone pairing, depending on the provider.
+
+After the connection returns, check its displayed account identity and status. A provider can report
+**Needs reauthorization** or **Sync failed** even though a saved connection row still exists.
+
+## Choose what feeds Brain
+
+Open the destination Brain and then **Sources**. For providers with selectable scope, choose the
+specific material OpenCompany may ingest:
+
+- Slack conversations;
+- Linear teams and issue/comment events;
+- GitHub repositories and issue or pull-request activity;
+- Gmail event types and any ingestion instructions;
+- Google Drive files or recursive folders;
+- HubSpot or Attio CRM objects and events.
+
+Connecting these accounts is not enough on its own: Brain ingestion starts only after a source is
+configured and enabled. Meeting-note providers such as Jamie, Granola, and Fathom do not have a
+second item picker; once connected and enabled for a Brain, completed meeting material can flow in.
+
+## Agent permissions are separate
+
+Agent actions have their own modes. **On** allows the action, **Ask** pauses for confirmation, and
+**Off** removes it from later turns. A provider's OAuth grant is the outer limit; OpenCompany's action
+mode can narrow what the agent may do within that grant.
+
+Changing an action permission does not retroactively change Brain source selection, and disabling a
+Brain source does not disconnect the provider account. Review both settings when you want to stop a
+provider from being used.
+
+Provider-specific scope and ingestion details are being documented under
+[Integrations](/docs/integrations). Until a provider page is complete, treat the provider consent
+screen and the scopes shown on the saved connection as authoritative.

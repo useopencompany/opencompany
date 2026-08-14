@@ -1,17 +1,9 @@
-import { loadGoatJamieWebhookContextForApiKey } from "@/lib/integrations/jamie";
-import { GOAT_JAMIE_WEBHOOK_SECRET_HEADER } from "@/lib/integrations/jamie-constants";
-import { handleGoatJamieWebhookDelivery } from "@/lib/integrations/jamie-webhook";
+import { proxyHeadlessApiRequest } from "@/lib/headless-api-proxy";
 
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
+// URL-continuity relay: Jamie deliveries target this URL with the x-jamie-api-key header. The canonical API owns API-key resolution and the meeting ingest; this route streams the request through unmodified.
 export async function POST(request: Request) {
-  const webhookContext = await loadGoatJamieWebhookContextForApiKey(
-    request.headers.get(GOAT_JAMIE_WEBHOOK_SECRET_HEADER),
-  );
-  return handleGoatJamieWebhookDelivery({
-    request,
-    webhookContext,
-    missingContextStatus: 401,
-  });
+  return proxyHeadlessApiRequest(request, ["webhooks", "jamie"], { basePath: "" });
 }

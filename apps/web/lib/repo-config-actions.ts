@@ -1,16 +1,26 @@
 "use server";
 
-import { getDb } from "@opencompany/db/client";
-import {
-  deleteGoatRepoConfig,
-  type GoatRepoConfigView,
-  isValidGitHubRepositoryExternalId,
-  listGoatWorkspaceRepositories,
-  upsertGoatRepoConfig,
-} from "@opencompany/db/goat-repo-configs";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
-import { normalizeGoatRepoSetupInstructions, validateGoatRepoEnv } from "@/lib/repo-env";
+import { serverApiClient, serverApiError, serverApiErrorMessage } from "@/lib/server-api-client";
+
+// Mirror the protocol's WorkspaceRepository/RepoConfig contracts with concrete
+// web-side types: the generated z.infer types collapse to `any` under this
+// app's tsconfig. Env values never appear here — only saved key names.
+export type GoatWorkspaceRepository = {
+  repositoryExternalId: string;
+  repositoryFullName: string;
+  private: boolean;
+};
+
+type RepoConfigDto = {
+  repositoryExternalId: string;
+  repositoryFullName: string;
+  envKeys: string[];
+  setupInstructions: string;
+  updatedAt: string;
+};
+
+export type GoatRepoConfigView = Omit<RepoConfigDto, "updatedAt"> & { updatedAt: Date };
 
 export type GoatRepoConfigMutationResult =
   | { ok: true; config: GoatRepoConfigView }
@@ -20,39 +30,9 @@ export type GoatRepoConfigDeleteResult =
   | { ok: true; repositoryExternalId: string }
   | { ok: false; message: string };
 
-async function requireWorkspaceAdmin(): Promise<
-  { ok: false; message: string } | { ok: true; workspaceId: string; userWorkosId: string }
-> {
-  const context = await currentGoatUser({ optional: true });
-  if (!context) return { ok: false, message: "You must be signed in." };
-  if (context.role !== "admin") {
-    return {
-      ok: false,
-      message: "Only workspace admins can configure repository environments.",
-    };
-  }
-  return { ok: true, workspaceId: context.workspace.id, userWorkosId: context.user.workosUserId };
-}
-
-async function resolveConfigurableRepository(input: {
-  workspaceId: string;
-  repositoryExternalId: string;
-}): Promise<{ repositoryExternalId: string; repositoryFullName: string } | null> {
-  const db = getDb();
-  const repositories = await listGoatWorkspaceRepositories({
-    db,
-    workspaceId: input.workspaceId,
-  });
-  const repository = repositories.find(
-    (candidate) => candidate.repositoryExternalId === input.repositoryExternalId,
-  );
-  return repository
-    ? {
-        repositoryExternalId: repository.repositoryExternalId,
-        repositoryFullName: repository.repositoryFullName,
-      }
-    : null;
-}
+// Mirrors the API's path-parameter contract so obviously invalid ids keep the
+// retired Server Action's messages instead of a generic validation error.
+const REPOSITORY_EXTERNAL_ID_PATTERN = /^[1-9]\d{0,63}$/;
 
 function isValidRepositoryMutationInput(input: unknown): input is {
   repositoryExternalId: string;
@@ -62,8 +42,26 @@ function isValidRepositoryMutationInput(input: unknown): input is {
     input !== null &&
     "repositoryExternalId" in input &&
     typeof input.repositoryExternalId === "string" &&
-    isValidGitHubRepositoryExternalId(input.repositoryExternalId)
+    REPOSITORY_EXTERNAL_ID_PATTERN.test(input.repositoryExternalId)
   );
+}
+
+export async function listGoatRepoConfigsAction(): Promise<{
+  repositories: GoatWorkspaceRepository[];
+  configs: GoatRepoConfigView[];
+}> {
+  const response = await (await serverApiClient()).v1["repo-configs"].$get();
+  if (!response.ok) {
+    throw await serverApiError(response, "Repository configurations could not be loaded.");
+  }
+  const data = (await response.json()).data as {
+    repositories: GoatWorkspaceRepository[];
+    configs: RepoConfigDto[];
+  };
+  return {
+    repositories: data.repositories,
+    configs: data.configs.map(configView),
+  };
 }
 
 export async function saveGoatRepoEnvAction(input: {
@@ -73,33 +71,14 @@ export async function saveGoatRepoEnvAction(input: {
   if (!isValidRepositoryMutationInput(input) || typeof input.envContent !== "string") {
     return { ok: false, message: "Invalid repository environment." };
   }
-
-  const validation = validateGoatRepoEnv(input.envContent);
-  if (!validation.ok) return validation;
-  const gate = await requireWorkspaceAdmin();
-  if (!gate.ok) return gate;
-
-  try {
-    const repository = await resolveConfigurableRepository({
-      workspaceId: gate.workspaceId,
-      repositoryExternalId: input.repositoryExternalId,
-    });
-    if (!repository) {
-      return { ok: false, message: "This repository is not available to the workspace." };
-    }
-    const config = await upsertGoatRepoConfig({
-      db: getDb(),
-      workspaceId: gate.workspaceId,
-      ...repository,
-      createdByWorkosId: gate.userWorkosId,
-      env: { content: input.envContent },
-    });
-    revalidatePath("/settings/repositories");
-    return { ok: true, config };
-  } catch (error) {
-    reportMutationFailure("save environment", gate, input.repositoryExternalId, error);
-    return { ok: false, message: "Repository environment could not be saved." };
-  }
+  return mutateConfig(
+    async () =>
+      (await serverApiClient()).v1["repo-configs"][":repositoryExternalId"].env.$put({
+        param: { repositoryExternalId: input.repositoryExternalId },
+        json: { content: input.envContent },
+      }),
+    "Repository environment could not be saved.",
+  );
 }
 
 export async function clearGoatRepoEnvAction(input: {
@@ -108,30 +87,14 @@ export async function clearGoatRepoEnvAction(input: {
   if (!isValidRepositoryMutationInput(input)) {
     return { ok: false, message: "Invalid repository." };
   }
-  const gate = await requireWorkspaceAdmin();
-  if (!gate.ok) return gate;
-
-  try {
-    const repository = await resolveConfigurableRepository({
-      workspaceId: gate.workspaceId,
-      repositoryExternalId: input.repositoryExternalId,
-    });
-    if (!repository) {
-      return { ok: false, message: "Repository configuration not found." };
-    }
-    const config = await upsertGoatRepoConfig({
-      db: getDb(),
-      workspaceId: gate.workspaceId,
-      ...repository,
-      createdByWorkosId: gate.userWorkosId,
-      env: null,
-    });
-    revalidatePath("/settings/repositories");
-    return { ok: true, config };
-  } catch (error) {
-    reportMutationFailure("clear environment", gate, input.repositoryExternalId, error);
-    return { ok: false, message: "Repository environment could not be cleared." };
-  }
+  return mutateConfig(
+    async () =>
+      (await serverApiClient()).v1["repo-configs"][":repositoryExternalId"].env.$put({
+        param: { repositoryExternalId: input.repositoryExternalId },
+        json: { content: null },
+      }),
+    "Repository environment could not be cleared.",
+  );
 }
 
 export async function saveGoatRepoSetupInstructionsAction(input: {
@@ -141,32 +104,14 @@ export async function saveGoatRepoSetupInstructionsAction(input: {
   if (!isValidRepositoryMutationInput(input) || typeof input.setupInstructions !== "string") {
     return { ok: false, message: "Invalid setup instructions." };
   }
-  const normalized = normalizeGoatRepoSetupInstructions(input.setupInstructions);
-  if (!normalized.ok) return normalized;
-  const gate = await requireWorkspaceAdmin();
-  if (!gate.ok) return gate;
-
-  try {
-    const repository = await resolveConfigurableRepository({
-      workspaceId: gate.workspaceId,
-      repositoryExternalId: input.repositoryExternalId,
-    });
-    if (!repository) {
-      return { ok: false, message: "This repository is not available to the workspace." };
-    }
-    const config = await upsertGoatRepoConfig({
-      db: getDb(),
-      workspaceId: gate.workspaceId,
-      ...repository,
-      createdByWorkosId: gate.userWorkosId,
-      setupInstructions: normalized.instructions,
-    });
-    revalidatePath("/settings/repositories");
-    return { ok: true, config };
-  } catch (error) {
-    reportMutationFailure("save setup instructions", gate, input.repositoryExternalId, error);
-    return { ok: false, message: "Setup instructions could not be saved." };
-  }
+  return mutateConfig(
+    async () =>
+      (await serverApiClient()).v1["repo-configs"][":repositoryExternalId"].setup.$put({
+        param: { repositoryExternalId: input.repositoryExternalId },
+        json: { setupInstructions: input.setupInstructions },
+      }),
+    "Setup instructions could not be saved.",
+  );
 }
 
 export async function deleteGoatRepoConfigAction(input: {
@@ -175,35 +120,48 @@ export async function deleteGoatRepoConfigAction(input: {
   if (!isValidRepositoryMutationInput(input)) {
     return { ok: false, message: "Invalid repository." };
   }
-  const gate = await requireWorkspaceAdmin();
-  if (!gate.ok) return gate;
-
   try {
-    const deleted = await deleteGoatRepoConfig({
-      db: getDb(),
-      workspaceId: gate.workspaceId,
-      repositoryExternalId: input.repositoryExternalId,
-    });
-    if (!deleted) {
-      return { ok: false, message: "Repository configuration not found." };
+    const response = await (await serverApiClient()).v1["repo-configs"][
+      ":repositoryExternalId"
+    ].$delete({ param: { repositoryExternalId: input.repositoryExternalId } });
+    if (!response.ok) {
+      return {
+        ok: false,
+        message: await serverApiErrorMessage(
+          response,
+          "Repository configuration could not be removed.",
+        ),
+      };
     }
+    const data = (await response.json()).data;
     revalidatePath("/settings/repositories");
-    return { ok: true, repositoryExternalId: input.repositoryExternalId };
+    return { ok: true, repositoryExternalId: data.repositoryExternalId };
   } catch (error) {
-    reportMutationFailure("remove", gate, input.repositoryExternalId, error);
-    return { ok: false, message: "Repository configuration could not be removed." };
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : "Repository configuration could not be removed.",
+    };
   }
 }
 
-function reportMutationFailure(
-  operation: string,
-  context: { workspaceId: string },
-  repositoryExternalId: string,
-  error: unknown,
-) {
-  console.error(`[goat] Failed to ${operation} for repository configuration`, {
-    workspaceId: context.workspaceId,
-    repositoryExternalId,
-    errorName: error instanceof Error ? error.name : "UnknownError",
-  });
+async function mutateConfig(
+  request: () => Promise<Response>,
+  fallback: string,
+): Promise<GoatRepoConfigMutationResult> {
+  try {
+    const response = await request();
+    if (!response.ok) {
+      return { ok: false, message: await serverApiErrorMessage(response, fallback) };
+    }
+    const data = (await response.json()) as { data: RepoConfigDto };
+    revalidatePath("/settings/repositories");
+    return { ok: true, config: configView(data.data) };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : fallback };
+  }
+}
+
+function configView(config: RepoConfigDto): GoatRepoConfigView {
+  return { ...config, updatedAt: new Date(config.updatedAt) };
 }

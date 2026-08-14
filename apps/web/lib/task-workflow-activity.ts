@@ -2,7 +2,7 @@ import type {
   GoatHarnessEngine,
   GoatTaskReportedOutcome,
   GoatTaskStatus,
-} from "@opencompany/db/goat-schema";
+} from "@opencompany/goat-agent/task-runtime-types";
 
 export type GoatTaskWorkflowStepStatus =
   | "pending"

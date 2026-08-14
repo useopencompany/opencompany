@@ -540,6 +540,9 @@ export type NormalizedUploadAssetContent = {
     mimeType: string;
     originalFileName: string;
     sizeBytes: number;
+    // Added after the initial asset format shipped. Optional so queued legacy
+    // rows remain readable; all newly normalized uploads include it.
+    contentSha256?: string;
   };
 };
 
@@ -573,7 +576,7 @@ export function normalizeUploadAsset(input: {
   const uploadedAt = optionalIsoString(input.uploadedAt);
   if (!uploadedAt) throw invalid("asset uploadedAt must be a timestamp", "invalid_asset");
 
-  const asset = {
+  const assetHashInput = {
     documentId,
     brainId: input.brainId,
     folderPath: input.folderPath,
@@ -582,12 +585,13 @@ export function normalizeUploadAsset(input: {
     originalFileName,
     sizeBytes: input.sizeBytes,
   };
+  const asset = { ...assetHashInput, contentSha256 };
   const contentHashInput = {
     sourceProvider: "upload",
     sourceType: "asset",
     externalId: documentId,
     contentSha256,
-    asset,
+    asset: assetHashInput,
   };
 
   return {
@@ -633,7 +637,8 @@ export function isNormalizedUploadAssetSourceItem(
     typeof asset.format === "string" &&
     typeof asset.mimeType === "string" &&
     typeof asset.originalFileName === "string" &&
-    typeof asset.sizeBytes === "number"
+    typeof asset.sizeBytes === "number" &&
+    (asset.contentSha256 === undefined || /^[a-f0-9]{64}$/u.test(asset.contentSha256))
   );
 }
 

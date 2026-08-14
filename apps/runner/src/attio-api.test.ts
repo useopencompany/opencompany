@@ -10,9 +10,9 @@ describe("renderAttioValues", () => {
     ).toBe("Jane Doe");
     expect(
       renderAttioValues([
-        { attribute_type: "email-address", email_address: "jane@acme.com", active_until: null },
+        { attribute_type: "email-address", email_address: "jane@acme.example", active_until: null },
       ]),
-    ).toBe("jane@acme.com");
+    ).toBe("jane@acme.example");
     expect(
       renderAttioValues([
         { attribute_type: "status", status: { title: "Closed won" }, active_until: null },

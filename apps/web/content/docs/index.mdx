@@ -1,22 +1,25 @@
 ---
-title: Goat
-description: Living notes for the experimental just-in-time agent harness.
+title: OpenCompany engineering notes
+description: Current implementation notes for the OpenCompany product stack.
 ---
 
 ## What these docs are
 
-These docs are the working reference for Goat: how the app is shaped, how the task harness runs, and what decisions are current enough to build on.
+These embedded docs are an engineering reference for the current product: how the browser, API,
+runner, Brain, and integrations fit together.
 
 They are intentionally close to the app code. The source lives in `apps/web/content/docs`, and the rendered docs live at `/docs` inside the web app.
 
 ## Current product shape
 
-Goat has two user-facing paths:
+OpenCompany's main work surfaces are:
 
 - **Chat** for direct answers, quick tool use, and starting durable background work.
-- **Results** for tasks that keep running through the runner service and stream durable status back into the app.
+- **Tasks** for durable work that keeps running through the runner service.
+- **Workflows and schedules** for reusable or recurring Task creation.
+- **Brain and integrations** for durable knowledge and connected company context.
 
-The app is still experimental. Treat these docs as a living map of the current implementation, not as a frozen public manual.
+Treat these pages as implementation notes, not a public user manual.
 
 ## Where to start
 

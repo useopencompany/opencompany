@@ -7,39 +7,54 @@ duplicating every optional provider variable.
 
 | Environment/path | Consumers | Contents |
 | --- | --- | --- |
-| `dev` `/goat` | local web | shared auth, integration, billing, Electric, and product values |
+| `dev` `/goat` | local web/API stack | browser auth/presentation values plus shared local API inputs |
 | `dev` `/runner` | local runner | runner tokens, provider credentials, sandbox configuration |
-| `prod` `/goat` | Vercel web | production product and webhook configuration |
-| `prod` `/api` | Render canonical Chat API | database, auth, Auto-routing gateway, Blob, Electric, Redis, and telemetry configuration |
+| `prod` `/goat` | Vercel web | browser auth, first-party origins, public URL and cron relays, email sender, and telemetry |
+| `prod` `/api` | Render product API | database, auth, billing/Stripe, provider ingress, managed capabilities, Auto-routing gateway, Blob, Electric, Redis, and telemetry configuration |
 | `prod` `/runner` | Render runner | production worker and broker configuration |
 | `prod` `/release` | GitHub Actions | production URLs, project/service IDs, deploy tokens, DB URL |
 | `prod` `/ci/turbo` | GitHub Actions | optional Turborepo remote-cache credentials |
 
-The `/goat` path and `GOAT_*` keys are retained compatibility contracts for the web app. Values are
-scoped: a secret in `/runner` does not reach web, and a secret in `/goat` does not
-reach the runner. Shared provider credentials must be present in both paths when both runtimes use
-them.
+The `/goat` path remains the Vercel deployment namespace; it no longer implies that web owns a
+product backend. Values are scoped: API database, Electric, model, billing, integration, and
+provider-ingress secrets belong in `/api`; runner execution secrets belong in `/runner`. Do not
+mirror an API-owned secret into `/goat` unless a current thin relay actually consumes it.
+
+The names-only production audit is recorded in [#1243](https://github.com/useopencompany/opencompany-experimental/issues/1243).
+Two web exceptions remain deliberately classified as suspects rather than prune candidates:
+`BLOB_READ_WRITE_TOKEN` backs the cached-client Brain upload adapter, and `DATABASE_URL` is still
+reached indirectly by `GoatAppShell` integration-state loaders composed from shared packages. The
+latter violates the intended pure-client boundary and must be removed from code before the web
+database value can be deleted.
 
 ## Required groups
 
 `scripts/release-preflight.mjs` is the executable source of truth for required web, API, runner, and
 release variables. Important contracts include:
 
-- Web: database, WorkOS, canonical URL, shared cookie domain, Vercel AI Gateway, Blob, runner
-  token/URL, Electric, managed capabilities, Stripe, X OAuth, cron, Goat PostHog, server fallback
-  API origin, public first-party API origin, and canonical Chat flag values.
+- Web: WorkOS/AuthKit, canonical URL, shared cookie domain, first-party API origins, the narrow
+  runner relay token/URL, cron relay secret, Goat PostHog, the cached-client Blob adapter, and the
+  temporary database suspect documented above; onboarding email settings remain optional. Web does
+  not require Electric, model, billing, or provider-ingress credentials.
 - API: direct database, WorkOS session/OAuth and shared cookie domain, the credentialed browser
-  origin allowlist, Vercel AI Gateway for canonical Auto routing, Blob, Electric, and Redis values.
+  origin allowlist, billing/Stripe, managed capabilities and cron reconciliation, Vercel AI Gateway
+  for canonical Auto routing, Blob, Electric, Redis, the cron secret for the internal email
+  persistence relays and the runner token/URL for the engine-auth control calls. The retained
+  generic PostHog compatibility sink remains optional.
 - Runner: database, internal/stream tokens, Goat origin, allowed origins, integration encryption,
-  E2B, model providers, GitHub/X integration credentials, Goat PostHog, and Redis values.
+  an explicitly enabled task-worker gate, E2B, Blob, model providers, GitHub/Google/X integration
+  credentials, Goat PostHog, and Redis values; capability controls and provider-specific tuning
+  remain optional.
 - Release: production DB URL, Vercel/Render credentials and project/service IDs, Goat/API/runner
   URLs.
 
-The canonical web Chat cohort calls the non-secret `NEXT_PUBLIC_GOAT_API_ORIGIN` directly and uses
-server-only `GOAT_API_ORIGIN` only for same-origin fallback routing. Configure both origins, the
-shared `WORKOS_COOKIE_DOMAIN`, and API `API_BROWSER_ORIGINS` while the flag is `false`; pass the
-disabled smoke gate, then set `NEXT_PUBLIC_GOAT_HEADLESS_CHAT=true` and redeploy web as documented in
-[Headless Chat operations](./headless-chat-operations.md).
+Browser clients call the non-secret `NEXT_PUBLIC_GOAT_API_ORIGIN` directly for commands and
+authorized read models. Server Components use the server-only `GOAT_API_ORIGIN`. Configure both
+origins, the shared `WORKOS_COOKIE_DOMAIN`, and API `API_BROWSER_ORIGINS`. Chat recovery is
+fix-forward as documented in [Chat operations](./chat-operations.md).
+
+`CRON_SECRET` must have the same value in prod `/goat` and `/api`: web keeps the public cron URL
+while the API owns onboarding-email persistence.
 
 `REDIS_URL` is optional for correctness but required by the production activation preflight. When
 configured for both `apps/api` and `apps/runner`, it
@@ -47,13 +62,26 @@ enables the canonical Chat transient presentation lane; without it both services
 Postgres streaming and reconnect behavior. The value is server-only and must never be copied to a
 `NEXT_PUBLIC_*` variable.
 
-The Stripe endpoint secret is `GOAT_STRIPE_WEBHOOK_SECRET`; there is no second product webhook.
-Google OAuth uses the direct Goat callback URLs listed in `.env.example`.
+The Stripe endpoint secret is `GOAT_STRIPE_WEBHOOK_SECRET` in `prod` `/api`; it is not a web secret.
+Stripe still calls the unchanged web URL, which streams the signed raw body to the API-owned
+handler. Other provider URLs follow the same rule: a web relay may preserve a stable public URL,
+but provider state, signing, credentials, and persistence configuration belong to the API.
+
+The generic `NEXT_PUBLIC_POSTHOG_*` names are server-side compatibility inputs despite their
+historical prefix: API billing and runner ingestion code still read them. Do not delete their only
+hosted copy until those readers are retired or the values are explicitly provisioned on the two
+owning runtimes.
+
+The marketing Vercel project uses `NEXT_PUBLIC_GOAT_POSTHOG_TOKEN` and
+`NEXT_PUBLIC_GOAT_POSTHOG_HOST` for basic page and conversion analytics in the same PostHog project
+as the product. Both variables are required in production and optional for local marketing work.
 
 ## Local generated values
 
 `bun run setup` writes branch-specific `DATABASE_URL`, local ports/origins, runner tokens, and
-Electric configuration to `.env.local` and mirrors the web subset into `apps/web/.env.local`.
+Electric configuration to `.env.local`. It mirrors only the web auth/proxy/compatibility and
+observability subset into `apps/web/.env.local`; API/runner provider credentials are not copied
+into that app-local file.
 Do not put branch database URLs or generated local tokens in Infisical. `.env.override.local` may
 override a developer's generated values and remains gitignored.
 

@@ -1,8 +1,7 @@
 "use client";
 
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import type { GoatMcpClient } from "@opencompany/db/goat-schema";
-import { type Collection, useLiveQuery } from "@tanstack/react-db";
+import { useLiveQuery } from "@tanstack/react-db";
 import {
   createContext,
   type ReactNode,
@@ -23,10 +22,20 @@ import {
 } from "@/lib/chat-ui";
 import type { GoatFeatureFlags } from "@/lib/feature-flags";
 import {
+  getHeadlessTaskSchedules,
+  type HeadlessTaskScheduleReadModel,
+} from "@/lib/headless-automation-collections";
+import type { GoatTaskScheduleView } from "@/lib/headless-automation-types";
+import {
   getHeadlessChatConversations,
+  getHeadlessEngineSessions,
   type HeadlessChatConversationReadModel,
+  type HeadlessEngineSessionReadModel,
 } from "@/lib/headless-chat-collections";
-import { HEADLESS_CHAT_ENABLED } from "@/lib/headless-chat-feature";
+import {
+  getHeadlessIntegrationAccounts,
+  type HeadlessIntegrationAccountReadModel,
+} from "@/lib/headless-integration-collections";
 import {
   getHeadlessTasks,
   type HeadlessTaskReadModel,
@@ -36,25 +45,17 @@ import {
 import { listLegacyTaskCompatibility } from "@/lib/headless-task-commands";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
+import type { GoatMcpClient } from "@/lib/mcp-setup";
 import {
   mergeOptimisticGoatChatSummaries,
   reconcileOptimisticGoatChatSummaries,
   useOptimisticGoatChatSummaries,
 } from "@/lib/optimistic-chat-summaries";
-import {
-  createGoatCollections,
-  type GoatChatSessionRow,
-  type GoatCodexChatSessionRow,
-  type GoatIntegrationRow,
-  type GoatTaskRow,
-  type GoatTaskScheduleRow,
-} from "@/lib/task-collections";
-import type { GoatTaskScheduleView } from "@/lib/task-schedules";
+import type { GoatTaskRow } from "@/lib/task-collections";
 import { deriveGoatTaskWorkflowSteps } from "@/lib/task-workflow-activity";
 
-// Durable background chats for every engine persist runtime in goat.codex_chat_sessions.
-// The name is historical: OpenCompany, Codex, and Claude Code all use it now.
-function hasDurableChatRuntime(engine: GoatChatSessionRow["engine"]): boolean {
+// Every engine exposes the same durable engine-session read model.
+function hasDurableChatRuntime(engine: HeadlessChatConversationReadModel["engine"]): boolean {
   return engine === "opencompany" || engine === "codex" || engine === "claude_code";
 }
 
@@ -107,7 +108,6 @@ export type GoatAppInitialData = {
   featureFlags: GoatFeatureFlags;
   codexConnected: boolean;
   claudeCodeConnected: boolean;
-  chatResumeEnabled: boolean;
   mcpSetup: {
     preferredClient: GoatMcpClient | null;
     completedAt: string | null;
@@ -206,10 +206,16 @@ function GoatAppLiveDataSubscriptions({
   initialData: GoatAppInitialData;
   onData: (value: GoatAppData) => void;
 }) {
-  const collections = useMemo(() => createGoatCollections(), []);
   const tasksCollection = useMemo(
     () => getHeadlessTasks(initialData.workspace.id),
     [initialData.workspace.id],
+  );
+  const taskSchedulesCollection = useMemo(
+    () =>
+      initialData.featureFlags.taskSpawning
+        ? getHeadlessTaskSchedules(initialData.workspace.id)
+        : null,
+    [initialData.featureFlags.taskSpawning, initialData.workspace.id],
   );
   // Keep Task metadata live even while the feature is disabled so every surface has current data
   // as soon as the user enables it. Authorization and shape identity stay in the API.
@@ -245,36 +251,26 @@ function GoatAppLiveDataSubscriptions({
     [legacyTaskRows, taskRows],
   );
   const { data: scheduleRows, isLoading: schedulesLoading } = useLiveQuery(
-    (q) =>
-      initialData.featureFlags.taskSpawning
-        ? q.from({ schedule: collections.taskSchedules })
-        : undefined,
-    [initialData.featureFlags.taskSpawning, collections],
+    (q) => (taskSchedulesCollection ? q.from({ schedule: taskSchedulesCollection }) : undefined),
+    [initialData.featureFlags.taskSpawning, taskSchedulesCollection],
   );
-  const headlessConversations = useMemo(
-    () => (HEADLESS_CHAT_ENABLED ? getHeadlessChatConversations() : null),
-    [],
+  const conversationsCollection = useMemo(() => getHeadlessChatConversations(), []);
+  const engineSessionsCollection = useMemo(() => getHeadlessEngineSessions(), []);
+  const integrationAccountsCollection = useMemo(
+    () => getHeadlessIntegrationAccounts(initialData.workspace.id),
+    [initialData.workspace.id],
   );
-  // Both collections are read-only here and narrowed to their selected schema below. Erasing the
-  // row generic lets this remain one hook/subscription, so the rollback switch cannot perturb the
-  // rest of the provider's subscription lifecycle.
-  const selectedChatCollection = (headlessConversations ??
-    collections.chatSessions) as unknown as Collection<
-    Record<string, unknown>,
-    string | number,
-    Record<string, unknown>
-  >;
   const { data: chatRows, isLoading: chatsLoading } = useLiveQuery(
-    () => selectedChatCollection,
-    [selectedChatCollection],
+    (q) => q.from({ conversation: conversationsCollection }),
+    [conversationsCollection],
   );
-  const chatSessionRows = HEADLESS_CHAT_ENABLED ? undefined : chatRows;
-  const headlessConversationRows = HEADLESS_CHAT_ENABLED ? chatRows : undefined;
-  const { data: codexChatSessionRows } = useLiveQuery((q) =>
-    q.from({ codexSession: collections.codexChatSessions }),
+  const { data: engineSessionRows } = useLiveQuery(
+    (q) => q.from({ engineSession: engineSessionsCollection }),
+    [engineSessionsCollection],
   );
-  const { data: integrationRows, isLoading: integrationsLoading } = useLiveQuery((q) =>
-    q.from({ integration: collections.integrations }),
+  const { data: integrationRows, isLoading: integrationsLoading } = useLiveQuery(
+    (q) => q.from({ integration: integrationAccountsCollection }),
+    [integrationAccountsCollection],
   );
 
   const tasks = useMemo(() => {
@@ -294,9 +290,8 @@ function GoatAppLiveDataSubscriptions({
   const schedules = useMemo(() => {
     if (!initialData.featureFlags.taskSpawning) return [];
     if (schedulesLoading && !scheduleRows?.length) return initialData.schedules;
-    return ((scheduleRows ?? []) as GoatTaskScheduleRow[])
-      .filter((row) => !row.deleted_at)
-      .map(taskScheduleRowToView)
+    return ((scheduleRows ?? []) as HeadlessTaskScheduleReadModel[])
+      .map(taskScheduleReadModelToView)
       .toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [
     initialData.featureFlags.taskSpawning,
@@ -306,95 +301,24 @@ function GoatAppLiveDataSubscriptions({
   ]);
 
   const recentChats = useMemo(() => {
-    if (HEADLESS_CHAT_ENABLED) {
-      if (chatsLoading && !headlessConversationRows?.length) return initialData.recentChats;
-      const initialById = new Map(initialData.recentChats.map((chat) => [chat.id, chat]));
-      const codexRuntimeByChatId = new Map(
-        ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[]).map((row) => [
-          row.chat_session_id,
-          {
-            status: row.status,
-            activeTurnId: row.active_turn_id,
-            error: row.error,
-            updatedAt: row.updated_at,
-          },
-        ]),
-      );
-      const toSummary = (row: HeadlessChatConversationReadModel): GoatChatSummaryView => {
-        const initial = initialById.get(row.id);
-        const durableRuntime = codexRuntimeByChatId.get(row.id);
-        const codexRuntime = hasDurableChatRuntime(row.engine)
-          ? (durableRuntime ?? initial?.codexRuntime ?? null)
-          : null;
-        return {
-          id: row.id,
-          title: row.title,
-          model: row.model as AgentModelId,
-          engine: row.engine,
-          codexComposerSettings: initial?.codexComposerSettings ?? null,
-          codexRuntime,
-          state: deriveGoatChatState({
-            updatedAt: row.updatedAt,
-            lastSeenAt: row.lastSeenAt,
-            codexRuntime,
-          }),
-          preview: initial?.preview ?? "No messages yet.",
-          updatedAt: row.updatedAt,
-          lastSeenAt: row.lastSeenAt,
-          pinnedAt: row.pinnedAt,
-        };
-      };
-      const openRows = (
-        (headlessConversationRows ?? []) as HeadlessChatConversationReadModel[]
-      ).filter((row) => !row.archivedAt);
-      const activeRuntimeChatIds = new Set(
-        ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[])
-          .filter((row) =>
-            isGoatChatRuntimeActive({ status: row.status, activeTurnId: row.active_turn_id }),
-          )
-          .map((row) => row.chat_session_id),
-      );
-      const pinned = openRows
-        .filter((row) => row.pinnedAt)
-        .toSorted(
-          (a, b) => new Date(b.pinnedAt ?? 0).getTime() - new Date(a.pinnedAt ?? 0).getTime(),
-        )
-        .slice(0, GOAT_PINNED_CHAT_LIMIT)
-        .map(toSummary);
-      const activeRuntime = openRows
-        .filter((row) => !row.pinnedAt && activeRuntimeChatIds.has(row.id))
-        .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-        .map(toSummary);
-      const recent = openRows
-        .filter(
-          (row) =>
-            !row.pinnedAt &&
-            !activeRuntimeChatIds.has(row.id) &&
-            isRecentGoatHomeActivity(row.updatedAt),
-        )
-        .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-        .slice(0, 8)
-        .map(toSummary);
-      return [...pinned, ...activeRuntime, ...recent];
-    }
-    if (chatsLoading && !chatSessionRows?.length) return initialData.recentChats;
+    if (chatsLoading && !chatRows?.length) return initialData.recentChats;
     const initialById = new Map(initialData.recentChats.map((chat) => [chat.id, chat]));
     const codexRuntimeByChatId = new Map(
-      ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[]).map((row) => [
-        row.chat_session_id,
+      ((engineSessionRows ?? []) as HeadlessEngineSessionReadModel[]).map((row) => [
+        row.conversationId,
         {
           status: row.status,
-          activeTurnId: row.active_turn_id,
+          activeTurnId: row.activeRunId,
           error: row.error,
-          updatedAt: row.updated_at,
+          updatedAt: row.updatedAt,
         },
       ]),
     );
-    const toSummary = (row: GoatChatSessionRow) => {
+    const toSummary = (row: HeadlessChatConversationReadModel): GoatChatSummaryView => {
       const initial = initialById.get(row.id);
-      const liveCodexRuntime = codexRuntimeByChatId.get(row.id);
+      const durableRuntime = codexRuntimeByChatId.get(row.id);
       const codexRuntime = hasDurableChatRuntime(row.engine)
-        ? (liveCodexRuntime ?? initial?.codexRuntime ?? null)
+        ? (durableRuntime ?? initial?.codexRuntime ?? null)
         : null;
       return {
         id: row.id,
@@ -404,95 +328,63 @@ function GoatAppLiveDataSubscriptions({
         codexComposerSettings: initial?.codexComposerSettings ?? null,
         codexRuntime,
         state: deriveGoatChatState({
-          updatedAt: row.updated_at,
-          lastSeenAt: row.last_seen_at,
+          updatedAt: row.updatedAt,
+          lastSeenAt: row.lastSeenAt,
           codexRuntime,
         }),
         preview: initial?.preview ?? "No messages yet.",
-        updatedAt: row.updated_at,
-        lastSeenAt: row.last_seen_at,
-        pinnedAt: row.pinned_at,
+        updatedAt: row.updatedAt,
+        lastSeenAt: row.lastSeenAt,
+        pinnedAt: row.pinnedAt,
       };
     };
-    const openRows = ((chatSessionRows ?? []) as GoatChatSessionRow[]).filter(
-      (row) => !row.closed_at && row.kind !== "task",
+    const openRows = ((chatRows ?? []) as HeadlessChatConversationReadModel[]).filter(
+      (row) => !row.archivedAt,
     );
     const activeRuntimeChatIds = new Set(
-      ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[])
+      ((engineSessionRows ?? []) as HeadlessEngineSessionReadModel[])
         .filter((row) =>
-          isGoatChatRuntimeActive({ status: row.status, activeTurnId: row.active_turn_id }),
+          isGoatChatRuntimeActive({ status: row.status, activeTurnId: row.activeRunId }),
         )
-        .map((row) => row.chat_session_id),
+        .map((row) => row.conversationId),
     );
-    // Pinned chats stay visible regardless of the recency window, with separate
-    // caps for pinned and unpinned hydration (mirrors listOpenSessions on the server).
     const pinned = openRows
-      .filter((row) => row.pinned_at)
-      .toSorted(
-        (a, b) => new Date(b.pinned_at ?? 0).getTime() - new Date(a.pinned_at ?? 0).getTime(),
-      )
+      .filter((row) => row.pinnedAt)
+      .toSorted((a, b) => new Date(b.pinnedAt ?? 0).getTime() - new Date(a.pinnedAt ?? 0).getTime())
       .slice(0, GOAT_PINNED_CHAT_LIMIT)
       .map(toSummary);
     const activeRuntime = openRows
-      .filter((row) => !row.pinned_at && activeRuntimeChatIds.has(row.id))
-      .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .filter((row) => !row.pinnedAt && activeRuntimeChatIds.has(row.id))
+      .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       .map(toSummary);
     const recent = openRows
       .filter(
         (row) =>
-          !row.pinned_at &&
+          !row.pinnedAt &&
           !activeRuntimeChatIds.has(row.id) &&
-          isRecentGoatHomeActivity(row.updated_at),
+          isRecentGoatHomeActivity(row.updatedAt),
       )
-      .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       .slice(0, 8)
       .map(toSummary);
     return [...pinned, ...activeRuntime, ...recent];
-  }, [
-    chatSessionRows,
-    chatsLoading,
-    codexChatSessionRows,
-    headlessConversationRows,
-    initialData.recentChats,
-  ]);
+  }, [chatRows, chatsLoading, engineSessionRows, initialData.recentChats]);
 
   const archivedChats = useMemo<GoatChatSummaryView[]>(() => {
     const codexRuntimeByChatId = new Map(
-      ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[]).map((row) => [
-        row.chat_session_id,
+      ((engineSessionRows ?? []) as HeadlessEngineSessionReadModel[]).map((row) => [
+        row.conversationId,
         {
           status: row.status,
-          activeTurnId: row.active_turn_id,
+          activeTurnId: row.activeRunId,
           error: row.error,
-          updatedAt: row.updated_at,
+          updatedAt: row.updatedAt,
         },
       ]),
     );
-    if (HEADLESS_CHAT_ENABLED) {
-      return ((headlessConversationRows ?? []) as HeadlessChatConversationReadModel[])
-        .filter((row) => row.archivedAt)
-        .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-        .slice(0, GOAT_ARCHIVED_CHAT_LIMIT)
-        .map((row) => ({
-          id: row.id,
-          title: row.title,
-          model: row.model as AgentModelId,
-          engine: row.engine,
-          codexComposerSettings: null,
-          codexRuntime: hasDurableChatRuntime(row.engine)
-            ? (codexRuntimeByChatId.get(row.id) ?? null)
-            : null,
-          state: "done_seen",
-          preview: "Archived",
-          updatedAt: row.updatedAt,
-          lastSeenAt: row.lastSeenAt,
-          pinnedAt: null,
-          archived: true,
-        }));
-    }
-    return ((chatSessionRows ?? []) as GoatChatSessionRow[])
-      .filter((row) => row.closed_at && row.kind !== "task")
-      .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+    return ((chatRows ?? []) as HeadlessChatConversationReadModel[])
+      .filter((row) => row.archivedAt)
+      .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       .slice(0, GOAT_ARCHIVED_CHAT_LIMIT)
       .map((row) => ({
         id: row.id,
@@ -505,17 +397,17 @@ function GoatAppLiveDataSubscriptions({
           : null,
         state: "done_seen",
         preview: "Archived",
-        updatedAt: row.updated_at,
-        lastSeenAt: row.last_seen_at,
+        updatedAt: row.updatedAt,
+        lastSeenAt: row.lastSeenAt,
         pinnedAt: null,
         archived: true,
       }));
-  }, [chatSessionRows, codexChatSessionRows, headlessConversationRows]);
+  }, [chatRows, engineSessionRows]);
 
   const integrations = useMemo(() => {
     if (integrationsLoading && !integrationRows?.length) return initialData.integrations;
     const liveIntegrations = goatIntegrationStateFromRows(
-      (integrationRows ?? []) as GoatIntegrationRow[],
+      (integrationRows ?? []) as HeadlessIntegrationAccountReadModel[],
     );
     return {
       ...liveIntegrations,
@@ -614,18 +506,8 @@ export function taskRowToView(row: GoatTaskRow): GoatTaskView {
   };
 }
 
-function taskScheduleRowToView(row: GoatTaskScheduleRow): GoatTaskScheduleView {
-  return {
-    id: row.id,
-    name: row.name,
-    sourceDescription: row.source_description,
-    cron: row.cron,
-    timezone: row.timezone,
-    prompt: row.prompt,
-    enabled: row.enabled,
-    lastRunAt: row.last_run_at,
-    nextRunAt: row.next_run_at,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
+function taskScheduleReadModelToView(
+  schedule: HeadlessTaskScheduleReadModel,
+): GoatTaskScheduleView {
+  return schedule;
 }

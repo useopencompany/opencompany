@@ -1,3 +1,4 @@
+import { PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER } from "@opencompany/protocol";
 import type { UIMessage, UIMessageChunk } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { awaitHeadlessChatTransaction } from "./headless-chat-collections";
@@ -206,11 +207,14 @@ describe("canonical Chat transport", () => {
   it("creates a durable Run and translates validated semantic events into AI SDK chunks", async () => {
     let createBody: Record<string, unknown> | null = null;
     let idempotencyKey = "";
+    let protocolVersion = "";
     const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       const url = requestUrl(input);
       if (url.pathname === "/v1/messages") {
         createBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-        idempotencyKey = new Headers(init?.headers).get("idempotency-key") ?? "";
+        const headers = new Headers(init?.headers);
+        idempotencyKey = headers.get("idempotency-key") ?? "";
+        protocolVersion = headers.get(PROTOCOL_VERSION_HEADER) ?? "";
         return Response.json(
           {
             data: {
@@ -283,12 +287,13 @@ describe("canonical Chat transport", () => {
       clientConversationId: "optimistic_conversation_1",
       clientMessageId: "ui_message_1",
       content: "Update the account",
-      engine: "opencompany",
+      engine: { type: "opencompany", schemaVersion: 1 },
       model: "model_1",
       attachmentIds: ["attachment_1"],
       mentions: [{ kind: "skill", id: "skill_1" }],
     });
     expect(idempotencyKey).toBe("web-message:ui_message_1");
+    expect(protocolVersion).toBe(PROTOCOL_VERSION);
     expect(accepted).toHaveBeenCalledWith(
       expect.objectContaining({ conversationId: "conversation_1", transactionId: "42" }),
     );
@@ -585,10 +590,12 @@ describe("canonical Chat transport", () => {
 
   it("waits for a background Run to settle through the shared semantic event stream", async () => {
     const paths: string[] = [];
-    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+    let protocolVersion = "";
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       const url = requestUrl(input);
       paths.push(url.pathname);
       if (url.pathname === "/v1/messages") {
+        protocolVersion = new Headers(init?.headers).get(PROTOCOL_VERSION_HEADER) ?? "";
         return Response.json(
           {
             data: {
@@ -627,6 +634,7 @@ describe("canonical Chat transport", () => {
       ),
     ).resolves.toMatchObject({ runId: "run_background" });
     expect(paths).toEqual(["/v1/messages", "/v1/runs/run_background/events"]);
+    expect(protocolVersion).toBe(PROTOCOL_VERSION);
   });
 });
 

@@ -30,6 +30,42 @@ test("pulls current Vercel production env before every prebuilt build", async ()
   );
 });
 
+test("checks only web-owned production environment keys", async () => {
+  const workflow = await readFile(workflowUrl, "utf8");
+  const stepStart = workflow.indexOf("- name: Check Vercel web env");
+  const stepEnd = workflow.indexOf("- name: Pull Vercel web production env", stepStart);
+  const step = workflow.slice(stepStart, stepEnd);
+  const requiredKeysBlock = step.match(/const required = \[(?<keys>[\s\S]*?)\n\s*\];/u)?.groups
+    ?.keys;
+
+  assert.ok(requiredKeysBlock, "web required keys must remain explicit in the release workflow");
+  assert.match(requiredKeysBlock, /"BLOB_READ_WRITE_TOKEN"/u);
+  assert.match(requiredKeysBlock, /"DATABASE_URL"/u);
+  for (const retiredKey of [
+    "GOAT_AUTHKIT_DOMAIN",
+    "GOAT_STRIPE_API_KEY",
+    "GOAT_STRIPE_CHECKOUT_ENABLED",
+    "GOAT_STRIPE_WEBHOOK_SECRET",
+    "ELECTRIC_URL",
+    "VERCEL_AI_GATEWAY_API_KEY",
+  ]) {
+    assert.doesNotMatch(requiredKeysBlock, new RegExp(`"${retiredKey}"`, "u"));
+  }
+  assert.doesNotMatch(workflow, /Check web billing env before production changes/u);
+  assert.doesNotMatch(workflow, /check-goat-billing-production-env\.mjs/u);
+});
+
+test("requires PostHog configuration in the marketing Vercel project", async () => {
+  const workflow = await readFile(workflowUrl, "utf8");
+  const stepStart = workflow.indexOf("- name: Check Vercel marketing project config");
+  const stepEnd = workflow.indexOf("- name: Pull Vercel marketing production env", stepStart);
+  const step = workflow.slice(stepStart, stepEnd);
+
+  assert.match(step, /"NEXT_PUBLIC_GOAT_POSTHOG_TOKEN"/u);
+  assert.match(step, /"NEXT_PUBLIC_GOAT_POSTHOG_HOST"/u);
+  assert.match(step, /Missing marketing Vercel production env keys/u);
+});
+
 function assertStepOrder(workflow, stepNames) {
   let previousIndex = -1;
 

@@ -13,7 +13,7 @@ import {
   type GoatBrainActivityFilter,
   GoatBrainRecentActivity,
 } from "@/components/GoatBrainActivity";
-import type { GoatBrainOverviewStats } from "@/lib/brain-overview";
+import type { GoatBrainOverviewStats } from "@/lib/headless-knowledge-types";
 
 const ACTIVITY_FILTER_OPTIONS = [
   "filed",

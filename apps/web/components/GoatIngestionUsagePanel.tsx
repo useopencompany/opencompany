@@ -1,24 +1,11 @@
-import type { GoatSpendBreakdownRow } from "@opencompany/db/goat-credits";
+import type { BillingUsageDto } from "@opencompany/protocol";
 import { AlertCircle, DatabaseZap } from "lucide-react";
 import Link from "next/link";
 import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
 
-export type GoatUsageData = {
-  breakdown: GoatSpendBreakdownRow[];
-  ingestedThisMonth: number;
-  pending: number;
-  creditBalanceUsdMicros: number;
-  providers: Array<{ provider: string; count: number }>;
-  recent: Array<{
-    id: string;
-    provider: string;
-    rawEventCount: number;
-    status: "pending" | "consumed";
-    createdAt: string;
-  }>;
-};
+export type GoatUsageData = BillingUsageDto;
 
-const CATEGORY_LABELS: Record<GoatSpendBreakdownRow["category"], string> = {
+const CATEGORY_LABELS: Record<BillingUsageDto["breakdown"][number]["category"], string> = {
   chat: "Chat",
   ingestion: "Ingestion",
   capabilities: "Paid capabilities",
@@ -111,7 +98,7 @@ export function GoatUsagePanel({ data }: { data: GoatUsageData }) {
         </h2>
         {data.recent.length ? (
           data.recent.map((item) => (
-            <div key={item.id} className="flex items-center gap-3 rounded-lg px-2 py-1.5">
+            <div key={item.activityId} className="flex items-center gap-3 rounded-lg px-2 py-1.5">
               <span className="min-w-0 flex-1">
                 <span className="block text-[13px] text-ink">{formatProvider(item.provider)}</span>
                 <span className="block text-[11px] text-ink-subtle">
@@ -144,8 +131,8 @@ function StatTile({ label, value }: { label: string; value: string }) {
   );
 }
 
-function groupByDay(rows: GoatSpendBreakdownRow[]) {
-  const byDay = new Map<string, GoatSpendBreakdownRow[]>();
+function groupByDay(rows: BillingUsageDto["breakdown"]) {
+  const byDay = new Map<string, BillingUsageDto["breakdown"]>();
   for (const row of rows) {
     const entry = byDay.get(row.day);
     if (entry) entry.push(row);

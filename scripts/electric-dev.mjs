@@ -41,7 +41,7 @@ if (!databaseUrl) {
 spawnSync("docker", ["rm", "-f", ELECTRIC_CONTAINER], { stdio: "ignore" });
 
 console.log(`\n  Starting Electric at http://localhost:${ELECTRIC_PORT} (insecure dev mode)`);
-console.log(`  → set ELECTRIC_URL="http://localhost:${ELECTRIC_PORT}" in your web env\n`);
+console.log(`  → set ELECTRIC_URL="http://localhost:${ELECTRIC_PORT}" in your local API env\n`);
 
 const child = spawn("docker", dockerRunArgs(databaseUrl), { stdio: "inherit" });
 

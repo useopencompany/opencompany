@@ -125,7 +125,7 @@ function AssistantTurn({
           artifact={item.artifact}
           href={
             artifactHref?.(item.artifact) ??
-            `/api/chat-artifacts/${encodeURIComponent(item.artifact.artifactId)}/versions/${encodeURIComponent(item.artifact.artifactVersionId)}`
+            `/v1/chat-artifacts/${encodeURIComponent(item.artifact.artifactId)}/versions/${encodeURIComponent(item.artifact.artifactVersionId)}`
           }
           readOnly={readOnly || nested}
         />

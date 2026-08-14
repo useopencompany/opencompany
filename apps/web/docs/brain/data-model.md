@@ -1,4 +1,4 @@
-# Goat Brain Data Model
+# Brain data model
 
 Source of truth for the brain's enums, grammars, document anatomy, and database tables. Every
 value here mirrors a constant in `packages/goat-brain/src/schema.ts`; if this page and that file
@@ -37,6 +37,7 @@ check constraint, and this page. Retired v1 names still parse through legacy ali
 | `concept` | Idea, framework, definition | `concepts/` |
 | `note` | Unstructured note, quick capture | `inbox/` |
 | `project` | An initiative with a lifecycle | `projects/` |
+| `meeting` | A meeting record or synthesis | `meetings/` |
 | `source` | External artifact/reference: article, video, email thread, repo, document, source record | `sources/` (snapshot: `evidence/`) |
 
 Validation: `isValidGoatBrainEntityType` (set membership).
@@ -57,13 +58,13 @@ the closed set above is what validators actually accept.
 
 ## Default folders
 
-`DEFAULT_GOAT_BRAIN_FOLDERS` — the 11 folders seeded per brain. `inbox`, `skills`, `people`,
-`companies`, and `evidence` are required system folders; the rest are adjustable custom defaults. Users and
+`DEFAULT_GOAT_BRAIN_FOLDERS` — the 10 folders seeded per Brain. `inbox`, `people`, `companies`,
+and `evidence` are required system folders; the rest are adjustable custom defaults. Users and
 agents can create free-form custom folders beyond these:
 
 ```
 inbox/  thoughts/  projects/  meetings/  research/  decisions/
-concepts/  skills/  people/  companies/  evidence/
+concepts/  people/  companies/  evidence/
 ```
 
 Folder paths match `GOAT_BRAIN_FOLDER_PATTERN`: lowercase `a-z0-9-` segments separated by `/`,
@@ -108,7 +109,6 @@ createdAt: 2026-07-01T09:00:00Z
 updatedAt: 2026-07-08T14:30:00Z
 title: Ada
 aliases: ["Ada L."]
-tags: []
 relations:
   - { type: works_at, to: opencompany }
 sources:
@@ -127,32 +127,10 @@ meeting [[evidence:ev-jamie-abc123]].
 
 - **Frontmatter** — the full field contract is `GoatBrainFrontmatter` in `schema.ts`: required
   `id`, `folder`, `kind`, `type`, `status`, `createdAt`, `updatedAt`, `relations`; optional
-  `title`, `description`, `aliases`, `tags`, `sources`, `mergedInto`, `legacyKeys`.
+  `title`, `description`, `aliases`, `sources`, `mergedInto`, `legacyKeys`.
 - **Compiled truth** — the current state of knowledge, rewritten in place (`goat-brain rewrite`).
 - **Timeline** — append-only dated entries, each with an `ev-*` id and optionally a source ref.
   History is never rewritten; the truth section is recompiled *from* it.
-
-## Skills
-
-Markdown pages in `skills/` or a descendant are formal, Brain-owned skills. Their stable `id` is
-the document slug; `name` is the editable document title; optional `description` is stored in
-frontmatter when present; and `instructions` are the compiled truth. Draft and active pages are
-attachable once instructions are non-empty. Archived, merged, binary, and incomplete pages are not
-listed or resolved as skills.
-
-`serializeGoatBrainSkillMarkdown` materializes an eligible page as a standard single-file
-`SKILL.md`. The stable document id becomes the native lowercase/hyphenated `name`; the editable
-title remains Goat display metadata. When present, descriptions follow the cross-runtime
-1,024-character, no-XML contract. Default Brain `list` and `query` retrieval
-exclude the skills zone; callers must explicitly pass `folder=skills` (or a descendant). Direct
-lookup by document id remains available.
-
-Explicit chat mentions snapshot the resolved skill in `goat.chat_session_skills`, keyed by chat
-session and skill id and linked to the first activating user message. The snapshot is immutable for
-the life of that chat: normal chat replays it at the activation point in model history, and Cloud
-Codex installs it under `.agents/skills/<id>/SKILL.md` for native discovery and invocation. Its
-`brain_ref` is provenance rather than a foreign key, so deleting the source Brain cannot invalidate
-an existing conversation.
 
 ## Binary assets
 
@@ -162,7 +140,8 @@ an existing conversation.
 
 - The bytes live in the private Vercel Blob store behind `asset_storage_key`;
   `original_file_name`, `mime_type`, `asset_size_bytes`, and `asset_content_hash` (sha256 of the
-  bytes) describe them. The UI serves them through `/api/brain-assets/[documentId]` and renders
+  bytes) describe them. The canonical API serves them through
+  `/v1/brain-assets/{documentId}` after Brain authorization and renders
   the file first-class, with metadata and the agent's summary in the details sidebar.
 - The `content` column still holds a normal markdown projection (frontmatter + compiled truth +
   timeline), so metadata, relations, wiki links, versioning, and sync work identically to
@@ -172,9 +151,11 @@ an existing conversation.
   block between `ASSET-TEXT:BEGIN/END` sentinels; the document parser strips that block, so the
   CLI and sync ignore it and edits inside it are discarded. Retrieval indexes it as the
   low-boost `assetText` field.
-- Uploads enter via drag-drop / the upload button in the brain tree
-  (`uploadGoatBrainAssetAction`), which creates the draft row and enqueues a
-  `brain_agent_ingest` job (provider `upload`, type `asset`). The runner extracts the text, then
+- Uploads enter via drag-drop / the upload button in the brain tree. The browser sends multipart
+  bytes to `POST /v1/brains/{brainId}/assets`; the API authorizes the Actor, computes the
+  authoritative hash, stores the private blob, creates the draft row, and enqueues a
+  `brain_agent_ingest` job (provider `upload`, type `asset`). Durable command idempotency prevents
+  create or replacement retries from duplicating or rolling back an asset. The runner extracts the text, then
   the standard ingestion agent rewrites the page's compiled truth and wires backlinks. Deleting
   the document best-effort deletes the blob; version rows keep the page, not the bytes.
 
@@ -195,7 +176,6 @@ brain-scoped carries a `brain_ref`.
 | `brain_source_items` | `goatBrainSourceItems` | Normalized external captures awaiting/after ingestion (see [ingestion.md](./ingestion.md)). |
 | `brain_ingest_jobs` | `goatBrainIngestJobs` | The ingest job queue (lease, attempts, status). |
 | `brain_tool_runs` | `goatBrainToolRuns` | Audit rows for brain tool invocations. |
-| `chat_session_skills` | `goatChatSessionSkills` | Immutable session skill snapshots linked to their first activating chat message. |
 
 Documents are materialized to a temp filesystem root for CLI access via
 `materializeGoatBrainFilesToRoot` (`packages/db/src/goat-brain-files.ts`) — there is no persistent

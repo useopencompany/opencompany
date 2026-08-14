@@ -1,70 +1,58 @@
-# Goat Brain
+# Brain engineering map
 
-The brain is Goat's per-user (and per-workspace) knowledge store: Markdown documents with typed
-frontmatter, an append-only evidence timeline, and a lightweight graph of wiki-links and typed
-relations. Documents live in `goat.brain_documents` rows — Markdown is the source of truth, the
-database is the storage. Writes are agent-mediated; reads are moving toward a fast deterministic
-read plane.
+Brain is OpenCompany's workspace knowledge store: Markdown knowledge pages, immutable evidence,
+file-backed documents, provenance, and a lightweight relation/wiki-link graph. Postgres is the
+durable authority. Filesystem trees are temporary projections for runner ingestion agents, not the
+storage model.
 
-This section is the fast-orientation reference for anyone (human or agent) working on the brain.
-The pages below are contracts and maps, not design narratives — for the original design rationale
-see `apps/web/research/goat-brain-v1.md` and issue #597.
+## Runtime ownership
 
-## Pages
+- `apps/api` owns authenticated Brain commands, assets, sources, fixed read models, MCP delivery,
+  authorization, and persistence composition.
+- `apps/runner` owns durable ingestion/import, Google Drive sync, provider poll/flush work, and the
+  agentic curation loop.
+- `packages/goat-agent` owns shared Brain tools, capture behavior, MCP registration, and asset
+  behavior used by those composition roots.
+- `packages/goat-brain` owns document schemas, parsing, validation, retrieval helpers, CLI behavior,
+  and the pointer/copy rule.
+- `packages/db` owns Brain tables, repositories, read queries, projections, and materialization.
+- `apps/web` renders Brain UI and calls typed `/v1` resources or named API read models. It does not
+  read or write Brain tables.
 
-| Page | What it answers |
+The web `/mcp` and selected asset/provider URLs are continuity relays to API-owned handlers. They do
+not host MCP tools, authorize Brain access, verify provider payloads, or persist Brain state.
+
+## References
+
+| Page | Purpose |
 | --- | --- |
-| [data-model.md](./data-model.md) | **Reference for all enums and grammars**: kinds, the 8 entity types, statuses, default folders, id/folder/source-ref patterns, document anatomy, DB tables. `packages/goat-brain/src/schema.ts` remains the code-level source of truth. |
-| [ingestion.md](./ingestion.md) | How content enters the brain: source items, the ingest job queue, and connector pipelines including Google Drive change ingestion. |
-| [tools-and-cli.md](./tools-and-cli.md) | Every surface that touches a brain: the `goat-brain` CLI commands, chat tools (`goat_brain`, `save_to_brain`), and the per-brain MCP connector. |
-| [pointer-copy-contract.md](./pointer-copy-contract.md) | How brain writers cite external sources: pointer vs. snapshot rules per source class, source-ref grammar, enforcement. |
-| [retrieval-planes.md](./retrieval-planes.md) | Design for how non-writers read the brain: deterministic read plane + librarian agent (step 4 of #597, partially implemented). |
-
-## Mental model in five lines
-
-1. A **brain** (`goat.brains` row, addressed by `brain_ref`) holds **documents** addressed by
-   `brain_id` slugs. Never confuse the two: `brain_ref` picks the brain, `brain_id` picks the doc.
-2. Every document is either a **page** (kind `page`, editable knowledge) or an **evidence record**
-   (kind `evidence`, immutable sourced snapshot). Kind is determined by folder: anything under
-   `evidence/` is evidence, everything else is a page.
-3. **Types are tags, folders are navigation.** A document has exactly one of 8 entity types
-   (`person`, `company`, …) and lives in exactly one free-form folder path.
-4. Each document is frontmatter + `## Compiled truth` (current state) + `## Timeline`
-   (append-only dated evidence entries).
-5. Claims carry provenance: inline links (`[[page:...]]`, `[[evidence:ev-...]]`,
-   `[[source:provider:id]]`) and `provider:id` source refs, per the
-   [pointer/copy contract](./pointer-copy-contract.md).
+| [Data model](./data-model.md) | document kinds, entity types, statuses, folder and identifier grammar, binary assets, and tables |
+| [Ingestion](./ingestion.md) | durable source-item/job admission and runner curation paths |
+| [Tools and CLI](./tools-and-cli.md) | browser-independent Brain reads, captures, MCP, and ingestion-agent CLI use |
+| [Pointer/copy contract](./pointer-copy-contract.md) | provenance and evidence rules for Brain writers |
 
 ## Code map
 
-| Area | Where |
+| Area | Source |
 | --- | --- |
-| Schema constants, patterns, validators | `packages/goat-brain/src/schema.ts` — the code-level source of truth every enum in [data-model.md](./data-model.md) mirrors |
-| Zod schemas | `packages/goat-brain/src/schemas.ts` |
-| Document parse/serialize (truth + timeline sections) | `packages/goat-brain/src/document.ts`, `entry.ts`, `frontmatter.ts` |
-| Inline links and graph edges | `packages/goat-brain/src/inline-links.ts`, `edges.ts`, `wiki-links.ts` |
-| Hybrid retrieval (BM25 + embeddings + graph expansion) | `packages/goat-brain/src/retrieval/` |
-| Validation and `doctor` findings | `packages/goat-brain/src/validate.ts`, `health.ts` |
-| Pointer/copy prompt constant | `packages/goat-brain/src/pointer-copy.ts` (`GOAT_BRAIN_POINTER_COPY_RULE`) |
-| CLI | `packages/goat-brain/src/cli/index.ts` |
-| DB tables (Drizzle) | `packages/db/src/goat-schema.ts` (`goatBrain*` exports) |
-| DB ↔ file materialization | `packages/db/src/goat-brain-files.ts` |
-| Chat tools | `apps/web/lib/brain-cli.ts` (`goat_brain`), `apps/web/lib/brain-capture.ts` (`save_to_brain`) |
-| Ingestion worker + handlers | `apps/runner/src/goat-brain-ingest-worker.ts`, `goat-brain-agent-ingest.ts`, `goat-brain-jamie-writes.ts` |
-| Source item normalization | `packages/goat-brain/src/source-items.ts` |
-| User-level MCP connector | `apps/web/app/mcp/route.ts`, `apps/web/lib/mcp-server.ts` |
+| Schemas, validators, and folder rules | `packages/goat-brain/src/schema.ts`, `schemas.ts`, and `folders.ts` |
+| Document parse/serialize and graph edges | `packages/goat-brain/src/document.ts`, `frontmatter.ts`, `inline-links.ts`, and `edges.ts` |
+| Pointer/copy prompt contract | `packages/goat-brain/src/pointer-copy.ts` |
+| Filesystem CLI | `packages/goat-brain/src/cli/index.ts` |
+| Shared Chat/MCP Brain tools and capture | `packages/goat-agent/src/brain-cli.ts`, `brain-surface.ts`, `brain-capture.ts`, and `mcp-server.ts` |
+| API composition | `apps/api/src/server.ts`, `app.ts`, and `brain-assets.ts` |
+| Runner ingestion | `apps/runner/src/goat-brain-ingest-worker.ts` and `goat-brain-agent-ingest.ts` |
+| Tables, materialization, and read plane | `packages/db/src/goat-schema.ts`, `goat-brain-files.ts`, and `goat-brain-read.ts` |
 
-## Invariants worth memorizing
+## Invariants
 
-- **Programmatic writes are agent-mediated.** External consumers never get a document-write API;
-  content enters through ingestion jobs or chat capture, both of which run a brain agent. Workspace
-  admins can manually create and edit draft Markdown notes in the Brain UI. Main chat reads through
-  `goat_brain`, captures new content through `save_to_brain`, and cannot create canonical Brain
-  entities directly. Authorized MCP clients have the same capture-only path; they do not receive
-  raw document mutation tools.
-- **Everything is scoped to one `brain_ref`.** No query, job, or tool call joins across brains.
-- **Evidence is immutable and zoned.** Evidence records live under `evidence/`, get `ev-*` ids,
-  and pages link to them rather than inlining content.
-- **A page cannot become `active` without cited provenance** — `goat-brain set --status active`
-  requires the compiled truth to contain at least one valid `[[evidence:...]]` or
-  `[[source:...]]` link.
+- Every command, query, job, and tool call is pinned to one `brain_ref` and rechecks authorized
+  access at its boundary.
+- Programmatic writes enter through authenticated API commands or durable capture/ingestion work.
+  Chat and MCP expose read operations plus capture-to-curation; they do not expose raw mutation CLI
+  commands.
+- Evidence under `evidence/` is immutable. Knowledge pages cite evidence or canonical source refs
+  instead of copying mutable provider bodies.
+- Promoting a page to `active` requires cited provenance in compiled truth.
+- Worker notifications and internal wake routes reduce latency only. The durable job row, lease, and
+  polling loop own correctness and recovery.

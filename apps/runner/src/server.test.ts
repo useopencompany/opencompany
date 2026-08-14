@@ -81,7 +81,9 @@ describe("runner server CORS", () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers["access-control-allow-origin"]).toBe("https://app.example.com");
     expect(response.headers.vary).toBe("Origin");
-    expect(response.json()).toMatchObject({ capabilities: { claudeActionsMcp: "v2" } });
+    expect(response.json()).toMatchObject({
+      capabilities: { claudeActionsMcp: "v2", brainWorkerAdmission: "postgres-v1" },
+    });
   });
 
   it("does not set CORS headers for unexpected origins", async () => {
@@ -111,6 +113,98 @@ describe("runner execution transport surface", () => {
     });
 
     expect(response.statusCode).toBe(404);
+  });
+});
+
+describe("Slack answer-bot event dispatch", () => {
+  it("requires internal auth and enqueues a versioned event command", async () => {
+    const enqueue = vi.fn();
+    const server = createServer(goatEnv, { slackBotEvents: { enqueue } });
+    servers.push(server);
+    const payload = {
+      schemaVersion: 1,
+      eventId: "Ev123",
+      claimId: "gsbec_claim",
+      kind: "mention",
+      input: {
+        teamId: "T123",
+        channelId: "C123",
+        messageTs: "1784196000.000100",
+        threadTs: null,
+        text: "<@B123> what changed?",
+        slackUserId: "U123",
+      },
+    };
+
+    const unauthorized = await server.inject({
+      method: "POST",
+      url: "/internal/goat/slack-bot/events",
+      payload,
+    });
+    expect(unauthorized.statusCode).toBe(401);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/goat/slack-bot/events",
+      headers: { authorization: `Bearer ${goatEnv.internalToken}` },
+      payload,
+    });
+    expect(response.statusCode).toBe(202);
+    expect(enqueue).toHaveBeenCalledWith(payload);
+  });
+
+  it("rejects malformed commands and disabled workers", async () => {
+    const enqueue = vi.fn();
+    const disabled = createServer(env, { slackBotEvents: { enqueue } });
+    servers.push(disabled);
+    const disabledResponse = await disabled.inject({
+      method: "POST",
+      url: "/internal/goat/slack-bot/events",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+      payload: { schemaVersion: 1 },
+    });
+    expect(disabledResponse.statusCode).toBe(503);
+
+    const enabled = createServer(goatEnv, { slackBotEvents: { enqueue } });
+    servers.push(enabled);
+    const invalid = await enabled.inject({
+      method: "POST",
+      url: "/internal/goat/slack-bot/events",
+      headers: { authorization: `Bearer ${goatEnv.internalToken}` },
+      payload: { schemaVersion: 1 },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+});
+
+describe("Goat action standing permissions", () => {
+  it("requires internal auth and forwards an actor-scoped command", async () => {
+    const alwaysAllow = vi.fn(async () => ({ changed: true }));
+    const server = createServer(goatEnv, { actionPermissions: { alwaysAllow } });
+    servers.push(server);
+    const payload = {
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+      actionId: "gmail.send_email",
+    };
+
+    const unauthorized = await server.inject({
+      method: "POST",
+      url: "/internal/goat/actions/always-allow",
+      payload,
+    });
+    expect(unauthorized.statusCode).toBe(401);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/goat/actions/always-allow",
+      headers: { authorization: `Bearer ${goatEnv.internalToken}` },
+      payload,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, changed: true });
+    expect(alwaysAllow).toHaveBeenCalledWith(payload);
   });
 });
 

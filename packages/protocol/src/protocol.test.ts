@@ -6,8 +6,11 @@ import {
   ChatReadModelSchema,
   CreateMessageBodySchema,
   CreateTaskBodySchema,
+  InvokeWorkflowBodySchema,
   MessageReadModelSchema,
+  ReadModelSchema,
   ResolveApprovalBodySchema,
+  UpdateWorkflowBodySchema,
 } from "./schemas";
 
 describe("headless protocol", () => {
@@ -19,16 +22,133 @@ describe("headless protocol", () => {
       "/v1/tasks/{taskId}/summary",
       "/v1/compatibility/tasks",
       "/v1/compatibility/tasks/{taskId}/history",
+      "/v1/workflows",
+      "/v1/workflows/{workflowId}",
+      "/v1/workflows/{workflowId}/archive",
+      "/v1/workflows/{workflowId}/invoke",
+      "/v1/workflows/{workflowId}/run-now",
+      "/v1/schedules",
+      "/v1/schedules/{scheduleId}",
+      "/v1/schedules/{scheduleId}/archive",
+      "/v1/schedules/{scheduleId}/run-now",
+      "/v1/brains/{brainId}",
+      "/v1/brains/{brainId}/overview",
+      "/v1/brains/{brainId}/source-items",
+      "/v1/brains/{brainId}/sources",
+      "/v1/brains/{brainId}/sources/{integrationId}",
+      "/v1/browser-profiles",
+      "/v1/browser-profiles/{profileId}",
+      "/v1/browser-profiles/{profileId}/login-sessions",
+      "/v1/browser-profiles/{profileId}/login-sessions/{sessionId}/complete",
+      "/v1/browser-profiles/{profileId}/live-view",
+      "/v1/capabilities",
+      "/v1/capabilities/session-budget",
+      "/v1/capabilities/{source}",
+      "/v1/capability-approvals/by-tool-call/{toolCallId}",
+      "/v1/capability-approvals/{runId}",
+      "/v1/brains",
+      "/v1/brains/{brainId}/switch",
+      "/v1/brains/{brainId}/access",
+      "/v1/brains/{brainId}/enrichment",
+      "/v1/brains/{brainId}/intelligence",
+      "/v1/identity",
+      "/v1/identity/sync",
+      "/v1/workspace",
+      "/v1/workspace/invitations",
+      "/v1/workspace/invitations/{invitationId}",
+      "/v1/workspace/members/{userId}",
+      "/v1/workspaces",
+      "/v1/workspaces/{workspaceId}/switch",
+      "/v1/onboarding",
+      "/v1/onboarding/workspace-slug/check",
+      "/v1/onboarding/profile",
+      "/v1/onboarding/workspace",
+      "/v1/onboarding/complete",
+      "/v1/integrations/{integrationId}/brain-source-options",
+      "/v1/brains/{brainId}/imports",
+      "/v1/brains/{brainId}/imports/{importRunId}/confirm",
+      "/v1/brains/{brainId}/imports/{importRunId}/cancel",
+      "/v1/brains/{brainId}/imports/{importRunId}/retry",
+      "/v1/brains/{brainId}/documents",
+      "/v1/brains/{brainId}/assets",
+      "/v1/brains/{brainId}/assets/{documentId}/replace",
+      "/v1/brain-assets/{documentId}",
+      "/v1/brains/{brainId}/documents/{documentId}",
+      "/v1/brains/{brainId}/documents/{documentId}/rename",
+      "/v1/brains/{brainId}/documents/{documentId}/delete",
+      "/v1/brains/{brainId}/folders",
+      "/v1/brains/{brainId}/folders/rename",
+      "/v1/brains/{brainId}/folders/delete",
+      "/v1/wiki/pages",
+      "/v1/wiki/pages/{slug}",
+      "/v1/wiki/pages/{slug}/delete",
+      "/v1/wiki/pages/{slug}/timeline",
+      "/v1/skills",
+      "/v1/skills/imports/preview",
+      "/v1/skills/imports",
+      "/v1/skills/catalog",
+      "/v1/skills/{slug}",
+      "/v1/skills/{slug}/archive",
       "/v1/conversations",
       "/v1/conversations/{conversationId}",
+      "/v1/conversations/{conversationId}/share",
+      "/v1/conversations/{conversationId}/title",
       "/v1/conversations/{conversationId}/messages",
       "/v1/messages",
       "/v1/attachments",
+      "/v1/chat-artifacts/{artifactId}",
+      "/v1/chat-artifacts/{artifactId}/versions/{versionId}",
+      "/v1/chat-attachments/{messageId}/{attachmentId}",
+      "/v1/chat-screenshots/{conversationId}/{filename}",
+      "/public/chat-shares/{shareId}",
+      "/public/chat-shares/{shareId}/metadata",
+      "/public/chat-shares/{shareId}/attachments/{messageId}/{attachmentId}",
+      "/public/chat-shares/{shareId}/artifacts/{artifactId}/versions/{versionId}",
+      "/v1/conversations/{conversationId}/engine-session/runtime",
+      "/v1/conversations/{conversationId}/engine-session/runtime-access",
       "/v1/runs/{runId}",
       "/v1/runs/{runId}/events",
       "/v1/runs/{runId}/cancel",
       "/v1/runs/{runId}/approvals/{approvalId}",
       "/v1/read-models/{readModel}",
+      "/v1/me/preferences",
+      "/v1/me/mcp-setup",
+      "/v1/feedback",
+      "/v1/repo-configs",
+      "/v1/repo-configs/{repositoryExternalId}/env",
+      "/v1/repo-configs/{repositoryExternalId}/setup",
+      "/v1/repo-configs/{repositoryExternalId}",
+      "/v1/integration-accounts/attio",
+      "/v1/integration-accounts/attio/{integrationId}",
+      "/v1/integration-accounts/fathom",
+      "/v1/integration-accounts/granola",
+      "/v1/integration-accounts/imessage/pairing",
+      "/v1/integration-accounts/imessage/pairing/confirm",
+      "/v1/integration-accounts/stripe",
+      "/v1/integration-accounts/jamie/webhook-endpoint",
+      "/v1/integration-accounts/jamie/api-key",
+      "/v1/integration-accounts",
+      "/v1/workspace/slack-bot",
+      "/v1/brains/{brainId}/slack-bot",
+      "/v1/brains/{brainId}/slack-bot/channels",
+      "/v1/integration-accounts/{integrationId}/usage",
+      "/v1/integration-accounts/{integrationId}/capability-modes/{capabilityId}",
+      "/v1/actions/{actionId}/permissions/always-allow",
+      "/v1/integration-accounts/{integrationId}",
+      "/v1/engine-auth/claude-code",
+      "/v1/engine-auth/codex",
+      "/v1/engine-auth/codex/device",
+      "/v1/engine-auth/codex/device/{flowId}/poll",
+      "/v1/engine-auth/infisical",
+      "/v1/engine-auth/infisical/start",
+      "/v1/engine-auth/infisical/{flowId}/complete",
+      "/v1/billing",
+      "/v1/billing/usage",
+      "/v1/billing/balance",
+      "/v1/billing/top-ups",
+      "/v1/billing/subscription-checkouts",
+      "/v1/billing/portal-sessions",
+      "/v1/billing/auto-refill",
     ]);
     expect(document.components?.securitySchemes).toHaveProperty("bearerAuth");
   });
@@ -37,7 +157,7 @@ describe("headless protocol", () => {
     expect(
       CreateMessageBodySchema.safeParse({
         content: "Hello",
-        engine: "opencompany",
+        engine: { type: "opencompany", schemaVersion: 1 },
         model: "provider/model",
         workspaceId: "workspace_1",
         sessionId: "goat_chat_1",
@@ -60,7 +180,7 @@ describe("headless protocol", () => {
     expect(
       CreateMessageBodySchema.safeParse({
         content: "Use the sales skill",
-        engine: "opencompany",
+        engine: { type: "opencompany", schemaVersion: 1 },
         mentions: [{ kind: "skill", id: "sales" }],
       }).success,
     ).toBe(true);
@@ -77,6 +197,60 @@ describe("headless protocol", () => {
         createdAt: "2026-08-10T00:00:00.000Z",
         updatedAt: "2026-08-10T00:00:00.000Z",
         actor_id: "must-not-cross",
+      }).success,
+    ).toBe(false);
+    expect(ReadModelSchema.safeParse("workflows-v1").success).toBe(true);
+    expect(ReadModelSchema.safeParse("workflow-schedules-v1").success).toBe(true);
+    expect(ReadModelSchema.safeParse("task-schedules-v1").success).toBe(true);
+    expect(ReadModelSchema.safeParse("integration-accounts-v1").success).toBe(true);
+    expect(ReadModelSchema.safeParse("goat.workflow_read_model_v1").success).toBe(false);
+  });
+
+  it("requires optimistic versions without accepting tenancy or planner state", () => {
+    const command = {
+      expectedVersion: 2,
+      name: "Weekly research",
+      description: "Track changes",
+      steps: [
+        {
+          id: "step_1",
+          title: "Research",
+          model: "provider/model",
+          instructions: "Find material changes.",
+        },
+      ],
+      status: "active",
+      trigger: { type: "manual" },
+    };
+    expect(UpdateWorkflowBodySchema.safeParse(command).success).toBe(true);
+    expect(
+      UpdateWorkflowBodySchema.safeParse({
+        ...command,
+        workspaceId: "workspace_1",
+        scheduleHarnessSpec: { secret: true },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts opaque skill references on Workflow invocation without persistence fields", () => {
+    expect(
+      InvokeWorkflowBodySchema.safeParse({
+        description: "Focus on competitors.",
+        attachmentIds: ["attachment_1"],
+        skillIds: ["market-research"],
+      }).success,
+    ).toBe(true);
+    expect(
+      InvokeWorkflowBodySchema.safeParse({
+        description: "Focus on competitors.",
+        skillIds: ["market-research"],
+        workspaceId: "workspace_1",
+      }).success,
+    ).toBe(false);
+    expect(
+      InvokeWorkflowBodySchema.safeParse({
+        description: "Focus on competitors.",
+        skillIds: Array.from({ length: 17 }, (_, index) => `skill-${index + 1}`),
       }).success,
     ).toBe(false);
   });

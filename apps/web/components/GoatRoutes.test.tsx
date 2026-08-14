@@ -9,6 +9,7 @@ import {
   GoatPreferencesSettingsRoute,
   GoatSkillEditorRoute,
   GoatSkillsSettingsRoute,
+  GoatWorkflowsRoute,
 } from "./GoatRoutes";
 
 const routerMock = vi.hoisted(() => ({
@@ -41,16 +42,20 @@ const userPreferencesMock = vi.hoisted(() => ({
 }));
 
 const workflowActionsMock = vi.hoisted(() => ({
-  updateGoatWorkflowAction: vi.fn(async () => ({ ok: true, slug: "test-workflow" })),
-  archiveGoatWorkflowAction: vi.fn(async () => ({ ok: true, slug: "test-workflow" })),
-  createGoatWorkflowAction: vi.fn(async () => ({ ok: true, slug: "test-workflow" })),
+  createHeadlessWorkflow: vi.fn(async () => ({ slug: "test-workflow" })),
+}));
+
+const workflowLiveQueryMock = vi.hoisted(() => ({
+  data: undefined as unknown[] | undefined,
+  hydrated: true,
+  isLoading: true,
 }));
 
 const skillActionsMock = vi.hoisted(() => ({
-  updateGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
-  archiveGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
-  createGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
-  previewGoatSkillImportAction: vi.fn(async () => ({
+  updateHeadlessSkill: vi.fn(async () => ({ slug: "test-skill" })),
+  archiveHeadlessSkill: vi.fn(async () => ({ slug: "test-skill" })),
+  createHeadlessSkill: vi.fn(async () => ({ slug: "test-skill" })),
+  previewHeadlessSkillImport: vi.fn(async () => ({
     status: "resolved" as const,
     proposedSlug: "imported-skill",
     name: "Imported skill",
@@ -60,9 +65,9 @@ const skillActionsMock = vi.hoisted(() => ({
     resolvedCommit: "a".repeat(40),
     integrity: `sha256:${"b".repeat(64)}`,
   })),
-  importGoatSkillAction: vi.fn(async () => ({
-    status: "imported" as const,
-    slug: "imported-skill",
+  importHeadlessSkill: vi.fn(async () => ({
+    skill: { slug: "imported-skill" },
+    replayed: false,
   })),
 }));
 
@@ -75,6 +80,18 @@ const themeMock = vi.hoisted(() => ({
 
 vi.mock("next/navigation", () => ({
   useRouter: () => routerMock,
+}));
+
+vi.mock("@tanstack/react-db", () => ({
+  useLiveQuery: vi.fn(() => workflowLiveQueryMock),
+}));
+
+vi.mock("@/components/useHydrated", () => ({
+  useHydrated: () => workflowLiveQueryMock.hydrated,
+}));
+
+vi.mock("@/lib/headless-automation-collections", () => ({
+  getHeadlessWorkflows: vi.fn(() => ({})),
 }));
 
 vi.mock("@/components/GoatBrainView", () => ({
@@ -132,18 +149,16 @@ vi.mock("@/lib/user-preferences", () => ({
   updateGoatWikiEnabledAction: userPreferencesMock.updateGoatWikiEnabledAction,
 }));
 
-vi.mock("@/lib/workflow-actions", () => ({
-  updateGoatWorkflowAction: workflowActionsMock.updateGoatWorkflowAction,
-  archiveGoatWorkflowAction: workflowActionsMock.archiveGoatWorkflowAction,
-  createGoatWorkflowAction: workflowActionsMock.createGoatWorkflowAction,
+vi.mock("@/lib/headless-automation-commands", () => ({
+  createHeadlessWorkflow: workflowActionsMock.createHeadlessWorkflow,
 }));
 
-vi.mock("@/lib/skill-actions", () => ({
-  updateGoatSkillAction: skillActionsMock.updateGoatSkillAction,
-  archiveGoatSkillAction: skillActionsMock.archiveGoatSkillAction,
-  createGoatSkillAction: skillActionsMock.createGoatSkillAction,
-  previewGoatSkillImportAction: skillActionsMock.previewGoatSkillImportAction,
-  importGoatSkillAction: skillActionsMock.importGoatSkillAction,
+vi.mock("@/lib/headless-knowledge-commands", () => ({
+  updateHeadlessSkill: skillActionsMock.updateHeadlessSkill,
+  archiveHeadlessSkill: skillActionsMock.archiveHeadlessSkill,
+  createHeadlessSkill: skillActionsMock.createHeadlessSkill,
+  previewHeadlessSkillImport: skillActionsMock.previewHeadlessSkillImport,
+  importHeadlessSkill: skillActionsMock.importHeadlessSkill,
 }));
 
 vi.mock("@/components/ThemeProvider", () => ({
@@ -153,6 +168,57 @@ vi.mock("@/components/ThemeProvider", () => ({
     setTheme: themeMock.setTheme,
   }),
 }));
+
+describe("GoatWorkflowsRoute", () => {
+  beforeEach(() => {
+    workflowLiveQueryMock.data = undefined;
+    workflowLiveQueryMock.hydrated = true;
+    workflowLiveQueryMock.isLoading = true;
+    workflowActionsMock.createHeadlessWorkflow.mockClear();
+    routerMock.push.mockClear();
+  });
+
+  it("uses the server snapshot only while the canonical Workflow projection loads", () => {
+    workflowLiveQueryMock.hydrated = false;
+    workflowLiveQueryMock.isLoading = false;
+    const props = {
+      workflows: [workflowListItem()],
+      workspaceId: "workspace_1",
+      canEdit: true,
+    };
+    const view = render(<GoatWorkflowsRoute {...props} />);
+
+    expect(screen.getByText("Weekly research")).toBeInTheDocument();
+
+    workflowLiveQueryMock.hydrated = true;
+    workflowLiveQueryMock.data = [];
+    workflowLiveQueryMock.isLoading = false;
+    view.rerender(<GoatWorkflowsRoute {...props} />);
+
+    expect(screen.queryByText("Weekly research")).not.toBeInTheDocument();
+    expect(screen.getByText("No workflows yet")).toBeInTheDocument();
+  });
+
+  it("creates through the typed Workflow command", async () => {
+    workflowLiveQueryMock.data = [];
+    workflowLiveQueryMock.isLoading = false;
+    const user = userEvent.setup();
+    render(<GoatWorkflowsRoute workflows={[]} workspaceId="workspace_1" canEdit />);
+
+    await user.click(screen.getByRole("button", { name: "New workflow" }));
+    await user.type(screen.getByPlaceholderText("Weekly investor update"), "Test workflow");
+    await user.type(screen.getByPlaceholderText("What this workflow does"), "Run the test");
+    await user.click(screen.getByRole("button", { name: "Create workflow" }));
+
+    await waitFor(() =>
+      expect(workflowActionsMock.createHeadlessWorkflow).toHaveBeenCalledWith({
+        name: "Test workflow",
+        description: "Run the test",
+      }),
+    );
+    expect(routerMock.push).toHaveBeenCalledWith("/workflows/test-workflow");
+  });
+});
 
 describe("GoatSettingsRoute", () => {
   beforeEach(() => {
@@ -329,13 +395,14 @@ describe("GoatBrainRoute", () => {
 
 describe("GoatSkillEditorRoute", () => {
   beforeEach(() => {
-    skillActionsMock.updateGoatSkillAction.mockClear();
+    skillActionsMock.updateHeadlessSkill.mockClear();
     routerMock.refresh.mockReset();
   });
 
   it("edits instructions with a rich text editor instead of a plain textarea", async () => {
     const skill = {
-      id: "test-skill",
+      id: "goat_skill_opaque_id",
+      slug: "test-skill",
       name: "Test skill",
       description: "Does a thing",
       instructions: "Use this when asked.",
@@ -347,13 +414,14 @@ describe("GoatSkillEditorRoute", () => {
 
     expect(container.querySelector("textarea")).toBeNull();
     expect(await screen.findByText("Use this when asked.")).toBeInTheDocument();
+    expect(screen.getByText(/@skill\/test-skill/)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
-      expect(skillActionsMock.updateGoatSkillAction).toHaveBeenCalledWith(
+      expect(skillActionsMock.updateHeadlessSkill).toHaveBeenCalledWith(
+        "test-skill",
         expect.objectContaining({
-          slug: "test-skill",
           instructions: "Use this when asked.",
         }),
       ),
@@ -362,7 +430,7 @@ describe("GoatSkillEditorRoute", () => {
 
   it("renders an imported skill read-only, with no Save button", async () => {
     const skill = {
-      id: "imported-skill",
+      slug: "imported-skill",
       name: "Imported skill",
       description: "Does an imported thing",
       instructions: "Use this when imported.",
@@ -392,8 +460,8 @@ describe("GoatSkillEditorRoute", () => {
 
 describe("GoatSkillsSettingsRoute", () => {
   beforeEach(() => {
-    skillActionsMock.previewGoatSkillImportAction.mockClear();
-    skillActionsMock.importGoatSkillAction.mockClear();
+    skillActionsMock.previewHeadlessSkillImport.mockClear();
+    skillActionsMock.importHeadlessSkill.mockClear();
     routerMock.push.mockReset();
   });
 
@@ -405,7 +473,7 @@ describe("GoatSkillsSettingsRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: "Preview" }));
 
     expect(await screen.findByText("Use this when imported.")).toBeInTheDocument();
-    expect(skillActionsMock.previewGoatSkillImportAction).toHaveBeenCalledWith({
+    expect(skillActionsMock.previewHeadlessSkillImport).toHaveBeenCalledWith({
       url: "github.com/o/r",
     });
 
@@ -414,7 +482,7 @@ describe("GoatSkillsSettingsRoute", () => {
     await userEvent.click(importButton);
 
     await waitFor(() =>
-      expect(skillActionsMock.importGoatSkillAction).toHaveBeenCalledWith({
+      expect(skillActionsMock.importHeadlessSkill).toHaveBeenCalledWith({
         url: "github.com/o/r",
         expectedResolvedCommit: "a".repeat(40),
         expectedIntegrity: `sha256:${"b".repeat(64)}`,
@@ -481,3 +549,19 @@ const brainSnapshot = {
     },
   ],
 };
+
+function workflowListItem() {
+  return {
+    id: "workflow_1",
+    slug: "weekly-research",
+    name: "Weekly research",
+    description: "Track changes",
+    steps: [],
+    status: "draft" as const,
+    trigger: { type: "manual" as const },
+    version: 1,
+    archivedAt: null,
+    createdAt: "2026-08-11T09:00:00.000Z",
+    updatedAt: "2026-08-11T09:00:00.000Z",
+  };
+}

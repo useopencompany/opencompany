@@ -1,11 +1,45 @@
 import type { SQL } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
-import { createWorkOsApiAuthenticator } from "./auth";
+import { createWorkOsApiAuthenticator, createWorkOsApiIdentityVerifier } from "./auth";
 
 describe("API authentication", () => {
+  it("accepts a verified pre-organization bearer identity for onboarding and identity sync", async () => {
+    const identify = createWorkOsApiIdentityVerifier({
+      audience: "api_resource",
+      authKitDomain: "https://example.authkit.app",
+      verifyJwt: vi.fn(async () => ({
+        payload: { sub: "user_1", sid: "session_1" },
+        protectedHeader: { alg: "RS256" },
+      })) as never,
+    });
+
+    await expect(
+      identify(
+        new Request("https://api.example.test/v1/identity/sync", {
+          headers: {
+            Authorization: "Bearer token",
+            Cookie: "goat-active-workspace=workspace_1; goat-active-brain=brain_1",
+          },
+        }),
+      ),
+    ).resolves.toMatchObject({
+      userId: "user_1",
+      organizationId: null,
+      activeWorkspaceId: "workspace_1",
+      activeBrainId: "brain_1",
+    });
+  });
+
   it("verifies bearer claims and resolves the local actor by WorkOS organization", async () => {
     const execute = vi.fn(async (_query: SQL) => ({
-      rows: [{ workspaceId: "workspace_1", role: "admin" }],
+      rows: [
+        {
+          workspaceId: "workspace_1",
+          role: "admin",
+          taskSpawningEnabled: true,
+          wikiEnabled: true,
+        },
+      ],
     }));
     const authenticate = createWorkOsApiAuthenticator(execute, {
       audience: "api_resource",
@@ -29,15 +63,98 @@ describe("API authentication", () => {
         role: "admin",
         authenticationMethod: "oauth",
         sessionId: "session_1",
-        permissions: ["chat:read", "chat:write", "task:read", "task:write"],
+        permissions: [
+          "chat:read",
+          "chat:write",
+          "task:read",
+          "task:write",
+          "brain:read",
+          "skill:read",
+          "brain:write",
+          "skill:write",
+          "wiki:read",
+          "wiki:write",
+          "workflow:read",
+          "workflow:write",
+          "schedule:read",
+          "schedule:write",
+        ],
       },
     });
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  it("rejects pre-organization bearer identities on ordinary product routes", async () => {
+    const execute = vi.fn();
+    const authenticate = createWorkOsApiAuthenticator(execute, {
+      audience: "api_resource",
+      authKitDomain: "https://example.authkit.app",
+      verifyJwt: vi.fn(async () => ({
+        payload: { sub: "user_1", sid: "session_1" },
+        protectedHeader: { alg: "RS256" },
+      })) as never,
+    });
+
+    await expect(
+      authenticate(
+        new Request("https://api.example.test/v1/conversations", {
+          headers: { Authorization: "Bearer token" },
+        }),
+      ),
+    ).rejects.toMatchObject({
+      status: 401,
+      code: "authentication_required",
+      message: "Invalid bearer token claims.",
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("withholds Workflow and schedule permissions while Tasks & Workflows is disabled", async () => {
+    const execute = vi.fn(async (_query: SQL) => ({
+      rows: [
+        {
+          workspaceId: "workspace_1",
+          role: "member",
+          taskSpawningEnabled: false,
+          wikiEnabled: false,
+        },
+      ],
+    }));
+    const authenticate = createWorkOsApiAuthenticator(execute, {
+      audience: "api_resource",
+      authKitDomain: "https://example.authkit.app",
+      verifyJwt: vi.fn(async () => ({
+        payload: { sub: "user_1", org_id: "org_1" },
+        protectedHeader: { alg: "RS256" },
+      })) as never,
+    });
+
+    const result = await authenticate(
+      new Request("https://api.example.test/v1/workflows", {
+        headers: { Authorization: "Bearer token" },
+      }),
+    );
+
+    expect(result.actor.permissions).toEqual([
+      "chat:read",
+      "chat:write",
+      "task:read",
+      "task:write",
+      "brain:read",
+      "skill:read",
+    ]);
+  });
+
   it("refreshes an expired sealed browser session and returns the rotated cookie", async () => {
     const execute = vi.fn(async () => ({
-      rows: [{ workspaceId: "workspace_1", role: "member" }],
+      rows: [
+        {
+          workspaceId: "workspace_1",
+          role: "member",
+          taskSpawningEnabled: true,
+          wikiEnabled: false,
+        },
+      ],
     }));
     const authenticate = createWorkOsApiAuthenticator(execute, {
       cookieName: "wos-session",

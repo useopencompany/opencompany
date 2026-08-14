@@ -6,7 +6,7 @@ import {
   encryptJson,
   loadEncryptionKey,
 } from "@opencompany/crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { getDb } from "./client";
 import type * as goatSchema from "./goat-schema";
@@ -374,7 +374,7 @@ export async function connectGoatSlackBotIntegration(input: {
   botUserId: string;
   accessToken: string;
   scopes: string[];
-  db?: GoatIntegrationBatchDb;
+  db?: GoatIntegrationRefreshDb;
   now?: Date;
 }) {
   const db = input.db ?? getDb();
@@ -419,60 +419,89 @@ export async function connectGoatSlackBotIntegration(input: {
     now,
   );
 
-  const [integrations, credentials] = await db.batch([
-    db
-      .insert(goatIntegrations)
-      .values({
-        id: integrationId,
-        userWorkosId: integrationUserWorkosId,
-        workspaceId: input.workspaceId,
-        provider: "slack_bot",
-        // The Slack team id is the routing key for inbound bot events.
-        externalId: input.teamId,
-        connectionLabel,
-        accountName: input.teamName,
-        accountEmail: null,
-        accountType: "slack_bot",
-        status: "connected",
-        statusReason: null,
-        scopes: input.scopes,
-        lastSyncedAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [goatIntegrations.workspaceId, goatIntegrations.provider],
-        targetWhere: sql`${goatIntegrations.workspaceId} IS NOT NULL AND ${goatIntegrations.provider} = 'slack_bot'`,
-        // On reconnect (possibly by a different admin) user_workos_id stays as
-        // the original connector: credential AAD and brain_sources FKs use it.
-        set: {
-          externalId: input.teamId,
-          connectionLabel,
-          accountName: input.teamName,
-          accountType: "slack_bot",
-          status: "connected",
-          statusReason: null,
-          scopes: input.scopes,
-          lastSyncedAt: now,
-          updatedAt: now,
-        },
-      })
-      .returning({ id: goatIntegrations.id }),
-    db
-      .insert(goatIntegrationCredentials)
-      .values(credentialWrite.values)
-      .onConflictDoUpdate({
-        target: [goatIntegrationCredentials.integrationId, goatIntegrationCredentials.kind],
-        set: credentialWrite.conflictSet,
-      })
-      .returning(GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING),
-  ] as const);
+  const integrationValues = {
+    id: integrationId,
+    userWorkosId: integrationUserWorkosId,
+    workspaceId: input.workspaceId,
+    provider: "slack_bot",
+    // The Slack team id is the routing key for inbound bot events.
+    externalId: input.teamId,
+    connectionLabel,
+    accountName: input.teamName,
+    accountEmail: null,
+    accountType: "slack_bot",
+    status: "connected",
+    statusReason: null,
+    scopes: input.scopes,
+    lastSyncedAt: now,
+    updatedAt: now,
+  } as const;
+  const integrationConflict = {
+    target: [goatIntegrations.workspaceId, goatIntegrations.provider],
+    targetWhere: sql`${goatIntegrations.workspaceId} IS NOT NULL AND ${goatIntegrations.provider} = 'slack_bot'`,
+    // On reconnect (possibly by a different admin) user_workos_id stays as
+    // the original connector: credential AAD and brain_sources FKs use it.
+    set: {
+      externalId: input.teamId,
+      connectionLabel,
+      accountName: input.teamName,
+      accountType: "slack_bot" as const,
+      status: "connected" as const,
+      statusReason: null,
+      scopes: input.scopes,
+      lastSyncedAt: now,
+      updatedAt: now,
+    },
+  };
+  const credentialConflict = {
+    target: [goatIntegrationCredentials.integrationId, goatIntegrationCredentials.kind],
+    set: credentialWrite.conflictSet,
+  };
 
-  const integration = integrations[0];
-  if (!integration || !credentials[0]) {
-    throw new Error("Could not persist Goat Slack bot integration and credential.");
+  // neon-http cannot open an interactive transaction, but its batch API sends
+  // all queries through Neon's transactional HTTP endpoint. The canonical
+  // API's node-postgres pool has no batch API and keeps the two writes atomic
+  // through a regular interactive transaction instead.
+  if ("batch" in db) {
+    const [integrations, credentials] = await db.batch([
+      db
+        .insert(goatIntegrations)
+        .values(integrationValues)
+        .onConflictDoUpdate(integrationConflict)
+        .returning({ id: goatIntegrations.id }),
+      db
+        .insert(goatIntegrationCredentials)
+        .values(credentialWrite.values)
+        .onConflictDoUpdate(credentialConflict)
+        .returning(GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING),
+    ] as const);
+
+    const integration = integrations[0];
+    if (!integration || !credentials[0]) {
+      throw new Error("Could not persist Goat Slack bot integration and credential.");
+    }
+
+    return { integrationId: integration.id };
   }
 
-  return { integrationId: integration.id };
+  return db.transaction(async (tx) => {
+    const [integration] = await tx
+      .insert(goatIntegrations)
+      .values(integrationValues)
+      .onConflictDoUpdate(integrationConflict)
+      .returning({ id: goatIntegrations.id });
+    const [credential] = await tx
+      .insert(goatIntegrationCredentials)
+      .values(credentialWrite.values)
+      .onConflictDoUpdate(credentialConflict)
+      .returning(GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING);
+
+    if (!integration || !credential) {
+      throw new Error("Could not persist Goat Slack bot integration and credential.");
+    }
+
+    return { integrationId: integration.id };
+  });
 }
 
 export type GoatLinearOAuthCredentialPayload = {
@@ -897,6 +926,97 @@ export async function markGoatIntegrationStatus(input: {
         eq(goatIntegrations.provider, input.provider),
       ),
     );
+}
+
+// Hard-deletes a personal integration account. Credentials, synced resources,
+// brain sources, and buffered events cascade away; already-ingested brain
+// content stays (pointer/copy rule) and event claims survive via SET NULL.
+//
+// Claims are created when work is enqueued, before the ingest job reaches
+// a terminal state. Hard-deleting an integration cascades its source items
+// and jobs, so release claims whose matching brain job never succeeded;
+// otherwise another member's copy could be suppressed forever. Keep claims
+// backed by successful jobs so completed ingestion remains deduplicated.
+//
+// Returns false when no personal integration owned by the acting user matched.
+export async function disconnectGoatPersonalIntegration(input: {
+  userWorkosId: string;
+  integrationId: string;
+  // Structural: both the neon-http default and the API's pooled node-postgres
+  // drizzle expose a thenable execute(sql) with compatible template semantics.
+  db?: { execute(query: ReturnType<typeof sql>): PromiseLike<unknown> };
+}): Promise<boolean> {
+  const db = input.db ?? getDb();
+  const result = await db.execute(sql`
+    WITH owned_integration AS (
+      SELECT integration.id
+      FROM goat.integrations integration
+      WHERE integration.id = ${input.integrationId}
+        AND integration.user_workos_id = ${input.userWorkosId}
+        AND integration.workspace_id IS NULL
+    ),
+    source_items AS MATERIALIZED (
+      SELECT source.id
+      FROM goat.brain_source_items source
+      JOIN owned_integration integration ON integration.id = source.integration_id
+    ),
+    released_claims AS (
+      DELETE FROM goat.brain_source_event_claims claim
+      USING source_items source
+      WHERE claim.source_item_id = source.id
+        AND NOT EXISTS (
+          SELECT 1
+          FROM goat.brain_ingest_jobs job
+          WHERE job.source_item_id = source.id
+            AND job.brain_ref = claim.brain_id
+            AND job.status = 'succeeded'
+        )
+      RETURNING claim.id
+    ),
+    release_guard AS (
+      SELECT count(*) AS released_count FROM released_claims
+    ),
+    deleted_integration AS (
+      DELETE FROM goat.integrations integration
+      USING owned_integration owned, release_guard
+      WHERE integration.id = owned.id
+      RETURNING integration.id
+    )
+    SELECT id FROM deleted_integration
+  `);
+  return rowsFromExecute<{ id: string }>(result).length > 0;
+}
+
+// Settings control: applies one capability mode override ("on" | "ask" | "off")
+// to the given connections. Modes are stored as sparse jsonb overrides;
+// registry defaults cover missing keys. Mode/capability validation is the
+// caller's responsibility — the capability registry lives outside this package.
+export async function applyGoatIntegrationCapabilityMode(input: {
+  integrationIds: readonly string[];
+  capabilityId: string;
+  mode: string;
+  db?: Pick<GoatIntegrationDb, "update">;
+  now?: Date;
+}) {
+  if (input.integrationIds.length === 0) return;
+  await (input.db ?? getDb())
+    .update(goatIntegrations)
+    .set({
+      capabilityModes: sql`${goatIntegrations.capabilityModes} || ${JSON.stringify({
+        [input.capabilityId]: input.mode,
+      })}::jsonb`,
+      updatedAt: input.now ?? new Date(),
+    })
+    .where(inArray(goatIntegrations.id, input.integrationIds));
+}
+
+function rowsFromExecute<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  if (result && typeof result === "object" && "rows" in result) {
+    const rows = (result as { rows?: unknown }).rows;
+    return Array.isArray(rows) ? (rows as T[]) : [];
+  }
+  return [];
 }
 
 export function goatCredentialAad(

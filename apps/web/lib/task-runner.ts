@@ -1,4 +1,4 @@
-import type { GoatHarnessSpec } from "@opencompany/db/goat-schema";
+import type { GoatHarnessSpec } from "@opencompany/goat-agent/task-runtime-types";
 
 const CODEX_CHAT_WAKE_TIMEOUT_MS = 5_000;
 const CODEX_CHAT_SANDBOX_STATUS_TIMEOUT_MS = 5_000;
@@ -293,68 +293,6 @@ export async function killGoatCodexSandbox(sandboxId: string): Promise<boolean> 
 
   const body = (await response.json()) as { killed?: unknown };
   return body.killed === true;
-}
-
-export async function triggerGoatBrainIngestWake() {
-  const baseUrl = runnerInternalBaseUrl();
-  const token = runnerToken();
-  if (!baseUrl || !token) {
-    console.warn("Goat Brain ingest wake skipped because the runner is not configured.", {
-      event: "goat.brain_ingest_wake_unconfigured",
-    });
-    return;
-  }
-
-  const response = await fetch(`${baseUrl}/internal/goat/brain-ingest/wake`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  if (!response.ok) {
-    const details = await response.text();
-    throw new Error(`Goat Brain ingest wake failed with ${response.status}: ${details}`);
-  }
-}
-
-export async function triggerGoatGoogleDriveSyncWake() {
-  const baseUrl = runnerInternalBaseUrl();
-  const token = runnerToken();
-  if (!baseUrl || !token) {
-    console.warn("Goat Google Drive sync wake skipped because the runner is not configured.", {
-      event: "goat.google_drive_sync_wake_unconfigured",
-    });
-    return;
-  }
-
-  const response = await fetch(`${baseUrl}/internal/goat/google-drive/sync`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!response.ok) {
-    const details = await response.text();
-    throw new Error(`Goat Google Drive sync wake failed with ${response.status}: ${details}`);
-  }
-}
-
-export async function triggerGoatBrainImportWake() {
-  const baseUrl = runnerInternalBaseUrl();
-  const token = runnerToken();
-  if (!baseUrl || !token) {
-    console.warn("Goat Brain import wake skipped because the runner is not configured.", {
-      event: "goat.brain_import_wake_unconfigured",
-    });
-    return;
-  }
-  const response = await fetch(`${baseUrl}/internal/goat/brain-import/wake`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!response.ok) {
-    const details = await response.text();
-    throw new Error(`Goat Brain import wake failed with ${response.status}: ${details}`);
-  }
 }
 
 function isGoatHarnessSpec(value: unknown): value is GoatHarnessSpec {

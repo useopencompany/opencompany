@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
 import {
   type GoatChatSessionSkill,
@@ -8,11 +7,8 @@ import {
   goatSkills,
 } from "@opencompany/db/goat-schema";
 import {
-  GOAT_BRAIN_SKILL_DESCRIPTION_MAX_LENGTH,
-  GOAT_BRAIN_SKILL_NAME_MAX_LENGTH,
   type GoatBrainSkill,
   isValidGoatBrainId,
-  normalizeGoatBrainId,
   serializeGoatBrainSkillMarkdown,
 } from "@opencompany/goat-brain";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
@@ -62,8 +58,6 @@ export type GoatSkillDetail = GoatWorkspaceSkill & {
 };
 
 export type GoatSkillMentionRef = { id: string };
-
-export type GoatSkillMutationResult = { ok: true; slug: string } | { ok: false; message: string };
 
 export type GoatChatSessionSkillSnapshot = Pick<
   GoatChatSessionSkill,
@@ -343,209 +337,6 @@ export function attachGoatSkillsToPrompt(prompt: string, skills: GoatWorkspaceSk
     payload,
     "</turn_context_json>",
   ].join("\n");
-}
-
-// --- Authoring (mutations) ---------------------------------------------------
-
-export function validateGoatSkillFields(input: {
-  name: string;
-  description: string;
-  instructions?: string;
-  status?: GoatSkillStatus;
-}): string | null {
-  const name = input.name.trim();
-  const description = input.description.trim();
-  if (!name) return "Skill name cannot be empty.";
-  if (name.length > GOAT_BRAIN_SKILL_NAME_MAX_LENGTH) {
-    return `Skill names must be ${GOAT_BRAIN_SKILL_NAME_MAX_LENGTH} characters or fewer.`;
-  }
-  if (description.length > GOAT_BRAIN_SKILL_DESCRIPTION_MAX_LENGTH) {
-    return `Skill descriptions must be ${GOAT_BRAIN_SKILL_DESCRIPTION_MAX_LENGTH} characters or fewer.`;
-  }
-  if (description.includes("<") || description.includes(">")) {
-    return 'Skill descriptions cannot contain "<" or ">".';
-  }
-  if (input.status === "active" && !input.instructions?.trim()) {
-    return "Add skill instructions before making it active.";
-  }
-  return null;
-}
-
-export async function createGoatSkill(input: {
-  workspaceId: string;
-  createdByWorkosId: string;
-  name: string;
-  description?: string;
-}): Promise<GoatSkillMutationResult> {
-  const invalid = validateGoatSkillFields({
-    name: input.name,
-    description: input.description ?? "",
-  });
-  if (invalid) return { ok: false, message: invalid };
-  const db = getDb();
-  const slug = await uniqueGoatSkillSlug(db, input.workspaceId, input.name);
-  await db.insert(goatSkills).values({
-    id: `goat_skill_${randomUUID()}`,
-    workspaceId: input.workspaceId,
-    slug,
-    name: input.name.trim(),
-    description: input.description?.trim() ?? "",
-    instructions: "",
-    status: "draft",
-    createdByWorkosId: input.createdByWorkosId,
-  });
-  return { ok: true, slug };
-}
-
-// Imports a skill resolved from an external SKILL.md (see apps/web/lib/skill-import.ts) into
-// the workspace catalog. Re-importing the same source (workspaceId + sourceUrl/sourceRef/
-// sourcePath) reuses the existing row instead of creating a duplicate — the unique index
-// `goat_skills_workspace_source_idx` backs this, but we check first for a friendlier result
-// than a constraint-violation error. Lands as "active" immediately: unlike a blank hand-authored
-// draft, an imported skill's instructions are already complete.
-export async function createImportedGoatSkill(input: {
-  workspaceId: string;
-  createdByWorkosId: string;
-  name: string;
-  description: string;
-  instructions: string;
-  source: {
-    type: GoatSkillSourceType;
-    url: string;
-    ref: string;
-    path: string;
-  };
-  resolvedCommit: string;
-  integrity: string;
-  db?: Db;
-}): Promise<GoatSkillMutationResult> {
-  const invalid = validateGoatSkillFields({
-    name: input.name,
-    description: input.description,
-    instructions: input.instructions,
-    status: "active",
-  });
-  if (invalid) return { ok: false, message: invalid };
-
-  const db = input.db ?? getDb();
-  const [existing] = await db
-    .select({ slug: goatSkills.slug })
-    .from(goatSkills)
-    .where(
-      and(
-        eq(goatSkills.workspaceId, input.workspaceId),
-        eq(goatSkills.sourceUrl, input.source.url),
-        eq(goatSkills.sourceRef, input.source.ref),
-        eq(goatSkills.sourcePath, input.source.path),
-        isNull(goatSkills.archivedAt),
-      ),
-    )
-    .limit(1);
-  if (existing) return { ok: true, slug: existing.slug };
-
-  const slug = await uniqueGoatSkillSlug(db, input.workspaceId, input.name);
-  await db.insert(goatSkills).values({
-    id: `goat_skill_${randomUUID()}`,
-    workspaceId: input.workspaceId,
-    slug,
-    name: input.name.trim(),
-    description: input.description.trim(),
-    instructions: input.instructions,
-    status: "active",
-    createdByWorkosId: input.createdByWorkosId,
-    sourceType: input.source.type,
-    sourceUrl: input.source.url,
-    sourceRef: input.source.ref,
-    sourcePath: input.source.path,
-    resolvedCommit: input.resolvedCommit,
-    integrity: input.integrity,
-  });
-  return { ok: true, slug };
-}
-
-export async function updateGoatSkill(input: {
-  workspaceId: string;
-  slug: string;
-  name: string;
-  description: string;
-  instructions: string;
-  status: GoatSkillStatus;
-}): Promise<GoatSkillMutationResult> {
-  const invalid = validateGoatSkillFields(input);
-  if (invalid) return { ok: false, message: invalid };
-  const db = getDb();
-  const [target] = await db
-    .select({ sourceType: goatSkills.sourceType, sourceUrl: goatSkills.sourceUrl })
-    .from(goatSkills)
-    .where(
-      and(
-        eq(goatSkills.workspaceId, input.workspaceId),
-        eq(goatSkills.slug, input.slug),
-        isNull(goatSkills.archivedAt),
-      ),
-    )
-    .limit(1);
-  if (!target) return { ok: false, message: "Skill not found." };
-  if (target.sourceType) {
-    return {
-      ok: false,
-      message: `This skill was imported from ${target.sourceUrl} and can't be edited here. Remove and re-import if the source changed.`,
-    };
-  }
-  const result = await db
-    .update(goatSkills)
-    .set({
-      name: input.name.trim(),
-      description: input.description.trim(),
-      instructions: input.instructions,
-      status: input.status,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(goatSkills.workspaceId, input.workspaceId),
-        eq(goatSkills.slug, input.slug),
-        isNull(goatSkills.archivedAt),
-      ),
-    )
-    .returning({ slug: goatSkills.slug });
-  if (result.length === 0) return { ok: false, message: "Skill not found." };
-  return { ok: true, slug: input.slug };
-}
-
-export async function archiveGoatSkill(input: {
-  workspaceId: string;
-  slug: string;
-}): Promise<GoatSkillMutationResult> {
-  const db = getDb();
-  const result = await db
-    .update(goatSkills)
-    .set({ archivedAt: new Date(), updatedAt: new Date() })
-    .where(
-      and(
-        eq(goatSkills.workspaceId, input.workspaceId),
-        eq(goatSkills.slug, input.slug),
-        isNull(goatSkills.archivedAt),
-      ),
-    )
-    .returning({ slug: goatSkills.slug });
-  if (result.length === 0) return { ok: false, message: "Skill not found." };
-  return { ok: true, slug: input.slug };
-}
-
-async function uniqueGoatSkillSlug(db: Db, workspaceId: string, name: string): Promise<string> {
-  const base = normalizeGoatBrainId(name).slice(0, 64).replace(/-+$/g, "") || "skill";
-  const rows = await db
-    .select({ slug: goatSkills.slug })
-    .from(goatSkills)
-    .where(and(eq(goatSkills.workspaceId, workspaceId), isNull(goatSkills.archivedAt)));
-  const taken = new Set(rows.map((row) => row.slug));
-  if (!taken.has(base)) return base;
-  for (let n = 2; n < 1000; n++) {
-    const candidate = `${base.slice(0, 60)}-${n}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-  return `${base.slice(0, 55)}-${randomUUID().slice(0, 8)}`;
 }
 
 function escapePromptJson(value: string) {

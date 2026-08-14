@@ -66,13 +66,12 @@ export function EmailCaptureForm({
           required
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          placeholder="you@company.com"
+          placeholder="you@company.example"
           className="w-full min-w-0 bg-transparent px-3 py-2.5 font-mono text-[13px] text-ink outline-none placeholder:text-ink-subtle"
         />
         <button
           type="submit"
           disabled={status === "loading"}
-          data-visitors-event="ship-early-access"
           className="shrink-0 whitespace-nowrap bg-black px-4 py-2.5 font-medium font-mono text-[13px] text-white transition hover:bg-black/85 disabled:opacity-60"
         >
           {status === "loading" ? "Sending…" : ctaLabel}

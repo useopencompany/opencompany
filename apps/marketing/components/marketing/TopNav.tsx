@@ -1,28 +1,19 @@
 import Link from "next/link";
 import { Cta } from "./Cta";
 import { GoatMark } from "./GoatMark";
-
-const navLinkClassName = "font-mono text-[13px] text-ink-muted transition-colors hover:text-ink";
+import { TopNavLinks } from "./TopNavLinks";
 
 export function TopNav() {
   return (
     <header className="sticky top-0 z-50 bg-background">
-      <div className="mx-auto grid h-14 max-w-5xl grid-cols-[1fr_auto_1fr] items-center px-6">
+      <div className="mx-auto grid h-14 max-w-5xl grid-cols-[1fr_auto_1fr] items-center px-6 lg:max-w-7xl xl:max-w-[90rem]">
         <Link href="/" className="flex items-center gap-2 text-ink" aria-label="opencompany home">
           <GoatMark className="size-5 animate-goat-mark-spin" />
           <span className="font-medium font-mono text-[15px] tracking-tight">opencompany</span>
         </Link>
 
         <nav aria-label="Primary navigation" className="hidden items-center gap-6 sm:flex">
-          <Link href="/pricing" className={navLinkClassName}>
-            pricing
-          </Link>
-          <Link href="/blog" className={navLinkClassName}>
-            blog
-          </Link>
-          <a href="https://my.opencompany.chat/changelog" className={navLinkClassName}>
-            changelog
-          </a>
+          <TopNavLinks />
         </nav>
 
         <div className="flex items-center justify-end gap-2">
@@ -30,12 +21,14 @@ export function TopNav() {
             href="https://cal.com/louis-morgner-k0wc9i/opencompany-onboarding"
             variant="secondary"
             className="hidden px-3 py-1.5 text-[12px] sm:inline-flex"
+            analyticsIntent="demo"
           >
-            Book demo
+            Get a Demo
           </Cta>
           <Cta
             href="https://my.opencompany.chat"
             className="hidden px-3 py-1.5 text-[12px] sm:inline-flex"
+            analyticsIntent="signup"
           >
             Sign up
           </Cta>
@@ -69,28 +62,19 @@ export function TopNav() {
               aria-label="Mobile navigation"
               className="absolute top-[calc(100%+0.5rem)] right-0 w-48 border border-border bg-background p-2 shadow-lg"
             >
-              <Link href="/pricing" className={`${navLinkClassName} block px-3 py-2`}>
-                pricing
-              </Link>
-              <Link href="/blog" className={`${navLinkClassName} block px-3 py-2`}>
-                blog
-              </Link>
-              <a
-                href="https://my.opencompany.chat/changelog"
-                className={`${navLinkClassName} block px-3 py-2`}
-              >
-                changelog
-              </a>
+              <TopNavLinks mobile />
               <Cta
                 href="https://cal.com/louis-morgner-k0wc9i/opencompany-onboarding"
                 variant="secondary"
                 className="mt-1 w-full justify-center px-3 py-2 text-[12px]"
+                analyticsIntent="demo"
               >
-                Book demo
+                Get a Demo
               </Cta>
               <Cta
                 href="https://my.opencompany.chat"
                 className="mt-1 w-full justify-center px-3 py-2 text-[12px]"
+                analyticsIntent="signup"
               >
                 Sign up
               </Cta>

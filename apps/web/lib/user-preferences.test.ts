@@ -1,117 +1,140 @@
-import { getDb } from "@opencompany/db/client";
 import { revalidatePath } from "next/cache";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { currentGoatUser } from "@/lib/auth";
+import { headers } from "next/headers";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   updateGoatAutoModelRoutingAction,
   updateGoatTaskViewModeAction,
-} from "@/lib/user-preferences";
+  updateGoatTimezoneAction,
+} from "./user-preferences";
 
-const dbMocks = vi.hoisted(() => ({
-  update: vi.fn(),
-  set: vi.fn(),
-  where: vi.fn(),
-  returning: vi.fn(),
-}));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/headers", () => ({ headers: vi.fn() }));
 
-vi.mock("@opencompany/db/client", () => ({
-  getDb: vi.fn(),
-}));
+const preferences = {
+  timezone: "Europe/Berlin",
+  taskSpawningEnabled: false,
+  wikiEnabled: false,
+  taskViewMode: "list",
+  imessageEnabled: false,
+  autoModelRoutingEnabled: true,
+};
 
-vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
-}));
+function stubApi(response: () => Response) {
+  const requests: Request[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      requests.push(input instanceof Request ? input : new Request(input, init));
+      return response();
+    }),
+  );
+  return requests;
+}
 
-vi.mock("next/cache", () => ({
-  revalidatePath: vi.fn(),
-}));
+function okEnvelope() {
+  return Response.json({
+    data: preferences,
+    meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+  });
+}
 
-describe("updateGoatAutoModelRoutingAction", () => {
+describe("user preference API actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getDb).mockReturnValue({ update: dbMocks.update } as never);
-    dbMocks.update.mockReturnValue({ set: dbMocks.set });
-    dbMocks.set.mockReturnValue({ where: dbMocks.where });
-    dbMocks.where.mockReturnValue({ returning: dbMocks.returning });
-    dbMocks.returning.mockResolvedValue([{ autoModelRoutingEnabled: true }]);
-    mockCurrentUser(false);
+    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
+    vi.mocked(headers).mockResolvedValue(
+      new Headers({
+        Cookie: "wos-session=sealed",
+        Authorization: "Bearer actor-token",
+        Origin: "https://my.opencompany.chat",
+      }) as never,
+    );
   });
 
-  it("updates the per-user flag and refreshes the app", async () => {
-    const result = await updateGoatAutoModelRoutingAction(true);
-
-    expect(result).toEqual({ ok: true, enabled: true });
-    expect(dbMocks.set).toHaveBeenCalledWith({
-      autoModelRoutingEnabled: true,
-      updatedAt: expect.any(Date),
-    });
-    expect(revalidatePath).toHaveBeenCalledWith("/");
-    expect(revalidatePath).toHaveBeenCalledWith("/settings/preferences");
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
-  it("skips the write when the preference already matches", async () => {
-    mockCurrentUser(true);
+  it("forwards actor credentials on the preferences PATCH and revalidates the app", async () => {
+    const requests = stubApi(okEnvelope);
 
     await expect(updateGoatAutoModelRoutingAction(true)).resolves.toEqual({
       ok: true,
       enabled: true,
     });
 
-    expect(getDb).not.toHaveBeenCalled();
+    const request = requests[0] as Request;
+    expect(request.method).toBe("PATCH");
+    expect(new URL(request.url).pathname).toBe("/v1/me/preferences");
+    await expect(request.json()).resolves.toEqual({ autoModelRoutingEnabled: true });
+    expect(request.headers.get("cookie")).toBe("wos-session=sealed");
+    expect(request.headers.get("authorization")).toBe("Bearer actor-token");
+    expect(request.headers.get("origin")).toBe("https://my.opencompany.chat");
+    expect(revalidatePath).toHaveBeenCalledWith("/");
+    expect(revalidatePath).toHaveBeenCalledWith("/settings/preferences");
+  });
+
+  it("returns the API's normalized timezone", async () => {
+    stubApi(okEnvelope);
+
+    await expect(updateGoatTimezoneAction("Europe/Berlin")).resolves.toEqual({
+      ok: true,
+      timezone: "Europe/Berlin",
+    });
     expect(revalidatePath).not.toHaveBeenCalled();
   });
-});
 
-describe("updateGoatTaskViewModeAction", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.mocked(getDb).mockReturnValue({ update: dbMocks.update } as never);
-    dbMocks.update.mockReturnValue({ set: dbMocks.set });
-    dbMocks.set.mockReturnValue({ where: dbMocks.where });
-    dbMocks.where.mockReturnValue({ returning: dbMocks.returning });
-    dbMocks.returning.mockResolvedValue([{ taskViewMode: "list" }]);
-    mockCurrentUser(false, "board");
-  });
-
-  it("updates the per-user view mode and revalidates the tasks page", async () => {
-    const result = await updateGoatTaskViewModeAction("list");
-
-    expect(result).toEqual({ ok: true, mode: "list" });
-    expect(dbMocks.set).toHaveBeenCalledWith({
-      taskViewMode: "list",
-      updatedAt: expect.any(Date),
-    });
-    expect(revalidatePath).toHaveBeenCalledWith("/tasks");
-  });
-
-  it("skips the write when the preference already matches", async () => {
-    mockCurrentUser(false, "list");
-
+  it("maps task view mode updates and degrades API failures to ok: false", async () => {
+    const requests = stubApi(okEnvelope);
     await expect(updateGoatTaskViewModeAction("list")).resolves.toEqual({
       ok: true,
       mode: "list",
     });
+    await expect((requests[0] as Request).json()).resolves.toEqual({ taskViewMode: "list" });
+    expect(revalidatePath).toHaveBeenCalledWith("/tasks");
 
-    expect(getDb).not.toHaveBeenCalled();
+    vi.mocked(revalidatePath).mockClear();
+    stubApi(() =>
+      Response.json(
+        {
+          error: {
+            code: "invalid_request",
+            message: "Request validation failed.",
+            requestId: "request_1",
+            retryable: false,
+          },
+          meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+        },
+        { status: 400 },
+      ),
+    );
+    await expect(updateGoatTaskViewModeAction("kanban" as never)).resolves.toEqual({
+      ok: false,
+      mode: "kanban",
+    });
     expect(revalidatePath).not.toHaveBeenCalled();
   });
 
-  it("rejects a mode outside the known set instead of hitting the database", async () => {
-    await expect(updateGoatTaskViewModeAction("kanban" as never)).resolves.toEqual({
-      ok: false,
-      mode: "board",
-    });
+  it("throws the protocol error for failed toggle updates so callers can surface it", async () => {
+    stubApi(() =>
+      Response.json(
+        {
+          error: {
+            code: "not_found",
+            message: "The acting user's profile was not found.",
+            requestId: "request_2",
+            retryable: false,
+          },
+          meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+        },
+        { status: 404 },
+      ),
+    );
 
-    expect(getDb).not.toHaveBeenCalled();
+    await expect(updateGoatAutoModelRoutingAction(true)).rejects.toThrow(
+      "The acting user's profile was not found. (request request_2)",
+    );
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });
-
-function mockCurrentUser(autoModelRoutingEnabled: boolean, taskViewMode = "board") {
-  vi.mocked(currentGoatUser).mockResolvedValue({
-    user: {
-      workosUserId: "user_1",
-      autoModelRoutingEnabled,
-      taskViewMode,
-    },
-  } as never);
-}

@@ -28,7 +28,7 @@ export type GoatChatAttachmentCaptureDependencies = {
       }
     | { ok: false; message: string }
   >;
-  wakeIngest: () => Promise<unknown>;
+  wakeIngest?: () => Promise<unknown>;
 };
 
 // save_to_brain with attachmentIds: files attached in the chat become brain
@@ -100,12 +100,14 @@ export async function saveChatAttachmentsToGoatBrain(
     });
   }
 
-  dependencies.wakeIngest().catch((error) => {
-    console.warn("Goat chat attachment capture failed to wake the ingest worker.", {
-      event: "goat.chat_attachment_capture_wake_failed",
-      error: error instanceof Error ? error.message : String(error),
+  if (dependencies.wakeIngest) {
+    dependencies.wakeIngest().catch((error) => {
+      console.warn("Goat chat attachment capture failed to wake the ingest worker.", {
+        event: "goat.chat_attachment_capture_wake_failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
     });
-  });
+  }
 
   return {
     ok: true,

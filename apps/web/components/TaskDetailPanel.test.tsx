@@ -24,7 +24,6 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
     archivedChats: [],
     codexConnected: false,
     claudeCodeConnected: false,
-    chatResumeEnabled: true,
     featureFlags: {
       taskSpawning: true,
       autoModelRouting: false,
@@ -73,7 +72,6 @@ describe("TaskDetailPanel", () => {
     });
     expect(mocks.surfaceProps).toMatchObject({
       taskSpawningEnabled: true,
-      chatResumeEnabled: false,
       userName: "Ada",
       userWorkosId: "user_1",
     });

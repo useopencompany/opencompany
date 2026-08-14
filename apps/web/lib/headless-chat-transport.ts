@@ -3,6 +3,10 @@
 import {
   type CreateMessageBody,
   createOpenCompanyClient,
+  type MessageEngine,
+  MessageEngineSchema,
+  PROTOCOL_VERSION,
+  PROTOCOL_VERSION_HEADER,
   type RunEventDto,
   streamRunEvents,
 } from "@opencompany/protocol";
@@ -34,21 +38,18 @@ type MessageMetadata = {
   attachments?: Array<{ id: string }>;
 };
 
+export type HeadlessMessageAccepted = {
+  conversationId: string;
+  runId: string;
+  assistantMessageId: string;
+  transactionId: string;
+};
+
 type TransportOptions = {
   baseUrl?: string;
   fetch?: typeof globalThis.fetch;
-  onAccepted?: (input: {
-    conversationId: string;
-    runId: string;
-    assistantMessageId: string;
-    transactionId: string;
-  }) => void;
-  onReconciled?: (input: {
-    conversationId: string;
-    runId: string;
-    assistantMessageId: string;
-    transactionId: string;
-  }) => void;
+  onAccepted?: (input: HeadlessMessageAccepted) => void;
+  onReconciled?: (input: HeadlessMessageAccepted) => void;
 };
 
 export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
@@ -56,6 +57,8 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
 {
   private readonly fetchImpl: typeof globalThis.fetch;
   private readonly apiFetchImpl: typeof globalThis.fetch;
+  private onAccepted: TransportOptions["onAccepted"];
+  private onReconciled: TransportOptions["onReconciled"];
 
   constructor(private readonly options: TransportOptions = {}) {
     this.fetchImpl = bindFetchToRuntime(options.fetch);
@@ -63,6 +66,17 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
       baseUrl: this.baseUrl(),
       fetch: this.fetchImpl,
     });
+    this.onAccepted = options.onAccepted;
+    this.onReconciled = options.onReconciled;
+  }
+
+  setEventHandlers(handlers: Pick<TransportOptions, "onAccepted" | "onReconciled">) {
+    this.onAccepted = handlers.onAccepted;
+    this.onReconciled = handlers.onReconciled;
+    return () => {
+      if (this.onAccepted === handlers.onAccepted) this.onAccepted = undefined;
+      if (this.onReconciled === handlers.onReconciled) this.onReconciled = undefined;
+    };
   }
 
   async sendMessages(input: Parameters<ChatTransport<UI_MESSAGE>["sendMessages"]>[0]) {
@@ -97,7 +111,10 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
     const client = createOpenCompanyClient(this.baseUrl(), { fetch: this.apiFetchImpl });
     const response = await client.v1.messages.$post(
       {
-        header: { "idempotency-key": idempotencyKey(latest.id) },
+        header: {
+          "idempotency-key": idempotencyKey(latest.id),
+          [PROTOCOL_VERSION_HEADER]: PROTOCOL_VERSION,
+        },
         json: body,
       },
       input.abortSignal ? { init: { signal: input.abortSignal } } : undefined,
@@ -118,12 +135,12 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
       assistantMessageId: state.assistantMessageId,
       transactionId: envelope.data.transactionId,
     };
-    this.options.onAccepted?.(accepted);
+    this.onAccepted?.(accepted);
     void awaitHeadlessChatTransaction({
       conversationId: state.conversationId,
       transactionId: envelope.data.transactionId,
     })
-      .then(() => this.options.onReconciled?.(accepted))
+      .then(() => this.onReconciled?.(accepted))
       .catch(() => undefined);
     return this.uiStream(input.chatId, state, input.abortSignal);
   }
@@ -287,6 +304,7 @@ export async function startHeadlessBackgroundChat(
     clientConversationId: string;
     clientMessageId: string;
     model: string;
+    engine?: MessageEngine;
     attachmentIds?: string[];
     mentions?: Array<{ kind: "skill"; id: string }>;
   },
@@ -297,12 +315,15 @@ export async function startHeadlessBackgroundChat(
   const apiFetchImpl = createHeadlessChatApiFetch({ baseUrl, fetch: fetchImpl });
   const client = createOpenCompanyClient(baseUrl, { fetch: apiFetchImpl });
   const response = await client.v1.messages.$post({
-    header: { "idempotency-key": idempotencyKey(input.clientMessageId) },
+    header: {
+      "idempotency-key": idempotencyKey(input.clientMessageId),
+      [PROTOCOL_VERSION_HEADER]: PROTOCOL_VERSION,
+    },
     json: {
       clientConversationId: input.clientConversationId,
       clientMessageId: input.clientMessageId,
       content: input.content,
-      engine: "opencompany",
+      engine: input.engine ?? { type: "opencompany", schemaVersion: 1 },
       model: input.model,
       ...(input.attachmentIds?.length ? { attachmentIds: input.attachmentIds } : {}),
       ...(input.mentions?.length ? { mentions: input.mentions } : {}),
@@ -314,8 +335,8 @@ export async function startHeadlessBackgroundChat(
     conversationId: data.conversationId,
     transactionId: data.transactionId,
   });
-  // Background Chat has no mounted useChat consumer. Keep the promise aligned with the legacy
-  // route by consuming semantic events until the Run settles or pauses for user interaction.
+  // Background Chat has no mounted useChat consumer, so consume semantic events until the Run
+  // settles or pauses for user interaction.
   for await (const event of streamRunEvents({
     baseUrl,
     runId: data.runId,
@@ -341,8 +362,9 @@ function requestContext(body: object | undefined) {
   };
 }
 
-function chatEngine(value: unknown): "opencompany" | "codex" | "claude_code" {
-  return value === "codex" || value === "claude_code" ? value : "opencompany";
+function chatEngine(value: unknown): MessageEngine {
+  const parsed = MessageEngineSchema.safeParse(value);
+  return parsed.success ? parsed.data : { type: "opencompany", schemaVersion: 1 };
 }
 
 function messageMetadata(message: UIMessage): MessageMetadata {

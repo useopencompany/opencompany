@@ -1,6 +1,6 @@
 ---
 title: Architecture
-description: The current Goat runtime shape from browser chat to durable task execution.
+description: The current browser, API, and durable runner topology.
 ---
 
 ## High-level flow
@@ -8,53 +8,46 @@ description: The current Goat runtime shape from browser chat to durable task ex
 ```text
 Browser
   GoatSurface
-    POST /api/chat
-      persist user message
-      stream foreground assistant response
-      optionally create a canonical Task, Conversation, Message, and Run
+    typed /v1 Message, Conversation, Run, approval, attachment, and runtime commands
+    semantic Run event stream
+    authorized API-owned Electric read models
 
-  Task surface
-    typed /v1 Task and Message commands
-    authorized Task, Message, and Run read models
+API
+  authenticate Actor and workspace on every /v1 route
+  validate and atomically persist commands
+  serve durable state, semantic events, and fixed read models
 
 Runner
-  shared durable turn worker
-    claim a queued turn with a fenced lease and per-session FIFO
-    load the linked task projection
-    plan the task harness when needed
-    execute the selected engine adapter
-    settle messages, usage, runtime state, and task outcome
-
-Goat UI
-  read chat and task state
-  subscribe to fixed, authorized API read models
+  claim queued Runs with fenced leases and per-Conversation FIFO
+  execute OpenCompany, Codex, or Claude Code
+  settle Messages, Events, artifacts, usage, approvals, and terminal state
 ```
 
-## Foreground chat
+## Chat
 
-The chat entry point is `apps/web/app/api/chat/route.ts`. It authenticates the current Goat user, validates the submitted message, stores the user turn, and streams a response through Vercel AI Gateway.
+`apps/web/components/GoatSurface.tsx` uses the typed protocol client through
+`headless-chat-transport.ts` and `headless-chat-commands.ts`. Sending a Message creates a stable Run
+under an idempotency key. Engine choice and settings are versioned descriptors on that same command.
+Closing the browser does not end execution; the runner continues from Postgres and the UI reconnects
+through durable read models and semantic Events.
 
-The chat agent can answer directly or use the tools assembled in `packages/goat-agent/src/chat-agent.ts`:
+Shared tools and provider-neutral behavior live in `packages/goat-agent`. Public command handling is
+composed in `apps/api`; durable engine execution is composed in `apps/runner`.
 
-- `goat_brain` for durable personal context.
-- `web_fetch` for reading known public URLs when Exa is configured.
-- `web_search` when Exa is configured.
-- `start_task` for work that belongs in Tasks.
-- `start_workflow` when the user explicitly asks to run an active workspace workflow.
+## Tasks
 
-## Durable tasks
+Manual, Workflow, schedule, and agent producers enter `TaskApplicationService`. Creation writes a
+Task, Conversation, initial Message, and Run atomically. Follow-ups use the Message command and stop
+targets the active Run.
 
-Durable tasks enter `TaskApplicationService` from manual, Workflow, schedule, and agent producers. Browser creation uses typed `POST /v1/tasks`; internal backend producers compose the same service directly. Creation writes a Task, its one task-kind Conversation, native Messages, engine runtime state, and the first canonical Run in one database statement.
+The 35 sessionless historical Tasks remain available only through an actor-scoped, read-only
+compatibility API. They are a separate ADR 0002 retention gate.
 
-`apps/runner/src/goat-codex-chat-worker.ts` owns the queue. It preserves one active turn per session, heartbeats a fenced lease, reclaims expired work after a crash, and hands active turns off during deploys. Task turns load their projection through `apps/runner/src/goat-task-turn.ts` and execute through the normal OpenCompany or Codex chat adapter.
+## Boundaries
 
-Settlement updates the Run, runtime session, Task projection, assistant Message, Workflow state, and origin-chat notification atomically. Legacy Task rows without `session_id` remain available only through the actor-scoped, read-only compatibility API.
-
-## Data boundaries
-
-Goat owns the surviving execution model:
-
-- Current chat and task rows live under the Goat schema.
-- The runner owns durable turns, coding sandboxes, Brain ingestion, integration workers, and runtime access.
-- Shared schema changes belong in `packages/db` and require a Drizzle migration.
-- The retired first-generation `.agent` session engine is not a Goat dependency.
+- Protocol DTOs contain no credentials, secret values, private storage locators, WorkOS IDs, or
+  physical database types.
+- Every `/v1` route authenticates an Actor and enforces workspace membership.
+- The runner owns durable execution, coding sandboxes, and fenced lease settlement.
+- The web app owns presentation and uses typed API clients for Chat and Task data.
+- Schema changes belong in `packages/db` and require additive Drizzle migrations.

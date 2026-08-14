@@ -1,17 +1,7 @@
 "use server";
 
-import { getDb } from "@opencompany/db/client";
-import { goatBrainSources, goatIntegrations } from "@opencompany/db/goat-schema";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import {
-  type GoatCapabilityMode,
-  isGoatCapabilityId,
-  isGoatCapabilityMode,
-  providerCapability,
-} from "@/lib/actions/capabilities";
-import { resolveGoatActionCatalog } from "@/lib/actions/catalog";
-import { currentGoatUser } from "@/lib/auth";
+import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
 export type GoatIntegrationAccountUsage = {
   ok: true;
@@ -24,15 +14,18 @@ export type GoatIntegrationAccountUsage = {
 export async function getGoatIntegrationAccountUsageAction(
   integrationId: string,
 ): Promise<GoatIntegrationAccountUsage | { ok: false; error: string }> {
-  const context = await currentGoatUser();
-  const owned = await loadOwnPersonalIntegration(integrationId, context.user.workosUserId);
-  if (!owned) return { ok: false, error: "Only the connection owner can manage this account." };
   try {
-    const [row] = await getDb()
-      .select({ count: sql<number>`count(*)::integer` })
-      .from(goatBrainSources)
-      .where(eq(goatBrainSources.integrationId, integrationId));
-    return { ok: true, affectedBrainSourceCount: Number(row?.count ?? 0) };
+    const response = await (await serverApiClient()).v1["integration-accounts"][
+      ":integrationId"
+    ].usage.$get({ param: { integrationId } });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not check account usage."),
+      };
+    }
+    const data = (await response.json()).data as { affectedBrainSourceCount: number };
+    return { ok: true, affectedBrainSourceCount: data.affectedBrainSourceCount };
   } catch (error) {
     return {
       ok: false,
@@ -47,52 +40,15 @@ export async function getGoatIntegrationAccountUsageAction(
 export async function disconnectGoatIntegrationAccountAction(
   integrationId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const context = await currentGoatUser();
   try {
-    // Claims are created when work is enqueued, before the ingest job reaches
-    // a terminal state. Hard-deleting an integration cascades its source items
-    // and jobs, so release claims whose matching brain job never succeeded;
-    // otherwise another member's copy could be suppressed forever. Keep claims
-    // backed by successful jobs so completed ingestion remains deduplicated.
-    const result = await getDb().execute(sql`
-      WITH owned_integration AS (
-        SELECT integration.id
-        FROM goat.integrations integration
-        WHERE integration.id = ${integrationId}
-          AND integration.user_workos_id = ${context.user.workosUserId}
-          AND integration.workspace_id IS NULL
-      ),
-      source_items AS MATERIALIZED (
-        SELECT source.id
-        FROM goat.brain_source_items source
-        JOIN owned_integration integration ON integration.id = source.integration_id
-      ),
-      released_claims AS (
-        DELETE FROM goat.brain_source_event_claims claim
-        USING source_items source
-        WHERE claim.source_item_id = source.id
-          AND NOT EXISTS (
-            SELECT 1
-            FROM goat.brain_ingest_jobs job
-            WHERE job.source_item_id = source.id
-              AND job.brain_ref = claim.brain_id
-              AND job.status = 'succeeded'
-          )
-        RETURNING claim.id
-      ),
-      release_guard AS (
-        SELECT count(*) AS released_count FROM released_claims
-      ),
-      deleted_integration AS (
-        DELETE FROM goat.integrations integration
-        USING owned_integration owned, release_guard
-        WHERE integration.id = owned.id
-        RETURNING integration.id
-      )
-      SELECT id FROM deleted_integration
-    `);
-    if (rowsFromExecute<{ id: string }>(result).length === 0) {
-      return { ok: false, error: "Only the connection owner can manage this account." };
+    const response = await (await serverApiClient()).v1["integration-accounts"][
+      ":integrationId"
+    ].$delete({ param: { integrationId } });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not disconnect this account."),
+      };
     }
     revalidatePath("/", "layout");
     return { ok: true };
@@ -106,29 +62,28 @@ export async function disconnectGoatIntegrationAccountAction(
 
 // Settings control: one capability mode ("on" | "ask" | "off") for one
 // connection. Modes are stored as sparse overrides; registry defaults cover
-// missing keys.
+// missing keys. Vocabulary and ownership validation happen in the API.
 export async function setGoatIntegrationCapabilityModeAction(
   integrationId: string,
   capabilityId: string,
   mode: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const context = await currentGoatUser();
-  if (!isGoatCapabilityMode(mode) || !isGoatCapabilityId(capabilityId)) {
+  if (!integrationId || !capabilityId || !mode) {
     return { ok: false, error: "Unknown permission mode." };
   }
-  const owned = await loadOwnPersonalIntegration(integrationId, context.user.workosUserId);
-  if (!owned) return { ok: false, error: "Only the connection owner can manage this account." };
-  const [row] = await getDb()
-    .select({ provider: goatIntegrations.provider })
-    .from(goatIntegrations)
-    .where(eq(goatIntegrations.id, integrationId))
-    .limit(1);
-  const capability = row ? providerCapability(row.provider, capabilityId) : undefined;
-  if (!capability) {
-    return { ok: false, error: "This integration has no such permission." };
-  }
   try {
-    await applyCapabilityMode([integrationId], capabilityId, mode);
+    const response = await (await serverApiClient()).v1["integration-accounts"][":integrationId"][
+      "capability-modes"
+    ][":capabilityId"].$put({
+      param: { integrationId, capabilityId },
+      json: { mode },
+    });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not update the permission."),
+      };
+    }
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
@@ -139,26 +94,24 @@ export async function setGoatIntegrationCapabilityModeAction(
   }
 }
 
-// Chat "Always allow": flips the asked capability to "on" for every ask-mode
-// connection behind the action, so the next call runs without a confirmation.
-// The catalog is re-resolved server-side — the client only names the action.
+// Chat "Always allow": the execution owner re-resolves the action catalog and
+// flips every ask-mode connection behind the action to "on". The browser only
+// sends the opaque action id from the approval card.
 export async function alwaysAllowGoatChatActionAction(
   actionId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const context = await currentGoatUser();
   try {
-    const catalog = await resolveGoatActionCatalog({
-      userWorkosId: context.user.workosUserId,
-      workspaceId: context.workspace.id,
+    const response = await (await serverApiClient()).v1.actions[":actionId"].permissions[
+      "always-allow"
+    ].$post({
+      param: { actionId },
     });
-    const action = catalog.actions.find((entry) => entry.id === actionId);
-    const permission = action?.permission;
-    if (!permission || permission.integrationIds.length === 0) {
-      // Nothing to flip (already on, or the action disappeared) — not an error
-      // worth surfacing over the one-off approval that is about to run.
-      return { ok: true };
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not update the permission."),
+      };
     }
-    await applyCapabilityMode(permission.integrationIds, permission.capabilityId, "on");
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
@@ -167,44 +120,4 @@ export async function alwaysAllowGoatChatActionAction(
       error: error instanceof Error ? error.message : "Could not update the permission.",
     };
   }
-}
-
-async function applyCapabilityMode(
-  integrationIds: string[],
-  capabilityId: string,
-  mode: GoatCapabilityMode,
-) {
-  await getDb()
-    .update(goatIntegrations)
-    .set({
-      capabilityModes: sql`${goatIntegrations.capabilityModes} || ${JSON.stringify({
-        [capabilityId]: mode,
-      })}::jsonb`,
-      updatedAt: new Date(),
-    })
-    .where(inArray(goatIntegrations.id, integrationIds));
-}
-
-async function loadOwnPersonalIntegration(integrationId: string, userWorkosId: string) {
-  const [row] = await getDb()
-    .select({ id: goatIntegrations.id })
-    .from(goatIntegrations)
-    .where(
-      and(
-        eq(goatIntegrations.id, integrationId),
-        eq(goatIntegrations.userWorkosId, userWorkosId),
-        isNull(goatIntegrations.workspaceId),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
-}
-
-function rowsFromExecute<T>(result: unknown): T[] {
-  if (Array.isArray(result)) return result as T[];
-  if (result && typeof result === "object" && "rows" in result) {
-    const rows = (result as { rows?: unknown }).rows;
-    return Array.isArray(rows) ? (rows as T[]) : [];
-  }
-  return [];
 }

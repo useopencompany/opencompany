@@ -1,14 +1,13 @@
 "use client";
 
 import type {
-  GoatRepoConfigView,
-  GoatWorkspaceRepository,
-} from "@opencompany/db/goat-repo-configs";
-import type {
   LegacyTaskHistoryDto,
   LegacyTaskHistoryEventDto,
   LegacyTaskHistoryMessageDto,
+  SkillDto,
+  SkillImportCandidateDto,
 } from "@opencompany/protocol";
+import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
@@ -59,22 +58,25 @@ import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPane
 import { StripeIntegrationSetup } from "@/components/StripeIntegrationSetup";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
-import type { GoatBrainSnapshot } from "@/lib/brain";
-import type { GoatBrainOverviewStats } from "@/lib/brain-overview";
+import { useHydrated } from "@/components/useHydrated";
 import type { GoatChatSessionView } from "@/lib/chat-ui";
+import { getHeadlessWorkflows } from "@/lib/headless-automation-collections";
+import { createHeadlessWorkflow } from "@/lib/headless-automation-commands";
+import type { GoatWorkflowListItem } from "@/lib/headless-automation-types";
+import {
+  archiveHeadlessSkill,
+  createHeadlessSkill,
+  importHeadlessSkill,
+  previewHeadlessSkillImport,
+  updateHeadlessSkill,
+} from "@/lib/headless-knowledge-commands";
+import type { GoatBrainOverviewStats, GoatBrainSnapshot } from "@/lib/headless-knowledge-types";
 import { legacyTaskDtoToRow, taskReadModelToRow } from "@/lib/headless-task-collections";
 import { getHeadlessTask, getLegacyTaskCompatibilityHistory } from "@/lib/headless-task-commands";
 import type { GoatIntegrationState } from "@/lib/integration-state";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
-import {
-  archiveGoatSkillAction,
-  createGoatSkillAction,
-  importGoatSkillAction,
-  previewGoatSkillImportAction,
-  updateGoatSkillAction,
-} from "@/lib/skill-actions";
-import type { GoatSkillImportCandidate } from "@/lib/skill-import";
-import type { GoatSkillListItem, GoatSkillSource, GoatWorkspaceSkill } from "@/lib/skills";
+import type { GoatRepoConfigView, GoatWorkspaceRepository } from "@/lib/repo-config-actions";
+import type { GoatSkillListItem, GoatSkillSource } from "@/lib/skills";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
 import {
   updateGoatAutoModelRoutingAction,
@@ -82,8 +84,6 @@ import {
   updateGoatTaskSpawningAction,
   updateGoatWikiEnabledAction,
 } from "@/lib/user-preferences";
-import { createGoatWorkflowAction } from "@/lib/workflow-actions";
-import type { GoatWorkflowListItem } from "@/lib/workflows";
 
 export function GoatHomeRoute({
   chatId,
@@ -98,13 +98,14 @@ export function GoatHomeRoute({
     if (!chatId) return null;
     if (routeInitialChat?.id === chatId) return routeInitialChat;
     const summary = data.recentChats.find((chat) => chat.id === chatId);
+    if (!summary?.engine) return null;
     return {
       id: chatId,
-      title: summary?.title ?? "Goat",
-      model: summary?.model ?? DEFAULT_GOAT_MODEL,
-      engine: summary?.engine ?? "opencompany",
-      codexComposerSettings: summary?.codexComposerSettings ?? null,
-      codexRuntime: summary?.codexRuntime ?? null,
+      title: summary.title,
+      model: summary.model,
+      engine: summary.engine,
+      codexComposerSettings: summary.codexComposerSettings ?? null,
+      codexRuntime: summary.codexRuntime ?? null,
       messages: [],
     };
   }, [chatId, data.recentChats, routeInitialChat]);
@@ -123,7 +124,6 @@ export function GoatHomeRoute({
         claudeCodeConnected={data.claudeCodeConnected}
         taskSpawningEnabled={data.featureFlags.taskSpawning}
         autoModelRoutingEnabled={data.featureFlags.autoModelRouting}
-        chatResumeEnabled={data.chatResumeEnabled}
         workspaceId={data.workspace.id}
         userName={userName}
         userWorkosId={data.user.workosUserId}
@@ -197,6 +197,7 @@ export function GoatIntegrationsSettingsRoute({
       <IntegrationRows
         integrations={integrations}
         isWorkspaceAdmin={workspace.role === "admin"}
+        workspaceId={workspace.id}
         imessageEnabled={featureFlags.imessage}
         browserProfilesEnabled={browserProfilesEnabled}
       />
@@ -788,11 +789,13 @@ function BetaFeatureSwitch({
 function IntegrationRows({
   integrations,
   isWorkspaceAdmin,
+  workspaceId,
   imessageEnabled,
   browserProfilesEnabled,
 }: {
   integrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
+  workspaceId: string;
   imessageEnabled: boolean;
   browserProfilesEnabled: boolean;
 }) {
@@ -800,6 +803,7 @@ function IntegrationRows({
     <SettingsIntegrationsPanel
       initialIntegrations={integrations}
       isWorkspaceAdmin={isWorkspaceAdmin}
+      scopeKey={workspaceId}
       imessageEnabled={imessageEnabled}
       browserProfilesEnabled={browserProfilesEnabled}
     />
@@ -832,13 +836,31 @@ function getInitials(firstName: string | null, lastName: string | null, email: s
 
 export function GoatWorkflowsRoute({
   workflows,
+  workspaceId,
   canEdit,
 }: {
   workflows: GoatWorkflowListItem[];
+  workspaceId: string;
   canEdit: boolean;
 }) {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
+  const hydrated = useHydrated();
+  const workflowCollection = useMemo(
+    () => (hydrated ? getHeadlessWorkflows(workspaceId) : null),
+    [hydrated, workspaceId],
+  );
+  const { data: workflowRows, isLoading: workflowsLoading } = useLiveQuery(
+    (q) => (workflowCollection ? q.from({ workflow: workflowCollection }) : undefined),
+    [workflowCollection],
+  );
+  const visibleWorkflows = useMemo(
+    () =>
+      ((!hydrated || workflowsLoading ? workflows : (workflowRows ?? [])) as GoatWorkflowListItem[])
+        .filter((workflow) => !workflow.archivedAt)
+        .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+    [hydrated, workflowRows, workflows, workflowsLoading],
+  );
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
@@ -866,7 +888,7 @@ export function GoatWorkflowsRoute({
             ) : null}
           </header>
 
-          {workflows.length === 0 ? (
+          {visibleWorkflows.length === 0 ? (
             <GoatEmptyState
               icon={Workflow}
               title="No workflows yet"
@@ -878,7 +900,7 @@ export function GoatWorkflowsRoute({
             />
           ) : (
             <ul className="flex flex-col gap-2">
-              {workflows.map((workflow) => (
+              {visibleWorkflows.map((workflow) => (
                 <li key={workflow.slug}>
                   <WorkflowListRow workflow={workflow} />
                 </li>
@@ -894,7 +916,10 @@ export function GoatWorkflowsRoute({
           namePlaceholder="Weekly investor update"
           descriptionPlaceholder="What this workflow does"
           submitLabel="Create workflow"
-          create={createGoatWorkflowAction}
+          create={async (input) => {
+            const workflow = await createHeadlessWorkflow(input);
+            return { ok: true, slug: workflow.slug };
+          }}
           onClose={() => setCreating(false)}
           onCreated={(slug) => router.push(`/workflows/${encodeURIComponent(slug)}`)}
         />
@@ -1003,7 +1028,7 @@ export function GoatSkillsSettingsRoute({
           namePlaceholder="Draft a customer reply"
           descriptionPlaceholder="What this skill does"
           submitLabel="Create skill"
-          create={createGoatSkillAction}
+          create={createSkill}
           onClose={() => setCreating(false)}
           onCreated={(slug) => router.push(`/settings/skills/${encodeURIComponent(slug)}`)}
         />
@@ -1053,7 +1078,7 @@ export function GoatSkillEditorRoute({
   canEdit,
   source,
 }: {
-  skill: GoatWorkspaceSkill;
+  skill: Pick<SkillDto, "slug" | "name" | "description" | "instructions">;
   initialStatus: "draft" | "active";
   canEdit: boolean;
   source: GoatSkillSource | null;
@@ -1080,38 +1105,32 @@ export function GoatSkillEditorRoute({
   const save = () => {
     setError(null);
     startSaving(async () => {
-      const result = await updateGoatSkillAction({
-        slug: skill.id,
-        name,
-        description,
-        instructions,
-        status,
-      });
-      if (result.ok) {
+      try {
+        await updateHeadlessSkill(skill.slug, { name, description, instructions, status });
         setSaved(true);
         router.refresh();
-        return;
+      } catch (cause) {
+        setError(errorMessage(cause));
       }
-      setError(result.message);
     });
   };
 
   const archive = () => {
     setError(null);
     startArchiving(async () => {
-      const result = await archiveGoatSkillAction({ slug: skill.id });
-      if (result.ok) {
+      try {
+        await archiveHeadlessSkill(skill.slug);
         router.push("/settings/skills");
-        return;
+      } catch (cause) {
+        setError(errorMessage(cause));
       }
-      setError(result.message);
     });
   };
 
   return (
     <GoatSettingsContent
       title={name.trim() || "Untitled skill"}
-      description={`Attach this skill with @skill/${skill.id} in chat.`}
+      description={`Attach this skill with @skill/${skill.slug} in chat.`}
       backLink={{ href: "/settings/skills", label: "Skills" }}
     >
       {isReadOnly ? (
@@ -1415,15 +1434,19 @@ function NewItemDialog({
     }
     setError(null);
     startTransition(async () => {
-      const result = await create({
-        name: trimmed,
-        ...(description.trim() ? { description: description.trim() } : {}),
-      });
-      if (result.ok) {
-        onCreated(result.slug);
-        return;
+      try {
+        const result = await create({
+          name: trimmed,
+          ...(description.trim() ? { description: description.trim() } : {}),
+        });
+        if (result.ok) {
+          onCreated(result.slug);
+          return;
+        }
+        setError(result.message);
+      } catch (error) {
+        setError(error instanceof Error ? error.message : "Could not create this item.");
       }
-      setError(result.message);
     });
   };
 
@@ -1505,6 +1528,19 @@ function NewItemDialog({
   );
 }
 
+async function createSkill(input: { name: string; description?: string }) {
+  try {
+    const skill = await createHeadlessSkill(input);
+    return { ok: true as const, slug: skill.slug };
+  } catch (cause) {
+    return { ok: false as const, message: errorMessage(cause) };
+  }
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Something went wrong.";
+}
+
 type ImportPreviewState = {
   name: string;
   description: string;
@@ -1523,7 +1559,7 @@ function ImportSkillDialog({
 }) {
   const [url, setUrl] = useState("");
   const [selectedPath, setSelectedPath] = useState<string | undefined>(undefined);
-  const [candidates, setCandidates] = useState<GoatSkillImportCandidate[] | null>(null);
+  const [candidates, setCandidates] = useState<SkillImportCandidateDto[] | null>(null);
   const [preview, setPreview] = useState<ImportPreviewState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isResolving, startResolving] = useTransition();
@@ -1545,30 +1581,30 @@ function ImportSkillDialog({
     }
     setError(null);
     startResolving(async () => {
-      const result = await previewGoatSkillImportAction({
-        url: trimmed,
-        ...(path !== undefined ? { selectedPath: path } : {}),
-      });
-      if (result.status === "error") {
-        setError(result.message);
+      try {
+        const result = await previewHeadlessSkillImport({
+          url: trimmed,
+          ...(path !== undefined ? { selectedPath: path } : {}),
+        });
+        if (result.status === "ambiguous") {
+          setCandidates(result.candidates);
+          setPreview(null);
+          return;
+        }
+        setCandidates(null);
+        setPreview({
+          name: result.name,
+          description: result.description,
+          instructions: result.instructions,
+          extraFiles: result.extraFiles,
+          resolvedCommit: result.resolvedCommit,
+          integrity: result.integrity,
+        });
+      } catch (cause) {
+        setError(errorMessage(cause));
         setCandidates(null);
         setPreview(null);
-        return;
       }
-      if (result.status === "ambiguous") {
-        setCandidates(result.candidates);
-        setPreview(null);
-        return;
-      }
-      setCandidates(null);
-      setPreview({
-        name: result.name,
-        description: result.description,
-        instructions: result.instructions,
-        extraFiles: result.extraFiles,
-        resolvedCommit: result.resolvedCommit,
-        integrity: result.integrity,
-      });
     });
   };
 
@@ -1578,22 +1614,17 @@ function ImportSkillDialog({
     const confirmedPreview = preview;
     setError(null);
     startImporting(async () => {
-      const result = await importGoatSkillAction({
-        url: trimmed,
-        ...(selectedPath !== undefined ? { selectedPath } : {}),
-        expectedResolvedCommit: confirmedPreview.resolvedCommit,
-        expectedIntegrity: confirmedPreview.integrity,
-      });
-      if (result.status === "imported") {
-        onImported(result.slug);
-        return;
+      try {
+        const result = await importHeadlessSkill({
+          url: trimmed,
+          ...(selectedPath !== undefined ? { selectedPath } : {}),
+          expectedResolvedCommit: confirmedPreview.resolvedCommit,
+          expectedIntegrity: confirmedPreview.integrity,
+        });
+        onImported(result.skill.slug);
+      } catch (cause) {
+        setError(errorMessage(cause));
       }
-      if (result.status === "ambiguous") {
-        setCandidates(result.candidates);
-        setPreview(null);
-        return;
-      }
-      setError(result.message);
     });
   };
 

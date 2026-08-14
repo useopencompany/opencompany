@@ -14,11 +14,12 @@ import {
 } from "@opencompany/observability";
 import { flushBraintrust } from "@opencompany/observability/braintrust";
 import * as Sentry from "@sentry/bun";
-import { assertRunnerDbConfig, closeDb } from "./db";
+import { assertRunnerDbConfig, closeDb, getDbPool } from "./db";
 import { loadEnv } from "./env";
 import { startGoatAttioFlushWorker } from "./goat-attio-flush-worker";
 import { setGoatBrainImportWakeup, startGoatBrainImportWorker } from "./goat-brain-import-worker";
 import { setGoatBrainIngestWakeup, startGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
+import { startGoatBrainWorkerAdmissionListener } from "./goat-brain-worker-admission";
 import {
   setGoatCodexChatWakeup,
   startGoatCodexChatWorker,
@@ -36,6 +37,7 @@ import { startGoatGranolaPollWorker } from "./goat-granola-poll-worker";
 import { startGoatHubspotFlushWorker } from "./goat-hubspot-flush-worker";
 import { startGoatLinearFlushWorker } from "./goat-linear-flush-worker";
 import { startGoatTaskScheduleWorker } from "./goat-scheduler";
+import { activeGoatSlackBotEventCount, drainGoatSlackBotEvents } from "./goat-slack-bot-events";
 import { startGoatSlackFlushWorker } from "./goat-slack-flush-worker";
 import { settleExpiredBrokerTokens } from "./llm-broker-tokens";
 import { createServer } from "./server";
@@ -126,6 +128,16 @@ setGoatBrainImportWakeup(() => {
 setGoatCodexChatWakeup(() => {
   goatCodexChatWorker?.notify();
 });
+const goatBrainWorkerAdmissionListener = env.goatTaskWorkerEnabled
+  ? startGoatBrainWorkerAdmissionListener({
+      pool: getDbPool(),
+      callbacks: {
+        brain_import: () => goatBrainImportWorker?.notify(),
+        brain_ingest: () => goatBrainIngestWorker?.notify(),
+        google_drive_sync: () => goatGoogleDriveSyncWorker?.notify(),
+      },
+    })
+  : null;
 const server = createServer(env);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
@@ -137,6 +149,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       active_goat_google_drive_sync_count: goatGoogleDriveSyncWorker?.activeCount() ?? 0,
       active_goat_brain_import_count: goatBrainImportWorker?.activeCount() ?? 0,
       active_goat_codex_chat_count: goatCodexChatWorker?.activeCount() ?? 0,
+      active_goat_slack_bot_event_count: activeGoatSlackBotEventCount(),
     });
     clearInterval(llmBrokerSweepTimer);
     // Stop accepting work and drain in-flight requests first, then close the DB pool so
@@ -156,6 +169,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       goatBrainIngestWorker?.stop() ?? Promise.resolve(),
       goatBrainImportWorker?.stop() ?? Promise.resolve(),
       goatSlackFlushWorker?.stop() ?? Promise.resolve(),
+      drainGoatSlackBotEvents(),
       goatLinearFlushWorker?.stop() ?? Promise.resolve(),
       goatGitHubFlushWorker?.stop() ?? Promise.resolve(),
       goatHubspotFlushWorker?.stop() ?? Promise.resolve(),
@@ -165,6 +179,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       goatGranolaPollWorker?.stop() ?? Promise.resolve(),
       goatFathomPollWorker?.stop() ?? Promise.resolve(),
       goatGoogleDriveSyncWorker?.stop() ?? Promise.resolve(),
+      goatBrainWorkerAdmissionListener?.stop() ?? Promise.resolve(),
       server.close(),
       chatPresentation?.close() ?? Promise.resolve(),
     ])

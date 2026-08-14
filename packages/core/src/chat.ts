@@ -155,6 +155,8 @@ export type CreateMessageCommand = {
   content: string;
   engine: ChatEngine;
   model: string;
+  runtimeModel?: string;
+  settings?: Readonly<Record<string, unknown>>;
   attachmentIds?: readonly string[];
   mentions?: readonly MessageMention[];
 };
@@ -247,7 +249,13 @@ export type ResolveApprovalCommand = {
   runId: string;
   approvalId: string;
   resolution: ApprovalResolution;
-  answer?: string;
+  answer?: string | EngineQuestionAnswer;
+};
+
+export type EngineQuestionAnswer = {
+  type: "engine_questions";
+  schemaVersion: 1;
+  answers: Readonly<Record<string, { answers: readonly string[] }>>;
 };
 
 export type ResolveApprovalResult = {
@@ -299,7 +307,13 @@ export interface ChatRepository {
 
 export class CoreError extends Error {
   constructor(
-    readonly code: "forbidden" | "invalid_argument" | "not_found" | "idempotency_conflict",
+    readonly code:
+      | "forbidden"
+      | "invalid_argument"
+      | "not_found"
+      | "conflict"
+      | "idempotency_conflict"
+      | "unavailable",
     message: string,
   ) {
     super(message);
@@ -419,12 +433,21 @@ export class ChatApplicationService {
         "conversationId and clientConversationId cannot both be provided.",
       );
     }
+    const runtimeModel = input.runtimeModel?.trim();
+    if (
+      runtimeModel !== undefined &&
+      (!runtimeModel || runtimeModel.length > MAX_MODEL_ID_LENGTH)
+    ) {
+      throw new CoreError("invalid_argument", "A valid runtime model is required.");
+    }
 
     const command: CreateMessageCommand = {
       idempotencyKey,
       content,
       engine: input.engine,
       model,
+      ...(runtimeModel ? { runtimeModel } : {}),
+      ...(input.settings ? { settings: input.settings } : {}),
       ...(input.conversationId
         ? { conversationId: resourceId(input.conversationId, "conversationId") }
         : {}),
@@ -508,16 +531,17 @@ export class ChatApplicationService {
     if (!APPROVAL_RESOLUTIONS.includes(input.resolution)) {
       throw new CoreError("invalid_argument", "The approval resolution is invalid.");
     }
-    const answer = input.answer?.trim();
+    const answer = typeof input.answer === "string" ? input.answer.trim() : input.answer;
     if (input.resolution === "answered" && !answer) {
       throw new CoreError("invalid_argument", "An answer is required for this resolution.");
     }
     if (input.resolution !== "answered" && answer) {
       throw new CoreError("invalid_argument", "An answer is only valid for an answered approval.");
     }
-    if (answer && answer.length > MAX_APPROVAL_ANSWER_LENGTH) {
+    if (typeof answer === "string" && answer.length > MAX_APPROVAL_ANSWER_LENGTH) {
       throw new CoreError("invalid_argument", "The approval answer is too long.");
     }
+    if (answer && typeof answer !== "string") validateEngineQuestionAnswer(answer);
     const result = await this.repository.resolveApproval({
       actor,
       command: {
@@ -529,6 +553,32 @@ export class ChatApplicationService {
     });
     if (!result) throw new CoreError("not_found", "Approval not found.");
     return result;
+  }
+}
+
+function validateEngineQuestionAnswer(answer: EngineQuestionAnswer) {
+  if (answer.type !== "engine_questions" || answer.schemaVersion !== 1) {
+    throw new CoreError("invalid_argument", "The approval answer is invalid.");
+  }
+  const entries = Object.entries(answer.answers);
+  if (entries.length === 0 || entries.length > 3) {
+    throw new CoreError("invalid_argument", "The approval answer is invalid.");
+  }
+  let totalLength = 0;
+  for (const [questionId, response] of entries) {
+    if (!questionId.trim() || response.answers.length === 0 || response.answers.length > 8) {
+      throw new CoreError("invalid_argument", "The approval answer is invalid.");
+    }
+    for (const value of response.answers) {
+      const normalized = value.trim();
+      if (!normalized || normalized.length > 4_000) {
+        throw new CoreError("invalid_argument", "The approval answer is invalid.");
+      }
+      totalLength += normalized.length;
+    }
+  }
+  if (totalLength > 12_000) {
+    throw new CoreError("invalid_argument", "The approval answer is too long.");
   }
 }
 

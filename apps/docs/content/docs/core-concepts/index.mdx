@@ -1,0 +1,18 @@
+---
+title: Core concepts
+description: A map of the durable objects and product surfaces used by OpenCompany.
+---
+
+OpenCompany uses the same durable execution model whether work begins in Chat, a Task, a Workflow,
+or a schedule.
+
+- A **Conversation** owns ordered user and assistant Messages.
+- A **Message** is a durable entry in that Conversation.
+- Sending a Message creates a **Run**, the unit of accepted work you can observe or cancel.
+- A **Task** adds a name, goal, source, status, and outcome around exactly one Conversation.
+- A **Workflow** is a reusable ordered definition. Invoking it creates a Task.
+- A **schedule** invokes a Workflow or recurring Task at a configured time and timezone.
+
+Integrations provide live actions or source material. Brain stores the knowledge that should outlive
+one Conversation. Keeping those roles separate lets you connect a service without ingesting it, or
+capture a durable fact without turning all chat history into knowledge.

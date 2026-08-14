@@ -1,6 +1,7 @@
 "use client";
 
-import type { GoatBrainIngestTrace } from "@opencompany/db/goat-brain-ingest-trace";
+import type { GoatBrainIngestTrace } from "@opencompany/goat-brain/ingest-trace";
+import type { BrainIngestJobReadModel, BrainSourceItemDto } from "@opencompany/protocol";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { useLiveQuery } from "@tanstack/react-db";
 import {
@@ -18,21 +19,14 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { BrainIngestTraceDialog } from "@/components/BrainIngestTraceView";
 import { buildGoatBrainActivityEvents, type GoatBrainActivityKind } from "@/lib/brain-activity";
-import {
-  createGoatCollections,
-  type GoatBrainIngestJobRow,
-  type GoatBrainSourceItemRow,
-} from "@/lib/task-collections";
+import { getHeadlessBrainCollections } from "@/lib/headless-knowledge-collections";
+import { listHeadlessBrainSourceItems } from "@/lib/headless-knowledge-commands";
 
 type SelectedBrainIngestTrace = {
   trace: GoatBrainIngestTrace;
   traceId: string;
   sourceTitle: string;
   durationMs: number | null;
-};
-
-type BrainActivitySourceItemsResponse = {
-  sourceItems?: GoatBrainSourceItemRow[];
 };
 
 const MAX_ACTIVITY_SOURCE_ITEM_FETCH_IDS = 100;
@@ -105,70 +99,48 @@ function GoatBrainActivityFeed({
   variant?: "popover" | "overview";
   activityFilter?: GoatBrainActivityFilter;
 }) {
-  const collections = useMemo(() => createGoatCollections(), []);
-  const brainCollections = useMemo(
-    () => collections.brainCollections(brainRef),
-    [brainRef, collections],
-  );
+  const brainCollections = useMemo(() => getHeadlessBrainCollections(brainRef), [brainRef]);
   const { data: jobRows, isLoading: jobsLoading } = useLiveQuery(
     (q) => q.from({ job: brainCollections.ingestJobs }),
     [brainCollections],
   );
-  const { data: itemRows, isLoading: itemsLoading } = useLiveQuery(
-    (q) => q.from({ item: collections.brainSourceItems }),
-    [collections],
-  );
-  const [brainSourceItemRows, setBrainSourceItemRows] = useState<GoatBrainSourceItemRow[]>([]);
-  const sourceItems = useMemo(
-    () => mergeSourceItemRows(brainSourceItemRows, (itemRows ?? []) as GoatBrainSourceItemRow[]),
-    [brainSourceItemRows, itemRows],
-  );
+  const [sourceItems, setSourceItems] = useState<BrainSourceItemDto[]>([]);
   const missingSourceItemIds = useMemo(() => {
-    if (itemsLoading) return [];
     const known = new Set(sourceItems.map((item) => item.id));
     return Array.from(
       new Set(
-        ((jobRows ?? []) as GoatBrainIngestJobRow[])
-          .map((job) => job.source_item_id)
+        ((jobRows ?? []) as BrainIngestJobReadModel[])
+          .map((job) => job.sourceItemId)
           .filter((id) => id && !known.has(id)),
       ),
     ).slice(0, MAX_ACTIVITY_SOURCE_ITEM_FETCH_IDS);
-  }, [itemsLoading, jobRows, sourceItems]);
+  }, [jobRows, sourceItems]);
   const missingSourceItemIdsKey = missingSourceItemIds.join(",");
   useEffect(() => {
     if (!missingSourceItemIdsKey) return;
-    const controller = new AbortController();
-    const url = new URL("/api/brain-activity/source-items", window.location.origin);
-    url.searchParams.set("brain_ref", brainRef);
-    url.searchParams.set("source_item_ids", missingSourceItemIdsKey);
-
-    fetch(url, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok)
-          throw new Error(`Failed to load brain source metadata: ${response.status}`);
-        return (await response.json()) as BrainActivitySourceItemsResponse;
-      })
-      .then((body) => {
-        const sourceItems = Array.isArray(body.sourceItems) ? body.sourceItems : [];
-        if (sourceItems.length === 0) return;
-        setBrainSourceItemRows((current) => mergeSourceItemRows(current, sourceItems));
-      })
-      .catch((error) => {
-        if (controller.signal.aborted) return;
+    let canceled = false;
+    void listHeadlessBrainSourceItems(brainRef, missingSourceItemIds).then(
+      (items) => {
+        if (canceled || items.length === 0) return;
+        setSourceItems((current) => mergeSourceItemRows(current, items));
+      },
+      (error) => {
+        if (canceled) return;
         console.warn("[goat-brain-activity] failed to load source metadata", {
           error: error instanceof Error ? error.message : String(error),
         });
-      });
+      },
+    );
 
     return () => {
-      controller.abort();
+      canceled = true;
     };
-  }, [brainRef, missingSourceItemIdsKey]);
+  }, [brainRef, missingSourceItemIds, missingSourceItemIdsKey]);
   const filteredKind = activityKindForFilter(activityFilter);
   const events = useMemo(
     () =>
       buildGoatBrainActivityEvents(
-        (jobRows ?? []) as GoatBrainIngestJobRow[],
+        (jobRows ?? []) as BrainIngestJobReadModel[],
         sourceItems,
         filteredKind ? { kinds: [filteredKind] } : undefined,
       ),
@@ -176,7 +148,7 @@ function GoatBrainActivityFeed({
   );
   const visibleEvents = limit ? events.slice(0, limit) : events;
   const hasJobs = (jobRows?.length ?? 0) > 0;
-  const loading = (jobsLoading || itemsLoading) && !hasJobs;
+  const loading = jobsLoading && !hasJobs;
   const overview = variant === "overview";
 
   return (
@@ -339,8 +311,8 @@ function TraceIdLine({ traceId }: { traceId: string }) {
   );
 }
 
-function mergeSourceItemRows(...sources: readonly (readonly GoatBrainSourceItemRow[])[]) {
-  const rowsById = new Map<string, GoatBrainSourceItemRow>();
+function mergeSourceItemRows(...sources: readonly (readonly BrainSourceItemDto[])[]) {
+  const rowsById = new Map<string, BrainSourceItemDto>();
   for (const source of sources) {
     for (const row of source) rowsById.set(row.id, row);
   }

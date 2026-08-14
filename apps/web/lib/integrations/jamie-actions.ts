@@ -1,13 +1,8 @@
 "use server";
 
+import type { GoatJamieWebhookSetup } from "@opencompany/goat-agent/integrations/jamie";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
-import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
-import {
-  createOrResetGoatJamieWebhookEndpoint,
-  type GoatJamieWebhookSetup,
-  saveGoatJamieWebhookApiKey,
-} from "@/lib/integrations/jamie";
+import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
 export type JamieWebhookEndpointActionResult =
   | {
@@ -20,52 +15,44 @@ export type JamieWebhookEndpointActionResult =
     };
 
 export async function createOrResetJamieWebhookEndpointAction(): Promise<JamieWebhookEndpointActionResult> {
-  const { user, workspace, role } = await currentGoatUser();
-  // Jamie webhooks are workspace-owned plumbing; only admins manage them.
-  if (role !== "admin") {
-    return { ok: false, error: "Only workspace admins can manage the Jamie integration." };
-  }
   try {
-    const setup = await createOrResetGoatJamieWebhookEndpoint({
-      userWorkosId: user.workosUserId,
-      workspaceId: workspace.id,
-    });
+    const response = await (await serverApiClient()).v1["integration-accounts"].jamie[
+      "webhook-endpoint"
+    ].$post();
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not create a Jamie webhook endpoint."),
+      };
+    }
+    const data = (await response.json()).data as { setup: GoatJamieWebhookSetup };
     revalidatePath("/", "layout");
-    return {
-      ok: true,
-      setup,
-    };
+    return { ok: true, setup: data.setup };
   } catch (error) {
     console.error("[goat-jamie] Failed to create Jamie webhook endpoint", error);
-    return {
-      ok: false,
-      error: "Could not create a Jamie webhook endpoint.",
-    };
+    return { ok: false, error: "Could not create a Jamie webhook endpoint." };
   }
 }
 
 export async function saveJamieWebhookApiKeyAction(
   apiKey: string,
 ): Promise<JamieWebhookEndpointActionResult> {
-  const { user, workspace, role } = await currentGoatUser();
-  if (role !== "admin") {
-    return { ok: false, error: "Only workspace admins can manage the Jamie integration." };
+  if (typeof apiKey !== "string" || !apiKey.trim()) {
+    return { ok: false, error: "Could not save the Jamie API key." };
   }
   try {
-    const setup = await saveGoatJamieWebhookApiKey({
-      workspaceId: workspace.id,
-      apiKey,
-    });
-    await captureGoatIntegrationAddedAnalytics({
-      userWorkosId: user.workosUserId,
-      workspaceId: workspace.id,
-      provider: "jamie",
-    });
+    const response = await (await serverApiClient()).v1["integration-accounts"].jamie[
+      "api-key"
+    ].$put({ json: { apiKey } });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not save the Jamie API key."),
+      };
+    }
+    const data = (await response.json()).data as { setup: GoatJamieWebhookSetup };
     revalidatePath("/", "layout");
-    return {
-      ok: true,
-      setup,
-    };
+    return { ok: true, setup: data.setup };
   } catch (error) {
     console.error("[goat-jamie] Failed to save Jamie webhook API key", error);
     return {

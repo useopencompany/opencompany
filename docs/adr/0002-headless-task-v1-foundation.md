@@ -174,11 +174,14 @@ in prior task-kind Conversations. Migration
 `0204_goat_task_conversation_history_projection.sql` remaps those owner- and workspace-matched,
 Task-linked rows only in the additive canonical Message/Run projections. This preserves one public
 `conversationId` and leaves physical Conversations, Messages, Runs, and runtimes unchanged for
-rollback. Normal Chat Task cards are not remapped.
+rollback. Normal Chat Task cards are not remapped. The production release audit then found two
+eligible Runs whose projection rows had already been absent before that remap. Additive migration
+`0205_goat_task_history_projection_repair.sql` upserts the same bounded Message/Run projection set
+without mutating physical history.
 
-The frozen `/api/chat` and legacy Chat adapter are unaffected. Workflow invocation moves in this
-phase, but Workflow editor/catalog CRUD does not. Expo/mobile, macOS, broad web DB cleanup, runner
-renaming, and new infrastructure remain out of scope.
+The Chat cutover is independent of this historical Task retention gate. Workflow invocation moves
+in this phase, but Workflow editor/catalog CRUD does not. Expo/mobile, macOS, runner renaming, and
+new infrastructure remain out of scope.
 
 ## Rollback
 
@@ -194,8 +197,9 @@ Existing canonical Tasks must never be moved to the legacy queue; the additive A
 read models may remain deployed. PR 4 rollback restores the prior application release, including
 the constructor and schedule fallback, while already queued canonical Runs keep draining through
 the shared worker. Migration `0204` may remain because it changes only rebuildable read projections;
-all source rows and nullable schedule storage are untouched. Retained historical compatibility data
-is never dropped as part of a code rollback.
+the same is true of projection-completeness repair `0205`. All source rows and nullable schedule
+storage are untouched. Retained historical compatibility data is never dropped as part of a code
+rollback.
 
 Production verification uses only the designated test actor/workspace. Stateful smoke evidence
 records anonymized durable identifiers and exact release SHAs on #1190; absence of operator access

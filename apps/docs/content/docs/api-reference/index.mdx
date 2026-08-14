@@ -1,0 +1,50 @@
+---
+title: API reference
+description: Authentication, protocol conventions, and the generated OpenCompany v1 endpoint reference.
+---
+
+The endpoint pages in this section are generated from
+`packages/protocol/openapi/openapi.v1.json`, the same OpenAPI 3.1 contract exported by the protocol
+package. The docs build regenerates one page per operation, grouped by API tag, before Fumadocs
+indexes or renders content. Endpoint additions and schema changes do not rely on a second
+hand-maintained reference.
+
+## Base URL
+
+The hosted product API is available at:
+
+```text
+https://api.opencompany.chat
+```
+
+Public product resources use the `/v1` prefix. The contract's relative server URL means paths are
+resolved against the API origin above, not against the documentation host.
+
+## Authentication
+
+The contract represents two authentication mechanisms:
+
+- a WorkOS-backed browser session cookie used by the signed-in product;
+- a bearer JWT for authorized non-browser clients.
+
+Public token issuance, rotation, and service-account onboarding guidance is not complete yet. Do not
+copy a browser session cookie into scripts or build an integration around an undocumented token
+flow. Contact the OpenCompany team before treating the current bearer surface as a stable onboarding
+contract.
+
+## Protocol conventions
+
+Requests and responses are scoped to the authenticated actor and active workspace. Resource IDs are
+opaque. List endpoints use opaque cursors where pagination applies. Command endpoints that declare
+`Idempotency-Key` require a fresh stable key for one logical command; retrying the same command with
+the same body and key returns the original accepted resource instead of creating another one.
+
+Response envelopes include API and protocol version metadata. Clients should validate response
+shapes and avoid depending on physical database field names or internal runner routes.
+
+## Generated endpoints
+
+Open **Endpoints** in the sidebar to browse the current contract grouped by tag. The interactive
+request playground is disabled until public credential handling and the documentation-host proxy
+policy are documented. Schemas, parameters, examples, and response types still render from the
+contract.

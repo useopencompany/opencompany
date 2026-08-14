@@ -1,11 +1,25 @@
 import type { Actor } from "@opencompany/core";
+import { normalizeGoatBrainIngestTrace } from "@opencompany/db/goat-brain-ingest-trace";
 import {
+  BrainDocumentReadModelSchema,
+  BrainEdgeReadModelSchema,
+  BrainFolderReadModelSchema,
+  BrainImportRunReadModelSchema,
+  BrainIngestJobReadModelSchema,
+  BrainTimelineReadModelSchema,
   ConversationReadModelSchema,
+  EngineSessionReadModelSchema,
+  IntegrationAccountReadModelSchema,
   MessageReadModelSchema,
   type ReadModel,
   RunReadModelSchema,
   TaskOutcomeSchema,
   TaskReadModelSchema,
+  TaskScheduleReadModelSchema,
+  WikiPageReadModelSchema,
+  WikiTimelineReadModelSchema,
+  WorkflowReadModelSchema,
+  WorkflowScheduleReadModelSchema,
 } from "@opencompany/protocol";
 import { ApiError } from "./errors";
 
@@ -35,13 +49,26 @@ const ELECTRIC_RESPONSE_HEADERS = [
 
 // These columns cross the API boundary as decoded JSON values. Omitting their upstream JSONB
 // metadata prevents @electric-sql/client from parsing the already-decoded values a second time.
-const PREDECODED_READ_MODEL_FIELDS = new Set(["presentation", "attachments"]);
+const PREDECODED_READ_MODEL_FIELDS = new Set([
+  "presentation",
+  "attachments",
+  "steps",
+  "trigger",
+  "timeline",
+  "relations",
+  "result",
+  "sources",
+  "aliases",
+  "scopes",
+  "capabilityModes",
+]);
 
 export interface ReadModelService {
   stream(input: {
     actor: Actor;
     readModel: ReadModel;
     conversationId?: string;
+    brainId?: string;
     requestUrl: URL;
   }): Promise<Response>;
 }
@@ -69,6 +96,7 @@ export class ElectricReadModelProxy implements ReadModelService {
     actor: Actor;
     readModel: ReadModel;
     conversationId?: string;
+    brainId?: string;
     requestUrl: URL;
   }) {
     const shape = readModelShape(input);
@@ -133,7 +161,12 @@ export class ElectricReadModelProxy implements ReadModelService {
   }
 }
 
-function readModelShape(input: { actor: Actor; readModel: ReadModel; conversationId?: string }) {
+function readModelShape(input: {
+  actor: Actor;
+  readModel: ReadModel;
+  conversationId?: string;
+  brainId?: string;
+}) {
   switch (input.readModel) {
     case "chat-conversations-v1":
       return {
@@ -178,6 +211,13 @@ function readModelShape(input: { actor: Actor; readModel: ReadModel; conversatio
         "created_at",
         "updated_at",
       ]);
+    case "engine-sessions-v1":
+      return {
+        table: "goat.codex_chat_sessions",
+        columns: ["chat_session_id", "engine", "status", "active_turn_id", "error", "updated_at"],
+        where: `"user_workos_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
+        params: [input.actor.userId, input.actor.workspaceId],
+      };
     case "tasks-v1":
       return {
         table: "goat.task_read_model_v1",
@@ -205,9 +245,212 @@ function readModelShape(input: { actor: Actor; readModel: ReadModel; conversatio
         where: `("workspace_id" = $2 OR (` + `"workspace_id" IS NULL AND "actor_id" = $1))`,
         params: [input.actor.userId, input.actor.workspaceId],
       };
+    case "workflows-v1":
+      return {
+        table: "goat.workflow_read_model_v1",
+        columns: [
+          "id",
+          "slug",
+          "name",
+          "description",
+          "steps",
+          "status",
+          "trigger",
+          "version",
+          "archived_at",
+          "created_at",
+          "updated_at",
+        ],
+        where: `"workspace_id" = $1`,
+        params: [input.actor.workspaceId],
+      };
+    case "workflow-schedules-v1":
+      return {
+        table: "goat.workflow_schedule_read_model_v1",
+        columns: [
+          "id",
+          "workflow_id",
+          "workflow_slug",
+          "name",
+          "cron",
+          "timezone",
+          "prompt",
+          "enabled",
+          "last_run_at",
+          "next_run_at",
+          "version",
+          "created_at",
+          "updated_at",
+        ],
+        where: `"workspace_id" = $1`,
+        params: [input.actor.workspaceId],
+      };
+    case "task-schedules-v1":
+      return {
+        table: "goat.task_schedule_read_model_v1",
+        columns: [
+          "id",
+          "name",
+          "source_description",
+          "cron",
+          "timezone",
+          "prompt",
+          "enabled",
+          "last_run_at",
+          "next_run_at",
+          "version",
+          "created_at",
+          "updated_at",
+        ],
+        where: `"actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
+        params: [input.actor.userId, input.actor.workspaceId],
+      };
+    case "integration-accounts-v1":
+      return {
+        table: "goat.integrations",
+        columns: [
+          "id",
+          "provider",
+          "workspace_id",
+          "external_id",
+          "connection_label",
+          "account_name",
+          "account_email",
+          "account_type",
+          "status",
+          "status_reason",
+          "scopes",
+          "capability_modes",
+        ],
+        where: `("user_workos_id" = $1 AND "workspace_id" IS NULL) OR "workspace_id" = $2`,
+        params: [input.actor.userId, input.actor.workspaceId],
+      };
+    case "brain-folders-v1":
+      return brainShape(input, "goat.brain_folders", [
+        "id",
+        "path",
+        "source",
+        "created_at",
+        "updated_at",
+      ]);
+    case "brain-documents-v1":
+      return brainShape(input, "goat.brain_documents", [
+        "id",
+        "brain_id",
+        "folder_path",
+        "title",
+        "content",
+        "body",
+        "timeline",
+        "format",
+        "mime_type",
+        "original_file_name",
+        "asset_size_bytes",
+        "relations",
+        "sources",
+        "kind",
+        "entity_type",
+        "status",
+        "aliases",
+        "content_hash",
+        "size_bytes",
+        "created_by_workos_id",
+        "created_at",
+        "updated_at",
+      ]);
+    case "brain-timeline-v1":
+      return brainShape(input, "goat.brain_timeline_entries", [
+        "id",
+        "document_id",
+        "brain_id",
+        "evidence_id",
+        "at",
+        "source_ref",
+        "source_title",
+        "summary",
+        "detail",
+        "created_at",
+      ]);
+    case "brain-edges-v1":
+      return brainShape(input, "goat.brain_edges", [
+        "id",
+        "document_id",
+        "from_brain_id",
+        "to_brain_id",
+        "relation_type",
+        "source_kind",
+        "created_at",
+        "updated_at",
+      ]);
+    case "brain-ingest-jobs-v1":
+      return brainShape(input, "goat.brain_ingest_jobs", [
+        "id",
+        "source_item_id",
+        "source_provider",
+        "kind",
+        "status",
+        "plan_paused",
+        "attempts",
+        "last_error",
+        "result",
+        "completed_at",
+        "created_at",
+        "updated_at",
+      ]);
+    case "brain-import-runs-v1":
+      return brainShape(input, "goat.brain_import_runs", [
+        "id",
+        "status",
+        "company_url",
+        "company_name",
+        "focus",
+        "source_selection",
+        "discovery_summary",
+        "last_error",
+        "confirmed_at",
+        "completed_at",
+        "created_at",
+        "updated_at",
+      ]);
+    case "wiki-pages-v1":
+      return {
+        table: "goat.wiki_pages",
+        columns: [
+          "id",
+          "slug",
+          "path",
+          "title",
+          "kind",
+          "content",
+          "content_hash",
+          "size_bytes",
+          "format",
+          "mime_type",
+          "original_file_name",
+          "asset_size_bytes",
+          "created_at",
+          "updated_at",
+        ],
+        where: `"workspace_id" = $1`,
+        params: [input.actor.workspaceId],
+      };
+    case "wiki-timeline-v1":
+      return {
+        table: "goat.wiki_timeline_entries",
+        columns: ["id", "page_id", "at", "text", "created_at"],
+        where: `"workspace_id" = $1`,
+        params: [input.actor.workspaceId],
+      };
     default:
       throw new ApiError(400, "invalid_request", "Unknown read model.");
   }
+}
+
+function brainShape(input: { brainId?: string }, table: string, columns: string[]) {
+  if (!input.brainId) {
+    throw new ApiError(400, "invalid_request", "brainId is required for this read model.");
+  }
+  return { table, columns, where: `"brain_ref" = $1`, params: [input.brainId] };
 }
 
 function conversationShape(
@@ -249,10 +492,18 @@ function projectReadModelValue(
   const projected: Record<string, unknown> = Object.fromEntries(
     Object.entries(columnNames).flatMap(([physicalName, publicName]) =>
       publicName && Object.hasOwn(row, physicalName)
-        ? [[publicName, readModelFieldValue(publicName, row[physicalName])]]
+        ? [[publicName, readModelFieldValue(readModel, publicName, row[physicalName])]]
         : [],
     ),
   );
+  if (readModel === "brain-documents-v1") {
+    if (typeof projected.folderPath === "string" && typeof projected.brainId === "string") {
+      projected.path = `${projected.folderPath}/${projected.brainId}.md`;
+    }
+    if (projected.title === null && typeof projected.brainId === "string") {
+      projected.title = projected.brainId;
+    }
+  }
   if (readModel === "tasks-v1") {
     const outcome = Object.fromEntries(
       Object.entries(TASK_OUTCOME_COLUMN_NAMES).flatMap(([physicalName, publicName]) =>
@@ -265,6 +516,36 @@ function projectReadModelValue(
       : TaskReadModelSchema;
     return schema.parse(projected);
   }
+  if (readModel === "workflows-v1") {
+    const schema = partial ? WorkflowReadModelSchema.partial() : WorkflowReadModelSchema;
+    return schema.parse(projected);
+  }
+  if (readModel === "brain-ingest-jobs-v1" && Object.hasOwn(projected, "result")) {
+    projected.result = publicBrainIngestJobResult(projected.result);
+  }
+  if (readModel === "brain-ingest-jobs-v1" && Object.hasOwn(projected, "lastError")) {
+    projected.lastError = boundedNullableString(projected.lastError, 2_000);
+  }
+  if (readModel === "brain-import-runs-v1") {
+    if (Object.hasOwn(projected, "sourceSelection")) {
+      projected.sourceSelection = publicBrainImportSourceSelection(projected.sourceSelection);
+    }
+    if (Object.hasOwn(projected, "discoverySummary")) {
+      projected.discoverySummary = publicBrainImportDiscoverySummary(projected.discoverySummary);
+    }
+    if (Object.hasOwn(projected, "lastError")) {
+      projected.lastError = boundedNullableString(projected.lastError, 2_000);
+    }
+    if (Object.hasOwn(projected, "companyUrl")) {
+      projected.companyUrl = boundedNullableString(projected.companyUrl, 2_048);
+    }
+    if (Object.hasOwn(projected, "companyName")) {
+      projected.companyName = boundedNullableString(projected.companyName, 512);
+    }
+    if (Object.hasOwn(projected, "focus")) {
+      projected.focus = boundedNullableString(projected.focus, 2_000);
+    }
+  }
   switch (readModel) {
     case "chat-conversations-v1":
       return (partial ? ConversationReadModelSchema.partial() : ConversationReadModelSchema).parse(
@@ -274,13 +555,87 @@ function projectReadModelValue(
       return (partial ? MessageReadModelSchema.partial() : MessageReadModelSchema).parse(projected);
     case "chat-runs-v1":
       return (partial ? RunReadModelSchema.partial() : RunReadModelSchema).parse(projected);
+    case "engine-sessions-v1":
+      return (
+        partial ? EngineSessionReadModelSchema.partial() : EngineSessionReadModelSchema
+      ).parse(projected);
+    case "workflow-schedules-v1":
+      return (
+        partial ? WorkflowScheduleReadModelSchema.partial() : WorkflowScheduleReadModelSchema
+      ).parse(projected);
+    case "task-schedules-v1":
+      return (partial ? TaskScheduleReadModelSchema.partial() : TaskScheduleReadModelSchema).parse(
+        projected,
+      );
+    case "integration-accounts-v1":
+      return (
+        partial ? IntegrationAccountReadModelSchema.partial() : IntegrationAccountReadModelSchema
+      ).parse(projected);
+    case "brain-folders-v1":
+      return (partial ? BrainFolderReadModelSchema.partial() : BrainFolderReadModelSchema).parse(
+        projected,
+      );
+    case "brain-documents-v1":
+      return (
+        partial ? BrainDocumentReadModelSchema.partial() : BrainDocumentReadModelSchema
+      ).parse(projected);
+    case "brain-timeline-v1":
+      return (
+        partial ? BrainTimelineReadModelSchema.partial() : BrainTimelineReadModelSchema
+      ).parse(projected);
+    case "brain-edges-v1":
+      return (partial ? BrainEdgeReadModelSchema.partial() : BrainEdgeReadModelSchema).parse(
+        projected,
+      );
+    case "brain-ingest-jobs-v1":
+      return (
+        partial ? BrainIngestJobReadModelSchema.partial() : BrainIngestJobReadModelSchema
+      ).parse(projected);
+    case "brain-import-runs-v1":
+      return (
+        partial ? BrainImportRunReadModelSchema.partial() : BrainImportRunReadModelSchema
+      ).parse(projected);
+    case "wiki-pages-v1":
+      return (partial ? WikiPageReadModelSchema.partial() : WikiPageReadModelSchema).parse(
+        projected,
+      );
+    case "wiki-timeline-v1":
+      return (partial ? WikiTimelineReadModelSchema.partial() : WikiTimelineReadModelSchema).parse(
+        projected,
+      );
   }
 }
 
-function readModelFieldValue(name: string, value: unknown) {
-  if (name.endsWith("At")) return timestampValue(value);
-  if (name === "attemptCount") return numberValue(value);
-  if (name === "presentation") return jsonValue(value);
+function readModelFieldValue(readModel: ReadModel, name: string, value: unknown) {
+  if (name.endsWith("At") || name === "at" || name === "scheduledFor") {
+    return timestampValue(value);
+  }
+  if (
+    name === "attemptCount" ||
+    name === "version" ||
+    name === "attempts" ||
+    name === "sizeBytes" ||
+    name === "assetSizeBytes" ||
+    (readModel === "brain-timeline-v1" && name === "id")
+  ) {
+    return value === null ? null : numberValue(value);
+  }
+  if (
+    name === "presentation" ||
+    name === "steps" ||
+    name === "trigger" ||
+    name === "timeline" ||
+    name === "relations" ||
+    name === "sources" ||
+    name === "aliases" ||
+    name === "result" ||
+    name === "sourceSelection" ||
+    name === "discoverySummary" ||
+    name === "scopes" ||
+    name === "capabilityModes"
+  ) {
+    return jsonValue(value);
+  }
   if (name === "attachments") {
     const attachments = jsonValue(value);
     return Array.isArray(attachments) ? attachments.map(publicAttachment) : attachments;
@@ -297,6 +652,111 @@ function publicAttachment(value: unknown) {
     sizeBytes: numberValue(value.sizeBytes),
     kind: value.kind,
   };
+}
+
+const BRAIN_IMPORT_PROVIDERS = new Set([
+  "public_web",
+  "github",
+  "jamie",
+  "granola",
+  "fathom",
+  "gmail",
+  "slack",
+  "linear",
+]);
+const BRAIN_IMPORT_SUMMARY_STATUSES = new Set(["pending", "ready", "failed", "unavailable"]);
+
+// Import-run source selection stores integration IDs and provider configuration. Only the
+// per-provider enabled flag is a public field; everything else stays behind the API boundary.
+function publicBrainImportSourceSelection(value: unknown) {
+  const record = jsonValue(value);
+  if (!isRecord(record)) return {};
+  const selection: Record<string, { enabled: boolean }> = {};
+  for (const [provider, entry] of Object.entries(record)) {
+    if (!BRAIN_IMPORT_PROVIDERS.has(provider) || !isRecord(entry)) continue;
+    selection[provider] = { enabled: entry.enabled === true };
+  }
+  return selection;
+}
+
+function publicBrainImportDiscoverySummary(value: unknown) {
+  const record = jsonValue(value);
+  if (!isRecord(record)) return {};
+  const summary: Record<string, unknown> = {};
+  for (const [provider, entry] of Object.entries(record)) {
+    if (!BRAIN_IMPORT_PROVIDERS.has(provider) || !isRecord(entry)) continue;
+    const status =
+      typeof entry.status === "string" && BRAIN_IMPORT_SUMMARY_STATUSES.has(entry.status)
+        ? entry.status
+        : "pending";
+    summary[provider] = {
+      status,
+      discoveredEntries: boundedCount(entry.discoveredEntries),
+      eligibleEntries: boundedCount(entry.eligibleEntries),
+      alreadyKnownEntries: boundedCount(entry.alreadyKnownEntries),
+      selectedEntries: boundedCount(entry.selectedEntries),
+      plannedRuns: boundedCount(entry.plannedRuns),
+      ...(typeof entry.error === "string" && entry.error
+        ? { error: entry.error.slice(0, 2_000) }
+        : {}),
+    };
+  }
+  return summary;
+}
+
+function boundedCount(value: unknown) {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : 0;
+}
+
+function publicBrainIngestJobResult(value: unknown) {
+  const result = jsonValue(value);
+  if (!isRecord(result)) return {};
+
+  const pages = Array.isArray(result.pages)
+    ? result.pages.slice(0, 20).flatMap((page) => {
+        if (!isRecord(page)) return [];
+        const brainId = limitedString(page.brainId, 80);
+        const folderPath = limitedString(page.folderPath, 512);
+        const title = limitedString(page.title, 160);
+        const action = page.action;
+        if (
+          !brainId ||
+          !folderPath ||
+          (action !== "created" && action !== "updated" && action !== "conflict_created")
+        ) {
+          return [];
+        }
+        return [{ brainId, folderPath, title, action }];
+      })
+    : undefined;
+  const trace = normalizeGoatBrainIngestTrace(result.trace);
+  const durationMs = typeof result.durationMs === "number" ? result.durationMs : null;
+
+  return {
+    ...(typeof result.summary === "string" ? { summary: result.summary.slice(0, 2_000) } : {}),
+    ...(limitedString(result.draftBrainId, 80)
+      ? { draftBrainId: limitedString(result.draftBrainId, 80) }
+      : {}),
+    ...(limitedString(result.meetingBrainId, 80)
+      ? { meetingBrainId: limitedString(result.meetingBrainId, 80) }
+      : {}),
+    ...(pages ? { pages } : {}),
+    ...(typeof result.skipped === "boolean" ? { skipped: result.skipped } : {}),
+    ...(durationMs !== null && Number.isFinite(durationMs) && durationMs >= 0
+      ? { durationMs }
+      : {}),
+    ...(trace ? { trace } : {}),
+  };
+}
+
+function limitedString(value: unknown, limit: number) {
+  return typeof value === "string" && value.length <= limit ? value : "";
+}
+
+function boundedNullableString(value: unknown, limit: number) {
+  if (value === null) return null;
+  return typeof value === "string" ? value.slice(0, limit) : value;
 }
 
 function numberValue(value: unknown) {
@@ -428,6 +888,14 @@ const READ_MODEL_COLUMN_NAMES = {
     created_at: "createdAt",
     updated_at: "updatedAt",
   },
+  "engine-sessions-v1": {
+    chat_session_id: "conversationId",
+    engine: "engine",
+    status: "status",
+    active_turn_id: "activeRunId",
+    error: "error",
+    updated_at: "updatedAt",
+  },
   "tasks-v1": {
     id: "id",
     display_id: "displayId",
@@ -448,6 +916,166 @@ const READ_MODEL_COLUMN_NAMES = {
     archived_at: "archivedAt",
     created_at: "createdAt",
     updated_at: "updatedAt",
+  },
+  "workflows-v1": {
+    id: "id",
+    slug: "slug",
+    name: "name",
+    description: "description",
+    steps: "steps",
+    status: "status",
+    trigger: "trigger",
+    version: "version",
+    archived_at: "archivedAt",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "workflow-schedules-v1": {
+    id: "id",
+    workflow_id: "workflowId",
+    workflow_slug: "workflowSlug",
+    name: "name",
+    cron: "cron",
+    timezone: "timezone",
+    prompt: "prompt",
+    enabled: "enabled",
+    last_run_at: "lastRunAt",
+    next_run_at: "nextRunAt",
+    version: "version",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "task-schedules-v1": {
+    id: "id",
+    name: "name",
+    source_description: "sourceDescription",
+    cron: "cron",
+    timezone: "timezone",
+    prompt: "prompt",
+    enabled: "enabled",
+    last_run_at: "lastRunAt",
+    next_run_at: "nextRunAt",
+    version: "version",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "integration-accounts-v1": {
+    id: "id",
+    provider: "provider",
+    workspace_id: "workspaceId",
+    external_id: "externalId",
+    connection_label: "connectionLabel",
+    account_name: "accountName",
+    account_email: "accountEmail",
+    account_type: "accountType",
+    status: "status",
+    status_reason: "statusReason",
+    scopes: "scopes",
+    capability_modes: "capabilityModes",
+  },
+  "brain-folders-v1": {
+    id: "id",
+    path: "path",
+    source: "source",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "brain-documents-v1": {
+    id: "id",
+    brain_id: "brainId",
+    folder_path: "folderPath",
+    title: "title",
+    content: "content",
+    body: "body",
+    timeline: "timeline",
+    format: "format",
+    mime_type: "mimeType",
+    original_file_name: "originalFileName",
+    asset_size_bytes: "assetSizeBytes",
+    relations: "relations",
+    sources: "sources",
+    kind: "kind",
+    entity_type: "type",
+    status: "status",
+    aliases: "aliases",
+    content_hash: "contentHash",
+    size_bytes: "sizeBytes",
+    created_by_workos_id: "createdByActorId",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "brain-timeline-v1": {
+    id: "id",
+    document_id: "documentId",
+    brain_id: "brainId",
+    evidence_id: "evidenceId",
+    at: "at",
+    source_ref: "sourceRef",
+    source_title: "sourceTitle",
+    summary: "summary",
+    detail: "detail",
+    created_at: "createdAt",
+  },
+  "brain-edges-v1": {
+    id: "id",
+    document_id: "documentId",
+    from_brain_id: "fromBrainId",
+    to_brain_id: "toBrainId",
+    relation_type: "relationType",
+    source_kind: "sourceKind",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "brain-ingest-jobs-v1": {
+    id: "id",
+    source_item_id: "sourceItemId",
+    source_provider: "sourceProvider",
+    kind: "kind",
+    status: "status",
+    plan_paused: "planPaused",
+    attempts: "attempts",
+    last_error: "lastError",
+    result: "result",
+    completed_at: "completedAt",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "brain-import-runs-v1": {
+    id: "id",
+    status: "status",
+    company_url: "companyUrl",
+    company_name: "companyName",
+    focus: "focus",
+    source_selection: "sourceSelection",
+    discovery_summary: "discoverySummary",
+    last_error: "lastError",
+    confirmed_at: "confirmedAt",
+    completed_at: "completedAt",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "wiki-pages-v1": {
+    id: "id",
+    slug: "slug",
+    path: "path",
+    title: "title",
+    kind: "kind",
+    content: "body",
+    content_hash: "contentHash",
+    size_bytes: "sizeBytes",
+    format: "format",
+    mime_type: "mimeType",
+    original_file_name: "originalFileName",
+    asset_size_bytes: "assetSizeBytes",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "wiki-timeline-v1": {
+    id: "id",
+    page_id: "pageId",
+    at: "at",
+    text: "text",
+    created_at: "createdAt",
   },
 } as const;
 

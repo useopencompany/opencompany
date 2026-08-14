@@ -1,3 +1,5 @@
+import { PROTOCOL_VERSION } from "@opencompany/protocol";
+
 export const dynamic = "force-dynamic";
 
 export function GET() {
@@ -5,6 +7,7 @@ export function GET() {
     ok: true,
     service: "opencompany-goat",
     environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "development",
+    protocolVersion: PROTOCOL_VERSION,
     release:
       process.env.RELEASE_SHA ??
       process.env.GITHUB_SHA ??

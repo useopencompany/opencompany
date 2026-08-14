@@ -17,20 +17,6 @@ import {
   syncGoatBrainFilesFromRoot,
   updateGoatBrainAssetExtraction,
 } from "@opencompany/db/goat-brain-files";
-import {
-  GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH,
-  GOAT_BRAIN_INGEST_TRACE_MAX_TOOL_CALLS,
-  GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
-  GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
-  GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH,
-  type GoatBrainIngestBudget,
-  type GoatBrainIngestTrace,
-  type GoatBrainIngestTraceToolCall,
-  type GoatBrainIngestTraceUsage,
-  type GoatBrainIngestTriageTrace,
-  goatBrainIngestTracePreview,
-  sanitizeGoatBrainIngestTraceArgs,
-} from "@opencompany/db/goat-brain-ingest-trace";
 import { getGoatGmailBrainSourceInstructions } from "@opencompany/db/goat-gmail";
 import type { GoatBrainIntelligence } from "@opencompany/db/goat-schema";
 import {
@@ -67,6 +53,20 @@ import {
   slackTsToIso,
 } from "@opencompany/goat-brain";
 import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
+import {
+  GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH,
+  GOAT_BRAIN_INGEST_TRACE_MAX_TOOL_CALLS,
+  GOAT_BRAIN_INGEST_TRACE_OUTPUT_PREVIEW_LENGTH,
+  GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
+  GOAT_BRAIN_INGEST_TRACE_STDIN_PREVIEW_LENGTH,
+  type GoatBrainIngestBudget,
+  type GoatBrainIngestTrace,
+  type GoatBrainIngestTraceToolCall,
+  type GoatBrainIngestTraceUsage,
+  type GoatBrainIngestTriageTrace,
+  goatBrainIngestTracePreview,
+  sanitizeGoatBrainIngestTraceArgs,
+} from "@opencompany/goat-brain/ingest-trace";
 import {
   createGoatGatewayAttribution,
   goatGatewayProviderOptions,
@@ -2168,24 +2168,48 @@ export const UPLOAD_ASSET_INGEST_PROFILE: GoatBrainIngestProfile<NormalizedUploa
       if (row.format === "markdown" || !row.assetStorageKey) {
         throw new Error(`Brain document ${asset.documentId} is not a binary asset.`);
       }
+      const expectedContentHash = asset.contentSha256 ?? row.assetContentHash;
+      if (expectedContentHash && row.assetContentHash !== expectedContentHash) {
+        return {
+          earlyResult: {
+            skipped: true,
+            reason: "asset_superseded",
+            documentId: asset.documentId,
+          },
+        };
+      }
 
       // Stage 1 (deterministic): fetch the bytes, extract text, record it on the
       // row so materialization inside the agent session includes the generated
       // extracted-text block and retrieval can index it. Images have no text to
       // extract — the bytes go to the (multimodal) agent as an image part instead.
       const bytes = await downloadGoatBrainAssetBytes(row.assetStorageKey, input.env);
+      const downloadedContentHash = createHash("sha256").update(bytes).digest("hex");
+      if (expectedContentHash && downloadedContentHash !== expectedContentHash) {
+        throw new Error(`Brain asset ${asset.documentId} bytes failed their content hash check.`);
+      }
       const extractedText = await extractAssetText(row.format, bytes);
-      await updateGoatBrainAssetExtraction(
+      const updated = await updateGoatBrainAssetExtraction(
         {
           brainRef,
           userWorkosId: input.userWorkosId,
           fileId: row.id,
           extractedText,
-          assetContentHash: createHash("sha256").update(bytes).digest("hex"),
+          assetContentHash: downloadedContentHash,
           assetSizeBytes: bytes.byteLength,
+          expectedAssetStorageKey: row.assetStorageKey,
         },
         { db },
       );
+      if (!updated) {
+        return {
+          earlyResult: {
+            skipped: true,
+            reason: "asset_superseded",
+            documentId: asset.documentId,
+          },
+        };
+      }
 
       const truncatedText = Buffer.byteLength(extractedText, "utf8") > PROMPT_ASSET_TEXT_BYTES;
       return {

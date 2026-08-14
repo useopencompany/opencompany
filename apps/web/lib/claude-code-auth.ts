@@ -1,15 +1,8 @@
 "use server";
 
-import { getDb } from "@opencompany/db/client";
-import {
-  deleteGoatClaudeCodeCredential,
-  saveGoatClaudeCodeCredential,
-} from "@opencompany/db/goat-claude-code-auth";
-import { goatClaudeCodeCredentials } from "@opencompany/db/goat-schema";
-import { eq } from "drizzle-orm";
+import { isGoatClaudeCodeConnectedForUser as readGoatClaudeCodeConnectionForUser } from "@opencompany/goat-agent/application/engine-auth-status";
 import { revalidatePath } from "next/cache";
-import { currentGoatUser } from "@/lib/auth";
-import { validateGoatClaudeCodeToken } from "@/lib/claude-code-token";
+import { serverApiClient, serverApiError, serverApiErrorMessage } from "@/lib/server-api-client";
 
 export type GoatClaudeCodeAuthSettings = {
   status: "connected" | "needs_reauth" | null;
@@ -19,55 +12,43 @@ export type GoatClaudeCodeAuthSettings = {
 };
 
 export async function loadCurrentGoatClaudeCodeAuthSettings(): Promise<GoatClaudeCodeAuthSettings> {
-  const { user } = await currentGoatUser();
-  return loadGoatClaudeCodeAuthSettingsForUser(user.workosUserId);
-}
-
-export async function loadGoatClaudeCodeAuthSettingsForUser(
-  userWorkosId: string,
-): Promise<GoatClaudeCodeAuthSettings> {
-  const [row] = await getDb()
-    .select({
-      status: goatClaudeCodeCredentials.status,
-      statusReason: goatClaudeCodeCredentials.statusReason,
-      lastValidatedAt: goatClaudeCodeCredentials.lastValidatedAt,
-      lastRotatedAt: goatClaudeCodeCredentials.lastRotatedAt,
-    })
-    .from(goatClaudeCodeCredentials)
-    .where(eq(goatClaudeCodeCredentials.userWorkosId, userWorkosId))
-    .limit(1);
-
-  return {
-    status: row?.status ?? null,
-    statusReason: row?.statusReason ?? null,
-    lastValidatedAt: row?.lastValidatedAt?.toISOString() ?? null,
-    lastRotatedAt: row?.lastRotatedAt?.toISOString() ?? null,
-  };
+  const response = await (await serverApiClient()).v1["engine-auth"]["claude-code"].$get();
+  if (!response.ok) {
+    throw await serverApiError(response, "Could not load the Claude Code connection.");
+  }
+  return (await response.json()).data as GoatClaudeCodeAuthSettings;
 }
 
 export async function isGoatClaudeCodeConnectedForUser(userWorkosId: string) {
-  const settings = await loadGoatClaudeCodeAuthSettingsForUser(userWorkosId);
-  return settings.status === "connected";
+  return readGoatClaudeCodeConnectionForUser(userWorkosId);
 }
 
 export async function saveGoatClaudeCodeToken(token: string) {
-  const validated = validateGoatClaudeCodeToken(token);
-  if (!validated.ok) return validated;
-
-  const { user } = await currentGoatUser();
-  await saveGoatClaudeCodeCredential({
-    db: getDb(),
-    userWorkosId: user.workosUserId,
-    authJson: { token: validated.token },
-    validatedAt: null,
-  });
+  try {
+    const response = await (await serverApiClient()).v1["engine-auth"]["claude-code"].$put({
+      json: { token },
+    });
+    if (!response.ok) {
+      return {
+        ok: false as const,
+        error: await serverApiErrorMessage(response, "Could not save the Claude Code token."),
+      };
+    }
+  } catch (error) {
+    return {
+      ok: false as const,
+      error: error instanceof Error ? error.message : "Could not save the Claude Code token.",
+    };
+  }
   revalidatePath("/settings");
   return { ok: true as const };
 }
 
 export async function disconnectGoatClaudeCodeAuth() {
-  const { user } = await currentGoatUser();
-  await deleteGoatClaudeCodeCredential({ db: getDb(), userWorkosId: user.workosUserId });
+  const response = await (await serverApiClient()).v1["engine-auth"]["claude-code"].$delete();
+  if (!response.ok) {
+    throw await serverApiError(response, "Could not disconnect Claude Code.");
+  }
   revalidatePath("/settings");
   return { ok: true as const };
 }

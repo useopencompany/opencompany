@@ -1,12 +1,12 @@
 "use client";
 
-import type { GoatWorkspaceCapabilityState } from "@opencompany/db/goat-capabilities";
-import type { GoatManagedCapabilitySource } from "@opencompany/db/goat-schema";
 import { Switch } from "@opencompany/ui/components/switch";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
 import {
+  type GoatManagedCapabilitySource,
+  type GoatWorkspaceCapabilityState,
   setWorkspaceCapabilityAction,
   setWorkspaceCapabilitySessionBudgetAction,
 } from "@/lib/capabilities/actions";

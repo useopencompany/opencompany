@@ -5,10 +5,11 @@ connected integrations, Brain knowledge, and cloud coding sessions.
 
 ## Stack
 
-The monorepo uses Bun and Turborepo. `web` is the Next.js App Router client and composition root deployed on Vercel;
-the durable runner is a Fastify service deployed on Render. Data lives in branch-isolated Neon
-Postgres and is accessed through Drizzle. WorkOS provides authentication, Electric provides live
-database sync, and Vercel AI Gateway fronts model providers.
+The monorepo uses Bun and Turborepo. `web` is the Next.js App Router presentation client deployed
+on Vercel, `api` is the Hono product API deployed on Render, and `runner` is the Fastify durable
+execution service deployed on Render. Data lives in branch-isolated Neon Postgres and is accessed
+through Drizzle by the API and runner. WorkOS provides authentication, Electric provides authorized
+live read models, and Vercel AI Gateway fronts model providers.
 
 ## Quick start
 
@@ -20,15 +21,20 @@ bun run dev:web
 
 `bun run setup` pulls development values from Infisical, creates or reuses a Neon branch tied to
 the current Git branch, runs migrations, and writes local app env files. `bun run dev` and
-`bun run dev:web` both start the OpenCompany web app, the runner, Stripe CLI webhook forwarding, Electric, and the
-local HTTPS/tunnel support needed by integrations.
+`bun run dev:web` both start the OpenCompany web app, canonical API, runner, Stripe CLI webhook
+forwarding, Electric, and the local HTTPS/tunnel support needed by integrations.
+
+Live Infisical and Vercel project bindings are local, gitignored state. The tracked example files
+document their shape without tying a clone to opencompany's provider accounts.
 
 See [Getting started](./docs/getting-started.md) for prerequisites and troubleshooting.
 
 ## Repository layout
 
-- `apps/web` — the OpenCompany Next.js client, composition root, and HTTP integration/webhook surface.
+- `apps/web` — the OpenCompany Next.js presentation client and stable public relay surface.
+- `apps/api` — the canonical typed API, application services, and provider ingress handlers.
 - `apps/runner` — Goat background workers, durable turns, Brain ingestion, and cloud coding.
+- `apps/docs` — user and API documentation built with Fumadocs.
 - `apps/stripe-webhooks` — local Stripe CLI forwarding for Goat billing.
 - `apps/marketing` — the public marketing site.
 - `apps/design-system` and `packages/ui` — shared UI development.
@@ -61,4 +67,3 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the review and verification expecta
 - [Deployment](./docs/deployment.md)
 - [Environment variables](./docs/env-vars.md)
 - [Secret management](./docs/secret-management.md)
-- [Legacy product retirement record](./docs/legacy-product-retirement.md)

@@ -1,4 +1,3 @@
-import { describe, expect, it } from "vitest";
 import {
   coerceDocumentIds,
   getDocumentToToolInput,
@@ -6,7 +5,8 @@ import {
   listDocumentsToToolInput,
   resolveBrainParam,
   searchBrainToToolInput,
-} from "./brain-tools";
+} from "@opencompany/goat-agent/brain-tools";
+import { describe, expect, it } from "vitest";
 
 describe("resolveBrainParam", () => {
   it("prefers brain, falls back to brain_id, trims, and returns undefined when absent", () => {

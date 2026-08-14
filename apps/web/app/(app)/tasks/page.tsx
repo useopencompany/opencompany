@@ -1,7 +1,7 @@
 import { TasksWorkflowsDisabledRoute } from "@/components/GoatRoutes";
 import { GoatTasksBoardRoute } from "@/components/GoatTasksBoard";
 import { currentGoatUser } from "@/lib/auth";
-import { listGoatWorkflows } from "@/lib/workflows";
+import { listHeadlessWorkflows } from "@/lib/headless-automation-server";
 
 export default async function TasksPage() {
   const context = await currentGoatUser();
@@ -9,7 +9,7 @@ export default async function TasksPage() {
     return <TasksWorkflowsDisabledRoute />;
   }
 
-  const workflows = await listGoatWorkflows(context.workspace.id);
+  const workflows = await listHeadlessWorkflows();
   const workflowNames = Object.fromEntries(
     workflows.map((workflow) => [workflow.slug, workflow.name]),
   );

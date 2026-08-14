@@ -1,7 +1,7 @@
 import { GoatSkillEditorRoute } from "@/components/GoatRoutes";
 import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
 import { currentGoatUser } from "@/lib/auth";
-import { getGoatSkill } from "@/lib/skills";
+import { getHeadlessSkill } from "@/lib/headless-knowledge-server";
 
 type SkillEditorPageProps = {
   params: Promise<{ slug: string }>;
@@ -10,7 +10,7 @@ type SkillEditorPageProps = {
 export default async function SkillEditorPage({ params }: SkillEditorPageProps) {
   const { slug } = await params;
   const context = await currentGoatUser();
-  const skill = await getGoatSkill(context.workspace.id, slug);
+  const skill = await getHeadlessSkill(slug);
 
   if (!skill) {
     return (

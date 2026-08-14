@@ -1,8 +1,10 @@
 import { GOAT_INFISICAL_US_HOST, isGoatInfisicalHost } from "@opencompany/db/goat-infisical-auth";
+import { parseGoatSlackBotEventCommand } from "@opencompany/goat-agent/integrations/slack-bot-events";
 import { createLogger } from "@opencompany/observability";
 import Fastify from "fastify";
 import { pollGoatCodexDeviceAuthFlow, startGoatCodexDeviceAuthFlow } from "./codex-auth";
 import type { RunnerEnv } from "./env";
+import { alwaysAllowGoatAction } from "./goat-action-permissions";
 import { wakeGoatBrainImportWorker } from "./goat-brain-import-worker";
 import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 import { registerGoatClaudeActionsMcpRoute } from "./goat-claude-actions-mcp";
@@ -16,6 +18,7 @@ import { createGoatDictationTicket } from "./goat-dictation-auth";
 import { wakeGoatGoogleDriveSyncWorker } from "./goat-google-drive-sync-worker";
 import { planGoatHarnessForTask } from "./goat-harness";
 import { getGoatHarnessPlannerContextForRunner } from "./goat-harness-planner";
+import { enqueueGoatSlackBotEvent } from "./goat-slack-bot-events";
 import { completeGoatInfisicalAuthFlow, startGoatInfisicalAuthFlow } from "./infisical-auth";
 import { type LlmBrokerOptions, registerLlmBrokerRoutes } from "./llm-broker";
 import { getSandboxLifecycleStatus, killSandbox } from "./sandbox";
@@ -29,6 +32,8 @@ export function createServer(
   env: RunnerEnv,
   options: {
     llmBroker?: Pick<LlmBrokerOptions, "store" | "fetchImpl">;
+    slackBotEvents?: { enqueue: typeof enqueueGoatSlackBotEvent };
+    actionPermissions?: { alwaysAllow: typeof alwaysAllowGoatAction };
   } = {},
 ) {
   const runtimeTransport = createGoatCodingWorkspaceTransport(env);
@@ -65,7 +70,7 @@ export function createServer(
   app.get("/healthz", async () => ({
     ok: true,
     service: "opencompany-runner",
-    capabilities: { claudeActionsMcp: "v2" },
+    capabilities: { claudeActionsMcp: "v2", brainWorkerAdmission: "postgres-v1" },
     environment: process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
     release:
       process.env.RENDER_GIT_COMMIT ??
@@ -158,6 +163,43 @@ export function createServer(
     }
     wakeGoatBrainIngestWorker();
     reply.status(202).send({ ok: true });
+  });
+
+  app.post("/internal/goat/slack-bot/events", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    if (!env.goatTaskWorkerEnabled) {
+      reply.status(503).send({ error: "Goat workers are disabled." });
+      return;
+    }
+    const command = parseGoatSlackBotEventCommand(request.body);
+    if (!command) {
+      reply.status(400).send({ error: "A valid Slack bot event command is required." });
+      return;
+    }
+    (options.slackBotEvents?.enqueue ?? enqueueGoatSlackBotEvent)(command);
+    reply.status(202).send({ ok: true });
+  });
+
+  app.post("/internal/goat/actions/always-allow", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    if (!env.goatTaskWorkerEnabled) {
+      reply.status(503).send({ error: "Goat workers are disabled." });
+      return;
+    }
+    const body = request.body as Record<string, unknown> | undefined;
+    const userWorkosId = boundedString(body?.userWorkosId, 255);
+    const workspaceId = boundedString(body?.workspaceId, 255);
+    const actionId = boundedString(body?.actionId, 255);
+    if (!userWorkosId || !workspaceId || !actionId) {
+      reply.status(400).send({ error: "userWorkosId, workspaceId, and actionId are required." });
+      return;
+    }
+    const result = await (options.actionPermissions?.alwaysAllow ?? alwaysAllowGoatAction)({
+      userWorkosId,
+      workspaceId,
+      actionId,
+    });
+    reply.send({ ok: true, changed: result.changed });
   });
 
   app.post("/internal/goat/google-drive/sync", async (request, reply) => {
@@ -346,6 +388,12 @@ function requireInternalAuth(header: string | undefined, token: string) {
     error.statusCode = 401;
     throw error;
   }
+}
+
+function boundedString(value: unknown, maxLength: number) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  return trimmed && trimmed.length <= maxLength ? trimmed : "";
 }
 
 function safeInfisicalCompletionRouteError(error: unknown) {

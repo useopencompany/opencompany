@@ -40,6 +40,17 @@ import {
   startGoatCodexDeviceAuth,
 } from "@/lib/codex-auth";
 import {
+  completeHeadlessBrowserProfileLogin,
+  createHeadlessBrowserProfile,
+  createHeadlessBrowserProfileLoginSession,
+  deleteHeadlessBrowserProfile,
+  listHeadlessBrowserProfiles,
+} from "@/lib/headless-browser-profile-api";
+import {
+  getHeadlessIntegrationAccounts,
+  type HeadlessIntegrationAccountReadModel,
+} from "@/lib/headless-integration-collections";
+import {
   completeGoatInfisicalAuth,
   disconnectGoatInfisicalAuth,
   type GoatInfisicalAuthFlow,
@@ -73,7 +84,6 @@ import {
   goatIntegrationConnectionError,
   goatIntegrationConnectionSuccess,
 } from "@/lib/onboarding-integrations";
-import { createGoatCollections, type GoatIntegrationRow } from "@/lib/task-collections";
 
 // Presentation metadata for each integration card: the real brand logo (or a
 // monogram fallback where no square vector mark exists), the colored logo tile,
@@ -228,6 +238,7 @@ export function SettingsIntegrationsPanel({
   isWorkspaceAdmin,
   imessageEnabled = false,
   browserProfilesEnabled = false,
+  scopeKey = "active",
 }: {
   initialIntegrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
@@ -235,6 +246,7 @@ export function SettingsIntegrationsPanel({
   // Preferences; pairing state alone must not surface it.
   imessageEnabled?: boolean;
   browserProfilesEnabled?: boolean;
+  scopeKey?: string;
 }) {
   const hydrated = useHydrated();
   return (
@@ -253,6 +265,7 @@ export function SettingsIntegrationsPanel({
           isWorkspaceAdmin={isWorkspaceAdmin}
           imessageEnabled={imessageEnabled}
           browserProfilesEnabled={browserProfilesEnabled}
+          scopeKey={scopeKey}
         />
       )}
     </>
@@ -295,19 +308,27 @@ function LiveSettingsIntegrations({
   isWorkspaceAdmin,
   imessageEnabled,
   browserProfilesEnabled,
+  scopeKey,
 }: {
   initialIntegrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
   imessageEnabled: boolean;
   browserProfilesEnabled: boolean;
+  scopeKey: string;
 }) {
-  const collections = useMemo(() => createGoatCollections(), []);
-  const { data: rows, isLoading } = useLiveQuery((q) =>
-    q.from({ integration: collections.integrations }),
+  const integrationAccountsCollection = useMemo(
+    () => getHeadlessIntegrationAccounts(scopeKey),
+    [scopeKey],
+  );
+  const { data: rows, isLoading } = useLiveQuery(
+    (q) => q.from({ integration: integrationAccountsCollection }),
+    [integrationAccountsCollection],
   );
   const integrations = useMemo(() => {
     if (isLoading && !rows?.length) return initialIntegrations;
-    const liveIntegrations = goatIntegrationStateFromRows((rows ?? []) as GoatIntegrationRow[]);
+    const liveIntegrations = goatIntegrationStateFromRows(
+      (rows ?? []) as HeadlessIntegrationAccountReadModel[],
+    );
     return {
       ...liveIntegrations,
       codex: initialIntegrations.codex,
@@ -517,14 +538,16 @@ function BrowserProfilesCard() {
   const [isPending, startTransition] = useTransition();
 
   const refresh = async () => {
-    const response = await fetch("/api/browser-profiles", {
-      cache: "no-store",
-    });
-    if (!response.ok) throw new Error("Could not load browser profiles.");
-    const payload = (await response.json()) as {
-      profiles?: BrowserProfileView[];
-    };
-    setProfiles(payload.profiles ?? []);
+    const loaded = await listHeadlessBrowserProfiles();
+    setProfiles(
+      loaded.map((profile) => ({
+        id: profile.id,
+        name: profile.name,
+        siteHost: profile.siteHost,
+        status: profile.status,
+        active: profile.active,
+      })),
+    );
   };
 
   useEffect(() => {
@@ -536,21 +559,10 @@ function BrowserProfilesCard() {
     setError(null);
     startTransition(async () => {
       try {
-        const created = await fetch("/api/browser-profiles", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, url }),
-        });
-        const createdPayload = (await created.json()) as {
-          profile?: BrowserProfileView;
-          error?: string;
-        };
-        if (!created.ok || !createdPayload.profile) {
-          throw new Error(createdPayload.error ?? "Could not create browser profile.");
-        }
+        const created = await createHeadlessBrowserProfile({ name, url });
         setName("");
         setUrl("");
-        await startLogin(createdPayload.profile.id);
+        await startLogin(created.id);
         await refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not connect browser profile.");
@@ -559,21 +571,11 @@ function BrowserProfilesCard() {
   };
 
   const startLogin = async (profileId: string) => {
-    const response = await fetch(`/api/browser-profiles/${profileId}/login-session`, {
-      method: "POST",
-    });
-    const payload = (await response.json()) as {
-      sessionId?: string;
-      liveViewUrl?: string;
-      error?: string;
-    };
-    if (!response.ok || !payload.sessionId || !payload.liveViewUrl) {
-      throw new Error(payload.error ?? "Could not start login session.");
-    }
+    const session = await createHeadlessBrowserProfileLoginSession(profileId);
     setLoginSession({
       profileId,
-      sessionId: payload.sessionId,
-      liveViewUrl: payload.liveViewUrl,
+      sessionId: session.sessionId,
+      liveViewUrl: session.liveViewUrl,
     });
   };
 
@@ -582,18 +584,7 @@ function BrowserProfilesCard() {
     setError(null);
     startTransition(async () => {
       try {
-        const response = await fetch(
-          `/api/browser-profiles/${loginSession.profileId}/complete-login`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sessionId: loginSession.sessionId }),
-          },
-        );
-        if (!response.ok) {
-          const payload = (await response.json()) as { error?: string };
-          throw new Error(payload.error ?? "Could not complete login.");
-        }
+        await completeHeadlessBrowserProfileLogin(loginSession.profileId, loginSession.sessionId);
         setLoginSession(null);
         await refresh();
       } catch (err) {
@@ -606,13 +597,7 @@ function BrowserProfilesCard() {
     setError(null);
     startTransition(async () => {
       try {
-        const response = await fetch(`/api/browser-profiles/${profileId}`, {
-          method: "DELETE",
-        });
-        if (!response.ok) {
-          const payload = (await response.json()) as { error?: string };
-          throw new Error(payload.error ?? "Could not delete browser profile.");
-        }
+        await deleteHeadlessBrowserProfile(profileId);
         await refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not delete browser profile.");

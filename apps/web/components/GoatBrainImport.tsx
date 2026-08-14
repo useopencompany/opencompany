@@ -14,7 +14,10 @@ import {
   getGoatBrainSourcesAction,
   listGoatGitHubRepositoriesAction,
 } from "@/lib/brain-source-actions";
-import { createGoatCollections, type GoatBrainImportRunRow } from "@/lib/task-collections";
+import {
+  getHeadlessBrainCollections,
+  type HeadlessBrainImportRunReadModel,
+} from "@/lib/headless-knowledge-collections";
 
 const PROVIDERS = [
   ["public_web", "Public web"],
@@ -34,18 +37,14 @@ export function GoatBrainImport({
   brainRef: string;
   compact?: boolean;
 }) {
-  const collections = useMemo(() => createGoatCollections(), []);
-  const brainCollections = useMemo(
-    () => collections.brainCollections(brainRef),
-    [brainRef, collections],
-  );
+  const brainCollections = useMemo(() => getHeadlessBrainCollections(brainRef), [brainRef]);
   const { data } = useLiveQuery(
     (q) => q.from({ run: brainCollections.importRuns }),
     [brainCollections],
   );
   const run =
-    ((data ?? []) as GoatBrainImportRunRow[]).toSorted((a, b) =>
-      b.created_at.localeCompare(a.created_at),
+    ((data ?? []) as HeadlessBrainImportRunReadModel[]).toSorted((a, b) =>
+      b.createdAt.localeCompare(a.createdAt),
     )[0] ?? null;
   const [website, setWebsite] = useState("");
   const [focus, setFocus] = useState("");
@@ -124,11 +123,11 @@ export function GoatBrainImport({
   const enabledAtConfirm = useMemo(
     () =>
       new Set(
-        Object.entries(run?.source_selection ?? {})
+        Object.entries(run?.sourceSelection ?? {})
           .filter(([provider, value]) => confirmationOverrides[provider] ?? value.enabled)
           .map(([provider]) => provider),
       ),
-    [confirmationOverrides, run?.source_selection],
+    [confirmationOverrides, run?.sourceSelection],
   );
 
   const start = () =>
@@ -269,7 +268,7 @@ export function GoatBrainImport({
 
   if (run.status === "awaiting_confirmation") {
     const planned =
-      Object.entries(run.discovery_summary).reduce(
+      Object.entries(run.discoverySummary).reduce(
         (total, [provider, value]) =>
           total + (enabledAtConfirm.has(provider) ? value.plannedRuns : 0),
         0,
@@ -282,7 +281,7 @@ export function GoatBrainImport({
         </p>
         <div className="mt-4 divide-y divide-border-subtle rounded-lg border border-border">
           {PROVIDERS.map(([id, label]) => {
-            const value = run.discovery_summary[id];
+            const value = run.discoverySummary[id];
             if (!value) return null;
             return (
               <label key={id} className="flex items-center gap-3 px-3 py-2.5">
@@ -334,12 +333,12 @@ export function GoatBrainImport({
     );
   }
 
-  if (run.status === "failed" && run.confirmed_at)
+  if (run.status === "failed" && run.confirmedAt)
     return (
       <StatusCard
         title="Import failed"
         detail={
-          run.last_error ??
+          run.lastError ??
           "The import could not finish. Any successfully created documents remain in the brain."
         }
         icon={<XCircle size={18} className="text-danger" />}
@@ -350,7 +349,7 @@ export function GoatBrainImport({
     return (
       <StatusCard
         title="Import failed"
-        detail={run.last_error ?? "The source scan could not be completed."}
+        detail={run.lastError ?? "The source scan could not be completed."}
         icon={<XCircle size={18} className="text-danger" />}
         action="Retry scan"
         onAction={() =>

@@ -139,7 +139,7 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
               onKeyDown={(event) => {
                 if (event.key === "Enter") invite();
               }}
-              placeholder="teammate@company.com"
+              placeholder="teammate@company.example"
               className="flex-1 rounded-md border border-ink/10 bg-canvas px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25"
             />
             <button

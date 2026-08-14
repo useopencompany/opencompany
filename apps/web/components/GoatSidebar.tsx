@@ -27,12 +27,10 @@ import { useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainSwitcher } from "@/components/GoatBrainSwitcher";
 import { GoatChatStateIndicator } from "@/components/GoatChatStateIndicator";
 import { GoatSidebarFeedback } from "@/components/GoatSidebarFeedback";
-import { closeGoatChatSessionAction, setGoatChatPinnedAction } from "@/lib/chat-actions";
 import { GOAT_HOME_NAVIGATION_EVENT, requestGoatChatComposerFocus } from "@/lib/chat-navigation";
 import { clearLocalGoatChatState, useLocalGoatChatStates } from "@/lib/chat-session-state";
 import { type GoatChatSummaryView, goatChatSummaryState } from "@/lib/chat-ui";
 import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
-import { HEADLESS_CHAT_ENABLED } from "@/lib/headless-chat-feature";
 import { createGoatWorkspaceAction, switchGoatWorkspaceAction } from "@/lib/workspace-actions";
 
 function GoatIcon({ className }: { className?: string }) {
@@ -364,27 +362,12 @@ function GoatSidebarRecentChats() {
   const pinnedChats = recentChats.filter(isPinned);
   const unpinnedChats = recentChats.filter((chat) => !isPinned(chat));
 
-  const archiveChat = (
-    chatId: string,
-    chatTitle: string,
-    href: string,
-    engine: GoatChatSummaryView["engine"],
-  ) => {
+  const archiveChat = (chatId: string, chatTitle: string, href: string) => {
     if (archivingIds.has(chatId)) return;
     setArchivingIds((current) => new Set(current).add(chatId));
     startTransition(async () => {
       try {
-        const result =
-          HEADLESS_CHAT_ENABLED && (engine ?? "opencompany") === "opencompany"
-            ? await updateHeadlessChatConversation(chatId, { archived: true }).then(() => ({
-                ok: true,
-                error: null,
-              }))
-            : await closeGoatChatSessionAction(chatId);
-        if (!result.ok) {
-          toast.error(result.error ?? `Could not archive "${chatTitle}".`);
-          return;
-        }
+        await updateHeadlessChatConversation(chatId, { archived: true });
         // If we archived the chat we're currently viewing, drop back to home.
         if (pathname === href) {
           router.push("/");
@@ -401,36 +384,14 @@ function GoatSidebarRecentChats() {
     });
   };
 
-  const togglePin = (
-    chatId: string,
-    chatTitle: string,
-    currentlyPinned: boolean,
-    engine: GoatChatSummaryView["engine"],
-  ) => {
+  const togglePin = (chatId: string, chatTitle: string, currentlyPinned: boolean) => {
     if (pinningIds.has(chatId)) return;
     const desiredPinned = !currentlyPinned;
     setPinOverrides((current) => new Map(current).set(chatId, desiredPinned));
     setPinningIds((current) => new Set(current).add(chatId));
     startTransition(async () => {
       try {
-        const result =
-          HEADLESS_CHAT_ENABLED && (engine ?? "opencompany") === "opencompany"
-            ? await updateHeadlessChatConversation(chatId, { pinned: desiredPinned }).then(() => ({
-                ok: true,
-                error: null,
-              }))
-            : await setGoatChatPinnedAction(chatId, desiredPinned);
-        if (result.ok) return;
-
-        setPinOverrides((current) => {
-          const next = new Map(current);
-          next.delete(chatId);
-          return next;
-        });
-        toast.error(
-          result.error ??
-            (currentlyPinned ? `Could not unpin "${chatTitle}".` : `Could not pin "${chatTitle}".`),
-        );
+        await updateHeadlessChatConversation(chatId, { pinned: desiredPinned });
       } catch {
         setPinOverrides((current) => {
           const next = new Map(current);
@@ -465,8 +426,8 @@ function GoatSidebarRecentChats() {
         pinning={pinningIds.has(chat.id)}
         onPrefetch={() => router.prefetch(href)}
         onRequestComposerFocus={() => requestGoatChatComposerFocus(chat.id)}
-        onTogglePin={() => togglePin(chat.id, chat.title, pinned, chat.engine)}
-        onArchive={() => archiveChat(chat.id, chat.title, href, chat.engine)}
+        onTogglePin={() => togglePin(chat.id, chat.title, pinned)}
+        onArchive={() => archiveChat(chat.id, chat.title, href)}
       />
     );
   };

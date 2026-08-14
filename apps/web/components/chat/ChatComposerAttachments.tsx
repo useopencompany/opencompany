@@ -1,6 +1,5 @@
 "use client";
 
-import type { GoatChatAttachmentKind } from "@opencompany/db/goat-schema";
 import { cn } from "@opencompany/ui/lib/utils";
 import { FileText, Upload, X } from "lucide-react";
 
@@ -14,8 +13,20 @@ export type PendingGoatChatAttachment = {
   previewUrl?: string;
   blobPathname?: string;
   blobUrl?: string;
+  canonical?: boolean;
   error?: string;
 };
+
+type GoatChatAttachmentKind =
+  | "image"
+  | "pdf"
+  | "docx"
+  | "xlsx"
+  | "srt"
+  | "csv"
+  | "tsv"
+  | "json"
+  | "text";
 
 // "Drop files to attach" overlay shown over the composer while a file drag is
 // active. Adapted from the original composer overlay.

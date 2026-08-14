@@ -1,0 +1,11 @@
+{
+  "title": "OpenCompany",
+  "pages": [
+    "index",
+    "getting-started",
+    "core-concepts",
+    "integrations",
+    "api-reference",
+    "self-hosting"
+  ]
+}

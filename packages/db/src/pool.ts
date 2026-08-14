@@ -1,5 +1,5 @@
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
-import { Pool, type PoolConfig } from "pg";
+import { type Notification, Pool, type PoolClient, type PoolConfig } from "pg";
 import * as goatSchema from "./goat-schema";
 import * as legacyBillingSchema from "./legacy-billing-schema";
 import * as llmBrokerSchema from "./llm-broker-schema";
@@ -15,6 +15,8 @@ const schema = { ...legacyBillingSchema, ...llmBrokerSchema, ...goatSchema };
 // `neon-http`; do not import this from serverless route code.
 
 export type PooledDb = NodePgDatabase<typeof schema>;
+export type PooledDbClient = PoolClient;
+export type PooledDbNotification = Notification;
 
 export type CreatePooledDbOptions = {
   /** Max connections in the pool. Size to worker concurrency + headroom. Default 10. */

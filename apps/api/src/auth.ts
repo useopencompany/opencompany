@@ -1,9 +1,19 @@
 import {
   type Actor,
+  BRAIN_READ_PERMISSION,
+  BRAIN_WRITE_PERMISSION,
   CHAT_READ_PERMISSION,
   CHAT_WRITE_PERMISSION,
+  SCHEDULE_READ_PERMISSION,
+  SCHEDULE_WRITE_PERMISSION,
+  SKILL_READ_PERMISSION,
+  SKILL_WRITE_PERMISSION,
   TASK_READ_PERMISSION,
   TASK_WRITE_PERMISSION,
+  WIKI_READ_PERMISSION,
+  WIKI_WRITE_PERMISSION,
+  WORKFLOW_READ_PERMISSION,
+  WORKFLOW_WRITE_PERMISSION,
 } from "@opencompany/core";
 import type { ChatSqlExecute } from "@opencompany/db/chat-repository";
 import { WorkOS } from "@workos-inc/node";
@@ -12,6 +22,7 @@ import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
 import { ApiError } from "./errors";
 
 const ACTIVE_WORKSPACE_COOKIE = "goat-active-workspace";
+const ACTIVE_BRAIN_COOKIE = "goat-active-brain";
 const DEFAULT_SESSION_COOKIE = "wos-session";
 const SESSION_MAX_AGE_SECONDS = 400 * 24 * 60 * 60;
 
@@ -30,6 +41,17 @@ type VerifiedIdentity = {
   refreshedSessionCookie?: string;
 };
 
+// Verified caller identity plus the requested workspace, before any local
+// actor/onboarding resolution. Provider-ingress routes use this directly so
+// mid-onboarding users can still finish OAuth connect flows, matching the
+// retired web routes' currentGoatUser() semantics.
+export type ApiIdentity = VerifiedIdentity & {
+  activeWorkspaceId: string | null;
+  activeBrainId: string | null;
+};
+
+export type ApiIdentityVerifier = (request: Request) => Promise<ApiIdentity>;
+
 type AuthenticatorOptions = {
   audience?: string;
   authKitDomain?: string;
@@ -40,10 +62,9 @@ type AuthenticatorOptions = {
   verifyJwt?: typeof jwtVerify;
 };
 
-export function createWorkOsApiAuthenticator(
-  execute: ChatSqlExecute,
+export function createWorkOsApiIdentityVerifier(
   options: AuthenticatorOptions = {},
-): ApiAuthenticator {
+): ApiIdentityVerifier {
   const cookieName = options.cookieName ?? process.env.WORKOS_COOKIE_NAME ?? DEFAULT_SESSION_COOKIE;
   const audience = options.audience ?? process.env.GOAT_API_OAUTH_AUDIENCE?.trim();
   const authKitDomain = normalizeOrigin(
@@ -95,10 +116,26 @@ export function createWorkOsApiAuthenticator(
       });
     }
 
-    const workspaceCookie = parseCookies(request.headers.get("cookie")).get(
-      ACTIVE_WORKSPACE_COOKIE,
-    );
-    const actor = await resolveLocalActor(execute, identity, workspaceCookie ?? null);
+    const cookies = parseCookies(request.headers.get("cookie"));
+    return {
+      ...identity,
+      activeWorkspaceId: cookies.get(ACTIVE_WORKSPACE_COOKIE) ?? null,
+      activeBrainId: cookies.get(ACTIVE_BRAIN_COOKIE) ?? null,
+    };
+  };
+}
+
+export function createWorkOsApiAuthenticator(
+  execute: ChatSqlExecute,
+  options: AuthenticatorOptions = {},
+): ApiAuthenticator {
+  const identify = createWorkOsApiIdentityVerifier(options);
+  return async (request) => {
+    const identity = await identify(request);
+    if (identity.method === "oauth" && !identity.organizationId) {
+      throw unauthorized("Invalid bearer token claims.");
+    }
+    const actor = await resolveLocalActor(execute, identity, identity.activeWorkspaceId);
     return {
       actor,
       ...(identity.refreshedSessionCookie
@@ -155,7 +192,7 @@ function identityFromJwt(payload: JWTPayload): VerifiedIdentity {
   const userId = stringClaim(payload.sub);
   const organizationId = stringClaim(payload.org_id);
   const sessionId = stringClaim(payload.sid);
-  if (!userId || !organizationId) throw unauthorized("Invalid bearer token claims.");
+  if (!userId) throw unauthorized("Invalid bearer token claims.");
   return {
     userId,
     organizationId,
@@ -172,7 +209,9 @@ async function resolveLocalActor(
   const result = await execute(sql`
     SELECT
       member.workspace_id AS "workspaceId",
-      member.role
+      member.role,
+      actor_user.task_spawning_enabled AS "taskSpawningEnabled",
+      actor_user.wiki_enabled AS "wikiEnabled"
     FROM goat.users AS actor_user
     JOIN goat.workspace_members AS member
       ON member.user_workos_id = actor_user.workos_user_id
@@ -198,7 +237,12 @@ async function resolveLocalActor(
       member.workspace_id ASC
     LIMIT 1
   `);
-  const row = rowsFromExecute<{ workspaceId: string; role: string }>(result)[0];
+  const row = rowsFromExecute<{
+    workspaceId: string;
+    role: string;
+    taskSpawningEnabled: boolean;
+    wikiEnabled: boolean;
+  }>(result)[0];
   if (!row) {
     throw new ApiError(
       403,
@@ -215,6 +259,18 @@ async function resolveLocalActor(
       CHAT_WRITE_PERMISSION,
       TASK_READ_PERMISSION,
       TASK_WRITE_PERMISSION,
+      BRAIN_READ_PERMISSION,
+      SKILL_READ_PERMISSION,
+      ...(row.role === "admin" ? [BRAIN_WRITE_PERMISSION, SKILL_WRITE_PERMISSION] : []),
+      ...(row.wikiEnabled ? [WIKI_READ_PERMISSION, WIKI_WRITE_PERMISSION] : []),
+      ...(row.taskSpawningEnabled
+        ? [
+            WORKFLOW_READ_PERMISSION,
+            WORKFLOW_WRITE_PERMISSION,
+            SCHEDULE_READ_PERMISSION,
+            SCHEDULE_WRITE_PERMISSION,
+          ]
+        : []),
     ],
     authenticationMethod: identity.method,
     ...(identity.sessionId ? { sessionId: identity.sessionId } : {}),

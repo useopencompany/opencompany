@@ -1,5 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { isIP } from "node:net";
+import { type Actor, CoreError } from "@opencompany/core";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import {
@@ -10,6 +11,7 @@ import {
   goatBrainImportRuns,
   goatBrainIngestJobs,
   goatBrainSourceItems,
+  goatKnowledgeCommandIdempotency,
 } from "./goat-schema";
 
 type DbLike = any;
@@ -44,53 +46,146 @@ export function normalizeGoatCompanyUrl(value: string): {
   return { url: `${parsed.protocol}//${domain}${port}`, domain };
 }
 
-export async function createGoatBrainImportRun(input: {
+// Durable start command for the canonical API. The reservation makes retries return the original
+// run, and the existing single-active-import unique index remains the arbiter for concurrent
+// first requests. Neon's HTTP driver has no transactions, so a crash between the reservation and
+// the insert is recovered by the replay path creating the run under the reserved ID.
+export async function startGoatBrainImportRunIdempotent(input: {
+  actor: Actor;
   brainRef: string;
-  userWorkosId: string;
+  idempotencyKey: string;
   companyUrl: string;
-  companyName?: string | null;
   focus?: string | null;
   sourceSelection: GoatBrainImportSourceSelection;
   now?: Date;
   db?: DbLike;
-}): Promise<GoatBrainImportRun> {
+}): Promise<{ run: GoatBrainImportRun; idempotentReplay: boolean }> {
   const db = input.db ?? getDb();
-  const now = input.now ?? new Date();
   const company = normalizeGoatCompanyUrl(input.companyUrl);
-  const historyStartAt = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const [run] = await db
-    .insert(goatBrainImportRuns)
+  const operation = "brain_import.start" as const;
+  const focus = input.focus?.trim() || null;
+  const requestHash = createHash("sha256")
+    .update(
+      stableImportJson({
+        operation,
+        command: {
+          brainRef: input.brainRef,
+          companyUrl: company.url,
+          focus,
+          sourceSelection: input.sourceSelection,
+        },
+      }),
+    )
+    .digest("hex");
+  const [reservation] = await db
+    .insert(goatKnowledgeCommandIdempotency)
     .values({
-      id: newGoatBrainImportRunId(),
-      brainRef: input.brainRef,
-      userWorkosId: input.userWorkosId,
-      companyUrl: company.url,
-      companyDomain: company.domain,
-      companyName: input.companyName?.trim() || null,
-      focus: input.focus?.trim() || null,
-      historyStartAt,
-      historyEndAt: now,
-      sourceSelection: input.sourceSelection,
-      status: "discovering",
-      nextRunAt: now,
-      updatedAt: now,
+      commandId: deterministicImportId("goat_knowledge_command", input.actor, input.idempotencyKey),
+      userWorkosId: input.actor.userId,
+      workspaceId: input.actor.workspaceId,
+      idempotencyKey: input.idempotencyKey,
+      requestHash,
+      operation,
+      resourceId: deterministicImportId("gbimp", input.actor, input.idempotencyKey),
     })
-    .returning();
-  if (!run) throw new Error("Could not start the company-context scan.");
-  return run;
+    .onConflictDoUpdate({
+      target: [
+        goatKnowledgeCommandIdempotency.userWorkosId,
+        goatKnowledgeCommandIdempotency.workspaceId,
+        goatKnowledgeCommandIdempotency.idempotencyKey,
+      ],
+      set: { touchedAt: new Date() },
+    })
+    .returning({
+      requestHash: goatKnowledgeCommandIdempotency.requestHash,
+      operation: goatKnowledgeCommandIdempotency.operation,
+      resourceId: goatKnowledgeCommandIdempotency.resourceId,
+    });
+  if (!reservation) throw new CoreError("conflict", "Could not reserve the import command.");
+  if (reservation.operation !== operation || reservation.requestHash !== requestHash) {
+    throw new CoreError(
+      "idempotency_conflict",
+      "The Idempotency-Key was already used for another command.",
+    );
+  }
+
+  const replay = await findGoatBrainImportRun(reservation.resourceId, input.brainRef, db);
+  if (replay) return { run: replay, idempotentReplay: true };
+
+  const now = input.now ?? new Date();
+  try {
+    const [run] = await db
+      .insert(goatBrainImportRuns)
+      .values({
+        id: reservation.resourceId,
+        brainRef: input.brainRef,
+        userWorkosId: input.actor.userId,
+        companyUrl: company.url,
+        companyDomain: company.domain,
+        focus,
+        historyStartAt: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
+        historyEndAt: now,
+        sourceSelection: input.sourceSelection,
+        status: "discovering",
+        nextRunAt: now,
+        updatedAt: now,
+      })
+      .returning();
+    if (!run) throw new CoreError("unavailable", "Could not start the company-context scan.");
+    return { run, idempotentReplay: false };
+  } catch (error) {
+    if (!isGoatImportUniqueViolation(error)) throw error;
+    // Either a concurrent identical retry won the insert, or another import is still active.
+    const winner = await findGoatBrainImportRun(reservation.resourceId, input.brainRef, db);
+    if (winner) return { run: winner, idempotentReplay: true };
+    throw new CoreError("conflict", "An import is already running for this brain.");
+  }
 }
 
-export async function getLatestGoatBrainImportRun(
+async function findGoatBrainImportRun(
+  runId: string,
   brainRef: string,
-  db: DbLike = getDb(),
+  db: DbLike,
 ): Promise<GoatBrainImportRun | null> {
   const [run] = await db
     .select()
     .from(goatBrainImportRuns)
-    .where(eq(goatBrainImportRuns.brainRef, brainRef))
-    .orderBy(desc(goatBrainImportRuns.createdAt))
+    .where(and(eq(goatBrainImportRuns.id, runId), eq(goatBrainImportRuns.brainRef, brainRef)))
     .limit(1);
   return run ?? null;
+}
+
+function deterministicImportId(prefix: string, actor: Actor, key: string) {
+  const digest = createHash("sha256")
+    .update([prefix, actor.userId, actor.workspaceId, key].join("\n"))
+    .digest("hex")
+    .slice(0, 32);
+  return `${prefix}_${digest}`;
+}
+
+function stableImportJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableImportJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableImportJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+// Depending on the driver, drizzle may surface the Postgres error directly or wrap it in a
+// DrizzleQueryError whose `cause` carries the SQLSTATE.
+function isGoatImportUniqueViolation(error: unknown) {
+  for (
+    let current = error;
+    current && typeof current === "object";
+    current = (current as { cause?: unknown }).cause ?? null
+  ) {
+    if ((current as { code?: string }).code === "23505") return true;
+  }
+  return false;
 }
 
 export async function addGoatBrainImportCandidate(input: {
@@ -332,7 +427,12 @@ export async function confirmGoatBrainImport(input: {
     FROM confirmed_run AS run
   `);
   const row = rowsFromExecute<{ importRunId: string; enqueued: number }>(result)[0];
-  if (!row) throw new Error("This company-context scan is no longer awaiting confirmation.");
+  if (!row) {
+    throw new CoreError(
+      "conflict",
+      "This company-context scan is no longer awaiting confirmation.",
+    );
+  }
   return row;
 }
 
@@ -377,7 +477,7 @@ export async function cancelGoatBrainImport(input: {
     FROM canceled_run AS run
   `);
   const row = rowsFromExecute<{ importRunId: string; skippedJobs: number }>(result)[0];
-  if (!row) throw new Error("This import is no longer active.");
+  if (!row) throw new CoreError("conflict", "This import is no longer active.");
   return row;
 }
 
@@ -418,7 +518,7 @@ export async function retryGoatBrainImportDiscovery(input: {
     FROM retried_run AS run
   `);
   const row = rowsFromExecute<{ importRunId: string; deletedCandidates: number }>(result)[0];
-  if (!row) throw new Error("Only a failed source scan can be retried.");
+  if (!row) throw new CoreError("conflict", "Only a failed source scan can be retried.");
   return row;
 }
 
@@ -455,10 +555,6 @@ export async function getGoatBrainImportJobProgress(
       ),
     ),
   };
-}
-
-export function newGoatBrainImportRunId() {
-  return `gbimp_${randomUUID().replace(/-/g, "")}`;
 }
 
 function isUnsafeHostname(hostname: string) {

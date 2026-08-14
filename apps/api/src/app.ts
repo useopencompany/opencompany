@@ -1,23 +1,49 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
+import type { GoatBillingApplicationService } from "@opencompany/billing/application-service";
 import {
   CHAT_PRESENTATION_READ_LIMIT,
   type ChatPresentationReader,
 } from "@opencompany/chat-presentation";
 import {
   type Actor,
+  type BrainDocument,
+  type BrainFolder,
+  type BrainOverview,
+  type BrainSourceItem,
   CHAT_ATTACHMENT_MAX_BYTES,
   type ChatApplicationService,
   CoreError,
+  type KnowledgeApplicationService,
   type LegacyTask,
   type LegacyTaskHistory,
   type RunEvent,
+  type Skill,
+  type SkillImportApplicationService,
+  type SkillListItem,
   type Task,
   type TaskApplicationService,
+  type TaskSchedule,
+  type TaskScheduleApplicationService,
+  type WikiPage,
+  type WikiTimelineEntry,
+  type Workflow,
+  type WorkflowApplicationService,
 } from "@opencompany/core";
 import {
   AutoModelRoutingError,
   type AutoModelRoutingResolution,
 } from "@opencompany/goat-agent/application/auto-model-routing";
+import type { GoatBrainImportApplicationService } from "@opencompany/goat-agent/brain-imports";
+import type { GoatBrainSourceApplicationService } from "@opencompany/goat-agent/brain-sources";
+import type { GoatBrowserProfileApplicationService } from "@opencompany/goat-agent/browser-profiles/service";
+import type {
+  GoatAttioProviderState,
+  GoatFathomProviderState,
+  GoatGranolaProviderState,
+  GoatImessageProviderState,
+  GoatStripeProviderState,
+} from "@opencompany/goat-agent/integration-state";
+import type { GoatMcpService } from "@opencompany/goat-agent/mcp-http";
 import { GOAT_SPANS, withGoatSpan } from "@opencompany/goat-observability";
 import { captureException, createLogger } from "@opencompany/observability";
 import {
@@ -27,7 +53,9 @@ import {
   decodePresentationCursor,
   encodeEventCursor,
   encodePresentationCursor,
+  PROTOCOL_UPDATE_REQUIRED_MESSAGE,
   PROTOCOL_VERSION,
+  PROTOCOL_VERSION_HEADER,
   PresentationDeltaEventSchema,
   RunEventSchema,
   type V1RouteHandlers,
@@ -39,11 +67,40 @@ import { requestId } from "hono/request-id";
 import { secureHeaders } from "hono/secure-headers";
 import { stream as streamResponse } from "hono/streaming";
 import type { AttachmentUploadService } from "./attachments";
-import type { ApiAuthenticator } from "./auth";
+import type { AttioIngressService } from "./attio-ingress";
+import type { ApiAuthenticator, ApiIdentity, ApiIdentityVerifier } from "./auth";
+import type { BillingReconcileService } from "./billing-reconcile";
+import type { BrainAssetService } from "./brain-assets";
+import type { BrainControlService } from "./brain-control";
+import type { ChatResourceDownload, ChatResourceService } from "./chat-resources";
+import type { ChatTitleService } from "./chat-title";
 import type { ReadModelService } from "./electric-read-models";
+import type { EngineAuthService } from "./engine-auth";
+import { admitEngineMessage } from "./engine-messages";
+import type { EngineSessionService } from "./engine-sessions";
 import { ApiError, errorResponse } from "./errors";
+import type { FeedbackService } from "./feedback";
+import type { GitHubIngressService } from "./github-ingress";
+import type { GoogleIngressService } from "./google-ingress";
+import type { HubspotIngressService } from "./hubspot-ingress";
+import type { IdentityService } from "./identity";
+import type { IntegrationAccountService } from "./integration-accounts";
+import type { JamieIngressService } from "./jamie-ingress";
+import type { LinearIngressService } from "./linear-ingress";
+import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
+import type { OnboardingService } from "./onboarding";
+import type { OnboardingEmailService } from "./onboarding-emails";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
+import type { RepoConfigService } from "./repo-configs";
 import { PollingRunEventNotifier, type RunEventNotifier } from "./run-event-notifier";
+import type { SlackBotIngressService } from "./slack-bot-ingress";
+import type { SlackBotSettingsService } from "./slack-bot-settings";
+import type { SlackIngressService } from "./slack-ingress";
+import type { StripeIngressService } from "./stripe-ingress";
+import type { UserSettingsService } from "./user-settings";
+import type { CapabilityApprovalView, WorkspaceCapabilityService } from "./workspace-capabilities";
+import type { WorkspaceControlService } from "./workspace-control";
+import type { XAccountIngressService } from "./x-account-ingress";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "hono" });
 const meta = { apiVersion: "v1", protocolVersion: PROTOCOL_VERSION } as const;
@@ -56,8 +113,15 @@ const HEARTBEAT_MS = 15_000;
 const TERMINAL_RUN_STATUSES = new Set(["paused", "completed", "failed", "canceled"]);
 const MULTIPART_ENVELOPE_BYTES = 64 * 1024;
 const SAFE_BROWSER_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-const CORS_ALLOW_HEADERS = ["Accept", "Content-Type", "Idempotency-Key", "Last-Event-ID"];
+const CORS_ALLOW_HEADERS = [
+  "Accept",
+  "Content-Type",
+  "Idempotency-Key",
+  "Last-Event-ID",
+  "X-OpenCompany-Protocol-Version",
+];
 const CORS_EXPOSE_HEADERS = [
+  "Content-Disposition",
   "Electric-Cursor",
   "Electric-Handle",
   "Electric-Offset",
@@ -67,13 +131,77 @@ const CORS_EXPOSE_HEADERS = [
   "X-OpenCompany-Run-Status",
   "X-Request-Id",
 ];
+const ONBOARDING_IDENTITY_PATH = "/v1/onboarding";
+const IDENTITY_PATH = "/v1/identity";
 
 export type CreateApiAppInput = {
   chat: ChatApplicationService;
   tasks: TaskApplicationService;
+  workflows: WorkflowApplicationService;
+  schedules: TaskScheduleApplicationService;
+  knowledge: KnowledgeApplicationService;
+  brainSources: Pick<GoatBrainSourceApplicationService, "list" | "set" | "remove" | "listOptions">;
+  brainImports: Pick<GoatBrainImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
+  browserProfiles: Pick<
+    GoatBrowserProfileApplicationService,
+    | "list"
+    | "create"
+    | "remove"
+    | "createLoginSession"
+    | "completeLoginSession"
+    | "resolveLiveViewUrl"
+  >;
+  skillImports: SkillImportApplicationService;
+  brainAssets: BrainAssetService;
+  chatResources?: ChatResourceService;
+  chatTitles?: ChatTitleService;
+  captureChatMessage?: (input: {
+    actor: Actor;
+    conversationId: string;
+    firstMessage: boolean;
+    engine: "opencompany" | "codex" | "claude_code";
+    model: string;
+    messageLength: number;
+    selectionMode: "manual" | "auto";
+    routing?: {
+      tier: "standard" | "frontier";
+      reason: string;
+      outcome: string;
+      durationMs: number;
+    };
+  }) => Promise<unknown> | unknown;
+  brainControl: BrainControlService;
   attachments: AttachmentUploadService;
+  userSettings: UserSettingsService;
+  feedback: FeedbackService;
+  repoConfigs: RepoConfigService;
+  integrationAccounts: IntegrationAccountService;
+  slackBotSettings: SlackBotSettingsService;
+  mcp?: GoatMcpService;
+  engineAuth: EngineAuthService;
+  engineSessions: EngineSessionService;
+  billing: GoatBillingApplicationService;
+  workspaceCapabilities: WorkspaceCapabilityService;
+  workspaceControl: WorkspaceControlService;
+  identity: IdentityService;
+  onboarding: OnboardingService;
+  onboardingEmails: OnboardingEmailService;
   authenticate: ApiAuthenticator;
+  identify: ApiIdentityVerifier;
+  emailLifecycleInternalSecret?: string;
   browserOrigins?: readonly string[];
+  githubIngress?: GitHubIngressService;
+  googleIngress?: GoogleIngressService;
+  slackIngress?: SlackIngressService;
+  linearIngress?: LinearIngressService;
+  hubspotIngress?: HubspotIngressService;
+  attioIngress?: AttioIngressService;
+  jamieIngress?: JamieIngressService;
+  mcpOAuthIngress?: McpOAuthIngressService;
+  xAccountIngress?: XAccountIngressService;
+  slackBotIngress?: SlackBotIngressService;
+  stripeIngress?: StripeIngressService;
+  billingReconcile?: BillingReconcileService;
   notifier?: RunEventNotifier;
   presentation?: ChatPresentationReader;
   rateLimiter?: ApiRateLimiter;
@@ -208,6 +336,854 @@ export function createApiApp(input: CreateApiAppInput) {
       const history = await input.tasks.getLegacyTaskHistory(actor, c.req.valid("param").taskId);
       return c.json({ data: legacyTaskHistoryDto(history), meta }, 200);
     },
+    listWorkflows: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const query = c.req.valid("query");
+      const page = await input.workflows.listWorkflows(actor, {
+        ...(query.cursor ? { cursor: query.cursor } : {}),
+        ...(query.limit ? { limit: query.limit } : {}),
+      });
+      return c.json(
+        { data: page.workflows.map(workflowDto), nextCursor: page.nextCursor, meta },
+        200,
+      );
+    },
+    createWorkflow: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const body = c.req.valid("json");
+      const result = await input.workflows.createWorkflow(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        name: body.name,
+        ...(body.description !== undefined ? { description: body.description } : {}),
+      });
+      return c.json(
+        {
+          data: {
+            workflow: workflowDto(result.workflow),
+            transactionId: result.transactionId,
+            replayed: result.idempotentReplay,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    getWorkflow: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const workflow = await input.workflows.getWorkflow(actor, c.req.valid("param").workflowId);
+      return c.json({ data: workflowDto(workflow), meta }, 200);
+    },
+    updateWorkflow: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.workflows.updateWorkflow(
+        actor,
+        c.req.valid("param").workflowId,
+        c.req.valid("json"),
+      );
+      return c.json(
+        {
+          data: { workflow: workflowDto(result.workflow), transactionId: result.transactionId },
+          meta,
+        },
+        200,
+      );
+    },
+    archiveWorkflow: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.workflows.archiveWorkflow(
+        actor,
+        c.req.valid("param").workflowId,
+        c.req.valid("json").expectedVersion,
+      );
+      return c.json({ data: result, meta }, 200);
+    },
+    invokeWorkflow: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "message", 30);
+      const body = c.req.valid("json");
+      const result = await input.workflows.invokeWorkflow(actor, c.req.valid("param").workflowId, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        description: body.description,
+        ...(body.attachmentIds ? { attachmentIds: body.attachmentIds } : {}),
+        ...(body.skillIds ? { skillIds: body.skillIds } : {}),
+      });
+      return c.json({ data: taskCreationDto(result), meta }, 202);
+    },
+    runWorkflowNow: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "message", 30);
+      const result = await input.workflows.runWorkflowNow(
+        actor,
+        c.req.valid("param").workflowId,
+        c.req.valid("header")["idempotency-key"],
+      );
+      return c.json({ data: taskCreationDto(result), meta }, 202);
+    },
+    listTaskSchedules: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const query = c.req.valid("query");
+      const page = await input.schedules.listTaskSchedules(actor, {
+        ...(query.cursor ? { cursor: query.cursor } : {}),
+        ...(query.limit ? { limit: query.limit } : {}),
+      });
+      return c.json(
+        { data: page.schedules.map(taskScheduleDto), nextCursor: page.nextCursor, meta },
+        200,
+      );
+    },
+    createTaskSchedule: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const body = c.req.valid("json");
+      const result = await input.schedules.createTaskSchedule(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.sourceDescription !== undefined
+          ? { sourceDescription: body.sourceDescription }
+          : {}),
+        cron: body.cron,
+        ...(body.timezone !== undefined ? { timezone: body.timezone } : {}),
+        prompt: body.prompt,
+      });
+      return c.json(
+        {
+          data: {
+            schedule: taskScheduleDto(result.schedule),
+            transactionId: result.transactionId,
+            replayed: result.idempotentReplay,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    getTaskSchedule: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const schedule = await input.schedules.getTaskSchedule(
+        actor,
+        c.req.valid("param").scheduleId,
+      );
+      return c.json({ data: taskScheduleDto(schedule), meta }, 200);
+    },
+    updateTaskSchedule: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const body = c.req.valid("json");
+      const scheduleId = c.req.valid("param").scheduleId;
+      const result =
+        "enabled" in body
+          ? await input.schedules.setTaskScheduleEnabled(actor, scheduleId, body)
+          : await input.schedules.updateTaskSchedule(actor, scheduleId, body);
+      return c.json(
+        {
+          data: { schedule: taskScheduleDto(result.schedule), transactionId: result.transactionId },
+          meta,
+        },
+        200,
+      );
+    },
+    archiveTaskSchedule: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.schedules.archiveTaskSchedule(
+        actor,
+        c.req.valid("param").scheduleId,
+        c.req.valid("json").expectedVersion,
+      );
+      return c.json({ data: result, meta }, 200);
+    },
+    runTaskScheduleNow: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "message", 30);
+      const result = await input.schedules.runTaskScheduleNow(
+        actor,
+        c.req.valid("param").scheduleId,
+        c.req.valid("header")["idempotency-key"],
+      );
+      return c.json({ data: taskCreationDto(result), meta }, 202);
+    },
+    getBrainSnapshot: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const snapshot = await input.knowledge.getBrainSnapshot(actor, c.req.valid("param").brainId);
+      return c.json(
+        {
+          data: {
+            folders: snapshot.folders.map(brainFolderDto),
+            documents: snapshot.documents.map(brainDocumentDto),
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    getBrainOverview: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const overview = await input.knowledge.getBrainOverview(actor, c.req.valid("param").brainId);
+      return c.json({ data: brainOverviewDto(overview), meta }, 200);
+    },
+    listBrainSourceItems: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const sourceItems = await input.knowledge.listBrainSourceItems(
+        actor,
+        c.req.valid("param").brainId,
+        c.req.valid("query").ids,
+      );
+      return c.json({ data: sourceItems.map(brainSourceItemDto), meta }, 200);
+    },
+    listBrainSources: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const details = await input.brainSources.list(actor, c.req.valid("param").brainId);
+      return c.json({ data: details, meta }, 200);
+    },
+    setBrainSource: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const command = c.req.valid("json");
+      await input.brainSources.set(actor, params.brainId, params.integrationId, command);
+      return c.json(
+        {
+          data: {
+            brainId: params.brainId,
+            integrationId: params.integrationId,
+            provider: command.provider,
+            enabled: command.enabled,
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    deleteBrainSource: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      await input.brainSources.remove(actor, params.brainId, params.integrationId);
+      return c.json(
+        {
+          data: { brainId: params.brainId, integrationId: params.integrationId, deleted: true },
+          meta,
+        },
+        200,
+      );
+    },
+    listBrainSourceOptions: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 120);
+      const options = await input.brainSources.listOptions(
+        actor,
+        c.req.valid("param").integrationId,
+        c.req.valid("json"),
+      );
+      return c.json({ data: options, meta }, 200);
+    },
+    listBrowserProfiles: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const profiles = await input.browserProfiles.list(actor);
+      return c.json({ data: profiles, meta }, 200);
+    },
+    createBrowserProfile: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 20);
+      const profile = await input.browserProfiles.create(actor, c.req.valid("json"));
+      return c.json({ data: profile, meta }, 201);
+    },
+    deleteBrowserProfile: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const { profileId } = c.req.valid("param");
+      await input.browserProfiles.remove(actor, profileId);
+      return c.json({ data: { profileId, deleted: true as const }, meta }, 200);
+    },
+    createBrowserProfileLoginSession: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      const { profileId } = c.req.valid("param");
+      const session = await input.browserProfiles.createLoginSession(actor, profileId);
+      return c.json(
+        {
+          data: {
+            profileId,
+            sessionId: session.sessionId,
+            liveViewUrl: session.liveViewUrl,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    completeBrowserProfileLogin: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const { profileId, sessionId } = c.req.valid("param");
+      await input.browserProfiles.completeLoginSession(actor, profileId, sessionId);
+      return c.json({ data: { profileId, sessionId, completed: true as const }, meta }, 200);
+    },
+    getBrowserProfileLiveView: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 120);
+      const { profileId } = c.req.valid("param");
+      const { sessionId } = c.req.valid("query");
+      const url = await input.browserProfiles.resolveLiveViewUrl(actor, profileId, sessionId);
+      return c.json({ data: { url }, meta }, 200);
+    },
+    getWorkspaceCapabilities: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const settings = await input.workspaceCapabilities.getSettings(actor);
+      return c.json({ data: settings, meta }, 200);
+    },
+    setCapabilitySessionBudget: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const sessionBudgetUsdMicros = await input.workspaceCapabilities.setSessionBudget(
+        actor,
+        c.req.valid("json").budgetUsd,
+      );
+      return c.json({ data: { sessionBudgetUsdMicros }, meta }, 200);
+    },
+    setWorkspaceCapability: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const capability = await input.workspaceCapabilities.setCapability(
+        actor,
+        c.req.valid("param").source,
+        c.req.valid("json").enabled,
+      );
+      return c.json({ data: capability, meta }, 200);
+    },
+    getCapabilityApprovalByToolCall: async (c) => {
+      const actor = actorFrom(c);
+      // Chat polls this resource while an approval card is visible, so it gets
+      // a dedicated read bucket instead of competing with ordinary RSC reads.
+      await enforceRateLimit(rateLimiter, actor, "capability-approval-read", 300);
+      const approval = await input.workspaceCapabilities.getApprovalByToolCall(
+        actor,
+        c.req.valid("param").toolCallId,
+      );
+      return c.json({ data: capabilityApprovalDto(approval), meta }, 200);
+    },
+    getCapabilityApproval: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "capability-approval-read", 300);
+      const approval = await input.workspaceCapabilities.getApproval(
+        actor,
+        c.req.valid("param").runId,
+      );
+      return c.json({ data: capabilityApprovalDto(approval), meta }, 200);
+    },
+    createBrain: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.brainControl.createBrain(actor, c.req.valid("json"));
+      return c.json({ data: result, meta }, 201);
+    },
+    switchBrain: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.brainControl.switchBrain(actor, c.req.valid("param").brainId);
+      return c.json({ data: result, meta }, 200);
+    },
+    getBrainAccess: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const access = await input.brainControl.getAccess(actor, c.req.valid("param").brainId);
+      return c.json({ data: access, meta }, 200);
+    },
+    setBrainAccess: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.brainControl.setAccess(actor, c.req.valid("param").brainId, c.req.valid("json"));
+      return c.json({ data: { updated: true as const }, meta }, 200);
+    },
+    getBrainEnrichment: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const setting = await input.brainControl.getEnrichment(actor, c.req.valid("param").brainId);
+      return c.json({ data: setting, meta }, 200);
+    },
+    setBrainEnrichment: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const { brainId } = c.req.valid("param");
+      const { enabled } = c.req.valid("json");
+      await input.brainControl.setEnrichment(actor, brainId, enabled);
+      return c.json({ data: { enabled }, meta }, 200);
+    },
+    getBrainIntelligence: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const setting = await input.brainControl.getIntelligence(actor, c.req.valid("param").brainId);
+      return c.json({ data: setting, meta }, 200);
+    },
+    setBrainIntelligence: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const { brainId } = c.req.valid("param");
+      const { intelligence } = c.req.valid("json");
+      await input.brainControl.setIntelligence(actor, brainId, intelligence);
+      return c.json({ data: { intelligence }, meta }, 200);
+    },
+    getIdentity: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "identity-read", 300);
+      return c.json({ data: await input.identity.get(identity), meta }, 200);
+    },
+    syncIdentity: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "identity-sync", 30);
+      return c.json({ data: await input.identity.sync(identity), meta }, 200);
+    },
+    getWorkspaceSettings: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const settings = await input.workspaceControl.getSettings(actor);
+      return c.json({ data: settings, meta }, 200);
+    },
+    renameWorkspace: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const workspace = await input.workspaceControl.rename(actor, c.req.valid("json").name);
+      return c.json({ data: workspace, meta }, 200);
+    },
+    inviteWorkspaceMember: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "workspace-invitation", 20);
+      await input.workspaceControl.invite(actor, c.req.valid("json").email);
+      return c.json({ data: { completed: true as const }, meta }, 201);
+    },
+    revokeWorkspaceInvitation: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.workspaceControl.revokeInvitation(actor, c.req.valid("param").invitationId);
+      return c.json({ data: { completed: true as const }, meta }, 200);
+    },
+    removeWorkspaceMember: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.workspaceControl.removeMember(actor, c.req.valid("param").userId);
+      return c.json({ data: { completed: true as const }, meta }, 200);
+    },
+    createWorkspace: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "workspace-create", 5);
+      const activation = await input.workspaceControl.create(actor, c.req.valid("json"));
+      return c.json({ data: activation, meta }, 201);
+    },
+    switchWorkspace: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const activation = await input.workspaceControl.switch(
+        actor,
+        c.req.valid("param").workspaceId,
+      );
+      return c.json({ data: activation, meta }, 200);
+    },
+    getOnboardingState: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-read", 300);
+      const state = await input.onboarding.getState(identity);
+      return c.json({ data: state, meta }, 200);
+    },
+    checkOnboardingWorkspaceSlug: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-slug", 120);
+      const result = await input.onboarding.checkSlug(identity, c.req.valid("json").slug);
+      return c.json({ data: result, meta }, 200);
+    },
+    saveOnboardingProfile: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-write", 30);
+      await input.onboarding.saveProfile(identity, c.req.valid("json"));
+      return c.json({ data: { completed: true as const }, meta }, 200);
+    },
+    saveOnboardingWorkspace: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-workspace", 10);
+      const workspace = await input.onboarding.saveWorkspace(identity, c.req.valid("json"));
+      return c.json({ data: workspace, meta }, 200);
+    },
+    finishOnboarding: async (c) => {
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-write", 30);
+      await input.onboarding.finish(identity, c.req.valid("json").referralSource);
+      return c.json({ data: { completed: true as const }, meta }, 200);
+    },
+    startBrainImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const result = await input.brainImports.start(actor, c.req.valid("param").brainId, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...c.req.valid("json"),
+      });
+      return c.json(
+        {
+          data: {
+            importRunId: result.importRunId,
+            status: result.status,
+            replayed: result.replayed,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    confirmBrainImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const result = await input.brainImports.confirm(
+        actor,
+        params.brainId,
+        params.importRunId,
+        c.req.valid("json").enabledProviders,
+      );
+      return c.json(
+        {
+          data: {
+            importRunId: result.importRunId,
+            status: result.status,
+            replayed: result.replayed,
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    cancelBrainImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const result = await input.brainImports.cancel(actor, params.brainId, params.importRunId);
+      return c.json(
+        {
+          data: {
+            importRunId: result.importRunId,
+            status: result.status,
+            replayed: result.replayed,
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    retryBrainImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const result = await input.brainImports.retry(actor, params.brainId, params.importRunId);
+      return c.json(
+        {
+          data: {
+            importRunId: result.importRunId,
+            status: result.status,
+            replayed: result.replayed,
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    createBrainDocument: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const document = await input.knowledge.createBrainDocument(
+        actor,
+        c.req.valid("param").brainId,
+        {
+          idempotencyKey: c.req.valid("header")["idempotency-key"],
+          ...c.req.valid("json"),
+        },
+      );
+      return c.json({ data: brainDocumentDto(document), meta }, 201);
+    },
+    uploadBrainAsset: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      const params = c.req.valid("param");
+      const form = c.req.valid("form");
+      const result = await input.brainAssets.upload({
+        actor,
+        brainId: params.brainId,
+        folderPath: form.folderPath,
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        file: form.file,
+      });
+      return c.json(
+        {
+          data: {
+            document: brainDocumentDto(result.document),
+            quotaPaused: result.quotaPaused,
+            replayed: result.replayed,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    replaceBrainAsset: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      const params = c.req.valid("param");
+      const result = await input.brainAssets.replace({
+        actor,
+        brainId: params.brainId,
+        documentId: params.documentId,
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        file: c.req.valid("form").file,
+      });
+      return c.json(
+        {
+          data: {
+            document: brainDocumentDto(result.document),
+            quotaPaused: result.quotaPaused,
+            replayed: result.replayed,
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    downloadBrainAsset: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const asset = await input.brainAssets.download({
+        actor,
+        documentId: c.req.valid("param").documentId,
+      });
+      const headers = new Headers({
+        "Content-Type": asset.mediaType,
+        "Content-Disposition": contentDisposition(asset.filename),
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+      });
+      if (asset.sizeBytes !== null) headers.set("Content-Length", String(asset.sizeBytes));
+      return new Response(asset.stream, {
+        status: 200,
+        headers,
+      }) as never;
+    },
+    updateBrainDocument: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const document = await input.knowledge.updateBrainDocument(
+        actor,
+        params.brainId,
+        params.documentId,
+        c.req.valid("json"),
+      );
+      return c.json({ data: brainDocumentDto(document), meta }, 200);
+    },
+    renameBrainDocument: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const document = await input.knowledge.renameBrainDocument(
+        actor,
+        params.brainId,
+        params.documentId,
+        c.req.valid("json"),
+      );
+      return c.json({ data: brainDocumentDto(document), meta }, 200);
+    },
+    deleteBrainDocument: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      await input.knowledge.deleteBrainDocument(actor, params.brainId, params.documentId);
+      return c.json({ data: { documentId: params.documentId }, meta }, 200);
+    },
+    createBrainFolder: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const folder = await input.knowledge.createBrainFolder(
+        actor,
+        c.req.valid("param").brainId,
+        c.req.valid("json"),
+      );
+      return c.json({ data: brainFolderDto(folder), meta }, 201);
+    },
+    renameBrainFolder: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.knowledge.renameBrainFolder(
+        actor,
+        c.req.valid("param").brainId,
+        c.req.valid("json"),
+      );
+      return c.json({ data: result, meta }, 200);
+    },
+    deleteBrainFolder: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const body = c.req.valid("json");
+      await input.knowledge.deleteBrainFolder(actor, params.brainId, body);
+      return c.json({ data: { path: body.path }, meta }, 200);
+    },
+    listWikiPages: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const pages = await input.knowledge.listWikiPages(actor);
+      return c.json({ data: pages.map(wikiPageDto), meta }, 200);
+    },
+    createWikiPage: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.knowledge.createWikiPage(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...c.req.valid("json"),
+      });
+      return c.json(
+        {
+          data: { page: wikiPageDto(result.page), transactionIds: result.transactionIds },
+          meta,
+        },
+        201,
+      );
+    },
+    updateWikiPage: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.knowledge.updateWikiPage(
+        actor,
+        c.req.valid("param").slug,
+        c.req.valid("json"),
+      );
+      return c.json(
+        {
+          data: { page: wikiPageDto(result.page), transactionIds: result.transactionIds },
+          meta,
+        },
+        200,
+      );
+    },
+    deleteWikiPage: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.knowledge.deleteWikiPage(actor, {
+        slug: c.req.valid("param").slug,
+        ...c.req.valid("json"),
+      });
+      return c.json({ data: result, meta }, 200);
+    },
+    addWikiTimelineEntry: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.knowledge.addWikiTimelineEntry(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        slug: c.req.valid("param").slug,
+        ...c.req.valid("json"),
+      });
+      return c.json(
+        {
+          data: {
+            entry: wikiTimelineEntryDto(result.entry),
+            transactionId: result.transactionId,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    listSkills: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const skills = await input.knowledge.listSkills(actor);
+      return c.json({ data: skills.map(skillListItemDto), meta }, 200);
+    },
+    createSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const skill = await input.knowledge.createSkill(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...c.req.valid("json"),
+      });
+      return c.json({ data: skillDto(skill), meta }, 201);
+    },
+    previewSkillImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const preview = await input.skillImports.preview(actor, c.req.valid("json"));
+      return c.json(
+        {
+          data:
+            preview.status === "resolved"
+              ? {
+                  status: preview.status,
+                  proposedSlug: preview.proposedSlug,
+                  name: preview.name,
+                  description: preview.description,
+                  instructions: preview.instructions,
+                  extraFiles: preview.extraFiles,
+                  resolvedCommit: preview.resolvedCommit,
+                  integrity: preview.integrity,
+                }
+              : {
+                  status: preview.status,
+                  candidates: preview.candidates,
+                },
+          meta,
+        },
+        200,
+      );
+    },
+    importSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const result = await input.skillImports.import(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...c.req.valid("json"),
+      });
+      return c.json(
+        {
+          data: { skill: skillDto(result.skill), replayed: result.idempotentReplay },
+          meta,
+        },
+        201,
+      );
+    },
+    listSkillCatalog: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json({ data: await input.knowledge.listSkillCatalog(actor), meta }, 200);
+    },
+    getSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const skill = await input.knowledge.getSkill(actor, c.req.valid("param").slug);
+      return c.json({ data: skillDto(skill), meta }, 200);
+    },
+    updateSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const skill = await input.knowledge.updateSkill(
+        actor,
+        c.req.valid("param").slug,
+        c.req.valid("json"),
+      );
+      return c.json({ data: skillDto(skill), meta }, 200);
+    },
+    archiveSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const slug = c.req.valid("param").slug;
+      await input.knowledge.archiveSkill(actor, slug);
+      return c.json({ data: { slug }, meta }, 200);
+    },
     listConversations: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -241,6 +1217,42 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: result, meta }, 200);
     },
+    getConversationShare: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const conversationId = c.req.valid("param").conversationId;
+      await authorizeConversationRead(input, actor, conversationId);
+      const shareId = await chatResourcesFrom(input).findShare(actor, conversationId);
+      return c.json({ data: { conversationId, shareId }, meta }, 200);
+    },
+    createConversationShare: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "share", 30);
+      const conversationId = c.req.valid("param").conversationId;
+      await authorizeConversationRead(input, actor, conversationId);
+      const shareId = await chatResourcesFrom(input).ensureShare(actor, conversationId);
+      return c.json({ data: { conversationId, shareId }, meta }, 200);
+    },
+    deleteConversationShare: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "share", 30);
+      const conversationId = c.req.valid("param").conversationId;
+      await authorizeConversationRead(input, actor, conversationId);
+      await chatResourcesFrom(input).revokeShare(actor, conversationId);
+      return c.json({ data: { conversationId, shareId: null }, meta }, 200);
+    },
+    generateConversationTitle: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "title", 30);
+      const conversationId = c.req.valid("param").conversationId;
+      await authorizeConversationRead(input, actor, conversationId);
+      const result = await chatTitlesFrom(input).generate(
+        actor,
+        conversationId,
+        c.req.valid("json").messageId,
+      );
+      return c.json({ data: result, meta }, 200);
+    },
     listMessages: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -259,14 +1271,21 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceRateLimit(rateLimiter, actor, "message", 30);
       const body = c.req.valid("json");
       const idempotencyKey = c.req.valid("header")["idempotency-key"];
+      const existingConversation = body.conversationId
+        ? await input.chat.getConversation(actor, body.conversationId)
+        : null;
+      if (existingConversation && existingConversation.engine !== body.engine.type) {
+        throw new ApiError(409, "conflict", "This conversation uses a different engine.");
+      }
       const requestedModel =
         body.model ??
+        existingConversation?.model ??
         input.defaultModel ??
         process.env.GOAT_DEFAULT_CHAT_MODEL ??
         "moonshotai/kimi-k3";
       let autoResolution: AutoModelRoutingResolution | null = null;
       if (requestedModel === "auto") {
-        if (body.engine !== "opencompany") {
+        if (body.engine.type !== "opencompany") {
           throw new ApiError(
             400,
             "invalid_request",
@@ -303,11 +1322,63 @@ export function createApiApp(input: CreateApiAppInput) {
             : {}),
         });
       }
-      const result = await input.chat.createMessage(actor, {
-        ...body,
-        idempotencyKey,
+      const admitted = await admitEngineMessage({
+        actor,
+        engine: body.engine,
         model: autoResolution?.model ?? requestedModel,
+        defaultOpenCompanyModel:
+          input.defaultModel ?? process.env.GOAT_DEFAULT_CHAT_MODEL ?? "moonshotai/kimi-k3",
+        auth: input.engineAuth,
       });
+      const { engine: _engine, model: _model, ...message } = body;
+      const result = await input.chat.createMessage(actor, {
+        ...message,
+        idempotencyKey,
+        engine: admitted.engine,
+        model: admitted.model,
+        runtimeModel: admitted.runtimeModel,
+        ...(admitted.settings ? { settings: admitted.settings } : {}),
+      });
+      if (!result.idempotentReplay && !existingConversation && input.chatTitles) {
+        void input.chatTitles
+          .generate(actor, result.conversationId, result.messageId)
+          .catch((error) =>
+            logger.warn("Canonical Chat title generation failed", {
+              event: "opencompany.chat_title_generation_failed",
+              conversation_id: result.conversationId,
+              error_name: error instanceof Error ? error.name : typeof error,
+            }),
+          );
+      }
+      if (!result.idempotentReplay && input.captureChatMessage) {
+        void Promise.resolve(
+          input.captureChatMessage({
+            actor,
+            conversationId: result.conversationId,
+            firstMessage: !existingConversation,
+            engine: admitted.engine,
+            model: admitted.model,
+            messageLength: body.content.length,
+            selectionMode: requestedModel === "auto" ? "auto" : "manual",
+            ...(autoResolution?.routing
+              ? {
+                  routing: {
+                    tier: autoResolution.routing.tier === "frontier" ? "frontier" : "standard",
+                    reason: autoResolution.routing.reason,
+                    outcome: autoResolution.routing.classifier.outcome,
+                    durationMs: autoResolution.routing.classifier.durationMs,
+                  },
+                }
+              : {}),
+          }),
+        ).catch((error) =>
+          logger.warn("Canonical Chat analytics capture failed", {
+            event: "opencompany.chat_analytics_capture_failed",
+            conversation_id: result.conversationId,
+            error_name: error instanceof Error ? error.name : typeof error,
+          }),
+        );
+      }
       return c.json(
         {
           data: {
@@ -348,6 +1419,84 @@ export function createApiApp(input: CreateApiAppInput) {
         },
         201,
       );
+    },
+    deleteChatArtifact: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const artifactId = c.req.valid("param").artifactId;
+      await chatResourcesFrom(input).deleteArtifact(actor, artifactId);
+      return c.json({ data: { artifactId, state: "deleted" as const }, meta }, 200);
+    },
+    downloadChatArtifact: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const params = c.req.valid("param");
+      const download = c.req.valid("query").download === "1";
+      const asset = await chatResourcesFrom(input).downloadArtifact({ actor, ...params, download });
+      return chatResourceResponse(asset) as never;
+    },
+    downloadChatAttachment: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const asset = await chatResourcesFrom(input).downloadAttachment({
+        actor,
+        ...c.req.valid("param"),
+      });
+      return chatResourceResponse(asset) as never;
+    },
+    downloadChatScreenshot: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const asset = await chatResourcesFrom(input).downloadScreenshot({
+        actor,
+        ...c.req.valid("param"),
+      });
+      return chatResourceResponse(asset) as never;
+    },
+    getPublicChatShare: async (c) => {
+      const shareId = c.req.valid("param").shareId;
+      await enforcePublicRateLimit(rateLimiter, shareId, "public-share-read", 300);
+      const share = await chatResourcesFrom(input).loadPublicShare(shareId);
+      c.header("Cache-Control", "private, no-store");
+      c.header("X-Robots-Tag", "noindex, nofollow, noarchive");
+      return c.json({ data: share, meta }, 200);
+    },
+    getPublicChatShareMetadata: async (c) => {
+      const shareId = c.req.valid("param").shareId;
+      await enforcePublicRateLimit(rateLimiter, shareId, "public-share-read", 300);
+      const share = await chatResourcesFrom(input).loadPublicShareMetadata(shareId);
+      c.header("Cache-Control", "private, no-store");
+      c.header("X-Robots-Tag", "noindex, nofollow, noarchive");
+      return c.json({ data: share, meta }, 200);
+    },
+    downloadPublicChatAttachment: async (c) => {
+      const params = c.req.valid("param");
+      await enforcePublicRateLimit(rateLimiter, params.shareId, "public-share-bytes", 600);
+      const asset = await chatResourcesFrom(input).downloadPublicAttachment(params);
+      return chatResourceResponse(asset) as never;
+    },
+    downloadPublicChatArtifact: async (c) => {
+      const params = c.req.valid("param");
+      await enforcePublicRateLimit(rateLimiter, params.shareId, "public-share-bytes", 600);
+      const asset = await chatResourcesFrom(input).downloadPublicArtifact({
+        ...params,
+        download: c.req.valid("query").download === "1",
+      });
+      return chatResourceResponse(asset) as never;
+    },
+    getEngineRuntimeStatus: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const conversationId = c.req.valid("param").conversationId;
+      const status = await input.engineSessions.getRuntimeStatus(actor, conversationId);
+      return c.json({ data: { conversationId, status }, meta }, 200);
+    },
+    createEngineRuntimeAccess: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "engine-runtime-access", 30);
+      const conversationId = c.req.valid("param").conversationId;
+      const access = await input.engineSessions.createRuntimeAccess(actor, conversationId);
+      return c.json({ data: access, meta }, 201);
     },
     getRun: async (c) => {
       const actor = actorFrom(c);
@@ -508,17 +1657,73 @@ export function createApiApp(input: CreateApiAppInput) {
       }
       const params = c.req.valid("param");
       const query = c.req.valid("query");
-      if (params.readModel === "tasks-v1") {
-        if (query.conversationId) {
+      if (params.readModel.startsWith("brain-")) {
+        if (query.conversationId || !query.brainId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "brainId is required and conversationId is not valid for this read model.",
+          );
+        }
+        await input.knowledge.authorizeBrainRead(actor, query.brainId);
+      } else if (params.readModel.startsWith("wiki-")) {
+        if (query.conversationId || query.brainId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "conversationId and brainId are not valid for this read model.",
+          );
+        }
+        input.knowledge.authorizeWikiRead(actor);
+      } else if (params.readModel === "tasks-v1") {
+        if (query.conversationId || query.brainId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "conversationId and brainId are not valid for this read model.",
+          );
+        }
+        await input.tasks.listTasks(actor, { limit: 1 });
+      } else if (params.readModel === "workflows-v1") {
+        if (query.conversationId || query.brainId) {
           throw new ApiError(
             400,
             "invalid_request",
             "conversationId is not valid for this read model.",
           );
         }
-        await input.tasks.listTasks(actor, { limit: 1 });
-      } else if (params.readModel !== "chat-conversations-v1") {
-        if (!query.conversationId) {
+        await input.workflows.listWorkflows(actor, { limit: 1 });
+      } else if (params.readModel === "workflow-schedules-v1") {
+        if (query.conversationId || query.brainId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "conversationId is not valid for this read model.",
+          );
+        }
+        await input.workflows.listWorkflows(actor, { limit: 1 });
+      } else if (params.readModel === "task-schedules-v1") {
+        if (query.conversationId || query.brainId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "conversationId is not valid for this read model.",
+          );
+        }
+        await input.schedules.listTaskSchedules(actor, { limit: 1 });
+      } else if (params.readModel === "integration-accounts-v1") {
+        if (query.conversationId || query.brainId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "conversationId and brainId are not valid for this read model.",
+          );
+        }
+      } else if (
+        params.readModel !== "chat-conversations-v1" &&
+        params.readModel !== "engine-sessions-v1"
+      ) {
+        if (!query.conversationId || query.brainId) {
           throw new ApiError(
             400,
             "invalid_request",
@@ -526,7 +1731,7 @@ export function createApiApp(input: CreateApiAppInput) {
           );
         }
         await authorizeConversationRead(input, actor, query.conversationId);
-      } else if (query.conversationId) {
+      } else if (query.conversationId || query.brainId) {
         throw new ApiError(
           400,
           "invalid_request",
@@ -537,18 +1742,392 @@ export function createApiApp(input: CreateApiAppInput) {
         actor,
         readModel: params.readModel,
         ...(query.conversationId ? { conversationId: query.conversationId } : {}),
+        ...(query.brainId ? { brainId: query.brainId } : {}),
         requestUrl: new URL(c.req.url),
       }) as never;
+    },
+    updateUserPreferences: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const preferences = await input.userSettings.updatePreferences(actor, c.req.valid("json"));
+      return c.json({ data: preferences, meta }, 200);
+    },
+    getMcpSetup: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const status = await input.userSettings.getMcpSetup(actor);
+      return c.json({ data: mcpSetupDto(status), meta }, 200);
+    },
+    updateMcpSetup: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const status = await input.userSettings.setPreferredMcpClient(
+        actor,
+        c.req.valid("json").preferredClient,
+      );
+      return c.json({ data: mcpSetupDto(status), meta }, 200);
+    },
+    submitFeedback: async (c) => {
+      const actor = actorFrom(c);
+      // Feedback gets its own bucket: sharing the write counter would let
+      // ordinary settings churn 429 the always-available feedback widget.
+      await enforceRateLimit(rateLimiter, actor, "feedback", 10);
+      await input.feedback.submit(actor, c.req.valid("json"));
+      return c.json({ data: { submitted: true as const }, meta }, 200);
+    },
+    listRepoConfigs: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const result = await input.repoConfigs.list(actor);
+      return c.json(
+        {
+          data: {
+            repositories: result.repositories,
+            configs: result.configs.map(repoConfigDto),
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    setRepoConfigEnv: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const config = await input.repoConfigs.setEnv(
+        actor,
+        c.req.valid("param").repositoryExternalId,
+        c.req.valid("json").content,
+      );
+      return c.json({ data: repoConfigDto(config), meta }, 200);
+    },
+    setRepoConfigSetup: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const config = await input.repoConfigs.setSetupInstructions(
+        actor,
+        c.req.valid("param").repositoryExternalId,
+        c.req.valid("json").setupInstructions,
+      );
+      return c.json({ data: repoConfigDto(config), meta }, 200);
+    },
+    deleteRepoConfig: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const repositoryExternalId = c.req.valid("param").repositoryExternalId;
+      await input.repoConfigs.remove(actor, repositoryExternalId);
+      return c.json({ data: { repositoryExternalId, deleted: true as const }, meta }, 200);
+    },
+    connectAttioAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.connectAttio(actor, c.req.valid("json").apiKey);
+      return c.json({ data: { state: attioStateDto(state) }, meta }, 200);
+    },
+    disconnectAttioAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const integrationId = c.req.valid("param").integrationId;
+      await input.integrationAccounts.disconnectAttio(actor, integrationId);
+      return c.json({ data: { integrationId, deleted: true as const }, meta }, 200);
+    },
+    connectFathomAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.connectFathom(
+        actor,
+        c.req.valid("json").apiKey,
+      );
+      return c.json({ data: { state: fathomStateDto(state) }, meta }, 200);
+    },
+    connectGranolaAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.connectGranola(
+        actor,
+        c.req.valid("json").apiKey,
+      );
+      return c.json({ data: { state: granolaStateDto(state) }, meta }, 200);
+    },
+    startImessagePairing: async (c) => {
+      const actor = actorFrom(c);
+      // Pairing sends a real text message, so it gets its own small bucket
+      // instead of sharing the general write counter.
+      await enforceRateLimit(rateLimiter, actor, "imessage-pairing", 5);
+      await input.integrationAccounts.startImessagePairing(actor, c.req.valid("json").phone);
+      return c.json({ data: { started: true as const }, meta }, 200);
+    },
+    confirmImessagePairing: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.confirmImessagePairing(
+        actor,
+        c.req.valid("json").code,
+      );
+      return c.json({ data: { state: imessageStateDto(state) }, meta }, 200);
+    },
+    connectStripeAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.connectStripe(
+        actor,
+        c.req.valid("json").apiKey,
+      );
+      return c.json({ data: { state: stripeStateDto(state) }, meta }, 200);
+    },
+    disconnectStripeAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.integrationAccounts.disconnectStripe(actor);
+      return c.json({ data: { deleted: true as const }, meta }, 200);
+    },
+    createJamieWebhookEndpoint: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const setup = await input.integrationAccounts.createOrResetJamieWebhookEndpoint(actor);
+      return c.json({ data: { setup }, meta }, 200);
+    },
+    saveJamieApiKey: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const setup = await input.integrationAccounts.saveJamieWebhookApiKey(
+        actor,
+        c.req.valid("json").apiKey,
+      );
+      return c.json({ data: { setup }, meta }, 200);
+    },
+    listIntegrationAccounts: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json({ data: await input.integrationAccounts.list(actor), meta }, 200);
+    },
+    getSlackBotWorkspaceSettings: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json({ data: await input.slackBotSettings.getWorkspaceSettings(actor), meta }, 200);
+    },
+    disconnectSlackBot: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.slackBotSettings.disconnect(actor);
+      return c.json({ data: { updated: true as const }, meta }, 200);
+    },
+    getSlackBotDestination: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const destination = await input.slackBotSettings.getDestination(
+        actor,
+        c.req.valid("param").brainId,
+      );
+      return c.json({ data: destination, meta }, 200);
+    },
+    setSlackBotDestination: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.slackBotSettings.setDestination(
+        actor,
+        c.req.valid("param").brainId,
+        c.req.valid("json"),
+      );
+      return c.json({ data: { updated: true as const }, meta }, 200);
+    },
+    listSlackBotChannels: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const result = await input.slackBotSettings.listChannels(actor, c.req.valid("param").brainId);
+      return c.json({ data: result, meta }, 200);
+    },
+    getIntegrationAccountUsage: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const usage = await input.integrationAccounts.getUsage(
+        actor,
+        c.req.valid("param").integrationId,
+      );
+      return c.json({ data: usage, meta }, 200);
+    },
+    setIntegrationCapabilityMode: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const mode = c.req.valid("json").mode;
+      await input.integrationAccounts.setCapabilityMode(
+        actor,
+        params.integrationId,
+        params.capabilityId,
+        mode,
+      );
+      return c.json(
+        {
+          data: {
+            integrationId: params.integrationId,
+            capabilityId: params.capabilityId,
+            // The service rejects anything outside the mode vocabulary.
+            mode: mode as "on" | "ask" | "off",
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    alwaysAllowAction: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const actionId = c.req.valid("param").actionId;
+      await input.integrationAccounts.alwaysAllowAction(actor, actionId);
+      return c.json({ data: { actionId, state: "allowed" as const }, meta }, 200);
+    },
+    deleteIntegrationAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const integrationId = c.req.valid("param").integrationId;
+      await input.integrationAccounts.disconnect(actor, integrationId);
+      return c.json({ data: { integrationId, deleted: true as const }, meta }, 200);
+    },
+    getClaudeCodeAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const status = await input.engineAuth.getClaudeCodeStatus(actor);
+      return c.json({ data: status, meta }, 200);
+    },
+    saveClaudeCodeToken: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const status = await input.engineAuth.saveClaudeCodeToken(actor, c.req.valid("json").token);
+      return c.json({ data: status, meta }, 200);
+    },
+    deleteClaudeCodeAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.engineAuth.disconnectClaudeCode(actor);
+      return c.json({ data: { deleted: true as const }, meta }, 200);
+    },
+    getCodexAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const status = await input.engineAuth.getCodexStatus(actor);
+      return c.json({ data: status, meta }, 200);
+    },
+    startCodexDeviceAuth: async (c) => {
+      const actor = actorFrom(c);
+      // Flow starts open device/browser authorizations against external auth
+      // providers, so they get a small dedicated bucket instead of the general
+      // write counter.
+      await enforceRateLimit(rateLimiter, actor, "engine-auth-start", 10);
+      const flow = await input.engineAuth.startCodexDeviceAuth(actor);
+      return c.json({ data: { flow }, meta }, 201);
+    },
+    pollCodexDeviceAuth: async (c) => {
+      const actor = actorFrom(c);
+      // The settings panel polls every few seconds during a device flow;
+      // sharing the write bucket would let ordinary mutations 429 the poll.
+      await enforceRateLimit(rateLimiter, actor, "engine-auth-poll", 120);
+      const flow = await input.engineAuth.pollCodexDeviceAuth(actor, c.req.valid("param").flowId);
+      return c.json({ data: { flow }, meta }, 200);
+    },
+    deleteCodexAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.engineAuth.disconnectCodex(actor);
+      return c.json({ data: { deleted: true as const }, meta }, 200);
+    },
+    getInfisicalAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const status = await input.engineAuth.getInfisicalStatus(actor);
+      return c.json({ data: status, meta }, 200);
+    },
+    startInfisicalAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "engine-auth-start", 10);
+      const flow = await input.engineAuth.startInfisicalAuth(actor, c.req.valid("json").host);
+      return c.json({ data: { flow }, meta }, 201);
+    },
+    completeInfisicalAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const flow = await input.engineAuth.completeInfisicalAuth(
+        actor,
+        c.req.valid("param").flowId,
+        c.req.valid("json").browserToken,
+      );
+      return c.json({ data: { flow }, meta }, 200);
+    },
+    deleteInfisicalAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.engineAuth.disconnectInfisical(actor);
+      return c.json({ data: { deleted: true as const }, meta }, 200);
+    },
+    getBillingOverview: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-read", 300);
+      c.header("Cache-Control", "private, no-store");
+      return c.json({ data: await input.billing.getOverview(actor), meta }, 200);
+    },
+    getBillingUsage: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-read", 300);
+      c.header("Cache-Control", "private, no-store");
+      return c.json({ data: await input.billing.getUsage(actor), meta }, 200);
+    },
+    getBillingBalance: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-read", 300);
+      c.header("Cache-Control", "private, no-store");
+      return c.json({ data: await input.billing.getBalance(actor), meta }, 200);
+    },
+    createBillingTopUp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-command", 10);
+      const result = await input.billing.createCreditTopUp(actor, {
+        ...c.req.valid("json"),
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+      });
+      return c.json({ data: result, meta }, 201);
+    },
+    createBillingSubscriptionCheckout: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-command", 10);
+      const result = await input.billing.createProCheckout(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+      });
+      return c.json({ data: result, meta }, 201);
+    },
+    createBillingPortalSession: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-command", 10);
+      const result = await input.billing.createBillingPortal(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+      });
+      return c.json({ data: result, meta }, 201);
+    },
+    updateBillingAutoRefill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "billing-command", 10);
+      const result = await input.billing.updateAutoRefill(actor, {
+        ...c.req.valid("json"),
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+      });
+      return c.json({ data: result, meta }, 200);
     },
   };
 
   const app = createV1Router(handlers, {
     beforeRoutes(router) {
+      router.use("/public/*", secureHeaders());
+      router.use(
+        "/public/*",
+        requestId({
+          headerName: "X-Request-Id",
+          limitLength: 128,
+          generator: () => `request_${randomUUID()}`,
+        }),
+      );
       router.use(
         "/v1/*",
         cors({
           origin: browserOrigins,
-          allowMethods: ["GET", "HEAD", "POST", "PATCH", "OPTIONS"],
+          allowMethods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
           allowHeaders: CORS_ALLOW_HEADERS,
           exposeHeaders: CORS_EXPOSE_HEADERS,
           credentials: true,
@@ -572,11 +2151,20 @@ export function createApiApp(input: CreateApiAppInput) {
           async (span) => {
             try {
               enforceCookieMutationOrigin(c.req.raw, browserOrigins);
-              const authentication = await input.authenticate(c.req.raw);
-              setContextValue(c, "actor", authentication.actor);
-              if (authentication.refreshedSessionCookie) {
-                c.header("Set-Cookie", authentication.refreshedSessionCookie);
+              if (isIdentityTierPath(c.req.path)) {
+                const identity = await input.identify(c.req.raw);
+                setContextValue(c, "identity", identity);
+                if (identity.refreshedSessionCookie) {
+                  c.header("Set-Cookie", identity.refreshedSessionCookie);
+                }
+              } else {
+                const authentication = await input.authenticate(c.req.raw);
+                setContextValue(c, "actor", authentication.actor);
+                if (authentication.refreshedSessionCookie) {
+                  c.header("Set-Cookie", authentication.refreshedSessionCookie);
+                }
               }
+              enforceMessageProtocolVersion(c);
               await next();
               span.setAttributes({ "goat.http_status_code": c.res.status });
               return c.res;
@@ -607,9 +2195,41 @@ export function createApiApp(input: CreateApiAppInput) {
             ),
         }),
       );
+      router.use(
+        "/v1/brains/:brainId/assets",
+        bodyLimit({
+          maxSize: 20 * 1024 * 1024 + MULTIPART_ENVELOPE_BYTES,
+          onError: (c) =>
+            apiErrorResponse(
+              c,
+              new ApiError(413, "invalid_request", "The Brain asset upload is too large."),
+            ),
+        }),
+      );
+      router.use(
+        "/v1/brains/:brainId/assets/:documentId/replace",
+        bodyLimit({
+          maxSize: 20 * 1024 * 1024 + MULTIPART_ENVELOPE_BYTES,
+          onError: (c) =>
+            apiErrorResponse(
+              c,
+              new ApiError(413, "invalid_request", "The Brain asset upload is too large."),
+            ),
+        }),
+      );
     },
     defaultHook(result, c) {
       if (result.success) return;
+      logger.warn("API request validation failed", {
+        event: "opencompany.api_request_validation_failed",
+        request_id: requestIdFrom(c),
+        method: c.req.method,
+        path: c.req.path,
+        validation_issues: result.error.issues.slice(0, 20).map((issue) => ({
+          code: issue.code,
+          path: issue.path.map(String).join(".") || "(root)",
+        })),
+      });
       return apiErrorResponse(
         c,
         new ApiError(400, "invalid_request", "Request validation failed."),
@@ -629,6 +2249,7 @@ export function createApiApp(input: CreateApiAppInput) {
       ok: true,
       service: "opencompany-api",
       environment: process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
+      protocolVersion: PROTOCOL_VERSION,
       release:
         process.env.RENDER_GIT_COMMIT ??
         process.env.OBSERVABILITY_RELEASE ??
@@ -638,8 +2259,180 @@ export function createApiApp(input: CreateApiAppInput) {
     }),
   );
   app.get("/openapi.json", (c) => c.json(createOpenApiDocument()));
+  if (input.mcp) {
+    app.on(["GET", "POST", "DELETE"], "/mcp", (c) => input.mcp!.handle(c.req.raw));
+  }
+  app.post("/internal/onboarding-emails/enroll", async (c) => {
+    authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
+    const body = await internalJsonBody(c.req.raw);
+    const workosUserId = boundedString(body.workosUserId, 128);
+    if (!workosUserId) {
+      throw new ApiError(400, "invalid_request", "A valid user id is required.");
+    }
+    await input.onboardingEmails.enroll(workosUserId);
+    return c.json({ data: { completed: true as const }, meta }, 200);
+  });
+  app.post("/internal/onboarding-emails/claim", async (c) => {
+    authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
+    const body = await internalJsonBody(c.req.raw);
+    const limit = body.limit;
+    if (!Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 100) {
+      throw new ApiError(400, "invalid_request", "A claim limit from 1 to 100 is required.");
+    }
+    const workosUserId =
+      body.workosUserId === undefined ? undefined : boundedString(body.workosUserId, 128);
+    if (body.workosUserId !== undefined && !workosUserId) {
+      throw new ApiError(400, "invalid_request", "A valid user id is required.");
+    }
+    const emails = workosUserId
+      ? await input.onboardingEmails.claimDue(Number(limit), workosUserId)
+      : await input.onboardingEmails.claimDue(Number(limit));
+    return c.json({ data: { emails }, meta }, 200);
+  });
+  app.post("/internal/onboarding-emails/settle", async (c) => {
+    authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
+    const body = await internalJsonBody(c.req.raw);
+    const id = boundedString(body.id, 128);
+    const outcome = body.outcome;
+    if (!id || !["sent", "failed", "rescheduled"].includes(String(outcome))) {
+      throw new ApiError(400, "invalid_request", "A valid email settlement is required.");
+    }
+    const error = body.error === undefined ? undefined : boundedString(body.error, 2_000);
+    const nextRunAt = body.nextRunAt === undefined ? undefined : validDate(String(body.nextRunAt));
+    if (outcome !== "sent" && !error) {
+      throw new ApiError(400, "invalid_request", "A delivery error is required.");
+    }
+    if (outcome === "rescheduled" && !nextRunAt) {
+      throw new ApiError(400, "invalid_request", "A retry schedule is required.");
+    }
+    await input.onboardingEmails.settle({
+      id,
+      outcome: outcome as "sent" | "failed" | "rescheduled",
+      ...(error ? { error } : {}),
+      ...(nextRunAt ? { nextRunAt } : {}),
+    });
+    return c.json({ data: { completed: true as const }, meta }, 200);
+  });
+  app.post("/internal/onboarding-emails/unsubscribe", async (c) => {
+    authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
+    const body = await internalJsonBody(c.req.raw);
+    const email = boundedString(body.email, 320)?.toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)) {
+      throw new ApiError(400, "invalid_request", "A valid email is required.");
+    }
+    const skipped = await input.onboardingEmails.unsubscribe(email);
+    return c.json({ data: { skipped }, meta }, 200);
+  });
+  if (input.githubIngress) {
+    // Purpose-specific provider ingress: registered outside /v1 so the /v1
+    // browser middleware (CORS, cookie-mutation Origin checks, actor context)
+    // does not apply. Each handler owns its authentication and verification.
+    const ingress = input.githubIngress;
+    app.get("/integrations/github/start", (c) => ingress.start(c.req.raw));
+    app.get("/integrations/github/callback", (c) => ingress.callback(c.req.raw));
+    // GitHub caps webhook payloads at 25 MB; unlike the retired Vercel route,
+    // Render enforces no platform body limit, so cap it here.
+    app.use("/webhooks/github/events", ingressBodyLimit(25 * 1024 * 1024));
+    app.post("/webhooks/github/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.googleIngress) {
+    const ingress = input.googleIngress;
+    app.get("/integrations/gmail/start", (c) => ingress.start("gmail", c.req.raw));
+    app.get("/integrations/gmail/callback", (c) => ingress.callback("gmail", c.req.raw));
+    app.get("/integrations/google-calendar/start", (c) =>
+      ingress.start("google_calendar", c.req.raw),
+    );
+    app.get("/integrations/google-calendar/callback", (c) =>
+      ingress.callback("google_calendar", c.req.raw),
+    );
+    app.get("/integrations/google-drive/start", (c) => ingress.start("google_drive", c.req.raw));
+    app.get("/integrations/google-drive/callback", (c) =>
+      ingress.callback("google_drive", c.req.raw),
+    );
+    app.post("/webhooks/google-drive", (c) => ingress.driveWebhook(c.req.raw));
+  }
+  if (input.slackIngress) {
+    const ingress = input.slackIngress;
+    app.get("/integrations/slack/start", (c) => ingress.start(c.req.raw));
+    app.get("/integrations/slack/callback", (c) => ingress.callback(c.req.raw));
+    // Slack event payloads are small; Render enforces no platform body cap, so
+    // bound the unauthenticated raw-body read here.
+    app.use("/webhooks/slack/events", ingressBodyLimit(5 * 1024 * 1024));
+    app.post("/webhooks/slack/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.linearIngress) {
+    const ingress = input.linearIngress;
+    app.get("/integrations/linear-ingest/start", (c) => ingress.start(c.req.raw));
+    app.get("/integrations/linear-ingest/callback", (c) => ingress.callback(c.req.raw));
+    app.use("/webhooks/linear/events", ingressBodyLimit(5 * 1024 * 1024));
+    app.post("/webhooks/linear/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.hubspotIngress) {
+    const ingress = input.hubspotIngress;
+    app.get("/integrations/hubspot/start", (c) => ingress.start(c.req.raw));
+    app.get("/integrations/hubspot/callback", (c) => ingress.callback(c.req.raw));
+    app.use("/webhooks/hubspot/events", ingressBodyLimit(5 * 1024 * 1024));
+    app.post("/webhooks/hubspot/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.attioIngress) {
+    const ingress = input.attioIngress;
+    app.use("/webhooks/attio/events", ingressBodyLimit(5 * 1024 * 1024));
+    app.post("/webhooks/attio/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.jamieIngress) {
+    const ingress = input.jamieIngress;
+    app.use("/webhooks/jamie", ingressBodyLimit(5 * 1024 * 1024));
+    app.post("/webhooks/jamie", (c) => ingress.webhook(c.req.raw));
+    app.use("/webhooks/jamie/:integrationId", ingressBodyLimit(5 * 1024 * 1024));
+    app.post("/webhooks/jamie/:integrationId", (c) =>
+      ingress.webhookForIntegration(c.req.param("integrationId"), c.req.raw),
+    );
+  }
+  if (input.mcpOAuthIngress) {
+    const ingress = input.mcpOAuthIngress;
+    app.get("/integrations/linear/start", (c) => ingress.start("linear", c.req.raw));
+    app.get("/integrations/linear/callback", (c) => ingress.callback("linear", c.req.raw));
+    app.get("/integrations/posthog/start", (c) => ingress.start("posthog", c.req.raw));
+    app.get("/integrations/posthog/callback", (c) => ingress.callback("posthog", c.req.raw));
+    app.get("/integrations/neon/start", (c) => ingress.start("neon", c.req.raw));
+    app.get("/integrations/neon/callback", (c) => ingress.callback("neon", c.req.raw));
+    app.get("/integrations/latitude/start", (c) => ingress.start("latitude", c.req.raw));
+    app.get("/integrations/latitude/callback", (c) => ingress.callback("latitude", c.req.raw));
+  }
+  if (input.xAccountIngress) {
+    const ingress = input.xAccountIngress;
+    app.get("/integrations/x-account/start", (c) => ingress.start(c.req.raw));
+    app.get("/integrations/x-account/callback", (c) => ingress.callback(c.req.raw));
+  }
+  if (input.slackBotIngress) {
+    const ingress = input.slackBotIngress;
+    app.get("/integrations/slack-bot/start", (c) => ingress.start(c.req.raw));
+    app.get("/integrations/slack-bot/callback", (c) => ingress.callback(c.req.raw));
+    app.use("/webhooks/slack-bot/events", ingressBodyLimit(1024 * 1024));
+    app.post("/webhooks/slack-bot/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.stripeIngress) {
+    app.use("/webhooks/stripe", ingressBodyLimit(1024 * 1024));
+    app.post("/webhooks/stripe", (c) => input.stripeIngress!.webhook(c.req.raw));
+  }
+  if (input.billingReconcile) {
+    app.get("/billing/reconcile", (c) => input.billingReconcile!.reconcile(c.req.raw));
+  }
   app.notFound((c) => apiErrorResponse(c, new ApiError(404, "not_found", "Route not found.")));
   return app;
+}
+
+// Ingress webhooks read the raw body before signature verification can reject
+// anything; Render has no platform request cap, so each route sets one.
+function ingressBodyLimit(maxSize: number) {
+  return bodyLimit({
+    maxSize,
+    onError: (c) =>
+      apiErrorResponse(
+        c,
+        new ApiError(413, "invalid_request", "The webhook payload is too large."),
+      ),
+  });
 }
 
 function autoRoutingApiError(error: unknown) {
@@ -697,6 +2490,66 @@ function enforceCookieMutationOrigin(request: Request, browserOrigins: readonly 
   }
 }
 
+function enforceMessageProtocolVersion(c: Context) {
+  if (c.req.method !== "POST" || c.req.path !== "/v1/messages") return;
+  const receivedProtocolVersion = c.req.header(PROTOCOL_VERSION_HEADER);
+  if (receivedProtocolVersion === PROTOCOL_VERSION) return;
+
+  logger.warn("Canonical Chat protocol version rejected", {
+    event: "opencompany.api_protocol_version_rejected",
+    request_id: requestIdFrom(c),
+    path: c.req.path,
+    expected_protocol_version: PROTOCOL_VERSION,
+    received_protocol_version: receivedProtocolVersion ?? "missing",
+  });
+  throw new ApiError(400, "invalid_request", PROTOCOL_UPDATE_REQUIRED_MESSAGE);
+}
+
+function isIdentityTierPath(path: string) {
+  return (
+    path === IDENTITY_PATH ||
+    path.startsWith(`${IDENTITY_PATH}/`) ||
+    path === ONBOARDING_IDENTITY_PATH ||
+    path.startsWith(`${ONBOARDING_IDENTITY_PATH}/`)
+  );
+}
+
+function authorizeEmailLifecycleInternalRequest(request: Request, configuredSecret?: string) {
+  const secret = configuredSecret?.trim();
+  if (!secret) {
+    throw new ApiError(503, "unavailable", "Email lifecycle persistence is unavailable.", true);
+  }
+  const authorization = request.headers.get("authorization");
+  const supplied = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
+  const expectedBuffer = Buffer.from(secret);
+  const suppliedBuffer = Buffer.from(supplied);
+  if (
+    suppliedBuffer.length !== expectedBuffer.length ||
+    !timingSafeEqual(suppliedBuffer, expectedBuffer)
+  ) {
+    throw new ApiError(401, "authentication_required", "Authentication required.");
+  }
+}
+
+async function internalJsonBody(request: Request): Promise<Record<string, unknown>> {
+  const body = await request.json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new ApiError(400, "invalid_request", "A JSON object is required.");
+  }
+  return body as Record<string, unknown>;
+}
+
+function boundedString(value: unknown, maxLength: number) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed && trimmed.length <= maxLength ? trimmed : null;
+}
+
+function validDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 async function enforceRateLimit(
   limiter: ApiRateLimiter,
   actor: Actor,
@@ -716,10 +2569,54 @@ async function enforceRateLimit(
   }
 }
 
+async function enforcePublicRateLimit(
+  limiter: ApiRateLimiter,
+  publicKey: string,
+  bucket: string,
+  limit: number,
+) {
+  const decision = await limiter.consume({
+    key: publicKey,
+    bucket,
+    limit,
+    windowMs: 60_000,
+  });
+  if (!decision.allowed) {
+    throw new ApiError(429, "rate_limited", "Too many requests.", true, {
+      "Retry-After": String(decision.retryAfterSeconds),
+    });
+  }
+}
+
+async function enforceIdentityRateLimit(
+  limiter: ApiRateLimiter,
+  identity: ApiIdentity,
+  bucket: string,
+  limit: number,
+) {
+  const decision = await limiter.consume({
+    key: identity.userId,
+    bucket,
+    limit,
+    windowMs: 60_000,
+  });
+  if (!decision.allowed) {
+    throw new ApiError(429, "rate_limited", "Too many requests.", true, {
+      "Retry-After": String(decision.retryAfterSeconds),
+    });
+  }
+}
+
 function actorFrom(c: Context): Actor {
   const actor = getContextValue(c, "actor");
   if (!actor) throw new ApiError(401, "authentication_required", "Authentication required.");
   return actor as Actor;
+}
+
+function identityFrom(c: Context): ApiIdentity {
+  const identity = getContextValue(c, "identity");
+  if (!identity) throw new ApiError(401, "authentication_required", "Authentication required.");
+  return identity as ApiIdentity;
 }
 
 function setContextValue(c: Context, key: string, value: unknown) {
@@ -732,6 +2629,43 @@ function getContextValue(c: Context, key: string) {
 
 function requestIdFrom(c: Context) {
   return (getContextValue(c, "requestId") as string | undefined) ?? `request_${randomUUID()}`;
+}
+
+function contentDisposition(value: string, inline = true) {
+  const filename = value.replace(/[\u0000-\u001f\u007f"\\]/gu, "_").trim() || "file";
+  const fallback = filename.replace(/[^\x20-\x7e]/gu, "_") || "file";
+  const encoded = encodeURIComponent(filename).replace(
+    /[!'()*]/gu,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `${inline ? "inline" : "attachment"}; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
+function chatResourcesFrom(input: CreateApiAppInput) {
+  if (!input.chatResources) {
+    throw new ApiError(503, "unavailable", "Chat resources are not configured.", true);
+  }
+  return input.chatResources;
+}
+
+function chatTitlesFrom(input: CreateApiAppInput) {
+  if (!input.chatTitles) {
+    throw new ApiError(503, "unavailable", "Chat title generation is not configured.", true);
+  }
+  return input.chatTitles;
+}
+
+function chatResourceResponse(asset: ChatResourceDownload) {
+  const headers = new Headers({
+    "Content-Type": asset.mediaType,
+    "Content-Disposition": contentDisposition(asset.filename, asset.inline),
+    "Cache-Control": asset.cacheControl,
+    "X-Content-Type-Options": "nosniff",
+    "X-Robots-Tag": "noindex, nofollow, noarchive",
+    ...(asset.sandbox ? { "Content-Security-Policy": "sandbox" } : {}),
+  });
+  if (asset.sizeBytes !== null) headers.set("Content-Length", String(asset.sizeBytes));
+  return new Response(asset.stream, { status: 200, headers });
 }
 
 function apiErrorResponse(c: Context, error: unknown) {
@@ -764,6 +2698,111 @@ function taskDto(task: Task) {
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
   };
+}
+
+function taskCreationDto(result: {
+  task: Task;
+  messageId: string;
+  assistantMessageId: string;
+  runId: string;
+  transactionId: string;
+  idempotentReplay: boolean;
+}) {
+  return {
+    task: taskDto(result.task),
+    messageId: result.messageId,
+    assistantMessageId: result.assistantMessageId,
+    runId: result.runId,
+    transactionId: result.transactionId,
+    replayed: result.idempotentReplay,
+  };
+}
+
+function workflowDto(workflow: Workflow) {
+  return {
+    ...workflow,
+    trigger:
+      workflow.trigger.type === "manual"
+        ? workflow.trigger
+        : {
+            ...workflow.trigger,
+            lastRunAt: workflow.trigger.lastRunAt?.toISOString() ?? null,
+            nextRunAt: workflow.trigger.nextRunAt?.toISOString() ?? null,
+          },
+    archivedAt: workflow.archivedAt?.toISOString() ?? null,
+    createdAt: workflow.createdAt.toISOString(),
+    updatedAt: workflow.updatedAt.toISOString(),
+  };
+}
+
+function taskScheduleDto(schedule: TaskSchedule) {
+  return {
+    ...schedule,
+    lastRunAt: schedule.lastRunAt?.toISOString() ?? null,
+    nextRunAt: schedule.nextRunAt.toISOString(),
+    createdAt: schedule.createdAt.toISOString(),
+    updatedAt: schedule.updatedAt.toISOString(),
+  };
+}
+
+function brainFolderDto(folder: BrainFolder) {
+  return {
+    ...folder,
+    createdAt: folder.createdAt.toISOString(),
+    updatedAt: folder.updatedAt.toISOString(),
+  };
+}
+
+function brainDocumentDto(document: BrainDocument) {
+  return {
+    ...document,
+    createdAt: document.createdAt.toISOString(),
+    updatedAt: document.updatedAt.toISOString(),
+  };
+}
+
+function brainOverviewDto(overview: BrainOverview) {
+  return { ...overview, windowStartedAt: overview.windowStartedAt.toISOString() };
+}
+
+function brainSourceItemDto(item: BrainSourceItem) {
+  return {
+    id: item.id,
+    sourceProvider: item.sourceProvider,
+    sourceType: item.sourceType,
+    externalId: item.externalId.slice(0, 4_096),
+    title: item.title?.slice(0, 512) ?? null,
+    lastIngestError: item.lastIngestError?.slice(0, 2_000) ?? null,
+    createdAt: item.createdAt.toISOString(),
+  };
+}
+
+function wikiPageDto(page: WikiPage) {
+  return {
+    ...page,
+    createdAt: page.createdAt.toISOString(),
+    updatedAt: page.updatedAt.toISOString(),
+  };
+}
+
+function wikiTimelineEntryDto(entry: WikiTimelineEntry) {
+  return {
+    ...entry,
+    at: entry.at.toISOString(),
+    createdAt: entry.createdAt.toISOString(),
+  };
+}
+
+function skillDto(skill: Skill) {
+  return {
+    ...skill,
+    createdAt: skill.createdAt.toISOString(),
+    updatedAt: skill.updatedAt.toISOString(),
+  };
+}
+
+function skillListItemDto(skill: SkillListItem) {
+  return { ...skill, updatedAt: skill.updatedAt.toISOString() };
 }
 
 function legacyTaskDto(task: LegacyTask) {
@@ -840,6 +2879,110 @@ function runDto(run: {
   updatedAt: Date;
 }) {
   return { ...run, createdAt: run.createdAt.toISOString(), updatedAt: run.updatedAt.toISOString() };
+}
+
+function capabilityApprovalDto(approval: CapabilityApprovalView) {
+  return {
+    ...approval,
+    expiresAt: approval.expiresAt?.toISOString() ?? null,
+  };
+}
+
+function mcpSetupDto(status: {
+  preferredClient: "claude" | "chatgpt" | "cursor" | null;
+  complete: boolean;
+  completedAt: Date | null;
+}) {
+  return {
+    preferredClient: status.preferredClient,
+    complete: status.complete,
+    completedAt: status.completedAt?.toISOString() ?? null,
+  };
+}
+
+// Env values are secret-bearing and intentionally absent from the view type;
+// this DTO only ever carries key names.
+function repoConfigDto(config: {
+  repositoryExternalId: string;
+  repositoryFullName: string;
+  envKeys: string[];
+  setupInstructions: string;
+  updatedAt: Date;
+}) {
+  return {
+    repositoryExternalId: config.repositoryExternalId,
+    repositoryFullName: config.repositoryFullName,
+    envKeys: config.envKeys,
+    setupInstructions: config.setupInstructions,
+    updatedAt: config.updatedAt.toISOString(),
+  };
+}
+
+// The shared provider-state types include "disconnected", but state loaders
+// filter those rows out; the protocol contract therefore omits it and any
+// straggler collapses to "not_connected".
+function integrationAccountStatusDto(
+  status: GoatAttioProviderState["status"],
+): "not_connected" | "connected" | "needs_reauth" | "sync_failed" {
+  return status === "disconnected" ? "not_connected" : status;
+}
+
+function attioStateDto(state: GoatAttioProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    workspaceName: state.workspaceName,
+    statusReason: state.statusReason,
+  };
+}
+
+function fathomStateDto(state: GoatFathomProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    accountEmail: state.accountEmail,
+    accountName: state.accountName,
+    statusReason: state.statusReason,
+  };
+}
+
+function granolaStateDto(state: GoatGranolaProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    accountEmail: state.accountEmail,
+    accountName: state.accountName,
+    statusReason: state.statusReason,
+  };
+}
+
+function imessageStateDto(state: GoatImessageProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    phoneE164: state.phoneE164,
+    statusReason: state.statusReason,
+  };
+}
+
+function stripeStateDto(state: GoatStripeProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    accountName: state.accountName,
+    livemode: state.livemode,
+    statusReason: state.statusReason,
+  };
 }
 
 function runEventDto(event: RunEvent) {

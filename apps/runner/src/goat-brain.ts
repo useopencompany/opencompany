@@ -46,6 +46,7 @@ export type MaterializedGoatBrainFile = {
   folderPath: string;
   relativePath: string;
   contentHash: string;
+  assetContentHash?: string | null;
 };
 
 export type GoatBrainMarkdownReportArtifact = {
@@ -323,6 +324,7 @@ function materializedFileFromDb(input: {
   folderPath: string;
   path: string;
   contentHash: string;
+  assetContentHash?: string | null;
 }): MaterializedGoatBrainFile;
 function materializedFileFromDb(input: {
   id: string;
@@ -330,6 +332,7 @@ function materializedFileFromDb(input: {
   folderPath: string;
   path: string;
   contentHash: string;
+  assetContentHash?: string | null;
 }): MaterializedGoatBrainFile {
   return {
     documentId: input.id,
@@ -337,6 +340,7 @@ function materializedFileFromDb(input: {
     folderPath: input.folderPath,
     relativePath: input.path,
     contentHash: input.contentHash,
+    ...(input.assetContentHash !== undefined ? { assetContentHash: input.assetContentHash } : {}),
   };
 }
 
@@ -349,6 +353,7 @@ function dbMaterializedFileFromRunner(
     folderPath: input.folderPath,
     path: input.relativePath,
     contentHash: input.contentHash,
+    ...(input.assetContentHash !== undefined ? { assetContentHash: input.assetContentHash } : {}),
   };
 }
 

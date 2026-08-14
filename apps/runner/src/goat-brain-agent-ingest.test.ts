@@ -1,9 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type {
-  GoatBrainIngestTrace,
-  GoatBrainIngestTriageTrace,
-} from "@opencompany/db/goat-brain-ingest-trace";
 import {
   normalizeAttioObjectWindow,
   normalizeGitHubActivityWebhook,
@@ -13,7 +9,12 @@ import {
   normalizeHubspotObjectWindow,
   normalizeJamieMeetingCompletedWebhook,
   normalizeSlackConversationWindow,
+  normalizeUploadAsset,
 } from "@opencompany/goat-brain";
+import type {
+  GoatBrainIngestTrace,
+  GoatBrainIngestTriageTrace,
+} from "@opencompany/goat-brain/ingest-trace";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const aiMock = vi.hoisted(() => ({
@@ -28,12 +29,14 @@ const agentRuntimeMock = vi.hoisted(() => ({
   executeExaSearchRequest: vi.fn(),
 }));
 const brainFilesMock = vi.hoisted(() => ({
+  getGoatBrainFile: vi.fn(),
   materializeGoatBrainFilesToRoot: vi.fn(async (_input?: { root: string }) => []),
   syncGoatBrainFilesFromRoot: vi.fn(async () => ({
     upserted: 3,
     deleted: 0,
     conflicts: [] as Array<{ path: string }>,
   })),
+  updateGoatBrainAssetExtraction: vi.fn(),
 }));
 const workspacesMock = vi.hoisted(() => ({
   getDefaultGoatBrainForUser: vi.fn(async () => ({ id: "gbrain_default" })),
@@ -64,8 +67,10 @@ vi.mock("@opencompany/agent-runtime", () => ({
 }));
 vi.mock("@opencompany/db/goat-brain-files", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
+  getGoatBrainFile: brainFilesMock.getGoatBrainFile,
   materializeGoatBrainFilesToRoot: brainFilesMock.materializeGoatBrainFilesToRoot,
   syncGoatBrainFilesFromRoot: brainFilesMock.syncGoatBrainFilesFromRoot,
+  updateGoatBrainAssetExtraction: brainFilesMock.updateGoatBrainAssetExtraction,
 }));
 vi.mock("@opencompany/db/goat-workspaces", () => ({
   getDefaultGoatBrainForUser: workspacesMock.getDefaultGoatBrainForUser,
@@ -153,6 +158,20 @@ function captureItem() {
   });
 }
 
+function uploadAssetItem(contentSha256 = "a".repeat(64)) {
+  return normalizeUploadAsset({
+    documentId: "document_1",
+    brainId: "plan",
+    folderPath: "inbox",
+    format: "pdf",
+    mimeType: "application/pdf",
+    originalFileName: "plan.pdf",
+    sizeBytes: 100,
+    contentSha256,
+    uploadedAt: "2026-08-12T10:00:00.000Z",
+  });
+}
+
 function githubActivityItem() {
   const item = normalizeGitHubActivityWebhook(
     "pull_request",
@@ -208,21 +227,21 @@ function gmailItem() {
     windowId: "ggmwin_test1",
     threadId: "thread_789",
     subject: "Series A term sheet",
-    accountEmail: "founder@acme.com",
+    accountEmail: "founder@acme.example",
     messages: [
       {
         messageId: "msg_1",
         direction: "received",
-        from: "Ada Investor <ada@fund.vc>",
-        to: "founder@acme.com",
+        from: "Ada Investor <ada@investor.example>",
+        to: "founder@acme.example",
         sentAt: "2026-07-13T10:00:00.000Z",
         bodyText: "Attached is the term sheet we discussed.",
       },
       {
         messageId: "msg_2",
         direction: "sent",
-        from: "Founder <founder@acme.com>",
-        to: "Ada Investor <ada@fund.vc>",
+        from: "Founder <founder@acme.example>",
+        to: "Ada Investor <ada@investor.example>",
         sentAt: "2026-07-13T10:05:00.000Z",
         bodyText: "Thanks, reviewing the terms now.",
       },
@@ -514,6 +533,36 @@ describe("capture-first ingest profiles", () => {
     expect(GOAT_CHAT_CAPTURE_INGEST_PROFILE.authorship).toBe("acting_user");
     expect(UPLOAD_ASSET_INGEST_PROFILE.authorship).toBe("acting_user");
   });
+
+  it("skips a queued upload version after replacement supersedes its content hash", async () => {
+    brainFilesMock.getGoatBrainFile.mockResolvedValueOnce({
+      id: "document_1",
+      format: "pdf",
+      assetStorageKey: "https://blob.example/new",
+      assetContentHash: "b".repeat(64),
+    });
+
+    await expect(
+      UPLOAD_ASSET_INGEST_PROFILE.prepare({
+        input: {
+          userWorkosId: "user_123",
+          brainRef: "gbrain_123",
+          item: uploadAssetItem(),
+          env: { vercelAiGatewayApiKey: "gw_test" },
+        },
+        brainRef: "gbrain_123",
+        db: {} as never,
+        deps: {},
+      }),
+    ).resolves.toEqual({
+      earlyResult: {
+        skipped: true,
+        reason: "asset_superseded",
+        documentId: "document_1",
+      },
+    });
+    expect(brainFilesMock.updateGoatBrainAssetExtraction).not.toHaveBeenCalled();
+  });
 });
 
 describe("tracker ingest profiles", () => {
@@ -802,8 +851,8 @@ describe("buildGmailThreadAgentIngestPrompt", () => {
     expect(prompt).toContain(
       "Ignore transactional mail; only investor and customer emails matter.",
     );
-    expect(prompt).toContain("RECEIVED from Ada Investor <ada@fund.vc>");
-    expect(prompt).toContain("SENT from Founder <founder@acme.com>");
+    expect(prompt).toContain("RECEIVED from Ada Investor <ada@investor.example>");
+    expect(prompt).toContain("SENT from Founder <founder@acme.example>");
     expect(prompt).toContain("Attached is the term sheet we discussed.");
     expect(prompt).toContain("Never paste message bodies into compiled truth");
   });
