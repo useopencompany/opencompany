@@ -1,3 +1,7 @@
+"use client";
+
+import { captureMarketingEvent } from "@opencompany/analytics/marketing/client";
+import type { MarketingCta } from "@opencompany/analytics/marketing/events";
 import { cn } from "@opencompany/ui/lib/utils";
 
 type CtaProps = {
@@ -5,6 +9,7 @@ type CtaProps = {
   variant?: "primary" | "secondary";
   className?: string;
   children: React.ReactNode;
+  analyticsIntent?: MarketingCta;
 };
 
 // Call-to-action built on the shadcn button base, tweaked toward a softer,
@@ -15,11 +20,19 @@ export function Cta({
   variant = "primary",
   className,
   children,
+  analyticsIntent,
 }: CtaProps) {
   return (
     <a
       href={href}
-      data-visitors-event={variant === "primary" ? "signup" : undefined}
+      onClick={() => {
+        if (analyticsIntent) {
+          captureMarketingEvent(
+            analyticsIntent === "signup" ? "marketing_clicked_signup" : "marketing_clicked_demo",
+            {},
+          );
+        }
+      }}
       className={cn(
         "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-[10px] px-6 py-2.5 font-medium font-sans text-[15px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         variant === "primary"

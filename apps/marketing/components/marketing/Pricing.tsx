@@ -81,6 +81,7 @@ export function Pricing() {
                 href="https://my.opencompany.chat"
                 variant={plan.ctaVariant}
                 className="mt-8 w-full justify-center px-4 py-2.5 text-[13px]"
+                analyticsIntent="signup"
               >
                 Sign up
               </Cta>

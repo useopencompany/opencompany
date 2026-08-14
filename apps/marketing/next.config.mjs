@@ -1,8 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // The marketing site ships TypeScript source from @opencompany/ui (no build step),
-  // so Next must transpile it like a first-party module.
-  transpilePackages: ["@opencompany/ui"],
+  // Workspace packages ship TypeScript source without a separate build step,
+  // so Next must transpile them like first-party modules.
+  transpilePackages: ["@opencompany/analytics", "@opencompany/ui"],
   async redirects() {
     return [
       {

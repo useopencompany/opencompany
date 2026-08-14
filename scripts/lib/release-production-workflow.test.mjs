@@ -55,6 +55,17 @@ test("checks only web-owned production environment keys", async () => {
   assert.doesNotMatch(workflow, /check-goat-billing-production-env\.mjs/u);
 });
 
+test("requires PostHog configuration in the marketing Vercel project", async () => {
+  const workflow = await readFile(workflowUrl, "utf8");
+  const stepStart = workflow.indexOf("- name: Check Vercel marketing project config");
+  const stepEnd = workflow.indexOf("- name: Pull Vercel marketing production env", stepStart);
+  const step = workflow.slice(stepStart, stepEnd);
+
+  assert.match(step, /"NEXT_PUBLIC_GOAT_POSTHOG_TOKEN"/u);
+  assert.match(step, /"NEXT_PUBLIC_GOAT_POSTHOG_HOST"/u);
+  assert.match(step, /Missing marketing Vercel production env keys/u);
+});
+
 function assertStepOrder(workflow, stepNames) {
   let previousIndex = -1;
 

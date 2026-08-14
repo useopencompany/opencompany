@@ -13,8 +13,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@opencompany/analytics": "workspace:*",
     "@opencompany/ui": "workspace:*",
-    "@vercel/analytics": "^2.0.1",
     "github-slugger": "^2.0.0",
     "gray-matter": "^4.0.3",
     "next": "16.2.6",
