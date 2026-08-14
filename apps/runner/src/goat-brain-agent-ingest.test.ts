@@ -227,21 +227,21 @@ function gmailItem() {
     windowId: "ggmwin_test1",
     threadId: "thread_789",
     subject: "Series A term sheet",
-    accountEmail: "founder@acme.com",
+    accountEmail: "founder@acme.example",
     messages: [
       {
         messageId: "msg_1",
         direction: "received",
-        from: "Ada Investor <ada@fund.vc>",
-        to: "founder@acme.com",
+        from: "Ada Investor <ada@investor.example>",
+        to: "founder@acme.example",
         sentAt: "2026-07-13T10:00:00.000Z",
         bodyText: "Attached is the term sheet we discussed.",
       },
       {
         messageId: "msg_2",
         direction: "sent",
-        from: "Founder <founder@acme.com>",
-        to: "Ada Investor <ada@fund.vc>",
+        from: "Founder <founder@acme.example>",
+        to: "Ada Investor <ada@investor.example>",
         sentAt: "2026-07-13T10:05:00.000Z",
         bodyText: "Thanks, reviewing the terms now.",
       },
@@ -851,8 +851,8 @@ describe("buildGmailThreadAgentIngestPrompt", () => {
     expect(prompt).toContain(
       "Ignore transactional mail; only investor and customer emails matter.",
     );
-    expect(prompt).toContain("RECEIVED from Ada Investor <ada@fund.vc>");
-    expect(prompt).toContain("SENT from Founder <founder@acme.com>");
+    expect(prompt).toContain("RECEIVED from Ada Investor <ada@investor.example>");
+    expect(prompt).toContain("SENT from Founder <founder@acme.example>");
     expect(prompt).toContain("Attached is the term sheet we discussed.");
     expect(prompt).toContain("Never paste message bodies into compiled truth");
   });

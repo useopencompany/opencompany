@@ -66,7 +66,7 @@ export function EmailCaptureForm({
           required
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          placeholder="you@company.com"
+          placeholder="you@company.example"
           className="w-full min-w-0 bg-transparent px-3 py-2.5 font-mono text-[13px] text-ink outline-none placeholder:text-ink-subtle"
         />
         <button

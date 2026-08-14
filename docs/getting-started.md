@@ -10,6 +10,13 @@
 - Stripe CLI for local billing webhooks
 - Caddy for the web app's local HTTPS origin (setup can install it with Homebrew on macOS)
 
+Live provider project bindings are not tracked. Run `infisical init` to create the gitignored
+`.infisical.json` used by setup. Run `vercel link` only when local work needs Vercel project access;
+it creates the gitignored `.vercel/project.json`. The tracked `.infisical.example.json` and
+`.vercel/project.json.example` files document the expected shapes without exposing opencompany's
+account or project IDs. Conductor copies existing bindings from the repository root into new
+workspaces through `.worktreeinclude`.
+
 ## Bootstrap
 
 ```bash

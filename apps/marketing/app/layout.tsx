@@ -34,13 +34,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   // prefers-color-scheme dark fallback.
   return (
     <html lang="en" data-theme="light" className={`${geistSans.variable} ${geistMono.variable}`}>
-      <head>
-        <script
-          src="https://cdn.visitors.now/v.js"
-          data-token="d989a074-c09b-4b3d-a622-72c2e6c00e3c"
-          data-persist
-        ></script>
-      </head>
       <body className="min-h-dvh bg-canvas font-sans text-ink antialiased">{children}</body>
     </html>
   );

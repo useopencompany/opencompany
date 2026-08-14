@@ -1,0 +1,3 @@
+.env*
+.infisical.json
+.vercel/project.json

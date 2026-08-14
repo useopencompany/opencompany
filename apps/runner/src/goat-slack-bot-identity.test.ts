@@ -28,7 +28,7 @@ vi.mock("@opencompany/goat-agent/integrations/slack", () => ({
 
 const GOAT_USER = {
   workosUserId: "user_1",
-  email: "jane@acme.com",
+  email: "jane@acme.example",
   firstName: "Jane",
   lastName: "Doe",
   timezone: "Europe/Berlin",

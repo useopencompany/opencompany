@@ -4828,24 +4828,24 @@ describe("GoatSurface chat streaming UI", () => {
                   input: {
                     command: "create",
                     flags: {
-                      id: "louis-morgner",
-                      title: "Louis Morgner",
+                      id: "ada-lovelace",
+                      title: "Ada Lovelace",
                       type: "person",
                       json: true,
                     },
-                    stdin: "Louis Morgner is a person.",
+                    stdin: "Ada Lovelace is a person.",
                   },
                   output: {
                     ok: false,
                     exitCode: 1,
                     command:
-                      'create --id louis-morgner --title "Louis Morgner" --type person --json --source-ref goat-chat:user_message_1',
+                      'create --id ada-lovelace --title "Ada Lovelace" --type person --json --source-ref goat-chat:user_message_1',
                     argv: [
                       "create",
                       "--id",
-                      "louis-morgner",
+                      "ada-lovelace",
                       "--title",
-                      "Louis Morgner",
+                      "Ada Lovelace",
                       "--type",
                       "person",
                       "--json",
@@ -4854,11 +4854,11 @@ describe("GoatSurface chat streaming UI", () => {
                     ],
                     stdout: JSON.stringify({
                       ok: true,
-                      applied: [{ id: "louis-morgner" }],
+                      applied: [{ id: "ada-lovelace" }],
                     }),
                     parsed: {
                       ok: true,
-                      applied: [{ id: "louis-morgner" }],
+                      applied: [{ id: "ada-lovelace" }],
                     },
                     stderr: "",
                   },
@@ -4898,7 +4898,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(within(firstBrainCall).getByText("Command")).toBeInTheDocument();
     expect(within(firstBrainCall).getByText("Stdout")).toBeInTheDocument();
     expect(within(firstBrainCall).getByText("Parsed")).toBeInTheDocument();
-    expect(within(firstBrainCall).getByText(/Louis Morgner is a person/)).toBeInTheDocument();
+    expect(within(firstBrainCall).getByText(/Ada Lovelace is a person/)).toBeInTheDocument();
     expect(within(firstBrainCall).getByText(/goat-chat:user_message_1/)).toBeInTheDocument();
   });
 
