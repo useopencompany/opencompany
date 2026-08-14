@@ -423,6 +423,22 @@ describe("canonical Chat transport", () => {
           meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
         });
       }
+      if (url.pathname === "/v1/runs/run_1") {
+        return Response.json({
+          data: {
+            id: "run_1",
+            conversationId: "conversation_1",
+            triggerMessageId: "message_user_1",
+            status: "queued",
+            engine: "opencompany",
+            model: "model_1",
+            attemptCount: 1,
+            createdAt: occurredAt,
+            updatedAt: occurredAt,
+          },
+          meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+        });
+      }
       if (url.pathname.endsWith("/events")) {
         eventCursors.push(url.searchParams.get("cursor"));
         return eventCursors.length === 1
@@ -464,30 +480,14 @@ describe("canonical Chat transport", () => {
         abortSignal: undefined,
       }),
     );
-    const chunks = await collect(
-      await transport.sendMessages({
-        trigger: "submit-message",
-        chatId: "chat_1",
-        messageId: undefined,
-        messages: [
-          {
-            id: "message_assistant_1",
-            role: "assistant",
-            parts: [
-              {
-                type: "dynamic-tool",
-                toolName: "use_action",
-                toolCallId: "tool_1",
-                input: {},
-                state: "approval-responded",
-                approval: { id: "approval_1", approved: true },
-              },
-            ],
-          } as UIMessage,
-        ],
-        abortSignal: undefined,
-      }),
-    );
+    await transport.resolveApproval({
+      chatId: "chat_1",
+      approvalId: "approval_1",
+      approved: true,
+    });
+    const resumed = await transport.reconnectToStream({ chatId: "chat_1" });
+    expect(resumed).not.toBeNull();
+    const chunks = await collect(resumed!);
     expect(eventCursors).toEqual([null, "v1:3"]);
     expect(chunks).toEqual(
       expect.arrayContaining([
@@ -497,16 +497,18 @@ describe("canonical Chat transport", () => {
     );
   });
 
-  it("recovers a paused approval without session storage and suppresses persisted content", async () => {
+  it("recovers a paused approval without session storage and reconnects to its Run", async () => {
+    let runGets = 0;
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
       const url = requestUrl(input);
       if (url.pathname === "/v1/runs/run_1") {
+        runGets += 1;
         return Response.json({
           data: {
             id: "run_1",
             conversationId: "conversation_1",
             triggerMessageId: "message_user_1",
-            status: "paused",
+            status: runGets === 1 ? "paused" : "queued",
             engine: "opencompany",
             model: "model_1",
             attemptCount: 1,
@@ -553,35 +555,21 @@ describe("canonical Chat transport", () => {
       baseUrl: "https://app.example.test",
       fetch: fetchMock as typeof fetch,
     });
-    const chunks = await collect(
-      await transport.sendMessages({
-        trigger: "submit-message",
-        chatId: "conversation_1",
-        messageId: undefined,
-        messages: [
-          {
-            id: "message_assistant_1",
-            role: "assistant",
-            metadata: { sessionId: "conversation_1", runId: "run_1", model: "model_1" },
-            parts: [
-              { type: "text", text: "Working", state: "done" },
-              {
-                type: "dynamic-tool",
-                toolName: "use_action",
-                toolCallId: "tool_1",
-                input: {},
-                state: "approval-responded",
-                approval: { id: "approval_1", approved: true },
-              },
-            ],
-          } as UIMessage,
-        ],
-        abortSignal: undefined,
-      }),
-    );
+    await transport.resolveApproval({
+      chatId: "conversation_1",
+      approvalId: "approval_1",
+      approved: true,
+      runId: "run_1",
+      assistantMessageId: "message_assistant_1",
+      model: "model_1",
+    });
+    const resumed = await transport.reconnectToStream({ chatId: "conversation_1" });
+    expect(resumed).not.toBeNull();
+    const chunks = await collect(resumed!);
 
     expect(chunks.filter((chunk) => chunk.type === "text-delta")).toEqual([
-      { type: "text-delta", id: "text_message_assistant_1_1", delta: " done" },
+      { type: "text-delta", id: "text_message_assistant_1_1", delta: "Working" },
+      { type: "text-delta", id: "text_message_assistant_1_2", delta: " done" },
     ]);
     expect(chunks.at(-1)).toEqual(
       expect.objectContaining({ type: "finish", finishReason: "stop" }),

@@ -37,7 +37,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@opencompany/ui/compone
 import { AnthropicIcon, DeepSeekIcon, MoonshotIcon, OpenAIIcon } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
-import { lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
 import {
   AlertCircle,
   Archive,
@@ -128,6 +127,7 @@ import {
   setLocalChatState,
   useLocalChatStates,
 } from "@/lib/chat-session-state";
+import { composeChatTranscript } from "@/lib/chat-transcript";
 import {
   type ChatMention,
   type ChatMessageMetadata,
@@ -712,9 +712,9 @@ export function Surface({
     sendMessage,
     status,
     stop,
+    resumeStream,
     error: chatError,
     clearError,
-    addToolApprovalResponse,
   } = useChat<ChatUiMessage>({
     id: chatInstanceKey,
     // useChat holds only this surface's in-flight overlay; persisted history
@@ -724,10 +724,6 @@ export function Surface({
     // whole thread on every token.
     experimental_throttle: 50,
     transport: headlessTransport,
-    // Once every pending tool approval on the last assistant message has a
-    // decision, auto-resend it so the server executes the approved calls and
-    // the model continues the turn.
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     onFinish: ({ message }) => {
       const sessionId = message.metadata?.sessionId;
       clearLocalActiveTurnState(sessionId);
@@ -897,20 +893,11 @@ export function Surface({
     }
   }, [persistedMessages, releaseOptimisticAttachmentPreviews]);
   const chatMessages = useMemo(() => {
-    if (persistedMessages.length === 0) return messages;
-    const persistedIds = new Set(persistedMessages.map((message) => message.id));
-    const overlay = messages.filter((message) => !persistedIds.has(message.id));
-    // An approval continuation streams into an assistant id that is already
-    // persisted (the paused turn wrote it); while streaming, the overlay copy
-    // is fresher than the Electric row, so it replaces in place.
-    const streaming = status === "submitted" || status === "streaming";
-    const base = streaming
-      ? (() => {
-          const overlayById = new Map(messages.map((message) => [message.id, message]));
-          return persistedMessages.map((message) => overlayById.get(message.id) ?? message);
-        })()
-      : persistedMessages;
-    return overlay.length > 0 ? [...base, ...overlay] : base;
+    return composeChatTranscript({
+      persistedMessages,
+      transientMessages: messages,
+      streaming: status === "submitted" || status === "streaming",
+    });
   }, [messages, persistedMessages, status]);
   useEffect(() => {
     if (!isAutoChatModel) return;
@@ -1958,18 +1945,7 @@ export function Surface({
     });
   }, [defaultModel]);
 
-  const handleActionApproval = async ({
-    approvalId,
-    action,
-    decision,
-    reason,
-  }: ActionApprovalRequest) => {
-    // After a reload the useChat overlay is empty; seed it from the merged
-    // thread so addToolApprovalResponse has the approval message to mutate.
-    const lastChatMessage = chatMessages.at(-1);
-    if (lastChatMessage && messages.at(-1)?.id !== lastChatMessage.id) {
-      setMessages(chatMessages);
-    }
+  const handleActionApproval = async ({ approvalId, action, decision }: ActionApprovalRequest) => {
     if (decision === "accept_always") {
       const saved = await alwaysAllowChatActionAction(action).catch(() => null);
       if (!saved?.ok) {
@@ -1978,11 +1954,31 @@ export function Surface({
         toast.error("Could not save the permission. Running this action once.");
       }
     }
-    await addToolApprovalResponse(
-      decision === "decline"
-        ? { id: approvalId, approved: false, reason: reason ?? "Declined by user." }
-        : { id: approvalId, approved: true },
+    const approvalMessage = chatMessages.findLast(
+      (message) =>
+        message.role === "assistant" &&
+        message.parts.some(
+          (part) =>
+            "approval" in part &&
+            part.approval &&
+            typeof part.approval === "object" &&
+            "id" in part.approval &&
+            part.approval.id === approvalId,
+        ),
     );
+    const runId = approvalMessage?.metadata?.runId;
+    if (!approvalMessage || !runId) {
+      throw new Error("The durable Run for this approval is no longer available.");
+    }
+    await headlessTransport.resolveApproval({
+      chatId: chatInstanceKey,
+      approvalId,
+      approved: decision !== "decline",
+      runId,
+      assistantMessageId: approvalMessage.id,
+      ...(approvalMessage.metadata?.model ? { model: approvalMessage.metadata.model } : {}),
+    });
+    await resumeStream();
   };
 
   const handleCodexToolAction = async (action: CodexToolAction) => {

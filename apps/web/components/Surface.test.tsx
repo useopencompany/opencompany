@@ -18,6 +18,7 @@ import {
   type CodexRuntimeView,
   START_TASK_TOOL_PART_TYPE,
   START_WORKFLOW_TOOL_PART_TYPE,
+  USE_ACTION_TOOL_PART_TYPE,
   WEB_FETCH_TOOL_PART_TYPE,
   WEB_SEARCH_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
@@ -36,6 +37,7 @@ const chatMock = vi.hoisted(() => ({
   status: "ready" as "ready" | "submitted" | "streaming" | "error",
   sendMessage: vi.fn(),
   stop: vi.fn(),
+  resumeStream: vi.fn(async () => undefined),
   finishSessionId: null as string | null,
   startWithSessionId: null as ((sessionId: string, model: string) => void) | null,
   finishWithSessionId: null as ((sessionId: string, model?: string) => void) | null,
@@ -258,6 +260,7 @@ vi.mock("@ai-sdk/react", async () => {
         stop: () => {
           chatMock.stop();
         },
+        resumeStream: chatMock.resumeStream,
         sendMessage: async (
           message: { text: string; metadata?: ChatMessageMetadata },
           requestOptions?: { body?: Record<string, unknown> },
@@ -418,6 +421,7 @@ describe("Surface chat streaming UI", () => {
     chatMock.sendError = null;
     chatMock.sendMessage.mockReset();
     chatMock.stop.mockReset();
+    chatMock.resumeStream.mockClear();
     routerMock.prefetch.mockReset();
     chatMock.preparedRequestBodies = [];
     routerMock.push.mockReset();
@@ -473,6 +477,64 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Hello opencompany" });
     expect(textarea).toHaveValue("");
     expect(await screen.findAllByText("Hello opencompany")).toHaveLength(2);
+  });
+
+  it("resolves action approvals as durable Run commands before resuming the stream", async () => {
+    const user = userEvent.setup();
+    const resolveApproval = vi
+      .spyOn(HeadlessChatTransport.prototype, "resolveApproval")
+      .mockResolvedValue();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "goat_chat_approval_1",
+          title: "Approval",
+          model: DEFAULT_MODEL,
+          messages: [
+            {
+              id: "assistant_approval_1",
+              role: "assistant",
+              metadata: {
+                sessionId: "goat_chat_approval_1",
+                runId: "run_approval_1",
+                model: DEFAULT_MODEL,
+              },
+              parts: [
+                {
+                  type: USE_ACTION_TOOL_PART_TYPE,
+                  toolCallId: "tool_approval_1",
+                  state: "approval-requested",
+                  input: {
+                    action: "googlecalendar.create_event",
+                    params: { title: "Planning" },
+                  },
+                  approval: { id: "approval_1" },
+                },
+              ],
+            },
+          ],
+        }}
+        codexConnected
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Accept" }));
+
+    await waitFor(() =>
+      expect(resolveApproval).toHaveBeenCalledWith({
+        chatId: "goat_chat_approval_1",
+        approvalId: "approval_1",
+        approved: true,
+        runId: "run_approval_1",
+        assistantMessageId: "assistant_approval_1",
+        model: DEFAULT_MODEL,
+      }),
+    );
+    expect(chatMock.resumeStream).toHaveBeenCalledOnce();
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
   it("starts a background chat from the main composer when the message starts with ampersand", async () => {
