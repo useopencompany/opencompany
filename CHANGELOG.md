@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-08-14
+
+### Changed
+- The marketing homepage has a refreshed hero message and simpler navigation (#1247) — @louis.
+
+### Fixed
+- Starting a new Codex coding session no longer occasionally leaves you on a broken chat URL if you navigate away before the message finishes saving (#1245) — @louis.
+- Claude Code and Codex sessions now reliably keep their full conversation history instead of occasionally losing earlier context (#1259) — @louis.
+- Chat reasoning no longer gets dropped while a reply is still streaming in (#1254) — @louis.
+- If your browser tab is still running an older version after we ship an update, you now get a clear prompt to refresh instead of chat silently breaking (#1249) — @louis.
+- Content saved to Brain now reliably kicks off indexing right away instead of occasionally waiting for the next sync (#1215) — @opencompany-bot.
+- The chat title now lines up with the left edge of the header above it (#1255) — @louis.
+
 ## [1.13.0] - 2026-08-12
 
 ### Fixed
