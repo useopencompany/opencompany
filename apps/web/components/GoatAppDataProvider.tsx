@@ -33,6 +33,10 @@ import {
   type HeadlessEngineSessionReadModel,
 } from "@/lib/headless-chat-collections";
 import {
+  getHeadlessIntegrationAccounts,
+  type HeadlessIntegrationAccountReadModel,
+} from "@/lib/headless-integration-collections";
+import {
   getHeadlessTasks,
   type HeadlessTaskReadModel,
   legacyTaskDtoToRow,
@@ -47,11 +51,7 @@ import {
   reconcileOptimisticGoatChatSummaries,
   useOptimisticGoatChatSummaries,
 } from "@/lib/optimistic-chat-summaries";
-import {
-  createGoatCollections,
-  type GoatIntegrationRow,
-  type GoatTaskRow,
-} from "@/lib/task-collections";
+import type { GoatTaskRow } from "@/lib/task-collections";
 import { deriveGoatTaskWorkflowSteps } from "@/lib/task-workflow-activity";
 
 // Every engine exposes the same durable engine-session read model.
@@ -206,7 +206,6 @@ function GoatAppLiveDataSubscriptions({
   initialData: GoatAppInitialData;
   onData: (value: GoatAppData) => void;
 }) {
-  const collections = useMemo(() => createGoatCollections(), []);
   const tasksCollection = useMemo(
     () => getHeadlessTasks(initialData.workspace.id),
     [initialData.workspace.id],
@@ -257,6 +256,10 @@ function GoatAppLiveDataSubscriptions({
   );
   const conversationsCollection = useMemo(() => getHeadlessChatConversations(), []);
   const engineSessionsCollection = useMemo(() => getHeadlessEngineSessions(), []);
+  const integrationAccountsCollection = useMemo(
+    () => getHeadlessIntegrationAccounts(initialData.workspace.id),
+    [initialData.workspace.id],
+  );
   const { data: chatRows, isLoading: chatsLoading } = useLiveQuery(
     (q) => q.from({ conversation: conversationsCollection }),
     [conversationsCollection],
@@ -265,8 +268,9 @@ function GoatAppLiveDataSubscriptions({
     (q) => q.from({ engineSession: engineSessionsCollection }),
     [engineSessionsCollection],
   );
-  const { data: integrationRows, isLoading: integrationsLoading } = useLiveQuery((q) =>
-    q.from({ integration: collections.integrations }),
+  const { data: integrationRows, isLoading: integrationsLoading } = useLiveQuery(
+    (q) => q.from({ integration: integrationAccountsCollection }),
+    [integrationAccountsCollection],
   );
 
   const tasks = useMemo(() => {
@@ -403,7 +407,7 @@ function GoatAppLiveDataSubscriptions({
   const integrations = useMemo(() => {
     if (integrationsLoading && !integrationRows?.length) return initialData.integrations;
     const liveIntegrations = goatIntegrationStateFromRows(
-      (integrationRows ?? []) as GoatIntegrationRow[],
+      (integrationRows ?? []) as HeadlessIntegrationAccountReadModel[],
     );
     return {
       ...liveIntegrations,

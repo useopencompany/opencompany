@@ -30,6 +30,8 @@ export type WorkspaceMemberView = {
   id: string;
   email: string;
   name: string;
+  firstName: string | null;
+  lastName: string | null;
   avatarUrl: string | null;
   role: "admin" | "member";
 };
@@ -333,6 +335,8 @@ function workspaceMemberView(entry: {
     name:
       [entry.user.firstName, entry.user.lastName].filter(Boolean).join(" ").trim() ||
       entry.user.email,
+    firstName: entry.user.firstName,
+    lastName: entry.user.lastName,
     avatarUrl: entry.user.avatarUrl,
     role: entry.member.role,
   };

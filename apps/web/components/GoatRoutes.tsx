@@ -59,8 +59,6 @@ import { StripeIntegrationSetup } from "@/components/StripeIntegrationSetup";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { useHydrated } from "@/components/useHydrated";
-import type { GoatBrainSnapshot } from "@/lib/brain";
-import type { GoatBrainOverviewStats } from "@/lib/brain-overview";
 import type { GoatChatSessionView } from "@/lib/chat-ui";
 import { getHeadlessWorkflows } from "@/lib/headless-automation-collections";
 import { createHeadlessWorkflow } from "@/lib/headless-automation-commands";
@@ -72,6 +70,7 @@ import {
   previewHeadlessSkillImport,
   updateHeadlessSkill,
 } from "@/lib/headless-knowledge-commands";
+import type { GoatBrainOverviewStats, GoatBrainSnapshot } from "@/lib/headless-knowledge-types";
 import { legacyTaskDtoToRow, taskReadModelToRow } from "@/lib/headless-task-collections";
 import { getHeadlessTask, getLegacyTaskCompatibilityHistory } from "@/lib/headless-task-commands";
 import type { GoatIntegrationState } from "@/lib/integration-state";
@@ -197,6 +196,7 @@ export function GoatIntegrationsSettingsRoute({
       <IntegrationRows
         integrations={integrations}
         isWorkspaceAdmin={workspace.role === "admin"}
+        workspaceId={workspace.id}
         imessageEnabled={featureFlags.imessage}
         browserProfilesEnabled={browserProfilesEnabled}
       />
@@ -788,11 +788,13 @@ function BetaFeatureSwitch({
 function IntegrationRows({
   integrations,
   isWorkspaceAdmin,
+  workspaceId,
   imessageEnabled,
   browserProfilesEnabled,
 }: {
   integrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
+  workspaceId: string;
   imessageEnabled: boolean;
   browserProfilesEnabled: boolean;
 }) {
@@ -800,6 +802,7 @@ function IntegrationRows({
     <SettingsIntegrationsPanel
       initialIntegrations={integrations}
       isWorkspaceAdmin={isWorkspaceAdmin}
+      scopeKey={workspaceId}
       imessageEnabled={imessageEnabled}
       browserProfilesEnabled={browserProfilesEnabled}
     />

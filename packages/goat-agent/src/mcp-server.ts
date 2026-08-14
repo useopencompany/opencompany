@@ -13,9 +13,13 @@ import {
   type WikiToolInput,
 } from "@opencompany/goat-wiki/tool";
 import * as z from "zod/v4-mini";
-import { captureToGoatBrainInbox } from "@/lib/brain-capture";
-import { runGoatBrainToolForUser } from "@/lib/brain-cli";
-import { normalizeGoatBrainReadToolInput } from "@/lib/brain-surface";
+import {
+  captureToGoatBrainInbox as captureToSharedGoatBrainInbox,
+  type GoatBrainCaptureResult,
+} from "./brain-capture";
+import { runGoatBrainToolForUser } from "./brain-cli";
+import { nextAvailableGoatBrainId } from "./brain-files";
+import { normalizeGoatBrainReadToolInput } from "./brain-surface";
 import {
   type BrainSelectorArgs,
   coerceDocumentIds,
@@ -47,9 +51,9 @@ import {
   saveToBrainInputSchema,
   searchBrainInputSchema,
   searchBrainToToolInput,
-} from "@/lib/brain-tools";
-import type { GoatBrainToolInput } from "@/lib/chat-ui";
-import { runWikiToolForUser } from "@/lib/wiki-tool";
+} from "./brain-tools";
+import type { GoatBrainToolInput } from "./chat-ui";
+import { runWikiToolForUser } from "./wiki-tool";
 
 // Tool registration for the user-level Goat MCP connector: one surface spanning
 // every brain the token's user can access, addressed via an optional `brain`
@@ -134,6 +138,21 @@ export function mcpTextToolResult(output: {
     ...(structuredContent ? { structuredContent } : {}),
     isError: !output.ok,
   };
+}
+
+function captureToGoatBrainInbox(input: {
+  brainRef: string;
+  userWorkosId: string;
+  text: string;
+  title?: string;
+  intent?: string;
+  source: { kind: "mcp"; connectionId: string; itemId: string };
+}): Promise<GoatBrainCaptureResult> {
+  const { userWorkosId, ...command } = input;
+  return captureToSharedGoatBrainInbox(
+    { ...command, actorId: userWorkosId },
+    { nextAvailableBrainId: nextAvailableGoatBrainId },
+  );
 }
 
 type BrainResolution =

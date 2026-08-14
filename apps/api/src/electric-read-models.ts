@@ -9,6 +9,7 @@ import {
   BrainTimelineReadModelSchema,
   ConversationReadModelSchema,
   EngineSessionReadModelSchema,
+  IntegrationAccountReadModelSchema,
   MessageReadModelSchema,
   type ReadModel,
   RunReadModelSchema,
@@ -58,6 +59,8 @@ const PREDECODED_READ_MODEL_FIELDS = new Set([
   "result",
   "sources",
   "aliases",
+  "scopes",
+  "capabilityModes",
 ]);
 
 export interface ReadModelService {
@@ -302,6 +305,26 @@ function readModelShape(input: {
         where: `"actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
         params: [input.actor.userId, input.actor.workspaceId],
       };
+    case "integration-accounts-v1":
+      return {
+        table: "goat.integrations",
+        columns: [
+          "id",
+          "provider",
+          "workspace_id",
+          "external_id",
+          "connection_label",
+          "account_name",
+          "account_email",
+          "account_type",
+          "status",
+          "status_reason",
+          "scopes",
+          "capability_modes",
+        ],
+        where: `("user_workos_id" = $1 AND "workspace_id" IS NULL) OR "workspace_id" = $2`,
+        params: [input.actor.userId, input.actor.workspaceId],
+      };
     case "brain-folders-v1":
       return brainShape(input, "goat.brain_folders", [
         "id",
@@ -544,6 +567,10 @@ function projectReadModelValue(
       return (partial ? TaskScheduleReadModelSchema.partial() : TaskScheduleReadModelSchema).parse(
         projected,
       );
+    case "integration-accounts-v1":
+      return (
+        partial ? IntegrationAccountReadModelSchema.partial() : IntegrationAccountReadModelSchema
+      ).parse(projected);
     case "brain-folders-v1":
       return (partial ? BrainFolderReadModelSchema.partial() : BrainFolderReadModelSchema).parse(
         projected,
@@ -603,7 +630,9 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
     name === "aliases" ||
     name === "result" ||
     name === "sourceSelection" ||
-    name === "discoverySummary"
+    name === "discoverySummary" ||
+    name === "scopes" ||
+    name === "capabilityModes"
   ) {
     return jsonValue(value);
   }
@@ -929,6 +958,20 @@ const READ_MODEL_COLUMN_NAMES = {
     version: "version",
     created_at: "createdAt",
     updated_at: "updatedAt",
+  },
+  "integration-accounts-v1": {
+    id: "id",
+    provider: "provider",
+    workspace_id: "workspaceId",
+    external_id: "externalId",
+    connection_label: "connectionLabel",
+    account_name: "accountName",
+    account_email: "accountEmail",
+    account_type: "accountType",
+    status: "status",
+    status_reason: "statusReason",
+    scopes: "scopes",
+    capability_modes: "capabilityModes",
   },
   "brain-folders-v1": {
     id: "id",

@@ -1,30 +1,49 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-
-vi.mock("@/lib/brain-capture", () => ({ captureToGoatBrainInbox: vi.fn() }));
-
-import { GET } from "./route";
+import { DELETE, GET, POST } from "./route";
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
-describe("GET /mcp", () => {
-  it("challenges missing bearer tokens with MCP resource metadata", async () => {
-    vi.stubEnv("GOAT_AUTHKIT_DOMAIN", "https://example.authkit.app");
+describe("/mcp compatibility relay", () => {
+  it.each([
+    ["GET", GET],
+    ["POST", POST],
+    ["DELETE", DELETE],
+  ] as const)("relays %s to the API-owned MCP endpoint", async (method, handler) => {
+    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
+    const requests: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+        requests.push(input instanceof Request ? input : new Request(input, init));
+        return new Response(null, {
+          status: 401,
+          headers: {
+            "WWW-Authenticate":
+              'Bearer resource_metadata="https://app.example.test/.well-known/oauth-protected-resource/mcp"',
+          },
+        });
+      }),
+    );
 
-    const response = await GET(new Request("https://goat.example.com/mcp"));
+    const response = await handler(
+      new Request("https://app.example.test/mcp", {
+        method,
+        ...(method === "POST" ? { body: "{}" } : {}),
+      }),
+    );
 
     expect(response.status).toBe(401);
-    expect(response.headers.get("WWW-Authenticate")).toContain(
-      'resource_metadata="https://goat.example.com/.well-known/oauth-protected-resource/mcp"',
-    );
+    expect(requests[0]?.url).toBe("https://api.example.test/mcp");
+    expect(requests[0]?.method).toBe(method);
+    expect(requests[0]?.headers.get("x-forwarded-host")).toBe("app.example.test");
   });
 
-  it("reports missing AuthKit configuration before authentication", async () => {
-    vi.stubEnv("GOAT_AUTHKIT_DOMAIN", "");
-
-    const response = await GET(new Request("https://goat.example.com/mcp"));
-
+  it("fails closed when the API origin is unavailable", async () => {
+    vi.stubEnv("GOAT_API_ORIGIN", "");
+    const response = await GET(new Request("https://app.example.test/mcp"));
     expect(response.status).toBe(503);
   });
 });

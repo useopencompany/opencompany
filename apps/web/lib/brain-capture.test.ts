@@ -26,7 +26,7 @@ vi.mock("@opencompany/db/goat-brain-ingest", async (importOriginal) => {
     upsertGoatBrainSourceItemAndEnqueue: mocks.enqueue,
   };
 });
-vi.mock("@/lib/brain", () => ({
+vi.mock("@opencompany/goat-agent/brain-files", () => ({
   nextAvailableGoatBrainId: mocks.nextBrainId,
 }));
 

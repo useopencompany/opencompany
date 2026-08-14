@@ -14,10 +14,10 @@ const captureMock = vi.hoisted(() => ({
 }));
 
 vi.mock("@opencompany/db/goat-workspaces", () => workspacesMock);
-vi.mock("@/lib/brain-cli", () => brainCliMock);
-vi.mock("@/lib/brain-capture", () => captureMock);
+vi.mock("@opencompany/goat-agent/brain-cli", () => brainCliMock);
+vi.mock("@opencompany/goat-agent/brain-capture", () => captureMock);
 
-import { registerGoatBrainTools } from "./mcp-server";
+import { registerGoatBrainTools } from "@opencompany/goat-agent/mcp-server";
 
 type RegisteredTool = {
   config: Record<string, unknown>;
@@ -320,18 +320,21 @@ describe("Goat MCP tools", () => {
       intent: "Product principle",
     });
 
-    expect(captureMock.captureToGoatBrainInbox).toHaveBeenCalledWith({
-      brainRef: general.brain.id,
-      userWorkosId: "user_123",
-      text: "Keep usage-based pricing simple for small teams.",
-      title: "Pricing idea",
-      intent: "Product principle",
-      source: {
-        kind: "mcp",
-        connectionId: `mcp:${general.brain.id}`,
-        itemId: expect.stringMatching(/^capture_[0-9a-f-]{36}$/),
+    expect(captureMock.captureToGoatBrainInbox).toHaveBeenCalledWith(
+      {
+        brainRef: general.brain.id,
+        actorId: "user_123",
+        text: "Keep usage-based pricing simple for small teams.",
+        title: "Pricing idea",
+        intent: "Product principle",
+        source: {
+          kind: "mcp",
+          connectionId: `mcp:${general.brain.id}`,
+          itemId: expect.stringMatching(/^capture_[0-9a-f-]{36}$/),
+        },
       },
-    });
+      { nextAvailableBrainId: expect.any(Function) },
+    );
     expect(result).toMatchObject({
       isError: false,
       structuredContent: {
@@ -353,7 +356,8 @@ describe("Goat MCP tools", () => {
     });
 
     expect(captureMock.captureToGoatBrainInbox).toHaveBeenCalledWith(
-      expect.objectContaining({ brainRef: general.brain.id }),
+      expect.objectContaining({ brainRef: general.brain.id, actorId: "user_123" }),
+      { nextAvailableBrainId: expect.any(Function) },
     );
   });
 

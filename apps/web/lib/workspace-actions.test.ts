@@ -198,6 +198,8 @@ describe("workspace settings actions", () => {
               id: "user_123",
               email: "owner@example.com",
               name: "Owner",
+              firstName: "Owner",
+              lastName: null,
               avatarUrl: null,
               role: "admin",
             },

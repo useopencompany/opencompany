@@ -1,5 +1,5 @@
 import * as z from "zod/v4-mini";
-import type { GoatBrainToolInput } from "@/lib/chat-ui";
+import type { GoatBrainToolInput } from "./chat-ui";
 
 // Single source of truth for the flat, intent-named Goat Brain tool surface.
 //

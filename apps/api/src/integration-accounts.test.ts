@@ -125,6 +125,56 @@ afterEach(() => {
 });
 
 describe("integration account service", () => {
+  it("lists only credential-free personal account fields", async () => {
+    const service = createIntegrationAccountService({
+      db: fakeDb([
+        [
+          {
+            id: "gint_gmail",
+            provider: "gmail",
+            workspaceId: null,
+            externalId: "google_subject",
+            accountEmail: "ada@example.com",
+            accountName: "Ada",
+            connectionLabel: "Personal",
+            statusReason: null,
+            status: "connected",
+            scopes: ["gmail.readonly"],
+            capabilityModes: { read: "on" },
+          },
+          {
+            id: "gint_linear_mcp",
+            provider: "linear",
+            workspaceId: null,
+            externalId: "linear_mcp",
+            accountEmail: null,
+            accountName: "Acme",
+            connectionLabel: null,
+            statusReason: null,
+            status: "connected",
+            scopes: [],
+            capabilityModes: {},
+          },
+        ],
+      ]),
+    });
+
+    await expect(service.list(member)).resolves.toEqual([
+      {
+        integrationId: "gint_gmail",
+        provider: "gmail",
+        status: "connected",
+        connected: true,
+        accountEmail: "ada@example.com",
+        accountName: "Ada",
+        connectionLabel: "Personal",
+        statusReason: null,
+        scopes: ["gmail.readonly"],
+        capabilityModes: { read: "on" },
+      },
+    ]);
+  });
+
   it("gates usage reads to the personal connection owner", async () => {
     const service = createIntegrationAccountService({ db: fakeDb([[]]) });
     await expect(service.getUsage(member, "gint_x")).rejects.toMatchObject({
