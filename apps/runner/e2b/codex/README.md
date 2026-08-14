@@ -43,5 +43,5 @@ rm -f /tmp/playwright-chromium-smoke.png
 ## Rollout
 
 Set `OPENCOMPANY_CODEX_E2B_TEMPLATE=opencompany-codex-toolbox` in Infisical for the runner
-environment, then redeploy the runner. The legacy variable name configures both persistent Codex
-and Claude Code chat sandboxes. Leave it unset to fall back to E2B's `codex` template.
+environment, then redeploy the runner. The variable configures both persistent Codex and Claude Code
+Chat sandboxes. Leave it unset to fall back to E2B's `codex` template.

@@ -14,7 +14,8 @@ branch database. `bun run setup -- --check` reports missing requirements without
 
 Edit secrets in the runtime's Infisical path and verify the integration sync on the destination:
 
-- Web: retained compatibility path `prod` `/goat` → existing Vercel project.
+- Web: deployment path `prod` `/goat` → Vercel product project.
+- API: `prod` `/api` → Render product API.
 - Runner: `prod` `/runner` → Render runner.
 - Release automation: `prod` `/release` → GitHub Actions through `infisical run`.
 

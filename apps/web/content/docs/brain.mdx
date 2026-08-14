@@ -1,165 +1,112 @@
 ---
 title: Brain
-description: Architecture and flows of the Goat Brain, the per-workspace knowledge graph.
+description: The current Brain document model, API boundary, retrieval, and durable ingestion flow.
 ---
 
-## What the Brain is
+## What Brain is
 
-The Brain is Goat's durable knowledge store: a per-workspace graph of markdown documents with typed links, evidence, and a timeline. Every workspace has at least one brain; users can create more and restrict who sees them. Chat, background tasks, and the ingestion agents all read from and write into it.
+Brain is OpenCompany's durable workspace knowledge store: Markdown knowledge pages, immutable
+evidence, file-backed documents, provenance, and a lightweight graph of typed relations and wiki
+links. Postgres is the source of truth.
 
-Three layers make it up:
+The current ownership boundary is:
 
-- **`packages/goat-brain`** — the format and toolkit: document parsing, validation, the graph model, retrieval, and a CLI. It works against a plain directory of files and knows nothing about the database.
-- **`packages/db/src/goat-schema.ts` + `goat-brain-files.ts` + `goat-brain-ingest.ts`** — the durable store: `goat.*` tables that hold brains, documents, derived edges, timeline entries, versions, and the ingestion queue.
-- **`apps/web` + `apps/runner`** — the surfaces: the Brain UI, the chat tools, the durable ingestion agents, and task integration.
-
-The database is the source of truth. Whenever an agent needs to work on the brain, the files are materialized to a directory, the agent works through the CLI, and changed files are synced back with conflict detection.
+- `packages/goat-brain` owns document parsing, schemas, validation, retrieval helpers, the
+  filesystem CLI, and the pointer/copy rule.
+- `packages/goat-agent` owns shared Brain reads, capture behavior, MCP tools, and asset behavior.
+- `packages/db` owns tables, repository queries, fixed read projections, and temporary filesystem
+  materialization.
+- `apps/api` owns authenticated Brain commands, assets, sources, MCP, authorization, and API read
+  models.
+- `apps/runner` owns durable ingestion/import, provider polling, Google Drive sync, and agentic
+  curation.
+- `apps/web` renders Brain and calls typed `/v1` commands or named read models. It does not import
+  Brain repositories or write tables.
 
 ## Document model
 
-A brain document is a markdown file with YAML frontmatter, stored at `folder/id.md`:
+A Brain document has a stable slug (`brain_id`) within one Brain (`brain_ref`), a folder, kind,
+entity type, status, compiled truth, and an append-only evidence timeline.
 
-- **`id`** — a lowercase slug, unique within the brain (called `brainId` in document code, distinct from the `brain_ref` that identifies the brain itself).
-- **`kind`** — `page` or `evidence`. This is the only structural rule in the system: evidence documents must live under the `evidence/` zone, pages must live outside it. A database constraint enforces it.
-- **`type`** — what the record represents, one of eight: `person`, `company`, `project`, `meeting`, `concept`, `source`, `analysis`, `note`. External artifacts of any format (articles, videos, email threads, repos) are `source`; synthesized prose is `analysis`. Types are pure metadata; they do not dictate where a document lives. Retired v1 names (`media`, `email` → `source`; `writing` → `analysis`) still parse via legacy aliases.
-- **`folder`** — free-form navigation, up to six path segments. There is an opinionated default per type (`person` → `people`, `note` → `inbox`, and so on in `packages/goat-brain/src/schemas.ts`), but users and agents can organize folders however they like.
-- **`status`** — the curation signal: `draft` (captured, not yet curated), `active` (curated synthesis; must cite at least one valid evidence record or external source in its compiled truth — validation enforces it on write), `archived` (deliberately retired), or `merged` (tombstone pointing at `mergedInto`). Ingestion agents promote pages to `active` once their compiled truth cites `[[evidence:...]]` or `[[source:...]]` provenance. Retrieval (`query`) excludes merged and archived documents unless `--include-merged` / `--include-archived` is passed; the UI shows archived documents in a collapsed sidebar section and hides merged ones entirely.
-- **`aliases`, `relations`, `sources`** — additional frontmatter used for lookup and graph derivation.
+- `kind` is `page` or `evidence`. Evidence must live under `evidence/`; pages must live outside it.
+- `type` is one of `person`, `company`, `project`, `meeting`, `concept`, `source`, `analysis`, or
+  `note`.
+- `status` is `draft`, `active`, `archived`, or `merged`. Active pages require cited provenance.
+- `relations` and typed `[[page:...]]`, `[[evidence:...]]`, and `[[source:...]]` links produce the
+  durable graph and citations.
+- `format` may be Markdown or a supported file type such as PDF, DOCX, XLSX, CSV, JSON, text, or
+  image. Private bytes stay behind authenticated API routes while the row keeps searchable metadata
+  and extracted text when supported.
 
-The body has two zones: a **compiled truth** section that writers rewrite in place (never append-only), and a **timeline** of dated evidence entries, each with a deterministic `ev-` id, a timestamp, and a source reference. Timeline entries are also denormalized into their own table so the UI can query them efficiently.
+The detailed schema reference is in `apps/web/docs/brain/data-model.md`; code-level truth lives in
+`packages/goat-brain/src/schema.ts` and `packages/db/src/goat-schema.ts`.
 
-Ideas and thoughts do not introduce another `kind`. `kind` remains the page/evidence boundary. A saved user-authored idea starts as a draft `note` in `inbox/`, then curation either merges it into an existing page, promotes it to a `concept`, updates or creates a `project`, files a rationale under `decisions/` with the best existing type, moves a durable raw reflection to `thoughts/` as a `note`, or leaves it in `inbox/` when it is still uncurated.
+## Pointer/copy rule
 
-## Links and the graph
+Brain writers prefer canonical pointers over stale copies. Claims cite a provider source ref.
+Ephemeral or unfetchable content may be snapshotted under `evidence/`; live systems such as issue
+trackers or Drive remain the canonical home and are represented by a pointer plus synthesized facts.
+The shared prompt contract lives in `packages/goat-brain/src/pointer-copy.ts`.
 
-Documents reference each other with typed inline links:
+## Commands and reads
 
-- `[[page:some-id|Label]]` — link to another page.
-- `[[evidence:ev-some-id|Label]]` — citation of an evidence document.
-- `[[source:provider:id|Label]]` — pointer to an external system, e.g. `[[source:jamie:meeting:123|Jamie notes]]`.
+The Brain UI uses authenticated `/v1/brains/*` commands for document, folder, source, membership,
+import, and asset changes. Updates use optimistic content hashes and creation uses durable
+idempotency. Fixed `brain-*-v1` read models keep authorized folders, documents, timelines, graph
+edges, source state, and ingestion activity current after hydration.
 
-Edges are **derived, not authored**: `deriveGoatBrainEdges` in `packages/goat-brain/src/edges.ts` extracts them from frontmatter relations and inline links, and they are persisted to `goat.brain_edges` on every write. Edge types are the relation type, `wiki_link` for page links, and `cites` for evidence citations. The UI separates page links from evidence links, while retrieval returns link metadata for both and keeps hop expansion focused on pages.
+Chat and MCP use the shared read surface in `packages/goat-agent/src/brain-surface.ts` and
+`brain-cli.ts`. Search, list, point reads, and timelines execute against indexed Postgres queries in
+`packages/db/src/goat-brain-read.ts`; they do not materialize the whole Brain. Chat and MCP expose
+capture-to-curation rather than arbitrary mutation CLI commands.
 
-## The pointer/copy contract
+The API hosts MCP at `/mcp`; the web `/mcp` URL is only a continuity relay. Each MCP call resolves
+the verified user, selects an accessible Brain, and rechecks membership. `save_to_brain` preserves
+the workspace-admin write boundary.
 
-Every writer into the brain follows one rule, defined once as `GOAT_BRAIN_POINTER_COPY_RULE` in `packages/goat-brain/src/pointer-copy.ts` and embedded into each writer's system prompt. The prose version lives in `apps/web/docs/brain/pointer-copy-contract.md`.
+## Capture and ingestion
 
-The short form: **prefer pointers over copies.** Every claim carries a `[[source:provider:id]]` pointer. Content is snapshotted into `evidence/` only when the source is ephemeral or unfetchable:
+`save_to_brain` creates a visible draft in `inbox/`, records a normalized source item, and commits a
+durable curation job. OpenCompany Chat invokes this through the runner host-tool boundary; API-hosted
+MCP uses the same shared capture behavior. Ref-only Slack, Gmail, and Linear captures can hydrate the
+provider source in the runner before curation.
 
-- Meeting transcripts, emails, and chat captures → snapshot into `evidence/` plus a pointer, because the brain cannot re-fetch them.
-- Linear and GitHub items → pointer plus a one-line state summary, never the body, because the tracker is the canonical live home and bodies go stale immediately.
-- Everything else → pointer only by default.
-
-Source refs follow a `provider:id` grammar (lowercase provider slug, provider-native id, max 256 chars). A resolver seam (`packages/goat-brain/src/source-resolvers.ts`) exists so integrations can later hydrate pointers with live URLs and state at read time; it is interface-only today.
-
-## Data model
-
-All tables live in the `goat` Postgres schema, defined in `packages/db/src/goat-schema.ts`:
-
-- **`brains`** — one row per brain: workspace, name, slug, `visibility` (`workspace` or `restricted`). `brain_members` holds the allow-list for restricted brains.
-- **`brain_folders`** — the folder tree per brain (`system` or `custom` source).
-- **`brain_documents`** — the documents: content, body, timeline JSON, kind, entity type, status, relations, sources, aliases, content hash. Format can be `markdown`, `pdf`, `docx`, `xlsx`, `srt`, `csv`, `tsv`, `json`, `text`, or `image`.
-- **`brain_timeline_entries`** — denormalized per-entry rows for efficient timeline queries.
-- **`brain_edges`** — the derived graph.
-- **`brain_document_versions`** — an audit trail of overwrites and deletes.
-- **`brain_source_items`** and **`brain_ingest_jobs`** — the ingestion pipeline (below).
-
-Every content table carries a `brain_ref` foreign key to `brains.id`. That is the isolation boundary: every read and write is scoped to exactly one brain, and access is checked with `requireGoatBrainAccess` / `brainAccessCondition` in `packages/db/src/goat-workspaces.ts`.
-
-## Write paths
-
-There are five ways content gets into a brain.
-
-### 1. The UI editor
-
-The Brain page (`/brain/...`) renders `GoatBrainView` with a Tiptap markdown editor that decorates inline links and supports cmd-click navigation. Its initial snapshot and overview come from the typed `/v1/brains/*` resources; after hydration, fixed authorized `brain-*-v1` read models keep folders, documents, timeline entries, and graph edges live. Editor create, update, rename, and delete operations use typed `/v1` commands. Updates carry an `expectedContentHash` so concurrent edits are detected rather than silently overwritten, and create commands are durably idempotent per actor and workspace. Asset upload and replacement stay on their existing route until the asset/ingestion cutover slice.
-
-### 2. Chat captures (`save_to_brain`)
-
-When the user asks main chat or a Cloud Codex chat to keep something — "save this reference",
-"here's an idea" — the agent calls `save_to_brain`. Both surfaces use the same deliberately
-capture-first flow, in two phases:
-
-1. **Capture now.** `captureToGoatBrainInbox` (`apps/web/lib/brain-capture.ts`) immediately writes the content as a draft page in `inbox/` (type `note`, status `draft`) in the same request. Plain chat saves use `goat-chat:<messageId>` provenance; integration and web saves preserve the canonical `sourceRef` returned by the action. Nothing the user saves can be lost, even if everything downstream fails, and the draft appears in the Brain UI instantly.
-2. **Curate later.** A copied-content save normalizes a `goat-chat`/`capture` source item and enqueues a `brain_agent_ingest` job. A ref-only Slack, Gmail, or Linear save instead normalizes a provider `pointer` and enqueues `brain_pointer_hydrate`; the runner re-fetches the full provider content before delegating to the existing provider ingest profile. Both paths are scoped to the Brain selected for the chat and wake the runner. The capture-curation agent checks the brain for an existing home, then folds the finding into an existing page or promotes the draft in place.
-
-Duplicate `save_to_brain` calls within one main-chat turn dedupe to a single draft. Cloud Codex
-captures also carry a durable content-derived key, so retries after runner recovery reuse the same
-completed capture. Identical webhook re-deliveries dedupe at the source-item layer via content hash.
-
-Every workspace member with access to the active brain can use the chat capture path. Direct
-`goat_brain` mutations and task/schedule tools remain unavailable to non-admin members. Each save
-reserves workspace ingestion credits.
-
-For ideas and thoughts, the curation agent applies an authorship test before topical filing. A user or team-authored idea with future value belongs in Brain even when rough; an agent behavior preference belongs in Memory; conversation-only scratch stays in chat. Brain-worthy ideas use the existing type and folder model: reusable abstractions become `concept` pages, concrete initiatives update `project` pages, choices or rationales go to the natural subject or `decisions/`, durable raw reflections move to `thoughts/` as `note` pages, and unresolved material remains a draft `note` in `inbox/`.
-
-### 3. The `goat_brain` chat tool
-
-The shared Chat agent exposes a read-only Brain surface: `get`, `list`, `query`, `timeline`, `help`, and `doctor`. All chat writes route through `save_to_brain`; raw CLI mutation commands are not exposed.
-
-### 4. The durable ingestion agents
-
-This is the main automated path. Both source kinds run on the same queue and worker; today there are two agent profiles.
-
-**Jamie meetings** flow end to end:
+Provider ingress and polling follow the same durable rail:
 
 ```text
-Jamie webhook (meeting.completed)
-  POST /api/webhooks/jamie
-    resolve integration from saved x-jamie-api-key hash
-    normalize payload -> upsert goat.brain_source_items (idempotent on content hash)
-    enqueue goat.brain_ingest_jobs (kind: brain_agent_ingest)
-    wake the runner via /internal/goat/brain-ingest/wake
-
-Runner (apps/runner/src/goat-brain-ingest-worker.ts)
-  claim job with FOR UPDATE SKIP LOCKED + 5-minute lease, heartbeat every 5s
-  materialize the target brain's files to a temp directory
-  pre-write a deterministic evidence snapshot (full transcript, evidence/ zone)
-  run the ingestion agent (apps/runner/src/goat-brain-agent-ingest.ts):
-    model loop with the goat-brain CLI as its only tool
-    max 32 steps, 10-minute timeout
-    brain-first discipline: query/get before create, rewrite compiled truth,
-    link every entity mention, follow the pointer/copy rule, or return SKIP
-  sync changed files back to the DB (retry the job if the brain changed underneath)
-  record job result, mark source item succeeded/failed
+verified API ingress, API command, or runner poller
+  -> goat.brain_source_items
+  -> goat.brain_ingest_jobs
+  -> runner fenced claim
+  -> validated handler and curation
+  -> committed Brain rows and terminal job state
 ```
 
-For a meeting, the agent produces a meeting page, person pages for attendees, company pages where relevant, and backlinks between all of them, each citing the pre-written evidence snapshot.
+Notifications and authenticated wake routes reduce latency only. The committed job, lease, and
+polling loop own admission and recovery. Agentic handlers materialize one authorized Brain into a
+temporary root so they can read their own writes through the allowlisted CLI, then sync validated
+changes back at job completion.
 
-**Chat captures** run the same loop with a different mission (curate the existing inbox draft, described above), an expanded command surface (`merge` allowed, no deterministic pre-write), and the instruction that user-saved content is almost never skippable.
+Registered source families include meeting providers, Chat/MCP capture, uploaded assets, Google
+Drive documents, Slack/Gmail/Linear pointers, and provider activity from GitHub, HubSpot, Attio, and
+other current integrations. The handler registry in
+`apps/runner/src/goat-brain-ingest-worker.ts` is the executable source of truth.
 
-Both profiles share `runBrainAgentIngestSession`: resolve brain → materialize → agent loop → sync back with conflict detection. Failures retry with exponential backoff up to five attempts; expired leases are reclaimed by the next poll. A legacy deterministic job kind (`brain_source_item_ingest`) remains registered so previously queued jobs drain.
+## Access and validation
 
-New source providers follow the same template: normalize into `brain_source_items` (see `packages/goat-brain/src/source-items.ts`), enqueue a `brain_agent_ingest` job, and register a handler descriptor in the worker.
+Every Brain query and mutation is pinned to one `brain_ref`. Workspace-visible Brains follow
+workspace membership; restricted Brains additionally require a Brain membership row. API commands,
+read models, MCP, runner jobs, and asset routes each enforce that boundary rather than trusting a
+client-supplied workspace.
 
-### 5. Task research reports
+`validateGoatBrainDocument` enforces identifiers, folder/kind alignment, statuses, timestamps,
+links, and active-page provenance on write. `goat-brain doctor` performs corpus integrity checks for
+broken links, citations, aliases, relations, and weak provenance.
 
-Tasks planned with `resultMode: "brain_markdown_report"` save their final output as an `analysis` document in the `research/` folder instead of a plain text result (`createGoatBrainMarkdownReportForTask` in `apps/runner/src/goat-brain.ts`), with a `goat-task:<taskId>` source ref and a timeline entry. Tasks can also materialize the whole brain into their sandbox and sync edits back the same way the ingestion agents do.
+## Engineering references
 
-## Read paths
-
-- **Chat and agents** query through the CLI's `query` command, which runs the hybrid ranker in `packages/goat-brain/src/retrieval/`: BM25 lexical search, optional embedding + rerank via Vercel AI Gateway, reciprocal-rank fusion, then graph expansion along edges with score decay and a recency blend. Hits report whether they matched by `text`, `graph`, or `both`, and include the hop path.
-- **The UI** does not search this way; it subscribes to Electric-backed live collections of documents, timeline entries, and edges, scoped to the active brain, and re-renders as rows change. Server-rendered props are only the initial snapshot.
-- **Known limitation:** every agent query currently materializes the brain to a temp directory and discards it afterwards, so the embedding cache never persists between queries.
-
-`apps/web/docs/brain/retrieval-planes.md` is the design for where this is heading: a deterministic read module over `brain_documents` rows (no materialization, durable `brain_embeddings` cache, exposed in-process, over HTTP, and over a per-brain MCP connector) plus a read-only "librarian" agent for synthesized answers with typed citations. That design is not implemented yet; the MCP connector lives on a separate branch.
-
-## Multiple brains and access
-
-Brains belong to workspaces. `visibility: "workspace"` brains are readable by every workspace member; `restricted` brains only by rows in `brain_members`. The sidebar's brain switcher (`GoatBrainSwitcher`) lists accessible brains, lets admins manage access, and switching brains re-creates the live collections scoped to the new `brain_ref`. When a machine path needs a brain and none was specified (for example an ingest job with a null `brain_ref`), it resolves the user's default brain via `getDefaultGoatBrainForUser`.
-
-## Validation and health
-
-`validateGoatBrainDocument` enforces the format on every write: id/folder shape, kind/zone alignment, status values, timestamps, link syntax, and that active pages cite valid evidence or source provenance. `goat-brain doctor` (also exposed to agents) runs `checkGoatBrainHealth` across the whole brain and reports duplicate ids, parse errors, broken relations and links, broken citations, alias collisions, orphan nodes, weak provenance (compiled truth without timeline or frontmatter sources), and nonstandard source refs.
-
-## Where to change things
-
-- Document format, links, validation, retrieval, CLI: `packages/goat-brain/src/` (after CLI changes, regenerate the bundle with `bun run bundle`).
-- Tables, access control, file sync, ingest queue: `packages/db/src/goat-schema.ts`, `goat-brain-files.ts`, `goat-brain-ingest.ts`, `goat-workspaces.ts` (schema changes need a Drizzle migration).
-- Ingestion worker and agent prompts: `apps/runner/src/goat-brain-ingest-worker.ts`, `apps/runner/src/goat-brain-agent-ingest.ts`.
-- Chat capture flow: the shared agent tools in `packages/goat-agent`, their API/runner composition,
-  and the Cloud Codex host tool and gateway in
-  `apps/runner/src/goat-codex-brain-capture-tool.ts` and `apps/web/lib/codex-brain-capture.ts`.
-- New source providers: normalize into `brain_source_items`, enqueue a `brain_agent_ingest` job, and add a handler — the Jamie webhook route and the chat capture path are the templates.
-- Brain UI: `apps/web/components/GoatBrainView.tsx`, `MarkdownGoatBrainEditor.tsx`, `GoatBrainSwitcher.tsx`, and server actions in `apps/web/lib/brain-actions.ts`.
-- Design references: `apps/web/docs/brain/pointer-copy-contract.md` and `apps/web/docs/brain/retrieval-planes.md`.
+- System map: `apps/web/docs/brain/README.md`
+- Data model: `apps/web/docs/brain/data-model.md`
+- Durable ingestion: `apps/web/docs/brain/ingestion.md`
+- Tools and CLI: `apps/web/docs/brain/tools-and-cli.md`
+- Pointer/copy contract: `apps/web/docs/brain/pointer-copy-contract.md`

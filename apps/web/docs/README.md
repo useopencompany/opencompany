@@ -41,7 +41,7 @@ locator fields never enter client DTOs.
 
 Manual, Workflow, schedule, and agent producers call shared application services. Creation writes a
 Task, its Conversation, initial Message, and Run atomically. Follow-ups use the Message command and
-cancellation targets the active Run. The runner applies per-session FIFO, fenced leases, retries,
+cancellation targets the active Run. The runner applies per-Conversation FIFO, fenced leases, retries,
 and terminal settlement.
 
 The 35 known sessionless pre-cutover Tasks are intentionally separate. They remain readable through

@@ -1,4 +1,4 @@
-# Goat Brain Pointer/Copy Contract
+# Brain pointer/copy contract
 
 How brain writers cite external sources. This is design principle 6 of the brain foundation
 (issue #597): the brain keeps claims and pointers, and copies content only when it has to.
@@ -27,7 +27,7 @@ Every claim written into the brain has three parts:
 | Emails | Snapshot into `evidence/` | Mailboxes are private and mutable; the brain cannot rely on re-fetching. |
 | Tracked work items (Linear issues, GitHub issues/PRs) | Pointer + one-line current-state summary | The tracker is the canonical live home; body copies go stale the moment they are written. Never copy the body. |
 | Google Drive documents | Pointer only | Drive is the canonical live home. The ingest agent synthesizes durable facts with `google-drive:file:<fileId>` provenance but never creates an `evidence/` snapshot or mirrors the document. |
-| Uploaded files (PDFs) | Bytes-by-key + extracted-text copy | The brain itself is the canonical home: the blob holds the bytes (`asset_storage_key`), the document row holds the machine-extracted text, and the page's `sources` entry carries the `upload:<documentId>` ref. See [data-model.md](./data-model.md#binary-assets-pdf). |
+| Uploaded files | Bytes-by-key + extracted-text copy | Brain is the canonical home: the blob holds the bytes (`asset_storage_key`), the document row holds machine-extracted text when supported, and the page's `sources` entry carries the `upload:<documentId>` ref. See [data-model.md](./data-model.md#binary-assets). |
 | Everything else | Pointer only, by default | Snapshot only if the content could not be re-fetched later. |
 
 ## Source ref grammar
@@ -75,6 +75,6 @@ type GoatBrainSourceResolver = {
 
 When resolvers land, a reader (deterministic read plane or the librarian agent, step 4 of #597)
 can turn `[[source:linear:issue_ABC-12]]` into a live link with fresh state instead of trusting
-the one-line summary frozen at write time. Implementations belong in the integrations layer
-(`integration_events` / `packages/integrations` direction), registered per provider — never in
+the one-line summary frozen at write time. Implementations belong behind the API/runner integration
+boundary, registered per provider and passed to shared Brain behavior — never embedded in
 `packages/goat-brain`.

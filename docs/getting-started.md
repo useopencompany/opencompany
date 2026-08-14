@@ -24,8 +24,8 @@ checked-in migrations, starts local Electric, and mirrors the required values to
 `apps/web/.env.local`. It is safe to rerun.
 
 The local web app is a presentation client. Product commands, identity persistence, and authorized
-read models are served by the local API; the runner claims durable execution/background work
-directly from the branch database. Setup does not enable a legacy Chat or web-database mode.
+read models are served by the local API; the runner claims durable execution and background work
+directly from the branch database.
 
 Use `bun run setup -- --check` for a read-only readiness report. `bun run env:pull` refreshes shared
 development values, and `bun run setup:stripe` refreshes local Stripe configuration.
@@ -35,18 +35,19 @@ development values, and `bun run setup:stripe` refreshes local Stripe configurat
 `bun run dev` and `bun run dev:web` start the same current stack:
 
 - the OpenCompany web app, normally at `https://localhost:3443`;
-- the canonical API, normally at `http://localhost:3001`;
+- the product API, normally at `http://localhost:3001`;
 - the runner, normally at `http://localhost:3040`;
 - Stripe CLI forwarding to the web app's unchanged `/api/stripe/webhook` relay, which streams to
   the API-owned handler;
 - Electric and the local HTTPS/tunnel helpers used by integrations.
 
 The browser uses the web origin for pages and the configured API origin for `/v1` commands, streams,
-and named read models. Historical provider callback URLs may pass through thin web relays before the
-API handles them; this does not create a second local backend.
+and named read models. Provider callback URLs may pass through thin web relays before the API handles
+them; this does not create a second local backend.
 
-Use `bun run dev:logs -- --source web --tail 100` or `--source runner` to inspect the gitignored
-Turbo log. Do not paste unredacted local logs into issues because provider output can be sensitive.
+Use `bun run dev:logs -- --source web --tail 100`, `--source @opencompany/api#dev`, or
+`--source runner` to inspect the gitignored Turbo log. Do not paste unredacted local logs into issues
+because provider output can be sensitive.
 
 ## Database isolation
 

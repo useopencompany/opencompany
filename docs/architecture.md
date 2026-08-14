@@ -20,7 +20,7 @@ OpenCompany is a modular monolith with three product composition roots: `web` pr
 
 The detailed product flow is maintained in
 [the OpenCompany system map](../apps/web/docs/README.md). Operational behavior is in
-[Headless Chat operations](./headless-chat-operations.md), and the permanent ownership decision is
+[Chat operations](./chat-operations.md), and the permanent ownership decision is
 [ADR 0003](./adr/0003-headless-workflow-and-schedule-foundation.md).
 
 ## Data and client boundary
