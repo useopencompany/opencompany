@@ -48,8 +48,10 @@ import { ensureCodexInstalled } from "./codex-cli";
 import { materializeCodexSkillSnapshotsForSession } from "./codex-managed-skills";
 import { createKnownSecretRedactor, gitAuthHeader } from "./coding-agent-shared";
 import {
-  type CodingChatHistoryMessage,
+  type CodingChatHistory,
+  type CodingChatHistoryAttachmentMaterialization,
   codingChatHistoryPromptLines,
+  emptyCodingChatHistory,
   loadCodingChatHistory,
 } from "./coding-chat-history";
 import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
@@ -458,7 +460,10 @@ export async function runCodexChatTurn(input: {
         : []),
     ];
     executionStage = "run_turn";
-    const buildTask = (history: readonly CodingChatHistoryMessage[]) =>
+    const buildTask = (
+      history: CodingChatHistory,
+      historyAttachmentMaterialization?: CodingChatHistoryAttachmentMaterialization,
+    ) =>
       input.recovery
         ? buildCodexChatRecoveryTask({
             prompt: turn.prompt,
@@ -474,6 +479,7 @@ export async function runCodexChatTurn(input: {
             previousProgress: summarizeCodexChatRecoveryProgress(initialParts),
             attachmentPaths: materializedAttachments.paths,
             conversationHistory: history,
+            ...(historyAttachmentMaterialization ? { historyAttachmentMaterialization } : {}),
             taskContext,
           })
         : buildCodexChatTask({
@@ -489,6 +495,7 @@ export async function runCodexChatTurn(input: {
             ),
             attachmentPaths: materializedAttachments.paths,
             conversationHistory: history,
+            ...(historyAttachmentMaterialization ? { historyAttachmentMaterialization } : {}),
             taskContext,
           });
     const summary = await runCodexAppServerTurn({
@@ -497,8 +504,20 @@ export async function runCodexChatTurn(input: {
       codexHome: CODEX_CHAT_HOME,
       skillFingerprint: codexSkills.fingerprint,
       skills: invokedSkills,
-      task: buildTask([]),
-      bootstrapTask: buildTask(conversationHistory),
+      task: buildTask(emptyCodingChatHistory()),
+      prepareBootstrapTurn: async () => {
+        const historyAttachments = await materializeCodingChatHistory({
+          sandbox,
+          turnId: turn.id,
+          history: conversationHistory,
+          blobToken: env.blobReadWriteToken,
+        });
+        await checkAbort();
+        return {
+          task: buildTask(conversationHistory, historyAttachments.materialization),
+          localImages: historyAttachments.localImages,
+        };
+      },
       localImages: materializedAttachments.localImages,
       dynamicTools,
       model: session.model || env.codexModel,
@@ -1162,7 +1181,8 @@ function buildCodexChatTask(input: {
   artifactsAvailable: boolean;
   repositoryBootstrapPrompt: string;
   attachmentPaths: string[];
-  conversationHistory: readonly CodingChatHistoryMessage[];
+  conversationHistory: CodingChatHistory;
+  historyAttachmentMaterialization?: CodingChatHistoryAttachmentMaterialization;
   taskContext?: TaskTurnContext | undefined;
 }) {
   return [
@@ -1186,7 +1206,10 @@ function buildCodexChatTask(input: {
       : null,
     ...codexBackgroundTaskPromptLines(input.taskContext),
     "Answer conversationally. Run commands or edit files only when the message calls for it, and keep replies concise unless the user asks for detail.",
-    ...codingChatHistoryPromptLines(input.conversationHistory),
+    ...codingChatHistoryPromptLines(
+      input.conversationHistory,
+      input.historyAttachmentMaterialization,
+    ),
     "",
     "<user_message>",
     input.prompt || "Review the attached file(s).",
@@ -1207,7 +1230,8 @@ function buildCodexChatRecoveryTask(input: {
   repositoryBootstrapPrompt: string;
   previousProgress: string;
   attachmentPaths: string[];
-  conversationHistory: readonly CodingChatHistoryMessage[];
+  conversationHistory: CodingChatHistory;
+  historyAttachmentMaterialization?: CodingChatHistoryAttachmentMaterialization;
   taskContext?: TaskTurnContext | undefined;
 }) {
   return [
@@ -1232,7 +1256,10 @@ function buildCodexChatRecoveryTask(input: {
       : null,
     ...codexBackgroundTaskPromptLines(input.taskContext),
     "If the interrupted work already finished, report the final result. If additional work is needed, finish it and then answer concisely.",
-    ...codingChatHistoryPromptLines(input.conversationHistory),
+    ...codingChatHistoryPromptLines(
+      input.conversationHistory,
+      input.historyAttachmentMaterialization,
+    ),
     "",
     "<original_user_message>",
     input.prompt || "Review the attached file(s).",
@@ -1286,9 +1313,15 @@ export async function materializeCodexChatAttachments(input: {
   turnId: string;
   attachments: ChatMessageAttachment[];
   blobToken: string | undefined;
+  bestEffort?: boolean;
 }) {
   if (input.attachments.length === 0) {
-    return { paths: [], localImages: [] };
+    return {
+      paths: [],
+      localImages: [],
+      materializedAttachments: [],
+      unavailableAttachmentIds: [],
+    };
   }
 
   const absoluteDirectory = `${CODEX_CHAT_ATTACHMENTS_ROOT}/${safePathSegment(input.turnId)}`;
@@ -1303,25 +1336,78 @@ export async function materializeCodexChatAttachments(input: {
           absolutePath,
           content,
         };
-      } catch {
+      } catch (error) {
+        if (input.bestEffort) {
+          logger.warn("Historical chat attachment could not be rematerialized", {
+            event: "opencompany.goat_coding_chat_history_attachment_unavailable",
+            turn_id: input.turnId,
+            attachment_id: attachment.id,
+            error_name: error instanceof Error ? error.name : typeof error,
+          });
+          return { attachment, unavailable: true as const };
+        }
         throw new Error(`Attachment "${attachment.filename}" could not be loaded.`);
       }
     }),
   );
 
-  await input.sandbox.commands.run(`mkdir -p ${shellQuote(absoluteDirectory)}`, {
-    timeoutMs: 30_000,
-  });
-  await writeSandboxTextFiles({
-    sandbox: input.sandbox,
-    files: files.map((file) => ({ path: file.absolutePath, content: file.content })),
-  });
+  const materializedFiles = files.filter(
+    (file): file is Exclude<(typeof files)[number], { unavailable: true }> =>
+      !("unavailable" in file),
+  );
+
+  if (materializedFiles.length > 0) {
+    await input.sandbox.commands.run(`mkdir -p ${shellQuote(absoluteDirectory)}`, {
+      timeoutMs: 30_000,
+    });
+    await writeSandboxTextFiles({
+      sandbox: input.sandbox,
+      files: materializedFiles.map((file) => ({ path: file.absolutePath, content: file.content })),
+    });
+  }
 
   return {
-    paths: files.map((file) => file.absolutePath),
-    localImages: files
+    paths: materializedFiles.map((file) => file.absolutePath),
+    localImages: materializedFiles
       .filter((file) => file.attachment.kind === "image")
       .map((file) => ({ path: file.absolutePath, detail: "original" as const })),
+    materializedAttachments: materializedFiles.map((file) => ({
+      attachmentId: file.attachment.id,
+      path: file.absolutePath,
+    })),
+    unavailableAttachmentIds: files.flatMap((file) =>
+      "unavailable" in file ? [file.attachment.id] : [],
+    ),
+  };
+}
+
+export async function materializeCodingChatHistory(input: {
+  sandbox: SandboxHandle;
+  turnId: string;
+  history: CodingChatHistory;
+  blobToken: string | undefined;
+}): Promise<{
+  materialization: CodingChatHistoryAttachmentMaterialization;
+  localImages: Array<{ path: string; detail: "original" }>;
+}> {
+  const materialized = await materializeCodexChatAttachments({
+    sandbox: input.sandbox,
+    turnId: `${input.turnId}-history`,
+    attachments: input.history.materializableAttachments,
+    blobToken: input.blobToken,
+    bestEffort: true,
+  });
+  return {
+    materialization: {
+      pathsByAttachmentId: new Map(
+        materialized.materializedAttachments.map((attachment) => [
+          attachment.attachmentId,
+          attachment.path,
+        ]),
+      ),
+      unavailableAttachmentIds: new Set(materialized.unavailableAttachmentIds),
+    },
+    localImages: materialized.localImages,
   };
 }
 

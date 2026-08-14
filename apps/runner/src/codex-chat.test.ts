@@ -9,6 +9,7 @@ import {
   CodexChatInterruptedError,
   claimCodexChatRecovery,
   createTurnAbortCheck,
+  materializeCodingChatHistory,
   runCodexChatTurn,
   summarizeCodexChatRecoveryProgress,
 } from "./codex-chat";
@@ -164,6 +165,38 @@ describe("createTurnAbortCheck", () => {
   });
 });
 
+describe("materializeCodingChatHistory", () => {
+  it("keeps recovery usable when an old attachment blob is unavailable", async () => {
+    attachmentMocks.downloadBlobBytes.mockRejectedValueOnce(new Error("Blob not found"));
+    const attachment = {
+      id: "attachment_missing",
+      kind: "image" as const,
+      mediaType: "image/png",
+      filename: "missing.png",
+      sizeBytes: 128,
+      blobPathname: "goat-chat/user_1/missing.png",
+      blobUrl: "https://blob.test/goat-chat/user_1/missing.png",
+    };
+
+    const result = await materializeCodingChatHistory({
+      sandbox: fakeSandbox("sbx_existing") as never,
+      turnId: "turn_2",
+      history: {
+        messages: [],
+        materializableAttachments: [attachment],
+        omittedTurnCount: 0,
+        omittedAttachmentCount: 0,
+      },
+      blobToken: "blob-token",
+    });
+
+    expect(result.materialization.pathsByAttachmentId).toEqual(new Map());
+    expect(result.materialization.unavailableAttachmentIds).toEqual(
+      new Set(["attachment_missing"]),
+    );
+  });
+});
+
 describe("runCodexChatTurn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -178,7 +211,12 @@ describe("runCodexChatTurn", () => {
     });
     codexAuthMocks.persistRefreshedCodexAuth.mockResolvedValue(undefined);
     codexToolMocks.ensureCodexInstalled.mockResolvedValue(undefined);
-    historyMocks.loadCodingChatHistory.mockResolvedValue([]);
+    historyMocks.loadCodingChatHistory.mockResolvedValue({
+      messages: [],
+      materializableAttachments: [],
+      omittedTurnCount: 0,
+      omittedAttachmentCount: 0,
+    });
     eventMocks.loadCodexChatAssistantMessageParts.mockResolvedValue([]);
     eventMocks.createCodexChatProjector.mockReturnValue({
       push: vi.fn(async () => undefined),
@@ -267,10 +305,35 @@ describe("runCodexChatTurn", () => {
   });
 
   it("supplies durable history only when Codex must bootstrap a native thread", async () => {
-    historyMocks.loadCodingChatHistory.mockResolvedValueOnce([
-      { role: "user", content: "Inspect the repository.", attachments: [] },
-      { role: "assistant", content: "It uses Next.js.", attachments: [] },
-    ]);
+    const priorAttachment = {
+      id: "attachment_prior",
+      kind: "image" as const,
+      mediaType: "image/png",
+      filename: "architecture.png",
+      sizeBytes: 128,
+      blobPathname: "goat-chat/user_1/architecture.png",
+      blobUrl: "https://blob.test/goat-chat/user_1/architecture.png",
+    };
+    historyMocks.loadCodingChatHistory.mockResolvedValueOnce({
+      messages: [
+        {
+          role: "user",
+          content: "Inspect the repository.",
+          attachments: [
+            {
+              id: priorAttachment.id,
+              kind: priorAttachment.kind,
+              mediaType: priorAttachment.mediaType,
+              filename: priorAttachment.filename,
+            },
+          ],
+        },
+        { role: "assistant", content: "It uses Next.js.", attachments: [] },
+      ],
+      materializableAttachments: [priorAttachment],
+      omittedTurnCount: 0,
+      omittedAttachmentCount: 0,
+    });
 
     await runCodexChatTurn({
       turn: { ...codexTurn(), prompt: "What did we establish?" },
@@ -278,15 +341,32 @@ describe("runCodexChatTurn", () => {
       env: env(),
     });
 
-    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+    const appServerInput = appServerMocks.runCodexAppServerTurn.mock.calls[0]?.[0];
+    expect(appServerInput).toEqual(
       expect.objectContaining({
         existingEngineSessionId: null,
         task: expect.not.stringContaining("Inspect the repository."),
-        bootstrapTask: expect.stringMatching(
-          /conversation_history_json[\s\S]*Inspect the repository\.[\s\S]*What did we establish\?/u,
-        ),
+        prepareBootstrapTurn: expect.any(Function),
       }),
     );
+    dbMocks.selectRows.push([
+      { interruptRequestedAt: null, leaseId: "lease_1", leaseOwner: "runner_1" },
+    ]);
+    const prepared = await appServerInput?.prepareBootstrapTurn();
+    expect(prepared).toEqual(
+      expect.objectContaining({
+        task: expect.stringMatching(
+          /conversation_history_json[\s\S]*Inspect the repository\.[\s\S]*What did we establish\?/u,
+        ),
+        localImages: [
+          expect.objectContaining({
+            path: expect.stringContaining("attachment_prior-architecture.png"),
+            detail: "original",
+          }),
+        ],
+      }),
+    );
+    expect(prepared?.task).toContain("sandboxPath");
   });
 
   it("invalidates a Codex checkpoint when its sandbox is replaced", async () => {

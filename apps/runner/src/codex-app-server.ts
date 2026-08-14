@@ -68,6 +68,11 @@ export type CodexAppServerLocalImage = {
   detail?: "high" | "original";
 };
 
+export type CodexAppServerBootstrapTurn = {
+  task: string;
+  localImages?: CodexAppServerLocalImage[];
+};
+
 export type CodexAppServerSkill = {
   name: string;
   path: string;
@@ -186,7 +191,7 @@ export async function runCodexAppServerTurn(input: {
   codexHome: string;
   skillFingerprint: string;
   task: string;
-  bootstrapTask?: string;
+  prepareBootstrapTurn?: () => Promise<CodexAppServerBootstrapTurn>;
   skills?: CodexAppServerSkill[];
   localImages?: CodexAppServerLocalImage[];
   dynamicTools?: CodexAppServerDynamicTool[];
@@ -318,7 +323,7 @@ async function killSocketAppServerProcesses(sandbox: SandboxHandle, socketPath: 
 async function runTurnThroughProxy(input: {
   sandbox: SandboxHandle;
   task: string;
-  bootstrapTask?: string;
+  prepareBootstrapTurn?: () => Promise<CodexAppServerBootstrapTurn>;
   skills?: CodexAppServerSkill[];
   localImages?: CodexAppServerLocalImage[];
   dynamicTools?: CodexAppServerDynamicTool[];
@@ -410,6 +415,7 @@ async function runTurnThroughProxy(input: {
         ...input,
         dynamicTools,
         allowFreshThreadOnResumeFailure: !input.reattachExistingTurn,
+        ...(input.prepareBootstrapTurn ? { prepareBootstrapTurn: input.prepareBootstrapTurn } : {}),
       },
     });
     threadId = thread.id;
@@ -458,7 +464,7 @@ async function runTurnThroughProxy(input: {
         input: [
           {
             type: "text",
-            text: thread.resumed ? input.task : (input.bootstrapTask ?? input.task),
+            text: thread.bootstrapTurn?.task ?? input.task,
             text_elements: [],
           },
           ...(input.skills ?? []).map((skill) => ({
@@ -466,11 +472,13 @@ async function runTurnThroughProxy(input: {
             name: skill.name,
             path: skill.path,
           })),
-          ...(input.localImages ?? []).map((image) => ({
-            type: "localImage",
-            path: image.path,
-            ...(image.detail ? { detail: image.detail } : {}),
-          })),
+          ...(input.localImages ?? [])
+            .concat(thread.bootstrapTurn?.localImages ?? [])
+            .map((image) => ({
+              type: "localImage",
+              path: image.path,
+              ...(image.detail ? { detail: image.detail } : {}),
+            })),
         ],
         cwd: input.plan.codexWorkRoot,
         model: input.model,
@@ -554,6 +562,7 @@ async function startOrResumeThread(input: {
     planModeReasoningEffort: CodexReasoningEffort | null;
     dynamicTools: CodexAppServerDynamicTool[];
     allowFreshThreadOnResumeFailure: boolean;
+    prepareBootstrapTurn?: () => Promise<CodexAppServerBootstrapTurn>;
     plan: ReturnType<typeof buildCodexAppServerCommandPlan>;
   };
 }) {
@@ -571,6 +580,7 @@ async function startOrResumeThread(input: {
         id: stringFromPath(resumed, ["thread", "id"]) ?? input.input.existingEngineSessionId,
         value: isRecord(resumed) && isRecord(resumed.thread) ? resumed.thread : {},
         resumed: true,
+        bootstrapTurn: null,
       };
     } catch (error) {
       if (!input.input.allowFreshThreadOnResumeFailure) throw error;
@@ -581,6 +591,7 @@ async function startOrResumeThread(input: {
     }
   }
 
+  const bootstrapTurn = await input.input.prepareBootstrapTurn?.();
   const started = await input.client.request("thread/start", {
     model: input.input.model,
     cwd: input.input.plan.codexWorkRoot,
@@ -597,6 +608,7 @@ async function startOrResumeThread(input: {
     id: threadId,
     value: isRecord(started) && isRecord(started.thread) ? started.thread : {},
     resumed: false,
+    bootstrapTurn: bootstrapTurn ?? null,
   };
 }
 

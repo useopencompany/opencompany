@@ -31,6 +31,7 @@ const chatMocks = vi.hoisted(() => ({
   loadGitHubAuthForUser: vi.fn(),
   markCodexChatSandboxTimeoutArmed: vi.fn(),
   materializeCodexChatAttachments: vi.fn(),
+  materializeCodingChatHistory: vi.fn(),
   summarizeCodexChatRecoveryProgress: vi.fn(),
   updateCodexChatSessionIfLeaseHeld: vi.fn(),
 }));
@@ -133,6 +134,7 @@ vi.mock("./codex-chat", () => ({
   loadGitHubAuthForUser: chatMocks.loadGitHubAuthForUser,
   markCodexChatSandboxTimeoutArmed: chatMocks.markCodexChatSandboxTimeoutArmed,
   materializeCodexChatAttachments: chatMocks.materializeCodexChatAttachments,
+  materializeCodingChatHistory: chatMocks.materializeCodingChatHistory,
   summarizeCodexChatRecoveryProgress: chatMocks.summarizeCodexChatRecoveryProgress,
   updateCodexChatSessionIfLeaseHeld: chatMocks.updateCodexChatSessionIfLeaseHeld,
 }));
@@ -290,9 +292,21 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       paths: [],
       localImages: [],
     });
+    chatMocks.materializeCodingChatHistory.mockResolvedValue({
+      materialization: {
+        pathsByAttachmentId: new Map(),
+        unavailableAttachmentIds: new Set(),
+      },
+      localImages: [],
+    });
     chatMocks.summarizeCodexChatRecoveryProgress.mockReturnValue("");
     chatMocks.updateCodexChatSessionIfLeaseHeld.mockResolvedValue(true);
-    historyMocks.loadCodingChatHistory.mockResolvedValue([]);
+    historyMocks.loadCodingChatHistory.mockResolvedValue({
+      messages: [],
+      materializableAttachments: [],
+      omittedTurnCount: 0,
+      omittedAttachmentCount: 0,
+    });
     cliMocks.ensureClaudeInstalled.mockResolvedValue(undefined);
     cliMocks.killLeftoverClaudeTurnProcesses.mockResolvedValue(undefined);
     cliMocks.buildClaudeTurnCommand.mockReturnValue("claude -p prompt");
@@ -466,10 +480,15 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
   it("bootstraps durable history after a stale Claude session cannot resume", async () => {
     const sandbox = fakeSandbox("sbx_existing");
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
-    historyMocks.loadCodingChatHistory.mockResolvedValueOnce([
-      { role: "user", content: "Inspect the repository.", attachments: [] },
-      { role: "assistant", content: "It uses Next.js.", attachments: [] },
-    ]);
+    historyMocks.loadCodingChatHistory.mockResolvedValueOnce({
+      messages: [
+        { role: "user", content: "Inspect the repository.", attachments: [] },
+        { role: "assistant", content: "It uses Next.js.", attachments: [] },
+      ],
+      materializableAttachments: [],
+      omittedTurnCount: 0,
+      omittedAttachmentCount: 0,
+    });
     cliMocks.runClaudeCodeCliProcess
       .mockResolvedValueOnce({
         exitCode: 1,

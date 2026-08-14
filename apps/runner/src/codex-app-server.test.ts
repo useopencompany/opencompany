@@ -459,6 +459,7 @@ describe("runCodexAppServerTurn", () => {
 
   it("resumes an existing thread id on follow-up turns", async () => {
     const sandbox = fakeSandbox();
+    const prepareBootstrapTurn = vi.fn(async () => ({ task: "durable history" }));
 
     const summary = await runCodexAppServerTurn({
       sandbox: sandbox as never,
@@ -466,6 +467,7 @@ describe("runCodexAppServerTurn", () => {
       codexHome,
       skillFingerprint: "skills_a",
       task: "continue",
+      prepareBootstrapTurn,
       model: "gpt-5.5",
       reasoningEffort: "medium",
       planModeReasoningEffort: null,
@@ -513,6 +515,7 @@ describe("runCodexAppServerTurn", () => {
     expect(sandbox.sentMessages().find((message) => message.method === "turn/start")).toMatchObject(
       {
         params: {
+          input: [{ type: "text", text: "continue", text_elements: [] }],
           collaborationMode: {
             mode: "default",
             settings: {
@@ -524,12 +527,16 @@ describe("runCodexAppServerTurn", () => {
         },
       },
     );
+    expect(prepareBootstrapTurn).not.toHaveBeenCalled();
     expect(summary.sessionId).toBe("thread_existing");
   });
 
   it("bootstraps durable history when a follow-up thread cannot be resumed", async () => {
     const sandbox = fakeSandbox({ resumeError: true });
     const persistedThreadIds: string[] = [];
+    const prepareBootstrapTurn = vi.fn(async () => ({
+      task: "durable conversation history\n\ncurrent user request",
+    }));
 
     const summary = await runCodexAppServerTurn({
       sandbox: sandbox as never,
@@ -537,7 +544,7 @@ describe("runCodexAppServerTurn", () => {
       codexHome,
       skillFingerprint: "skills_a",
       task: "current user request",
-      bootstrapTask: "durable conversation history\n\ncurrent user request",
+      prepareBootstrapTurn,
       model: "gpt-5.5",
       reasoningEffort: "medium",
       planModeReasoningEffort: null,
@@ -574,6 +581,7 @@ describe("runCodexAppServerTurn", () => {
       },
     );
     expect(persistedThreadIds).toEqual(["thread_started"]);
+    expect(prepareBootstrapTurn).toHaveBeenCalledOnce();
     expect(summary.sessionId).toBe("thread_started");
   });
 
