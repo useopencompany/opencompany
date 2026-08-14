@@ -9,8 +9,8 @@ duplicating every optional provider variable.
 | --- | --- | --- |
 | `dev` `/goat` | local web/API stack | browser auth/presentation values plus shared local API inputs |
 | `dev` `/runner` | local runner | runner tokens, provider credentials, sandbox configuration |
-| `prod` `/goat` | Vercel web | browser auth, first-party origins, thin relays, email sender, telemetry, and bounded compatibility inputs |
-| `prod` `/api` | Render canonical API | database, auth, billing/Stripe, managed capabilities, Auto-routing gateway, Blob, Electric, Redis, and telemetry configuration |
+| `prod` `/goat` | Vercel web | browser auth, first-party origins, public URL and cron relays, email sender, and telemetry |
+| `prod` `/api` | Render product API | database, auth, billing/Stripe, provider ingress, managed capabilities, Auto-routing gateway, Blob, Electric, Redis, and telemetry configuration |
 | `prod` `/runner` | Render runner | production worker and broker configuration |
 | `prod` `/release` | GitHub Actions | production URLs, project/service IDs, deploy tokens, DB URL |
 | `prod` `/ci/turbo` | GitHub Actions | optional Turborepo remote-cache credentials |
@@ -48,10 +48,10 @@ release variables. Important contracts include:
 - Release: production DB URL, Vercel/Render credentials and project/service IDs, Goat/API/runner
   URLs.
 
-Canonical browser clients call the non-secret `NEXT_PUBLIC_GOAT_API_ORIGIN` directly for commands
-and authorized read models. RSC loaders use the server-only `GOAT_API_ORIGIN`. Configure both
-origins, the shared `WORKOS_COOKIE_DOMAIN`, and API `API_BROWSER_ORIGINS`. Chat is fully cut over and
-operates fix-forward as documented in [Headless Chat operations](./headless-chat-operations.md).
+Browser clients call the non-secret `NEXT_PUBLIC_GOAT_API_ORIGIN` directly for commands and
+authorized read models. Server Components use the server-only `GOAT_API_ORIGIN`. Configure both
+origins, the shared `WORKOS_COOKIE_DOMAIN`, and API `API_BROWSER_ORIGINS`. Chat recovery is
+fix-forward as documented in [Chat operations](./chat-operations.md).
 
 `CRON_SECRET` must have the same value in prod `/goat` and `/api`: web keeps the public cron URL
 while the API owns onboarding-email persistence.
@@ -64,8 +64,8 @@ Postgres streaming and reconnect behavior. The value is server-only and must nev
 
 The Stripe endpoint secret is `GOAT_STRIPE_WEBHOOK_SECRET` in `prod` `/api`; it is not a web secret.
 Stripe still calls the unchanged web URL, which streams the signed raw body to the API-owned
-handler. Other historical provider URLs follow the same rule: a web relay may preserve the public
-URL, but provider state, signing, credentials, and persistence configuration belong to the API.
+handler. Other provider URLs follow the same rule: a web relay may preserve a stable public URL,
+but provider state, signing, credentials, and persistence configuration belong to the API.
 
 The generic `NEXT_PUBLIC_POSTHOG_*` names are server-side compatibility inputs despite their
 historical prefix: API billing and runner ingestion code still read them. Do not delete their only

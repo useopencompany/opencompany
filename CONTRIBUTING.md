@@ -18,8 +18,8 @@ bun run secrets:check
 ```
 
 TruffleHog must be installed for the local secret scan. CI runs the same scan on pull requests.
-`boundary:check` prevents new production `apps/web` imports of the database or Drizzle while the
-headless-core migration removes the audited legacy imports; `lint` runs the same ratchet.
+`boundary:check` enforces the permanent rule that production `apps/web` code cannot import the
+database, Drizzle, or retired worker-control transports; `lint` runs the same check.
 For focused checks, use Turborepo filters such as `bun run test --filter @opencompany/web` and
 `bun run test --filter @opencompany/runner`.
 
@@ -35,8 +35,9 @@ external provider or fixture was unavailable.
 - Never rewrite migration history or run production migrations from a development task.
 - New env vars must be added to `.env.example`, the appropriate Infisical path, release preflight,
   and operational documentation.
-- Goat production secrets live in `prod` `/goat`; runner secrets live in `prod` `/runner`; release
-  credentials live in `prod` `/release`.
+- Web production secrets live in the retained `prod` `/goat` deployment namespace; API secrets
+  live in `prod` `/api`; runner secrets live in `prod` `/runner`; release credentials live in
+  `prod` `/release`.
 
 ## Tooling
 

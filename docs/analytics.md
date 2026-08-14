@@ -1,90 +1,56 @@
 # Analytics
 
-We use PostHog through the shared `@opencompany/analytics` package. App code should not import
-PostHog directly.
-
-The legacy web app and Goat send to separate PostHog projects. The shared package only reuses the
-transport and privacy conventions; each product has its own event registry and project token.
+OpenCompany uses PostHog through the shared `@opencompany/analytics` package. Product code should
+not import PostHog directly.
 
 ## Event registries
 
-- `packages/analytics/src/events.ts` is the legacy web event registry.
-- `packages/analytics/src/goat-events.ts` is the Goat event registry.
+`packages/analytics/src/goat-events.ts` is the current product registry. It defines every event
+name, allowed property shape, description, and safe property keys. Events cover app and onboarding
+activity, Chat and Task use, integrations and Brain ingestion, model usage and spend, and billing
+top-ups.
 
-Each registry defines every event name, its allowed property shape, a description, and the safe
-property keys reviewers should expect.
+`packages/analytics/src/events.ts` is a separate billing-compatibility registry. It exists for the
+shared Stripe and retained billing contracts and is not a second product analytics surface. Do not
+add ordinary product events to it.
 
-Goat's product events are:
-
-| Event | Purpose |
-| --- | --- |
-| `app_opened` | Signed-in active users |
-| `signup_completed` | New-user conversion |
-| `chat_message_sent` | Main-chat engagement across OpenCompany, Codex, and Claude Code engines; `is_first_message` also measures new chats |
-| `integration_added` | Integration activation |
-| `brain_source_added` | A new enabled integration source was attached to a Brain |
-| `brain_ingestion_completed` | A full Brain ingestion job completed successfully |
-| `billing_topup_completed` | Credits were added manually or by auto-refill; `topup_type` distinguishes the path and `amount_usd` can be summed for daily revenue |
-
-There is no separate `chat_started` event because it would double-count the first message. Goat
-does not capture pageviews, page leaves, clicks, dead clicks, heatmaps, exceptions, performance,
-feature flags, surveys, product tours, conversations, or session recordings.
+There is no separate `chat_started` event: the first Message is represented by
+`chat_message_sent.is_first_message`. Before adding a new event, check the registry for an existing
+signal that already answers the question.
 
 ## Privacy rules
 
-Event payloads should only send coarse product data:
+Event payloads may contain internal entity IDs, selected enum values, counts, durations, model
+metadata, and changed field names. OpenCompany identifies a person with the internal WorkOS user
+ID; the allowlisted workspace and display fields may be set as person properties.
 
-- internal user, workspace, and entity IDs
-- selected enum values
-- counts and changed field names
+Do not send prompts, Messages, tool arguments or output, provider payloads, file contents, company
+URLs, free-text onboarding answers, credentials, or other user-authored content. Lengths and counts
+are acceptable where the registry permits them. Person properties must not be copied into ordinary
+event properties unless the registry explicitly includes the field.
 
-Goat identifies people with the internal WorkOS user ID. It sets workspace ID, email, first name,
-last name, and display name as person properties so activity remains attributable across browser
-and server-side events. These allowlisted identity fields may be set through the browser
-`identify()` call or PostHog's server-side `$set`; they must not be copied into ordinary event
-properties.
+## Configuration
 
-Do not send company URLs, free-text onboarding answers, agent content, editor documents, prompts,
-or other user-authored content. `message_length` is allowed; message content is not.
-
-## Project setup and environment
-
-Create a PostHog project named `Goat` in the same PostHog organization as the legacy web project.
-Do not reuse the legacy project's token.
-
-Store the Goat project's API host and project token in:
-
-- Infisical `prod` + `/goat`, synced to the existing web Vercel project
-- Infisical `prod` + `/web`, synced temporarily to the legacy Vercel project for the Stripe
-  cutover rollback route
-- Infisical `prod` + `/runner`, synced to Render for completed Brain ingestion events
-- Infisical `dev` + `/web` when local Goat analytics are needed
-- Infisical `dev` + `/runner` when local Brain ingestion analytics are needed
-
-Analytics is optional in ordinary local development. Missing values make the package a no-op.
+The current product project uses:
 
 ```bash
-# Legacy web project
-NEXT_PUBLIC_POSTHOG_TOKEN=""
-NEXT_PUBLIC_POSTHOG_HOST=""
-
-# Dedicated Goat project
 NEXT_PUBLIC_GOAT_POSTHOG_TOKEN=""
 NEXT_PUBLIC_GOAT_POSTHOG_HOST=""
-
 NEXT_PUBLIC_ANALYTICS_DEBUG="false"
 ```
 
-Set `NEXT_PUBLIC_ANALYTICS_DEBUG=true` to log sanitized event payloads locally without requiring a
-PostHog project.
+The values must be available in every runtime that emits current product events: web, API, or
+runner as required by `scripts/release-preflight.mjs`. Billing-compatibility values use
+`NEXT_PUBLIC_POSTHOG_TOKEN` and `NEXT_PUBLIC_POSTHOG_HOST` only in the retained emitters that still
+consume that registry.
+
+Analytics is optional for ordinary local development. Missing values make the package a no-op.
+Set `NEXT_PUBLIC_ANALYTICS_DEBUG=true` to log sanitized event names and property keys locally
+without requiring a PostHog project.
 
 ## Verification
 
-With Goat PostHog values missing, exercise signup, app load, chat, and integration connection and
-confirm the app has no analytics-related errors.
-
-With debug enabled, confirm analytics logs contain only the event properties registered in
-`goat-events.ts`. Person-property updates should log their property names, never their values.
-
-With the real Goat project values, confirm the explicit events exercised by the app, shared Stripe
-webhook, and runner appear in the Goat project, and that none appear in the legacy web project.
+With product PostHog values missing, exercise the changed flow and confirm there are no
+analytics-related failures. With debug enabled, confirm logs contain only properties registered in
+`goat-events.ts` and never print values for sensitive person fields. With hosted values, confirm the
+event arrives in the product project once and does not also enter the billing-compatibility project.

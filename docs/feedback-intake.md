@@ -1,39 +1,39 @@
-# Feedback Intake
+# Feedback intake
 
-This app sends authenticated user feedback directly to Linear.
+The sidebar submits authenticated Bug, Feedback, or Idea reports to `POST /v1/feedback`. The product
+API validates the report, derives the Actor and workspace from the session, rate-limits submissions,
+and creates the Linear issue. The web app does not hold Linear credentials or dispatch issues
+directly.
 
-## App Configuration
+## API configuration
 
-Set these environment variables in the canonical API runtime (Infisical `prod` `/api`) and locally:
+Configure these values in the API runtime (`prod` `/api`) and in local shared development values
+when exercising feedback:
 
 ```bash
 LINEAR_API_KEY="lin_api_..."
-GOAT_FEEDBACK_LINEAR_TEAM_ID="..."
+GOAT_FEEDBACK_LINEAR_TEAM_ID=""
 GOAT_FEEDBACK_LINEAR_PROJECT_ID=""
-GOAT_FEEDBACK_LINEAR_LABELS="customer-feedback"
+GOAT_FEEDBACK_LINEAR_LABELS=""
 ```
 
-`LINEAR_API_KEY` and `GOAT_FEEDBACK_LINEAR_TEAM_ID` are required for feedback dispatch. The API
-fails only the feedback request when they are unset; the rest of the product remains available.
+`LINEAR_API_KEY` and `GOAT_FEEDBACK_LINEAR_TEAM_ID` are required for delivery. The project and
+additional labels are optional. The service always applies the report-kind label and attempts to
+create missing labels; insufficient label permissions do not block issue creation. Missing required
+configuration fails only the feedback request, not the rest of the product.
 
-The app creates labels on demand when the Linear API key has permission. If label creation is not allowed, feedback still creates an issue and Linear Triage Intelligence can suggest labels.
+The API includes bounded internal user, workspace, and Conversation context. It never accepts
+client-supplied identity as authority.
 
-## Linear Setup
+## Linear setup
 
-Use a dedicated Linear team for feedback intake if possible.
+Use a dedicated Linear team when practical, enable Triage for that team, and assign a clear owner
+for accepting, deduplicating, and routing feedback. Keep GitHub Issues downstream if engineering
+work needs them; the product delivery path remains Linear.
 
-1. Enable Triage in Linear Team Settings > Triage.
-2. Enable Triage Intelligence in Settings > AI.
-3. In the team triage suggestion settings, auto-apply labels, project, and assignee suggestions where the recommendations are trusted.
-4. Add triage responsibility for the person rotating on feedback.
+## Verification
 
-Linear's docs describe Triage as the inbox for integration-created issues and Triage Intelligence as the agentic model layer that suggests labels, teams, projects, assignees, and duplicates for new triage issues.
-
-## Recommended Flow
-
-1. User submits feedback in the app.
-2. App creates a Linear issue with app/user/workspace context, the current session ID when submitted from a session page, and first-pass labels.
-3. Linear Triage Intelligence enriches the issue.
-4. The feedback owner accepts, dedupes, scopes, or ships from Linear.
-
-GitHub Issues can work as a downstream engineering tracker, but Linear should stay first in the path because its Triage, Customer Requests, and AI suggestions are purpose-built for fast intake.
+Submit one report of each kind from the sidebar. Confirm the API returns success, one issue is
+created in the configured team with the expected labels and bounded context, and the browser never
+receives a Linear credential. Also verify the user sees a clear error when API delivery is not
+configured or Linear rejects the request.
