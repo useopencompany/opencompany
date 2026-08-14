@@ -9,26 +9,48 @@ const groups = {
   web: {
     label: "Vercel web app",
     required: [
+      // GoatAppShell still composes shared integration-state readers that
+      // resolve through @opencompany/db. Keep this required until #1243's
+      // suspect is removed from the web runtime.
+      "DATABASE_URL",
       "WORKOS_CLIENT_ID",
       "WORKOS_API_KEY",
       "WORKOS_COOKIE_PASSWORD",
       "WORKOS_COOKIE_DOMAIN",
       "GOAT_NEXT_PUBLIC_APP_URL",
       "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
-      "GOAT_AUTHKIT_DOMAIN",
       "RUNNER_PUBLIC_URL",
       "RUNNER_INTERNAL_TOKEN",
       "GOAT_API_ORIGIN",
       "NEXT_PUBLIC_GOAT_API_ORIGIN",
       "CRON_SECRET",
+      // Cached clients may still mint private Brain-asset upload tokens through
+      // the retained compatibility route.
+      "BLOB_READ_WRITE_TOKEN",
       "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
       "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
     ],
     optional: [
       "RUNNER_INTERNAL_URL",
+      "WORKOS_COOKIE_NAME",
       "RESEND_API_KEY",
       "RESEND_WELCOME_FROM",
       "RESEND_REPLY_TO",
+      // Compatibility fallbacks remain code-readable but are not provisioned
+      // when the canonical Goat-specific values above are present.
+      "NEXT_PUBLIC_APP_URL",
+      "NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+      "WORKOS_REDIRECT_URI",
+      "NEXT_PUBLIC_ANALYTICS_DEBUG",
+      "OBSERVABILITY_ENABLED",
+      "OBSERVABILITY_ENV",
+      "OBSERVABILITY_RELEASE",
+      "OBSERVABILITY_LOG_LEVEL",
+      "OBSERVABILITY_TIMING",
+      "NEXT_PUBLIC_OBSERVABILITY_ENABLED",
+      "NEXT_PUBLIC_OBSERVABILITY_ENV",
+      "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
+      "NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL",
       "GOAT_OBSERVABILITY_ENABLED",
       "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
       "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
@@ -117,11 +139,17 @@ const groups = {
       "GOAT_BROWSER_PROFILES_KILL_SWITCH",
       "BROWSERBASE_API_KEY",
       "BROWSERBASE_PROJECT_ID",
+      "APIFY_API_TOKEN",
+      "RUNNER_GOAT_BROWSER_ENABLED",
+      "GOAT_BRAIN_GATEWAY_BASE_URL",
+      "GOAT_BRAIN_EMBEDDING_MODEL",
+      "GOAT_BRAIN_VECTOR_MAX_DISTANCE",
+      "GOAT_MANAGED_CAPABILITIES_KILL_SWITCH",
+      "GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS",
       "ELECTRIC_SOURCE_ID",
       "ELECTRIC_SOURCE_SECRET",
       "ELECTRIC_SECRET",
       "ELECTRIC_TOKEN",
-      "BETTER_STACK_ERRORS_DSN",
       "OBSERVABILITY_ENABLED",
       "OBSERVABILITY_ENV",
       "OBSERVABILITY_RELEASE",
@@ -132,6 +160,14 @@ const groups = {
       "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
       "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
       "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
+      // Retained billing/ingestion compatibility analytics still emit to the
+      // generic PostHog project from the API composition root.
+      "NEXT_PUBLIC_POSTHOG_TOKEN",
+      "NEXT_PUBLIC_POSTHOG_HOST",
+      "LATITUDE_API_KEY",
+      "LATITUDE_PROJECT_SLUG",
+      "LATITUDE_SERVICE_NAME",
+      "LATITUDE_TELEMETRY_DISABLED",
       // Sidebar feedback dispatch (#1203 5a1) moved to POST /v1/feedback.
       // Optional (mirrors the retired web behavior): without these, feedback
       // submission fails with a clear error and nothing else degrades.
@@ -153,15 +189,6 @@ const groups = {
   },
   runner: {
     label: "Render runner",
-    // The runner drives in-process browser profile agent sessions; the same
-    // feature gate applies as in the API group.
-    conditional: [
-      {
-        when: "GOAT_BROWSER_PROFILES_ENABLED",
-        equals: "true",
-        require: ["BROWSERBASE_API_KEY"],
-      },
-    ],
     required: [
       "DATABASE_URL",
       "RUNNER_INTERNAL_TOKEN",
@@ -172,21 +199,50 @@ const groups = {
       "E2B_API_KEY",
       "VERCEL_AI_GATEWAY_API_KEY",
       "OPENAI_CODEX_API_KEY",
+      "BLOB_READ_WRITE_TOKEN",
       "GITHUB_INTEGRATION_APP_ID",
       "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
+      "GOOGLE_OAUTH_CLIENT_ID",
+      "GOOGLE_OAUTH_CLIENT_SECRET",
       "GOAT_X_CLIENT_ID",
       "GOAT_X_CLIENT_SECRET",
+      "MONID_API_KEY",
       "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
       "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
       "REDIS_URL",
+      "RUNNER_GOAT_TASK_WORKER_ENABLED",
     ],
     optional: [
       "EXA_API_KEY",
       "APIFY_API_TOKEN",
+      "RUNNER_PUBLIC_URL",
+      "RUNNER_DATABASE_URL",
+      "RUNNER_DB_POOL_MAX",
+      "RUNNER_WORKER_CONCURRENCY",
+      "RUNNER_JOB_LEASE_TTL_MS",
       "OPENCOMPANY_CODEX_E2B_TEMPLATE",
+      "RUNNER_CODEX_MODEL",
+      "RUNNER_CODEX_TIMEOUT_MS",
+      "RUNNER_CODEX_API_KEY_FALLBACK_ENABLED",
+      "RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS",
+      "RUNNER_GOAT_CODEX_CHAT_LEASE_TTL_MS",
+      "RUNNER_GOAT_BROWSER_ENABLED",
       "RUNNER_INSTANCE_ID",
       "RUNNER_PREVIEW_BASE_DOMAIN",
       "RUNNER_PREVIEW_PROTOCOL",
+      "GOAT_BRAIN_GATEWAY_BASE_URL",
+      "GOAT_BRAIN_EMBEDDING_MODEL",
+      "GOAT_BRAIN_VECTOR_MAX_DISTANCE",
+      "GOAT_CHAT_ACTIONS_KILL_SWITCH",
+      "GOAT_CHAT_SANDBOX_IMAGE",
+      "GOAT_MANAGED_CAPABILITIES_KILL_SWITCH",
+      "GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS",
+      "GOAT_REVOLUT_BUSINESS_WORKSPACE_ID",
+      "GOAT_REVOLUT_BUSINESS_API_TOKEN",
+      "GOAT_REVOLUT_BUSINESS_ACCOUNT_LABEL",
+      "GOAT_REVOLUT_BUSINESS_API_BASE_URL",
+      "GOAT_HUBSPOT_CLIENT_ID",
+      "GOAT_HUBSPOT_CLIENT_SECRET",
       "GOAT_DICTATION_REALTIME_MODEL",
       "GOAT_DICTATION_FINAL_MODEL",
       "OPENAI_API_KEY",
@@ -196,6 +252,10 @@ const groups = {
       "OBSERVABILITY_RELEASE",
       "OBSERVABILITY_LOG_LEVEL",
       "OBSERVABILITY_TIMING",
+      "BRAINTRUST_ENABLED",
+      "BRAINTRUST_API_KEY",
+      "BRAINTRUST_PROJECT_ID",
+      "BRAINTRUST_PROJECT_NAME",
       "GOAT_OBSERVABILITY_ENABLED",
       "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
       "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
@@ -209,6 +269,9 @@ const groups = {
       "LATITUDE_PROJECT_SLUG",
       "LATITUDE_SERVICE_NAME",
       "LATITUDE_TELEMETRY_DISABLED",
+      // Retained ingestion analytics still emit to the generic PostHog project.
+      "NEXT_PUBLIC_POSTHOG_TOKEN",
+      "NEXT_PUBLIC_POSTHOG_HOST",
     ],
   },
   release: {
@@ -322,6 +385,10 @@ if (selected.includes("runner")) {
     console.log(
       "\nLATITUDE_API_KEY and LATITUDE_PROJECT_SLUG must either both be set or both be unset.",
     );
+  }
+  if (process.env.RUNNER_GOAT_TASK_WORKER_ENABLED?.trim().toLowerCase() !== "true") {
+    failed = true;
+    console.log("\nRUNNER_GOAT_TASK_WORKER_ENABLED must be true in the production runner.");
   }
 }
 

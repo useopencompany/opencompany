@@ -5,9 +5,9 @@ surfaces:
 
 | Surface | Host | Responsibility |
 | --- | --- | --- |
-| Web | Vercel | product presentation, WorkOS browser shell, health/static delivery, and narrow public URL relays |
-| Product API | Render | authenticated `/v1` resources, provider ingress, OpenAPI, SSE, and authorized read models |
-| Runner | Render | durable Run execution, schedules, ingestion, integration workers, sandboxes, and internal transports |
+| Web | Vercel | product presentation, WorkOS browser shell, health/static delivery, and narrow public URL or cron relays |
+| Product API | Render | authenticated `/v1` resources, provider ingress, OpenAPI, SSE, attachment commands, and authorized read models |
+| Runner | Render | durable Run execution, schedules, ingestion, integration workers, sandboxes, internal transports, and the LLM broker |
 | Marketing | Vercel | public marketing site |
 
 The Vercel web project root is `apps/web`; the marketing project root is `apps/marketing`. Release
